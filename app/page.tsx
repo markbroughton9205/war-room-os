@@ -83,6 +83,23 @@ type RiskLevel = 'low' | 'medium' | 'high'
 type IncomeRadarView = 'active' | 'expiring' | 'expired'
 type OpportunityScoutStatus = 'idle' | 'searching' | 'reviewing' | 'found' | 'error'
 type ProviderHealth = 'online' | 'standby' | 'offline' | 'error'
+type RaelActionStatus = 'pending' | 'answered' | 'expired'
+type RaelActionUrgency = 'low' | 'medium' | 'high'
+
+type RaelActionItem = {
+  action_id: string
+  related_opportunity_id: string | null
+  title: string
+  question: string
+  response_options: string[]
+  status: RaelActionStatus
+  urgency: RaelActionUrgency
+  created_at: string
+  expires_at: string | null
+  source_agent: string
+  selected_response?: string
+  answered_at?: string
+}
 
 type OpportunityScoutState = {
   status: OpportunityScoutStatus
@@ -988,6 +1005,125 @@ function MemoryPanel({ memories }: { memories: MemoryEntry[] }) {
   )
 }
 
+function NeedsRaelPanel({
+  actions,
+  opportunities,
+  onRespond,
+}: {
+  actions: RaelActionItem[]
+  opportunities: IncomeOpportunity[]
+  onRespond: (actionId: string, response: string) => void
+}) {
+  const urgencyStyles: Record<RaelActionUrgency, { color: string; border: string; background: string }> = {
+    low: { color: '#60A5FA', border: 'rgba(96,165,250,0.28)', background: 'rgba(96,165,250,0.06)' },
+    medium: { color: '#FFD700', border: 'rgba(255,215,0,0.28)', background: 'rgba(255,215,0,0.06)' },
+    high: { color: '#EF4444', border: 'rgba(239,68,68,0.32)', background: 'rgba(239,68,68,0.08)' },
+  }
+  const visibleActions = [...actions].sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'pending' ? -1 : 1
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
+  const pendingCount = actions.filter(action => action.status === 'pending').length
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(255,215,0,0.018)' }}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FFD700' }}>
+            NEEDS RA&apos;EL
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Internal approval queue for War Room decisions.
+          </p>
+        </div>
+        <span className="rounded px-3 py-1 text-xs font-bold tracking-widest"
+          style={{
+            color: pendingCount > 0 ? '#FFD700' : '#555',
+            border: pendingCount > 0 ? '1px solid rgba(255,215,0,0.35)' : '1px solid #222',
+            background: 'rgba(0,0,0,0.3)',
+          }}>
+          {pendingCount} PENDING
+        </span>
+      </div>
+
+      {visibleActions.length === 0 ? (
+        <div className="rounded-md px-3 py-4 text-center text-xs tracking-widest"
+          style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#555', background: 'rgba(0,0,0,0.22)' }}>
+          No pending approvals.
+        </div>
+      ) : (
+        <div className="grid gap-2 lg:grid-cols-2">
+          {visibleActions.map(action => {
+            const relatedOpportunity = opportunities.find(opportunity => opportunity.id === action.related_opportunity_id)
+            const urgencyStyle = urgencyStyles[action.urgency]
+
+            return (
+              <div key={action.action_id} className="rounded-md p-3"
+                style={{ border: `1px solid ${urgencyStyle.border}`, background: urgencyStyle.background }}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-bold tracking-widest" style={{ color: '#ddd' }}>
+                      {action.title}
+                    </div>
+                    <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#555' }}>
+                      {action.source_agent} | {new Date(action.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <span className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+                      style={{ color: urgencyStyle.color, border: `1px solid ${urgencyStyle.border}`, background: 'rgba(0,0,0,0.24)' }}>
+                      {action.urgency.toUpperCase()}
+                    </span>
+                    <span className="rounded px-2 py-1 text-[10px] tracking-widest"
+                      style={{ color: action.status === 'pending' ? '#FFD700' : action.status === 'answered' ? '#34D399' : '#EF4444', border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+                      {action.status.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="mt-3 text-xs leading-relaxed" style={{ color: '#bbb' }}>{action.question}</p>
+
+                <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
+                  <div className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+                    <div className="tracking-widest" style={{ color: '#444' }}>RELATED OPPORTUNITY</div>
+                    <div className="mt-1" style={{ color: relatedOpportunity ? '#888' : '#555' }}>
+                      {relatedOpportunity?.title ?? 'None linked'}
+                    </div>
+                  </div>
+                  <div className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+                    <div className="tracking-widest" style={{ color: '#444' }}>EXPIRES</div>
+                    <div className="mt-1" style={{ color: action.expires_at ? '#888' : '#555' }}>
+                      {action.expires_at ? new Date(action.expires_at).toLocaleString() : 'No deadline'}
+                    </div>
+                  </div>
+                </div>
+
+                {action.status === 'pending' ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {action.response_options.map(option => (
+                      <button key={option} type="button" onClick={() => onRespond(action.action_id, option)}
+                        className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
+                        style={{ border: '1px solid rgba(255,215,0,0.35)', color: '#FFD700', background: 'rgba(0,0,0,0.2)' }}>
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded px-2 py-2 text-xs"
+                    style={{ border: '1px solid #222', color: '#777', background: 'rgba(0,0,0,0.24)' }}>
+                    Response: {action.selected_response ?? 'none recorded'}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MemorySavePromptPanel({
   prompt,
   onSave,
@@ -1200,6 +1336,7 @@ export default function Home() {
   const [incomeView, setIncomeView] = useState<IncomeRadarView>('active')
   const [opportunityScout, setOpportunityScout] = useState<OpportunityScoutState>(INITIAL_OPPORTUNITY_SCOUT_STATE)
   const [opportunityScoutLoading, setOpportunityScoutLoading] = useState(false)
+  const [raelActions, setRaelActions] = useState<RaelActionItem[]>([])
   const [usageRows, setUsageRows] = useState<UsageEstimate[]>(BASE_USAGE_ROWS)
   const [currentDecreeCost, setCurrentDecreeCost] = useState(0)
   const [sessionCost, setSessionCost] = useState(0)
@@ -1289,9 +1426,51 @@ export default function Home() {
     })
   }
 
+  const addRaelAction = (action: Omit<RaelActionItem, 'created_at' | 'status'> & { status?: RaelActionStatus; created_at?: string }) => {
+    const createdAt = action.created_at ?? new Date().toISOString()
+
+    setRaelActions(prev => {
+      const existingPendingAction = prev.find(item => item.action_id === action.action_id && item.status === 'pending')
+      if (existingPendingAction) return prev
+
+      return [{
+        ...action,
+        status: action.status ?? 'pending',
+        created_at: createdAt,
+      }, ...prev].slice(0, 24)
+    })
+  }
+
+  const respondToRaelAction = (actionId: string, response: string) => {
+    setRaelActions(prev => prev.map(action => (
+      action.action_id === actionId
+        ? {
+          ...action,
+          status: 'answered',
+          selected_response: response,
+          answered_at: new Date().toISOString(),
+        }
+        : action
+    )))
+    addSystemMessage(`Ra'el answered action queue: ${response}`)
+  }
+
   useEffect(() => {
     addSystemMessageRef.current = addSystemMessage
   })
+
+  useEffect(() => {
+    const expireActions = window.setInterval(() => {
+      const now = Date.now()
+      setRaelActions(prev => prev.map(action => (
+        action.status === 'pending' && action.expires_at && new Date(action.expires_at).getTime() <= now
+          ? { ...action, status: 'expired' }
+          : action
+      )))
+    }, 30000)
+
+    return () => window.clearInterval(expireActions)
+  }, [])
 
   const estimateContinuationCost = () => {
     const threadText = messages.map(m => `${m.familyName}: ${m.content}`).join('\n')
@@ -1469,6 +1648,18 @@ export default function Home() {
           firecrawl: normalizeProviderHealth(data.providerStatus?.firecrawl),
         },
       })
+      if (Array.isArray(data.opportunities) && data.opportunities.length > 0) {
+        addRaelAction({
+          action_id: `scout-review-${data.lastScanTime ?? Date.now()}`,
+          related_opportunity_id: null,
+          title: 'Opportunity Scout review',
+          question: `Opportunity Scout found ${data.opportunities.length} candidate opportunities. Review candidates before saving any to Income Radar?`,
+          response_options: ['Review now', 'Later', 'Dismiss'],
+          urgency: 'medium',
+          expires_at: null,
+          source_agent: 'Opportunity Scout',
+        })
+      }
     } catch {
       setOpportunityScout(prev => ({
         ...prev,
@@ -1607,6 +1798,17 @@ export default function Home() {
     setSessionCost(prev => prev + finalCost)
 
     if ((data.chatgpt || data.claude) && !inputText.toLowerCase().includes('continue council discussion')) {
+      const memoryActionId = `memory-save-${Date.now()}`
+      addRaelAction({
+        action_id: memoryActionId,
+        related_opportunity_id: null,
+        title: 'Memory save approval',
+        question: 'Council wants permission to save this response into Chronicle memory.',
+        response_options: ['Save Memory', 'Not Now'],
+        urgency: 'low',
+        expires_at: null,
+        source_agent: 'Memory',
+      })
       setMemorySavePrompt({
         reason: 'new council response may be useful later',
         memory: {
@@ -1706,6 +1908,16 @@ export default function Home() {
 
     const expansionNeed = detectExpansionNeed(decree)
     if (expansionNeed) {
+      addRaelAction({
+        action_id: `expanded-analysis-${decree.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80)}`,
+        related_opportunity_id: null,
+        title: 'Expanded analysis approval',
+        question: `Council requests expanded analysis. Estimated extra usage: ${formatCost(expansionNeed.extraCost)}. Reason: ${expansionNeed.reason}. Continue?`,
+        response_options: ['Approve', 'Decline', 'Summarize instead'],
+        urgency: expansionNeed.urgent ? 'high' : 'medium',
+        expires_at: null,
+        source_agent: 'Cost Guard',
+      })
       setExpansionPrompt({ decree, ...expansionNeed })
       setUsageRows(createUsageEstimate(decree, DEFAULT_OUTPUT_TOKEN_BUDGET))
       setCurrentDecreeCost(totalUsageCost(createUsageEstimate(decree, DEFAULT_OUTPUT_TOKEN_BUDGET)))
@@ -1770,7 +1982,18 @@ export default function Home() {
       if (now - lastAutoContinueAtRef.current < COUNCIL_CONTINUE_INTERVAL_MS) return
 
       lastAutoContinueAtRef.current = now
-      setContinuationPrompt({ estimatedCost: estimateContinuationCostRef.current?.() ?? 0 })
+      const estimatedCost = estimateContinuationCostRef.current?.() ?? 0
+      setContinuationPrompt({ estimatedCost })
+      addRaelAction({
+        action_id: `continue-council-${now}`,
+        related_opportunity_id: null,
+        title: 'Council continuation approval',
+        question: `Council wants to continue discussion. Estimated extra usage: ${formatCost(estimatedCost)}.`,
+        response_options: ['Allow', 'Pause', 'Stop', 'Summarize'],
+        urgency: 'medium',
+        expires_at: new Date(now + 5 * 60 * 1000).toISOString(),
+        source_agent: 'Council',
+      })
     }, 1000)
 
     return () => window.clearInterval(loop)
@@ -1946,6 +2169,7 @@ export default function Home() {
       <div className="relative z-10 flex-shrink-0">
         <ToolStatusPanel toolStatuses={toolStatuses} />
         <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} />
+        <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} />
         <IncomeRadarPanel
           opportunities={incomeOpportunities}
           loading={incomeLoading}
