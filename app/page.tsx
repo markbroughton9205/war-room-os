@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
-import { TOOL_REGISTRY, type ToolId } from '@/lib/tools/toolRegistry'
+import { TOOL_REGISTRY, type ToolId, type ToolStatus } from '@/lib/tools/toolRegistry'
 
 const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Goal: Panama relocation. Motivated by vision of success. Wants truth about systems that harm Black and low income communities.`
 
@@ -43,6 +43,16 @@ type ContinuationPrompt = {
   estimatedCost: number
 }
 
+type MemoryEntry = {
+  id: string
+  content: string
+  source: string
+  family: string
+  tags: string[]
+  importance: number
+  created_at: string
+}
+
 const FAMILY_META: Record<TypingFamily, { color: string; icon: string }> = {
   'CHATGPT FAMILY': { color: '#34D399', icon: '🧠' },
   'CLAUDE FAMILY': { color: '#A78BFA', icon: '🔮' },
@@ -67,6 +77,11 @@ const MOCK_RATES_PER_MILLION: Record<UsageFamily, { input: number; output: numbe
   'Grok Family': { input: 0, output: 0 },
   'Gemini Family': { input: 0, output: 0 },
 }
+
+const INITIAL_TOOL_STATUSES = TOOL_REGISTRY.reduce((acc, tool) => {
+  acc[tool.id] = tool.status
+  return acc
+}, {} as Record<ToolId, ToolStatus>)
 
 function detectToneMode(message: string): ToneMode {
   const text = message.toLowerCase()
@@ -196,13 +211,14 @@ function TypingIndicator({ familyName }: { familyName: TypingFamily }) {
   )
 }
 
-function ToolStatusPanel({ activeTools }: { activeTools: ToolId[] }) {
+function ToolStatusPanel({ toolStatuses }: { toolStatuses: Record<ToolId, ToolStatus> }) {
   return (
     <div className="border-b border-yellow-900 px-6 py-2 flex-shrink-0"
       style={{ background: 'rgba(255,215,0,0.02)' }}>
       <div className="flex items-center gap-2 overflow-x-auto">
         {TOOL_REGISTRY.map(tool => {
-          const active = activeTools.includes(tool.id)
+          const status = toolStatuses[tool.id] ?? tool.status
+          const active = status !== 'idle'
 
           return (
             <div key={tool.id}
@@ -223,7 +239,7 @@ function ToolStatusPanel({ activeTools }: { activeTools: ToolId[] }) {
                 }} />
               <span>{tool.name}</span>
               <span style={{ color: active ? '#7ee7b7' : '#333' }}>
-                {active ? 'SCANNING' : tool.status.toUpperCase()}
+                {status.toUpperCase()}
               </span>
             </div>
           )
@@ -271,6 +287,40 @@ function TokenUsagePanel({
             </div>
             <div className="text-xs mt-1" style={{ color: row.active ? '#34D399' : '#333' }}>
               {formatCost(row.estimatedCost)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MemoryPanel({ memories }: { memories: MemoryEntry[] }) {
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(52,211,153,0.025)' }}>
+      <div className="flex items-center justify-between gap-4 mb-2">
+        <h2 className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>
+          MEMORY LOG
+        </h2>
+        <span className="text-xs tracking-widest" style={{ color: '#555' }}>
+          LATEST {memories.length}
+        </span>
+      </div>
+      <div className="grid gap-2 md:grid-cols-3">
+        {memories.length === 0 ? (
+          <div className="text-xs" style={{ color: '#555' }}>
+            No saved War Room memories yet.
+          </div>
+        ) : memories.slice(0, 3).map(memory => (
+          <div key={memory.id || `${memory.created_at}-${memory.content}`} className="rounded border border-[#00ff41]/10 bg-black/30 px-3 py-2">
+            <div className="flex items-center justify-between gap-2 text-[10px] tracking-widest">
+              <span style={{ color: '#34D399' }}>{memory.family}</span>
+              <span style={{ color: '#555' }}>I{memory.importance}</span>
+            </div>
+            <p className="mt-1 line-clamp-2 text-xs text-slate-400">{memory.content}</p>
+            <div className="mt-1 truncate text-[10px]" style={{ color: '#555' }}>
+              {memory.source} {memory.tags.length ? `· ${memory.tags.join(', ')}` : ''}
             </div>
           </div>
         ))}
@@ -391,7 +441,8 @@ export default function Home() {
   const [showContinue, setShowContinue] = useState(false)
   const [discussionSeconds, setDiscussionSeconds] = useState(DEFAULT_DISCUSSION_SECONDS)
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
-  const [activeTools, setActiveTools] = useState<ToolId[]>([])
+  const [toolStatuses, setToolStatuses] = useState<Record<ToolId, ToolStatus>>(INITIAL_TOOL_STATUSES)
+  const [memories, setMemories] = useState<MemoryEntry[]>([])
   const [usageRows, setUsageRows] = useState<UsageEstimate[]>(BASE_USAGE_ROWS)
   const [currentDecreeCost, setCurrentDecreeCost] = useState(0)
   const [sessionCost, setSessionCost] = useState(0)
@@ -406,6 +457,7 @@ export default function Home() {
   const addSystemMessageRef = useRef<((content: string) => void) | null>(null)
   const submitDecreeRef = useRef<((decree: string, mode?: CouncilMode) => Promise<void>) | null>(null)
   const estimateContinuationCostRef = useRef<(() => number) | null>(null)
+  const loadMemoriesRef = useRef<(() => Promise<void>) | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const councilPausedRef = useRef(false)
   const councilStoppedRef = useRef(false)
@@ -440,6 +492,10 @@ export default function Home() {
     setMessages(prev => [...prev, ...newMsgs])
   }
 
+  const setToolStatus = (toolId: ToolId, status: ToolStatus) => {
+    setToolStatuses(prev => ({ ...prev, [toolId]: status }))
+  }
+
   const addSystemMessage = (content: string) => {
     addMessages([{
       id: Date.now() + '-system',
@@ -471,8 +527,56 @@ export default function Home() {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     setTypingFamily(null)
-    setActiveTools([])
+    setToolStatus('web', 'idle')
+    setToolStatus('research', 'idle')
     setLoading(false)
+  }
+
+  const loadMemories = async () => {
+    setToolStatus('memory', 'active')
+    try {
+      const res = await fetch('/api/tools/memory')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Memory retrieval failed')
+      setMemories(data.memories ?? [])
+      setToolStatus('memory', 'complete')
+    } catch {
+      setToolStatus('memory', 'error')
+    }
+  }
+
+  useEffect(() => {
+    loadMemoriesRef.current = loadMemories
+  })
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadMemoriesRef.current?.()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  const saveMemory = async (memory: Omit<MemoryEntry, 'id' | 'created_at'>) => {
+    setToolStatus('memory', 'active')
+    try {
+      const res = await fetch('/api/tools/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(memory),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Memory save failed')
+
+      if (data.memory) {
+        setMemories(prev => [data.memory, ...prev].slice(0, 10))
+      }
+      setToolStatus('memory', 'complete')
+      addSystemMessage('Memory saved')
+    } catch {
+      setToolStatus('memory', 'error')
+      addSystemMessage('Memory save failed')
+    }
   }
 
   const revealFamilyMessages = async (data: { chatgpt?: string; claude?: string }, inputText: string) => {
@@ -510,7 +614,8 @@ export default function Home() {
       await wait(350)
       if (councilPausedRef.current || councilStoppedRef.current) return
       addSystemMessage('Retrieval complete')
-      setActiveTools([])
+      setToolStatus('web', 'idle')
+      setToolStatus('research', 'idle')
       await wait(350)
     }
 
@@ -547,7 +652,8 @@ export default function Home() {
     if (mode === 'continue') {
       addSystemMessage('Council channel continuing')
     } else {
-      setActiveTools(['web', 'research'])
+      setToolStatus('web', 'scanning')
+      setToolStatus('research', 'scanning')
       addSystemMessage('Web Research initiated')
     }
 
@@ -583,7 +689,8 @@ export default function Home() {
       if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return
       setShowContinue(false)
       setTypingFamily(null)
-      setActiveTools([])
+      setToolStatus('web', 'idle')
+      setToolStatus('research', 'idle')
       addMessages([{
         id: Date.now() + '-err',
         familyName: 'SYSTEM',
@@ -597,7 +704,8 @@ export default function Home() {
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null
       setTypingFamily(null)
-      setActiveTools([])
+      setToolStatus('web', 'idle')
+      setToolStatus('research', 'idle')
       setLoading(false)
     }
   }
@@ -635,6 +743,14 @@ export default function Home() {
       provider: '',
       messageType: 'decree'
     }])
+
+    void saveMemory({
+      content: decree,
+      source: 'decree',
+      family: "RA'EL",
+      tags: [detectToneMode(decree), mode ?? 'standard'],
+      importance: mode === 'expanded' ? 3 : 2,
+    })
 
     await submitDecree(decree, mode)
   }
@@ -814,8 +930,9 @@ export default function Home() {
       </div>
 
       <div className="relative z-10 flex-shrink-0">
-        <ToolStatusPanel activeTools={activeTools} />
+        <ToolStatusPanel toolStatuses={toolStatuses} />
         <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} />
+        <MemoryPanel memories={memories} />
         <CodexAgentPlaceholder />
       </div>
 
