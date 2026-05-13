@@ -62,11 +62,16 @@ const railBtn =
 const activeRail =
   'bg-[#d4af37]/10 text-[#d4af37] shadow-[inset_0_0_0_1px_rgba(212,175,55,0.35),0_0_24px_-8px_rgba(56,189,248,0.35)]'
 
-export function Sidebar() {
-  const [active, setActive] = useState('overview')
-  const [drawerOpen, setDrawerOpen] = useState(false)
-
-  const NavButtons = (opts: { compact?: boolean }) => (
+function NavButtons({
+  active,
+  compact,
+  onSelect,
+}: {
+  active: string
+  compact?: boolean
+  onSelect: (id: string) => void
+}) {
+  return (
     <nav className="flex flex-col gap-1 p-3" aria-label="War room">
       {NAV.map((item) => {
         const isActive = active === item.id
@@ -75,21 +80,28 @@ export function Sidebar() {
             key={item.id}
             type="button"
             title={item.label}
-            onClick={() => {
-              setActive(item.id)
-              setDrawerOpen(false)
-            }}
-            className={`${railBtn} ${isActive ? activeRail : ''} ${opts.compact ? 'justify-center px-2' : ''}`}
+            onClick={() => onSelect(item.id)}
+            className={`${railBtn} ${isActive ? activeRail : ''} ${compact ? 'justify-center px-2' : ''}`}
           >
             <span className={isActive ? 'text-[#d4af37]' : 'text-slate-400'}>
               <Icon name={item.icon} />
             </span>
-            {!opts.compact && <span className="font-medium uppercase text-xs">{item.label}</span>}
+            {!compact && <span className="font-medium uppercase text-xs">{item.label}</span>}
           </button>
         )
       })}
     </nav>
   )
+}
+
+export function Sidebar() {
+  const [active, setActive] = useState('overview')
+  const [drawerOpen, setDrawerOpen] = useState(false)
+
+  const handleSelect = (id: string) => {
+    setActive(id)
+    setDrawerOpen(false)
+  }
 
   return (
     <div className="flex flex-col md:contents">
@@ -121,7 +133,7 @@ export function Sidebar() {
             <div className="border-b border-white/10 px-4 py-3 text-xs uppercase tracking-[0.3em] text-slate-400">
               Navigation
             </div>
-            <NavButtons />
+            <NavButtons active={active} onSelect={handleSelect} />
             <div className="mt-auto border-t border-white/10 p-4 text-[10px] text-slate-500">
               Mock UI — no backend
             </div>
@@ -135,12 +147,12 @@ export function Sidebar() {
           <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-[#d4af37]">War Room</p>
           <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">Command surface</p>
         </div>
-        <NavButtons />
+        <NavButtons active={active} onSelect={handleSelect} />
         <div className="mt-auto border-t border-white/10 p-4 text-[10px] text-slate-500">v0.1 · local</div>
       </aside>
 
       <aside className="relative hidden h-full w-16 shrink-0 flex-col border-r border-white/10 bg-slate-950/55 backdrop-blur-xl md:flex md:flex-col lg:hidden">
-        <NavButtons compact />
+        <NavButtons active={active} compact onSelect={handleSelect} />
       </aside>
     </div>
   )

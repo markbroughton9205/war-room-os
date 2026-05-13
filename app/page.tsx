@@ -81,6 +81,41 @@ type OpportunityType = 'surveys' | 'AI evaluation' | 'user testing' | 'research 
 type OpportunityStatus = 'not started' | 'applied' | 'active' | 'paid'
 type RiskLevel = 'low' | 'medium' | 'high'
 type IncomeRadarView = 'active' | 'expiring' | 'expired'
+type OpportunityScoutStatus = 'idle' | 'searching' | 'reviewing' | 'found' | 'error'
+type ProviderHealth = 'online' | 'standby' | 'offline' | 'error'
+
+type OpportunityScoutState = {
+  status: OpportunityScoutStatus
+  message: string
+  lastScanTime: string | null
+  sourcesChecked: number
+  opportunitiesFound: number
+  opportunitiesRejected: number
+  riskFilterStatus: string
+  nextScanAction: string
+  results: OpportunityScoutResult[]
+  providerUsed: string
+  scanDurationMs: number
+  providerStatus: {
+    tavily: ProviderHealth
+    firecrawl: ProviderHealth
+  }
+}
+
+type OpportunityScoutResult = {
+  title: string
+  url: string
+  source: string
+  country: string
+  payout: string | null
+  currency: string | null
+  expiration: string | null
+  type: string
+  riskLevel: RiskLevel
+  verificationStatus: 'candidate' | 'rejected'
+  reason: string
+  provider?: string
+}
 
 type IncomeOpportunity = {
   id: string
@@ -115,6 +150,24 @@ const DEFAULT_DISCUSSION_SECONDS = 90
 const COUNCIL_CONTINUE_INTERVAL_MS = 22000
 const STREAM_CHUNK_SIZE = 8
 const STREAM_CHUNK_DELAY_MS = 35
+const TOOL_REQUEST_TIMEOUT_MS = 45000
+const INITIAL_OPPORTUNITY_SCOUT_STATE: OpportunityScoutState = {
+  status: 'idle',
+  message: 'Ready to scan when a live provider is connected.',
+  lastScanTime: null,
+  sourcesChecked: 0,
+  opportunitiesFound: 0,
+  opportunitiesRejected: 0,
+  riskFilterStatus: 'verification required before save',
+  nextScanAction: 'Connect live search provider',
+  results: [],
+  providerUsed: 'none',
+  scanDurationMs: 0,
+  providerStatus: {
+    tavily: 'offline',
+    firecrawl: 'offline',
+  },
+}
 const BASE_USAGE_ROWS: UsageEstimate[] = [
   { familyName: 'Claude Family', provider: 'Anthropic', model: 'claude-sonnet-4-20250514', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
   { familyName: 'ChatGPT Family', provider: 'OpenAI', model: 'gpt-4o', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
@@ -193,6 +246,20 @@ function detectToneMode(message: string): ToneMode {
   return 'casual'
 }
 
+function detectOpportunityScoutIntent(message: string) {
+  const text = message.toLowerCase()
+
+  return /\b(opportunity scout|scout opportunities|scout for opportunities|search opportunities|find opportunities|income radar search|income scout)\b/.test(text)
+}
+
+function detectToolIntent(message: string) {
+  const text = message.toLowerCase()
+
+  if (detectOpportunityScoutIntent(text)) return false
+
+  return /\b(search|research|look up|lookup|find live info|live info|current info|current information|web check|verify online|check online|find online|online research)\b/.test(text)
+}
+
 function estimateTokens(text: string) {
   return Math.max(1, Math.ceil(text.length / 4))
 }
@@ -240,6 +307,12 @@ function formatDateLabel(value: string | null) {
     day: 'numeric',
     year: 'numeric',
   })
+}
+
+function normalizeProviderHealth(value: unknown): ProviderHealth {
+  return value === 'online' || value === 'standby' || value === 'error' || value === 'offline'
+    ? value
+    : 'offline'
 }
 
 function createUsageEstimate(inputText: string, outputBudget: number) {
@@ -423,6 +496,165 @@ function TokenUsagePanel({
   )
 }
 
+function OpportunityScoutPanel({
+  scout,
+  loading,
+  onScout,
+}: {
+  scout: OpportunityScoutState
+  loading: boolean
+  onScout: () => Promise<void>
+}) {
+  const statusColors: Record<OpportunityScoutStatus, string> = {
+    idle: '#666',
+    searching: '#34D399',
+    reviewing: '#FFD700',
+    found: '#60A5FA',
+    error: '#EF4444',
+  }
+  const safeScout: OpportunityScoutState = {
+    ...INITIAL_OPPORTUNITY_SCOUT_STATE,
+    ...scout,
+    results: scout?.results ?? [],
+    providerStatus: {
+      ...INITIAL_OPPORTUNITY_SCOUT_STATE.providerStatus,
+      ...scout?.providerStatus,
+    },
+  }
+  const providerItems = [
+    { name: 'Tavily', status: safeScout.providerStatus.tavily },
+    { name: 'Firecrawl', status: safeScout.providerStatus.firecrawl },
+  ]
+  const providerColor: Record<ProviderHealth, string> = {
+    online: '#34D399',
+    standby: '#FFD700',
+    offline: '#666',
+    error: '#EF4444',
+  }
+
+  return (
+    <div className="mb-4 rounded-md p-3"
+      style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.28)' }}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>
+            OPPORTUNITY SCOUT
+          </div>
+          <div className="mt-1 text-xs" style={{ color: '#777' }}>
+            Global income opportunity researcher
+          </div>
+        </div>
+        <button type="button" onClick={() => void onScout()} disabled={loading}
+          className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+          style={{ background: '#34D399', color: '#000' }}>
+          Scout Opportunities
+        </button>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.3)' }}>
+          <div className="tracking-widest" style={{ color: '#444' }}>STATUS</div>
+          <div className="mt-1 font-bold" style={{ color: statusColors[safeScout.status] }}>{safeScout.status.toUpperCase()}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.3)' }}>
+          <div className="tracking-widest" style={{ color: '#444' }}>LAST SCAN</div>
+          <div className="mt-1" style={{ color: '#888' }}>
+            {safeScout.lastScanTime ? new Date(safeScout.lastScanTime).toLocaleString() : 'Not scanned'}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.3)' }}>
+          <div className="tracking-widest" style={{ color: '#444' }}>SOURCES CHECKED</div>
+          <div className="mt-1" style={{ color: '#888' }}>{safeScout.sourcesChecked}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.3)' }}>
+          <div className="tracking-widest" style={{ color: '#444' }}>RISK FILTER</div>
+          <div className="mt-1" style={{ color: '#FFD700' }}>{safeScout.riskFilterStatus}</div>
+        </div>
+      </div>
+
+      <div className="mt-2 grid gap-2 text-xs md:grid-cols-4">
+        {providerItems.map(provider => (
+          <div key={provider.name} className="rounded px-3 py-2"
+            style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.25)' }}>
+            <span style={{ color: '#444' }}>{provider.name.toUpperCase()} </span>
+            <span style={{ color: providerColor[provider.status] }}>
+              {provider.status.toUpperCase()}
+            </span>
+          </div>
+        ))}
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.25)' }}>
+          <span style={{ color: '#444' }}>PROVIDER </span>
+          <span style={{ color: '#888' }}>{safeScout.providerUsed.toUpperCase()}</span>
+        </div>
+      </div>
+
+      <div className="mt-2 grid gap-2 text-xs md:grid-cols-3">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.25)' }}>
+          <span style={{ color: '#444' }}>FOUND </span>
+          <span style={{ color: '#34D399' }}>{safeScout.opportunitiesFound}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.25)' }}>
+          <span style={{ color: '#444' }}>REJECTED </span>
+          <span style={{ color: '#EF4444' }}>{safeScout.opportunitiesRejected}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.25)' }}>
+          <span style={{ color: '#444' }}>NEXT </span>
+          <span style={{ color: '#888' }}>{safeScout.nextScanAction}</span>
+        </div>
+      </div>
+
+      <div className="mt-2 rounded px-3 py-2 text-xs"
+        style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.25)' }}>
+        <span style={{ color: '#444' }}>SCAN DURATION </span>
+        <span style={{ color: '#888' }}>{safeScout.scanDurationMs ? `${(safeScout.scanDurationMs / 1000).toFixed(1)}s` : 'not scanned'}</span>
+      </div>
+
+      {safeScout.message && (
+        <div className="mt-3 rounded px-3 py-2 text-xs"
+          style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#888', background: 'rgba(0,0,0,0.24)' }}>
+          {safeScout.message}
+        </div>
+      )}
+
+      {safeScout.results.length > 0 && (
+        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          {safeScout.results.map(result => (
+            <div key={result.url} className="rounded px-3 py-2 text-xs"
+              style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.26)' }}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-bold tracking-widest" style={{ color: '#ddd' }}>{result.title}</div>
+                  <div className="mt-1 tracking-widest" style={{ color: '#555' }}>
+                    {result.source} | {result.type} | {result.provider ?? safeScout.providerUsed}
+                  </div>
+                </div>
+                <span className="rounded px-2 py-1 text-[10px] tracking-widest"
+                  style={{
+                    color: result.riskLevel === 'high' ? '#EF4444' : result.riskLevel === 'medium' ? '#FFD700' : '#34D399',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                  }}>
+                  {result.riskLevel.toUpperCase()} RISK
+                </span>
+              </div>
+              <div className="mt-2 grid gap-2 md:grid-cols-3">
+                <span style={{ color: '#888' }}>Country: {result.country}</span>
+                <span style={{ color: '#888' }}>Payout: {result.payout ?? 'not found'}</span>
+                <span style={{ color: '#888' }}>Expires: {result.expiration ?? 'not found'}</span>
+              </div>
+              <div className="mt-2" style={{ color: '#666' }}>{result.reason}</div>
+              <a href={result.url} target="_blank" rel="noreferrer"
+                className="mt-2 inline-flex rounded px-3 py-1 text-[10px] tracking-widest"
+                style={{ border: '1px solid #333', color: '#888' }}>
+                OPEN SOURCE
+              </a>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function IncomeRadarPanel({
   opportunities,
   loading,
@@ -430,6 +662,9 @@ function IncomeRadarPanel({
   onViewChange,
   onCreate,
   onExpire,
+  scout,
+  scoutLoading,
+  onScout,
 }: {
   opportunities: IncomeOpportunity[]
   loading: boolean
@@ -437,6 +672,9 @@ function IncomeRadarPanel({
   onViewChange: (view: IncomeRadarView) => void
   onCreate: (opportunity: Omit<IncomeOpportunity, 'id' | 'created_at'>) => Promise<void>
   onExpire: (id: string) => Promise<void>
+  scout: OpportunityScoutState
+  scoutLoading: boolean
+  onScout: () => Promise<void>
 }) {
   const [form, setForm] = useState({
     title: '',
@@ -535,7 +773,7 @@ function IncomeRadarPanel({
             INCOME RADAR
           </h2>
           <p className="text-xs mt-1" style={{ color: '#666' }}>
-            Real entries only. No guaranteed income, bank connections, fraud automation, or scraping.
+            Verified income leads and tracked opportunities.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-3">
@@ -553,6 +791,8 @@ function IncomeRadarPanel({
           </div>
         </div>
       </div>
+
+      <OpportunityScoutPanel scout={scout} loading={scoutLoading} onScout={onScout} />
 
       <form onSubmit={submitOpportunity} className="mb-4 rounded-md p-3"
         style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.28)' }}>
@@ -958,6 +1198,8 @@ export default function Home() {
   const [incomeOpportunities, setIncomeOpportunities] = useState<IncomeOpportunity[]>([])
   const [incomeLoading, setIncomeLoading] = useState(false)
   const [incomeView, setIncomeView] = useState<IncomeRadarView>('active')
+  const [opportunityScout, setOpportunityScout] = useState<OpportunityScoutState>(INITIAL_OPPORTUNITY_SCOUT_STATE)
+  const [opportunityScoutLoading, setOpportunityScoutLoading] = useState(false)
   const [usageRows, setUsageRows] = useState<UsageEstimate[]>(BASE_USAGE_ROWS)
   const [currentDecreeCost, setCurrentDecreeCost] = useState(0)
   const [sessionCost, setSessionCost] = useState(0)
@@ -970,6 +1212,7 @@ export default function Home() {
   })
   const [discussionExpiredNoticeShown, setDiscussionExpiredNoticeShown] = useState(false)
   const [councilPaused, setCouncilPaused] = useState(false)
+  const [toolRequestActive, setToolRequestActive] = useState(false)
   const [continuationPrompt, setContinuationPrompt] = useState<ContinuationPrompt | null>(null)
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -982,6 +1225,9 @@ export default function Home() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const councilPausedRef = useRef(false)
   const councilStoppedRef = useRef(false)
+  const toolRequestActiveRef = useRef(false)
+  const toolTimeoutRef = useRef<number | null>(null)
+  const activeToolSystemMessageRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!autoScrollEnabled) return
@@ -989,14 +1235,14 @@ export default function Home() {
   }, [messages, autoScrollEnabled])
 
   useEffect(() => {
-    if (!showContinue || councilPaused || discussionSeconds === 0) return
+    if (!showContinue || councilPaused || toolRequestActive || discussionSeconds === 0) return
 
     const timer = window.setInterval(() => {
       setDiscussionSeconds(prev => Math.max(prev - 1, 0))
     }, 1000)
 
     return () => window.clearInterval(timer)
-  }, [showContinue, councilPaused, discussionSeconds])
+  }, [showContinue, councilPaused, toolRequestActive, discussionSeconds])
 
   useEffect(() => {
     councilPausedRef.current = councilPaused
@@ -1026,7 +1272,11 @@ export default function Home() {
   }
 
   const addSystemMessage = (content: string) => {
-    addMessages([{
+    setMessages(prev => {
+      const lastSystemMessage = [...prev].reverse().find(message => message.familyName === 'SYSTEM')
+      if (lastSystemMessage?.content === content) return prev
+
+      return [...prev, {
       id: Date.now() + '-system',
       familyName: 'SYSTEM',
       content,
@@ -1035,7 +1285,8 @@ export default function Home() {
       icon: '⚙',
       provider: '',
       messageType: 'system'
-    }])
+      }]
+    })
   }
 
   useEffect(() => {
@@ -1052,14 +1303,51 @@ export default function Home() {
     estimateContinuationCostRef.current = estimateContinuationCost
   })
 
+  const endToolRequest = () => {
+    if (toolTimeoutRef.current !== null) {
+      window.clearTimeout(toolTimeoutRef.current)
+      toolTimeoutRef.current = null
+    }
+    toolRequestActiveRef.current = false
+    activeToolSystemMessageRef.current = null
+    setToolRequestActive(false)
+    setToolStatus('web', 'idle')
+    setToolStatus('research', 'idle')
+  }
+
+  const beginToolRequest = (controller: AbortController) => {
+    if (toolRequestActiveRef.current) return false
+
+    toolRequestActiveRef.current = true
+    setToolRequestActive(true)
+    setToolStatus('web', 'scanning')
+    setToolStatus('research', 'scanning')
+
+    if (activeToolSystemMessageRef.current !== 'Web Research initiated') {
+      activeToolSystemMessageRef.current = 'Web Research initiated'
+      addSystemMessage('Web Research initiated')
+    }
+
+    toolTimeoutRef.current = window.setTimeout(() => {
+      addSystemMessage('Research timed out.')
+      controller.abort()
+      endToolRequest()
+      setTypingFamily(null)
+      setPresence('CHATGPT FAMILY', 'idle', 'standby')
+      setPresence('CLAUDE FAMILY', 'idle', 'standby')
+      setLoading(false)
+    }, TOOL_REQUEST_TIMEOUT_MS)
+
+    return true
+  }
+
   const cancelActiveCouncilRequest = () => {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     setTypingFamily(null)
     setPresence('CHATGPT FAMILY', 'idle', 'standby')
     setPresence('CLAUDE FAMILY', 'idle', 'standby')
-    setToolStatus('web', 'idle')
-    setToolStatus('research', 'idle')
+    endToolRequest()
     setLoading(false)
   }
 
@@ -1141,6 +1429,61 @@ export default function Home() {
     }
   }
 
+  const runOpportunityScout = async () => {
+    if (opportunityScoutLoading) return
+
+    setOpportunityScoutLoading(true)
+    setOpportunityScout(prev => ({
+      ...prev,
+      status: 'searching',
+      message: 'Opportunity Scout scanning provider status...',
+      lastScanTime: new Date().toISOString(),
+      providerUsed: 'tavily',
+    }))
+
+    window.setTimeout(() => {
+      setOpportunityScout(prev => (
+        prev.status === 'searching'
+          ? { ...prev, status: 'reviewing', message: 'Opportunity Scout reviewing live results...' }
+          : prev
+      ))
+    }, 600)
+
+    try {
+      const res = await fetch('/api/income/scout', { method: 'POST' })
+      const data = await res.json()
+      setOpportunityScout({
+        status: data.status ?? (res.ok ? 'found' : 'error'),
+        message: data.message ?? 'Opportunity Scout scan complete.',
+        lastScanTime: data.lastScanTime ?? new Date().toISOString(),
+        sourcesChecked: Number(data.sourcesChecked ?? 0),
+        opportunitiesFound: Number(data.opportunitiesFound ?? 0),
+        opportunitiesRejected: Number(data.opportunitiesRejected ?? 0),
+        riskFilterStatus: String(data.riskFilterStatus ?? 'verification required before save'),
+        nextScanAction: String(data.nextScanAction ?? 'Connect live search provider'),
+        results: Array.isArray(data.opportunities) ? data.opportunities : [],
+        providerUsed: String(data.providerUsed ?? data.provider ?? 'none'),
+        scanDurationMs: Number(data.scanDurationMs ?? 0),
+        providerStatus: {
+          tavily: normalizeProviderHealth(data.providerStatus?.tavily),
+          firecrawl: normalizeProviderHealth(data.providerStatus?.firecrawl),
+        },
+      })
+    } catch {
+      setOpportunityScout(prev => ({
+        ...prev,
+        status: 'error',
+        message: 'Opportunity Scout needs a live search provider connected.',
+        lastScanTime: new Date().toISOString(),
+        nextScanAction: 'Connect live search provider',
+        results: [],
+        providerUsed: 'none',
+      }))
+    } finally {
+      setOpportunityScoutLoading(false)
+    }
+  }
+
   const saveMemory = async (memory: Omit<MemoryEntry, 'id' | 'created_at'>) => {
     setToolStatus('memory', 'active')
     try {
@@ -1214,7 +1557,7 @@ export default function Home() {
     setPresence(familyName, 'idle', 'standby')
   }
 
-  const revealFamilyMessages = async (data: { chatgpt?: string; claude?: string }, inputText: string) => {
+  const revealFamilyMessages = async (data: { chatgpt?: string; claude?: string }, inputText: string, toolIntent: boolean) => {
     const inputTokens = estimateTokens(inputText)
     const nextUsageRows = BASE_USAGE_ROWS.map(row => {
       if (!row.active) return row
@@ -1240,10 +1583,11 @@ export default function Home() {
         streamingLabel: 'ChatGPT streaming...',
       })
       if (councilPausedRef.current || councilStoppedRef.current) return
-      addSystemMessage('Retrieval complete')
-      setToolStatus('web', 'idle')
-      setToolStatus('research', 'idle')
-      await wait(350)
+      if (toolIntent) {
+        addSystemMessage('Retrieval complete')
+        endToolRequest()
+        await wait(350)
+      }
     }
 
     if (data.claude) {
@@ -1277,6 +1621,12 @@ export default function Home() {
   }
 
   const submitDecree = async (decree: string, mode?: CouncilMode) => {
+    const toolIntent = mode !== 'continue' && detectToolIntent(decree)
+    if (toolIntent && toolRequestActiveRef.current) {
+      addSystemMessage('Research already in progress.')
+      return
+    }
+
     const controller = new AbortController()
     abortControllerRef.current = controller
     councilStoppedRef.current = false
@@ -1286,10 +1636,12 @@ export default function Home() {
     setContinuationPrompt(null)
     if (mode === 'continue') {
       addSystemMessage('Council channel continuing')
-    } else {
-      setToolStatus('web', 'scanning')
-      setToolStatus('research', 'scanning')
-      addSystemMessage('Web Research initiated')
+    } else if (toolIntent && !beginToolRequest(controller)) {
+      addSystemMessage('Research already in progress.')
+      if (abortControllerRef.current === controller) abortControllerRef.current = null
+      setLoading(false)
+      setTypingFamily(null)
+      return
     }
 
     const threadHistory = messages.map(m => ({ sender: m.familyName, content: m.content }))
@@ -1308,7 +1660,7 @@ export default function Home() {
       })
       const data = await res.json()
       if (controller.signal.aborted || councilPausedRef.current || councilStoppedRef.current) return
-      await revealFamilyMessages(data, inputText)
+      await revealFamilyMessages(data, inputText, toolIntent)
       if (controller.signal.aborted || councilPausedRef.current || councilStoppedRef.current) return
       if (data.showContinue || (mode === 'continue' && discussionSeconds > 0)) {
         if (mode !== 'continue') {
@@ -1324,8 +1676,7 @@ export default function Home() {
       if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return
       setShowContinue(false)
       setTypingFamily(null)
-      setToolStatus('web', 'idle')
-      setToolStatus('research', 'idle')
+      if (toolIntent) endToolRequest()
       addMessages([{
         id: Date.now() + '-err',
         familyName: 'SYSTEM',
@@ -1339,8 +1690,7 @@ export default function Home() {
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null
       setTypingFamily(null)
-      setToolStatus('web', 'idle')
-      setToolStatus('research', 'idle')
+      if (toolIntent) endToolRequest()
       setLoading(false)
     }
   }
@@ -1389,6 +1739,10 @@ export default function Home() {
       })
     }
 
+    if (detectOpportunityScoutIntent(decree)) {
+      void runOpportunityScout()
+    }
+
     await submitDecree(decree, mode)
   }
 
@@ -1409,7 +1763,7 @@ export default function Home() {
   }, [showContinue, discussionSeconds, discussionExpiredNoticeShown])
 
   useEffect(() => {
-    if (!showContinue || councilPaused || discussionSeconds === 0 || loading || expansionPrompt || continuationPrompt) return
+    if (!showContinue || councilPaused || toolRequestActive || discussionSeconds === 0 || loading || expansionPrompt || continuationPrompt) return
 
     const loop = window.setInterval(() => {
       const now = Date.now()
@@ -1420,7 +1774,7 @@ export default function Home() {
     }, 1000)
 
     return () => window.clearInterval(loop)
-  }, [showContinue, councilPaused, discussionSeconds, loading, expansionPrompt, continuationPrompt])
+  }, [showContinue, councilPaused, toolRequestActive, discussionSeconds, loading, expansionPrompt, continuationPrompt])
 
   const extendCouncilDiscussion = (seconds: number) => {
     setDiscussionSeconds(seconds)
@@ -1460,7 +1814,7 @@ export default function Home() {
   }
 
   const allowContinuationRound = async () => {
-    if (loading || councilPaused || discussionSeconds === 0) return
+    if (loading || councilPaused || toolRequestActiveRef.current || discussionSeconds === 0) return
     setContinuationPrompt(null)
     lastAutoContinueAtRef.current = Date.now()
     await submitDecreeRef.current?.('continue council discussion', 'continue')
@@ -1599,6 +1953,9 @@ export default function Home() {
           onViewChange={setIncomeView}
           onCreate={createIncomeOpportunity}
           onExpire={markIncomeOpportunityExpired}
+          scout={opportunityScout}
+          scoutLoading={opportunityScoutLoading}
+          onScout={runOpportunityScout}
         />
         <MemoryPanel memories={memories} />
         <CodexAgentPlaceholder />

@@ -26,9 +26,13 @@ Add this to `.env.local` for local development:
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+FIRECRAWL_API_KEY=
+TAVILY_API_KEY=
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` is used only by `/api/tools/memory` on the server so the browser never receives it.
+`FIRECRAWL_API_KEY` is used only by `/api/income/scout` on the server for Opportunity Scout search.
+`TAVILY_API_KEY` is used only by `/api/income/scout` as the primary Opportunity Scout search provider.
 
 If you choose to keep anon-key access instead of the server service-role route, enable RLS policies for local app access in Supabase:
 

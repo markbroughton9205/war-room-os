@@ -7,15 +7,14 @@ function formatTime(d: Date) {
 }
 
 export function StatusBar() {
-  const [now, setNow] = useState<Date | null>(null)
+  const [now, setNow] = useState(() => new Date())
 
   useEffect(() => {
-    setNow(new Date())
     const id = window.setInterval(() => setNow(new Date()), 1000)
     return () => window.clearInterval(id)
   }, [])
 
-  const timeLabel = now ? formatTime(now) : '—'
+  const timeLabel = formatTime(now)
 
   return (
     <footer className="relative z-10 flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-slate-950/70 px-4 py-2.5 text-[11px] uppercase tracking-widest text-slate-400 shadow-[0_-12px_40px_-20px_rgba(56,189,248,0.35)] backdrop-blur-xl">
@@ -42,3 +41,4 @@ export function StatusBar() {
     </footer>
   )
 }
+

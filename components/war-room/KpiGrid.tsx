@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { MOCK_KPIS } from '@/lib/war-room/mock-kpis'
 
 export function KpiGrid() {
@@ -34,16 +35,16 @@ export function KpiGrid() {
       </div>
 
       <p className="mt-10 text-center text-[10px] uppercase tracking-[0.35em] text-slate-600">
-        <a
+        <Link
           href="/globe"
           className="text-[#d4af37]/80 underline-offset-4 transition hover:text-[#d4af37] hover:underline"
         >
           Global intelligence
-        </a>
+        </Link>
         <span className="mx-3 text-slate-700">·</span>
-        <a href="/" className="text-slate-500 underline-offset-4 transition hover:text-slate-300 hover:underline">
+        <Link href="/" className="text-slate-500 underline-offset-4 transition hover:text-slate-300 hover:underline">
           Home
-        </a>
+        </Link>
       </p>
     </div>
   )
