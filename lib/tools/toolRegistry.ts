@@ -1,5 +1,5 @@
 export type ToolStatus = 'idle' | 'scanning' | 'active' | 'complete' | 'error'
-export type ToolId = 'web' | 'memory' | 'files' | 'research' | 'repo' | 'deployments'
+export type ToolId = 'web' | 'memory' | 'files' | 'research' | 'repo' | 'deployments' | 'build'
 
 export type WarRoomTool = {
   id: ToolId
@@ -33,7 +33,7 @@ export const TOOL_REGISTRY: WarRoomTool[] = [
     status: 'idle',
     description: 'Workspace file inspection and artifact handling foundation.',
     requiresAuth: true,
-    endpoint: '/api/tools/files',
+    endpoint: '/api/files',
   },
   {
     id: 'research',
@@ -58,6 +58,14 @@ export const TOOL_REGISTRY: WarRoomTool[] = [
     description: 'Deployment status and release workflow foundation.',
     requiresAuth: true,
     endpoint: '/api/tools/deployments',
+  },
+  {
+    id: 'build',
+    name: 'Build',
+    status: 'idle',
+    description: 'Build request queue persistence and drafting.',
+    requiresAuth: true,
+    endpoint: '/api/build-requests',
   },
 ]
 

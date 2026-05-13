@@ -23,17 +23,54 @@ function normalizeMemory(row: Record<string, unknown>): MemoryEntry {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const healthOnly = new URL(req.url).searchParams.get('health') === '1'
+
   let supabase
   try {
     supabase = createSupabaseServerClient()
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Supabase server client is not configured'
+    if (healthOnly) {
+      return NextResponse.json({
+        tool: 'memory',
+        healthy: false,
+        status: 'error',
+        message,
+      }, { status: 503 })
+    }
     return NextResponse.json({
       tool: 'memory',
       status: 'error',
-      message: error instanceof Error ? error.message : 'Supabase server client is not configured',
+      message,
       memories: [],
     }, { status: 500 })
+  }
+
+  if (healthOnly) {
+    const { error } = await supabase
+      .from('memories')
+      .select('id')
+      .limit(1)
+
+    if (error) {
+      const fallback = await supabase.from('memories').select('id').limit(1)
+      if (fallback.error) {
+        return NextResponse.json({
+          tool: 'memory',
+          healthy: false,
+          status: 'error',
+          message: fallback.error.message,
+        }, { status: 500 })
+      }
+    }
+
+    return NextResponse.json({
+      tool: 'memory',
+      healthy: true,
+      status: 'complete',
+      message: 'Memory store reachable.',
+    })
   }
 
   const { data, error } = await supabase

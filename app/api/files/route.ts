@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fileUploadInProgress } from '@/lib/filesUploadActivity'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 
 type FileRow = Record<string, unknown>
@@ -23,6 +24,10 @@ function normalizeFile(row: FileRow) {
   }
 }
 
+function configuredBucketName() {
+  return process.env.SUPABASE_FILES_BUCKET?.trim() ?? ''
+}
+
 function getClientOrError() {
   try {
     return { supabase: createSupabaseServerClient(), error: null }
@@ -39,9 +44,53 @@ function getClientOrError() {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const healthOnly = new URL(req.url).searchParams.get('health') === '1'
+
   const { supabase, error } = getClientOrError()
-  if (error) return error
+  if (error) {
+    if (healthOnly) {
+      return NextResponse.json({
+        tool: 'files',
+        configured: false,
+        bucketReady: false,
+        tableReady: false,
+        uploading: fileUploadInProgress(),
+        message: 'Supabase is not configured for file metadata.',
+      }, { status: 503 })
+    }
+    return error
+  }
+
+  if (healthOnly) {
+    const bucket = configuredBucketName()
+    const uploading = fileUploadInProgress()
+    if (!bucket) {
+      return NextResponse.json({
+        tool: 'files',
+        configured: false,
+        bucketReady: false,
+        tableReady: false,
+        uploading,
+        message: 'SUPABASE_FILES_BUCKET is not set.',
+      })
+    }
+
+    const { error: bucketError } = await supabase.storage.getBucket(bucket)
+    const { error: tableError } = await supabase.from('war_room_files').select('id').limit(1)
+
+    const bucketReady = !bucketError
+    const tableReady = !tableError
+
+    return NextResponse.json({
+      tool: 'files',
+      configured: bucketReady && tableReady,
+      bucketReady,
+      tableReady,
+      configuredBucket: bucket,
+      uploading,
+    })
+  }
 
   const { data, error: queryError } = await supabase
     .from('war_room_files')

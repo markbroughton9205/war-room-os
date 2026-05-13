@@ -2,6 +2,8 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { NextResponse } from 'next/server'
 
+let repoScanInProgress = false
+
 type RepoFile = {
   relativePath: string
   extension: string
@@ -171,11 +173,36 @@ async function scanRepo() {
   }
 }
 
-export async function GET() {
-  return POST()
+export async function GET(req: Request) {
+  const health = new URL(req.url).searchParams.get('health') === '1'
+  if (!health) {
+    return NextResponse.json(
+      {
+        tool: 'repo-awareness',
+        message: 'Use GET ?health=1 for a cheap probe, or POST for a full index.',
+      },
+      { status: 400 },
+    )
+  }
+
+  return NextResponse.json({
+    tool: 'repo-awareness',
+    ok: true,
+    scanning: repoScanInProgress,
+    cwd: process.cwd(),
+  })
 }
 
 export async function POST() {
+  if (repoScanInProgress) {
+    return NextResponse.json({
+      tool: 'repo-awareness',
+      status: 'busy',
+      message: 'A repo scan is already running.',
+    }, { status: 409 })
+  }
+
+  repoScanInProgress = true
   try {
     const scan = await scanRepo()
     return NextResponse.json({ tool: 'repo-awareness', status: 'complete', scan })
@@ -185,5 +212,7 @@ export async function POST() {
       status: 'error',
       message: error instanceof Error ? error.message : 'Repo scan failed',
     }, { status: 500 })
+  } finally {
+    repoScanInProgress = false
   }
 }

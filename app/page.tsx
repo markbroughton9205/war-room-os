@@ -4,7 +4,16 @@ import { useState, useRef, useEffect } from 'react'
 import type { FormEvent } from 'react'
 import Link from 'next/link'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
-import { TOOL_REGISTRY, type ToolId, type ToolStatus } from '@/lib/tools/toolRegistry'
+import { APPROVAL_RISK_GATES, SECURE_APPROVAL_RISKS } from '@/lib/kernel/approvals'
+import { KERNEL_EVENT_SCHEMA, KERNEL_EVENT_TYPES } from '@/lib/kernel/events'
+import { MEMORY_POLICY } from '@/lib/kernel/memoryPolicy'
+import { AGENT_FAMILY_CAPABILITIES, CAPABILITY_ROUTES } from '@/lib/kernel/routing'
+import { LOCAL_FAMILY_AGENTS } from '@/lib/local-agent/family-agents'
+import { LOCAL_AGENT_ENGINES, LOCAL_AGENT_RELIABILITY_PRINCIPLES, LOCAL_AGENT_TASK_LIFECYCLE } from '@/lib/local-agent/engines'
+import { LOCAL_TASK_CATEGORIES } from '@/lib/local-agent/router'
+import type { LocalAgentBridgeStatusResponse, LocalAgentEngineId, LocalFamilyAgentsResponse, LocalTaskCategory, LocalTaskRoutingDecision } from '@/lib/local-agent/types'
+import { TOOL_REGISTRY, type ToolId } from '@/lib/tools/toolRegistry'
+import { fetchToolBarHealth, initialToolBarHealth, type ToolBarLabel } from '@/lib/warRoomToolBarHealth'
 
 const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Goal: Panama relocation. Motivated by vision of success. Wants truth about systems that harm Black and low income communities.`
 
@@ -88,6 +97,9 @@ type RaelActionStatus = 'pending' | 'answered' | 'expired'
 type RaelActionUrgency = 'low' | 'medium' | 'high'
 type SmsBridgeStatus = 'not configured' | 'standby' | 'online' | 'error'
 type RepoScanStatus = 'idle' | 'scanning' | 'indexed' | 'error'
+type ProviderConnectionStatus = 'online' | 'standby' | 'error' | 'not_connected'
+type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'redteam'
+type BridgeLifecycleState = 'observing' | 'planning' | 'reviewing diff' | 'QA checking' | 'awaiting approval' | 'applied' | 'rollback suggested'
 
 type RaelActionItem = {
   action_id: string
@@ -217,6 +229,11 @@ type RepoAwarenessState = {
   message: string
 }
 
+type ProviderHealthState = {
+  providers: Record<ProviderFamilyKey, ProviderConnectionStatus>
+  labels: Record<ProviderFamilyKey, string>
+}
+
 const FAMILY_META: Record<TypingFamily, { color: string; icon: string }> = {
   'CHATGPT FAMILY': { color: '#34D399', icon: '🧠' },
   'CLAUDE FAMILY': { color: '#A78BFA', icon: '🔮' },
@@ -276,6 +293,51 @@ const INITIAL_REPO_AWARENESS_STATE: RepoAwarenessState = {
   durationMs: 0,
   message: 'Repo scan has not run yet.',
 }
+const INITIAL_PROVIDER_HEALTH: ProviderHealthState = {
+  providers: {
+    claude: 'not_connected',
+    chatgpt: 'not_connected',
+    grok: 'not_connected',
+    gemini: 'not_connected',
+    redteam: 'standby',
+  },
+  labels: {
+    claude: 'Anthropic · Claude · checking',
+    chatgpt: 'OpenAI · ChatGPT · checking',
+    grok: 'xAI · Grok · checking',
+    gemini: 'Google · Gemini · not connected',
+    redteam: 'War Room · Red Team · standby',
+  },
+}
+const INITIAL_LOCAL_AGENT_BRIDGE: LocalAgentBridgeStatusResponse = {
+  bridge: 'config_needed',
+  engines: LOCAL_AGENT_ENGINES.reduce((acc, engine) => {
+    acc[engine.id] = {
+      id: engine.id,
+      name: engine.name,
+      status: 'not_detected',
+      endpoint: engine.defaultEndpoint,
+      message: 'Not checked yet.',
+    }
+    return acc
+  }, {} as LocalAgentBridgeStatusResponse['engines']),
+  selectedEngine: null,
+  repoAccessStatus: 'read-only status bridge; write access not granted',
+  lastTask: null,
+  qaStatus: 'idle',
+  rollbackCheckpointStatus: 'not created',
+  checkedAt: '',
+}
+const INITIAL_LOCAL_FAMILY_AGENTS: LocalFamilyAgentsResponse = {
+  ollamaDetected: false,
+  availableModels: [],
+  familyAgents: LOCAL_FAMILY_AGENTS.map(agent => ({
+    ...agent,
+    status: 'inactive',
+    modelInstalled: false,
+  })),
+  checkedAt: '',
+}
 const BASE_USAGE_ROWS: UsageEstimate[] = [
   { familyName: 'Claude Family', provider: 'Anthropic', model: 'claude-sonnet-4-20250514', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
   { familyName: 'ChatGPT Family', provider: 'OpenAI', model: 'gpt-4o', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
@@ -326,11 +388,6 @@ const MOCK_RATES_PER_MILLION: Record<UsageFamily, { input: number; output: numbe
   'Grok Family': { input: 0, output: 0 },
   'Gemini Family': { input: 0, output: 0 },
 }
-
-const INITIAL_TOOL_STATUSES = TOOL_REGISTRY.reduce((acc, tool) => {
-  acc[tool.id] = tool.status
-  return acc
-}, {} as Record<ToolId, ToolStatus>)
 
 function detectToneMode(message: string): ToneMode {
   const text = message.toLowerCase()
@@ -526,35 +583,117 @@ function TypingIndicator({ familyName, label }: { familyName: TypingFamily; labe
   )
 }
 
-function ToolStatusPanel({ toolStatuses }: { toolStatuses: Record<ToolId, ToolStatus> }) {
+function toolBarTone(label: ToolBarLabel) {
+  if (label === '—') {
+    return {
+      active: false,
+      nameColor: '#555',
+      labelColor: '#444',
+      border: '1px solid #222',
+      background: 'rgba(255,255,255,0.02)',
+      dot: '#333',
+      dotGlow: 'none',
+    }
+  }
+
+  if (label === 'SCANNING' || label === 'ACTIVE') {
+    return {
+      active: true,
+      nameColor: '#FFD700',
+      labelColor: '#fde68a',
+      border: '1px solid rgba(255,215,0,0.45)',
+      background: 'rgba(255,215,0,0.08)',
+      dot: '#FFD700',
+      dotGlow: '0 0 8px rgba(255,215,0,0.75)',
+    }
+  }
+
+  if (label === 'ERROR') {
+    return {
+      active: true,
+      nameColor: '#fca5a5',
+      labelColor: '#fecaca',
+      border: '1px solid rgba(239,68,68,0.45)',
+      background: 'rgba(239,68,68,0.06)',
+      dot: '#EF4444',
+      dotGlow: '0 0 8px rgba(239,68,68,0.55)',
+    }
+  }
+
+  if (label === 'CONFIG NEEDED' || label === 'PARTIAL') {
+    return {
+      active: true,
+      nameColor: '#fdba74',
+      labelColor: '#ffedd5',
+      border: '1px solid rgba(251,146,60,0.45)',
+      background: 'rgba(251,146,60,0.06)',
+      dot: '#fb923c',
+      dotGlow: '0 0 8px rgba(251,146,60,0.45)',
+    }
+  }
+
+  if (label === 'NOT CONNECTED') {
+    return {
+      active: false,
+      nameColor: '#666',
+      labelColor: '#737373',
+      border: '1px solid #2a2a2a',
+      background: 'rgba(255,255,255,0.02)',
+      dot: '#525252',
+      dotGlow: 'none',
+    }
+  }
+
+  return {
+    active: true,
+    nameColor: '#34D399',
+    labelColor: '#7ee7b7',
+    border: '1px solid rgba(52,211,153,0.45)',
+    background: 'rgba(52,211,153,0.08)',
+    dot: '#34D399',
+    dotGlow: '0 0 8px rgba(52,211,153,0.8)',
+  }
+}
+
+function ToolStatusPanel({
+  health,
+  activity,
+}: {
+  health: Record<ToolId, ToolBarLabel>
+  activity: Partial<Record<ToolId, ToolBarLabel>>
+}) {
   return (
     <div className="border-b border-yellow-900 px-6 py-2 flex-shrink-0"
       style={{ background: 'rgba(255,215,0,0.02)' }}>
       <div className="flex items-center gap-2 overflow-x-auto">
         {TOOL_REGISTRY.map(tool => {
-          const status = toolStatuses[tool.id] ?? tool.status
-          const active = status !== 'idle'
+          const label = activity[tool.id] ?? health[tool.id] ?? '—'
+          const tone = toolBarTone(label)
+          const tooltipSynonym =
+            label === 'ONLINE' && tool.id === 'memory'
+              ? ' (memory store reachable; same as API complete)'
+              : ''
 
           return (
             <div key={tool.id}
               className="flex items-center gap-2 rounded px-3 py-2 text-xs tracking-widest whitespace-nowrap"
-              title={`${tool.description} Endpoint: ${tool.endpoint}${tool.requiresAuth ? ' Auth required.' : ''}`}
+              title={`${tool.description} Endpoint: ${tool.endpoint}${tool.requiresAuth ? ' Auth required.' : ''}${tooltipSynonym}`}
               style={{
-                border: active ? '1px solid rgba(52,211,153,0.45)' : '1px solid #222',
-                color: active ? '#34D399' : '#555',
-                background: active ? 'rgba(52,211,153,0.08)' : 'rgba(255,255,255,0.02)',
+                border: tone.border,
+                color: tone.nameColor,
+                background: tone.background,
               }}>
-              <span className={active ? 'tool-dot-active' : ''}
+              <span className={tone.active ? 'tool-dot-active' : ''}
                 style={{
                   width: '0.45rem',
                   height: '0.45rem',
                   borderRadius: '9999px',
-                  background: active ? '#34D399' : '#333',
-                  boxShadow: active ? '0 0 8px rgba(52,211,153,0.8)' : 'none',
+                  background: tone.dot,
+                  boxShadow: tone.dotGlow,
                 }} />
               <span>{tool.name}</span>
-              <span style={{ color: active ? '#7ee7b7' : '#333' }}>
-                {status.toUpperCase()}
+              <span style={{ color: tone.labelColor }}>
+                {label}
               </span>
             </div>
           )
@@ -568,11 +707,21 @@ function TokenUsagePanel({
   rows,
   currentCost,
   sessionTotal,
+  providerHealth,
 }: {
   rows: UsageEstimate[]
   currentCost: number
   sessionTotal: number
+  providerHealth: ProviderHealthState
 }) {
+  const modelLabel = (row: UsageEstimate) => {
+    if (row.familyName === 'Grok Family') return providerHealth.labels.grok
+    if (row.familyName === 'Gemini Family') return providerHealth.labels.gemini
+    if (row.familyName === 'Claude Family') return providerHealth.labels.claude
+    if (row.familyName === 'ChatGPT Family') return providerHealth.labels.chatgpt
+    return `${row.provider} · ${row.model}`
+  }
+
   return (
     <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
       style={{ background: 'rgba(255,255,255,0.015)' }}>
@@ -596,7 +745,7 @@ function TokenUsagePanel({
             <div className="text-xs font-bold tracking-widest" style={{ color: row.active ? '#ddd' : '#444' }}>
               {row.familyName}
             </div>
-            <div className="text-xs mt-1" style={{ color: '#555' }}>{row.provider} · {row.model}</div>
+            <div className="text-xs mt-1" style={{ color: '#555' }}>{modelLabel(row)}</div>
             <div className="text-xs mt-2" style={{ color: row.active ? '#888' : '#333' }}>
               IN {row.inputTokens} · OUT {row.outputTokens}
             </div>
@@ -764,6 +913,128 @@ function RepoAwarenessPanel({
 
       <div className="mt-3 text-xs" style={{ color: '#555' }}>
         Last scan: {repo.lastScanTime ? new Date(repo.lastScanTime).toLocaleString() : 'never'} | {repo.message}
+      </div>
+    </div>
+  )
+}
+
+function KernelStatusPanel() {
+  const routingCount = Object.keys(CAPABILITY_ROUTES).length
+  const familyCount = Object.keys(AGENT_FAMILY_CAPABILITIES).length
+  const gateCount = Object.keys(APPROVAL_RISK_GATES).length
+  const memoryCategories = MEMORY_POLICY.categories.length
+  const statusItems = [
+    { label: 'KERNEL', value: 'ONLINE', color: '#34D399' },
+    { label: 'ROUTING', value: 'ACTIVE', color: '#38BDF8' },
+    { label: 'EVENT BUS', value: 'READY', color: '#A78BFA' },
+    { label: 'MEMORY POLICY', value: 'ACTIVE', color: '#34D399' },
+    { label: 'APPROVAL GATES', value: 'ACTIVE', color: '#FFD700' },
+    { label: 'COST LEDGER', value: 'PLACEHOLDER', color: '#777' },
+  ]
+  const safetyRules = [
+    'no autonomous execution',
+    'no payment or banking execution',
+    'no shell/code execution from UI',
+    'secure approval gates enforced',
+  ]
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(56,189,248,0.018)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#38BDF8' }}>
+            WAR ROOM KERNEL
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Capability routing, event schema, memory policy, and approval gates.
+          </p>
+        </div>
+        <span className="rounded px-3 py-1 text-xs font-bold tracking-widest"
+          style={{ color: '#34D399', border: '1px solid rgba(52,211,153,0.35)', background: 'rgba(0,0,0,0.28)' }}>
+          NERVOUS SYSTEM READY
+        </span>
+      </div>
+
+      <div className="grid gap-2 text-xs md:grid-cols-6">
+        {statusItems.map(item => (
+          <div key={item.label} className="rounded px-3 py-2"
+            style={{ border: '1px solid rgba(56,189,248,0.16)', background: 'rgba(0,0,0,0.28)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>{item.label}</div>
+            <div className="mt-1 font-bold" style={{ color: item.color }}>{item.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-5">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <span style={{ color: '#555' }}>FAMILIES </span>
+          <span style={{ color: '#34D399' }}>{familyCount}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(56,189,248,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <span style={{ color: '#555' }}>ROUTES </span>
+          <span style={{ color: '#38BDF8' }}>{routingCount}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <span style={{ color: '#555' }}>EVENT TYPES </span>
+          <span style={{ color: '#A78BFA' }}>{KERNEL_EVENT_TYPES.length}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <span style={{ color: '#555' }}>GATES </span>
+          <span style={{ color: '#FFD700' }}>{gateCount}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <span style={{ color: '#555' }}>MEMORY TYPES </span>
+          <span style={{ color: '#34D399' }}>{memoryCategories}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(56,189,248,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#38BDF8' }}>CAPABILITY ROUTING</div>
+          <div className="flex flex-wrap gap-1">
+            {Object.entries(CAPABILITY_ROUTES).slice(0, 12).map(([capability, families]) => (
+              <span key={capability} className="rounded px-2 py-1 text-[10px]" style={{ border: '1px solid #222', color: '#888' }}>
+                {capability} &rarr; {AGENT_FAMILY_CAPABILITIES[families[0]].label}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#A78BFA' }}>EVENT SCHEMA</div>
+          <div className="flex flex-wrap gap-1">
+            {KERNEL_EVENT_SCHEMA.eventTypes.slice(0, 8).map(eventType => (
+              <span key={eventType} className="rounded px-2 py-1 text-[10px]" style={{ border: '1px solid #222', color: '#888' }}>
+                {eventType}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FFD700' }}>GOVERNANCE</div>
+          <div className="flex flex-wrap gap-1">
+            {SECURE_APPROVAL_RISKS.map(risk => (
+              <span key={risk} className="rounded px-2 py-1 text-[10px]" style={{ border: '1px solid rgba(255,215,0,0.18)', color: '#FFD700' }}>
+                {risk}: secure approval
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {MEMORY_POLICY.rules.map(rule => (
+          <span key={rule} className="rounded px-2 py-1 text-[10px] tracking-widest"
+            style={{ border: '1px solid rgba(52,211,153,0.18)', color: '#777' }}>
+            {rule}
+          </span>
+        ))}
+        {safetyRules.map(rule => (
+          <span key={rule} className="rounded px-2 py-1 text-[10px] tracking-widest"
+            style={{ border: '1px solid rgba(239,68,68,0.18)', color: '#777' }}>
+            {rule}
+          </span>
+        ))}
       </div>
     </div>
   )
@@ -1691,16 +1962,36 @@ function FamilyPresencePanel({
 }: {
   presence: Record<TypingFamily, FamilyPresence>
 }) {
+  const coreFamilies = [
+    { name: 'ChatGPT Family', role: 'orchestration/synthesis', color: '#34D399' },
+    { name: 'Claude Family', role: 'architecture/systems reasoning', color: '#A78BFA' },
+    { name: 'Grok Family', role: 'realtime radar, signal detection, X/web intelligence, current-event monitoring', color: '#F97316' },
+  ]
+
   return (
     <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
       style={{ background: 'rgba(0,255,65,0.018)' }}>
-      <div className="flex items-center justify-between gap-4 mb-3">
-        <h2 className="text-xs font-bold tracking-widest" style={{ color: '#9AE6B4' }}>
-          LIVE COGNITION
-        </h2>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#9AE6B4' }}>
+            LIVE COGNITION
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Family presence means role architecture exists. Provider connection status is reported separately.
+          </p>
+        </div>
         <span className="text-xs tracking-widest" style={{ color: '#555' }}>
           SUB-AGENT CONSTELLATIONS
         </span>
+      </div>
+      <div className="mb-3 grid gap-2 lg:grid-cols-3">
+        {coreFamilies.map(family => (
+          <div key={family.name} className="rounded px-3 py-2 text-xs"
+            style={{ border: `1px solid ${family.color}33`, background: 'rgba(0,0,0,0.24)' }}>
+            <div className="font-bold tracking-widest" style={{ color: family.color }}>{family.name}</div>
+            <div className="mt-1 leading-relaxed" style={{ color: '#888' }}>{family.role}</div>
+          </div>
+        ))}
       </div>
       <div className="grid gap-2 xl:grid-cols-6 md:grid-cols-3">
         {FAMILY_NODE_GROUPS.map(group => {
@@ -1887,6 +2178,562 @@ function CodexAgentPlaceholder() {
   )
 }
 
+function BridgeArchitectPanel() {
+  const lifecycleStates: BridgeLifecycleState[] = [
+    'observing',
+    'planning',
+    'reviewing diff',
+    'QA checking',
+    'awaiting approval',
+    'applied',
+    'rollback suggested',
+  ]
+  const currentState: BridgeLifecycleState = 'observing'
+  const localEnginesConnected = false
+  const responsibilities = [
+    '🧭 explains local agent activity',
+    '🧩 translates raw model output',
+    '🔍 summarizes diffs and risk',
+    '✅ coordinates QA flow',
+    '🤝 keeps trust and transparency high',
+  ]
+  const guardrails = [
+    'Does not modify files directly',
+    'Does not execute shell commands',
+    'Does not bypass approval gates',
+    'Does not commit autonomously',
+  ]
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(96,165,250,0.018)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#60A5FA' }}>
+            🌉 BRIDGE ARCHITECT
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#777' }}>
+            Translator, coordinator, explainer, and trust layer for local coding agents.
+          </p>
+        </div>
+        <span className="rounded px-3 py-1 text-xs font-bold tracking-widest"
+          style={{ color: '#FFD700', border: '1px solid rgba(255,215,0,0.35)', background: 'rgba(0,0,0,0.28)' }}>
+          {currentState.toUpperCase()}
+        </span>
+      </div>
+
+      <div className="grid gap-2 text-xs md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>PERSONALITY</div>
+          <div className="mt-1 font-bold" style={{ color: '#60A5FA' }}>calm · precise · conversational</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>INTERNAL ALIAS</div>
+          <div className="mt-1 font-bold" style={{ color: '#34D399' }}>Big Sis / Big Bro</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>LOCAL ENGINES</div>
+          <div className="mt-1 font-bold" style={{ color: localEnginesConnected ? '#34D399' : '#777' }}>
+            {localEnginesConnected ? 'connected' : 'none connected yet'}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>POSITION</div>
+          <div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>between engines and Ra&apos;el</div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {lifecycleStates.map(state => {
+          const active = state === currentState
+
+          return (
+            <span key={state} className="rounded px-2 py-1 text-[10px] tracking-widest"
+              style={{
+                color: active ? '#60A5FA' : '#555',
+                border: active ? '1px solid rgba(96,165,250,0.45)' : '1px solid #222',
+                background: active ? 'rgba(96,165,250,0.08)' : 'rgba(0,0,0,0.22)',
+              }}>
+              {active ? '● ' : ''}{state}
+            </span>
+          )
+        })}
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-4">
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(96,165,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#60A5FA' }}>TRANSPARENCY LOG</div>
+          <div className="rounded px-2 py-3 text-center tracking-widest" style={{ border: '1px solid #222', color: '#555', background: 'rgba(0,0,0,0.22)' }}>
+            No local agent activity yet.
+          </div>
+        </div>
+
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#34D399' }}>DIFF SUMMARY</div>
+          <div className="rounded px-2 py-3 text-center tracking-widest" style={{ border: '1px solid #222', color: '#555', background: 'rgba(0,0,0,0.22)' }}>
+            No diff submitted for review.
+          </div>
+        </div>
+
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#A78BFA' }}>QA EXPLANATION</div>
+          <div className="rounded px-2 py-3 text-center tracking-widest" style={{ border: '1px solid #222', color: '#555', background: 'rgba(0,0,0,0.22)' }}>
+            QA flow will appear after a local change request.
+          </div>
+        </div>
+
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FFD700' }}>APPROVAL RECOMMENDATION</div>
+          <div className="rounded px-2 py-3 text-center tracking-widest" style={{ border: '1px solid #222', color: '#555', background: 'rgba(0,0,0,0.22)' }}>
+            No approval needed.
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(96,165,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#60A5FA' }}>RESPONSIBILITIES</div>
+          <div className="flex flex-wrap gap-2">
+            {responsibilities.map(item => (
+              <span key={item} className="rounded px-2 py-1 text-[10px] tracking-widest"
+                style={{ border: '1px solid rgba(96,165,250,0.18)', color: '#999' }}>
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(239,68,68,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#EF4444' }}>GUARDRAILS</div>
+          <div className="flex flex-wrap gap-2">
+            {guardrails.map(rule => (
+              <span key={rule} className="rounded px-2 py-1 text-[10px] tracking-widest"
+                style={{ border: '1px solid rgba(239,68,68,0.18)', color: '#999' }}>
+                {rule}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LocalCodeAgentBridgePanel({
+  bridge,
+  onRefresh,
+}: {
+  bridge: LocalAgentBridgeStatusResponse
+  onRefresh: () => void
+}) {
+  const bridgeColor = bridge.bridge === 'online' ? '#34D399' : bridge.bridge === 'error' ? '#EF4444' : '#FFD700'
+  const engineStatusStyle: Record<LocalAgentBridgeStatusResponse['engines'][LocalAgentEngineId]['status'], { color: string; label: string }> = {
+    detected: { color: '#34D399', label: 'DETECTED' },
+    not_detected: { color: '#555', label: 'NOT DETECTED' },
+    error: { color: '#EF4444', label: 'ERROR' },
+  }
+  const selectedEngine = bridge.selectedEngine ? bridge.engines[bridge.selectedEngine] : null
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(52,211,153,0.014)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>
+            LOCAL CODE AGENT BRIDGE
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Foundation for Ollama, LM Studio, OpenHands, Aider, Continue, and Goose.
+          </p>
+        </div>
+        <button type="button" onClick={onRefresh}
+          className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+          style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#34D399', background: 'rgba(0,0,0,0.28)' }}>
+          Refresh Bridge
+        </button>
+      </div>
+
+      <div className="grid gap-2 text-xs md:grid-cols-6">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>BRIDGE STATUS</div>
+          <div className="mt-1 font-bold" style={{ color: bridgeColor }}>{bridge.bridge.toUpperCase().replace('_', ' ')}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>AVAILABLE ENGINES</div>
+          <div className="mt-1 font-bold" style={{ color: '#60A5FA' }}>
+            {Object.values(bridge.engines).filter(engine => engine.status === 'detected').length}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>SELECTED ENGINE</div>
+          <div className="mt-1 font-bold" style={{ color: selectedEngine ? '#FFD700' : '#777' }}>
+            {selectedEngine?.name ?? 'none'}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>REPO ACCESS</div>
+          <div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{bridge.repoAccessStatus}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>QA STATUS</div>
+          <div className="mt-1 font-bold" style={{ color: '#60A5FA' }}>{bridge.qaStatus}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>ROLLBACK</div>
+          <div className="mt-1 font-bold" style={{ color: '#EF4444' }}>{bridge.rollbackCheckpointStatus}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        <div className="rounded px-3 py-2 text-xs lg:col-span-2" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#34D399' }}>ENGINE DETECTION</div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {LOCAL_AGENT_ENGINES.map(engine => {
+              const status = bridge.engines[engine.id]
+              const style = engineStatusStyle[status.status]
+
+              return (
+                <div key={engine.id} className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold tracking-widest" style={{ color: '#ddd' }}>{engine.name}</span>
+                    <span className="text-[10px] tracking-widest" style={{ color: style.color }}>{style.label}</span>
+                  </div>
+                  <div className="mt-1 text-[10px] leading-relaxed" style={{ color: '#666' }}>
+                    {status.message}
+                  </div>
+                  <div className="mt-1 truncate text-[10px]" style={{ color: '#444' }}>
+                    {status.endpoint ?? 'endpoint not configured'}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FFD700' }}>TASK LIFECYCLE</div>
+          <div className="flex flex-wrap gap-1">
+            {LOCAL_AGENT_TASK_LIFECYCLE.map(step => (
+              <span key={step} className="rounded px-2 py-1 text-[10px] tracking-widest"
+                style={{ border: '1px solid #222', color: '#777' }}>
+                {step}
+              </span>
+            ))}
+          </div>
+          <div className="mt-3 rounded px-2 py-2" style={{ border: '1px solid #222', color: '#555', background: 'rgba(0,0,0,0.22)' }}>
+            Last task: {bridge.lastTask ?? 'none'}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {LOCAL_AGENT_RELIABILITY_PRINCIPLES.map(principle => (
+          <span key={principle} className="rounded px-2 py-1 text-[10px] tracking-widest"
+            style={{ border: '1px solid rgba(52,211,153,0.18)', color: '#999', background: 'rgba(0,0,0,0.22)' }}>
+            {principle}
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-3 text-xs" style={{ color: '#555' }}>
+        Last check: {bridge.checkedAt ? new Date(bridge.checkedAt).toLocaleString() : 'not checked yet'}
+      </div>
+    </div>
+  )
+}
+
+function LocalFamilyAgentsPanel({
+  families,
+  onRefresh,
+}: {
+  families: LocalFamilyAgentsResponse
+  onRefresh: () => void
+}) {
+  const firstAgentId = families.familyAgents[0]?.id ?? ''
+  const [selectedAgentId, setSelectedAgentId] = useState(firstAgentId)
+  const [testPrompt, setTestPrompt] = useState('')
+  const [testResponse, setTestResponse] = useState('')
+  const [testLabel, setTestLabel] = useState('local model response')
+  const [testLoading, setTestLoading] = useState(false)
+  const [testError, setTestError] = useState<string | null>(null)
+  const selectedAgent = families.familyAgents.find(agent => agent.id === selectedAgentId) ?? families.familyAgents[0]
+  const availableCount = families.familyAgents.filter(agent => agent.modelInstalled).length
+
+  const runLocalFamilyTest = async () => {
+    if (!selectedAgent || !testPrompt.trim()) return
+
+    setTestLoading(true)
+    setTestError(null)
+    setTestResponse('')
+
+    try {
+      const res = await fetch('/api/local-agent/invoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          familyAgentId: selectedAgent.id,
+          prompt: testPrompt,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) throw new Error(data.message || 'Local model invocation failed')
+      setTestLabel(data.label ?? 'local model response')
+      setTestResponse(data.response ?? '')
+    } catch (error) {
+      setTestError(error instanceof Error ? error.message : 'Local model invocation failed')
+    } finally {
+      setTestLoading(false)
+    }
+  }
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(167,139,250,0.016)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#A78BFA' }}>
+            LOCAL FAMILY AGENTS
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            War Room baby-family registry backed by local Ollama models. Prompt only, no execution permissions.
+          </p>
+        </div>
+        <button type="button" onClick={onRefresh}
+          className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+          style={{ border: '1px solid rgba(167,139,250,0.35)', color: '#A78BFA', background: 'rgba(0,0,0,0.28)' }}>
+          Refresh Families
+        </button>
+      </div>
+
+      <div className="mb-3 grid gap-2 text-xs md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>OLLAMA</div>
+          <div className="mt-1 font-bold" style={{ color: families.ollamaDetected ? '#34D399' : '#777' }}>
+            {families.ollamaDetected ? 'DETECTED' : 'NOT DETECTED'}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>AVAILABLE BABIES</div>
+          <div className="mt-1 font-bold" style={{ color: '#60A5FA' }}>{availableCount}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>MODELS</div>
+          <div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{families.availableModels.length}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>LAST CHECK</div>
+          <div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>
+            {families.checkedAt ? new Date(families.checkedAt).toLocaleTimeString() : 'not checked'}
+          </div>
+        </div>
+      </div>
+
+      {families.availableModels.length === 0 ? (
+        <div className="mb-3 rounded px-3 py-4 text-center text-xs tracking-widest"
+          style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#666', background: 'rgba(0,0,0,0.22)' }}>
+          No local Ollama models found yet. Install a model such as llama3.2:3b, then refresh families.
+        </div>
+      ) : (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {families.availableModels.map(model => (
+            <span key={model.name} className="rounded px-2 py-1 text-[10px] tracking-widest"
+              style={{ border: '1px solid rgba(52,211,153,0.2)', color: '#9AE6B4', background: 'rgba(0,0,0,0.22)' }}>
+              {model.name} {model.family ? `| ${model.family}` : ''} {model.parameterSize ? `| ${model.parameterSize}` : ''} {model.quantization ? `| ${model.quantization}` : ''}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="grid gap-2 xl:grid-cols-3 lg:grid-cols-2">
+        {families.familyAgents.map(agent => (
+          <div key={agent.id} className="rounded px-3 py-2 text-xs"
+            style={{
+              border: agent.modelInstalled ? '1px solid rgba(52,211,153,0.22)' : '1px solid rgba(255,255,255,0.08)',
+              background: agent.modelInstalled ? 'rgba(52,211,153,0.035)' : 'rgba(0,0,0,0.24)',
+            }}>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="font-bold tracking-widest" style={{ color: agent.modelInstalled ? '#ddd' : '#777' }}>
+                  {agent.displayName}
+                </div>
+                <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#555' }}>{agent.family}</div>
+              </div>
+              <span className="rounded px-2 py-1 text-[10px] tracking-widest"
+                style={{
+                  border: agent.modelInstalled ? '1px solid rgba(52,211,153,0.25)' : '1px solid #222',
+                  color: agent.modelInstalled ? '#34D399' : '#666',
+                }}>
+                {agent.status.toUpperCase()}
+              </span>
+            </div>
+            <div className="mt-2 leading-relaxed" style={{ color: '#888' }}>{agent.role}</div>
+            <div className="mt-2 grid gap-1 text-[10px]">
+              <span style={{ color: '#666' }}>preferred model: <b style={{ color: '#FFD700' }}>{agent.preferredModel}</b></span>
+              <span style={{ color: agent.modelInstalled ? '#34D399' : '#EF4444' }}>model installed: {String(agent.modelInstalled)}</span>
+              <span style={{ color: '#777' }}>internet access: {String(agent.internetAccess)}</span>
+              <span style={{ color: '#777' }}>approval required: {String(agent.requiresApproval)}</span>
+              <span style={{ color: '#777' }}>can execute code: {String(agent.canExecuteCode)}</span>
+              <span style={{ color: '#777' }}>can modify files: {String(agent.canModifyFiles)}</span>
+            </div>
+            <div className="mt-2 rounded px-2 py-2 leading-relaxed" style={{ border: '1px solid #222', color: '#666', background: 'rgba(0,0,0,0.22)' }}>
+              {agent.notes}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 rounded px-3 py-3 text-xs" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.26)' }}>
+        <div className="mb-2 font-bold tracking-widest" style={{ color: '#A78BFA' }}>SAFE LOCAL TEST</div>
+        <div className="grid gap-2 md:grid-cols-[220px_1fr_auto]">
+          <select value={selectedAgent?.id ?? ''} onChange={event => setSelectedAgentId(event.target.value)}
+            className="rounded bg-black px-3 py-2 text-xs"
+            style={{ border: '1px solid #222', color: '#ddd' }}>
+            {families.familyAgents.map(agent => (
+              <option key={agent.id} value={agent.id}>{agent.displayName}</option>
+            ))}
+          </select>
+          <input value={testPrompt} onChange={event => setTestPrompt(event.target.value)}
+            className="rounded bg-black px-3 py-2 text-xs"
+            style={{ border: '1px solid #222', color: '#ddd' }}
+            placeholder="Send a safe prompt to the local model" />
+          <button type="button" onClick={() => void runLocalFamilyTest()} disabled={testLoading || !selectedAgent?.modelInstalled || !testPrompt.trim()}
+            className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+            style={{ background: '#A78BFA', color: '#000' }}>
+            {testLoading ? 'ASKING...' : 'TEST LOCAL'}
+          </button>
+        </div>
+        {(testResponse || testError) && (
+          <div className="mt-3 rounded px-3 py-2 leading-relaxed" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.3)' }}>
+            <div className="mb-1 text-[10px] font-bold tracking-widest" style={{ color: testError ? '#EF4444' : '#34D399' }}>
+              {testError ? 'LOCAL MODEL ERROR' : testLabel.toUpperCase()}
+            </div>
+            <div style={{ color: testError ? '#fca5a5' : '#bbb' }}>{testError ?? testResponse}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CapabilityRouterPanel() {
+  const [taskCategory, setTaskCategory] = useState<LocalTaskCategory>('synthesis')
+  const [prompt, setPrompt] = useState('')
+  const [decision, setDecision] = useState<LocalTaskRoutingDecision | null>(null)
+  const [routing, setRouting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const routeTask = async () => {
+    setRouting(true)
+    setError(null)
+
+    try {
+      const res = await fetch('/api/local-agent/route-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskCategory,
+          prompt,
+          requireApproval: true,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) throw new Error(data.message || 'Capability routing failed')
+      setDecision(data)
+    } catch (routeError) {
+      setError(routeError instanceof Error ? routeError.message : 'Capability routing failed')
+    } finally {
+      setRouting(false)
+    }
+  }
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(56,189,248,0.014)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#38BDF8' }}>
+            CAPABILITY ROUTER
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Routes task types to the right local family baby. Routing only; safe invoke remains separate.
+          </p>
+        </div>
+        <button type="button" onClick={() => void routeTask()} disabled={routing}
+          className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+          style={{ background: '#38BDF8', color: '#000' }}>
+          {routing ? 'ROUTING...' : 'ROUTE TASK'}
+        </button>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-[220px_1fr]">
+        <select value={taskCategory} onChange={event => setTaskCategory(event.target.value as LocalTaskCategory)}
+          className="rounded bg-black px-3 py-2 text-xs"
+          style={{ border: '1px solid #222', color: '#ddd' }}>
+          {LOCAL_TASK_CATEGORIES.map(category => (
+            <option key={category} value={category}>{category}</option>
+          ))}
+        </select>
+        <input value={prompt} onChange={event => setPrompt(event.target.value)}
+          className="rounded bg-black px-3 py-2 text-xs"
+          style={{ border: '1px solid #222', color: '#ddd' }}
+          placeholder="Optional prompt context for routing only" />
+      </div>
+
+      {error && (
+        <div className="mt-3 rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(239,68,68,0.25)', color: '#fca5a5', background: 'rgba(239,68,68,0.05)' }}>
+          {error}
+        </div>
+      )}
+
+      {decision ? (
+        <div className="mt-3 grid gap-2 lg:grid-cols-3">
+          <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(56,189,248,0.22)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>SELECTED FAMILY</div>
+            <div className="mt-1 font-bold" style={{ color: '#38BDF8' }}>{decision.selectedFamily}</div>
+            <div className="mt-2 tracking-widest" style={{ color: '#555' }}>LOCAL BABY</div>
+            <div className="mt-1" style={{ color: '#ddd' }}>{decision.selectedAgent.displayName}</div>
+          </div>
+          <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>SELECTED MODEL</div>
+            <div className="mt-1 font-bold" style={{ color: '#34D399' }}>{decision.selectedModel}</div>
+            <div className="mt-2" style={{ color: decision.modelInstalled ? '#34D399' : '#EF4444' }}>
+              model installed: {String(decision.modelInstalled)}
+            </div>
+            <div className="mt-1" style={{ color: '#777' }}>approval required: {String(decision.approvalRequired)}</div>
+            <div className="mt-1" style={{ color: '#777' }}>can execute: {String(decision.canExecute)}</div>
+          </div>
+          <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.22)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>RECOMMENDED NEXT STEP</div>
+            <div className="mt-1 leading-relaxed" style={{ color: '#FFD700' }}>{decision.recommendedNextStep}</div>
+          </div>
+          <div className="rounded px-3 py-2 text-xs lg:col-span-2" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="mb-2 font-bold tracking-widest" style={{ color: '#A78BFA' }}>REASONING</div>
+            <div className="leading-relaxed" style={{ color: '#bbb' }}>{decision.reasoning}</div>
+          </div>
+          <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(239,68,68,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="mb-2 font-bold tracking-widest" style={{ color: '#EF4444' }}>SUPPORT RECOMMENDATION</div>
+            {decision.recommendedSupportingAgents.length === 0 ? (
+              <div style={{ color: '#555' }}>No supporting baby recommended.</div>
+            ) : (
+              <div className="grid gap-1">
+                {decision.recommendedSupportingAgents.map(agent => (
+                  <span key={agent.id} style={{ color: '#999' }}>{agent.displayName}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 rounded px-3 py-4 text-center text-xs tracking-widest"
+          style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#555', background: 'rgba(0,0,0,0.22)' }}>
+          No task routed yet.
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ExpansionPermissionPrompt({
   prompt,
   onApprove,
@@ -1973,7 +2820,7 @@ export default function Home() {
   const [messages, setMessages] = useState<CouncilMessage[]>([{
     id: '0',
     familyName: 'SYSTEM',
-    content: "War Room initialized. Claude and ChatGPT Family present. Speak your decree, Ra'el.",
+    content: "War Room initialized. ChatGPT, Claude, and Grok Families present. Speak your decree, Ra'el.",
     timestamp: '--:--',
     color: '#FFD700',
     icon: '⚔',
@@ -1984,9 +2831,15 @@ export default function Home() {
   const [showContinue, setShowContinue] = useState(false)
   const [discussionSeconds, setDiscussionSeconds] = useState(DEFAULT_DISCUSSION_SECONDS)
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
-  const [toolStatuses, setToolStatuses] = useState<Record<ToolId, ToolStatus>>(INITIAL_TOOL_STATUSES)
+  const [toolBarHealth, setToolBarHealth] = useState(initialToolBarHealth)
+  const [toolBarActivity, setToolBarActivity] = useState<Partial<Record<ToolId, ToolBarLabel>>>({})
+
+  const refreshToolBarHealthBars = () => fetchToolBarHealth().then(setToolBarHealth).catch(() => undefined)
   const [memories, setMemories] = useState<MemoryEntry[]>([])
   const [repoAwareness, setRepoAwareness] = useState<RepoAwarenessState>(INITIAL_REPO_AWARENESS_STATE)
+  const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
+  const [localAgentBridge, setLocalAgentBridge] = useState<LocalAgentBridgeStatusResponse>(INITIAL_LOCAL_AGENT_BRIDGE)
+  const [localFamilyAgents, setLocalFamilyAgents] = useState<LocalFamilyAgentsResponse>(INITIAL_LOCAL_FAMILY_AGENTS)
   const [warRoomFiles, setWarRoomFiles] = useState<WarRoomFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesMessage, setFilesMessage] = useState<string | null>(null)
@@ -2063,10 +2916,6 @@ export default function Home() {
 
   const setPresence = (familyName: TypingFamily, status: FamilyPresence['status'], label: string) => {
     setFamilyPresence(prev => ({ ...prev, [familyName]: { status, label } }))
-  }
-
-  const setToolStatus = (toolId: ToolId, status: ToolStatus) => {
-    setToolStatuses(prev => ({ ...prev, [toolId]: status }))
   }
 
   const addSystemMessage = (content: string) => {
@@ -2226,8 +3075,12 @@ export default function Home() {
     toolRequestActiveRef.current = false
     activeToolSystemMessageRef.current = null
     setToolRequestActive(false)
-    setToolStatus('web', 'idle')
-    setToolStatus('research', 'idle')
+    setToolBarActivity(prev => {
+      const next = { ...prev }
+      delete next.web
+      delete next.research
+      return next
+    })
   }
 
   const beginToolRequest = (controller: AbortController) => {
@@ -2235,8 +3088,7 @@ export default function Home() {
 
     toolRequestActiveRef.current = true
     setToolRequestActive(true)
-    setToolStatus('web', 'scanning')
-    setToolStatus('research', 'scanning')
+    setToolBarActivity(prev => ({ ...prev, web: 'SCANNING', research: 'SCANNING' }))
 
     if (activeToolSystemMessageRef.current !== 'Web Research initiated') {
       activeToolSystemMessageRef.current = 'Web Research initiated'
@@ -2267,15 +3119,21 @@ export default function Home() {
   }
 
   const loadMemories = async () => {
-    setToolStatus('memory', 'active')
+    setToolBarActivity(prev => ({ ...prev, memory: 'ACTIVE' }))
     try {
       const res = await fetch('/api/tools/memory')
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Memory retrieval failed')
       setMemories(data.memories ?? [])
-      setToolStatus('memory', 'complete')
     } catch {
-      setToolStatus('memory', 'error')
+      setToolBarHealth(prev => ({ ...prev, memory: 'ERROR' }))
+    } finally {
+      setToolBarActivity(prev => {
+        const next = { ...prev }
+        delete next.memory
+        return next
+      })
+      void refreshToolBarHealthBars()
     }
   }
 
@@ -2309,6 +3167,7 @@ export default function Home() {
   const uploadWarRoomFile = async (formData: FormData) => {
     setFilesLoading(true)
     setFilesMessage(null)
+    setToolBarActivity(prev => ({ ...prev, files: 'ACTIVE' }))
     try {
       const res = await fetch('/api/files/upload', {
         method: 'POST',
@@ -2324,10 +3183,17 @@ export default function Home() {
       setFilesMessage(error instanceof Error ? error.message : 'File upload failed')
     } finally {
       setFilesLoading(false)
+      setToolBarActivity(prev => {
+        const next = { ...prev }
+        delete next.files
+        return next
+      })
+      void refreshToolBarHealthBars()
     }
   }
 
   const scanRepo = async () => {
+    setToolBarActivity(prev => ({ ...prev, repo: 'SCANNING' }))
     setRepoAwareness(prev => ({
       ...prev,
       scanStatus: 'scanning',
@@ -2352,6 +3218,72 @@ export default function Home() {
         scanStatus: 'error',
         repoStatus: 'scan error',
         message: error instanceof Error ? error.message : 'Repo scan failed',
+      }))
+    } finally {
+      setToolBarActivity(prev => {
+        const next = { ...prev }
+        delete next.repo
+        return next
+      })
+      void refreshToolBarHealthBars()
+    }
+  }
+
+  const loadProviderHealth = async () => {
+    try {
+      const res = await fetch('/api/providers/health')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Provider health check failed')
+      setProviderHealth({
+        providers: {
+          ...INITIAL_PROVIDER_HEALTH.providers,
+          ...data.providers,
+        },
+        labels: {
+          ...INITIAL_PROVIDER_HEALTH.labels,
+          ...data.labels,
+        },
+      })
+    } catch {
+      setProviderHealth(prev => ({
+        ...prev,
+        providers: {
+          ...prev.providers,
+          claude: 'error',
+          chatgpt: 'error',
+          grok: 'error',
+        },
+      }))
+    }
+  }
+
+  const loadLocalAgentBridge = async () => {
+    try {
+      const res = await fetch('/api/local-agent/status')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Local agent bridge check failed')
+      setLocalAgentBridge(data)
+    } catch {
+      setLocalAgentBridge(prev => ({
+        ...prev,
+        bridge: 'error',
+        qaStatus: 'error',
+        checkedAt: new Date().toISOString(),
+      }))
+    }
+  }
+
+  const loadLocalFamilyAgents = async () => {
+    try {
+      const res = await fetch('/api/local-agent/families')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Local family registry check failed')
+      setLocalFamilyAgents(data)
+    } catch {
+      setLocalFamilyAgents(prev => ({
+        ...prev,
+        ollamaDetected: false,
+        checkedAt: new Date().toISOString(),
       }))
     }
   }
@@ -2378,10 +3310,14 @@ export default function Home() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      void refreshToolBarHealthBars()
       void loadMemoriesRef.current?.()
       void loadIncomeOpportunities()
       void loadRaelActions()
       void loadWarRoomFiles()
+      void loadProviderHealth()
+      void loadLocalAgentBridge()
+      void loadLocalFamilyAgents()
     }, 0)
 
     return () => window.clearTimeout(timer)
@@ -2493,7 +3429,7 @@ export default function Home() {
   }
 
   const saveMemory = async (memory: Omit<MemoryEntry, 'id' | 'created_at'>) => {
-    setToolStatus('memory', 'active')
+    setToolBarActivity(prev => ({ ...prev, memory: 'ACTIVE' }))
     try {
       const res = await fetch('/api/tools/memory', {
         method: 'POST',
@@ -2506,13 +3442,19 @@ export default function Home() {
       if (data.memory) {
         setMemories(prev => [data.memory, ...prev].slice(0, 10))
       }
-      setToolStatus('memory', 'complete')
       addSystemMessage('Memory saved')
       setMemoryNotification('Memory Saved')
       window.setTimeout(() => setMemoryNotification(null), 2400)
     } catch {
-      setToolStatus('memory', 'error')
+      setToolBarHealth(prev => ({ ...prev, memory: 'ERROR' }))
       addSystemMessage('Memory save failed')
+    } finally {
+      setToolBarActivity(prev => {
+        const next = { ...prev }
+        delete next.memory
+        return next
+      })
+      void refreshToolBarHealthBars()
     }
   }
 
@@ -2891,12 +3833,18 @@ export default function Home() {
   }
 
   const familyStatusItems = [
-    { key: 'CLAUDE FAMILY' as TypingFamily, label: 'CLAUDE', presence: familyPresence['CLAUDE FAMILY'] },
-    { key: 'CHATGPT FAMILY' as TypingFamily, label: 'CHATGPT', presence: familyPresence['CHATGPT FAMILY'] },
-    { key: 'GROK', label: 'GROK', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
-    { key: 'GEMINI', label: 'GEMINI', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
-    { key: 'RED TEAM', label: 'RED TEAM', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
+    { key: 'CLAUDE FAMILY' as TypingFamily, providerKey: 'claude' as ProviderFamilyKey, label: 'CLAUDE', presence: familyPresence['CLAUDE FAMILY'] },
+    { key: 'CHATGPT FAMILY' as TypingFamily, providerKey: 'chatgpt' as ProviderFamilyKey, label: 'CHATGPT', presence: familyPresence['CHATGPT FAMILY'] },
+    { key: 'GROK', providerKey: 'grok' as ProviderFamilyKey, label: 'GROK', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
+    { key: 'GEMINI', providerKey: 'gemini' as ProviderFamilyKey, label: 'GEMINI', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
+    { key: 'RED TEAM', providerKey: 'redteam' as ProviderFamilyKey, label: 'RED TEAM', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
   ]
+  const providerStatusStyles: Record<ProviderConnectionStatus, { color: string; dot: string; shadow: string }> = {
+    online: { color: '#9AE6B4', dot: '#00ff41', shadow: '0 0 8px #00ff41' },
+    standby: { color: '#FFD700', dot: '#FFD700', shadow: '0 0 8px rgba(255,215,0,0.7)' },
+    not_connected: { color: '#444', dot: '#203321', shadow: 'none' },
+    error: { color: '#EF4444', dot: '#EF4444', shadow: '0 0 8px rgba(239,68,68,0.8)' },
+  }
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white flex flex-col font-mono">
@@ -2965,21 +3913,24 @@ export default function Home() {
             Baby AI Private
           </Link>
           {familyStatusItems.map(item => {
-            const active = item.presence.status !== 'idle'
+            const responding = item.presence.status !== 'idle'
+            const providerStatus = providerHealth.providers[item.providerKey]
+            const statusStyle = providerStatusStyles[providerStatus]
+            const active = responding || providerStatus === 'online'
 
             return (
-              <div key={item.key} className="flex items-center gap-1" title={item.presence.label}>
+              <div key={item.key} className="flex items-center gap-1" title={providerHealth.labels[item.providerKey]}>
                 <div
-                  className={`w-2 h-2 rounded-full ${active ? 'tool-dot-active' : ''}`}
+                  className={`w-2 h-2 rounded-full ${responding ? 'tool-dot-active' : ''}`}
                   style={{
-                    background: active ? '#00ff41' : '#203321',
-                    boxShadow: active ? '0 0 8px #00ff41' : 'none',
+                    background: statusStyle.dot,
+                    boxShadow: statusStyle.shadow,
                   }}
                 />
-                <span className="text-xs" style={{ color: active ? '#9AE6B4' : '#444' }}>{item.label}</span>
-                {active && (
+                <span className="text-xs" style={{ color: active ? statusStyle.color : '#444' }}>{item.label}</span>
+                {(responding || providerStatus !== 'not_connected') && (
                   <span className="hidden lg:inline text-[10px] tracking-widest" style={{ color: '#555' }}>
-                    {item.presence.label.toUpperCase()}
+                    {responding ? item.presence.label.toUpperCase() : providerStatus.toUpperCase().replace('_', ' ')}
                   </span>
                 )}
               </div>
@@ -2989,9 +3940,10 @@ export default function Home() {
       </div>
 
       <div className="relative z-10 flex-shrink-0">
-        <ToolStatusPanel toolStatuses={toolStatuses} />
-        <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} />
+        <ToolStatusPanel health={toolBarHealth} activity={toolBarActivity} />
+        <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} providerHealth={providerHealth} />
         <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
+        <KernelStatusPanel />
         <div
           className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-yellow-900 px-6 py-2"
           style={{ background: 'rgba(255,215,0,0.035)' }}
@@ -3029,6 +3981,10 @@ export default function Home() {
         />
         <MemoryPanel memories={memories} />
         <CodexAgentPlaceholder />
+        <BridgeArchitectPanel />
+        <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={() => void loadLocalAgentBridge()} />
+        <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={() => void loadLocalFamilyAgents()} />
+        <CapabilityRouterPanel />
         <BabyAiObserverPanel memories={memories} actions={raelActions} opportunities={incomeOpportunities} />
         <FamilyPresencePanel presence={familyPresence} />
       </div>
