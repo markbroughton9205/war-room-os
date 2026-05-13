@@ -87,6 +87,7 @@ type ProviderHealth = 'online' | 'standby' | 'offline' | 'error'
 type RaelActionStatus = 'pending' | 'answered' | 'expired'
 type RaelActionUrgency = 'low' | 'medium' | 'high'
 type SmsBridgeStatus = 'not configured' | 'standby' | 'online' | 'error'
+type RepoScanStatus = 'idle' | 'scanning' | 'indexed' | 'error'
 
 type RaelActionItem = {
   action_id: string
@@ -179,6 +180,43 @@ type WarRoomFile = {
   notes: string
 }
 
+type RepoCommit = {
+  hash: string
+  message: string
+  author: string
+  date: string | null
+  timezone: string
+}
+
+type RepoFeature = {
+  name: string
+  detected: boolean
+}
+
+type RepoArchitectureModule = {
+  module: string
+  fileCount: number
+}
+
+type RepoAwarenessState = {
+  repoStatus: string
+  totalFilesIndexed: number
+  routes: string[]
+  apiRoutes: string[]
+  extensionCounts: Record<string, number>
+  features: RepoFeature[]
+  latestCommits: RepoCommit[]
+  currentBranch: string
+  lastScanTime: string | null
+  scanStatus: RepoScanStatus
+  buildStatus: string
+  deploymentStatus: string
+  architectureMap: RepoArchitectureModule[]
+  restrictions: string[]
+  durationMs: number
+  message: string
+}
+
 const FAMILY_META: Record<TypingFamily, { color: string; icon: string }> = {
   'CHATGPT FAMILY': { color: '#34D399', icon: '🧠' },
   'CLAUDE FAMILY': { color: '#A78BFA', icon: '🔮' },
@@ -213,6 +251,30 @@ const INITIAL_SMS_BRIDGE_STATE: SmsBridgeState = {
   lastNotification: null,
   message: 'SMS Bridge ready for configuration check.',
   sending: false,
+}
+const INITIAL_REPO_AWARENESS_STATE: RepoAwarenessState = {
+  repoStatus: 'idle',
+  totalFilesIndexed: 0,
+  routes: [],
+  apiRoutes: [],
+  extensionCounts: {},
+  features: [],
+  latestCommits: [],
+  currentBranch: 'unknown',
+  lastScanTime: null,
+  scanStatus: 'idle',
+  buildStatus: 'placeholder: not scanned',
+  deploymentStatus: 'placeholder: not scanned',
+  architectureMap: [],
+  restrictions: [
+    'read/analyze only',
+    'no code execution',
+    'no auto-modification',
+    'no autonomous commits',
+    'no shell command execution from UI',
+  ],
+  durationMs: 0,
+  message: 'Repo scan has not run yet.',
 }
 const BASE_USAGE_ROWS: UsageEstimate[] = [
   { familyName: 'Claude Family', provider: 'Anthropic', model: 'claude-sonnet-4-20250514', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
@@ -543,6 +605,165 @@ function TokenUsagePanel({
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function RepoAwarenessPanel({
+  repo,
+  onScan,
+}: {
+  repo: RepoAwarenessState
+  onScan: () => Promise<void>
+}) {
+  const scanColor: Record<RepoScanStatus, string> = {
+    idle: '#666',
+    scanning: '#FFD700',
+    indexed: '#34D399',
+    error: '#EF4444',
+  }
+  const extensionSummary = Object.entries(repo.extensionCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(167,139,250,0.016)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#A78BFA' }}>
+            REPO AWARENESS
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Read-only codebase structure, routes, feature inventory, and build/deploy placeholders.
+          </p>
+        </div>
+        <button type="button" onClick={() => void onScan()} disabled={repo.scanStatus === 'scanning'}
+          className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+          style={{ background: '#A78BFA', color: '#000' }}>
+          {repo.scanStatus === 'scanning' ? 'SCANNING...' : 'SCAN REPO'}
+        </button>
+      </div>
+
+      <div className="grid gap-2 text-xs md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>REPO STATUS</div>
+          <div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{repo.repoStatus}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>FILES INDEXED</div>
+          <div className="mt-1 font-bold" style={{ color: '#34D399' }}>{repo.totalFilesIndexed}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>CURRENT BRANCH</div>
+          <div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{repo.currentBranch}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(239,68,68,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>SCAN STATUS</div>
+          <div className="mt-1 font-bold" style={{ color: scanColor[repo.scanStatus] }}>{repo.scanStatus.toUpperCase()}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+          <span style={{ color: '#555' }}>APP ROUTES </span>
+          <span style={{ color: '#888' }}>{repo.routes.length}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+          <span style={{ color: '#555' }}>API ROUTES </span>
+          <span style={{ color: '#888' }}>{repo.apiRoutes.length}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+          <span style={{ color: '#555' }}>BUILD </span>
+          <span style={{ color: '#888' }}>{repo.buildStatus}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+          <span style={{ color: '#555' }}>DEPLOYMENT </span>
+          <span style={{ color: '#888' }}>{repo.deploymentStatus}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#A78BFA' }}>ARCHITECTURE MAP</div>
+          <div className="grid gap-1">
+            {repo.architectureMap.length === 0 ? (
+              <span style={{ color: '#555' }}>No scan yet.</span>
+            ) : repo.architectureMap.map(item => (
+              <div key={item.module} className="flex items-center justify-between rounded px-2 py-1" style={{ border: '1px solid #222' }}>
+                <span style={{ color: '#888' }}>{item.module}/</span>
+                <span style={{ color: '#34D399' }}>{item.fileCount}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#34D399' }}>FEATURES DETECTED</div>
+          <div className="flex flex-wrap gap-1">
+            {repo.features.length === 0 ? (
+              <span style={{ color: '#555' }}>No scan yet.</span>
+            ) : repo.features.map(feature => (
+              <span key={feature.name} className="rounded px-2 py-1 text-[10px] tracking-widest"
+                style={{ border: '1px solid rgba(52,211,153,0.2)', color: '#9AE6B4' }}>
+                {feature.name}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FFD700' }}>LATEST COMMITS</div>
+          <div className="grid gap-1">
+            {repo.latestCommits.length === 0 ? (
+              <span style={{ color: '#555' }}>No commit data yet.</span>
+            ) : repo.latestCommits.slice(0, 3).map(commit => (
+              <div key={`${commit.hash}-${commit.message}`} className="rounded px-2 py-1" style={{ border: '1px solid #222' }}>
+                <span style={{ color: '#FFD700' }}>{commit.hash}</span>
+                <span style={{ color: '#888' }}> {commit.message || 'commit'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 tracking-widest" style={{ color: '#555' }}>ROUTES</div>
+          <div className="flex flex-wrap gap-1">
+            {repo.routes.slice(0, 12).map(route => (
+              <span key={route} className="rounded px-2 py-1 text-[10px]" style={{ border: '1px solid #222', color: '#888' }}>{route}</span>
+            ))}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 tracking-widest" style={{ color: '#555' }}>API ROUTES</div>
+          <div className="flex flex-wrap gap-1">
+            {repo.apiRoutes.slice(0, 16).map(route => (
+              <span key={route} className="rounded px-2 py-1 text-[10px]" style={{ border: '1px solid #222', color: '#888' }}>{route}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {extensionSummary.map(([extension, count]) => (
+          <span key={extension} className="rounded px-2 py-1 text-[10px] tracking-widest"
+            style={{ border: '1px solid rgba(167,139,250,0.18)', color: '#999' }}>
+            .{extension}: {count}
+          </span>
+        ))}
+        {repo.restrictions.map(restriction => (
+          <span key={restriction} className="rounded px-2 py-1 text-[10px] tracking-widest"
+            style={{ border: '1px solid rgba(239,68,68,0.2)', color: '#777' }}>
+            {restriction}
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-3 text-xs" style={{ color: '#555' }}>
+        Last scan: {repo.lastScanTime ? new Date(repo.lastScanTime).toLocaleString() : 'never'} | {repo.message}
       </div>
     </div>
   )
@@ -1657,9 +1878,9 @@ function CodexAgentPlaceholder() {
       style={{ background: 'rgba(0,255,65,0.025)' }}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs tracking-widest">
         <span style={{ color: '#FFD700' }}>Codex Agent — Engineering / Deployment</span>
-        <span style={{ color: '#666' }}>Status: standby</span>
-        <span style={{ color: '#34D399' }}>
-          Capability: feature deployment, code patching, repo operations
+        <span style={{ color: '#666' }}>Status: not connected</span>
+        <span style={{ color: '#888' }}>
+          Planned scope: implementation support when wired — no live agent session from this UI
         </span>
       </div>
     </div>
@@ -1765,6 +1986,7 @@ export default function Home() {
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
   const [toolStatuses, setToolStatuses] = useState<Record<ToolId, ToolStatus>>(INITIAL_TOOL_STATUSES)
   const [memories, setMemories] = useState<MemoryEntry[]>([])
+  const [repoAwareness, setRepoAwareness] = useState<RepoAwarenessState>(INITIAL_REPO_AWARENESS_STATE)
   const [warRoomFiles, setWarRoomFiles] = useState<WarRoomFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesMessage, setFilesMessage] = useState<string | null>(null)
@@ -2102,6 +2324,35 @@ export default function Home() {
       setFilesMessage(error instanceof Error ? error.message : 'File upload failed')
     } finally {
       setFilesLoading(false)
+    }
+  }
+
+  const scanRepo = async () => {
+    setRepoAwareness(prev => ({
+      ...prev,
+      scanStatus: 'scanning',
+      repoStatus: 'scanning',
+      message: 'Scanning app, components, lib, and supabase directories...',
+    }))
+
+    try {
+      const res = await fetch('/api/repo/scan', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Repo scan failed')
+
+      setRepoAwareness({
+        ...INITIAL_REPO_AWARENESS_STATE,
+        ...data.scan,
+        scanStatus: 'indexed',
+        message: `Indexed in ${data.scan?.durationMs ?? 0}ms.`,
+      })
+    } catch (error) {
+      setRepoAwareness(prev => ({
+        ...prev,
+        scanStatus: 'error',
+        repoStatus: 'scan error',
+        message: error instanceof Error ? error.message : 'Repo scan failed',
+      }))
     }
   }
 
@@ -2740,6 +2991,22 @@ export default function Home() {
       <div className="relative z-10 flex-shrink-0">
         <ToolStatusPanel toolStatuses={toolStatuses} />
         <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} />
+        <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
+        <div
+          className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-yellow-900 px-6 py-2"
+          style={{ background: 'rgba(255,215,0,0.035)' }}
+        >
+          <span className="text-[10px] font-bold tracking-widest" style={{ color: '#888' }}>
+            BUILD AGENT DIVISION — OPEN WAR ROOM FOR QUEUE
+          </span>
+          <Link
+            href="/war-room"
+            className="text-[10px] font-bold tracking-widest underline-offset-4 transition hover:underline"
+            style={{ color: '#FFD700' }}
+          >
+            Open War Room Command →
+          </Link>
+        </div>
         <SmsBridgePanel bridge={smsBridge} onTest={testSmsBridge} />
         <PaymentsPayoutsPanel opportunities={incomeOpportunities} />
         <FilesEvidenceVaultPanel

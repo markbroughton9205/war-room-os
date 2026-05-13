@@ -1,17 +1,19 @@
 import type { Metadata } from 'next'
+import { BuildAgentDivisionPanel } from '@/components/war-room/build-agent/BuildAgentDivisionPanel'
 import { BabyObserverNode, CouncilTable, SentinelStatusPanel } from '@/components/war-room/council'
 import { KpiGrid } from '@/components/war-room/KpiGrid'
 import { WarRoomShell } from '@/components/war-room/WarRoomShell'
 
 export const metadata: Metadata = {
   title: 'War Room OS — Command',
-  description: 'War Room OS dashboard shell (mock data, frontend only).',
+  description: 'War Room OS command dashboard — council layout and panels are UI shells until wired to live data.',
 }
 
 export default function WarRoomDashboardPage() {
   return (
     <WarRoomShell>
       <KpiGrid />
+      <BuildAgentDivisionPanel />
       <section className="mx-auto mt-14 max-w-6xl border-t border-white/10 pt-10">
         <header className="mb-6">
           <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-[#d4af37]">Council</p>
