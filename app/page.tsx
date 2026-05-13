@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import type { FormEvent } from 'react'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
 import { TOOL_REGISTRY, type ToolId, type ToolStatus } from '@/lib/tools/toolRegistry'
 
@@ -74,6 +75,33 @@ type FamilyNodeGroup = {
   presenceKey?: TypingFamily
   color: string
   nodes: SubAgentNode[]
+}
+
+type OpportunityType = 'surveys' | 'AI evaluation' | 'user testing' | 'research studies' | 'remote micro-contracts' | 'digital service gigs'
+type OpportunityStatus = 'not started' | 'applied' | 'active' | 'paid'
+type RiskLevel = 'low' | 'medium' | 'high'
+type IncomeRadarView = 'active' | 'expiring' | 'expired'
+
+type IncomeOpportunity = {
+  id: string
+  title: string
+  platform: string
+  country: string
+  currency: string
+  local_payout: number | null
+  usd_estimate: number | null
+  estimated_hourly: number | null
+  payout_speed: string
+  type: OpportunityType
+  risk_level: RiskLevel
+  status: OpportunityStatus
+  apply_url: string
+  notes: string
+  expires_at: string | null
+  discovered_at: string
+  last_checked_at: string | null
+  is_active: boolean
+  created_at: string
 }
 
 const FAMILY_META: Record<TypingFamily, { color: string; icon: string }> = {
@@ -176,6 +204,42 @@ function estimateFamilyCost(familyName: UsageFamily, inputTokens: number, output
 
 function formatCost(cost: number) {
   return cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(2)}`
+}
+
+function formatMoney(amount: number) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
+function formatLocalMoney(amount: number | null, currency: string) {
+  if (amount === null || Number.isNaN(amount)) return 'Not set'
+
+  return `${currency || 'LOCAL'} ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+}
+
+function isExpired(opportunity: IncomeOpportunity) {
+  return !opportunity.is_active || Boolean(opportunity.expires_at && new Date(opportunity.expires_at) <= new Date())
+}
+
+function expiresSoon(opportunity: IncomeOpportunity) {
+  if (!opportunity.expires_at || isExpired(opportunity)) return false
+
+  const now = Date.now()
+  const expiresAt = new Date(opportunity.expires_at).getTime()
+  return expiresAt - now <= 72 * 60 * 60 * 1000
+}
+
+function formatDateLabel(value: string | null) {
+  if (!value) return 'Expiration unknown'
+
+  return new Date(value).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
 }
 
 function createUsageEstimate(inputText: string, outputBudget: number) {
@@ -355,6 +419,297 @@ function TokenUsagePanel({
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function IncomeRadarPanel({
+  opportunities,
+  loading,
+  view,
+  onViewChange,
+  onCreate,
+  onExpire,
+}: {
+  opportunities: IncomeOpportunity[]
+  loading: boolean
+  view: IncomeRadarView
+  onViewChange: (view: IncomeRadarView) => void
+  onCreate: (opportunity: Omit<IncomeOpportunity, 'id' | 'created_at'>) => Promise<void>
+  onExpire: (id: string) => Promise<void>
+}) {
+  const [form, setForm] = useState({
+    title: '',
+    platform: '',
+    country: '',
+    currency: 'USD',
+    local_payout: '',
+    estimated_hourly: '',
+    payout_speed: '',
+    type: 'user testing' as OpportunityType,
+    risk_level: 'medium' as RiskLevel,
+    status: 'not started' as OpportunityStatus,
+    apply_url: '',
+    notes: '',
+    expires_at: '',
+  })
+  const activeOpportunities = opportunities.filter(opportunity => !isExpired(opportunity))
+  const expiredOpportunities = opportunities.filter(isExpired)
+  const expiringOpportunities = activeOpportunities.filter(expiresSoon)
+  const visibleOpportunities = view === 'expired'
+    ? expiredOpportunities
+    : view === 'expiring'
+      ? expiringOpportunities
+      : activeOpportunities
+  const rankedOpportunities = [...visibleOpportunities].sort((a, b) => {
+    const expiresA = a.expires_at ? new Date(a.expires_at).getTime() : Number.MAX_SAFE_INTEGER
+    const expiresB = b.expires_at ? new Date(b.expires_at).getTime() : Number.MAX_SAFE_INTEGER
+    const expiryDelta = expiresA - expiresB
+    return expiryDelta !== 0 ? expiryDelta : (b.usd_estimate ?? 0) - (a.usd_estimate ?? 0)
+  })
+  const totalExpected = activeOpportunities.reduce((total, opportunity) => total + (opportunity.usd_estimate ?? 0), 0)
+  const totalPaid = opportunities
+    .filter(opportunity => opportunity.status === 'paid')
+    .reduce((total, opportunity) => total + (opportunity.usd_estimate ?? 0), 0)
+  const riskStyles: Record<RiskLevel, { color: string; background: string; border: string }> = {
+    low: { color: '#34D399', background: 'rgba(52,211,153,0.08)', border: 'rgba(52,211,153,0.3)' },
+    medium: { color: '#FFD700', background: 'rgba(255,215,0,0.08)', border: 'rgba(255,215,0,0.28)' },
+    high: { color: '#EF4444', background: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.28)' },
+  }
+  const statusColors: Record<OpportunityStatus, string> = {
+    'not started': '#666',
+    applied: '#FFD700',
+    active: '#34D399',
+    paid: '#60A5FA',
+  }
+  const inputClass = 'rounded border border-[#24301f] bg-black/40 px-2 py-2 text-xs text-slate-200 outline-none focus:border-[#34D399]'
+  const submitOpportunity = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!form.title.trim() || !form.platform.trim()) return
+
+    const now = new Date().toISOString()
+    const localPayout = form.local_payout ? Number(form.local_payout) : null
+
+    await onCreate({
+      title: form.title.trim(),
+      platform: form.platform.trim(),
+      country: form.country.trim(),
+      currency: form.currency.trim().toUpperCase() || 'USD',
+      local_payout: localPayout,
+      usd_estimate: form.currency.trim().toUpperCase() === 'USD' ? localPayout : null,
+      estimated_hourly: form.estimated_hourly ? Number(form.estimated_hourly) : null,
+      payout_speed: form.payout_speed.trim(),
+      type: form.type,
+      risk_level: form.risk_level,
+      status: form.status,
+      apply_url: form.apply_url.trim(),
+      notes: form.notes.trim(),
+      expires_at: form.expires_at ? new Date(form.expires_at).toISOString() : null,
+      discovered_at: now,
+      last_checked_at: now,
+      is_active: true,
+    })
+    setForm({
+      title: '',
+      platform: '',
+      country: '',
+      currency: 'USD',
+      local_payout: '',
+      estimated_hourly: '',
+      payout_speed: '',
+      type: 'user testing',
+      risk_level: 'medium',
+      status: 'not started',
+      apply_url: '',
+      notes: '',
+      expires_at: '',
+    })
+  }
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-4 flex-shrink-0"
+      style={{ background: 'rgba(0,255,65,0.02)' }}>
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>
+            INCOME RADAR
+          </h2>
+          <p className="text-xs mt-1" style={{ color: '#666' }}>
+            Real entries only. No guaranteed income, bank connections, fraud automation, or scraping.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-3">
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.35)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>ACTIVE EXPECTED</div>
+            <div className="mt-1 font-bold" style={{ color: '#34D399' }}>{formatMoney(totalExpected)}</div>
+          </div>
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(0,0,0,0.35)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>PAID</div>
+            <div className="mt-1 font-bold" style={{ color: '#60A5FA' }}>{formatMoney(totalPaid)}</div>
+          </div>
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.22)', background: 'rgba(0,0,0,0.35)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>EXPIRING</div>
+            <div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{expiringOpportunities.length}</div>
+          </div>
+        </div>
+      </div>
+
+      <form onSubmit={submitOpportunity} className="mb-4 rounded-md p-3"
+        style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.28)' }}>
+        <div className="mb-3 text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>
+          MANUAL OPPORTUNITY ENTRY
+        </div>
+        <div className="grid gap-2 md:grid-cols-4">
+          <input className={inputClass} value={form.title} onChange={event => setForm(prev => ({ ...prev, title: event.target.value }))} placeholder="Title" required />
+          <input className={inputClass} value={form.platform} onChange={event => setForm(prev => ({ ...prev, platform: event.target.value }))} placeholder="Platform" required />
+          <input className={inputClass} value={form.country} onChange={event => setForm(prev => ({ ...prev, country: event.target.value }))} placeholder="Country" />
+          <select className={inputClass} value={form.type} onChange={event => setForm(prev => ({ ...prev, type: event.target.value as OpportunityType }))}>
+            {['surveys', 'AI evaluation', 'user testing', 'research studies', 'remote micro-contracts', 'digital service gigs'].map(type => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+          <input className={inputClass} value={form.currency} onChange={event => setForm(prev => ({ ...prev, currency: event.target.value }))} placeholder="Currency" />
+          <input className={inputClass} value={form.local_payout} onChange={event => setForm(prev => ({ ...prev, local_payout: event.target.value }))} placeholder="Local payout" type="number" min="0" step="0.01" />
+          <input className={inputClass} value={form.estimated_hourly} onChange={event => setForm(prev => ({ ...prev, estimated_hourly: event.target.value }))} placeholder="Estimated hourly" type="number" min="0" step="0.01" />
+          <input className={inputClass} value={form.payout_speed} onChange={event => setForm(prev => ({ ...prev, payout_speed: event.target.value }))} placeholder="Payout speed" />
+          <select className={inputClass} value={form.risk_level} onChange={event => setForm(prev => ({ ...prev, risk_level: event.target.value as RiskLevel }))}>
+            {['low', 'medium', 'high'].map(risk => <option key={risk} value={risk}>{risk} risk</option>)}
+          </select>
+          <select className={inputClass} value={form.status} onChange={event => setForm(prev => ({ ...prev, status: event.target.value as OpportunityStatus }))}>
+            {['not started', 'applied', 'active', 'paid'].map(status => <option key={status} value={status}>{status}</option>)}
+          </select>
+          <input className={inputClass} value={form.expires_at} onChange={event => setForm(prev => ({ ...prev, expires_at: event.target.value }))} type="date" />
+          <input className={inputClass} value={form.apply_url} onChange={event => setForm(prev => ({ ...prev, apply_url: event.target.value }))} placeholder="Apply URL" />
+        </div>
+        <textarea className={`${inputClass} mt-2 min-h-16 w-full`} value={form.notes} onChange={event => setForm(prev => ({ ...prev, notes: event.target.value }))} placeholder="Notes, warnings, payout terms, requirements" />
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs" style={{ color: '#666' }}>
+            USD estimate unavailable until currency tool is connected.
+          </span>
+          <button className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            style={{ background: '#34D399', color: '#000' }} disabled={loading}>
+            ADD REAL OPPORTUNITY
+          </button>
+        </div>
+      </form>
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        {[
+          { id: 'active' as IncomeRadarView, label: `Active Opportunities (${activeOpportunities.length})` },
+          { id: 'expiring' as IncomeRadarView, label: `Expiring Soon (${expiringOpportunities.length})` },
+          { id: 'expired' as IncomeRadarView, label: `Expired Archive (${expiredOpportunities.length})` },
+        ].map(item => (
+          <button key={item.id} type="button" onClick={() => onViewChange(item.id)}
+            className="rounded px-3 py-2 text-xs tracking-widest"
+            style={{
+              background: view === item.id ? 'rgba(52,211,153,0.18)' : 'rgba(0,0,0,0.24)',
+              border: view === item.id ? '1px solid rgba(52,211,153,0.45)' : '1px solid #222',
+              color: view === item.id ? '#34D399' : '#666',
+            }}>
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {rankedOpportunities.length === 0 ? (
+        <div className="rounded-md px-3 py-6 text-center text-xs tracking-widest"
+          style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#666', background: 'rgba(0,0,0,0.22)' }}>
+          No live opportunities loaded yet.
+        </div>
+      ) : (
+      <div className="grid gap-3 xl:grid-cols-3 lg:grid-cols-2">
+        {rankedOpportunities.map(opportunity => {
+          const riskStyle = riskStyles[opportunity.risk_level]
+          const opportunityExpired = isExpired(opportunity)
+          const opportunityExpiresSoon = expiresSoon(opportunity)
+
+          return (
+            <div key={opportunity.id} className="rounded-md p-3"
+              style={{
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'linear-gradient(180deg, rgba(0,255,65,0.035), rgba(0,0,0,0.28))',
+              }}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold tracking-widest" style={{ color: '#ddd' }}>
+                    {opportunity.title}
+                  </div>
+                  <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#555' }}>
+                    {opportunity.platform} | {opportunity.country || 'country unset'} | {opportunity.type}
+                  </div>
+                </div>
+                <span className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+                  style={{ color: riskStyle.color, background: riskStyle.background, border: `1px solid ${riskStyle.border}` }}>
+                  {opportunity.risk_level.toUpperCase()} RISK
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <div className="tracking-widest" style={{ color: '#444' }}>PAYOUT</div>
+                  <div className="mt-1" style={{ color: '#FFD700' }}>{opportunity.payout_speed || 'Not set'}</div>
+                </div>
+                <div>
+                  <div className="tracking-widest" style={{ color: '#444' }}>RATE</div>
+                  <div className="mt-1" style={{ color: '#34D399' }}>
+                    {opportunity.estimated_hourly === null ? 'Not set' : `${formatMoney(opportunity.estimated_hourly)}/hr`}
+                  </div>
+                </div>
+                <div>
+                  <div className="tracking-widest" style={{ color: '#444' }}>LOCAL</div>
+                  <div className="mt-1" style={{ color: '#34D399' }}>{formatLocalMoney(opportunity.local_payout, opportunity.currency)}</div>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded px-2 py-2 text-xs leading-relaxed"
+                style={{ color: '#888', border: '1px solid #1f271f', background: 'rgba(0,0,0,0.25)' }}>
+                {opportunity.usd_estimate === null
+                  ? 'USD estimate unavailable until currency tool is connected.'
+                  : `USD estimate: ${formatMoney(opportunity.usd_estimate)}`}
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <span className="rounded px-2 py-1 text-[10px] tracking-widest"
+                  style={{ border: '1px solid #222', color: statusColors[opportunity.status], background: 'rgba(0,0,0,0.35)' }}>
+                  STATUS: {opportunity.status.toUpperCase()}
+                </span>
+                <span className="rounded px-2 py-1 text-[10px] tracking-widest"
+                  style={{
+                    border: opportunityExpiresSoon ? '1px solid rgba(255,215,0,0.45)' : '1px solid #222',
+                    color: opportunityExpired ? '#EF4444' : opportunityExpiresSoon ? '#FFD700' : '#777',
+                    background: opportunityExpiresSoon ? 'rgba(255,215,0,0.08)' : 'rgba(0,0,0,0.35)',
+                  }}>
+                  {opportunityExpiresSoon ? 'EXPIRES SOON: ' : opportunityExpired ? 'EXPIRED: ' : ''}
+                  {formatDateLabel(opportunity.expires_at)}
+                </span>
+              </div>
+              {opportunity.notes && <p className="mt-3 text-xs text-slate-500">{opportunity.notes}</p>}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {opportunity.apply_url ? (
+                  <a href={opportunity.apply_url} target="_blank" rel="noreferrer"
+                    className="rounded px-3 py-1 text-[10px] tracking-widest"
+                    style={{ border: '1px solid #333', color: '#888' }}>
+                    OPEN APPLY LINK
+                  </a>
+                ) : (
+                  <span className="rounded px-3 py-1 text-[10px] tracking-widest"
+                    style={{ border: '1px solid #222', color: '#555' }}>
+                    NO APPLY LINK SAVED
+                  </span>
+                )}
+                {!opportunityExpired && (
+                  <button type="button" onClick={() => void onExpire(opportunity.id)}
+                    className="rounded px-3 py-1 text-[10px] tracking-widest"
+                    style={{ border: '1px solid rgba(239,68,68,0.35)', color: '#EF4444' }}>
+                    MARK EXPIRED
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      )}
     </div>
   )
 }
@@ -600,6 +955,9 @@ export default function Home() {
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
   const [toolStatuses, setToolStatuses] = useState<Record<ToolId, ToolStatus>>(INITIAL_TOOL_STATUSES)
   const [memories, setMemories] = useState<MemoryEntry[]>([])
+  const [incomeOpportunities, setIncomeOpportunities] = useState<IncomeOpportunity[]>([])
+  const [incomeLoading, setIncomeLoading] = useState(false)
+  const [incomeView, setIncomeView] = useState<IncomeRadarView>('active')
   const [usageRows, setUsageRows] = useState<UsageEstimate[]>(BASE_USAGE_ROWS)
   const [currentDecreeCost, setCurrentDecreeCost] = useState(0)
   const [sessionCost, setSessionCost] = useState(0)
@@ -718,6 +1076,20 @@ export default function Home() {
     }
   }
 
+  const loadIncomeOpportunities = async () => {
+    setIncomeLoading(true)
+    try {
+      const res = await fetch('/api/income/opportunities')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Income opportunities retrieval failed')
+      setIncomeOpportunities(data.opportunities ?? [])
+    } catch {
+      setIncomeOpportunities([])
+    } finally {
+      setIncomeLoading(false)
+    }
+  }
+
   useEffect(() => {
     loadMemoriesRef.current = loadMemories
   })
@@ -725,10 +1097,49 @@ export default function Home() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadMemoriesRef.current?.()
+      void loadIncomeOpportunities()
     }, 0)
 
     return () => window.clearTimeout(timer)
   }, [])
+
+  const createIncomeOpportunity = async (opportunity: Omit<IncomeOpportunity, 'id' | 'created_at'>) => {
+    setIncomeLoading(true)
+    try {
+      const res = await fetch('/api/income/opportunities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(opportunity),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Income opportunity save failed')
+      if (data.opportunity) {
+        setIncomeOpportunities(prev => [data.opportunity, ...prev])
+      }
+    } finally {
+      setIncomeLoading(false)
+    }
+  }
+
+  const markIncomeOpportunityExpired = async (id: string) => {
+    setIncomeLoading(true)
+    try {
+      const res = await fetch('/api/income/opportunities', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, is_active: false, expires_at: new Date().toISOString() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Income opportunity update failed')
+      if (data.opportunity) {
+        setIncomeOpportunities(prev => prev.map(opportunity => (
+          opportunity.id === id ? data.opportunity : opportunity
+        )))
+      }
+    } finally {
+      setIncomeLoading(false)
+    }
+  }
 
   const saveMemory = async (memory: Omit<MemoryEntry, 'id' | 'created_at'>) => {
     setToolStatus('memory', 'active')
@@ -1181,6 +1592,14 @@ export default function Home() {
       <div className="relative z-10 flex-shrink-0">
         <ToolStatusPanel toolStatuses={toolStatuses} />
         <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} />
+        <IncomeRadarPanel
+          opportunities={incomeOpportunities}
+          loading={incomeLoading}
+          view={incomeView}
+          onViewChange={setIncomeView}
+          onCreate={createIncomeOpportunity}
+          onExpire={markIncomeOpportunityExpired}
+        />
         <MemoryPanel memories={memories} />
         <CodexAgentPlaceholder />
         <FamilyPresencePanel presence={familyPresence} />
