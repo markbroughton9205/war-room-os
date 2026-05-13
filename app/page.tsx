@@ -1362,6 +1362,7 @@ export default function Home() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const councilPausedRef = useRef(false)
   const councilStoppedRef = useRef(false)
+  const raelActionsRef = useRef<RaelActionItem[]>([])
   const toolRequestActiveRef = useRef(false)
   const toolTimeoutRef = useRef<number | null>(null)
   const activeToolSystemMessageRef = useRef<string | null>(null)
@@ -1428,30 +1429,44 @@ export default function Home() {
 
   const addRaelAction = (action: Omit<RaelActionItem, 'created_at' | 'status'> & { status?: RaelActionStatus; created_at?: string }) => {
     const createdAt = action.created_at ?? new Date().toISOString()
+    const queuedAction = {
+      ...action,
+      status: action.status ?? 'pending',
+      created_at: createdAt,
+    }
 
     setRaelActions(prev => {
       const existingPendingAction = prev.find(item => item.action_id === action.action_id && item.status === 'pending')
       if (existingPendingAction) return prev
 
-      return [{
-        ...action,
-        status: action.status ?? 'pending',
-        created_at: createdAt,
-      }, ...prev].slice(0, 24)
+      return [queuedAction, ...prev].slice(0, 24)
     })
+
+    void fetch('/api/actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(queuedAction),
+    }).catch(() => undefined)
   }
 
   const respondToRaelAction = (actionId: string, response: string) => {
+    const answeredAt = new Date().toISOString()
+
     setRaelActions(prev => prev.map(action => (
       action.action_id === actionId
         ? {
           ...action,
           status: 'answered',
           selected_response: response,
-          answered_at: new Date().toISOString(),
+          answered_at: answeredAt,
         }
         : action
     )))
+    void fetch(`/api/actions/${encodeURIComponent(actionId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'answered', answer: response, answered_at: answeredAt }),
+    }).catch(() => undefined)
     addSystemMessage(`Ra'el answered action queue: ${response}`)
   }
 
@@ -1460,8 +1475,24 @@ export default function Home() {
   })
 
   useEffect(() => {
+    raelActionsRef.current = raelActions
+  }, [raelActions])
+
+  useEffect(() => {
     const expireActions = window.setInterval(() => {
       const now = Date.now()
+      const expiredActions = raelActionsRef.current.filter(action => (
+        action.status === 'pending' && action.expires_at && new Date(action.expires_at).getTime() <= now
+      ))
+
+      expiredActions.forEach(action => {
+        void fetch(`/api/actions/${encodeURIComponent(action.action_id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'expired' }),
+        }).catch(() => undefined)
+      })
+
       setRaelActions(prev => prev.map(action => (
         action.status === 'pending' && action.expires_at && new Date(action.expires_at).getTime() <= now
           ? { ...action, status: 'expired' }
@@ -1557,6 +1588,22 @@ export default function Home() {
     }
   }
 
+  const loadRaelActions = async () => {
+    try {
+      const res = await fetch('/api/actions')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Rael action queue retrieval failed')
+
+      const actions = Array.isArray(data.actions) ? data.actions : []
+      setRaelActions(actions.map((action: RaelActionItem & { answer?: string | null }) => ({
+        ...action,
+        selected_response: action.answer ?? action.selected_response,
+      })))
+    } catch {
+      setRaelActions([])
+    }
+  }
+
   useEffect(() => {
     loadMemoriesRef.current = loadMemories
   })
@@ -1565,6 +1612,7 @@ export default function Home() {
     const timer = window.setTimeout(() => {
       void loadMemoriesRef.current?.()
       void loadIncomeOpportunities()
+      void loadRaelActions()
     }, 0)
 
     return () => window.clearTimeout(timer)
