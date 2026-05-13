@@ -53,6 +53,29 @@ type MemoryEntry = {
   created_at: string
 }
 
+type MemorySavePrompt = {
+  memory: Omit<MemoryEntry, 'id' | 'created_at'>
+  reason: string
+}
+
+type FamilyPresence = {
+  status: 'idle' | 'thinking' | 'streaming' | 'complete'
+  label: string
+}
+
+type SubAgentNode = {
+  name: string
+  status: 'idle' | 'active' | 'reviewing' | 'blocked'
+  task: string
+}
+
+type FamilyNodeGroup = {
+  familyName: string
+  presenceKey?: TypingFamily
+  color: string
+  nodes: SubAgentNode[]
+}
+
 const FAMILY_META: Record<TypingFamily, { color: string; icon: string }> = {
   'CHATGPT FAMILY': { color: '#34D399', icon: '🧠' },
   'CLAUDE FAMILY': { color: '#A78BFA', icon: '🔮' },
@@ -62,12 +85,49 @@ const DEFAULT_OUTPUT_TOKEN_BUDGET = 160
 const EXPANDED_OUTPUT_TOKEN_BUDGET = 480
 const DEFAULT_DISCUSSION_SECONDS = 90
 const COUNCIL_CONTINUE_INTERVAL_MS = 22000
+const STREAM_CHUNK_SIZE = 8
+const STREAM_CHUNK_DELAY_MS = 35
 const BASE_USAGE_ROWS: UsageEstimate[] = [
   { familyName: 'Claude Family', provider: 'Anthropic', model: 'claude-sonnet-4-20250514', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
   { familyName: 'ChatGPT Family', provider: 'OpenAI', model: 'gpt-4o', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
   { familyName: 'Kimi Family', provider: 'Moonshot', model: 'placeholder', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: false },
   { familyName: 'Grok Family', provider: 'xAI', model: 'placeholder', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: false },
   { familyName: 'Gemini Family', provider: 'Google', model: 'placeholder', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: false },
+]
+
+const FAMILY_NODE_GROUPS: FamilyNodeGroup[] = [
+  {
+    familyName: 'ChatGPT Family',
+    presenceKey: 'CHATGPT FAMILY',
+    color: '#34D399',
+    nodes: ['Strategy', 'UX', 'Synthesis', 'Language', 'Continuity'].map(name => ({ name, status: 'idle', task: 'standing by' })),
+  },
+  {
+    familyName: 'Claude Family',
+    presenceKey: 'CLAUDE FAMILY',
+    color: '#A78BFA',
+    nodes: ['Architecture', 'Governance', 'Security', 'Logic', 'Documentation'].map(name => ({ name, status: 'idle', task: 'standing by' })),
+  },
+  {
+    familyName: 'Kimi Family',
+    color: '#60A5FA',
+    nodes: ['Task Tree', 'Dependency', 'Parallelization', 'Operations', 'Sequencing'].map(name => ({ name, status: 'idle', task: 'future worker node' })),
+  },
+  {
+    familyName: 'Grok Family',
+    color: '#F97316',
+    nodes: ['Realtime', 'Trend', 'Social Pulse', 'Contradiction', 'Alert'].map(name => ({ name, status: 'idle', task: 'future worker node' })),
+  },
+  {
+    familyName: 'Gemini Family',
+    color: '#38BDF8',
+    nodes: ['Vision', 'Pattern', 'Document', 'Multimodal', 'Forecast'].map(name => ({ name, status: 'idle', task: 'future worker node' })),
+  },
+  {
+    familyName: 'Red Team',
+    color: '#EF4444',
+    nodes: ['Risk', 'Attack', 'Weakness', 'Assumption', 'Stress Test'].map(name => ({ name, status: 'idle', task: 'future worker node' })),
+  },
 ]
 
 const MOCK_RATES_PER_MILLION: Record<UsageFamily, { input: number; output: number }> = {
@@ -159,6 +219,10 @@ function detectExpansionNeed(message: string): Omit<ExpansionPrompt, 'decree'> |
   return null
 }
 
+function isExplicitMemoryRequest(message: string) {
+  return /\b(remember this|save this|save memory|commit this to memory|add this to memory)\b/i.test(message)
+}
+
 const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
 
 function MessageBubble({ msg }: { msg: CouncilMessage }) {
@@ -189,7 +253,7 @@ function MessageBubble({ msg }: { msg: CouncilMessage }) {
   )
 }
 
-function TypingIndicator({ familyName }: { familyName: TypingFamily }) {
+function TypingIndicator({ familyName, label }: { familyName: TypingFamily; label?: string }) {
   const family = FAMILY_META[familyName]
 
   return (
@@ -201,7 +265,7 @@ function TypingIndicator({ familyName }: { familyName: TypingFamily }) {
       <div className="flex items-center gap-2 rounded px-3 py-2"
         style={{ background: 'rgba(255,255,255,0.03)', borderLeft: `2px solid ${family.color}` }}>
         <span className="text-xs font-bold tracking-widest" style={{ color: family.color }}>
-          {familyName} TYPING
+          {label ?? `${familyName} THINKING`}
         </span>
         <span className="typing-dot" style={{ background: family.color }} />
         <span className="typing-dot" style={{ background: family.color, animationDelay: '120ms' }} />
@@ -301,10 +365,10 @@ function MemoryPanel({ memories }: { memories: MemoryEntry[] }) {
       style={{ background: 'rgba(52,211,153,0.025)' }}>
       <div className="flex items-center justify-between gap-4 mb-2">
         <h2 className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>
-          MEMORY LOG
+          CHRONICLE / MEMORY
         </h2>
         <span className="text-xs tracking-widest" style={{ color: '#555' }}>
-          LATEST {memories.length}
+          GROWTH +{memories.length} · LATEST {memories.length}
         </span>
       </div>
       <div className="grid gap-2 md:grid-cols-3">
@@ -324,6 +388,99 @@ function MemoryPanel({ memories }: { memories: MemoryEntry[] }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function MemorySavePromptPanel({
+  prompt,
+  onSave,
+  onDismiss,
+}: {
+  prompt: MemorySavePrompt
+  onSave: () => void
+  onDismiss: () => void
+}) {
+  return (
+    <div className="message-fade-in ml-11 mb-4 p-3 rounded"
+      style={{ background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.25)' }}>
+      <div className="text-xs tracking-widest" style={{ color: '#ddd' }}>
+        Council asks permission to save this memory. Reason: {prompt.reason}
+      </div>
+      <p className="mt-2 line-clamp-2 text-xs text-slate-400">{prompt.memory.content}</p>
+      <div className="flex flex-wrap gap-2 mt-3">
+        <button onClick={onSave} className="text-xs px-3 py-1 rounded tracking-widest"
+          style={{ background: '#34D399', color: '#000', fontWeight: 'bold' }}>
+          Save Memory
+        </button>
+        <button onClick={onDismiss} className="text-xs px-3 py-1 rounded tracking-widest"
+          style={{ border: '1px solid #333', color: '#888' }}>
+          Not Now
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function FamilyPresencePanel({
+  presence,
+}: {
+  presence: Record<TypingFamily, FamilyPresence>
+}) {
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(0,255,65,0.018)' }}>
+      <div className="flex items-center justify-between gap-4 mb-3">
+        <h2 className="text-xs font-bold tracking-widest" style={{ color: '#9AE6B4' }}>
+          LIVE COGNITION
+        </h2>
+        <span className="text-xs tracking-widest" style={{ color: '#555' }}>
+          SUB-AGENT CONSTELLATIONS
+        </span>
+      </div>
+      <div className="grid gap-2 xl:grid-cols-6 md:grid-cols-3">
+        {FAMILY_NODE_GROUPS.map(group => {
+          const familyPresence = group.presenceKey ? presence[group.presenceKey] : null
+          const active = Boolean(familyPresence && familyPresence.status !== 'idle')
+
+          return (
+            <div key={group.familyName} className="rounded px-3 py-2"
+              style={{
+                border: active ? `1px solid ${group.color}55` : '1px solid rgba(255,255,255,0.08)',
+                background: active ? `${group.color}10` : 'rgba(255,255,255,0.012)',
+              }}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-bold tracking-widest" style={{ color: active ? group.color : '#666' }}>
+                  {group.familyName}
+                </span>
+                <span className="text-[10px] tracking-widest" style={{ color: active ? '#9AE6B4' : '#333' }}>
+                  {familyPresence?.label ?? 'standby'}
+                </span>
+              </div>
+              <div className="relative mt-3 flex items-center justify-between">
+                <div className="absolute left-1 right-1 top-1/2 h-px -translate-y-1/2"
+                  style={{ background: active ? `${group.color}55` : 'rgba(255,255,255,0.08)' }} />
+                {group.nodes.map((node, index) => {
+                  const nodeActive = active && index === 0
+                  const status = nodeActive ? 'active' : node.status
+
+                  return (
+                    <div key={node.name}
+                      className={`relative z-10 h-3 w-3 rounded-full ${nodeActive ? 'tool-dot-active' : ''}`}
+                      title={`${node.name} | status: ${status} | current micro-task: ${nodeActive ? familyPresence?.label : node.task}`}
+                      style={{
+                        background: nodeActive ? group.color : '#15251a',
+                        border: `1px solid ${nodeActive ? group.color : '#25402b'}`,
+                        boxShadow: nodeActive ? `0 0 10px ${group.color}` : 'none',
+                      }}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -447,6 +604,12 @@ export default function Home() {
   const [currentDecreeCost, setCurrentDecreeCost] = useState(0)
   const [sessionCost, setSessionCost] = useState(0)
   const [expansionPrompt, setExpansionPrompt] = useState<ExpansionPrompt | null>(null)
+  const [memorySavePrompt, setMemorySavePrompt] = useState<MemorySavePrompt | null>(null)
+  const [memoryNotification, setMemoryNotification] = useState<string | null>(null)
+  const [familyPresence, setFamilyPresence] = useState<Record<TypingFamily, FamilyPresence>>({
+    'CHATGPT FAMILY': { status: 'idle', label: 'standby' },
+    'CLAUDE FAMILY': { status: 'idle', label: 'standby' },
+  })
   const [discussionExpiredNoticeShown, setDiscussionExpiredNoticeShown] = useState(false)
   const [councilPaused, setCouncilPaused] = useState(false)
   const [continuationPrompt, setContinuationPrompt] = useState<ContinuationPrompt | null>(null)
@@ -492,6 +655,14 @@ export default function Home() {
     setMessages(prev => [...prev, ...newMsgs])
   }
 
+  const updateMessageContent = (id: string, content: string) => {
+    setMessages(prev => prev.map(msg => msg.id === id ? { ...msg, content } : msg))
+  }
+
+  const setPresence = (familyName: TypingFamily, status: FamilyPresence['status'], label: string) => {
+    setFamilyPresence(prev => ({ ...prev, [familyName]: { status, label } }))
+  }
+
   const setToolStatus = (toolId: ToolId, status: ToolStatus) => {
     setToolStatuses(prev => ({ ...prev, [toolId]: status }))
   }
@@ -527,6 +698,8 @@ export default function Home() {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     setTypingFamily(null)
+    setPresence('CHATGPT FAMILY', 'idle', 'standby')
+    setPresence('CLAUDE FAMILY', 'idle', 'standby')
     setToolStatus('web', 'idle')
     setToolStatus('research', 'idle')
     setLoading(false)
@@ -573,14 +746,64 @@ export default function Home() {
       }
       setToolStatus('memory', 'complete')
       addSystemMessage('Memory saved')
+      setMemoryNotification('Memory Saved')
+      window.setTimeout(() => setMemoryNotification(null), 2400)
     } catch {
       setToolStatus('memory', 'error')
       addSystemMessage('Memory save failed')
     }
   }
 
-  const revealFamilyMessages = async (data: { chatgpt?: string; claude?: string }, inputText: string) => {
+  const streamFamilyMessage = async ({
+    familyName,
+    content,
+    provider,
+    messageId,
+    thinkingLabel,
+    streamingLabel,
+  }: {
+    familyName: TypingFamily
+    content: string
+    provider: string
+    messageId: string
+    thinkingLabel: string
+    streamingLabel: string
+  }) => {
+    const family = FAMILY_META[familyName]
     const now = new Date().toLocaleTimeString()
+
+    setPresence(familyName, 'thinking', thinkingLabel)
+    setTypingFamily(familyName)
+    await wait(familyName === 'CHATGPT FAMILY' ? 450 : 700)
+    if (councilPausedRef.current || councilStoppedRef.current) return
+
+    addMessages([{
+      id: messageId,
+      familyName,
+      content: '',
+      timestamp: now,
+      color: family.color,
+      icon: family.icon,
+      provider,
+      messageType: 'response'
+    }])
+
+    setTypingFamily(null)
+    setPresence(familyName, 'streaming', streamingLabel)
+
+    for (let i = 0; i < content.length; i += STREAM_CHUNK_SIZE) {
+      if (councilPausedRef.current || councilStoppedRef.current) return
+      updateMessageContent(messageId, content.slice(0, i + STREAM_CHUNK_SIZE))
+      await wait(STREAM_CHUNK_DELAY_MS)
+    }
+
+    updateMessageContent(messageId, content)
+    setPresence(familyName, 'complete', 'complete')
+    await wait(350)
+    setPresence(familyName, 'idle', 'standby')
+  }
+
+  const revealFamilyMessages = async (data: { chatgpt?: string; claude?: string }, inputText: string) => {
     const inputTokens = estimateTokens(inputText)
     const nextUsageRows = BASE_USAGE_ROWS.map(row => {
       if (!row.active) return row
@@ -597,21 +820,14 @@ export default function Home() {
     })
 
     if (data.chatgpt) {
-      setTypingFamily('CHATGPT FAMILY')
-      await wait(450)
-      if (councilPausedRef.current || councilStoppedRef.current) return
-      addMessages([{
-        id: Date.now() + '-gpt',
+      await streamFamilyMessage({
         familyName: 'CHATGPT FAMILY',
         content: data.chatgpt,
-        timestamp: now,
-        color: FAMILY_META['CHATGPT FAMILY'].color,
-        icon: FAMILY_META['CHATGPT FAMILY'].icon,
         provider: 'OpenAI · gpt-4o',
-        messageType: 'response'
-      }])
-      setTypingFamily(null)
-      await wait(350)
+        messageId: Date.now() + '-gpt',
+        thinkingLabel: 'ChatGPT analyzing...',
+        streamingLabel: 'ChatGPT streaming...',
+      })
       if (councilPausedRef.current || councilStoppedRef.current) return
       addSystemMessage('Retrieval complete')
       setToolStatus('web', 'idle')
@@ -620,26 +836,33 @@ export default function Home() {
     }
 
     if (data.claude) {
-      setTypingFamily('CLAUDE FAMILY')
-      await wait(650)
-      if (councilPausedRef.current || councilStoppedRef.current) return
-      addMessages([{
-        id: Date.now() + '-claude',
+      await streamFamilyMessage({
         familyName: 'CLAUDE FAMILY',
         content: data.claude,
-        timestamp: now,
-        color: FAMILY_META['CLAUDE FAMILY'].color,
-        icon: FAMILY_META['CLAUDE FAMILY'].icon,
         provider: 'Anthropic · claude-sonnet',
-        messageType: 'response'
-      }])
-      setTypingFamily(null)
+        messageId: Date.now() + '-claude',
+        thinkingLabel: 'Claude thinking...',
+        streamingLabel: 'Claude streaming...',
+      })
     }
 
     const finalCost = totalUsageCost(nextUsageRows)
     setUsageRows(nextUsageRows)
     setCurrentDecreeCost(finalCost)
     setSessionCost(prev => prev + finalCost)
+
+    if ((data.chatgpt || data.claude) && !inputText.toLowerCase().includes('continue council discussion')) {
+      setMemorySavePrompt({
+        reason: 'new council response may be useful later',
+        memory: {
+          content: `Council response: ${[data.chatgpt, data.claude].filter(Boolean).join(' ')}`.slice(0, 1200),
+          source: 'council',
+          family: 'Council',
+          tags: ['council', 'response'],
+          importance: 2,
+        },
+      })
+    }
   }
 
   const submitDecree = async (decree: string, mode?: CouncilMode) => {
@@ -648,6 +871,7 @@ export default function Home() {
     councilStoppedRef.current = false
     setLoading(true)
     setTypingFamily('CHATGPT FAMILY')
+    setPresence('CHATGPT FAMILY', 'thinking', 'ChatGPT analyzing...')
     setContinuationPrompt(null)
     if (mode === 'continue') {
       addSystemMessage('Council channel continuing')
@@ -744,13 +968,15 @@ export default function Home() {
       messageType: 'decree'
     }])
 
-    void saveMemory({
-      content: decree,
-      source: 'decree',
-      family: "RA'EL",
-      tags: [detectToneMode(decree), mode ?? 'standard'],
-      importance: mode === 'expanded' ? 3 : 2,
-    })
+    if (isExplicitMemoryRequest(decree)) {
+      void saveMemory({
+        content: decree,
+        source: 'decree',
+        family: "RA'EL",
+        tags: [detectToneMode(decree), mode ?? 'standard'],
+        importance: mode === 'expanded' ? 3 : 2,
+      })
+    }
 
     await submitDecree(decree, mode)
   }
@@ -859,6 +1085,14 @@ export default function Home() {
     await sendRaelDecree(expansionPrompt.decree, 'summarize')
   }
 
+  const familyStatusItems = [
+    { key: 'CLAUDE FAMILY' as TypingFamily, label: 'CLAUDE', presence: familyPresence['CLAUDE FAMILY'] },
+    { key: 'CHATGPT FAMILY' as TypingFamily, label: 'CHATGPT', presence: familyPresence['CHATGPT FAMILY'] },
+    { key: 'GROK', label: 'GROK', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
+    { key: 'GEMINI', label: 'GEMINI', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
+    { key: 'RED TEAM', label: 'RED TEAM', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
+  ]
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white flex flex-col font-mono">
       <MatrixCodeRain />
@@ -920,12 +1154,27 @@ export default function Home() {
           <p className="text-xs tracking-widest" style={{ color: '#444' }}>RA&apos;EL — HIGHER VISION INC</p>
         </div>
         <div className="flex gap-4">
-          {['CLAUDE', 'CHATGPT', 'GROK', 'GEMINI', 'RED TEAM'].map(f => (
-            <div key={f} className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full" style={{ background: '#00ff41', boxShadow: '0 0 4px #00ff41' }} />
-              <span className="text-xs" style={{ color: '#444' }}>{f}</span>
-            </div>
-          ))}
+          {familyStatusItems.map(item => {
+            const active = item.presence.status !== 'idle'
+
+            return (
+              <div key={item.key} className="flex items-center gap-1" title={item.presence.label}>
+                <div
+                  className={`w-2 h-2 rounded-full ${active ? 'tool-dot-active' : ''}`}
+                  style={{
+                    background: active ? '#00ff41' : '#203321',
+                    boxShadow: active ? '0 0 8px #00ff41' : 'none',
+                  }}
+                />
+                <span className="text-xs" style={{ color: active ? '#9AE6B4' : '#444' }}>{item.label}</span>
+                {active && (
+                  <span className="hidden lg:inline text-[10px] tracking-widest" style={{ color: '#555' }}>
+                    {item.presence.label.toUpperCase()}
+                  </span>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
 
@@ -934,7 +1183,15 @@ export default function Home() {
         <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} />
         <MemoryPanel memories={memories} />
         <CodexAgentPlaceholder />
+        <FamilyPresencePanel presence={familyPresence} />
       </div>
+
+      {memoryNotification && (
+        <div className="fixed right-6 top-6 z-30 message-fade-in rounded px-3 py-2 text-xs font-bold tracking-widest"
+          style={{ background: 'rgba(52,211,153,0.14)', border: '1px solid rgba(52,211,153,0.35)', color: '#34D399' }}>
+          {memoryNotification}
+        </div>
+      )}
 
       <div className="relative z-10 border-b border-yellow-900 px-6 py-2 flex items-center gap-2 flex-shrink-0"
         style={{ background: 'rgba(0,0,0,0.45)' }}>
@@ -989,7 +1246,20 @@ export default function Home() {
           />
         )}
 
-        {typingFamily && <TypingIndicator familyName={typingFamily} />}
+        {memorySavePrompt && (
+          <MemorySavePromptPanel
+            prompt={memorySavePrompt}
+            onSave={() => {
+              void saveMemory(memorySavePrompt.memory)
+              setMemorySavePrompt(null)
+            }}
+            onDismiss={() => setMemorySavePrompt(null)}
+          />
+        )}
+
+        {typingFamily && (
+          <TypingIndicator familyName={typingFamily} label={familyPresence[typingFamily].label} />
+        )}
 
         {showContinue && (
           <div className="flex items-center gap-3 ml-11 mb-4 p-3 rounded"
