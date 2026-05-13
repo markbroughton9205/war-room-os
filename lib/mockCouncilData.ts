@@ -2,6 +2,7 @@
 
 export type CouncilFamilyStatus =
   | 'idle'
+  | 'standby'
   | 'thinking'
   | 'executing'
   | 'reviewing'
@@ -9,6 +10,13 @@ export type CouncilFamilyStatus =
   | 'complete'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
+export type SubAgentStatus = 'idle' | 'active' | 'reviewing' | 'blocked'
+
+export interface CouncilSubAgent {
+  name: string
+  status: SubAgentStatus
+  currentTask: string
+}
 
 export interface CouncilFamily {
   familyName: string
@@ -26,6 +34,20 @@ export interface CouncilFamily {
   costUsageMeter: number
   lastActiveTime: string
   nextAction: string
+  subAgents?: CouncilSubAgent[]
+}
+
+function subAgents(names: string[], activeIndex = 0): CouncilSubAgent[] {
+  const statuses: SubAgentStatus[] = ['idle', 'active', 'reviewing', 'blocked', 'idle']
+
+  return names.map((name, index) => ({
+    name,
+    status: index === activeIndex ? 'active' : statuses[index] ?? 'idle',
+    currentTask:
+      index === activeIndex
+        ? `Processing ${name.toLowerCase()} signal`
+        : `Standby for ${name.toLowerCase()} handoff`,
+  }))
 }
 
 export type SentinelMetricState = 'nominal' | 'elevated' | 'critical'
@@ -65,6 +87,7 @@ export const MOCK_COUNCIL_FAMILIES: CouncilFamily[] = [
     costUsageMeter: 34,
     lastActiveTime: '2026-05-12T14:22:09.000Z',
     nextAction: 'Publish annotated diff for Council sign-off',
+    subAgents: subAgents(['Architecture', 'Governance', 'Security', 'Logic', 'Documentation'], 2),
   },
   {
     familyName: 'ChatGPT',
@@ -80,6 +103,7 @@ export const MOCK_COUNCIL_FAMILIES: CouncilFamily[] = [
     costUsageMeter: 58,
     lastActiveTime: '2026-05-12T14:21:44.000Z',
     nextAction: 'Wire checklist into CommandBar quick actions',
+    subAgents: subAgents(['Strategy', 'UX', 'Synthesis', 'Language', 'Continuity'], 0),
   },
   {
     familyName: 'Kimi',
@@ -95,6 +119,7 @@ export const MOCK_COUNCIL_FAMILIES: CouncilFamily[] = [
     costUsageMeter: 22,
     lastActiveTime: '2026-05-12T14:20:11.000Z',
     nextAction: 'Emit dedupe brief to memory graph',
+    subAgents: subAgents(['Task Tree', 'Dependency', 'Parallelization', 'Operations', 'Sequencing'], 4),
   },
   {
     familyName: 'Grok',
@@ -110,6 +135,7 @@ export const MOCK_COUNCIL_FAMILIES: CouncilFamily[] = [
     costUsageMeter: 12,
     lastActiveTime: '2026-05-12T14:05:00.000Z',
     nextAction: 'Join when Gemini completes shard merge',
+    subAgents: subAgents(['Realtime', 'Trend', 'Social Pulse', 'Contradiction', 'Alert'], 3),
   },
   {
     familyName: 'Gemini',
@@ -125,6 +151,24 @@ export const MOCK_COUNCIL_FAMILIES: CouncilFamily[] = [
     costUsageMeter: 71,
     lastActiveTime: '2026-05-12T14:22:01.000Z',
     nextAction: 'Re-request shard C with alternate codec',
+    subAgents: subAgents(['Vision', 'Pattern', 'Document', 'Multimodal', 'Forecast'], 1),
+  },
+  {
+    familyName: 'Codex Agent',
+    domain: 'Engineering / Deployment',
+    provider: 'Codex',
+    status: 'standby',
+    currentTask: 'Status: standby',
+    lastOutputSummary:
+      'Capability: feature deployment, code patching, repo operations',
+    confidenceScore: 0,
+    riskLevel: 'low',
+    objectionFlag: false,
+    memoryContributionCount: 0,
+    costUsageMeter: 0,
+    lastActiveTime: '2026-05-13T00:00:00.000Z',
+    nextAction:
+      'Future: let Ra’el request app changes from War Room, including mobile',
   },
   {
     familyName: 'Red Team',
@@ -140,6 +184,7 @@ export const MOCK_COUNCIL_FAMILIES: CouncilFamily[] = [
     costUsageMeter: 19,
     lastActiveTime: '2026-05-12T13:58:33.000Z',
     nextAction: 'Escalate vault token to Sentinel for waiver or substitute fixture',
+    subAgents: subAgents(['Risk', 'Attack', 'Weakness', 'Assumption', 'Stress Test'], 0),
   },
 ]
 

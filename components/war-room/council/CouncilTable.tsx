@@ -2,8 +2,9 @@ import type { CouncilFamily } from '@/lib/mockCouncilData'
 import { MOCK_COUNCIL_FAMILIES } from '@/lib/mockCouncilData'
 import { FamilySeat } from './FamilySeat'
 
-/** Six seats around hub: start at top (−90°), then every 60° */
-const SEAT_INDEX_TO_DEG = [0, 1, 2, 3, 4, 5].map((i) => i * 60 - 90)
+function seatDeg(index: number, total: number) {
+  return index * (360 / Math.max(1, total)) - 90
+}
 
 function seatStyle(deg: number, orbitFrac: number) {
   const rad = (deg * Math.PI) / 180
@@ -82,7 +83,7 @@ export function CouncilTable({
         </div>
 
         {families.map((family, i) => {
-          const deg = SEAT_INDEX_TO_DEG[i] ?? -90
+          const deg = seatDeg(i, families.length)
           return (
             <div
               key={family.familyName}
