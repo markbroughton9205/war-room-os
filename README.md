@@ -28,11 +28,20 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 FIRECRAWL_API_KEY=
 TAVILY_API_KEY=
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
+RAEL_PHONE_NUMBER=
+SUPABASE_FILES_BUCKET=
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` is used only by `/api/tools/memory` on the server so the browser never receives it.
 `FIRECRAWL_API_KEY` is used only by `/api/income/scout` on the server for Opportunity Scout search.
 `TAVILY_API_KEY` is used only by `/api/income/scout` as the primary Opportunity Scout search provider.
+Twilio variables are used only by `/api/sms/send` and `/api/sms/inbound` on the server for the SMS Bridge foundation.
+`SUPABASE_FILES_BUCKET` is used only by `/api/files/upload` on the server for the Files / Evidence Vault. It must match the Supabase Storage bucket ID exactly, including spaces and capitalization. Current local target: `War Room Files`.
+
+Payment operations should route through secure provider integrations such as Stripe, PayPal, Square, or ACH providers. SMS may notify Ra'el and collect low-risk responses, but financial actions require secure War Room approval and must not store raw routing or account numbers.
 
 If you choose to keep anon-key access instead of the server service-role route, enable RLS policies for local app access in Supabase:
 

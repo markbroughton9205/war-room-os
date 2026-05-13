@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import type { FormEvent } from 'react'
+import Link from 'next/link'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
 import { TOOL_REGISTRY, type ToolId, type ToolStatus } from '@/lib/tools/toolRegistry'
 
@@ -85,6 +86,7 @@ type OpportunityScoutStatus = 'idle' | 'searching' | 'reviewing' | 'found' | 'er
 type ProviderHealth = 'online' | 'standby' | 'offline' | 'error'
 type RaelActionStatus = 'pending' | 'answered' | 'expired'
 type RaelActionUrgency = 'low' | 'medium' | 'high'
+type SmsBridgeStatus = 'not configured' | 'standby' | 'online' | 'error'
 
 type RaelActionItem = {
   action_id: string
@@ -99,6 +101,13 @@ type RaelActionItem = {
   source_agent: string
   selected_response?: string
   answered_at?: string
+}
+
+type SmsBridgeState = {
+  status: SmsBridgeStatus
+  lastNotification: string | null
+  message: string
+  sending: boolean
 }
 
 type OpportunityScoutState = {
@@ -156,6 +165,20 @@ type IncomeOpportunity = {
   created_at: string
 }
 
+type WarRoomFile = {
+  id: string
+  file_name: string
+  file_type: string
+  mime_type: string
+  size_bytes: number
+  storage_path: string
+  source_context: string
+  uploaded_at: string
+  tags: string[]
+  status: 'uploaded' | 'indexed' | 'error'
+  notes: string
+}
+
 const FAMILY_META: Record<TypingFamily, { color: string; icon: string }> = {
   'CHATGPT FAMILY': { color: '#34D399', icon: '🧠' },
   'CLAUDE FAMILY': { color: '#A78BFA', icon: '🔮' },
@@ -184,6 +207,12 @@ const INITIAL_OPPORTUNITY_SCOUT_STATE: OpportunityScoutState = {
     tavily: 'offline',
     firecrawl: 'offline',
   },
+}
+const INITIAL_SMS_BRIDGE_STATE: SmsBridgeState = {
+  status: 'standby',
+  lastNotification: null,
+  message: 'SMS Bridge ready for configuration check.',
+  sending: false,
 }
 const BASE_USAGE_ROWS: UsageEstimate[] = [
   { familyName: 'Claude Family', provider: 'Anthropic', model: 'claude-sonnet-4-20250514', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
@@ -296,6 +325,12 @@ function formatMoney(amount: number) {
     currency: 'USD',
     maximumFractionDigits: 0,
   }).format(amount)
+}
+
+function formatFileSize(sizeBytes: number) {
+  if (sizeBytes < 1024) return `${sizeBytes} B`
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function formatLocalMoney(amount: number | null, currency: string) {
@@ -509,6 +544,224 @@ function TokenUsagePanel({
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function PaymentsPayoutsPanel({ opportunities }: { opportunities: IncomeOpportunity[] }) {
+  const paidOpportunities = opportunities.filter(opportunity => opportunity.status === 'paid')
+  const pendingPayments = opportunities.filter(opportunity => (
+    !isExpired(opportunity) && opportunity.status !== 'paid' && (opportunity.local_payout !== null || opportunity.usd_estimate !== null)
+  ))
+  const expectedPayouts = pendingPayments.reduce((total, opportunity) => total + (opportunity.usd_estimate ?? 0), 0)
+  const paidTotal = paidOpportunities.reduce((total, opportunity) => total + (opportunity.usd_estimate ?? 0), 0)
+  const invoiceItems = opportunities.filter(opportunity => (
+    opportunity.notes.toLowerCase().includes('invoice') || opportunity.status === 'applied' || opportunity.status === 'active'
+  ))
+  const providerPlaceholders = ['Stripe links', 'PayPal', 'Square', 'ACH provider']
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(52,211,153,0.016)' }}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>
+            PAYMENTS / PAYOUTS
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Payment operations through secure provider approvals.
+          </p>
+        </div>
+        <span className="rounded px-3 py-1 text-xs font-bold tracking-widest"
+          style={{ color: '#FFD700', border: '1px solid rgba(255,215,0,0.35)', background: 'rgba(0,0,0,0.28)' }}>
+          SECURE APPROVAL REQUIRED
+        </span>
+      </div>
+
+      <div className="grid gap-2 text-xs md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>PENDING PAYMENTS</div>
+          <div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{pendingPayments.length}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>EXPECTED PAYOUTS</div>
+          <div className="mt-1 font-bold" style={{ color: '#34D399' }}>{formatMoney(expectedPayouts)}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>PAID OPPORTUNITIES</div>
+          <div className="mt-1 font-bold" style={{ color: '#60A5FA' }}>{paidOpportunities.length} | {formatMoney(paidTotal)}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>INVOICE STATUS</div>
+          <div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{invoiceItems.length ? `${invoiceItems.length} tracking` : 'none active'}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs lg:grid-cols-2">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 tracking-widest" style={{ color: '#555' }}>PAYMENT PROVIDERS</div>
+          <div className="flex flex-wrap gap-2">
+            {providerPlaceholders.map(provider => (
+              <span key={provider} className="rounded px-2 py-1 text-[10px] tracking-widest"
+                style={{ border: '1px solid rgba(52,211,153,0.18)', color: '#888', background: 'rgba(0,0,0,0.24)' }}>
+                {provider} | future
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 tracking-widest" style={{ color: '#555' }}>SECURITY RULE</div>
+          <div style={{ color: '#888' }}>
+            SMS may notify and collect low-risk responses. Payment execution requires secure War Room approval and a real payment provider.
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FilesEvidenceVaultPanel({
+  files,
+  loading,
+  message,
+  onUpload,
+}: {
+  files: WarRoomFile[]
+  loading: boolean
+  message: string | null
+  onUpload: (formData: FormData) => Promise<void>
+}) {
+  const [sourceContext, setSourceContext] = useState('war-room')
+  const [tags, setTags] = useState('')
+  const [notes, setNotes] = useState('')
+  const statusColors: Record<WarRoomFile['status'], string> = {
+    uploaded: '#FFD700',
+    indexed: '#34D399',
+    error: '#EF4444',
+  }
+
+  const submitFile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const formData = new FormData(form)
+    await onUpload(formData)
+    form.reset()
+    setSourceContext('war-room')
+    setTags('')
+    setNotes('')
+  }
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-4 flex-shrink-0"
+      style={{ background: 'rgba(96,165,250,0.016)' }}>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#60A5FA' }}>
+            FILES / EVIDENCE VAULT
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Upload real documents, screenshots, datasets, and project evidence for future analysis.
+          </p>
+        </div>
+        <span className="rounded px-3 py-1 text-xs font-bold tracking-widest"
+          style={{ color: '#FFD700', border: '1px solid rgba(255,215,0,0.3)', background: 'rgba(0,0,0,0.28)' }}>
+          {files.length} FILES
+        </span>
+      </div>
+
+      <form onSubmit={submitFile} className="mb-4 rounded-md p-3"
+        style={{ border: '1px solid rgba(96,165,250,0.18)', background: 'rgba(0,0,0,0.28)' }}>
+        <div className="grid gap-2 md:grid-cols-4">
+          <input
+            name="file"
+            type="file"
+            accept=".pdf,.txt,.md,.markdown,.json,.csv,.png,.jpg,.jpeg,.webp,application/pdf,text/plain,text/markdown,application/json,text/csv,image/png,image/jpeg,image/webp"
+            required
+            className="rounded border border-[#24301f] bg-black/40 px-2 py-2 text-xs text-slate-200 outline-none focus:border-[#60A5FA] md:col-span-2"
+          />
+          <input
+            name="source_context"
+            value={sourceContext}
+            onChange={event => setSourceContext(event.target.value)}
+            placeholder="Source context"
+            className="rounded border border-[#24301f] bg-black/40 px-2 py-2 text-xs text-slate-200 outline-none focus:border-[#60A5FA]"
+          />
+          <input
+            name="tags"
+            value={tags}
+            onChange={event => setTags(event.target.value)}
+            placeholder="Tags, comma separated"
+            className="rounded border border-[#24301f] bg-black/40 px-2 py-2 text-xs text-slate-200 outline-none focus:border-[#60A5FA]"
+          />
+        </div>
+        <textarea
+          name="notes"
+          value={notes}
+          onChange={event => setNotes(event.target.value)}
+          placeholder="Notes for future council or Baby AI analysis"
+          className="mt-2 min-h-16 w-full rounded border border-[#24301f] bg-black/40 px-2 py-2 text-xs text-slate-200 outline-none focus:border-[#60A5FA]"
+        />
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs" style={{ color: message?.includes('not configured') ? '#FFD700' : '#666' }}>
+            {message ?? 'Allowed: PDF, TXT, Markdown, JSON, CSV, PNG, JPG, WebP.'}
+          </span>
+          <button type="submit" disabled={loading}
+            className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+            style={{ background: '#60A5FA', color: '#000' }}>
+            {loading ? 'UPLOADING...' : 'UPLOAD FILE'}
+          </button>
+        </div>
+      </form>
+
+      {files.length === 0 ? (
+        <div className="rounded-md px-3 py-6 text-center text-xs tracking-widest"
+          style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#666', background: 'rgba(0,0,0,0.22)' }}>
+          No files uploaded yet.
+        </div>
+      ) : (
+        <div className="grid gap-2 xl:grid-cols-3 lg:grid-cols-2">
+          {files.map(file => (
+            <div key={file.id} className="rounded-md p-3"
+              style={{ border: '1px solid rgba(96,165,250,0.16)', background: 'rgba(0,0,0,0.26)' }}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold tracking-widest" style={{ color: '#ddd' }}>
+                    {file.file_name}
+                  </div>
+                  <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#555' }}>
+                    {file.file_type.toUpperCase()} | {file.mime_type} | {formatFileSize(file.size_bytes)}
+                  </div>
+                </div>
+                <span className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+                  style={{ color: statusColors[file.status], border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+                  {file.status.toUpperCase()}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
+                <div className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+                  <span style={{ color: '#444' }}>UPLOADED </span>
+                  <span style={{ color: '#888' }}>{new Date(file.uploaded_at).toLocaleString()}</span>
+                </div>
+                <div className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
+                  <span style={{ color: '#444' }}>SOURCE </span>
+                  <span style={{ color: '#888' }}>{file.source_context}</span>
+                </div>
+              </div>
+              {file.tags.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {file.tags.map(tag => (
+                    <span key={tag} className="rounded px-2 py-1 text-[10px] tracking-widest"
+                      style={{ border: '1px solid rgba(96,165,250,0.18)', color: '#9CCBFF' }}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {file.notes && <p className="mt-3 text-xs text-slate-500">{file.notes}</p>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -1005,14 +1258,65 @@ function MemoryPanel({ memories }: { memories: MemoryEntry[] }) {
   )
 }
 
+function SmsBridgePanel({
+  bridge,
+  onTest,
+}: {
+  bridge: SmsBridgeState
+  onTest: () => void
+}) {
+  const statusColors: Record<SmsBridgeStatus, string> = {
+    'not configured': '#666',
+    standby: '#FFD700',
+    online: '#34D399',
+    error: '#EF4444',
+  }
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(96,165,250,0.018)' }}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#60A5FA' }}>
+            SMS BRIDGE
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Phone notification bridge for action queue approvals.
+          </p>
+        </div>
+        <button type="button" onClick={onTest} disabled={bridge.sending}
+          className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+          style={{ border: '1px solid rgba(96,165,250,0.4)', color: '#60A5FA', background: 'rgba(0,0,0,0.25)' }}>
+          {bridge.sending ? 'Sending...' : 'Test Notification'}
+        </button>
+      </div>
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}>
+          <span style={{ color: '#444' }}>STATUS </span>
+          <span style={{ color: statusColors[bridge.status] }}>{bridge.status.toUpperCase()}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}>
+          <span style={{ color: '#444' }}>LAST NOTIFICATION </span>
+          <span style={{ color: '#888' }}>{bridge.lastNotification ? new Date(bridge.lastNotification).toLocaleString() : 'None'}</span>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}>
+          <span style={{ color: '#888' }}>{bridge.message}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function NeedsRaelPanel({
   actions,
   opportunities,
   onRespond,
+  onNotify,
 }: {
   actions: RaelActionItem[]
   opportunities: IncomeOpportunity[]
   onRespond: (actionId: string, response: string) => void
+  onNotify: (action: RaelActionItem) => void
 }) {
   const urgencyStyles: Record<RaelActionUrgency, { color: string; border: string; background: string }> = {
     low: { color: '#60A5FA', border: 'rgba(96,165,250,0.28)', background: 'rgba(96,165,250,0.06)' },
@@ -1108,6 +1412,13 @@ function NeedsRaelPanel({
                         {option}
                       </button>
                     ))}
+                    {action.urgency === 'high' && (
+                      <button type="button" onClick={() => onNotify(action)}
+                        className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
+                        style={{ border: '1px solid rgba(52,211,153,0.4)', color: '#34D399', background: 'rgba(0,0,0,0.2)' }}>
+                        Notify Ra&apos;el
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div className="mt-3 rounded px-2 py-2 text-xs"
@@ -1212,6 +1523,129 @@ function FamilyPresencePanel({
             </div>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+function BabyAiObserverPanel({
+  memories,
+  actions,
+  opportunities,
+}: {
+  memories: MemoryEntry[]
+  actions: RaelActionItem[]
+  opportunities: IncomeOpportunity[]
+}) {
+  const familyContributions = [
+    { family: 'Claude Family', skill: 'architecture, governance, systems thinking', color: '#A78BFA' },
+    { family: 'ChatGPT Family', skill: 'strategy, synthesis, communication', color: '#34D399' },
+    { family: 'Kimi Family', skill: 'decomposition, task sequencing, execution planning', color: '#60A5FA' },
+    { family: 'Grok Family', skill: 'realtime signal awareness', color: '#F97316' },
+    { family: 'Codex Agent', skill: 'coding, build, deployment awareness', color: '#FFD700' },
+    { family: 'Red Team', skill: 'risk detection, contradiction checking', color: '#EF4444' },
+    { family: 'Archivist / Memory', skill: 'continuity and pattern memory', color: '#38BDF8' },
+  ]
+  const hardRules = [
+    'No speaking for Ra’el',
+    'No saving sensitive memories without approval',
+    'No external actions without approval',
+    'No payment or banking actions without secure approval',
+    'No fake identity or platform-rule evasion',
+    'No uncontrolled execution',
+  ]
+  const experienceCount = memories.length + actions.length + opportunities.length
+  const patternsLearned = Math.min(memories.length + opportunities.filter(opportunity => opportunity.status === 'paid').length, 99)
+  const pendingLessons = actions.filter(action => action.status === 'pending').length + opportunities.filter(expiresSoon).length
+  const approvalGatesActive = actions.filter(action => action.status === 'pending').length
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(56,189,248,0.018)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#38BDF8' }}>
+            BABY AI OBSERVER
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#777' }}>
+            War Room Native | Memory + Council Experience + Family Skills
+          </p>
+        </div>
+        <span className="rounded px-3 py-1 text-xs font-bold tracking-widest"
+          style={{ color: '#FFD700', border: '1px solid rgba(255,215,0,0.35)', background: 'rgba(0,0,0,0.28)' }}>
+          OBSERVES | LEARNS | RECOMMENDS
+        </span>
+      </div>
+
+      <div className="grid gap-2 text-xs md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(56,189,248,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>ORIGIN</div>
+          <div className="mt-1 font-bold" style={{ color: '#38BDF8' }}>War Room Native</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>EXPERIENCE COUNT</div>
+          <div className="mt-1 font-bold" style={{ color: '#34D399' }}>{experienceCount}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>PATTERNS LEARNED</div>
+          <div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{patternsLearned}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>APPROVAL GATES ACTIVE</div>
+          <div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{approvalGatesActive}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(56,189,248,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#38BDF8' }}>SKILL STACK</div>
+          <div className="leading-relaxed" style={{ color: '#888' }}>
+            Observes, learns, summarizes, recommends, and coordinates. Not autonomous yet.
+          </div>
+          <div className="mt-2 rounded px-2 py-2" style={{ border: '1px solid #222', color: '#777', background: 'rgba(0,0,0,0.22)' }}>
+            Command posture: Ra&apos;el controls Baby AI Observer. It reports clearly, waits for approval, and does not act on its own.
+          </div>
+        </div>
+
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#34D399' }}>FAMILY CONTRIBUTIONS</div>
+          <div className="grid gap-1">
+            {familyContributions.map(contribution => (
+              <div key={contribution.family} className="flex flex-wrap items-center gap-2">
+                <span className="h-2 w-2 rounded-full" style={{ background: contribution.color, boxShadow: `0 0 8px ${contribution.color}` }} />
+                <span style={{ color: contribution.color }}>{contribution.family}</span>
+                <span style={{ color: '#666' }}>{contribution.skill}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FFD700' }}>LEARNING PROGRESS</div>
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between rounded px-2 py-1" style={{ border: '1px solid #222' }}>
+              <span style={{ color: '#555' }}>Pending lessons</span>
+              <span style={{ color: '#FFD700' }}>{pendingLessons}</span>
+            </div>
+            <div className="flex items-center justify-between rounded px-2 py-1" style={{ border: '1px solid #222' }}>
+              <span style={{ color: '#555' }}>Memory signals</span>
+              <span style={{ color: '#34D399' }}>{memories.length}</span>
+            </div>
+            <div className="flex items-center justify-between rounded px-2 py-1" style={{ border: '1px solid #222' }}>
+              <span style={{ color: '#555' }}>Opportunity signals</span>
+              <span style={{ color: '#60A5FA' }}>{opportunities.length}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {hardRules.map(rule => (
+          <span key={rule} className="rounded px-2 py-1 text-[10px] tracking-widest"
+            style={{ border: '1px solid rgba(239,68,68,0.22)', color: '#999', background: 'rgba(0,0,0,0.24)' }}>
+            {rule}
+          </span>
+        ))}
       </div>
     </div>
   )
@@ -1331,12 +1765,16 @@ export default function Home() {
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
   const [toolStatuses, setToolStatuses] = useState<Record<ToolId, ToolStatus>>(INITIAL_TOOL_STATUSES)
   const [memories, setMemories] = useState<MemoryEntry[]>([])
+  const [warRoomFiles, setWarRoomFiles] = useState<WarRoomFile[]>([])
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [filesMessage, setFilesMessage] = useState<string | null>(null)
   const [incomeOpportunities, setIncomeOpportunities] = useState<IncomeOpportunity[]>([])
   const [incomeLoading, setIncomeLoading] = useState(false)
   const [incomeView, setIncomeView] = useState<IncomeRadarView>('active')
   const [opportunityScout, setOpportunityScout] = useState<OpportunityScoutState>(INITIAL_OPPORTUNITY_SCOUT_STATE)
   const [opportunityScoutLoading, setOpportunityScoutLoading] = useState(false)
   const [raelActions, setRaelActions] = useState<RaelActionItem[]>([])
+  const [smsBridge, setSmsBridge] = useState<SmsBridgeState>(INITIAL_SMS_BRIDGE_STATE)
   const [usageRows, setUsageRows] = useState<UsageEstimate[]>(BASE_USAGE_ROWS)
   const [currentDecreeCost, setCurrentDecreeCost] = useState(0)
   const [sessionCost, setSessionCost] = useState(0)
@@ -1470,6 +1908,51 @@ export default function Home() {
     addSystemMessage(`Ra'el answered action queue: ${response}`)
   }
 
+  const sendSmsNotification = async (message: string) => {
+    setSmsBridge(prev => ({ ...prev, sending: true, message: 'Sending SMS notification...' }))
+    try {
+      const res = await fetch('/api/sms/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setSmsBridge(prev => ({
+          ...prev,
+          status: data.status === 'not_configured' ? 'not configured' : 'error',
+          message: data.message ?? 'SMS notification failed',
+          sending: false,
+        }))
+        return
+      }
+
+      setSmsBridge({
+        status: 'online',
+        lastNotification: data.sentAt ?? new Date().toISOString(),
+        message: data.message ?? 'SMS notification sent',
+        sending: false,
+      })
+    } catch {
+      setSmsBridge(prev => ({
+        ...prev,
+        status: 'error',
+        message: 'SMS notification failed',
+        sending: false,
+      }))
+    }
+  }
+
+  const testSmsBridge = () => {
+    void sendSmsNotification('War Room SMS Bridge test. Reply STATUS to confirm command handling.')
+  }
+
+  const notifyRaelAction = (action: RaelActionItem) => {
+    const options = action.response_options.join(' / ')
+    void sendSmsNotification(`War Room needs Ra'el: ${action.title}. ${action.question} Reply options: ${options}.`)
+  }
+
   useEffect(() => {
     addSystemMessageRef.current = addSystemMessage
   })
@@ -1588,6 +2071,40 @@ export default function Home() {
     }
   }
 
+  const loadWarRoomFiles = async () => {
+    try {
+      const res = await fetch('/api/files')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Files retrieval failed')
+      setWarRoomFiles(Array.isArray(data.files) ? data.files : [])
+      setFilesMessage(null)
+    } catch (error) {
+      setWarRoomFiles([])
+      setFilesMessage(error instanceof Error ? error.message : 'Files retrieval failed')
+    }
+  }
+
+  const uploadWarRoomFile = async (formData: FormData) => {
+    setFilesLoading(true)
+    setFilesMessage(null)
+    try {
+      const res = await fetch('/api/files/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'File upload failed')
+      if (data.file) {
+        setWarRoomFiles(prev => [data.file, ...prev])
+      }
+      setFilesMessage(data.message ?? 'File uploaded')
+    } catch (error) {
+      setFilesMessage(error instanceof Error ? error.message : 'File upload failed')
+    } finally {
+      setFilesLoading(false)
+    }
+  }
+
   const loadRaelActions = async () => {
     try {
       const res = await fetch('/api/actions')
@@ -1613,6 +2130,7 @@ export default function Home() {
       void loadMemoriesRef.current?.()
       void loadIncomeOpportunities()
       void loadRaelActions()
+      void loadWarRoomFiles()
     }, 0)
 
     return () => window.clearTimeout(timer)
@@ -2189,7 +2707,12 @@ export default function Home() {
           <h1 className="text-xl font-bold tracking-widest" style={{ color: '#FFD700' }}>⚔ WAR ROOM</h1>
           <p className="text-xs tracking-widest" style={{ color: '#444' }}>RA&apos;EL — HIGHER VISION INC</p>
         </div>
-        <div className="flex gap-4">
+        <div className="flex flex-wrap items-center justify-end gap-4">
+          <Link href="/baby"
+            className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            style={{ border: '1px solid rgba(56,189,248,0.35)', color: '#38BDF8', background: 'rgba(0,0,0,0.28)' }}>
+            Baby AI Private
+          </Link>
           {familyStatusItems.map(item => {
             const active = item.presence.status !== 'idle'
 
@@ -2217,7 +2740,15 @@ export default function Home() {
       <div className="relative z-10 flex-shrink-0">
         <ToolStatusPanel toolStatuses={toolStatuses} />
         <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} />
-        <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} />
+        <SmsBridgePanel bridge={smsBridge} onTest={testSmsBridge} />
+        <PaymentsPayoutsPanel opportunities={incomeOpportunities} />
+        <FilesEvidenceVaultPanel
+          files={warRoomFiles}
+          loading={filesLoading}
+          message={filesMessage}
+          onUpload={uploadWarRoomFile}
+        />
+        <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
         <IncomeRadarPanel
           opportunities={incomeOpportunities}
           loading={incomeLoading}
@@ -2231,6 +2762,7 @@ export default function Home() {
         />
         <MemoryPanel memories={memories} />
         <CodexAgentPlaceholder />
+        <BabyAiObserverPanel memories={memories} actions={raelActions} opportunities={incomeOpportunities} />
         <FamilyPresencePanel presence={familyPresence} />
       </div>
 
