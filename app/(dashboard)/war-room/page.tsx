@@ -1,0 +1,37 @@
+import type { Metadata } from 'next'
+import { BabyObserverNode, CouncilTable, SentinelStatusPanel } from '@/components/war-room/council'
+import { KpiGrid } from '@/components/war-room/KpiGrid'
+import { WarRoomShell } from '@/components/war-room/WarRoomShell'
+
+export const metadata: Metadata = {
+  title: 'War Room OS — Command',
+  description: 'War Room OS dashboard shell (mock data, frontend only).',
+}
+
+export default function WarRoomDashboardPage() {
+  return (
+    <WarRoomShell>
+      <KpiGrid />
+      <section className="mx-auto mt-14 max-w-6xl border-t border-white/10 pt-10">
+        <header className="mb-6">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-[#d4af37]">Council</p>
+          <h2 className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-2xl">Seating &amp; oversight</h2>
+          <p className="mt-1 max-w-2xl text-sm text-slate-500">
+            Mock council layout — six family seats, Sentinel metrics, Baby observer node.
+          </p>
+        </header>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_17.5rem] lg:items-start lg:gap-x-8 lg:gap-y-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="min-w-0 lg:col-start-1 lg:row-start-1">
+            <CouncilTable />
+          </div>
+          <div className="min-w-0 lg:col-start-2 lg:row-start-1">
+            <SentinelStatusPanel />
+          </div>
+          <div className="border-t border-white/10 pt-6 lg:col-span-2">
+            <BabyObserverNode className="lg:max-w-xl" />
+          </div>
+        </div>
+      </section>
+    </WarRoomShell>
+  )
+}

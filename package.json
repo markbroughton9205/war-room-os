@@ -12,6 +12,7 @@
     "@supabase/auth-js": "^2.105.4",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.4",
+    "ai": "^6.0.177",
     "globe.gl": "^2.45.3",
     "next": "16.2.6",
     "react": "19.2.4",
