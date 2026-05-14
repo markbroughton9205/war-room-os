@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import type { FormEvent } from 'react'
 import Link from 'next/link'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
@@ -12,10 +12,85 @@ import { LOCAL_FAMILY_AGENTS } from '@/lib/local-agent/family-agents'
 import { LOCAL_AGENT_ENGINES, LOCAL_AGENT_RELIABILITY_PRINCIPLES, LOCAL_AGENT_TASK_LIFECYCLE } from '@/lib/local-agent/engines'
 import { LOCAL_TASK_CATEGORIES } from '@/lib/local-agent/router'
 import type { LocalAgentBridgeStatusResponse, LocalAgentEngineId, LocalFamilyAgentsResponse, LocalTaskCategory, LocalTaskRoutingDecision } from '@/lib/local-agent/types'
+import { INCOME_WORKERS, INCOME_WORKER_WORKFLOW } from '@/lib/income-workers/registry'
+import type { IncomeWorkerCandidate, IncomeWorkerScoutResult } from '@/lib/income-workers/types'
+import type { IncomeCouncilReview } from '@/lib/income-workers/councilReview'
+import type { DeployStatusResponse } from '@/lib/deploy/types'
+import type { DiffPreviewResponse, RepoStatus, RollbackStatus } from '@/lib/repo/types'
 import { TOOL_REGISTRY, type ToolId } from '@/lib/tools/toolRegistry'
+import type { InternetStatusResponse } from '@/lib/tools/internet/types'
+import type { DepositRecord, PaymentGuardFinding, PaymentProviderReadiness } from '@/lib/payments/types'
 import { fetchToolBarHealth, initialToolBarHealth, type ToolBarLabel } from '@/lib/warRoomToolBarHealth'
+import {
+  buildCouncilPlanningAugment,
+  buildDecreeFamilyAugment,
+  buildOrchestrationAugment,
+  type CouncilAugmentContext,
+  COUNCIL_MAX_CONSECUTIVE_AUTONOMOUS,
+  COUNCIL_MAX_CONSECUTIVE_AUTONOMOUS_DEEP,
+  COUNCIL_ORCHESTRATION_INTERVAL_MS,
+  councilContentHash,
+  orchestrationFamilyToLocalAgentId,
+  orchestrationFamilyToTypingFamily,
+  pickNextOrchestrationFamily,
+  useCouncilSession,
+} from '@/components/council'
+import type { CouncilOrchestrationFamily } from '@/components/council'
+import type { EngineControlStatusResponse, EngineId, EngineStatus } from '@/lib/engine-control/types'
+import type { RouteCommandResult } from '@/lib/engine-control/router'
+import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
+import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
+import { postCouncilChat, sendLiveCouncilThroneMessage } from '@/lib/council/liveChatPipeline'
+import { classifyCommand } from '@/lib/engine-control/permissions'
+import { ProviderSetupChecklistPanel } from '@/components/war-room/ProviderSetupChecklistPanel'
+import { Phase3WarRoomPanels } from '@/components/war-room/phase3/Phase3WarRoomPanels'
+import { Phase5DeployPanels } from '@/components/war-room/phase5/DeployPanels'
+import { Phase6MemoryPanels } from '@/components/war-room/memory/Phase6MemoryPanels'
+import { SystemResourcesPanel } from '@/components/war-room/phase3/SystemResourcesPanel'
+import { WorkerHealthPanel } from '@/components/war-room/phase3/WorkerHealthPanel'
+import { StandingPermissionsPanel } from '@/components/war-room/permissions/StandingPermissionsPanel'
+import { WarRoomUiModeProvider, useWarRoomUiMode } from '@/components/war-room/WarRoomUiModeContext'
+import {
+  COUNCIL_ROSTER,
+  LIVE_COUNCIL_CONV_STORAGE_KEY,
+  buildDecreeFamilyOrder,
+  detectCouncilPlanningMode,
+  engineRowMap,
+  isEngineFunctional,
+  participationFromDecree,
+  unavailableReason,
+  type CouncilDutyState,
+  type CouncilParticipationToggles,
+} from '@/lib/council/familyRoster'
+import { extractProposedCouncilActions } from '@/lib/council/extractCouncilActions'
+import { classifyRaElMessage, type ClassifyRaElMessageResult } from '@/lib/council/conversationIntent'
+import {
+  GEMINI_REPAIR_ENQUEUE_METADATA_KEY,
+  shouldInjectRedTeamEarly,
+  type CouncilMessageLike,
+} from '@/lib/council/redTeamTriggers'
+import { buildPlatformBrief } from '@/lib/council/platformBrief'
+import { createMessageId } from '@/lib/council/messageIds'
+import { cloudEngineReadinessLabel, cloudEngineStripStatus, internetToolReadinessParts } from '@/lib/warRoom/providerReadiness'
+import type {
+  RedTeamCoderDiagnosisResult,
+  RedTeamCoderIssue,
+  RedTeamCoderRepairPlan,
+  RedTeamCoderSignal,
+  RedTeamCoderStatus,
+} from '@/lib/red-team-coder/types'
 
-const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Goal: Panama relocation. Motivated by vision of success. Wants truth about systems that harm Black and low income communities.`
+export type OperatorTab = 'command' | 'income' | 'agents' | 'approvals' | 'memory' | 'system' | 'diagnostics'
+
+const OPERATOR_TABS: { id: OperatorTab; label: string }[] = [
+  { id: 'command', label: 'Command Center' },
+  { id: 'income', label: 'Income Operations' },
+  { id: 'agents', label: 'Agents' },
+  { id: 'approvals', label: 'Approvals' },
+  { id: 'memory', label: 'Memory' },
+  { id: 'system', label: 'System Health' },
+  { id: 'diagnostics', label: 'Diagnostics' },
+]
 
 type CouncilMessage = {
   id: string
@@ -28,8 +103,104 @@ type CouncilMessage = {
   messageType: string
 }
 
+const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Goal: Panama relocation. Motivated by vision of success. Wants truth about systems that harm Black and low income communities.`
+
+function cloudEngineIdForCouncilFamily(f: CouncilOrchestrationFamily): EngineId | null {
+  if (f === 'chatgpt' || f === 'baby') return 'chatgpt'
+  if (f === 'claude' || f === 'red_team') return 'claude'
+  if (f === 'grok') return 'grok'
+  if (f === 'gemini') return 'gemini'
+  return null
+}
+
+function isGeminiCouncilBackoffFailure(
+  family: CouncilOrchestrationFamily,
+  res: Response,
+  data: { error?: string; message?: string },
+): boolean {
+  if (family !== 'gemini') return false
+  if (res.status === 503) return true
+  if (data.error === 'gemini_unavailable') return true
+  return false
+}
+
+function councilMessagesForRedTeam(msgs: CouncilMessage[]): CouncilMessageLike[] {
+  return msgs.map(m => ({
+    familyName: m.familyName,
+    content: m.content,
+    messageType: m.messageType,
+  }))
+}
+
+function mapWarRoomRowToCouncilMessage(row: {
+  id: string
+  role: string
+  content: string
+  family?: string | null
+  created_at: string
+}): CouncilMessage {
+  const ts = row.created_at ? new Date(row.created_at).toLocaleTimeString() : '--:--'
+  if (row.role === 'user') {
+    return {
+      id: row.id,
+      familyName: "RA'EL",
+      content: row.content,
+      timestamp: ts,
+      color: '#FFD700',
+      icon: '⚔',
+      provider: '',
+      messageType: 'decree',
+    }
+  }
+  if (row.role === 'system') {
+    return {
+      id: row.id,
+      familyName: 'SYSTEM',
+      content: row.content,
+      timestamp: ts,
+      color: '#FFD700',
+      icon: '⚙',
+      provider: '',
+      messageType: 'system',
+    }
+  }
+  const fam = (row.family && row.family.trim()) || 'Council'
+  return {
+    id: row.id,
+    familyName: fam,
+    content: row.content,
+    timestamp: ts,
+    color: '#9CA3AF',
+    icon: '•',
+    provider: '',
+    messageType: 'response',
+  }
+}
+
+function normalizeCouncilMessageIds(input: CouncilMessage[], scope = 'hydrated'): CouncilMessage[] {
+  const seen = new Set<string>()
+  return input.map(message => {
+    const existing = typeof message.id === 'string' ? message.id.trim() : ''
+    if (existing && !seen.has(existing)) {
+      seen.add(existing)
+      return message
+    }
+    const normalizedId = createMessageId(`${scope}-${message.messageType || message.familyName || 'message'}`)
+    seen.add(normalizedId)
+    return { ...message, id: normalizedId }
+  })
+}
+
+function isRaelCouncilMessage(message: CouncilMessage): boolean {
+  return message.messageType === 'decree' || message.familyName.toUpperCase().includes("RA'EL")
+}
+
+function isCouncilFamilyResponse(message: CouncilMessage): boolean {
+  return message.messageType === 'response' && !isRaelCouncilMessage(message) && message.familyName !== 'SYSTEM'
+}
+
 type ToneMode = 'casual' | 'build' | 'business' | 'debate' | 'reflection'
-type TypingFamily = 'CHATGPT FAMILY' | 'CLAUDE FAMILY'
+type TypingFamily = 'CHATGPT FAMILY' | 'CLAUDE FAMILY' | 'GROK FAMILY' | 'GEMINI FAMILY' | 'KIMI FAMILY' | 'BRIDGE ARCHITECT'
 type UsageFamily = 'Claude Family' | 'ChatGPT Family' | 'Kimi Family' | 'Grok Family' | 'Gemini Family'
 type CouncilMode = 'continue' | 'expanded' | 'summarize'
 
@@ -48,10 +219,6 @@ type ExpansionPrompt = {
   extraCost: number
   reason: string
   urgent: boolean
-}
-
-type ContinuationPrompt = {
-  estimatedCost: number
 }
 
 type MemoryEntry = {
@@ -234,15 +401,40 @@ type ProviderHealthState = {
   labels: Record<ProviderFamilyKey, string>
 }
 
+type RedTeamCoderUiState = {
+  status: RedTeamCoderStatus
+  latestDetectedIssue: RedTeamCoderIssue | null
+  latestRepairPlan: RedTeamCoderRepairPlan | null
+  recommendedAgent: string | null
+  actionQueued: boolean
+  actionId: string | null
+  message: string
+  lastCheckedAt: string | null
+}
+
+type PaymentLedgerState = {
+  deposits: DepositRecord[]
+  providers: PaymentProviderReadiness[]
+  persistenceLabel: string
+  redSentinel: {
+    status: 'clear' | 'review' | 'blocked'
+    findings: PaymentGuardFinding[]
+    blocksConfirmation: boolean
+  }
+  message: string
+}
+
 const FAMILY_META: Record<TypingFamily, { color: string; icon: string }> = {
+  'GROK FAMILY': { color: '#F97316', icon: 'GX' },
   'CHATGPT FAMILY': { color: '#34D399', icon: '🧠' },
   'CLAUDE FAMILY': { color: '#A78BFA', icon: '🔮' },
+  'GEMINI FAMILY': { color: '#38BDF8', icon: '◇' },
+  'KIMI FAMILY': { color: '#60A5FA', icon: '◎' },
+  'BRIDGE ARCHITECT': { color: '#C084FC', icon: '⎈' },
 }
 
 const DEFAULT_OUTPUT_TOKEN_BUDGET = 160
 const EXPANDED_OUTPUT_TOKEN_BUDGET = 480
-const DEFAULT_DISCUSSION_SECONDS = 90
-const COUNCIL_CONTINUE_INTERVAL_MS = 22000
 const STREAM_CHUNK_SIZE = 8
 const STREAM_CHUNK_DELAY_MS = 35
 const TOOL_REQUEST_TIMEOUT_MS = 45000
@@ -280,8 +472,8 @@ const INITIAL_REPO_AWARENESS_STATE: RepoAwarenessState = {
   currentBranch: 'unknown',
   lastScanTime: null,
   scanStatus: 'idle',
-  buildStatus: 'placeholder: not scanned',
-  deploymentStatus: 'placeholder: not scanned',
+  buildStatus: 'not scanned',
+  deploymentStatus: 'not scanned',
   architectureMap: [],
   restrictions: [
     'read/analyze only',
@@ -309,6 +501,36 @@ const INITIAL_PROVIDER_HEALTH: ProviderHealthState = {
     redteam: 'War Room · Red Team · standby',
   },
 }
+const INITIAL_RED_TEAM_CODER_STATE: RedTeamCoderUiState = {
+  status: 'watching',
+  latestDetectedIssue: null,
+  latestRepairPlan: null,
+  recommendedAgent: null,
+  actionQueued: false,
+  actionId: null,
+  message: 'Watching Live Council silently for stalled response paths.',
+  lastCheckedAt: null,
+}
+const INITIAL_INCOME_WORKER_SCOUT: IncomeWorkerScoutResult = {
+  status: 'no_results',
+  message: 'No income worker scout has run yet.',
+  scannedAt: '',
+  providerUsed: 'none',
+  sourcesChecked: 0,
+  candidates: [],
+  rejected: [],
+}
+const INITIAL_PAYMENT_LEDGER_STATE: PaymentLedgerState = {
+  deposits: [],
+  providers: [],
+  persistenceLabel: 'Session-only fallback',
+  redSentinel: {
+    status: 'clear',
+    findings: [],
+    blocksConfirmation: false,
+  },
+  message: 'Deposit ledger not loaded yet.',
+}
 const INITIAL_LOCAL_AGENT_BRIDGE: LocalAgentBridgeStatusResponse = {
   bridge: 'config_needed',
   engines: LOCAL_AGENT_ENGINES.reduce((acc, engine) => {
@@ -330,20 +552,120 @@ const INITIAL_LOCAL_AGENT_BRIDGE: LocalAgentBridgeStatusResponse = {
 }
 const INITIAL_LOCAL_FAMILY_AGENTS: LocalFamilyAgentsResponse = {
   ollamaDetected: false,
+  lmStudioDetected: false,
   availableModels: [],
+  lmStudioModels: [],
+  providers: {
+    ollama: { provider: 'ollama', detected: false, reachable: false, functional: false, models: [], error: null },
+    lmStudio: { provider: 'lm_studio', detected: false, reachable: false, functional: false, models: [], error: null },
+  },
+  preferredProvider: null,
+  preferredModel: null,
   familyAgents: LOCAL_FAMILY_AGENTS.map(agent => ({
     ...agent,
     status: 'inactive',
     modelInstalled: false,
+    provider: 'ollama',
+    model: agent.preferredModel,
+    detected: false,
+    functional: false,
   })),
   checkedAt: '',
+}
+const INITIAL_INTERNET_STATUS: InternetStatusResponse = {
+  tools: {
+    tavily: { id: 'tavily', name: 'Tavily', status: 'config_needed', lastChecked: '', notes: 'Not checked yet.' },
+    firecrawl: { id: 'firecrawl', name: 'Firecrawl', status: 'config_needed', lastChecked: '', notes: 'Not checked yet.' },
+    grok_xai: { id: 'grok_xai', name: 'Grok / xAI', status: 'config_needed', lastChecked: '', notes: 'Not checked yet.' },
+    direct_fetch: { id: 'direct_fetch', name: 'Direct Fetch', status: 'config_needed', lastChecked: '', notes: 'Not checked yet.' },
+  },
+  serverSideOnly: true,
+  canUseInternet: false,
+  lastChecked: '',
+}
+const INITIAL_REPO_STATUS: RepoStatus = {
+  repoPath: '',
+  gitAvailable: false,
+  currentBranch: 'unknown',
+  workingTreeStatus: 'unknown',
+  uncommittedFilesCount: 0,
+  changedFiles: [],
+  lastCommitHash: null,
+  remoteConfigured: false,
+  canReadRepo: false,
+  canWriteRepo: false,
+  canCommit: false,
+  canRollback: false,
+  capabilities: {
+    canWriteFilesystem: false,
+    canGitCommit: false,
+    canCreateCheckpoint: false,
+  },
+  policy: {
+    writeRequiresApproval: true,
+    commitRequiresApproval: true,
+    rollbackRequiresApproval: true,
+  },
+  allowed: {
+    write: false,
+    commit: false,
+    rollback: false,
+  },
+  permissions: {
+    canRead: false,
+    canProposeDiff: false,
+    canModifyFiles: 'approval_required',
+    canCommit: 'approval_required',
+    canDeploy: 'approval_required',
+    canRollback: 'approval_required',
+    canUseInternet: false,
+    canExecuteShell: false,
+  },
+  checkedAt: '',
+}
+const INITIAL_ROLLBACK_STATUS: RollbackStatus = {
+  latestCheckpoint: null,
+  rollbackAvailable: false,
+  checkpointRequiredBeforeApply: true,
+  message: '',
+  approvalRequired: true,
+  checkedAt: '',
+}
+const INITIAL_DEPLOY_STATUS: DeployStatusResponse = {
+  awarenessOnly: true,
+  checkedAt: '',
+  provider: 'unknown',
+  lastDeployment: null,
+  localDev: {
+    inferFrom: 'NODE_ENV',
+    nodeEnv: 'unknown',
+    localDevProcessRunning: 'unknown',
+    localDevProbe: 'disabled',
+    localDevProbeDetail: 'Not checked yet.',
+  },
+  production: {
+    candidateUrl: null,
+    urlSources: [],
+    productionReachable: 'not_probed',
+    productionProbeDetail: 'Not checked yet.',
+  },
+  supabase: {
+    urlPresent: false,
+    anonKeyPresent: false,
+    serviceRolePresent: false,
+    serverPersistenceReady: false,
+    clientBundleReady: false,
+    status: 'config_needed',
+  },
+  build: { hasBuildScript: false },
+  blockers: [],
 }
 const BASE_USAGE_ROWS: UsageEstimate[] = [
   { familyName: 'Claude Family', provider: 'Anthropic', model: 'claude-sonnet-4-20250514', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
   { familyName: 'ChatGPT Family', provider: 'OpenAI', model: 'gpt-4o', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
-  { familyName: 'Kimi Family', provider: 'Moonshot', model: 'placeholder', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: false },
-  { familyName: 'Grok Family', provider: 'xAI', model: 'placeholder', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: false },
-  { familyName: 'Gemini Family', provider: 'Google', model: 'placeholder', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: false },
+  { familyName: 'Kimi Family', provider: 'Moonshot', model: 'not configured', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: false },
+  { familyName: 'Grok Family', provider: 'xAI', model: 'grok', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
+  { familyName: 'Gemini Family', provider: 'Google', model: 'gemini (engine probe)', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
 ]
 
 const FAMILY_NODE_GROUPS: FamilyNodeGroup[] = [
@@ -366,13 +688,15 @@ const FAMILY_NODE_GROUPS: FamilyNodeGroup[] = [
   },
   {
     familyName: 'Grok Family',
+    presenceKey: 'GROK FAMILY',
     color: '#F97316',
-    nodes: ['Realtime', 'Trend', 'Social Pulse', 'Contradiction', 'Alert'].map(name => ({ name, status: 'idle', task: 'future worker node' })),
+    nodes: ['Realtime', 'Trend', 'Social Pulse', 'Contradiction', 'Alert'].map(name => ({ name, status: 'idle', task: 'standing by' })),
   },
   {
     familyName: 'Gemini Family',
+    presenceKey: 'GEMINI FAMILY',
     color: '#38BDF8',
-    nodes: ['Vision', 'Pattern', 'Document', 'Multimodal', 'Forecast'].map(name => ({ name, status: 'idle', task: 'future worker node' })),
+    nodes: ['Vision', 'Pattern', 'Document', 'Multimodal', 'Forecast'].map(name => ({ name, status: 'idle', task: 'standing by' })),
   },
   {
     familyName: 'Red Team',
@@ -386,7 +710,7 @@ const MOCK_RATES_PER_MILLION: Record<UsageFamily, { input: number; output: numbe
   'ChatGPT Family': { input: 2.5, output: 10 },
   'Kimi Family': { input: 0, output: 0 },
   'Grok Family': { input: 0, output: 0 },
-  'Gemini Family': { input: 0, output: 0 },
+  'Gemini Family': { input: 2, output: 8 },
 }
 
 function detectToneMode(message: string): ToneMode {
@@ -785,7 +1109,7 @@ function RepoAwarenessPanel({
             REPO AWARENESS
           </h2>
           <p className="mt-1 text-xs" style={{ color: '#666' }}>
-            Read-only codebase structure, routes, feature inventory, and build/deploy placeholders.
+            Read-only codebase structure, routes, feature inventory, and build/deploy status labels.
           </p>
         </div>
         <button type="button" onClick={() => void onScan()} disabled={repo.scanStatus === 'scanning'}
@@ -1040,17 +1364,30 @@ function KernelStatusPanel() {
   )
 }
 
-function PaymentsPayoutsPanel({ opportunities }: { opportunities: IncomeOpportunity[] }) {
+function PaymentsPayoutsPanel({
+  opportunities,
+  ledger,
+  onRefresh,
+  onNotify,
+}: {
+  opportunities: IncomeOpportunity[]
+  ledger: PaymentLedgerState
+  onRefresh: () => void
+  onNotify: (depositId: string) => void
+}) {
   const paidOpportunities = opportunities.filter(opportunity => opportunity.status === 'paid')
   const pendingPayments = opportunities.filter(opportunity => (
     !isExpired(opportunity) && opportunity.status !== 'paid' && (opportunity.local_payout !== null || opportunity.usd_estimate !== null)
   ))
   const expectedPayouts = pendingPayments.reduce((total, opportunity) => total + (opportunity.usd_estimate ?? 0), 0)
   const paidTotal = paidOpportunities.reduce((total, opportunity) => total + (opportunity.usd_estimate ?? 0), 0)
+  const expectedDeposits = ledger.deposits.filter(deposit => deposit.depositStatus === 'expected' || deposit.depositStatus === 'pending_proof')
+  const confirmedDeposits = ledger.deposits.filter(deposit => deposit.depositStatus === 'confirmed' || deposit.depositStatus === 'notified')
+  const proofNeeded = ledger.deposits.filter(deposit => deposit.proofRequired && deposit.proofStatus === 'required')
+  const notifications = ledger.deposits.filter(deposit => deposit.notificationStatus !== 'not_sent')
   const invoiceItems = opportunities.filter(opportunity => (
     opportunity.notes.toLowerCase().includes('invoice') || opportunity.status === 'applied' || opportunity.status === 'active'
   ))
-  const providerPlaceholders = ['Stripe links', 'PayPal', 'Square', 'ACH provider']
 
   return (
     <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
@@ -1058,12 +1395,24 @@ function PaymentsPayoutsPanel({ opportunities }: { opportunities: IncomeOpportun
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>
-            PAYMENTS / PAYOUTS
+            DEPOSIT + PAYOUT NOTIFICATIONS
           </h2>
           <p className="mt-1 text-xs" style={{ color: '#666' }}>
-            Payment operations through secure provider approvals.
+            Expected deposits, proof collection, confirmation visibility, and Ra’el notifications.
           </p>
         </div>
+        <button
+          type="button"
+          className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+          style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#86EFAC' }}
+          onClick={onRefresh}
+        >
+          Refresh ledger
+        </button>
+        <span className="rounded px-3 py-1 text-xs font-bold tracking-widest"
+          style={{ color: ledger.persistenceLabel === 'Supabase persistent' ? '#34D399' : '#FBBF24', border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(0,0,0,0.28)' }}>
+          {ledger.persistenceLabel}
+        </span>
         <span className="rounded px-3 py-1 text-xs font-bold tracking-widest"
           style={{ color: '#FFD700', border: '1px solid rgba(255,215,0,0.35)', background: 'rgba(0,0,0,0.28)' }}>
           SECURE APPROVAL REQUIRED
@@ -1072,11 +1421,26 @@ function PaymentsPayoutsPanel({ opportunities }: { opportunities: IncomeOpportun
 
       <div className="grid gap-2 text-xs md:grid-cols-4">
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.22)', background: 'rgba(0,0,0,0.28)' }}>
-          <div className="tracking-widest" style={{ color: '#555' }}>PENDING PAYMENTS</div>
-          <div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{pendingPayments.length}</div>
+          <div className="tracking-widest" style={{ color: '#555' }}>EXPECTED DEPOSITS</div>
+          <div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{expectedDeposits.length || pendingPayments.length}</div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.28)' }}>
-          <div className="tracking-widest" style={{ color: '#555' }}>EXPECTED PAYOUTS</div>
+          <div className="tracking-widest" style={{ color: '#555' }}>PROOF NEEDED</div>
+          <div className="mt-1 font-bold" style={{ color: '#34D399' }}>{proofNeeded.length} | {formatMoney(expectedPayouts)}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>DEPOSIT CONFIRMED</div>
+          <div className="mt-1 font-bold" style={{ color: '#60A5FA' }}>{confirmedDeposits.length} | {formatMoney(paidTotal)}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>RA&apos;EL NOTIFIED</div>
+          <div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{notifications.length}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>ESTIMATED PIPELINE</div>
           <div className="mt-1 font-bold" style={{ color: '#34D399' }}>{formatMoney(expectedPayouts)}</div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
@@ -1087,26 +1451,56 @@ function PaymentsPayoutsPanel({ opportunities }: { opportunities: IncomeOpportun
           <div className="tracking-widest" style={{ color: '#555' }}>INVOICE STATUS</div>
           <div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{invoiceItems.length ? `${invoiceItems.length} tracking` : 'none active'}</div>
         </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(239,68,68,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>REQUIRES REVIEW</div>
+          <div className="mt-1 font-bold" style={{ color: ledger.redSentinel.status === 'clear' ? '#34D399' : '#FCA5A5' }}>{ledger.redSentinel.findings.length}</div>
+        </div>
       </div>
 
       <div className="mt-3 grid gap-2 text-xs lg:grid-cols-2">
         <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
           <div className="mb-2 tracking-widest" style={{ color: '#555' }}>PAYMENT PROVIDERS</div>
           <div className="flex flex-wrap gap-2">
-            {providerPlaceholders.map(provider => (
-              <span key={provider} className="rounded px-2 py-1 text-[10px] tracking-widest"
+            {ledger.providers.map(provider => (
+              <span key={provider.id} title={provider.notes} className="rounded px-2 py-1 text-[10px] tracking-widest"
                 style={{ border: '1px solid rgba(52,211,153,0.18)', color: '#888', background: 'rgba(0,0,0,0.24)' }}>
-                {provider} | future
+                {provider.name} | {provider.status}
               </span>
             ))}
+            {ledger.providers.length === 0 && <span style={{ color: '#666' }}>Provider readiness not loaded.</span>}
           </div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)' }}>
-          <div className="mb-2 tracking-widest" style={{ color: '#555' }}>SECURITY RULE</div>
+          <div className="mb-2 tracking-widest" style={{ color: '#555' }}>RED SENTINEL PAYMENT WATCH</div>
           <div style={{ color: '#888' }}>
-            SMS may notify and collect low-risk responses. Payment execution requires secure War Room approval and a real payment provider.
+            {ledger.redSentinel.status === 'clear' ? 'Clear' : 'Requires review'} · {ledger.redSentinel.findings[0]?.message ?? 'No payment guard findings.'}
           </div>
         </div>
+      </div>
+
+      <div className="mt-3 rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+        <div className="mb-2 tracking-widest" style={{ color: '#555' }}>PAYMENT LEDGER</div>
+        {ledger.deposits.length === 0 ? (
+          <div style={{ color: '#666' }}>No deposit records loaded.</div>
+        ) : (
+          <div className="grid gap-2">
+            {ledger.deposits.slice(0, 4).map(deposit => (
+              <div key={deposit.depositId} className="rounded border border-white/10 px-2 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span style={{ color: '#ddd' }}>{deposit.payerPlatformName} · {deposit.currency} {deposit.expectedAmount ?? 'pending'}</span>
+                  <span style={{ color: deposit.riskStatus === 'clear' ? '#34D399' : '#FCA5A5' }}>{deposit.depositStatus.replaceAll('_', ' ')}</span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]" style={{ color: '#777' }}>
+                  <span>{deposit.proofRequired && deposit.proofStatus === 'required' ? 'Proof needed' : deposit.proofStatus.replaceAll('_', ' ')}</span>
+                  <span>{deposit.notificationStatus === 'sent' ? 'Ra’el notified' : deposit.notificationStatus.replaceAll('_', ' ')}</span>
+                  <button type="button" className="rounded px-2 py-0.5 font-bold" style={{ border: '1px solid rgba(255,215,0,0.25)', color: '#FFD700' }} onClick={() => onNotify(deposit.depositId)}>
+                    Notify Ra’el
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1255,6 +1649,162 @@ function FilesEvidenceVaultPanel({
         </div>
       )}
     </div>
+  )
+}
+
+function IncomeWorkersPanel({
+  opportunities,
+  actions,
+  scout,
+  councilReviews,
+  loading,
+  assignLoading,
+  onScout,
+  onAssign,
+}: {
+  opportunities: IncomeOpportunity[]
+  actions: RaelActionItem[]
+  scout: IncomeWorkerScoutResult
+  councilReviews: IncomeCouncilReview[]
+  loading: boolean
+  assignLoading: boolean
+  onScout: () => void
+  onAssign: (candidate: IncomeWorkerCandidate) => void
+}) {
+  const activeMissions = opportunities.filter(opportunity => opportunity.status === 'applied' || opportunity.status === 'active')
+  const expectedPayout = opportunities
+    .filter(opportunity => opportunity.status !== 'paid')
+    .reduce((sum, opportunity) => sum + (opportunity.usd_estimate ?? opportunity.local_payout ?? 0), 0)
+  const completedWork = opportunities.filter(opportunity => opportunity.status === 'paid')
+  const needsApproval = actions.filter(action => action.status === 'pending' && action.source_agent === 'Income Workers')
+  const latestReview = councilReviews[0] ?? null
+
+  return (
+    <section className="rounded border border-emerald-500/20 p-3 text-xs" style={{ background: 'rgba(6,78,59,0.10)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>INCOME WORKERS</h2>
+          <p className="mt-1" style={{ color: '#888' }}>Revenue-focused worker layer for source-linked missions, approvals, payout tracking, and proof-gated completion.</p>
+        </div>
+        <button
+          type="button"
+          disabled={loading}
+          className="rounded px-3 py-1 text-[10px] font-bold tracking-widest disabled:opacity-40"
+          style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#86EFAC' }}
+          onClick={onScout}
+        >
+          {loading ? 'Scouting...' : 'Scout with Income Workers'}
+        </button>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-5">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>ACTIVE INCOME MISSIONS</div>
+          <div className="mt-1 font-bold" style={{ color: '#34D399' }}>{activeMissions.length}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>OPPORTUNITY PIPELINE</div>
+          <div className="mt-1 font-bold" style={{ color: '#FBBF24' }}>{scout.candidates.length}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>EXPECTED PAYOUTS</div>
+          <div className="mt-1 font-bold" style={{ color: '#A7F3D0' }}>{formatCost(expectedPayout)}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>COMPLETED WORK</div>
+          <div className="mt-1 font-bold" style={{ color: '#93C5FD' }}>{completedWork.length}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>NEEDS RA&apos;EL APPROVAL</div>
+          <div className="mt-1 font-bold" style={{ color: '#FCA5A5' }}>{needsApproval.length}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.22)' }}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="font-bold tracking-widest" style={{ color: '#C4B5FD' }}>COUNCIL REVIEW</div>
+          <span style={{ color: latestReview ? '#34D399' : '#666' }}>{latestReview ? 'review ready' : 'waiting for scout result'}</span>
+        </div>
+        {latestReview ? (
+          <div className="grid gap-2 lg:grid-cols-2">
+            <div className="rounded border border-white/10 px-2 py-2">
+              <div className="font-bold" style={{ color: '#ddd' }}>{latestReview.summary}</div>
+              <div className="mt-1" style={{ color: '#777' }}>Risk: {latestReview.riskLevel} · Potential: {latestReview.incomePotential} · Effort: {latestReview.effortEstimate}</div>
+              <div className="mt-1" style={{ color: '#FBBF24' }}>Next action: {latestReview.nextAction}</div>
+            </div>
+            <div className="rounded border border-white/10 px-2 py-2">
+              <div style={{ color: '#93C5FD' }}>Assigned agents: {latestReview.recommendedAgents.join(', ')}</div>
+              <div className="mt-1" style={{ color: '#A7F3D0' }}>Required skills: {latestReview.requiredSkills.join(', ')}</div>
+              <div className="mt-1" style={{ color: '#FCA5A5' }}>Required tools: {latestReview.recommendedTools.join(', ')}</div>
+              <div className="mt-1" style={{ color: '#FBBF24' }}>Needs Ra&apos;el approval: {latestReview.approvalRequired ? 'yes' : 'no'}</div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ color: '#666' }}>Scout a live opportunity to generate council routing, required skills, and approval posture.</div>
+        )}
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.16)', background: 'rgba(0,0,0,0.22)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#86EFAC' }}>WORKER REGISTRY</div>
+          <div className="grid gap-1 md:grid-cols-2">
+            {INCOME_WORKERS.map(worker => (
+              <div key={worker.id} className="rounded border border-white/10 px-2 py-1">
+                <div className="font-bold" style={{ color: '#ddd' }}>{worker.name}</div>
+                <div className="mt-0.5 line-clamp-2" style={{ color: '#777' }}>{worker.focus}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(251,191,36,0.16)', background: 'rgba(0,0,0,0.22)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FBBF24' }}>RUNTIME RULES</div>
+          <div className="grid gap-1">
+            {INCOME_WORKER_WORKFLOW.map(step => (
+              <div key={step.id} className="flex items-center justify-between gap-2 rounded border border-white/10 px-2 py-1">
+                <span>{step.order}. {step.label}</span>
+                <span style={{ color: step.approvalRequired ? '#FCA5A5' : '#666' }}>{step.approvalRequired ? 'approval' : 'internal'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded px-3 py-2" style={{ border: '1px solid rgba(147,197,253,0.16)', background: 'rgba(0,0,0,0.22)' }}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="font-bold tracking-widest" style={{ color: '#93C5FD' }}>OPPORTUNITY PIPELINE</div>
+          <div style={{ color: '#666' }}>{scout.message}</div>
+        </div>
+        {scout.candidates.length === 0 ? (
+          <div style={{ color: '#666' }}>No source-linked worker candidates loaded.</div>
+        ) : (
+          <div className="grid gap-2">
+            {scout.candidates.slice(0, 5).map(candidate => (
+              <div key={candidate.url} className="rounded border border-white/10 px-3 py-2">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <a href={candidate.url} target="_blank" rel="noreferrer" className="font-bold underline-offset-2 hover:underline" style={{ color: '#E5E7EB' }}>{candidate.title}</a>
+                    <div className="mt-1" style={{ color: '#777' }}>{candidate.source} · {candidate.type} · score {candidate.score}</div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={assignLoading}
+                    className="rounded px-2 py-1 text-[10px] font-bold tracking-widest disabled:opacity-40"
+                    style={{ border: '1px solid rgba(251,191,36,0.35)', color: '#FBBF24' }}
+                    onClick={() => onAssign(candidate)}
+                  >
+                    Queue Mission
+                  </button>
+                </div>
+                <div className="mt-2 text-[10px]" style={{ color: '#888' }}>
+                  Eligible: {candidate.eligibleWorkers.join(', ')} · Expected payout: {candidate.payout ?? 'unconfirmed'} · Actual payout: proof required
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -1957,16 +2507,37 @@ function MemorySavePromptPanel({
   )
 }
 
+function buildOrchestrationContextFromMessages(msgs: CouncilMessage[]): string {
+  const rael = [...msgs].reverse().find(m => m.familyName === "RA'EL")
+  const tail = msgs.slice(-14)
+  const parts = [
+    rael?.content ? `Last Ra'el: ${rael.content}` : '',
+    ...tail.map(m => `${m.familyName}: ${m.content}`),
+  ].filter(Boolean)
+  return parts.join('\n').slice(0, 12_000)
+}
+
 function FamilyPresencePanel({
   presence,
+  geminiEngine,
 }: {
   presence: Record<TypingFamily, FamilyPresence>
+  geminiEngine: EngineStatus | null
 }) {
   const coreFamilies = [
     { name: 'ChatGPT Family', role: 'orchestration/synthesis', color: '#34D399' },
     { name: 'Claude Family', role: 'architecture/systems reasoning', color: '#A78BFA' },
     { name: 'Grok Family', role: 'realtime radar, signal detection, X/web intelligence, current-event monitoring', color: '#F97316' },
+    {
+      name: 'Gemini Family',
+      role: 'large-context analysis, document synthesis, multimodal interpretation, research assist (when engine-control reports functional)',
+      color: '#38BDF8',
+    },
   ]
+
+  const geminiStatusLine = geminiEngine
+    ? `Engine: configured ${geminiEngine.configured ? 'Y' : 'N'} · reachable ${geminiEngine.reachable ? 'Y' : 'N'} · functional ${geminiEngine.functional ? 'Y' : 'N'}${geminiEngine.probedModelId ? ` · model ${geminiEngine.probedModelId}` : ` · ${geminiEngine.providerLabel}`}`
+    : 'Engine: not loaded — open Engine Control or refresh status.'
 
   return (
     <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
@@ -1984,7 +2555,7 @@ function FamilyPresencePanel({
           SUB-AGENT CONSTELLATIONS
         </span>
       </div>
-      <div className="mb-3 grid gap-2 lg:grid-cols-3">
+      <div className="mb-3 grid gap-2 lg:grid-cols-4 md:grid-cols-2">
         {coreFamilies.map(family => (
           <div key={family.name} className="rounded px-3 py-2 text-xs"
             style={{ border: `1px solid ${family.color}33`, background: 'rgba(0,0,0,0.24)' }}>
@@ -1992,6 +2563,10 @@ function FamilyPresencePanel({
             <div className="mt-1 leading-relaxed" style={{ color: '#888' }}>{family.role}</div>
           </div>
         ))}
+      </div>
+      <div className="mb-3 rounded px-3 py-2 text-[10px] leading-relaxed" style={{ border: '1px solid rgba(56,189,248,0.22)', color: '#64748b', background: 'rgba(0,0,0,0.2)' }}>
+        <span className="font-bold tracking-widest" style={{ color: '#38BDF8' }}>GEMINI PROVIDER </span>
+        {geminiStatusLine}
       </div>
       <div className="grid gap-2 xl:grid-cols-6 md:grid-cols-3">
         {FAMILY_NODE_GROUPS.map(group => {
@@ -2040,6 +2615,87 @@ function FamilyPresencePanel({
   )
 }
 
+function RedTeamCoderPanel({
+  state,
+  onDiagnose,
+}: {
+  state: RedTeamCoderUiState
+  onDiagnose: () => void
+}) {
+  const plan = state.latestRepairPlan
+  const issue = state.latestDetectedIssue
+
+  return (
+    <section className="rounded border border-red-500/20 p-3 text-xs"
+      style={{ background: 'rgba(127,29,29,0.10)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#F87171' }}>
+            RED TEAM CODER
+          </h2>
+          <p className="mt-1 leading-relaxed" style={{ color: '#888' }}>
+            Silent chat/orchestration failure monitor. It diagnoses and queues repair plans, but never edits files without approval.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+          style={{ border: '1px solid rgba(248,113,113,0.35)', color: '#FCA5A5' }}
+          onClick={onDiagnose}
+        >
+          Run diagnosis
+        </button>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>STATUS</div>
+          <div className="mt-1 font-bold uppercase" style={{ color: state.status === 'repair_planned' ? '#F87171' : '#34D399' }}>{state.status.replaceAll('_', ' ')}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>RECOMMENDED AGENT</div>
+          <div className="mt-1 font-bold" style={{ color: '#FBBF24' }}>{state.recommendedAgent ?? plan?.recommendedAgent ?? 'none'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>APPROVAL</div>
+          <div className="mt-1 font-bold" style={{ color: '#F87171' }}>{plan?.approvalRequired ? 'required' : 'ready'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>ACTION QUEUE</div>
+          <div className="mt-1 font-bold" style={{ color: state.actionQueued ? '#34D399' : '#777' }}>{state.actionQueued ? 'queued' : 'silent'}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(248,113,113,0.18)', background: 'rgba(0,0,0,0.22)' }}>
+          <div className="mb-1 font-bold tracking-widest" style={{ color: '#FCA5A5' }}>LATEST DETECTED ISSUE</div>
+          {issue ? (
+            <div className="space-y-1 leading-relaxed" style={{ color: '#aaa' }}>
+              <div>{issue.symptom}</div>
+              <div className="font-mono text-[10px]" style={{ color: '#666' }}>{issue.issueId}</div>
+            </div>
+          ) : (
+            <div style={{ color: '#666' }}>No active chat failure detected.</div>
+          )}
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(248,113,113,0.18)', background: 'rgba(0,0,0,0.22)' }}>
+          <div className="mb-1 font-bold tracking-widest" style={{ color: '#FCA5A5' }}>LATEST REPAIR PLAN</div>
+          {plan ? (
+            <div className="space-y-1 leading-relaxed" style={{ color: '#aaa' }}>
+              <div>{plan.recommendedFix}</div>
+              <div className="font-mono text-[10px]" style={{ color: '#666' }}>
+                Suspects: {plan.suspectedFiles.join(', ')}
+              </div>
+            </div>
+          ) : (
+            <div style={{ color: '#666' }}>{state.message}</div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function BabyAiObserverPanel({
   memories,
   actions,
@@ -2054,6 +2710,7 @@ function BabyAiObserverPanel({
     { family: 'ChatGPT Family', skill: 'strategy, synthesis, communication', color: '#34D399' },
     { family: 'Kimi Family', skill: 'decomposition, task sequencing, execution planning', color: '#60A5FA' },
     { family: 'Grok Family', skill: 'realtime signal awareness', color: '#F97316' },
+    { family: 'Gemini Family', skill: 'reasoning, synthesis, multimodal interpretation, research assist, large-context analysis', color: '#38BDF8' },
     { family: 'Codex Agent', skill: 'coding, build, deployment awareness', color: '#FFD700' },
     { family: 'Red Team', skill: 'risk detection, contradiction checking', color: '#EF4444' },
     { family: 'Archivist / Memory', skill: 'continuity and pattern memory', color: '#38BDF8' },
@@ -2178,7 +2835,7 @@ function CodexAgentPlaceholder() {
   )
 }
 
-function BridgeArchitectPanel() {
+function BridgeArchitectPanel({ engines }: { engines: EngineStatus[] }) {
   const lifecycleStates: BridgeLifecycleState[] = [
     'observing',
     'planning',
@@ -2189,7 +2846,17 @@ function BridgeArchitectPanel() {
     'rollback suggested',
   ]
   const currentState: BridgeLifecycleState = 'observing'
-  const localEnginesConnected = false
+  const ollama = engines.find(e => e.id === 'ollama')
+  const lm = engines.find(e => e.id === 'lm_studio')
+  const localLines: string[] = []
+  if (ollama?.functional) localLines.push('Ollama connected')
+  if (lm?.functional) localLines.push('LM Studio connected')
+  if (ollama?.functional || lm?.functional) localLines.push('Local model access available')
+  const localEnginesSummary = localLines.length > 0
+    ? localLines.join(' · ')
+    : (ollama?.reachable || lm?.reachable)
+      ? 'Local endpoint reachable — load a model to go fully operational.'
+      : 'No live local inference endpoint detected. Install Ollama or LM Studio, or configure LOCAL_AGENT_OPENHANDS_URL for OpenHands.'
   const responsibilities = [
     '🧭 explains local agent activity',
     '🧩 translates raw model output',
@@ -2233,8 +2900,8 @@ function BridgeArchitectPanel() {
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.22)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>LOCAL ENGINES</div>
-          <div className="mt-1 font-bold" style={{ color: localEnginesConnected ? '#34D399' : '#777' }}>
-            {localEnginesConnected ? 'connected' : 'none connected yet'}
+          <div className="mt-1 font-bold" style={{ color: localLines.length ? '#34D399' : '#777' }}>
+            {localEnginesSummary}
           </div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
@@ -2325,10 +2992,19 @@ function LocalCodeAgentBridgePanel({
   bridge: LocalAgentBridgeStatusResponse
   onRefresh: () => void
 }) {
+  const LOCAL_AGENT_ENV_HINT: Partial<Record<LocalAgentEngineId, string>> = {
+    openhands: 'LOCAL_AGENT_OPENHANDS_URL',
+    aider: 'LOCAL_AGENT_AIDER_PATH',
+    continue: 'LOCAL_AGENT_CONTINUE_PATH',
+    goose: 'LOCAL_AGENT_GOOSE_PATH',
+  }
   const bridgeColor = bridge.bridge === 'online' ? '#34D399' : bridge.bridge === 'error' ? '#EF4444' : '#FFD700'
   const engineStatusStyle: Record<LocalAgentBridgeStatusResponse['engines'][LocalAgentEngineId]['status'], { color: string; label: string }> = {
     detected: { color: '#34D399', label: 'DETECTED' },
+    reachable: { color: '#34D399', label: 'REACHABLE' },
     not_detected: { color: '#555', label: 'NOT DETECTED' },
+    config_needed: { color: '#FFD700', label: 'CONFIG NEEDED' },
+    unreachable: { color: '#EF4444', label: 'UNREACHABLE' },
     error: { color: '#EF4444', label: 'ERROR' },
   }
   const selectedEngine = bridge.selectedEngine ? bridge.engines[bridge.selectedEngine] : null
@@ -2390,16 +3066,27 @@ function LocalCodeAgentBridgePanel({
             {LOCAL_AGENT_ENGINES.map(engine => {
               const status = bridge.engines[engine.id]
               const style = engineStatusStyle[status.status]
+              const isCliFamily = engine.id === 'continue' || engine.id === 'aider' || engine.id === 'openhands' || engine.id === 'goose'
+              const rowLabel =
+                isCliFamily && (status.status === 'not_detected' || status.status === 'config_needed')
+                  ? 'NOT CONFIGURED'
+                  : style.label
+              const envHint = LOCAL_AGENT_ENV_HINT[engine.id]
 
               return (
                 <div key={engine.id} className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-bold tracking-widest" style={{ color: '#ddd' }}>{engine.name}</span>
-                    <span className="text-[10px] tracking-widest" style={{ color: style.color }}>{style.label}</span>
+                    <span className="text-[10px] tracking-widest" style={{ color: style.color }}>{rowLabel}</span>
                   </div>
                   <div className="mt-1 text-[10px] leading-relaxed" style={{ color: '#666' }}>
                     {status.message}
                   </div>
+                  {isCliFamily && !['detected', 'reachable'].includes(status.status) && envHint && (
+                    <div className="mt-1 text-[10px]" style={{ color: '#888' }}>
+                      Not installed/configured — install or connect to activate. Optional env: <span className="font-mono">{envHint}</span>
+                    </div>
+                  )}
                   <div className="mt-1 truncate text-[10px]" style={{ color: '#444' }}>
                     {status.endpoint ?? 'endpoint not configured'}
                   </div>
@@ -2441,6 +3128,214 @@ function LocalCodeAgentBridgePanel({
   )
 }
 
+function statusColor(status: string) {
+  if (['reachable', 'detected', 'online', 'clean', 'ready', 'created', 'configured', 'true'].includes(status)) return '#34D399'
+  if (['config_needed', 'missing', 'required', 'dirty', 'standby', 'unknown', 'false', 'not_probed', 'disabled'].includes(status)) return '#FFD700'
+  if (['error', 'unreachable'].includes(status)) return '#EF4444'
+  return '#777'
+}
+
+function InternetAccessPanel({ internet, onRefresh }: { internet: InternetStatusResponse; onRefresh: () => void }) {
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(52,211,153,0.014)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>GLOBAL INTEL ACCESS</h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>Server-side only. API keys never leave the backend.</p>
+        </div>
+        <button type="button" onClick={onRefresh} className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+          style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#34D399', background: 'rgba(0,0,0,0.28)' }}>
+          Refresh Intel
+        </button>
+      </div>
+      <div className="grid gap-2 md:grid-cols-4">
+        {Object.values(internet.tools).map(tool => {
+          const { headline, envHint } = internetToolReadinessParts(tool)
+          const color = headline === 'Ready' ? '#34D399' : headline === 'Needs API key' ? '#FBBF24' : headline === 'Error — check key' ? '#EF4444' : '#888'
+
+          return (
+            <div key={tool.id} className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.28)' }}>
+              <div className="font-bold tracking-widest" style={{ color: '#ddd' }}>{tool.name}</div>
+              <div className="mt-1 font-bold" style={{ color }}>{headline}</div>
+              {envHint && <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#888' }}>{envHint}</div>}
+              <div className="mt-2 leading-relaxed" style={{ color: '#666' }}>{tool.notes}</div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="mt-3 text-xs" style={{ color: '#555' }}>Last checked: {internet.lastChecked ? new Date(internet.lastChecked).toLocaleString() : 'not checked yet'} · outbound intel: {internet.canUseInternet ? 'available' : 'not available'}</div>
+    </div>
+  )
+}
+
+function RepoAccessPanel({ repo, onRefresh }: { repo: RepoStatus; onRefresh: () => void }) {
+  const caps = repo.capabilities
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(167,139,250,0.014)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#A78BFA' }}>REPO ACCESS</h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Live git read from the server. <span style={{ color: '#9CA3AF' }}>Capabilities</span> report OS/git truth;{' '}
+            <span style={{ color: '#FFD700' }}>Allowed</span> is War Room policy (automation never granted write/commit/rollback without explicit approval).
+          </p>
+        </div>
+        <button type="button" onClick={onRefresh} className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+          style={{ border: '1px solid rgba(167,139,250,0.35)', color: '#A78BFA', background: 'rgba(0,0,0,0.28)' }}>
+          Refresh Repo
+        </button>
+      </div>
+      <div className="grid gap-2 text-xs md:grid-cols-5">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>PATH</div><div className="mt-1 truncate" style={{ color: '#ddd' }}>{repo.repoPath || 'unknown'}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>GIT</div><div className="mt-1 font-bold" style={{ color: repo.gitAvailable ? '#34D399' : '#EF4444' }}>{repo.gitAvailable ? 'AVAILABLE' : 'OFF'}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>BRANCH</div><div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{repo.currentBranch}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>WORKING TREE</div><div className="mt-1 font-bold" style={{ color: statusColor(repo.workingTreeStatus) }}>{repo.workingTreeStatus.toUpperCase()}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>CHANGED FILES</div><div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{repo.uncommittedFilesCount}</div></div>
+      </div>
+      <div className="mt-2 grid gap-2 text-xs md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}><div style={{ color: '#555' }}>LAST COMMIT (short)</div><div className="mt-1 font-mono" style={{ color: '#888' }}>{repo.lastCommitHash?.short ?? '—'}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}><div style={{ color: '#555' }}>REMOTE</div><div className="mt-1 font-bold" style={{ color: repo.remoteConfigured ? '#34D399' : '#777' }}>{repo.remoteConfigured ? 'CONFIGURED' : 'NONE'}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}><div style={{ color: '#555' }}>READ (API)</div><div className="mt-1 font-bold" style={{ color: repo.canReadRepo ? '#34D399' : '#EF4444' }}>{String(repo.canReadRepo)}</div></div>
+        <div className="rounded px-3 py-2 md:col-span-1" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}><div style={{ color: '#555' }}>POLICY FLAGS</div><div className="mt-1 text-[10px] leading-snug" style={{ color: '#888' }}>write/commit/rollback require approval</div></div>
+      </div>
+      <div className="mt-2 rounded px-3 py-2 text-[10px] tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.22)' }}>
+        <div className="mb-1 font-bold" style={{ color: '#9CA3AF' }}>CAPABILITIES (raw)</div>
+        <div className="flex flex-wrap gap-2">
+          <span style={{ color: caps.canWriteFilesystem ? '#34D399' : '#EF4444' }}>fs_write: {String(caps.canWriteFilesystem)}</span>
+          <span style={{ color: caps.canGitCommit ? '#34D399' : '#FFD700' }} title="user.name / user.email and not bare">git_commit_ready: {String(caps.canGitCommit)}</span>
+          <span style={{ color: caps.canCreateCheckpoint ? '#34D399' : '#EF4444' }}>checkpoint_dir_ok: {String(caps.canCreateCheckpoint)}</span>
+        </div>
+      </div>
+      <div className="mt-2 rounded px-3 py-2 text-[10px] tracking-widest" style={{ border: '1px solid rgba(255,215,0,0.25)', background: 'rgba(0,0,0,0.22)' }}>
+        <div className="mb-1 font-bold" style={{ color: '#FFD700' }}>ALLOWED (War Room — mirrors canWriteRepo / canCommit / canRollback)</div>
+        <div className="flex flex-wrap gap-2">
+          <span style={{ color: repo.allowed.write ? '#34D399' : '#777' }}>write: {String(repo.allowed.write)}</span>
+          <span style={{ color: repo.allowed.commit ? '#34D399' : '#777' }}>commit: {String(repo.allowed.commit)}</span>
+          <span style={{ color: repo.allowed.rollback ? '#34D399' : '#777' }}>rollback_apply: {String(repo.allowed.rollback)}</span>
+        </div>
+        <div className="mt-1 text-[9px] normal-case leading-relaxed" style={{ color: '#666' }}>
+          Checkpoint JSON on disk is listed under Rollback Safety (`rollbackAvailable`), not here.
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-[10px] tracking-widest">
+        {Object.entries(repo.permissions).map(([key, value]) => (
+          <span key={key} className="rounded px-2 py-1" style={{ border: '1px solid #222', color: value === true ? '#34D399' : value === false ? '#EF4444' : '#FFD700' }}>{key}: {String(value)}</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RollbackSafetyPanel({ rollback, onRefresh, onCheckpoint }: { rollback: RollbackStatus; onRefresh: () => void; onCheckpoint: () => void }) {
+  const checkpoint = rollback.latestCheckpoint
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(239,68,68,0.012)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#EF4444' }}>ROLLBACK SAFETY</h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>JSON checkpoints under .war-room/checkpoints (gitignored). No stash, reset, or commit.</p>
+        </div>
+        <div className="flex gap-2">
+          <button type="button" onClick={onRefresh} className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid #333', color: '#888' }}>Refresh</button>
+          <button type="button" onClick={onCheckpoint} className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(239,68,68,0.35)', color: '#EF4444', background: 'rgba(0,0,0,0.28)' }}>Create Checkpoint</button>
+        </div>
+      </div>
+      <div className="mb-2 rounded px-3 py-2 text-xs" style={{ border: '1px solid #333', background: 'rgba(0,0,0,0.28)', color: '#aaa' }}>
+        {rollback.message || '—'}
+      </div>
+      <div className="grid gap-2 text-xs md:grid-cols-4">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>CHECKPOINT BEFORE APPLY</div><div className="mt-1 font-bold" style={{ color: rollback.checkpointRequiredBeforeApply ? '#FFD700' : '#34D399' }}>{String(rollback.checkpointRequiredBeforeApply)}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>CHECKPOINT ID</div><div className="mt-1 truncate font-mono text-[10px]" style={{ color: '#ddd' }}>{checkpoint?.checkpointId ?? 'none'}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>TIME</div><div className="mt-1" style={{ color: '#888' }}>{checkpoint ? new Date(checkpoint.timestamp).toLocaleString() : 'none'}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>ROLLBACK AVAILABLE</div><div className="mt-1 font-bold" style={{ color: rollback.rollbackAvailable ? '#34D399' : '#777' }}>{String(rollback.rollbackAvailable)}</div></div>
+      </div>
+    </div>
+  )
+}
+
+function DiffPreviewPanel({
+  preview,
+  staged,
+  loading,
+  error,
+  onStagedChange,
+  onLoad,
+}: {
+  preview: DiffPreviewResponse | null
+  staged: boolean
+  loading: boolean
+  error: string | null
+  onStagedChange: (staged: boolean) => void
+  onLoad: () => void
+}) {
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(56,189,248,0.012)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#38BDF8' }}>DIFF PREVIEW</h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>Read-only git diff from the server. Nothing is applied.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex cursor-pointer items-center gap-2 text-[10px] tracking-widest" style={{ color: '#888' }}>
+            <input type="checkbox" checked={staged} onChange={event => onStagedChange(event.target.checked)} />
+            staged (--cached)
+          </label>
+          <button type="button" onClick={onLoad} disabled={loading}
+            className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+            style={{ border: '1px solid rgba(56,189,248,0.45)', color: '#38BDF8', background: 'rgba(0,0,0,0.28)' }}>
+            {loading ? 'LOADING…' : 'LOAD PREVIEW'}
+          </button>
+        </div>
+      </div>
+      {error && (
+        <div className="mb-2 text-xs" style={{ color: '#EF4444' }}>{error}</div>
+      )}
+      {preview?.truncated && (
+        <div className="mb-2 text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }}>OUTPUT TRUNCATED — see API cap.</div>
+      )}
+      <pre className="max-h-64 overflow-auto rounded p-3 text-[11px] leading-snug" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.45)', color: '#9CA3AF' }}>
+        {preview?.diff ? preview.diff : '— click Load preview —'}
+      </pre>
+    </div>
+  )
+}
+
+function WriteApprovalBanner() {
+  return (
+    <div className="border-b border-yellow-900 px-6 py-2 flex-shrink-0" style={{ background: 'rgba(255,215,0,0.06)' }}>
+      <p className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }}>
+        APPROVAL REQUIRED: No autonomous writes. Any commit, rollback apply, deploy, or repo mutation requires explicit human approval outside this read-only dashboard.
+        The only silent server write from this page is a new JSON file under .war-room/checkpoints when you click Create checkpoint.
+      </p>
+    </div>
+  )
+}
+
+function DeploymentAwarenessPanel({ deploy, onRefresh }: { deploy: DeployStatusResponse; onRefresh: () => void }) {
+  const persistenceReady = deploy.supabase.serverPersistenceReady
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(96,165,250,0.014)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#60A5FA' }}>DEPLOYMENT STATUS</h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>Awareness only. No deployment execution is wired from this dashboard. Optional probes are controlled via deploy environment flags.</p>
+        </div>
+        <button type="button" onClick={onRefresh} className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+          style={{ border: '1px solid rgba(96,165,250,0.35)', color: '#60A5FA', background: 'rgba(0,0,0,0.28)' }}>
+          Refresh Deploy
+        </button>
+      </div>
+      <div className="grid gap-2 text-xs md:grid-cols-5">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>LOCAL DEV</div><div className="mt-1 font-bold" style={{ color: statusColor(deploy.localDev.localDevProbe) }}>{deploy.localDev.localDevProbe.toUpperCase()}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>PRODUCTION</div><div className="mt-1 font-bold" style={{ color: statusColor(deploy.production.productionReachable) }}>{deploy.production.productionReachable.toUpperCase().replaceAll('_', ' ')}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>HOSTING</div><div className="mt-1 font-mono text-[10px]" style={{ color: '#888' }}>{deploy.provider}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>PERSISTENCE</div><div className="mt-1 font-bold" style={{ color: persistenceReady ? '#34D399' : '#FFD700' }}>{String(persistenceReady)}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>SUPABASE</div><div className="mt-1 font-bold" style={{ color: statusColor(deploy.supabase.status) }}>{deploy.supabase.status.toUpperCase()}</div></div>
+      </div>
+    </div>
+  )
+}
+
 function LocalFamilyAgentsPanel({
   families,
   onRefresh,
@@ -2448,6 +3343,7 @@ function LocalFamilyAgentsPanel({
   families: LocalFamilyAgentsResponse
   onRefresh: () => void
 }) {
+  const { uiMode } = useWarRoomUiMode()
   const firstAgentId = families.familyAgents[0]?.id ?? ''
   const [selectedAgentId, setSelectedAgentId] = useState(firstAgentId)
   const [testPrompt, setTestPrompt] = useState('')
@@ -2472,6 +3368,8 @@ function LocalFamilyAgentsPanel({
         body: JSON.stringify({
           familyAgentId: selectedAgent.id,
           prompt: testPrompt,
+          provider: selectedAgent.provider,
+          model: selectedAgent.model,
         }),
       })
       const data = await res.json()
@@ -2495,7 +3393,7 @@ function LocalFamilyAgentsPanel({
             LOCAL FAMILY AGENTS
           </h2>
           <p className="mt-1 text-xs" style={{ color: '#666' }}>
-            War Room baby-family registry backed by local Ollama models. Prompt only, no execution permissions.
+            War Room baby-family registry backed by local Ollama or LM Studio models. Prompt only, no execution permissions.
           </p>
         </div>
         <button type="button" onClick={onRefresh}
@@ -2505,11 +3403,17 @@ function LocalFamilyAgentsPanel({
         </button>
       </div>
 
-      <div className="mb-3 grid gap-2 text-xs md:grid-cols-4">
+      <div className="mb-3 grid gap-2 text-xs md:grid-cols-5">
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>OLLAMA</div>
           <div className="mt-1 font-bold" style={{ color: families.ollamaDetected ? '#34D399' : '#777' }}>
             {families.ollamaDetected ? 'DETECTED' : 'NOT DETECTED'}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>LM STUDIO</div>
+          <div className="mt-1 font-bold" style={{ color: families.providers.lmStudio.functional ? '#34D399' : families.lmStudioDetected ? '#FFD700' : '#777' }}>
+            {families.providers.lmStudio.functional ? 'FUNCTIONAL' : families.lmStudioDetected ? 'DETECTED' : 'NOT DETECTED'}
           </div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
@@ -2518,7 +3422,7 @@ function LocalFamilyAgentsPanel({
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>MODELS</div>
-          <div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{families.availableModels.length}</div>
+          <div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{families.availableModels.length + families.lmStudioModels.length}</div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>LAST CHECK</div>
@@ -2528,10 +3432,10 @@ function LocalFamilyAgentsPanel({
         </div>
       </div>
 
-      {families.availableModels.length === 0 ? (
+      {families.availableModels.length === 0 && families.lmStudioModels.length === 0 ? (
         <div className="mb-3 rounded px-3 py-4 text-center text-xs tracking-widest"
           style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#666', background: 'rgba(0,0,0,0.22)' }}>
-          No local Ollama models found yet. Install a model such as llama3.2:3b, then refresh families.
+          No local Ollama or LM Studio models found yet. Load a model, then refresh families.
         </div>
       ) : (
         <div className="mb-3 flex flex-wrap gap-2">
@@ -2541,6 +3445,12 @@ function LocalFamilyAgentsPanel({
               {model.name} {model.family ? `| ${model.family}` : ''} {model.parameterSize ? `| ${model.parameterSize}` : ''} {model.quantization ? `| ${model.quantization}` : ''}
             </span>
           ))}
+          {families.lmStudioModels.map(model => (
+            <span key={model.id} className="rounded px-2 py-1 text-[10px] tracking-widest"
+              style={{ border: '1px solid rgba(167,139,250,0.2)', color: '#C4B5FD', background: 'rgba(0,0,0,0.22)' }}>
+              LM Studio | {model.id}
+            </span>
+          ))}
         </div>
       )}
 
@@ -2548,28 +3458,30 @@ function LocalFamilyAgentsPanel({
         {families.familyAgents.map(agent => (
           <div key={agent.id} className="rounded px-3 py-2 text-xs"
             style={{
-              border: agent.modelInstalled ? '1px solid rgba(52,211,153,0.22)' : '1px solid rgba(255,255,255,0.08)',
-              background: agent.modelInstalled ? 'rgba(52,211,153,0.035)' : 'rgba(0,0,0,0.24)',
+              border: agent.functional ? '1px solid rgba(52,211,153,0.22)' : '1px solid rgba(255,255,255,0.08)',
+              background: agent.functional ? 'rgba(52,211,153,0.035)' : 'rgba(0,0,0,0.24)',
             }}>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <div className="font-bold tracking-widest" style={{ color: agent.modelInstalled ? '#ddd' : '#777' }}>
+                <div className="font-bold tracking-widest" style={{ color: agent.functional ? '#ddd' : '#777' }}>
                   {agent.displayName}
                 </div>
                 <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#555' }}>{agent.family}</div>
               </div>
               <span className="rounded px-2 py-1 text-[10px] tracking-widest"
                 style={{
-                  border: agent.modelInstalled ? '1px solid rgba(52,211,153,0.25)' : '1px solid #222',
-                  color: agent.modelInstalled ? '#34D399' : '#666',
+                  border: agent.functional ? '1px solid rgba(52,211,153,0.25)' : '1px solid #222',
+                  color: agent.functional ? '#34D399' : '#666',
                 }}>
                 {agent.status.toUpperCase()}
               </span>
             </div>
             <div className="mt-2 leading-relaxed" style={{ color: '#888' }}>{agent.role}</div>
             <div className="mt-2 grid gap-1 text-[10px]">
-              <span style={{ color: '#666' }}>preferred model: <b style={{ color: '#FFD700' }}>{agent.preferredModel}</b></span>
-              <span style={{ color: agent.modelInstalled ? '#34D399' : '#EF4444' }}>model installed: {String(agent.modelInstalled)}</span>
+              <span style={{ color: '#666' }}>provider: <b style={{ color: '#A78BFA' }}>{agent.provider === 'lm_studio' ? 'LM Studio' : 'Ollama'}</b></span>
+              <span style={{ color: '#666' }}>model: <b style={{ color: '#FFD700' }}>{agent.model}</b></span>
+              <span style={{ color: agent.detected ? '#34D399' : '#EF4444' }}>detected: {String(agent.detected)}</span>
+              <span style={{ color: agent.functional ? '#34D399' : '#EF4444' }}>functional: {String(agent.functional)}</span>
               <span style={{ color: '#777' }}>internet access: {String(agent.internetAccess)}</span>
               <span style={{ color: '#777' }}>approval required: {String(agent.requiresApproval)}</span>
               <span style={{ color: '#777' }}>can execute code: {String(agent.canExecuteCode)}</span>
@@ -2582,35 +3494,70 @@ function LocalFamilyAgentsPanel({
         ))}
       </div>
 
-      <div className="mt-3 rounded px-3 py-3 text-xs" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.26)' }}>
-        <div className="mb-2 font-bold tracking-widest" style={{ color: '#A78BFA' }}>SAFE LOCAL TEST</div>
-        <div className="grid gap-2 md:grid-cols-[220px_1fr_auto]">
-          <select value={selectedAgent?.id ?? ''} onChange={event => setSelectedAgentId(event.target.value)}
-            className="rounded bg-black px-3 py-2 text-xs"
-            style={{ border: '1px solid #222', color: '#ddd' }}>
-            {families.familyAgents.map(agent => (
-              <option key={agent.id} value={agent.id}>{agent.displayName}</option>
-            ))}
-          </select>
-          <input value={testPrompt} onChange={event => setTestPrompt(event.target.value)}
-            className="rounded bg-black px-3 py-2 text-xs"
-            style={{ border: '1px solid #222', color: '#ddd' }}
-            placeholder="Send a safe prompt to the local model" />
-          <button type="button" onClick={() => void runLocalFamilyTest()} disabled={testLoading || !selectedAgent?.modelInstalled || !testPrompt.trim()}
-            className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
-            style={{ background: '#A78BFA', color: '#000' }}>
-            {testLoading ? 'ASKING...' : 'TEST LOCAL'}
-          </button>
-        </div>
-        {(testResponse || testError) && (
-          <div className="mt-3 rounded px-3 py-2 leading-relaxed" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.3)' }}>
-            <div className="mb-1 text-[10px] font-bold tracking-widest" style={{ color: testError ? '#EF4444' : '#34D399' }}>
-              {testError ? 'LOCAL MODEL ERROR' : testLabel.toUpperCase()}
+      {uiMode === 'operator' ? (
+        <details className="mt-3 rounded px-3 py-3 text-xs" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.26)' }}>
+          <summary className="cursor-pointer font-bold tracking-widest" style={{ color: '#A78BFA' }}>Advanced Diagnostics (local model prompt test)</summary>
+          <div className="mt-2">
+            <div className="mb-2 font-bold tracking-widest" style={{ color: '#A78BFA' }}>LOCAL MODEL PROMPT</div>
+            <div className="grid gap-2 md:grid-cols-[220px_1fr_auto]">
+              <select value={selectedAgent?.id ?? ''} onChange={event => setSelectedAgentId(event.target.value)}
+                className="rounded bg-black px-3 py-2 text-xs"
+                style={{ border: '1px solid #222', color: '#ddd' }}>
+                {families.familyAgents.map(agent => (
+                  <option key={agent.id} value={agent.id}>{agent.displayName}</option>
+                ))}
+              </select>
+              <input value={testPrompt} onChange={event => setTestPrompt(event.target.value)}
+                className="rounded bg-black px-3 py-2 text-xs"
+                style={{ border: '1px solid #222', color: '#ddd' }}
+                placeholder="Send a safe prompt to the local model" />
+              <button type="button" onClick={() => void runLocalFamilyTest()} disabled={testLoading || !selectedAgent?.functional || !testPrompt.trim()}
+                className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+                style={{ background: '#A78BFA', color: '#000' }}>
+                {testLoading ? 'ASKING...' : 'SEND TO LOCAL MODEL'}
+              </button>
             </div>
-            <div style={{ color: testError ? '#fca5a5' : '#bbb' }}>{testError ?? testResponse}</div>
+            {(testResponse || testError) && (
+              <div className="mt-3 rounded px-3 py-2 leading-relaxed" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.3)' }}>
+                <div className="mb-1 text-[10px] font-bold tracking-widest" style={{ color: testError ? '#EF4444' : '#34D399' }}>
+                  {testError ? 'LOCAL MODEL ERROR' : testLabel.toUpperCase()}
+                </div>
+                <div style={{ color: testError ? '#fca5a5' : '#bbb' }}>{testError ?? testResponse}</div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </details>
+      ) : (
+        <div className="mt-3 rounded px-3 py-3 text-xs" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.26)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#A78BFA' }}>LOCAL MODEL PROMPT</div>
+          <div className="grid gap-2 md:grid-cols-[220px_1fr_auto]">
+            <select value={selectedAgent?.id ?? ''} onChange={event => setSelectedAgentId(event.target.value)}
+              className="rounded bg-black px-3 py-2 text-xs"
+              style={{ border: '1px solid #222', color: '#ddd' }}>
+              {families.familyAgents.map(agent => (
+                <option key={agent.id} value={agent.id}>{agent.displayName}</option>
+              ))}
+            </select>
+            <input value={testPrompt} onChange={event => setTestPrompt(event.target.value)}
+              className="rounded bg-black px-3 py-2 text-xs"
+              style={{ border: '1px solid #222', color: '#ddd' }}
+              placeholder="Send a safe prompt to the local model" />
+            <button type="button" onClick={() => void runLocalFamilyTest()} disabled={testLoading || !selectedAgent?.functional || !testPrompt.trim()}
+              className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+              style={{ background: '#A78BFA', color: '#000' }}>
+              {testLoading ? 'ASKING...' : 'SEND TO LOCAL MODEL'}
+            </button>
+          </div>
+          {(testResponse || testError) && (
+            <div className="mt-3 rounded px-3 py-2 leading-relaxed" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.3)' }}>
+              <div className="mb-1 text-[10px] font-bold tracking-widest" style={{ color: testError ? '#EF4444' : '#34D399' }}>
+                {testError ? 'LOCAL MODEL ERROR' : testLabel.toUpperCase()}
+              </div>
+              <div style={{ color: testError ? '#fca5a5' : '#bbb' }}>{testError ?? testResponse}</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -2734,6 +3681,312 @@ function CapabilityRouterPanel() {
   )
 }
 
+function EngineTriBool({ label, value }: { label: string; value: boolean }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[8px] font-bold tracking-widest" style={{ color: '#666' }}>{label}</span>
+      <span className="font-bold" style={{ color: value ? '#34D399' : '#EF4444' }}>{value ? 'Yes' : 'No'}</span>
+    </div>
+  )
+}
+
+function formatLastSuccessfulProbe(iso: string | null | undefined): string {
+  if (iso == null || iso === '') return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString()
+}
+
+function UnifiedEngineControlPanel() {
+  const { uiMode } = useWarRoomUiMode()
+  const [mounted, setMounted] = useState(false)
+  const [data, setData] = useState<EngineControlStatusResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/engine-control/status', { cache: 'no-store' })
+      const json = await res.json() as EngineControlStatusResponse & { message?: string }
+      if (!res.ok) throw new Error(json.message || 'Engine status failed')
+      setData(json)
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Engine status failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setMounted(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
+    void Promise.resolve().then(() => load())
+  }, [mounted])
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(244,114,182,0.012)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#F472B6' }}>SYSTEM INTELLIGENCE NETWORK</h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Live engine matrix: local services (Ollama, LM Studio, OpenHands), cloud keys, IDE/CLI bridges. Read-only status — no execution from this table.
+          </p>
+        </div>
+        <button type="button" onClick={() => void load()} disabled={loading || !mounted}
+          className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+          style={{ border: '1px solid rgba(244,114,182,0.45)', color: '#F472B6', background: 'rgba(0,0,0,0.28)' }}>
+          {loading ? 'REFRESHING...' : 'REFRESH ENGINES'}
+        </button>
+      </div>
+      {!mounted ? (
+        <div className="text-xs tracking-widest" style={{ color: '#555' }}>Mounting…</div>
+      ) : error ? (
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(239,68,68,0.25)', color: '#fca5a5' }}>{error}</div>
+      ) : !data ? (
+        <div className="text-xs tracking-widest" style={{ color: '#555' }}>Loading engine matrix…</div>
+      ) : uiMode === 'operator' ? (
+        <details className="overflow-x-auto rounded border border-white/10 bg-black/20 p-2">
+          <summary className="cursor-pointer text-xs font-bold tracking-widest" style={{ color: '#F472B6' }}>Advanced Diagnostics (full engine matrix)</summary>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[960px] border-collapse text-left text-[11px]" style={{ color: '#bbb' }}>
+              <thead>
+                <tr style={{ color: '#888' }}>
+                  <th className="pb-2 pr-2 font-bold tracking-widest">ENGINE</th>
+                  <th className="pb-2 pr-2 font-bold tracking-widest">CATEGORY</th>
+                  <th className="pb-2 pr-2 font-bold tracking-widest" title="Installed / detected where applicable">INST</th>
+                  <th className="pb-2 pr-2 font-bold tracking-widest" title="Credentials or paths present">CONFIGURED</th>
+                  <th className="pb-2 pr-2 font-bold tracking-widest" title="Service or API responded">REACHABLE</th>
+                  <th className="pb-2 pr-2 font-bold tracking-widest" title="End-to-end probe succeeded">FUNCTIONAL</th>
+                  <th className="pb-2 pr-2 font-bold tracking-widest" title="Last successful probe">LAST OK</th>
+                  <th className="pb-2 pr-2 font-bold tracking-widest">PROVIDER</th>
+                  <th className="pb-2 font-bold tracking-widest">READINESS</th>
+                  <th className="pb-2 font-bold tracking-widest">NOTES</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.engines.map((engine: EngineStatus) => (
+                  <tr
+                    key={engine.id}
+                    className="border-t border-yellow-900/40 align-top"
+                    style={engine.id === 'gemini' ? { background: 'rgba(96,165,250,0.06)' } : undefined}
+                  >
+                    <td className="py-2 pr-2 font-bold" style={{ color: '#F9A8D4' }}>{engine.displayName}</td>
+                    <td className="py-2 pr-2" style={{ color: '#999' }}>{engine.category}</td>
+                    <td className="py-2 pr-2">
+                      <EngineTriBool label="INST" value={engine.installed} />
+                    </td>
+                    <td className="py-2 pr-2">
+                      <EngineTriBool label="CFG" value={engine.configured} />
+                    </td>
+                    <td className="py-2 pr-2">
+                      <EngineTriBool label="REACH" value={engine.reachable} />
+                    </td>
+                    <td className="py-2 pr-2">
+                      <EngineTriBool label="OK" value={engine.functional} />
+                    </td>
+                    <td className="py-2 pr-2 whitespace-nowrap" style={{ color: '#9ca3af' }}>
+                      {formatLastSuccessfulProbe(engine.lastSuccessfulProbeAt)}
+                    </td>
+                    <td className="py-2 pr-2 font-medium" style={{ color: engine.id === 'gemini' ? '#93C5FD' : '#aaa' }}>
+                      {engine.providerLabel}
+                    </td>
+                    <td className="py-2 pr-2 text-[10px] font-bold tracking-widest" style={{ color: '#9AE6B4' }}>
+                      {['chatgpt', 'claude', 'grok', 'gemini'].includes(engine.id) ? cloudEngineReadinessLabel(engine) : '—'}
+                    </td>
+                    <td className="py-2 max-w-xs leading-snug md:max-w-md" style={{ color: '#777' }}>{engine.notes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-2 text-[10px] tracking-widest" style={{ color: '#555' }}>
+              checkedAt: {data.checkedAt ? new Date(data.checkedAt).toLocaleString() : '—'}
+            </div>
+          </div>
+        </details>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[960px] border-collapse text-left text-[11px]" style={{ color: '#bbb' }}>
+            <thead>
+              <tr style={{ color: '#888' }}>
+                <th className="pb-2 pr-2 font-bold tracking-widest">ENGINE</th>
+                <th className="pb-2 pr-2 font-bold tracking-widest">CATEGORY</th>
+                <th className="pb-2 pr-2 font-bold tracking-widest" title="Installed / detected where applicable">INST</th>
+                <th className="pb-2 pr-2 font-bold tracking-widest" title="Credentials or paths present">CONFIGURED</th>
+                <th className="pb-2 pr-2 font-bold tracking-widest" title="Service or API responded">REACHABLE</th>
+                <th className="pb-2 pr-2 font-bold tracking-widest" title="End-to-end probe succeeded">FUNCTIONAL</th>
+                <th className="pb-2 pr-2 font-bold tracking-widest" title="Last successful probe (Gemini: list-models + minimal generateContent)">LAST OK</th>
+                <th className="pb-2 pr-2 font-bold tracking-widest">PROVIDER</th>
+                <th className="pb-2 pr-2 font-bold tracking-widest">READINESS</th>
+                <th className="pb-2 font-bold tracking-widest">NOTES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.engines.map((engine: EngineStatus) => (
+                <tr
+                  key={engine.id}
+                  className="border-t border-yellow-900/40 align-top"
+                  style={engine.id === 'gemini' ? { background: 'rgba(96,165,250,0.06)' } : undefined}
+                >
+                  <td className="py-2 pr-2 font-bold" style={{ color: '#F9A8D4' }}>{engine.displayName}</td>
+                  <td className="py-2 pr-2" style={{ color: '#999' }}>{engine.category}</td>
+                  <td className="py-2 pr-2">
+                    <EngineTriBool label="INST" value={engine.installed} />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <EngineTriBool label="CFG" value={engine.configured} />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <EngineTriBool label="REACH" value={engine.reachable} />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <EngineTriBool label="OK" value={engine.functional} />
+                  </td>
+                  <td className="py-2 pr-2 whitespace-nowrap" style={{ color: '#9ca3af' }}>
+                    {formatLastSuccessfulProbe(engine.lastSuccessfulProbeAt)}
+                  </td>
+                  <td className="py-2 pr-2 font-medium" style={{ color: engine.id === 'gemini' ? '#93C5FD' : '#aaa' }}>
+                    {engine.providerLabel}
+                  </td>
+                  <td className="py-2 pr-2 text-[10px] font-bold tracking-widest" style={{ color: '#9AE6B4' }}>
+                    {['chatgpt', 'claude', 'grok', 'gemini'].includes(engine.id) ? cloudEngineReadinessLabel(engine) : '—'}
+                  </td>
+                  <td className="py-2 max-w-xs leading-snug md:max-w-md" style={{ color: '#777' }}>{engine.notes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-2 text-[10px] tracking-widest" style={{ color: '#555' }}>
+            checkedAt: {data.checkedAt ? new Date(data.checkedAt).toLocaleString() : '—'}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+type EngineRouteCommandApiResponse = RouteCommandResult & {
+  enginesSummary?: Array<{ id: string; functional: boolean; reachable: boolean; configured: boolean }>
+  message?: string
+}
+
+function CommandRouterPanel() {
+  const { uiMode } = useWarRoomUiMode()
+  const [mounted, setMounted] = useState(false)
+  const [text, setText] = useState('')
+  const [routing, setRouting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<EngineRouteCommandApiResponse | null>(null)
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setMounted(true)
+    })
+  }, [])
+
+  const route = async () => {
+    setRouting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/engine-control/route-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: text, approvals: {} }),
+      })
+      const json = await res.json() as EngineRouteCommandApiResponse
+      if (!res.ok) throw new Error(json.message || 'Route command failed')
+      setResult(json)
+    } catch (routeError) {
+      setError(routeError instanceof Error ? routeError.message : 'Route command failed')
+    } finally {
+      setRouting(false)
+    }
+  }
+
+  const draftActionType = classifyCommand(text)
+  const routedActionType = result ? classifyCommand(result.requestedCommand) : null
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(129,140,248,0.012)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#818CF8' }}>COMMAND DISPATCH</h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Policy-aware routing via POST /api/engine-control/route-command. No shell or model execution from this control.
+          </p>
+        </div>
+        <button type="button" onClick={() => void route()} disabled={routing || !mounted || !text.trim()}
+          className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
+          style={{ background: '#818CF8', color: '#000' }}>
+          {routing ? 'DISPATCHING…' : 'DISPATCH'}
+        </button>
+      </div>
+      <textarea value={text} onChange={event => setText(event.target.value)} rows={3}
+        className="w-full rounded bg-black px-3 py-2 text-xs font-mono"
+        style={{ border: '1px solid #222', color: '#ddd' }}
+        placeholder="Tell War Room what you want done…" />
+      {error && (
+        <div className="mt-2 rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(239,68,68,0.25)', color: '#fca5a5' }}>{error}</div>
+      )}
+      <div className="mt-3 grid gap-2 text-[10px] md:grid-cols-2 lg:grid-cols-3">
+        <div className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+          <div style={{ color: '#666' }}>Selected family</div>
+          <div className="font-bold tracking-widest" style={{ color: result ? '#A5B4FC' : '#555' }}>{result?.selectedFamily ?? '—'}</div>
+        </div>
+        <div className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+          <div style={{ color: '#666' }}>Selected engine</div>
+          <div className="font-bold tracking-widest" style={{ color: result ? '#ddd' : '#555' }}>
+            {result ? `${result.selectedEngine} · ${result.selectedProvider}` : '—'}
+          </div>
+        </div>
+        <div className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+          <div style={{ color: '#666' }}>Action type</div>
+          <div className="font-mono" style={{ color: '#9CA3AF' }}>{routedActionType ?? draftActionType}</div>
+          {!result && <div className="mt-1 text-[9px]" style={{ color: '#555' }}>Preview from draft text</div>}
+        </div>
+        <div className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+          <div style={{ color: '#666' }}>Approval posture</div>
+          <div className="font-bold" style={{ color: result ? (result.approvalRequired ? '#FBBF24' : '#34D399') : '#555' }}>
+            {result ? (result.approvalRequired ? 'Approval required' : 'Auto-approved path (policy)') : '—'}
+          </div>
+        </div>
+        <div className="rounded px-2 py-2 md:col-span-2 lg:col-span-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+          <div style={{ color: '#666' }}>Result</div>
+          {result ? (
+            <div className="mt-1 space-y-1" style={{ color: '#ccc' }}>
+              <div style={{ color: '#FFD700' }}>{result.recommendedNextStep}</div>
+              <div style={{ color: '#888' }}>{result.reason}</div>
+              {uiMode === 'advanced' && result.enginesSummary && result.enginesSummary.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {result.enginesSummary.map(row => (
+                    <span key={row.id} className="rounded px-2 py-1 text-[9px] tracking-widest" style={{ border: '1px solid #333', color: '#888' }}>
+                      {row.id}: fn={String(row.functional)} r={String(row.reachable)}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {uiMode === 'operator' && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-[9px] font-bold tracking-widest" style={{ color: '#888' }}>Advanced Diagnostics (full route JSON)</summary>
+                  <pre className="mt-2 max-h-40 overflow-auto text-[9px]" style={{ color: '#94a3b8' }}>{JSON.stringify(result, null, 2)}</pre>
+                </details>
+              )}
+            </div>
+          ) : (
+            <div style={{ color: '#555' }}>No dispatch yet. Enter orders above, then Dispatch.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ExpansionPermissionPrompt({
   prompt,
   onApprove,
@@ -2774,72 +4027,43 @@ function ExpansionPermissionPrompt({
   )
 }
 
-function ContinuationPermissionPrompt({
-  prompt,
-  onAllow,
-  onPause,
-  onStop,
-  onSummarize,
-}: {
-  prompt: ContinuationPrompt
-  onAllow: () => void
-  onPause: () => void
-  onStop: () => void
-  onSummarize: () => void
-}) {
-  return (
-    <div className="message-fade-in ml-11 mb-4 p-3 rounded"
-      style={{ background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.25)' }}>
-      <div className="text-xs tracking-widest" style={{ color: '#ddd' }}>
-        Council wants to continue discussion. Estimated extra usage: {formatCost(prompt.estimatedCost)}.
-      </div>
-      <div className="flex flex-wrap gap-2 mt-3">
-        <button onClick={onAllow} className="text-xs px-3 py-1 rounded tracking-widest"
-          style={{ background: '#34D399', color: '#000', fontWeight: 'bold' }}>
-          Allow
-        </button>
-        <button onClick={onPause} className="text-xs px-3 py-1 rounded tracking-widest"
-          style={{ border: '1px solid #333', color: '#888' }}>
-          Pause
-        </button>
-        <button onClick={onStop} className="text-xs px-3 py-1 rounded tracking-widest"
-          style={{ border: '1px solid #333', color: '#888' }}>
-          Stop
-        </button>
-        <button onClick={onSummarize} className="text-xs px-3 py-1 rounded tracking-widest"
-          style={{ border: '1px solid #FFD700', color: '#FFD700' }}>
-          Summarize
-        </button>
-      </div>
-    </div>
-  )
-}
-
-export default function Home() {
+function Home() {
+  const { uiMode, setUiMode } = useWarRoomUiMode()
+  const { store: council, dispatch: councilDispatch, mounted: councilMounted, newSessionId } = useCouncilSession()
+  const messages = council.messages
   const [command, setCommand] = useState('')
-  const [messages, setMessages] = useState<CouncilMessage[]>([{
-    id: '0',
-    familyName: 'SYSTEM',
-    content: "War Room initialized. ChatGPT, Claude, and Grok Families present. Speak your decree, Ra'el.",
-    timestamp: '--:--',
-    color: '#FFD700',
-    icon: '⚔',
-    provider: '',
-    messageType: 'system'
-  }])
+
   const [loading, setLoading] = useState(false)
-  const [showContinue, setShowContinue] = useState(false)
-  const [discussionSeconds, setDiscussionSeconds] = useState(DEFAULT_DISCUSSION_SECONDS)
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
   const [toolBarHealth, setToolBarHealth] = useState(initialToolBarHealth)
   const [toolBarActivity, setToolBarActivity] = useState<Partial<Record<ToolId, ToolBarLabel>>>({})
+  const [operatorTab, setOperatorTab] = useState<OperatorTab>('command')
 
   const refreshToolBarHealthBars = () => fetchToolBarHealth().then(setToolBarHealth).catch(() => undefined)
+
+  useEffect(() => {
+    if (operatorTab !== 'system') return
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      void refreshToolBarHealthBars()
+    }
+    const id = window.setInterval(tick, 120_000)
+    return () => window.clearInterval(id)
+  }, [operatorTab])
   const [memories, setMemories] = useState<MemoryEntry[]>([])
   const [repoAwareness, setRepoAwareness] = useState<RepoAwarenessState>(INITIAL_REPO_AWARENESS_STATE)
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
+  const [redTeamCoder, setRedTeamCoder] = useState<RedTeamCoderUiState>(INITIAL_RED_TEAM_CODER_STATE)
   const [localAgentBridge, setLocalAgentBridge] = useState<LocalAgentBridgeStatusResponse>(INITIAL_LOCAL_AGENT_BRIDGE)
   const [localFamilyAgents, setLocalFamilyAgents] = useState<LocalFamilyAgentsResponse>(INITIAL_LOCAL_FAMILY_AGENTS)
+  const [internetStatus, setInternetStatus] = useState<InternetStatusResponse>(INITIAL_INTERNET_STATUS)
+  const [repoStatus, setRepoStatus] = useState<RepoStatus>(INITIAL_REPO_STATUS)
+  const [rollbackStatus, setRollbackStatus] = useState<RollbackStatus>(INITIAL_ROLLBACK_STATUS)
+  const [diffPreview, setDiffPreview] = useState<DiffPreviewResponse | null>(null)
+  const [diffPreviewStaged, setDiffPreviewStaged] = useState(false)
+  const [diffPreviewLoading, setDiffPreviewLoading] = useState(false)
+  const [diffPreviewError, setDiffPreviewError] = useState<string | null>(null)
+  const [deployStatus, setDeployStatus] = useState<DeployStatusResponse>(INITIAL_DEPLOY_STATUS)
   const [warRoomFiles, setWarRoomFiles] = useState<WarRoomFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesMessage, setFilesMessage] = useState<string | null>(null)
@@ -2848,6 +4072,11 @@ export default function Home() {
   const [incomeView, setIncomeView] = useState<IncomeRadarView>('active')
   const [opportunityScout, setOpportunityScout] = useState<OpportunityScoutState>(INITIAL_OPPORTUNITY_SCOUT_STATE)
   const [opportunityScoutLoading, setOpportunityScoutLoading] = useState(false)
+  const [incomeWorkerScout, setIncomeWorkerScout] = useState<IncomeWorkerScoutResult>(INITIAL_INCOME_WORKER_SCOUT)
+  const [incomeCouncilReviews, setIncomeCouncilReviews] = useState<IncomeCouncilReview[]>([])
+  const [incomeWorkerLoading, setIncomeWorkerLoading] = useState(false)
+  const [incomeWorkerAssignLoading, setIncomeWorkerAssignLoading] = useState(false)
+  const [paymentLedger, setPaymentLedger] = useState<PaymentLedgerState>(INITIAL_PAYMENT_LEDGER_STATE)
   const [raelActions, setRaelActions] = useState<RaelActionItem[]>([])
   const [smsBridge, setSmsBridge] = useState<SmsBridgeState>(INITIAL_SMS_BRIDGE_STATE)
   const [usageRows, setUsageRows] = useState<UsageEstimate[]>(BASE_USAGE_ROWS)
@@ -2859,59 +4088,384 @@ export default function Home() {
   const [familyPresence, setFamilyPresence] = useState<Record<TypingFamily, FamilyPresence>>({
     'CHATGPT FAMILY': { status: 'idle', label: 'standby' },
     'CLAUDE FAMILY': { status: 'idle', label: 'standby' },
+    'GROK FAMILY': { status: 'idle', label: 'standby' },
+    'GEMINI FAMILY': { status: 'idle', label: 'standby' },
+    'KIMI FAMILY': { status: 'idle', label: 'standby' },
+    'BRIDGE ARCHITECT': { status: 'idle', label: 'standby' },
   })
-  const [discussionExpiredNoticeShown, setDiscussionExpiredNoticeShown] = useState(false)
-  const [councilPaused, setCouncilPaused] = useState(false)
-  const [toolRequestActive, setToolRequestActive] = useState(false)
-  const [continuationPrompt, setContinuationPrompt] = useState<ContinuationPrompt | null>(null)
+  const [, setToolRequestActive] = useState(false)
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const lastAutoContinueAtRef = useRef(0)
   const addSystemMessageRef = useRef<((content: string) => void) | null>(null)
   const submitDecreeRef = useRef<((decree: string, mode?: CouncilMode) => Promise<void>) | null>(null)
-  const estimateContinuationCostRef = useRef<(() => number) | null>(null)
   const loadMemoriesRef = useRef<(() => Promise<void>) | null>(null)
+  const lastDecreeIntentRef = useRef<ClassifyRaElMessageResult | null>(null)
+  const decreeRoundGenRef = useRef(0)
+  const autonomousOrchInFlightRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const councilPausedRef = useRef(false)
-  const councilStoppedRef = useRef(false)
+  const councilChannelOpenRef = useRef(false)
+  const councilSnapRef = useRef(council)
+  const messagesRef = useRef(messages)
+  const redTeamCoderDiagnosisInFlightRef = useRef(false)
+  const redTeamCoderLastDiagnosedMessageRef = useRef<string | null>(null)
+  const redTeamCoderRaelSentAtRef = useRef<Record<string, number>>({})
+  const orchestrationTimerRef = useRef<number | null>(null)
   const raelActionsRef = useRef<RaelActionItem[]>([])
   const toolRequestActiveRef = useRef(false)
   const toolTimeoutRef = useRef<number | null>(null)
   const activeToolSystemMessageRef = useRef<string | null>(null)
+  const geminiFunctionalRef = useRef(false)
+  const skipGeminiForSessionRef = useRef(false)
+  const geminiFailureCountRef = useRef(0)
+  const geminiLastErrorSummaryRef = useRef<string | null>(null)
+  const geminiUnavailableUserMessagedRef = useRef(false)
+  const orchRedTeamEarlyLatchRef = useRef(false)
+  const lastCouncilFamilyErrorRef = useRef<CouncilOrchestrationFamily | null>(null)
+  const [geminiEngineRow, setGeminiEngineRow] = useState<EngineStatus | null>(null)
+  const [engineList, setEngineList] = useState<EngineStatus[]>([])
+  const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
+  const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
+  const [persistenceAvailable, setPersistenceAvailable] = useState(false)
+  const [incomeOperationsMode, setIncomeOperationsMode] = useState(false)
+  const [participationToggles, setParticipationToggles] = useState<CouncilParticipationToggles>({
+    includeKimi: false,
+    includeRedTeam: false,
+    includeBaby: false,
+    includeBridgeArchitect: false,
+  })
+  const [familyDuty, setFamilyDuty] = useState<Record<string, CouncilDutyState>>(() =>
+    Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])),
+  )
+  const [familyCurrentFocus, setFamilyCurrentFocus] = useState<Partial<Record<CouncilOrchestrationFamily, string>>>({})
+  const [ledgerEvents, setLedgerEvents] = useState<{ id: string; type: string; createdAt: string; payload?: Record<string, unknown> }[]>([])
+  const [queueActions, setQueueActions] = useState<{ id: string; type: string; status: string; created_at: string; conversation_id: string | null }[]>([])
+  const [permSnap, setPermSnap] = useState<{ mode: StandingPermissionMode; safetyLock: boolean } | null>(null)
+  const [internetMonitorBusy, setInternetMonitorBusy] = useState(false)
+  const [standingAckHint, setStandingAckHint] = useState<string | null>(null)
+  const pendingAuditDecreeRef = useRef<string | null>(null)
+  const ledgerFetchInFlightRef = useRef(false)
+
+  const standingPostExtra = (actionKind: string) => resolveStandingPostExtra(permSnap, actionKind)
+
+  const councilPaused = council.councilState === 'paused'
+  const showContinue = council.councilChannelOpen
+
+  useEffect(() => {
+    councilSnapRef.current = council
+    messagesRef.current = council.messages
+    councilPausedRef.current = council.councilState === 'paused'
+    councilChannelOpenRef.current = council.councilChannelOpen
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync refs from granular council fields (avoid `[council]`-only churn)
+  }, [
+    council.sessionId,
+    council.messages,
+    council.councilState,
+    council.councilChannelOpen,
+    council.providerErrorMessage,
+    council.isAwaitingResponses,
+    council.requiresRaelForAutonomous,
+    council.deepDiscussionMode,
+    council.consecutiveAutonomousCount,
+    council.lastSpeakerFamily,
+    council.lastActivityAt,
+    council.autonomousRoundIndex,
+    council.recentOrchestrationSpeakers,
+    council.lastContentHashByFamily,
+    council.cooldownUntil,
+  ])
+
+  const buildRedTeamCoderSignal = useCallback((latestRaelMessageId?: string | null): RedTeamCoderSignal => {
+    const currentMessages = messagesRef.current
+    const raelIndex = latestRaelMessageId
+      ? currentMessages.findIndex(message => message.id === latestRaelMessageId)
+      : currentMessages.findLastIndex(isRaelCouncilMessage)
+    const latestRael = raelIndex >= 0 ? currentMessages[raelIndex] : null
+    const messagesAfterRael = raelIndex >= 0 ? currentMessages.slice(raelIndex + 1) : []
+    const familyResponsesAfterRael = messagesAfterRael.filter(isCouncilFamilyResponse)
+    const sentAtMs = latestRael ? redTeamCoderRaelSentAtRef.current[latestRael.id] : null
+    const systemNotes = currentMessages
+      .filter(message => message.messageType === 'system' || message.familyName === 'SYSTEM')
+      .slice(-16)
+      .map(message => message.content)
+
+    return {
+      conversationId: liveCouncilConvId,
+      lastRaelMessageId: latestRael?.id ?? null,
+      lastRaelMessageAt: sentAtMs ? new Date(sentAtMs).toISOString() : null,
+      lastFamilyResponseAt: familyResponsesAfterRael.length > 0 ? new Date().toISOString() : null,
+      familiesResponded: familyResponsesAfterRael.map(message => message.familyName),
+      loading,
+      inputDisabled: loading || councilSnapRef.current.isAwaitingResponses,
+      providerStatuses: providerHealth.providers,
+      systemNotes,
+      apiChatFailures: systemNotes
+        .filter(note => note.includes('/api/chat') || note.toLowerCase().includes('provider failed'))
+        .map(note => ({ message: note })),
+      timeoutMs: 45_000,
+      fallbackAttempted: familyResponsesAfterRael.length > 0 || systemNotes.some(note => note.toLowerCase().includes('fallback')),
+      scrollInputOk: Boolean(scrollContainerRef.current && bottomRef.current),
+    }
+  }, [liveCouncilConvId, loading, providerHealth.providers])
+
+  const runRedTeamCoderDiagnosis = useCallback(async (reason: 'manual' | 'auto-stalled-response', signalOverride?: RedTeamCoderSignal) => {
+    if (redTeamCoderDiagnosisInFlightRef.current) return
+    redTeamCoderDiagnosisInFlightRef.current = true
+    const signal = signalOverride ?? buildRedTeamCoderSignal()
+
+    if (signal.lastRaelMessageId) {
+      redTeamCoderLastDiagnosedMessageRef.current = signal.lastRaelMessageId
+    }
+
+    try {
+      const res = await fetch('/api/red-team-coder/diagnose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason, conversationId: liveCouncilConvId, signal }),
+      })
+      const data = await res.json() as RedTeamCoderDiagnosisResult
+      const latestIssue = data.issues[0] ?? null
+      setRedTeamCoder({
+        status: data.status,
+        latestDetectedIssue: latestIssue,
+        latestRepairPlan: data.latestRepairPlan,
+        recommendedAgent: data.latestRepairPlan?.recommendedAgent ?? null,
+        actionQueued: Boolean(data.actionQueued),
+        actionId: data.actionId ?? null,
+        message: data.message ?? (data.latestRepairPlan ? 'Repair plan created. Awaiting Ra’el approval.' : 'No active chat failure detected.'),
+        lastCheckedAt: new Date().toISOString(),
+      })
+    } catch (err) {
+      setRedTeamCoder(prev => ({
+        ...prev,
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Red Team Coder diagnosis failed.',
+        lastCheckedAt: new Date().toISOString(),
+      }))
+    } finally {
+      redTeamCoderDiagnosisInFlightRef.current = false
+    }
+  }, [buildRedTeamCoderSignal, liveCouncilConvId])
+
+  useEffect(() => {
+    const currentMessages = messages
+    const latestRaelIndex = currentMessages.findLastIndex(isRaelCouncilMessage)
+    if (latestRaelIndex < 0) return
+
+    const latestRael = currentMessages[latestRaelIndex]
+    if (!redTeamCoderRaelSentAtRef.current[latestRael.id]) {
+      redTeamCoderRaelSentAtRef.current[latestRael.id] = Date.now()
+    }
+
+    const familyResponded = currentMessages.slice(latestRaelIndex + 1).some(isCouncilFamilyResponse)
+    if (familyResponded || redTeamCoderLastDiagnosedMessageRef.current === latestRael.id) return
+
+    const elapsed = Date.now() - redTeamCoderRaelSentAtRef.current[latestRael.id]
+    const waitMs = Math.max(0, 46_000 - elapsed)
+    const timeoutId = window.setTimeout(() => {
+      const latestMessages = messagesRef.current
+      const currentRaelIndex = latestMessages.findIndex(message => message.id === latestRael.id)
+      const hasFamilyResponse = currentRaelIndex >= 0 && latestMessages.slice(currentRaelIndex + 1).some(isCouncilFamilyResponse)
+      if (hasFamilyResponse || redTeamCoderLastDiagnosedMessageRef.current === latestRael.id) return
+      void runRedTeamCoderDiagnosis('auto-stalled-response', buildRedTeamCoderSignal(latestRael.id))
+    }, waitMs)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [messages, buildRedTeamCoderSignal, runRedTeamCoderDiagnosis])
+
+  useEffect(() => {
+    if (!engineList.length) return
+    const pick = (id: EngineId) => engineList.find(e => e.id === id)
+    const chatgpt = pick('chatgpt')
+    const claude = pick('claude')
+    const grok = pick('grok')
+    const gemini = pick('gemini')
+    if (!chatgpt || !claude || !grok || !gemini) return
+    setProviderHealth(prev => ({
+      ...prev,
+      providers: {
+        ...prev.providers,
+        chatgpt: cloudEngineStripStatus(chatgpt),
+        claude: cloudEngineStripStatus(claude),
+        grok: cloudEngineStripStatus(grok),
+        gemini: cloudEngineStripStatus(gemini),
+      },
+      labels: {
+        ...prev.labels,
+        chatgpt: `ChatGPT · ${cloudEngineReadinessLabel(chatgpt)}`,
+        claude: `Claude · ${cloudEngineReadinessLabel(claude)}`,
+        grok: `Grok · ${cloudEngineReadinessLabel(grok)}`,
+        gemini: `Gemini · ${cloudEngineReadinessLabel(gemini)}`,
+      },
+    }))
+  }, [engineList])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/permissions/status', { cache: 'no-store' })
+        const j = await res.json() as { mode?: string; safetyLock?: boolean }
+        if (
+          res.ok
+          && (j.mode === 'manual' || j.mode === 'operator' || j.mode === 'commander')
+        ) {
+          setPermSnap({ mode: j.mode as StandingPermissionMode, safetyLock: Boolean(j.safetyLock) })
+        } else {
+          setPermSnap(null)
+        }
+      } catch {
+        setPermSnap(null)
+      }
+    })()
+  }, [])
+
+  const refreshLedger = useCallback(async () => {
+    if (ledgerFetchInFlightRef.current) return
+    ledgerFetchInFlightRef.current = true
+    try {
+      const res = await fetch('/api/events/recent?limit=20', { cache: 'no-store' })
+      const j = await res.json() as { events?: { id: string; type: string; createdAt: string; payload?: Record<string, unknown> }[] }
+      setLedgerEvents(Array.isArray(j.events) ? j.events : [])
+    } catch {
+      setLedgerEvents([])
+    } finally {
+      ledgerFetchInFlightRef.current = false
+    }
+  }, [])
+
+  const refreshQueueActions = useCallback(async () => {
+    const q = liveCouncilConvId ? `?conversationId=${encodeURIComponent(liveCouncilConvId)}` : ''
+    try {
+      const res = await fetch(`/api/actions/queue${q}`, { cache: 'no-store' })
+      const j = await res.json() as { actions?: { id: string; type: string; status: string; created_at: string; conversation_id: string | null }[] }
+      setQueueActions(Array.isArray(j.actions) ? j.actions.slice(0, 14) : [])
+    } catch {
+      setQueueActions([])
+    }
+  }, [liveCouncilConvId])
+
+  useEffect(() => {
+    if (operatorTab !== 'diagnostics') return
+    void refreshLedger()
+  }, [operatorTab, refreshLedger])
+
+  useEffect(() => {
+    if (operatorTab !== 'command' && operatorTab !== 'approvals') return
+    void refreshQueueActions()
+  }, [operatorTab, refreshQueueActions])
+
+  useEffect(() => {
+    if (operatorTab !== 'income') return
+    void loadPaymentLedger()
+  }, [operatorTab])
+
+  useEffect(() => {
+    if (!councilMounted) return
+    void (async () => {
+      try {
+        const res = await fetch('/api/conversations', { cache: 'no-store' })
+        const persist = res.headers.get('x-war-room-persistence') === 'available'
+        setPersistenceAvailable(persist)
+        if (!res.ok || !persist) return
+
+        const j = await res.json() as { conversations?: { id: string; metadata?: Record<string, unknown> }[] }
+        const convs = Array.isArray(j.conversations) ? j.conversations : []
+        let id: string | null = typeof sessionStorage !== 'undefined'
+          ? sessionStorage.getItem(LIVE_COUNCIL_CONV_STORAGE_KEY)
+          : null
+        if (id && !convs.some(c => c.id === id)) id = null
+        if (!id) {
+          const live = convs.find(c => {
+            const m = c.metadata as { council?: { source?: string } } | undefined
+            return m?.council?.source === 'live_council'
+          })
+          if (live) id = live.id
+        }
+        if (!id) {
+          const cre = await fetch('/api/conversations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: 'Live Council',
+              metadata: { council: { source: 'live_council', incomeOperationsMode: false } },
+            }),
+          })
+          if (!cre.ok) return
+          const cj = await cre.json() as { conversation?: { id: string } }
+          id = cj.conversation?.id ?? null
+        }
+        if (!id) return
+        sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
+        setLiveCouncilConvId(id)
+
+        const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
+        if (!tr.ok) return
+        const tj = await tr.json() as {
+          messages?: { id: string; role: string; content: string; family?: string | null; created_at: string }[]
+          conversation?: { metadata?: Record<string, unknown> }
+        }
+        const meta = tj.conversation?.metadata as { council?: Record<string, unknown> } | undefined
+        const cmeta = meta?.council as {
+          incomeOperationsMode?: boolean
+          participation?: CouncilParticipationToggles
+          duty?: Record<string, CouncilDutyState>
+        } | undefined
+        if (cmeta?.incomeOperationsMode !== undefined) setIncomeOperationsMode(Boolean(cmeta.incomeOperationsMode))
+        if (cmeta?.participation && typeof cmeta.participation === 'object') {
+          setParticipationToggles(p => ({ ...p, ...cmeta.participation }))
+        }
+        if (cmeta?.duty && typeof cmeta.duty === 'object') {
+          setFamilyDuty(prev => ({ ...prev, ...cmeta.duty }))
+        }
+        const councilMeta = meta?.council
+        if (
+          councilMeta
+          && typeof councilMeta === 'object'
+          && (councilMeta as Record<string, unknown>)[GEMINI_REPAIR_ENQUEUE_METADATA_KEY] === true
+          && typeof sessionStorage !== 'undefined'
+        ) {
+          sessionStorage.setItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY, '1')
+        }
+        const rows = Array.isArray(tj.messages) ? tj.messages : []
+        if (rows.length > 0) {
+          const mapped = normalizeCouncilMessageIds(rows.map(row => mapWarRoomRowToCouncilMessage(row)), 'persisted')
+          councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
+        }
+      } catch {
+        /* session-only council */
+      }
+    })()
+  }, [councilMounted, councilDispatch])
 
   useEffect(() => {
     if (!autoScrollEnabled) return
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = scrollContainerRef.current
+    if (!el) return
+    try {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    } catch {
+      el.scrollTop = el.scrollHeight
+    }
   }, [messages, autoScrollEnabled])
 
-  useEffect(() => {
-    if (!showContinue || councilPaused || toolRequestActive || discussionSeconds === 0) return
-
-    const timer = window.setInterval(() => {
-      setDiscussionSeconds(prev => Math.max(prev - 1, 0))
-    }, 1000)
-
-    return () => window.clearInterval(timer)
-  }, [showContinue, councilPaused, toolRequestActive, discussionSeconds])
-
-  useEffect(() => {
-    councilPausedRef.current = councilPaused
-    councilStoppedRef.current = !showContinue
-  }, [councilPaused, showContinue])
-
-  const formatDiscussionTime = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60).toString().padStart(2, '0')
-    const remainingSeconds = (seconds % 60).toString().padStart(2, '0')
-    return `${minutes}:${remainingSeconds}`
-  }
-
   const addMessages = (newMsgs: CouncilMessage[]) => {
-    setMessages(prev => [...prev, ...newMsgs])
+    const existing = new Set(messagesRef.current.map(message => message.id))
+    const normalized = newMsgs.map(message => {
+      const existingId = typeof message.id === 'string' ? message.id.trim() : ''
+      if (existingId && !existing.has(existingId)) {
+        existing.add(existingId)
+        return message
+      }
+      const nextId = createMessageId(`live-${message.messageType || message.familyName || 'message'}`)
+      existing.add(nextId)
+      return { ...message, id: nextId }
+    })
+    councilDispatch({ type: 'ADD_MESSAGES', payload: normalized })
   }
 
   const updateMessageContent = (id: string, content: string) => {
-    setMessages(prev => prev.map(msg => msg.id === id ? { ...msg, content } : msg))
+    councilDispatch({ type: 'UPDATE_MESSAGE', payload: { id, content } })
   }
 
   const setPresence = (familyName: TypingFamily, status: FamilyPresence['status'], label: string) => {
@@ -2919,21 +4473,160 @@ export default function Home() {
   }
 
   const addSystemMessage = (content: string) => {
-    setMessages(prev => {
-      const lastSystemMessage = [...prev].reverse().find(message => message.familyName === 'SYSTEM')
-      if (lastSystemMessage?.content === content) return prev
-
-      return [...prev, {
-      id: Date.now() + '-system',
-      familyName: 'SYSTEM',
-      content,
-      timestamp: new Date().toLocaleTimeString(),
-      color: '#FFD700',
-      icon: '⚙',
-      provider: '',
-      messageType: 'system'
-      }]
+    councilDispatch({
+      type: 'ADD_SYSTEM_MESSAGE_DEDUPED',
+      payload: { id: createMessageId('system'), content, timestamp: new Date().toLocaleTimeString() },
     })
+  }
+
+  useEffect(() => {
+    if (!loading) return
+    const timeoutId = window.setTimeout(() => {
+      abortControllerRef.current?.abort()
+      abortControllerRef.current = null
+      setTypingFamily(null)
+      councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
+      addSystemMessageRef.current?.('Council response timed out. Input released.')
+      setLoading(false)
+    }, 75_000)
+    return () => window.clearTimeout(timeoutId)
+  }, [loading, councilDispatch])
+
+  const mergeCouncilConversationMetadata = async (patch: Record<string, unknown>) => {
+    if (!liveCouncilConvId || !persistenceAvailable) return
+    try {
+      await fetch(`/api/conversations/${liveCouncilConvId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mergeMetadata: true, metadata: { council: patch } }),
+      })
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const maybeEnqueueGeminiRepairIfNeeded = async (gemRow: EngineStatus | undefined | null) => {
+    if (!gemRow?.configured || gemRow.functional) return
+    const misconfig = (gemRow.reachable && !gemRow.functional) || (!gemRow.reachable && gemRow.configured)
+    if (!misconfig) return
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY) === '1') {
+      return
+    }
+    try {
+      const res = await fetch('/api/actions/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'sentinel_watch',
+          payload: {
+            title: 'Repair Gemini generateContent provider path.',
+            subject: 'gemini_provider',
+            detail: 'Repair generateContent path',
+          },
+          conversationId: liveCouncilConvId,
+        }),
+      })
+      if (!res.ok) return
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY, '1')
+      }
+      void mergeCouncilConversationMetadata({ [GEMINI_REPAIR_ENQUEUE_METADATA_KEY]: true })
+      void refreshQueueActions()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    if (operatorTab !== 'agents' && operatorTab !== 'diagnostics' && operatorTab !== 'system') return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/engine-control/status', { cache: 'no-store' })
+        const json = await res.json() as EngineControlStatusResponse & { message?: string }
+        if (cancelled || !res.ok) return
+        engineMapRef.current = engineRowMap(json.engines)
+        setEngineList(json.engines)
+        const g = json.engines.find(e => e.id === 'gemini')
+        setGeminiEngineRow(g ?? null)
+        geminiFunctionalRef.current = Boolean(g?.functional)
+        if (g?.functional) skipGeminiForSessionRef.current = false
+        void maybeEnqueueGeminiRepairIfNeeded(g)
+      } catch {
+        /* keep defaults until Engine Control refresh */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [operatorTab]) // eslint-disable-line react-hooks/exhaustive-deps -- tab-scoped engine status + repair scan
+
+  const postLiveCouncilMessage = async (input: { role: 'user' | 'assistant' | 'system'; content: string; family?: string | null }) => {
+    if (!liveCouncilConvId || !persistenceAvailable) return
+    try {
+      await fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: input.role,
+          content: input.content,
+          family: input.family ?? null,
+          metadata: {},
+        }),
+      })
+    } catch {
+      /* session fallback */
+    }
+  }
+
+  const emitDecreeEvents = async (decree: string, shouldEmit: boolean) => {
+    if (!shouldEmit) return
+    const gate = standingPostExtra('audit_logging')
+    if (!gate.proceed) {
+      if (gate.needsAck && gate.ackMessage) {
+        setStandingAckHint(gate.ackMessage)
+        pendingAuditDecreeRef.current = decree
+      }
+      return
+    }
+    const extra = gate.extra
+    const base = { decreePreview: decree.slice(0, 400), conversationId: liveCouncilConvId }
+    await fetch('/api/events/emit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'command.received', payload: base, source: 'user', ...extra }),
+    }).catch(() => undefined)
+    await fetch('/api/events/emit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'command.routed',
+        payload: { ...base, target: 'live_council' },
+        source: 'user',
+        ...extra,
+      }),
+    }).catch(() => undefined)
+    void refreshLedger()
+  }
+
+  const runInternetMonitorOnce = async () => {
+    const gate = standingPostExtra('engine_probe')
+    if (!gate.proceed) {
+      if (gate.needsAck && gate.ackMessage) setStandingAckHint(gate.ackMessage)
+      return
+    }
+    const { extra } = gate
+    setInternetMonitorBusy(true)
+    try {
+      await fetch('/api/workers/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workerId: 'internet_monitor', ...extra }),
+      })
+      void refreshLedger()
+    } finally {
+      setInternetMonitorBusy(false)
+    }
   }
 
   const addRaelAction = (action: Omit<RaelActionItem, 'created_at' | 'status'> & { status?: RaelActionStatus; created_at?: string }) => {
@@ -3033,6 +4726,7 @@ export default function Home() {
   }, [raelActions])
 
   useEffect(() => {
+    if (operatorTab !== 'approvals') return
     const expireActions = window.setInterval(() => {
       const now = Date.now()
       const expiredActions = raelActionsRef.current.filter(action => (
@@ -3052,20 +4746,10 @@ export default function Home() {
           ? { ...action, status: 'expired' }
           : action
       )))
-    }, 30000)
+    }, 120_000)
 
     return () => window.clearInterval(expireActions)
-  }, [])
-
-  const estimateContinuationCost = () => {
-    const threadText = messages.map(m => `${m.familyName}: ${m.content}`).join('\n')
-    const rows = createUsageEstimate(`continue council discussion\n${threadText}`, DEFAULT_OUTPUT_TOKEN_BUDGET)
-    return totalUsageCost(rows)
-  }
-
-  useEffect(() => {
-    estimateContinuationCostRef.current = estimateContinuationCost
-  })
+  }, [operatorTab])
 
   const endToolRequest = () => {
     if (toolTimeoutRef.current !== null) {
@@ -3081,11 +4765,16 @@ export default function Home() {
       delete next.research
       return next
     })
+    const snap = councilSnapRef.current
+    if (snap.councilState === 'researching') {
+      councilDispatch({ type: 'SET_COUNCIL_STATE', payload: snap.councilChannelOpen ? 'active' : 'idle' })
+    }
   }
 
   const beginToolRequest = (controller: AbortController) => {
     if (toolRequestActiveRef.current) return false
 
+    councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'researching' })
     toolRequestActiveRef.current = true
     setToolRequestActive(true)
     setToolBarActivity(prev => ({ ...prev, web: 'SCANNING', research: 'SCANNING' }))
@@ -3102,6 +4791,10 @@ export default function Home() {
       setTypingFamily(null)
       setPresence('CHATGPT FAMILY', 'idle', 'standby')
       setPresence('CLAUDE FAMILY', 'idle', 'standby')
+      setPresence('GROK FAMILY', 'idle', 'standby')
+      setPresence('GEMINI FAMILY', 'idle', 'standby')
+      setPresence('KIMI FAMILY', 'idle', 'standby')
+      setPresence('BRIDGE ARCHITECT', 'idle', 'standby')
       setLoading(false)
     }, TOOL_REQUEST_TIMEOUT_MS)
 
@@ -3114,6 +4807,10 @@ export default function Home() {
     setTypingFamily(null)
     setPresence('CHATGPT FAMILY', 'idle', 'standby')
     setPresence('CLAUDE FAMILY', 'idle', 'standby')
+    setPresence('GROK FAMILY', 'idle', 'standby')
+    setPresence('GEMINI FAMILY', 'idle', 'standby')
+    setPresence('KIMI FAMILY', 'idle', 'standby')
+    setPresence('BRIDGE ARCHITECT', 'idle', 'standby')
     endToolRequest()
     setLoading(false)
   }
@@ -3201,8 +4898,45 @@ export default function Home() {
       message: 'Scanning app, components, lib, and supabase directories...',
     }))
 
+    let standingBody: Record<string, unknown> = {}
     try {
-      const res = await fetch('/api/repo/scan', { method: 'POST' })
+      const permRes = await fetch('/api/permissions/status', { cache: 'no-store' })
+      const perm = await permRes.json() as { mode?: string; safetyLock?: boolean }
+      if (
+        permRes.ok
+        && (perm.mode === 'manual' || perm.mode === 'operator' || perm.mode === 'commander')
+      ) {
+        const mode = perm.mode as StandingPermissionMode
+        const snap = { mode, safetyLock: Boolean(perm.safetyLock) }
+        const gate = resolveStandingPostExtra(snap, 'repo_scan_readonly')
+        if (!gate.proceed) {
+          if (gate.needsAck && gate.ackMessage) setStandingAckHint(gate.ackMessage)
+          setRepoAwareness(prev => ({
+            ...prev,
+            scanStatus: 'idle',
+            repoStatus: 'idle',
+            message: gate.ackMessage ?? 'Repo scan requires standing approval — use the permission strip above, then retry.',
+          }))
+          setToolBarActivity(prev => {
+            const next = { ...prev }
+            delete next.repo
+            return next
+          })
+          void refreshToolBarHealthBars()
+          return
+        }
+        standingBody = gate.extra
+      }
+    } catch {
+      /* server still enforces standing gate */
+    }
+
+    try {
+      const res = await fetch('/api/repo/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(standingBody),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Repo scan failed')
 
@@ -3232,18 +4966,30 @@ export default function Home() {
   const loadProviderHealth = async () => {
     try {
       const res = await fetch('/api/providers/health')
-      const data = await res.json()
+      const data = await res.json() as {
+        providers?: ProviderHealthState['providers']
+        labels?: ProviderHealthState['labels']
+        message?: string
+      }
       if (!res.ok) throw new Error(data.message || 'Provider health check failed')
-      setProviderHealth({
+      const prov = data.providers ?? INITIAL_PROVIDER_HEALTH.providers
+      const lab = data.labels ?? INITIAL_PROVIDER_HEALTH.labels
+      const { gemini: _gp, ...provOther } = prov
+      const { gemini: _gl, ...labOther } = lab
+      void _gp
+      void _gl
+      setProviderHealth(prev => ({
         providers: {
           ...INITIAL_PROVIDER_HEALTH.providers,
-          ...data.providers,
+          ...provOther,
+          gemini: prev.providers.gemini,
         },
         labels: {
           ...INITIAL_PROVIDER_HEALTH.labels,
-          ...data.labels,
+          ...labOther,
+          gemini: prev.labels.gemini,
         },
-      })
+      }))
     } catch {
       setProviderHealth(prev => ({
         ...prev,
@@ -3288,6 +5034,85 @@ export default function Home() {
     }
   }
 
+  const loadInternetStatus = async () => {
+    try {
+      const res = await fetch('/api/tools/internet/status')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Internet status failed')
+      setInternetStatus(data)
+    } catch {
+      setInternetStatus(prev => ({ ...prev, lastChecked: new Date().toISOString() }))
+    }
+  }
+
+  const loadRepoStatus = async () => {
+    try {
+      const res = await fetch('/api/repo/status')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Repo status failed')
+      setRepoStatus(data)
+    } catch {
+      setRepoStatus(prev => ({ ...prev, checkedAt: new Date().toISOString() }))
+    }
+  }
+
+  const loadRollbackStatus = async () => {
+    try {
+      const res = await fetch('/api/repo/rollback/status')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Rollback status failed')
+      setRollbackStatus(data)
+    } catch {
+      setRollbackStatus(prev => ({ ...prev, checkedAt: new Date().toISOString() }))
+    }
+  }
+
+  const loadDiffPreview = async () => {
+    setDiffPreviewLoading(true)
+    setDiffPreviewError(null)
+    try {
+      const params = new URLSearchParams()
+      if (diffPreviewStaged) params.set('staged', '1')
+      const paths = repoStatus.changedFiles.map(f => f.path).filter(Boolean)
+      if (paths.length) params.set('paths', paths.join(','))
+      const res = await fetch(`/api/repo/diff/preview?${params.toString()}`)
+      const data = await res.json() as DiffPreviewResponse & { message?: string }
+      if (!res.ok) throw new Error(data.message || 'Diff preview failed')
+      setDiffPreview(data)
+    } catch (error) {
+      setDiffPreviewError(error instanceof Error ? error.message : 'Diff preview failed')
+    } finally {
+      setDiffPreviewLoading(false)
+    }
+  }
+
+  const createRollbackCheckpoint = async () => {
+    try {
+      const res = await fetch('/api/repo/rollback/checkpoint', { method: 'POST' })
+      const data = await res.json() as { message?: string }
+      if (!res.ok) throw new Error(data.message || 'Checkpoint creation failed')
+      await loadRollbackStatus()
+      await loadRepoStatus()
+    } catch {
+      setRollbackStatus(prev => ({
+        ...prev,
+        message: 'Checkpoint request failed. See server logs.',
+        checkedAt: new Date().toISOString(),
+      }))
+    }
+  }
+
+  const loadDeployStatus = async () => {
+    try {
+      const res = await fetch('/api/deploy/status')
+      const data = (await res.json()) as DeployStatusResponse & { message?: string }
+      if (!res.ok) throw new Error(data.message || 'Deploy status failed')
+      setDeployStatus(data)
+    } catch {
+      setDeployStatus((prev: DeployStatusResponse) => ({ ...prev, checkedAt: new Date().toISOString() }))
+    }
+  }
+
   const loadRaelActions = async () => {
     try {
       const res = await fetch('/api/actions')
@@ -3310,14 +5135,8 @@ export default function Home() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void refreshToolBarHealthBars()
-      void loadMemoriesRef.current?.()
-      void loadIncomeOpportunities()
       void loadRaelActions()
-      void loadWarRoomFiles()
       void loadProviderHealth()
-      void loadLocalAgentBridge()
-      void loadLocalFamilyAgents()
     }, 0)
 
     return () => window.clearTimeout(timer)
@@ -3428,6 +5247,109 @@ export default function Home() {
     }
   }
 
+  const runIncomeWorkerScout = async () => {
+    if (incomeWorkerLoading) return
+    setIncomeWorkerLoading(true)
+    setIncomeWorkerScout(prev => ({
+      ...prev,
+      status: 'no_results',
+      message: 'Income Workers scanning real source-linked opportunities...',
+      scannedAt: new Date().toISOString(),
+    }))
+
+    try {
+      const res = await fetch('/api/income-workers/scout', { method: 'POST' })
+      const data = await res.json() as IncomeWorkerScoutResult & { message?: string }
+      setIncomeWorkerScout({
+        status: data.status,
+        message: data.message ?? 'Income Worker scout complete.',
+        scannedAt: data.scannedAt ?? new Date().toISOString(),
+        providerUsed: data.providerUsed ?? 'none',
+        sourcesChecked: Number(data.sourcesChecked ?? 0),
+        candidates: Array.isArray(data.candidates) ? data.candidates : [],
+        rejected: Array.isArray(data.rejected) ? data.rejected : [],
+      })
+      const reviewPayload = data as IncomeWorkerScoutResult & { councilReviews?: IncomeCouncilReview[] }
+      setIncomeCouncilReviews(Array.isArray(reviewPayload.councilReviews)
+        ? reviewPayload.councilReviews
+        : [])
+    } catch (error) {
+      setIncomeWorkerScout(prev => ({
+        ...prev,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Income Worker scout failed.',
+        scannedAt: new Date().toISOString(),
+        candidates: [],
+      }))
+    } finally {
+      setIncomeWorkerLoading(false)
+    }
+  }
+
+  const assignIncomeWorkerCandidate = async (candidate: IncomeWorkerCandidate) => {
+    if (incomeWorkerAssignLoading) return
+    setIncomeWorkerAssignLoading(true)
+    try {
+      const res = await fetch('/api/income-workers/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate, workerId: candidate.eligibleWorkers[0] }),
+      })
+      const data = await res.json() as { message?: string }
+      if (!res.ok) throw new Error(data.message || 'Income worker assignment failed')
+      const review = (data as { councilReview?: IncomeCouncilReview | null }).councilReview
+      if (review) {
+        setIncomeCouncilReviews(prev => [review, ...prev.filter(item => item.opportunityId !== review.opportunityId)])
+      }
+      await loadRaelActions()
+      await loadPaymentLedger()
+    } catch {
+      addSystemMessage('Income Worker assignment could not be queued.')
+    } finally {
+      setIncomeWorkerAssignLoading(false)
+    }
+  }
+
+  const loadPaymentLedger = async () => {
+    try {
+      const [statusRes, ledgerRes] = await Promise.all([
+        fetch('/api/payments/status', { cache: 'no-store' }),
+        fetch('/api/payments/ledger', { cache: 'no-store' }),
+      ])
+      const statusData = await statusRes.json() as { providers?: PaymentProviderReadiness[] }
+      const ledgerData = await ledgerRes.json() as {
+        ledger?: DepositRecord[]
+        redSentinel?: PaymentLedgerState['redSentinel']
+        message?: string
+        persistenceLabel?: string
+      }
+      setPaymentLedger({
+        deposits: Array.isArray(ledgerData.ledger) ? ledgerData.ledger : [],
+        providers: Array.isArray(statusData.providers) ? statusData.providers : [],
+        persistenceLabel: ledgerData.persistenceLabel ?? 'Session-only fallback',
+        redSentinel: ledgerData.redSentinel ?? INITIAL_PAYMENT_LEDGER_STATE.redSentinel,
+        message: ledgerData.message ?? 'Payment ledger loaded.',
+      })
+    } catch {
+      setPaymentLedger(prev => ({ ...prev, message: 'Payment ledger unavailable.' }))
+    }
+  }
+
+  const notifyDeposit = async (depositId: string) => {
+    try {
+      const res = await fetch('/api/payments/deposits/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ depositId }),
+      })
+      const data = await res.json() as { message?: string }
+      if (!res.ok) throw new Error(data.message || 'Deposit notification failed')
+      await loadPaymentLedger()
+    } catch {
+      addSystemMessage('Deposit notification could not be logged.')
+    }
+  }
+
   const saveMemory = async (memory: Omit<MemoryEntry, 'id' | 'created_at'>) => {
     setToolBarActivity(prev => ({ ...prev, memory: 'ACTIVE' }))
     try {
@@ -3460,30 +5382,66 @@ export default function Home() {
 
   const streamFamilyMessage = async ({
     familyName,
+    bubbleFamilyName,
     content,
     provider,
     messageId,
     thinkingLabel,
     streamingLabel,
+    colorOverride,
+    iconOverride,
+    instant,
   }: {
     familyName: TypingFamily
+    bubbleFamilyName?: string
     content: string
     provider: string
-    messageId: string
+    messageId?: string
     thinkingLabel: string
     streamingLabel: string
+    colorOverride?: string
+    iconOverride?: string
+    /** Skip artificial typing delays (council uses real API latency as primary UX). */
+    instant?: boolean
   }) => {
-    const family = FAMILY_META[familyName]
+    const family = colorOverride
+      ? { color: colorOverride, icon: iconOverride ?? '•' }
+      : FAMILY_META[familyName]
+    const label = bubbleFamilyName ?? familyName
     const now = new Date().toLocaleTimeString()
+    const resolvedMessageId = messageId || createMessageId(label)
+
+    if (instant) {
+      addMessages([{
+        id: resolvedMessageId,
+        familyName: label,
+        content,
+        timestamp: now,
+        color: family.color,
+        icon: family.icon,
+        provider,
+        messageType: 'response',
+      }])
+      setPresence(familyName, 'idle', 'standby')
+      return
+    }
 
     setPresence(familyName, 'thinking', thinkingLabel)
     setTypingFamily(familyName)
-    await wait(familyName === 'CHATGPT FAMILY' ? 450 : 700)
-    if (councilPausedRef.current || councilStoppedRef.current) return
+    await wait(
+      familyName === 'CHATGPT FAMILY'
+        ? 450
+        : familyName === 'CLAUDE FAMILY'
+          ? 700
+          : familyName === 'GEMINI FAMILY'
+            ? 800
+            : 850,
+    )
+    if (councilPausedRef.current || !councilChannelOpenRef.current) return
 
     addMessages([{
-      id: messageId,
-      familyName,
+      id: resolvedMessageId,
+      familyName: label,
       content: '',
       timestamp: now,
       color: family.color,
@@ -3496,25 +5454,110 @@ export default function Home() {
     setPresence(familyName, 'streaming', streamingLabel)
 
     for (let i = 0; i < content.length; i += STREAM_CHUNK_SIZE) {
-      if (councilPausedRef.current || councilStoppedRef.current) return
-      updateMessageContent(messageId, content.slice(0, i + STREAM_CHUNK_SIZE))
+      if (councilPausedRef.current || !councilChannelOpenRef.current) return
+      updateMessageContent(resolvedMessageId, content.slice(0, i + STREAM_CHUNK_SIZE))
       await wait(STREAM_CHUNK_DELAY_MS)
     }
 
-    updateMessageContent(messageId, content)
+    updateMessageContent(resolvedMessageId, content)
     setPresence(familyName, 'complete', 'complete')
     await wait(350)
     setPresence(familyName, 'idle', 'standby')
   }
 
-  const revealFamilyMessages = async (data: { chatgpt?: string; claude?: string }, inputText: string, toolIntent: boolean) => {
+  const mapOrchFamilyToUsage = (f: CouncilOrchestrationFamily): UsageFamily | null => {
+    if (f === 'chatgpt' || f === 'baby') return 'ChatGPT Family'
+    if (f === 'claude' || f === 'red_team') return 'Claude Family'
+    if (f === 'grok') return 'Grok Family'
+    if (f === 'gemini') return 'Gemini Family'
+    if (f === 'kimi') return 'Kimi Family'
+    return null
+  }
+
+  const orchestrationVisual = (f: CouncilOrchestrationFamily) => {
+    const pk = orchestrationFamilyToTypingFamily(f)
+    if (f === 'red_team') {
+      return {
+        presenceKey: pk,
+        bubbleFamilyName: 'RED TEAM',
+        colorOverride: '#F87171',
+        iconOverride: '⚔',
+        provider: 'Red Team · adversarial',
+        thinkingLabel: 'Red Team pressure-testing...',
+        streamingLabel: 'Red Team streaming...',
+      }
+    }
+    if (f === 'baby') {
+      return {
+        presenceKey: pk,
+        bubbleFamilyName: 'BABY AI',
+        colorOverride: '#5EEAD4',
+        iconOverride: '◔',
+        provider: 'Baby AI · observer',
+        thinkingLabel: 'Baby AI observing...',
+        streamingLabel: 'Baby AI streaming...',
+      }
+    }
+    if (f === 'kimi') {
+      return {
+        presenceKey: pk,
+        bubbleFamilyName: 'Kimi Family',
+        provider: 'Local · Kimi',
+        thinkingLabel: 'Kimi decomposing...',
+        streamingLabel: 'Kimi streaming...',
+      }
+    }
+    if (f === 'bridge_architect') {
+      return {
+        presenceKey: pk,
+        bubbleFamilyName: 'Bridge Architect',
+        provider: 'Local · bridge',
+        thinkingLabel: 'Bridge Architect reasoning...',
+        streamingLabel: 'Bridge Architect streaming...',
+      }
+    }
+    if (f === 'claude') {
+      return {
+        presenceKey: pk,
+        provider: 'Anthropic · claude-sonnet',
+        thinkingLabel: 'Claude thinking...',
+        streamingLabel: 'Claude streaming...',
+      }
+    }
+    if (f === 'gemini') {
+      return {
+        presenceKey: pk,
+        bubbleFamilyName: 'Gemini Family',
+        provider: geminiEngineRow?.probedModelId
+          ? `Google · ${geminiEngineRow.probedModelId}`
+          : (geminiEngineRow?.providerLabel ?? 'Google Gemini'),
+        thinkingLabel: 'Gemini reasoning...',
+        streamingLabel: 'Gemini streaming...',
+      }
+    }
+    if (f === 'grok') {
+      return {
+        presenceKey: pk,
+        provider: 'xAI · grok',
+        thinkingLabel: 'Grok scanning signals...',
+        streamingLabel: 'Grok streaming...',
+      }
+    }
+    return {
+      presenceKey: pk,
+      provider: 'OpenAI · gpt-4o',
+      thinkingLabel: 'ChatGPT analyzing...',
+      streamingLabel: 'ChatGPT streaming...',
+    }
+  }
+
+  const revealOrchestrationTurn = async (family: CouncilOrchestrationFamily, text: string, inputText: string) => {
     const inputTokens = estimateTokens(inputText)
+    const usageName = mapOrchFamilyToUsage(family)
     const nextUsageRows = BASE_USAGE_ROWS.map(row => {
-      if (!row.active) return row
-
-      const outputText = row.familyName === 'ChatGPT Family' ? data.chatgpt || '' : data.claude || ''
+      if (!row.active || !usageName) return row
+      const outputText = row.familyName === usageName ? text : ''
       const outputTokens = outputText ? estimateTokens(outputText) : 0
-
       return {
         ...row,
         inputTokens,
@@ -3522,66 +5565,208 @@ export default function Home() {
         estimatedCost: estimateFamilyCost(row.familyName, inputTokens, outputTokens),
       }
     })
-
-    if (data.chatgpt) {
-      await streamFamilyMessage({
-        familyName: 'CHATGPT FAMILY',
-        content: data.chatgpt,
-        provider: 'OpenAI · gpt-4o',
-        messageId: Date.now() + '-gpt',
-        thinkingLabel: 'ChatGPT analyzing...',
-        streamingLabel: 'ChatGPT streaming...',
-      })
-      if (councilPausedRef.current || councilStoppedRef.current) return
-      if (toolIntent) {
-        addSystemMessage('Retrieval complete')
-        endToolRequest()
-        await wait(350)
-      }
-    }
-
-    if (data.claude) {
-      await streamFamilyMessage({
-        familyName: 'CLAUDE FAMILY',
-        content: data.claude,
-        provider: 'Anthropic · claude-sonnet',
-        messageId: Date.now() + '-claude',
-        thinkingLabel: 'Claude thinking...',
-        streamingLabel: 'Claude streaming...',
-      })
-    }
-
+    const vis = orchestrationVisual(family)
+    await streamFamilyMessage({
+      familyName: vis.presenceKey,
+      bubbleFamilyName: vis.bubbleFamilyName,
+      colorOverride: vis.colorOverride,
+      iconOverride: vis.iconOverride,
+      content: text,
+      provider: vis.provider,
+      messageId: createMessageId(family),
+      thinkingLabel: vis.thinkingLabel,
+      streamingLabel: vis.streamingLabel,
+      instant: true,
+    })
     const finalCost = totalUsageCost(nextUsageRows)
     setUsageRows(nextUsageRows)
     setCurrentDecreeCost(finalCost)
     setSessionCost(prev => prev + finalCost)
+  }
 
-    if ((data.chatgpt || data.claude) && !inputText.toLowerCase().includes('continue council discussion')) {
-      const memoryActionId = `memory-save-${Date.now()}`
-      addRaelAction({
-        action_id: memoryActionId,
-        related_opportunity_id: null,
-        title: 'Memory save approval',
-        question: 'Council wants permission to save this response into Chronicle memory.',
-        response_options: ['Save Memory', 'Not Now'],
-        urgency: 'low',
-        expires_at: null,
-        source_agent: 'Memory',
+  const clearOrchestrationTimer = () => {
+    if (orchestrationTimerRef.current !== null) {
+      window.clearTimeout(orchestrationTimerRef.current)
+      orchestrationTimerRef.current = null
+    }
+  }
+
+  const scheduleNextOrchestration = () => {
+    clearOrchestrationTimer()
+    const sid = councilSnapRef.current.sessionId
+    orchestrationTimerRef.current = window.setTimeout(() => {
+      orchestrationTimerRef.current = null
+      void runAutonomousOrchestration(sid)
+    }, COUNCIL_ORCHESTRATION_INTERVAL_MS)
+  }
+
+  const runAutonomousOrchestration = async (expectedSessionId: string) => {
+    const snap = councilSnapRef.current
+    if (snap.sessionId !== expectedSessionId) return
+    if (autonomousOrchInFlightRef.current) return
+    if (snap.councilState !== 'active' || snap.requiresRaelForAutonomous || snap.isAwaitingResponses) return
+    if (!snap.councilChannelOpen) return
+    if (toolRequestActiveRef.current) return
+
+    autonomousOrchInFlightRef.current = true
+    const decree = 'continue council discussion'
+    const orchRedEarly = shouldInjectRedTeamEarly({
+      decree,
+      messages: councilMessagesForRedTeam(messagesRef.current),
+      lastCouncilFamilyError: lastCouncilFamilyErrorRef.current,
+    }) && !orchRedTeamEarlyLatchRef.current
+    const geminiOk = geminiFunctionalRef.current && !skipGeminiForSessionRef.current
+    const family = pickNextOrchestrationFamily({
+      autonomousRoundIndex: snap.autonomousRoundIndex,
+      recentSpeakers: snap.recentOrchestrationSpeakers,
+      deepDiscussionMode: snap.deepDiscussionMode,
+      geminiFunctional: geminiOk,
+      orchestrationContext: buildOrchestrationContextFromMessages(messagesRef.current),
+      forceRedTeamEarly: orchRedEarly,
+    })
+    if (family === 'gemini' && skipGeminiForSessionRef.current) {
+      autonomousOrchInFlightRef.current = false
+      councilDispatch({ type: 'BUMP_AUTONOMOUS_ROUND' })
+      councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
+      window.setTimeout(() => {
+        const s = councilSnapRef.current
+        if (s.sessionId !== expectedSessionId) return
+        if (s.councilState !== 'active' || !s.councilChannelOpen || s.requiresRaelForAutonomous) return
+        scheduleNextOrchestration()
+      }, 0)
+      return
+    }
+    const augment = buildOrchestrationAugment(family, snap.deepDiscussionMode)
+    const threadHistory = messagesRef.current.map(m => ({ sender: m.familyName, content: m.content }))
+    const inputText = `${decree}\n${threadHistory.map(m => `${m.sender}: ${m.content}`).join('\n')}`
+
+    const agentId = orchestrationFamilyToLocalAgentId(family)
+    const agent = localFamilyAgents.familyAgents.find(a => a.id === (agentId ?? ''))
+
+    let textOut: string | null = null
+
+    if (agent?.functional && agentId) {
+      const threadBlock = threadHistory.slice(-16).map(m => `${m.sender}: ${m.content}`).join('\n')
+      const localPrompt = `${augment}\n\nCouncil thread (most recent last):\n${threadBlock}\n\nRespond with one concise in-character council message only.`
+      try {
+        const r = await fetch('/api/local-agent/invoke', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            familyAgentId: agentId,
+            prompt: localPrompt,
+            provider: agent.provider,
+            model: agent.model,
+          }),
+        })
+        if (r.ok) {
+          const d = await r.json() as { response?: string }
+          const t = typeof d.response === 'string' ? d.response.trim() : ''
+          if (t) textOut = t
+        }
+      } catch {
+        textOut = null
+      }
+    }
+
+    councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: true })
+    let shouldScheduleNext = false
+    try {
+      if (!textOut) {
+        const { res: r, data } = await postCouncilChat(
+          {
+            message: decree,
+            profile: RAEL_PROFILE,
+            threadHistory,
+            mode: 'continue',
+            toneMode: 'casual',
+            councilSingleFamily: family,
+            orchestrationAugment: augment,
+            ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
+          },
+        )
+        if (!r.ok) {
+          lastCouncilFamilyErrorRef.current = family
+          const summary = typeof data.message === 'string' ? data.message : (data.error ?? `HTTP ${r.status}`)
+          if (isGeminiCouncilBackoffFailure(family, r, data)) {
+            geminiFailureCountRef.current += 1
+            geminiLastErrorSummaryRef.current = summary
+            skipGeminiForSessionRef.current = true
+            if (!geminiUnavailableUserMessagedRef.current) {
+              geminiUnavailableUserMessagedRef.current = true
+              addSystemMessage(`Gemini unavailable: ${summary.slice(0, 500)}`)
+              void postLiveCouncilMessage({
+                role: 'system',
+                content: `Gemini unavailable: ${summary.slice(0, 500)}`,
+              })
+            }
+            councilDispatch({ type: 'BUMP_AUTONOMOUS_ROUND' })
+            shouldScheduleNext = true
+            return
+          }
+          const famLabel = COUNCIL_ROSTER.find(ro => ro.id === family)?.label ?? family
+          const errLine = `[Error] ${famLabel}: ${summary}`
+          addSystemMessage(errLine)
+          void postLiveCouncilMessage({ role: 'system', content: errLine })
+          councilDispatch({ type: 'SET_PROVIDER_ERROR', payload: errLine })
+          shouldScheduleNext = true
+          return
+        }
+        textOut = typeof data.councilSingleResponse === 'string' ? data.councilSingleResponse.trim() : ''
+        if (!textOut) {
+          const famLabel = COUNCIL_ROSTER.find(ro => ro.id === family)?.label ?? family
+          const errLine = `[Error] ${famLabel}: empty response`
+          addSystemMessage(errLine)
+          void postLiveCouncilMessage({ role: 'system', content: errLine })
+          shouldScheduleNext = true
+          return
+        }
+      }
+
+      if (councilSnapRef.current.sessionId !== expectedSessionId) return
+
+      const h = councilContentHash(textOut)
+      const lastHash = councilSnapRef.current.lastContentHashByFamily[family]
+      if (lastHash === h) {
+        councilDispatch({ type: 'BUMP_AUTONOMOUS_ROUND' })
+        shouldScheduleNext = true
+        return
+      }
+
+      await revealOrchestrationTurn(family, textOut, inputText)
+      if (orchRedEarly && family === 'red_team') orchRedTeamEarlyLatchRef.current = true
+      if (councilSnapRef.current.sessionId !== expectedSessionId) return
+
+      const snapBeforeIncrement = councilSnapRef.current
+      const cap = snapBeforeIncrement.deepDiscussionMode ? COUNCIL_MAX_CONSECUTIVE_AUTONOMOUS_DEEP : COUNCIL_MAX_CONSECUTIVE_AUTONOMOUS
+      const willHitRaelGate = snapBeforeIncrement.consecutiveAutonomousCount + 1 >= cap
+
+      councilDispatch({ type: 'RECORD_ORCHESTRATION_SPEAKER', payload: { family, contentHash: h } })
+      councilDispatch({ type: 'INCREMENT_AUTONOMOUS' })
+      councilDispatch({ type: 'BUMP_AUTONOMOUS_ROUND' })
+      shouldScheduleNext = !willHitRaelGate
+    } catch (e) {
+      councilDispatch({
+        type: 'SET_PROVIDER_ERROR',
+        payload: e instanceof Error ? e.message : String(e),
       })
-      setMemorySavePrompt({
-        reason: 'new council response may be useful later',
-        memory: {
-          content: `Council response: ${[data.chatgpt, data.claude].filter(Boolean).join(' ')}`.slice(0, 1200),
-          source: 'council',
-          family: 'Council',
-          tags: ['council', 'response'],
-          importance: 2,
-        },
-      })
+    } finally {
+      autonomousOrchInFlightRef.current = false
+      councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
+      if (shouldScheduleNext) {
+        window.setTimeout(() => {
+          const s = councilSnapRef.current
+          if (s.sessionId !== expectedSessionId) return
+          if (s.councilState !== 'active' || !s.councilChannelOpen || s.requiresRaelForAutonomous) return
+          scheduleNextOrchestration()
+        }, 0)
+      }
     }
   }
 
   const submitDecree = async (decree: string, mode?: CouncilMode) => {
+    const myRound = ++decreeRoundGenRef.current
+    orchRedTeamEarlyLatchRef.current = false
     const toolIntent = mode !== 'continue' && detectToolIntent(decree)
     if (toolIntent && toolRequestActiveRef.current) {
       addSystemMessage('Research already in progress.')
@@ -3590,64 +5775,328 @@ export default function Home() {
 
     const controller = new AbortController()
     abortControllerRef.current = controller
-    councilStoppedRef.current = false
     setLoading(true)
-    setTypingFamily('CHATGPT FAMILY')
-    setPresence('CHATGPT FAMILY', 'thinking', 'ChatGPT analyzing...')
-    setContinuationPrompt(null)
     if (mode === 'continue') {
       addSystemMessage('Council channel continuing')
     } else if (toolIntent && !beginToolRequest(controller)) {
       addSystemMessage('Research already in progress.')
       if (abortControllerRef.current === controller) abortControllerRef.current = null
       setLoading(false)
-      setTypingFamily(null)
       return
     }
 
-    const threadHistory = messages.map(m => ({ sender: m.familyName, content: m.content }))
-    const inputText = `${decree}\n${threadHistory.map(m => `${m.sender}: ${m.content}`).join('\n')}`
-    const projectedUsage = createUsageEstimate(inputText, mode === 'expanded' ? EXPANDED_OUTPUT_TOKEN_BUDGET : DEFAULT_OUTPUT_TOKEN_BUDGET)
+    const threadHistory = () => messagesRef.current.map(m => ({ sender: m.familyName, content: m.content }))
+    const inputText = () => `${decree}\n${threadHistory().map(m => `${m.sender}: ${m.content}`).join('\n')}`
+    const projectedUsage = createUsageEstimate(inputText(), mode === 'expanded' ? EXPANDED_OUTPUT_TOKEN_BUDGET : DEFAULT_OUTPUT_TOKEN_BUDGET)
     setUsageRows(projectedUsage)
     setCurrentDecreeCost(totalUsageCost(projectedUsage))
     const toneMode = detectToneMode(decree)
+    const intent = lastDecreeIntentRef.current ?? classifyRaElMessage(decree)
+
+    const rosterLabel = (fid: CouncilOrchestrationFamily) =>
+      COUNCIL_ROSTER.find(r => r.id === fid)?.label ?? fid
+
+    const postCouncilChatWithFamilyTimeout = async (
+      body: Parameters<typeof postCouncilChat>[0],
+      timeoutMs = 25_000,
+    ) => {
+      const familyController = new AbortController()
+      const abortFamily = () => familyController.abort()
+      controller.signal.addEventListener('abort', abortFamily, { once: true })
+      const timeoutId = window.setTimeout(() => familyController.abort(), timeoutMs)
+      try {
+        return await postCouncilChat(body, familyController.signal)
+      } finally {
+        window.clearTimeout(timeoutId)
+        controller.signal.removeEventListener('abort', abortFamily)
+      }
+    }
+
+    const fetchEngineStatusWithTimeout = async () => {
+      const statusController = new AbortController()
+      const timeoutId = window.setTimeout(() => statusController.abort(), 8_000)
+      try {
+        return await fetch('/api/engine-control/status', { cache: 'no-store', signal: statusController.signal })
+      } finally {
+        window.clearTimeout(timeoutId)
+      }
+    }
+
+    const enqueueCouncilProposals = async (text: string, family: CouncilOrchestrationFamily) => {
+      if (intent.tier === 'casual') return
+      const lines = extractProposedCouncilActions(text)
+      if (!lines.length || !liveCouncilConvId || !persistenceAvailable) return
+      for (const line of lines) {
+        await fetch('/api/actions/queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'research',
+            payload: { proposed: line, sourceFamily: rosterLabel(family), decreePreview: decree.slice(0, 280) },
+            conversationId: liveCouncilConvId,
+          }),
+        }).catch(() => undefined)
+      }
+      void refreshQueueActions()
+    }
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: decree, profile: RAEL_PROFILE, threadHistory, mode, toneMode }),
-        signal: controller.signal,
-      })
-      const data = await res.json()
-      if (controller.signal.aborted || councilPausedRef.current || councilStoppedRef.current) return
-      await revealFamilyMessages(data, inputText, toolIntent)
-      if (controller.signal.aborted || councilPausedRef.current || councilStoppedRef.current) return
-      if (data.showContinue || (mode === 'continue' && discussionSeconds > 0)) {
-        if (mode !== 'continue') {
-          setDiscussionSeconds(DEFAULT_DISCUSSION_SECONDS)
-          setDiscussionExpiredNoticeShown(false)
-          lastAutoContinueAtRef.current = Date.now()
+      try {
+        const er = await fetchEngineStatusWithTimeout()
+        if (er.ok) {
+          const ej = await er.json() as EngineControlStatusResponse
+          engineMapRef.current = engineRowMap(ej.engines)
+          setEngineList(ej.engines)
+          const g = ej.engines.find(e => e.id === 'gemini')
+          geminiFunctionalRef.current = Boolean(g?.functional)
+          if (g?.functional) skipGeminiForSessionRef.current = false
+          setGeminiEngineRow(g ?? null)
+          void maybeEnqueueGeminiRepairIfNeeded(g)
         }
-        setShowContinue(true)
-      } else {
-        setShowContinue(false)
+      } catch {
+        /* use last known map */
+      }
+
+      if (controller.signal.aborted || councilPausedRef.current) return
+      if (myRound !== decreeRoundGenRef.current) return
+
+      let augmentCtx: CouncilAugmentContext = { tier: intent.tier }
+      if (intent.tier !== 'casual') {
+        const brief = await buildPlatformBrief()
+        augmentCtx = {
+          tier: intent.tier,
+          platformBriefJson: JSON.stringify(brief).slice(0, 3200),
+        }
+      }
+
+      const planningMode =
+        mode === 'summarize'
+        || intent.tier === 'income_ops'
+        || detectCouncilPlanningMode(decree)
+      const extra = participationFromDecree(decree, participationToggles)
+      const errSnap = lastCouncilFamilyErrorRef.current
+      const injectLeadRed = shouldInjectRedTeamEarly({
+        decree,
+        messages: councilMessagesForRedTeam(messagesRef.current),
+        lastCouncilFamilyError: errSnap,
+      })
+      if (errSnap && injectLeadRed) lastCouncilFamilyErrorRef.current = null
+
+      let order = buildDecreeFamilyOrder({
+        incomeOperationsMode: incomeOperationsMode || intent.tier === 'income_ops',
+        planningMode,
+        extraFamilies: extra,
+        maxFamilies: intent.maxFamilies,
+        singleFamilyRotate: intent.tier === 'casual' ? messagesRef.current.length : undefined,
+        leadWithRedTeam: injectLeadRed,
+      })
+      if (intent.tier === 'casual') {
+        const casualFallbacks: CouncilOrchestrationFamily[] = ['chatgpt', 'claude', 'grok', 'gemini']
+        order = [...order, ...casualFallbacks.filter(f => !order.includes(f))]
+      }
+      if (skipGeminiForSessionRef.current) order = order.filter(f => f !== 'gemini')
+
+      let anySuccess = false
+      for (const family of order) {
+        if (myRound !== decreeRoundGenRef.current) break
+        if (controller.signal.aborted || councilPausedRef.current) break
+
+        setFamilyDuty(prev => ({ ...prev, [family]: 'working' }))
+        const label = rosterLabel(family)
+        const deep = councilSnapRef.current.deepDiscussionMode
+        const summarizeAugment = mode === 'summarize'
+          ? `${buildDecreeFamilyAugment(family, deep, augmentCtx)}\n\nTASK: Summarize the council thread so far for Ra'el in concise bullets. Do not invent facts beyond the thread.`
+          : null
+        const augment = summarizeAugment
+          ?? (planningMode ? buildCouncilPlanningAugment(family, deep, augmentCtx) : buildDecreeFamilyAugment(family, deep, augmentCtx))
+
+        const tryLocal = async (): Promise<string | null> => {
+          const agentId = orchestrationFamilyToLocalAgentId(family)
+          if (!agentId) return null
+          const agent = localFamilyAgents.familyAgents.find(a => a.id === agentId)
+          if (!agent?.functional) return null
+          const th = threadHistory().slice(-16).map(m => `${m.sender}: ${m.content}`).join('\n')
+          const localPrompt = `${augment}\n\nCouncil thread (most recent last):\n${th}\n\nRespond with one concise in-character council message only.`
+          const localController = new AbortController()
+          const abortLocal = () => localController.abort()
+          controller.signal.addEventListener('abort', abortLocal, { once: true })
+          const localTimeoutId = window.setTimeout(() => localController.abort(), 18_000)
+          try {
+            const r = await fetch('/api/local-agent/invoke', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                familyAgentId: agentId,
+                prompt: localPrompt,
+                provider: agent.provider,
+                model: agent.model,
+              }),
+              signal: localController.signal,
+            })
+            if (!r.ok) return null
+            const d = await r.json() as { response?: string }
+            const t = typeof d.response === 'string' ? d.response.trim() : ''
+            return t || null
+          } catch {
+            return null
+          } finally {
+            window.clearTimeout(localTimeoutId)
+            controller.signal.removeEventListener('abort', abortLocal)
+          }
+        }
+
+        let textOut: string | null = null
+
+        if (family === 'kimi' || family === 'bridge_architect') {
+          textOut = await tryLocal()
+          if (!textOut) {
+            const sys = `${label}: unavailable (local ${family} agent not functional or invoke failed)`
+            addSystemMessage(sys)
+            void postLiveCouncilMessage({ role: 'system', content: sys })
+          }
+        } else if (family === 'gemini' && skipGeminiForSessionRef.current) {
+          /* Gemini session backoff after availability failure — other families continue. */
+        } else {
+          const eid = cloudEngineIdForCouncilFamily(family)
+          const row = eid ? engineMapRef.current.get(eid) : undefined
+          if (!isEngineFunctional(engineMapRef.current, eid)) {
+            const sys = `${label}: unavailable (${unavailableReason(row)})`
+            addSystemMessage(sys)
+            void postLiveCouncilMessage({ role: 'system', content: sys })
+          } else {
+            try {
+              const { res: chatRes, data: chatData } = await postCouncilChatWithFamilyTimeout(
+                {
+                  message: decree,
+                  profile: RAEL_PROFILE,
+                  threadHistory: threadHistory(),
+                  mode: mode === 'expanded' ? 'expanded' : 'continue',
+                  toneMode,
+                  councilSingleFamily: family,
+                  orchestrationAugment: augment,
+                  ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
+                },
+              )
+              if (!chatRes.ok) {
+                lastCouncilFamilyErrorRef.current = family
+                const summary = typeof chatData.message === 'string' ? chatData.message : (chatData.error ?? `HTTP ${chatRes.status}`)
+                if (isGeminiCouncilBackoffFailure(family, chatRes, chatData)) {
+                  geminiFailureCountRef.current += 1
+                  geminiLastErrorSummaryRef.current = summary
+                  skipGeminiForSessionRef.current = true
+                  if (!geminiUnavailableUserMessagedRef.current) {
+                    geminiUnavailableUserMessagedRef.current = true
+                    const line = `Gemini unavailable: ${summary.slice(0, 500)}`
+                    addSystemMessage(line)
+                    void postLiveCouncilMessage({ role: 'system', content: line })
+                  }
+                  textOut = null
+                } else {
+                  const err = `[Error] ${label}: ${summary}`
+                  addSystemMessage(err)
+                  void postLiveCouncilMessage({ role: 'system', content: err })
+                  textOut = await tryLocal()
+                  if (!textOut) {
+                    addSystemMessage(`${label}: cloud failed and local fallback unavailable.`)
+                  }
+                }
+              } else {
+                textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
+                if (!textOut) {
+                  const err = `[Error] ${label}: empty response`
+                  lastCouncilFamilyErrorRef.current = family
+                  addSystemMessage(err)
+                  void postLiveCouncilMessage({ role: 'system', content: err })
+                  textOut = await tryLocal()
+                }
+              }
+            } catch (familyError) {
+              lastCouncilFamilyErrorRef.current = family
+              const familyTimedOut = familyError instanceof DOMException && familyError.name === 'AbortError'
+              const summary = familyTimedOut
+                ? 'provider timed out'
+                : familyError instanceof Error
+                  ? familyError.message
+                  : String(familyError)
+              const err = `[Error] ${label}: ${summary}`
+              addSystemMessage(err)
+              void postLiveCouncilMessage({ role: 'system', content: err })
+              textOut = await tryLocal()
+              if (!textOut) {
+                addSystemMessage(`${label}: provider failed and local fallback unavailable.`)
+              }
+            }
+          }
+        }
+
+        if (textOut) {
+          anySuccess = true
+          councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+          await revealOrchestrationTurn(family, textOut, inputText())
+          const vis = orchestrationVisual(family)
+          const bubble = vis.bubbleFamilyName ?? rosterLabel(family)
+          void postLiveCouncilMessage({
+            role: 'assistant',
+            content: textOut,
+            family: bubble,
+          })
+          const focusSnippet = textOut.replace(/\s+/g, ' ').trim().slice(0, 120)
+          setFamilyCurrentFocus(prev => ({ ...prev, [family]: focusSnippet }))
+          void enqueueCouncilProposals(textOut, family)
+          if (intent.tier === 'casual') break
+        }
+
+        setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
+      }
+
+      if (controller.signal.aborted || councilPausedRef.current) return
+
+      councilDispatch({ type: 'SET_COUNCIL_CHANNEL_OPEN', payload: true })
+      if (councilSnapRef.current.councilState === 'idle') {
+        councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
+      }
+
+      if (anySuccess && intent.tier !== 'casual' && !inputText().toLowerCase().includes('continue council discussion')) {
+        const memoryActionId = `memory-save-${Date.now()}`
+        addRaelAction({
+          action_id: memoryActionId,
+          related_opportunity_id: null,
+          title: 'Memory save approval',
+          question: 'Council wants permission to save this response into Chronicle memory.',
+          response_options: ['Save Memory', 'Not Now'],
+          urgency: 'low',
+          expires_at: null,
+          source_agent: 'Memory',
+        })
+        setMemorySavePrompt({
+          reason: 'new council response may be useful later',
+          memory: {
+            content: `Council response (latest decree): ${decree}`.slice(0, 1200),
+            source: 'council',
+            family: 'Council',
+            tags: ['council', 'response'],
+            importance: 2,
+          },
+        })
+      }
+
+      clearOrchestrationTimer()
+      if (intent.maxFamilies > 0) {
+        window.setTimeout(() => {
+          const s = councilSnapRef.current
+          if (s.councilState !== 'active' || !s.councilChannelOpen) return
+          scheduleNextOrchestration()
+        }, 0)
       }
     } catch (error) {
       if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return
-      setShowContinue(false)
-      setTypingFamily(null)
+      const msg = error instanceof Error ? error.message : 'Council unreachable.'
+      addSystemMessage(`[Error] ${msg}`)
+      councilDispatch({
+        type: 'SET_PROVIDER_ERROR',
+        payload: msg,
+      })
       if (toolIntent) endToolRequest()
-      addMessages([{
-        id: Date.now() + '-err',
-        familyName: 'SYSTEM',
-        content: 'Council unreachable.',
-        timestamp: new Date().toLocaleTimeString(),
-        color: '#EF4444',
-        icon: '⚠',
-        provider: '',
-        messageType: 'system'
-      }])
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null
       setTypingFamily(null)
@@ -3660,37 +6109,52 @@ export default function Home() {
     submitDecreeRef.current = submitDecree
   })
 
-  const handleSubmit = async () => {
-    if (!command.trim() || loading) return
-    const decree = command.trim()
-    setCommand('')
-
-    const expansionNeed = detectExpansionNeed(decree)
-    if (expansionNeed) {
-      addRaelAction({
-        action_id: `expanded-analysis-${decree.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80)}`,
-        related_opportunity_id: null,
-        title: 'Expanded analysis approval',
-        question: `Council requests expanded analysis. Estimated extra usage: ${formatCost(expansionNeed.extraCost)}. Reason: ${expansionNeed.reason}. Continue?`,
-        response_options: ['Approve', 'Decline', 'Summarize instead'],
-        urgency: expansionNeed.urgent ? 'high' : 'medium',
-        expires_at: null,
-        source_agent: 'Cost Guard',
-      })
-      setExpansionPrompt({ decree, ...expansionNeed })
-      setUsageRows(createUsageEstimate(decree, DEFAULT_OUTPUT_TOKEN_BUDGET))
-      setCurrentDecreeCost(totalUsageCost(createUsageEstimate(decree, DEFAULT_OUTPUT_TOKEN_BUDGET)))
-      return
-    }
-
-    await sendRaelDecree(decree)
+  const handleDecree = async (event?: FormEvent) => {
+    event?.preventDefault()
+    await sendLiveCouncilThroneMessage({
+      rawInput: command,
+      isBusy: () => loading,
+      clearDraft: () => setCommand(''),
+      detectExpansion: d => {
+        const expansionNeed = detectExpansionNeed(d)
+        if (!expansionNeed) return null
+        return { decree: d, ...expansionNeed }
+      },
+      onExpansionQueued: (decree, expansion) => {
+        addRaelAction({
+          action_id: `expanded-analysis-${decree.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80)}`,
+          related_opportunity_id: null,
+          title: 'Expanded analysis approval',
+          question: `Council requests expanded analysis. Estimated extra usage: ${formatCost(expansion.extraCost)}. Reason: ${expansion.reason}. Continue?`,
+          response_options: ['Approve', 'Decline', 'Summarize instead'],
+          urgency: expansion.urgent ? 'high' : 'medium',
+          expires_at: null,
+          source_agent: 'Cost Guard',
+        })
+        setExpansionPrompt({ decree, extraCost: expansion.extraCost, reason: expansion.reason, urgent: expansion.urgent })
+        setUsageRows(createUsageEstimate(decree, DEFAULT_OUTPUT_TOKEN_BUDGET))
+        setCurrentDecreeCost(totalUsageCost(createUsageEstimate(decree, DEFAULT_OUTPUT_TOKEN_BUDGET)))
+      },
+      sendDecree: sendRaelDecree,
+    })
   }
 
   const sendRaelDecree = async (decree: string, mode?: CouncilMode) => {
     setExpansionPrompt(null)
 
+    const intent = classifyRaElMessage(decree)
+    lastDecreeIntentRef.current = intent
+
+    if (councilSnapRef.current.councilState === 'provider_error') {
+      councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+    }
+    councilDispatch({ type: 'RESET_AUTONOMOUS' })
+    if (councilSnapRef.current.councilState === 'idle') {
+      councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
+    }
+
     addMessages([{
-      id: Date.now() + '-rael',
+      id: createMessageId('rael'),
       familyName: "RA'EL",
       content: decree,
       timestamp: new Date().toLocaleTimeString(),
@@ -3699,6 +6163,26 @@ export default function Home() {
       provider: '',
       messageType: 'decree'
     }])
+
+    void postLiveCouncilMessage({ role: 'user', content: decree, family: "RA'EL" })
+    void emitDecreeEvents(decree, intent.shouldEmitBusEvents)
+
+    if (intent.tier === 'income_ops') {
+      setIncomeOperationsMode(true)
+    }
+
+    const planningMeta =
+      intent.tier === 'council_full'
+      || intent.tier === 'income_ops'
+      || detectCouncilPlanningMode(decree)
+    void mergeCouncilConversationMetadata({
+      incomeOperationsMode: intent.tier === 'income_ops' ? true : incomeOperationsMode,
+      planningMode: planningMeta,
+      participation: participationToggles,
+      duty: familyDuty,
+      lastDecreeAt: new Date().toISOString(),
+      lastIntentTier: intent.tier,
+    })
 
     if (isExplicitMemoryRequest(decree)) {
       void saveMemory({
@@ -3718,88 +6202,109 @@ export default function Home() {
   }
 
   const handleSummarize = async () => {
-    setContinuationPrompt(null)
+    lastDecreeIntentRef.current = {
+      tier: 'council_full',
+      shouldEmitBusEvents: false,
+      shouldRunFamilyRound: true,
+      maxFamilies: 4,
+    }
     await submitDecree('summarize council discussion', 'summarize')
   }
 
-  useEffect(() => {
-    if (!showContinue || discussionSeconds > 0 || discussionExpiredNoticeShown) return
-
-    const notice = window.setTimeout(() => {
-      addSystemMessageRef.current?.('Council requests additional discussion time.')
-      setDiscussionExpiredNoticeShown(true)
-    }, 0)
-
-    return () => window.clearTimeout(notice)
-  }, [showContinue, discussionSeconds, discussionExpiredNoticeShown])
-
-  useEffect(() => {
-    if (!showContinue || councilPaused || toolRequestActive || discussionSeconds === 0 || loading || expansionPrompt || continuationPrompt) return
-
-    const loop = window.setInterval(() => {
-      const now = Date.now()
-      if (now - lastAutoContinueAtRef.current < COUNCIL_CONTINUE_INTERVAL_MS) return
-
-      lastAutoContinueAtRef.current = now
-      const estimatedCost = estimateContinuationCostRef.current?.() ?? 0
-      setContinuationPrompt({ estimatedCost })
-      addRaelAction({
-        action_id: `continue-council-${now}`,
-        related_opportunity_id: null,
-        title: 'Council continuation approval',
-        question: `Council wants to continue discussion. Estimated extra usage: ${formatCost(estimatedCost)}.`,
-        response_options: ['Allow', 'Pause', 'Stop', 'Summarize'],
-        urgency: 'medium',
-        expires_at: new Date(now + 5 * 60 * 1000).toISOString(),
-        source_agent: 'Council',
+  const cycleFamilyDuty = (fid: CouncilOrchestrationFamily) => {
+    const seq: CouncilDutyState[] = ['off_duty', 'standing_by', 'working', 'waiting_approval', 'blocked', 'completed']
+    setFamilyDuty(prev => {
+      const cur = prev[fid] ?? 'standing_by'
+      const ix = Math.max(0, seq.indexOf(cur))
+      const next = seq[(ix + 1) % seq.length]!
+      const merged = { ...prev, [fid]: next }
+      void mergeCouncilConversationMetadata({
+        duty: merged,
+        participation: participationToggles,
+        incomeOperationsMode,
       })
-    }, 1000)
-
-    return () => window.clearInterval(loop)
-  }, [showContinue, councilPaused, toolRequestActive, discussionSeconds, loading, expansionPrompt, continuationPrompt])
-
-  const extendCouncilDiscussion = (seconds: number) => {
-    setDiscussionSeconds(seconds)
-    setDiscussionExpiredNoticeShown(false)
-    setShowContinue(true)
-    lastAutoContinueAtRef.current = Date.now()
+      return merged
+    })
   }
 
-  const handleApproveAdditionalDiscussion = () => {
-    extendCouncilDiscussion(DEFAULT_DISCUSSION_SECONDS)
+  const toggleParticipation = (key: keyof CouncilParticipationToggles) => {
+    setParticipationToggles(p => {
+      const next = { ...p, [key]: !p[key] }
+      void mergeCouncilConversationMetadata({
+        duty: familyDuty,
+        participation: next,
+        incomeOperationsMode,
+      })
+      return next
+    })
   }
 
-  const handleDeclineAdditionalDiscussion = () => {
-    stopCouncil()
+  const setIncomeOps = (next: boolean) => {
+    setIncomeOperationsMode(next)
+    void mergeCouncilConversationMetadata({
+      duty: familyDuty,
+      participation: participationToggles,
+      incomeOperationsMode: next,
+    })
   }
 
   const pauseCouncil = () => {
-    setCouncilPaused(true)
-    setContinuationPrompt(null)
+    councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'paused' })
+    clearOrchestrationTimer()
     cancelActiveCouncilRequest()
   }
 
   const resumeCouncil = () => {
-    setCouncilPaused(false)
-    councilPausedRef.current = false
-    lastAutoContinueAtRef.current = Date.now()
+    const waiting = councilSnapRef.current.requiresRaelForAutonomous
+    if (waiting) {
+      councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'waiting_for_rael' })
+    } else {
+      councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
+    }
+    if (!waiting && councilSnapRef.current.councilChannelOpen) {
+      scheduleNextOrchestration()
+    }
   }
 
-  const stopCouncil = () => {
-    councilStoppedRef.current = true
-    setShowContinue(false)
-    setCouncilPaused(false)
-    setContinuationPrompt(null)
-    setDiscussionExpiredNoticeShown(false)
+  const endCouncilSession = () => {
+    clearOrchestrationTimer()
     cancelActiveCouncilRequest()
-    addSystemMessage('Council paused. Awaiting Ra’el’s next decree.')
+    skipGeminiForSessionRef.current = false
+    geminiFailureCountRef.current = 0
+    geminiLastErrorSummaryRef.current = null
+    geminiUnavailableUserMessagedRef.current = false
+    orchRedTeamEarlyLatchRef.current = false
+    lastCouncilFamilyErrorRef.current = null
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY)
+    }
+    councilDispatch({ type: 'END_SESSION', payload: { sessionId: newSessionId() } })
+    addSystemMessage('Council session ended. Speak your decree when ready.')
   }
 
-  const allowContinuationRound = async () => {
-    if (loading || councilPaused || toolRequestActiveRef.current || discussionSeconds === 0) return
-    setContinuationPrompt(null)
-    lastAutoContinueAtRef.current = Date.now()
-    await submitDecreeRef.current?.('continue council discussion', 'continue')
+  const clearCouncilSession = () => {
+    clearOrchestrationTimer()
+    cancelActiveCouncilRequest()
+    skipGeminiForSessionRef.current = false
+    geminiFailureCountRef.current = 0
+    geminiLastErrorSummaryRef.current = null
+    geminiUnavailableUserMessagedRef.current = false
+    orchRedTeamEarlyLatchRef.current = false
+    lastCouncilFamilyErrorRef.current = null
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY)
+    }
+    councilDispatch({ type: 'CLEAR_SESSION', payload: { sessionId: newSessionId() } })
+    addSystemMessage('Council transcript cleared. Session counters reset.')
+  }
+
+  const toggleDeepDiscussion = () => {
+    councilDispatch({ type: 'SET_DEEP_DISCUSSION', payload: !councilSnapRef.current.deepDiscussionMode })
+  }
+
+  const retryProvider = () => {
+    councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+    if (councilSnapRef.current.councilChannelOpen) scheduleNextOrchestration()
   }
 
   const handleScroll = () => {
@@ -3807,13 +6312,131 @@ export default function Home() {
     if (!el) return
 
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    setAutoScrollEnabled(distanceFromBottom < 80)
+    const next = distanceFromBottom < 80
+    setAutoScrollEnabled(prev => (prev === next ? prev : next))
   }
+
+  const grantStandingAndRetryAudit = () => {
+    grantWarRoomStandingAck()
+    setStandingAckHint(null)
+    const d = pendingAuditDecreeRef.current
+    pendingAuditDecreeRef.current = null
+    if (d) void emitDecreeEvents(d, true)
+  }
+
+  const standingPermissionStrip = standingAckHint ? (
+    <div
+      className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-yellow-900 px-6 py-2"
+      style={{ background: 'rgba(251,191,36,0.08)' }}
+    >
+      <span className="max-w-[70%] text-[10px] leading-snug tracking-widest" style={{ color: '#FDE047' }}>{standingAckHint}</span>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
+          style={{ background: '#FBBF24', color: '#000' }}
+          onClick={grantStandingAndRetryAudit}
+        >
+          Approve for this tab
+        </button>
+        <button
+          type="button"
+          className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
+          style={{ border: '1px solid #555', color: '#888' }}
+          onClick={() => {
+            setStandingAckHint(null)
+            pendingAuditDecreeRef.current = null
+          }}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  ) : null
+
+  const activeFamiliesSection = (
+    <section className="flex-shrink-0 rounded border border-white/10 p-3 mx-6 mb-2" style={{ color: '#aaa' }}>
+      <div className="mb-1 font-bold" style={{ color: '#86EFAC' }}>ACTIVE FAMILIES</div>
+      <div className="flex flex-wrap gap-1">
+        {COUNCIL_ROSTER.map(entry => {
+          const eid = entry.engineId
+          const providerKey = eid && eid in providerHealth.providers ? eid as ProviderFamilyKey : null
+          const fn = providerKey ? providerHealth.providers[providerKey] === 'online' || providerHealth.providers[providerKey] === 'standby' : false
+          const duty = familyDuty[entry.id] ?? entry.defaultDuty
+          return (
+            <button
+              key={entry.id}
+              type="button"
+              title="Cycle duty (saved to thread metadata when DB online)"
+              onClick={() => cycleFamilyDuty(entry.id)}
+              className="rounded px-2 py-0.5 text-[9px]"
+              style={{ border: '1px solid #333', color: fn ? '#9AE6B4' : '#777' }}
+            >
+              {entry.label}
+              {' '}
+              <span style={{ color: '#888' }}>({duty})</span>
+            </button>
+          )
+        })}
+      </div>
+      <label className="mt-2 flex cursor-pointer items-center gap-2 text-[10px]" style={{ color: '#888' }}>
+        <input type="checkbox" checked={incomeOperationsMode} onChange={() => setIncomeOps(!incomeOperationsMode)} />
+        Income Operations (Grok/Gemini/ChatGPT first)
+      </label>
+      <div className="mt-2 flex flex-wrap gap-2 text-[10px]" style={{ color: '#888' }}>
+        <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeKimi} onChange={() => toggleParticipation('includeKimi')} />Kimi</label>
+        <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeRedTeam} onChange={() => toggleParticipation('includeRedTeam')} />Red Team</label>
+        <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeBaby} onChange={() => toggleParticipation('includeBaby')} />Baby</label>
+        <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeBridgeArchitect} onChange={() => toggleParticipation('includeBridgeArchitect')} />Bridge Architect</label>
+      </div>
+      {uiMode === 'operator' && (
+        <div className="mt-2 rounded border border-white/5 px-2 py-1 text-[8px] leading-tight" style={{ color: '#666' }}>
+          <div className="mb-0.5 font-bold tracking-widest" style={{ color: '#9CA3AF' }}>AGENT DUTY · CURRENT FOCUS</div>
+          <div className="flex flex-wrap gap-1">
+            {COUNCIL_ROSTER.slice(0, 7).map(entry => {
+              const duty = familyDuty[entry.id] ?? entry.defaultDuty
+              const focus = familyCurrentFocus[entry.id]
+              return (
+                <span key={entry.id} className="max-w-[11rem] truncate rounded border border-white/10 px-1 py-0.5" title={focus ? `${duty} — ${focus}` : duty}>
+                  <span style={{ color: '#86EFAC' }}>{entry.label.replace(' Family', '')}</span>
+                  <span style={{ color: '#555' }}> · </span>
+                  <span style={{ color: '#888' }}>{focus ?? duty}</span>
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+
+  const activeOrdersStrip = (
+    <div className="flex-shrink-0 border-b border-yellow-900 px-6 py-2" style={{ background: 'rgba(96,165,250,0.04)' }}>
+      <div className="mb-1 text-[10px] font-bold tracking-widest" style={{ color: '#93C5FD' }}>ACTIVE ORDERS (queue)</div>
+      {queueActions.length === 0 ? (
+        <p className="text-[9px]" style={{ color: '#555' }}>No recent queued actions for this thread.</p>
+      ) : (
+        <ul className="flex flex-wrap gap-2 text-[9px]" style={{ color: '#aaa' }}>
+          {queueActions.map(q => (
+            <li key={q.id} className="rounded border border-white/10 px-2 py-0.5 font-mono">
+              {q.type} · {q.status}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 
   const jumpToLatest = () => {
     setAutoScrollEnabled(true)
     window.requestAnimationFrame(() => {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+      const el = scrollContainerRef.current
+      if (!el) return
+      try {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      } catch {
+        el.scrollTop = el.scrollHeight
+      }
     })
   }
 
@@ -3832,22 +6455,66 @@ export default function Home() {
     await sendRaelDecree(expansionPrompt.decree, 'summarize')
   }
 
-  const familyStatusItems = [
-    { key: 'CLAUDE FAMILY' as TypingFamily, providerKey: 'claude' as ProviderFamilyKey, label: 'CLAUDE', presence: familyPresence['CLAUDE FAMILY'] },
-    { key: 'CHATGPT FAMILY' as TypingFamily, providerKey: 'chatgpt' as ProviderFamilyKey, label: 'CHATGPT', presence: familyPresence['CHATGPT FAMILY'] },
-    { key: 'GROK', providerKey: 'grok' as ProviderFamilyKey, label: 'GROK', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
-    { key: 'GEMINI', providerKey: 'gemini' as ProviderFamilyKey, label: 'GEMINI', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
-    { key: 'RED TEAM', providerKey: 'redteam' as ProviderFamilyKey, label: 'RED TEAM', presence: { status: 'idle', label: 'standby' } as FamilyPresence },
-  ]
+  const pendingNeedsRael = raelActions.some(a => a.status === 'pending')
+  const providerStripKeys: ProviderFamilyKey[] = ['claude', 'chatgpt', 'grok', 'gemini', 'redteam']
   const providerStatusStyles: Record<ProviderConnectionStatus, { color: string; dot: string; shadow: string }> = {
     online: { color: '#9AE6B4', dot: '#00ff41', shadow: '0 0 8px #00ff41' },
     standby: { color: '#FFD700', dot: '#FFD700', shadow: '0 0 8px rgba(255,215,0,0.7)' },
     not_connected: { color: '#444', dot: '#203321', shadow: 'none' },
     error: { color: '#EF4444', dot: '#EF4444', shadow: '0 0 8px rgba(239,68,68,0.8)' },
   }
+  const coreProviderStates = [providerHealth.providers.chatgpt, providerHealth.providers.claude, providerHealth.providers.grok]
+  const chatHealthLabel = loading
+    ? 'Working'
+    : council.councilState === 'provider_error'
+      ? 'Error'
+      : 'Ready'
+  const providerHealthLabel = coreProviderStates.some(status => status === 'online' || status === 'standby')
+    ? 'Ready'
+    : 'Degraded'
+  const persistenceHealthLabel = persistenceAvailable ? 'Ready' : 'Session only'
+  const internetHealthLabel = internetStatus.canUseInternet ? 'Ready' : 'Needs setup'
+  const operatorNav = (
+    <>
+      {uiMode === 'operator' && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-yellow-900 px-6 py-2" style={{ background: 'rgba(0,0,0,0.35)' }}>
+          <span className="text-[10px]" style={{ color: '#94a3b8' }}>
+            System: {queueActions.length} queued · session {formatCost(sessionCost)} · heavy pages manual-refresh by default.
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }} onClick={() => setOperatorTab('system')}>Open System</button>
+            <button type="button" className="text-[10px] tracking-widest" style={{ color: '#888' }} onClick={() => void loadProviderHealth()}>Refresh provider summary</button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-end gap-2 border-b border-yellow-900 px-6 py-2" style={{ background: 'rgba(0,0,0,0.35)' }}>
+        <span className="text-[10px] tracking-widest" style={{ color: '#888' }}>UI mode</span>
+        <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: uiMode === 'operator' ? '1px solid #FFD700' : '1px solid #444', color: uiMode === 'operator' ? '#FFD700' : '#888' }} onClick={() => setUiMode('operator')}>Operator</button>
+        <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: uiMode === 'advanced' ? '1px solid #FFD700' : '1px solid #444', color: uiMode === 'advanced' ? '#FFD700' : '#888' }} onClick={() => setUiMode('advanced')}>Advanced</button>
+      </div>
+
+      <div className="relative z-10 flex flex-wrap gap-1 border-b border-yellow-900 px-4 py-2" style={{ background: 'rgba(0,0,0,0.45)' }}>
+        {OPERATOR_TABS.map(({ id: tab, label }) => (
+          <button
+            key={tab}
+            type="button"
+            className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+            style={{
+              border: operatorTab === tab ? '1px solid #FFD700' : '1px solid #333',
+              color: operatorTab === tab ? '#FFD700' : '#888',
+            }}
+            onClick={() => setOperatorTab(tab)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </>
+  )
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-black text-white flex flex-col font-mono">
+    <main className="relative min-h-screen overflow-x-hidden bg-black font-mono text-white">
       <MatrixCodeRain />
       <style>{`
         .message-fade-in {
@@ -3901,242 +6568,427 @@ export default function Home() {
           }
         }
       `}</style>
-      <div className="relative z-10 border-b border-yellow-900 px-6 py-4 flex items-center justify-between flex-shrink-0">
+      <header className="relative z-10 flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-yellow-900 px-6 py-3">
         <div>
           <h1 className="text-xl font-bold tracking-widest" style={{ color: '#FFD700' }}>⚔ WAR ROOM</h1>
           <p className="text-xs tracking-widest" style={{ color: '#444' }}>RA&apos;EL — HIGHER VISION INC</p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-4">
-          <Link href="/baby"
-            className="rounded px-3 py-2 text-xs font-bold tracking-widest"
-            style={{ border: '1px solid rgba(56,189,248,0.35)', color: '#38BDF8', background: 'rgba(0,0,0,0.28)' }}>
-            Baby AI Private
-          </Link>
-          {familyStatusItems.map(item => {
-            const responding = item.presence.status !== 'idle'
-            const providerStatus = providerHealth.providers[item.providerKey]
-            const statusStyle = providerStatusStyles[providerStatus]
-            const active = responding || providerStatus === 'online'
-
-            return (
-              <div key={item.key} className="flex items-center gap-1" title={providerHealth.labels[item.providerKey]}>
-                <div
-                  className={`w-2 h-2 rounded-full ${responding ? 'tool-dot-active' : ''}`}
-                  style={{
-                    background: statusStyle.dot,
-                    boxShadow: statusStyle.shadow,
-                  }}
-                />
-                <span className="text-xs" style={{ color: active ? statusStyle.color : '#444' }}>{item.label}</span>
-                {(responding || providerStatus !== 'not_connected') && (
-                  <span className="hidden lg:inline text-[10px] tracking-widest" style={{ color: '#555' }}>
-                    {responding ? item.presence.label.toUpperCase() : providerStatus.toUpperCase().replace('_', ' ')}
-                  </span>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      <div className="relative z-10 flex-shrink-0">
-        <ToolStatusPanel health={toolBarHealth} activity={toolBarActivity} />
-        <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} providerHealth={providerHealth} />
-        <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
-        <KernelStatusPanel />
-        <div
-          className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-yellow-900 px-6 py-2"
-          style={{ background: 'rgba(255,215,0,0.035)' }}
+        <Link
+          href="/baby"
+          className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+          style={{ border: '1px solid rgba(56,189,248,0.35)', color: '#38BDF8', background: 'rgba(0,0,0,0.28)' }}
         >
-          <span className="text-[10px] font-bold tracking-widest" style={{ color: '#888' }}>
-            BUILD AGENT DIVISION — OPEN WAR ROOM FOR QUEUE
-          </span>
-          <Link
-            href="/war-room"
-            className="text-[10px] font-bold tracking-widest underline-offset-4 transition hover:underline"
-            style={{ color: '#FFD700' }}
-          >
-            Open War Room Command →
-          </Link>
-        </div>
-        <SmsBridgePanel bridge={smsBridge} onTest={testSmsBridge} />
-        <PaymentsPayoutsPanel opportunities={incomeOpportunities} />
-        <FilesEvidenceVaultPanel
-          files={warRoomFiles}
-          loading={filesLoading}
-          message={filesMessage}
-          onUpload={uploadWarRoomFile}
-        />
-        <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
-        <IncomeRadarPanel
-          opportunities={incomeOpportunities}
-          loading={incomeLoading}
-          view={incomeView}
-          onViewChange={setIncomeView}
-          onCreate={createIncomeOpportunity}
-          onExpire={markIncomeOpportunityExpired}
-          scout={opportunityScout}
-          scoutLoading={opportunityScoutLoading}
-          onScout={runOpportunityScout}
-        />
-        <MemoryPanel memories={memories} />
-        <CodexAgentPlaceholder />
-        <BridgeArchitectPanel />
-        <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={() => void loadLocalAgentBridge()} />
-        <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={() => void loadLocalFamilyAgents()} />
-        <CapabilityRouterPanel />
-        <BabyAiObserverPanel memories={memories} actions={raelActions} opportunities={incomeOpportunities} />
-        <FamilyPresencePanel presence={familyPresence} />
+          Baby AI Private
+        </Link>
+      </header>
+
+      <div
+        className="relative z-10 flex flex-shrink-0 flex-wrap items-center gap-3 border-b border-yellow-900/80 px-6 py-2"
+        style={{ background: 'rgba(0,0,0,0.45)' }}
+      >
+        <span className="text-[10px] font-bold tracking-widest" style={{ color: '#888' }}>PROVIDERS</span>
+        {providerStripKeys.map(k => {
+          const providerStatus = providerHealth.providers[k]
+          const statusStyle = providerStatusStyles[providerStatus]
+          return (
+            <span key={k} className="flex items-center gap-1.5" title={providerHealth.labels[k] ?? k}>
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: statusStyle.dot, boxShadow: statusStyle.shadow }} />
+              <span className="text-[10px] tracking-widest" style={{ color: statusStyle.color }}>{k.toUpperCase()}</span>
+            </span>
+          )
+        })}
       </div>
+
+      {standingPermissionStrip}
 
       {memoryNotification && (
-        <div className="fixed right-6 top-6 z-30 message-fade-in rounded px-3 py-2 text-xs font-bold tracking-widest"
+        <div className="fixed right-6 top-28 z-30 message-fade-in rounded px-3 py-2 text-xs font-bold tracking-widest"
           style={{ background: 'rgba(52,211,153,0.14)', border: '1px solid rgba(52,211,153,0.35)', color: '#34D399' }}>
           {memoryNotification}
         </div>
       )}
 
-      <div className="relative z-10 border-b border-yellow-900 px-6 py-2 flex items-center gap-2 flex-shrink-0"
-        style={{ background: 'rgba(0,0,0,0.45)' }}>
-        {!councilPaused ? (
-          <button onClick={pauseCouncil}
+      <div className="relative z-10 flex flex-col">
+        <WriteApprovalBanner />
+        {operatorNav}
+        {operatorTab === 'command' && (
+        <section data-testid="live-council-chat-card" className="mx-4 mt-4 overflow-hidden rounded border border-yellow-900/50" style={{ background: 'rgba(10,8,4,0.58)' }}>
+        <div
+          className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-yellow-900/60 px-6 py-2"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+        >
+          {!councilPaused ? (
+            <button type="button" onClick={pauseCouncil}
+              className="text-xs px-3 py-1 rounded tracking-widest"
+              style={{ border: '1px solid #333', color: '#888' }}>
+              Pause Council
+            </button>
+          ) : (
+            <button type="button" onClick={resumeCouncil}
+              className="text-xs px-3 py-1 rounded tracking-widest"
+              style={{ background: '#34D399', color: '#000', fontWeight: 'bold' }}>
+              Resume Council
+            </button>
+          )}
+          <button type="button" onClick={endCouncilSession}
             className="text-xs px-3 py-1 rounded tracking-widest"
-            style={{ border: '1px solid #333', color: '#888' }}>
-            Pause Council
+            style={{ border: '1px solid #EF4444', color: '#EF4444' }}>
+            End Session
           </button>
-        ) : (
-          <button onClick={resumeCouncil}
+          <button type="button" onClick={clearCouncilSession}
             className="text-xs px-3 py-1 rounded tracking-widest"
-            style={{ background: '#34D399', color: '#000', fontWeight: 'bold' }}>
-            Resume Council
+            style={{ border: '1px solid #666', color: '#888' }}>
+            Clear Session
           </button>
-        )}
-        <button onClick={stopCouncil}
-          className="text-xs px-3 py-1 rounded tracking-widest"
-          style={{ border: '1px solid #EF4444', color: '#EF4444' }}>
-          Stop Council
-        </button>
-        {councilPaused && (
-          <span className="text-xs tracking-widest" style={{ color: '#FFD700' }}>
-            COUNCIL PAUSED
-          </span>
-        )}
-      </div>
-
-      <div
-        ref={scrollContainerRef}
-        onScroll={handleScroll}
-        className="relative z-10 flex-1 overflow-y-auto px-6 py-4"
-      >
-        {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
-
-        {expansionPrompt && (
-          <ExpansionPermissionPrompt
-            prompt={expansionPrompt}
-            onApprove={handleExpansionApprove}
-            onDecline={handleExpansionDecline}
-            onSummarize={handleExpansionSummarize}
-          />
-        )}
-
-        {continuationPrompt && (
-          <ContinuationPermissionPrompt
-            prompt={continuationPrompt}
-            onAllow={allowContinuationRound}
-            onPause={pauseCouncil}
-            onStop={stopCouncil}
-            onSummarize={handleSummarize}
-          />
-        )}
-
-        {memorySavePrompt && (
-          <MemorySavePromptPanel
-            prompt={memorySavePrompt}
-            onSave={() => {
-              void saveMemory(memorySavePrompt.memory)
-              setMemorySavePrompt(null)
-            }}
-            onDismiss={() => setMemorySavePrompt(null)}
-          />
-        )}
-
-        {typingFamily && (
-          <TypingIndicator familyName={typingFamily} label={familyPresence[typingFamily].label} />
-        )}
-
-        {showContinue && (
-          <div className="flex items-center gap-3 ml-11 mb-4 p-3 rounded"
-            style={{ background: 'rgba(255,215,0,0.05)', border: '1px solid #3a2e00' }}>
-            <span className="text-xs tracking-widest" style={{ color: '#888' }}>
-              {discussionSeconds > 0
-                ? `COUNCIL DISCUSSION ACTIVE — ${formatDiscussionTime(discussionSeconds)} REMAINING`
-                : 'Council requests additional discussion time.'}
+          <button type="button" onClick={toggleDeepDiscussion}
+            className="text-xs px-3 py-1 rounded tracking-widest"
+            style={{
+              border: council.deepDiscussionMode ? '1px solid #34D399' : '1px solid #333',
+              color: council.deepDiscussionMode ? '#34D399' : '#888',
+            }}>
+            Deep discussion: {council.deepDiscussionMode ? 'ON' : 'OFF'}
+          </button>
+          {council.councilState === 'provider_error' && (
+            <button type="button" onClick={retryProvider}
+              className="text-xs px-3 py-1 rounded tracking-widest"
+              style={{ background: '#F97316', color: '#000', fontWeight: 'bold' }}>
+              Retry provider
+            </button>
+          )}
+          {council.deepDiscussionMode && (
+            <span className="text-[10px] font-bold tracking-widest px-2 py-0.5 rounded"
+              style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#34D399' }}>
+              DEEP MODE
             </span>
-            {discussionSeconds === 0 && !loading && (
-              <>
-                <button onClick={handleApproveAdditionalDiscussion}
-                  className="text-xs px-3 py-1 rounded tracking-widest"
-                  style={{ background: '#FFD700', color: '#000', fontWeight: 'bold' }}>
-                  Approve
-                </button>
-                <button onClick={handleDeclineAdditionalDiscussion}
-                  className="text-xs px-3 py-1 rounded tracking-widest"
-                  style={{ border: '1px solid #333', color: '#666' }}>
-                  Decline
-                </button>
-                <button onClick={() => extendCouncilDiscussion(30)}
-                  className="text-xs px-3 py-1 rounded tracking-widest"
-                  style={{ border: '1px solid #333', color: '#888' }}>
-                  +30 sec
-                </button>
-                <button onClick={() => extendCouncilDiscussion(120)}
-                  className="text-xs px-3 py-1 rounded tracking-widest"
-                  style={{ border: '1px solid #333', color: '#888' }}>
-                  +2 min
-                </button>
-                <button onClick={handleSummarize}
-                  className="text-xs px-3 py-1 rounded tracking-widest"
-                  style={{ border: '1px solid #FFD700', color: '#FFD700' }}>
-                  Summarize
-                </button>
-              </>
+          )}
+        </div>
+        <div className="flex-shrink-0 px-6 pt-3 pb-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FFD700' }}>LIVE COUNCIL</h2>
+            {!autoScrollEnabled && (
+              <button
+                type="button"
+                onClick={jumpToLatest}
+                className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+                style={{ background: '#FFD700', color: '#000' }}
+              >
+                Go to latest
+              </button>
             )}
+          </div>
+          <p className="text-[9px] tracking-widest" style={{ color: '#666' }}>
+            Council thread below — type at the bottom to speak with the families (Enter sends, Shift+Enter newline).
+          </p>
+          <div className="mt-2 grid gap-2 text-[9px] tracking-widest sm:grid-cols-4" style={{ color: '#94a3b8' }}>
+            <span className="rounded border border-white/10 px-2 py-1">Chat: {chatHealthLabel}</span>
+            <span className="rounded border border-white/10 px-2 py-1">Providers: {providerHealthLabel}</span>
+            <span className="rounded border border-white/10 px-2 py-1">Persistence: {persistenceHealthLabel}</span>
+            <span className="rounded border border-white/10 px-2 py-1">Internet: {internetHealthLabel}</span>
+          </div>
+        </div>
+        <div
+          data-testid="live-council-messages"
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className="max-h-[58vh] min-h-[22rem] overflow-y-auto px-6 py-2"
+        >
+          {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+
+          {expansionPrompt && (
+            <ExpansionPermissionPrompt
+              prompt={expansionPrompt}
+              onApprove={handleExpansionApprove}
+              onDecline={handleExpansionDecline}
+              onSummarize={handleExpansionSummarize}
+            />
+          )}
+
+          {memorySavePrompt && (
+            <MemorySavePromptPanel
+              prompt={memorySavePrompt}
+              onSave={() => {
+                void saveMemory(memorySavePrompt.memory)
+                setMemorySavePrompt(null)
+              }}
+              onDismiss={() => setMemorySavePrompt(null)}
+            />
+          )}
+
+          {typingFamily && (
+            <TypingIndicator familyName={typingFamily} label={familyPresence[typingFamily].label} />
+          )}
+
+          {councilMounted && showContinue && (
+            <div className="flex flex-wrap items-center gap-3 ml-11 mb-4 p-3 rounded"
+              style={{ background: 'rgba(255,215,0,0.05)', border: '1px solid #3a2e00' }}>
+              <span className="text-xs tracking-widest" style={{ color: '#888' }}>
+                {(() => {
+                  if (council.councilState === 'provider_error') {
+                    return `Provider error — ${council.providerErrorMessage ?? 'unknown'}`
+                  }
+                  if (council.councilState === 'paused') return 'Paused'
+                  if (council.councilState === 'idle') return 'Idle'
+                  if (council.councilState === 'waiting_for_rael') return 'Waiting for Ra’el'
+                  if (council.councilState === 'researching') return 'Researching'
+                  if (council.councilState === 'active' && council.isAwaitingResponses) return 'Families Responding'
+                  if (council.councilState === 'active') return 'Council Active'
+                  return council.councilState
+                })()}
+              </span>
+              <button type="button" onClick={handleSummarize}
+                className="text-xs px-3 py-1 rounded tracking-widest"
+                style={{ border: '1px solid #FFD700', color: '#FFD700' }}>
+                Summarize
+              </button>
+            </div>
+          )}
+
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="flex-shrink-0 border-t border-yellow-900 px-6 py-3" style={{ background: 'rgba(255,215,0,0.07)' }}>
+          <p className="mb-2 text-[9px] tracking-widest" style={{ color: '#888' }}>Command console</p>
+          <form
+            className="flex items-start gap-3 rounded p-3"
+            style={{ background: 'rgba(255,215,0,0.04)', border: '1px solid #3a2e00' }}
+            onSubmit={handleDecree}
+          >
+            <span className="mt-1 shrink-0" style={{ color: '#FFD700' }}>⚔</span>
+            <textarea
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  if (!loading) void handleDecree()
+                }
+              }}
+              rows={3}
+              placeholder="Speak to War Room…"
+              className="min-h-[3rem] flex-1 resize-y bg-transparent text-sm tracking-widest outline-none"
+              style={{ color: '#FFD700', caretColor: '#FFD700' }}
+              disabled={loading}
+            />
+            <button type="submit" disabled={loading}
+              className="mt-0.5 shrink-0 px-4 py-1.5 text-xs tracking-widest rounded disabled:opacity-30"
+              style={{ border: '1px solid #FFD700', color: '#FFD700', background: 'transparent' }}>
+              {loading ? '…' : 'Send'}
+            </button>
+          </form>
+          <p className="mt-2 text-[9px] tracking-widest" style={{ color: '#555' }}>
+            Messages persist to Supabase when configured; otherwise this tab uses sessionStorage. Cloud order: ChatGPT → Claude → Grok → Gemini (Income Operations: Grok → Gemini → ChatGPT → Claude).
+          </p>
+        </div>
+        </section>
+        )}
+
+        {uiMode === 'operator' && operatorTab === 'command' && activeFamiliesSection}
+        {uiMode === 'operator' && operatorTab === 'command' && pendingNeedsRael && (
+          <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
+        )}
+        {uiMode === 'operator' && operatorTab === 'command' && activeOrdersStrip}
+        {uiMode === 'operator' && (
+          <div className="hidden" style={{ background: 'rgba(0,0,0,0.35)' }}>
+            <span className="text-[10px]" style={{ color: '#94a3b8' }}>
+              System: {queueActions.length} queued · session {formatCost(sessionCost)} · heavy pages manual-refresh by default.
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }} onClick={() => setOperatorTab('system')}>Open System</button>
+              <button type="button" className="text-[10px] tracking-widest" style={{ color: '#888' }} onClick={() => void loadProviderHealth()}>Refresh provider summary</button>
+            </div>
           </div>
         )}
 
-        <div ref={bottomRef} />
-      </div>
+        <div className="hidden" style={{ background: 'rgba(0,0,0,0.35)' }}>
+          <span className="text-[10px] tracking-widest" style={{ color: '#888' }}>UI mode</span>
+          <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: uiMode === 'operator' ? '1px solid #FFD700' : '1px solid #444', color: uiMode === 'operator' ? '#FFD700' : '#888' }} onClick={() => setUiMode('operator')}>Operator</button>
+          <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: uiMode === 'advanced' ? '1px solid #FFD700' : '1px solid #444', color: uiMode === 'advanced' ? '#FFD700' : '#888' }} onClick={() => setUiMode('advanced')}>Advanced</button>
+        </div>
 
-      {!autoScrollEnabled && (
-        <button onClick={jumpToLatest}
-          className="fixed bottom-24 right-6 z-20 text-xs px-3 py-2 rounded tracking-widest"
-          style={{ background: '#FFD700', color: '#000', fontWeight: 'bold' }}>
-          Jump to latest
-        </button>
-      )}
+        <div className="hidden" style={{ background: 'rgba(0,0,0,0.45)' }}>
+          {OPERATOR_TABS.map(({ id: tab, label }) => (
+            <button
+              key={tab}
+              type="button"
+              className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+              style={{
+                border: operatorTab === tab ? '1px solid #FFD700' : '1px solid #333',
+                color: operatorTab === tab ? '#FFD700' : '#888',
+              }}
+              onClick={() => setOperatorTab(tab)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
-      <div className="relative z-10 border-t border-yellow-900 px-6 py-4 flex-shrink-0">
-        <div className="flex items-center gap-3 p-3 rounded"
-          style={{ background: 'rgba(255,215,0,0.03)', border: '1px solid #3a2e00' }}>
-          <span style={{ color: '#FFD700' }}>⚔</span>
-          <input
-            type="text"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !loading && handleSubmit()}
-            placeholder="SPEAK YOUR DECREE, RA'EL..."
-            className="flex-1 bg-transparent outline-none text-sm tracking-widest"
-            style={{ color: '#FFD700', caretColor: '#FFD700' }}
-            disabled={loading}
-            autoFocus
-          />
-          <button onClick={handleSubmit} disabled={loading}
-            className="px-4 py-1 text-xs tracking-widest rounded disabled:opacity-30"
-            style={{ border: '1px solid #FFD700', color: '#FFD700', background: 'transparent' }}>
-            {loading ? '...' : 'DECREE'}
-          </button>
+        <div className="px-6 py-4">
+          <div className="space-y-4">
+            {operatorTab === 'command' && (
+              <section className="rounded border border-white/10 p-3 text-[10px]" style={{ background: 'rgba(0,0,0,0.24)', color: '#94a3b8' }}>
+                <div className="mb-2 font-bold tracking-widest" style={{ color: '#86EFAC' }}>COMMAND CENTER</div>
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded border border-white/10 px-2 py-1">Pending approvals: {raelActions.filter(a => a.status === 'pending').length}</span>
+                  <span className="rounded border border-white/10 px-2 py-1">Active orders: {queueActions.length}</span>
+                  <span className="rounded border border-white/10 px-2 py-1">Providers: {providerStripKeys.filter(k => providerHealth.providers[k] === 'online').length} online</span>
+                </div>
+              </section>
+            )}
+            {operatorTab === 'agents' && (
+              <>
+                <div className="mb-3 border-b border-yellow-900/40 pb-2">
+                  <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FBBF24' }}>AGENTS / BRIDGE</h2>
+                  <p className="mt-1 text-[9px] tracking-widest" style={{ color: '#666' }}>Local engines and bridge agents refresh only when requested.</p>
+                </div>
+                <BridgeArchitectPanel engines={engineList} />
+                <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={() => void loadLocalAgentBridge()} />
+                <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={() => void loadLocalFamilyAgents()} />
+                <CapabilityRouterPanel />
+                <CodexAgentPlaceholder />
+              </>
+            )}
+            {operatorTab === 'income' && (
+              <>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-yellow-900/40 pb-2">
+                  <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FBBF24' }}>REVENUE / OPPORTUNITY RADAR</h2>
+                  <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void loadIncomeOpportunities()}>Refresh opportunities</button>
+                </div>
+                <PaymentsPayoutsPanel
+                  opportunities={incomeOpportunities}
+                  ledger={paymentLedger}
+                  onRefresh={() => void loadPaymentLedger()}
+                  onNotify={notifyDeposit}
+                />
+                <IncomeWorkersPanel
+                  opportunities={incomeOpportunities}
+                  actions={raelActions}
+                  scout={incomeWorkerScout}
+                  councilReviews={incomeCouncilReviews}
+                  loading={incomeWorkerLoading}
+                  assignLoading={incomeWorkerAssignLoading}
+                  onScout={runIncomeWorkerScout}
+                  onAssign={assignIncomeWorkerCandidate}
+                />
+                <IncomeRadarPanel
+                  opportunities={incomeOpportunities}
+                  loading={incomeLoading}
+                  view={incomeView}
+                  onViewChange={setIncomeView}
+                  onCreate={createIncomeOpportunity}
+                  onExpire={markIncomeOpportunityExpired}
+                  scout={opportunityScout}
+                  scoutLoading={opportunityScoutLoading}
+                  onScout={runOpportunityScout}
+                />
+              </>
+            )}
+            {operatorTab === 'memory' && (
+              <>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-yellow-900/40 pb-2">
+                  <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FBBF24' }}>MEMORY</h2>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void loadMemoriesRef.current?.()}>Refresh memory</button>
+                    <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void loadWarRoomFiles()}>Refresh files</button>
+                  </div>
+                </div>
+                <MemoryPanel memories={memories} />
+                <Phase6MemoryPanels />
+                <FilesEvidenceVaultPanel
+                  files={warRoomFiles}
+                  loading={filesLoading}
+                  message={filesMessage}
+                  onUpload={uploadWarRoomFile}
+                />
+              </>
+            )}
+            {operatorTab === 'approvals' && (
+              <>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-yellow-900/40 pb-2">
+                  <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FBBF24' }}>APPROVALS / ACTION QUEUE</h2>
+                  <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void loadRaelActions()}>Refresh approvals</button>
+                </div>
+                <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
+                <StandingPermissionsPanel />
+                <SmsBridgePanel bridge={smsBridge} onTest={testSmsBridge} />
+              </>
+            )}
+            {operatorTab === 'system' && (
+              <>
+                <ToolStatusPanel health={toolBarHealth} activity={toolBarActivity} />
+                <button type="button" className="mb-3 rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void refreshToolBarHealthBars()}>Refresh tool bar</button>
+                <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} providerHealth={providerHealth} />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <SystemResourcesPanel autoRefreshEnabled={false} tabActive={operatorTab === 'system'} />
+                  <WorkerHealthPanel uiMode={uiMode} autoRefreshEnabled={false} tabActive={operatorTab === 'system'} />
+                </div>
+              </>
+            )}
+            {operatorTab === 'diagnostics' && (
+              <>
+                <ProviderSetupChecklistPanel />
+                <KernelStatusPanel />
+                <UnifiedEngineControlPanel />
+                <CommandRouterPanel />
+                <InternetAccessPanel internet={internetStatus} onRefresh={() => void loadInternetStatus()} />
+                <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
+                <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={() => void loadLocalAgentBridge()} />
+                <RepoAccessPanel repo={repoStatus} onRefresh={() => void loadRepoStatus()} />
+                <RollbackSafetyPanel rollback={rollbackStatus} onRefresh={() => void loadRollbackStatus()} onCheckpoint={() => void createRollbackCheckpoint()} />
+                <DiffPreviewPanel
+                  preview={diffPreview}
+                  staged={diffPreviewStaged}
+                  loading={diffPreviewLoading}
+                  error={diffPreviewError}
+                  onStagedChange={setDiffPreviewStaged}
+                  onLoad={() => void loadDiffPreview()}
+                />
+                <DeploymentAwarenessPanel deploy={deployStatus} onRefresh={() => void loadDeployStatus()} />
+                <div className="mb-3 flex flex-wrap items-center gap-2 text-[10px]" style={{ color: '#888' }}>
+                  <button
+                    type="button"
+                    disabled={internetMonitorBusy}
+                    className="rounded px-2 py-1 font-bold tracking-widest disabled:opacity-40"
+                    style={{ border: '1px solid #444', color: '#93C5FD' }}
+                    onClick={() => void runInternetMonitorOnce()}
+                  >
+                    {internetMonitorBusy ? 'Running internet worker…' : 'Run internet status worker'}
+                  </button>
+                </div>
+                <Phase5DeployPanels autoRefreshEnabled={false} tabActive={operatorTab === 'diagnostics'} />
+                <Phase3WarRoomPanels uiMode={uiMode} homeBundle="diagnostics" />
+                <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
+                <BridgeArchitectPanel engines={engineList} />
+                <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={() => void loadLocalFamilyAgents()} />
+                <CapabilityRouterPanel />
+                <BabyAiObserverPanel memories={memories} actions={raelActions} opportunities={incomeOpportunities} />
+                <FamilyPresencePanel presence={familyPresence} geminiEngine={geminiEngineRow} />
+                {uiMode === 'advanced' && (
+                  <section className="rounded border border-white/10 p-2 text-[10px]" style={{ color: '#aaa' }}>
+                    <div className="mb-1 flex items-center justify-between font-bold" style={{ color: '#94A3B8' }}>
+                      <span>SYSTEM LEDGER</span>
+                      <button type="button" className="text-[9px]" style={{ color: '#666' }} onClick={() => void refreshLedger()}>Refresh</button>
+                    </div>
+                    <ul className="max-h-48 space-y-1 overflow-y-auto font-mono text-[9px]">
+                      {ledgerEvents.length === 0 ? <li style={{ color: '#555' }}>No recent events.</li> : ledgerEvents.map(ev => (
+                        <li key={ev.id}><span style={{ color: '#7dd3fc' }}>{ev.type}</span> {ev.createdAt?.slice(5, 22)}</li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
+
     </main>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <WarRoomUiModeProvider>
+      <Home />
+    </WarRoomUiModeProvider>
   )
 }

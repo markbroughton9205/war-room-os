@@ -1,6 +1,13 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { NextResponse } from 'next/server'
+import { assertAutoOrApproval } from '@/lib/permissions/policy'
+import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
+import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { fetchWarRoomPermissionsState, recordLastStandingAutoAction } from '@/lib/war-room/permissionsState'
+import { resolveRepoRoot } from '@/lib/repo/paths'
+
+const REPO_SCAN_ACTION_KIND = 'repo_scan_readonly'
 
 let repoScanInProgress = false
 
@@ -132,7 +139,7 @@ async function readGitInfo(repoRoot: string) {
 }
 
 async function scanRepo() {
-  const repoRoot = process.cwd()
+  const repoRoot = resolveRepoRoot()
   const started = Date.now()
   const files = await collectFiles(repoRoot)
   const appSource = await readTextIfExists(repoRoot, 'app/page.tsx')
@@ -189,11 +196,32 @@ export async function GET(req: Request) {
     tool: 'repo-awareness',
     ok: true,
     scanning: repoScanInProgress,
-    cwd: process.cwd(),
+    cwd: resolveRepoRoot(),
   })
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  const sup = tryWarRoomSupabase()
+
+  let body: Record<string, unknown> = {}
+  try {
+    const raw = await req.json()
+    if (raw !== null && typeof raw === 'object') body = raw as Record<string, unknown>
+  } catch {
+    body = {}
+  }
+
+  const state = await fetchWarRoomPermissionsState(sup.ok ? sup.client : null)
+  const gate = assertAutoOrApproval({
+    mode: state.mode,
+    safetyLock: state.safetyLock,
+    actionKind: REPO_SCAN_ACTION_KIND,
+    body,
+  })
+  if (!gate.ok) {
+    return jsonWithPersistence({ tool: 'repo-awareness', error: gate.error }, sup.ok, { status: gate.status })
+  }
+
   if (repoScanInProgress) {
     return NextResponse.json({
       tool: 'repo-awareness',
@@ -205,6 +233,18 @@ export async function POST() {
   repoScanInProgress = true
   try {
     const scan = await scanRepo()
+    if (gate.viaAutoPolicy && sup.ok) {
+      await recordLastStandingAutoAction(sup.client, {
+        kind: REPO_SCAN_ACTION_KIND,
+        detail: { totalFilesIndexed: scan.totalFilesIndexed },
+      })
+      await insertWarRoomAuditLog(sup.client, {
+        actor: 'system',
+        category: 'permissions',
+        message: `Standing auto-run: ${REPO_SCAN_ACTION_KIND}`,
+        metadata: { auto: true, actionKind: REPO_SCAN_ACTION_KIND, mode: state.mode },
+      })
+    }
     return NextResponse.json({ tool: 'repo-awareness', status: 'complete', scan })
   } catch (error) {
     return NextResponse.json({

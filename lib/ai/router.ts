@@ -12,6 +12,7 @@ export type CouncilFamilyName =
   | 'ChatGPT'
   | 'Kimi'
   | 'Grok'
+  /** Council / engine-control id `gemini`; must match `CouncilOrchestrationFamily` routing in UI + `/api/chat`. */
   | 'Gemini'
   | 'Red Team'
 
@@ -57,7 +58,7 @@ const RULES: Rule[] = [
     describeHit: (n) => `Matched council keyword “${n}” → Grok (xAI).`,
   },
   {
-    needles: ['gemini', 'google ai', 'multimodal shard'],
+    needles: ['gemini', 'google', 'google ai', 'multimodal shard'],
     selectedFamily: 'Gemini',
     provider: 'Google',
     describeHit: (n) => `Matched council keyword “${n}” → Gemini (Google).`,

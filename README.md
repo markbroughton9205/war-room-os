@@ -1,5 +1,15 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Startup
+
+Double-click `start-war-room.bat` to launch War Room.
+
+On a fresh clone, run `pnpm install` first. You can also start the app with `.\start-war-room.ps1` in PowerShell; if scripts are blocked, relax the [execution policy](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_execution_policies) for your user scope (for example `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`) or run the batch file instead.
+
+Windows may show a **firewall** prompt the first time Node listens on port 3000. If the browser cannot load `http://localhost:3000`, allow Node for your current network profile.
+
+For a public URL when your machine is off, see [docs/deploy-war-room-netlify-vercel.md](docs/deploy-war-room-netlify-vercel.md).
+
 ## Getting Started
 
 First, run the development server:

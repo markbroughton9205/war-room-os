@@ -6,7 +6,15 @@ export type LocalAgentEngineId =
   | 'continue'
   | 'goose'
 
-export type LocalAgentEngineStatus = 'detected' | 'not_detected' | 'error'
+export type LocalAgentEngineStatus =
+  | 'detected'
+  | 'not_detected'
+  | 'config_needed'
+  | 'reachable'
+  | 'unreachable'
+  | 'error'
+
+export type LocalModelProvider = 'ollama' | 'lm_studio'
 
 export type LocalAgentBridgeStatus = 'online' | 'config_needed' | 'error'
 
@@ -48,6 +56,11 @@ export type LocalAgentStatusEntry = {
   status: LocalAgentEngineStatus
   endpoint: string | null
   message: string
+  modelsReachable?: boolean
+  chatCompletionsReachable?: boolean
+  functional?: boolean
+  lastFunctionalTestAt?: string | null
+  error?: string | null
 }
 
 export type LocalAgentBridgeStatusResponse = {
@@ -82,13 +95,40 @@ export type LocalOllamaModel = {
   quantization: string | null
 }
 
+export type LocalLMStudioModel = {
+  id: string
+  object: string | null
+  ownedBy: string | null
+}
+
+export type LocalProviderAvailability = {
+  provider: LocalModelProvider
+  detected: boolean
+  reachable: boolean
+  functional: boolean
+  models: Array<LocalOllamaModel | LocalLMStudioModel>
+  error: string | null
+}
+
 export type LocalFamilyAgentAvailability = LocalFamilyAgent & {
   modelInstalled: boolean
+  provider: LocalModelProvider
+  model: string
+  detected: boolean
+  functional: boolean
 }
 
 export type LocalFamilyAgentsResponse = {
   ollamaDetected: boolean
+  lmStudioDetected: boolean
   availableModels: LocalOllamaModel[]
+  lmStudioModels: LocalLMStudioModel[]
+  providers: {
+    ollama: LocalProviderAvailability
+    lmStudio: LocalProviderAvailability
+  }
+  preferredProvider: LocalModelProvider | null
+  preferredModel: string | null
   familyAgents: LocalFamilyAgentAvailability[]
   checkedAt: string
 }

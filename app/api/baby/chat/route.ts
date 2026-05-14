@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { sourceFromUrl } from '@/lib/income/tavily'
+import { tryPersistMemoryProposalFromModelOutput } from '@/lib/memory/ingestFromModel'
+import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 const TAVILY_URL = 'https://api.tavily.com/search'
@@ -249,6 +251,15 @@ Ra'el: ${userMessage}
 Respond as Baby AI Observer in private mode. Keep it natural, useful, and concise.`
 
   const reply = await callBabyAi(prompt, system)
+
+  const supWar = tryWarRoomSupabase()
+  await tryPersistMemoryProposalFromModelOutput({
+    client: supWar.ok ? supWar.client : null,
+    responseText: typeof reply === 'string' ? reply : String(reply),
+    fallbackPartition: 'Baby AI Observer',
+    conversationId: null,
+    extraMetadata: { route: '/api/baby/chat' },
+  })
 
   return NextResponse.json({
     reply,

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { BuildAgentDivisionPanel } from '@/components/war-room/build-agent/BuildAgentDivisionPanel'
 import { BabyObserverNode, CouncilTable, SentinelStatusPanel } from '@/components/war-room/council'
+import { Phase3WarRoomPanels } from '@/components/war-room/phase3/Phase3WarRoomPanels'
 import { KpiGrid } from '@/components/war-room/KpiGrid'
 import { WarRoomShell } from '@/components/war-room/WarRoomShell'
 
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
 export default function WarRoomDashboardPage() {
   return (
     <WarRoomShell>
+      <Phase3WarRoomPanels />
       <KpiGrid />
       <BuildAgentDivisionPanel />
       <section className="mx-auto mt-14 max-w-6xl border-t border-white/10 pt-10">

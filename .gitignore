@@ -37,6 +37,12 @@ yarn-error.log*
 # vercel
 .vercel
 
+# war room local checkpoints (metadata only)
+.war-room/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+dev-bg.txt
+dev-bg-err.txt
+dev-out.txt

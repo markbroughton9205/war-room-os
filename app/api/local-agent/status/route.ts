@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { LOCAL_AGENT_ENGINES } from '@/lib/local-agent/engines'
+import { getLMStudioModels, getOllamaModels, testLMStudioChat } from '@/lib/local-agent/providers'
 import type {
   LocalAgentBridgeStatus,
   LocalAgentBridgeStatusResponse,
@@ -10,7 +11,7 @@ import type {
 
 export const dynamic = 'force-dynamic'
 
-async function probeEndpoint(endpoint: string, requireModels = false): Promise<'detected' | 'not_detected' | 'error'> {
+async function probeEndpoint(endpoint: string, requireModels = false): Promise<LocalAgentStatusEntry['status']> {
   const controller = new AbortController()
   const timeout = windowlessTimeout(() => controller.abort(), 1200)
 
@@ -22,17 +23,55 @@ async function probeEndpoint(endpoint: string, requireModels = false): Promise<'
     })
 
     if (response.ok) {
-      if (!requireModels) return 'detected'
+      if (!requireModels) return 'reachable'
       const data = await response.json() as { models?: unknown[] }
       return Array.isArray(data.models) && data.models.length > 0 ? 'detected' : 'not_detected'
     }
     if (response.status === 404) return 'not_detected'
     return 'error'
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') return 'not_detected'
-    return 'not_detected'
+    if (error instanceof Error && error.name === 'AbortError') return 'unreachable'
+    return 'unreachable'
   } finally {
     clearTimeout(timeout)
+  }
+}
+
+async function detectLMStudio(engine: LocalAgentEngine): Promise<LocalAgentStatusEntry> {
+  const checkedAt = new Date().toISOString()
+  const { baseUrl, models, error } = await getLMStudioModels()
+
+  if (models.length === 0) {
+    return {
+      id: engine.id,
+      name: engine.name,
+      status: error ? 'unreachable' : 'not_detected',
+      endpoint: `${baseUrl}/v1/models`,
+      message: error ?? 'LM Studio models endpoint returned no models.',
+      modelsReachable: false,
+      chatCompletionsReachable: false,
+      functional: false,
+      lastFunctionalTestAt: checkedAt,
+      error,
+    }
+  }
+
+  const model = models[0].id
+  const functionalTest = await testLMStudioChat(baseUrl, model)
+
+  return {
+    id: engine.id,
+    name: engine.name,
+    status: functionalTest.functional ? 'detected' : 'reachable',
+    endpoint: `${baseUrl}/v1/models`,
+    message: functionalTest.functional
+      ? `LM Studio models and chat completions responded using ${model}.`
+      : `LM Studio models reachable, but chat completion failed using ${model}.`,
+    modelsReachable: true,
+    chatCompletionsReachable: functionalTest.functional,
+    functional: functionalTest.functional,
+    lastFunctionalTestAt: checkedAt,
+    error: functionalTest.error,
   }
 }
 
@@ -42,17 +81,22 @@ function windowlessTimeout(callback: () => void, ms: number) {
 
 function configuredEndpointFor(engine: LocalAgentEngine) {
   if (engine.id === 'openhands') return process.env.LOCAL_AGENT_OPENHANDS_URL?.trim() || null
+  if (engine.id === 'aider') return process.env.LOCAL_AGENT_AIDER_PATH?.trim() || null
+  if (engine.id === 'continue') return process.env.LOCAL_AGENT_CONTINUE_PATH?.trim() || null
+  if (engine.id === 'goose') return process.env.LOCAL_AGENT_GOOSE_PATH?.trim() || null
   return engine.defaultEndpoint
 }
 
 async function detectEngine(engine: LocalAgentEngine): Promise<LocalAgentStatusEntry> {
+  if (engine.id === 'lm_studio') return detectLMStudio(engine)
+
   const endpoint = configuredEndpointFor(engine)
 
   if (!endpoint) {
     return {
       id: engine.id,
       name: engine.name,
-      status: 'not_detected',
+      status: engine.configurable ? 'config_needed' : 'not_detected',
       endpoint: null,
       message: engine.configurable
         ? 'No local endpoint configured yet.'
@@ -60,7 +104,39 @@ async function detectEngine(engine: LocalAgentEngine): Promise<LocalAgentStatusE
     }
   }
 
-  const status = await probeEndpoint(endpoint, engine.id === 'ollama')
+  if (engine.id === 'ollama') {
+    try {
+      const models = await getOllamaModels()
+      const detected = models.length > 0
+      return {
+        id: engine.id,
+        name: engine.name,
+        status: detected ? 'detected' : 'not_detected',
+        endpoint,
+        message: detected ? 'Ollama responded with installed models.' : 'Ollama models endpoint returned no models.',
+        modelsReachable: detected,
+        chatCompletionsReachable: detected,
+        functional: detected,
+        lastFunctionalTestAt: new Date().toISOString(),
+        error: null,
+      }
+    } catch (error) {
+      return {
+        id: engine.id,
+        name: engine.name,
+        status: 'unreachable',
+        endpoint,
+        message: 'Ollama endpoint is not reachable.',
+        modelsReachable: false,
+        chatCompletionsReachable: false,
+        functional: false,
+        lastFunctionalTestAt: new Date().toISOString(),
+        error: error instanceof Error ? error.message : 'Ollama check failed.',
+      }
+    }
+  }
+
+  const status = await probeEndpoint(endpoint)
 
   return {
     id: engine.id,
@@ -68,7 +144,11 @@ async function detectEngine(engine: LocalAgentEngine): Promise<LocalAgentStatusE
     status,
     endpoint,
     message: status === 'detected'
-      ? `${engine.name} responded on its local endpoint.`
+      ? `${engine.name} responded with installed models.`
+      : status === 'reachable'
+        ? `${engine.name} endpoint is reachable.`
+        : status === 'unreachable'
+          ? `${engine.name} endpoint is not reachable.`
       : status === 'error'
         ? `${engine.name} endpoint responded with an error.`
         : `${engine.name} not detected on its local endpoint.`,
@@ -82,7 +162,7 @@ export async function GET() {
       acc[engine.id] = engine
       return acc
     }, {} as Record<LocalAgentEngineId, LocalAgentStatusEntry>)
-    const selectedEngine = detectedEngines.find(engine => engine.status === 'detected')?.id ?? null
+    const selectedEngine = detectedEngines.find(engine => engine.functional || engine.status === 'detected' || engine.status === 'reachable')?.id ?? null
     const bridge: LocalAgentBridgeStatus = selectedEngine ? 'online' : 'config_needed'
 
     const body: LocalAgentBridgeStatusResponse = {
