@@ -3418,13 +3418,123 @@ function DiffPreviewPanel({
   )
 }
 
+type QueueActionRow = {
+  status: string
+  type: string
+  created_at: string
+  payload?: Record<string, unknown> | null
+}
+
+function formatApprovalPendingLabel(action: QueueActionRow): string {
+  const rawTitle = action.payload && typeof action.payload.title === 'string' ? action.payload.title.trim() : ''
+  const title = rawTitle.length > 0 ? rawTitle : null
+  if (title) return `${action.type} — ${title}`
+  return action.type
+}
+
 function WriteApprovalBanner() {
+  const [phase, setPhase] = useState<'initial' | 'ready' | 'error'>('initial')
+  const [pendingLabel, setPendingLabel] = useState<string | null>(null)
+  const [hostingIsVercel, setHostingIsVercel] = useState(false)
+  const queueInFlight = useRef(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/deploy/status', { cache: 'no-store' })
+        if (!res.ok) return
+        const data = (await res.json()) as { provider?: string }
+        setHostingIsVercel(data.provider === 'vercel')
+      } catch {
+        /* keep false — do not claim Vercel */
+      }
+    })()
+  }, [])
+
+  const refreshApprovalBanner = useCallback(async () => {
+    if (queueInFlight.current) return
+    queueInFlight.current = true
+    try {
+      const res = await fetch('/api/actions/queue', { cache: 'no-store' })
+      if (!res.ok) {
+        setPhase('error')
+        setPendingLabel(null)
+        return
+      }
+      const j = await res.json() as { actions?: unknown }
+      if (!Array.isArray(j.actions)) {
+        setPhase('error')
+        setPendingLabel(null)
+        return
+      }
+      const rows = j.actions as QueueActionRow[]
+      const waiting = rows.filter(row => row.status === 'waiting_approval')
+      waiting.sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      )
+      const next = waiting[0] ?? null
+      setPendingLabel(next ? formatApprovalPendingLabel(next) : null)
+      setPhase('ready')
+    } catch {
+      setPhase('error')
+      setPendingLabel(null)
+    } finally {
+      queueInFlight.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void refreshApprovalBanner()
+    })
+    const id = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      void refreshApprovalBanner()
+    }, 30_000)
+    const onVis = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void refreshApprovalBanner()
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [refreshApprovalBanner])
+
+  const pending = Boolean(pendingLabel)
+  const unknown = phase === 'error'
+  const calmIdle = phase === 'ready' && !pending && !unknown
+
+  const borderColor = pending
+    ? 'rgba(234,179,8,0.55)'
+    : unknown
+      ? 'rgba(248,113,113,0.45)'
+      : 'rgba(71,85,105,0.45)'
+  const bg = pending
+    ? 'rgba(234,179,8,0.08)'
+    : unknown
+      ? 'rgba(248,113,113,0.06)'
+      : 'rgba(15,23,42,0.35)'
+  const textColor = pending ? '#EAB308' : unknown ? '#F87171' : '#94A3B8'
+
+  const primaryLine = unknown
+    ? 'Approval gate status unknown.'
+    : pending
+      ? `Approval required: ${pendingLabel}.`
+      : 'Approval gate active. No pending write actions.'
+
   return (
-    <div className="border-b border-yellow-900 px-6 py-2 flex-shrink-0" style={{ background: 'rgba(255,215,0,0.06)' }}>
-      <p className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }}>
-        APPROVAL REQUIRED: No autonomous writes. Any commit, rollback apply, deploy, or repo mutation requires explicit human approval outside this read-only dashboard.
-        The only silent server write from this page is a new JSON file under .war-room/checkpoints when you click Create checkpoint.
+    <div className="border-b px-6 py-2 flex-shrink-0" style={{ borderColor, background: bg }}>
+      <p className="text-[10px] font-bold tracking-widest" style={{ color: textColor }}>
+        {phase === 'initial' ? 'Checking approval queue…' : primaryLine}
       </p>
+      {calmIdle && hostingIsVercel ? (
+        <p className="mt-1 text-[9px] font-bold tracking-widest" style={{ color: '#64748B' }}>
+          Repo mutation controls unavailable in production dashboard.
+        </p>
+      ) : null}
     </div>
   )
 }
