@@ -114,6 +114,26 @@ export function runtimeAfterAttendanceHardClose(args: {
   return 'TIMED_OUT'
 }
 
+/** Runtime outcomes that should surface provider-issue UI for the current packet. */
+export function isActionableProviderRuntime(
+  runtime: ProviderFamilyOutcomeStatus,
+  runtimeDetail?: string,
+): boolean {
+  if (runtime === 'FAILED' || runtime === 'TIMED_OUT' || runtime === 'DEGRADED') return true
+  if (runtime === 'SKIPPED' && runtimeDetail === 'preflight_unavailable') return true
+  return false
+}
+
+export function packetHasActionableProviderIssues(
+  states: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> | undefined,
+  runtimeDetails?: Partial<Record<CouncilOrchestrationFamily, string>>,
+): boolean {
+  if (!states) return false
+  return (Object.entries(states) as [CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus][]).some(
+    ([family, runtime]) => isActionableProviderRuntime(runtime, runtimeDetails?.[family]),
+  )
+}
+
 export function attendancePresenceLine(
   family: CouncilOrchestrationFamily,
   status: AttendanceSlotStatus,

@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import type { CouncilRenderPacket } from '@/lib/council/renderPacket'
@@ -46,7 +47,7 @@ function providerStatusLabel(st: ProviderFamilyOutcomeStatus): string {
   return attendanceBadgeLabel(st)
 }
 
-export function CouncilCommandBadges({
+function CouncilCommandBadgesInner({
   cmd,
   packet,
 }: {
@@ -69,7 +70,7 @@ export function CouncilCommandBadges({
 
   return (
     <div className="mt-2 space-y-1">
-      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
         {cmd.directInvocation && cmd.targetFamilies[0] ? (
           <span
             className="rounded px-2 py-0.5 text-[9px] font-bold tracking-widest"
@@ -101,7 +102,7 @@ export function CouncilCommandBadges({
           )
         })}
       </div>
-      <p className="text-[8px] tracking-wide" style={{ color: '#555' }} title="Parsed from latest Ra’el decree">
+      <p className="text-[8px] tracking-wide" style={{ color: '#555' }} title="Parsed from latest Ra'el decree">
         {commandSummary(cmd)}
       </p>
       {packet ? (
@@ -155,3 +156,5 @@ export function CouncilCommandBadges({
     </div>
   )
 }
+
+export const CouncilCommandBadges = memo(CouncilCommandBadgesInner)

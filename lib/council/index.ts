@@ -39,6 +39,8 @@ export {
   attendancePresenceLine,
   buildAttendanceDirectedOrder,
   isAttendanceIntent,
+  isActionableProviderRuntime,
+  packetHasActionableProviderIssues,
   runtimeAfterAttendanceHardClose,
   runtimeAfterAttendanceSoftCap,
   type AttendanceSlot,

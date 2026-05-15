@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
 import type { FormEvent } from 'react'
 import Link from 'next/link'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
@@ -78,11 +78,16 @@ import { deriveTopicScopeLock } from '@/lib/council/topicScope'
 import { runFinalModerator } from '@/lib/council/finalModerator'
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { shouldSuppressStaleAutonomousReveal } from '@/lib/council/sessionBarrier'
-import { buildCouncilRenderPacket, type CouncilRenderPacket } from '@/lib/council/renderPacket'
+import {
+  buildCouncilRenderPacket,
+  type CouncilProviderRuntimeDetails,
+  type CouncilRenderPacket,
+} from '@/lib/council/renderPacket'
 import { resolveCouncilPacketSyncMs } from '@/lib/council/packetSync'
 import {
   buildAttendanceDirectedOrder,
   isAttendanceIntent,
+  packetHasActionableProviderIssues,
   runtimeAfterAttendanceHardClose,
   runtimeAfterAttendanceSoftCap,
 } from '@/lib/council/attendanceReadiness'
@@ -914,7 +919,17 @@ function isExplicitMemoryRequest(message: string) {
 
 const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
 
-function MessageBubble({ msg, diagnosticsOpen }: { msg: CouncilMessage; diagnosticsOpen?: boolean }) {
+function gatherCellsToProviderRuntimeDetails(
+  cells: { family: CouncilOrchestrationFamily; runtimeDetail?: string }[],
+): CouncilProviderRuntimeDetails | undefined {
+  const out: CouncilProviderRuntimeDetails = {}
+  for (const c of cells) {
+    if (c.runtimeDetail) out[c.family] = c.runtimeDetail
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+const MessageBubble = memo(function MessageBubble({ msg, diagnosticsOpen }: { msg: CouncilMessage; diagnosticsOpen?: boolean }) {
   const isRael = msg.familyName === "RA'EL"
   if (
     msg.messageType === 'system'
@@ -946,7 +961,17 @@ function MessageBubble({ msg, diagnosticsOpen }: { msg: CouncilMessage; diagnost
       </div>
     </div>
   )
-}
+})
+
+const CouncilMessageRows = memo(function CouncilMessageRows({ messages }: { messages: CouncilMessage[] }) {
+  return (
+    <>
+      {messages.map(msg => (
+        <MessageBubble key={msg.id} msg={msg} diagnosticsOpen={false} />
+      ))}
+    </>
+  )
+})
 
 function TypingIndicator({ familyName, label }: { familyName: TypingFamily; label?: string }) {
   const family = FAMILY_META[familyName]
@@ -4211,6 +4236,19 @@ function Home() {
   const lastRaelDirectiveContentRef = useRef('')
   const [councilUiCommand, setCouncilUiCommand] = useState<CouncilCommand>(() => ({ ...DEFAULT_COUNCIL_COMMAND }))
   const [councilPacketRender, setCouncilPacketRender] = useState<CouncilRenderPacket | null>(null)
+  const applyCouncilPacketRender = useCallback((packet: CouncilRenderPacket) => {
+    setCouncilPacketRender(packet)
+    if (
+      packet.sessionState === 'CLOSED'
+      && (packet.packetStatus === 'released' || packet.packetStatus === 'idle')
+      && !packetHasActionableProviderIssues(packet.providerRuntimeStates, packet.providerRuntimeDetails)
+    ) {
+      if (councilSnapRef.current.councilState === 'provider_error') {
+        councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+      }
+      lastCouncilFamilyErrorRef.current = null
+    }
+  }, [councilDispatch])
   const [continuationRequests, setContinuationRequests] = useState<ContinuationRequest[]>([])
   const decreePacketFlushCompleteRef = useRef(false)
   const decreePacketOpenedAtMsRef = useRef(0)
@@ -4548,13 +4586,16 @@ function Home() {
 
   useEffect(() => {
     if (!autoScrollEnabled) return
-    const el = scrollContainerRef.current
-    if (!el) return
-    try {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-    } catch {
-      el.scrollTop = el.scrollHeight
-    }
+    const frame = window.requestAnimationFrame(() => {
+      const el = scrollContainerRef.current
+      if (!el) return
+      try {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      } catch {
+        el.scrollTop = el.scrollHeight
+      }
+    })
+    return () => window.cancelAnimationFrame(frame)
   }, [messages, autoScrollEnabled])
 
   const addMessages = (newMsgs: CouncilMessage[]) => {
@@ -6225,7 +6266,7 @@ function Home() {
             addSystemMessage(FULL_TEAM_UNSATISFIED_MESSAGE)
             void postLiveCouncilMessage({ role: 'system', content: FULL_TEAM_UNSATISFIED_MESSAGE, family: 'SYSTEM' })
             decreePacketFlushCompleteRef.current = true
-            setCouncilPacketRender(
+            applyCouncilPacketRender(
               buildCouncilRenderPacket({
                 command: cmd,
                 sessionState: 'CLOSED',
@@ -6256,6 +6297,7 @@ function Home() {
         postLiveCouncilMessage(input, { applyAttendanceLateGatherSkip: attendanceWave })
 
       let providerRuntimeStates: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
+      let providerRuntimeDetails: CouncilProviderRuntimeDetails | undefined
       let attendancePreflightMap: Partial<Record<CouncilOrchestrationFamily, AttendancePreflightStatus>> = {}
 
       if (attendanceWave) {
@@ -6267,9 +6309,15 @@ function Home() {
         providerRuntimeStates = Object.fromEntries(
           directedOrder.map(f => [f, attendancePreflightToProviderRuntime(attendancePreflightMap[f])]),
         ) as Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>>
+        const preflightUnavailable = directedOrder.filter(f =>
+          attendancePreflightSkipsChat(attendancePreflightMap[f]),
+        )
+        providerRuntimeDetails = preflightUnavailable.length
+          ? Object.fromEntries(preflightUnavailable.map(f => [f, 'preflight_unavailable'] as const))
+          : undefined
       }
 
-      setCouncilPacketRender(
+      applyCouncilPacketRender(
         buildCouncilRenderPacket({
           command: cmd,
           sessionState: 'OPEN',
@@ -6277,6 +6325,7 @@ function Home() {
           families: [],
           extraWarnings: modeWarnings,
           providerRuntimeStates,
+          providerRuntimeDetails,
         }),
       )
 
@@ -6600,6 +6649,7 @@ function Home() {
       providerRuntimeStates = Object.fromEntries(cells.map(c => [c.family, c.runtime])) as Partial<
         Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>
       >
+      providerRuntimeDetails = gatherCellsToProviderRuntimeDetails(cells)
 
       modeGovernor = resolveModeGovernor({
         decreeText: decree,
@@ -6628,20 +6678,9 @@ function Home() {
         councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
       }
 
-      setCouncilPacketRender(
-        buildCouncilRenderPacket({
-          command: activeCouncilCommandRef.current,
-          sessionState: 'OPEN',
-          packetStatus: 'gathering',
-          families: staged.map(s => ({ family: s.family, content: s.textOut })),
-          extraWarnings: [...modeWarnings, ...(decreeTopicLockPreview.locked ? ['topic_scope_lock_active'] : [])],
-          providerRuntimeStates,
-        }),
-      )
-
       if (controller.signal.aborted || councilPausedRef.current) {
         decreePacketFlushCompleteRef.current = true
-        setCouncilPacketRender(
+        applyCouncilPacketRender(
           buildCouncilRenderPacket({
             command: activeCouncilCommandRef.current,
             sessionState: 'CLOSED',
@@ -6649,6 +6688,7 @@ function Home() {
             families: [],
             extraWarnings: [...modeWarnings, 'packet_cancelled_mid_gather'],
             providerRuntimeStates,
+            providerRuntimeDetails,
           }),
         )
         return
@@ -6700,7 +6740,7 @@ function Home() {
       }
 
       if (staged.length > 0 || attendanceWave) {
-        setCouncilPacketRender(
+        applyCouncilPacketRender(
           buildCouncilRenderPacket({
             command: activeCouncilCommandRef.current,
             sessionState: 'FINALIZING',
@@ -6708,6 +6748,7 @@ function Home() {
             families: staged.map(s => ({ family: s.family, content: s.textOut })),
             extraWarnings: [...modeWarnings, 'packet_finalizing'],
             providerRuntimeStates,
+            providerRuntimeDetails,
           }),
         )
         const syncMs = resolveCouncilPacketSyncMs({
@@ -6721,7 +6762,7 @@ function Home() {
 
         if (controller.signal.aborted || councilPausedRef.current) {
           decreePacketFlushCompleteRef.current = true
-          setCouncilPacketRender(
+          applyCouncilPacketRender(
             buildCouncilRenderPacket({
               command: activeCouncilCommandRef.current,
               sessionState: 'CLOSED',
@@ -6729,6 +6770,7 @@ function Home() {
               families: [],
               extraWarnings: [...modeWarnings, 'packet_cancelled_before_release'],
               providerRuntimeStates,
+              providerRuntimeDetails,
             }),
           )
           return
@@ -6772,6 +6814,7 @@ function Home() {
           providerRuntimeStates = Object.fromEntries(cells.map(c => [c.family, c.runtime])) as Partial<
             Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>
           >
+          providerRuntimeDetails = gatherCellsToProviderRuntimeDetails(cells)
 
           modeGovernor = resolveModeGovernor({
             decreeText: decree,
@@ -6827,7 +6870,7 @@ function Home() {
             }
           })
 
-        setCouncilPacketRender(
+        applyCouncilPacketRender(
           buildCouncilRenderPacket({
             command: activeCouncilCommandRef.current,
             sessionState: 'CLOSED',
@@ -6838,11 +6881,12 @@ function Home() {
               ...(topicLock.locked ? ['topic_scope_lock_active'] : []),
             ],
             providerRuntimeStates,
+            providerRuntimeDetails,
           }),
         )
       } else {
         decreePacketFlushCompleteRef.current = true
-        setCouncilPacketRender(
+        applyCouncilPacketRender(
           buildCouncilRenderPacket({
             command: activeCouncilCommandRef.current,
             sessionState: 'CLOSED',
@@ -6850,6 +6894,7 @@ function Home() {
             families: [],
             extraWarnings: modeWarnings,
             providerRuntimeStates,
+            providerRuntimeDetails,
           }),
         )
       }
@@ -7290,11 +7335,33 @@ function Home() {
     error: { color: '#EF4444', dot: '#EF4444', shadow: '0 0 8px rgba(239,68,68,0.8)' },
   }
   const coreProviderStates = [providerHealth.providers.chatgpt, providerHealth.providers.claude, providerHealth.providers.grok]
-  const chatHealthLabel = loading
-    ? 'Working'
-    : council.councilState === 'provider_error'
-      ? 'Error'
-      : 'Ready'
+  const currentPacketProviderIssue = useMemo(
+    () => packetHasActionableProviderIssues(
+      councilPacketRender?.providerRuntimeStates,
+      councilPacketRender?.providerRuntimeDetails,
+    ),
+    [councilPacketRender],
+  )
+  const chatHealthLabel = useMemo(() => {
+    if (loading) return 'Working'
+    if (currentPacketProviderIssue) return 'Error'
+    if (council.councilState === 'provider_error') return 'Error'
+    return 'Ready'
+  }, [loading, currentPacketProviderIssue, council.councilState])
+  const councilContinueStatusLine = useMemo(() => {
+    if (currentPacketProviderIssue) return 'Provider issue — see family status badges.'
+    if (council.councilState === 'paused') return 'Paused'
+    if (council.councilState === 'idle') return 'Idle'
+    if (council.councilState === 'waiting_for_rael') return 'Waiting for Ra’el'
+    if (council.councilState === 'researching') return 'Researching'
+    if (council.councilState === 'active' && council.isAwaitingResponses) return 'Families Responding'
+    if (council.councilState === 'active') return 'Council Active'
+    return council.councilState
+  }, [
+    currentPacketProviderIssue,
+    council.councilState,
+    council.isAwaitingResponses,
+  ])
   const providerHealthLabel = coreProviderStates.some(status => status === 'online' || status === 'standby')
     ? 'Ready'
     : 'Degraded'
@@ -7474,7 +7541,7 @@ function Home() {
             }}>
             Deep discussion: {council.deepDiscussionMode ? 'ON' : 'OFF'}
           </button>
-          {council.councilState === 'provider_error' && (
+          {(currentPacketProviderIssue || council.councilState === 'provider_error') && (
             <button type="button" onClick={retryProvider}
               className="text-xs px-3 py-1 rounded tracking-widest"
               style={{ background: '#F97316', color: '#000', fontWeight: 'bold' }}>
@@ -7574,9 +7641,7 @@ function Home() {
           onScroll={handleScroll}
           className="max-h-[58vh] min-h-[22rem] overflow-y-auto px-6 py-2"
         >
-          {messages.map(msg => (
-            <MessageBubble key={msg.id} msg={msg} diagnosticsOpen={false} />
-          ))}
+          <CouncilMessageRows messages={messages} />
 
           {expansionPrompt && (
             <ExpansionPermissionPrompt
@@ -7606,18 +7671,7 @@ function Home() {
             <div className="flex flex-wrap items-center gap-3 ml-11 mb-4 p-3 rounded"
               style={{ background: 'rgba(255,215,0,0.05)', border: '1px solid #3a2e00' }}>
               <span className="text-xs tracking-widest" style={{ color: '#888' }}>
-                {(() => {
-                  if (council.councilState === 'provider_error') {
-                    return 'Provider issue — see family status badges.'
-                  }
-                  if (council.councilState === 'paused') return 'Paused'
-                  if (council.councilState === 'idle') return 'Idle'
-                  if (council.councilState === 'waiting_for_rael') return 'Waiting for Ra’el'
-                  if (council.councilState === 'researching') return 'Researching'
-                  if (council.councilState === 'active' && council.isAwaitingResponses) return 'Families Responding'
-                  if (council.councilState === 'active') return 'Council Active'
-                  return council.councilState
-                })()}
+                {councilContinueStatusLine}
               </span>
               <button type="button" onClick={handleSummarize}
                 className="text-xs px-3 py-1 rounded tracking-widest"

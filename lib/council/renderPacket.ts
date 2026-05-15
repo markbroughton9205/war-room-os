@@ -7,6 +7,8 @@ export type CouncilPacketStatus = 'idle' | 'gathering' | 'finalizing' | 'release
 
 export type CouncilProviderRuntimeStates = Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>>
 
+export type CouncilProviderRuntimeDetails = Partial<Record<CouncilOrchestrationFamily, string>>
+
 export type CouncilRenderPacketFamily = {
   family: CouncilOrchestrationFamily
   content: string
@@ -23,6 +25,8 @@ export type CouncilRenderPacket = {
   participatingFamilies: CouncilOrchestrationFamily[]
   /** Per-family outcome for the last gather wave (badges / footer). */
   providerRuntimeStates?: CouncilProviderRuntimeStates
+  /** Disambiguates SKIPPED (e.g. preflight_unavailable) for provider-issue UI. */
+  providerRuntimeDetails?: CouncilProviderRuntimeDetails
 }
 
 export function buildCouncilRenderPacket(args: {
@@ -32,6 +36,7 @@ export function buildCouncilRenderPacket(args: {
   families: CouncilRenderPacketFamily[]
   extraWarnings?: string[]
   providerRuntimeStates?: CouncilProviderRuntimeStates
+  providerRuntimeDetails?: CouncilProviderRuntimeDetails
 }): CouncilRenderPacket {
   const participatingFamilies = args.families.map(f => f.family)
   const warnings = [
@@ -46,5 +51,6 @@ export function buildCouncilRenderPacket(args: {
     warnings: [...new Set(warnings)],
     participatingFamilies,
     ...(args.providerRuntimeStates ? { providerRuntimeStates: args.providerRuntimeStates } : {}),
+    ...(args.providerRuntimeDetails ? { providerRuntimeDetails: args.providerRuntimeDetails } : {}),
   }
 }
