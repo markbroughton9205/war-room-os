@@ -12,6 +12,7 @@
  * **Throne send:** `sendLiveCouncilThroneMessage` sequences expansion gate → caller-provided append + council round.
  */
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 
 export type CouncilChatRequestBody = {
   message: string
@@ -22,11 +23,16 @@ export type CouncilChatRequestBody = {
   councilSingleFamily: CouncilOrchestrationFamily
   orchestrationAugment: string
   conversationId?: string
+  /** Structured discipline from latest Ra’el directive (client-authored). */
+  councilCommand?: CouncilCommand
+  /** Latest Ra’el decree text — used for silent-mode checks when `message` is a synthetic continue line. */
+  raelDirectiveText?: string
 }
 
 export type CouncilChatJson = {
   councilSingleResponse?: string
   councilSingleFamily?: CouncilOrchestrationFamily
+  councilGovernorSkipped?: boolean
   error?: string
   message?: string
 }

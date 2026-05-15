@@ -4,6 +4,8 @@ import { callXAIChat } from '@/lib/ai/providers/xai'
 import { councilSingleFamilyToMemoryPartition, tryPersistMemoryProposalFromModelOutput } from '@/lib/memory/ingestFromModel'
 import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { coerceCouncilCommand } from '@/lib/council/councilCommandTypes'
+import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
@@ -134,6 +136,12 @@ export async function POST(req: Request) {
       ? body.conversationId.trim()
       : null
 
+  const councilCommand = coerceCouncilCommand(body.councilCommand)
+  const raelDirectiveText =
+    typeof body.raelDirectiveText === 'string' && body.raelDirectiveText.trim()
+      ? body.raelDirectiveText.trim()
+      : message
+
   const thread = buildThread(threadHistory)
 
   const expandedAnalysis = mode === 'expanded'
@@ -248,11 +256,45 @@ export async function POST(req: Request) {
         throw new Error(`${councilSingleFamily} returned empty body`)
       }
 
+      const governed = applyGovernor(responseText, councilSingleFamily, councilCommand, { raelDirectiveText })
+      if (governed.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
+        await auditCouncil({
+          success: true,
+          flow: 'continue_single',
+          councilSingleFamily,
+          expanded: expandedAnalysis,
+          councilGovernorSkipped: true,
+          councilDisciplineMode: councilCommand.mode,
+          ...(geminiDegradedReason !== null
+            ? { geminiDegraded: true, geminiDegradedReason }
+            : {}),
+          models:
+            councilSingleFamily === 'grok'
+              ? { primary: 'xai' }
+              : councilSingleFamily === 'claude' || councilSingleFamily === 'red_team'
+                ? { primary: 'anthropic' }
+                : councilSingleFamily === 'gemini'
+                  ? { primary: 'google_gemini' }
+                  : { primary: 'openai' },
+        })
+        return NextResponse.json({
+          councilSingleResponse: '',
+          councilSingleFamily,
+          showContinue: true,
+          councilGovernorSkipped: true,
+        })
+      }
+      responseText = governed.text
+      if (!responseText.trim()) {
+        throw new Error(`${councilSingleFamily} returned empty body after governor`)
+      }
+
       await auditCouncil({
         success: true,
         flow: 'continue_single',
         councilSingleFamily,
         expanded: expandedAnalysis,
+        councilDisciplineMode: councilCommand.mode,
         ...(geminiDegradedReason !== null
           ? { geminiDegraded: true, geminiDegradedReason }
           : {}),

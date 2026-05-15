@@ -64,6 +64,14 @@ import {
 } from '@/lib/council/familyRoster'
 import { extractProposedCouncilActions } from '@/lib/council/extractCouncilActions'
 import { classifyRaElMessage, type ClassifyRaElMessageResult } from '@/lib/council/conversationIntent'
+import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
+import { DEFAULT_COUNCIL_COMMAND, type CouncilCommand } from '@/lib/council/councilCommandTypes'
+import {
+  ALL_ORCHESTRATION_FAMILIES,
+  filterOrchestrationOrderByCommand,
+  parseCouncilCommand,
+} from '@/lib/council/commandParser'
+import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
 import {
   GEMINI_REPAIR_ENQUEUE_METADATA_KEY,
   shouldInjectRedTeamEarly,
@@ -4136,6 +4144,9 @@ function Home() {
     includeBaby: false,
     includeBridgeArchitect: false,
   })
+  const activeCouncilCommandRef = useRef<CouncilCommand>({ ...DEFAULT_COUNCIL_COMMAND })
+  const lastRaelDirectiveContentRef = useRef('')
+  const [councilUiCommand, setCouncilUiCommand] = useState<CouncilCommand>(() => ({ ...DEFAULT_COUNCIL_COMMAND }))
   const [familyDuty, setFamilyDuty] = useState<Record<string, CouncilDutyState>>(() =>
     Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])),
   )
@@ -5623,7 +5634,18 @@ function Home() {
       lastCouncilFamilyError: lastCouncilFamilyErrorRef.current,
     }) && !orchRedTeamEarlyLatchRef.current
     const geminiOk = geminiFunctionalRef.current && !skipGeminiForSessionRef.current
-    const family = pickNextOrchestrationFamily({
+    const cmd = activeCouncilCommandRef.current
+    const allowed = filterOrchestrationOrderByCommand(
+      ALL_ORCHESTRATION_FAMILIES,
+      cmd,
+      lastRaelDirectiveContentRef.current,
+    )
+    if (!allowed.length) {
+      autonomousOrchInFlightRef.current = false
+      councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
+      return
+    }
+    let family = pickNextOrchestrationFamily({
       autonomousRoundIndex: snap.autonomousRoundIndex,
       recentSpeakers: snap.recentOrchestrationSpeakers,
       deepDiscussionMode: snap.deepDiscussionMode,
@@ -5631,6 +5653,9 @@ function Home() {
       orchestrationContext: buildOrchestrationContextFromMessages(messagesRef.current),
       forceRedTeamEarly: orchRedEarly,
     })
+    if (!allowed.includes(family)) {
+      family = allowed[snap.autonomousRoundIndex % allowed.length]!
+    }
     if (family === 'gemini' && skipGeminiForSessionRef.current) {
       autonomousOrchInFlightRef.current = false
       councilDispatch({ type: 'BUMP_AUTONOMOUS_ROUND' })
@@ -5669,7 +5694,14 @@ function Home() {
         if (r.ok) {
           const d = await r.json() as { response?: string }
           const t = typeof d.response === 'string' ? d.response.trim() : ''
-          if (t) textOut = t
+          if (t) {
+            const gov = applyGovernor(t, family, activeCouncilCommandRef.current, {
+              raelDirectiveText: lastRaelDirectiveContentRef.current,
+            })
+            if (!gov.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
+              textOut = gov.text
+            }
+          }
         }
       } catch {
         textOut = null
@@ -5689,6 +5721,8 @@ function Home() {
             toneMode: 'casual',
             councilSingleFamily: family,
             orchestrationAugment: augment,
+            councilCommand: activeCouncilCommandRef.current,
+            raelDirectiveText: lastRaelDirectiveContentRef.current,
             ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
           },
         )
@@ -5716,6 +5750,12 @@ function Home() {
           addSystemMessage(errLine)
           void postLiveCouncilMessage({ role: 'system', content: errLine })
           councilDispatch({ type: 'SET_PROVIDER_ERROR', payload: errLine })
+          shouldScheduleNext = true
+          return
+        }
+        if (data.councilGovernorSkipped) {
+          lastCouncilFamilyErrorRef.current = null
+          councilDispatch({ type: 'BUMP_AUTONOMOUS_ROUND' })
           shouldScheduleNext = true
           return
         }
@@ -5919,8 +5959,11 @@ function Home() {
       }
       if (skipGeminiForSessionRef.current) order = order.filter(f => f !== 'gemini')
 
+      const cmd = activeCouncilCommandRef.current
+      const directedOrder = filterOrchestrationOrderByCommand(order, cmd, decree)
+
       let anySuccess = false
-      for (const family of order) {
+      for (const family of directedOrder) {
         if (myRound !== decreeRoundGenRef.current) break
         if (controller.signal.aborted || councilPausedRef.current) break
 
@@ -5959,7 +6002,12 @@ function Home() {
             if (!r.ok) return null
             const d = await r.json() as { response?: string }
             const t = typeof d.response === 'string' ? d.response.trim() : ''
-            return t || null
+            if (!t) return null
+            const gov = applyGovernor(t, family, activeCouncilCommandRef.current, {
+              raelDirectiveText: decree,
+            })
+            if (gov.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) return null
+            return gov.text || null
           } catch {
             return null
           } finally {
@@ -5997,6 +6045,8 @@ function Home() {
                   toneMode,
                   councilSingleFamily: family,
                   orchestrationAugment: augment,
+                  councilCommand: activeCouncilCommandRef.current,
+                  raelDirectiveText: decree,
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
                 },
               )
@@ -6024,6 +6074,11 @@ function Home() {
                   }
                 }
               } else {
+                if (chatData.councilGovernorSkipped) {
+                  textOut = null
+                  setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
+                  continue
+                }
                 textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
                 if (!textOut) {
                   const err = `[Error] ${label}: empty response`
@@ -6165,6 +6220,16 @@ function Home() {
   const sendRaelDecree = async (decree: string, mode?: CouncilMode) => {
     setExpansionPrompt(null)
 
+    /*
+     * Ra’el directive source: Live Council composer (`sendRaelDecree` → `submitDecree`).
+     * `isRaelCouncilMessage` treats `messageType === 'decree'` or familyName containing RA'EL.
+     * If external channels are ambiguous, prefer user text containing "Ra'el" — not wired here.
+     */
+    const parsedCmd = parseCouncilCommand(decree)
+    activeCouncilCommandRef.current = parsedCmd
+    setCouncilUiCommand(parsedCmd)
+    lastRaelDirectiveContentRef.current = decree
+
     const intent = classifyRaElMessage(decree)
     lastDecreeIntentRef.current = intent
 
@@ -6298,6 +6363,9 @@ function Home() {
     geminiUnavailableUserMessagedRef.current = false
     orchRedTeamEarlyLatchRef.current = false
     lastCouncilFamilyErrorRef.current = null
+    activeCouncilCommandRef.current = { ...DEFAULT_COUNCIL_COMMAND }
+    lastRaelDirectiveContentRef.current = ''
+    setCouncilUiCommand({ ...DEFAULT_COUNCIL_COMMAND })
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY)
     }
@@ -6314,6 +6382,9 @@ function Home() {
     geminiUnavailableUserMessagedRef.current = false
     orchRedTeamEarlyLatchRef.current = false
     lastCouncilFamilyErrorRef.current = null
+    activeCouncilCommandRef.current = { ...DEFAULT_COUNCIL_COMMAND }
+    lastRaelDirectiveContentRef.current = ''
+    setCouncilUiCommand({ ...DEFAULT_COUNCIL_COMMAND })
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY)
     }
@@ -6708,6 +6779,7 @@ function Home() {
             <span className="rounded border border-white/10 px-2 py-1">Persistence: {persistenceHealthLabel}</span>
             <span className="rounded border border-white/10 px-2 py-1">Internet: {internetHealthLabel}</span>
           </div>
+          <CouncilCommandBadges cmd={councilUiCommand} />
         </div>
         <div
           data-testid="live-council-messages"
