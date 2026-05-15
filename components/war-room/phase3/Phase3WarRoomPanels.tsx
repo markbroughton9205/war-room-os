@@ -10,6 +10,7 @@ import { SystemResourcesPanel } from '@/components/war-room/phase3/SystemResourc
 import { WorkerHealthPanel } from '@/components/war-room/phase3/WorkerHealthPanel'
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
+import { formatActionQueuePersistFailureMessage, isActionQueuePostSucceeded, type ActionQueuePostFailureBody } from '@/lib/war-room/actionQueueClient'
 
 export type Phase3HomeBundle = 'operations' | 'diagnostics'
 
@@ -383,7 +384,20 @@ export function Phase3WarRoomPanels({
       }),
     })
     setPersistence(readPersistence(res))
-    if (res.ok) void loadActions()
+    let body: ActionQueuePostFailureBody = {}
+    try {
+      body = (await res.json()) as ActionQueuePostFailureBody
+    } catch {
+      body = {}
+    }
+    if (isActionQueuePostSucceeded(res, body)) {
+      void loadActions()
+      return
+    }
+    setActionError(formatActionQueuePersistFailureMessage({
+      ...body,
+      error: body.error ?? 'Approval task could not be persisted.',
+    }))
   }
 
   const runSearch = async () => {

@@ -69,6 +69,7 @@ import {
   shouldInjectRedTeamEarly,
   type CouncilMessageLike,
 } from '@/lib/council/redTeamTriggers'
+import { formatActionQueuePersistFailureMessage, isActionQueuePostSucceeded, type ActionQueuePostFailureBody } from '@/lib/war-room/actionQueueClient'
 import { buildPlatformBrief } from '@/lib/council/platformBrief'
 import { createMessageId } from '@/lib/council/messageIds'
 import { cloudEngineReadinessLabel, cloudEngineStripStatus, internetToolReadinessParts } from '@/lib/warRoom/providerReadiness'
@@ -4526,7 +4527,13 @@ function Home() {
           conversationId: liveCouncilConvId,
         }),
       })
-      if (!res.ok) return
+      let repairQueueJson: { persisted?: boolean; queued?: boolean } = {}
+      try {
+        repairQueueJson = (await res.json()) as { persisted?: boolean; queued?: boolean }
+      } catch {
+        repairQueueJson = {}
+      }
+      if (!isActionQueuePostSucceeded(res, repairQueueJson)) return
       if (typeof sessionStorage !== 'undefined') {
         sessionStorage.setItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY, '1')
       }
@@ -5827,15 +5834,31 @@ function Home() {
       const lines = extractProposedCouncilActions(text)
       if (!lines.length || !liveCouncilConvId || !persistenceAvailable) return
       for (const line of lines) {
-        await fetch('/api/actions/queue', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'research',
-            payload: { proposed: line, sourceFamily: rosterLabel(family), decreePreview: decree.slice(0, 280) },
-            conversationId: liveCouncilConvId,
-          }),
-        }).catch(() => undefined)
+        try {
+          const res = await fetch('/api/actions/queue', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'research',
+              payload: { proposed: line, sourceFamily: rosterLabel(family), decreePreview: decree.slice(0, 280) },
+              conversationId: liveCouncilConvId,
+            }),
+          })
+          let j: ActionQueuePostFailureBody = {}
+          try {
+            j = (await res.json()) as ActionQueuePostFailureBody
+          } catch {
+            j = {}
+          }
+          if (isActionQueuePostSucceeded(res, j)) continue
+          const lineMsg = formatActionQueuePersistFailureMessage(j)
+          addSystemMessage(lineMsg)
+          void postLiveCouncilMessage({ role: 'system', content: lineMsg, family: 'SYSTEM' })
+        } catch {
+          const fail = 'Approval task could not be persisted (network error).'
+          addSystemMessage(fail)
+          void postLiveCouncilMessage({ role: 'system', content: fail, family: 'SYSTEM' })
+        }
       }
       void refreshQueueActions()
     }

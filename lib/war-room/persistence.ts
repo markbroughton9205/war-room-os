@@ -1,15 +1,19 @@
 import { NextResponse } from 'next/server'
-import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 
-export type WarRoomSupabase = ReturnType<typeof createSupabaseServerClient>
+export type WarRoomSupabase = ReturnType<typeof createSupabaseAdminClient>
 
-export type WarRoomSupabaseResult = { ok: true; client: WarRoomSupabase } | { ok: false }
+export type WarRoomSupabaseResult =
+  | { ok: true; client: WarRoomSupabase }
+  | { ok: false; configError: string }
 
 export function tryWarRoomSupabase(): WarRoomSupabaseResult {
   try {
-    return { ok: true, client: createSupabaseServerClient() }
-  } catch {
-    return { ok: false }
+    return { ok: true, client: createSupabaseAdminClient() }
+  } catch (e) {
+    const configError =
+      e instanceof Error ? e.message : 'Supabase admin client could not be created (check server env).'
+    return { ok: false, configError }
   }
 }
 
