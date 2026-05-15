@@ -48,6 +48,92 @@ export type CouncilSingleFamily =
   | 'kimi'
   | 'bridge_architect'
 
+type ProviderResultStatus = 'OK' | 'FAILED' | 'TIMED_OUT' | 'UNAVAILABLE'
+
+type ProviderResult = {
+  family: string
+  content: string
+  status: ProviderResultStatus
+  messageType?: string
+  error?: string
+}
+
+const PROVIDER_TIMEOUT_MS = 10_000
+
+function displayFamilyName(family: CouncilSingleFamily): string {
+  if (family === 'chatgpt') return 'ChatGPT'
+  if (family === 'claude') return 'Claude'
+  if (family === 'grok') return 'Grok'
+  if (family === 'gemini') return 'Gemini'
+  if (family === 'kimi') return 'Kimi'
+  if (family === 'red_team') return 'RED TEAM'
+  if (family === 'baby') return 'Baby AI'
+  if (family === 'bridge_architect') return 'Bridge Architect'
+  return family
+}
+
+function familyFromDirectValue(value: string): CouncilSingleFamily | null {
+  if (value === 'Claude') return 'claude'
+  if (value === 'ChatGPT') return 'chatgpt'
+  if (value === 'Grok') return 'grok'
+  if (value === 'Gemini') return 'gemini'
+  if (value === 'Kimi') return 'kimi'
+  if (value === 'RedTeam') return 'red_team'
+  return null
+}
+
+function withTimeout(
+  family: string,
+  task: Promise<ProviderResult>,
+  timeoutMs = PROVIDER_TIMEOUT_MS,
+): Promise<ProviderResult> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      resolve({ family, content: '', status: 'TIMED_OUT' })
+    }, timeoutMs)
+    task
+      .then(result => {
+        clearTimeout(timer)
+        resolve(result)
+      })
+      .catch(error => {
+        clearTimeout(timer)
+        resolve({
+          family,
+          content: '',
+          status: 'FAILED',
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+  })
+}
+
+function validateProviderResults(results: ProviderResult[]): ProviderResult[] {
+  const violations: string[] = []
+  for (const result of results) {
+    const content = result.content.trim()
+    if (content.length < 5) {
+      violations.push(`⚠ ${result.family}: empty or clipped response under 5 characters`)
+    }
+    if (/\bra['’]?el\s*:/i.test(content) || /\brael\s*:/i.test(content)) {
+      violations.push(`⚠ ${result.family}: possible fabricated Ra'el dialogue marker`)
+    }
+    if (result.status === 'TIMED_OUT') {
+      violations.push(`⚠ ${result.family}: provider timed out after ${PROVIDER_TIMEOUT_MS}ms`)
+    }
+  }
+  if (violations.length === 0) return results
+  return [
+    ...results,
+    {
+      family: 'RED TEAM',
+      content: violations.join('\n'),
+      status: 'OK',
+      messageType: 'integrity_flag',
+    },
+  ]
+}
+
 async function callChatGPT(
   prompt: string,
   system: string,
@@ -174,6 +260,15 @@ function coerceProviderRuntimeStates(
 }
 
 export async function POST(req: Request) {
+  const DIRECT_KEYS = {
+    'claude': 'Claude',
+    'chatgpt': 'ChatGPT',
+    'grok': 'Grok',
+    'gemini': 'Gemini',
+    'kimi': 'Kimi',
+    'red team': 'RedTeam',
+  } as const
+
   let body: Record<string, unknown>
   try {
     body = await req.json() as Record<string, unknown>
@@ -183,6 +278,11 @@ export async function POST(req: Request) {
 
   const message = typeof body.message === 'string' ? body.message : ''
   if (!message) return NextResponse.json({ error: 'No message' }, { status: 400 })
+
+  const directKey = message.trim().toLowerCase() as keyof typeof DIRECT_KEYS
+  const directFamily = Object.prototype.hasOwnProperty.call(DIRECT_KEYS, directKey)
+    ? familyFromDirectValue(DIRECT_KEYS[directKey])
+    : null
 
   const profile = typeof body.profile === 'string' ? body.profile : ''
   const threadHistory = body.threadHistory
@@ -241,6 +341,8 @@ export async function POST(req: Request) {
   const claudeSystem = `You are Claude Family in Ra'el's War Room. Role: Architecture, Truth, Precision. Personality: honest, direct, dry humor. ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Ra'el profile when relevant: ${profile}`
   const grokSystem = `You are Grok Family in Ra'el's War Room. Role: realtime radar, signal detection, X/web intelligence framing, current-event monitoring, and sharp contradiction spotting. Personality: fast, candid, observant, a little mischievous but grounded. ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Important: if live tools are not provided in the prompt, do not pretend you searched X or the web. Ra'el profile when relevant: ${profile}`
   const geminiSystem = `You are Gemini Family in Ra'el's War Room. Role: reasoning, synthesis, multimodal interpretation when the thread actually includes images/PDFs or pasted excerpts, research-assist framing, and large-context analysis. Personality: structured, curious, precise. ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not claim live web, image/PDF ingestion, or tools you were not given in the prompt. Ra'el profile when relevant: ${profile}`
+  const redTeamSystem = `You are Red Team in Ra'el's War Room — internal adversary and risk hunter. Hunt contradictions, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Ra'el profile when relevant: ${profile}`
+  const babySystem = `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Ra'el profile when relevant: ${profile}`
 
   const augmentBlock = orchestrationAugment.trim()
     ? `\n\nCouncil orchestration directives:\n${orchestrationAugment.trim()}`
@@ -269,19 +371,200 @@ export async function POST(req: Request) {
     councilFam: CouncilSingleFamily,
     status: 'timed_out' | 'failed',
     detail: string,
-  ) =>
-    NextResponse.json(
+  ) => {
+    const resultStatus: ProviderResultStatus = status === 'timed_out' ? 'TIMED_OUT' : 'FAILED'
+    const results = validateProviderResults([
+      {
+        family: displayFamilyName(councilFam),
+        content: '',
+        status: resultStatus,
+        error: detail,
+      },
+    ])
+    return NextResponse.json(
       {
         councilSingleResponse: '',
         councilSingleFamily: councilFam,
+        results,
         showContinue: true,
         councilProviderHttpStatus: status,
         councilProviderHttpDetail: detail,
       },
       { status: 200 },
     )
+  }
+
+  const callCouncilProvider = async (
+    family: CouncilSingleFamily,
+    userPrompt: string,
+  ): Promise<ProviderResult> => {
+    const familyName = displayFamilyName(family)
+    if (family === 'kimi' || family === 'bridge_architect') {
+      return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE' }
+    }
+    if (family === 'chatgpt' && !process.env.OPENAI_API_KEY) {
+      return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE' }
+    }
+    if ((family === 'claude' || family === 'red_team') && !process.env.ANTHROPIC_API_KEY) {
+      return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE' }
+    }
+    if (family === 'grok' && !process.env.XAI_API_KEY) {
+      return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE' }
+    }
+    if (family === 'gemini' && !process.env.GEMINI_API_KEY) {
+      return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE' }
+    }
+
+    try {
+      if (family === 'chatgpt') {
+        const ac = new AbortController()
+        const tid = setTimeout(() => ac.abort(), PROVIDER_TIMEOUT_MS)
+        try {
+          return { family: familyName, content: await callChatGPT(userPrompt, gptSystem, maxTokens, ac.signal), status: 'OK' }
+        } finally {
+          clearTimeout(tid)
+        }
+      }
+      if (family === 'claude') {
+        const ac = new AbortController()
+        const tid = setTimeout(() => ac.abort(), PROVIDER_TIMEOUT_MS)
+        try {
+          return { family: familyName, content: await callClaude(userPrompt, claudeSystem, maxTokens, ac.signal), status: 'OK' }
+        } finally {
+          clearTimeout(tid)
+        }
+      }
+      if (family === 'grok') {
+        return { family: familyName, content: await callGrok(userPrompt, grokSystem, maxTokens, PROVIDER_TIMEOUT_MS), status: 'OK' }
+      }
+      if (family === 'gemini') {
+        const geminiResult = await completeGeminiCouncilMessage({
+          userPrompt,
+          systemPrompt: geminiSystem,
+          maxOutputTokens: maxTokens,
+          timeoutMs: PROVIDER_TIMEOUT_MS,
+        })
+        if (!geminiResult.ok) {
+          return {
+            family: familyName,
+            content: geminiResult.degraded ? geminiResult.note : '',
+            status: geminiResult.degraded ? 'OK' : 'FAILED',
+            error: geminiResult.degraded ? geminiResult.reason : geminiResult.error,
+          }
+        }
+        return { family: familyName, content: geminiResult.text.trim(), status: 'OK' }
+      }
+      if (family === 'red_team') {
+        const ac = new AbortController()
+        const tid = setTimeout(() => ac.abort(), PROVIDER_TIMEOUT_MS)
+        try {
+          return { family: familyName, content: await callClaude(userPrompt, redTeamSystem, maxTokens, ac.signal), status: 'OK' }
+        } finally {
+          clearTimeout(tid)
+        }
+      }
+      if (family === 'baby') {
+        const ac = new AbortController()
+        const tid = setTimeout(() => ac.abort(), PROVIDER_TIMEOUT_MS)
+        try {
+          return { family: familyName, content: await callChatGPT(userPrompt, babySystem, maxTokens, ac.signal), status: 'OK' }
+        } finally {
+          clearTimeout(tid)
+        }
+      }
+      return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE' }
+    } catch (error) {
+      return {
+        family: familyName,
+        content: '',
+        status: 'FAILED',
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
 
   try {
+    const baseUserPrompt = buildCouncilUserPrompt({
+      raelDirectiveText,
+      threadBlock: thread,
+      augmentBlock,
+      intentLabel: intentState.intent,
+      modeGovernorBlock,
+    })
+
+    if (directFamily) {
+      const result = await withTimeout(
+        displayFamilyName(directFamily),
+        callCouncilProvider(directFamily, baseUserPrompt),
+        PROVIDER_TIMEOUT_MS,
+      )
+      const normalized = result.status === 'OK'
+        ? result
+        : { ...result, content: `${displayFamilyName(directFamily)} Family is currently unavailable.` }
+      await safeAudit({
+        success: normalized.status === 'OK',
+        flow: 'direct_invocation',
+        family: normalized.family,
+        status: normalized.status,
+      })
+      return NextResponse.json({
+        result: normalized,
+        results: [normalized],
+        hardStop: true,
+        mode: 'direct_invocation',
+      })
+    }
+
+    if (!councilSingleFamily) {
+      const activeFamilies: CouncilSingleFamily[] = [
+        ...(process.env.OPENAI_API_KEY ? (['chatgpt'] as const) : []),
+        ...(process.env.ANTHROPIC_API_KEY ? (['claude'] as const) : []),
+        ...(process.env.XAI_API_KEY ? (['grok'] as const) : []),
+        ...(process.env.GEMINI_API_KEY ? (['gemini'] as const) : []),
+      ]
+
+      if (activeFamilies.length === 0) {
+        const result: ProviderResult = {
+          family: 'SYSTEM',
+          content: 'No council providers are currently available.',
+          status: 'UNAVAILABLE',
+        }
+        await safeAudit({
+          success: false,
+          flow: 'parallel_providers',
+          reason: 'no_active_providers',
+        })
+        return NextResponse.json({
+          results: [result],
+          hardStop: false,
+          mode: 'parallel_providers',
+        })
+      }
+
+      const providerResults = await Promise.all(
+        activeFamilies.map(family =>
+          withTimeout(
+            displayFamilyName(family),
+            callCouncilProvider(family, baseUserPrompt),
+            PROVIDER_TIMEOUT_MS,
+          ),
+        ),
+      )
+      const results = validateProviderResults(providerResults)
+      await safeAudit({
+        success: true,
+        flow: 'parallel_providers',
+        families: activeFamilies,
+        resultCount: results.length,
+      })
+      return NextResponse.json({
+        results,
+        hardStop: false,
+        mode: 'parallel_providers',
+        showContinue: true,
+      })
+    }
+
     if (mode === 'continue' && councilSingleFamily) {
       if (councilSingleFamily === 'kimi' || councilSingleFamily === 'bridge_architect') {
         await safeAudit({
@@ -321,13 +604,7 @@ export async function POST(req: Request) {
         }
       }
 
-      const userPrompt = buildCouncilUserPrompt({
-        raelDirectiveText,
-        threadBlock: thread,
-        augmentBlock,
-        intentLabel: intentState.intent,
-        modeGovernorBlock,
-      })
+      const userPrompt = baseUserPrompt
 
       let responseText = ''
       let geminiDegradedReason: string | null = null
@@ -487,6 +764,13 @@ export async function POST(req: Request) {
         return NextResponse.json({
           councilSingleResponse: '',
           councilSingleFamily,
+          results: validateProviderResults([
+            {
+              family: displayFamilyName(councilSingleFamily),
+              content: '',
+              status: 'OK',
+            },
+          ]),
           showContinue: true,
           councilGovernorSkipped: true,
         })
@@ -546,6 +830,13 @@ export async function POST(req: Request) {
       return NextResponse.json({
         councilSingleResponse: responseText,
         councilSingleFamily,
+        results: validateProviderResults([
+          {
+            family: displayFamilyName(councilSingleFamily),
+            content: responseText,
+            status: 'OK',
+          },
+        ]),
         showContinue: true,
         ...(continuationRequest ? { continuationRequest } : {}),
       })
