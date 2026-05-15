@@ -7,6 +7,8 @@ function formatRoomStatusLine(r: RoomStatus): string {
 
 function modeRulesBlock(governor: ModeGovernor): string[] {
   const lines: string[] = [
+    'Providers should think deeply, but only within the boundaries of the current decree.',
+    'Informative and strategic insight is welcome when it serves the decree. No autonomous topic changes.',
     `War Room mode: ${governor.mode}`,
     `Max sentences: ${governor.maxSentences}`,
     `Continuation allowed: ${governor.continuationAllowed ? 'yes' : 'no'}`,
@@ -23,16 +25,31 @@ function modeRulesBlock(governor: ModeGovernor): string[] {
     )
   }
 
+  if (governor.mode === 'greeting') {
+    lines.push(
+      'Greeting: short and warm (~2 sentences). Natural helpful tone is fine.',
+      'Do not steer mission, ask for today\'s objective, or drift into Panama/business unless the decree asks.',
+    )
+  }
+
   if (governor.mode === 'attendance') {
     lines.push(
-      'Attendance: one short presence line only (e.g. "Present." / "Present and operational." / Red Team: "Monitoring.").',
-      'No strategy, no multi-paragraph roll call, no emojis.',
+      'Attendance: one sentence — presence plus an optional short clause (e.g. "Present and operational." / Red Team: "Monitoring.").',
+      'No multi-paragraph roll call, diagnostics, or infrastructure narratives. No emojis.',
     )
   }
 
   if (governor.mode === 'council') {
     lines.push(
+      'Council: informative structured analysis within decree scope is encouraged.',
       'When substantive, prefer: Primary finding — … / Recommended action — … / Risk — …',
+      'Explain reasoning when useful; stay on the decree topic only.',
+    )
+  }
+
+  if (governor.mode === 'deep_analysis') {
+    lines.push(
+      'Deep analysis: long-form allowed only because the decree authorized it. Stay on decree topic.',
     )
   }
 

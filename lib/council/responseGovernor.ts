@@ -1,7 +1,6 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { familyMentionedInDirective } from '@/lib/council/commandParser'
-import { COUNCIL_ROSTER } from '@/lib/council/familyRoster'
 import { effectiveMaxCharsForFamily } from '@/lib/council/familyPermissions'
 import type { IntentKind } from '@/lib/council/intentClassifier'
 import type { ActiveScope } from '@/lib/council/intentScope'
@@ -15,7 +14,7 @@ import {
   textViolatesForbiddenScope,
 } from '@/lib/council/intentScope'
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
-import { compressForModeGovernor } from '@/lib/council/responseCompression'
+import { compressForModeGovernor, shapeAttendanceForModeGovernor } from '@/lib/council/responseCompression'
 import { repairOrFlagResponse } from '@/lib/council/responseIntegrity'
 
 const FLUFF_LINE = new RegExp(
@@ -181,11 +180,14 @@ function applyActiveScopeTail(args: {
   cmd: CouncilCommand
   intent?: IntentKind
   scope?: ActiveScope
+  modeGovernor?: ModeGovernor
   warnings: string[]
 }): string {
   let t = args.text
-  const { family, cmd, intent, scope, warnings } = args
+  const { family, cmd, intent, scope, modeGovernor, warnings } = args
   const ik = intent ?? scope?.intent
+  const informativeMode =
+    modeGovernor?.mode === 'council' || modeGovernor?.mode === 'deep_analysis'
 
   if (scope) {
     const allowStrip =
@@ -213,11 +215,10 @@ function applyActiveScopeTail(args: {
     }
   }
 
-  if (family === 'red_team' && !isVerificationHeavyContext(cmd, ik ?? 'natural')) {
-    const warmCap = ik === 'attendance' ? 220 : ik === 'greeting' ? 260 : 520
-    const cap = warmCap
-    if (t.length > cap) {
-      t = t.slice(0, cap).trim()
+  if (family === 'red_team' && !isVerificationHeavyContext(cmd, ik ?? 'natural') && !informativeMode) {
+    const warmCap = ik === 'attendance' ? 220 : ik === 'greeting' ? 320 : 520
+    if (t.length > warmCap) {
+      t = t.slice(0, warmCap).trim()
       warnings.push('council_governor_red_team_length_capped')
       scopeLog('red_team_capped_non_verification')
     }
@@ -230,15 +231,15 @@ function applyActiveScopeTail(args: {
     }
   }
 
-  if (ik === 'greeting') {
+  if (ik === 'greeting' && !informativeMode) {
     const gr = stripGreetingStrategicBoilerplate(t)
     t = gr.text
     if (gr.stripped > 0) {
       warnings.push('council_governor_greeting_stripped_boilerplate')
       scopeLog('greeting_stripped_strategic')
     }
-    if (t.length > 420) {
-      t = `${t.slice(0, 417).trim()}…`
+    if (t.length > 520) {
+      t = `${t.slice(0, 517).trim()}…`
       warnings.push('council_governor_greeting_length_capped')
     }
   }
@@ -284,16 +285,19 @@ export function applyGovernor(
     t = stripAttendanceDisplayNoise(t.replace(/\n{2,}/g, ' ').replace(/\s+/g, ' ').trim())
     const cap = Math.min(380, maxChars)
     if (t.length > cap) t = `${t.slice(0, cap - 1).trim()}…`
-    const familyLabel = COUNCIL_ROSTER.find(r => r.id === orch)?.label ?? orch
-    t = `${familyLabel} present.`
+    t = shapeAttendanceForModeGovernor(t, orch)
     t = applyActiveScopeTail({
       text: t,
       family: orch,
       cmd,
       intent,
       scope,
+      modeGovernor: context?.modeGovernor,
       warnings,
     })
+    if (context?.modeGovernor) {
+      t = compressForModeGovernor(t, context.modeGovernor, { family: orch })
+    }
     return { text: t, warnings: warnings.length ? warnings : undefined }
   }
 
@@ -303,7 +307,15 @@ export function applyGovernor(
 
   t = applyFamilySoftRules(t, family, maxChars)
 
-  t = applyActiveScopeTail({ text: t, family: orch, cmd, intent, scope, warnings })
+  t = applyActiveScopeTail({
+    text: t,
+    family: orch,
+    cmd,
+    intent,
+    scope,
+    modeGovernor: context?.modeGovernor,
+    warnings,
+  })
 
   const repaired = repairOrFlagResponse(t)
   t = repaired.text

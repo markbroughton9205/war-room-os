@@ -25,6 +25,29 @@ function truncateAtSentenceBoundary(text: string, maxSentences: number): string 
   return sentences.slice(0, maxSentences).join(' ').trim()
 }
 
+const COUNCIL_SECTION_LINE =
+  /^\s*(?:[-*•]\s+)?(?:primary\s+finding|recommended\s+action|risk)\s*[—:\-]/i
+
+/** Keep labeled council sections when sentence clamp would erase substance. */
+function truncateCouncilPreservingStructure(text: string, maxSentences: number): string {
+  const trimmed = text.trim()
+  if (!trimmed) return trimmed
+
+  const truncated = truncateAtSentenceBoundary(trimmed, maxSentences)
+  if (truncated.trim()) return truncated
+
+  const sectionLines = trimmed.split('\n').filter(l => COUNCIL_SECTION_LINE.test(l.trim()))
+  if (sectionLines.length) {
+    return sectionLines.slice(0, Math.max(1, maxSentences)).join('\n').trim()
+  }
+
+  const sentences = splitSentences(trimmed)
+  if (sentences.length) {
+    return sentences.slice(0, Math.max(1, maxSentences)).join(' ').trim()
+  }
+  return trimmed.slice(0, 480).trim()
+}
+
 function rosterLabel(family: CouncilOrchestrationFamily): string {
   return COUNCIL_ROSTER.find(r => r.id === family)?.label ?? family
 }
@@ -59,13 +82,24 @@ export function compressForModeGovernor(
   let t = (text ?? '').trim()
   if (!t) return t
 
-  t = t.replace(FILLER_CLAUSE, '')
+  const informative = governor.mode === 'council' || governor.mode === 'deep_analysis'
+
+  if (!informative) {
+    t = t.replace(FILLER_CLAUSE, '')
+  }
   if (!governor.continuationAllowed) {
     t = t.replace(RECURSIVE_CONTINUATION, '')
   }
 
   t = applyModeGovernorFilters(t, governor)
-  t = truncateAtSentenceBoundary(t, governor.maxSentences)
+
+  if (informative) {
+    t = governor.mode === 'council'
+      ? truncateCouncilPreservingStructure(t, governor.maxSentences)
+      : truncateAtSentenceBoundary(t, governor.maxSentences)
+  } else {
+    t = truncateAtSentenceBoundary(t, governor.maxSentences)
+  }
 
   if (governor.mode === 'attendance' && opts?.family) {
     t = shapeAttendanceForModeGovernor(t, opts.family)

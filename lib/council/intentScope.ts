@@ -52,7 +52,9 @@ export function buildActiveScope(args: {
       ? [...DEFAULT_BUSINESS_LABELS, 'panama', 'sovereignty', 'logistics']
       : intent === 'greeting' || intent === 'attendance' || intent === 'silent'
         ? ['tone', 'presence', 'coordination']
-        : []
+        : intent === 'council_analysis' || cmd.mode === 'analysis' || cmd.mode === 'debate'
+          ? ['analysis', 'strategy', 'risk', 'recommendation']
+          : []
 
   let responseLength: ResponseLength = 'standard'
   let responseStyle: ResponseStyle = 'neutral'
@@ -181,8 +183,13 @@ export function stripForbiddenScopeLines(text: string, scope: ActiveScope): { te
   return { text: kept.join('\n').trim(), stripped }
 }
 
+/** Greeting: block mission steering / off-decree business drift — not general helpful substance. */
+const GREETING_STEERING_FORBIDDEN =
+  /\b(panama|revenue|logistics|sovereignty|business|invoice|contract|roadmap|okr|kpi|agenda|what\s+objective|objective\s+today|capital allocation|boardroom|north\s*star|stakeholder|operating\s+model|go-?to-?market)\b/i
+
+/** Attendance: off-topic ops / roll-call strategy — allow brief "operational" presence lines. */
 const ATT_FORBIDDEN =
-  /\b(panama|revenue|strategy|logistics|sovereignty|business|invoice|contract|roadmap|okr|kpi|agenda|capital allocation|boardroom|north\s*star|stakeholder|operating\s+model|go-?to-?market)\b/i
+  /\b(panama|revenue|logistics|sovereignty|business|invoice|contract|roadmap|okr|kpi|agenda|capital allocation|boardroom|north\s*star|stakeholder|operating\s+model|go-?to-?market|infrastructure\s+(?:status|narrative)|diagnostic)\b/i
 
 const ATTENDANCE_VOICE_FLUFF =
   /\b(locked\s+in|accounted\s+for|all\s+present\s+and|roll\s*call\s+complete|nodes?\s+aligned|spectral|signal\s+lock|battle\s+rhythm)\b/gi
@@ -220,13 +227,13 @@ export function stripGreetingStrategicBoilerplate(text: string): { text: string;
   let stripped = 0
   const out: string[] = []
   for (const line of lines) {
-    if (ATT_FORBIDDEN.test(line) && line.length > 40) {
+    if (GREETING_STEERING_FORBIDDEN.test(line) && line.length > 48) {
       stripped += 1
       continue
     }
     out.push(line)
   }
   const joined = out.join('\n').trim()
-  const cap = joined.slice(0, 520)
+  const cap = joined.slice(0, 640)
   return { text: cap, stripped: stripped + (joined.length > cap.length ? 1 : 0) }
 }

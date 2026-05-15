@@ -1,5 +1,4 @@
 import { DEFAULT_COUNCIL_COMMAND, type CouncilCommand } from '@/lib/council/councilCommandTypes'
-import { COUNCIL_ROSTER } from '@/lib/council/familyRoster'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { repairOrFlagResponse } from '@/lib/council/responseIntegrity'
 import { stripLockedTopicLines, textViolatesTopicLock, type TopicScopeLock } from '@/lib/council/topicScope'
@@ -11,7 +10,7 @@ import {
   type ActiveScope,
 } from '@/lib/council/intentScope'
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
-import { compressForModeGovernor } from '@/lib/council/responseCompression'
+import { compressForModeGovernor, shapeAttendanceForModeGovernor } from '@/lib/council/responseCompression'
 
 export type ModeratedFamilyLine = {
   family: CouncilOrchestrationFamily
@@ -154,8 +153,7 @@ export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLi
     }
 
     if (cmd.mode === 'attendance' || activeScope?.intent === 'attendance') {
-      const familyLabel = COUNCIL_ROSTER.find(r => r.id === row.family)?.label ?? row.family
-      content = `${familyLabel} present.`
+      content = shapeAttendanceForModeGovernor(content, row.family)
     }
 
     if (modeGovernor) {

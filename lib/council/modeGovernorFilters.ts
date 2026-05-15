@@ -21,12 +21,9 @@ export function applyModeGovernorFilters(text: string, governor: ModeGovernor): 
   let t = (text ?? '').trim()
   if (!t) return t
 
-  const strict =
-    governor.mode === 'recovery'
-    || governor.mode === 'attendance'
-    || !governor.allowSpeculation
+  const presenceModes = governor.mode === 'recovery' || governor.mode === 'attendance'
 
-  if (strict) {
+  if (presenceModes) {
     for (const re of RECOVERY_ATTENDANCE_BLOCK_PATTERNS) {
       t = t.replace(re, ' ')
     }
@@ -36,6 +33,16 @@ export function applyModeGovernorFilters(text: string, governor: ModeGovernor): 
     if (governor.mode === 'attendance' && MULTI_PARA_ATTENDANCE.test(t)) {
       t = t.split(/\n\s*\n+/)[0] ?? t
     }
+  }
+
+  if (
+    !governor.allowSpeculation
+    && governor.mode !== 'council'
+    && governor.mode !== 'deep_analysis'
+    && ADVERSARY_WITHOUT_EVIDENCE.test(t)
+    && !/\b(evidence|log|trace|confirmed|observed)\b/i.test(t)
+  ) {
+    t = t.replace(ADVERSARY_WITHOUT_EVIDENCE, ' ')
   }
 
   return t.replace(/\s{2,}/g, ' ').trim()
