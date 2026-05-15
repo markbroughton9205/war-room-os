@@ -13,6 +13,8 @@
  */
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
+import type { IntentKind } from '@/lib/council/intentClassifier'
+import type { ActiveScope } from '@/lib/council/intentScope'
 
 export type CouncilChatRequestBody = {
   message: string
@@ -27,6 +29,10 @@ export type CouncilChatRequestBody = {
   councilCommand?: CouncilCommand
   /** Latest Ra’el decree text — used for silent-mode checks when `message` is a synthetic continue line. */
   raelDirectiveText?: string
+  /** Decree-derived intent (echoed for parity; server recomputes from `raelDirectiveText`). */
+  councilIntentKind?: IntentKind
+  /** Serialized active scope — server recomputes from decree when omitted. */
+  councilActiveScope?: ActiveScope
 }
 
 export type CouncilChatJson = {

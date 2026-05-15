@@ -1,4 +1,7 @@
 export * from '@/lib/council/councilCommandTypes'
+export * from '@/lib/council/intentClassifier'
+export * from '@/lib/council/intentScope'
+export * from '@/lib/council/currentIntent'
 export * from '@/lib/council/commandParser'
 export * from '@/lib/council/liveChatPipeline'
 export * from '@/lib/council/responseGovernor'

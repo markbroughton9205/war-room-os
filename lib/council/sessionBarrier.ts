@@ -16,3 +16,10 @@ export function shouldSuppressVisibleLateResponse(args: SessionBarrierArgs): boo
   if (args.closeTimestampMs == null) return false
   return args.messageTimestampMs > args.closeTimestampMs
 }
+
+/**
+ * Autonomous fetches tied to decree round N must not render after Ra’el opens round N+1.
+ */
+export function shouldSuppressStaleAutonomousReveal(fetchStartedRound: number, currentRound: number): boolean {
+  return fetchStartedRound !== currentRound
+}

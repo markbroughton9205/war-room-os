@@ -74,6 +74,8 @@ import {
 import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
 import { deriveTopicScopeLock } from '@/lib/council/topicScope'
 import { runFinalModerator } from '@/lib/council/finalModerator'
+import { resolveCurrentIntent } from '@/lib/council/currentIntent'
+import { shouldSuppressStaleAutonomousReveal } from '@/lib/council/sessionBarrier'
 import { buildCouncilRenderPacket, type CouncilRenderPacket } from '@/lib/council/renderPacket'
 import { resolveCouncilPacketSyncMs } from '@/lib/council/packetSync'
 import {
@@ -5580,13 +5582,21 @@ function Home() {
     family: CouncilOrchestrationFamily,
     text: string,
     inputText: string,
-    opts?: { councilRevealSource?: 'autonomous' | 'decree' },
+    opts?: { councilRevealSource?: 'autonomous' | 'decree'; autonomousDecreeRoundAtFetch?: number },
   ) => {
     const councilRevealSource = opts?.councilRevealSource ?? 'autonomous'
     if (councilRevealSource === 'decree' && decreePacketFlushCompleteRef.current) {
       if (process.env.NODE_ENV === 'development') {
         console.debug("[Live Council] Suppressed visible late family reply after packet close.")
       }
+      return
+    }
+    if (
+      councilRevealSource === 'autonomous'
+      && typeof opts?.autonomousDecreeRoundAtFetch === 'number'
+      && shouldSuppressStaleAutonomousReveal(opts.autonomousDecreeRoundAtFetch, decreeRoundGenRef.current)
+    ) {
+      console.warn('[council-session] suppressed_stale_autonomous_reveal')
       return
     }
     const inputTokens = estimateTokens(inputText)
@@ -5646,6 +5656,7 @@ function Home() {
     if (toolRequestActiveRef.current) return
 
     autonomousOrchInFlightRef.current = true
+    const autonomousDecreeRoundAtFetch = decreeRoundGenRef.current
     const decree = 'continue council discussion'
     const orchRedEarly = shouldInjectRedTeamEarly({
       decree,
@@ -5688,6 +5699,7 @@ function Home() {
       return
     }
     const augment = buildOrchestrationAugment(family, snap.deepDiscussionMode)
+    const autonomousIntent = resolveCurrentIntent({ latestRaelDecreeText: lastRaelDirectiveContentRef.current })
     const threadHistory = messagesRef.current.map(m => ({ sender: m.familyName, content: m.content }))
     const inputText = `${decree}\n${threadHistory.map(m => `${m.sender}: ${m.content}`).join('\n')}`
 
@@ -5698,7 +5710,8 @@ function Home() {
 
     if (agent?.functional && agentId) {
       const threadBlock = threadHistory.slice(-16).map(m => `${m.sender}: ${m.content}`).join('\n')
-      const localPrompt = `${augment}\n\nCouncil thread (most recent last):\n${threadBlock}\n\nRespond with one concise in-character council message only.`
+      const authoritativeDecree = lastRaelDirectiveContentRef.current.trim() || decree
+      const localPrompt = `${augment}\n\nCURRENT DECREE (authoritative):\n${authoritativeDecree}\n\nCouncil thread (continuity only, most recent last):\n${threadBlock}\n\nRespond with one concise in-character council message only.`
       try {
         const r = await fetch('/api/local-agent/invoke', {
           method: 'POST',
@@ -5716,6 +5729,8 @@ function Home() {
           if (t) {
             const gov = applyGovernor(t, family, activeCouncilCommandRef.current, {
               raelDirectiveText: lastRaelDirectiveContentRef.current,
+              councilIntentKind: autonomousIntent.intent,
+              councilActiveScope: autonomousIntent.scope,
             })
             if (!gov.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
               textOut = gov.text
@@ -5742,6 +5757,8 @@ function Home() {
             orchestrationAugment: augment,
             councilCommand: activeCouncilCommandRef.current,
             raelDirectiveText: lastRaelDirectiveContentRef.current,
+            councilIntentKind: autonomousIntent.intent,
+            councilActiveScope: autonomousIntent.scope,
             ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
           },
         )
@@ -5799,7 +5816,10 @@ function Home() {
         return
       }
 
-      await revealOrchestrationTurn(family, textOut, inputText)
+      await revealOrchestrationTurn(family, textOut, inputText, {
+        councilRevealSource: 'autonomous',
+        autonomousDecreeRoundAtFetch,
+      })
       if (orchRedEarly && family === 'red_team') orchRedTeamEarlyLatchRef.current = true
       if (councilSnapRef.current.sessionId !== expectedSessionId) return
 
@@ -5979,8 +5999,11 @@ function Home() {
       if (skipGeminiForSessionRef.current) order = order.filter(f => f !== 'gemini')
 
       const cmd = activeCouncilCommandRef.current
+      const councilIntentState = resolveCurrentIntent({ latestRaelDecreeText: decree })
       const directedOrder = filterOrchestrationOrderByCommand(order, cmd, decree)
-      const decreeTopicLockPreview = deriveTopicScopeLock(decree)
+      const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
+        allowBusinessTopicsFromIntent: councilIntentState.intent === 'business_ops',
+      })
 
       decreePacketFlushCompleteRef.current = false
       decreePacketOpenedAtMsRef.current = Date.now()
@@ -6016,7 +6039,7 @@ function Home() {
           const agent = localFamilyAgents.familyAgents.find(a => a.id === agentId)
           if (!agent?.functional) return null
           const th = threadHistory().slice(-16).map(m => `${m.sender}: ${m.content}`).join('\n')
-          const localPrompt = `${augment}\n\nCouncil thread (most recent last):\n${th}\n\nRespond with one concise in-character council message only.`
+          const localPrompt = `${augment}\n\nCURRENT DECREE (authoritative):\n${decree}\n\nCouncil thread (continuity only, most recent last):\n${th}\n\nRespond with one concise in-character council message only.`
           const localController = new AbortController()
           const abortLocal = () => localController.abort()
           controller.signal.addEventListener('abort', abortLocal, { once: true })
@@ -6039,6 +6062,8 @@ function Home() {
             if (!t) return null
             const gov = applyGovernor(t, family, activeCouncilCommandRef.current, {
               raelDirectiveText: decree,
+              councilIntentKind: councilIntentState.intent,
+              councilActiveScope: councilIntentState.scope,
             })
             if (gov.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) return null
             return gov.text || null
@@ -6081,6 +6106,8 @@ function Home() {
                   orchestrationAugment: augment,
                   councilCommand: activeCouncilCommandRef.current,
                   raelDirectiveText: decree,
+                  councilIntentKind: councilIntentState.intent,
+                  councilActiveScope: councilIntentState.scope,
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
                 },
               )
@@ -6209,6 +6236,8 @@ function Home() {
         const moderated = runFinalModerator({
           lines: staged.map(s => ({ family: s.family, content: s.textOut })),
           topicLock,
+          activeScope: councilIntentState.scope,
+          councilCommand: cmd,
         })
 
         for (const line of moderated) {
@@ -6231,6 +6260,7 @@ function Home() {
           w.startsWith('integrity_')
           || w.startsWith('protocol_drift_response')
           || w === 'protocol_drift_topic_scope_residual'
+          || w === 'protocol_drift_active_scope_residual'
 
         const packetFamilies = moderated
           .filter(m => m.content.trim())

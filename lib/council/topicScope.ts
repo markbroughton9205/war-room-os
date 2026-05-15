@@ -36,8 +36,18 @@ function mentionsAny(text: string, words: readonly string[]): boolean {
 /**
  * If Ra’el directive + optional user message do **not** mention scope keywords,
  * the lock forbids reintroducing those topics (families drift → strip or warn).
+ *
+ * When `allowBusinessTopicsFromIntent` is true (decree explicitly classified as business ops),
+ * the lock stays open regardless of keyword presence in this path.
  */
-export function deriveTopicScopeLock(raelDirectiveText: string, userMessage?: string): TopicScopeLock {
+export function deriveTopicScopeLock(
+  raelDirectiveText: string,
+  userMessage?: string,
+  opts?: { allowBusinessTopicsFromIntent?: boolean },
+): TopicScopeLock {
+  if (opts?.allowBusinessTopicsFromIntent) {
+    return { locked: false, forbiddenLabels: [], forbiddenPatterns: [] }
+  }
   const combined = [raelDirectiveText, userMessage].filter(Boolean).join('\n')
   const mentioned = mentionsAny(combined, TOPIC_SCOPE_KEYWORDS)
   if (mentioned) {

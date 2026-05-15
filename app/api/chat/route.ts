@@ -6,6 +6,8 @@ import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { coerceCouncilCommand } from '@/lib/council/councilCommandTypes'
 import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
+import { resolveCurrentIntent } from '@/lib/council/currentIntent'
+import { buildActiveScope } from '@/lib/council/intentScope'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
@@ -114,6 +116,27 @@ function buildThread(threadHistory: unknown) {
   return slice.map(m => `${m.sender}: ${m.content}`).join('\n')
 }
 
+function buildCouncilUserPrompt(args: {
+  raelDirectiveText: string
+  threadBlock: string
+  augmentBlock: string
+  intentLabel: string
+}): string {
+  const { raelDirectiveText, threadBlock, augmentBlock, intentLabel } = args
+  return [
+    `CURRENT DECREE (authoritative — stay on this topic; do not let prior chat override it):`,
+    raelDirectiveText,
+    '',
+    `Decree intent (routing only): ${intentLabel}`,
+    '',
+    `Prior council thread (continuity only — preserve tone, but do not resurrect or pivot topics forbidden by the decree):`,
+    threadBlock,
+    '',
+    `Continue the council with one response for your family only.${augmentBlock}`,
+    `Do not speak for Ra'el. Add new substance; avoid repeating the previous speaker verbatim.`,
+  ].join('\n')
+}
+
 export async function POST(req: Request) {
   let body: Record<string, unknown>
   try {
@@ -143,6 +166,12 @@ export async function POST(req: Request) {
       : message
 
   const thread = buildThread(threadHistory)
+  const intentState = resolveCurrentIntent({ latestRaelDecreeText: raelDirectiveText })
+  const scopeForGovernor = buildActiveScope({
+    decreeText: raelDirectiveText,
+    councilCommand,
+    intent: intentState.intent,
+  })
 
   const expandedAnalysis = mode === 'expanded'
   const toneInstruction = TONE_INSTRUCTIONS[toneMode] || TONE_INSTRUCTIONS.casual
@@ -191,7 +220,12 @@ export async function POST(req: Request) {
         )
       }
 
-      const userPrompt = `Council thread:\n${thread}\n\nContinue the council with one response for your family only.${augmentBlock}\nDo not speak for Ra'el. Add new substance; avoid repeating the previous speaker verbatim.`
+      const userPrompt = buildCouncilUserPrompt({
+        raelDirectiveText,
+        threadBlock: thread,
+        augmentBlock,
+        intentLabel: intentState.intent,
+      })
 
       let responseText = ''
       let geminiDegradedReason: string | null = null
@@ -256,7 +290,11 @@ export async function POST(req: Request) {
         throw new Error(`${councilSingleFamily} returned empty body`)
       }
 
-      const governed = applyGovernor(responseText, councilSingleFamily, councilCommand, { raelDirectiveText })
+      const governed = applyGovernor(responseText, councilSingleFamily, councilCommand, {
+        raelDirectiveText,
+        councilIntentKind: intentState.intent,
+        councilActiveScope: scopeForGovernor,
+      })
       if (governed.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
         await auditCouncil({
           success: true,

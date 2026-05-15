@@ -2,6 +2,17 @@ import type { CouncilOrchestrationFamily } from '@/components/council/councilSes
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { familyMentionedInDirective } from '@/lib/council/commandParser'
 import { effectiveMaxCharsForFamily } from '@/lib/council/familyPermissions'
+import type { IntentKind } from '@/lib/council/intentClassifier'
+import type { ActiveScope } from '@/lib/council/intentScope'
+import {
+  enforceAttendancePresenceShape,
+  isVerificationHeavyContext,
+  stripCrossTalkLines,
+  stripForbiddenScopeLines,
+  stripGreetingStrategicBoilerplate,
+  stripStrategicPivotLanguage,
+  textViolatesForbiddenScope,
+} from '@/lib/council/intentScope'
 
 const FLUFF_LINE = new RegExp(
   String.raw`^\s*(remember|believe in yourself|you've got this|stay strong|keep pushing|dream big|manifest|the universe|deep breath|you are enough)[^.]*$`,
@@ -13,6 +24,8 @@ export const COUNCIL_GOVERNOR_SILENT_SKIP = 'council_governor_silent_skip'
 export type GovernorContext = {
   /** Latest Ra’el decree text — required for silent-mode invocation checks. */
   raelDirectiveText: string
+  councilIntentKind?: IntentKind
+  councilActiveScope?: ActiveScope
 }
 
 /** ChatGPT: favor crisp synthesis — trim long hedging intros when over cap. */
@@ -134,6 +147,79 @@ function silentFamilyInvoked(cmd: CouncilCommand, family: CouncilOrchestrationFa
   return familyMentionedInDirective(raelDirective, family)
 }
 
+function scopeLog(tag: string) {
+  console.warn(`[council-scope] ${tag}`)
+}
+
+function applyActiveScopeTail(args: {
+  text: string
+  family: CouncilOrchestrationFamily
+  cmd: CouncilCommand
+  intent?: IntentKind
+  scope?: ActiveScope
+  warnings: string[]
+}): string {
+  let t = args.text
+  const { family, cmd, intent, scope, warnings } = args
+  const ik = intent ?? scope?.intent
+
+  if (scope) {
+    const allowStrip =
+      family !== 'red_team' || !isVerificationHeavyContext(cmd, scope.intent)
+    if (allowStrip) {
+      const st = stripForbiddenScopeLines(t, scope)
+      t = st.text
+      if (st.stripped > 0) {
+        warnings.push('council_governor_stripped_active_scope_topic')
+        scopeLog('stripped_forbidden_topic_lines')
+      }
+      if (textViolatesForbiddenScope(scope, t)) {
+        warnings.push('protocol_drift_active_scope_residual')
+        scopeLog('residual_forbidden_topic')
+      }
+    }
+  }
+
+  if (scope && !scope.crossTalkAllowed) {
+    const cx = stripCrossTalkLines(t)
+    t = cx.text
+    if (cx.stripped > 0) {
+      warnings.push('council_governor_stripped_cross_talk')
+      scopeLog('stripped_cross_talk')
+    }
+  }
+
+  if (family === 'red_team' && !isVerificationHeavyContext(cmd, ik ?? 'natural')) {
+    const cap = 520
+    if (t.length > cap) {
+      t = t.slice(0, cap).trim()
+      warnings.push('council_governor_red_team_length_capped')
+      scopeLog('red_team_capped_non_verification')
+    }
+    const pv = stripStrategicPivotLanguage(t)
+    t = pv.text
+    if (pv.stripped > 0) {
+      warnings.push('council_governor_red_team_stripped_pivot_language')
+      scopeLog('red_team_stripped_pivot')
+    }
+  }
+
+  if (ik === 'greeting') {
+    const gr = stripGreetingStrategicBoilerplate(t)
+    t = gr.text
+    if (gr.stripped > 0) {
+      warnings.push('council_governor_greeting_stripped_boilerplate')
+      scopeLog('greeting_stripped_strategic')
+    }
+    if (t.length > 420) {
+      t = `${t.slice(0, 417).trim()}…`
+      warnings.push('council_governor_greeting_length_capped')
+    }
+  }
+
+  return t.trim()
+}
+
 /**
  * Post-process model output before UI / API returns. Pure function — no I/O.
  */
@@ -146,7 +232,14 @@ export function applyGovernor(
   const warnings: string[] = []
   const orch = family as CouncilOrchestrationFamily
   let t = (text ?? '').trim()
-  const maxChars = Math.max(80, effectiveMaxCharsForFamily(orch, cmd.responseLimits.maxChars))
+  const intent = context?.councilIntentKind
+  const scope = context?.councilActiveScope
+
+  let maxChars = Math.max(80, effectiveMaxCharsForFamily(orch, cmd.responseLimits.maxChars))
+  if (scope?.familyPermissions?.maxCharsPerFamily) {
+    maxChars = Math.min(maxChars, Math.max(80, scope.familyPermissions.maxCharsPerFamily))
+  }
+
   const raelDirective = context?.raelDirectiveText?.trim() ?? ''
 
   if (cmd.mode === 'silent') {
@@ -158,14 +251,24 @@ export function applyGovernor(
   t = collapseRepeatedBlocks(t)
   t = collapseRepeatedLines(t)
 
-  if (cmd.mode === 'attendance') {
+  if (cmd.mode === 'attendance' || intent === 'attendance') {
     t = stripBulletStrategy(t)
     t = t.replace(/\n{2,}/g, ' ').replace(/\s+/g, ' ').trim()
     const cap = Math.min(380, maxChars)
     if (t.length > cap) t = `${t.slice(0, cap - 1).trim()}…`
     if (!/[.!?]$/.test(t)) t = `${t}.`
     const presence = t.toLowerCase().startsWith('present') ? t : `Present — ${t}`
-    return { text: presence, warnings }
+    const shaped = enforceAttendancePresenceShape(presence)
+    if (shaped.adjusted) warnings.push('council_governor_attendance_scope_shaped')
+    t = applyActiveScopeTail({
+      text: shaped.text,
+      family: orch,
+      cmd,
+      intent,
+      scope,
+      warnings,
+    })
+    return { text: t, warnings: warnings.length ? warnings : undefined }
   }
 
   if (cmd.mode === 'execution') {
@@ -173,6 +276,8 @@ export function applyGovernor(
   }
 
   t = applyFamilySoftRules(t, family, maxChars)
+
+  t = applyActiveScopeTail({ text: t, family: orch, cmd, intent, scope, warnings })
 
   if (!t.trim()) {
     warnings.push('council_governor_empty_after_trim')

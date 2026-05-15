@@ -1,6 +1,14 @@
+import { DEFAULT_COUNCIL_COMMAND, type CouncilCommand } from '@/lib/council/councilCommandTypes'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { repairOrFlagResponse } from '@/lib/council/responseIntegrity'
 import { stripLockedTopicLines, textViolatesTopicLock, type TopicScopeLock } from '@/lib/council/topicScope'
+import {
+  isVerificationHeavyContext,
+  stripCrossTalkLines,
+  stripForbiddenScopeLines,
+  textViolatesForbiddenScope,
+  type ActiveScope,
+} from '@/lib/council/intentScope'
 
 export type ModeratedFamilyLine = {
   family: CouncilOrchestrationFamily
@@ -47,13 +55,16 @@ function sortByPacketOrder(items: ModeratedFamilyLine[]): ModeratedFamilyLine[] 
 export type FinalModeratorInput = {
   lines: { family: CouncilOrchestrationFamily; content: string }[]
   topicLock: TopicScopeLock
+  activeScope?: ActiveScope
+  councilCommand?: CouncilCommand
 }
 
 /**
  * Single pass: integrity repair, topic lock strip, cross-critique reduction (non–Red Team), packet ordering.
  */
 export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLine[] {
-  const { topicLock } = input
+  const { topicLock, activeScope, councilCommand } = input
+  const cmd = councilCommand ?? DEFAULT_COUNCIL_COMMAND
   const moderated: ModeratedFamilyLine[] = []
 
   for (const row of input.lines) {
@@ -75,6 +86,24 @@ export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLi
     }
     if (textViolatesTopicLock(topicLock, content) && row.family !== 'red_team') {
       warnings.push('protocol_drift_topic_scope_residual')
+    }
+
+    if (activeScope) {
+      const allowScopeStrip =
+        row.family !== 'red_team' || !isVerificationHeavyContext(cmd, activeScope.intent)
+      if (allowScopeStrip) {
+        const sc = stripForbiddenScopeLines(content, activeScope)
+        content = sc.text
+        if (sc.stripped > 0) warnings.push('moderator_stripped_active_scope_topic')
+        if (textViolatesForbiddenScope(activeScope, content) && row.family !== 'red_team') {
+          warnings.push('protocol_drift_active_scope_residual')
+        }
+      }
+      if (!activeScope.crossTalkAllowed) {
+        const cx = stripCrossTalkLines(content)
+        content = cx.text
+        if (cx.stripped > 0) warnings.push('moderator_stripped_cross_talk')
+      }
     }
 
     moderated.push({ family: row.family, content: content.trim(), warnings })
