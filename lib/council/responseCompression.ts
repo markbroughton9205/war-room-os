@@ -3,6 +3,11 @@ import { COUNCIL_ROSTER } from '@/lib/council/familyRoster'
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
 import { applyModeGovernorFilters } from '@/lib/council/modeGovernorFilters'
 import { enforceAttendancePresenceShape, stripAttendanceDisplayNoise } from '@/lib/council/intentScope'
+import {
+  isSpeculativeInfrastructureLanguage,
+  replaceWithRuntimeTruthLine,
+  type VerifiedRuntimeContext,
+} from '@/lib/council/runtimeTruth'
 
 const FILLER_CLAUSE =
   /\b(in conclusion|to summarize|that said|it'?s worth noting|broadly speaking|at a high level|let me know if)\b[^.!?]*[.!?]\s*/gi
@@ -77,7 +82,7 @@ export function shapeAttendanceForModeGovernor(
 export function compressForModeGovernor(
   text: string,
   governor: ModeGovernor,
-  opts?: { family?: CouncilOrchestrationFamily },
+  opts?: { family?: CouncilOrchestrationFamily; verifiedContext?: VerifiedRuntimeContext },
 ): string {
   let t = (text ?? '').trim()
   if (!t) return t
@@ -103,6 +108,13 @@ export function compressForModeGovernor(
 
   if (governor.mode === 'attendance' && opts?.family) {
     t = shapeAttendanceForModeGovernor(t, opts.family)
+  }
+
+  if (governor.mode === 'recovery' && opts?.family) {
+    const verified: VerifiedRuntimeContext = { family: opts.family, ...opts.verifiedContext }
+    if (isSpeculativeInfrastructureLanguage(t, verified) || !t.trim()) {
+      t = replaceWithRuntimeTruthLine(opts.family, verified)
+    }
   }
 
   return t.trim()

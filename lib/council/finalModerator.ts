@@ -11,6 +11,8 @@ import {
 } from '@/lib/council/intentScope'
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
 import { compressForModeGovernor, shapeAttendanceForModeGovernor } from '@/lib/council/responseCompression'
+import { applyRuntimeTruthFilter, type VerifiedRuntimeContext } from '@/lib/council/runtimeTruth'
+import type { RoomStatus } from '@/lib/council/roomStatus'
 
 export type ModeratedFamilyLine = {
   family: CouncilOrchestrationFamily
@@ -88,13 +90,15 @@ export type FinalModeratorInput = {
   activeScope?: ActiveScope
   councilCommand?: CouncilCommand
   modeGovernor?: ModeGovernor
+  roomStatuses?: RoomStatus[]
+  verifiedRuntimeByFamily?: Partial<Record<CouncilOrchestrationFamily, VerifiedRuntimeContext>>
 }
 
 /**
  * Single pass: integrity repair, topic lock strip, cross-critique reduction (non–Red Team), packet ordering.
  */
 export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLine[] {
-  const { topicLock, activeScope, councilCommand, modeGovernor } = input
+  const { topicLock, activeScope, councilCommand, modeGovernor, roomStatuses, verifiedRuntimeByFamily } = input
   const cmd = councilCommand ?? DEFAULT_COUNCIL_COMMAND
   const moderated: ModeratedFamilyLine[] = []
 
@@ -157,8 +161,20 @@ export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLi
     }
 
     if (modeGovernor) {
-      content = compressForModeGovernor(content, modeGovernor, { family: row.family })
+      content = compressForModeGovernor(content, modeGovernor, {
+        family: row.family,
+        verifiedContext: verifiedRuntimeByFamily?.[row.family],
+      })
     }
+
+    const rt = applyRuntimeTruthFilter(content, {
+      family: row.family,
+      mode: modeGovernor?.mode ?? 'council',
+      verifiedContext: verifiedRuntimeByFamily?.[row.family],
+      roomStatuses,
+    })
+    content = rt.text
+    if (rt.warnings.length) warnings.push(...rt.warnings)
 
     moderated.push({ family: row.family, content: content.trim(), warnings })
   }

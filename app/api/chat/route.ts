@@ -13,6 +13,7 @@ import { buildContinuationRequestFromModelOutput } from '@/lib/council/continuat
 import { resolveModeGovernor } from '@/lib/council/modeGovernor'
 import { buildModeGovernorPromptBlock } from '@/lib/council/modeGovernorPrompt'
 import { buildRoomStatusesFromProviderStates } from '@/lib/council/roomStatus'
+import { providerOutcomeToVerifiedContext } from '@/lib/council/runtimeTruth'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 
@@ -436,11 +437,19 @@ export async function POST(req: Request) {
         return degradedProviderResponse(councilSingleFamily, 'failed', `${councilSingleFamily} returned empty body`)
       }
 
+      const preCallRuntime = providerRuntimeStates?.[councilSingleFamily]
       const governed = applyGovernor(responseText, councilSingleFamily, councilCommand, {
         raelDirectiveText,
         councilIntentKind: intentState.intent,
         councilActiveScope: scopeForGovernor,
         modeGovernor,
+        roomStatuses,
+        verifiedRuntimeContext: preCallRuntime
+          ? providerOutcomeToVerifiedContext({
+              family: councilSingleFamily,
+              runtime: preCallRuntime,
+            })
+          : { family: councilSingleFamily },
       })
       if (governed.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
         await safeAudit({

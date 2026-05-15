@@ -56,6 +56,7 @@ function modeRulesBlock(governor: ModeGovernor): string[] {
   lines.push(
     'Never impersonate Ra\'el or another family. Answer only for your own family.',
     'Do not claim another provider responded or that queues succeeded unless shown in room status.',
+    'Only cite provider/orchestrator facts from ROOM STATUS. No invented infrastructure root causes. Truthful uncertainty is preferred.',
   )
 
   return lines

@@ -93,7 +93,11 @@ import {
   FULL_TEAM_GATE_TIMEOUT_MS,
   FULL_TEAM_UNSATISFIED_MESSAGE,
 } from '@/lib/council/fullTeamGate'
-import { buildRoomStatusesFromEngineFunctional } from '@/lib/council/roomStatus'
+import { buildRoomStatusesFromEngineFunctional, buildRoomStatusesFromProviderStates } from '@/lib/council/roomStatus'
+import {
+  providerOutcomeToVerifiedContext,
+  verifiedContextsFromProviderStates,
+} from '@/lib/council/runtimeTruth'
 import {
   GEMINI_REPAIR_ENQUEUE_METADATA_KEY,
   shouldInjectRedTeamEarly,
@@ -5789,6 +5793,7 @@ function Home() {
               raelDirectiveText: lastRaelDirectiveContentRef.current,
               councilIntentKind: autonomousIntent.intent,
               councilActiveScope: autonomousIntent.scope,
+              verifiedRuntimeContext: { family },
             })
             if (!gov.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
               textOut = gov.text
@@ -6231,6 +6236,16 @@ function Home() {
               councilIntentKind: councilIntentState.intent,
               councilActiveScope: councilIntentState.scope,
               modeGovernor,
+              verifiedRuntimeContext: providerRuntimeStates[family]
+                ? providerOutcomeToVerifiedContext({
+                    family,
+                    runtime: providerRuntimeStates[family]!,
+                  })
+                : { family },
+              roomStatuses: buildRoomStatusesFromProviderStates(
+                providerRuntimeStates,
+                directedOrder,
+              ),
             })
             if (gov.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) return null
             return gov.text || null
@@ -6499,12 +6514,27 @@ function Home() {
         }
 
         const topicLock = decreeTopicLockPreview
+        const runtimeDetailsByFamily = Object.fromEntries(
+          cells
+            .filter((c): c is GatherCell & { runtimeDetail: string } => Boolean(c.runtimeDetail))
+            .map(c => [c.family, c.runtimeDetail]),
+        ) as Partial<Record<CouncilOrchestrationFamily, string>>
+        const verifiedRuntimeByFamily = verifiedContextsFromProviderStates(
+          providerRuntimeStates,
+          runtimeDetailsByFamily,
+        )
+        const roomStatuses = buildRoomStatusesFromProviderStates(
+          providerRuntimeStates,
+          directedOrder,
+        )
         const moderated = runFinalModerator({
           lines: staged.map(s => ({ family: s.family, content: s.textOut })),
           topicLock,
           activeScope: councilIntentState.scope,
           councilCommand: cmd,
           modeGovernor,
+          roomStatuses,
+          verifiedRuntimeByFamily,
         })
 
         for (const line of moderated) {

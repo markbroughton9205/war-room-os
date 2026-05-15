@@ -16,6 +16,11 @@ import {
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
 import { compressForModeGovernor, shapeAttendanceForModeGovernor } from '@/lib/council/responseCompression'
 import { repairOrFlagResponse } from '@/lib/council/responseIntegrity'
+import {
+  applyRuntimeTruthFilter,
+  type VerifiedRuntimeContext,
+} from '@/lib/council/runtimeTruth'
+import type { RoomStatus } from '@/lib/council/roomStatus'
 
 const FLUFF_LINE = new RegExp(
   String.raw`^\s*(remember|believe in yourself|you've got this|stay strong|keep pushing|dream big|manifest|the universe|deep breath|you are enough)[^.]*$`,
@@ -30,6 +35,8 @@ export type GovernorContext = {
   councilIntentKind?: IntentKind
   councilActiveScope?: ActiveScope
   modeGovernor?: ModeGovernor
+  verifiedRuntimeContext?: VerifiedRuntimeContext
+  roomStatuses?: RoomStatus[]
 }
 
 /** ChatGPT: favor crisp synthesis — trim long hedging intros when over cap. */
@@ -174,6 +181,23 @@ function scopeLog(tag: string) {
   console.warn(`[council-scope] ${tag}`)
 }
 
+function applyRuntimeTruthTail(
+  text: string,
+  family: CouncilOrchestrationFamily,
+  context: GovernorContext | undefined,
+  warnings: string[],
+): string {
+  const mode = context?.modeGovernor?.mode ?? 'council'
+  const rt = applyRuntimeTruthFilter(text, {
+    family,
+    mode,
+    verifiedContext: context?.verifiedRuntimeContext,
+    roomStatuses: context?.roomStatuses,
+  })
+  if (rt.warnings.length) warnings.push(...rt.warnings)
+  return rt.text
+}
+
 function applyActiveScopeTail(args: {
   text: string
   family: CouncilOrchestrationFamily
@@ -296,8 +320,12 @@ export function applyGovernor(
       warnings,
     })
     if (context?.modeGovernor) {
-      t = compressForModeGovernor(t, context.modeGovernor, { family: orch })
+      t = compressForModeGovernor(t, context.modeGovernor, {
+        family: orch,
+        verifiedContext: context.verifiedRuntimeContext,
+      })
     }
+    t = applyRuntimeTruthTail(t, orch, context, warnings)
     return { text: t, warnings: warnings.length ? warnings : undefined }
   }
 
@@ -324,8 +352,13 @@ export function applyGovernor(
   }
 
   if (context?.modeGovernor) {
-    t = compressForModeGovernor(t, context.modeGovernor, { family: orch })
+    t = compressForModeGovernor(t, context.modeGovernor, {
+      family: orch,
+      verifiedContext: context.verifiedRuntimeContext,
+    })
   }
+
+  t = applyRuntimeTruthTail(t, orch, context, warnings)
 
   if (!t.trim()) {
     warnings.push('council_governor_empty_after_trim')
