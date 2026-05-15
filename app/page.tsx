@@ -78,6 +78,11 @@ import { deriveTopicScopeLock } from '@/lib/council/topicScope'
 import { runFinalModerator } from '@/lib/council/finalModerator'
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { shouldSuppressStaleAutonomousReveal } from '@/lib/council/sessionBarrier'
+import { isSequentialDiagnosticIntent } from '@/lib/council/diagnosticMode'
+import { buildDefaultDiagnosticOrder } from '@/lib/council/turnSequencer'
+import { detectRedTeamRuntimeHold } from '@/lib/council/redTeamHold'
+import { useSequentialDiagnostics } from '@/components/war-room/runtime/useSequentialDiagnostics'
+import { DiagnosticSessionPanel } from '@/components/war-room/runtime/DiagnosticSessionPanel'
 import {
   buildCouncilRenderPacket,
   type CouncilProviderRuntimeDetails,
@@ -4265,6 +4270,13 @@ function Home() {
   const [standingAckHint, setStandingAckHint] = useState<string | null>(null)
   const pendingAuditDecreeRef = useRef<string | null>(null)
   const ledgerFetchInFlightRef = useRef(false)
+  const sequentialDiagnosticHoldRef = useRef(false)
+  const sequentialDiagnosticApiRef = useRef<{
+    turn: number
+    total: number
+    order: CouncilOrchestrationFamily[]
+  } | null>(null)
+  const sequentialDiagnostics = useSequentialDiagnostics()
 
   const standingPostExtra = (actionKind: string) => resolveStandingPostExtra(permSnap, actionKind)
 
@@ -6225,6 +6237,8 @@ function Home() {
             localFamilyAgents,
           })
         : filterOrchestrationOrderByCommand(order, cmd, decree)
+      const diagnosticSequential = isSequentialDiagnosticIntent(decree) && !attendanceWave
+      const orderForGather = diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
         allowBusinessTopicsFromIntent: councilIntentState.intent === 'business_ops',
       })
@@ -6329,6 +6343,12 @@ function Home() {
         }),
       )
 
+      sequentialDiagnosticApiRef.current = null
+      if (diagnosticSequential) {
+        sequentialDiagnosticHoldRef.current = false
+        sequentialDiagnostics.start(orderForGather)
+      }
+
       let anySuccess = false
 
       type GatherCell = {
@@ -6408,7 +6428,7 @@ function Home() {
                 : { family },
               roomStatuses: buildRoomStatusesFromProviderStates(
                 providerRuntimeStates,
-                directedOrder,
+                orderForGather,
               ),
             })
             if (gov.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) return null
@@ -6476,6 +6496,14 @@ function Home() {
                   councilActiveScope: councilIntentState.scope,
                   councilModeGovernor: modeGovernor,
                   councilProviderRuntimeStates: providerRuntimeStates,
+                  ...(sequentialDiagnosticApiRef.current
+                    ? {
+                        sequentialDiagnostic: true,
+                        diagnosticTurnIndex: sequentialDiagnosticApiRef.current.turn,
+                        diagnosticTurnTotal: sequentialDiagnosticApiRef.current.total,
+                        diagnosticOrder: sequentialDiagnosticApiRef.current.order,
+                      }
+                    : {}),
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
                 })
 
@@ -6596,7 +6624,7 @@ function Home() {
       }
 
       const outcomeByFamily = new Map<CouncilOrchestrationFamily, GatherCell>()
-      const gatherPromises = directedOrder.map(family =>
+      const gatherPromises = orderForGather.map(family =>
         gatherFamily(family).then(cell => {
           const prev = outcomeByFamily.get(family)
           if (prev?.textOut?.trim() && cell.textOut?.trim()) return prev
@@ -6630,13 +6658,36 @@ function Home() {
 
       if (attendanceWave && batchCeilingMs != null) {
         await wait(batchCeilingMs)
+      } else if (diagnosticSequential) {
+        for (let i = 0; i < orderForGather.length; i++) {
+          if (sequentialDiagnosticHoldRef.current) break
+          const family = orderForGather[i]!
+          sequentialDiagnosticApiRef.current = {
+            turn: i,
+            total: orderForGather.length,
+            order: orderForGather,
+          }
+          sequentialDiagnostics.setTurn(i)
+          const cell = await gatherFamily(family)
+          const prev = outcomeByFamily.get(family)
+          if (prev?.textOut?.trim() && cell.textOut?.trim()) continue
+          outcomeByFamily.set(family, cell)
+          if (family === 'red_team' && typeof cell.textOut === 'string' && detectRedTeamRuntimeHold(cell.textOut)) {
+            sequentialDiagnosticHoldRef.current = true
+            sequentialDiagnostics.setHold(true)
+          }
+          await new Promise<void>(resolve => {
+            window.setTimeout(resolve, 250)
+          })
+        }
+        sequentialDiagnosticApiRef.current = null
       } else {
         await Promise.allSettled(gatherPromises)
       }
 
       let cells: GatherCell[] = attendanceWave
         ? mapSoftCapCells()
-        : directedOrder.map(family => {
+        : orderForGather.map(family => {
             const done = outcomeByFamily.get(family)
             if (done) return done
             return { family, textOut: null, runtime: 'SKIPPED' as const, runtimeDetail: 'missing_gather_slot' }
@@ -6656,7 +6707,7 @@ function Home() {
         intentKind: councilIntentState.intent,
         councilCommand: cmd,
         providerStates: providerRuntimeStates,
-        directedFamilies: directedOrder,
+        directedFamilies: orderForGather,
       })
 
       const stagedCandidates = cells
@@ -6709,7 +6760,7 @@ function Home() {
           runtimeStates,
           runtimeDetailsByFamily,
         )
-        const roomStatuses = buildRoomStatusesFromProviderStates(runtimeStates, directedOrder)
+        const roomStatuses = buildRoomStatusesFromProviderStates(runtimeStates, orderForGather)
         const moderated = runFinalModerator({
           lines: linesToRelease.map(s => ({ family: s.family, content: s.textOut })),
           topicLock,
@@ -6949,6 +7000,8 @@ function Home() {
       if (toolIntent) endToolRequest()
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null
+      sequentialDiagnosticApiRef.current = null
+      sequentialDiagnostics.stop()
       setTypingFamily(null)
       if (toolIntent) endToolRequest()
       setLoading(false)
@@ -7863,6 +7916,23 @@ function Home() {
             )}
             {operatorTab === 'diagnostics' && (
               <>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[10px]" style={{ color: '#94a3b8' }}>
+                  <Link href="/war-room/integrity" className="font-semibold tracking-wide text-sky-400 underline underline-offset-2">
+                    Open runtime integrity dashboard →
+                  </Link>
+                </div>
+                {sequentialDiagnostics.session?.active ? (
+                  <div className="mb-4">
+                    <DiagnosticSessionPanel
+                      state={{
+                        active: sequentialDiagnostics.session.active,
+                        turnIndex: sequentialDiagnostics.session.turnIndex,
+                        order: sequentialDiagnostics.session.order,
+                        hold: sequentialDiagnostics.session.hold,
+                      }}
+                    />
+                  </div>
+                ) : null}
                 <ProviderSetupChecklistPanel />
                 <KernelStatusPanel />
                 <UnifiedEngineControlPanel />

@@ -28,6 +28,11 @@ export type CouncilChatRequestBody = {
   councilSingleFamily: CouncilOrchestrationFamily
   orchestrationAugment: string
   conversationId?: string
+  /** When true with `councilSingleFamily`, chat route echoes diagnostic meta (sequential diagnostics). */
+  sequentialDiagnostic?: boolean
+  diagnosticTurnIndex?: number
+  diagnosticTurnTotal?: number
+  diagnosticOrder?: CouncilOrchestrationFamily[]
   /** Structured discipline from latest Ra’el directive (client-authored). */
   councilCommand?: CouncilCommand
   /** Latest Ra’el decree text — used for silent-mode checks when `message` is a synthetic continue line. */
@@ -55,6 +60,13 @@ export type CouncilChatJson = {
   councilProviderHttpDetail?: string
   /** Server-detected continuation pressure without permission framing — requires UI approval before acting. */
   continuationRequest?: ContinuationRequest
+  diagnosticMeta?: {
+    mode: 'sequential_diagnostic'
+    turn: number
+    total: number
+    order: CouncilOrchestrationFamily[]
+    hold: boolean
+  }
 }
 
 export async function postCouncilChat(

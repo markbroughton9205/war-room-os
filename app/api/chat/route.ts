@@ -17,6 +17,7 @@ import {
 } from '@/lib/council/modeGovernorPrompt'
 import { buildRoomStatusesFromProviderStates } from '@/lib/council/roomStatus'
 import { providerOutcomeToVerifiedContext } from '@/lib/council/runtimeTruth'
+import { ALL_ORCHESTRATION_FAMILIES } from '@/lib/council/commandParser'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 
@@ -302,6 +303,22 @@ export async function POST(req: Request) {
       ? body.raelDirectiveText.trim()
       : message
 
+  const sequentialDiagnostic = body.sequentialDiagnostic === true
+  const diagnosticTurnIndex = typeof body.diagnosticTurnIndex === 'number' ? body.diagnosticTurnIndex : undefined
+  const diagnosticTurnTotal = typeof body.diagnosticTurnTotal === 'number' ? body.diagnosticTurnTotal : undefined
+  const diagnosticOrderAllowed = new Set<string>(ALL_ORCHESTRATION_FAMILIES)
+  const coerceDiagnosticOrder = (raw: unknown): CouncilOrchestrationFamily[] | undefined => {
+    if (!Array.isArray(raw)) return undefined
+    const out: CouncilOrchestrationFamily[] = []
+    for (const x of raw) {
+      if (typeof x === 'string' && diagnosticOrderAllowed.has(x)) {
+        out.push(x as CouncilOrchestrationFamily)
+      }
+    }
+    return out.length ? out : undefined
+  }
+  const diagnosticOrderCoerced = coerceDiagnosticOrder(body.diagnosticOrder)
+
   const thread = buildThread(threadHistory)
   const intentState = resolveCurrentIntent({ latestRaelDecreeText: raelDirectiveText })
 
@@ -383,6 +400,19 @@ export async function POST(req: Request) {
     }
   }
 
+  const diagnosticMetaFor = (fam: CouncilSingleFamily | undefined) => {
+    if (!sequentialDiagnostic || !fam) return undefined
+    const order =
+      diagnosticOrderCoerced && diagnosticOrderCoerced.length ? diagnosticOrderCoerced : [fam]
+    return {
+      mode: 'sequential_diagnostic' as const,
+      turn: diagnosticTurnIndex ?? 0,
+      total: diagnosticTurnTotal ?? order.length,
+      order,
+      hold: false,
+    }
+  }
+
   const degradedProviderResponse = (
     councilFam: CouncilSingleFamily,
     status: 'timed_out' | 'failed',
@@ -400,6 +430,7 @@ export async function POST(req: Request) {
       ],
       { integrityCheck: !skipProviderIntegrityCheck },
     )
+    const dm = diagnosticMetaFor(councilFam)
     return NextResponse.json(
       {
         councilSingleResponse: '',
@@ -408,6 +439,7 @@ export async function POST(req: Request) {
         showContinue: true,
         councilProviderHttpStatus: status,
         councilProviderHttpDetail: detail,
+        ...(dm ? { diagnosticMeta: dm } : {}),
       },
       { status: 200 },
     )
@@ -783,6 +815,7 @@ export async function POST(req: Request) {
                   ? { primary: 'google_gemini' }
                   : { primary: 'openai' },
         })
+        const dmGov = diagnosticMetaFor(councilSingleFamily)
         return NextResponse.json({
           councilSingleResponse: '',
           councilSingleFamily,
@@ -798,6 +831,7 @@ export async function POST(req: Request) {
           ),
           showContinue: true,
           councilGovernorSkipped: true,
+          ...(dmGov ? { diagnosticMeta: dmGov } : {}),
         })
       }
       responseText = governed.text
@@ -852,6 +886,7 @@ export async function POST(req: Request) {
         })
       }
 
+      const dmOk = diagnosticMetaFor(councilSingleFamily)
       return NextResponse.json({
         councilSingleResponse: responseText,
         councilSingleFamily,
@@ -867,6 +902,7 @@ export async function POST(req: Request) {
         ),
         showContinue: true,
         ...(continuationRequest ? { continuationRequest } : {}),
+        ...(dmOk ? { diagnosticMeta: dmOk } : {}),
       })
     }
 
