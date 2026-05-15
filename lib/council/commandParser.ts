@@ -131,7 +131,7 @@ export function parseCouncilCommand(input: string): CouncilCommand {
   }
 
   const direct = detectDirectInvocation(raw)
-  if (direct.invoked && direct.family) {
+  if (mode !== 'attendance' && direct.invoked && direct.family) {
     targetFamilies = [direct.family]
     return {
       mode: 'council',

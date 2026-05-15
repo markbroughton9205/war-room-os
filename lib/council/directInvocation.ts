@@ -37,6 +37,10 @@ const SORTED_ALIASES: { family: CouncilOrchestrationFamily; alias: string }[] = 
 const SUPPRESS_DIRECT_PREFIX =
   /^\s*(?:council|attendance|war\s*council|roll\s*call)\b/i
 
+/** Whole-decree attendance / roll-call must not lock to a provider alias embedded in the text. */
+const SUPPRESS_DIRECT_ATTENDANCE_BODY =
+  /\b(?:attendance|roll\s*call|presence\s*only|one\s*(?:response|line)\s*each)\b/i
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -62,7 +66,10 @@ function matchesAtStart(normalized: string, alias: string): boolean {
 
 /** True when decree opens with council/attendance framing instead of a bare provider name. */
 export function decreeSuppressesDirectInvocation(text: string): boolean {
-  return SUPPRESS_DIRECT_PREFIX.test(typeof text === 'string' ? text : '')
+  const raw = typeof text === 'string' ? text : ''
+  if (SUPPRESS_DIRECT_PREFIX.test(raw)) return true
+  if (SUPPRESS_DIRECT_ATTENDANCE_BODY.test(raw)) return true
+  return false
 }
 
 /**

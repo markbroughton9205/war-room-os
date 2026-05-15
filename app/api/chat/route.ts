@@ -108,7 +108,11 @@ function withTimeout(
   })
 }
 
-function validateProviderResults(results: ProviderResult[]): ProviderResult[] {
+function validateProviderResults(
+  results: ProviderResult[],
+  opts?: { integrityCheck?: boolean },
+): ProviderResult[] {
+  if (opts?.integrityCheck === false) return results
   const violations: string[] = []
   for (const result of results) {
     const content = result.content.trim()
@@ -279,11 +283,6 @@ export async function POST(req: Request) {
   const message = typeof body.message === 'string' ? body.message : ''
   if (!message) return NextResponse.json({ error: 'No message' }, { status: 400 })
 
-  const directKey = message.trim().toLowerCase() as keyof typeof DIRECT_KEYS
-  const directFamily = Object.prototype.hasOwnProperty.call(DIRECT_KEYS, directKey)
-    ? familyFromDirectValue(DIRECT_KEYS[directKey])
-    : null
-
   const profile = typeof body.profile === 'string' ? body.profile : ''
   const threadHistory = body.threadHistory
   const mode = body.mode as string | undefined
@@ -297,6 +296,7 @@ export async function POST(req: Request) {
 
   const councilCommand = coerceCouncilCommand(body.councilCommand)
   const councilGatherPhase = body.councilGatherPhase === 'decree_soft' ? 'decree_soft' : null
+  const councilSingleFamilyEarly = body.councilSingleFamily as CouncilSingleFamily | undefined
   const raelDirectiveText =
     typeof body.raelDirectiveText === 'string' && body.raelDirectiveText.trim()
       ? body.raelDirectiveText.trim()
@@ -304,6 +304,22 @@ export async function POST(req: Request) {
 
   const thread = buildThread(threadHistory)
   const intentState = resolveCurrentIntent({ latestRaelDecreeText: raelDirectiveText })
+
+  const isAttendanceFlow =
+    councilCommand.mode === 'attendance'
+    || intentState.intent === 'attendance'
+    || councilGatherPhase === 'decree_soft'
+
+  const directKey = message.trim().toLowerCase() as keyof typeof DIRECT_KEYS
+  const directFamily =
+    !councilSingleFamilyEarly
+    && !isAttendanceFlow
+    && !councilCommand.directInvocation
+    && Object.prototype.hasOwnProperty.call(DIRECT_KEYS, directKey)
+      ? familyFromDirectValue(DIRECT_KEYS[directKey])
+      : null
+
+  const skipProviderIntegrityCheck = Boolean(councilSingleFamilyEarly && isAttendanceFlow)
   const scopeForGovernor = buildActiveScope({
     decreeText: raelDirectiveText,
     councilCommand,
@@ -373,14 +389,17 @@ export async function POST(req: Request) {
     detail: string,
   ) => {
     const resultStatus: ProviderResultStatus = status === 'timed_out' ? 'TIMED_OUT' : 'FAILED'
-    const results = validateProviderResults([
-      {
-        family: displayFamilyName(councilFam),
-        content: '',
-        status: resultStatus,
-        error: detail,
-      },
-    ])
+    const results = validateProviderResults(
+      [
+        {
+          family: displayFamilyName(councilFam),
+          content: '',
+          status: resultStatus,
+          error: detail,
+        },
+      ],
+      { integrityCheck: !skipProviderIntegrityCheck },
+    )
     return NextResponse.json(
       {
         councilSingleResponse: '',
@@ -764,13 +783,16 @@ export async function POST(req: Request) {
         return NextResponse.json({
           councilSingleResponse: '',
           councilSingleFamily,
-          results: validateProviderResults([
-            {
-              family: displayFamilyName(councilSingleFamily),
-              content: '',
-              status: 'OK',
-            },
-          ]),
+          results: validateProviderResults(
+            [
+              {
+                family: displayFamilyName(councilSingleFamily),
+                content: '',
+                status: 'OK',
+              },
+            ],
+            { integrityCheck: !skipProviderIntegrityCheck },
+          ),
           showContinue: true,
           councilGovernorSkipped: true,
         })
@@ -830,13 +852,16 @@ export async function POST(req: Request) {
       return NextResponse.json({
         councilSingleResponse: responseText,
         councilSingleFamily,
-        results: validateProviderResults([
-          {
-            family: displayFamilyName(councilSingleFamily),
-            content: responseText,
-            status: 'OK',
-          },
-        ]),
+        results: validateProviderResults(
+          [
+            {
+              family: displayFamilyName(councilSingleFamily),
+              content: responseText,
+              status: 'OK',
+            },
+          ],
+          { integrityCheck: !skipProviderIntegrityCheck },
+        ),
         showContinue: true,
         ...(continuationRequest ? { continuationRequest } : {}),
       })

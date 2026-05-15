@@ -1,14 +1,18 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { orchestrationFamilyToLocalAgentId } from '@/components/council/councilOrchestration'
 import type { EngineControlStatusResponse, EngineId, EngineStatus } from '@/lib/engine-control/types'
-import { engineRowMap, isEngineFunctional, unavailableReason } from '@/lib/council/familyRoster'
+import { engineRowMap, isEngineFunctional } from '@/lib/council/familyRoster'
 import { raceWithTimeout } from '@/lib/council/providerIsolation'
-import { ATTENDANCE_PREFLIGHT_PER_FAMILY_MS } from '@/lib/council/providerTimeouts'
+import {
+  ATTENDANCE_PREFLIGHT_PER_FAMILY_MS,
+  ATTENDANCE_PREFLIGHT_STATUS_FETCH_MS,
+} from '@/lib/council/providerTimeouts'
 
 export type AttendancePreflightStatus = 'healthy' | 'unavailable' | 'degraded'
 
 export type AttendancePreflightOpts = {
   perFamilyTimeoutMs?: number
+  statusFetchTimeoutMs?: number
   engineMap?: Map<EngineId, EngineStatus>
   localFamilyAgents?: { familyAgents: { id: string; functional: boolean }[] }
   skipGeminiForSession?: boolean
@@ -43,18 +47,18 @@ function classifyFamilyFromEngineMap(
   const row = engineMap.get(eid)
   if (!row?.configured) return 'unavailable'
   if (isEngineFunctional(engineMap, eid)) return 'healthy'
-  if (row.configured && row.reachable) {
-    const reason = unavailableReason(row)
-    if (reason !== 'ok' && reason !== 'not configured') return 'degraded'
-  }
+  // Key present but engine-status slow or probe failed — still attempt minimal attendance call.
+  if (row.configured) return 'degraded'
   return 'unavailable'
 }
 
 async function resolveEngineMap(
   opts: AttendancePreflightOpts,
   budgetMs: number,
-): Promise<Map<EngineId, EngineStatus>> {
-  if (opts.engineMap && opts.engineMap.size > 0) return opts.engineMap
+): Promise<{ map: Map<EngineId, EngineStatus>; fetchTimedOut: boolean }> {
+  if (opts.engineMap && opts.engineMap.size > 0) {
+    return { map: opts.engineMap, fetchTimedOut: false }
+  }
 
   const raced = await raceWithTimeout(
     fetch('/api/engine-control/status', { cache: 'no-store', signal: opts.signal }).then(async res => {
@@ -65,8 +69,11 @@ async function resolveEngineMap(
     budgetMs,
   )
 
-  if (raced.ok) return raced.value
-  return opts.engineMap ?? new Map()
+  if (raced.ok) return { map: raced.value, fetchTimedOut: false }
+  if (opts.engineMap && opts.engineMap.size > 0) {
+    return { map: opts.engineMap, fetchTimedOut: raced.reason === 'timeout' }
+  }
+  return { map: new Map(), fetchTimedOut: raced.reason === 'timeout' }
 }
 
 /**
@@ -77,8 +84,9 @@ export async function runAttendancePreflight(
   opts: AttendancePreflightOpts = {},
 ): Promise<Partial<Record<CouncilOrchestrationFamily, AttendancePreflightStatus>>> {
   const perFamilyMs = opts.perFamilyTimeoutMs ?? ATTENDANCE_PREFLIGHT_PER_FAMILY_MS
+  const statusFetchMs = opts.statusFetchTimeoutMs ?? ATTENDANCE_PREFLIGHT_STATUS_FETCH_MS
   const unique = [...new Set(families)]
-  const engineMap = await resolveEngineMap(opts, perFamilyMs)
+  const { map: engineMap, fetchTimedOut } = await resolveEngineMap(opts, statusFetchMs)
 
   const out: Partial<Record<CouncilOrchestrationFamily, AttendancePreflightStatus>> = {}
 
@@ -88,7 +96,12 @@ export async function runAttendancePreflight(
         Promise.resolve(classifyFamilyFromEngineMap(family, engineMap, opts)),
         perFamilyMs,
       )
-      out[family] = raced.ok ? raced.value : 'unavailable'
+      if (raced.ok) {
+        out[family] = raced.value
+        return
+      }
+      const fallback = classifyFamilyFromEngineMap(family, engineMap, opts)
+      out[family] = fetchTimedOut && fallback !== 'unavailable' ? 'degraded' : fallback
     }),
   )
 
@@ -101,4 +114,11 @@ export function attendancePreflightToProviderRuntime(
   if (status === 'healthy') return 'READY'
   if (status === 'degraded') return 'DEGRADED'
   return 'SKIPPED'
+}
+
+/** True when attendance gather should skip /api/chat for this family (missing key / local down only). */
+export function attendancePreflightSkipsChat(
+  status: AttendancePreflightStatus | undefined,
+): boolean {
+  return status === 'unavailable'
 }

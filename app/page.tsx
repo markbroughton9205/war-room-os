@@ -87,6 +87,7 @@ import {
 } from '@/lib/council/providerTimeouts'
 import { shouldSuppressProviderFailureFromChatStream } from '@/lib/council/chatStreamFilters'
 import {
+  attendancePreflightSkipsChat,
   attendancePreflightToProviderRuntime,
   runAttendancePreflight,
   type AttendancePreflightStatus,
@@ -6247,7 +6248,6 @@ function Home() {
           engineMap: engineMapRef.current,
           localFamilyAgents,
           skipGeminiForSession: skipGeminiForSessionRef.current,
-          signal: controller.signal,
         })
         providerRuntimeStates = Object.fromEntries(
           directedOrder.map(f => [f, attendancePreflightToProviderRuntime(attendancePreflightMap[f])]),
@@ -6282,7 +6282,7 @@ function Home() {
           return { family, textOut: null, runtime: 'SKIPPED', runtimeDetail: 'aborted' }
         }
 
-        if (attendanceWave && attendancePreflightMap[family] === 'unavailable') {
+        if (attendanceWave && attendancePreflightSkipsChat(attendancePreflightMap[family])) {
           return { family, textOut: null, runtime: 'SKIPPED', runtimeDetail: 'preflight_unavailable' }
         }
 
@@ -6384,7 +6384,9 @@ function Home() {
           } else {
             const eid = cloudEngineIdForCouncilFamily(family)
             const row = eid ? engineMapRef.current.get(eid) : undefined
-            if (!isEngineFunctional(engineMapRef.current, eid)) {
+            const engineGateBlocksChat =
+              !attendanceWave && !isEngineFunctional(engineMapRef.current, eid)
+            if (engineGateBlocksChat) {
               if (isDirectInvoke) {
                 postDirectUnavailable('SKIPPED', unavailableReason(row))
               } else {
@@ -6550,11 +6552,11 @@ function Home() {
           return {
             family,
             textOut: null,
-            runtime: 'TIMED_OUT',
+            runtime: 'SKIPPED',
             runtimeDetail: 'attendance_soft_cap',
           }
         }
-        return { family, textOut: null, runtime: 'FAILED' as const, runtimeDetail: 'missing_gather_slot' }
+        return { family, textOut: null, runtime: 'SKIPPED' as const, runtimeDetail: 'missing_gather_slot' }
       })
 
       if (attendanceWave) {

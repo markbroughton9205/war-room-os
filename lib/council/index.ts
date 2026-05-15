@@ -26,4 +26,10 @@ export * from '@/lib/council/responseCompression'
 export * from '@/lib/council/modeGovernorFilters'
 export * from '@/lib/council/fullTeamGate'
 export * from '@/lib/council/messagePersistenceFilter'
-export * from '@/lib/council/attendancePreflight'
+export {
+  attendancePreflightSkipsChat,
+  attendancePreflightToProviderRuntime,
+  runAttendancePreflight,
+  type AttendancePreflightOpts,
+  type AttendancePreflightStatus,
+} from '@/lib/council/attendancePreflight'
