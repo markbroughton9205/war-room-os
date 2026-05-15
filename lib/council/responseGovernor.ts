@@ -1,6 +1,7 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { familyMentionedInDirective } from '@/lib/council/commandParser'
+import { effectiveMaxCharsForFamily } from '@/lib/council/familyPermissions'
 
 const FLUFF_LINE = new RegExp(
   String.raw`^\s*(remember|believe in yourself|you've got this|stay strong|keep pushing|dream big|manifest|the universe|deep breath|you are enough)[^.]*$`,
@@ -145,7 +146,7 @@ export function applyGovernor(
   const warnings: string[] = []
   const orch = family as CouncilOrchestrationFamily
   let t = (text ?? '').trim()
-  const maxChars = Math.max(80, cmd.responseLimits.maxChars)
+  const maxChars = Math.max(80, effectiveMaxCharsForFamily(orch, cmd.responseLimits.maxChars))
   const raelDirective = context?.raelDirectiveText?.trim() ?? ''
 
   if (cmd.mode === 'silent') {

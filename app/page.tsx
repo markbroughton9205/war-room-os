@@ -66,12 +66,16 @@ import { extractProposedCouncilActions } from '@/lib/council/extractCouncilActio
 import { classifyRaElMessage, type ClassifyRaElMessageResult } from '@/lib/council/conversationIntent'
 import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
 import { DEFAULT_COUNCIL_COMMAND, type CouncilCommand } from '@/lib/council/councilCommandTypes'
+import { councilModeExtensionWarnings, resolveActiveCommand } from '@/lib/council/commandAuthority'
 import {
   ALL_ORCHESTRATION_FAMILIES,
   filterOrchestrationOrderByCommand,
-  parseCouncilCommand,
 } from '@/lib/council/commandParser'
 import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
+import { deriveTopicScopeLock } from '@/lib/council/topicScope'
+import { runFinalModerator } from '@/lib/council/finalModerator'
+import { buildCouncilRenderPacket, type CouncilRenderPacket } from '@/lib/council/renderPacket'
+import { resolveCouncilPacketSyncMs } from '@/lib/council/packetSync'
 import {
   GEMINI_REPAIR_ENQUEUE_METADATA_KEY,
   shouldInjectRedTeamEarly,
@@ -4147,6 +4151,9 @@ function Home() {
   const activeCouncilCommandRef = useRef<CouncilCommand>({ ...DEFAULT_COUNCIL_COMMAND })
   const lastRaelDirectiveContentRef = useRef('')
   const [councilUiCommand, setCouncilUiCommand] = useState<CouncilCommand>(() => ({ ...DEFAULT_COUNCIL_COMMAND }))
+  const [councilPacketRender, setCouncilPacketRender] = useState<CouncilRenderPacket | null>(null)
+  const decreePacketFlushCompleteRef = useRef(false)
+  const decreePacketOpenedAtMsRef = useRef(0)
   const [familyDuty, setFamilyDuty] = useState<Record<string, CouncilDutyState>>(() =>
     Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])),
   )
@@ -5569,7 +5576,19 @@ function Home() {
     }
   }
 
-  const revealOrchestrationTurn = async (family: CouncilOrchestrationFamily, text: string, inputText: string) => {
+  const revealOrchestrationTurn = async (
+    family: CouncilOrchestrationFamily,
+    text: string,
+    inputText: string,
+    opts?: { councilRevealSource?: 'autonomous' | 'decree' },
+  ) => {
+    const councilRevealSource = opts?.councilRevealSource ?? 'autonomous'
+    if (councilRevealSource === 'decree' && decreePacketFlushCompleteRef.current) {
+      if (process.env.NODE_ENV === 'development') {
+        console.debug("[Live Council] Suppressed visible late family reply after packet close.")
+      }
+      return
+    }
     const inputTokens = estimateTokens(inputText)
     const usageName = mapOrchFamilyToUsage(family)
     const nextUsageRows = BASE_USAGE_ROWS.map(row => {
@@ -5961,6 +5980,21 @@ function Home() {
 
       const cmd = activeCouncilCommandRef.current
       const directedOrder = filterOrchestrationOrderByCommand(order, cmd, decree)
+      const decreeTopicLockPreview = deriveTopicScopeLock(decree)
+
+      decreePacketFlushCompleteRef.current = false
+      decreePacketOpenedAtMsRef.current = Date.now()
+      const staged: { family: CouncilOrchestrationFamily; textOut: string }[] = []
+      const modeWarnings = councilModeExtensionWarnings(cmd)
+      setCouncilPacketRender(
+        buildCouncilRenderPacket({
+          command: cmd,
+          sessionState: 'OPEN',
+          packetStatus: 'gathering',
+          families: [],
+          extraWarnings: modeWarnings,
+        }),
+      )
 
       let anySuccess = false
       for (const family of directedOrder) {
@@ -6110,21 +6144,130 @@ function Home() {
         if (textOut) {
           anySuccess = true
           councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
-          await revealOrchestrationTurn(family, textOut, inputText())
-          const vis = orchestrationVisual(family)
-          const bubble = vis.bubbleFamilyName ?? rosterLabel(family)
-          void postLiveCouncilMessage({
-            role: 'assistant',
-            content: textOut,
-            family: bubble,
-          })
-          const focusSnippet = textOut.replace(/\s+/g, ' ').trim().slice(0, 120)
-          setFamilyCurrentFocus(prev => ({ ...prev, [family]: focusSnippet }))
-          void enqueueCouncilProposals(textOut, family)
+          staged.push({ family, textOut })
+          setCouncilPacketRender(
+            buildCouncilRenderPacket({
+              command: activeCouncilCommandRef.current,
+              sessionState: 'OPEN',
+              packetStatus: 'gathering',
+              families: staged.map(s => ({ family: s.family, content: s.textOut })),
+              extraWarnings: [...modeWarnings, ...(decreeTopicLockPreview.locked ? ['topic_scope_lock_active'] : [])],
+            }),
+          )
           if (intent.tier === 'casual') break
         }
 
         setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
+      }
+
+      if (controller.signal.aborted || councilPausedRef.current) {
+        decreePacketFlushCompleteRef.current = true
+        setCouncilPacketRender(
+          buildCouncilRenderPacket({
+            command: activeCouncilCommandRef.current,
+            sessionState: 'CLOSED',
+            packetStatus: 'idle',
+            families: [],
+            extraWarnings: [...modeWarnings, 'packet_cancelled_mid_gather'],
+          }),
+        )
+        return
+      }
+
+      if (staged.length > 0) {
+        setCouncilPacketRender(
+          buildCouncilRenderPacket({
+            command: activeCouncilCommandRef.current,
+            sessionState: 'FINALIZING',
+            packetStatus: 'finalizing',
+            families: staged.map(s => ({ family: s.family, content: s.textOut })),
+            extraWarnings: [...modeWarnings, 'packet_finalizing'],
+          }),
+        )
+        const syncMs = resolveCouncilPacketSyncMs({
+          intentTier: intent.tier,
+          mode: activeCouncilCommandRef.current.mode,
+        })
+        const elapsed = Date.now() - decreePacketOpenedAtMsRef.current
+        if (elapsed < syncMs) await wait(syncMs - elapsed)
+
+        if (controller.signal.aborted || councilPausedRef.current) {
+          decreePacketFlushCompleteRef.current = true
+          setCouncilPacketRender(
+            buildCouncilRenderPacket({
+              command: activeCouncilCommandRef.current,
+              sessionState: 'CLOSED',
+              packetStatus: 'idle',
+              families: [],
+              extraWarnings: [...modeWarnings, 'packet_cancelled_before_release'],
+            }),
+          )
+          return
+        }
+
+        const topicLock = decreeTopicLockPreview
+        const moderated = runFinalModerator({
+          lines: staged.map(s => ({ family: s.family, content: s.textOut })),
+          topicLock,
+        })
+
+        for (const line of moderated) {
+          if (!line.content.trim()) continue
+          await revealOrchestrationTurn(line.family, line.content, inputText(), { councilRevealSource: 'decree' })
+          const vis = orchestrationVisual(line.family)
+          const bubble = vis.bubbleFamilyName ?? rosterLabel(line.family)
+          void postLiveCouncilMessage({
+            role: 'assistant',
+            content: line.content,
+            family: bubble,
+          })
+          const focusSnippet = line.content.replace(/\s+/g, ' ').trim().slice(0, 120)
+          setFamilyCurrentFocus(prev => ({ ...prev, [line.family]: focusSnippet }))
+          void enqueueCouncilProposals(line.content, line.family)
+        }
+        decreePacketFlushCompleteRef.current = true
+
+        const isIntegrityish = (w: string) =>
+          w.startsWith('integrity_')
+          || w.startsWith('protocol_drift_response')
+          || w === 'protocol_drift_topic_scope_residual'
+
+        const packetFamilies = moderated
+          .filter(m => m.content.trim())
+          .map(m => {
+            const iw = m.warnings.filter(isIntegrityish)
+            const mw = m.warnings.filter(w => !isIntegrityish(w))
+            return {
+              family: m.family,
+              content: m.content,
+              ...(iw.length ? { integrityWarnings: iw } : {}),
+              ...(mw.length ? { moderatorWarnings: mw } : {}),
+            }
+          })
+
+        setCouncilPacketRender(
+          buildCouncilRenderPacket({
+            command: activeCouncilCommandRef.current,
+            sessionState: 'CLOSED',
+            packetStatus: 'released',
+            families: packetFamilies,
+            extraWarnings: [
+              ...modeWarnings,
+              ...(topicLock.locked ? ['topic_scope_lock_active'] : []),
+            ],
+          }),
+        )
+      } else {
+        decreePacketFlushCompleteRef.current = true
+        setCouncilPacketRender(
+          buildCouncilRenderPacket({
+            command: activeCouncilCommandRef.current,
+            sessionState: 'CLOSED',
+            packetStatus: 'idle',
+            families: [],
+            extraWarnings: modeWarnings,
+          }),
+        )
       }
 
       if (controller.signal.aborted || councilPausedRef.current) return
@@ -6225,7 +6368,7 @@ function Home() {
      * `isRaelCouncilMessage` treats `messageType === 'decree'` or familyName containing RA'EL.
      * If external channels are ambiguous, prefer user text containing "Ra'el" — not wired here.
      */
-    const parsedCmd = parseCouncilCommand(decree)
+    const parsedCmd = resolveActiveCommand({ latestDecreeText: decree }).command
     activeCouncilCommandRef.current = parsedCmd
     setCouncilUiCommand(parsedCmd)
     lastRaelDirectiveContentRef.current = decree
@@ -6366,6 +6509,7 @@ function Home() {
     activeCouncilCommandRef.current = { ...DEFAULT_COUNCIL_COMMAND }
     lastRaelDirectiveContentRef.current = ''
     setCouncilUiCommand({ ...DEFAULT_COUNCIL_COMMAND })
+    setCouncilPacketRender(null)
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY)
     }
@@ -6385,6 +6529,7 @@ function Home() {
     activeCouncilCommandRef.current = { ...DEFAULT_COUNCIL_COMMAND }
     lastRaelDirectiveContentRef.current = ''
     setCouncilUiCommand({ ...DEFAULT_COUNCIL_COMMAND })
+    setCouncilPacketRender(null)
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY)
     }
@@ -6779,7 +6924,7 @@ function Home() {
             <span className="rounded border border-white/10 px-2 py-1">Persistence: {persistenceHealthLabel}</span>
             <span className="rounded border border-white/10 px-2 py-1">Internet: {internetHealthLabel}</span>
           </div>
-          <CouncilCommandBadges cmd={councilUiCommand} />
+          <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />
         </div>
         <div
           data-testid="live-council-messages"

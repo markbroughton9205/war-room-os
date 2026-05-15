@@ -1,6 +1,8 @@
 'use client'
 
+import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
+import type { CouncilRenderPacket } from '@/lib/council/renderPacket'
 
 const BADGES: { mode: CouncilCommand['mode']; label: string }[] = [
   { mode: 'attendance', label: 'ATTENDANCE' },
@@ -22,7 +24,40 @@ function commandSummary(cmd: CouncilCommand): string {
   return bits.join(' · ')
 }
 
-export function CouncilCommandBadges({ cmd }: { cmd: CouncilCommand }) {
+const PACKET_STATUS_LABEL: Record<CouncilRenderPacket['packetStatus'], string> = {
+  idle: 'PACKET · idle',
+  gathering: 'PACKET · gathering',
+  finalizing: 'PACKET · finalizing',
+  released: 'PACKET · released',
+}
+
+function familyShort(id: CouncilOrchestrationFamily): string {
+  if (id === 'red_team') return 'Red Team'
+  if (id === 'bridge_architect') return 'Bridge'
+  return id.replace(/_/g, ' ')
+}
+
+export function CouncilCommandBadges({
+  cmd,
+  packet,
+}: {
+  cmd: CouncilCommand
+  packet?: CouncilRenderPacket | null
+}) {
+  const sessionLine = packet
+    ? `Session · ${packet.sessionState} · ${PACKET_STATUS_LABEL[packet.packetStatus]}`
+    : 'Session · —'
+
+  const familiesLine = packet?.participatingFamilies?.length
+    ? `Families · ${packet.participatingFamilies.map(familyShort).join(', ')}`
+    : packet?.packetStatus === 'gathering' || packet?.packetStatus === 'finalizing'
+      ? 'Families · (pending release)'
+      : null
+
+  const drift = packet?.warnings?.length
+    ? `Protocol / integrity · ${packet.warnings.slice(0, 6).join(' · ')}${packet.warnings.length > 6 ? ' …' : ''}`
+    : null
+
   return (
     <div className="mt-2 space-y-1">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -47,6 +82,26 @@ export function CouncilCommandBadges({ cmd }: { cmd: CouncilCommand }) {
       <p className="text-[8px] tracking-wide" style={{ color: '#555' }} title="Parsed from latest Ra’el decree">
         {commandSummary(cmd)}
       </p>
+      {packet ? (
+        <div className="space-y-0.5 border-t border-white/5 pt-1">
+          <p className="text-[8px] font-bold tracking-widest" style={{ color: '#8B7355' }}>
+            Active mode · {packet.mode}
+          </p>
+          <p className="text-[8px] tracking-wide" style={{ color: '#6a6a6a' }} title="Council resolution packet lifecycle">
+            {sessionLine}
+          </p>
+          {familiesLine ? (
+            <p className="text-[8px] tracking-wide" style={{ color: '#6a6a6a' }}>
+              {familiesLine}
+            </p>
+          ) : null}
+          {drift ? (
+            <p className="text-[8px] leading-snug tracking-wide" style={{ color: '#b45309' }} title="Integrity and scope drift signals">
+              {drift}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }
