@@ -3,6 +3,7 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import type { CouncilRenderPacket } from '@/lib/council/renderPacket'
+import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 
 const BADGES: { mode: CouncilCommand['mode']; label: string }[] = [
   { mode: 'attendance', label: 'ATTENDANCE' },
@@ -35,6 +36,15 @@ function familyShort(id: CouncilOrchestrationFamily): string {
   if (id === 'red_team') return 'Red Team'
   if (id === 'bridge_architect') return 'Bridge'
   return id.replace(/_/g, ' ')
+}
+
+const PROVIDER_STATUS_LABEL: Record<string, string> = {
+  READY: 'ready',
+  RESPONDED: 'ok',
+  TIMED_OUT: 'timed out',
+  DEGRADED: 'degraded',
+  FAILED: 'failed',
+  SKIPPED: 'skipped',
 }
 
 export function CouncilCommandBadges({
@@ -99,6 +109,32 @@ export function CouncilCommandBadges({
             <p className="text-[8px] leading-snug tracking-wide" style={{ color: '#b45309' }} title="Integrity and scope drift signals">
               {drift}
             </p>
+          ) : null}
+          {packet?.providerRuntimeStates && Object.keys(packet.providerRuntimeStates).length ? (
+            <div className="flex flex-wrap gap-1 pt-0.5" title="Per-family provider outcome for the last gather">
+              {(Object.entries(packet.providerRuntimeStates) as [CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus][]).map(
+                ([fid, st]) => (
+                  <span
+                    key={fid}
+                    className="rounded px-1.5 py-0.5 text-[8px] font-semibold tracking-wide"
+                    style={{
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      color:
+                        st === 'RESPONDED'
+                          ? '#9ca3af'
+                          : st === 'TIMED_OUT'
+                            ? '#d97706'
+                            : st === 'FAILED'
+                              ? '#b91c1c'
+                              : '#6b7280',
+                      background: 'rgba(0,0,0,0.25)',
+                    }}
+                  >
+                    {familyShort(fid)} · {PROVIDER_STATUS_LABEL[st] ?? st}
+                  </span>
+                ),
+              )}
+            </div>
           ) : null}
         </div>
       ) : null}

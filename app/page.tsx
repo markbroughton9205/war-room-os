@@ -40,7 +40,7 @@ import type { EngineControlStatusResponse, EngineId, EngineStatus } from '@/lib/
 import type { RouteCommandResult } from '@/lib/engine-control/router'
 import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
-import { postCouncilChat, sendLiveCouncilThroneMessage } from '@/lib/council/liveChatPipeline'
+import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
 import { classifyCommand } from '@/lib/engine-control/permissions'
 import { ProviderSetupChecklistPanel } from '@/components/war-room/ProviderSetupChecklistPanel'
 import { Phase3WarRoomPanels } from '@/components/war-room/phase3/Phase3WarRoomPanels'
@@ -78,6 +78,8 @@ import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { shouldSuppressStaleAutonomousReveal } from '@/lib/council/sessionBarrier'
 import { buildCouncilRenderPacket, type CouncilRenderPacket } from '@/lib/council/renderPacket'
 import { resolveCouncilPacketSyncMs } from '@/lib/council/packetSync'
+import { resolveAttendanceBatchCeilingMs, resolveProviderTimeoutMs } from '@/lib/council/providerTimeouts'
+import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 import {
   GEMINI_REPAIR_ENQUEUE_METADATA_KEY,
   shouldInjectRedTeamEarly,
@@ -5746,22 +5748,38 @@ function Home() {
     let shouldScheduleNext = false
     try {
       if (!textOut) {
-        const { res: r, data } = await postCouncilChat(
-          {
-            message: decree,
-            profile: RAEL_PROFILE,
-            threadHistory,
-            mode: 'continue',
-            toneMode: 'casual',
-            councilSingleFamily: family,
-            orchestrationAugment: augment,
-            councilCommand: activeCouncilCommandRef.current,
-            raelDirectiveText: lastRaelDirectiveContentRef.current,
-            councilIntentKind: autonomousIntent.intent,
-            councilActiveScope: autonomousIntent.scope,
-            ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
-          },
-        )
+        const autoBudget = resolveProviderTimeoutMs({
+          intentKind: autonomousIntent.intent,
+          mode: 'continue',
+          councilCommand: activeCouncilCommandRef.current,
+        })
+        const famCtrl = new AbortController()
+        const tid = window.setTimeout(() => famCtrl.abort(), autoBudget)
+        let r: Response
+        let data: CouncilChatJson
+        try {
+          const out = await postCouncilChat(
+            {
+              message: decree,
+              profile: RAEL_PROFILE,
+              threadHistory,
+              mode: 'continue',
+              toneMode: 'casual',
+              councilSingleFamily: family,
+              orchestrationAugment: augment,
+              councilCommand: activeCouncilCommandRef.current,
+              raelDirectiveText: lastRaelDirectiveContentRef.current,
+              councilIntentKind: autonomousIntent.intent,
+              councilActiveScope: autonomousIntent.scope,
+              ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
+            },
+            famCtrl.signal,
+          )
+          r = out.res
+          data = out.data
+        } finally {
+          window.clearTimeout(tid)
+        }
         if (!r.ok) {
           lastCouncilFamilyErrorRef.current = family
           const summary = typeof data.message === 'string' ? data.message : (data.error ?? `HTTP ${r.status}`)
@@ -5786,6 +5804,12 @@ function Home() {
           addSystemMessage(errLine)
           void postLiveCouncilMessage({ role: 'system', content: errLine })
           councilDispatch({ type: 'SET_PROVIDER_ERROR', payload: errLine })
+          shouldScheduleNext = true
+          return
+        }
+        if (data.councilProviderHttpStatus === 'timed_out' || data.councilProviderHttpStatus === 'failed') {
+          lastCouncilFamilyErrorRef.current = data.councilProviderHttpStatus === 'failed' ? family : null
+          councilDispatch({ type: 'BUMP_AUTONOMOUS_ROUND' })
           shouldScheduleNext = true
           return
         }
@@ -5884,7 +5908,11 @@ function Home() {
 
     const postCouncilChatWithFamilyTimeout = async (
       body: Parameters<typeof postCouncilChat>[0],
-      timeoutMs = 25_000,
+      timeoutMs = resolveProviderTimeoutMs({
+        intentKind: body.councilIntentKind ?? 'natural',
+        mode: body.mode,
+        councilCommand: body.councilCommand,
+      }),
     ) => {
       const familyController = new AbortController()
       const abortFamily = () => familyController.abort()
@@ -6009,6 +6037,14 @@ function Home() {
       decreePacketOpenedAtMsRef.current = Date.now()
       const staged: { family: CouncilOrchestrationFamily; textOut: string }[] = []
       const modeWarnings = councilModeExtensionWarnings(cmd)
+
+      const attendanceWave = cmd.mode === 'attendance' || councilIntentState.intent === 'attendance'
+      const batchCeilingMs = attendanceWave
+        ? resolveAttendanceBatchCeilingMs({ familyCount: directedOrder.length })
+        : null
+
+      let providerRuntimeStates: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
+
       setCouncilPacketRender(
         buildCouncilRenderPacket({
           command: cmd,
@@ -6016,13 +6052,26 @@ function Home() {
           packetStatus: 'gathering',
           families: [],
           extraWarnings: modeWarnings,
+          providerRuntimeStates,
         }),
       )
 
       let anySuccess = false
-      for (const family of directedOrder) {
-        if (myRound !== decreeRoundGenRef.current) break
-        if (controller.signal.aborted || councilPausedRef.current) break
+
+      type GatherCell = {
+        family: CouncilOrchestrationFamily
+        textOut: string | null
+        runtime: ProviderFamilyOutcomeStatus
+        runtimeDetail?: string
+      }
+
+      const gatherFamily = async (family: CouncilOrchestrationFamily): Promise<GatherCell> => {
+        if (myRound !== decreeRoundGenRef.current) {
+          return { family, textOut: null, runtime: 'SKIPPED', runtimeDetail: 'superseded' }
+        }
+        if (controller.signal.aborted || councilPausedRef.current) {
+          return { family, textOut: null, runtime: 'SKIPPED', runtimeDetail: 'aborted' }
+        }
 
         setFamilyDuty(prev => ({ ...prev, [family]: 'working' }))
         const label = rosterLabel(family)
@@ -6076,116 +6125,186 @@ function Home() {
         }
 
         let textOut: string | null = null
+        let runtime: ProviderFamilyOutcomeStatus = 'SKIPPED'
+        let runtimeDetail: string | undefined
 
-        if (family === 'kimi' || family === 'bridge_architect') {
-          textOut = await tryLocal()
-          if (!textOut) {
-            const sys = `${label}: unavailable (local ${family} agent not functional or invoke failed)`
-            addSystemMessage(sys)
-            void postLiveCouncilMessage({ role: 'system', content: sys })
-          }
-        } else if (family === 'gemini' && skipGeminiForSessionRef.current) {
-          /* Gemini session backoff after availability failure — other families continue. */
-        } else {
-          const eid = cloudEngineIdForCouncilFamily(family)
-          const row = eid ? engineMapRef.current.get(eid) : undefined
-          if (!isEngineFunctional(engineMapRef.current, eid)) {
-            const sys = `${label}: unavailable (${unavailableReason(row)})`
-            addSystemMessage(sys)
-            void postLiveCouncilMessage({ role: 'system', content: sys })
+        try {
+          if (family === 'kimi' || family === 'bridge_architect') {
+            textOut = await tryLocal()
+            if (!textOut) {
+              const sys = `${label}: unavailable (local ${family} agent not functional or invoke failed)`
+              addSystemMessage(sys)
+              void postLiveCouncilMessage({ role: 'system', content: sys })
+              runtime = 'FAILED'
+              runtimeDetail = 'local_unavailable'
+            } else {
+              runtime = 'RESPONDED'
+            }
+          } else if (family === 'gemini' && skipGeminiForSessionRef.current) {
+            runtime = 'SKIPPED'
+            runtimeDetail = 'gemini_session_backoff'
           } else {
-            try {
-              const { res: chatRes, data: chatData } = await postCouncilChatWithFamilyTimeout(
-                {
-                  message: decree,
-                  profile: RAEL_PROFILE,
-                  threadHistory: threadHistory(),
-                  mode: mode === 'expanded' ? 'expanded' : 'continue',
-                  toneMode,
-                  councilSingleFamily: family,
-                  orchestrationAugment: augment,
-                  councilCommand: activeCouncilCommandRef.current,
-                  raelDirectiveText: decree,
-                  councilIntentKind: councilIntentState.intent,
-                  councilActiveScope: councilIntentState.scope,
-                  ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
-                },
-              )
-              if (!chatRes.ok) {
-                lastCouncilFamilyErrorRef.current = family
-                const summary = typeof chatData.message === 'string' ? chatData.message : (chatData.error ?? `HTTP ${chatRes.status}`)
-                if (isGeminiCouncilBackoffFailure(family, chatRes, chatData)) {
-                  geminiFailureCountRef.current += 1
-                  geminiLastErrorSummaryRef.current = summary
-                  skipGeminiForSessionRef.current = true
-                  if (!geminiUnavailableUserMessagedRef.current) {
-                    geminiUnavailableUserMessagedRef.current = true
-                    const line = `Gemini unavailable: ${summary.slice(0, 500)}`
-                    addSystemMessage(line)
-                    void postLiveCouncilMessage({ role: 'system', content: line })
+            const eid = cloudEngineIdForCouncilFamily(family)
+            const row = eid ? engineMapRef.current.get(eid) : undefined
+            if (!isEngineFunctional(engineMapRef.current, eid)) {
+              const sys = `${label}: unavailable (${unavailableReason(row)})`
+              addSystemMessage(sys)
+              void postLiveCouncilMessage({ role: 'system', content: sys })
+              runtime = 'SKIPPED'
+              runtimeDetail = 'engine_unavailable'
+            } else {
+              const perMs = resolveProviderTimeoutMs({
+                intentKind: councilIntentState.intent,
+                mode: mode === 'expanded' ? 'expanded' : 'continue',
+                councilCommand: activeCouncilCommandRef.current,
+              })
+              const effectiveMs = batchCeilingMs != null ? Math.min(perMs, batchCeilingMs) : perMs
+              try {
+                const { res: chatRes, data: chatData } = await postCouncilChatWithFamilyTimeout(
+                  {
+                    message: decree,
+                    profile: RAEL_PROFILE,
+                    threadHistory: threadHistory(),
+                    mode: mode === 'expanded' ? 'expanded' : 'continue',
+                    toneMode,
+                    councilSingleFamily: family,
+                    orchestrationAugment: augment,
+                    councilCommand: activeCouncilCommandRef.current,
+                    raelDirectiveText: decree,
+                    councilIntentKind: councilIntentState.intent,
+                    councilActiveScope: councilIntentState.scope,
+                    ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
+                  },
+                  effectiveMs,
+                )
+
+                if (chatRes.ok && chatData.councilProviderHttpStatus === 'timed_out') {
+                  runtime = 'TIMED_OUT'
+                  runtimeDetail = chatData.councilProviderHttpDetail
+                  textOut = null
+                } else if (chatRes.ok && chatData.councilProviderHttpStatus === 'failed') {
+                  runtime = 'FAILED'
+                  runtimeDetail = chatData.councilProviderHttpDetail
+                  textOut = null
+                } else if (!chatRes.ok) {
+                  lastCouncilFamilyErrorRef.current = family
+                  const summary = typeof chatData.message === 'string' ? chatData.message : (chatData.error ?? `HTTP ${chatRes.status}`)
+                  if (isGeminiCouncilBackoffFailure(family, chatRes, chatData)) {
+                    geminiFailureCountRef.current += 1
+                    geminiLastErrorSummaryRef.current = summary
+                    skipGeminiForSessionRef.current = true
+                    if (!geminiUnavailableUserMessagedRef.current) {
+                      geminiUnavailableUserMessagedRef.current = true
+                      const line = `Gemini unavailable: ${summary.slice(0, 500)}`
+                      addSystemMessage(line)
+                      void postLiveCouncilMessage({ role: 'system', content: line })
+                    }
+                    textOut = null
+                    runtime = 'FAILED'
+                    runtimeDetail = 'gemini_backoff'
+                  } else {
+                    const err = `[Error] ${label}: ${summary}`
+                    addSystemMessage(err)
+                    void postLiveCouncilMessage({ role: 'system', content: err })
+                    textOut = await tryLocal()
+                    if (!textOut) {
+                      addSystemMessage(`${label}: cloud failed and local fallback unavailable.`)
+                      runtime = 'FAILED'
+                      runtimeDetail = 'cloud_and_local_failed'
+                    } else {
+                      runtime = 'RESPONDED'
+                    }
                   }
+                } else if (chatData.councilGovernorSkipped) {
+                  textOut = null
+                  runtime = 'SKIPPED'
+                  runtimeDetail = 'governor_silent_skip'
+                } else {
+                  textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
+                  if (!textOut) {
+                    const err = `[Error] ${label}: empty response`
+                    lastCouncilFamilyErrorRef.current = family
+                    addSystemMessage(err)
+                    void postLiveCouncilMessage({ role: 'system', content: err })
+                    textOut = await tryLocal()
+                    if (!textOut) {
+                      runtime = 'FAILED'
+                      runtimeDetail = 'empty_then_local_failed'
+                    } else {
+                      runtime = 'RESPONDED'
+                    }
+                  } else {
+                    runtime = 'RESPONDED'
+                  }
+                }
+              } catch (familyError) {
+                const familyTimedOut = familyError instanceof DOMException && familyError.name === 'AbortError'
+                if (familyTimedOut) {
+                  runtime = 'TIMED_OUT'
+                  runtimeDetail = 'client_abort_or_budget'
                   textOut = null
                 } else {
+                  lastCouncilFamilyErrorRef.current = family
+                  const summary = familyError instanceof Error ? familyError.message : String(familyError)
                   const err = `[Error] ${label}: ${summary}`
                   addSystemMessage(err)
                   void postLiveCouncilMessage({ role: 'system', content: err })
                   textOut = await tryLocal()
                   if (!textOut) {
-                    addSystemMessage(`${label}: cloud failed and local fallback unavailable.`)
+                    addSystemMessage(`${label}: provider failed and local fallback unavailable.`)
+                    runtime = 'FAILED'
+                  } else {
+                    runtime = 'RESPONDED'
                   }
                 }
-              } else {
-                if (chatData.councilGovernorSkipped) {
-                  textOut = null
-                  setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
-                  continue
-                }
-                textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
-                if (!textOut) {
-                  const err = `[Error] ${label}: empty response`
-                  lastCouncilFamilyErrorRef.current = family
-                  addSystemMessage(err)
-                  void postLiveCouncilMessage({ role: 'system', content: err })
-                  textOut = await tryLocal()
-                }
-              }
-            } catch (familyError) {
-              lastCouncilFamilyErrorRef.current = family
-              const familyTimedOut = familyError instanceof DOMException && familyError.name === 'AbortError'
-              const summary = familyTimedOut
-                ? 'provider timed out'
-                : familyError instanceof Error
-                  ? familyError.message
-                  : String(familyError)
-              const err = `[Error] ${label}: ${summary}`
-              addSystemMessage(err)
-              void postLiveCouncilMessage({ role: 'system', content: err })
-              textOut = await tryLocal()
-              if (!textOut) {
-                addSystemMessage(`${label}: provider failed and local fallback unavailable.`)
               }
             }
           }
+        } finally {
+          setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
         }
 
-        if (textOut) {
-          anySuccess = true
-          councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
-          staged.push({ family, textOut })
-          setCouncilPacketRender(
-            buildCouncilRenderPacket({
-              command: activeCouncilCommandRef.current,
-              sessionState: 'OPEN',
-              packetStatus: 'gathering',
-              families: staged.map(s => ({ family: s.family, content: s.textOut })),
-              extraWarnings: [...modeWarnings, ...(decreeTopicLockPreview.locked ? ['topic_scope_lock_active'] : [])],
-            }),
-          )
-          if (intent.tier === 'casual') break
-        }
-
-        setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
+        return { family, textOut, runtime, runtimeDetail }
       }
+
+      const settled = await Promise.allSettled(directedOrder.map(family => gatherFamily(family)))
+      const cells: GatherCell[] = directedOrder.map((family, i) => {
+        const s = settled[i]
+        if (!s) return { family, textOut: null, runtime: 'FAILED' as const, runtimeDetail: 'missing_slot' }
+        if (s.status === 'fulfilled') return s.value
+        const reason = s.reason instanceof Error ? s.reason.message : String(s.reason)
+        return { family, textOut: null, runtime: 'FAILED' as const, runtimeDetail: reason }
+      })
+
+      providerRuntimeStates = Object.fromEntries(cells.map(c => [c.family, c.runtime])) as Partial<
+        Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>
+      >
+
+      const stagedCandidates = cells
+        .filter(c => Boolean(c.textOut?.trim()))
+        .map(c => ({ family: c.family, textOut: c.textOut!.trim() }))
+
+      if (intent.tier === 'casual' && stagedCandidates.length) {
+        staged.push(stagedCandidates[0]!)
+      } else {
+        for (const row of stagedCandidates) staged.push(row)
+      }
+
+      if (staged.length) {
+        anySuccess = true
+        councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+      }
+
+      setCouncilPacketRender(
+        buildCouncilRenderPacket({
+          command: activeCouncilCommandRef.current,
+          sessionState: 'OPEN',
+          packetStatus: 'gathering',
+          families: staged.map(s => ({ family: s.family, content: s.textOut })),
+          extraWarnings: [...modeWarnings, ...(decreeTopicLockPreview.locked ? ['topic_scope_lock_active'] : [])],
+          providerRuntimeStates,
+        }),
+      )
 
       if (controller.signal.aborted || councilPausedRef.current) {
         decreePacketFlushCompleteRef.current = true
@@ -6196,6 +6315,7 @@ function Home() {
             packetStatus: 'idle',
             families: [],
             extraWarnings: [...modeWarnings, 'packet_cancelled_mid_gather'],
+            providerRuntimeStates,
           }),
         )
         return
@@ -6209,6 +6329,7 @@ function Home() {
             packetStatus: 'finalizing',
             families: staged.map(s => ({ family: s.family, content: s.textOut })),
             extraWarnings: [...modeWarnings, 'packet_finalizing'],
+            providerRuntimeStates,
           }),
         )
         const syncMs = resolveCouncilPacketSyncMs({
@@ -6227,6 +6348,7 @@ function Home() {
               packetStatus: 'idle',
               families: [],
               extraWarnings: [...modeWarnings, 'packet_cancelled_before_release'],
+              providerRuntimeStates,
             }),
           )
           return
@@ -6285,6 +6407,7 @@ function Home() {
               ...modeWarnings,
               ...(topicLock.locked ? ['topic_scope_lock_active'] : []),
             ],
+            providerRuntimeStates,
           }),
         )
       } else {
@@ -6296,6 +6419,7 @@ function Home() {
             packetStatus: 'idle',
             families: [],
             extraWarnings: modeWarnings,
+            providerRuntimeStates,
           }),
         )
       }

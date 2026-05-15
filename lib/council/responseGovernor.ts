@@ -13,6 +13,7 @@ import {
   stripStrategicPivotLanguage,
   textViolatesForbiddenScope,
 } from '@/lib/council/intentScope'
+import { repairOrFlagResponse } from '@/lib/council/responseIntegrity'
 
 const FLUFF_LINE = new RegExp(
   String.raw`^\s*(remember|believe in yourself|you've got this|stay strong|keep pushing|dream big|manifest|the universe|deep breath|you are enough)[^.]*$`,
@@ -278,6 +279,12 @@ export function applyGovernor(
   t = applyFamilySoftRules(t, family, maxChars)
 
   t = applyActiveScopeTail({ text: t, family: orch, cmd, intent, scope, warnings })
+
+  const repaired = repairOrFlagResponse(t)
+  t = repaired.text
+  if (repaired.integrityWarnings.length) {
+    warnings.push(...repaired.integrityWarnings)
+  }
 
   if (!t.trim()) {
     warnings.push('council_governor_empty_after_trim')

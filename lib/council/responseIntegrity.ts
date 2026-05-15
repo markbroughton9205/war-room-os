@@ -1,6 +1,8 @@
 const TRUNCATED_WORD = /\b\w{2,}\s*$/m
 const BROKEN_BULLET = /(?:^|\n)\s*[-*•]\s*$/m
 const CLIPPED_ELLIPSIS_END = /…\s*$/
+/** Truncated tool / sync boilerplate tails (mid-token cutoffs from caps or stream ends). */
+const BROKEN_SYNC_TAIL = /\s*(?:sync|syncing|synchroni[sz]e?|synchroni[sz]ing)\w*$/i
 
 export type ResponseIntegrityResult = {
   text: string
@@ -57,6 +59,11 @@ export function repairOrFlagResponse(raw: string): ResponseIntegrityResult {
   const integrityWarnings: string[] = []
   let text = (raw ?? '').replace(/\r\n/g, '\n').trim()
   if (!text) return { text: '', integrityWarnings: [] }
+
+  if (BROKEN_SYNC_TAIL.test(text)) {
+    text = text.replace(BROKEN_SYNC_TAIL, '').trim()
+    integrityWarnings.push('integrity_stripped_broken_sync_tail')
+  }
 
   const initial = detectIntegrityIssues(text)
   if (initial.length) {

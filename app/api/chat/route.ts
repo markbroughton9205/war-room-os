@@ -8,13 +8,13 @@ import { coerceCouncilCommand } from '@/lib/council/councilCommandTypes'
 import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { buildActiveScope } from '@/lib/council/intentScope'
+import { resolveProviderTimeoutMs } from '@/lib/council/providerTimeouts'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514'
 const DEFAULT_MAX_TOKENS = 220
 const EXPANDED_MAX_TOKENS = 520
-const GROK_TIMEOUT_MS = 30000
 
 const COUNCIL_THREAD_MESSAGES = 16
 
@@ -38,13 +38,19 @@ export type CouncilSingleFamily =
   | 'kimi'
   | 'bridge_architect'
 
-async function callChatGPT(prompt: string, system: string, maxTokens = DEFAULT_MAX_TOKENS): Promise<string> {
+async function callChatGPT(
+  prompt: string,
+  system: string,
+  maxTokens = DEFAULT_MAX_TOKENS,
+  signal?: AbortSignal,
+): Promise<string> {
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'authorization': `Bearer ${process.env.OPENAI_API_KEY || ''}`,
     },
+    signal,
     body: JSON.stringify({
       model: 'gpt-4o',
       messages: [
@@ -65,7 +71,12 @@ async function callChatGPT(prompt: string, system: string, maxTokens = DEFAULT_M
   return text.trim()
 }
 
-async function callClaude(prompt: string, system: string, maxTokens = DEFAULT_MAX_TOKENS): Promise<string> {
+async function callClaude(
+  prompt: string,
+  system: string,
+  maxTokens = DEFAULT_MAX_TOKENS,
+  signal?: AbortSignal,
+): Promise<string> {
   const res = await fetch(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
@@ -73,6 +84,7 @@ async function callClaude(prompt: string, system: string, maxTokens = DEFAULT_MA
       'x-api-key': process.env.ANTHROPIC_API_KEY || '',
       'anthropic-version': '2023-06-01',
     },
+    signal,
     body: JSON.stringify({
       model: CLAUDE_MODEL,
       max_tokens: maxTokens,
@@ -91,14 +103,14 @@ async function callClaude(prompt: string, system: string, maxTokens = DEFAULT_MA
   return text.trim()
 }
 
-async function callGrok(prompt: string, system: string, maxTokens = DEFAULT_MAX_TOKENS): Promise<string> {
+async function callGrok(prompt: string, system: string, maxTokens = DEFAULT_MAX_TOKENS, timeoutMs?: number): Promise<string> {
   const result = await callXAIChat({
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: prompt },
     ],
     maxTokens,
-    timeoutMs: GROK_TIMEOUT_MS,
+    timeoutMs: timeoutMs ?? 30_000,
   })
 
   if (result.status !== 'online') {
@@ -189,23 +201,44 @@ export async function POST(req: Request) {
     : ''
 
   const sup = tryWarRoomSupabase()
-  const auditCouncil = (meta: Record<string, unknown>) =>
-    insertWarRoomAuditLog(sup.ok ? sup.client : null, {
-      actor: 'system',
-      category: 'engine',
-      message: meta.success === false ? 'Council /api/chat failed or aborted' : 'Council /api/chat completed',
-      metadata: {
-        route: '/api/chat',
-        toneMode,
-        mode: mode ?? null,
-        ...meta,
+  const safeAudit = async (meta: Record<string, unknown>) => {
+    try {
+      await insertWarRoomAuditLog(sup.ok ? sup.client : null, {
+        actor: 'system',
+        category: 'engine',
+        message: meta.success === false ? 'Council /api/chat failed or aborted' : 'Council /api/chat completed',
+        metadata: {
+          route: '/api/chat',
+          toneMode,
+          mode: mode ?? null,
+          ...meta,
+        },
+      })
+    } catch (err) {
+      console.warn('[war-room-audit] insertWarRoomAuditLog failed:', err)
+    }
+  }
+
+  const degradedProviderResponse = (
+    councilFam: CouncilSingleFamily,
+    status: 'timed_out' | 'failed',
+    detail: string,
+  ) =>
+    NextResponse.json(
+      {
+        councilSingleResponse: '',
+        councilSingleFamily: councilFam,
+        showContinue: true,
+        councilProviderHttpStatus: status,
+        councilProviderHttpDetail: detail,
       },
-    })
+      { status: 200 },
+    )
 
   try {
     if (mode === 'continue' && councilSingleFamily) {
       if (councilSingleFamily === 'kimi' || councilSingleFamily === 'bridge_architect') {
-        await auditCouncil({
+        await safeAudit({
           success: false,
           flow: 'continue_single',
           councilSingleFamily,
@@ -220,6 +253,21 @@ export async function POST(req: Request) {
         )
       }
 
+      const providerBudgetMs = resolveProviderTimeoutMs({
+        intentKind: intentState.intent,
+        mode,
+        councilCommand,
+      })
+
+      const withBudgetSignal = () => {
+        const ac = new AbortController()
+        const tid = setTimeout(() => ac.abort(), providerBudgetMs)
+        return {
+          signal: ac.signal,
+          dispose: () => clearTimeout(tid),
+        }
+      }
+
       const userPrompt = buildCouncilUserPrompt({
         raelDirectiveText,
         threadBlock: thread,
@@ -229,65 +277,123 @@ export async function POST(req: Request) {
 
       let responseText = ''
       let geminiDegradedReason: string | null = null
-      switch (councilSingleFamily) {
-        case 'chatgpt':
-          responseText = await callChatGPT(userPrompt, gptSystem, maxTokens)
-          break
-        case 'claude':
-          responseText = await callClaude(userPrompt, claudeSystem, maxTokens)
-          break
-        case 'grok':
-          responseText = await callGrok(userPrompt, grokSystem, maxTokens)
-          break
-        case 'gemini': {
-          const geminiResult = await completeGeminiCouncilMessage({
-            userPrompt,
-            systemPrompt: geminiSystem,
-            maxOutputTokens: maxTokens,
-          })
-          if (!geminiResult.ok) {
-            if (geminiResult.degraded) {
-              responseText = geminiResult.note
-              geminiDegradedReason = geminiResult.reason
-              break
+      try {
+        switch (councilSingleFamily) {
+          case 'chatgpt': {
+            const { signal, dispose } = withBudgetSignal()
+            try {
+              responseText = await callChatGPT(userPrompt, gptSystem, maxTokens, signal)
+            } finally {
+              dispose()
             }
-            await auditCouncil({
+            break
+          }
+          case 'claude': {
+            const { signal, dispose } = withBudgetSignal()
+            try {
+              responseText = await callClaude(userPrompt, claudeSystem, maxTokens, signal)
+            } finally {
+              dispose()
+            }
+            break
+          }
+          case 'grok':
+            responseText = await callGrok(userPrompt, grokSystem, maxTokens, providerBudgetMs)
+            break
+          case 'gemini': {
+            const geminiResult = await completeGeminiCouncilMessage({
+              userPrompt,
+              systemPrompt: geminiSystem,
+              maxOutputTokens: maxTokens,
+              timeoutMs: providerBudgetMs,
+            })
+            if (!geminiResult.ok) {
+              if (geminiResult.degraded) {
+                responseText = geminiResult.note
+                geminiDegradedReason = geminiResult.reason
+                break
+              }
+              await safeAudit({
+                success: false,
+                flow: 'continue_single',
+                councilSingleFamily: 'gemini',
+                reason: 'gemini_provider_error',
+              })
+              return degradedProviderResponse('gemini', 'failed', geminiResult.error)
+            }
+            responseText = geminiResult.text.trim()
+            if (!responseText) {
+              await safeAudit({
+                success: false,
+                flow: 'continue_single',
+                councilSingleFamily: 'gemini',
+                reason: 'gemini_empty',
+              })
+              return degradedProviderResponse('gemini', 'failed', 'Gemini returned empty content')
+            }
+            break
+          }
+          case 'red_team': {
+            const redSystem = `You are Red Team in Ra'el's War Room — internal adversary and risk hunter. Hunt contradictions, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Ra'el profile when relevant: ${profile}`
+            const { signal, dispose } = withBudgetSignal()
+            try {
+              responseText = await callClaude(userPrompt, redSystem, maxTokens, signal)
+            } finally {
+              dispose()
+            }
+            break
+          }
+          case 'baby': {
+            const babySystem = `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Ra'el profile when relevant: ${profile}`
+            const { signal, dispose } = withBudgetSignal()
+            try {
+              responseText = await callChatGPT(userPrompt, babySystem, maxTokens, signal)
+            } finally {
+              dispose()
+            }
+            break
+          }
+          default:
+            await safeAudit({
               success: false,
               flow: 'continue_single',
-              councilSingleFamily: 'gemini',
-              reason: 'gemini_provider_error',
+              reason: 'unknown_councilSingleFamily',
+              councilSingleFamily: String(councilSingleFamily),
             })
-            return NextResponse.json(
-              { error: 'gemini_provider_error', message: geminiResult.error },
-              { status: 502 },
-            )
-          }
-          responseText = geminiResult.text.trim()
-          if (!responseText) throw new Error('Gemini returned empty content')
-          break
+            return NextResponse.json({ error: 'Unknown councilSingleFamily' }, { status: 400 })
         }
-        case 'red_team': {
-          const redSystem = `You are Red Team in Ra'el's War Room — internal adversary and risk hunter. Hunt contradictions, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Ra'el profile when relevant: ${profile}`
-          responseText = await callClaude(userPrompt, redSystem, maxTokens)
-          break
+      } catch (providerErr) {
+        const msg = providerErr instanceof Error ? providerErr.message : String(providerErr)
+        const timedOut =
+          (providerErr instanceof DOMException && providerErr.name === 'AbortError')
+          || /\b(aborted|abort|timeout)\b/i.test(msg)
+        await safeAudit({
+          success: false,
+          flow: 'continue_single',
+          councilSingleFamily,
+          error: msg,
+          timedOut,
+        })
+        if (timedOut) {
+          return degradedProviderResponse(councilSingleFamily, 'timed_out', msg)
         }
-        case 'baby': {
-          const babySystem = `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Ra'el profile when relevant: ${profile}`
-          responseText = await callChatGPT(userPrompt, babySystem, maxTokens)
-          break
+        if (/\b(api[_ ]?key|not configured|missing|unauthorized|401)\b/i.test(msg)) {
+          return NextResponse.json(
+            { error: 'council_configuration_error', message: msg },
+            { status: 503 },
+          )
         }
-        default:
-          await auditCouncil({
-            success: false,
-            flow: 'continue_single',
-            reason: 'unknown_councilSingleFamily',
-            councilSingleFamily: String(councilSingleFamily),
-          })
-          return NextResponse.json({ error: 'Unknown councilSingleFamily' }, { status: 400 })
+        return degradedProviderResponse(councilSingleFamily, 'failed', msg)
       }
 
       if (!responseText.trim()) {
-        throw new Error(`${councilSingleFamily} returned empty body`)
+        await safeAudit({
+          success: false,
+          flow: 'continue_single',
+          councilSingleFamily,
+          reason: 'empty_body',
+        })
+        return degradedProviderResponse(councilSingleFamily, 'failed', `${councilSingleFamily} returned empty body`)
       }
 
       const governed = applyGovernor(responseText, councilSingleFamily, councilCommand, {
@@ -296,7 +402,7 @@ export async function POST(req: Request) {
         councilActiveScope: scopeForGovernor,
       })
       if (governed.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
-        await auditCouncil({
+        await safeAudit({
           success: true,
           flow: 'continue_single',
           councilSingleFamily,
@@ -324,10 +430,20 @@ export async function POST(req: Request) {
       }
       responseText = governed.text
       if (!responseText.trim()) {
-        throw new Error(`${councilSingleFamily} returned empty body after governor`)
+        await safeAudit({
+          success: false,
+          flow: 'continue_single',
+          councilSingleFamily,
+          reason: 'empty_after_governor',
+        })
+        return degradedProviderResponse(
+          councilSingleFamily,
+          'failed',
+          `${councilSingleFamily} returned empty body after governor`,
+        )
       }
 
-      await auditCouncil({
+      await safeAudit({
         success: true,
         flow: 'continue_single',
         councilSingleFamily,
@@ -363,7 +479,7 @@ export async function POST(req: Request) {
       })
     }
 
-    await auditCouncil({
+    await safeAudit({
       success: false,
       flow: 'unsupported',
       reason: 'require_continue_single',
@@ -377,14 +493,17 @@ export async function POST(req: Request) {
       { status: 400 },
     )
   } catch (e) {
-    await auditCouncil({
+    await safeAudit({
       success: false,
       flow: 'council',
       error: e instanceof Error ? e.message : String(e),
     })
-    return NextResponse.json({
-      error: 'council_provider_failed',
-      message: e instanceof Error ? e.message : String(e),
-    }, { status: 503 })
+    return NextResponse.json(
+      {
+        error: 'council_internal_error',
+        message: e instanceof Error ? e.message : String(e),
+      },
+      { status: 500 },
+    )
   }
 }

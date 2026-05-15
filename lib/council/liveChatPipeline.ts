@@ -41,6 +41,9 @@ export type CouncilChatJson = {
   councilGovernorSkipped?: boolean
   error?: string
   message?: string
+  /** Present on HTTP 200 when the route degraded instead of failing the batch. */
+  councilProviderHttpStatus?: 'timed_out' | 'failed'
+  councilProviderHttpDetail?: string
 }
 
 export async function postCouncilChat(

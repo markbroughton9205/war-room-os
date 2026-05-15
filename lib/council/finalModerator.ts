@@ -29,6 +29,34 @@ const PACKET_ORDER: CouncilOrchestrationFamily[] = [
 
 const CROSS_CRITIQUE = /\b(chatgpt|claude|grok|gemini|red\s*team|baby|kimi|bridge)\b[^.!?\n]{0,120}\b(wrong|incorrect|flawed|useless|fails?|bad\s+take|nonsense)\b/i
 
+/** Clamp autonomous “keep going” voice to permission-style phrasing only (heuristic strip). */
+const AGGRESSIVE_CONTINUATION = new RegExp(
+  String.raw`(?m)^\s*(?:(?:let me|allow me to)\s+(?:continue|go on|elaborate|expand)|i(?:'ll|\s+will)\s+continue\b|shall i\s+continue\b|(?:keep|stay)\s+going\b|going\s+deeper\b|(?:much\s+)?more\s+detail\s+if\s+you\s+want\b)[^.!?\n]*[.!?]?\s*$`,
+  'i',
+)
+
+function stripAggressiveContinuationHeuristic(text: string): { text: string; stripped: boolean } {
+  const t = text.trim()
+  if (!t) return { text, stripped: false }
+  const lines = t.split('\n')
+  const out: string[] = []
+  let stripped = false
+  for (const line of lines) {
+    if (AGGRESSIVE_CONTINUATION.test(line.trim())) {
+      stripped = true
+      continue
+    }
+    out.push(line)
+  }
+  const joined = out.join('\n').trim()
+  if (!stripped) return { text, stripped: false }
+  const permissionOnly = 'Say if you want more detail on any point above.'
+  return {
+    text: joined ? `${joined}\n\n${permissionOnly}` : permissionOnly,
+    stripped: true,
+  }
+}
+
 function reduceCrossCritiqueHeuristic(text: string, family: CouncilOrchestrationFamily): { text: string; stripped: number } {
   if (family === 'red_team' || !text.trim()) return { text, stripped: 0 }
   const lines = text.split('\n')
@@ -74,6 +102,10 @@ export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLi
     const integ = repairOrFlagResponse(content)
     content = integ.text
     warnings.push(...integ.integrityWarnings)
+
+    const cont = stripAggressiveContinuationHeuristic(content)
+    content = cont.text
+    if (cont.stripped) warnings.push('moderator_clamped_autonomous_continuation')
 
     const cc = reduceCrossCritiqueHeuristic(content, row.family)
     content = cc.text
