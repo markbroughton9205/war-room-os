@@ -1,3 +1,7 @@
+import {
+  councilMessageFromWarRoomRow,
+  shouldPersistCouncilMessage,
+} from '@/lib/council/messagePersistenceFilter'
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import {
   httpStatusForSupabaseFailure,
@@ -62,6 +66,14 @@ export async function POST(
 
   const family = typeof body.family === 'string' ? body.family.trim() || null : null
   const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata : {}
+
+  if (
+    !shouldPersistCouncilMessage(
+      councilMessageFromWarRoomRow({ role, content, family, metadata }),
+    )
+  ) {
+    return jsonWithPersistence({ skipped: true, reason: 'message_not_persistable' }, true, { status: 202 })
+  }
 
   const { data, error } = await sup.client
     .from(TABLE_MESSAGES)

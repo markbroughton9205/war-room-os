@@ -8,6 +8,11 @@ import {
 } from './councilSessionReducer'
 import type { CouncilPersistedV1 } from './councilSessionTypes'
 import { createMessageId } from '@/lib/council/messageIds'
+import {
+  councilMessageFromPersisted,
+  shouldPersistCouncilMessage,
+  type CouncilMessagePersistenceContext,
+} from '@/lib/council/messagePersistenceFilter'
 
 const MAX_PERSISTED_MESSAGES = 100
 
@@ -16,9 +21,18 @@ function newSessionId() {
   return `council-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-function clipMessages(store: CouncilPersistedV1): CouncilPersistedV1 {
-  if (store.messages.length <= MAX_PERSISTED_MESSAGES) return store
-  return { ...store, messages: store.messages.slice(-MAX_PERSISTED_MESSAGES) }
+function clipMessages(
+  store: CouncilPersistedV1,
+  persistenceCtx?: CouncilMessagePersistenceContext,
+): CouncilPersistedV1 {
+  const filtered = store.messages.filter(m =>
+    shouldPersistCouncilMessage(councilMessageFromPersisted(m), persistenceCtx),
+  )
+  const clipped =
+    filtered.length <= MAX_PERSISTED_MESSAGES
+      ? filtered
+      : filtered.slice(-MAX_PERSISTED_MESSAGES)
+  return { ...store, messages: clipped }
 }
 
 function normalizePersistedMessageIds(store: CouncilPersistedV1): CouncilPersistedV1 {
@@ -43,13 +57,13 @@ function parsePersisted(raw: string | null): CouncilPersistedV1 | null {
   try {
     const data = JSON.parse(raw) as CouncilPersistedV1
     if (data?.v !== 1 || typeof data.sessionId !== 'string' || !Array.isArray(data.messages)) return null
-    return normalizePersistedMessageIds(clipMessages(data))
+    return normalizePersistedMessageIds(clipMessages(data, undefined))
   } catch {
     return null
   }
 }
 
-export function useCouncilSession() {
+export function useCouncilSession(persistenceCtx?: CouncilMessagePersistenceContext) {
   const [mounted, setMounted] = useState(false)
   const skipNextPersist = useRef(true)
   const storeRef = useRef<CouncilPersistedV1 | null>(null)
@@ -79,12 +93,12 @@ export function useCouncilSession() {
       return
     }
     try {
-      const clipped = clipMessages(store)
+      const clipped = clipMessages(store, persistenceCtx)
       window.sessionStorage.setItem(COUNCIL_SESSION_STORAGE_KEY, JSON.stringify(clipped))
     } catch {
       // Quota or privacy mode — council still works in-memory for this tab.
     }
-  }, [store, mounted])
+  }, [store, mounted, persistenceCtx])
 
   const newSessionIdCb = useCallback(() => newSessionId(), [])
 

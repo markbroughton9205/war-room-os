@@ -70,6 +70,9 @@ export function resolveDecreeSoftGatherServerBudgetMs(args: {
   return Math.max(base, DECREE_GATHER_HARD_HANG_MS - 5000)
 }
 
+/** Per-family engine-status probe budget during attendance preflight (no generate). */
+export const ATTENDANCE_PREFLIGHT_PER_FAMILY_MS = 2500
+
 /** Hard ceiling for an entire attendance gather wave (parallel batch). */
 export function resolveAttendanceBatchCeilingMs(args: { familyCount: number }): number {
   const n = Math.max(1, args.familyCount)

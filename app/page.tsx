@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import type { FormEvent } from 'react'
 import Link from 'next/link'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
@@ -86,6 +86,17 @@ import {
   resolveProviderTimeoutMs,
 } from '@/lib/council/providerTimeouts'
 import { shouldSuppressProviderFailureFromChatStream } from '@/lib/council/chatStreamFilters'
+import {
+  attendancePreflightToProviderRuntime,
+  runAttendancePreflight,
+  type AttendancePreflightStatus,
+} from '@/lib/council/attendancePreflight'
+import {
+  buildCouncilPersistenceContext,
+  councilMessageFromLivePost,
+  councilMessageFromWarRoomRow,
+  shouldPersistCouncilMessage,
+} from '@/lib/council/messagePersistenceFilter'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 import { resolveModeGovernor } from '@/lib/council/modeGovernor'
 import {
@@ -4072,8 +4083,6 @@ function ExpansionPermissionPrompt({
 
 function Home() {
   const { uiMode, setUiMode } = useWarRoomUiMode()
-  const { store: council, dispatch: councilDispatch, mounted: councilMounted, newSessionId } = useCouncilSession()
-  const messages = council.messages
   const [command, setCommand] = useState('')
 
   const [loading, setLoading] = useState(false)
@@ -4099,6 +4108,17 @@ function Home() {
   const [redTeamCoder, setRedTeamCoder] = useState<RedTeamCoderUiState>(INITIAL_RED_TEAM_CODER_STATE)
   const [localAgentBridge, setLocalAgentBridge] = useState<LocalAgentBridgeStatusResponse>(INITIAL_LOCAL_AGENT_BRIDGE)
   const [localFamilyAgents, setLocalFamilyAgents] = useState<LocalFamilyAgentsResponse>(INITIAL_LOCAL_FAMILY_AGENTS)
+  const councilPersistenceCtx = useMemo(
+    () =>
+      buildCouncilPersistenceContext({
+        localFamilyAgents,
+        orchestrationFamilyToLocalAgentId,
+      }),
+    [localFamilyAgents],
+  )
+  const { store: council, dispatch: councilDispatch, mounted: councilMounted, newSessionId } =
+    useCouncilSession(councilPersistenceCtx)
+  const messages = council.messages
   const [internetStatus, setInternetStatus] = useState<InternetStatusResponse>(INITIAL_INTERNET_STATUS)
   const [repoStatus, setRepoStatus] = useState<RepoStatus>(INITIAL_REPO_STATUS)
   const [rollbackStatus, setRollbackStatus] = useState<RollbackStatus>(INITIAL_ROLLBACK_STATUS)
@@ -4454,7 +4474,14 @@ function Home() {
         const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
         if (!tr.ok) return
         const tj = await tr.json() as {
-          messages?: { id: string; role: string; content: string; family?: string | null; created_at: string }[]
+          messages?: {
+            id: string
+            role: string
+            content: string
+            family?: string | null
+            created_at: string
+            metadata?: Record<string, unknown>
+          }[]
           conversation?: { metadata?: Record<string, unknown> }
         }
         const meta = tj.conversation?.metadata as { council?: Record<string, unknown> } | undefined
@@ -4481,14 +4508,34 @@ function Home() {
         }
         const rows = Array.isArray(tj.messages) ? tj.messages : []
         if (rows.length > 0) {
-          const mapped = normalizeCouncilMessageIds(rows.map(row => mapWarRoomRowToCouncilMessage(row)), 'persisted')
-          councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
+          const mapped = normalizeCouncilMessageIds(
+            rows
+              .filter(row =>
+                shouldPersistCouncilMessage(
+                  councilMessageFromWarRoomRow({
+                    role: row.role,
+                    content: row.content,
+                    family: row.family,
+                    metadata:
+                      row.metadata && typeof row.metadata === 'object'
+                        ? (row.metadata as Record<string, unknown>)
+                        : undefined,
+                  }),
+                  councilPersistenceCtx,
+                ),
+              )
+              .map(row => mapWarRoomRowToCouncilMessage(row)),
+            'persisted',
+          )
+          if (mapped.length > 0) {
+            councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
+          }
         }
       } catch {
         /* session-only council */
       }
     })()
-  }, [councilMounted, councilDispatch])
+  }, [councilMounted, councilDispatch, councilPersistenceCtx])
 
   useEffect(() => {
     if (!autoScrollEnabled) return
@@ -4627,7 +4674,11 @@ function Home() {
 
   const postLiveCouncilMessage = async (
     input: { role: 'user' | 'assistant' | 'system'; content: string; family?: string | null },
-    opts?: { applyAttendanceLateGatherSkip?: boolean },
+    opts?: {
+      applyAttendanceLateGatherSkip?: boolean
+      responseSuccessful?: boolean
+      providerRuntime?: ProviderFamilyOutcomeStatus
+    },
   ) => {
     if (
       opts?.applyAttendanceLateGatherSkip
@@ -4641,6 +4692,11 @@ function Home() {
     ) {
       return
     }
+    const persistable = councilMessageFromLivePost(input, {
+      responseSuccessful: opts?.responseSuccessful,
+      providerRuntime: opts?.providerRuntime,
+    })
+    if (!shouldPersistCouncilMessage(persistable, councilPersistenceCtx)) return
     if (!liveCouncilConvId || !persistenceAvailable) return
     try {
       await fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
@@ -4650,7 +4706,10 @@ function Home() {
           role: input.role,
           content: input.content,
           family: input.family ?? null,
-          metadata: {},
+          metadata: {
+            responseSuccessful: opts?.responseSuccessful === true,
+            ...(opts?.providerRuntime ? { providerRuntime: opts.providerRuntime } : {}),
+          },
         }),
       })
     } catch {
@@ -6181,6 +6240,19 @@ function Home() {
         postLiveCouncilMessage(input, { applyAttendanceLateGatherSkip: attendanceWave })
 
       let providerRuntimeStates: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
+      let attendancePreflightMap: Partial<Record<CouncilOrchestrationFamily, AttendancePreflightStatus>> = {}
+
+      if (attendanceWave) {
+        attendancePreflightMap = await runAttendancePreflight(directedOrder, {
+          engineMap: engineMapRef.current,
+          localFamilyAgents,
+          skipGeminiForSession: skipGeminiForSessionRef.current,
+          signal: controller.signal,
+        })
+        providerRuntimeStates = Object.fromEntries(
+          directedOrder.map(f => [f, attendancePreflightToProviderRuntime(attendancePreflightMap[f])]),
+        ) as Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>>
+      }
 
       setCouncilPacketRender(
         buildCouncilRenderPacket({
@@ -6208,6 +6280,10 @@ function Home() {
         }
         if (controller.signal.aborted || councilPausedRef.current) {
           return { family, textOut: null, runtime: 'SKIPPED', runtimeDetail: 'aborted' }
+        }
+
+        if (attendanceWave && attendancePreflightMap[family] === 'unavailable') {
+          return { family, textOut: null, runtime: 'SKIPPED', runtimeDetail: 'preflight_unavailable' }
         }
 
         setFamilyDuty(prev => ({ ...prev, [family]: 'working' }))
@@ -6602,11 +6678,13 @@ function Home() {
           await revealOrchestrationTurn(line.family, line.content, inputText(), { councilRevealSource: 'decree' })
           const vis = orchestrationVisual(line.family)
           const bubble = vis.bubbleFamilyName ?? rosterLabel(line.family)
-          void postLiveCouncilMessage({
-            role: 'assistant',
-            content: line.content,
-            family: bubble,
-          })
+          void postLiveCouncilMessage(
+            { role: 'assistant', content: line.content, family: bubble },
+            {
+              responseSuccessful: true,
+              providerRuntime: providerRuntimeStates[line.family],
+            },
+          )
           const focusSnippet = line.content.replace(/\s+/g, ' ').trim().slice(0, 120)
           setFamilyCurrentFocus(prev => ({ ...prev, [line.family]: focusSnippet }))
           void enqueueCouncilProposals(line.content, line.family)
@@ -6784,7 +6862,10 @@ function Home() {
       messageType: 'decree'
     }])
 
-    void postLiveCouncilMessage({ role: 'user', content: decree, family: "RA'EL" })
+    void postLiveCouncilMessage(
+      { role: 'user', content: decree, family: "RA'EL" },
+      { responseSuccessful: true },
+    )
     void emitDecreeEvents(decree, intent.shouldEmitBusEvents)
 
     if (intent.tier === 'income_ops') {
