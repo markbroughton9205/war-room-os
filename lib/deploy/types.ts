@@ -97,6 +97,8 @@ export type DeployStatusResponse = {
   checkedAt: string
   provider: DeploymentProvider
   lastDeployment: string | null
+  /** Short git SHA when platform env exposes it (never fabricated). */
+  gitCommitShort?: string | null
   localDev: DevServerHint
   /**
    * Present only when localhost probe ran (`DEPLOY_STATUS_PROBE_LOCALHOST=1`) and GET / did not succeed.

@@ -1,7 +1,16 @@
+import type { EngineStatus } from '@/lib/engine-control/types'
 import type {
+  DeploymentIntegrityRollup,
+  InternetLayerRollup,
   OverallStatus,
+  PersistenceRollup,
+  PersistenceTableProbeStatus,
+  ProviderIntegritySlot,
+  RuntimeHealthRollup,
   SubsystemRow,
   SubsystemOperationalStatus,
+  ToolLayerClassification,
+  ToolsLayerRollup,
   TruthLevel,
 } from '@/lib/runtime/runtimeIntegrityTypes'
 
@@ -474,4 +483,165 @@ export function mapOrchestrationState(depth: number): SubsystemRow {
     recommendation:
       'Queue depth is declarative only; use /api/orchestration/task for enqueue semantics (requires approvals per policy).',
   })
+}
+
+function probeStatus(p: SupabaseProbe): PersistenceTableProbeStatus {
+  if (!p.ok) return 'FAILING'
+  return 'HEALTHY'
+}
+
+export function buildPersistenceRollup(args: {
+  conversations: SupabaseProbe
+  messages: SupabaseProbe
+  actions: SupabaseProbe
+  audit: SupabaseProbe
+  memory: SupabaseProbe
+  urlPresent: boolean
+  anonKeyPresent: boolean
+}): PersistenceRollup {
+  return {
+    conversations: probeStatus(args.conversations),
+    messages: probeStatus(args.messages),
+    actions: probeStatus(args.actions),
+    audit: probeStatus(args.audit),
+    memoryProposals: probeStatus(args.memory),
+    clientOnlyPersistenceFallbackLikely: Boolean(args.urlPresent && !args.anonKeyPresent),
+  }
+}
+
+export function buildInternetRollupFromInternetStatusJson(json: unknown): InternetLayerRollup | null {
+  if (!json || typeof json !== 'object') return null
+  const j = json as Record<string, unknown>
+  if (typeof j.error === 'string') return null
+  return {
+    lastChecked: typeof j.lastChecked === 'string' ? j.lastChecked : null,
+    overallStatus: typeof j.overallStatus === 'string' ? j.overallStatus : null,
+    label: typeof j.label === 'string' ? j.label : null,
+    tavily: j.tavily as InternetLayerRollup['tavily'],
+    firecrawl: j.firecrawl as InternetLayerRollup['firecrawl'],
+    grok: j.grok as InternetLayerRollup['grok'],
+    gemini: j.gemini as InternetLayerRollup['gemini'],
+    fetch: j.fetch as InternetLayerRollup['fetch'],
+  }
+}
+
+export function buildProviderIntegritySlots(engineJson: unknown, providerHealthJson: unknown): ProviderIntegritySlot[] {
+  const j = engineJson as { engines?: EngineStatus[] }
+  const engines = Array.isArray(j.engines) ? j.engines : []
+  const slots: ProviderIntegritySlot[] = engines.map(e => ({
+    id: e.id,
+    displayName: e.displayName,
+    configured: Boolean(e.configured),
+    reachable: Boolean(e.reachable),
+    functional: Boolean(e.functional),
+    degraded: Boolean(e.configured && (!e.functional || !e.reachable)),
+    failed: Boolean(e.configured && !e.functional && !e.reachable),
+    lastSuccess: typeof e.lastSuccessfulProbeAt === 'string' ? e.lastSuccessfulProbeAt : null,
+    lastFailure: null,
+    lastResponseMs: null,
+  }))
+
+  const ph = providerHealthJson as { availability?: Record<string, string> }
+  const av = ph.availability && typeof ph.availability === 'object' ? ph.availability : {}
+  const rt = av.redteam
+  if (typeof rt === 'string') {
+    slots.push({
+      id: 'redteam',
+      displayName: 'Red Team (provider slot)',
+      configured: rt !== 'not_configured',
+      reachable: false,
+      functional: false,
+      degraded: rt === 'probe_required',
+      failed: false,
+      lastSuccess: null,
+      lastFailure: null,
+      lastResponseMs: null,
+    })
+  }
+  return slots
+}
+
+export function buildToolsLayerRollup(args: {
+  toolsInternetJson: unknown
+  toolsResearchJson: unknown
+  /** Full `/api/internet/status` JSON for adapter reachability (optional). */
+  internetStatusJson?: unknown
+}): ToolsLayerRollup {
+  if (process.env.WAR_ROOM_TOOLS_MOCK === '1') {
+    return {
+      internetToolStatus: 'MOCK',
+      researchAdapters: 'MOCK',
+      notes: 'WAR_ROOM_TOOLS_MOCK=1 — tooling classified as MOCK (explicit simulation flag).',
+    }
+  }
+
+  const ij = args.toolsInternetJson as { canUseInternet?: boolean }
+  const rj = args.toolsResearchJson as { tavilyConfigured?: boolean; firecrawlConfigured?: boolean }
+  const internetLive = ij.canUseInternet === true
+  const researchConfigured = Boolean(rj.tavilyConfigured || rj.firecrawlConfigured)
+  const rollup = buildInternetRollupFromInternetStatusJson(args.internetStatusJson ?? null)
+  const anyAdapterReachable = Boolean(
+    rollup?.tavily?.reachable === true
+      || rollup?.firecrawl?.reachable === true
+      || rollup?.gemini?.reachable === true
+      || (typeof rollup?.grok?.status === 'string' && rollup.grok.status === 'reachable'),
+  )
+
+  let internetToolStatus: ToolLayerClassification = 'UNWIRED'
+  if (internetLive) internetToolStatus = 'LIVE'
+  else if (anyAdapterReachable) internetToolStatus = 'DEGRADED'
+  else if (researchConfigured) internetToolStatus = 'PARTIAL'
+
+  let researchAdapters: ToolLayerClassification = 'UNWIRED'
+  if (researchConfigured && internetLive) researchAdapters = 'LIVE'
+  else if (researchConfigured && anyAdapterReachable) researchAdapters = 'DEGRADED'
+  else if (researchConfigured) researchAdapters = 'PARTIAL'
+  else if (anyAdapterReachable) researchAdapters = 'DEGRADED'
+
+  return { internetToolStatus, researchAdapters }
+}
+
+export function buildRuntimeHealthRollup(args: {
+  councilModeFromQuery: string | null
+  orchestrationQueueDepth: number
+  subsystems: SubsystemRow[]
+}): RuntimeHealthRollup {
+  const unresolvedFailures = args.subsystems
+    .filter(s => s.status === 'FAILING')
+    .map(s => ({ subsystemId: s.id, label: s.label }))
+  return {
+    ...(args.councilModeFromQuery ? { councilModeFromQuery: args.councilModeFromQuery } : {}),
+    orchestrationQueueDepth: args.orchestrationQueueDepth,
+    unresolvedFailures,
+  }
+}
+
+export function buildDeploymentIntegrityRollup(deployJson: unknown): DeploymentIntegrityRollup {
+  const j = deployJson as {
+    error?: string
+    gitCommitShort?: string | null
+    lastDeployment?: string | null
+    provider?: string
+    checkedAt?: string
+  }
+  if (typeof j.error === 'string') {
+    return {
+      commitShort: null,
+      lastDeployment: null,
+      provider: null,
+      checkedAt: typeof j.checkedAt === 'string' ? j.checkedAt : null,
+    }
+  }
+  const commit =
+    typeof j.gitCommitShort === 'string' && j.gitCommitShort.trim()
+      ? j.gitCommitShort.trim()
+      : typeof j.lastDeployment === 'string' && /sha:([0-9a-f]{7,40})/i.test(j.lastDeployment)
+        ? (j.lastDeployment.match(/sha:([0-9a-f]{7,40})/i)?.[1]?.slice(0, 7) ?? null)
+        : null
+  return {
+    commitShort: commit,
+    lastDeployment: typeof j.lastDeployment === 'string' ? j.lastDeployment : null,
+    provider: typeof j.provider === 'string' ? j.provider : null,
+    checkedAt: typeof j.checkedAt === 'string' ? j.checkedAt : null,
+  }
 }

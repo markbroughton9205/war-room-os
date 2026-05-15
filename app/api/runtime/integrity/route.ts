@@ -1,5 +1,12 @@
 import { getOrchestrationQueueDepth } from '@/lib/orchestration/taskOrchestrator'
+import { insertDiagnosticEvent } from '@/lib/runtime/diagnosticLog'
 import {
+  buildDeploymentIntegrityRollup,
+  buildInternetRollupFromInternetStatusJson,
+  buildPersistenceRollup,
+  buildProviderIntegritySlots,
+  buildRuntimeHealthRollup,
+  buildToolsLayerRollup,
   computeOverallStatus,
   mapActionQueueProbe,
   mapConversationsProbe,
@@ -14,11 +21,14 @@ import {
   mapRedTeamCoderJson,
   type SupabaseProbe,
 } from '@/lib/runtime/runtimeIntegrityMapper'
-import type { RuntimeIntegrityResponse, SubsystemRow } from '@/lib/runtime/runtimeIntegrityTypes'
+import type { RuntimeIntegrityResponse } from '@/lib/runtime/runtimeIntegrityTypes'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+const FAILING_LOG_COOLDOWN_MS = 300_000
+const lastFailingIntegrityLogAt = new Map<string, number>()
 
 function resolveInternalBaseUrl(req: Request): string {
   const trimmedPublic = process.env.NEXT_PUBLIC_APP_URL?.trim()
@@ -64,20 +74,55 @@ async function fetchJson(
 async function probeTable(
   table: string,
   columns: string,
+  filter?: { column: string; value: string },
 ): Promise<SupabaseProbe> {
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return { ok: false, error: 'Supabase not configured for this runtime.' }
   }
-  const { error, data } = await sup.client.from(table).select(columns).limit(1)
+  let q = sup.client.from(table).select(columns).limit(1)
+  if (filter) {
+    q = sup.client.from(table).select(columns).eq(filter.column, filter.value).limit(1)
+  }
+  const { error, data } = await q
   if (error) {
     return { ok: false, error: error.message }
   }
   return { ok: true, hasRows: Array.isArray(data) && data.length > 0 }
 }
 
+function trimEnv(name: string): string {
+  return typeof process.env[name] === 'string' ? process.env[name]!.trim() : ''
+}
+
+function maybeLogFailingSubsystems(subsystems: RuntimeIntegrityResponse['subsystems']): void {
+  const sup = tryWarRoomSupabase()
+  if (!sup.ok) return
+  const now = Date.now()
+  for (const s of subsystems) {
+    if (s.status !== 'FAILING') continue
+    const prev = lastFailingIntegrityLogAt.get(s.id) ?? 0
+    if (now - prev < FAILING_LOG_COOLDOWN_MS) continue
+    lastFailingIntegrityLogAt.set(s.id, now)
+    insertDiagnosticEvent(sup.client, {
+      subsystem: s.id,
+      severity: 'FAILING',
+      source_family: 'integrity_poll',
+      evidence: {
+        label: s.label,
+        truthLevel: s.truthLevel,
+        evidence: s.evidence.slice(0, 4000),
+      },
+      recommendation: s.recommendation.slice(0, 2000),
+      diagnostic_mode: null,
+    })
+  }
+}
+
 export async function GET(req: Request): Promise<Response> {
   const base = resolveInternalBaseUrl(req)
+  const url = new URL(req.url)
+  const councilMode = url.searchParams.get('councilMode')?.trim() || null
 
   const [
     engineRes,
@@ -87,8 +132,12 @@ export async function GET(req: Request): Promise<Response> {
     internetRes,
     localRes,
     deployRes,
+    toolsInternetRes,
+    toolsResearchRes,
     actionProbe,
     convProbe,
+    messagesProbe,
+    auditProbe,
     memoryProbe,
   ] = await Promise.all([
     fetchJson(base, '/api/engine-control/status'),
@@ -98,12 +147,16 @@ export async function GET(req: Request): Promise<Response> {
     fetchJson(base, '/api/internet/status'),
     fetchJson(base, '/api/local-agent/status'),
     fetchJson(base, '/api/deploy/status'),
+    fetchJson(base, '/api/tools/internet/status', 8000),
+    fetchJson(base, '/api/tools/research', 8000),
     probeTable('war_room_actions', 'id'),
     probeTable('war_room_conversations', 'id'),
+    probeTable('war_room_messages', 'id', { column: 'role', value: 'assistant' }),
+    probeTable('war_room_audit_logs', 'id'),
     probeTable('war_room_memory_proposals', 'id'),
   ])
 
-  const subsystems: SubsystemRow[] = [
+  const subsystems = [
     mapEngineControlJson(engineRes.ok ? engineRes.json : {}),
     mapProvidersHealthJson(providersRes.ok ? providersRes.json : {}),
     mapRedSentinelJson(sentinelRes.ok ? sentinelRes.json : {}),
@@ -117,11 +170,39 @@ export async function GET(req: Request): Promise<Response> {
     mapOrchestrationState(getOrchestrationQueueDepth()),
   ]
 
+  const urlPresent = Boolean(trimEnv('NEXT_PUBLIC_SUPABASE_URL'))
+  const anonKeyPresent = Boolean(trimEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'))
+
   const body: RuntimeIntegrityResponse = {
     generatedAt: new Date().toISOString(),
     overallStatus: computeOverallStatus(subsystems),
     subsystems,
+    attendanceParticipation: 'UNKNOWN',
+    providers: buildProviderIntegritySlots(engineRes.ok ? engineRes.json : {}, providersRes.ok ? providersRes.json : {}),
+    internetRollup: buildInternetRollupFromInternetStatusJson(internetRes.ok ? internetRes.json : null),
+    persistence: buildPersistenceRollup({
+      conversations: convProbe,
+      messages: messagesProbe,
+      actions: actionProbe,
+      audit: auditProbe,
+      memory: memoryProbe,
+      urlPresent,
+      anonKeyPresent,
+    }),
+    runtimeHealth: buildRuntimeHealthRollup({
+      councilModeFromQuery: councilMode,
+      orchestrationQueueDepth: getOrchestrationQueueDepth(),
+      subsystems,
+    }),
+    toolsLayer: buildToolsLayerRollup({
+      toolsInternetJson: toolsInternetRes.ok ? toolsInternetRes.json : {},
+      toolsResearchJson: toolsResearchRes.ok ? toolsResearchRes.json : {},
+      internetStatusJson: internetRes.ok ? internetRes.json : undefined,
+    }),
+    deployment: buildDeploymentIntegrityRollup(deployRes.ok ? deployRes.json : {}),
   }
+
+  maybeLogFailingSubsystems(subsystems)
 
   return Response.json(body)
 }

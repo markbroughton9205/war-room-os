@@ -12,6 +12,7 @@
  * **Throne send:** `sendLiveCouncilThroneMessage` sequences expansion gate → caller-provided append + council round.
  */
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import type { DiagnosticIntentMode } from '@/lib/council/diagnosticMode'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import type { ContinuationRequest } from '@/lib/council/continuationRequest'
 import type { IntentKind } from '@/lib/council/intentClassifier'
@@ -33,6 +34,10 @@ export type CouncilChatRequestBody = {
   diagnosticTurnIndex?: number
   diagnosticTurnTotal?: number
   diagnosticOrder?: CouncilOrchestrationFamily[]
+  /** Truncated JSON string from GET /api/runtime/integrity (diagnostic modes only; server re-validates). */
+  runtimeIntegritySnapshot?: string
+  /** Client echo of decree-derived diagnostic intent (server recomputes from `raelDirectiveText`). */
+  diagnosticIntentMode?: DiagnosticIntentMode
   /** Structured discipline from latest Ra’el directive (client-authored). */
   councilCommand?: CouncilCommand
   /** Latest Ra’el decree text — used for silent-mode checks when `message` is a synthetic continue line. */
@@ -62,6 +67,7 @@ export type CouncilChatJson = {
   continuationRequest?: ContinuationRequest
   diagnosticMeta?: {
     mode: 'sequential_diagnostic'
+    intentMode?: DiagnosticIntentMode
     turn: number
     total: number
     order: CouncilOrchestrationFamily[]

@@ -214,6 +214,26 @@ alter table public.war_room_audit_logs
   );
 
 -- -----------------------------------------------------------------------------
+-- Runtime integrity diagnostic events (API inserts; service role bypasses RLS)
+-- -----------------------------------------------------------------------------
+create table if not exists public.war_room_runtime_integrity_logs (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  subsystem text not null,
+  severity text not null,
+  source_family text,
+  evidence jsonb not null default '{}'::jsonb,
+  recommendation text,
+  diagnostic_mode text
+);
+
+create index if not exists war_room_runtime_integrity_logs_created_idx
+  on public.war_room_runtime_integrity_logs (created_at desc);
+
+create index if not exists war_room_runtime_integrity_logs_subsystem_created_idx
+  on public.war_room_runtime_integrity_logs (subsystem, created_at desc);
+
+-- -----------------------------------------------------------------------------
 -- Red Sentinel — scan snapshots / runtime diagnostics persistence
 -- -----------------------------------------------------------------------------
 create table if not exists public.war_room_sentinel_scans (
@@ -519,6 +539,7 @@ alter table public.war_room_actions enable row level security;
 alter table public.war_room_action_logs enable row level security;
 alter table public.war_room_internet_logs enable row level security;
 alter table public.war_room_audit_logs enable row level security;
+alter table public.war_room_runtime_integrity_logs enable row level security;
 alter table public.war_room_sentinel_scans enable row level security;
 alter table public.war_room_events enable row level security;
 alter table public.war_room_worker_runs enable row level security;
@@ -582,6 +603,20 @@ drop policy if exists war_room_audit_logs_service_role_all on public.war_room_au
 
 create policy war_room_audit_logs_service_role_all
   on public.war_room_audit_logs
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+-- -----------------------------------------------------------------------------
+-- war_room_runtime_integrity_logs: PostgREST + service_role DML
+-- -----------------------------------------------------------------------------
+grant select, insert, update, delete on table public.war_room_runtime_integrity_logs to service_role;
+
+drop policy if exists war_room_runtime_integrity_logs_service_role_all on public.war_room_runtime_integrity_logs;
+
+create policy war_room_runtime_integrity_logs_service_role_all
+  on public.war_room_runtime_integrity_logs
   for all
   to service_role
   using (true)

@@ -18,6 +18,7 @@ export function RuntimeIntegrityDashboard({
   const [data, setData] = useState<RuntimeIntegrityResponse | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [linkedSession, setLinkedSession] = useState<DiagnosticPanelState | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -46,7 +47,28 @@ export function RuntimeIntegrityDashboard({
     return () => window.clearInterval(t)
   }, [load, refreshIntervalMs])
 
+  useEffect(() => {
+    const tick = () => {
+      try {
+        const raw = sessionStorage.getItem('warRoomDiagnosticStrip')
+        if (!raw) {
+          setLinkedSession(null)
+          return
+        }
+        const j = JSON.parse(raw) as DiagnosticPanelState
+        setLinkedSession(j?.active ? j : null)
+      } catch {
+        setLinkedSession(null)
+      }
+    }
+    tick()
+    const id = window.setInterval(tick, 2000)
+    return () => window.clearInterval(id)
+  }, [])
+
   const repairs = data ? mapIntegrityRowsToRepairs(data.subsystems) : []
+  const effectiveDiagnosticSession =
+    diagnosticSession !== undefined && diagnosticSession !== null ? diagnosticSession : linkedSession
 
   function overallTone(s: RuntimeIntegrityResponse['overallStatus']): string {
     switch (s) {
@@ -84,12 +106,15 @@ export function RuntimeIntegrityDashboard({
         </button>
       </div>
 
-      {diagnosticSession !== undefined && (
-        <div className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-white/45">Diagnostics session</div>
-          <DiagnosticSessionPanel state={diagnosticSession ?? null} />
+      <div className="space-y-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-white/45">
+          Sequential diagnostics
+          {diagnosticSession === undefined ? (
+            <span className="ml-2 font-normal normal-case text-white/40">(mirrored from Operations → Diagnostics tab)</span>
+          ) : null}
         </div>
-      )}
+        <DiagnosticSessionPanel state={effectiveDiagnosticSession} />
+      </div>
 
       {err && <div className="rounded-md border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-sm text-rose-100">{err}</div>}
 
@@ -101,7 +126,90 @@ export function RuntimeIntegrityDashboard({
               <div className={`text-2xl font-semibold ${overallTone(data.overallStatus)}`}>{data.overallStatus}</div>
             </div>
             <div className="text-xs text-white/45">Generated {new Date(data.generatedAt).toLocaleString()}</div>
+            <div className="text-xs text-white/45">
+              Attendance (integrity): <span className="text-white/70">{data.attendanceParticipation}</span>
+            </div>
           </div>
+
+          {(data.deployment?.commitShort || data.deployment?.lastDeployment) && (
+            <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/75">
+              <span className="text-white/45">Deploy hint:</span>{' '}
+              {data.deployment.commitShort ? <span className="text-sky-200/90">commit {data.deployment.commitShort}</span> : null}
+              {data.deployment.lastDeployment ? (
+                <span className="ml-2 text-white/60">· {data.deployment.lastDeployment}</span>
+              ) : null}
+            </div>
+          )}
+
+          {data.runtimeHealth && (
+            <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+              <div className="font-semibold text-white/50">Runtime health</div>
+              <div className="mt-1 text-white/70">
+                Queue depth: {data.runtimeHealth.orchestrationQueueDepth}
+                {data.runtimeHealth.councilModeFromQuery ? (
+                  <span className="ml-3 text-white/55">councilMode(query): {data.runtimeHealth.councilModeFromQuery}</span>
+                ) : null}
+              </div>
+              {data.runtimeHealth.unresolvedFailures?.length ? (
+                <div className="mt-1 text-rose-200/90">
+                  Unresolved failures:{' '}
+                  {data.runtimeHealth.unresolvedFailures.map(f => f.label).join(', ')}
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {data.toolsLayer && (
+            <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+              <div className="font-semibold text-white/50">Tool layer</div>
+              <div className="mt-1">
+                Internet surface: <span className="text-emerald-200/80">{data.toolsLayer.internetToolStatus}</span>
+                <span className="mx-2 text-white/35">·</span>
+                Research adapters: <span className="text-emerald-200/80">{data.toolsLayer.researchAdapters}</span>
+              </div>
+              {data.toolsLayer.notes ? <div className="mt-1 text-white/55">{data.toolsLayer.notes}</div> : null}
+            </div>
+          )}
+
+          {data.persistence && (
+            <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/75">
+              <div className="font-semibold text-white/50">Persistence probes</div>
+              <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                <div>conversations: {data.persistence.conversations}</div>
+                <div>messages (assistant filter): {data.persistence.messages}</div>
+                <div>actions: {data.persistence.actions}</div>
+                <div>audit: {data.persistence.audit}</div>
+                <div>memory proposals: {data.persistence.memoryProposals}</div>
+              </div>
+              {data.persistence.clientOnlyPersistenceFallbackLikely ? (
+                <div className="mt-1 text-amber-200/85">Client-only persistence fallback likely (anon key missing).</div>
+              ) : null}
+            </div>
+          )}
+
+          {data.providers?.length ? (
+            <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/75">
+              <div className="font-semibold text-white/50">Provider / engine slots</div>
+              <ul className="mt-1 max-h-40 space-y-1 overflow-y-auto font-mono text-[11px]">
+                {data.providers.map(p => (
+                  <li key={p.id}>
+                    {p.id}: cfg={String(p.configured)} rch={String(p.reachable)} fn={String(p.functional)} deg=
+                    {String(p.degraded)} fail={String(p.failed)}
+                    {p.lastSuccess ? ` · lastOK=${p.lastSuccess}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {data.internetRollup && (
+            <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/75">
+              <div className="font-semibold text-white/50">Internet layer rollup</div>
+              <div className="mt-1 text-white/60">
+                {data.internetRollup.overallStatus ?? '—'} · {data.internetRollup.label ?? ''}
+              </div>
+            </div>
+          )}
 
           <SystemStatusMatrix rows={data.subsystems} />
 

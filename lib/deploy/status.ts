@@ -17,6 +17,13 @@ function trimEnv(name: string): string {
   return typeof process.env[name] === 'string' ? process.env[name]!.trim() : ''
 }
 
+/** Best-effort commit hint from CI / Vercel / Pages env (no fabricated value). */
+export function resolveGitCommitShortFromEnv(): string | null {
+  const raw = trimEnv('VERCEL_GIT_COMMIT_SHA') || trimEnv('GITHUB_SHA') || trimEnv('CF_PAGES_COMMIT_SHA')
+  if (!raw) return null
+  return raw.length >= 7 ? raw.slice(0, 7) : raw
+}
+
 function withHttps(url: string): string {
   if (url.startsWith('http://') || url.startsWith('https://')) return url
   return `https://${url}`
@@ -234,6 +241,7 @@ export async function collectDeployStatus(): Promise<DeployStatusResponse> {
     checkedAt,
     provider,
     lastDeployment,
+    gitCommitShort: resolveGitCommitShortFromEnv(),
     localDev,
     ...(offlineHint ? { offlineHint } : {}),
     production,

@@ -78,7 +78,7 @@ import { deriveTopicScopeLock } from '@/lib/council/topicScope'
 import { runFinalModerator } from '@/lib/council/finalModerator'
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { shouldSuppressStaleAutonomousReveal } from '@/lib/council/sessionBarrier'
-import { isSequentialDiagnosticIntent } from '@/lib/council/diagnosticMode'
+import { resolveDiagnosticIntentMode } from '@/lib/council/diagnosticMode'
 import { buildDefaultDiagnosticOrder } from '@/lib/council/turnSequencer'
 import { detectRedTeamRuntimeHold } from '@/lib/council/redTeamHold'
 import { useSequentialDiagnostics } from '@/components/war-room/runtime/useSequentialDiagnostics'
@@ -4412,7 +4412,38 @@ function Home() {
     total: number
     order: CouncilOrchestrationFamily[]
   } | null>(null)
+  const diagnosticIntegritySnapshotRef = useRef<string | null>(null)
+  const diagnosticHoldTimerRef = useRef<number | null>(null)
+  const diagnosticHoldReleaseRef = useRef<(() => void) | null>(null)
   const sequentialDiagnostics = useSequentialDiagnostics()
+
+  const releaseSequentialDiagnosticHold = useCallback(() => {
+    diagnosticHoldReleaseRef.current?.()
+  }, [])
+
+  useEffect(() => {
+    try {
+      const s = sequentialDiagnostics.session
+      if (s?.active) {
+        sessionStorage.setItem(
+          'warRoomDiagnosticStrip',
+          JSON.stringify({
+            active: s.active,
+            turnIndex: s.turnIndex,
+            order: s.order,
+            hold: s.hold,
+            intentMode: s.intentMode,
+            outcomes: s.outcomes,
+            holdReason: s.holdReason,
+          }),
+        )
+      } else {
+        sessionStorage.removeItem('warRoomDiagnosticStrip')
+      }
+    } catch {
+      /* private mode / no sessionStorage */
+    }
+  }, [sequentialDiagnostics.session])
 
   const standingPostExtra = (actionKind: string) => resolveStandingPostExtra(permSnap, actionKind)
 
@@ -6396,7 +6427,8 @@ function Home() {
             localFamilyAgents,
           })
         : filterOrchestrationOrderByCommand(order, cmd, decree)
-      const diagnosticSequential = isSequentialDiagnosticIntent(decree) && !attendanceWave
+      const diagnosticIntentMode = resolveDiagnosticIntentMode(decree)
+      const diagnosticSequential = diagnosticIntentMode !== 'none' && !attendanceWave
       const orderForGather = diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
         allowBusinessTopicsFromIntent: councilIntentState.intent === 'business_ops',
@@ -6505,7 +6537,21 @@ function Home() {
       sequentialDiagnosticApiRef.current = null
       if (diagnosticSequential) {
         sequentialDiagnosticHoldRef.current = false
-        sequentialDiagnostics.start(orderForGather)
+        diagnosticIntegritySnapshotRef.current = null
+        void fetch('/api/runtime/integrity', { cache: 'no-store' })
+          .then(r => (r.ok ? r.json() : null))
+          .then(obj => {
+            if (!obj) return
+            try {
+              diagnosticIntegritySnapshotRef.current = JSON.stringify(obj).slice(0, 12_000)
+            } catch {
+              diagnosticIntegritySnapshotRef.current = null
+            }
+          })
+          .catch(() => {
+            diagnosticIntegritySnapshotRef.current = null
+          })
+        sequentialDiagnostics.start(orderForGather, diagnosticIntentMode)
       }
 
       let anySuccess = false
@@ -6663,6 +6709,10 @@ function Home() {
                         diagnosticOrder: sequentialDiagnosticApiRef.current.order,
                       }
                     : {}),
+                  ...(diagnosticSequential && diagnosticIntegritySnapshotRef.current
+                    ? { runtimeIntegritySnapshot: diagnosticIntegritySnapshotRef.current }
+                    : {}),
+                  ...(diagnosticSequential ? { diagnosticIntentMode } : {}),
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
                 })
 
@@ -6819,7 +6869,6 @@ function Home() {
         await wait(batchCeilingMs)
       } else if (diagnosticSequential) {
         for (let i = 0; i < orderForGather.length; i++) {
-          if (sequentialDiagnosticHoldRef.current) break
           const family = orderForGather[i]!
           sequentialDiagnosticApiRef.current = {
             turn: i,
@@ -6831,9 +6880,32 @@ function Home() {
           const prev = outcomeByFamily.get(family)
           if (prev?.textOut?.trim() && cell.textOut?.trim()) continue
           outcomeByFamily.set(family, cell)
+          sequentialDiagnostics.recordOutcome(family, cell.runtime)
           if (family === 'red_team' && typeof cell.textOut === 'string' && detectRedTeamRuntimeHold(cell.textOut)) {
             sequentialDiagnosticHoldRef.current = true
-            sequentialDiagnostics.setHold(true)
+            sequentialDiagnostics.setHold(true, 'red_team_runtime_hold')
+            await new Promise<void>(resolve => {
+              let settled = false
+              const finish = () => {
+                if (settled) return
+                settled = true
+                if (diagnosticHoldTimerRef.current != null) {
+                  window.clearTimeout(diagnosticHoldTimerRef.current)
+                  diagnosticHoldTimerRef.current = null
+                }
+                diagnosticHoldReleaseRef.current = null
+                sequentialDiagnosticHoldRef.current = false
+                sequentialDiagnostics.setHold(false)
+                resolve()
+              }
+              diagnosticHoldReleaseRef.current = finish
+              diagnosticHoldTimerRef.current = window.setTimeout(() => {
+                const line = `Red Team HOLD — timed out after 60s; auto-resuming diagnostic queue.`
+                gatherPostSystem(line)
+                void gatherPostLive({ role: 'system', content: line })
+                finish()
+              }, 60_000)
+            })
           }
           await new Promise<void>(resolve => {
             window.setTimeout(resolve, 250)
@@ -8107,7 +8179,11 @@ function Home() {
                         turnIndex: sequentialDiagnostics.session.turnIndex,
                         order: sequentialDiagnostics.session.order,
                         hold: sequentialDiagnostics.session.hold,
+                        intentMode: sequentialDiagnostics.session.intentMode,
+                        outcomes: sequentialDiagnostics.session.outcomes,
+                        holdReason: sequentialDiagnostics.session.holdReason,
                       }}
+                      onReleaseHold={releaseSequentialDiagnosticHold}
                     />
                   </div>
                 ) : null}

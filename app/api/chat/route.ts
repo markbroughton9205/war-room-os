@@ -4,7 +4,10 @@ import { callXAIChat } from '@/lib/ai/providers/xai'
 import { councilSingleFamilyToMemoryPartition, tryPersistMemoryProposalFromModelOutput } from '@/lib/memory/ingestFromModel'
 import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { insertDiagnosticEvent } from '@/lib/runtime/diagnosticLog'
 import { coerceCouncilCommand } from '@/lib/council/councilCommandTypes'
+import { resolveDiagnosticIntentMode } from '@/lib/council/diagnosticMode'
+import { detectRedTeamRuntimeHold } from '@/lib/council/redTeamHold'
 import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { buildActiveScope } from '@/lib/council/intentScope'
@@ -319,6 +322,8 @@ export async function POST(req: Request) {
   }
   const diagnosticOrderCoerced = coerceDiagnosticOrder(body.diagnosticOrder)
 
+  const diagnosticIntentMode = resolveDiagnosticIntentMode(raelDirectiveText)
+
   const thread = buildThread(threadHistory)
   const intentState = resolveCurrentIntent({ latestRaelDecreeText: raelDirectiveText })
 
@@ -377,9 +382,19 @@ export async function POST(req: Request) {
   const redTeamSystem = `You are Red Team in Ra'el's War Room — internal adversary and risk hunter. Hunt contradictions, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Ra'el profile when relevant: ${profile}`
   const babySystem = `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Ra'el profile when relevant: ${profile}`
 
-  const augmentBlock = orchestrationAugment.trim()
-    ? `\n\nCouncil orchestration directives:\n${orchestrationAugment.trim()}`
-    : ''
+  const runtimeSnapRaw =
+    typeof body.runtimeIntegritySnapshot === 'string' ? body.runtimeIntegritySnapshot.trim() : ''
+  const runtimeSnapTruncated = runtimeSnapRaw.length > 8000 ? runtimeSnapRaw.slice(0, 8000) : runtimeSnapRaw
+  const integrityAugment =
+    sequentialDiagnostic && diagnosticIntentMode !== 'none' && runtimeSnapTruncated.length > 0
+      ? `\n\n### Runtime integrity snapshot (truncated; diagnostics only)\n${runtimeSnapTruncated}`
+      : ''
+  const augmentBlock = [
+    orchestrationAugment.trim() ? `\n\nCouncil orchestration directives:\n${orchestrationAugment.trim()}` : '',
+    integrityAugment,
+  ]
+    .filter(Boolean)
+    .join('')
 
   const sup = tryWarRoomSupabase()
   const safeAudit = async (meta: Record<string, unknown>) => {
@@ -400,16 +415,17 @@ export async function POST(req: Request) {
     }
   }
 
-  const diagnosticMetaFor = (fam: CouncilSingleFamily | undefined) => {
+  const diagnosticMetaFor = (fam: CouncilSingleFamily | undefined, meta?: { hold?: boolean }) => {
     if (!sequentialDiagnostic || !fam) return undefined
     const order =
       diagnosticOrderCoerced && diagnosticOrderCoerced.length ? diagnosticOrderCoerced : [fam]
     return {
       mode: 'sequential_diagnostic' as const,
+      ...(diagnosticIntentMode !== 'none' ? { intentMode: diagnosticIntentMode } : {}),
       turn: diagnosticTurnIndex ?? 0,
       total: diagnosticTurnTotal ?? order.length,
       order,
-      hold: false,
+      hold: meta?.hold ?? false,
     }
   }
 
@@ -886,7 +902,35 @@ export async function POST(req: Request) {
         })
       }
 
-      const dmOk = diagnosticMetaFor(councilSingleFamily)
+      if (sequentialDiagnostic && diagnosticIntentMode !== 'none' && councilSingleFamily) {
+        insertDiagnosticEvent(sup.ok ? sup.client : null, {
+          subsystem: 'council_diagnostic',
+          severity: 'INFO',
+          source_family: councilSingleFamily,
+          evidence: { turn: diagnosticTurnIndex ?? null, total: diagnosticTurnTotal ?? null },
+          recommendation: null,
+          diagnostic_mode: diagnosticIntentMode,
+        })
+      }
+      if (
+        sequentialDiagnostic
+        && diagnosticIntentMode !== 'none'
+        && councilSingleFamily === 'red_team'
+        && detectRedTeamRuntimeHold(responseText)
+      ) {
+        insertDiagnosticEvent(sup.ok ? sup.client : null, {
+          subsystem: 'red_team_hold',
+          severity: 'WARN',
+          source_family: 'red_team',
+          evidence: { excerpt: responseText.slice(0, 1200) },
+          recommendation: "Await Ra'el or use Continue diagnostics; queue auto-resumes after 60s.",
+          diagnostic_mode: diagnosticIntentMode,
+        })
+      }
+
+      const dmOk = diagnosticMetaFor(councilSingleFamily, {
+        hold: councilSingleFamily === 'red_team' && detectRedTeamRuntimeHold(responseText),
+      })
       return NextResponse.json({
         councilSingleResponse: responseText,
         councilSingleFamily,
