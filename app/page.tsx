@@ -85,7 +85,15 @@ import {
   resolveAttendanceBatchCeilingMs,
   resolveProviderTimeoutMs,
 } from '@/lib/council/providerTimeouts'
+import { shouldSuppressProviderFailureFromChatStream } from '@/lib/council/chatStreamFilters'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
+import { resolveModeGovernor } from '@/lib/council/modeGovernor'
+import {
+  evaluateFullTeamSatisfied,
+  FULL_TEAM_GATE_TIMEOUT_MS,
+  FULL_TEAM_UNSATISFIED_MESSAGE,
+} from '@/lib/council/fullTeamGate'
+import { buildRoomStatusesFromEngineFunctional } from '@/lib/council/roomStatus'
 import {
   GEMINI_REPAIR_ENQUEUE_METADATA_KEY,
   shouldInjectRedTeamEarly,
@@ -880,8 +888,14 @@ function isExplicitMemoryRequest(message: string) {
 
 const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
 
-function MessageBubble({ msg }: { msg: CouncilMessage }) {
+function MessageBubble({ msg, diagnosticsOpen }: { msg: CouncilMessage; diagnosticsOpen?: boolean }) {
   const isRael = msg.familyName === "RA'EL"
+  if (
+    msg.messageType === 'system'
+    && shouldSuppressProviderFailureFromChatStream(msg.content, { diagnosticsOpen })
+  ) {
+    return null
+  }
   return (
     <div className={`message-fade-in flex items-start gap-3 mb-4 ${isRael ? 'flex-row-reverse' : ''}`}>
       <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm"
@@ -4165,6 +4179,8 @@ function Home() {
   const [continuationRequests, setContinuationRequests] = useState<ContinuationRequest[]>([])
   const decreePacketFlushCompleteRef = useRef(false)
   const decreePacketOpenedAtMsRef = useRef(0)
+  /** After attendance soft gather snapshot, block late gather error lines from chat / persistence. */
+  const attendanceSoftGatherUiClosedRef = useRef(false)
   const [familyDuty, setFamilyDuty] = useState<Record<string, CouncilDutyState>>(() =>
     Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])),
   )
@@ -4502,7 +4518,13 @@ function Home() {
     setFamilyPresence(prev => ({ ...prev, [familyName]: { status, label } }))
   }
 
-  const addSystemMessage = (content: string) => {
+  const addSystemMessage = (content: string, opts?: { force?: boolean }) => {
+    if (
+      !opts?.force
+      && shouldSuppressProviderFailureFromChatStream(content, { diagnosticsOpen: operatorTab === 'diagnostics' })
+    ) {
+      return
+    }
     councilDispatch({
       type: 'ADD_SYSTEM_MESSAGE_DEDUPED',
       payload: { id: createMessageId('system'), content, timestamp: new Date().toLocaleTimeString() },
@@ -4516,7 +4538,7 @@ function Home() {
       abortControllerRef.current = null
       setTypingFamily(null)
       councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
-      addSystemMessageRef.current?.('Council response timed out. Input released.')
+      addSystemMessageRef.current?.('Council wait limit reached. Input released.')
       setLoading(false)
     }, 75_000)
     return () => window.clearTimeout(timeoutId)
@@ -4597,7 +4619,22 @@ function Home() {
     }
   }, [operatorTab]) // eslint-disable-line react-hooks/exhaustive-deps -- tab-scoped engine status + repair scan
 
-  const postLiveCouncilMessage = async (input: { role: 'user' | 'assistant' | 'system'; content: string; family?: string | null }) => {
+  const postLiveCouncilMessage = async (
+    input: { role: 'user' | 'assistant' | 'system'; content: string; family?: string | null },
+    opts?: { applyAttendanceLateGatherSkip?: boolean },
+  ) => {
+    if (
+      opts?.applyAttendanceLateGatherSkip
+      && attendanceSoftGatherUiClosedRef.current
+    ) {
+      return
+    }
+    if (
+      (input.role === 'system' || input.role === 'assistant')
+      && shouldSuppressProviderFailureFromChatStream(input.content, { diagnosticsOpen: operatorTab === 'diagnostics' })
+    ) {
+      return
+    }
     if (!liveCouncilConvId || !persistenceAvailable) return
     try {
       await fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
@@ -5593,6 +5630,9 @@ function Home() {
     inputText: string,
     opts?: { councilRevealSource?: 'autonomous' | 'decree'; autonomousDecreeRoundAtFetch?: number },
   ) => {
+    if (shouldSuppressProviderFailureFromChatStream(text, { diagnosticsOpen: operatorTab === 'diagnostics' })) {
+      return
+    }
     const councilRevealSource = opts?.councilRevealSource ?? 'autonomous'
     if (councilRevealSource === 'decree' && decreePacketFlushCompleteRef.current) {
       if (process.env.NODE_ENV === 'development') {
@@ -6052,15 +6092,73 @@ function Home() {
         allowBusinessTopicsFromIntent: councilIntentState.intent === 'business_ops',
       })
 
+      const modeWarnings = councilModeExtensionWarnings(cmd)
+
+      let modeGovernor = resolveModeGovernor({
+        decreeText: decree,
+        intentKind: councilIntentState.intent,
+        councilCommand: cmd,
+      })
+
+      const isCouncilFamilyEngineReady = (family: CouncilOrchestrationFamily): boolean => {
+        if (family === 'kimi' || family === 'bridge_architect') {
+          const agentId = orchestrationFamilyToLocalAgentId(family)
+          if (!agentId) return false
+          return Boolean(localFamilyAgents.familyAgents.find(a => a.id === agentId)?.functional)
+        }
+        if (family === 'gemini' && skipGeminiForSessionRef.current) return false
+        const eid = cloudEngineIdForCouncilFamily(family)
+        return isEngineFunctional(engineMapRef.current, eid)
+      }
+
+      if (modeGovernor.mode === 'council' && modeGovernor.fullTeamRequired) {
+        let teamStatuses = buildRoomStatusesFromEngineFunctional(directedOrder, isCouncilFamilyEngineReady)
+        if (!evaluateFullTeamSatisfied(directedOrder, teamStatuses)) {
+          await wait(FULL_TEAM_GATE_TIMEOUT_MS)
+          try {
+            const er = await fetchEngineStatusWithTimeout()
+            if (er.ok) {
+              const ej = await er.json() as EngineControlStatusResponse
+              engineMapRef.current = engineRowMap(ej.engines)
+            }
+          } catch {
+            /* keep prior engine map */
+          }
+          teamStatuses = buildRoomStatusesFromEngineFunctional(directedOrder, isCouncilFamilyEngineReady)
+          if (!evaluateFullTeamSatisfied(directedOrder, teamStatuses)) {
+            addSystemMessage(FULL_TEAM_UNSATISFIED_MESSAGE)
+            void postLiveCouncilMessage({ role: 'system', content: FULL_TEAM_UNSATISFIED_MESSAGE, family: 'SYSTEM' })
+            decreePacketFlushCompleteRef.current = true
+            setCouncilPacketRender(
+              buildCouncilRenderPacket({
+                command: cmd,
+                sessionState: 'CLOSED',
+                packetStatus: 'idle',
+                families: [],
+                extraWarnings: [...modeWarnings, 'full_team_gate_unsatisfied'],
+              }),
+            )
+            return
+          }
+        }
+      }
+
       decreePacketFlushCompleteRef.current = false
+      attendanceSoftGatherUiClosedRef.current = false
       decreePacketOpenedAtMsRef.current = Date.now()
       const staged: { family: CouncilOrchestrationFamily; textOut: string }[] = []
-      const modeWarnings = councilModeExtensionWarnings(cmd)
 
       const attendanceWave = cmd.mode === 'attendance' || councilIntentState.intent === 'attendance'
       const batchCeilingMs = attendanceWave
         ? resolveAttendanceBatchCeilingMs({ familyCount: directedOrder.length })
         : null
+
+      const gatherPostSystem = (line: string) => {
+        if (attendanceWave && attendanceSoftGatherUiClosedRef.current) return
+        addSystemMessage(line)
+      }
+      const gatherPostLive = (input: { role: 'user' | 'assistant' | 'system'; content: string; family?: string | null }) =>
+        postLiveCouncilMessage(input, { applyAttendanceLateGatherSkip: attendanceWave })
 
       let providerRuntimeStates: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
 
@@ -6132,6 +6230,7 @@ function Home() {
               raelDirectiveText: decree,
               councilIntentKind: councilIntentState.intent,
               councilActiveScope: councilIntentState.scope,
+              modeGovernor,
             })
             if (gov.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) return null
             return gov.text || null
@@ -6152,8 +6251,8 @@ function Home() {
             textOut = await tryLocal()
             if (!textOut) {
               const sys = `${label}: unavailable (local ${family} agent not functional or invoke failed)`
-              addSystemMessage(sys)
-              void postLiveCouncilMessage({ role: 'system', content: sys })
+              gatherPostSystem(sys)
+              void gatherPostLive({ role: 'system', content: sys })
               runtime = 'FAILED'
               runtimeDetail = 'local_unavailable'
             } else {
@@ -6167,8 +6266,8 @@ function Home() {
             const row = eid ? engineMapRef.current.get(eid) : undefined
             if (!isEngineFunctional(engineMapRef.current, eid)) {
               const sys = `${label}: unavailable (${unavailableReason(row)})`
-              addSystemMessage(sys)
-              void postLiveCouncilMessage({ role: 'system', content: sys })
+              gatherPostSystem(sys)
+              void gatherPostLive({ role: 'system', content: sys })
               runtime = 'SKIPPED'
               runtimeDetail = 'engine_unavailable'
             } else {
@@ -6185,6 +6284,8 @@ function Home() {
                   raelDirectiveText: decree,
                   councilIntentKind: councilIntentState.intent,
                   councilActiveScope: councilIntentState.scope,
+                  councilModeGovernor: modeGovernor,
+                  councilProviderRuntimeStates: providerRuntimeStates,
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
                 })
 
@@ -6206,19 +6307,19 @@ function Home() {
                     if (!geminiUnavailableUserMessagedRef.current) {
                       geminiUnavailableUserMessagedRef.current = true
                       const line = `Gemini unavailable: ${summary.slice(0, 500)}`
-                      addSystemMessage(line)
-                      void postLiveCouncilMessage({ role: 'system', content: line })
+                      gatherPostSystem(line)
+                      void gatherPostLive({ role: 'system', content: line })
                     }
                     textOut = null
                     runtime = 'FAILED'
                     runtimeDetail = 'gemini_backoff'
                   } else {
                     const err = `[Error] ${label}: ${summary}`
-                    addSystemMessage(err)
-                    void postLiveCouncilMessage({ role: 'system', content: err })
+                    gatherPostSystem(err)
+                    void gatherPostLive({ role: 'system', content: err })
                     textOut = await tryLocal()
                     if (!textOut) {
-                      addSystemMessage(`${label}: cloud failed and local fallback unavailable.`)
+                      gatherPostSystem(`${label}: cloud failed and local fallback unavailable.`)
                       runtime = 'FAILED'
                       runtimeDetail = 'cloud_and_local_failed'
                     } else {
@@ -6234,8 +6335,8 @@ function Home() {
                   if (!textOut) {
                     const err = `[Error] ${label}: empty response`
                     lastCouncilFamilyErrorRef.current = family
-                    addSystemMessage(err)
-                    void postLiveCouncilMessage({ role: 'system', content: err })
+                    gatherPostSystem(err)
+                    void gatherPostLive({ role: 'system', content: err })
                     textOut = await tryLocal()
                     if (!textOut) {
                       runtime = 'FAILED'
@@ -6257,11 +6358,11 @@ function Home() {
                   lastCouncilFamilyErrorRef.current = family
                   const summary = familyError instanceof Error ? familyError.message : String(familyError)
                   const err = `[Error] ${label}: ${summary}`
-                  addSystemMessage(err)
-                  void postLiveCouncilMessage({ role: 'system', content: err })
+                  gatherPostSystem(err)
+                  void gatherPostLive({ role: 'system', content: err })
                   textOut = await tryLocal()
                   if (!textOut) {
-                    addSystemMessage(`${label}: provider failed and local fallback unavailable.`)
+                    gatherPostSystem(`${label}: provider failed and local fallback unavailable.`)
                     runtime = 'FAILED'
                   } else {
                     runtime = 'RESPONDED'
@@ -6298,16 +6399,28 @@ function Home() {
           return {
             family,
             textOut: null,
-            runtime: 'IN_FLIGHT',
-            runtimeDetail: 'soft_gather_window',
+            runtime: 'TIMED_OUT',
+            runtimeDetail: 'attendance_soft_cap',
           }
         }
         return { family, textOut: null, runtime: 'FAILED' as const, runtimeDetail: 'missing_gather_slot' }
       })
 
+      if (attendanceWave) {
+        attendanceSoftGatherUiClosedRef.current = true
+      }
+
       providerRuntimeStates = Object.fromEntries(cells.map(c => [c.family, c.runtime])) as Partial<
         Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>
       >
+
+      modeGovernor = resolveModeGovernor({
+        decreeText: decree,
+        intentKind: councilIntentState.intent,
+        councilCommand: cmd,
+        providerStates: providerRuntimeStates,
+        directedFamilies: directedOrder,
+      })
 
       const stagedCandidates = cells
         .filter(c => Boolean(c.textOut?.trim()))
@@ -6365,6 +6478,7 @@ function Home() {
           intentTier: intent.tier,
           mode: activeCouncilCommandRef.current.mode,
           intentKind: councilIntentState.intent,
+          renderImmediately: modeGovernor.renderImmediately,
         })
         const elapsed = Date.now() - decreePacketOpenedAtMsRef.current
         if (elapsed < syncMs) await wait(syncMs - elapsed)
@@ -6390,6 +6504,7 @@ function Home() {
           topicLock,
           activeScope: councilIntentState.scope,
           councilCommand: cmd,
+          modeGovernor,
         })
 
         for (const line of moderated) {
@@ -7171,7 +7286,9 @@ function Home() {
           onScroll={handleScroll}
           className="max-h-[58vh] min-h-[22rem] overflow-y-auto px-6 py-2"
         >
-          {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+          {messages.map(msg => (
+            <MessageBubble key={msg.id} msg={msg} diagnosticsOpen={false} />
+          ))}
 
           {expansionPrompt && (
             <ExpansionPermissionPrompt
@@ -7203,7 +7320,7 @@ function Home() {
               <span className="text-xs tracking-widest" style={{ color: '#888' }}>
                 {(() => {
                   if (council.councilState === 'provider_error') {
-                    return `Provider error — ${council.providerErrorMessage ?? 'unknown'}`
+                    return 'Provider issue — see family status badges.'
                   }
                   if (council.councilState === 'paused') return 'Paused'
                   if (council.councilState === 'idle') return 'Idle'

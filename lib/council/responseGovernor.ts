@@ -1,18 +1,21 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { familyMentionedInDirective } from '@/lib/council/commandParser'
+import { COUNCIL_ROSTER } from '@/lib/council/familyRoster'
 import { effectiveMaxCharsForFamily } from '@/lib/council/familyPermissions'
 import type { IntentKind } from '@/lib/council/intentClassifier'
 import type { ActiveScope } from '@/lib/council/intentScope'
 import {
-  enforceAttendancePresenceShape,
   isVerificationHeavyContext,
+  stripAttendanceDisplayNoise,
   stripCrossTalkLines,
   stripForbiddenScopeLines,
   stripGreetingStrategicBoilerplate,
   stripStrategicPivotLanguage,
   textViolatesForbiddenScope,
 } from '@/lib/council/intentScope'
+import type { ModeGovernor } from '@/lib/council/modeGovernor'
+import { compressForModeGovernor } from '@/lib/council/responseCompression'
 import { repairOrFlagResponse } from '@/lib/council/responseIntegrity'
 
 const FLUFF_LINE = new RegExp(
@@ -27,6 +30,7 @@ export type GovernorContext = {
   raelDirectiveText: string
   councilIntentKind?: IntentKind
   councilActiveScope?: ActiveScope
+  modeGovernor?: ModeGovernor
 }
 
 /** ChatGPT: favor crisp synthesis — trim long hedging intros when over cap. */
@@ -277,15 +281,13 @@ export function applyGovernor(
 
   if (cmd.mode === 'attendance' || intent === 'attendance') {
     t = stripBulletStrategy(t)
-    t = t.replace(/\n{2,}/g, ' ').replace(/\s+/g, ' ').trim()
+    t = stripAttendanceDisplayNoise(t.replace(/\n{2,}/g, ' ').replace(/\s+/g, ' ').trim())
     const cap = Math.min(380, maxChars)
     if (t.length > cap) t = `${t.slice(0, cap - 1).trim()}…`
-    if (!/[.!?]$/.test(t)) t = `${t}.`
-    const presence = t.toLowerCase().startsWith('present') ? t : `Present — ${t}`
-    const shaped = enforceAttendancePresenceShape(presence)
-    if (shaped.adjusted) warnings.push('council_governor_attendance_scope_shaped')
+    const familyLabel = COUNCIL_ROSTER.find(r => r.id === orch)?.label ?? orch
+    t = `${familyLabel} present.`
     t = applyActiveScopeTail({
-      text: shaped.text,
+      text: t,
       family: orch,
       cmd,
       intent,
@@ -307,6 +309,10 @@ export function applyGovernor(
   t = repaired.text
   if (repaired.integrityWarnings.length) {
     warnings.push(...repaired.integrityWarnings)
+  }
+
+  if (context?.modeGovernor) {
+    t = compressForModeGovernor(t, context.modeGovernor, { family: orch })
   }
 
   if (!t.trim()) {

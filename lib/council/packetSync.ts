@@ -5,7 +5,8 @@ export type CouncilIntentTier = 'casual' | 'council_full' | 'income_ops' | strin
 
 const SYNC_CASUAL_MS = 1800
 const SYNC_GREETING_MS = 900
-const SYNC_ATTENDANCE_MS = 1200
+/** Attendance packet: release immediately after finalize (gather window already caps visible wait). */
+const SYNC_ATTENDANCE_MS = 0
 const SYNC_COUNCIL_MS = 24_000
 const SYNC_RESEARCH_MS = 20_000
 const SYNC_EXECUTION_MS = 18_000
@@ -20,7 +21,10 @@ export function resolveCouncilPacketSyncMs(args: {
   mode: CouncilDisciplineMode
   /** Decree intent — short post-gather sync for greeting / attendance. */
   intentKind?: IntentKind
+  /** Mode governor: skip post-finalize wait when true (attendance / single-family greeting). */
+  renderImmediately?: boolean
 }): number {
+  if (args.renderImmediately) return SYNC_ATTENDANCE_MS
   if (args.intentKind === 'greeting') return SYNC_GREETING_MS
   if (args.intentKind === 'attendance') return SYNC_ATTENDANCE_MS
   if (args.intentTier === 'casual') return SYNC_CASUAL_MS

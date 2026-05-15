@@ -1,4 +1,5 @@
 import { DEFAULT_COUNCIL_COMMAND, type CouncilCommand } from '@/lib/council/councilCommandTypes'
+import { COUNCIL_ROSTER } from '@/lib/council/familyRoster'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { repairOrFlagResponse } from '@/lib/council/responseIntegrity'
 import { stripLockedTopicLines, textViolatesTopicLock, type TopicScopeLock } from '@/lib/council/topicScope'
@@ -9,6 +10,8 @@ import {
   textViolatesForbiddenScope,
   type ActiveScope,
 } from '@/lib/council/intentScope'
+import type { ModeGovernor } from '@/lib/council/modeGovernor'
+import { compressForModeGovernor } from '@/lib/council/responseCompression'
 
 export type ModeratedFamilyLine = {
   family: CouncilOrchestrationFamily
@@ -85,13 +88,14 @@ export type FinalModeratorInput = {
   topicLock: TopicScopeLock
   activeScope?: ActiveScope
   councilCommand?: CouncilCommand
+  modeGovernor?: ModeGovernor
 }
 
 /**
  * Single pass: integrity repair, topic lock strip, cross-critique reduction (non–Red Team), packet ordering.
  */
 export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLine[] {
-  const { topicLock, activeScope, councilCommand } = input
+  const { topicLock, activeScope, councilCommand, modeGovernor } = input
   const cmd = councilCommand ?? DEFAULT_COUNCIL_COMMAND
   const moderated: ModeratedFamilyLine[] = []
 
@@ -147,6 +151,15 @@ export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLi
         content = cx.text
         if (cx.stripped > 0) warnings.push('moderator_stripped_cross_talk')
       }
+    }
+
+    if (cmd.mode === 'attendance' || activeScope?.intent === 'attendance') {
+      const familyLabel = COUNCIL_ROSTER.find(r => r.id === row.family)?.label ?? row.family
+      content = `${familyLabel} present.`
+    }
+
+    if (modeGovernor) {
+      content = compressForModeGovernor(content, modeGovernor, { family: row.family })
     }
 
     moderated.push({ family: row.family, content: content.trim(), warnings })

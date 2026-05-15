@@ -10,6 +10,11 @@ import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { buildActiveScope } from '@/lib/council/intentScope'
 import { resolveProviderTimeoutMs, resolveDecreeSoftGatherServerBudgetMs } from '@/lib/council/providerTimeouts'
 import { buildContinuationRequestFromModelOutput } from '@/lib/council/continuationRequest'
+import { resolveModeGovernor } from '@/lib/council/modeGovernor'
+import { buildModeGovernorPromptBlock } from '@/lib/council/modeGovernorPrompt'
+import { buildRoomStatusesFromProviderStates } from '@/lib/council/roomStatus'
+import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
@@ -134,13 +139,16 @@ function buildCouncilUserPrompt(args: {
   threadBlock: string
   augmentBlock: string
   intentLabel: string
+  modeGovernorBlock: string
 }): string {
-  const { raelDirectiveText, threadBlock, augmentBlock, intentLabel } = args
+  const { raelDirectiveText, threadBlock, augmentBlock, intentLabel, modeGovernorBlock } = args
   return [
     `CURRENT DECREE (authoritative — stay on this topic; do not let prior chat override it):`,
     raelDirectiveText,
     '',
     `Decree intent (routing only): ${intentLabel}`,
+    '',
+    modeGovernorBlock,
     '',
     `Prior council thread (continuity only — preserve tone, but do not resurrect or pivot topics forbidden by the decree):`,
     threadBlock,
@@ -148,6 +156,17 @@ function buildCouncilUserPrompt(args: {
     `Continue the council with one response for your family only.${augmentBlock}`,
     `Do not speak for Ra'el. Add new substance; avoid repeating the previous speaker verbatim.`,
   ].join('\n')
+}
+
+function coerceProviderRuntimeStates(
+  raw: unknown,
+): Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string') out[k as CouncilOrchestrationFamily] = v as ProviderFamilyOutcomeStatus
+  }
+  return Object.keys(out).length ? out : undefined
 }
 
 export async function POST(req: Request) {
@@ -187,7 +206,18 @@ export async function POST(req: Request) {
     intent: intentState.intent,
   })
 
-  const expandedAnalysis = mode === 'expanded'
+  const providerRuntimeStates = coerceProviderRuntimeStates(body.councilProviderRuntimeStates)
+  const modeGovernor = resolveModeGovernor({
+    decreeText: raelDirectiveText,
+    intentKind: intentState.intent,
+    councilCommand,
+    providerStates: providerRuntimeStates,
+    directedFamilies: councilSingleFamily ? [councilSingleFamily] : undefined,
+  })
+  const roomStatuses = buildRoomStatusesFromProviderStates(providerRuntimeStates)
+  const modeGovernorBlock = buildModeGovernorPromptBlock(modeGovernor, roomStatuses)
+
+  const expandedAnalysis = mode === 'expanded' || modeGovernor.allowLongForm
   const toneInstruction = TONE_INSTRUCTIONS[toneMode] || TONE_INSTRUCTIONS.casual
   const responseDepth = expandedAnalysis
     ? 'Expanded analysis approved. You may go deeper, but stay organized and avoid filler.'
@@ -282,6 +312,7 @@ export async function POST(req: Request) {
         threadBlock: thread,
         augmentBlock,
         intentLabel: intentState.intent,
+        modeGovernorBlock,
       })
 
       let responseText = ''
@@ -409,6 +440,7 @@ export async function POST(req: Request) {
         raelDirectiveText,
         councilIntentKind: intentState.intent,
         councilActiveScope: scopeForGovernor,
+        modeGovernor,
       })
       if (governed.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
         await safeAudit({
@@ -452,10 +484,13 @@ export async function POST(req: Request) {
         )
       }
 
-      const continuationRequest = buildContinuationRequestFromModelOutput({
-        family: councilSingleFamily,
-        text: responseText,
-      })
+      const continuationRequest =
+        modeGovernor.continuationAllowed
+          ? buildContinuationRequestFromModelOutput({
+              family: councilSingleFamily,
+              text: responseText,
+            })
+          : null
 
       await safeAudit({
         success: true,

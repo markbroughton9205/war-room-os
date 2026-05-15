@@ -184,6 +184,17 @@ export function stripForbiddenScopeLines(text: string, scope: ActiveScope): { te
 const ATT_FORBIDDEN =
   /\b(panama|revenue|strategy|logistics|sovereignty|business|invoice|contract|roadmap|okr|kpi|agenda|capital allocation|boardroom|north\s*star|stakeholder|operating\s+model|go-?to-?market)\b/i
 
+const ATTENDANCE_VOICE_FLUFF =
+  /\b(locked\s+in|accounted\s+for|all\s+present\s+and|roll\s*call\s+complete|nodes?\s+aligned|spectral|signal\s+lock|battle\s+rhythm)\b/gi
+
+/** Strip roll-call filler / diagnostics tone before shaping `{Family} present.` */
+export function stripAttendanceDisplayNoise(text: string): string {
+  let t = text.replace(ATTENDANCE_VOICE_FLUFF, ' ').replace(/\s+/g, ' ').trim()
+  t = t.replace(/[\uFE0F\u200D]/g, '')
+  t = t.replace(/[\u{1F300}-\u{1FAFF}]{2,}/gu, ' ')
+  return t.replace(/\s{2,}/g, ' ').trim()
+}
+
 /** Loosely enforce presence-style single line for attendance intent. */
 export function enforceAttendancePresenceShape(text: string): { text: string; adjusted: boolean } {
   let t = text.replace(/\n{2,}/g, ' ').replace(/\s+/g, ' ').trim()

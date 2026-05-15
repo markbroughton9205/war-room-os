@@ -16,6 +16,8 @@ import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import type { ContinuationRequest } from '@/lib/council/continuationRequest'
 import type { IntentKind } from '@/lib/council/intentClassifier'
 import type { ActiveScope } from '@/lib/council/intentScope'
+import type { ModeGovernor } from '@/lib/council/modeGovernor'
+import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 
 export type CouncilChatRequestBody = {
   message: string
@@ -36,6 +38,10 @@ export type CouncilChatRequestBody = {
   councilActiveScope?: ActiveScope
   /** Soft decree gather: server uses a long provider budget; client does not mirror short packet aborts. */
   councilGatherPhase?: 'decree_soft'
+  /** Phase 3 mode governor snapshot (server recomputes when omitted). */
+  councilModeGovernor?: ModeGovernor
+  /** Per-family runtime outcomes for prompt room-status block. */
+  councilProviderRuntimeStates?: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>>
 }
 
 export type CouncilChatJson = {
