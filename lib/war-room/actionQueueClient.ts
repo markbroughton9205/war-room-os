@@ -4,7 +4,15 @@ export type ActionQueuePostFailureBody = {
   error?: string
   persisted?: boolean
   queued?: boolean
-  supabase?: { table?: string; message?: string; code?: string; httpStatus?: number }
+  supabase?: {
+    table?: string
+    operation?: string
+    message?: string
+    code?: string
+    httpStatus?: number
+    details?: string
+    hint?: string
+  }
 }
 
 export function isActionQueuePostSucceeded(
@@ -23,6 +31,13 @@ export function formatActionQueuePersistFailureMessage(body: ActionQueuePostFail
   const table = typeof s.table === 'string' ? s.table : ''
   const code = typeof s.code === 'string' ? s.code : ''
   const hs = typeof s.httpStatus === 'number' ? String(s.httpStatus) : ''
-  const detail = [table, code, hs].filter(Boolean).join(' · ')
-  return detail ? `${base} (${detail})` : base
+  const op = typeof s.operation === 'string' ? s.operation : ''
+  const details = typeof s.details === 'string' && s.details.trim() ? s.details.trim().slice(0, 200) : ''
+  const hint = typeof s.hint === 'string' && s.hint.trim() ? s.hint.trim().slice(0, 200) : ''
+  const parts = [table, op, code, hs].filter(Boolean).join(' · ')
+  const extra = [details && `details: ${details}`, hint && `hint: ${hint}`].filter(Boolean).join(' — ')
+  if (parts && extra) return `${base} (${parts}; ${extra})`
+  if (parts) return `${base} (${parts})`
+  if (extra) return `${base} (${extra})`
+  return base
 }

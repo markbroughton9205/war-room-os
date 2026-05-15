@@ -111,7 +111,7 @@ export async function PATCH(
     .maybeSingle()
 
   if (error) {
-    const supabase = warRoomSupabaseFailurePayload(TABLE_ACTIONS, error)
+    const supabase = warRoomSupabaseFailurePayload(TABLE_ACTIONS, error, { operation: 'update' })
     auditQueuePatchFailureFireAndForget(sup.client, 'war_room_actions queue PATCH update failed', { supabase })
     auditQueueSentinelMisleadingSuccessFireAndForget(sup.client, 'PATCH (update)', { supabase })
     return jsonWithPersistence(

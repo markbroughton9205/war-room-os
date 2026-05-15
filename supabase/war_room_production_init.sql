@@ -533,6 +533,22 @@ alter table public.build_requests enable row level security;
 alter table public.income_opportunities enable row level security;
 
 -- -----------------------------------------------------------------------------
+-- war_room_actions: PostgREST + service_role DML (prevents REST 403 with valid JWT)
+-- -----------------------------------------------------------------------------
+grant usage on schema public to anon, authenticated, service_role;
+
+grant select, insert, update, delete on table public.war_room_actions to service_role;
+
+drop policy if exists war_room_actions_service_role_all on public.war_room_actions;
+
+create policy war_room_actions_service_role_all
+  on public.war_room_actions
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+-- -----------------------------------------------------------------------------
 -- Functions & triggers — updated_at + conversation last_message_at
 -- -----------------------------------------------------------------------------
 create or replace function public.touch_war_room_conversations_updated_at()

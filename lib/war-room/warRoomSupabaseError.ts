@@ -1,8 +1,11 @@
 export type WarRoomSupabaseFailurePayload = {
   table: string
+  operation?: string
   message: string
   code?: string
   httpStatus?: number
+  details?: string
+  hint?: string
 }
 
 function readNumeric(obj: Record<string, unknown>, keys: string[]): number | undefined {
@@ -14,7 +17,12 @@ function readNumeric(obj: Record<string, unknown>, keys: string[]): number | und
 }
 
 /** Shape Supabase/PostgREST errors for API JSON (no secrets). */
-export function warRoomSupabaseFailurePayload(table: string, err: unknown): WarRoomSupabaseFailurePayload {
+export function warRoomSupabaseFailurePayload(
+  table: string,
+  err: unknown,
+  options?: { operation?: string },
+): WarRoomSupabaseFailurePayload {
+  const operation = options?.operation
   if (err && typeof err === 'object') {
     const o = err as Record<string, unknown>
     const message =
@@ -24,13 +32,15 @@ export function warRoomSupabaseFailurePayload(table: string, err: unknown): WarR
           ? err.message
           : 'Supabase request failed'
     const code = typeof o.code === 'string' ? o.code : undefined
+    const details = typeof o.details === 'string' ? o.details : undefined
+    const hint = typeof o.hint === 'string' ? o.hint : undefined
     const httpStatus = readNumeric(o, ['status', 'statusCode'])
-    return { table, message, code, httpStatus }
+    return { table, operation, message, code, httpStatus, details, hint }
   }
   if (err instanceof Error) {
-    return { table, message: err.message }
+    return { table, operation, message: err.message }
   }
-  return { table, message: 'Supabase request failed' }
+  return { table, operation, message: 'Supabase request failed' }
 }
 
 export function httpStatusForSupabaseFailure(payload: WarRoomSupabaseFailurePayload, fallback: number): number {

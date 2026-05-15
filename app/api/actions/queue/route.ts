@@ -70,7 +70,7 @@ export async function GET(req: Request) {
   const { data, error } = await q
 
   if (error) {
-    const supabase = warRoomSupabaseFailurePayload(TABLE_ACTIONS, error)
+    const supabase = warRoomSupabaseFailurePayload(TABLE_ACTIONS, error, { operation: 'select' })
     auditQueueFailureFireAndForget(sup.client, 'war_room_actions queue GET failed', { supabase })
     return jsonWithPersistence(
       { error: supabase.message, actions: [], supabase, persisted: false },
@@ -147,7 +147,7 @@ export async function POST(req: Request) {
       .is('deleted_at', null)
       .maybeSingle()
     if (cErr) {
-      const supabase = warRoomSupabaseFailurePayload(TABLE_CONVERSATIONS, cErr)
+      const supabase = warRoomSupabaseFailurePayload(TABLE_CONVERSATIONS, cErr, { operation: 'select' })
       auditQueueFailureFireAndForget(sup.client, 'war_room_actions queue POST conversation lookup failed', {
         supabase,
       })
@@ -194,7 +194,7 @@ export async function POST(req: Request) {
     .single()
 
   if (error) {
-    const supabase = warRoomSupabaseFailurePayload(TABLE_ACTIONS, error)
+    const supabase = warRoomSupabaseFailurePayload(TABLE_ACTIONS, error, { operation: 'insert' })
     auditQueueFailureFireAndForget(sup.client, 'war_room_actions queue POST insert failed', { supabase })
     auditQueueSentinelMisleadingSuccessFireAndForget(sup.client, 'POST (insert)', { supabase })
     const statusCode = httpStatusForSupabaseFailure(supabase, 500)
