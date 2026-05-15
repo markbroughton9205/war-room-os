@@ -6833,14 +6833,17 @@ function Home() {
       }
 
       const outcomeByFamily = new Map<CouncilOrchestrationFamily, GatherCell>()
-      const gatherPromises = orderForGather.map(family =>
-        gatherFamily(family).then(cell => {
-          const prev = outcomeByFamily.get(family)
-          if (prev?.textOut?.trim() && cell.textOut?.trim()) return prev
-          outcomeByFamily.set(family, cell)
-          return cell
-        }),
-      )
+      /** Parallel in-flight gathers only for non-sequential decree gathers (sequential diagnostics must not fan out). */
+      const gatherPromises = diagnosticSequential
+        ? []
+        : orderForGather.map(family =>
+            gatherFamily(family).then(cell => {
+              const prev = outcomeByFamily.get(family)
+              if (prev?.textOut?.trim() && cell.textOut?.trim()) return prev
+              outcomeByFamily.set(family, cell)
+              return cell
+            }),
+          )
 
       const mapSoftCapCells = (): GatherCell[] =>
         directedOrder.map(family => {
@@ -6945,7 +6948,12 @@ function Home() {
         .filter(c => Boolean(c.textOut?.trim()))
         .map(c => ({ family: c.family, textOut: c.textOut!.trim() }))
 
-      if (intent.tier === 'casual' && stagedCandidates.length && !attendanceWave) {
+      if (
+        intent.tier === 'casual'
+        && stagedCandidates.length
+        && !attendanceWave
+        && !diagnosticSequential
+      ) {
         staged.push(stagedCandidates[0]!)
       } else {
         for (const row of stagedCandidates) staged.push(row)
