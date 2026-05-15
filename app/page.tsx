@@ -96,8 +96,10 @@ import {
 import { buildRoomStatusesFromEngineFunctional, buildRoomStatusesFromProviderStates } from '@/lib/council/roomStatus'
 import {
   providerOutcomeToVerifiedContext,
+  replaceWithRuntimeTruthLine,
   verifiedContextsFromProviderStates,
 } from '@/lib/council/runtimeTruth'
+import { detectDirectInvocation } from '@/lib/council/directInvocation'
 import {
   GEMINI_REPAIR_ENQUEUE_METADATA_KEY,
   shouldInjectRedTeamEarly,
@@ -5727,26 +5729,35 @@ function Home() {
     }) && !orchRedTeamEarlyLatchRef.current
     const geminiOk = geminiFunctionalRef.current && !skipGeminiForSessionRef.current
     const cmd = activeCouncilCommandRef.current
-    const allowed = filterOrchestrationOrderByCommand(
+    const decreeDirect = detectDirectInvocation(lastRaelDirectiveContentRef.current)
+    let allowed = filterOrchestrationOrderByCommand(
       ALL_ORCHESTRATION_FAMILIES,
       cmd,
       lastRaelDirectiveContentRef.current,
     )
+    if (decreeDirect.invoked && decreeDirect.family) {
+      allowed = [decreeDirect.family]
+    }
     if (!allowed.length) {
       autonomousOrchInFlightRef.current = false
       councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
       return
     }
-    let family = pickNextOrchestrationFamily({
-      autonomousRoundIndex: snap.autonomousRoundIndex,
-      recentSpeakers: snap.recentOrchestrationSpeakers,
-      deepDiscussionMode: snap.deepDiscussionMode,
-      geminiFunctional: geminiOk,
-      orchestrationContext: buildOrchestrationContextFromMessages(messagesRef.current),
-      forceRedTeamEarly: orchRedEarly,
-    })
-    if (!allowed.includes(family)) {
-      family = allowed[snap.autonomousRoundIndex % allowed.length]!
+    let family: CouncilOrchestrationFamily
+    if (decreeDirect.invoked && decreeDirect.family) {
+      family = decreeDirect.family
+    } else {
+      family = pickNextOrchestrationFamily({
+        autonomousRoundIndex: snap.autonomousRoundIndex,
+        recentSpeakers: snap.recentOrchestrationSpeakers,
+        deepDiscussionMode: snap.deepDiscussionMode,
+        geminiFunctional: geminiOk,
+        orchestrationContext: buildOrchestrationContextFromMessages(messagesRef.current),
+        forceRedTeamEarly: orchRedEarly,
+      })
+      if (!allowed.includes(family)) {
+        family = allowed[snap.autonomousRoundIndex % allowed.length]!
+      }
     }
     if (family === 'gemini' && skipGeminiForSessionRef.current) {
       autonomousOrchInFlightRef.current = false
@@ -6077,15 +6088,19 @@ function Home() {
         incomeOperationsMode: incomeOperationsMode || intent.tier === 'income_ops',
         planningMode,
         extraFamilies: extra,
-        maxFamilies: intent.maxFamilies,
+        maxFamilies: cmd.directInvocation ? 1 : intent.maxFamilies,
         singleFamilyRotate:
-          councilIntentState.intent === 'greeting' && !decreeAsksMultiFamilyGreeting(decree)
+          cmd.directInvocation
+          || (councilIntentState.intent === 'greeting' && !decreeAsksMultiFamilyGreeting(decree))
             ? undefined
             : intent.tier === 'casual'
               ? messagesRef.current.length
               : undefined,
-        leadWithRedTeam: injectLeadRed,
+        leadWithRedTeam: injectLeadRed && !cmd.directInvocation,
       })
+      if (cmd.directInvocation && cmd.targetFamilies[0]) {
+        order = [cmd.targetFamilies[0]]
+      }
       if (intent.tier === 'casual') {
         const casualFallbacks: CouncilOrchestrationFamily[] = ['chatgpt', 'claude', 'grok', 'gemini']
         order = [...order, ...casualFallbacks.filter(f => !order.includes(f))]
@@ -6197,6 +6212,15 @@ function Home() {
 
         setFamilyDuty(prev => ({ ...prev, [family]: 'working' }))
         const label = rosterLabel(family)
+        const isDirectInvoke = Boolean(cmd.directInvocation && cmd.targetFamilies[0] === family)
+        const postDirectUnavailable = (rt: ProviderFamilyOutcomeStatus, detail?: string) => {
+          const line = replaceWithRuntimeTruthLine(
+            family,
+            providerOutcomeToVerifiedContext({ family, runtime: rt, runtimeDetail: detail }),
+          )
+          gatherPostSystem(line)
+          void gatherPostLive({ role: 'system', content: line })
+        }
         const deep = councilSnapRef.current.deepDiscussionMode
         const summarizeAugment = mode === 'summarize'
           ? `${buildDecreeFamilyAugment(family, deep, augmentCtx)}\n\nTASK: Summarize the council thread so far for Ra'el in concise bullets. Do not invent facts beyond the thread.`
@@ -6265,9 +6289,13 @@ function Home() {
           if (family === 'kimi' || family === 'bridge_architect') {
             textOut = await tryLocal()
             if (!textOut) {
-              const sys = `${label}: unavailable (local ${family} agent not functional or invoke failed)`
-              gatherPostSystem(sys)
-              void gatherPostLive({ role: 'system', content: sys })
+              if (isDirectInvoke) {
+                postDirectUnavailable('FAILED', 'local_unavailable')
+              } else {
+                const sys = `${label}: unavailable (local ${family} agent not functional or invoke failed)`
+                gatherPostSystem(sys)
+                void gatherPostLive({ role: 'system', content: sys })
+              }
               runtime = 'FAILED'
               runtimeDetail = 'local_unavailable'
             } else {
@@ -6276,13 +6304,18 @@ function Home() {
           } else if (family === 'gemini' && skipGeminiForSessionRef.current) {
             runtime = 'SKIPPED'
             runtimeDetail = 'gemini_session_backoff'
+            if (isDirectInvoke) postDirectUnavailable('SKIPPED', runtimeDetail)
           } else {
             const eid = cloudEngineIdForCouncilFamily(family)
             const row = eid ? engineMapRef.current.get(eid) : undefined
             if (!isEngineFunctional(engineMapRef.current, eid)) {
-              const sys = `${label}: unavailable (${unavailableReason(row)})`
-              gatherPostSystem(sys)
-              void gatherPostLive({ role: 'system', content: sys })
+              if (isDirectInvoke) {
+                postDirectUnavailable('SKIPPED', unavailableReason(row))
+              } else {
+                const sys = `${label}: unavailable (${unavailableReason(row)})`
+                gatherPostSystem(sys)
+                void gatherPostLive({ role: 'system', content: sys })
+              }
               runtime = 'SKIPPED'
               runtimeDetail = 'engine_unavailable'
             } else {
@@ -6308,10 +6341,15 @@ function Home() {
                   runtime = 'TIMED_OUT'
                   runtimeDetail = chatData.councilProviderHttpDetail
                   textOut = null
+                  if (isDirectInvoke) postDirectUnavailable('TIMED_OUT', runtimeDetail)
                 } else if (chatRes.ok && chatData.councilProviderHttpStatus === 'failed') {
                   runtime = 'FAILED'
                   runtimeDetail = chatData.councilProviderHttpDetail
                   textOut = null
+                  if (isDirectInvoke) {
+                    textOut = await tryLocal()
+                    if (!textOut) postDirectUnavailable('FAILED', runtimeDetail)
+                  }
                 } else if (!chatRes.ok) {
                   lastCouncilFamilyErrorRef.current = family
                   const summary = typeof chatData.message === 'string' ? chatData.message : (chatData.error ?? `HTTP ${chatRes.status}`)
@@ -6328,6 +6366,15 @@ function Home() {
                     textOut = null
                     runtime = 'FAILED'
                     runtimeDetail = 'gemini_backoff'
+                  } else if (isDirectInvoke) {
+                    textOut = await tryLocal()
+                    if (!textOut) {
+                      postDirectUnavailable('FAILED', summary)
+                      runtime = 'FAILED'
+                      runtimeDetail = 'cloud_and_local_failed'
+                    } else {
+                      runtime = 'RESPONDED'
+                    }
                   } else {
                     const err = `[Error] ${label}: ${summary}`
                     gatherPostSystem(err)
@@ -6348,12 +6395,15 @@ function Home() {
                 } else {
                   textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
                   if (!textOut) {
-                    const err = `[Error] ${label}: empty response`
-                    lastCouncilFamilyErrorRef.current = family
-                    gatherPostSystem(err)
-                    void gatherPostLive({ role: 'system', content: err })
+                    if (!isDirectInvoke) {
+                      const err = `[Error] ${label}: empty response`
+                      lastCouncilFamilyErrorRef.current = family
+                      gatherPostSystem(err)
+                      void gatherPostLive({ role: 'system', content: err })
+                    }
                     textOut = await tryLocal()
                     if (!textOut) {
+                      if (isDirectInvoke) postDirectUnavailable('FAILED', 'empty_then_local_failed')
                       runtime = 'FAILED'
                       runtimeDetail = 'empty_then_local_failed'
                     } else {
@@ -6369,6 +6419,16 @@ function Home() {
                   runtime = 'TIMED_OUT'
                   runtimeDetail = 'client_abort_or_budget'
                   textOut = null
+                  if (isDirectInvoke) postDirectUnavailable('TIMED_OUT', runtimeDetail)
+                } else if (isDirectInvoke) {
+                  textOut = await tryLocal()
+                  if (!textOut) {
+                    const summary = familyError instanceof Error ? familyError.message : String(familyError)
+                    postDirectUnavailable('FAILED', summary)
+                    runtime = 'FAILED'
+                  } else {
+                    runtime = 'RESPONDED'
+                  }
                 } else {
                   lastCouncilFamilyErrorRef.current = family
                   const summary = familyError instanceof Error ? familyError.message : String(familyError)

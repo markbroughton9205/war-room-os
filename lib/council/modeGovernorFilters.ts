@@ -17,6 +17,26 @@ const ADVERSARY_WITHOUT_EVIDENCE =
 
 const MULTI_PARA_ATTENDANCE = /\n\s*\n/
 
+const DIRECT_REINTERPRET_LINE =
+  /\b(?:council\s+(?:now\s+)?routed|routing\s+(?:the\s+)?council|switching\s+to\s+(?:analysis|attendance))\b/i
+
+const DIRECT_COMPARATIVE_FAMILY =
+  /\b(?:chatgpt|claude|grok|gemini|red\s*team|kimi|baby|bridge)\s+(?:family|patterns?|approach|perspective|take)\b/i
+
+function stripDirectInvocationReinterpretation(text: string): string {
+  return text
+    .split('\n')
+    .filter(line => {
+      const s = line.trim()
+      if (!s) return true
+      if (DIRECT_REINTERPRET_LINE.test(s)) return false
+      if (DIRECT_COMPARATIVE_FAMILY.test(s)) return false
+      return true
+    })
+    .join('\n')
+    .trim()
+}
+
 export function applyModeGovernorFilters(text: string, governor: ModeGovernor): string {
   let t = (text ?? '').trim()
   if (!t) return t
@@ -43,6 +63,10 @@ export function applyModeGovernorFilters(text: string, governor: ModeGovernor): 
     && !/\b(evidence|log|trace|confirmed|observed)\b/i.test(t)
   ) {
     t = t.replace(ADVERSARY_WITHOUT_EVIDENCE, ' ')
+  }
+
+  if (governor.mode === 'direct_invocation') {
+    t = stripDirectInvocationReinterpretation(t)
   }
 
   return t.replace(/\s{2,}/g, ' ').trim()

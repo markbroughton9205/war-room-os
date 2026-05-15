@@ -19,6 +19,9 @@ const BADGES: { mode: CouncilCommand['mode']; label: string }[] = [
 
 function commandSummary(cmd: CouncilCommand): string {
   const bits: string[] = [cmd.mode]
+  if (cmd.directInvocation && cmd.targetFamilies.length) {
+    bits.push(`direct → ${cmd.targetFamilies.join(', ')}`)
+  }
   if (cmd.targetFamilies.length) bits.push(`only: ${cmd.targetFamilies.join(', ')}`)
   if (cmd.excludedFamilies.length) bits.push(`except: ${cmd.excludedFamilies.join(', ')}`)
   bits.push(`≤${cmd.responseLimits.maxChars}c`)
@@ -72,6 +75,19 @@ export function CouncilCommandBadges({
   return (
     <div className="mt-2 space-y-1">
       <div className="flex flex-wrap items-center gap-1.5">
+        {cmd.directInvocation && cmd.targetFamilies[0] ? (
+          <span
+            className="rounded px-2 py-0.5 text-[9px] font-bold tracking-widest"
+            style={{
+              border: '1px solid rgba(56,189,248,0.55)',
+              color: '#38bdf8',
+              background: 'rgba(56,189,248,0.1)',
+            }}
+            title="Provider name invoked — single family only"
+          >
+            DIRECT · {familyShort(cmd.targetFamilies[0])}
+          </span>
+        ) : null}
         {BADGES.map(b => {
           const on = cmd.mode === b.mode
           return (

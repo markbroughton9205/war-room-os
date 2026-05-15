@@ -6,6 +6,7 @@ import {
   type CouncilExecutionPermission,
   type CouncilResponseLimits,
 } from '@/lib/council/councilCommandTypes'
+import { detectDirectInvocation } from '@/lib/council/directInvocation'
 
 /** Full orchestration id list for command filtering (order-agnostic). */
 export const ALL_ORCHESTRATION_FAMILIES: CouncilOrchestrationFamily[] = [
@@ -129,12 +130,30 @@ export function parseCouncilCommand(input: string): CouncilCommand {
     responseLimits = mergeLimits(DEFAULT_COUNCIL_COMMAND, 1, 400)
   }
 
+  const direct = detectDirectInvocation(raw)
+  if (direct.invoked && direct.family) {
+    targetFamilies = [direct.family]
+    return {
+      mode: 'council',
+      authority: 'rael_explicit',
+      scope: 'session',
+      targetFamilies,
+      excludedFamilies,
+      directInvocation: true,
+      directInvocationRemainder: direct.remainder,
+      executionPermission,
+      responseLimits: mergeLimits(DEFAULT_COUNCIL_COMMAND, 2, 4000),
+    }
+  }
+
   return {
     mode,
     authority: 'rael_explicit',
     scope: 'session',
     targetFamilies,
     excludedFamilies,
+    directInvocation: false,
+    directInvocationRemainder: '',
     executionPermission,
     responseLimits,
   }
@@ -156,6 +175,11 @@ export function filterOrchestrationOrderByCommand(
   cmd: CouncilCommand,
   raelDirectiveText: string,
 ): CouncilOrchestrationFamily[] {
+  if (cmd.directInvocation && cmd.targetFamilies.length === 1) {
+    const only = cmd.targetFamilies[0]!
+    return order.includes(only) ? [only] : [only]
+  }
+
   let next = [...order]
 
   if (cmd.mode === 'red_team_only') {

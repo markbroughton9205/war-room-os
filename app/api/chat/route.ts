@@ -11,7 +11,10 @@ import { buildActiveScope } from '@/lib/council/intentScope'
 import { resolveProviderTimeoutMs, resolveDecreeSoftGatherServerBudgetMs } from '@/lib/council/providerTimeouts'
 import { buildContinuationRequestFromModelOutput } from '@/lib/council/continuationRequest'
 import { resolveModeGovernor } from '@/lib/council/modeGovernor'
-import { buildModeGovernorPromptBlock } from '@/lib/council/modeGovernorPrompt'
+import {
+  buildDirectInvocationPromptTail,
+  buildModeGovernorPromptBlock,
+} from '@/lib/council/modeGovernorPrompt'
 import { buildRoomStatusesFromProviderStates } from '@/lib/council/roomStatus'
 import { providerOutcomeToVerifiedContext } from '@/lib/council/runtimeTruth'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
@@ -216,7 +219,17 @@ export async function POST(req: Request) {
     directedFamilies: councilSingleFamily ? [councilSingleFamily] : undefined,
   })
   const roomStatuses = buildRoomStatusesFromProviderStates(providerRuntimeStates)
-  const modeGovernorBlock = buildModeGovernorPromptBlock(modeGovernor, roomStatuses)
+  const directInvocationTail =
+    councilCommand.directInvocation
+    && councilSingleFamily
+    && councilCommand.targetFamilies.includes(councilSingleFamily)
+      ? buildDirectInvocationPromptTail(councilSingleFamily, councilCommand.directInvocationRemainder)
+      : undefined
+  const modeGovernorBlock = buildModeGovernorPromptBlock(
+    modeGovernor,
+    roomStatuses,
+    directInvocationTail,
+  )
 
   const expandedAnalysis = mode === 'expanded' || modeGovernor.allowLongForm
   const toneInstruction = TONE_INSTRUCTIONS[toneMode] || TONE_INSTRUCTIONS.casual

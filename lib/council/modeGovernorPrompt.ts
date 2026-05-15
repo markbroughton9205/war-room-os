@@ -1,5 +1,7 @@
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
 import type { RoomStatus } from '@/lib/council/roomStatus'
+import { familyDisplayName } from '@/lib/council/directInvocation'
+import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 
 function formatRoomStatusLine(r: RoomStatus): string {
   return `${r.family}: ${r.status}`
@@ -47,6 +49,16 @@ function modeRulesBlock(governor: ModeGovernor): string[] {
     )
   }
 
+  if (governor.mode === 'direct_invocation') {
+    lines.push(
+      'Direct invocation: Ra\'el addressed YOU by provider name. Respond only as your family.',
+      'Do not route to council analysis, roll call, or multi-family synthesis.',
+      'Do not discuss other providers unless Ra\'el explicitly asked.',
+      'If there is no substantive tail after your name, reply briefly: "Present. Awaiting directive."',
+      'If there is a tail after your name, answer that tail only — stay in character.',
+    )
+  }
+
   if (governor.mode === 'deep_analysis') {
     lines.push(
       'Deep analysis: long-form allowed only because the decree authorized it. Stay on decree topic.',
@@ -62,19 +74,39 @@ function modeRulesBlock(governor: ModeGovernor): string[] {
   return lines
 }
 
+export function buildDirectInvocationPromptTail(
+  family: CouncilOrchestrationFamily,
+  remainder: string,
+): string {
+  const label = familyDisplayName(family)
+  const tail = remainder.trim()
+  if (!tail) {
+    return `DIRECT INVOCATION: User invoked ${label} only. Reply: "Present. Awaiting directive." (one short sentence; no council routing).`
+  }
+  return [
+    `DIRECT INVOCATION: User invoked ${label} directly.`,
+    `Answer only this tail (do not reinterpret as council analysis): ${tail}`,
+  ].join('\n')
+}
+
 export function buildModeGovernorPromptBlock(
   governor: ModeGovernor,
   roomStatuses: RoomStatus[],
+  directInvocationTail?: string,
 ): string {
   const statusLines = roomStatuses.length
     ? roomStatuses.map(formatRoomStatusLine).join('\n')
     : '(no provider runtime snapshot)'
 
-  return [
+  const blocks = [
     'MODE GOVERNOR (decree-first — overrides casual verbosity):',
     ...modeRulesBlock(governor),
     '',
     'Room status (orchestrator view — do not invent presence):',
     statusLines,
-  ].join('\n')
+  ]
+  if (directInvocationTail?.trim()) {
+    blocks.push('', directInvocationTail.trim())
+  }
+  return blocks.join('\n')
 }

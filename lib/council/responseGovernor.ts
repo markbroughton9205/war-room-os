@@ -14,6 +14,7 @@ import {
   textViolatesForbiddenScope,
 } from '@/lib/council/intentScope'
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
+import { applyModeGovernorFilters } from '@/lib/council/modeGovernorFilters'
 import { compressForModeGovernor, shapeAttendanceForModeGovernor } from '@/lib/council/responseCompression'
 import { repairOrFlagResponse } from '@/lib/council/responseIntegrity'
 import {
@@ -356,6 +357,7 @@ export function applyGovernor(
       family: orch,
       verifiedContext: context.verifiedRuntimeContext,
     })
+    t = applyModeGovernorFilters(t, context.modeGovernor)
   }
 
   t = applyRuntimeTruthTail(t, orch, context, warnings)

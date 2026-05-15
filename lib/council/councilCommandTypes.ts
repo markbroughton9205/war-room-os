@@ -34,6 +34,10 @@ export type CouncilCommand = {
   targetFamilies: CouncilOrchestrationFamily[]
   /** From “except Claude” style phrases. */
   excludedFamilies: CouncilOrchestrationFamily[]
+  /** Provider name invoked directly (e.g. "chatgpt") — single-family lock, highest routing priority. */
+  directInvocation: boolean
+  /** Text after the provider name for direct invocations (e.g. "status" from "grok status"). */
+  directInvocationRemainder: string
   executionPermission: CouncilExecutionPermission
   responseLimits: CouncilResponseLimits
 }
@@ -44,6 +48,8 @@ export const DEFAULT_COUNCIL_COMMAND: CouncilCommand = {
   scope: 'session',
   targetFamilies: [],
   excludedFamilies: [],
+  directInvocation: false,
+  directInvocationRemainder: '',
   executionPermission: 'open',
   responseLimits: {
     maxResponsesPerFamily: 4,
@@ -102,6 +108,9 @@ export function coerceCouncilCommand(raw: unknown): CouncilCommand {
     scope: 'session',
     targetFamilies: coerceFamilyArray(o.targetFamilies),
     excludedFamilies: coerceFamilyArray(o.excludedFamilies),
+    directInvocation: o.directInvocation === true,
+    directInvocationRemainder:
+      typeof o.directInvocationRemainder === 'string' ? o.directInvocationRemainder : '',
     executionPermission: o.executionPermission === 'limited' ? 'limited' : 'open',
     responseLimits: {
       maxResponsesPerFamily: Number.isFinite(maxR) && maxR >= 1 ? Math.floor(maxR) : DEFAULT_COUNCIL_COMMAND.responseLimits.maxResponsesPerFamily,

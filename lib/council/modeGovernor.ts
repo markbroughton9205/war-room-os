@@ -6,7 +6,14 @@ import { decreeAsksMultiFamilyGreeting } from '@/lib/council/greetingRouting'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 import { detectFullTeamRequired } from '@/lib/council/fullTeamGate'
 
-export type WarRoomMode = 'greeting' | 'attendance' | 'recovery' | 'council' | 'deep_analysis' | 'execution'
+export type WarRoomMode =
+  | 'greeting'
+  | 'attendance'
+  | 'recovery'
+  | 'council'
+  | 'deep_analysis'
+  | 'execution'
+  | 'direct_invocation'
 
 export type ModeGovernor = {
   mode: WarRoomMode
@@ -109,6 +116,18 @@ function basePreset(mode: WarRoomMode, decreeText: string): ModeGovernor {
         allowLongForm: false,
         renderImmediately: false,
       }
+    case 'direct_invocation':
+      return {
+        mode,
+        maxSentences: 4,
+        continuationAllowed: false,
+        providerAwareness: false,
+        allowCrossFamilyReference: false,
+        fullTeamRequired: false,
+        allowSpeculation: false,
+        allowLongForm: false,
+        renderImmediately: true,
+      }
     case 'council':
     default:
       return {
@@ -133,6 +152,10 @@ function resolveWarRoomMode(args: {
   directedFamilies?: CouncilOrchestrationFamily[]
 }): WarRoomMode {
   const { decreeText, intentKind, councilCommand, providerStates, directedFamilies } = args
+
+  if (councilCommand.directInvocation && councilCommand.targetFamilies.length === 1) {
+    return 'direct_invocation'
+  }
 
   if (
     providerStatesNeedRecovery(providerStates)

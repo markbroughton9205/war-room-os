@@ -25,6 +25,9 @@ export function resolveActiveCommand(args: { latestDecreeText: string }): Resolv
 /** Extra mode checks — warnings only; enforcement stays in governor + orchestration filter. */
 export function councilModeExtensionWarnings(cmd: CouncilCommand): string[] {
   const w: string[] = []
+  if (cmd.directInvocation && cmd.targetFamilies.length === 1) {
+    w.push(`direct_invocation_${cmd.targetFamilies[0]}`)
+  }
   if (cmd.mode === 'silent' && cmd.targetFamilies.length === 0) {
     w.push('mode_silent_requires_family_mention_or_target')
   }
