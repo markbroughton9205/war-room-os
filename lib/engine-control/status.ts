@@ -1,3 +1,9 @@
+import {
+  GEMINI_REST_BASE,
+  fetchGeminiListModelsJson,
+  geminiAllowedGenerateContentIds,
+  geminiOrderedCandidates,
+} from '@/lib/ai/providers/geminiGenerative'
 import { getLMStudioModels, getOllamaModels, testLMStudioChat } from '@/lib/local-agent/providers'
 
 import { ENGINE_REGISTRY } from './registry'
@@ -220,12 +226,6 @@ async function buildOpenHands(lastChecked: string): Promise<EngineStatus> {
   })
 }
 
-const GEMINI_REST_BASE = 'https://generativelanguage.googleapis.com/v1beta'
-
-type GeminiListModelsJson = {
-  models?: { name?: string; supportedGenerationMethods?: string[] }[]
-}
-
 /**
  * Read-only probes against Google Generative Language API (HTTPS). Uses `x-goog-api-key` only;
  * never logs the key or `GEMINI_API_KEY`.
@@ -242,38 +242,21 @@ export async function probeGeminiApi(
 }> {
   const headers = { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' }
   try {
-    const listRes = await fetch(`${GEMINI_REST_BASE}/models?pageSize=8`, {
-      method: 'GET',
-      headers: { 'x-goog-api-key': apiKey },
-      signal,
-      cache: 'no-store',
-    })
-    if (!listRes.ok) {
+    const listed = await fetchGeminiListModelsJson(apiKey, signal)
+    if (!listed.ok) {
       return {
         reachable: false,
         functional: false,
-        notes: `Gemini list models request failed (HTTP ${listRes.status}).`,
+        notes: `Gemini list models request failed (HTTP ${listed.status}).`,
         lastSuccessfulProbeAt: null,
         functionalModelId: null,
       }
     }
 
-    let preferredModel = 'gemini-2.0-flash'
-    try {
-      const listJson = (await listRes.json()) as GeminiListModelsJson
-      const withGen = listJson.models?.find(m => m.supportedGenerationMethods?.includes('generateContent'))
-      const rawName = withGen?.name
-      if (rawName?.startsWith('models/')) {
-        preferredModel = rawName.slice('models/'.length)
-      }
-    } catch {
-      /* use default model id */
-    }
+    const allowed = geminiAllowedGenerateContentIds(listed.json)
+    const candidates = geminiOrderedCandidates(allowed)
 
-    const tryModels = [preferredModel, 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
-    const uniqueModels = [...new Set(tryModels)]
-
-    for (const modelId of uniqueModels) {
+    for (const modelId of candidates) {
       const genRes = await fetch(`${GEMINI_REST_BASE}/models/${encodeURIComponent(modelId)}:generateContent`, {
         method: 'POST',
         headers,
@@ -298,7 +281,10 @@ export async function probeGeminiApi(
     return {
       reachable: true,
       functional: false,
-      notes: 'Gemini list models succeeded but minimal generateContent failed for candidate models.',
+      notes:
+        candidates.length === 0
+          ? 'Gemini list models succeeded but no council fallback model is available for generateContent on this key.'
+          : 'Gemini list models succeeded but minimal generateContent failed for every listed fallback model.',
       lastSuccessfulProbeAt: null,
       functionalModelId: null,
     }

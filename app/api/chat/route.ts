@@ -186,6 +186,7 @@ export async function POST(req: Request) {
       const userPrompt = `Council thread:\n${thread}\n\nContinue the council with one response for your family only.${augmentBlock}\nDo not speak for Ra'el. Add new substance; avoid repeating the previous speaker verbatim.`
 
       let responseText = ''
+      let geminiDegradedReason: string | null = null
       switch (councilSingleFamily) {
         case 'chatgpt':
           responseText = await callChatGPT(userPrompt, gptSystem, maxTokens)
@@ -202,16 +203,21 @@ export async function POST(req: Request) {
             systemPrompt: geminiSystem,
             maxOutputTokens: maxTokens,
           })
-          if ('error' in geminiResult) {
+          if (!geminiResult.ok) {
+            if (geminiResult.degraded) {
+              responseText = geminiResult.note
+              geminiDegradedReason = geminiResult.reason
+              break
+            }
             await auditCouncil({
               success: false,
               flow: 'continue_single',
               councilSingleFamily: 'gemini',
-              reason: 'gemini_unavailable',
+              reason: 'gemini_provider_error',
             })
             return NextResponse.json(
-              { error: 'gemini_unavailable', message: geminiResult.error },
-              { status: 503 },
+              { error: 'gemini_provider_error', message: geminiResult.error },
+              { status: 502 },
             )
           }
           responseText = geminiResult.text.trim()
@@ -247,6 +253,9 @@ export async function POST(req: Request) {
         flow: 'continue_single',
         councilSingleFamily,
         expanded: expandedAnalysis,
+        ...(geminiDegradedReason !== null
+          ? { geminiDegraded: true, geminiDegradedReason }
+          : {}),
         models:
           councilSingleFamily === 'grok'
             ? { primary: 'xai' }
@@ -257,13 +266,15 @@ export async function POST(req: Request) {
                 : { primary: 'openai' },
       })
 
-      await tryPersistMemoryProposalFromModelOutput({
-        client: sup.ok ? sup.client : null,
-        responseText,
-        fallbackPartition: councilSingleFamilyToMemoryPartition(councilSingleFamily),
-        conversationId,
-        extraMetadata: { councilSingleFamily, route: '/api/chat' },
-      })
+      if (geminiDegradedReason === null) {
+        await tryPersistMemoryProposalFromModelOutput({
+          client: sup.ok ? sup.client : null,
+          responseText,
+          fallbackPartition: councilSingleFamilyToMemoryPartition(councilSingleFamily),
+          conversationId,
+          extraMetadata: { councilSingleFamily, route: '/api/chat' },
+        })
+      }
 
       return NextResponse.json({
         councilSingleResponse: responseText,
