@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, memo, startTransition } from 'react'
 import type { FormEvent } from 'react'
 import Link from 'next/link'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
@@ -3232,6 +3232,27 @@ function statusColor(status: string) {
   return '#777'
 }
 
+const LiveCouncilHealthBadgesRow = memo(function LiveCouncilHealthBadgesRow({
+  chatHealthLabel,
+  providerHealthLabel,
+  persistenceHealthLabel,
+  internetHealthLabel,
+}: {
+  chatHealthLabel: string
+  providerHealthLabel: string
+  persistenceHealthLabel: string
+  internetHealthLabel: string
+}) {
+  return (
+    <div className="mt-2 grid gap-2 text-[9px] tracking-widest sm:grid-cols-4" style={{ color: '#94a3b8' }}>
+      <span className="rounded border border-white/10 px-2 py-1">Chat: {chatHealthLabel}</span>
+      <span className="rounded border border-white/10 px-2 py-1">Providers: {providerHealthLabel}</span>
+      <span className="rounded border border-white/10 px-2 py-1">Persistence: {persistenceHealthLabel}</span>
+      <span className="rounded border border-white/10 px-2 py-1">Internet: {internetHealthLabel}</span>
+    </div>
+  )
+})
+
 function InternetAccessPanel({ internet, onRefresh }: { internet: InternetStatusResponse; onRefresh: () => void }) {
   return (
     <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(52,211,153,0.014)' }}>
@@ -4271,6 +4292,7 @@ function Home() {
   const [queueActions, setQueueActions] = useState<{ id: string; type: string; status: string; created_at: string; conversation_id: string | null }[]>([])
   const [permSnap, setPermSnap] = useState<{ mode: StandingPermissionMode; safetyLock: boolean } | null>(null)
   const [internetMonitorBusy, setInternetMonitorBusy] = useState(false)
+  const loadInternetStatusRef = useRef<() => Promise<void>>(() => Promise.resolve())
   const [standingAckHint, setStandingAckHint] = useState<string | null>(null)
   const pendingAuditDecreeRef = useRef<string | null>(null)
   const ledgerFetchInFlightRef = useRef(false)
@@ -4972,6 +4994,7 @@ function Home() {
     const snap = councilSnapRef.current
     if (snap.councilState === 'researching') {
       councilDispatch({ type: 'SET_COUNCIL_STATE', payload: snap.councilChannelOpen ? 'active' : 'idle' })
+      void loadInternetStatusRef.current()
     }
   }
 
@@ -5238,9 +5261,9 @@ function Home() {
     }
   }
 
-  const loadInternetStatus = async () => {
+  const loadInternetStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/tools/internet/status')
+      const res = await fetch('/api/tools/internet/status', { cache: 'no-store' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Internet status failed')
       setInternetStatus(data)
@@ -5253,7 +5276,8 @@ function Home() {
         canUseInternet: false,
       }))
     }
-  }
+  }, [])
+  loadInternetStatusRef.current = loadInternetStatus
 
   const loadRepoStatus = async () => {
     try {
@@ -5347,10 +5371,25 @@ function Home() {
     const timer = window.setTimeout(() => {
       void loadRaelActions()
       void loadProviderHealth()
+      void loadInternetStatus()
     }, 0)
 
     return () => window.clearTimeout(timer)
-  }, [])
+  }, [loadInternetStatus])
+
+  useEffect(() => {
+    const bump = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void loadInternetStatus()
+      }
+    }
+    document.addEventListener('visibilitychange', bump)
+    window.addEventListener('pageshow', bump)
+    return () => {
+      document.removeEventListener('visibilitychange', bump)
+      window.removeEventListener('pageshow', bump)
+    }
+  }, [loadInternetStatus])
 
   const createIncomeOpportunity = async (opportunity: Omit<IncomeOpportunity, 'id' | 'created_at'>) => {
     setIncomeLoading(true)
@@ -7127,14 +7166,14 @@ function Home() {
     await submitDecree(decree, mode)
   }
 
-  const handleSummarize = async () => {
+  const handleSummarize = () => {
     lastDecreeIntentRef.current = {
       tier: 'council_full',
       shouldEmitBusEvents: false,
       shouldRunFamilyRound: true,
       maxFamilies: 4,
     }
-    await submitDecree('summarize council discussion', 'summarize')
+    window.setTimeout(() => void submitDecree('summarize council discussion', 'summarize'), 0)
   }
 
   const cycleFamilyDuty = (fid: CouncilOrchestrationFamily) => {
@@ -7429,7 +7468,20 @@ function Home() {
     ? 'Ready'
     : 'Degraded'
   const persistenceHealthLabel = persistenceAvailable ? 'Ready' : 'Session only'
-  const internetHealthLabel = internetStatus.label
+  const internetHealthLabel = useMemo(() => {
+    const live = internetStatus.overallStatus === 'live' || internetStatus.canUseInternet === true
+    if (live) {
+      const trimmed = typeof internetStatus.label === 'string' ? internetStatus.label.trim() : ''
+      if (trimmed) return trimmed
+      return 'Live'
+    }
+    const fallback = typeof internetStatus.label === 'string' ? internetStatus.label.trim() : ''
+    return fallback || 'Unknown'
+  }, [
+    internetStatus.canUseInternet,
+    internetStatus.label,
+    internetStatus.overallStatus,
+  ])
   const operatorNav = (
     <>
       {uiMode === 'operator' && (
@@ -7438,8 +7490,11 @@ function Home() {
             System: {queueActions.length} queued · session {formatCost(sessionCost)} · heavy pages manual-refresh by default.
           </span>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }} onClick={() => setOperatorTab('system')}>Open System</button>
-            <button type="button" className="text-[10px] tracking-widest" style={{ color: '#888' }} onClick={() => void loadProviderHealth()}>Refresh provider summary</button>
+            <button type="button" className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }} onClick={() => startTransition(() => setOperatorTab('system'))}>Open System</button>
+            <button type="button" className="text-[10px] tracking-widest" style={{ color: '#888' }} onClick={() => window.setTimeout(() => {
+              void loadProviderHealth()
+              void loadInternetStatus()
+            }, 0)}>Refresh provider summary</button>
           </div>
         </div>
       )}
@@ -7574,29 +7629,29 @@ function Home() {
           style={{ background: 'rgba(0,0,0,0.5)' }}
         >
           {!councilPaused ? (
-            <button type="button" onClick={pauseCouncil}
+            <button type="button" onClick={() => startTransition(pauseCouncil)}
               className="text-xs px-3 py-1 rounded tracking-widest"
               style={{ border: '1px solid #333', color: '#888' }}>
               Pause Council
             </button>
           ) : (
-            <button type="button" onClick={resumeCouncil}
+            <button type="button" onClick={() => startTransition(resumeCouncil)}
               className="text-xs px-3 py-1 rounded tracking-widest"
               style={{ background: '#34D399', color: '#000', fontWeight: 'bold' }}>
               Resume Council
             </button>
           )}
-          <button type="button" onClick={endCouncilSession}
+          <button type="button" onClick={() => startTransition(endCouncilSession)}
             className="text-xs px-3 py-1 rounded tracking-widest"
             style={{ border: '1px solid #EF4444', color: '#EF4444' }}>
             End Session
           </button>
-          <button type="button" onClick={clearCouncilSession}
+          <button type="button" onClick={() => startTransition(clearCouncilSession)}
             className="text-xs px-3 py-1 rounded tracking-widest"
             style={{ border: '1px solid #666', color: '#888' }}>
             Clear Session
           </button>
-          <button type="button" onClick={toggleDeepDiscussion}
+          <button type="button" onClick={() => startTransition(toggleDeepDiscussion)}
             className="text-xs px-3 py-1 rounded tracking-widest"
             style={{
               border: council.deepDiscussionMode ? '1px solid #34D399' : '1px solid #333',
@@ -7605,7 +7660,7 @@ function Home() {
             Deep discussion: {council.deepDiscussionMode ? 'ON' : 'OFF'}
           </button>
           {(currentPacketProviderIssue || council.councilState === 'provider_error') && (
-            <button type="button" onClick={retryProvider}
+            <button type="button" onClick={() => startTransition(retryProvider)}
               className="text-xs px-3 py-1 rounded tracking-widest"
               style={{ background: '#F97316', color: '#000', fontWeight: 'bold' }}>
               Retry provider
@@ -7635,12 +7690,12 @@ function Home() {
           <p className="text-[9px] tracking-widest" style={{ color: '#666' }}>
             Council thread below — type at the bottom to speak with the families (Enter sends, Shift+Enter newline).
           </p>
-          <div className="mt-2 grid gap-2 text-[9px] tracking-widest sm:grid-cols-4" style={{ color: '#94a3b8' }}>
-            <span className="rounded border border-white/10 px-2 py-1">Chat: {chatHealthLabel}</span>
-            <span className="rounded border border-white/10 px-2 py-1">Providers: {providerHealthLabel}</span>
-            <span className="rounded border border-white/10 px-2 py-1">Persistence: {persistenceHealthLabel}</span>
-            <span className="rounded border border-white/10 px-2 py-1">Internet: {internetHealthLabel}</span>
-          </div>
+          <LiveCouncilHealthBadgesRow
+            chatHealthLabel={chatHealthLabel}
+            providerHealthLabel={providerHealthLabel}
+            persistenceHealthLabel={persistenceHealthLabel}
+            internetHealthLabel={internetHealthLabel}
+          />
           <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
@@ -7736,7 +7791,7 @@ function Home() {
               <span className="text-xs tracking-widest" style={{ color: '#888' }}>
                 {councilContinueStatusLine}
               </span>
-              <button type="button" onClick={handleSummarize}
+              <button type="button" onClick={() => startTransition(() => void handleSummarize())}
                 className="text-xs px-3 py-1 rounded tracking-widest"
                 style={{ border: '1px solid #FFD700', color: '#FFD700' }}>
                 Summarize
@@ -7794,8 +7849,11 @@ function Home() {
               System: {queueActions.length} queued · session {formatCost(sessionCost)} · heavy pages manual-refresh by default.
             </span>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }} onClick={() => setOperatorTab('system')}>Open System</button>
-              <button type="button" className="text-[10px] tracking-widest" style={{ color: '#888' }} onClick={() => void loadProviderHealth()}>Refresh provider summary</button>
+              <button type="button" className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }} onClick={() => startTransition(() => setOperatorTab('system'))}>Open System</button>
+              <button type="button" className="text-[10px] tracking-widest" style={{ color: '#888' }} onClick={() => window.setTimeout(() => {
+                void loadProviderHealth()
+                void loadInternetStatus()
+              }, 0)}>Refresh provider summary</button>
             </div>
           </div>
         )}

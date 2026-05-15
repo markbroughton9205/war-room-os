@@ -204,7 +204,14 @@ export function mapInternetStatusJson(json: unknown, httpStatus: number): Subsys
     })
   }
 
-  const j = json as { error?: string; lastChecked?: string; overallStatus?: string; label?: string }
+  const j = json as {
+    error?: string
+    lastChecked?: string
+    overallStatus?: string
+    label?: string
+    /** Present on `/api/tools/internet/status` — treat as live when overall missing. */
+    canUseInternet?: boolean
+  }
   if (typeof j.error === 'string') {
     return row({
       id: 'internet_layer',
@@ -221,7 +228,8 @@ export function mapInternetStatusJson(json: unknown, httpStatus: number): Subsys
     })
   }
 
-  const overall = typeof j.overallStatus === 'string' ? j.overallStatus : ''
+  let overall = typeof j.overallStatus === 'string' ? j.overallStatus.trim() : ''
+  if (!overall && j.canUseInternet === true) overall = 'live'
   const evidence = [
     typeof j.lastChecked === 'string' ? `lastChecked=${j.lastChecked}` : null,
     overall ? `research=${overall}` : null,
@@ -305,7 +313,7 @@ export function mapInternetStatusJson(json: unknown, httpStatus: number): Subsys
     unwired: false,
     configured: false,
     reachable: false,
-    recommendation: 'Could not classify internet layer snapshot; retry /api/internet/status.',
+    recommendation: 'Could not classify internet layer snapshot; retry /api/tools/internet/status or /api/internet/status.',
   })
 }
 
