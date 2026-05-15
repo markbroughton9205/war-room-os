@@ -31,8 +31,8 @@ const CROSS_CRITIQUE = /\b(chatgpt|claude|grok|gemini|red\s*team|baby|kimi|bridg
 
 /** Clamp autonomous “keep going” voice to permission-style phrasing only (heuristic strip). */
 const AGGRESSIVE_CONTINUATION = new RegExp(
-  String.raw`(?m)^\s*(?:(?:let me|allow me to)\s+(?:continue|go on|elaborate|expand)|i(?:'ll|\s+will)\s+continue\b|shall i\s+continue\b|(?:keep|stay)\s+going\b|going\s+deeper\b|(?:much\s+)?more\s+detail\s+if\s+you\s+want\b)[^.!?\n]*[.!?]?\s*$`,
-  'i',
+  String.raw`^\s*(?:(?:let me|allow me to)\s+(?:continue|go on|elaborate|expand)|i(?:'ll|\s+will)\s+continue\b|shall i\s+continue\b|(?:keep|stay)\s+going\b|going\s+deeper\b|(?:much\s+)?more\s+detail\s+if\s+you\s+want\b)[^.!?\n]*[.!?]?\s*$`,
+  'im',
 )
 
 function stripAggressiveContinuationHeuristic(text: string): { text: string; stripped: boolean } {
