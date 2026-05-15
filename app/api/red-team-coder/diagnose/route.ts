@@ -5,6 +5,8 @@ import type { RedTeamCoderRepairPlan, RedTeamCoderSignal } from '@/lib/red-team-
 import { appendWarRoomActionLog } from '@/lib/war-room/actionLogs'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 
+/** Queue persistence: primary `war_room_actions`; legacy fallback `rael_action_queue` (JSON `queue` labels path). */
+
 export const dynamic = 'force-dynamic'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -25,7 +27,13 @@ async function queueRepairAction(
   plan: RedTeamCoderRepairPlan,
   body: unknown,
   signal: RedTeamCoderSignal,
-): Promise<{ actionQueued: boolean; actionId: string | null; persistence: 'available' | 'unavailable'; message?: string }> {
+): Promise<{
+  actionQueued: boolean
+  actionId: string | null
+  persistence: 'available' | 'unavailable'
+  message?: string
+  queue?: 'war_room_actions' | 'legacy_fallback'
+}> {
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return {
@@ -50,7 +58,13 @@ async function queueRepairAction(
   })
 
   if (duplicate) {
-    return { actionQueued: true, actionId: duplicate.id as string, persistence: 'available', message: 'Existing open repair task reused.' }
+    return {
+      actionQueued: true,
+      actionId: duplicate.id as string,
+      persistence: 'available',
+      message: 'Existing open repair task reused.',
+      queue: 'war_room_actions',
+    }
   }
 
   const insert = {
@@ -110,6 +124,7 @@ async function queueRepairAction(
       actionId: String(raelAction.action_id),
       persistence: 'available',
       message: 'Repair task queued in Rael Action Queue fallback.',
+      queue: 'legacy_fallback',
     }
   }
 
@@ -118,7 +133,7 @@ async function queueRepairAction(
     recommendedAgent: plan.recommendedAgent,
   })
 
-  return { actionQueued: true, actionId: data.id, persistence: 'available' }
+  return { actionQueued: true, actionId: data.id, persistence: 'available', queue: 'war_room_actions' }
 }
 
 export async function POST(req: Request) {
@@ -155,5 +170,6 @@ export async function POST(req: Request) {
     actionId: queue.actionId,
     persistence: queue.persistence,
     message: queue.message,
+    ...(queue.queue ? { queue: queue.queue } : {}),
   })
 }

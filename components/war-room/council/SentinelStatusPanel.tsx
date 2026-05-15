@@ -1,3 +1,7 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+
 import type { SentinelMetricState, SentinelStatus } from '@/lib/mockCouncilData'
 import { MOCK_SENTINEL_STATUS } from '@/lib/mockCouncilData'
 
@@ -24,6 +28,25 @@ export function SentinelStatusPanel({
   sentinel?: SentinelStatus
   className?: string
 }) {
+  const [feedHint, setFeedHint] = useState('Mock / Not live')
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/red-sentinel/status', { cache: 'no-store' })
+        if (!res.ok) throw new Error('status failed')
+        await res.json()
+        if (!cancelled) setFeedHint('Red Sentinel API reachable · metrics mock')
+      } catch {
+        if (!cancelled) setFeedHint('Mock / Not live')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <section
       className={[
@@ -36,7 +59,7 @@ export function SentinelStatusPanel({
     >
       <header className="mb-3 flex items-center justify-between gap-2 border-b border-white/10 pb-2">
         <h2 className="text-[10px] font-semibold uppercase tracking-[0.35em] text-[#FFD700]">Sentinel</h2>
-        <span className="text-[9px] uppercase tracking-widest text-[#00ff41]/70">live</span>
+        <span className="max-w-[55%] text-right text-[9px] uppercase tracking-wide text-[#00ff41]/70">{feedHint}</span>
       </header>
       <div className="grid gap-2 sm:grid-cols-2">
         {ROWS.map(({ key, label }) => {

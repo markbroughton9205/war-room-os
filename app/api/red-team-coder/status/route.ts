@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 
+/** Reads repair rows from primary `war_room_actions`; falls back to legacy `rael_action_queue` (JSON `queue`). */
+
 export const dynamic = 'force-dynamic'
 
 type RedTeamCoderActionRow = {
@@ -61,6 +63,7 @@ export async function GET() {
       actionId: fallbackRow?.action_id ?? null,
       actionStatus: fallbackRow?.status ?? null,
       persistence: 'available',
+      queue: 'legacy_fallback',
       message: fallbackRow ? 'Latest Red Team Coder task is in Rael Action Queue fallback.' : error.message,
     })
   }
@@ -80,5 +83,6 @@ export async function GET() {
     actionId: row?.id ?? null,
     actionStatus: row?.status ?? null,
     persistence: 'available',
+    queue: 'war_room_actions',
   })
 }

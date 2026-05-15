@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 
+import { assertDebugRouteAuthorized } from '@/lib/security/debugRouteGuard'
+
 export const dynamic = 'force-dynamic'
 
 type JwtPayloadShape = { role?: unknown; ref?: unknown }
@@ -38,7 +40,10 @@ function decodeJwtPayloadMiddle(middleB64: string): JwtPayloadShape | null {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = assertDebugRouteAuthorized(req)
+  if (denied) return denied
+
   const keyRaw = trimEnv('SUPABASE_SERVICE_ROLE_KEY')
   const keyPresent = keyRaw.length > 0
 

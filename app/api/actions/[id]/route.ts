@@ -1,3 +1,6 @@
+/**
+ * PATCH handler targets legacy `rael_action_queue`. Primary queue updates use `war_room_actions`.
+ */
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 

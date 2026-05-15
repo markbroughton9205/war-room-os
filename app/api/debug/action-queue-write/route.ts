@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
+import { assertDebugRouteAuthorized } from '@/lib/security/debugRouteGuard'
 import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
@@ -118,12 +119,18 @@ function httpStatusForProbe(body: ProbeResult): number {
   return 500
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = assertDebugRouteAuthorized(req)
+  if (denied) return denied
+
   const body = await runInsertProbe()
   return NextResponse.json(body, { status: httpStatusForProbe(body) })
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  const denied = assertDebugRouteAuthorized(req)
+  if (denied) return denied
+
   const body = await runInsertProbe()
   return NextResponse.json(body, { status: httpStatusForProbe(body) })
 }

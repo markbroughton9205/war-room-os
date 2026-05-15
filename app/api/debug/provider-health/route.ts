@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { assertDebugRouteAuthorized } from '@/lib/security/debugRouteGuard'
 import { collectEngineStatuses } from '@/lib/engine-control/status'
 import { buildToolRoutingSnapshotFromOrigin, requestOriginFromHeaders } from '@/lib/engine-control/tool-snapshot'
 import type { EngineId } from '@/lib/engine-control/types'
@@ -51,7 +52,10 @@ function classifyPreflight(
   return 'unavailable'
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = assertDebugRouteAuthorized(req)
+  if (denied) return denied
+
   const started = Date.now()
   let engines: Awaited<ReturnType<typeof collectEngineStatuses>> = []
   let collectError: string | null = null

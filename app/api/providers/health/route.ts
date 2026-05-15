@@ -1,40 +1,73 @@
 import { NextResponse } from 'next/server'
 
-type ProviderStatus = 'online' | 'standby' | 'error' | 'not_connected'
+export const dynamic = 'force-dynamic'
 
-function keyStatus(keyName: string, routeAvailable = true): ProviderStatus {
-  if (!process.env[keyName]) return 'not_connected'
-  return routeAvailable ? 'online' : 'standby'
+type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'redteam'
+
+/** Presence/config classification — does not assert live API connectivity. */
+export type ProviderAvailability = 'configured' | 'not_configured' | 'probe_required'
+
+function trimmedEnv(key: string): boolean {
+  return Boolean(process.env[key]?.trim())
 }
 
-function geminiProviderHealth(): { status: ProviderStatus; label: string } {
-  if (!process.env.GEMINI_API_KEY?.trim()) {
-    return { status: 'not_connected', label: 'Google · Gemini · not connected' }
-  }
-  return {
-    status: 'standby',
-    label: 'Google · Gemini · key present — live status in GET /api/engine-control/status',
-  }
+/**
+ * Maps availability to the legacy `providers` map consumed by older UI code.
+ * Avoids reporting `online` from credential presence alone.
+ */
+function legacyConnectionStatus(avail: ProviderAvailability): 'online' | 'standby' | 'error' | 'not_connected' {
+  if (avail === 'not_configured') return 'not_connected'
+  return 'standby'
 }
 
 export async function GET() {
-  const gemini = geminiProviderHealth()
+  const availability: Record<ProviderFamilyKey, ProviderAvailability> = {
+    claude: trimmedEnv('ANTHROPIC_API_KEY') ? 'configured' : 'not_configured',
+    chatgpt: trimmedEnv('OPENAI_API_KEY') ? 'configured' : 'not_configured',
+    grok: trimmedEnv('XAI_API_KEY') ? 'configured' : 'not_configured',
+    gemini: trimmedEnv('GEMINI_API_KEY') ? 'configured' : 'not_configured',
+    redteam: 'probe_required',
+  }
+
+  const providers = {
+    claude: legacyConnectionStatus(availability.claude),
+    chatgpt: legacyConnectionStatus(availability.chatgpt),
+    grok: legacyConnectionStatus(availability.grok),
+    gemini: legacyConnectionStatus(availability.gemini),
+    redteam: 'standby' as const,
+  }
+
+  const labels = {
+    claude:
+      availability.claude === 'not_configured'
+        ? 'Anthropic · Claude · not configured'
+        : 'Anthropic · Claude · key configured (live probe required)',
+    chatgpt:
+      availability.chatgpt === 'not_configured'
+        ? 'OpenAI · ChatGPT · not configured'
+        : 'OpenAI · ChatGPT · key configured (live probe required)',
+    grok:
+      availability.grok === 'not_configured'
+        ? 'xAI · Grok · not configured'
+        : 'xAI · Grok · key configured (live probe required)',
+    gemini:
+      availability.gemini === 'not_configured'
+        ? 'Google · Gemini · not configured'
+        : 'Google · Gemini · key configured — live engine status via GET /api/engine-control/status',
+    redteam: 'War Room · Red Team · standby',
+  }
+
   return NextResponse.json({
     tool: 'provider-health',
     status: 'complete',
-    providers: {
-      claude: keyStatus('ANTHROPIC_API_KEY'),
-      chatgpt: keyStatus('OPENAI_API_KEY'),
-      grok: keyStatus('XAI_API_KEY'),
-      gemini: gemini.status,
-      redteam: 'standby',
-    },
-    labels: {
-      claude: process.env.ANTHROPIC_API_KEY ? 'Anthropic · Claude · online' : 'Anthropic · Claude · not connected',
-      chatgpt: process.env.OPENAI_API_KEY ? 'OpenAI · ChatGPT · online' : 'OpenAI · ChatGPT · not connected',
-      grok: process.env.XAI_API_KEY ? 'xAI · grok · online' : 'xAI · grok · not connected',
-      gemini: gemini.label,
-      redteam: 'War Room · Red Team · standby',
+    availability,
+    providers,
+    labels,
+    guidance:
+      '`availability` reflects credential/configuration hints only; use GET /api/engine-control/status or GET /api/debug/provider-health for live preflight where enabled.',
+    deprecatedSemantics: {
+      providersOnlineFromKeysOnly:
+        'Removed: keys alone no longer imply `providers.* === "online"` (mapped to standby when configured). Prefer `availability`.',
     },
   })
 }

@@ -1,3 +1,7 @@
+/**
+ * Legacy HTTP surface for the original `rael_action_queue` table.
+ * Primary operator approval persistence lives in `war_room_actions` (see `/api/actions/queue`).
+ */
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 

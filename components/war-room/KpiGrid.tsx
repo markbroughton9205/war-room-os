@@ -12,6 +12,9 @@ export function KpiGrid() {
         <p className="mt-2 max-w-2xl text-sm text-slate-400">
           The Council is aligned. Memory persists. Signal integrity stable.
         </p>
+        <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.35em] text-amber-500/85">
+          Mock / Estimated
+        </p>
       </header>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
