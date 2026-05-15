@@ -8,7 +8,8 @@ import { coerceCouncilCommand } from '@/lib/council/councilCommandTypes'
 import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { buildActiveScope } from '@/lib/council/intentScope'
-import { resolveProviderTimeoutMs } from '@/lib/council/providerTimeouts'
+import { resolveProviderTimeoutMs, resolveDecreeSoftGatherServerBudgetMs } from '@/lib/council/providerTimeouts'
+import { buildContinuationRequestFromModelOutput } from '@/lib/council/continuationRequest'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
@@ -172,6 +173,7 @@ export async function POST(req: Request) {
       : null
 
   const councilCommand = coerceCouncilCommand(body.councilCommand)
+  const councilGatherPhase = body.councilGatherPhase === 'decree_soft' ? 'decree_soft' : null
   const raelDirectiveText =
     typeof body.raelDirectiveText === 'string' && body.raelDirectiveText.trim()
       ? body.raelDirectiveText.trim()
@@ -253,11 +255,18 @@ export async function POST(req: Request) {
         )
       }
 
-      const providerBudgetMs = resolveProviderTimeoutMs({
-        intentKind: intentState.intent,
-        mode,
-        councilCommand,
-      })
+      const providerBudgetMs =
+        councilGatherPhase === 'decree_soft'
+          ? resolveDecreeSoftGatherServerBudgetMs({
+              intentKind: intentState.intent,
+              mode,
+              councilCommand,
+            })
+          : resolveProviderTimeoutMs({
+              intentKind: intentState.intent,
+              mode,
+              councilCommand,
+            })
 
       const withBudgetSignal = () => {
         const ac = new AbortController()
@@ -443,6 +452,11 @@ export async function POST(req: Request) {
         )
       }
 
+      const continuationRequest = buildContinuationRequestFromModelOutput({
+        family: councilSingleFamily,
+        text: responseText,
+      })
+
       await safeAudit({
         success: true,
         flow: 'continue_single',
@@ -476,6 +490,7 @@ export async function POST(req: Request) {
         councilSingleResponse: responseText,
         councilSingleFamily,
         showContinue: true,
+        ...(continuationRequest ? { continuationRequest } : {}),
       })
     }
 

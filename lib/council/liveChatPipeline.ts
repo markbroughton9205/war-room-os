@@ -13,6 +13,7 @@
  */
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
+import type { ContinuationRequest } from '@/lib/council/continuationRequest'
 import type { IntentKind } from '@/lib/council/intentClassifier'
 import type { ActiveScope } from '@/lib/council/intentScope'
 
@@ -33,6 +34,8 @@ export type CouncilChatRequestBody = {
   councilIntentKind?: IntentKind
   /** Serialized active scope — server recomputes from decree when omitted. */
   councilActiveScope?: ActiveScope
+  /** Soft decree gather: server uses a long provider budget; client does not mirror short packet aborts. */
+  councilGatherPhase?: 'decree_soft'
 }
 
 export type CouncilChatJson = {
@@ -44,6 +47,8 @@ export type CouncilChatJson = {
   /** Present on HTTP 200 when the route degraded instead of failing the batch. */
   councilProviderHttpStatus?: 'timed_out' | 'failed'
   councilProviderHttpDetail?: string
+  /** Server-detected continuation pressure without permission framing — requires UI approval before acting. */
+  continuationRequest?: ContinuationRequest
 }
 
 export async function postCouncilChat(

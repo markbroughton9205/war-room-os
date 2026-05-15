@@ -41,6 +41,8 @@ import type { RouteCommandResult } from '@/lib/engine-control/router'
 import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
+import type { ContinuationRequest } from '@/lib/council/continuationRequest'
+import { decreeAsksMultiFamilyGreeting } from '@/lib/council/greetingRouting'
 import { classifyCommand } from '@/lib/engine-control/permissions'
 import { ProviderSetupChecklistPanel } from '@/components/war-room/ProviderSetupChecklistPanel'
 import { Phase3WarRoomPanels } from '@/components/war-room/phase3/Phase3WarRoomPanels'
@@ -78,7 +80,11 @@ import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { shouldSuppressStaleAutonomousReveal } from '@/lib/council/sessionBarrier'
 import { buildCouncilRenderPacket, type CouncilRenderPacket } from '@/lib/council/renderPacket'
 import { resolveCouncilPacketSyncMs } from '@/lib/council/packetSync'
-import { resolveAttendanceBatchCeilingMs, resolveProviderTimeoutMs } from '@/lib/council/providerTimeouts'
+import {
+  DECREE_GATHER_HARD_HANG_MS,
+  resolveAttendanceBatchCeilingMs,
+  resolveProviderTimeoutMs,
+} from '@/lib/council/providerTimeouts'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 import {
   GEMINI_REPAIR_ENQUEUE_METADATA_KEY,
@@ -4156,6 +4162,7 @@ function Home() {
   const lastRaelDirectiveContentRef = useRef('')
   const [councilUiCommand, setCouncilUiCommand] = useState<CouncilCommand>(() => ({ ...DEFAULT_COUNCIL_COMMAND }))
   const [councilPacketRender, setCouncilPacketRender] = useState<CouncilRenderPacket | null>(null)
+  const [continuationRequests, setContinuationRequests] = useState<ContinuationRequest[]>([])
   const decreePacketFlushCompleteRef = useRef(false)
   const decreePacketOpenedAtMsRef = useRef(0)
   const [familyDuty, setFamilyDuty] = useState<Record<string, CouncilDutyState>>(() =>
@@ -5633,6 +5640,15 @@ function Home() {
     setSessionCost(prev => prev + finalCost)
   }
 
+  const mergeContinuationFromChatJson = (data: CouncilChatJson) => {
+    const cr = data.continuationRequest
+    if (!cr) return
+    setContinuationRequests(prev => {
+      if (prev.some(p => p.id === cr.id)) return prev
+      return [...prev, cr].slice(-14)
+    })
+  }
+
   const clearOrchestrationTimer = () => {
     if (orchestrationTimerRef.current !== null) {
       window.clearTimeout(orchestrationTimerRef.current)
@@ -5777,6 +5793,7 @@ function Home() {
           )
           r = out.res
           data = out.data
+          mergeContinuationFromChatJson(data)
         } finally {
           window.clearTimeout(tid)
         }
@@ -5906,23 +5923,19 @@ function Home() {
     const rosterLabel = (fid: CouncilOrchestrationFamily) =>
       COUNCIL_ROSTER.find(r => r.id === fid)?.label ?? fid
 
-    const postCouncilChatWithFamilyTimeout = async (
-      body: Parameters<typeof postCouncilChat>[0],
-      timeoutMs = resolveProviderTimeoutMs({
-        intentKind: body.councilIntentKind ?? 'natural',
-        mode: body.mode,
-        councilCommand: body.councilCommand,
-      }),
-    ) => {
-      const familyController = new AbortController()
-      const abortFamily = () => familyController.abort()
-      controller.signal.addEventListener('abort', abortFamily, { once: true })
-      const timeoutId = window.setTimeout(() => familyController.abort(), timeoutMs)
+    const postCouncilChatDecreeGather = async (body: Parameters<typeof postCouncilChat>[0]) => {
+      const merged = new AbortController()
+      const onDecreeAbort = () => merged.abort()
+      controller.signal.addEventListener('abort', onDecreeAbort, { once: true })
+      const hangId = window.setTimeout(() => merged.abort(), DECREE_GATHER_HARD_HANG_MS)
+      if (controller.signal.aborted) merged.abort()
       try {
-        return await postCouncilChat(body, familyController.signal)
+        const out = await postCouncilChat({ ...body, councilGatherPhase: 'decree_soft' }, merged.signal)
+        mergeContinuationFromChatJson(out.data)
+        return out
       } finally {
-        window.clearTimeout(timeoutId)
-        controller.signal.removeEventListener('abort', abortFamily)
+        window.clearTimeout(hangId)
+        controller.signal.removeEventListener('abort', onDecreeAbort)
       }
     }
 
@@ -6012,12 +6025,20 @@ function Home() {
       })
       if (errSnap && injectLeadRed) lastCouncilFamilyErrorRef.current = null
 
+      const cmd = activeCouncilCommandRef.current
+      const councilIntentState = resolveCurrentIntent({ latestRaelDecreeText: decree })
+
       let order = buildDecreeFamilyOrder({
         incomeOperationsMode: incomeOperationsMode || intent.tier === 'income_ops',
         planningMode,
         extraFamilies: extra,
         maxFamilies: intent.maxFamilies,
-        singleFamilyRotate: intent.tier === 'casual' ? messagesRef.current.length : undefined,
+        singleFamilyRotate:
+          councilIntentState.intent === 'greeting' && !decreeAsksMultiFamilyGreeting(decree)
+            ? undefined
+            : intent.tier === 'casual'
+              ? messagesRef.current.length
+              : undefined,
         leadWithRedTeam: injectLeadRed,
       })
       if (intent.tier === 'casual') {
@@ -6026,8 +6047,6 @@ function Home() {
       }
       if (skipGeminiForSessionRef.current) order = order.filter(f => f !== 'gemini')
 
-      const cmd = activeCouncilCommandRef.current
-      const councilIntentState = resolveCurrentIntent({ latestRaelDecreeText: decree })
       const directedOrder = filterOrchestrationOrderByCommand(order, cmd, decree)
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
         allowBusinessTopicsFromIntent: councilIntentState.intent === 'business_ops',
@@ -6153,30 +6172,21 @@ function Home() {
               runtime = 'SKIPPED'
               runtimeDetail = 'engine_unavailable'
             } else {
-              const perMs = resolveProviderTimeoutMs({
-                intentKind: councilIntentState.intent,
-                mode: mode === 'expanded' ? 'expanded' : 'continue',
-                councilCommand: activeCouncilCommandRef.current,
-              })
-              const effectiveMs = batchCeilingMs != null ? Math.min(perMs, batchCeilingMs) : perMs
               try {
-                const { res: chatRes, data: chatData } = await postCouncilChatWithFamilyTimeout(
-                  {
-                    message: decree,
-                    profile: RAEL_PROFILE,
-                    threadHistory: threadHistory(),
-                    mode: mode === 'expanded' ? 'expanded' : 'continue',
-                    toneMode,
-                    councilSingleFamily: family,
-                    orchestrationAugment: augment,
-                    councilCommand: activeCouncilCommandRef.current,
-                    raelDirectiveText: decree,
-                    councilIntentKind: councilIntentState.intent,
-                    councilActiveScope: councilIntentState.scope,
-                    ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
-                  },
-                  effectiveMs,
-                )
+                const { res: chatRes, data: chatData } = await postCouncilChatDecreeGather({
+                  message: decree,
+                  profile: RAEL_PROFILE,
+                  threadHistory: threadHistory(),
+                  mode: mode === 'expanded' ? 'expanded' : 'continue',
+                  toneMode,
+                  councilSingleFamily: family,
+                  orchestrationAugment: augment,
+                  councilCommand: activeCouncilCommandRef.current,
+                  raelDirectiveText: decree,
+                  councilIntentKind: councilIntentState.intent,
+                  councilActiveScope: councilIntentState.scope,
+                  ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
+                })
 
                 if (chatRes.ok && chatData.councilProviderHttpStatus === 'timed_out') {
                   runtime = 'TIMED_OUT'
@@ -6267,13 +6277,32 @@ function Home() {
         return { family, textOut, runtime, runtimeDetail }
       }
 
-      const settled = await Promise.allSettled(directedOrder.map(family => gatherFamily(family)))
-      const cells: GatherCell[] = directedOrder.map((family, i) => {
-        const s = settled[i]
-        if (!s) return { family, textOut: null, runtime: 'FAILED' as const, runtimeDetail: 'missing_slot' }
-        if (s.status === 'fulfilled') return s.value
-        const reason = s.reason instanceof Error ? s.reason.message : String(s.reason)
-        return { family, textOut: null, runtime: 'FAILED' as const, runtimeDetail: reason }
+      const outcomeByFamily = new Map<CouncilOrchestrationFamily, GatherCell>()
+      const gatherPromises = directedOrder.map(family =>
+        gatherFamily(family).then(cell => {
+          outcomeByFamily.set(family, cell)
+          return cell
+        }),
+      )
+
+      if (attendanceWave && batchCeilingMs != null) {
+        await wait(batchCeilingMs)
+      } else {
+        await Promise.allSettled(gatherPromises)
+      }
+
+      const cells: GatherCell[] = directedOrder.map(family => {
+        const done = outcomeByFamily.get(family)
+        if (done) return done
+        if (attendanceWave && batchCeilingMs != null) {
+          return {
+            family,
+            textOut: null,
+            runtime: 'IN_FLIGHT',
+            runtimeDetail: 'soft_gather_window',
+          }
+        }
+        return { family, textOut: null, runtime: 'FAILED' as const, runtimeDetail: 'missing_gather_slot' }
       })
 
       providerRuntimeStates = Object.fromEntries(cells.map(c => [c.family, c.runtime])) as Partial<
@@ -6335,6 +6364,7 @@ function Home() {
         const syncMs = resolveCouncilPacketSyncMs({
           intentTier: intent.tier,
           mode: activeCouncilCommandRef.current.mode,
+          intentKind: councilIntentState.intent,
         })
         const elapsed = Date.now() - decreePacketOpenedAtMsRef.current
         if (elapsed < syncMs) await wait(syncMs - elapsed)
@@ -7079,6 +7109,61 @@ function Home() {
             <span className="rounded border border-white/10 px-2 py-1">Internet: {internetHealthLabel}</span>
           </div>
           <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />
+          {continuationRequests.some(c => c.status === 'pending') ? (
+            <div
+              className="mt-2 rounded border border-amber-900/40 px-3 py-2"
+              style={{ background: 'rgba(0,0,0,0.35)' }}
+            >
+              <p className="mb-1 text-[9px] font-bold tracking-widest" style={{ color: '#EAB308' }}>
+                CONTINUATION REQUESTS (local approval only)
+              </p>
+              <ul className="space-y-2 text-[9px] tracking-wide" style={{ color: '#a8a29e' }}>
+                {continuationRequests
+                  .filter(c => c.status === 'pending')
+                  .map(cr => (
+                    <li key={cr.id} className="flex flex-wrap items-center gap-2">
+                      <span className="max-w-[min(100%,22rem)]">
+                        {(COUNCIL_ROSTER.find(r => r.id === cr.family)?.label ?? cr.family)} · {cr.kind}
+                      </span>
+                      <button
+                        type="button"
+                        className="rounded px-2 py-0.5 text-[8px] font-bold tracking-widest"
+                        style={{ border: '1px solid #34D399', color: '#34D399' }}
+                        onClick={() => {
+                          setContinuationRequests(prev =>
+                            prev.map(p => (p.id === cr.id ? { ...p, status: 'approved' } : p)),
+                          )
+                          void postLiveCouncilMessage({
+                            role: 'system',
+                            content: `Ra’el approved continuation request (${cr.family} · ${cr.kind}).`,
+                            family: 'SYSTEM',
+                          })
+                        }}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded px-2 py-0.5 text-[8px] font-bold tracking-widest"
+                        style={{ border: '1px solid #888', color: '#888' }}
+                        onClick={() => {
+                          setContinuationRequests(prev =>
+                            prev.map(p => (p.id === cr.id ? { ...p, status: 'rejected' } : p)),
+                          )
+                          void postLiveCouncilMessage({
+                            role: 'system',
+                            content: `Ra’el rejected continuation request (${cr.family} · ${cr.kind}).`,
+                            family: 'SYSTEM',
+                          })
+                        }}
+                      >
+                        Reject
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
         <div
           data-testid="live-council-messages"

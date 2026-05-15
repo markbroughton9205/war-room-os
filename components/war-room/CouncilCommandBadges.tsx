@@ -45,6 +45,7 @@ const PROVIDER_STATUS_LABEL: Record<string, string> = {
   DEGRADED: 'degraded',
   FAILED: 'failed',
   SKIPPED: 'skipped',
+  IN_FLIGHT: 'in flight',
 }
 
 export function CouncilCommandBadges({
@@ -126,7 +127,9 @@ export function CouncilCommandBadges({
                             ? '#d97706'
                             : st === 'FAILED'
                               ? '#b91c1c'
-                              : '#6b7280',
+                              : st === 'IN_FLIGHT'
+                                ? '#a78bfa'
+                                : '#6b7280',
                       background: 'rgba(0,0,0,0.25)',
                     }}
                   >

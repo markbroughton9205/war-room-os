@@ -1,6 +1,7 @@
 /**
  * Decree-only intent classification (keyword / phrase heuristics, case-insensitive).
  * Latest Ra’el decree is authoritative — not chat history.
+ * Multi-family **greeting** widening is handled in `conversationIntent` + `greetingRouting`, not here.
  */
 
 export type IntentKind =

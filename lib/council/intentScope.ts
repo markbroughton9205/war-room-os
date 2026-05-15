@@ -181,7 +181,8 @@ export function stripForbiddenScopeLines(text: string, scope: ActiveScope): { te
   return { text: kept.join('\n').trim(), stripped }
 }
 
-const ATT_FORBIDDEN = /\b(panama|revenue|strategy|logistics|sovereignty|business|invoice|contract|roadmap|okr)\b/i
+const ATT_FORBIDDEN =
+  /\b(panama|revenue|strategy|logistics|sovereignty|business|invoice|contract|roadmap|okr|kpi|agenda|capital allocation|boardroom|north\s*star|stakeholder|operating\s+model|go-?to-?market)\b/i
 
 /** Loosely enforce presence-style single line for attendance intent. */
 export function enforceAttendancePresenceShape(text: string): { text: string; adjusted: boolean } {

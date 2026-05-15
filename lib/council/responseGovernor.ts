@@ -108,6 +108,25 @@ function collapseRepeatedLines(text: string): string {
   return out.join('\n').trim()
 }
 
+function stripCouncilTelemetryCliches(text: string): string {
+  let t = text
+  t = t.replace(/\ball\s+nodes\s+aligned\b/gi, '')
+  t = t.replace(/\b(nodes|mesh)\s+are\s+aligned\b/gi, '')
+  t = t.replace(/\bfull\s+spectral\s+awareness\b/gi, '')
+  t = t.replace(/\bbattle\s+rhythm\b/gi, 'cadence')
+  t = t.replace(/\bforce\s+multiplier\b/gi, 'lever')
+  t = t.replace(/\bOODA\s+loop\b/gi, 'decision loop')
+  return t.replace(/\n{3,}/g, '\n\n').trim()
+}
+
+function stripRedTeamWarmIntentNoise(text: string, intent?: IntentKind): string {
+  if (intent !== 'greeting' && intent !== 'attendance') return text
+  return text
+    .replace(/^\s*(?:attack|strike|pressure-?test|destroy|hunt|obliterate)\b[^.!?\n]*[.!?]?\s*/i, '')
+    .replace(/^\s*(?:adversary|adversarial)\s+view\s*:\s*/i, '')
+    .trim()
+}
+
 function stripExecutionFluff(text: string): string {
   return text
     .split('\n')
@@ -191,12 +210,14 @@ function applyActiveScopeTail(args: {
   }
 
   if (family === 'red_team' && !isVerificationHeavyContext(cmd, ik ?? 'natural')) {
-    const cap = 520
+    const warmCap = ik === 'attendance' ? 220 : ik === 'greeting' ? 260 : 520
+    const cap = warmCap
     if (t.length > cap) {
       t = t.slice(0, cap).trim()
       warnings.push('council_governor_red_team_length_capped')
       scopeLog('red_team_capped_non_verification')
     }
+    t = stripRedTeamWarmIntentNoise(t, ik)
     const pv = stripStrategicPivotLanguage(t)
     t = pv.text
     if (pv.stripped > 0) {
@@ -235,6 +256,8 @@ export function applyGovernor(
   let t = (text ?? '').trim()
   const intent = context?.councilIntentKind
   const scope = context?.councilActiveScope
+
+  t = stripCouncilTelemetryCliches(t)
 
   let maxChars = Math.max(80, effectiveMaxCharsForFamily(orch, cmd.responseLimits.maxChars))
   if (scope?.familyPermissions?.maxCharsPerFamily) {

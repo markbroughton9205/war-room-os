@@ -107,6 +107,17 @@ export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLi
     content = cont.text
     if (cont.stripped) warnings.push('moderator_clamped_autonomous_continuation')
 
+    if (activeScope?.intent === 'greeting' && row.family === 'red_team') {
+      const softened = content.replace(
+        /^\s*(?:attack|strike|pressure-?test|destroy|hunt|obliterate)\b[^.!?\n]*[.!?]?\s*/i,
+        '',
+      )
+      if (softened !== content) {
+        warnings.push('moderator_softened_red_team_greeting')
+        content = softened.trim()
+      }
+    }
+
     const cc = reduceCrossCritiqueHeuristic(content, row.family)
     content = cc.text
     if (cc.stripped > 0) warnings.push('moderator_stripped_cross_family_critique')

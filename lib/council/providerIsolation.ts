@@ -7,6 +7,8 @@ export type ProviderFamilyOutcomeStatus =
   | 'DEGRADED'
   | 'FAILED'
   | 'SKIPPED'
+  /** Response still in flight after a soft gather window (no client abort). */
+  | 'IN_FLIGHT'
 
 export type ProviderFamilyRuntimeOutcome = {
   status: ProviderFamilyOutcomeStatus

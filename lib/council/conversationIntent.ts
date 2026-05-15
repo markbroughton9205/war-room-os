@@ -3,6 +3,8 @@
  * No LLM — keyword / pattern heuristics only.
  */
 
+import { decreeAsksMultiFamilyGreeting } from '@/lib/council/greetingRouting'
+
 export type ConversationIntentTier = 'casual' | 'coordination' | 'council_full' | 'income_ops'
 
 export type ClassifyRaElMessageResult = {
@@ -48,11 +50,12 @@ export function classifyRaElMessage(text: string): ClassifyRaElMessageResult {
   const isGreetingOrThanks = GREETING_OR_THANKS_PATTERN.test(raw) || THANKS_ONLY_PATTERN.test(raw)
 
   if (isGreetingOrThanks) {
+    const multi = decreeAsksMultiFamilyGreeting(raw)
     return {
-      tier: 'casual',
-      shouldEmitBusEvents: false,
+      tier: multi ? 'coordination' : 'casual',
+      shouldEmitBusEvents: multi,
       shouldRunFamilyRound: true,
-      maxFamilies: 1,
+      maxFamilies: multi ? 4 : 1,
     }
   }
 

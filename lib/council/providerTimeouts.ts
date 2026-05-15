@@ -1,6 +1,9 @@
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import type { IntentKind } from '@/lib/council/intentClassifier'
 
+/** Client decree gather: user cancel only until this wall clock; avoids mirroring soft packet windows. */
+export const DECREE_GATHER_HARD_HANG_MS = 55_000
+
 /** HTTP `body.mode` from Live Council (expanded = higher token budget, slightly longer budget). */
 export type CouncilHttpBodyMode = 'continue' | 'expanded' | string | undefined
 
@@ -22,7 +25,8 @@ export function resolveProviderTimeoutMs(args: {
   const ik = args.intentKind
 
   if (cmdMode === 'attendance' || ik === 'attendance') {
-    return expandedBump(4000, args.mode) // 3–5s tier
+    // Short path for autonomous / tools; decree gather uses `decreeSoftGather` server budget instead.
+    return expandedBump(4000, args.mode)
   }
 
   if (ik === 'research' || cmdMode === 'research') {
@@ -53,10 +57,23 @@ export function resolveProviderTimeoutMs(args: {
   return expandedBump(6500, args.mode)
 }
 
+/**
+ * Server-side provider budget for `/api/chat` when the client uses soft decree gather
+ * (no early fetch abort). Stays below hard hang so the route can return `timed_out` before the client drops.
+ */
+export function resolveDecreeSoftGatherServerBudgetMs(args: {
+  intentKind: IntentKind
+  mode: CouncilHttpBodyMode
+  councilCommand?: CouncilCommand
+}): number {
+  const base = resolveProviderTimeoutMs(args)
+  return Math.max(base, DECREE_GATHER_HARD_HANG_MS - 5000)
+}
+
 /** Hard ceiling for an entire attendance gather wave (parallel batch). */
 export function resolveAttendanceBatchCeilingMs(args: { familyCount: number }): number {
   const n = Math.max(1, args.familyCount)
-  // 3–8s global cap: scale slightly with roster size but stay within band
-  const scaled = 3200 + Math.min(n, 6) * 420
-  return Math.min(8000, Math.max(3000, scaled))
+  // Healthy-path soft release ~2–5s; slow providers may finish later without client abort (see decree gather).
+  const scaled = 2000 + Math.min(n, 6) * 400
+  return Math.min(5000, Math.max(2000, scaled))
 }
