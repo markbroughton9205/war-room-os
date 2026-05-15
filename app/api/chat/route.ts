@@ -728,6 +728,9 @@ export async function POST(req: Request) {
           return degradedProviderResponse(councilSingleFamily, 'timed_out', msg)
         }
         if (/\b(api[_ ]?key|not configured|missing|unauthorized|401)\b/i.test(msg)) {
+          if (isAttendanceFlow) {
+            return degradedProviderResponse(councilSingleFamily, 'failed', msg)
+          }
           return NextResponse.json(
             { error: 'council_configuration_error', message: msg },
             { status: 503 },

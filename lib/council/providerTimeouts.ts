@@ -76,10 +76,16 @@ export const ATTENDANCE_PREFLIGHT_STATUS_FETCH_MS = 8000
 /** Per-family classification slice after status map is loaded (sync work only). */
 export const ATTENDANCE_PREFLIGHT_PER_FAMILY_MS = 500
 
-/** Hard ceiling for an entire attendance gather wave (parallel batch). */
+/** Visual release window for attendance gather (parallel batch) — ~2–5s. */
 export function resolveAttendanceBatchCeilingMs(args: { familyCount: number }): number {
   const n = Math.max(1, args.familyCount)
-  // Healthy-path soft release ~2–5s; slow providers may finish later without client abort (see decree gather).
   const scaled = 2000 + Math.min(n, 6) * 400
   return Math.min(5000, Math.max(2000, scaled))
+}
+
+/** Hard close after visual release — allows late merge before session closes. */
+export function resolveAttendanceHardCloseMs(args: { familyCount: number }): number {
+  const visual = resolveAttendanceBatchCeilingMs(args)
+  const n = Math.max(1, args.familyCount)
+  return visual + 8000 + Math.min(n, 6) * 1000
 }

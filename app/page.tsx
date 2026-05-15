@@ -81,10 +81,18 @@ import { shouldSuppressStaleAutonomousReveal } from '@/lib/council/sessionBarrie
 import { buildCouncilRenderPacket, type CouncilRenderPacket } from '@/lib/council/renderPacket'
 import { resolveCouncilPacketSyncMs } from '@/lib/council/packetSync'
 import {
+  buildAttendanceDirectedOrder,
+  isAttendanceIntent,
+  runtimeAfterAttendanceHardClose,
+  runtimeAfterAttendanceSoftCap,
+} from '@/lib/council/attendanceReadiness'
+import {
   DECREE_GATHER_HARD_HANG_MS,
   resolveAttendanceBatchCeilingMs,
+  resolveAttendanceHardCloseMs,
   resolveProviderTimeoutMs,
 } from '@/lib/council/providerTimeouts'
+import { shapeAttendanceForModeGovernor } from '@/lib/council/responseCompression'
 import { shouldSuppressProviderFailureFromChatStream } from '@/lib/council/chatStreamFilters'
 import {
   attendancePreflightSkipsChat,
@@ -6143,12 +6151,13 @@ function Home() {
 
       const cmd = activeCouncilCommandRef.current
       const councilIntentState = resolveCurrentIntent({ latestRaelDecreeText: decree })
+      const attendanceWave = isAttendanceIntent(cmd, councilIntentState.intent)
 
       let order = buildDecreeFamilyOrder({
         incomeOperationsMode: incomeOperationsMode || intent.tier === 'income_ops',
         planningMode,
         extraFamilies: extra,
-        maxFamilies: cmd.directInvocation ? 1 : intent.maxFamilies,
+        maxFamilies: cmd.directInvocation ? 1 : attendanceWave ? 8 : intent.maxFamilies,
         singleFamilyRotate:
           cmd.directInvocation
           || (councilIntentState.intent === 'greeting' && !decreeAsksMultiFamilyGreeting(decree))
@@ -6161,13 +6170,20 @@ function Home() {
       if (cmd.directInvocation && cmd.targetFamilies[0]) {
         order = [cmd.targetFamilies[0]]
       }
-      if (intent.tier === 'casual') {
+      if (intent.tier === 'casual' && !attendanceWave) {
         const casualFallbacks: CouncilOrchestrationFamily[] = ['chatgpt', 'claude', 'grok', 'gemini']
         order = [...order, ...casualFallbacks.filter(f => !order.includes(f))]
       }
       if (skipGeminiForSessionRef.current) order = order.filter(f => f !== 'gemini')
 
-      const directedOrder = filterOrchestrationOrderByCommand(order, cmd, decree)
+      const directedOrder = attendanceWave
+        ? buildAttendanceDirectedOrder({
+            cmd,
+            decree,
+            participationToggles,
+            localFamilyAgents,
+          })
+        : filterOrchestrationOrderByCommand(order, cmd, decree)
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
         allowBusinessTopicsFromIntent: councilIntentState.intent === 'business_ops',
       })
@@ -6228,7 +6244,6 @@ function Home() {
       decreePacketOpenedAtMsRef.current = Date.now()
       const staged: { family: CouncilOrchestrationFamily; textOut: string }[] = []
 
-      const attendanceWave = cmd.mode === 'attendance' || councilIntentState.intent === 'attendance'
       const batchCeilingMs = attendanceWave
         ? resolveAttendanceBatchCeilingMs({ familyCount: directedOrder.length })
         : null
@@ -6534,10 +6549,35 @@ function Home() {
       const outcomeByFamily = new Map<CouncilOrchestrationFamily, GatherCell>()
       const gatherPromises = directedOrder.map(family =>
         gatherFamily(family).then(cell => {
+          const prev = outcomeByFamily.get(family)
+          if (prev?.textOut?.trim() && cell.textOut?.trim()) return prev
           outcomeByFamily.set(family, cell)
           return cell
         }),
       )
+
+      const mapSoftCapCells = (): GatherCell[] =>
+        directedOrder.map(family => {
+          const done = outcomeByFamily.get(family)
+          if (done) {
+            const hasContent = Boolean(done.textOut?.trim())
+            return {
+              ...done,
+              runtime: runtimeAfterAttendanceSoftCap({
+                runtime: done.runtime,
+                hasContent,
+                runtimeDetail: done.runtimeDetail,
+              }),
+              runtimeDetail: hasContent ? done.runtimeDetail : (done.runtimeDetail ?? 'attendance_soft_cap'),
+            }
+          }
+          return {
+            family,
+            textOut: null,
+            runtime: 'IN_FLIGHT' as const,
+            runtimeDetail: 'attendance_soft_cap',
+          }
+        })
 
       if (attendanceWave && batchCeilingMs != null) {
         await wait(batchCeilingMs)
@@ -6545,19 +6585,13 @@ function Home() {
         await Promise.allSettled(gatherPromises)
       }
 
-      const cells: GatherCell[] = directedOrder.map(family => {
-        const done = outcomeByFamily.get(family)
-        if (done) return done
-        if (attendanceWave && batchCeilingMs != null) {
-          return {
-            family,
-            textOut: null,
-            runtime: 'SKIPPED',
-            runtimeDetail: 'attendance_soft_cap',
-          }
-        }
-        return { family, textOut: null, runtime: 'SKIPPED' as const, runtimeDetail: 'missing_gather_slot' }
-      })
+      let cells: GatherCell[] = attendanceWave
+        ? mapSoftCapCells()
+        : directedOrder.map(family => {
+            const done = outcomeByFamily.get(family)
+            if (done) return done
+            return { family, textOut: null, runtime: 'SKIPPED' as const, runtimeDetail: 'missing_gather_slot' }
+          })
 
       if (attendanceWave) {
         attendanceSoftGatherUiClosedRef.current = true
@@ -6579,11 +6613,15 @@ function Home() {
         .filter(c => Boolean(c.textOut?.trim()))
         .map(c => ({ family: c.family, textOut: c.textOut!.trim() }))
 
-      if (intent.tier === 'casual' && stagedCandidates.length) {
+      if (intent.tier === 'casual' && stagedCandidates.length && !attendanceWave) {
         staged.push(stagedCandidates[0]!)
       } else {
         for (const row of stagedCandidates) staged.push(row)
       }
+
+      const attendanceRevealedFamilies = new Set<CouncilOrchestrationFamily>(
+        staged.map(s => s.family),
+      )
 
       if (staged.length) {
         anySuccess = true
@@ -6616,7 +6654,52 @@ function Home() {
         return
       }
 
-      if (staged.length > 0) {
+      const releaseAttendancePacket = async (
+        linesToRelease: { family: CouncilOrchestrationFamily; textOut: string }[],
+        runtimeStates: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>>,
+      ) => {
+        if (!linesToRelease.length) return []
+        const topicLock = decreeTopicLockPreview
+        const runtimeDetailsByFamily = Object.fromEntries(
+          cells
+            .filter((c): c is GatherCell & { runtimeDetail: string } => Boolean(c.runtimeDetail))
+            .map(c => [c.family, c.runtimeDetail]),
+        ) as Partial<Record<CouncilOrchestrationFamily, string>>
+        const verifiedRuntimeByFamily = verifiedContextsFromProviderStates(
+          runtimeStates,
+          runtimeDetailsByFamily,
+        )
+        const roomStatuses = buildRoomStatusesFromProviderStates(runtimeStates, directedOrder)
+        const moderated = runFinalModerator({
+          lines: linesToRelease.map(s => ({ family: s.family, content: s.textOut })),
+          topicLock,
+          activeScope: councilIntentState.scope,
+          councilCommand: cmd,
+          modeGovernor,
+          roomStatuses,
+          verifiedRuntimeByFamily,
+        })
+        for (const line of moderated) {
+          if (!line.content.trim()) continue
+          await revealOrchestrationTurn(line.family, line.content, inputText(), { councilRevealSource: 'decree' })
+          attendanceRevealedFamilies.add(line.family)
+          const vis = orchestrationVisual(line.family)
+          const bubble = vis.bubbleFamilyName ?? rosterLabel(line.family)
+          void postLiveCouncilMessage(
+            { role: 'assistant', content: line.content, family: bubble },
+            {
+              responseSuccessful: true,
+              providerRuntime: runtimeStates[line.family],
+            },
+          )
+          const focusSnippet = line.content.replace(/\s+/g, ' ').trim().slice(0, 120)
+          setFamilyCurrentFocus(prev => ({ ...prev, [line.family]: focusSnippet }))
+          void enqueueCouncilProposals(line.content, line.family)
+        }
+        return moderated
+      }
+
+      if (staged.length > 0 || attendanceWave) {
         setCouncilPacketRender(
           buildCouncilRenderPacket({
             command: activeCouncilCommandRef.current,
@@ -6651,55 +6734,87 @@ function Home() {
           return
         }
 
-        const topicLock = decreeTopicLockPreview
-        const runtimeDetailsByFamily = Object.fromEntries(
-          cells
-            .filter((c): c is GatherCell & { runtimeDetail: string } => Boolean(c.runtimeDetail))
-            .map(c => [c.family, c.runtimeDetail]),
-        ) as Partial<Record<CouncilOrchestrationFamily, string>>
-        const verifiedRuntimeByFamily = verifiedContextsFromProviderStates(
-          providerRuntimeStates,
-          runtimeDetailsByFamily,
-        )
-        const roomStatuses = buildRoomStatusesFromProviderStates(
-          providerRuntimeStates,
-          directedOrder,
-        )
-        const moderated = runFinalModerator({
-          lines: staged.map(s => ({ family: s.family, content: s.textOut })),
-          topicLock,
-          activeScope: councilIntentState.scope,
-          councilCommand: cmd,
-          modeGovernor,
-          roomStatuses,
-          verifiedRuntimeByFamily,
-        })
-
-        for (const line of moderated) {
-          if (!line.content.trim()) continue
-          await revealOrchestrationTurn(line.family, line.content, inputText(), { councilRevealSource: 'decree' })
-          const vis = orchestrationVisual(line.family)
-          const bubble = vis.bubbleFamilyName ?? rosterLabel(line.family)
-          void postLiveCouncilMessage(
-            { role: 'assistant', content: line.content, family: bubble },
-            {
-              responseSuccessful: true,
-              providerRuntime: providerRuntimeStates[line.family],
-            },
-          )
-          const focusSnippet = line.content.replace(/\s+/g, ' ').trim().slice(0, 120)
-          setFamilyCurrentFocus(prev => ({ ...prev, [line.family]: focusSnippet }))
-          void enqueueCouncilProposals(line.content, line.family)
+        let allModerated: Awaited<ReturnType<typeof releaseAttendancePacket>> = []
+        if (staged.length > 0) {
+          allModerated = await releaseAttendancePacket(staged, providerRuntimeStates)
         }
+
+        if (attendanceWave && batchCeilingMs != null) {
+          const hardCloseMs = resolveAttendanceHardCloseMs({ familyCount: directedOrder.length })
+          const hardRemaining = Math.max(0, hardCloseMs - batchCeilingMs)
+          if (hardRemaining > 0) {
+            await Promise.race([wait(hardRemaining), Promise.allSettled(gatherPromises)])
+          } else {
+            await Promise.allSettled(gatherPromises)
+          }
+
+          cells = directedOrder.map(family => {
+            const done = outcomeByFamily.get(family)
+            if (!done) {
+              return {
+                family,
+                textOut: null,
+                runtime: 'TIMED_OUT' as const,
+                runtimeDetail: 'attendance_hard_close',
+              }
+            }
+            const hasContent = Boolean(done.textOut?.trim())
+            return {
+              ...done,
+              runtime: runtimeAfterAttendanceHardClose({
+                runtime: done.runtime,
+                hasContent,
+                runtimeDetail: done.runtimeDetail,
+              }),
+            }
+          })
+
+          providerRuntimeStates = Object.fromEntries(cells.map(c => [c.family, c.runtime])) as Partial<
+            Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>
+          >
+
+          modeGovernor = resolveModeGovernor({
+            decreeText: decree,
+            intentKind: councilIntentState.intent,
+            councilCommand: cmd,
+            providerStates: providerRuntimeStates,
+            directedFamilies: directedOrder,
+          })
+
+          const lateLines: { family: CouncilOrchestrationFamily; textOut: string }[] = []
+          for (const c of cells) {
+            if (attendanceRevealedFamilies.has(c.family)) continue
+            if (c.textOut?.trim()) {
+              lateLines.push({ family: c.family, textOut: c.textOut.trim() })
+              continue
+            }
+            const slotStatus =
+              c.runtime === 'DEGRADED'
+                ? 'DEGRADED'
+                : c.runtime === 'FAILED'
+                  ? 'FAILED'
+                  : 'UNAVAILABLE'
+            lateLines.push({
+              family: c.family,
+              textOut: shapeAttendanceForModeGovernor('', c.family, slotStatus),
+            })
+          }
+          if (lateLines.length) {
+            const lateModerated = await releaseAttendancePacket(lateLines, providerRuntimeStates)
+            allModerated = [...allModerated, ...lateModerated]
+          }
+        }
+
         decreePacketFlushCompleteRef.current = true
 
+        const topicLock = decreeTopicLockPreview
         const isIntegrityish = (w: string) =>
           w.startsWith('integrity_')
           || w.startsWith('protocol_drift_response')
           || w === 'protocol_drift_topic_scope_residual'
           || w === 'protocol_drift_active_scope_residual'
 
-        const packetFamilies = moderated
+        const packetFamilies = allModerated
           .filter(m => m.content.trim())
           .map(m => {
             const iw = m.warnings.filter(isIntegrityish)
@@ -6716,7 +6831,7 @@ function Home() {
           buildCouncilRenderPacket({
             command: activeCouncilCommandRef.current,
             sessionState: 'CLOSED',
-            packetStatus: 'released',
+            packetStatus: packetFamilies.length ? 'released' : 'idle',
             families: packetFamilies,
             extraWarnings: [
               ...modeWarnings,

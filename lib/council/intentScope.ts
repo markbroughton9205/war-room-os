@@ -212,7 +212,9 @@ export function enforceAttendancePresenceShape(text: string): { text: string; ad
     t = (m ? m[0] : 'Present.').trim()
     adjusted = true
   } else if (t.length > 120) {
-    t = `${t.slice(0, 117).trim()}…`
+    const cut = t.slice(0, 120)
+    const lastSpace = cut.lastIndexOf(' ')
+    t = `${(lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim()}.`
     adjusted = true
   }
   if (!/\bpresent\b/i.test(t)) {

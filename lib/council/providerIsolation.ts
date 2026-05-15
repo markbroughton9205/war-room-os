@@ -66,3 +66,7 @@ export function markResponded(family: CouncilOrchestrationFamily): ProviderFamil
 export function markDegraded(family: CouncilOrchestrationFamily, detail: string): ProviderFamilyRuntimeOutcome {
   return { status: 'DEGRADED', family, detail }
 }
+
+export function markInFlight(family: CouncilOrchestrationFamily, detail?: string): ProviderFamilyRuntimeOutcome {
+  return { status: 'IN_FLIGHT', family, detail }
+}

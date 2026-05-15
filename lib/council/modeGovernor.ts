@@ -43,14 +43,14 @@ function providerStatesNeedRecovery(
   )
 }
 
-function attendanceMissing(
+function attendanceAllRequiredFailed(
   providerStates: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> | undefined,
   directedFamilies: CouncilOrchestrationFamily[] | undefined,
 ): boolean {
   if (!providerStates || !directedFamilies?.length) return false
-  return directedFamilies.some(f => {
+  return directedFamilies.every(f => {
     const s = providerStates[f]
-    return !s || s === 'TIMED_OUT' || s === 'FAILED' || s === 'SKIPPED'
+    return s === 'FAILED' || s === 'TIMED_OUT' || s === 'SKIPPED'
   })
 }
 
@@ -157,17 +157,24 @@ function resolveWarRoomMode(args: {
     return 'direct_invocation'
   }
 
-  if (
-    providerStatesNeedRecovery(providerStates)
-    || (intentKind === 'attendance' && attendanceMissing(providerStates, directedFamilies))
-  ) {
+  const attendanceMode =
+    intentKind === 'attendance' || councilCommand.mode === 'attendance'
+
+  if (attendanceMode) {
+    const confirming = directedFamilies?.some(f => providerStates?.[f] === 'IN_FLIGHT')
+    if (!confirming && attendanceAllRequiredFailed(providerStates, directedFamilies)) {
+      return 'recovery'
+    }
+    return 'attendance'
+  }
+
+  if (providerStatesNeedRecovery(providerStates)) {
     return 'recovery'
   }
 
   if (DEEP_ANALYSIS_DECREE.test(normDecree(decreeText))) return 'deep_analysis'
 
   if (intentKind === 'greeting') return 'greeting'
-  if (intentKind === 'attendance' || councilCommand.mode === 'attendance') return 'attendance'
   if (intentKind === 'execution' || councilCommand.mode === 'execution') return 'execution'
 
   return 'council'

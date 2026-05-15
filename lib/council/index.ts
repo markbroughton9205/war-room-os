@@ -33,3 +33,14 @@ export {
   type AttendancePreflightOpts,
   type AttendancePreflightStatus,
 } from '@/lib/council/attendancePreflight'
+export {
+  ATTENDANCE_REQUIRED_CORE,
+  attendanceBadgeLabel,
+  attendancePresenceLine,
+  buildAttendanceDirectedOrder,
+  isAttendanceIntent,
+  runtimeAfterAttendanceHardClose,
+  runtimeAfterAttendanceSoftCap,
+  type AttendanceSlot,
+  type AttendanceSlotStatus,
+} from '@/lib/council/attendanceReadiness'

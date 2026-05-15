@@ -3,6 +3,7 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import type { CouncilRenderPacket } from '@/lib/council/renderPacket'
+import { attendanceBadgeLabel } from '@/lib/council/attendanceReadiness'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 
 const BADGES: { mode: CouncilCommand['mode']; label: string }[] = [
@@ -41,14 +42,8 @@ function familyShort(id: CouncilOrchestrationFamily): string {
   return id.replace(/_/g, ' ')
 }
 
-const PROVIDER_STATUS_LABEL: Record<string, string> = {
-  READY: 'ready',
-  RESPONDED: 'ok',
-  TIMED_OUT: 'timed out',
-  DEGRADED: 'degraded',
-  FAILED: 'failed',
-  SKIPPED: 'skipped',
-  IN_FLIGHT: 'in flight',
+function providerStatusLabel(st: ProviderFamilyOutcomeStatus): string {
+  return attendanceBadgeLabel(st)
 }
 
 export function CouncilCommandBadges({
@@ -149,7 +144,7 @@ export function CouncilCommandBadges({
                       background: 'rgba(0,0,0,0.25)',
                     }}
                   >
-                    {familyShort(fid)} · {PROVIDER_STATUS_LABEL[st] ?? st}
+                    {familyShort(fid)} · {providerStatusLabel(st)}
                   </span>
                 ),
               )}

@@ -102,9 +102,24 @@ export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLi
   const cmd = councilCommand ?? DEFAULT_COUNCIL_COMMAND
   const moderated: ModeratedFamilyLine[] = []
 
+  const attendanceOnly =
+    cmd.mode === 'attendance' || activeScope?.intent === 'attendance'
+
   for (const row of input.lines) {
     const warnings: string[] = []
     let content = row.content
+
+    if (attendanceOnly) {
+      content = shapeAttendanceForModeGovernor(content, row.family)
+      if (modeGovernor) {
+        content = compressForModeGovernor(content, modeGovernor, {
+          family: row.family,
+          verifiedContext: verifiedRuntimeByFamily?.[row.family],
+        })
+      }
+      moderated.push({ family: row.family, content: content.trim(), warnings })
+      continue
+    }
 
     const integ = repairOrFlagResponse(content)
     content = integ.text
@@ -154,10 +169,6 @@ export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLi
         content = cx.text
         if (cx.stripped > 0) warnings.push('moderator_stripped_cross_talk')
       }
-    }
-
-    if (cmd.mode === 'attendance' || activeScope?.intent === 'attendance') {
-      content = shapeAttendanceForModeGovernor(content, row.family)
     }
 
     if (modeGovernor) {

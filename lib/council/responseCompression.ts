@@ -1,7 +1,11 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
-import { COUNCIL_ROSTER } from '@/lib/council/familyRoster'
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
 import { applyModeGovernorFilters } from '@/lib/council/modeGovernorFilters'
+import {
+  attendancePresenceLine,
+  rosterLabelForAttendance,
+  type AttendanceSlotStatus,
+} from '@/lib/council/attendanceReadiness'
 import { enforceAttendancePresenceShape, stripAttendanceDisplayNoise } from '@/lib/council/intentScope'
 import {
   isSpeculativeInfrastructureLanguage,
@@ -53,30 +57,42 @@ function truncateCouncilPreservingStructure(text: string, maxSentences: number):
   return trimmed.slice(0, 480).trim()
 }
 
-function rosterLabel(family: CouncilOrchestrationFamily): string {
-  return COUNCIL_ROSTER.find(r => r.id === family)?.label ?? family
+function truncateAtWordBoundary(text: string, maxLen: number): string {
+  const trimmed = text.trim()
+  if (trimmed.length <= maxLen) return trimmed
+  const cut = trimmed.slice(0, maxLen)
+  const lastSpace = cut.lastIndexOf(' ')
+  const base = lastSpace > 40 ? cut.slice(0, lastSpace) : cut
+  return `${base.trim()}.`
 }
 
-/** Attendance packet shaping — no emojis, no provider errors, presence-only voice. */
+/** Attendance packet shaping — single line: "{Family} present." / unavailable / confirming. */
 export function shapeAttendanceForModeGovernor(
   text: string,
   family: CouncilOrchestrationFamily,
+  slotStatus: AttendanceSlotStatus = 'PRESENT',
 ): string {
+  if (slotStatus !== 'PRESENT') {
+    return attendancePresenceLine(family, slotStatus)
+  }
+
   let t = stripAttendanceDisplayNoise(text)
   t = t.replace(/\[(?:error|timeout)\][^\n]*/gi, ' ').trim()
-  const label = rosterLabel(family)
   const shaped = enforceAttendancePresenceShape(t)
   t = shaped.text
+  t = truncateAtWordBoundary(t, 120)
 
-  if (family === 'red_team') {
-    if (/\bmonitor/i.test(t)) return `${label}: Monitoring.`
-    return `${label}: Monitoring.`
+  const label = rosterLabelForAttendance(family)
+  if (family === 'red_team' && /\bmonitor/i.test(t)) {
+    return `${label} monitoring.`
   }
   if (/\boperational\b/i.test(t) && /\bpresent\b/i.test(t)) {
-    return `${label}: Present and operational.`
+    return `${label} present and operational.`
   }
-  if (/\bpresent\b/i.test(t)) return `${label}: Present.`
-  return `${label}: Present.`
+  if (/\bpresent\b/i.test(t)) return `${label} present.`
+  if (/\bunavailable\b/i.test(t)) return `${label} unavailable.`
+  if (/\bconfirming\b/i.test(t)) return `${label} confirming.`
+  return `${label} present.`
 }
 
 export function compressForModeGovernor(

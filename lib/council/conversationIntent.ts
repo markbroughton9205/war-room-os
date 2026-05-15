@@ -31,6 +31,9 @@ const INCOME_OPS_PATTERN = new RegExp(
 
 const COUNCIL_FULL_PATTERN = /@council\b|\b(full council|all families|every family|war council|summon the council)\b/i
 
+const ATTENDANCE_PATTERN =
+  /\b(attendance|check-?in|roll\s*call|presence\s*only|one\s*(?:response|line)\s*each)\b/i
+
 const COORDINATION_PATTERN =
   /\b(coordinate|coordination|sync up|align teams|handoff|status meeting|standup|roadmap|milestone|dependencies)\b/i
 
@@ -74,6 +77,15 @@ export function classifyRaElMessage(text: string): ClassifyRaElMessageResult {
       shouldEmitBusEvents: true,
       shouldRunFamilyRound: true,
       maxFamilies: 12,
+    }
+  }
+
+  if (ATTENDANCE_PATTERN.test(raw)) {
+    return {
+      tier: 'coordination',
+      shouldEmitBusEvents: true,
+      shouldRunFamilyRound: true,
+      maxFamilies: 8,
     }
   }
 

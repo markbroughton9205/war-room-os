@@ -25,6 +25,9 @@ const NON_SUCCESS_PROVIDER_RUNTIME = new Set<ProviderFamilyOutcomeStatus>([
   'IN_FLIGHT',
 ])
 
+const ATTENDANCE_PLACEHOLDER_RE =
+  /\bconfirming\.?$|\bunavailable\.?$|\battendance_soft_cap\b/i
+
 export type CouncilPersistableMessage = {
   content?: string
   messageType?: string
@@ -100,8 +103,22 @@ function providerRuntimeFailed(message: CouncilPersistableMessage): boolean {
   return false
 }
 
+function isAttendanceNonPersistablePlaceholder(message: CouncilPersistableMessage): boolean {
+  const rt = message.providerRuntime ?? message.providerState
+  if (rt === 'IN_FLIGHT') return true
+  const content = message.content?.trim() ?? ''
+  if (!content) return false
+  if (ATTENDANCE_PLACEHOLDER_RE.test(content)) return true
+  const detail =
+    message.metadata && typeof message.metadata.runtimeDetail === 'string'
+      ? message.metadata.runtimeDetail
+      : ''
+  return detail === 'attendance_soft_cap'
+}
+
 function isSuccessfulVisibleMessage(message: CouncilPersistableMessage): boolean {
   if (message.responseSuccessful === false) return false
+  if (isAttendanceNonPersistablePlaceholder(message)) return false
   if (message.responseSuccessful === true) return Boolean(message.content?.trim())
   if (providerRuntimeFailed(message)) return false
   return Boolean(message.content?.trim())
