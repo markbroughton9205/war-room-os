@@ -1,8 +1,14 @@
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import {
+  httpStatusForSupabaseFailure,
+  warRoomSupabaseFailurePayload,
+} from '@/lib/war-room/warRoomSupabaseError'
 
 export const dynamic = 'force-dynamic'
 
 const ROLES = ['system', 'user', 'assistant', 'tool', 'note'] as const
+const TABLE_CONVERSATIONS = 'war_room_conversations'
+const TABLE_MESSAGES = 'war_room_messages'
 
 export async function POST(
   req: Request,
@@ -36,14 +42,19 @@ export async function POST(
   }
 
   const { data: conv, error: cErr } = await sup.client
-    .from('war_room_conversations')
+    .from(TABLE_CONVERSATIONS)
     .select('id')
     .eq('id', conversationId)
     .is('deleted_at', null)
     .maybeSingle()
 
   if (cErr) {
-    return jsonWithPersistence({ error: cErr.message }, true, { status: 500 })
+    const supabase = warRoomSupabaseFailurePayload(TABLE_CONVERSATIONS, cErr, { operation: 'select' })
+    return jsonWithPersistence(
+      { error: supabase.message, supabase },
+      true,
+      { status: httpStatusForSupabaseFailure(supabase, 500) },
+    )
   }
   if (!conv) {
     return jsonWithPersistence({ error: 'Conversation not found' }, true, { status: 404 })
@@ -53,7 +64,7 @@ export async function POST(
   const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata : {}
 
   const { data, error } = await sup.client
-    .from('war_room_messages')
+    .from(TABLE_MESSAGES)
     .insert({
       conversation_id: conversationId,
       role,
@@ -65,7 +76,12 @@ export async function POST(
     .single()
 
   if (error) {
-    return jsonWithPersistence({ error: error.message }, true, { status: 500 })
+    const supabase = warRoomSupabaseFailurePayload(TABLE_MESSAGES, error, { operation: 'insert' })
+    return jsonWithPersistence(
+      { error: supabase.message, supabase },
+      true,
+      { status: httpStatusForSupabaseFailure(supabase, 500) },
+    )
   }
 
   return jsonWithPersistence({ message: data }, true, { status: 201 })

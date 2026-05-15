@@ -549,6 +549,31 @@ create policy war_room_actions_service_role_all
   with check (true);
 
 -- -----------------------------------------------------------------------------
+-- war_room_conversations + war_room_messages: PostgREST + service_role DML
+-- (prevents REST 403 with valid service_role JWT; mirrors war_room_actions)
+-- -----------------------------------------------------------------------------
+grant select, insert, update, delete on table public.war_room_conversations to service_role;
+grant select, insert, update, delete on table public.war_room_messages to service_role;
+
+drop policy if exists war_room_conversations_service_role_all on public.war_room_conversations;
+
+create policy war_room_conversations_service_role_all
+  on public.war_room_conversations
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+drop policy if exists war_room_messages_service_role_all on public.war_room_messages;
+
+create policy war_room_messages_service_role_all
+  on public.war_room_messages
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+-- -----------------------------------------------------------------------------
 -- Functions & triggers — updated_at + conversation last_message_at
 -- -----------------------------------------------------------------------------
 create or replace function public.touch_war_room_conversations_updated_at()

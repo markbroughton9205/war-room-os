@@ -1,8 +1,14 @@
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import {
+  httpStatusForSupabaseFailure,
+  warRoomSupabaseFailurePayload,
+} from '@/lib/war-room/warRoomSupabaseError'
 
 export const dynamic = 'force-dynamic'
 
 const MESSAGE_LIMIT = 300
+const TABLE_CONVERSATIONS = 'war_room_conversations'
+const TABLE_MESSAGES = 'war_room_messages'
 
 export async function GET(
   _req: Request,
@@ -22,27 +28,37 @@ export async function GET(
   }
 
   const { data: conv, error: cErr } = await sup.client
-    .from('war_room_conversations')
+    .from(TABLE_CONVERSATIONS)
     .select('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at')
     .eq('id', id)
     .maybeSingle()
 
   if (cErr) {
-    return jsonWithPersistence({ error: cErr.message }, true, { status: 500 })
+    const supabase = warRoomSupabaseFailurePayload(TABLE_CONVERSATIONS, cErr, { operation: 'select' })
+    return jsonWithPersistence(
+      { error: supabase.message, supabase },
+      true,
+      { status: httpStatusForSupabaseFailure(supabase, 500) },
+    )
   }
   if (!conv || conv.deleted_at) {
     return jsonWithPersistence({ error: 'Not found' }, true, { status: 404 })
   }
 
   const { data: messages, error: mErr } = await sup.client
-    .from('war_room_messages')
+    .from(TABLE_MESSAGES)
     .select('id,conversation_id,role,content,family,metadata,created_at')
     .eq('conversation_id', id)
     .order('created_at', { ascending: true })
     .limit(MESSAGE_LIMIT)
 
   if (mErr) {
-    return jsonWithPersistence({ error: mErr.message, conversation: conv, messages: [] }, true, { status: 500 })
+    const supabase = warRoomSupabaseFailurePayload(TABLE_MESSAGES, mErr, { operation: 'select' })
+    return jsonWithPersistence(
+      { error: supabase.message, conversation: conv, messages: [], supabase },
+      true,
+      { status: httpStatusForSupabaseFailure(supabase, 500) },
+    )
   }
 
   return jsonWithPersistence(
@@ -84,13 +100,18 @@ export async function PATCH(
   if (body.metadata && typeof body.metadata === 'object') {
     if (body.mergeMetadata) {
       const { data: existing, error: exErr } = await sup.client
-        .from('war_room_conversations')
+        .from(TABLE_CONVERSATIONS)
         .select('metadata')
         .eq('id', id)
         .is('deleted_at', null)
         .maybeSingle()
       if (exErr) {
-        return jsonWithPersistence({ error: exErr.message }, true, { status: 500 })
+        const supabase = warRoomSupabaseFailurePayload(TABLE_CONVERSATIONS, exErr, { operation: 'select' })
+        return jsonWithPersistence(
+          { error: supabase.message, supabase },
+          true,
+          { status: httpStatusForSupabaseFailure(supabase, 500) },
+        )
       }
       const prev = existing?.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)
         ? (existing.metadata as Record<string, unknown>)
@@ -117,7 +138,7 @@ export async function PATCH(
   }
 
   const { data, error } = await sup.client
-    .from('war_room_conversations')
+    .from(TABLE_CONVERSATIONS)
     .update(updates)
     .eq('id', id)
     .is('deleted_at', null)
@@ -125,7 +146,12 @@ export async function PATCH(
     .maybeSingle()
 
   if (error) {
-    return jsonWithPersistence({ error: error.message }, true, { status: 500 })
+    const supabase = warRoomSupabaseFailurePayload(TABLE_CONVERSATIONS, error, { operation: 'update' })
+    return jsonWithPersistence(
+      { error: supabase.message, supabase },
+      true,
+      { status: httpStatusForSupabaseFailure(supabase, 500) },
+    )
   }
   if (!data) {
     return jsonWithPersistence({ error: 'Not found' }, true, { status: 404 })
@@ -149,7 +175,7 @@ export async function DELETE(
   }
 
   const { data, error } = await sup.client
-    .from('war_room_conversations')
+    .from(TABLE_CONVERSATIONS)
     .update({ deleted_at: new Date().toISOString(), state: 'archived' })
     .eq('id', id)
     .is('deleted_at', null)
@@ -157,7 +183,12 @@ export async function DELETE(
     .maybeSingle()
 
   if (error) {
-    return jsonWithPersistence({ error: error.message }, true, { status: 500 })
+    const supabase = warRoomSupabaseFailurePayload(TABLE_CONVERSATIONS, error, { operation: 'update' })
+    return jsonWithPersistence(
+      { error: supabase.message, supabase },
+      true,
+      { status: httpStatusForSupabaseFailure(supabase, 500) },
+    )
   }
   if (!data) {
     return jsonWithPersistence({ error: 'Not found' }, true, { status: 404 })
