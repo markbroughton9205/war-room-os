@@ -649,6 +649,10 @@ const INITIAL_INTERNET_STATUS: InternetStatusResponse = {
   serverSideOnly: true,
   canUseInternet: false,
   lastChecked: '',
+  overallStatus: 'unknown',
+  label: 'Unknown',
+  tavily: { keyPresent: false, configured: false, notes: 'Not checked yet.' },
+  firecrawl: { keyPresent: false, configured: false, notes: 'Not checked yet.' },
 }
 const INITIAL_REPO_STATUS: RepoStatus = {
   repoPath: '',
@@ -3256,7 +3260,7 @@ function InternetAccessPanel({ internet, onRefresh }: { internet: InternetStatus
           )
         })}
       </div>
-      <div className="mt-3 text-xs" style={{ color: '#555' }}>Last checked: {internet.lastChecked ? new Date(internet.lastChecked).toLocaleString() : 'not checked yet'} · outbound intel: {internet.canUseInternet ? 'available' : 'not available'}</div>
+      <div className="mt-3 text-xs" style={{ color: '#555' }}>Last checked: {internet.lastChecked ? new Date(internet.lastChecked).toLocaleString() : 'not checked yet'} · research adapters: {internet.label}</div>
     </div>
   )
 }
@@ -5241,7 +5245,13 @@ function Home() {
       if (!res.ok) throw new Error(data.message || 'Internet status failed')
       setInternetStatus(data)
     } catch {
-      setInternetStatus(prev => ({ ...prev, lastChecked: new Date().toISOString() }))
+      setInternetStatus(prev => ({
+        ...prev,
+        lastChecked: new Date().toISOString(),
+        overallStatus: 'unknown',
+        label: 'Unknown',
+        canUseInternet: false,
+      }))
     }
   }
 
@@ -7419,7 +7429,7 @@ function Home() {
     ? 'Ready'
     : 'Degraded'
   const persistenceHealthLabel = persistenceAvailable ? 'Ready' : 'Session only'
-  const internetHealthLabel = internetStatus.canUseInternet ? 'Ready' : 'Needs setup'
+  const internetHealthLabel = internetStatus.label
   const operatorNav = (
     <>
       {uiMode === 'operator' && (

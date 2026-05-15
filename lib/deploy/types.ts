@@ -68,8 +68,10 @@ export type DeployEngineSummary = {
 
 export type DeployInternetSummary = {
   lastChecked: string
-  tavily: { apiKeyPresent: boolean; status: string; notes: string }
-  firecrawl: { apiKeyPresent: boolean; status: string; notes: string }
+  overallStatus: string
+  label: string
+  tavily: { keyPresent: boolean; configured: boolean; reachable?: boolean; notes: string }
+  firecrawl: { keyPresent: boolean; configured: boolean; reachable?: boolean; notes: string }
   grok: { apiKeyPresent: boolean; status: string; notes: string }
   gemini: { apiKeyPresent: boolean; configured: boolean; reachable: boolean; notes: string }
   fetch: {

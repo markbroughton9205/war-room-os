@@ -22,8 +22,8 @@ function toEngineSummary(engines: EngineStatus[]): DeployEngineSummary[] {
 }
 
 function toInternetSummary(layer: Awaited<ReturnType<typeof buildWarRoomInternetLayerStatus>>): DeployInternetSummary {
-  const { lastChecked, tavily, firecrawl, grok, gemini, fetch } = layer
-  return { lastChecked, tavily, firecrawl, grok, gemini, fetch }
+  const { lastChecked, overallStatus, label, tavily, firecrawl, grok, gemini, fetch } = layer
+  return { lastChecked, overallStatus, label, tavily, firecrawl, grok, gemini, fetch }
 }
 
 export async function GET() {

@@ -83,7 +83,6 @@ async function probeTool(id: InternetToolId): Promise<Pick<InternetToolHealth, '
 export async function buildInternetToolMatrix(): Promise<{
   tools: Record<InternetToolId, InternetToolHealth>
   lastChecked: string
-  canUseInternet: boolean
 }> {
   const lastChecked = new Date().toISOString()
   const entries = await Promise.all(INTERNET_TOOL_REGISTRY.map(async tool => {
@@ -105,6 +104,5 @@ export async function buildInternetToolMatrix(): Promise<{
   return {
     tools,
     lastChecked,
-    canUseInternet: entries.some(tool => tool.status === 'reachable'),
   }
 }

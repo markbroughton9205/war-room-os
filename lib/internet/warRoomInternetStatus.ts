@@ -1,4 +1,10 @@
+import {
+  deriveInternetResearchOverall,
+  internetResearchAdapterSummary,
+  isInternetResearchLayerUnwired,
+} from '@/lib/internet/internetResearchSummary'
 import { buildInternetToolMatrix } from '@/lib/internet/probes'
+import type { InternetResearchAdapterSummary, InternetResearchOverallStatus } from '@/lib/tools/internet/types'
 
 const GEMINI_REST_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
@@ -26,8 +32,10 @@ async function probeGeminiList(): Promise<{ configured: boolean; reachable: bool
 
 export type WarRoomInternetLayerStatus = {
   lastChecked: string
-  tavily: { apiKeyPresent: boolean } & { status: string; notes: string }
-  firecrawl: { apiKeyPresent: boolean } & { status: string; notes: string }
+  overallStatus: InternetResearchOverallStatus
+  label: string
+  tavily: InternetResearchAdapterSummary
+  firecrawl: InternetResearchAdapterSummary
   grok: { apiKeyPresent: boolean } & { status: string; notes: string }
   gemini: { apiKeyPresent: boolean; configured: boolean; reachable: boolean; notes: string }
   fetch: {
@@ -57,18 +65,21 @@ export async function buildWarRoomInternetLayerStatus(): Promise<WarRoomInternet
   const f = matrix.tools.firecrawl
   const g = matrix.tools.grok_xai
 
+  const unwired = isInternetResearchLayerUnwired()
+  const tavilyBlock = internetResearchAdapterSummary(t)
+  const firecrawlBlock = internetResearchAdapterSummary(f)
+  const { overallStatus, label } = deriveInternetResearchOverall({
+    tavily: tavilyBlock,
+    firecrawl: firecrawlBlock,
+    unwired,
+  })
+
   return {
     lastChecked: matrix.lastChecked,
-    tavily: {
-      apiKeyPresent: Boolean(process.env.TAVILY_API_KEY?.trim()),
-      status: t.status,
-      notes: t.notes,
-    },
-    firecrawl: {
-      apiKeyPresent: Boolean(process.env.FIRECRAWL_API_KEY?.trim()),
-      status: f.status,
-      notes: f.notes,
-    },
+    overallStatus,
+    label,
+    tavily: tavilyBlock,
+    firecrawl: firecrawlBlock,
     grok: {
       apiKeyPresent: Boolean(process.env.XAI_API_KEY?.trim()),
       status: g.status,

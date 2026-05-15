@@ -204,7 +204,7 @@ export function mapInternetStatusJson(json: unknown, httpStatus: number): Subsys
     })
   }
 
-  const j = json as { error?: string; lastChecked?: string }
+  const j = json as { error?: string; lastChecked?: string; overallStatus?: string; label?: string }
   if (typeof j.error === 'string') {
     return row({
       id: 'internet_layer',
@@ -221,20 +221,91 @@ export function mapInternetStatusJson(json: unknown, httpStatus: number): Subsys
     })
   }
 
-  const evidence = typeof j.lastChecked === 'string' ? `lastChecked=${j.lastChecked}` : 'internet layer snapshot present'
+  const overall = typeof j.overallStatus === 'string' ? j.overallStatus : ''
+  const evidence = [
+    typeof j.lastChecked === 'string' ? `lastChecked=${j.lastChecked}` : null,
+    overall ? `research=${overall}` : null,
+    typeof j.label === 'string' ? `label=${j.label}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ') || 'internet layer snapshot present'
+
+  if (overall === 'unwired') {
+    return row({
+      id: 'internet_layer',
+      label: 'Internet / research layer',
+      status: 'UNWIRED',
+      truthLevel: 'DECLARED',
+      evidence,
+      source: 'fetch',
+      mock: false,
+      unwired: true,
+      configured: false,
+      reachable: false,
+      recommendation: 'Research adapters marked unwired; enable Tavily / Firecrawl keys when wiring this deployment.',
+    })
+  }
+
+  if (overall === 'needs_api_key') {
+    return row({
+      id: 'internet_layer',
+      label: 'Internet / research layer',
+      status: 'CONFIGURED_ONLY',
+      truthLevel: 'DECLARED',
+      evidence,
+      source: 'fetch',
+      mock: false,
+      unwired: false,
+      configured: false,
+      reachable: false,
+      recommendation: 'Set TAVILY_API_KEY and/or FIRECRAWL_API_KEY for server-side research probes.',
+    })
+  }
+
+  if (overall === 'configured_only' || overall === 'partial') {
+    return row({
+      id: 'internet_layer',
+      label: 'Internet / research layer',
+      status: 'CONFIGURED_ONLY',
+      truthLevel: 'PARTIAL',
+      evidence,
+      source: 'fetch',
+      mock: false,
+      unwired: false,
+      configured: true,
+      reachable: false,
+      recommendation: 'Keys are present; confirm outbound HTTPS and provider quotas if probes stay non-live.',
+    })
+  }
+
+  if (overall === 'live') {
+    return row({
+      id: 'internet_layer',
+      label: 'Internet / research layer',
+      status: 'HEALTHY',
+      truthLevel: 'VERIFIED',
+      evidence,
+      source: 'fetch',
+      mock: false,
+      unwired: false,
+      configured: true,
+      reachable: true,
+      recommendation: 'If research fails in council, confirm rate limits and keys for Tavily / Firecrawl as configured.',
+    })
+  }
 
   return row({
     id: 'internet_layer',
     label: 'Internet / research layer',
-    status: 'HEALTHY',
-    truthLevel: 'VERIFIED',
+    status: 'DEGRADED',
+    truthLevel: 'UNKNOWN',
     evidence,
     source: 'fetch',
     mock: false,
     unwired: false,
-    configured: true,
-    reachable: true,
-    recommendation: 'If research fails in council, confirm rate limits and keys for Tavily / Firecrawl as configured.',
+    configured: false,
+    reachable: false,
+    recommendation: 'Could not classify internet layer snapshot; retry /api/internet/status.',
   })
 }
 
