@@ -8,18 +8,27 @@ export type FamilyIntelligenceFrame = {
   family: CouncilOrchestrationFamily
   packet: IntelligencePacket
   framing: string
+  expansion_lane: string
   prompt_block: string
 }
 
 const FAMILY_FRAMING: Partial<Record<CouncilOrchestrationFamily, string>> = {
-  chatgpt: 'Synthesize the answer directly from evidence. For local questions, summarize verified vs emerging local layers before any requested strategic interpretation.',
-  claude: 'Check structural plausibility, feasibility, local infrastructure constraints, and evidence gaps without expanding beyond the decree.',
-  grok: 'Read signal velocity, trend acceleration, and emerging local radar, but label social velocity and realtime interpretation as unverified unless packet evidence supports it.',
-  gemini: 'Cross-reference local ecosystem relationships, categories, source overlap, and corroboration patterns while separating evidence from inference.',
-  red_team: 'Flag rumor risk, manipulation, unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, stale evidence, contradictions, and narrative inflation.',
+  chatgpt: 'Executive lane: brief prioritized meaning, what matters first, and source-backed operational interpretation only when useful.',
+  claude: 'Systems lane: infrastructure, public services, feasibility, civic/structural implications, and practical constraints.',
+  grok: 'Signal lane: breaking movement, local chatter, weak signals, social velocity, and emerging narratives with uncertainty labels.',
+  gemini: 'Pattern lane: cross-source patterns, event clustering, historical/contextual relationships, and ecosystem mapping.',
+  red_team: 'Risk lane: contradictions, unsupported claims, manipulation risk, source weakness, public safety concerns, and narrative inflation.',
   baby: 'Observe pattern drift, tone, unresolved loops, and whether the packet suggests a memory proposal.',
   kimi: 'Decompose the packet into task sequence, dependencies, and retrieval gaps.',
   bridge_architect: 'Map packet implications across systems, interfaces, handoffs, and integration risk.',
+}
+
+const FAMILY_EXPANSION_LANES: Partial<Record<CouncilOrchestrationFamily, string>> = {
+  chatgpt: 'May request source-backed executive prioritization follow-up; do not request broad recrawls.',
+  claude: 'May request source-backed public systems / city infrastructure follow-up.',
+  grok: 'May request source-backed weak signal / social chatter follow-up.',
+  gemini: 'May request source-backed historical or cross-reference follow-up.',
+  red_team: 'May request source-backed contradiction, reliability, or manipulation-risk follow-up.',
 }
 
 export function buildFamilyIntelligenceFrame(
@@ -31,11 +40,15 @@ export function buildFamilyIntelligenceFrame(
     family,
     packet,
     framing,
+    expansion_lane: FAMILY_EXPANSION_LANES[family] ?? 'No specialized expansion lane configured.',
     prompt_block: [
       buildIntelligenceGroundingBlock(packet, family),
       '',
       `### ${family} analysis frame`,
       `- ${framing}`,
+      `- Specialized expansion lane: ${FAMILY_EXPANSION_LANES[family] ?? 'Use the shared packet only.'}`,
+      '- Do not repeat the same event list as other families; add value from your lane.',
+      '- If Commander environment context is supplied, use weather, local alerts, headlines, or source health only when relevant to the decree.',
       '- Do not claim private live awareness. Use only the packet plus explicitly provided thread context.',
       '- Keep visible provenance compact when answering: source count, freshness, confidence, and a short source preview when available.',
       '- Separate evidence from inference. Do not treat weak signals as operational truth.',

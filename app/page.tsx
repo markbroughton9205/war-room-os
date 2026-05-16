@@ -71,6 +71,13 @@ import { detectResearchIntent } from '@/lib/research/researchIntent'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
+import { LiveEnvironmentPanel } from '@/components/intelligence/LiveEnvironmentPanel'
+import {
+  DEFAULT_COMMANDER_LOCATION,
+  forgetLocationHistory,
+  type CommanderLocationState,
+  type LocationMode,
+} from '@/lib/intelligence/environment/locationPolicy'
 import { DEFAULT_COUNCIL_COMMAND, type CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { councilModeExtensionWarnings, resolveActiveCommand } from '@/lib/council/commandAuthority'
 import {
@@ -4837,6 +4844,31 @@ function Home() {
     holdSuppressions: 0,
   })
   const [liveResearchHud, setLiveResearchHud] = useState<LiveResearchClientUi | null>(null)
+  const [commanderLocation, setCommanderLocation] = useState<CommanderLocationState>(DEFAULT_COMMANDER_LOCATION)
+  const [horoscopeEnabled, setHoroscopeEnabled] = useState(false)
+  const setLocationMode = useCallback((mode: LocationMode) => {
+    setCommanderLocation(prev => {
+      if (mode === 'off') return { mode: 'off', historyStored: false }
+      if (mode === 'precise_temporary') {
+        return {
+          ...prev,
+          mode,
+          preciseExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+          historyStored: false,
+        }
+      }
+      return {
+        ...prev,
+        mode,
+        city: prev.city ?? DEFAULT_COMMANDER_LOCATION.city,
+        preciseExpiresAt: undefined,
+        historyStored: false,
+      }
+    })
+  }, [])
+  const forgetCommanderLocation = useCallback(() => {
+    setCommanderLocation(prev => forgetLocationHistory(prev))
+  }, [])
   const decreePacketFlushCompleteRef = useRef(false)
   const decreePacketOpenedAtMsRef = useRef(0)
   const lastAutonomousResearchFamilyRef = useRef<CouncilOrchestrationFamily | null>(null)
@@ -9287,6 +9319,15 @@ function Home() {
           )
         })}
       </div>
+
+      <LiveEnvironmentPanel
+        liveResearchHud={liveResearchHud}
+        location={commanderLocation}
+        horoscopeEnabled={horoscopeEnabled}
+        onSetLocationMode={setLocationMode}
+        onForgetLocation={forgetCommanderLocation}
+        onToggleHoroscope={() => setHoroscopeEnabled(prev => !prev)}
+      />
 
       {standingPermissionStrip}
 
