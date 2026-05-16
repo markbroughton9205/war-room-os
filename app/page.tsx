@@ -46,6 +46,7 @@ import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePac
 import type { ContinuationRequest } from '@/lib/council/continuationRequest'
 import { classifyCommand } from '@/lib/engine-control/permissions'
 import { ProviderSetupChecklistPanel } from '@/components/war-room/ProviderSetupChecklistPanel'
+import { ConfigurationHealthSummaryPanel, ConfigurationSweepPanel } from '@/components/war-room/configuration/ConfigurationSweepPanel'
 import { Phase3WarRoomPanels } from '@/components/war-room/phase3/Phase3WarRoomPanels'
 import { Phase5DeployPanels } from '@/components/war-room/phase5/DeployPanels'
 import { Phase6MemoryPanels } from '@/components/war-room/memory/Phase6MemoryPanels'
@@ -9787,6 +9788,7 @@ function Home() {
             )}
             {operatorTab === 'system' && (
               <>
+                <ConfigurationHealthSummaryPanel />
                 <ToolStatusPanel health={toolBarHealth} activity={toolBarActivity} />
                 <button type="button" className="mb-3 rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void refreshToolBarHealthBars()}>Refresh tool bar</button>
                 <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} providerHealth={providerHealth} />
@@ -9881,6 +9883,7 @@ function Home() {
                     />
                   </div>
                 ) : null}
+                <ConfigurationSweepPanel />
                 <ProviderSetupChecklistPanel />
                 <KernelStatusPanel />
                 <UnifiedEngineControlPanel />

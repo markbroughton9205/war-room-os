@@ -1,6 +1,10 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
+import type { ConfigurationSweep } from '@/lib/configuration/configurationHealth'
+import type { ProviderConfigStatus } from '@/lib/configuration/providerConfigStatus'
 import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import { describeLocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import { buildWeatherEnvironmentSnapshot } from '@/lib/intelligence/environment/weatherEnvironment'
@@ -11,6 +15,28 @@ function modeLabel(mode: LocationMode): string {
   if (mode === 'city_only') return 'City'
   if (mode === 'precise_temporary') return 'Precise temp'
   return mode.replace(/_/g, ' ')
+}
+
+function providerStatusLabel(provider: ProviderConfigStatus | undefined): string {
+  if (!provider) return 'checking provider setup'
+  return provider.status.replaceAll('_', ' ')
+}
+
+function providerStatusColor(provider: ProviderConfigStatus | undefined): string {
+  if (!provider) return '#64748B'
+  if (provider.status === 'ready' || provider.status === 'configured') return '#34D399'
+  if (provider.status === 'degraded') return '#FBBF24'
+  if (provider.status === 'disabled_by_operator') return '#A78BFA'
+  return '#FB923C'
+}
+
+function providerSetupHint(provider: ProviderConfigStatus | undefined, fallback: string): string {
+  if (!provider) return fallback
+  const envNames = [...provider.requiredEnvVars, ...provider.optionalEnvVars].join(', ') || 'no env vars registered'
+  if (provider.status === 'ready' || provider.status === 'configured') {
+    return `${provider.name}: configured. ${provider.lastCheckResult}`
+  }
+  return `${provider.name}: ${provider.recommendedNextAction} Env names: ${envNames}.`
 }
 
 export function LiveEnvironmentPanel({
@@ -32,6 +58,7 @@ export function LiveEnvironmentPanel({
   onToggleHoroscope: () => void
   onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
 }) {
+  const [configurationSweep, setConfigurationSweep] = useState<ConfigurationSweep | null>(null)
   const weather = buildWeatherEnvironmentSnapshot(location)
   const horoscope = buildHoroscopeSnapshot('Aries', new Date(), astrologyMode)
   const cards = buildNewsCardsFromIntelligence(liveResearchHud?.intelligence)
@@ -39,6 +66,29 @@ export function LiveEnvironmentPanel({
     ? liveResearchHud.intelligence.retrieval.success ? 'Retrieval ok' : 'Retrieval gap'
     : 'Retrieval idle'
   const weakSignals = liveResearchHud?.intelligence?.local?.weakSignalCount ?? (liveResearchHud?.intelligence?.weakSignalDetected ? 1 : 0)
+  const providerById = new Map((configurationSweep?.providers ?? []).map(provider => [provider.id, provider]))
+  const weatherProvider = providerById.get('weather_provider')
+  const horoscopeProvider = providerById.get('horoscope_provider')
+  const newsProvider = providerById.get('rss_news_sources')
+  const sourceNetworkProvider = providerById.get('persistent_source_network')
+  const localSourceProvider = providerById.get('local_hyperlocal_sources')
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/configuration/sweep', { cache: 'no-store' })
+        if (!res.ok) return
+        const json = await res.json() as ConfigurationSweep
+        if (!cancelled) setConfigurationSweep(json)
+      } catch {
+        /* Live Environment remains usable if the read-only sweep endpoint is unavailable. */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   return (
     <section className="mx-4 mt-4 rounded border border-sky-500/20 bg-slate-950/45 px-4 py-3 font-mono shadow-[0_0_30px_rgba(56,189,248,0.08)]">
@@ -59,12 +109,18 @@ export function LiveEnvironmentPanel({
             <p className="mt-1 text-xs text-slate-200">{weather.locationLabel}</p>
             <p className="text-[10px] text-amber-200">{weather.condition}</p>
             <p className="mt-1 text-[9px] text-slate-500">Temp -- · High/Low -- · Rain --</p>
+            <p className="mt-1 text-[8px] uppercase tracking-widest" style={{ color: providerStatusColor(weatherProvider) }}>
+              {providerStatusLabel(weatherProvider)}
+            </p>
           </summary>
           <div className="mt-2 border-t border-white/10 pt-2 text-[8px] uppercase tracking-widest text-slate-500">
             <p>Hourly report unavailable</p>
             <p>Severe alerts: {weather.alertActive ? 'active' : 'none from configured source'}</p>
             <p>{weather.source} · {weather.freshness}</p>
             <p className="normal-case tracking-wide">{weather.detail}</p>
+            <p className="normal-case tracking-wide" style={{ color: providerStatusColor(weatherProvider) }}>
+              {providerSetupHint(weatherProvider, 'Weather provider setup check pending.')}
+            </p>
           </div>
         </details>
 
@@ -98,6 +154,12 @@ export function LiveEnvironmentPanel({
           <p className="text-[10px] text-slate-500">
             Contradictions: {liveResearchHud?.intelligence?.contradictionWarnings ?? 0}
           </p>
+          <p className="mt-1 text-[8px] uppercase tracking-widest" style={{ color: providerStatusColor(sourceNetworkProvider) }}>
+            Source network: {providerStatusLabel(sourceNetworkProvider)}
+          </p>
+          <p className="text-[8px] uppercase tracking-widest" style={{ color: providerStatusColor(localSourceProvider) }}>
+            Local sources: {providerStatusLabel(localSourceProvider)}
+          </p>
         </div>
 
         <details className="rounded border border-white/10 bg-black/25 p-2">
@@ -110,6 +172,9 @@ export function LiveEnvironmentPanel({
             </div>
             <p className="mt-1 text-[10px] text-slate-300">{horoscopeEnabled ? horoscope.interpretation : 'Optional astrology widget off.'}</p>
             <p className="mt-1 text-[8px] text-slate-600">{horoscope.framingNote}</p>
+            <p className="mt-1 text-[8px] uppercase tracking-widest" style={{ color: providerStatusColor(horoscopeProvider) }}>
+              {providerStatusLabel(horoscopeProvider)}
+            </p>
           </summary>
           <div className="mt-2 border-t border-white/10 pt-2">
             <div className="flex flex-wrap gap-1">
@@ -134,12 +199,18 @@ export function LiveEnvironmentPanel({
               <p>Provider: {horoscope.provider}</p>
               <p>Moon phase: {horoscope.moonPhase ?? 'not loaded'}</p>
               <p>Planetary data: {horoscope.planetaryFacts.length ? horoscope.planetaryFacts.join(' · ') : 'not loaded'}</p>
+              <p className="normal-case tracking-wide" style={{ color: providerStatusColor(horoscopeProvider) }}>
+                {providerSetupHint(horoscopeProvider, 'Horoscope provider setup check pending.')}
+              </p>
             </div>
           </div>
         </details>
 
         <div className="rounded border border-white/10 bg-black/25 p-2">
           <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">News Cards</p>
+          <p className="mt-1 text-[8px] uppercase tracking-widest" style={{ color: providerStatusColor(newsProvider) }}>
+            RSS/news: {providerStatusLabel(newsProvider)}
+          </p>
           {cards.length ? (
             <div className="mt-1 space-y-1">
               {cards.map(card => (
@@ -153,7 +224,9 @@ export function LiveEnvironmentPanel({
               ))}
             </div>
           ) : (
-            <p className="mt-1 text-[10px] text-slate-500">No source-backed image cards loaded.</p>
+            <p className="mt-1 text-[10px] text-slate-500">
+              No source-backed image cards loaded. {providerSetupHint(newsProvider, 'News provider setup check pending.')}
+            </p>
           )}
         </div>
       </div>
