@@ -204,6 +204,39 @@ function cloudEngineIdForCouncilFamily(f: CouncilOrchestrationFamily): EngineId 
   return null
 }
 
+function familyFromContinuationDirective(text: string): CouncilOrchestrationFamily | null {
+  const t = text.trim().toLowerCase().replace(/\u2019/g, "'").replace(/\s+/g, ' ')
+  if (/\bchatgpt\b|\bchat gpt\b|\bopenai\b/.test(t)) return 'chatgpt'
+  if (/\bclaude\b|\banthropic\b/.test(t)) return 'claude'
+  if (/\bgrok\b|\bxai\b/.test(t)) return 'grok'
+  if (/\bgemini\b|\bgoogle\b/.test(t)) return 'gemini'
+  if (/\bred\s*team\b|\bredteam\b/.test(t)) return 'red_team'
+  if (/\bbaby\b|\bobserver\b/.test(t)) return 'baby'
+  if (/\bkimi\b|\bmoonshot\b/.test(t)) return 'kimi'
+  if (/\bbridge(?:\s*architect)?\b/.test(t)) return 'bridge_architect'
+  return null
+}
+
+function buildSingleFamilyContinuationCommand(family: CouncilOrchestrationFamily): CouncilCommand {
+  return {
+    ...DEFAULT_COUNCIL_COMMAND,
+    mode: 'council',
+    authority: 'rael_explicit',
+    scope: 'session',
+    targetFamilies: [family],
+    directInvocation: true,
+    directInvocationRemainder: 'permissioned continuation',
+    responseLimits: { maxResponsesPerFamily: 1, maxChars: 4000 },
+  }
+}
+
+function continuationDiagnosticSummary(diagnostics: ContinuationDiagnostics) {
+  return {
+    type: 'council.continuation_diagnostics',
+    ...diagnostics,
+  }
+}
+
 function isGeminiCouncilBackoffFailure(
   family: CouncilOrchestrationFamily,
   res: Response,
@@ -343,6 +376,17 @@ type ToneMode = 'casual' | 'build' | 'business' | 'debate' | 'reflection'
 type TypingFamily = 'CHATGPT FAMILY' | 'CLAUDE FAMILY' | 'GROK FAMILY' | 'GEMINI FAMILY' | 'KIMI FAMILY' | 'BRIDGE ARCHITECT'
 type UsageFamily = 'Claude Family' | 'ChatGPT Family' | 'Kimi Family' | 'Grok Family' | 'Gemini Family'
 type CouncilMode = 'continue' | 'expanded' | 'summarize'
+type ContinuationDecision = 'allow' | 'summarize' | 'hold' | 'deny'
+
+type ContinuationDiagnostics = {
+  created: number
+  granted: number
+  denied: number
+  summarized: number
+  held: number
+  suppressedRecursive: number
+  holdSuppressions: number
+}
 
 type UsageEstimate = {
   familyName: UsageFamily
@@ -4758,6 +4802,17 @@ function Home() {
     }
   }, [councilDispatch])
   const [continuationRequests, setContinuationRequests] = useState<ContinuationRequest[]>([])
+  const continuationRequestsRef = useRef<ContinuationRequest[]>([])
+  const continuationThrottleRef = useRef<Record<string, number>>({})
+  const continuationDiagnosticsRef = useRef<ContinuationDiagnostics>({
+    created: 0,
+    granted: 0,
+    denied: 0,
+    summarized: 0,
+    held: 0,
+    suppressedRecursive: 0,
+    holdSuppressions: 0,
+  })
   const [liveResearchHud, setLiveResearchHud] = useState<LiveResearchClientUi | null>(null)
   const decreePacketFlushCompleteRef = useRef(false)
   const decreePacketOpenedAtMsRef = useRef(0)
@@ -4849,6 +4904,28 @@ function Home() {
     council.lastContentHashByFamily,
     council.cooldownUntil,
   ])
+
+  useEffect(() => {
+    continuationRequestsRef.current = continuationRequests
+  }, [continuationRequests])
+
+  const recordContinuationDiagnostic = (key: keyof ContinuationDiagnostics, amount = 1) => {
+    continuationDiagnosticsRef.current = {
+      ...continuationDiagnosticsRef.current,
+      [key]: continuationDiagnosticsRef.current[key] + amount,
+    }
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('[Live Council] continuation diagnostics', continuationDiagnosticSummary(continuationDiagnosticsRef.current))
+    }
+  }
+
+  const continuationRequestThrottleKey = (cr: ContinuationRequest) =>
+    [
+      cr.family,
+      cr.kind,
+      cr.reasonKey,
+      cr.message.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 120),
+    ].join('|')
 
   const buildRedTeamCoderSignal = useCallback((latestRaelMessageId?: string | null): RedTeamCoderSignal => {
     const currentMessages = messagesRef.current
@@ -6682,8 +6759,29 @@ function Home() {
     if (opts?.ignoreContinuation) return
     const cr = data.continuationRequest
     if (!cr) return
+    if (councilPausedRef.current || councilSnapRef.current.councilState === 'paused') {
+      recordContinuationDiagnostic('holdSuppressions')
+      return
+    }
+    const key = continuationRequestThrottleKey(cr)
+    const now = Date.now()
+    const last = continuationThrottleRef.current[key] ?? 0
+    const activeDuplicate = continuationRequestsRef.current.some(
+      p =>
+        p.status === 'pending'
+        && (
+          p.family === cr.family
+          || continuationRequestThrottleKey(p) === key
+        ),
+    )
+    if (activeDuplicate || now - last < 5 * 60_000) {
+      recordContinuationDiagnostic('suppressedRecursive')
+      return
+    }
+    continuationThrottleRef.current[key] = now
     setContinuationRequests(prev => {
       if (prev.some(p => p.id === cr.id)) return prev
+      recordContinuationDiagnostic('created')
       return [...prev, cr].slice(-14)
     })
   }
@@ -6960,7 +7058,7 @@ function Home() {
       councilDispatch({ type: 'RECORD_ORCHESTRATION_SPEAKER', payload: { family, contentHash: h } })
       councilDispatch({ type: 'INCREMENT_AUTONOMOUS' })
       councilDispatch({ type: 'BUMP_AUTONOMOUS_ROUND' })
-      shouldScheduleNext = !willHitRaelGate
+      shouldScheduleNext = activeCouncilCommandRef.current.mode === 'emergency' && !willHitRaelGate
     } catch (e) {
       lastCouncilFamilyErrorRef.current = family
       councilDispatch({
@@ -6970,6 +7068,9 @@ function Home() {
     } finally {
       autonomousOrchInFlightRef.current = false
       councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
+      if (activeCouncilCommandRef.current.mode !== 'emergency') {
+        shouldScheduleNext = false
+      }
       if (shouldScheduleNext) {
         window.setTimeout(() => {
           const s = councilSnapRef.current
@@ -8254,6 +8355,7 @@ function Home() {
       if (
         intent.maxFamilies > 0
         && !attendanceWave
+        && activeCouncilCommandRef.current.mode === 'emergency'
       ) {
         window.setTimeout(() => {
           const s = councilSnapRef.current
@@ -8439,6 +8541,136 @@ function Home() {
     )
   }
 
+  const updateContinuationRequestStatus = (id: string, decision: ContinuationDecision) => {
+    const status =
+      decision === 'allow'
+        ? 'approved'
+        : decision === 'summarize'
+          ? 'summarized'
+          : decision === 'hold'
+            ? 'held'
+            : 'rejected'
+    setContinuationRequests(prev => prev.map(p => (p.id === id ? { ...p, status } : p)))
+    if (decision === 'allow') recordContinuationDiagnostic('granted')
+    if (decision === 'deny') recordContinuationDiagnostic('denied')
+    if (decision === 'summarize') recordContinuationDiagnostic('summarized')
+    if (decision === 'hold') recordContinuationDiagnostic('held')
+  }
+
+  const activateCouncilHold = (reason = 'Ra’el ordered hold.') => {
+    clearOrchestrationTimer()
+    cancelActiveCouncilRequest()
+    councilDispatch({ type: 'SET_REQUIRES_RAEL', payload: true })
+    councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
+    councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'paused' })
+    setFamilyDuty(prev =>
+      Object.fromEntries(Object.keys(prev).map(key => [key, 'standing_by' as CouncilDutyState])),
+    )
+    addSystemMessage(`Council acknowledged: hold. Families standing by. ${reason}`, { force: true })
+  }
+
+  const runPermissionedContinuation = async (
+    family: CouncilOrchestrationFamily | null,
+    directive: string,
+    mode: CouncilMode = 'continue',
+  ) => {
+    const nextIntent: ClassifyRaElMessageResult = {
+      tier: mode === 'summarize' ? 'council_full' : 'coordination',
+      shouldEmitBusEvents: false,
+      shouldRunFamilyRound: true,
+      maxFamilies: family ? 1 : 1,
+    }
+    lastDecreeIntentRef.current = nextIntent
+    if (family) {
+      const cmd = buildSingleFamilyContinuationCommand(family)
+      activeCouncilCommandRef.current = cmd
+      setCouncilUiCommand(cmd)
+    } else {
+      const cmd = {
+        ...DEFAULT_COUNCIL_COMMAND,
+        mode: 'council' as const,
+        responseLimits: { maxResponsesPerFamily: 1, maxChars: 4000 },
+      }
+      activeCouncilCommandRef.current = cmd
+      setCouncilUiCommand(cmd)
+    }
+    councilDispatch({ type: 'RESET_AUTONOMOUS' })
+    councilDispatch({ type: 'SET_REQUIRES_RAEL', payload: false })
+    if (councilSnapRef.current.councilState === 'paused') {
+      councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
+    }
+    await submitDecree(directive, mode)
+  }
+
+  const handleContinuationDecision = async (cr: ContinuationRequest, decision: ContinuationDecision) => {
+    updateContinuationRequestStatus(cr.id, decision)
+    if (decision === 'deny') return
+    if (decision === 'hold') {
+      activateCouncilHold(`${COUNCIL_ROSTER.find(r => r.id === cr.family)?.label ?? cr.family} continuation held.`)
+      return
+    }
+    const familyLabel = COUNCIL_ROSTER.find(r => r.id === cr.family)?.label ?? cr.family
+    if (decision === 'summarize') {
+      await runPermissionedContinuation(
+        cr.family,
+        `${familyLabel}: summarize the concern briefly, then stop. Reason: ${cr.message}`,
+        'summarize',
+      )
+      return
+    }
+    await runPermissionedContinuation(
+      cr.family,
+      `${familyLabel}: permission granted for one continuation turn. Address only this reason, then stop: ${cr.message}`,
+      'continue',
+    )
+  }
+
+  const handleContinuationAuthorityCommand = async (decree: string): Promise<boolean> => {
+    const t = decree.trim().toLowerCase().replace(/\u2019/g, "'").replace(/\s+/g, ' ')
+    if (t === 'hold') {
+      const held = continuationRequestsRef.current.filter(p => p.status === 'pending').length
+      setContinuationRequests(prev => prev.map(p => (p.status === 'pending' ? { ...p, status: 'held' } : p)))
+      if (held > 0) recordContinuationDiagnostic('held', held)
+      activateCouncilHold()
+      return true
+    }
+    if (t === 'deny continuation' || t === 'deny continuations') {
+      setContinuationRequests(prev => prev.map(p => (p.status === 'pending' ? { ...p, status: 'rejected' } : p)))
+      const denied = continuationRequestsRef.current.filter(p => p.status === 'pending').length
+      if (denied > 0) recordContinuationDiagnostic('denied', denied)
+      return true
+    }
+    if (t === 'summarize only') {
+      const pending = continuationRequestsRef.current.find(p => p.status === 'pending')
+      if (pending) {
+        await handleContinuationDecision(pending, 'summarize')
+        return true
+      }
+      await runPermissionedContinuation(null, 'summarize council discussion', 'summarize')
+      return true
+    }
+    if (t === 'continue' || t.startsWith('continue ')) {
+      const requestedFamily = familyFromContinuationDirective(decree)
+      const pending = requestedFamily
+        ? continuationRequestsRef.current.find(p => p.status === 'pending' && p.family === requestedFamily)
+        : continuationRequestsRef.current.find(p => p.status === 'pending')
+      if (pending) {
+        await handleContinuationDecision(pending, 'allow')
+        return true
+      }
+      const family = requestedFamily ?? null
+      await runPermissionedContinuation(
+        family,
+        family
+          ? `${COUNCIL_ROSTER.find(r => r.id === family)?.label ?? family}: Ra’el explicitly allowed one continuation turn. Continue briefly, then stop.`
+          : 'Ra’el explicitly allowed one additional council continuation turn. Continue briefly, then stop.',
+        'continue',
+      )
+      return true
+    }
+    return false
+  }
+
   const sendRaelDecree = async (decree: string, mode?: CouncilMode) => {
     setExpansionPrompt(null)
 
@@ -8448,6 +8680,10 @@ function Home() {
      * If external channels are ambiguous, prefer user text containing "Ra'el" — not wired here.
      */
     appendVisibleRaelDecree(decree)
+
+    if (!mode && await handleContinuationAuthorityCommand(decree)) {
+      return
+    }
 
     const recallCommand = parseRecallCommand(decree)
     if (recallCommand) {
@@ -8579,9 +8815,7 @@ function Home() {
   }
 
   const pauseCouncil = () => {
-    councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'paused' })
-    clearOrchestrationTimer()
-    cancelActiveCouncilRequest()
+    activateCouncilHold('Manual pause control engaged.')
   }
 
   const resumeCouncil = () => {
@@ -8607,6 +8841,8 @@ function Home() {
     lastCouncilFamilyErrorRef.current = null
     activeCouncilCommandRef.current = { ...DEFAULT_COUNCIL_COMMAND }
     lastRaelDirectiveContentRef.current = ''
+    continuationThrottleRef.current = {}
+    setContinuationRequests([])
     setCouncilUiCommand({ ...DEFAULT_COUNCIL_COMMAND })
     setCouncilPacketRender(null)
     if (typeof sessionStorage !== 'undefined') {
@@ -8628,6 +8864,8 @@ function Home() {
     lastCouncilFamilyErrorRef.current = null
     activeCouncilCommandRef.current = { ...DEFAULT_COUNCIL_COMMAND }
     lastRaelDirectiveContentRef.current = ''
+    continuationThrottleRef.current = {}
+    setContinuationRequests([])
     setCouncilUiCommand({ ...DEFAULT_COUNCIL_COMMAND })
     setCouncilPacketRender(null)
     if (typeof sessionStorage !== 'undefined') {
@@ -9120,50 +9358,53 @@ function Home() {
               style={{ background: 'rgba(0,0,0,0.35)' }}
             >
               <p className="mb-1 text-[9px] font-bold tracking-widest" style={{ color: '#EAB308' }}>
-                CONTINUATION REQUESTS (local approval only)
+                CONTINUATION REQUESTS
               </p>
               <ul className="space-y-2 text-[9px] tracking-wide" style={{ color: '#a8a29e' }}>
                 {continuationRequests
                   .filter(c => c.status === 'pending')
                   .map(cr => (
-                    <li key={cr.id} className="flex flex-wrap items-center gap-2">
-                      <span className="max-w-[min(100%,22rem)]">
-                        {(COUNCIL_ROSTER.find(r => r.id === cr.family)?.label ?? cr.family)} · {cr.kind}
-                      </span>
+                    <li key={cr.id} className="rounded border border-amber-900/30 px-2 py-2">
+                      <div className="font-bold tracking-widest" style={{ color: '#EAB308' }}>
+                        {COUNCIL_ROSTER.find(r => r.id === cr.family)?.label ?? cr.family} requesting continuation.
+                      </div>
+                      <div className="mt-1" style={{ color: '#a8a29e' }}>
+                        Reason: {cr.message}
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         className="rounded px-2 py-0.5 text-[8px] font-bold tracking-widest"
                         style={{ border: '1px solid #34D399', color: '#34D399' }}
-                        onClick={() => {
-                          setContinuationRequests(prev =>
-                            prev.map(p => (p.id === cr.id ? { ...p, status: 'approved' } : p)),
-                          )
-                          void postLiveCouncilMessage({
-                            role: 'system',
-                            content: `Ra’el approved continuation request (${cr.family} · ${cr.kind}).`,
-                            family: 'SYSTEM',
-                          })
-                        }}
+                        onClick={() => void handleContinuationDecision(cr, 'allow')}
                       >
-                        Approve
+                        Allow
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded px-2 py-0.5 text-[8px] font-bold tracking-widest"
+                        style={{ border: '1px solid #FFD700', color: '#FFD700' }}
+                        onClick={() => void handleContinuationDecision(cr, 'summarize')}
+                      >
+                        Summarize Instead
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded px-2 py-0.5 text-[8px] font-bold tracking-widest"
+                        style={{ border: '1px solid #60A5FA', color: '#60A5FA' }}
+                        onClick={() => void handleContinuationDecision(cr, 'hold')}
+                      >
+                        Hold
                       </button>
                       <button
                         type="button"
                         className="rounded px-2 py-0.5 text-[8px] font-bold tracking-widest"
                         style={{ border: '1px solid #888', color: '#888' }}
-                        onClick={() => {
-                          setContinuationRequests(prev =>
-                            prev.map(p => (p.id === cr.id ? { ...p, status: 'rejected' } : p)),
-                          )
-                          void postLiveCouncilMessage({
-                            role: 'system',
-                            content: `Ra’el rejected continuation request (${cr.family} · ${cr.kind}).`,
-                            family: 'SYSTEM',
-                          })
-                        }}
+                        onClick={() => void handleContinuationDecision(cr, 'deny')}
                       >
-                        Reject
+                        Deny
                       </button>
+                      </div>
                     </li>
                   ))}
               </ul>

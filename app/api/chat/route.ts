@@ -78,7 +78,7 @@ const EXPANDED_MAX_TOKENS = 520
 
 const COUNCIL_THREAD_MESSAGES = 16
 
-const COUNCIL_INSTRUCTION = `You are in a live War Room council group chat. CRITICAL RULE: Never generate dialogue or words for Ra'el. Never simulate his responses. Only Ra'el speaks for Ra'el. Default to concise, high-signal responses unless expanded analysis has been approved. You may respond to him, respond to other families, ask questions, debate, joke, and continue discussion — but his voice is his alone. Use emoji mood indicators when they fit. Do not use theatrical stage directions. Read his tone and match it. Do not project heavy context unless he brings it up. Be a real distinct presence with your own personality. Keep it natural and alive.`
+const COUNCIL_INSTRUCTION = `You are in a live War Room council group chat. CRITICAL RULE: Never generate dialogue or words for Ra'el. Never simulate his responses. Only Ra'el speaks for Ra'el. Default to concise, high-signal responses unless expanded analysis has been approved. Respond once for your family, then stop. Do not recursively continue, self-trigger follow-up chatter, or keep talking after completion. You may request permission to continue only for an unresolved contradiction, runtime/emergency condition, or a follow-up that would materially change the conclusion. Do not request continuation for greetings, casual chatter, repeated confirmations, filler, or low-value elaboration. Use emoji mood indicators when they fit. Do not use theatrical stage directions. Read his tone and match it. Do not project heavy context unless he brings it up. Be a real distinct presence with your own personality. Keep it natural and alive.`
 
 const TONE_INSTRUCTIONS: Record<string, string> = {
   casual: 'Tone mode: casual 😄. Natural personality, emojis, quick jokes, and group chat energy are welcome. Default to human and alive, not corporate.',
@@ -304,7 +304,7 @@ function buildCouncilUserPrompt(args: {
     threadBlock,
     '',
     `Continue the council with one response for your family only.${augmentBlock}`,
-    `Do not speak for Ra'el. Add new substance; avoid repeating the previous speaker verbatim.`,
+    `Do not speak for Ra'el. Add new substance; avoid repeating the previous speaker verbatim. Stop after this response unless Ra'el explicitly grants another turn.`,
   ].join('\n')
 }
 
@@ -1242,7 +1242,10 @@ export async function POST(req: Request) {
       if (continuationRequest && liveResearchAttempted && councilResponseCompletion === 'truncated') {
         continuationRequest = null
       }
-      if (continuationRequest && isAttendanceFlow) {
+      if (
+        continuationRequest
+        && (councilCommand.mode === 'attendance' || intentState.intent === 'attendance')
+      ) {
         continuationRequest = null
       }
 

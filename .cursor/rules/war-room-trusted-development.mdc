@@ -1,0 +1,43 @@
+---
+alwaysApply: true
+description: War Room trusted development approval policy
+---
+
+# War Room Trusted Development Policy
+
+This rule applies only when the active workspace root is `C:\Users\markb\warroom`.
+
+## Trusted Development Actions
+
+When working inside this repository, treat the following as trusted normal development actions and batch them when practical:
+
+- Create or modify files under `C:\Users\markb\warroom`.
+- Run `pnpm install`.
+- Run `pnpm run build`.
+- Run `pnpm exec tsc --noEmit`.
+- Run `pnpm exec eslint`.
+- Run local Next.js development commands, including `pnpm dev`, `pnpm run dev`, `pnpm start`, `pnpm run start`, and equivalent `next dev` or `next start` commands from this repository.
+- Run `git status`.
+- Run `git add` for files in this repository.
+- Run `git commit` after the user has explicitly requested a commit.
+- Run `git push` after the user has explicitly requested a push.
+- Generate Supabase migration files under this repository's `supabase` directory.
+
+Keep normal visibility: summarize files changed, commands executed, validation results, and any commits created.
+
+## Approval Still Required
+
+Ask for approval before performing actions in any of these categories:
+
+- Deleting large directories or generated trees, including recursive destructive cleanup.
+- Creating, modifying, or deleting files outside `C:\Users\markb\warroom`.
+- Changing OS, shell, package-manager, network, firewall, browser, credential-store, or system-wide configuration.
+- Reading, printing, copying, or exposing credentials, tokens, private keys, `.env` contents, or other secrets.
+- Changing network or security configuration.
+- Executing packages or scripts from unknown or unreviewed sources.
+- Running recursive destructive commands such as `rm -rf`, broad `Remove-Item -Recurse`, or equivalent cleanup outside narrowly reviewed generated artifacts.
+- Running force git operations that rewrite or discard history, including hard resets, force pushes, and rebases, unless the user explicitly requests the exact action.
+
+## Safety Notes
+
+Do not enable unrestricted autonomous execution globally. Do not edit `~/.cursor/permissions.json` or user settings to broaden terminal or MCP allowlists for this project unless the user explicitly asks for a global configuration change after reviewing the scope.

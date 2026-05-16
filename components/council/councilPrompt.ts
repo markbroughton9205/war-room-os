@@ -52,6 +52,12 @@ function depthBlock(deepDiscussionMode: boolean, terse: boolean) {
     : 'Cost-control mode: default concise, high-signal.'
 }
 
+const TURN_DISCIPLINE_BLOCK = [
+  'Turn discipline: answer once, then stop. Do not recursively continue the conversation or self-trigger a follow-up turn.',
+  'If an unresolved contradiction, runtime/emergency condition, or materially conclusion-changing concern remains, end with one brief permission request only, such as "Permission to continue?" Otherwise do not ask to continue.',
+  'Never request continuation for greetings, casual chatter, repeated confirmations, filler, or low-value elaboration.',
+].join('\n')
+
 /** First-turn reply after Ra’el’s decree (not autonomous continuation). */
 export function buildDecreeFamilyAugment(
   family: CouncilOrchestrationFamily,
@@ -64,6 +70,7 @@ export function buildDecreeFamilyAugment(
     'Never generate dialogue for Ra’el; never simulate his voice.',
     INTERACTION_RULES[family],
     depthBlock(deepDiscussionMode, terse),
+    TURN_DISCIPLINE_BLOCK,
     voiceAndToneBlock(ctx),
   ]
   return lines.filter(Boolean).join('\n')
@@ -75,10 +82,11 @@ export function buildOrchestrationAugment(family: CouncilOrchestrationFamily, de
     : 'Cost-control mode: default concise, high-signal.'
 
   return [
-    'ORCHESTRATION TURN — council continues autonomously.',
+    'PERMISSIONED CONTINUATION TURN — Ra’el explicitly allowed one additional council turn.',
     'Never generate dialogue for Ra’el; never simulate his voice.',
     INTERACTION_RULES[family],
     depth,
+    TURN_DISCIPLINE_BLOCK,
     'Voice: operational briefing; no fake telemetry narration; no boilerplate AI self-descriptions.',
   ].join('\n')
 }

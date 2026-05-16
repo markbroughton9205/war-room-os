@@ -51,6 +51,21 @@ function parseFamilyOnlyPhrase(t: string): CouncilOrchestrationFamily[] | null {
   return null
 }
 
+function parseContinuationTarget(t: string): CouncilOrchestrationFamily[] | null {
+  const m = t.match(/^\s*continue\s+(chatgpt|chat\s*gpt|openai|claude|anthropic|grok|xai|gemini|google|red\s*team|redteam|baby|observer|kimi|moonshot|bridge(?:\s*architect)?)\b/i)
+  if (!m) return null
+  const g = m[1]!.toLowerCase().replace(/\s+/g, ' ')
+  if (g.includes('red')) return ['red_team']
+  if (g.includes('chat') || g === 'openai') return ['chatgpt']
+  if (g.includes('claude') || g.includes('anthropic')) return ['claude']
+  if (g.includes('grok') || g === 'xai') return ['grok']
+  if (g.includes('gemini') || g.includes('google')) return ['gemini']
+  if (g.includes('baby') || g.includes('observer')) return ['baby']
+  if (g.includes('kimi') || g.includes('moonshot')) return ['kimi']
+  if (g.includes('bridge')) return ['bridge_architect']
+  return null
+}
+
 function parseExceptFamilies(t: string): CouncilOrchestrationFamily[] {
   const out: CouncilOrchestrationFamily[] = []
   const re = /\bexcept\s+(chatgpt|openai|claude|anthropic|grok|xai|gemini|google|red\s*team|baby|kimi|moonshot|bridge(?:\s*architect)?)\b/gi
@@ -72,7 +87,7 @@ function parseExceptFamilies(t: string): CouncilOrchestrationFamily[] {
 function detectMode(t: string): CouncilDisciplineMode {
   if (/\b(emergency|code\s*red|drop\s*everything)\b/i.test(t)) return 'emergency'
   if (/\bred\s*team\s*only\b/i.test(t)) return 'red_team_only'
-  if (/\bsilent\b|\bhold\s*responses\b|\bno\s*responses\b/i.test(t)) return 'silent'
+  if (/^\s*hold\s*$/i.test(t) || /\bsilent\b|\bhold\s*responses\b|\bno\s*responses\b/i.test(t)) return 'silent'
   if (/\battendance\s*only\b|\broll\s*call\b|\bpresence\s*only\b/i.test(t)) return 'attendance'
   if (/\bno\s+strategy\b|\bstrategy\s*off\b/i.test(t)) return 'attendance'
   if (/\bone\s*response\s*each\b|\bone\s*line\s*each\b/i.test(t)) return 'attendance'
@@ -103,7 +118,7 @@ export function parseCouncilCommand(input: string): CouncilCommand {
 
   const mode = detectMode(t)
   const excludedFamilies = parseExceptFamilies(t)
-  let targetFamilies = parseFamilyOnlyPhrase(t) ?? []
+  let targetFamilies = parseContinuationTarget(t) ?? parseFamilyOnlyPhrase(t) ?? []
 
   if (mode === 'red_team_only') {
     targetFamilies = ['red_team']
@@ -148,6 +163,20 @@ export function parseCouncilCommand(input: string): CouncilCommand {
       directInvocationRemainder: direct.remainder,
       executionPermission,
       responseLimits: mergeLimits(DEFAULT_COUNCIL_COMMAND, 2, 4000),
+    }
+  }
+
+  if (/^\s*continue\s+/i.test(t) && targetFamilies.length === 1) {
+    return {
+      mode: 'council',
+      authority: 'rael_explicit',
+      scope: 'session',
+      targetFamilies,
+      excludedFamilies,
+      directInvocation: true,
+      directInvocationRemainder: 'permissioned continuation',
+      executionPermission,
+      responseLimits: mergeLimits(DEFAULT_COUNCIL_COMMAND, 1, 4000),
     }
   }
 
