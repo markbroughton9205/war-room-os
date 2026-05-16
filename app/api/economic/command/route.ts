@@ -39,6 +39,17 @@ function isWorkflowQueuePermissionDenied(error: string): boolean {
     && /war_room_economic_workflow_queue/i.test(error)
 }
 
+function looksLikeProviderFailureOnly(content: string): boolean {
+  return /\b(provider analysis unavailable|family is currently unavailable|timed out|api[_ ]?key|not configured|unauthorized|provider_http_|returned empty|configuration_error)\b/i
+    .test(content)
+}
+
+function normalizeProviderSuccess(content: string, success: boolean | undefined): boolean | undefined {
+  if (success !== false) return success
+  if (content.trim().length >= 80 && !looksLikeProviderFailureOnly(content)) return true
+  return false
+}
+
 async function recordExtractionTelemetry(args: {
   client: WarRoomSupabase
   domainId: EconomicOperationalDomainId
@@ -85,20 +96,47 @@ export async function POST(req: Request) {
   if (!decree) return jsonWithPersistence({ error: 'decree is required.' }, true, { status: 400 })
 
   const providerAnalyses = (Array.isArray(payload.providerAnalyses) ? payload.providerAnalyses : [])
-    .map(row => ({
-      provider_family: typeof row.provider_family === 'string' && isEconomicFamily(row.provider_family)
-        ? row.provider_family
-        : 'chatgpt',
-      content: typeof row.content === 'string' ? row.content : '',
-      latency_ms: row.latency_ms,
-      success: row.success,
-    }))
+    .map(row => {
+      const content = typeof row.content === 'string' ? row.content : ''
+      return {
+        provider_family: typeof row.provider_family === 'string' && isEconomicFamily(row.provider_family)
+          ? row.provider_family
+          : 'chatgpt',
+        content,
+        latency_ms: row.latency_ms,
+        success: normalizeProviderSuccess(content, row.success),
+      }
+    })
   const successfulProviderAnalyses = providerAnalyses.filter(row => row.success !== false && row.content.trim())
   const failedProviderAnalyses = providerAnalyses.filter(row => row.success === false)
 
   const parsed = parseEconomicOperationalCommand(decree)
   if (!parsed.matched) {
     return jsonWithPersistence({ matched: false, summary: 'No Economic Ops command detected.' }, true)
+  }
+
+  for (const [index, analysis] of providerAnalyses.entries()) {
+    await recordExtractionTelemetry({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      providerFamily: analysis.provider_family,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      metricName: 'provider_invocation_completed',
+      metricValue: analysis.success === false ? 0 : 1,
+      metadata: {
+        provider_selected: index === 0,
+        provider_response_length: analysis.content.length,
+        provider_success_boolean: analysis.success !== false,
+        provider_latency_ms: typeof analysis.latency_ms === 'number' ? analysis.latency_ms : null,
+        normalized_provider_payload: {
+          provider_family: analysis.provider_family,
+          content_length: analysis.content.length,
+          success: analysis.success !== false,
+          preserved_raw_content_for_extraction: analysis.success !== false && analysis.content.trim().length > 0,
+        },
+      },
+    })
   }
 
   let extraction: ReturnType<typeof extractEconomicOpportunities>
@@ -164,7 +202,11 @@ export async function POST(req: Request) {
     sessionId: payload.sessionId,
     metricName: 'extraction_attempted',
     metricValue: extraction.telemetry.attempted,
-    metadata: extraction.telemetry,
+    metadata: {
+      ...extraction.telemetry,
+      extraction_input_count: successfulProviderAnalyses.length,
+      failed_provider_input_count: failedProviderAnalyses.length,
+    },
   })
 
   let inserted = 0
@@ -200,6 +242,8 @@ export async function POST(req: Request) {
     metricValue: inserted > 0 ? inserted : 1,
     metadata: {
       ...extraction.telemetry,
+      extraction_input_count: successfulProviderAnalyses.length,
+      extraction_output_count: extraction.opportunities.length,
       inserted_opportunities: inserted,
     },
   })
@@ -264,7 +308,7 @@ export async function POST(req: Request) {
 
   return jsonWithPersistence({
     matched: true,
-    summary: failedProviderAnalyses.length && inserted === 0
+    summary: failedProviderAnalyses.length && successfulProviderAnalyses.length === 0 && inserted === 0
       ? 'Economic Ops routed to Opportunity Scout, but provider analysis failed. Failure telemetry was stored without broadcasting family availability spam.'
       : `${inserted} opportunities discovered and added to Opportunity Scout.`,
     workflowId: workflow.value,

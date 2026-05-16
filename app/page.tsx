@@ -6720,39 +6720,105 @@ function Home() {
         }),
       )
 
+      let selectedProviderFamily = assignedFamily
       let providerAnalysis = ''
       let providerFailure: string | null = null
-      try {
-        const out = await postCouncilChat(
-          {
-            message: decree,
-            profile: RAEL_PROFILE,
-            threadHistory: threadHistory(),
-            mode: 'continue',
-            toneMode,
-            councilSingleFamily: assignedFamily,
-            orchestrationAugment: [
-              'Economic Ops extraction mode.',
-              'Return concise structured opportunity candidates only.',
-              'Do not perform external actions. Do not send outreach, payments, contracts, publishing, account actions, or submissions.',
-            ].join('\n'),
-            councilCommand: cmdForEconomicOps,
-            raelDirectiveText: decree,
-            councilIntentKind: councilIntentState.intent,
-            councilActiveScope: councilIntentState.scope,
-            ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
-          },
-          controller.signal,
-        )
-        providerAnalysis = typeof out.data.councilSingleResponse === 'string' ? out.data.councilSingleResponse.trim() : ''
-        if (!out.res.ok || out.data.councilProviderHttpStatus) {
-          providerFailure = out.data.councilProviderHttpDetail
+      const providerAttempts: {
+        provider_family: typeof assignedFamily
+        content: string
+        success: boolean
+        latency_ms?: number
+      }[] = []
+      const economicOpsProviderPrompt = [
+        'Economic Ops extraction mode.',
+        'Return concise structured opportunity candidates only.',
+        'Prefer bullets with title, estimated value, confidence, risk, and required actions.',
+        'Do not perform external actions. Do not send outreach, payments, contracts, publishing, account actions, or submissions.',
+      ].join('\n')
+      for (const providerFamily of economicCommand.domain.providerPriority) {
+        selectedProviderFamily = providerFamily
+        const startedAt = Date.now()
+        console.info('[economic-ops-provider]', {
+          event: 'provider_invocation_started',
+          provider: providerFamily,
+          command: economicCommand.command,
+        })
+        try {
+          const out = await postCouncilChat(
+            {
+              message: decree,
+              profile: RAEL_PROFILE,
+              threadHistory: threadHistory(),
+              mode: 'continue',
+              toneMode,
+              councilSingleFamily: providerFamily,
+              orchestrationAugment: economicOpsProviderPrompt,
+              councilCommand: cmdForEconomicOps,
+              raelDirectiveText: decree,
+              councilIntentKind: councilIntentState.intent,
+              councilActiveScope: councilIntentState.scope,
+              ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
+            },
+            controller.signal,
+          )
+          const rawAnalysis = typeof out.data.economicOpsRawProviderAnalysis === 'string'
+            ? out.data.economicOpsRawProviderAnalysis.trim()
+            : ''
+          const governedAnalysis = typeof out.data.councilSingleResponse === 'string'
+            ? out.data.councilSingleResponse.trim()
+            : ''
+          const resultAnalysis = out.data.results
+            ?.map(result => typeof result.content === 'string' ? result.content.trim() : '')
+            .find(Boolean)
+            ?? ''
+          const normalizedContent = rawAnalysis || governedAnalysis || resultAnalysis
+          const failureDetail = out.data.councilProviderHttpDetail
             ?? out.data.message
             ?? out.data.error
-            ?? `provider_http_${out.res.status}`
+            ?? (!out.res.ok ? `provider_http_${out.res.status}` : null)
+          const success = Boolean(normalizedContent)
+            && !out.data.councilProviderHttpStatus
+            && !/\bfamily is currently unavailable\b/i.test(normalizedContent)
+          providerAttempts.push({
+            provider_family: providerFamily,
+            content: normalizedContent || failureDetail || 'Provider analysis unavailable during Economic Ops extraction.',
+            success,
+            latency_ms: Date.now() - startedAt,
+          })
+          console.info('[economic-ops-provider]', {
+            event: 'provider_invocation_completed',
+            provider: providerFamily,
+            success,
+            responseLength: normalizedContent.length,
+            normalizedPayload: {
+              hasRawAnalysis: Boolean(rawAnalysis),
+              hasCouncilSingleResponse: Boolean(governedAnalysis),
+              hasResultContent: Boolean(resultAnalysis),
+              councilProviderHttpStatus: out.data.councilProviderHttpStatus ?? null,
+            },
+          })
+          if (success) {
+            providerAnalysis = normalizedContent
+            providerFailure = null
+            break
+          }
+          providerFailure = failureDetail ?? 'Provider returned no usable Economic Ops analysis.'
+        } catch (err) {
+          providerFailure = err instanceof Error ? err.message : String(err)
+          providerAttempts.push({
+            provider_family: providerFamily,
+            content: providerFailure,
+            success: false,
+            latency_ms: Date.now() - startedAt,
+          })
+          console.info('[economic-ops-provider]', {
+            event: 'provider_invocation_completed',
+            provider: providerFamily,
+            success: false,
+            responseLength: 0,
+            normalizedPayload: { error: providerFailure },
+          })
         }
-      } catch (err) {
-        providerFailure = err instanceof Error ? err.message : String(err)
       }
 
       const economicRes = await fetch('/api/economic/command', {
@@ -6762,16 +6828,29 @@ function Home() {
           decree,
           sessionId: liveCouncilConvId ?? 'live-council',
           providerAnalyses: providerAnalysis
-            ? [{ provider_family: assignedFamily, content: providerAnalysis, success: true }]
-            : [{
-                provider_family: assignedFamily,
-                content: providerFailure ?? 'Provider analysis unavailable during Economic Ops extraction.',
-                success: false,
-              }],
+            ? providerAttempts.map(attempt => (
+                attempt.provider_family === selectedProviderFamily
+                  ? { ...attempt, content: providerAnalysis, success: true }
+                  : attempt
+              ))
+            : providerAttempts.length
+              ? providerAttempts
+              : [{
+                  provider_family: assignedFamily,
+                  content: providerFailure ?? 'Provider analysis unavailable during Economic Ops extraction.',
+                  success: false,
+                }],
         }),
         signal: controller.signal,
       })
       const economicJson = await economicRes.json() as { summary?: string; error?: string; opportunityCount?: number }
+      console.info('[economic-ops-provider]', {
+        event: 'extraction_completed',
+        selectedProvider: selectedProviderFamily,
+        providerAttemptCount: providerAttempts.length,
+        extractionInputCount: providerAttempts.filter(attempt => attempt.success && attempt.content.trim()).length,
+        extractionOutputCount: Number(economicJson.opportunityCount ?? 0),
+      })
       const summary = economicJson.summary
         ?? economicJson.error
         ?? 'Economic Ops routed to Opportunity Scout.'
@@ -6790,6 +6869,7 @@ function Home() {
             'economic_ops_bypassed_attendance',
             'economic_ops_bypassed_legacy_research',
             ...(providerFailure && !providerAnalysis ? ['economic_ops_provider_failure_telemetry_only'] : []),
+            ...(selectedProviderFamily !== assignedFamily ? ['economic_ops_provider_priority_fallback'] : []),
           ],
         }),
       )

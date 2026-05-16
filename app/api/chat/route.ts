@@ -1120,6 +1120,10 @@ export async function POST(req: Request) {
         return degradedProviderResponse(councilSingleFamily, 'failed', `${councilSingleFamily} returned empty body`)
       }
 
+      const economicOpsRawProviderAnalysis =
+        councilCommand.mode === 'economic_ops' || economicRouting.mode === 'economic_ops'
+          ? responseText.trim()
+          : undefined
       const preCallRuntime = providerRuntimeStates?.[councilSingleFamily]
       const governed = applyGovernor(responseText, councilSingleFamily, councilCommand, {
         raelDirectiveText,
@@ -1167,6 +1171,7 @@ export async function POST(req: Request) {
         const dmGov = diagnosticMetaFor(councilSingleFamily)
         return NextResponse.json({
           councilSingleResponse: '',
+          ...(economicOpsRawProviderAnalysis ? { economicOpsRawProviderAnalysis } : {}),
           councilSingleFamily,
           results: validateProviderResults(
             [
@@ -1311,6 +1316,7 @@ export async function POST(req: Request) {
       })
       return NextResponse.json({
         councilSingleResponse: responseText,
+        ...(economicOpsRawProviderAnalysis ? { economicOpsRawProviderAnalysis } : {}),
         councilSingleFamily,
         results: validateProviderResults(
           [

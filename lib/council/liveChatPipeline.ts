@@ -61,10 +61,12 @@ export type CouncilChatRequestBody = {
 
 export type CouncilChatJson = {
   councilSingleResponse?: string
+  economicOpsRawProviderAnalysis?: string
   councilSingleFamily?: CouncilOrchestrationFamily
   councilGovernorSkipped?: boolean
   error?: string
   message?: string
+  results?: { family?: string; content?: string; status?: string; error?: string }[]
   /** Present on HTTP 200 when the route degraded instead of failing the batch. */
   councilProviderHttpStatus?: 'timed_out' | 'failed'
   councilProviderHttpDetail?: string
