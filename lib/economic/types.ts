@@ -29,13 +29,23 @@ export const ECONOMIC_WORKFLOW_TYPES = [
 
 export type EconomicWorkflowType = (typeof ECONOMIC_WORKFLOW_TYPES)[number]
 
-export const ECONOMIC_WORKFLOW_STATUSES = ['pending', 'active', 'completed', 'failed', 'archived'] as const
+export const ECONOMIC_WORKFLOW_STATUSES = [
+  'pending',
+  'investigating',
+  'approved',
+  'queued',
+  'executing',
+  'completed',
+  'failed',
+  'archived',
+] as const
 export type EconomicWorkflowStatus = (typeof ECONOMIC_WORKFLOW_STATUSES)[number]
 
 export const ECONOMIC_OPPORTUNITY_STATUSES = [
   'discovered',
   'investigating',
   'approved',
+  'queued',
   'executing',
   'completed',
   'rejected',
@@ -107,14 +117,18 @@ export type EconomicOpportunity = {
   title: string
   category: EconomicOperationalDomainId
   source: string
+  source_provider: EconomicFamily | 'unknown'
   confidence: number
   estimated_value: number | null
   assigned_family: EconomicFamily
   required_actions: readonly string[]
   risk_level: EconomicRiskLevel
+  notes: string
+  source_details: Record<string, unknown>
   status: EconomicOpportunityStatus
   discovered_at: string
   expires_at: string | null
+  dedupe_key: string
   metadata?: Record<string, unknown>
 }
 
@@ -173,10 +187,23 @@ export type ActiveEconomicMission = {
   title: string
   domain_id: EconomicOperationalDomainId
   assigned_family: EconomicFamily
-  status: 'planned' | 'active' | 'paused' | 'completed' | 'archived'
+  status: 'pending' | 'investigating' | 'approved' | 'queued' | 'executing' | 'completed' | 'archived'
   approval_required: true
+  last_activity_at: string
   created_at: string
   updated_at: string
+  metadata?: Record<string, unknown>
+}
+
+export type EconomicAssignmentHistory = {
+  id: string
+  subject_type: 'opportunity' | 'workflow' | 'proposal' | 'mission'
+  subject_id: string
+  assigned_family: EconomicFamily
+  provider_runtime_state: 'recommended' | 'assigned' | 'investigating' | 'waiting_approval' | 'completed' | 'blocked'
+  confidence: number
+  last_activity_at: string
+  created_at: string
   metadata?: Record<string, unknown>
 }
 

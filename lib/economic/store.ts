@@ -2,9 +2,14 @@ import type { WarRoomSupabase } from '@/lib/war-room/persistence'
 import { ECONOMIC_DOMAIN_REGISTRY } from '@/lib/economic/domains'
 import type {
   ActiveEconomicMission,
+  EconomicAssignmentHistory,
+  EconomicFamily,
+  EconomicOperationalDomainId,
   EconomicOpportunity,
+  EconomicOpportunityStatus,
   EconomicProposal,
   EconomicTelemetryEvent,
+  EconomicWorkflowStatus,
   EconomicWorkflowQueueItem,
   ProviderEffectivenessSnapshot,
   UnresolvedEconomicOperation,
@@ -48,14 +53,18 @@ export async function insertEconomicOpportunity(
       title: opportunity.title,
       category: opportunity.category,
       source: opportunity.source,
+      source_provider: opportunity.source_provider,
       confidence: opportunity.confidence,
       estimated_value: opportunity.estimated_value,
       assigned_family: opportunity.assigned_family,
       required_actions: opportunity.required_actions,
       risk_level: opportunity.risk_level,
+      notes: opportunity.notes,
+      source_details: opportunity.source_details,
       status: opportunity.status,
       discovered_at: opportunity.discovered_at,
       expires_at: opportunity.expires_at,
+      dedupe_key: opportunity.dedupe_key,
       metadata: metadataOf(opportunity),
     })
     .select('id')
@@ -63,6 +72,41 @@ export async function insertEconomicOpportunity(
 
   if (error || !data?.id) return { ok: false, error: error?.message || 'Opportunity insert failed.' }
   return { ok: true, value: data.id as string }
+}
+
+export async function upsertEconomicOpportunity(
+  client: WarRoomSupabase,
+  opportunity: EconomicOpportunity,
+): StoreResult<string> {
+  const { data, error } = await client
+    .from('war_room_economic_opportunities')
+    .upsert(
+      {
+        id: opportunity.id,
+        title: opportunity.title,
+        category: opportunity.category,
+        source: opportunity.source,
+        source_provider: opportunity.source_provider,
+        confidence: opportunity.confidence,
+        estimated_value: opportunity.estimated_value,
+        assigned_family: opportunity.assigned_family,
+        required_actions: opportunity.required_actions,
+        risk_level: opportunity.risk_level,
+        notes: opportunity.notes,
+        source_details: opportunity.source_details,
+        status: opportunity.status,
+        discovered_at: opportunity.discovered_at,
+        expires_at: opportunity.expires_at,
+        dedupe_key: opportunity.dedupe_key,
+        metadata: metadataOf(opportunity),
+      },
+      { onConflict: 'dedupe_key', ignoreDuplicates: true },
+    )
+    .select('id')
+    .maybeSingle()
+
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, value: (data?.id as string | undefined) ?? opportunity.id }
 }
 
 export async function insertEconomicWorkflow(
@@ -82,6 +126,7 @@ export async function insertEconomicWorkflow(
       summary: workflow.summary,
       domain_id: workflow.domain_id,
       approval_required: workflow.approval_required,
+      dedupe_key: typeof workflow.metadata?.dedupe_key === 'string' ? workflow.metadata.dedupe_key : workflow.id,
       metadata: metadataOf(workflow),
     })
     .select('id')
@@ -89,6 +134,36 @@ export async function insertEconomicWorkflow(
 
   if (error || !data?.id) return { ok: false, error: error?.message || 'Workflow insert failed.' }
   return { ok: true, value: data.id as string }
+}
+
+export async function upsertEconomicWorkflow(
+  client: WarRoomSupabase,
+  workflow: EconomicWorkflowQueueItem,
+): StoreResult<string> {
+  const { data, error } = await client
+    .from('war_room_economic_workflow_queue')
+    .upsert(
+      {
+        id: workflow.id,
+        workflow_type: workflow.workflow_type,
+        status: workflow.status,
+        assigned_family: workflow.assigned_family,
+        priority: workflow.priority,
+        created_at: workflow.created_at,
+        updated_at: workflow.updated_at,
+        summary: workflow.summary,
+        domain_id: workflow.domain_id,
+        approval_required: workflow.approval_required,
+        dedupe_key: typeof workflow.metadata?.dedupe_key === 'string' ? workflow.metadata.dedupe_key : workflow.id,
+        metadata: metadataOf(workflow),
+      },
+      { onConflict: 'dedupe_key', ignoreDuplicates: true },
+    )
+    .select('id')
+    .maybeSingle()
+
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, value: (data?.id as string | undefined) ?? workflow.id }
 }
 
 export async function insertEconomicProposal(client: WarRoomSupabase, proposal: EconomicProposal): StoreResult<string> {
@@ -178,6 +253,7 @@ export async function insertActiveEconomicMission(
       assigned_family: mission.assigned_family,
       status: mission.status,
       approval_required: mission.approval_required,
+      last_activity_at: mission.last_activity_at,
       created_at: mission.created_at,
       updated_at: mission.updated_at,
       metadata: metadataOf(mission),
@@ -211,5 +287,144 @@ export async function insertUnresolvedEconomicOperation(
     .single()
 
   if (error || !data?.id) return { ok: false, error: error?.message || 'Unresolved operation insert failed.' }
+  return { ok: true, value: data.id as string }
+}
+
+export type EconomicSurfaceRow = {
+  opportunities: EconomicOpportunity[]
+  workflows: EconomicWorkflowQueueItem[]
+  proposals: EconomicProposal[]
+  missions: ActiveEconomicMission[]
+  telemetry: EconomicTelemetryEvent[]
+  providerEffectiveness: ProviderEffectivenessSnapshot[]
+  unresolvedOperations: UnresolvedEconomicOperation[]
+  assignmentHistory: EconomicAssignmentHistory[]
+}
+
+type OpportunityRow = {
+  id: string
+  title: string
+  category: EconomicOperationalDomainId
+  source: string
+  source_provider: EconomicFamily | 'unknown' | null
+  confidence: number
+  estimated_value: number | null
+  assigned_family: EconomicFamily
+  required_actions: string[] | null
+  risk_level: EconomicOpportunity['risk_level']
+  notes: string | null
+  source_details: Record<string, unknown> | null
+  status: EconomicOpportunityStatus
+  discovered_at: string
+  expires_at: string | null
+  dedupe_key: string | null
+  metadata: Record<string, unknown> | null
+}
+
+function mapOpportunity(row: OpportunityRow): EconomicOpportunity {
+  return {
+    id: row.id,
+    title: row.title,
+    category: row.category,
+    source: row.source,
+    source_provider: row.source_provider ?? 'unknown',
+    confidence: Number(row.confidence ?? 0),
+    estimated_value: row.estimated_value,
+    assigned_family: row.assigned_family,
+    required_actions: Array.isArray(row.required_actions) ? row.required_actions : [],
+    risk_level: row.risk_level,
+    notes: row.notes ?? '',
+    source_details: row.source_details && typeof row.source_details === 'object' ? row.source_details : {},
+    status: row.status,
+    discovered_at: row.discovered_at,
+    expires_at: row.expires_at,
+    dedupe_key: row.dedupe_key ?? row.id,
+    metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : {},
+  }
+}
+
+export async function listEconomicSurface(client: WarRoomSupabase, limit = 50): StoreResult<EconomicSurfaceRow> {
+  const [opps, workflows, proposals, missions, telemetry, providers, unresolved, assignments] = await Promise.all([
+    client.from('war_room_economic_opportunities').select('*').order('discovered_at', { ascending: false }).limit(limit),
+    client.from('war_room_economic_workflow_queue').select('*').order('created_at', { ascending: false }).limit(limit),
+    client.from('war_room_economic_proposals').select('*').order('created_at', { ascending: false }).limit(limit),
+    client.from('war_room_economic_active_missions').select('*').order('created_at', { ascending: false }).limit(limit),
+    client.from('war_room_economic_telemetry').select('*').order('recorded_at', { ascending: false }).limit(limit),
+    client.from('war_room_economic_provider_effectiveness').select('*').order('updated_at', { ascending: false }).limit(limit),
+    client.from('war_room_economic_unresolved_operations').select('*').order('created_at', { ascending: false }).limit(limit),
+    client.from('war_room_economic_assignment_history').select('*').order('created_at', { ascending: false }).limit(limit),
+  ])
+
+  const firstError = [opps.error, workflows.error, proposals.error, missions.error, telemetry.error, providers.error, unresolved.error, assignments.error].find(Boolean)
+  if (firstError) return { ok: false, error: firstError.message }
+
+  return {
+    ok: true,
+    value: {
+      opportunities: ((opps.data ?? []) as OpportunityRow[]).map(mapOpportunity),
+      workflows: (workflows.data ?? []) as EconomicWorkflowQueueItem[],
+      proposals: (proposals.data ?? []) as EconomicProposal[],
+      missions: (missions.data ?? []) as ActiveEconomicMission[],
+      telemetry: (telemetry.data ?? []) as EconomicTelemetryEvent[],
+      providerEffectiveness: (providers.data ?? []) as ProviderEffectivenessSnapshot[],
+      unresolvedOperations: (unresolved.data ?? []) as UnresolvedEconomicOperation[],
+      assignmentHistory: (assignments.data ?? []) as EconomicAssignmentHistory[],
+    },
+  }
+}
+
+export async function updateEconomicOpportunityStatus(
+  client: WarRoomSupabase,
+  id: string,
+  status: EconomicOpportunityStatus,
+): StoreResult<string> {
+  const { data, error } = await client
+    .from('war_room_economic_opportunities')
+    .update({ status })
+    .eq('id', id)
+    .select('id')
+    .single()
+
+  if (error || !data?.id) return { ok: false, error: error?.message || 'Opportunity status update failed.' }
+  return { ok: true, value: data.id as string }
+}
+
+export async function updateEconomicWorkflowStatus(
+  client: WarRoomSupabase,
+  id: string,
+  status: EconomicWorkflowStatus,
+): StoreResult<string> {
+  const { data, error } = await client
+    .from('war_room_economic_workflow_queue')
+    .update({ status })
+    .eq('id', id)
+    .select('id')
+    .single()
+
+  if (error || !data?.id) return { ok: false, error: error?.message || 'Workflow status update failed.' }
+  return { ok: true, value: data.id as string }
+}
+
+export async function insertEconomicAssignmentHistory(
+  client: WarRoomSupabase,
+  assignment: EconomicAssignmentHistory,
+): StoreResult<string> {
+  const { data, error } = await client
+    .from('war_room_economic_assignment_history')
+    .insert({
+      id: assignment.id,
+      subject_type: assignment.subject_type,
+      subject_id: assignment.subject_id,
+      assigned_family: assignment.assigned_family,
+      provider_runtime_state: assignment.provider_runtime_state,
+      confidence: assignment.confidence,
+      last_activity_at: assignment.last_activity_at,
+      created_at: assignment.created_at,
+      metadata: metadataOf(assignment),
+    })
+    .select('id')
+    .single()
+
+  if (error || !data?.id) return { ok: false, error: error?.message || 'Assignment insert failed.' }
   return { ok: true, value: data.id as string }
 }

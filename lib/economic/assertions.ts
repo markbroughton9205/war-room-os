@@ -1,6 +1,7 @@
 import { assertAllExternalActionsApprovalGated } from '@/lib/economic/approvalSafeguards'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
 import { ECONOMIC_DOMAIN_REGISTRY } from '@/lib/economic/domains'
+import { extractEconomicOpportunities } from '@/lib/economic/extraction'
 import { ECONOMIC_FAMILY_ROLE_REGISTRY } from '@/lib/economic/familyRoles'
 import { createOpportunityDraft, validateOpportunity } from '@/lib/economic/opportunities'
 import { assertProposalExternalUseBlockedUntilApproved, createProposalDraft } from '@/lib/economic/proposals'
@@ -62,6 +63,8 @@ export function assertEconomicOpportunityFoundation(): void {
   const valid = validateOpportunity(opportunity)
   if (!valid.ok) throw new Error(valid.error)
   if (opportunity.status !== 'discovered') throw new Error('Opportunity should begin as discovered.')
+  if (!opportunity.source_provider) throw new Error('Opportunity should track source provider.')
+  if (!opportunity.dedupe_key) throw new Error('Opportunity should include a dedupe key.')
 }
 
 export function assertEconomicProposalFoundation(): void {
@@ -82,4 +85,18 @@ export function assertEconomicOperationsFoundations(): void {
   assertEconomicCommandFoundations()
   assertEconomicOpportunityFoundation()
   assertEconomicProposalFoundation()
+}
+
+export function assertEconomicOpportunityExtraction(): void {
+  const extracted = extractEconomicOpportunities({
+    decree: 'scan opportunities',
+    sessionId: 'assertion-session',
+    providerAnalyses: [{
+      provider_family: 'grok',
+      content: '- Local service audit offer: $1500 monthly, medium risk, high confidence',
+    }],
+  })
+  if (!extracted.commandMatched) throw new Error('Economic extraction should match command.')
+  if (extracted.opportunities.length !== 1) throw new Error('Economic extraction should produce one opportunity.')
+  if (!extracted.summary.includes('Opportunity Scout')) throw new Error('Economic summary should be operational.')
 }

@@ -12,6 +12,7 @@ export type CreateEconomicWorkflowInput = {
   assigned_family?: EconomicFamily
   priority?: number
   summary: string
+  dedupe_key?: string
   metadata?: Record<string, unknown>
 }
 
@@ -35,7 +36,10 @@ export function createWorkflowQueueItem(input: CreateEconomicWorkflowInput): Eco
     summary: input.summary.trim().slice(0, 1000),
     domain_id: input.domain_id,
     approval_required: true,
-    metadata: input.metadata && typeof input.metadata === 'object' ? input.metadata : {},
+    metadata: {
+      ...(input.metadata && typeof input.metadata === 'object' ? input.metadata : {}),
+      ...(input.dedupe_key ? { dedupe_key: input.dedupe_key } : {}),
+    },
   }
 }
 
