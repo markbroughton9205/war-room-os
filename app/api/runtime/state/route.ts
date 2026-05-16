@@ -1,15 +1,33 @@
-import { applyRuntimeStatePost, readRuntimeContinuityBundle, type RuntimeStatePostBody } from '@/lib/runtime/runtimeContinuityServer'
+import {
+  applyRuntimeStatePost,
+  readRuntimeContinuityBundle,
+  type RuntimeStatePostBody,
+} from '@/lib/runtime/runtimeContinuityServer'
+import { auditRuntimePersistenceEvent } from '@/lib/runtime/runtimeStatePersistenceGuards'
+import { isRuntimeStatePersistenceConfigured } from '@/lib/runtime/runtimeStateStore'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET(): Promise<Response> {
   try {
-    const { persistenceConfigured, bundle } = await readRuntimeContinuityBundle()
+    const payload = await readRuntimeContinuityBundle()
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      },
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Failed to read runtime state'
+    auditRuntimePersistenceEvent('runtimeStateReadFailed', { phase: 'get_route_throw', message: msg })
     return new Response(
       JSON.stringify({
-        persistenceConfigured,
-        bundle,
+        persistenceConfigured: isRuntimeStatePersistenceConfigured(),
+        bundle: null,
+        runtimeStateReadFailed: true,
+        error: msg,
       }),
       {
         status: 200,
@@ -19,12 +37,6 @@ export async function GET(): Promise<Response> {
         },
       },
     )
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to read runtime state'
-    return new Response(JSON.stringify({ persistenceConfigured: false, bundle: null, error: msg }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-    })
   }
 }
 
@@ -38,10 +50,16 @@ export async function POST(req: Request): Promise<Response> {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       })
     }
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-    })
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        ...(result.persistenceUnavailable ? { persistenceUnavailable: true } : {}),
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      },
+    )
   } catch {
     return new Response(JSON.stringify({ ok: false, error: 'Invalid JSON body' }), {
       status: 400,

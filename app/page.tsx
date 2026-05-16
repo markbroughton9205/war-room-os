@@ -4385,6 +4385,7 @@ function Home() {
   const [continuityMode, setContinuityMode] = useState<RuntimeContinuityIndicatorMode>('Unknown')
   const [continuityRecoverAt, setContinuityRecoverAt] = useState<string | null>(null)
   const [recoverRuntimeBanner, setRecoverRuntimeBanner] = useState(false)
+  const [runtimePersistenceBanner, setRuntimePersistenceBanner] = useState<string | null>(null)
   const [recoveredIntegrityPartial, setRecoveredIntegrityPartial] = useState<RuntimeIntegrityPartial | null>(null)
   const [recoveredAttendanceSummary, setRecoveredAttendanceSummary] = useState<RuntimeAttendanceSummary | null>(null)
   const [recoveredDiagnosticHistory, setRecoveredDiagnosticHistory] = useState<DiagnosticHistoryEvent[]>([])
@@ -5560,12 +5561,32 @@ function Home() {
       if (!r.persistenceConfigured) {
         setContinuityMode('Unknown')
         setRecoverRuntimeBanner(false)
+        setRuntimePersistenceBanner(r.error ?? null)
         setContinuityRecoverAt(null)
         setRecoveredIntegrityPartial(null)
         setRecoveredAttendanceSummary(null)
         setRecoveredDiagnosticHistory([])
         setRecoveredRedTeamHold(null)
         return
+      }
+      if (Array.isArray(r.fallbackEngines) && r.fallbackEngines.length > 0) {
+        engineMapRef.current = engineRowMap(r.fallbackEngines)
+        setEngineList(r.fallbackEngines)
+        const g = r.fallbackEngines.find(e => e.id === 'gemini')
+        if (g) {
+          setGeminiEngineRow(g)
+          geminiFunctionalRef.current = Boolean(g.functional)
+          if (g.functional) skipGeminiForSessionRef.current = false
+        }
+      }
+      if (r.runtimeStateTableMissing || r.runtimeStateReadFailed) {
+        setRuntimePersistenceBanner(
+          r.runtimeStateTableMissing
+            ? 'Runtime state unavailable (storage table missing) — council uses live registry engine status.'
+            : 'Runtime state unavailable — council uses live registry engine status.',
+        )
+      } else {
+        setRuntimePersistenceBanner(null)
       }
       if (r.bundle) {
         setRecoverRuntimeBanner(true)
@@ -8167,6 +8188,7 @@ function Home() {
               mode={continuityMode}
               lastRecoveredAt={continuityRecoverAt}
               recoverBanner={recoverRuntimeBanner}
+              persistNote={runtimePersistenceBanner}
             />
           </div>
           <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />

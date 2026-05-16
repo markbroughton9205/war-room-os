@@ -1,4 +1,5 @@
 import { WAR_ROOM_RUNTIME_STATE_SCOPE } from '@/lib/runtime/runtimeContinuityConstants'
+import { isWarRoomRuntimeStateRelationMissingError } from '@/lib/runtime/runtimeStatePersistenceGuards'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 
 type RuntimeStateRow = {
@@ -28,6 +29,10 @@ export type SetRuntimeStateOptions = {
   expiresAt?: string | null
 }
 
+export type RuntimeStatePersistResult =
+  | { ok: true }
+  | { ok: false; tableMissing?: boolean }
+
 export async function getRuntimeState<T = unknown>(key: string, scope = WAR_ROOM_RUNTIME_STATE_SCOPE): Promise<T | null> {
   const supabase = getAdminOrNull()
   if (!supabase) return null
@@ -42,7 +47,7 @@ export async function getRuntimeState<T = unknown>(key: string, scope = WAR_ROOM
   if (exp) {
     const t = Date.parse(exp)
     if (Number.isFinite(t) && t < Date.now()) {
-      await deleteRuntimeState(key, scope)
+      void deleteRuntimeState(key, scope)
       return null
     }
   }
@@ -53,9 +58,9 @@ export async function setRuntimeState(
   key: string,
   value: unknown,
   options?: SetRuntimeStateOptions,
-): Promise<boolean> {
+): Promise<RuntimeStatePersistResult> {
   const supabase = getAdminOrNull()
-  if (!supabase) return false
+  if (!supabase) return { ok: false }
   const scope = options?.scope ?? WAR_ROOM_RUNTIME_STATE_SCOPE
   const row: Record<string, unknown> = {
     scope,
@@ -67,14 +72,16 @@ export async function setRuntimeState(
     row.expires_at = options.expiresAt
   }
   const { error } = await supabase.from('war_room_runtime_state').upsert(row, { onConflict: 'scope,key' })
-  return !error
+  if (!error) return { ok: true }
+  return { ok: false, tableMissing: isWarRoomRuntimeStateRelationMissingError(error) }
 }
 
-export async function deleteRuntimeState(key: string, scope = WAR_ROOM_RUNTIME_STATE_SCOPE): Promise<boolean> {
+export async function deleteRuntimeState(key: string, scope = WAR_ROOM_RUNTIME_STATE_SCOPE): Promise<RuntimeStatePersistResult> {
   const supabase = getAdminOrNull()
-  if (!supabase) return false
+  if (!supabase) return { ok: false }
   const { error } = await supabase.from('war_room_runtime_state').delete().eq('scope', scope).eq('key', key)
-  return !error
+  if (!error) return { ok: true }
+  return { ok: false, tableMissing: isWarRoomRuntimeStateRelationMissingError(error) }
 }
 
 export async function listRuntimeState(scope = WAR_ROOM_RUNTIME_STATE_SCOPE): Promise<RuntimeStateRow[]> {

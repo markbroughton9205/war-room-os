@@ -14,10 +14,12 @@ export function RuntimeContinuityIndicator({
   mode,
   lastRecoveredAt,
   recoverBanner,
+  persistNote,
 }: {
   mode: RuntimeContinuityIndicatorMode
   lastRecoveredAt: string | null
   recoverBanner: boolean
+  persistNote?: string | null
 }) {
   const t = tone[mode]
   return (
@@ -28,6 +30,14 @@ export function RuntimeContinuityIndicator({
           style={{ borderColor: t.border, color: t.color, background: t.bg }}
         >
           Recovered previous runtime state (historical until live probes refresh).
+        </div>
+      ) : null}
+      {persistNote?.trim() ? (
+        <div
+          className="rounded border border-amber-500/35 bg-amber-950/35 px-2 py-1 text-[9px] font-bold tracking-widest text-amber-100/90"
+          title="Durable runtime snapshots are unavailable; live provider registry status is still shown when loaded."
+        >
+          {persistNote}
         </div>
       ) : null}
       <div

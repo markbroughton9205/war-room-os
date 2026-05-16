@@ -1,4 +1,5 @@
 import { RUNTIME_STATE_KEYS } from '@/lib/runtime/runtimeContinuityConstants'
+import type { EngineStatus } from '@/lib/engine-control/types'
 import type { DiagnosticHistoryEvent } from '@/lib/runtime/runtimeContinuityTypes'
 import type { RuntimeIntegrityResponse } from '@/lib/runtime/runtimeIntegrityTypes'
 
@@ -16,6 +17,10 @@ export type RuntimeRecoveryApiResponse = {
     redTeamHoldUnresolved: unknown
   } | null
   error?: string
+  runtimeStateTableMissing?: boolean
+  runtimeStateReadFailed?: boolean
+  fallbackEngines?: EngineStatus[]
+  fallbackProviderRegistryUsed?: boolean
 }
 
 export async function fetchRuntimeRecoveryBundle(): Promise<RuntimeRecoveryApiResponse> {

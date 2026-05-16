@@ -10,6 +10,7 @@ export const WAR_ROOM_AUDIT_CATEGORIES = [
   'event',
   'memory',
   'payment',
+  'runtime',
 ] as const
 export type WarRoomAuditCategory = (typeof WAR_ROOM_AUDIT_CATEGORIES)[number]
 

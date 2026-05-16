@@ -1,3 +1,6 @@
+import { collectEngineStatuses } from '@/lib/engine-control/status'
+import { buildToolRoutingSnapshotFromOrigin, requestOriginFromHeaders } from '@/lib/engine-control/tool-snapshot'
+import type { EngineStatus } from '@/lib/engine-control/types'
 import { RUNTIME_STATE_KEYS, WAR_ROOM_RUNTIME_STATE_SCOPE } from '@/lib/runtime/runtimeContinuityConstants'
 import type {
   DiagnosticHistoryEvent,
@@ -9,6 +12,10 @@ import { tryParseRuntimeIntegrityPartial } from '@/lib/runtime/runtimeIntegrityS
 import { mapIntegrityRowsToRepairs } from '@/lib/runtime/runtimeRepairMap'
 import type { RuntimeIntegrityResponse } from '@/lib/runtime/runtimeIntegrityTypes'
 import { deleteRuntimeState, getRuntimeState, isRuntimeStatePersistenceConfigured, setRuntimeState } from '@/lib/runtime/runtimeStateStore'
+import {
+  auditRuntimePersistenceEvent,
+  probeWarRoomRuntimeStateReachable,
+} from '@/lib/runtime/runtimeStatePersistenceGuards'
 
 const MAX_PATCH_BYTES = 96_000
 const MAX_DIAGNOSTIC_EVENTS = 200
@@ -78,7 +85,17 @@ function eventsFromIntegritySnapshot(snap: RuntimeIntegrityResponse, at: string)
   return out.slice(0, 40)
 }
 
-export async function readRuntimeContinuityBundle(): Promise<{
+async function loadFallbackEngineStatusesForRuntimeApi(): Promise<EngineStatus[]> {
+  try {
+    const origin = await requestOriginFromHeaders()
+    const tools = await buildToolRoutingSnapshotFromOrigin(origin)
+    return await collectEngineStatuses(tools)
+  } catch {
+    return []
+  }
+}
+
+export type RuntimeContinuityReadResult = {
   persistenceConfigured: boolean
   bundle: {
     recoveredFromStorageAt: string
@@ -89,9 +106,51 @@ export async function readRuntimeContinuityBundle(): Promise<{
     diagnosticModeSummary: DiagnosticModeSummary | null
     redTeamHoldUnresolved: RedTeamHoldUnresolvedPayload | null
   } | null
-}> {
+  runtimeStateTableMissing?: boolean
+  runtimeStateReadFailed?: boolean
+  fallbackEngines?: EngineStatus[]
+  fallbackProviderRegistryUsed?: boolean
+}
+
+export async function readRuntimeContinuityBundle(): Promise<RuntimeContinuityReadResult> {
   if (!isRuntimeStatePersistenceConfigured()) {
     return { persistenceConfigured: false, bundle: null }
+  }
+  const persistenceConfigured = true
+  const probe = await probeWarRoomRuntimeStateReachable()
+  if (!probe.ok) {
+    if (probe.reason === 'no_admin_client') {
+      auditRuntimePersistenceEvent('runtimeStateReadFailed', { phase: 'read_bundle', reason: 'admin_client_throw' })
+      const fallbackEngines = await loadFallbackEngineStatusesForRuntimeApi()
+      if (fallbackEngines.length) {
+        auditRuntimePersistenceEvent('fallbackProviderRegistryUsed', { phase: 'read_bundle', engines: fallbackEngines.map(e => e.id) })
+      }
+      return {
+        persistenceConfigured,
+        bundle: null,
+        runtimeStateReadFailed: true,
+        fallbackEngines,
+        fallbackProviderRegistryUsed: fallbackEngines.length > 0,
+      }
+    }
+    const tableMissing = Boolean(probe.tableMissing)
+    if (tableMissing) {
+      auditRuntimePersistenceEvent('runtimeStateTableMissing', { phase: 'read_bundle', code: probe.code })
+    } else {
+      auditRuntimePersistenceEvent('runtimeStateReadFailed', { phase: 'read_bundle', code: probe.code, message: probe.message })
+    }
+    const fallbackEngines = await loadFallbackEngineStatusesForRuntimeApi()
+    if (fallbackEngines.length) {
+      auditRuntimePersistenceEvent('fallbackProviderRegistryUsed', { phase: 'read_bundle', engines: fallbackEngines.map(e => e.id) })
+    }
+    return {
+      persistenceConfigured,
+      bundle: null,
+      runtimeStateTableMissing: tableMissing,
+      runtimeStateReadFailed: !tableMissing,
+      fallbackEngines,
+      fallbackProviderRegistryUsed: fallbackEngines.length > 0,
+    }
   }
   const scope = WAR_ROOM_RUNTIME_STATE_SCOPE
   const [
@@ -117,8 +176,6 @@ export async function readRuntimeContinuityBundle(): Promise<{
     || rawHistory != null
     || rawModeSummary != null
     || rawHold != null
-
-  const persistenceConfigured = isRuntimeStatePersistenceConfigured()
 
   if (!hasAny) {
     return { persistenceConfigured, bundle: null }
@@ -160,7 +217,9 @@ export type RuntimeStatePostBody = {
   appendDiagnosticEvents?: DiagnosticHistoryEvent[]
 }
 
-export async function applyRuntimeStatePost(body: RuntimeStatePostBody): Promise<{ ok: boolean; error?: string }> {
+export async function applyRuntimeStatePost(
+  body: RuntimeStatePostBody,
+): Promise<{ ok: boolean; error?: string; persistenceUnavailable?: boolean }> {
   if (!isRuntimeStatePersistenceConfigured()) return { ok: false, error: 'Persistence not configured' }
   if (!body || typeof body !== 'object') return { ok: false, error: 'Invalid body' }
 
@@ -182,14 +241,46 @@ export async function applyRuntimeStatePost(body: RuntimeStatePostBody): Promise
     const raw = body.set[RUNTIME_STATE_KEYS.integritySnapshot]
     const snap = parseIntegrityForStorage(raw)
     if (!snap) return { ok: false, error: 'integrity_snapshot invalid' }
-    const ok = await setRuntimeState(RUNTIME_STATE_KEYS.integritySnapshot, raw, { scope })
-    if (!ok) return { ok: false, error: 'Failed to persist integrity_snapshot' }
+  }
+
+  const probe = await probeWarRoomRuntimeStateReachable()
+  if (!probe.ok) {
+    if (probe.reason === 'no_admin_client') {
+      auditRuntimePersistenceEvent('runtimeStateReadFailed', { phase: 'post', reason: 'admin_client_throw' })
+    } else if (probe.tableMissing) {
+      auditRuntimePersistenceEvent('runtimeStateTableMissing', { phase: 'post', code: probe.code })
+    } else {
+      auditRuntimePersistenceEvent('runtimeStateReadFailed', { phase: 'post', code: probe.code, message: probe.message })
+    }
+    return { ok: true, persistenceUnavailable: true }
+  }
+
+  const softUnavailableOnPersist = (): { ok: true; persistenceUnavailable: true } => ({ ok: true, persistenceUnavailable: true })
+
+  if (body.set?.[RUNTIME_STATE_KEYS.integritySnapshot] !== undefined) {
+    const raw = body.set[RUNTIME_STATE_KEYS.integritySnapshot]
+    const snap = parseIntegrityForStorage(raw)!
+    const pr = await setRuntimeState(RUNTIME_STATE_KEYS.integritySnapshot, raw, { scope })
+    if (!pr.ok) {
+      if (pr.tableMissing) {
+        auditRuntimePersistenceEvent('runtimeStateTableMissing', { phase: 'post_write', key: RUNTIME_STATE_KEYS.integritySnapshot })
+        return softUnavailableOnPersist()
+      }
+      return { ok: false, error: 'Failed to persist integrity_snapshot' }
+    }
 
     const derived = eventsFromIntegritySnapshot(snap, new Date().toISOString())
     if (derived.length) {
       const hist = await getRuntimeState(RUNTIME_STATE_KEYS.diagnosticHistory, scope)
       const merged = mergeDiagnosticHistory(hist, derived)
-      await setRuntimeState(RUNTIME_STATE_KEYS.diagnosticHistory, { events: merged }, { scope })
+      const dh = await setRuntimeState(RUNTIME_STATE_KEYS.diagnosticHistory, { events: merged }, { scope })
+      if (!dh.ok) {
+        if (dh.tableMissing) {
+          auditRuntimePersistenceEvent('runtimeStateTableMissing', { phase: 'post_write', key: RUNTIME_STATE_KEYS.diagnosticHistory })
+          return softUnavailableOnPersist()
+        }
+        return { ok: false, error: 'Failed to persist diagnostic history' }
+      }
     }
   }
 
@@ -198,12 +289,24 @@ export async function applyRuntimeStatePost(body: RuntimeStatePostBody): Promise
       if (key === RUNTIME_STATE_KEYS.integritySnapshot) continue
       if (!ALLOWED_KEYS.has(key)) continue
       if (value === null) {
-        const ok = await deleteRuntimeState(key, scope)
-        if (!ok) return { ok: false, error: `Failed to delete ${key}` }
+        const dr = await deleteRuntimeState(key, scope)
+        if (!dr.ok) {
+          if (dr.tableMissing) {
+            auditRuntimePersistenceEvent('runtimeStateTableMissing', { phase: 'post_delete', key })
+            return softUnavailableOnPersist()
+          }
+          return { ok: false, error: `Failed to delete ${key}` }
+        }
         continue
       }
-      const ok = await setRuntimeState(key, value, { scope })
-      if (!ok) return { ok: false, error: `Failed to persist ${key}` }
+      const sr = await setRuntimeState(key, value, { scope })
+      if (!sr.ok) {
+        if (sr.tableMissing) {
+          auditRuntimePersistenceEvent('runtimeStateTableMissing', { phase: 'post_write', key })
+          return softUnavailableOnPersist()
+        }
+        return { ok: false, error: `Failed to persist ${key}` }
+      }
     }
   }
 
@@ -229,7 +332,14 @@ export async function applyRuntimeStatePost(body: RuntimeStatePostBody): Promise
     if (sanitized.length) {
       const hist = await getRuntimeState(RUNTIME_STATE_KEYS.diagnosticHistory, scope)
       const merged = mergeDiagnosticHistory(hist, sanitized)
-      await setRuntimeState(RUNTIME_STATE_KEYS.diagnosticHistory, { events: merged }, { scope })
+      const ar = await setRuntimeState(RUNTIME_STATE_KEYS.diagnosticHistory, { events: merged }, { scope })
+      if (!ar.ok) {
+        if (ar.tableMissing) {
+          auditRuntimePersistenceEvent('runtimeStateTableMissing', { phase: 'post_append_diag', key: RUNTIME_STATE_KEYS.diagnosticHistory })
+          return softUnavailableOnPersist()
+        }
+        return { ok: false, error: 'Failed to persist diagnostic append' }
+      }
     }
   }
 

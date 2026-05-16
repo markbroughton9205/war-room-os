@@ -4,8 +4,9 @@
 -- Purpose: single idempotent script for greenfield or repair installs. Merges
 --   war_room_phase3.sql, war_room_phase3b.sql, war_room_phase4_permissions.sql,
 --   war_room_phase4_events.sql, war_room_phase6_memory.sql, war_room_payments.sql,
---   plus war_room_files (files.sql), build_requests (build_requests.sql), and
---   income_opportunities (income_opportunities.sql) used by operational snapshot + income APIs.
+--   plus war_room_files (files.sql), build_requests (build_requests.sql),
+--   income_opportunities (income_opportunities.sql), and war_room_runtime_state.sql used
+--   for operational snapshot + income APIs + continuity KV.
 --
 -- Not included here (no schema in repo): public.rael_action_queue, public.memories — create
 -- separately if those features are enabled in production.
@@ -157,6 +158,60 @@ create index if not exists war_room_internet_logs_created_idx
   on public.war_room_internet_logs (created_at desc);
 
 -- -----------------------------------------------------------------------------
+-- Operational runtime state — durable key/value snapshots (service-role API; RLS)
+-- Matches supabase/war_room_runtime_state.sql
+-- -----------------------------------------------------------------------------
+create table if not exists public.war_room_runtime_state (
+  id uuid primary key default gen_random_uuid(),
+  key text not null,
+  value jsonb not null default '{}'::jsonb,
+  scope text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  expires_at timestamptz null,
+  constraint war_room_runtime_state_scope_key_unique unique (scope, key)
+);
+
+create index if not exists war_room_runtime_state_scope_idx
+  on public.war_room_runtime_state (scope);
+
+create index if not exists war_room_runtime_state_expires_idx
+  on public.war_room_runtime_state (expires_at)
+  where expires_at is not null;
+
+create or replace function public.war_room_runtime_state_touch_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists war_room_runtime_state_touch_updated_at on public.war_room_runtime_state;
+
+create trigger war_room_runtime_state_touch_updated_at
+  before update on public.war_room_runtime_state
+  for each row
+  execute procedure public.war_room_runtime_state_touch_updated_at();
+
+alter table public.war_room_runtime_state enable row level security;
+
+grant usage on schema public to anon, authenticated, service_role;
+
+grant select, insert, update, delete on table public.war_room_runtime_state to service_role;
+
+drop policy if exists war_room_runtime_state_service_role_all on public.war_room_runtime_state;
+
+create policy war_room_runtime_state_service_role_all
+  on public.war_room_runtime_state
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+-- -----------------------------------------------------------------------------
 -- Unified audit — cross-cutting trail (includes payment + memory + events)
 -- -----------------------------------------------------------------------------
 create table if not exists public.war_room_audit_logs (
@@ -180,7 +235,8 @@ create table if not exists public.war_room_audit_logs (
       'permissions',
       'event',
       'memory',
-      'payment'
+      'payment',
+      'runtime'
     )
   )
 );
@@ -209,7 +265,8 @@ alter table public.war_room_audit_logs
       'permissions',
       'event',
       'memory',
-      'payment'
+      'payment',
+      'runtime'
     )
   );
 
