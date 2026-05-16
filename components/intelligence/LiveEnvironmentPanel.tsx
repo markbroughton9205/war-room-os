@@ -4,7 +4,7 @@ import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePac
 import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import { describeLocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import { buildWeatherEnvironmentSnapshot } from '@/lib/intelligence/environment/weatherEnvironment'
-import { buildHoroscopeSnapshot } from '@/lib/intelligence/environment/horoscopeEnvironment'
+import { buildHoroscopeSnapshot, type AstrologyInterpretationMode } from '@/lib/intelligence/environment/horoscopeEnvironment'
 import { buildNewsCardsFromIntelligence } from '@/lib/intelligence/environment/newsCards'
 
 function modeLabel(mode: LocationMode): string {
@@ -17,19 +17,23 @@ export function LiveEnvironmentPanel({
   liveResearchHud,
   location,
   horoscopeEnabled,
+  astrologyMode,
   onSetLocationMode,
   onForgetLocation,
   onToggleHoroscope,
+  onSetAstrologyMode,
 }: {
   liveResearchHud: LiveResearchClientUi | null
   location: CommanderLocationState
   horoscopeEnabled: boolean
+  astrologyMode: AstrologyInterpretationMode
   onSetLocationMode: (mode: LocationMode) => void
   onForgetLocation: () => void
   onToggleHoroscope: () => void
+  onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
 }) {
   const weather = buildWeatherEnvironmentSnapshot(location)
-  const horoscope = buildHoroscopeSnapshot()
+  const horoscope = buildHoroscopeSnapshot('Aries', new Date(), astrologyMode)
   const cards = buildNewsCardsFromIntelligence(liveResearchHud?.intelligence)
   const sourceHealth = liveResearchHud?.intelligence?.retrieval
     ? liveResearchHud.intelligence.retrieval.success ? 'Retrieval ok' : 'Retrieval gap'
@@ -96,16 +100,43 @@ export function LiveEnvironmentPanel({
           </p>
         </div>
 
-        <div className="rounded border border-white/10 bg-black/25 p-2">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Horoscope</p>
-            <button type="button" className="text-[8px] uppercase tracking-widest text-sky-300" onClick={onToggleHoroscope}>
-              {horoscopeEnabled ? 'On' : 'Off'}
-            </button>
+        <details className="rounded border border-white/10 bg-black/25 p-2">
+          <summary className="cursor-pointer list-none">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Horoscope</p>
+              <button type="button" className="text-[8px] uppercase tracking-widest text-sky-300" onClick={onToggleHoroscope}>
+                {horoscopeEnabled ? 'On' : 'Off'}
+              </button>
+            </div>
+            <p className="mt-1 text-[10px] text-slate-300">{horoscopeEnabled ? horoscope.interpretation : 'Optional astrology widget off.'}</p>
+            <p className="mt-1 text-[8px] text-slate-600">{horoscope.framingNote}</p>
+          </summary>
+          <div className="mt-2 border-t border-white/10 pt-2">
+            <div className="flex flex-wrap gap-1">
+              {(['spiritual', 'ancestral', 'symbolic', 'neutral', 'entertainment'] as AstrologyInterpretationMode[]).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  className="rounded px-1.5 py-0.5 text-[8px] uppercase tracking-widest"
+                  style={{
+                    border: astrologyMode === mode ? '1px solid #c084fc' : '1px solid rgba(255,255,255,0.12)',
+                    color: astrologyMode === mode ? '#d8b4fe' : '#94a3b8',
+                  }}
+                  onClick={() => onSetAstrologyMode(mode)}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 text-[8px] uppercase tracking-widest text-slate-500">
+              <p>Sign: {horoscope.sign}</p>
+              <p>Date: {horoscope.date}</p>
+              <p>Provider: {horoscope.provider}</p>
+              <p>Moon phase: {horoscope.moonPhase ?? 'not loaded'}</p>
+              <p>Planetary data: {horoscope.planetaryFacts.length ? horoscope.planetaryFacts.join(' · ') : 'not loaded'}</p>
+            </div>
           </div>
-          <p className="mt-1 text-[10px] text-slate-300">{horoscopeEnabled ? horoscope.interpretation : 'Optional symbolic widget off.'}</p>
-          <p className="mt-1 text-[8px] text-slate-600">Symbolic, not verified prediction.</p>
-        </div>
+        </details>
 
         <div className="rounded border border-white/10 bg-black/25 p-2">
           <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">News Cards</p>

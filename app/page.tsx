@@ -78,6 +78,7 @@ import {
   type CommanderLocationState,
   type LocationMode,
 } from '@/lib/intelligence/environment/locationPolicy'
+import type { AstrologyInterpretationMode } from '@/lib/intelligence/environment/horoscopeEnvironment'
 import { DEFAULT_COUNCIL_COMMAND, type CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { councilModeExtensionWarnings, resolveActiveCommand } from '@/lib/council/commandAuthority'
 import {
@@ -4846,6 +4847,7 @@ function Home() {
   const [liveResearchHud, setLiveResearchHud] = useState<LiveResearchClientUi | null>(null)
   const [commanderLocation, setCommanderLocation] = useState<CommanderLocationState>(DEFAULT_COMMANDER_LOCATION)
   const [horoscopeEnabled, setHoroscopeEnabled] = useState(false)
+  const [astrologyMode, setAstrologyMode] = useState<AstrologyInterpretationMode>('spiritual')
   const setLocationMode = useCallback((mode: LocationMode) => {
     setCommanderLocation(prev => {
       if (mode === 'off') return { mode: 'off', historyStored: false }
@@ -9324,9 +9326,11 @@ function Home() {
         liveResearchHud={liveResearchHud}
         location={commanderLocation}
         horoscopeEnabled={horoscopeEnabled}
+        astrologyMode={astrologyMode}
         onSetLocationMode={setLocationMode}
         onForgetLocation={forgetCommanderLocation}
         onToggleHoroscope={() => setHoroscopeEnabled(prev => !prev)}
+        onSetAstrologyMode={setAstrologyMode}
       />
 
       {standingPermissionStrip}
