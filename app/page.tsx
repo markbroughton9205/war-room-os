@@ -155,6 +155,14 @@ import { formatActionQueuePersistFailureMessage, isActionQueuePostSucceeded, typ
 import { buildPlatformBrief } from '@/lib/council/platformBrief'
 import { createMessageId } from '@/lib/council/messageIds'
 import { cloudEngineReadinessLabel, cloudEngineStripStatus, internetToolReadinessParts } from '@/lib/warRoom/providerReadiness'
+import { windowLiveChatMessages } from '@/lib/conversation/liveWindow'
+import {
+  formatRecallResponse,
+  parseRecallCommand,
+  type ParsedRecallCommand,
+  type RecallSummaryPreview,
+  type RecallTranscriptPreview,
+} from '@/lib/memory/recallCommands'
 import type {
   RedTeamCoderDiagnosisResult,
   RedTeamCoderIssue,
@@ -280,6 +288,20 @@ function isRaelCouncilMessage(message: CouncilMessage): boolean {
 
 function isCouncilFamilyResponse(message: CouncilMessage): boolean {
   return message.messageType === 'response' && !isRaelCouncilMessage(message) && message.familyName !== 'SYSTEM'
+}
+
+function archiveRoleForMessage(message: CouncilMessage): 'user' | 'assistant' | 'system' {
+  if (isRaelCouncilMessage(message)) return 'user'
+  if (message.familyName === 'SYSTEM' || message.messageType === 'system') return 'system'
+  return 'assistant'
+}
+
+function archiveTopicForMessage(message: CouncilMessage): string | null {
+  const text = `${message.familyName} ${message.content}`.toLowerCase()
+  if (/\bgrok\b|\bxai\b/.test(text)) return 'grok'
+  if (/\beconomic ops\b|\bopportunity scout\b|\bincome radar\b/.test(text)) return 'economic_ops'
+  if (/\bincome\b|\brevenue\b|\bopportunit(y|ies)\b|\bclient\b|\bleads?\b/.test(text)) return 'income_ideas'
+  return null
 }
 
 type ToneMode = 'casual' | 'build' | 'business' | 'debate' | 'reflection'
@@ -1018,9 +1040,40 @@ const MessageBubble = memo(function MessageBubble({ msg, diagnosticsOpen }: { ms
   )
 })
 
-const CouncilMessageRows = memo(function CouncilMessageRows({ messages }: { messages: CouncilMessage[] }) {
+const CouncilMessageRows = memo(function CouncilMessageRows({
+  messages,
+  hiddenCount,
+  onViewArchive,
+  onSummarizeSession,
+  onRecallEconomicOps,
+}: {
+  messages: CouncilMessage[]
+  hiddenCount: number
+  onViewArchive: () => void
+  onSummarizeSession: () => void
+  onRecallEconomicOps: () => void
+}) {
   return (
     <>
+      {hiddenCount > 0 ? (
+        <div
+          className="mb-4 ml-11 flex flex-wrap items-center gap-2 rounded px-3 py-2 text-xs"
+          style={{ background: 'rgba(96,165,250,0.07)', border: '1px solid rgba(96,165,250,0.24)', color: '#93C5FD' }}
+        >
+          <span className="tracking-widest">
+            Older messages archived. Use recall to retrieve. {hiddenCount} hidden from live view.
+          </span>
+          <button type="button" onClick={onViewArchive} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #60A5FA', color: '#BFDBFE' }}>
+            View Archive
+          </button>
+          <button type="button" onClick={onSummarizeSession} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #FFD700', color: '#FFD700' }}>
+            Summarize Session
+          </button>
+          <button type="button" onClick={onRecallEconomicOps} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #34D399', color: '#86EFAC' }}>
+            Recall Economic Ops
+          </button>
+        </div>
+      ) : null}
       {messages.map(msg => (
         <MessageBubble key={msg.id} msg={msg} diagnosticsOpen={false} />
       ))}
@@ -4396,6 +4449,10 @@ function Home() {
   const { store: council, dispatch: councilDispatch, mounted: councilMounted, newSessionId } =
     useCouncilSession(councilPersistenceCtx)
   const messages = council.messages
+  const liveChatWindow = useMemo(() => windowLiveChatMessages(messages), [messages])
+  const visibleCouncilMessages = liveChatWindow.visibleMessages
+  const archivedCouncilMessages = liveChatWindow.archivedMessages
+  const hiddenCouncilMessageCount = liveChatWindow.hiddenCount
   const [internetStatus, setInternetStatus] = useState<InternetStatusResponse>(INITIAL_INTERNET_STATUS)
   const [repoStatus, setRepoStatus] = useState<RepoStatus>(INITIAL_REPO_STATUS)
   const [rollbackStatus, setRollbackStatus] = useState<RollbackStatus>(INITIAL_ROLLBACK_STATUS)
@@ -4449,6 +4506,7 @@ function Home() {
   const councilChannelOpenRef = useRef(false)
   const councilSnapRef = useRef(council)
   const messagesRef = useRef(messages)
+  const archivedMessageIdsRef = useRef<Set<string>>(new Set())
   const redTeamCoderDiagnosisInFlightRef = useRef(false)
   const redTeamCoderLastDiagnosedMessageRef = useRef<string | null>(null)
   const redTeamCoderRaelSentAtRef = useRef<Record<string, number>>({})
@@ -5088,6 +5146,43 @@ function Home() {
       return null
     }
   }
+
+  useEffect(() => {
+    if (!persistenceAvailable || !liveCouncilConvId || archivedCouncilMessages.length === 0) return
+    const batch = archivedCouncilMessages.filter(message => !archivedMessageIdsRef.current.has(message.id))
+    if (!batch.length) return
+
+    batch.forEach(message => archivedMessageIdsRef.current.add(message.id))
+    const latestDecree = [...messagesRef.current].reverse().find(isRaelCouncilMessage)
+
+    void fetch('/api/memory/archive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: liveCouncilConvId,
+        createSummary: true,
+        messages: batch.map(message => ({
+          id: message.id,
+          sessionId: liveCouncilConvId,
+          decreeId: latestDecree?.id ?? null,
+          timestamp: new Date().toISOString(),
+          role: archiveRoleForMessage(message),
+          family: message.familyName,
+          provider: message.provider || null,
+          content: message.content,
+          messageType: message.messageType,
+          tags: [message.messageType, message.familyName].filter(Boolean),
+          topic: archiveTopicForMessage(message),
+          sourceMode: 'live_chat_window',
+          operatorId: null,
+          operatorName: "Ra'el",
+          visibility: 'private',
+        })),
+      }),
+    }).catch(() => {
+      batch.forEach(message => archivedMessageIdsRef.current.delete(message.id))
+    })
+  }, [archivedCouncilMessages, liveCouncilConvId, persistenceAvailable])
 
   const isTransientProviderStatusContent = (
     content: string,
@@ -8042,8 +8137,80 @@ function Home() {
     })
   }
 
+  const executeRecallCommand = async (decree: string, recallCommand: ParsedRecallCommand) => {
+    const now = new Date().toLocaleTimeString()
+    const recallUserMessage: CouncilMessage = {
+      id: createMessageId('rael-recall'),
+      familyName: "RA'EL",
+      content: decree,
+      timestamp: now,
+      color: '#FFD700',
+      icon: '⚔',
+      provider: '',
+      messageType: 'decree',
+    }
+    addMessages([recallUserMessage])
+    void postLiveCouncilMessage(
+      { role: 'user', content: decree, family: "RA'EL" },
+      { responseSuccessful: true },
+    )
+
+    try {
+      const params = new URLSearchParams({
+        command: recallCommand.kind,
+        limit: recallCommand.summarize ? '30' : '20',
+      })
+      if (liveCouncilConvId) params.set('sessionId', liveCouncilConvId)
+      const res = await fetch(`/api/memory/archive?${params.toString()}`, { cache: 'no-store' })
+      const payload = await res.json() as {
+        command?: ParsedRecallCommand
+        records?: RecallTranscriptPreview[]
+        summaries?: RecallSummaryPreview[]
+      }
+      const content = formatRecallResponse({
+        command: payload.command ?? recallCommand,
+        records: Array.isArray(payload.records) ? payload.records : [],
+        summaries: Array.isArray(payload.summaries) ? payload.summaries : [],
+        persistenceAvailable: res.headers.get('x-war-room-persistence') === 'available',
+      })
+      addMessages([{
+        id: createMessageId('memory-recall'),
+        familyName: 'MEMORY ARCHIVE',
+        content,
+        timestamp: new Date().toLocaleTimeString(),
+        color: '#60A5FA',
+        icon: '◷',
+        provider: 'archive',
+        messageType: recallCommand.summarize ? 'summary' : 'recall',
+      }])
+      void postLiveCouncilMessage(
+        { role: 'system', content, family: 'MEMORY ARCHIVE' },
+        { responseSuccessful: true },
+      )
+      setMemoryNotification('Memory archive recalled into live view.')
+    } catch {
+      const content = 'Memory archive recall failed. Raw transcript remains preserved; try again after persistence recovers.'
+      addMessages([{
+        id: createMessageId('memory-recall-error'),
+        familyName: 'MEMORY ARCHIVE',
+        content,
+        timestamp: new Date().toLocaleTimeString(),
+        color: '#F87171',
+        icon: '!',
+        provider: 'archive',
+        messageType: 'system',
+      }])
+    }
+  }
+
   const sendRaelDecree = async (decree: string, mode?: CouncilMode) => {
     setExpansionPrompt(null)
+
+    const recallCommand = parseRecallCommand(decree)
+    if (recallCommand) {
+      await executeRecallCommand(decree, recallCommand)
+      return
+    }
 
     /*
      * Ra’el directive source: Live Council composer (`sendRaelDecree` → `submitDecree`).
@@ -8125,6 +8292,21 @@ function Home() {
       maxFamilies: 4,
     }
     window.setTimeout(() => void submitDecree('summarize council discussion', 'summarize'), 0)
+  }
+
+  const handleViewArchive = () => {
+    const parsed = parseRecallCommand('show archive')
+    if (parsed) void executeRecallCommand('show archive', parsed)
+  }
+
+  const handleSummarizeSessionArchive = () => {
+    const parsed = parseRecallCommand('summarize last session')
+    if (parsed) void executeRecallCommand('summarize last session', parsed)
+  }
+
+  const handleRecallEconomicOps = () => {
+    const parsed = parseRecallCommand('recall economic ops')
+    if (parsed) void executeRecallCommand('recall economic ops', parsed)
   }
 
   const cycleFamilyDuty = (fid: CouncilOrchestrationFamily) => {
@@ -8749,7 +8931,13 @@ function Home() {
           onScroll={handleScroll}
           className="max-h-[58vh] min-h-[22rem] overflow-y-auto px-6 py-2"
         >
-          <CouncilMessageRows messages={messages} />
+          <CouncilMessageRows
+            messages={visibleCouncilMessages}
+            hiddenCount={hiddenCouncilMessageCount}
+            onViewArchive={handleViewArchive}
+            onSummarizeSession={handleSummarizeSessionArchive}
+            onRecallEconomicOps={handleRecallEconomicOps}
+          />
 
           {expansionPrompt && (
             <ExpansionPermissionPrompt
