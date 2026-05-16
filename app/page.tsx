@@ -4943,6 +4943,8 @@ function Home() {
       responseSuccessful?: boolean
       providerRuntime?: ProviderFamilyOutcomeStatus
       transientProviderStatus?: boolean
+      allowProviderFailureMessage?: boolean
+      directInvocationMetadata?: Record<string, unknown>
     },
   ): Promise<string | null> => {
     if (
@@ -4952,6 +4954,8 @@ function Home() {
       return null
     }
     if (
+      !opts?.allowProviderFailureMessage
+      &&
       (input.role === 'system' || input.role === 'assistant')
       && shouldSuppressProviderFailureFromChatStream(input.content, { diagnosticsOpen: operatorTab === 'diagnostics' })
     ) {
@@ -4975,6 +4979,7 @@ function Home() {
             responseSuccessful: opts?.responseSuccessful === true,
             ...(opts?.providerRuntime ? { providerRuntime: opts.providerRuntime } : {}),
             ...(opts?.transientProviderStatus ? { transientProviderStatus: true } : {}),
+            ...(opts?.directInvocationMetadata ? { directInvocation: opts.directInvocationMetadata } : {}),
           },
         }),
       })
@@ -5027,12 +5032,16 @@ function Home() {
     messageIds?: string[]
     persistedMessageIds?: string[]
     includeGenericRecovery?: boolean
-  }) => {
+    keepMessageIds?: string[]
+  }): number => {
     const ids = new Set(args.messageIds ?? [])
+    const keepIds = new Set(args.keepMessageIds ?? [])
     const latestRaelIndex = messagesRef.current.findLastIndex(isRaelCouncilMessage)
-    let removed = false
-    const nextMessages = messagesRef.current.filter((message, index) => {
-      if (index <= latestRaelIndex) return true
+    const removeIds: string[] = []
+    for (let index = 0; index < messagesRef.current.length; index += 1) {
+      const message = messagesRef.current[index]!
+      if (keepIds.has(message.id)) continue
+      if (index <= latestRaelIndex) continue
       const matchesTrackedId = ids.has(message.id)
       const matchesTransientStatus =
         message.familyName === 'SYSTEM'
@@ -5040,14 +5049,12 @@ function Home() {
           includeGenericRecovery: args.includeGenericRecovery,
         })
       if (matchesTrackedId || matchesTransientStatus) {
-        removed = true
-        return false
+        removeIds.push(message.id)
       }
-      return true
-    })
+    }
 
-    if (removed) {
-      councilDispatch({ type: 'SET_MESSAGES', payload: nextMessages })
+    if (removeIds.length > 0) {
+      councilDispatch({ type: 'REMOVE_MESSAGES', payload: { ids: removeIds } })
     }
 
     const providerError = councilSnapRef.current.providerErrorMessage
@@ -5063,6 +5070,52 @@ function Home() {
     if (args.persistedMessageIds?.length) {
       void deleteLiveCouncilMessages(args.persistedMessageIds)
     }
+    return removeIds.length
+  }
+
+  const terminalReasonForDirectInvocation = (
+    cell: { runtime: ProviderFamilyOutcomeStatus; runtimeDetail?: string; textOut: string | null },
+  ): 'timeout' | 'unavailable' | 'error' | 'no_response' => {
+    const detail = cell.runtimeDetail ?? ''
+    if (cell.runtime === 'TIMED_OUT' || /\b(timeout|timed\s+out|abort|deadline)\b/i.test(detail)) return 'timeout'
+    if (cell.runtime === 'SKIPPED' || /\b(unavailable|not configured|engine status unknown|engine_unavailable|local_unavailable)\b/i.test(detail)) return 'unavailable'
+    if (cell.runtime === 'FAILED' && detail.trim()) return 'error'
+    return 'no_response'
+  }
+
+  const terminalTextForDirectInvocation = (
+    family: CouncilOrchestrationFamily,
+    reason: 'timeout' | 'unavailable' | 'error' | 'no_response',
+    detail?: string,
+  ): string => {
+    const label = COUNCIL_ROSTER.find(r => r.id === family)?.label ?? family
+    if (reason === 'timeout') {
+      return family === 'grok' ? 'Grok Family timed out after 25s.' : `${label} timed out.`
+    }
+    if (reason === 'unavailable') return `${label} unavailable.`
+    if (reason === 'error') {
+      const clean = detail?.replace(/\s+/g, ' ').trim().slice(0, 180)
+      return clean ? `${label}: ${clean}` : `${label} unavailable.`
+    }
+    return `${label} did not return a response.`
+  }
+
+  const emitDirectInvocationTerminalDebug = (metadata: {
+    directInvocationTarget: CouncilOrchestrationFamily
+    finalVisibleMessageEmitted: boolean
+    temporaryMessagesRemoved: number
+    terminalReason: 'success' | 'timeout' | 'unavailable' | 'error' | 'no_response'
+  }) => {
+    console.debug('[Live Council] direct_invocation_terminal', metadata)
+    void fetch('/api/events/emit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'audit.logged',
+        source: 'system',
+        payload: metadata,
+      }),
+    }).catch(() => undefined)
   }
 
   const emitDecreeEvents = async (decree: string, shouldEmit: boolean) => {
@@ -6161,17 +6214,6 @@ function Home() {
       console.warn('[council-session] suppressed_stale_autonomous_reveal')
       return
     }
-    if (
-      text.trim()
-      && councilRevealSource === 'decree'
-      && activeCouncilCommandRef.current.directInvocation
-      && activeCouncilCommandRef.current.targetFamilies[0] === family
-    ) {
-      clearTransientProviderStatusAfterSuccess({
-        family,
-        includeGenericRecovery: true,
-      })
-    }
     const inputTokens = estimateTokens(inputText)
     const usageName = mapOrchFamilyToUsage(family)
     const nextUsageRows = BASE_USAGE_ROWS.map(row => {
@@ -6198,6 +6240,23 @@ function Home() {
       streamingLabel: vis.streamingLabel,
       instant: true,
     })
+    if (
+      text.trim()
+      && councilRevealSource === 'decree'
+      && activeCouncilCommandRef.current.directInvocation
+      && activeCouncilCommandRef.current.targetFamilies[0] === family
+    ) {
+      const temporaryMessagesRemoved = clearTransientProviderStatusAfterSuccess({
+        family,
+        includeGenericRecovery: true,
+      })
+      emitDirectInvocationTerminalDebug({
+        directInvocationTarget: family,
+        finalVisibleMessageEmitted: true,
+        temporaryMessagesRemoved,
+        terminalReason: 'success',
+      })
+    }
     const finalCost = totalUsageCost(nextUsageRows)
     setUsageRows(nextUsageRows)
     setCurrentDecreeCost(finalCost)
@@ -7120,15 +7179,6 @@ function Home() {
           setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
         }
 
-        if (isDirectInvoke && textOut?.trim()) {
-          clearTransientProviderStatusAfterSuccess({
-            family,
-            messageIds: transientDirectStatusMessageIds,
-            persistedMessageIds: transientDirectStatusPersistedIds,
-            includeGenericRecovery: true,
-          })
-        }
-
         return { family, textOut, runtime, runtimeDetail }
       }
 
@@ -7301,6 +7351,48 @@ function Home() {
       const attendanceRevealedFamilies = new Set<CouncilOrchestrationFamily>(
         staged.map(s => s.family),
       )
+
+      const directInvocationTarget =
+        !attendanceWave && cmd.directInvocation ? cmd.targetFamilies[0] : undefined
+      const directInvocationHasStagedResult = Boolean(
+        directInvocationTarget && staged.some(s => s.family === directInvocationTarget && s.textOut.trim()),
+      )
+      if (directInvocationTarget && !directInvocationHasStagedResult) {
+        const cell = cells.find(c => c.family === directInvocationTarget) ?? {
+          family: directInvocationTarget,
+          textOut: null,
+          runtime: 'SKIPPED' as const,
+          runtimeDetail: 'missing_direct_invocation_result',
+        }
+        const terminalReason = terminalReasonForDirectInvocation(cell)
+        const terminalText = terminalTextForDirectInvocation(
+          directInvocationTarget,
+          terminalReason,
+          cell.runtimeDetail,
+        )
+        const terminalMessageId = createMessageId(`direct-terminal-${directInvocationTarget}`)
+        addSystemMessage(terminalText, { id: terminalMessageId, force: true })
+        const temporaryMessagesRemoved = clearTransientProviderStatusAfterSuccess({
+          family: directInvocationTarget,
+          includeGenericRecovery: true,
+          keepMessageIds: [terminalMessageId],
+        })
+        const terminalMetadata = {
+          directInvocationTarget,
+          finalVisibleMessageEmitted: true,
+          temporaryMessagesRemoved,
+          terminalReason,
+        }
+        void postLiveCouncilMessage(
+          { role: 'system', content: terminalText, family: directInvocationTarget },
+          {
+            allowProviderFailureMessage: true,
+            providerRuntime: cell.runtime,
+            directInvocationMetadata: terminalMetadata,
+          },
+        )
+        emitDirectInvocationTerminalDebug(terminalMetadata)
+      }
 
       if (staged.length) {
         anySuccess = true

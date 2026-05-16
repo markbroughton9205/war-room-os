@@ -53,6 +53,7 @@ export type CouncilSessionAction =
   | { type: 'SET_COUNCIL_CHANNEL_OPEN'; payload: boolean }
   | { type: 'SET_MESSAGES'; payload: PersistedCouncilMessage[] }
   | { type: 'ADD_MESSAGES'; payload: PersistedCouncilMessage[] }
+  | { type: 'REMOVE_MESSAGES'; payload: { ids: string[] } }
   | { type: 'UPDATE_MESSAGE'; payload: { id: string; content: string } }
   | { type: 'INCREMENT_AUTONOMOUS' }
   | { type: 'RESET_AUTONOMOUS' }
@@ -124,6 +125,16 @@ export function councilSessionReducer(state: CouncilPersistedV1, action: Council
 
     case 'ADD_MESSAGES':
       return { ...state, messages: [...state.messages, ...action.payload], lastActivityAt: now }
+
+    case 'REMOVE_MESSAGES': {
+      const ids = new Set(action.payload.ids)
+      if (!ids.size) return state
+      return {
+        ...state,
+        messages: state.messages.filter(m => !ids.has(m.id)),
+        lastActivityAt: now,
+      }
+    }
 
     case 'UPDATE_MESSAGE':
       return {
