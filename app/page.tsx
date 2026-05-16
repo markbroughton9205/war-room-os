@@ -83,6 +83,17 @@ import { buildDefaultDiagnosticOrder } from '@/lib/council/turnSequencer'
 import { detectRedTeamRuntimeHold } from '@/lib/council/redTeamHold'
 import { useSequentialDiagnostics } from '@/components/war-room/runtime/useSequentialDiagnostics'
 import { DiagnosticSessionPanel } from '@/components/war-room/runtime/DiagnosticSessionPanel'
+import { RuntimeContinuityIndicator } from '@/components/war-room/runtime/RuntimeContinuityIndicator'
+import { RUNTIME_STATE_KEYS } from '@/lib/runtime/runtimeContinuityConstants'
+import type { DiagnosticHistoryEvent, RedTeamHoldUnresolvedPayload, RuntimeAttendanceSummary } from '@/lib/runtime/runtimeContinuityTypes'
+import type { RuntimeIntegrityPartial } from '@/lib/runtime/finalizeRuntimeIntegrityResponse'
+import type { RuntimeIntegrityResponse } from '@/lib/runtime/runtimeIntegrityTypes'
+import {
+  buildIntegrityPersistencePayload,
+  fetchRuntimeRecoveryBundle,
+  postRuntimeStatePatch,
+  type RuntimeContinuityIndicatorMode,
+} from '@/lib/runtime/runtimeStateClient'
 import {
   buildCouncilRenderPacket,
   type CouncilProviderRuntimeDetails,
@@ -4365,6 +4376,13 @@ function Home() {
   const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
   const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
   const [persistenceAvailable, setPersistenceAvailable] = useState(false)
+  const [continuityMode, setContinuityMode] = useState<RuntimeContinuityIndicatorMode>('Unknown')
+  const [continuityRecoverAt, setContinuityRecoverAt] = useState<string | null>(null)
+  const [recoverRuntimeBanner, setRecoverRuntimeBanner] = useState(false)
+  const [recoveredIntegrityPartial, setRecoveredIntegrityPartial] = useState<RuntimeIntegrityPartial | null>(null)
+  const [recoveredAttendanceSummary, setRecoveredAttendanceSummary] = useState<RuntimeAttendanceSummary | null>(null)
+  const [recoveredDiagnosticHistory, setRecoveredDiagnosticHistory] = useState<DiagnosticHistoryEvent[]>([])
+  const [recoveredRedTeamHold, setRecoveredRedTeamHold] = useState<RedTeamHoldUnresolvedPayload | null>(null)
   const [incomeOperationsMode, setIncomeOperationsMode] = useState(false)
   const [participationToggles, setParticipationToggles] = useState<CouncilParticipationToggles>({
     includeKimi: false,
@@ -4417,6 +4435,10 @@ function Home() {
   const diagnosticHoldTimerRef = useRef<number | null>(null)
   const diagnosticHoldReleaseRef = useRef<(() => void) | null>(null)
   const sequentialDiagnostics = useSequentialDiagnostics()
+  const sequentialDiagnosticsSessionRef = useRef(sequentialDiagnostics.session)
+  useEffect(() => {
+    sequentialDiagnosticsSessionRef.current = sequentialDiagnostics.session
+  }, [sequentialDiagnostics.session])
 
   const releaseSequentialDiagnosticHold = useCallback(() => {
     diagnosticHoldReleaseRef.current?.()
@@ -5520,6 +5542,63 @@ function Home() {
   }, [loadInternetStatus])
 
   useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setContinuityMode('Refreshing')
+      const r = await fetchRuntimeRecoveryBundle()
+      if (cancelled) return
+      if (!r.persistenceConfigured) {
+        setContinuityMode('Unknown')
+        setRecoverRuntimeBanner(false)
+        setContinuityRecoverAt(null)
+        setRecoveredIntegrityPartial(null)
+        setRecoveredAttendanceSummary(null)
+        setRecoveredDiagnosticHistory([])
+        setRecoveredRedTeamHold(null)
+        return
+      }
+      if (r.bundle) {
+        setRecoverRuntimeBanner(true)
+        setContinuityRecoverAt(r.bundle.recoveredFromStorageAt)
+        setRecoveredIntegrityPartial((r.bundle.integrityPartial as RuntimeIntegrityPartial | null) ?? null)
+        setRecoveredAttendanceSummary((r.bundle.attendanceSummary as RuntimeAttendanceSummary | null) ?? null)
+        setRecoveredDiagnosticHistory(Array.isArray(r.bundle.diagnosticHistory) ? r.bundle.diagnosticHistory : [])
+        setRecoveredRedTeamHold((r.bundle.redTeamHoldUnresolved as RedTeamHoldUnresolvedPayload | null) ?? null)
+        setContinuityMode('Historical')
+      } else {
+        setRecoverRuntimeBanner(false)
+        setContinuityRecoverAt(null)
+        setRecoveredIntegrityPartial(null)
+        setRecoveredAttendanceSummary(null)
+        setRecoveredDiagnosticHistory([])
+        setRecoveredRedTeamHold(null)
+        setContinuityMode('Refreshing')
+      }
+      await Promise.all([
+        fetchToolBarHealth().then(setToolBarHealth).catch(() => undefined),
+        loadProviderHealth(),
+        loadInternetStatus(),
+      ])
+      try {
+        const ir = await fetch('/api/runtime/integrity', { cache: 'no-store' })
+        if (!cancelled && ir.ok) {
+          await ir.json()
+          setRecoveredIntegrityPartial(null)
+        }
+      } catch {
+        /* ignore */
+      }
+      if (!cancelled) {
+        setContinuityMode('Live')
+        setRecoverRuntimeBanner(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [loadInternetStatus])
+
+  useEffect(() => {
     const bump = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         void loadInternetStatus()
@@ -6550,6 +6629,7 @@ function Home() {
                 typeof (obj as { generatedAt?: unknown }).generatedAt === 'string'
                   ? (obj as { generatedAt: string }).generatedAt
                   : null
+              void postRuntimeStatePatch({ set: buildIntegrityPersistencePayload(obj as RuntimeIntegrityResponse) })
             } catch {
               diagnosticIntegritySnapshotRef.current = null
               diagnosticIntegrityGeneratedAtRef.current = null
@@ -6900,6 +6980,26 @@ function Home() {
           if (family === 'red_team' && typeof cell.textOut === 'string' && detectRedTeamRuntimeHold(cell.textOut)) {
             sequentialDiagnosticHoldRef.current = true
             sequentialDiagnostics.setHold(true, 'red_team_runtime_hold')
+            const holdOutcomes = orderForGather.map(f => ({
+              family: f,
+              runtime: (outcomeByFamily.get(f)?.runtime ?? 'SKIPPED') as ProviderFamilyOutcomeStatus,
+            }))
+            void postRuntimeStatePatch({
+              appendDiagnosticEvents: [
+                { kind: 'red_team_hold', at: new Date().toISOString(), reason: 'red_team_runtime_hold' },
+              ],
+              set: {
+                [RUNTIME_STATE_KEYS.redTeamHoldUnresolved]: {
+                  capturedAt: new Date().toISOString(),
+                  holdReason: 'red_team_runtime_hold',
+                  panel: {
+                    order: orderForGather,
+                    turnIndex: i,
+                    outcomes: holdOutcomes,
+                  },
+                },
+              },
+            })
             await new Promise<void>(resolve => {
               let settled = false
               const finish = () => {
@@ -6912,6 +7012,7 @@ function Home() {
                 diagnosticHoldReleaseRef.current = null
                 sequentialDiagnosticHoldRef.current = false
                 sequentialDiagnostics.setHold(false)
+                void postRuntimeStatePatch({ set: { [RUNTIME_STATE_KEYS.redTeamHoldUnresolved]: null } })
                 resolve()
               }
               diagnosticHoldReleaseRef.current = finish
@@ -6948,6 +7049,16 @@ function Home() {
         Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>
       >
       providerRuntimeDetails = gatherCellsToProviderRuntimeDetails(cells)
+
+      void postRuntimeStatePatch({
+        set: {
+          [RUNTIME_STATE_KEYS.attendanceSummary]: {
+            capturedAt: new Date().toISOString(),
+            providerRuntimeStates,
+            providerRuntimeDetails,
+          },
+        },
+      })
 
       modeGovernor = resolveModeGovernor({
         decreeText: decree,
@@ -7253,6 +7364,39 @@ function Home() {
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null
       sequentialDiagnosticApiRef.current = null
+      const snap = sequentialDiagnosticsSessionRef.current
+      if (snap?.active && snap.order.length) {
+        const outs = (snap.outcomes ?? []).filter(o => o && o.runtime !== 'IN_FLIGHT')
+        if (outs.length === snap.order.length) {
+          const mode = snap.intentMode && snap.intentMode !== 'none' ? snap.intentMode : 'sequential_diagnostics'
+          const modeLabel =
+            mode === 'runtime_audit'
+              ? 'Runtime audit'
+              : mode === 'repair_review'
+                ? 'Repair review'
+                : mode === 'sequential_diagnostics'
+                  ? 'Sequential diagnostics'
+                  : 'Sequential diagnostic'
+          void postRuntimeStatePatch({
+            appendDiagnosticEvents: [
+              {
+                kind: 'diagnostic_session_complete',
+                at: new Date().toISOString(),
+                intentMode: mode,
+                order: snap.order,
+                outcomes: outs,
+              },
+            ],
+            set: {
+              [RUNTIME_STATE_KEYS.diagnosticModeSummary]: {
+                at: new Date().toISOString(),
+                intentMode: mode,
+                label: modeLabel,
+              },
+            },
+          })
+        }
+      }
       sequentialDiagnostics.stop()
       setTypingFamily(null)
       if (toolIntent) endToolRequest()
@@ -7899,6 +8043,13 @@ function Home() {
             persistenceHealthLabel={persistenceHealthLabel}
             internetHealthLabel={internetHealthLabel}
           />
+          <div className="mt-1">
+            <RuntimeContinuityIndicator
+              mode={continuityMode}
+              lastRecoveredAt={continuityRecoverAt}
+              recoverBanner={recoverRuntimeBanner}
+            />
+          </div>
           <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
@@ -8192,6 +8343,75 @@ function Home() {
                     Open runtime integrity dashboard →
                   </Link>
                 </div>
+                <div className="mb-3">
+                  <RuntimeContinuityIndicator
+                    mode={continuityMode}
+                    lastRecoveredAt={continuityRecoverAt}
+                    recoverBanner={recoverRuntimeBanner}
+                  />
+                </div>
+                {recoveredRedTeamHold ? (
+                  <div
+                    className="mb-3 rounded border border-amber-500/45 px-3 py-2 text-[10px]"
+                    style={{ color: '#fde68a', background: 'rgba(69,26,3,0.35)' }}
+                  >
+                    <div className="font-bold tracking-widest">PREVIOUS RED TEAM HOLD (STORAGE)</div>
+                    <div className="mt-1 text-amber-100/90">
+                      An unresolved hold was recorded in durable state. This is historical context only — diagnostics do not
+                      auto-resume.
+                    </div>
+                    <div className="mt-1 text-white/55">
+                      Captured {new Date(recoveredRedTeamHold.capturedAt).toLocaleString()}
+                      {recoveredRedTeamHold.holdReason ? ` · ${recoveredRedTeamHold.holdReason}` : ''}
+                    </div>
+                  </div>
+                ) : null}
+                {recoveredAttendanceSummary ? (
+                  <div className="mb-3 rounded border border-white/10 px-3 py-2 text-[10px]" style={{ color: '#a8a29e' }}>
+                    <div className="font-bold tracking-widest text-white/70">LAST ATTENDANCE SUMMARY (HISTORICAL)</div>
+                    <div className="mt-1 text-white/55">
+                      Captured {new Date(recoveredAttendanceSummary.capturedAt).toLocaleString()}
+                    </div>
+                    <pre className="mt-1 max-h-28 overflow-auto text-[9px] text-white/60">
+                      {JSON.stringify(recoveredAttendanceSummary.providerRuntimeStates, null, 2)}
+                    </pre>
+                  </div>
+                ) : null}
+                {recoveredDiagnosticHistory.length ? (
+                  <div className="mb-3 rounded border border-white/10 px-3 py-2 text-[10px]" style={{ color: '#a8a29e' }}>
+                    <div className="font-bold tracking-widest text-white/70">DIAGNOSTIC HISTORY (HISTORICAL)</div>
+                    <ul className="mt-1 max-h-40 list-inside list-disc space-y-1 overflow-auto text-[9px] text-white/65">
+                      {recoveredDiagnosticHistory.slice(-12).map((ev, idx) => (
+                        <li key={`${ev.kind}-${idx}-${(ev as { at?: string }).at ?? idx}`}>
+                          {(ev as { kind: string }).kind}
+                          {(ev as { at?: string }).at ? ` · ${new Date((ev as { at: string }).at).toLocaleString()}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {recoveredIntegrityPartial ? (
+                  <details className="mb-3 rounded border border-white/10 px-3 py-2 text-[10px]" style={{ color: '#a8a29e' }}>
+                    <summary className="cursor-pointer font-bold tracking-widest text-white/70">
+                      Historical runtime integrity snapshot (from storage)
+                    </summary>
+                    <div className="mt-1 text-white/50">
+                      Generated {new Date(recoveredIntegrityPartial.generatedAt).toLocaleString()} — superseded after live
+                      integrity refresh.
+                    </div>
+                    <pre className="mt-1 max-h-48 overflow-auto text-[9px] text-white/60">
+                      {JSON.stringify(
+                        {
+                          overall: recoveredIntegrityPartial.subsystems?.length ?? 0,
+                          providers: recoveredIntegrityPartial.providers,
+                          persistence: recoveredIntegrityPartial.persistence,
+                        },
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </details>
+                ) : null}
                 {sequentialDiagnostics.session?.active ? (
                   <div className="mb-4">
                     <DiagnosticSessionPanel
