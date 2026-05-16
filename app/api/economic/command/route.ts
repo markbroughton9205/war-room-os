@@ -24,6 +24,12 @@ function isEconomicFamily(value: string): value is EconomicFamily {
   return value === 'chatgpt' || value === 'claude' || value === 'grok' || value === 'gemini' || value === 'red_team'
 }
 
+function isWorkflowQueueDedupeSchemaMissing(error: string): boolean {
+  return /dedupe_key/i.test(error)
+    && /war_room_economic_workflow_queue/i.test(error)
+    && /(schema cache|column|could not find)/i.test(error)
+}
+
 export async function POST(req: Request) {
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
@@ -70,7 +76,17 @@ export async function POST(req: Request) {
   const workflowDedupeKey = `workflow:${payload.sessionId ?? 'global'}:${parsed.command}:${parsed.domain.id}:${decree.toLowerCase().replace(/\s+/g, ' ').trim()}`
   parsed.workflow.metadata = { ...(parsed.workflow.metadata ?? {}), dedupe_key: workflowDedupeKey }
   const workflow = await upsertEconomicWorkflow(sup.client, parsed.workflow)
-  if (!workflow.ok) return jsonWithPersistence({ error: workflow.error }, true, { status: 500 })
+  if (!workflow.ok) {
+    if (isWorkflowQueueDedupeSchemaMissing(workflow.error)) {
+      return jsonWithPersistence({
+        error: 'schema_migration_required',
+        message: 'Economic workflow queue is missing dedupe_key in Supabase schema cache. Run supabase/war_room_phase7b_queue_schema_patch.sql, then retry.',
+        migration: 'supabase/war_room_phase7b_queue_schema_patch.sql',
+        detail: workflow.error,
+      }, true, { status: 503 })
+    }
+    return jsonWithPersistence({ error: workflow.error }, true, { status: 500 })
+  }
 
   let inserted = 0
   for (const opportunity of extraction.opportunities) {
