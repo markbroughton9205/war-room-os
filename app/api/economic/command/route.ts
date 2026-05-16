@@ -34,6 +34,11 @@ function isWorkflowQueueConflictConstraintMissing(error: string): boolean {
   return /no unique or exclusion constraint matching the on conflict specification/i.test(error)
 }
 
+function isWorkflowQueuePermissionDenied(error: string): boolean {
+  return /permission denied/i.test(error)
+    && /war_room_economic_workflow_queue/i.test(error)
+}
+
 export async function POST(req: Request) {
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
@@ -95,6 +100,15 @@ export async function POST(req: Request) {
         message: 'Economic workflow queue dedupe_key does not have a matching unique constraint for upsert. Run supabase/war_room_phase7b_workflow_queue_conflict_patch.sql, then retry.',
         migration: 'supabase/war_room_phase7b_workflow_queue_conflict_patch.sql',
         onConflict: 'dedupe_key',
+        detail: workflow.error,
+      }, true, { status: 503 })
+    }
+    if (isWorkflowQueuePermissionDenied(workflow.error)) {
+      return jsonWithPersistence({
+        error: 'schema_migration_required',
+        message: 'Economic workflow queue denies service_role writes. Run supabase/war_room_phase7b_workflow_queue_rls_patch.sql, then retry.',
+        migration: 'supabase/war_room_phase7b_workflow_queue_rls_patch.sql',
+        role: 'service_role',
         detail: workflow.error,
       }, true, { status: 503 })
     }

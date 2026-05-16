@@ -206,6 +206,9 @@ alter table public.war_room_economic_provider_effectiveness enable row level sec
 alter table public.war_room_economic_active_missions enable row level security;
 alter table public.war_room_economic_unresolved_operations enable row level security;
 
+grant usage on schema public to service_role;
+grant select, insert, update, delete on table public.war_room_economic_workflow_queue to service_role;
+
 drop policy if exists war_room_economic_domains_service_role_all on public.war_room_economic_operational_domains;
 create policy war_room_economic_domains_service_role_all on public.war_room_economic_operational_domains
   for all to service_role using (true) with check (true);
