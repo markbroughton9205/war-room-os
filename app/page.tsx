@@ -68,6 +68,8 @@ import {
 import { extractProposedCouncilActions } from '@/lib/council/extractCouncilActions'
 import { classifyRaElMessage, type ClassifyRaElMessageResult } from '@/lib/council/conversationIntent'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
+import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
+import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
 import { DEFAULT_COUNCIL_COMMAND, type CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { councilModeExtensionWarnings, resolveActiveCommand } from '@/lib/council/commandAuthority'
@@ -824,6 +826,7 @@ function detectOpportunityScoutIntent(message: string) {
   const text = message.toLowerCase()
 
   return /\b(opportunity scout|scout opportunities|scout for opportunities|search opportunities|find opportunities|income radar search|income scout)\b/.test(text)
+    || resolveEconomicOpsRouting(message).mode === 'economic_ops'
 }
 
 function detectToolIntent(message: string) {
@@ -6692,6 +6695,108 @@ function Home() {
         }
       }
       void refreshQueueActions()
+    }
+
+    const economicRouting = resolveEconomicOpsRouting(decree)
+    const economicCommand = parseEconomicOperationalCommand(decree)
+    if (mode !== 'continue' && economicRouting.mode === 'economic_ops' && economicCommand.matched) {
+      const councilIntentState = resolveCurrentIntent({ latestRaelDecreeText: decree })
+      logEconomicOpsResolvedMode({
+        decree,
+        resolvedMode: 'economic_ops',
+        source: 'client',
+        reason: economicRouting.reason,
+      })
+
+      const assignedFamily = economicCommand.domain.providerPriority[0]
+      const cmdForEconomicOps = activeCouncilCommandRef.current
+      applyCouncilPacketRender(
+        buildCouncilRenderPacket({
+          command: cmdForEconomicOps,
+          sessionState: 'OPEN',
+          packetStatus: 'gathering',
+          families: [],
+          extraWarnings: ['economic_ops_bypass_active'],
+        }),
+      )
+
+      let providerAnalysis = ''
+      let providerFailure: string | null = null
+      try {
+        const out = await postCouncilChat(
+          {
+            message: decree,
+            profile: RAEL_PROFILE,
+            threadHistory: threadHistory(),
+            mode: 'continue',
+            toneMode,
+            councilSingleFamily: assignedFamily,
+            orchestrationAugment: [
+              'Economic Ops extraction mode.',
+              'Return concise structured opportunity candidates only.',
+              'Do not perform external actions. Do not send outreach, payments, contracts, publishing, account actions, or submissions.',
+            ].join('\n'),
+            councilCommand: cmdForEconomicOps,
+            raelDirectiveText: decree,
+            councilIntentKind: councilIntentState.intent,
+            councilActiveScope: councilIntentState.scope,
+            ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
+          },
+          controller.signal,
+        )
+        providerAnalysis = typeof out.data.councilSingleResponse === 'string' ? out.data.councilSingleResponse.trim() : ''
+        if (!out.res.ok || out.data.councilProviderHttpStatus) {
+          providerFailure = out.data.councilProviderHttpDetail
+            ?? out.data.message
+            ?? out.data.error
+            ?? `provider_http_${out.res.status}`
+        }
+      } catch (err) {
+        providerFailure = err instanceof Error ? err.message : String(err)
+      }
+
+      const economicRes = await fetch('/api/economic/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decree,
+          sessionId: liveCouncilConvId ?? 'live-council',
+          providerAnalyses: providerAnalysis
+            ? [{ provider_family: assignedFamily, content: providerAnalysis, success: true }]
+            : [{
+                provider_family: assignedFamily,
+                content: providerFailure ?? 'Provider analysis unavailable during Economic Ops extraction.',
+                success: false,
+              }],
+        }),
+        signal: controller.signal,
+      })
+      const economicJson = await economicRes.json() as { summary?: string; error?: string; opportunityCount?: number }
+      const summary = economicJson.summary
+        ?? economicJson.error
+        ?? 'Economic Ops routed to Opportunity Scout.'
+      addSystemMessage(summary)
+      void postLiveCouncilMessage({ role: 'system', content: summary, family: 'SYSTEM' })
+      applyCouncilPacketRender(
+        buildCouncilRenderPacket({
+          command: cmdForEconomicOps,
+          sessionState: 'CLOSED',
+          packetStatus: 'released',
+          families: [{
+            family: assignedFamily,
+            content: summary,
+          }],
+          extraWarnings: [
+            'economic_ops_bypassed_attendance',
+            'economic_ops_bypassed_legacy_research',
+            ...(providerFailure && !providerAnalysis ? ['economic_ops_provider_failure_telemetry_only'] : []),
+          ],
+        }),
+      )
+      decreePacketFlushCompleteRef.current = true
+      setLoading(false)
+      if (abortControllerRef.current === controller) abortControllerRef.current = null
+      return
     }
 
     let decreeSubmitFaultAnchor: CouncilOrchestrationFamily | undefined

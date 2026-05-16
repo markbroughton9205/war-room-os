@@ -5,6 +5,7 @@ import { extractEconomicOpportunities } from '@/lib/economic/extraction'
 import { ECONOMIC_FAMILY_ROLE_REGISTRY } from '@/lib/economic/familyRoles'
 import { createOpportunityDraft, validateOpportunity } from '@/lib/economic/opportunities'
 import { assertProposalExternalUseBlockedUntilApproved, createProposalDraft } from '@/lib/economic/proposals'
+import { resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { ECONOMIC_OPERATIONAL_DOMAINS } from '@/lib/economic/types'
 import { workflowRequiresHumanApproval } from '@/lib/economic/workflowQueue'
 
@@ -48,6 +49,8 @@ export function assertEconomicCommandFoundations(): void {
   for (const input of examples) {
     const parsed = parseEconomicOperationalCommand(input)
     if (!parsed.matched) throw new Error(`Economic command did not parse: ${input}`)
+    const route = resolveEconomicOpsRouting(input)
+    if (route.mode !== 'economic_ops') throw new Error(`Economic command did not route as economic_ops: ${input}`)
     workflowRequiresHumanApproval(parsed.workflow)
     if (!parsed.recommendedFamilies.length) throw new Error(`Economic command lacks routing guidance: ${input}`)
   }

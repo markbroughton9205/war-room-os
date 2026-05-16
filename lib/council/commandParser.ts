@@ -7,6 +7,7 @@ import {
   type CouncilResponseLimits,
 } from '@/lib/council/councilCommandTypes'
 import { detectDirectInvocation } from '@/lib/council/directInvocation'
+import { resolveEconomicOpsRouting } from '@/lib/economic/routing'
 
 /** Full orchestration id list for command filtering (order-agnostic). */
 export const ALL_ORCHESTRATION_FAMILIES: CouncilOrchestrationFamily[] = [
@@ -75,6 +76,7 @@ function detectMode(t: string): CouncilDisciplineMode {
   if (/\battendance\s*only\b|\broll\s*call\b|\bpresence\s*only\b/i.test(t)) return 'attendance'
   if (/\bno\s+strategy\b|\bstrategy\s*off\b/i.test(t)) return 'attendance'
   if (/\bone\s*response\s*each\b|\bone\s*line\s*each\b/i.test(t)) return 'attendance'
+  if (resolveEconomicOpsRouting(t).mode === 'economic_ops') return 'economic_ops'
   if (/\bexecution\b|\bexecute\b|\bops\s*mode\b/i.test(t)) return 'execution'
   if (/\bresearch\b|\blit\s*review\b|\binvestigate\b/i.test(t)) return 'research'
   if (/\bdebate\b|\bsparring\b|\bchallenge\b/i.test(t)) return 'debate'
@@ -125,6 +127,9 @@ export function parseCouncilCommand(input: string): CouncilCommand {
   }
   if (mode === 'research' || mode === 'analysis') {
     responseLimits = mergeLimits(DEFAULT_COUNCIL_COMMAND, 3, 9000)
+  }
+  if (mode === 'economic_ops') {
+    responseLimits = mergeLimits(DEFAULT_COUNCIL_COMMAND, 1, 1200)
   }
   if (mode === 'silent') {
     responseLimits = mergeLimits(DEFAULT_COUNCIL_COMMAND, 1, 400)

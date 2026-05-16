@@ -11,6 +11,7 @@ export type CouncilDisciplineMode =
   | 'silent'
   | 'execution'
   | 'research'
+  | 'economic_ops'
   | 'council'
   | 'emergency'
   | 'red_team_only'
@@ -64,6 +65,7 @@ const MODES: CouncilDisciplineMode[] = [
   'silent',
   'execution',
   'research',
+  'economic_ops',
   'council',
   'emergency',
   'red_team_only',

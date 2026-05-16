@@ -14,6 +14,7 @@ export type WarRoomMode =
   | 'deep_analysis'
   | 'execution'
   | 'direct_invocation'
+  | 'economic_ops'
 
 export type ModeGovernor = {
   mode: WarRoomMode
@@ -116,6 +117,18 @@ function basePreset(mode: WarRoomMode, decreeText: string): ModeGovernor {
         allowLongForm: false,
         renderImmediately: false,
       }
+    case 'economic_ops':
+      return {
+        mode,
+        maxSentences: 2,
+        continuationAllowed: false,
+        providerAwareness: false,
+        allowCrossFamilyReference: false,
+        fullTeamRequired: false,
+        allowSpeculation: false,
+        allowLongForm: false,
+        renderImmediately: true,
+      }
     case 'direct_invocation':
       return {
         mode,
@@ -155,6 +168,10 @@ function resolveWarRoomMode(args: {
 
   if (councilCommand.directInvocation && councilCommand.targetFamilies.length === 1) {
     return 'direct_invocation'
+  }
+
+  if (intentKind === 'economic_ops' || councilCommand.mode === 'economic_ops') {
+    return 'economic_ops'
   }
 
   const attendanceMode =

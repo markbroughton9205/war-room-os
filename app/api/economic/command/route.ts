@@ -54,14 +54,19 @@ export async function POST(req: Request) {
       latency_ms: row.latency_ms,
       success: row.success,
     }))
-    .filter(row => row.content.trim())
+  const successfulProviderAnalyses = providerAnalyses.filter(row => row.success !== false && row.content.trim())
+  const failedProviderAnalyses = providerAnalyses.filter(row => row.success === false)
 
   const parsed = parseEconomicOperationalCommand(decree)
   if (!parsed.matched) {
     return jsonWithPersistence({ matched: false, summary: 'No Economic Ops command detected.' }, true)
   }
 
-  const extraction = extractEconomicOpportunities({ decree, sessionId: payload.sessionId, providerAnalyses })
+  const extraction = extractEconomicOpportunities({
+    decree,
+    sessionId: payload.sessionId,
+    providerAnalyses: successfulProviderAnalyses,
+  })
   const workflowDedupeKey = `workflow:${payload.sessionId ?? 'global'}:${parsed.command}:${parsed.domain.id}:${decree.toLowerCase().replace(/\s+/g, ' ').trim()}`
   parsed.workflow.metadata = { ...(parsed.workflow.metadata ?? {}), dedupe_key: workflowDedupeKey }
   const workflow = await upsertEconomicWorkflow(sup.client, parsed.workflow)
@@ -99,18 +104,37 @@ export async function POST(req: Request) {
     metadata: { command: parsed.command, session_id: payload.sessionId ?? null },
   }))
 
+  for (const failure of failedProviderAnalyses) {
+    await insertEconomicTelemetryEvent(sup.client, createTelemetryEvent({
+      category: 'provider_success_failure_rate',
+      domain_id: parsed.domain.id,
+      provider_family: failure.provider_family,
+      metric_name: 'provider_failure',
+      metric_value: 1,
+      metadata: {
+        command: parsed.command,
+        session_id: payload.sessionId ?? null,
+        failure_detail: failure.content.slice(0, 1000),
+        broadcast_to_council: false,
+      },
+    }))
+  }
+
   const compression = compressEconomicOpsResponse({
     assignedFamily: parsed.domain.providerPriority[0],
     opportunityCount: inserted,
     workflowCount: 1,
-    fullProviderAnalysis: providerAnalyses.map(row => `[${row.provider_family}]\n${row.content}`).join('\n\n'),
+    fullProviderAnalysis: successfulProviderAnalyses.map(row => `[${row.provider_family}]\n${row.content}`).join('\n\n'),
   })
 
   return jsonWithPersistence({
     matched: true,
-    summary: `${inserted} opportunities discovered and added to Opportunity Scout.`,
+    summary: failedProviderAnalyses.length && inserted === 0
+      ? 'Economic Ops routed to Opportunity Scout, but provider analysis failed. Failure telemetry was stored without broadcasting family availability spam.'
+      : `${inserted} opportunities discovered and added to Opportunity Scout.`,
     workflowId: workflow.value,
     opportunityCount: inserted,
+    providerFailures: failedProviderAnalyses.length,
     compression,
     approvalRequired: true,
   }, true, { status: 201 })

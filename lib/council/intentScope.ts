@@ -41,7 +41,7 @@ export function buildActiveScope(args: {
   intent: IntentKind
 }): ActiveScope {
   const { councilCommand: cmd, intent } = args
-  const businessTopicsAllowed = intent === 'business_ops'
+  const businessTopicsAllowed = intent === 'business_ops' || intent === 'economic_ops' || cmd.mode === 'economic_ops'
 
   const forbiddenTopics = businessTopicsAllowed
     ? []
@@ -49,7 +49,7 @@ export function buildActiveScope(args: {
 
   const allowedTopics =
     businessTopicsAllowed
-      ? [...DEFAULT_BUSINESS_LABELS, 'panama', 'sovereignty', 'logistics']
+      ? [...DEFAULT_BUSINESS_LABELS, 'panama', 'sovereignty', 'logistics', 'opportunity scout']
       : intent === 'greeting' || intent === 'attendance' || intent === 'silent'
         ? ['tone', 'presence', 'coordination']
         : intent === 'council_analysis' || cmd.mode === 'analysis' || cmd.mode === 'debate'
@@ -70,6 +70,10 @@ export function buildActiveScope(args: {
     sessionDuration = 'single_burst'
   } else if (intent === 'silent' || cmd.mode === 'silent') {
     responseLength = 'presence'
+    sessionDuration = 'single_burst'
+  } else if (intent === 'economic_ops' || cmd.mode === 'economic_ops') {
+    responseLength = 'brief'
+    responseStyle = 'procedural'
     sessionDuration = 'single_burst'
   } else if (intent === 'research' || cmd.mode === 'research') {
     responseLength = 'extended'
@@ -112,6 +116,10 @@ export function buildActiveScope(args: {
   }
   if (intent === 'silent') {
     familyPermissions.maxCharsPerFamily = Math.min(familyPermissions.maxCharsPerFamily, 400)
+  }
+  if (intent === 'economic_ops' || cmd.mode === 'economic_ops') {
+    familyPermissions.maxResponsesPerFamily = 1
+    familyPermissions.maxCharsPerFamily = Math.min(familyPermissions.maxCharsPerFamily, 1200)
   }
 
   return {

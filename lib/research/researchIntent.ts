@@ -1,4 +1,5 @@
 import type { IntentKind } from '@/lib/council/intentClassifier'
+import { isEconomicOpsCommand } from '@/lib/economic/routing'
 
 export type ResearchIntentContext = {
   /** Server-side attendance wave / attendance command — never triggers live research. */
@@ -97,6 +98,10 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
   }
 
   const reasons: string[] = []
+
+  if (isEconomicOpsCommand(t) || ctx?.intentKind === 'economic_ops') {
+    return { shouldResearch: false, reasons: ['excluded_economic_ops'], confidence: 0 }
+  }
 
   if (ctx?.attendanceFlow) {
     return { shouldResearch: false, reasons: ['excluded_attendance_flow'], confidence: 0 }

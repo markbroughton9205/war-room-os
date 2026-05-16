@@ -46,6 +46,7 @@ import {
 } from '@/lib/runtime/runtimeEvidencePacket'
 import { assessCouncilTextCompletion, type CouncilResponseCompletion } from '@/lib/council/responseCompletion'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
+import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { runLiveResearchRouter } from '@/lib/research/researchRouter'
 import { buildLiveResearchEvidencePacket, logLiveResearchEvidenceMetadata } from '@/lib/research/researchEvidence'
 import {
@@ -478,6 +479,43 @@ export async function POST(req: Request) {
     } catch (err) {
       console.warn('[war-room-audit] insertWarRoomAuditLog failed:', err)
     }
+  }
+
+  const economicRouting = resolveEconomicOpsRouting(raelDirectiveText)
+  const resolvedModeForDebug =
+    councilCommand.directInvocation
+      ? 'direct_invocation'
+      : isAttendanceFlow
+        ? 'attendance'
+        : economicRouting.mode === 'economic_ops'
+          ? 'economic_ops'
+          : intentState.intent === 'research' || councilCommand.mode === 'research'
+            ? 'research'
+            : modeGovernor.mode
+  logEconomicOpsResolvedMode({
+    decree: raelDirectiveText,
+    resolvedMode: resolvedModeForDebug,
+    source: 'server',
+    reason: economicRouting.reason,
+  })
+
+  if (economicRouting.mode === 'economic_ops' && !councilSingleFamily) {
+    await safeAudit({
+      success: true,
+      flow: 'economic_ops_bypass',
+      resolvedMode: 'economic_ops',
+      bypassed: ['parallel_family_attendance', 'legacy_provider_availability_broadcast', 'live_research_router'],
+    })
+    return NextResponse.json({
+      results: [{
+        family: 'SYSTEM',
+        content: 'Economic Ops command routed to Opportunity Scout. Provider analysis will be stored in operational records, not broadcast as council wall-of-text.',
+        status: 'OK',
+      }],
+      hardStop: true,
+      mode: 'economic_ops',
+      economicOpsBypass: true,
+    })
   }
 
   const diagnosticMetaFor = (fam: CouncilSingleFamily | undefined, meta?: { hold?: boolean }) => {

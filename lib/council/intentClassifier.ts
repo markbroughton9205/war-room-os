@@ -3,6 +3,7 @@
  * Latest Ra’el decree is authoritative — not chat history.
  * Multi-family **greeting** widening is handled in `conversationIntent` + `greetingRouting`, not here.
  */
+import { resolveEconomicOpsRouting } from '@/lib/economic/routing'
 
 export type IntentKind =
   | 'greeting'
@@ -15,6 +16,7 @@ export type IntentKind =
   | 'debugging'
   | 'brainstorming'
   | 'silent'
+  | 'economic_ops'
   /** Explicit Panama / sovereignty / revenue / ops framing in the decree — widens business topics. */
   | 'business_ops'
 
@@ -35,6 +37,8 @@ export function classifyIntentFromDecree(text: string): IntentKind {
   if (GREETING_LINE.test(raw.trim()) || (GREETING_PREFIX.test(raw) && raw.length < 80)) return 'greeting'
 
   if (/\battendance\b|\bcheck-?in\b|\broll\s*call\b|\bpresence\s*only\b|\bpresence\b.*\bcheck\b/i.test(t)) return 'attendance'
+
+  if (resolveEconomicOpsRouting(raw).mode === 'economic_ops') return 'economic_ops'
 
   if (/\bresearch\b|\blit(?:erature)?\s*review\b|\binvestigate\b|\blook\s*up\b|\bsource(?:s)?\b/i.test(t)) return 'research'
 
