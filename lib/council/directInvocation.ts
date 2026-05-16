@@ -41,6 +41,12 @@ const SUPPRESS_DIRECT_PREFIX =
 const SUPPRESS_DIRECT_ATTENDANCE_BODY =
   /\b(?:attendance|roll\s*call|presence\s*only|one\s*(?:response|line)\s*each)\b/i
 
+const INVOCATION_PREFIX_RE =
+  /^(?:hey|yo|hello|hi|wassup|what's up|where is|call|summon)\s+/i
+
+const RAW_INVOCATION_PREFIX_RE =
+  /^\s*(?:hey|yo|hello|hi|wassup|what['’]s\s+up|where\s+is|call|summon)\s+/i
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -54,6 +60,10 @@ function stripAliasPrefix(raw: string, alias: string): string {
   const m = raw.match(re)
   if (!m) return raw.trim()
   return raw.slice(m[0].length).trim()
+}
+
+function stripInvocationPrefix(raw: string): string {
+  return raw.replace(RAW_INVOCATION_PREFIX_RE, '').trim()
 }
 
 function matchesAtStart(normalized: string, alias: string): boolean {
@@ -85,10 +95,12 @@ export function detectDirectInvocation(text: string): DirectInvocationResult {
   }
 
   const normalized = normalizeComparable(raw)
+  const normalizedCandidate = normalized.replace(INVOCATION_PREFIX_RE, '').trim()
+  const rawCandidate = normalizedCandidate === normalized ? raw : stripInvocationPrefix(raw)
 
   for (const { family, alias } of SORTED_ALIASES) {
-    if (!matchesAtStart(normalized, alias)) continue
-    const remainder = stripAliasPrefix(raw, alias)
+    if (!matchesAtStart(normalizedCandidate, alias)) continue
+    const remainder = stripAliasPrefix(rawCandidate, alias)
     return { invoked: true, family, remainder }
   }
 

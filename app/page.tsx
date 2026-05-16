@@ -6183,15 +6183,36 @@ function Home() {
       transientMessageIds?: string[]
     },
   ) => {
+    const directTarget = activeCouncilCommandRef.current.directInvocation
+      ? activeCouncilCommandRef.current.targetFamilies[0]
+      : undefined
+    if (directTarget && family !== directTarget) {
+      const metadata = {
+        directInvocationTarget: directTarget,
+        blockedFamily: family,
+        routingViolationBlocked: true,
+      }
+      console.warn('[Live Council] routingViolationBlocked', metadata)
+      void fetch('/api/events/emit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'audit.logged',
+          source: 'system',
+          payload: metadata,
+        }),
+      }).catch(() => undefined)
+      return false
+    }
     if (shouldSuppressProviderFailureFromChatStream(text, { diagnosticsOpen: operatorTab === 'diagnostics' })) {
-      return
+      return false
     }
     const councilRevealSource = opts?.councilRevealSource ?? 'autonomous'
     if (councilRevealSource === 'decree' && decreePacketFlushCompleteRef.current) {
       if (process.env.NODE_ENV === 'development') {
         console.debug("[Live Council] Suppressed visible late family reply after packet close.")
       }
-      return
+      return false
     }
     if (
       councilRevealSource === 'autonomous'
@@ -6199,7 +6220,7 @@ function Home() {
       && shouldSuppressStaleAutonomousReveal(opts.autonomousDecreeRoundAtFetch, decreeRoundGenRef.current)
     ) {
       console.warn('[council-session] suppressed_stale_autonomous_reveal')
-      return
+      return false
     }
     const inputTokens = estimateTokens(inputText)
     const usageName = mapOrchFamilyToUsage(family)
@@ -6263,6 +6284,7 @@ function Home() {
     setUsageRows(nextUsageRows)
     setCurrentDecreeCost(finalCost)
     setSessionCost(prev => prev + finalCost)
+    return true
   }
 
   const mergeContinuationFromChatJson = (data: CouncilChatJson, opts?: { ignoreContinuation?: boolean }) => {
@@ -7487,10 +7509,11 @@ function Home() {
           const sourceLine =
             linesToRelease.find(l => l.family === line.family && l.textOut.trim() === line.content.trim())
             ?? linesToRelease.find(l => l.family === line.family)
-          await revealOrchestrationTurn(line.family, line.content, inputText(), {
+          const visible = await revealOrchestrationTurn(line.family, line.content, inputText(), {
             councilRevealSource: 'decree',
             transientMessageIds: sourceLine?.transientMessageIds,
           })
+          if (!visible) continue
           attendanceRevealedFamilies.add(line.family)
           const vis = orchestrationVisual(line.family)
           const bubble = vis.bubbleFamilyName ?? rosterLabel(line.family)
