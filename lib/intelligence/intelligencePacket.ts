@@ -2,6 +2,12 @@ import type { CouncilOrchestrationFamily } from '@/components/council/councilSes
 import { classifyConfidenceSummary } from '@/lib/intelligence/confidenceClassifier'
 import { scanContradictions } from '@/lib/intelligence/contradictionScanner'
 import { scoreEvidenceItems } from '@/lib/intelligence/evidenceScoring'
+import {
+  buildLocalIntelligenceLayer,
+  toLocalIntelligenceClientMetadata,
+  type LocalIntelligenceClientMetadata,
+  type LocalIntelligenceLayer,
+} from '@/lib/intelligence/local/localSignalIngestion'
 import type { IntelligenceQueryPlan } from '@/lib/intelligence/queryPlanner'
 import { planIntelligenceQuery } from '@/lib/intelligence/queryPlanner'
 import { runRedTeamVerification, type RedTeamVerificationReport } from '@/lib/intelligence/redTeamVerification'
@@ -80,6 +86,7 @@ export type IntelligencePacket = {
   freshness: EvidenceFreshness
   gaps: string[]
   red_team_verification: RedTeamVerificationReport
+  local_intelligence?: LocalIntelligenceLayer
 }
 
 export type IntelligenceClientMetadata = {
@@ -94,6 +101,7 @@ export type IntelligenceClientMetadata = {
   weakSignalDetected: boolean
   unsupportedClaims: number
   redTeamWarnings: number
+  local?: LocalIntelligenceClientMetadata
 }
 
 function makePacketId(timestamp: string, decree: string): string {
@@ -170,11 +178,17 @@ export function buildIntelligencePacket(args: {
   const withContradictions = scanContradictions(normalized)
   const scored = scoreEvidenceItems(withContradictions)
   const confidenceSummary = classifyConfidenceSummary(scored)
+  const sourceFailures = sourceFailureRecords(queryPlan, args.rawSources)
   const redTeam = runRedTeamVerification({
     evidence: scored,
     confidenceSummary,
     unsupportedClaims: args.unsupportedClaims ?? [],
-    sourceFailures: sourceFailureRecords(queryPlan, args.rawSources),
+    sourceFailures,
+  })
+  const localIntelligence = buildLocalIntelligenceLayer({
+    decree: args.decree,
+    evidence: scored,
+    sourceFailures,
   })
 
   const contradictions = [
@@ -201,10 +215,11 @@ export function buildIntelligencePacket(args: {
     contradictions,
     weak_signals: scored.filter(item => item.weak_signal || item.confidence_tier === 'weak_signal'),
     unsupported_claims: [...(args.unsupportedClaims ?? []), ...redTeam.unsupported_claims],
-    source_failures: sourceFailureRecords(queryPlan, args.rawSources),
+    source_failures: sourceFailures,
     freshness: freshnessFromEvidence(scored),
     gaps: [...new Set(gaps)],
     red_team_verification: redTeam,
+    ...(localIntelligence.active ? { local_intelligence: localIntelligence } : {}),
   }
 }
 
@@ -222,6 +237,7 @@ export function toIntelligenceClientMetadata(packet: IntelligencePacket): Intell
     weakSignalDetected: packet.weak_signals.length > 0,
     unsupportedClaims: packet.unsupported_claims.length,
     redTeamWarnings: packet.red_team_verification.warnings.length,
+    ...(packet.local_intelligence ? { local: toLocalIntelligenceClientMetadata(packet.local_intelligence) } : {}),
   }
 }
 
@@ -249,11 +265,32 @@ export function buildIntelligenceGroundingBlock(packet: IntelligencePacket, fami
   if (packet.weak_signals.length) {
     lines.push(`- weakSignalNote: ${packet.weak_signals.length} item(s) may inform radar/trend analysis but are not operational truth.`)
   }
+  if (packet.local_intelligence) {
+    const local = packet.local_intelligence
+    lines.push(
+      `- localIntelligence: sourceDepth=${local.source_depth} · localityDepth=${local.locality_depth} · corroboration=${local.corroboration_level} · weakSignals=${local.weak_signal_count} · contradictions=${local.contradiction_warnings}`,
+    )
+    if (local.local_signals.length) {
+      lines.push('- localSignals:')
+      for (const signal of local.local_signals.slice(0, 5)) {
+        lines.push(`  - [${signal.layer}/${signal.confidence}] ${signal.summary.slice(0, 360)}`)
+      }
+    }
+    if (local.narratives.length) {
+      lines.push(`- localNarratives: ${local.narratives.slice(0, 4).map(n => `${n.label}(${n.narrative_momentum})`).join(' | ')}`)
+    }
+    if (local.gaps.length) {
+      lines.push(`- localGaps: ${local.gaps.slice(0, 4).join(' || ')}`)
+    }
+  }
   if (packet.gaps.length) {
     lines.push(`- gaps: ${packet.gaps.slice(0, 5).join(' || ')}`)
   }
   lines.push(
     '- Response shape: answer the decree directly. Use only the headings that have content: Verified, Emerging, Contradictions, Unknowns, Optional recommended next step.',
+  )
+  lines.push(
+    '- Local response shape: for local questions, use only non-empty headings from Verified, Emerging, Local chatter, Contradictions, Unknowns, Optional next step.',
   )
   lines.push(
     '- Inference labels: say "Unconfirmed local discussion suggests...", "Weak signal only...", "No verified evidence currently...", or "Inference based on limited reporting..." when support is incomplete.',

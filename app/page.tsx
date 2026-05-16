@@ -9482,6 +9482,9 @@ function Home() {
                           liveResearchHud.intelligence
                             ? ` Phase 8A intelligence: ${liveResearchHud.intelligence.sourcesUsed} source(s): ${liveResearchHud.intelligence.sourcesPreview || 'none'}. Confidence ${liveResearchHud.intelligence.confidenceLevel} (${Math.round(liveResearchHud.intelligence.confidenceScore * 100)}%), freshness ${liveResearchHud.intelligence.freshness}, contradictions ${liveResearchHud.intelligence.contradictionWarnings}, weak signal ${liveResearchHud.intelligence.weakSignalDetected ? 'yes' : 'no'}.`
                             : '',
+                          liveResearchHud.intelligence?.local?.active
+                            ? ` Local: source depth ${liveResearchHud.intelligence.local.sourceDepth}, locality ${liveResearchHud.intelligence.local.localityDepth}, corroboration ${liveResearchHud.intelligence.local.corroborationLevel}, weak signals ${liveResearchHud.intelligence.local.weakSignalCount}, contradictions ${liveResearchHud.intelligence.local.contradictionWarnings}.`
+                            : '',
                           liveResearchHud.responseCompletion
                             ? ` Model completion: ${liveResearchHud.responseCompletion}.`
                             : '',
@@ -9500,6 +9503,9 @@ function Home() {
                     ? ` · contradiction ${liveResearchHud.intelligence.contradictionWarnings}`
                     : ''}
                   {liveResearchHud.intelligence?.weakSignalDetected ? ' · weak signal' : ''}
+                  {liveResearchHud.intelligence?.local?.active
+                    ? ` · local ${liveResearchHud.intelligence.local.localityDepth}/${liveResearchHud.intelligence.local.corroborationLevel}`
+                    : ''}
                 </span>
               ) : null}
               <button type="button" onClick={() => startTransition(() => void handleSummarize())}
