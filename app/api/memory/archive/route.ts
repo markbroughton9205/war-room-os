@@ -106,6 +106,7 @@ export async function GET(req: Request) {
   const command = parseRecallCommand(commandText) ?? parseRecallCommand('show archive')!
   const sessionId = url.searchParams.get('sessionId')
   const limit = Number.parseInt(url.searchParams.get('limit') ?? '20', 10)
+  const fullContent = url.searchParams.get('full') === '1'
 
   if (!sup.ok) {
     return jsonWithPersistence({ command, records: [], summaries: [] }, false)
@@ -114,6 +115,7 @@ export async function GET(req: Request) {
   const result = await recallArchivedTranscripts(sup.client, command, {
     sessionId,
     limit: Number.isFinite(limit) ? limit : 20,
+    fullContent,
   })
 
   if (!result.ok) {

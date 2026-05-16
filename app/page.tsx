@@ -157,7 +157,6 @@ import { createMessageId } from '@/lib/council/messageIds'
 import { cloudEngineReadinessLabel, cloudEngineStripStatus, internetToolReadinessParts } from '@/lib/warRoom/providerReadiness'
 import { windowLiveChatMessages } from '@/lib/conversation/liveWindow'
 import {
-  formatRecallResponse,
   parseRecallCommand,
   type ParsedRecallCommand,
   type RecallSummaryPreview,
@@ -339,6 +338,15 @@ type MemoryEntry = {
 type MemorySavePrompt = {
   memory: Omit<MemoryEntry, 'id' | 'created_at'>
   reason: string
+}
+
+type MemoryRecallView = {
+  command: ParsedRecallCommand
+  records: RecallTranscriptPreview[]
+  summaries: RecallSummaryPreview[]
+  recalledAt: string
+  persistenceAvailable: boolean
+  error?: string | null
 }
 
 type FamilyPresence = {
@@ -2553,6 +2561,108 @@ function MemoryPanel({ memories }: { memories: MemoryEntry[] }) {
   )
 }
 
+function MemoryRecallPanel({ recall }: { recall: MemoryRecallView | null }) {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(96,165,250,0.028)' }}>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#60A5FA' }}>
+            MEMORY ARCHIVE / RECALL VIEW
+          </h2>
+          <p className="mt-1 text-[10px] tracking-widest" style={{ color: '#64748B' }}>
+            Archive results stay here; Live Council remains an active working surface.
+          </p>
+        </div>
+        {recall ? (
+          <span className="rounded px-2 py-1 text-[10px] tracking-widest"
+            style={{ border: '1px solid rgba(96,165,250,0.28)', color: '#93C5FD' }}>
+            {recall.command.kind} · {new Date(recall.recalledAt).toLocaleString()}
+          </span>
+        ) : null}
+      </div>
+
+      {!recall ? (
+        <div className="rounded border border-white/10 bg-black/30 px-3 py-3 text-xs text-slate-500">
+          No archive recall loaded yet. Use `recall today`, `show archive`, or the live chat archive buttons.
+        </div>
+      ) : !recall.persistenceAvailable ? (
+        <div className="rounded border border-red-500/25 bg-red-950/10 px-3 py-3 text-xs text-red-300">
+          Memory archive unavailable because persistence is not configured.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {recall.error ? (
+            <div className="rounded border border-red-500/25 bg-red-950/10 px-3 py-2 text-xs text-red-300">
+              {recall.error}
+            </div>
+          ) : null}
+
+          {recall.summaries.length ? (
+            <div className="grid gap-2">
+              {recall.summaries.slice(0, 3).map(summary => (
+                <div key={summary.id} className="rounded border border-[#60A5FA]/20 bg-black/35 px-3 py-2">
+                  <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-[10px] tracking-widest">
+                    <span style={{ color: '#93C5FD' }}>{summary.summaryKind}</span>
+                    <span style={{ color: '#475569' }}>{new Date(summary.createdAt).toLocaleString()}</span>
+                  </div>
+                  <p className="whitespace-pre-wrap text-xs text-slate-300">{summary.summary}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="grid gap-2">
+            {recall.records.length === 0 ? (
+              <div className="rounded border border-white/10 bg-black/30 px-3 py-3 text-xs text-slate-500">
+                No archived transcript rows matched this recall.
+              </div>
+            ) : recall.records.map(record => {
+              const expanded = expandedIds.has(record.id)
+              const source = [record.family ?? record.role, record.provider].filter(Boolean).join(' · ')
+              return (
+                <div key={record.id} className="rounded border border-white/10 bg-black/35 px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] tracking-widest">
+                    <span style={{ color: '#BFDBFE' }}>{source || 'archive'}</span>
+                    <span style={{ color: '#475569' }}>{new Date(record.timestamp).toLocaleString()}</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-2 text-[10px] tracking-widest" style={{ color: '#64748B' }}>
+                    {record.messageType ? <span>{record.messageType}</span> : null}
+                    {record.topic ? <span>{record.topic}</span> : null}
+                    {record.tags.slice(0, 4).map(tag => <span key={tag}>#{tag}</span>)}
+                  </div>
+                  <p className={`mt-2 whitespace-pre-wrap text-xs text-slate-300 ${expanded ? '' : 'line-clamp-3'}`}>
+                    {record.content}
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-2 rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+                    style={{ border: '1px solid rgba(96,165,250,0.35)', color: '#93C5FD' }}
+                    onClick={() => toggleExpanded(record.id)}
+                  >
+                    {expanded ? 'Collapse Transcript' : 'View Full Transcript'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SmsBridgePanel({
   bridge,
   onTest,
@@ -4483,6 +4593,7 @@ function Home() {
   const [expansionPrompt, setExpansionPrompt] = useState<ExpansionPrompt | null>(null)
   const [memorySavePrompt, setMemorySavePrompt] = useState<MemorySavePrompt | null>(null)
   const [memoryNotification, setMemoryNotification] = useState<string | null>(null)
+  const [memoryRecallView, setMemoryRecallView] = useState<MemoryRecallView | null>(null)
   const [familyPresence, setFamilyPresence] = useState<Record<TypingFamily, FamilyPresence>>({
     'CHATGPT FAMILY': { status: 'idle', label: 'standby' },
     'CLAUDE FAMILY': { status: 'idle', label: 'standby' },
@@ -8137,28 +8248,12 @@ function Home() {
     })
   }
 
-  const executeRecallCommand = async (decree: string, recallCommand: ParsedRecallCommand) => {
-    const now = new Date().toLocaleTimeString()
-    const recallUserMessage: CouncilMessage = {
-      id: createMessageId('rael-recall'),
-      familyName: "RA'EL",
-      content: decree,
-      timestamp: now,
-      color: '#FFD700',
-      icon: '⚔',
-      provider: '',
-      messageType: 'decree',
-    }
-    addMessages([recallUserMessage])
-    void postLiveCouncilMessage(
-      { role: 'user', content: decree, family: "RA'EL" },
-      { responseSuccessful: true },
-    )
-
+  const executeRecallCommand = async (recallCommand: ParsedRecallCommand) => {
     try {
       const params = new URLSearchParams({
         command: recallCommand.kind,
         limit: recallCommand.summarize ? '30' : '20',
+        full: '1',
       })
       if (liveCouncilConvId) params.set('sessionId', liveCouncilConvId)
       const res = await fetch(`/api/memory/archive?${params.toString()}`, { cache: 'no-store' })
@@ -8166,34 +8261,45 @@ function Home() {
         command?: ParsedRecallCommand
         records?: RecallTranscriptPreview[]
         summaries?: RecallSummaryPreview[]
+        error?: string
       }
-      const content = formatRecallResponse({
+      const persistenceAvailable = res.headers.get('x-war-room-persistence') === 'available'
+      setMemoryRecallView({
         command: payload.command ?? recallCommand,
         records: Array.isArray(payload.records) ? payload.records : [],
         summaries: Array.isArray(payload.summaries) ? payload.summaries : [],
-        persistenceAvailable: res.headers.get('x-war-room-persistence') === 'available',
+        recalledAt: new Date().toISOString(),
+        persistenceAvailable,
+        error: typeof payload.error === 'string' ? payload.error : null,
       })
+      setOperatorTab('memory')
       addMessages([{
         id: createMessageId('memory-recall'),
         familyName: 'MEMORY ARCHIVE',
-        content,
+        content: persistenceAvailable
+          ? 'Memory archive recalled in archive view.'
+          : 'Memory archive recall unavailable; persistence is not configured.',
         timestamp: new Date().toLocaleTimeString(),
         color: '#60A5FA',
         icon: '◷',
         provider: 'archive',
-        messageType: recallCommand.summarize ? 'summary' : 'recall',
+        messageType: 'recall',
       }])
-      void postLiveCouncilMessage(
-        { role: 'system', content, family: 'MEMORY ARCHIVE' },
-        { responseSuccessful: true },
-      )
-      setMemoryNotification('Memory archive recalled into live view.')
+      setMemoryNotification('Memory archive recalled in archive view.')
     } catch {
-      const content = 'Memory archive recall failed. Raw transcript remains preserved; try again after persistence recovers.'
+      setMemoryRecallView({
+        command: recallCommand,
+        records: [],
+        summaries: [],
+        recalledAt: new Date().toISOString(),
+        persistenceAvailable: false,
+        error: 'Memory archive recall failed. Raw transcript remains preserved; try again after persistence recovers.',
+      })
+      setOperatorTab('memory')
       addMessages([{
         id: createMessageId('memory-recall-error'),
         familyName: 'MEMORY ARCHIVE',
-        content,
+        content: 'Memory archive recall failed. See archive view.',
         timestamp: new Date().toLocaleTimeString(),
         color: '#F87171',
         icon: '!',
@@ -8208,7 +8314,7 @@ function Home() {
 
     const recallCommand = parseRecallCommand(decree)
     if (recallCommand) {
-      await executeRecallCommand(decree, recallCommand)
+      await executeRecallCommand(recallCommand)
       return
     }
 
@@ -8296,17 +8402,17 @@ function Home() {
 
   const handleViewArchive = () => {
     const parsed = parseRecallCommand('show archive')
-    if (parsed) void executeRecallCommand('show archive', parsed)
+    if (parsed) void executeRecallCommand(parsed)
   }
 
   const handleSummarizeSessionArchive = () => {
     const parsed = parseRecallCommand('summarize last session')
-    if (parsed) void executeRecallCommand('summarize last session', parsed)
+    if (parsed) void executeRecallCommand(parsed)
   }
 
   const handleRecallEconomicOps = () => {
     const parsed = parseRecallCommand('recall economic ops')
-    if (parsed) void executeRecallCommand('recall economic ops', parsed)
+    if (parsed) void executeRecallCommand(parsed)
   }
 
   const cycleFamilyDuty = (fid: CouncilOrchestrationFamily) => {
@@ -9165,6 +9271,7 @@ function Home() {
                     <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void loadWarRoomFiles()}>Refresh files</button>
                   </div>
                 </div>
+                <MemoryRecallPanel recall={memoryRecallView} />
                 <MemoryPanel memories={memories} />
                 <Phase6MemoryPanels />
                 <FilesEvidenceVaultPanel

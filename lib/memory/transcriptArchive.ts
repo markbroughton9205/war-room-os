@@ -185,12 +185,12 @@ export async function archiveTranscriptBatch(
 export async function recallArchivedTranscripts(
   client: WarRoomSupabase,
   command: ParsedRecallCommand,
-  opts?: { sessionId?: string | null; limit?: number },
+  opts?: { sessionId?: string | null; limit?: number; fullContent?: boolean },
 ): Promise<{ ok: true; records: RecallTranscriptPreview[]; summaries: RecallSummaryPreview[] } | { ok: false; error: string }> {
   const limit = Math.min(50, Math.max(1, opts?.limit ?? 20))
   let query = client
     .from(TABLE_ARCHIVE)
-    .select('id,message_timestamp,role,family,content,message_type,tags,topic')
+    .select('id,message_timestamp,role,family,provider,content,message_type,tags,topic')
     .order('message_timestamp', { ascending: false })
     .limit(limit)
 
@@ -228,6 +228,7 @@ export async function recallArchivedTranscripts(
       message_timestamp: string
       role: string
       family: string | null
+      provider: string | null
       content: string
       message_type: string | null
       tags: string[] | null
@@ -238,8 +239,9 @@ export async function recallArchivedTranscripts(
       timestamp: r.message_timestamp,
       role: r.role,
       family: r.family,
+      provider: r.provider,
       messageType: r.message_type,
-      content: cleanPreview(r.content, 500),
+      content: opts?.fullContent ? r.content : cleanPreview(r.content, 500),
       tags: Array.isArray(r.tags) ? r.tags : [],
       topic: r.topic,
     }

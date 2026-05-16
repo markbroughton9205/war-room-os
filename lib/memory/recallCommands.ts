@@ -53,6 +53,7 @@ export type RecallTranscriptPreview = {
   timestamp: string
   role: string
   family: string | null
+  provider: string | null
   messageType: string | null
   content: string
   tags: string[]
