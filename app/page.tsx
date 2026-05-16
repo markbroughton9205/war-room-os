@@ -6700,7 +6700,6 @@ function Home() {
     const economicRouting = resolveEconomicOpsRouting(decree)
     const economicCommand = parseEconomicOperationalCommand(decree)
     if (mode !== 'continue' && economicRouting.mode === 'economic_ops' && economicCommand.matched) {
-      const councilIntentState = resolveCurrentIntent({ latestRaelDecreeText: decree })
       logEconomicOpsResolvedMode({
         decree,
         resolvedMode: 'economic_ops',
@@ -6720,106 +6719,21 @@ function Home() {
         }),
       )
 
-      let selectedProviderFamily = assignedFamily
-      let providerAnalysis = ''
-      let providerFailure: string | null = null
+      const selectedProviderFamily = assignedFamily
+      const providerAnalysis = ''
+      const providerFailure: string | null = null
       const providerAttempts: {
         provider_family: typeof assignedFamily
         content: string
         success: boolean
         latency_ms?: number
       }[] = []
-      const economicOpsProviderPrompt = [
-        'Economic Ops extraction mode.',
-        'Return concise structured opportunity candidates only.',
-        'Prefer bullets with title, estimated value, confidence, risk, and required actions.',
-        'Do not perform external actions. Do not send outreach, payments, contracts, publishing, account actions, or submissions.',
-      ].join('\n')
-      for (const providerFamily of economicCommand.domain.providerPriority) {
-        selectedProviderFamily = providerFamily
-        const startedAt = Date.now()
-        console.info('[economic-ops-provider]', {
-          event: 'provider_invocation_started',
-          provider: providerFamily,
-          command: economicCommand.command,
-        })
-        try {
-          const out = await postCouncilChat(
-            {
-              message: decree,
-              profile: RAEL_PROFILE,
-              threadHistory: threadHistory(),
-              mode: 'continue',
-              toneMode,
-              councilSingleFamily: providerFamily,
-              orchestrationAugment: economicOpsProviderPrompt,
-              councilCommand: cmdForEconomicOps,
-              raelDirectiveText: decree,
-              councilIntentKind: councilIntentState.intent,
-              councilActiveScope: councilIntentState.scope,
-              ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
-            },
-            controller.signal,
-          )
-          const rawAnalysis = typeof out.data.economicOpsRawProviderAnalysis === 'string'
-            ? out.data.economicOpsRawProviderAnalysis.trim()
-            : ''
-          const governedAnalysis = typeof out.data.councilSingleResponse === 'string'
-            ? out.data.councilSingleResponse.trim()
-            : ''
-          const resultAnalysis = out.data.results
-            ?.map(result => typeof result.content === 'string' ? result.content.trim() : '')
-            .find(Boolean)
-            ?? ''
-          const normalizedContent = rawAnalysis || governedAnalysis || resultAnalysis
-          const failureDetail = out.data.councilProviderHttpDetail
-            ?? out.data.message
-            ?? out.data.error
-            ?? (!out.res.ok ? `provider_http_${out.res.status}` : null)
-          const success = Boolean(normalizedContent)
-            && !out.data.councilProviderHttpStatus
-            && !/\bfamily is currently unavailable\b/i.test(normalizedContent)
-          providerAttempts.push({
-            provider_family: providerFamily,
-            content: normalizedContent || failureDetail || 'Provider analysis unavailable during Economic Ops extraction.',
-            success,
-            latency_ms: Date.now() - startedAt,
-          })
-          console.info('[economic-ops-provider]', {
-            event: 'provider_invocation_completed',
-            provider: providerFamily,
-            success,
-            responseLength: normalizedContent.length,
-            normalizedPayload: {
-              hasRawAnalysis: Boolean(rawAnalysis),
-              hasCouncilSingleResponse: Boolean(governedAnalysis),
-              hasResultContent: Boolean(resultAnalysis),
-              councilProviderHttpStatus: out.data.councilProviderHttpStatus ?? null,
-            },
-          })
-          if (success) {
-            providerAnalysis = normalizedContent
-            providerFailure = null
-            break
-          }
-          providerFailure = failureDetail ?? 'Provider returned no usable Economic Ops analysis.'
-        } catch (err) {
-          providerFailure = err instanceof Error ? err.message : String(err)
-          providerAttempts.push({
-            provider_family: providerFamily,
-            content: providerFailure,
-            success: false,
-            latency_ms: Date.now() - startedAt,
-          })
-          console.info('[economic-ops-provider]', {
-            event: 'provider_invocation_completed',
-            provider: providerFamily,
-            success: false,
-            responseLength: 0,
-            normalizedPayload: { error: providerFailure },
-          })
-        }
-      }
+      console.info('[economic-ops-provider]', {
+        event: 'live_scout_ingestion_before_provider_analysis',
+        provider: assignedFamily,
+        command: economicCommand.command,
+        providerInvocationSkipped: true,
+      })
 
       const economicRes = await fetch('/api/economic/command', {
         method: 'POST',
@@ -6833,13 +6747,7 @@ function Home() {
                   ? { ...attempt, content: providerAnalysis, success: true }
                   : attempt
               ))
-            : providerAttempts.length
-              ? providerAttempts
-              : [{
-                  provider_family: assignedFamily,
-                  content: providerFailure ?? 'Provider analysis unavailable during Economic Ops extraction.',
-                  success: false,
-                }],
+            : providerAttempts,
         }),
         signal: controller.signal,
       })

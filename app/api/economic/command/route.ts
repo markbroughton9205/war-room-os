@@ -1,6 +1,8 @@
 import { jsonWithPersistence, tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persistence'
 import { extractEconomicOpportunities } from '@/lib/economic/extraction'
 import { compressEconomicOpsResponse } from '@/lib/economic/responseCompression'
+import { buildOpportunityDedupeKey, createOpportunityDraft } from '@/lib/economic/opportunities'
+import { runLiveOpportunityScoutPipeline } from '@/lib/economic/scout/scoutPipeline'
 import {
   insertEconomicAssignmentHistory,
   insertEconomicTelemetryEvent,
@@ -9,7 +11,8 @@ import {
 } from '@/lib/economic/store'
 import { createTelemetryEvent } from '@/lib/economic/telemetry'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
-import type { EconomicFamily, EconomicOperationalDomainId } from '@/lib/economic/types'
+import type { NormalizedScoutCandidate } from '@/lib/economic/scout/normalizeScoutResults'
+import type { EconomicFamily, EconomicOperationalDomainId, EconomicOpportunity } from '@/lib/economic/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,6 +77,53 @@ async function recordExtractionTelemetry(args: {
   }))
 }
 
+function opportunityFromScoutCandidate(input: {
+  candidate: NormalizedScoutCandidate
+  decree: string
+  sessionId?: string | null
+  command: string
+  workflowId: string
+}): EconomicOpportunity {
+  return createOpportunityDraft({
+    title: input.candidate.title,
+    category: input.candidate.category,
+    source: input.decree,
+    source_provider: 'unknown',
+    confidence: input.candidate.confidence,
+    estimated_value: input.candidate.estimated_value,
+    assigned_family: input.candidate.assigned_family,
+    required_actions: input.candidate.required_actions,
+    risk_level: input.candidate.risk_level,
+    notes: input.candidate.summary,
+    source_details: {
+      command: input.command,
+      workflow_id: input.workflowId,
+      scout_provider: input.candidate.source_provider,
+      scout_source: input.candidate.source,
+      scout_url: input.candidate.url,
+      scout_evidence: input.candidate.evidence,
+      family_scores: input.candidate.family_scores,
+      rank_score: input.candidate.rank_score,
+      approval_required: true,
+      external_action_allowed: false,
+    },
+    dedupe_key: buildOpportunityDedupeKey({
+      provider: input.candidate.source_provider,
+      sessionId: input.sessionId,
+      decree: input.decree,
+      title: input.candidate.title,
+    }),
+    metadata: {
+      session_id: input.sessionId ?? null,
+      source: 'phase7c_live_opportunity_scout',
+      scout_provider: input.candidate.source_provider,
+      scout_url: input.candidate.url,
+      approval_required: true,
+      rank_score: input.candidate.rank_score,
+    },
+  })
+}
+
 export async function POST(req: Request) {
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
@@ -114,6 +164,90 @@ export async function POST(req: Request) {
   if (!parsed.matched) {
     return jsonWithPersistence({ matched: false, summary: 'No Economic Ops command detected.' }, true)
   }
+
+  const scout = await runLiveOpportunityScoutPipeline({
+    decree,
+    domainId: parsed.domain.id,
+    fallbackFamily: parsed.domain.providerPriority[0],
+  })
+
+  await Promise.all([
+    recordExtractionTelemetry({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      providerFamily: null,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      metricName: 'scout_queries',
+      metricValue: scout.telemetry.scout_queries,
+      metadata: {
+        tavily_queries: scout.tavily.queries,
+        tavily_duration_ms: scout.tavily.durationMs,
+      },
+    }),
+    recordExtractionTelemetry({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      providerFamily: null,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      metricName: scout.telemetry.scout_success ? 'scout_success' : 'scout_failure',
+      metricValue: scout.telemetry.scout_success || scout.telemetry.scout_failure,
+      metadata: {
+        fallback_created: scout.fallbackCreated,
+        tavily_ok: scout.tavily.ok,
+        tavily_error: scout.tavily.error ?? null,
+        firecrawl_ok: scout.firecrawl.ok,
+        firecrawl_attempted: scout.firecrawl.attempted,
+        firecrawl_error: scout.firecrawl.error ?? null,
+      },
+    }),
+    recordExtractionTelemetry({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      providerFamily: null,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      metricName: 'candidates_generated',
+      metricValue: scout.telemetry.candidates_generated,
+      metadata: {
+        candidate_sources: scout.candidates.map(candidate => ({
+          provider: candidate.source_provider,
+          source: candidate.source,
+          url: candidate.url,
+        })),
+      },
+    }),
+    recordExtractionTelemetry({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      providerFamily: null,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      metricName: 'candidates_ranked',
+      metricValue: scout.telemetry.candidates_ranked,
+      metadata: {
+        ranked_titles: scout.rankedCandidates.map(candidate => candidate.title),
+      },
+    }),
+    recordExtractionTelemetry({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      providerFamily: null,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      metricName: 'family_scores_created',
+      metricValue: scout.telemetry.family_scores_created,
+      metadata: {
+        scoring_families: ['chatgpt', 'claude', 'grok', 'gemini'],
+        ranked_scores: scout.rankedCandidates.map(candidate => ({
+          title: candidate.title,
+          rank_score: candidate.rank_score,
+          family_scores: candidate.family_scores,
+        })),
+      },
+    }),
+  ])
 
   for (const [index, analysis] of providerAnalyses.entries()) {
     await recordExtractionTelemetry({
@@ -209,8 +343,19 @@ export async function POST(req: Request) {
     },
   })
 
+  const scoutOpportunities = scout.rankedCandidates.map(candidate => opportunityFromScoutCandidate({
+    candidate,
+    decree,
+    sessionId: payload.sessionId,
+    command: parsed.command,
+    workflowId: workflow.value,
+  }))
+  const opportunitiesToPersist = scoutOpportunities.length
+    ? scoutOpportunities
+    : extraction.opportunities.slice(0, 3)
+
   let inserted = 0
-  for (const opportunity of extraction.opportunities) {
+  for (const opportunity of opportunitiesToPersist) {
     const saved = await upsertEconomicOpportunity(sup.client, opportunity)
     if (saved.ok) {
       inserted += 1
@@ -227,6 +372,7 @@ export async function POST(req: Request) {
           source_provider: opportunity.source_provider,
           workflow_id: workflow.value,
           approval_required: true,
+          phase7c_live_scout: opportunity.metadata?.source === 'phase7c_live_opportunity_scout',
         },
       })
     }
@@ -244,6 +390,7 @@ export async function POST(req: Request) {
       ...extraction.telemetry,
       extraction_input_count: successfulProviderAnalyses.length,
       extraction_output_count: extraction.opportunities.length,
+      scout_candidates_ranked: scout.rankedCandidates.length,
       inserted_opportunities: inserted,
     },
   })
@@ -303,7 +450,14 @@ export async function POST(req: Request) {
     assignedFamily: parsed.domain.providerPriority[0],
     opportunityCount: inserted,
     workflowCount: 1,
-    fullProviderAnalysis: successfulProviderAnalyses.map(row => `[${row.provider_family}]\n${row.content}`).join('\n\n'),
+    fullProviderAnalysis: [
+      scout.rankedCandidates.map(candidate => [
+        `[live_scout:${candidate.source_provider}] ${candidate.title}`,
+        `Source: ${candidate.url ?? candidate.source}`,
+        `Summary: ${candidate.summary}`,
+      ].join('\n')).join('\n\n'),
+      successfulProviderAnalyses.map(row => `[${row.provider_family}]\n${row.content}`).join('\n\n'),
+    ].filter(Boolean).join('\n\n'),
   })
 
   return jsonWithPersistence({
@@ -314,6 +468,14 @@ export async function POST(req: Request) {
     workflowId: workflow.value,
     opportunityCount: inserted,
     providerFailures: failedProviderAnalyses.length,
+    scout: {
+      ok: scout.ok,
+      fallbackCreated: scout.fallbackCreated,
+      candidatesGenerated: scout.telemetry.candidates_generated,
+      candidatesRanked: scout.telemetry.candidates_ranked,
+      tavilyOk: scout.tavily.ok,
+      firecrawlOk: scout.firecrawl.ok,
+    },
     compression,
     approvalRequired: true,
   }, true, { status: 201 })
