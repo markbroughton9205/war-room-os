@@ -9480,7 +9480,7 @@ function Home() {
                       : [
                           'Phase 5/6 live research HUD.',
                           liveResearchHud.intelligence
-                            ? ` Phase 8A intelligence: ${liveResearchHud.intelligence.sourcesUsed} source(s), confidence ${liveResearchHud.intelligence.confidenceLevel} (${Math.round(liveResearchHud.intelligence.confidenceScore * 100)}%), freshness ${liveResearchHud.intelligence.freshness}, contradictions ${liveResearchHud.intelligence.contradictionWarnings}, weak signal ${liveResearchHud.intelligence.weakSignalDetected ? 'yes' : 'no'}.`
+                            ? ` Phase 8A intelligence: ${liveResearchHud.intelligence.sourcesUsed} source(s): ${liveResearchHud.intelligence.sourcesPreview || 'none'}. Confidence ${liveResearchHud.intelligence.confidenceLevel} (${Math.round(liveResearchHud.intelligence.confidenceScore * 100)}%), freshness ${liveResearchHud.intelligence.freshness}, contradictions ${liveResearchHud.intelligence.contradictionWarnings}, weak signal ${liveResearchHud.intelligence.weakSignalDetected ? 'yes' : 'no'}.`
                             : '',
                           liveResearchHud.responseCompletion
                             ? ` Model completion: ${liveResearchHud.responseCompletion}.`
@@ -9494,10 +9494,10 @@ function Home() {
                     : ''}
                   {liveResearchHud.sourcesCount > 0 ? ` · ${liveResearchHud.sourcesCount}` : ''}
                   {liveResearchHud.intelligence
-                    ? ` · intel ${liveResearchHud.intelligence.confidenceLevel}/${liveResearchHud.intelligence.freshness}`
+                    ? ` · src ${liveResearchHud.intelligence.sourcesUsed} · ${liveResearchHud.intelligence.freshness} · ${liveResearchHud.intelligence.confidenceLevel}`
                     : ''}
                   {liveResearchHud.intelligence?.contradictionWarnings
-                    ? ` · contradictions ${liveResearchHud.intelligence.contradictionWarnings}`
+                    ? ` · contradiction ${liveResearchHud.intelligence.contradictionWarnings}`
                     : ''}
                   {liveResearchHud.intelligence?.weakSignalDetected ? ' · weak signal' : ''}
                 </span>

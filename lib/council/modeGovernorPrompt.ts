@@ -44,7 +44,7 @@ function modeRulesBlock(governor: ModeGovernor): string[] {
   if (governor.mode === 'council') {
     lines.push(
       'Council: informative structured analysis within decree scope is encouraged.',
-      'When substantive, prefer: Primary finding — … / Recommended action — … / Risk — …',
+      'When intelligence evidence is involved, use only non-empty light headings: Verified, Emerging, Contradictions, Unknowns, Optional recommended next step.',
       'Explain reasoning when useful; stay on the decree topic only.',
     )
   }

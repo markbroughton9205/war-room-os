@@ -86,6 +86,7 @@ export type IntelligenceClientMetadata = {
   packetId: string
   sourcesUsed: number
   sourceLabels: string[]
+  sourcesPreview: string
   confidenceLevel: EvidenceConfidenceTier
   confidenceScore: number
   freshness: EvidenceFreshness
@@ -132,6 +133,28 @@ function sourceFailureRecords(queryPlan: IntelligenceQueryPlan, rawRecords: RawI
         failure_behavior: behavior,
       }]
     })
+}
+
+function hostnameFromUrl(url: string | undefined): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return null
+  }
+}
+
+export function buildSourcesPreview(packet: IntelligencePacket, max = 4): string {
+  const names = new Set<string>()
+  for (const item of packet.evidence) {
+    const host = hostnameFromUrl(item.url)
+    names.add(host ?? item.source_label)
+    if (names.size >= max) break
+  }
+  if (!names.size && packet.sources_used.length) {
+    for (const source of packet.sources_used.slice(0, max)) names.add(source)
+  }
+  return Array.from(names).join(', ')
 }
 
 export function buildIntelligencePacket(args: {
@@ -186,10 +209,12 @@ export function buildIntelligencePacket(args: {
 }
 
 export function toIntelligenceClientMetadata(packet: IntelligencePacket): IntelligenceClientMetadata {
+  const sourceLabels = [...new Set(packet.evidence.map(item => item.source_label))].slice(0, 6)
   return {
     packetId: packet.id,
     sourcesUsed: packet.sources_used.length,
-    sourceLabels: [...new Set(packet.evidence.map(item => item.source_label))].slice(0, 6),
+    sourceLabels,
+    sourcesPreview: buildSourcesPreview(packet),
     confidenceLevel: packet.confidence_summary.overall,
     confidenceScore: packet.confidence_summary.score,
     freshness: packet.freshness,
@@ -207,7 +232,7 @@ export function buildIntelligenceGroundingBlock(packet: IntelligencePacket, fami
   const lines = [
     '### Universal intelligence packet (server-built; read-only)',
     `- packetId: ${packet.id} · generatedAt: ${packet.timestamp}`,
-    `- confidence: ${packet.confidence_summary.overall} (${packet.confidence_summary.score.toFixed(2)}) · freshness: ${packet.freshness}`,
+    `- provenance: ${packet.sources_used.length} source(s) · ${buildSourcesPreview(packet) || 'none'} · freshness=${packet.freshness} · confidence=${packet.confidence_summary.overall} (${packet.confidence_summary.score.toFixed(2)})`,
     `- sourcesUsed: ${packet.sources_used.length ? packet.sources_used.join(', ') : 'none'}`,
     `- weakSignals: ${packet.weak_signals.length} · contradictions: ${packet.contradictions.length} · unsupportedClaims: ${packet.unsupported_claims.length}`,
     roleLine,
@@ -228,7 +253,16 @@ export function buildIntelligenceGroundingBlock(packet: IntelligencePacket, fami
     lines.push(`- gaps: ${packet.gaps.slice(0, 5).join(' || ')}`)
   }
   lines.push(
-    '- Operational truth doctrine: unverified information may be discussed only with uncertainty labels. Do not convert weak signals, rumors, stale evidence, or unsupported claims into facts.',
+    '- Response shape: answer the decree directly. Use only the headings that have content: Verified, Emerging, Contradictions, Unknowns, Optional recommended next step.',
+  )
+  lines.push(
+    '- Inference labels: say "Unconfirmed local discussion suggests...", "Weak signal only...", "No verified evidence currently...", or "Inference based on limited reporting..." when support is incomplete.',
+  )
+  lines.push(
+    '- Context restraint: do not relate this to Commander mission, business goals, philosophy, or strategy unless the decree explicitly asks for that relevance.',
+  )
+  lines.push(
+    '- Operational truth doctrine: unverified information may be discussed only with uncertainty labels. Do not convert weak signals, rumors, stale evidence, inferred locality, or unsupported claims into facts. Do not imply live/current awareness beyond the packet freshness and connected sources.',
   )
   return lines.join('\n')
 }

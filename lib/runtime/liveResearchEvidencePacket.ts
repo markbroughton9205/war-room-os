@@ -4,7 +4,11 @@
  */
 
 import type { CouncilResponseCompletion } from '@/lib/council/responseCompletion'
-import type { IntelligenceClientMetadata, IntelligencePacket } from '@/lib/intelligence/intelligencePacket'
+import {
+  toIntelligenceClientMetadata,
+  type IntelligenceClientMetadata,
+  type IntelligencePacket,
+} from '@/lib/intelligence/intelligencePacket'
 
 export type LiveResearchSourceKind = 'tavily' | 'grok_xai' | 'gemini' | 'direct_fetch'
 
@@ -70,7 +74,7 @@ export function buildLiveResearchGroundingBlock(packet: LiveResearchEvidencePack
   if (packet.intelligencePacket) {
     const intel = packet.intelligencePacket
     lines.push(
-      `- universalIntelligence: ${intel.id} · tier=${intel.confidence_summary.overall} · evidence=${intel.evidence.length} · weakSignals=${intel.weak_signals.length} · contradictions=${intel.contradictions.length}`,
+      `- universalIntelligence: ${intel.id} · sources=${intel.sources_used.length} · preview=${toIntelligenceClientMetadata(intel).sourcesPreview || 'none'} · tier=${intel.confidence_summary.overall} · freshness=${intel.freshness} · weakSignals=${intel.weak_signals.length} · contradictions=${intel.contradictions.length}`,
     )
   }
   if (packet.sources.length) {
@@ -96,7 +100,7 @@ export function buildLiveResearchGroundingBlock(packet: LiveResearchEvidencePack
     lines.push(`- pipelineNote: ${packet.researchErrorSummary}`)
   }
   lines.push(
-    '- Epistemic discipline: Label claims as **verified current** only when directly supported by the sources above. Mark **inference** vs **speculation** vs **historical / general knowledge**. Never invent URLs, citations, or article titles. If live research failed or is partial, say so explicitly; do not fill gaps with fabricated “current events”.',
+    '- Epistemic discipline: Answer the decree directly. Label claims as **verified current** only when directly supported by the sources above. Mark **inference**, **weak signal**, **speculation**, and **unknown** clearly. Never invent URLs, local facts, citations, article titles, or current conditions. Do not add Commander mission/business/strategy relevance unless asked.',
   )
   return lines.join('\n')
 }
@@ -215,16 +219,5 @@ export function toLiveResearchClientSummary(
 }
 
 function toIntelligenceMetadata(packet: IntelligencePacket): IntelligenceClientMetadata {
-  return {
-    packetId: packet.id,
-    sourcesUsed: packet.sources_used.length,
-    sourceLabels: [...new Set(packet.evidence.map(item => item.source_label))].slice(0, 6),
-    confidenceLevel: packet.confidence_summary.overall,
-    confidenceScore: packet.confidence_summary.score,
-    freshness: packet.freshness,
-    contradictionWarnings: packet.contradictions.length,
-    weakSignalDetected: packet.weak_signals.length > 0,
-    unsupportedClaims: packet.unsupported_claims.length,
-    redTeamWarnings: packet.red_team_verification.warnings.length,
-  }
+  return toIntelligenceClientMetadata(packet)
 }
