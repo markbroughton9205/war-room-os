@@ -6082,10 +6082,11 @@ function Home() {
     setSessionCost(prev => prev + finalCost)
   }
 
-  const mergeContinuationFromChatJson = (data: CouncilChatJson) => {
+  const mergeContinuationFromChatJson = (data: CouncilChatJson, opts?: { ignoreContinuation?: boolean }) => {
     if (data.liveResearchAttempted && data.liveResearchUi) {
       setLiveResearchHud(data.liveResearchUi)
     }
+    if (opts?.ignoreContinuation) return
     const cr = data.continuationRequest
     if (!cr) return
     setContinuationRequests(prev => {
@@ -6117,6 +6118,12 @@ function Home() {
     if (snap.councilState !== 'active' || snap.requiresRaelForAutonomous || snap.isAwaitingResponses) return
     if (!snap.councilChannelOpen) return
     if (toolRequestActiveRef.current) return
+
+    const autonomousCmd = activeCouncilCommandRef.current
+    const autonomousIntentPrecheck = resolveCurrentIntent({
+      latestRaelDecreeText: lastRaelDirectiveContentRef.current,
+    })
+    if (autonomousIntentPrecheck.intent === 'attendance' || autonomousCmd.mode === 'attendance') return
 
     autonomousOrchInFlightRef.current = true
     const autonomousDecreeRoundAtFetch = decreeRoundGenRef.current
@@ -6405,7 +6412,10 @@ function Home() {
     const rosterLabel = (fid: CouncilOrchestrationFamily) =>
       COUNCIL_ROSTER.find(r => r.id === fid)?.label ?? fid
 
-    const postCouncilChatDecreeGather = async (body: Parameters<typeof postCouncilChat>[0]) => {
+    const postCouncilChatDecreeGather = async (
+      body: Parameters<typeof postCouncilChat>[0],
+      continuationMergeOpts?: { ignoreContinuation?: boolean },
+    ) => {
       const merged = new AbortController()
       const onDecreeAbort = () => merged.abort()
       controller.signal.addEventListener('abort', onDecreeAbort, { once: true })
@@ -6413,7 +6423,7 @@ function Home() {
       if (controller.signal.aborted) merged.abort()
       try {
         const out = await postCouncilChat({ ...body, councilGatherPhase: 'decree_soft' }, merged.signal)
-        mergeContinuationFromChatJson(out.data)
+        mergeContinuationFromChatJson(out.data, continuationMergeOpts)
         return out
       } finally {
         window.clearTimeout(hangId)
@@ -6842,7 +6852,7 @@ function Home() {
                     : {}),
                   ...(diagnosticSequential ? { diagnosticIntentMode } : {}),
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
-                })
+                }, attendanceWave ? { ignoreContinuation: true } : undefined)
 
                 if (chatRes.ok && chatData.councilProviderHttpStatus === 'timed_out') {
                   runtime = 'TIMED_OUT'
@@ -7177,7 +7187,10 @@ function Home() {
           verifiedRuntimeByFamily,
         })
         for (const line of moderated) {
-          if (!line.content.trim()) continue
+          if (!line.content.trim()) {
+            attendanceRevealedFamilies.add(line.family)
+            continue
+          }
           await revealOrchestrationTurn(line.family, line.content, inputText(), { councilRevealSource: 'decree' })
           attendanceRevealedFamilies.add(line.family)
           const vis = orchestrationVisual(line.family)
@@ -7359,11 +7372,30 @@ function Home() {
       if (controller.signal.aborted || councilPausedRef.current) return
 
       councilDispatch({ type: 'SET_COUNCIL_CHANNEL_OPEN', payload: true })
-      if (councilSnapRef.current.councilState === 'idle') {
-        councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
+      if (!attendanceWave) {
+        if (councilSnapRef.current.councilState === 'idle') {
+          councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
+        }
+      } else {
+        councilDispatch({ type: 'RESET_AUTONOMOUS' })
+        councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
+        councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'idle' })
+        setContinuationRequests([])
+        orchRedTeamEarlyLatchRef.current = false
+        lastAutonomousHadLiveResearchRef.current = false
+        lastAutonomousResearchFamilyRef.current = null
+        setTypingFamily(null)
+        setLiveResearchHud(null)
+        setFamilyDuty(Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])))
+        setFamilyCurrentFocus({})
       }
 
-      if (anySuccess && intent.tier !== 'casual' && !inputText().toLowerCase().includes('continue council discussion')) {
+      if (
+        anySuccess
+        && intent.tier !== 'casual'
+        && !inputText().toLowerCase().includes('continue council discussion')
+        && !attendanceWave
+      ) {
         const memoryActionId = `memory-save-${Date.now()}`
         addRaelAction({
           action_id: memoryActionId,
@@ -7388,7 +7420,10 @@ function Home() {
       }
 
       clearOrchestrationTimer()
-      if (intent.maxFamilies > 0) {
+      if (
+        intent.maxFamilies > 0
+        && !attendanceWave
+      ) {
         window.setTimeout(() => {
           const s = councilSnapRef.current
           if (s.councilState !== 'active' || !s.councilChannelOpen) return

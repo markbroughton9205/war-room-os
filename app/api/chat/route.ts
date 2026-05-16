@@ -1085,6 +1085,9 @@ export async function POST(req: Request) {
       if (continuationRequest && liveResearchAttempted && councilResponseCompletion === 'truncated') {
         continuationRequest = null
       }
+      if (continuationRequest && isAttendanceFlow) {
+        continuationRequest = null
+      }
 
       await safeAudit({
         success: true,
