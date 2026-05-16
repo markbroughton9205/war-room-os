@@ -4812,7 +4812,7 @@ function Home() {
     return () => window.cancelAnimationFrame(frame)
   }, [messages, autoScrollEnabled])
 
-  const addMessages = (newMsgs: CouncilMessage[]) => {
+  const addMessages = (newMsgs: CouncilMessage[], opts?: { removeIds?: string[] }) => {
     const existing = new Set(messagesRef.current.map(message => message.id))
     const normalized = newMsgs.map(message => {
       const existingId = typeof message.id === 'string' ? message.id.trim() : ''
@@ -4824,6 +4824,13 @@ function Home() {
       existing.add(nextId)
       return { ...message, id: nextId }
     })
+    if (opts?.removeIds?.length) {
+      councilDispatch({
+        type: 'ADD_MESSAGES_REMOVING',
+        payload: { messages: normalized, removeIds: opts.removeIds },
+      })
+      return
+    }
     councilDispatch({ type: 'ADD_MESSAGES', payload: normalized })
   }
 
@@ -4992,20 +4999,6 @@ function Home() {
     }
   }
 
-  const deleteLiveCouncilMessages = async (messageIds: string[]) => {
-    const ids = [...new Set(messageIds.filter(id => typeof id === 'string' && id.trim()))]
-    if (!ids.length || !liveCouncilConvId || !persistenceAvailable) return
-    try {
-      await fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids }),
-      })
-    } catch {
-      /* cleanup is best-effort; audit/event history is untouched */
-    }
-  }
-
   const isTransientProviderStatusContent = (
     content: string,
     family: CouncilOrchestrationFamily,
@@ -5027,13 +5020,12 @@ function Home() {
     return /\b(engine status unknown|unavailable|has not responded yet|pending|provider returned timeout|provider call failed|not configured|configured|not reachable|reachable|client_abort_or_budget|local_unavailable|engine_unavailable|empty_then_local_failed|cloud_and_local_failed|recovery)\b/i.test(text)
   }
 
-  const clearTransientProviderStatusAfterSuccess = (args: {
+  const collectTransientProviderStatusMessageIds = (args: {
     family: CouncilOrchestrationFamily
     messageIds?: string[]
-    persistedMessageIds?: string[]
     includeGenericRecovery?: boolean
     keepMessageIds?: string[]
-  }): number => {
+  }): string[] => {
     const ids = new Set(args.messageIds ?? [])
     const keepIds = new Set(args.keepMessageIds ?? [])
     const latestRaelIndex = messagesRef.current.findLastIndex(isRaelCouncilMessage)
@@ -5052,25 +5044,7 @@ function Home() {
         removeIds.push(message.id)
       }
     }
-
-    if (removeIds.length > 0) {
-      councilDispatch({ type: 'REMOVE_MESSAGES', payload: { ids: removeIds } })
-    }
-
-    const providerError = councilSnapRef.current.providerErrorMessage
-    if (
-      providerError
-      && isTransientProviderStatusContent(providerError, args.family, {
-        includeGenericRecovery: args.includeGenericRecovery,
-      })
-    ) {
-      councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
-    }
-
-    if (args.persistedMessageIds?.length) {
-      void deleteLiveCouncilMessages(args.persistedMessageIds)
-    }
-    return removeIds.length
+    return removeIds
   }
 
   const terminalReasonForDirectInvocation = (
@@ -5097,14 +5071,18 @@ function Home() {
       const clean = detail?.replace(/\s+/g, ' ').trim().slice(0, 180)
       return clean ? `${label}: ${clean}` : `${label} unavailable.`
     }
-    return `${label} did not return a response.`
+    return `${label} did not return a response in time.`
   }
 
   const emitDirectInvocationTerminalDebug = (metadata: {
     directInvocationTarget: CouncilOrchestrationFamily
     finalVisibleMessageEmitted: boolean
     temporaryMessagesRemoved: number
+    placeholdersRemoved: number
     terminalReason: 'success' | 'timeout' | 'unavailable' | 'error' | 'no_response'
+    terminalVisibleMessageExists: boolean
+    terminalFallbackInserted: boolean
+    packetCloseAllowed: boolean
   }) => {
     console.debug('[Live Council] direct_invocation_terminal', metadata)
     void fetch('/api/events/emit', {
@@ -6030,6 +6008,7 @@ function Home() {
     colorOverride,
     iconOverride,
     instant,
+    removeMessageIds,
   }: {
     familyName: TypingFamily
     bubbleFamilyName?: string
@@ -6042,6 +6021,8 @@ function Home() {
     iconOverride?: string
     /** Skip artificial typing delays (council uses real API latency as primary UX). */
     instant?: boolean
+    /** Remove stale placeholders atomically when the final visible response appears. */
+    removeMessageIds?: string[]
   }) => {
     const family = colorOverride
       ? { color: colorOverride, icon: iconOverride ?? '•' }
@@ -6060,7 +6041,7 @@ function Home() {
         icon: family.icon,
         provider,
         messageType: 'response',
-      }])
+      }], removeMessageIds?.length ? { removeIds: removeMessageIds } : undefined)
       setPresence(familyName, 'idle', 'standby')
       return
     }
@@ -6228,6 +6209,17 @@ function Home() {
       }
     })
     const vis = orchestrationVisual(family)
+    const directInvocationFinal =
+      text.trim()
+      && councilRevealSource === 'decree'
+      && activeCouncilCommandRef.current.directInvocation
+      && activeCouncilCommandRef.current.targetFamilies[0] === family
+    const directInvocationRemoveIds = directInvocationFinal
+      ? collectTransientProviderStatusMessageIds({
+          family,
+          includeGenericRecovery: true,
+        })
+      : []
     await streamFamilyMessage({
       familyName: vis.presenceKey,
       bubbleFamilyName: vis.bubbleFamilyName,
@@ -6239,22 +6231,25 @@ function Home() {
       thinkingLabel: vis.thinkingLabel,
       streamingLabel: vis.streamingLabel,
       instant: true,
+      removeMessageIds: directInvocationRemoveIds,
     })
-    if (
-      text.trim()
-      && councilRevealSource === 'decree'
-      && activeCouncilCommandRef.current.directInvocation
-      && activeCouncilCommandRef.current.targetFamilies[0] === family
-    ) {
-      const temporaryMessagesRemoved = clearTransientProviderStatusAfterSuccess({
-        family,
-        includeGenericRecovery: true,
-      })
+    if (directInvocationFinal) {
+      const providerError = councilSnapRef.current.providerErrorMessage
+      if (
+        providerError
+        && isTransientProviderStatusContent(providerError, family, { includeGenericRecovery: true })
+      ) {
+        councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+      }
       emitDirectInvocationTerminalDebug({
         directInvocationTarget: family,
         finalVisibleMessageEmitted: true,
-        temporaryMessagesRemoved,
+        temporaryMessagesRemoved: directInvocationRemoveIds.length,
+        placeholdersRemoved: directInvocationRemoveIds.length,
         terminalReason: 'success',
+        terminalVisibleMessageExists: true,
+        terminalFallbackInserted: false,
+        packetCloseAllowed: true,
       })
     }
     const finalCost = totalUsageCost(nextUsageRows)
@@ -6916,7 +6911,6 @@ function Home() {
         const label = rosterLabel(family)
         const isDirectInvoke = Boolean(cmd.directInvocation && cmd.targetFamilies[0] === family)
         const transientDirectStatusMessageIds: string[] = []
-        const transientDirectStatusPersistedIds: string[] = []
         const postDirectUnavailable = async (rt: ProviderFamilyOutcomeStatus, detail?: string) => {
           const line = replaceWithRuntimeTruthLine(
             family,
@@ -6925,11 +6919,10 @@ function Home() {
           const uiMessageId = createMessageId(`transient-${family}`)
           transientDirectStatusMessageIds.push(uiMessageId)
           gatherPostSystem(line, { id: uiMessageId })
-          const persistedId = await gatherPostLive(
+          await gatherPostLive(
             { role: 'system', content: line, family },
             { transientProviderStatus: true, providerRuntime: rt },
           )
-          if (persistedId) transientDirectStatusPersistedIds.push(persistedId)
         }
         const deep = councilSnapRef.current.deepDiscussionMode
         const summarizeAugment = mode === 'summarize'
@@ -7371,17 +7364,38 @@ function Home() {
           cell.runtimeDetail,
         )
         const terminalMessageId = createMessageId(`direct-terminal-${directInvocationTarget}`)
-        addSystemMessage(terminalText, { id: terminalMessageId, force: true })
-        const temporaryMessagesRemoved = clearTransientProviderStatusAfterSuccess({
+        const removeIds = collectTransientProviderStatusMessageIds({
           family: directInvocationTarget,
           includeGenericRecovery: true,
           keepMessageIds: [terminalMessageId],
         })
+        const terminalMessage: CouncilMessage = {
+          id: terminalMessageId,
+          familyName: 'SYSTEM',
+          content: terminalText,
+          timestamp: new Date().toLocaleTimeString(),
+          color: '#FFD700',
+          icon: '⚙',
+          provider: '',
+          messageType: 'system',
+        }
+        addMessages([terminalMessage], { removeIds })
+        const providerError = councilSnapRef.current.providerErrorMessage
+        if (
+          providerError
+          && isTransientProviderStatusContent(providerError, directInvocationTarget, { includeGenericRecovery: true })
+        ) {
+          councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+        }
         const terminalMetadata = {
           directInvocationTarget,
           finalVisibleMessageEmitted: true,
-          temporaryMessagesRemoved,
+          temporaryMessagesRemoved: removeIds.length,
+          placeholdersRemoved: removeIds.length,
           terminalReason,
+          terminalVisibleMessageExists: true,
+          terminalFallbackInserted: true,
+          packetCloseAllowed: true,
         }
         void postLiveCouncilMessage(
           { role: 'system', content: terminalText, family: directInvocationTarget },

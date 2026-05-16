@@ -54,6 +54,7 @@ export type CouncilSessionAction =
   | { type: 'SET_MESSAGES'; payload: PersistedCouncilMessage[] }
   | { type: 'ADD_MESSAGES'; payload: PersistedCouncilMessage[] }
   | { type: 'REMOVE_MESSAGES'; payload: { ids: string[] } }
+  | { type: 'ADD_MESSAGES_REMOVING'; payload: { messages: PersistedCouncilMessage[]; removeIds: string[] } }
   | { type: 'UPDATE_MESSAGE'; payload: { id: string; content: string } }
   | { type: 'INCREMENT_AUTONOMOUS' }
   | { type: 'RESET_AUTONOMOUS' }
@@ -66,6 +67,45 @@ export type CouncilSessionAction =
 
 function maxAutonomousCap(deep: boolean) {
   return deep ? COUNCIL_MAX_CONSECUTIVE_AUTONOMOUS_DEEP : COUNCIL_MAX_CONSECUTIVE_AUTONOMOUS
+}
+
+function latestRaelIndex(messages: PersistedCouncilMessage[]): number {
+  return messages.findLastIndex(m => {
+    const u = m.familyName.toUpperCase()
+    return u.includes("RA'EL") || u === 'RAEL'
+  })
+}
+
+function visibleOutputKey(message: PersistedCouncilMessage): string {
+  return [
+    message.familyName.trim().toLowerCase(),
+    message.messageType.trim().toLowerCase(),
+    message.provider.trim().toLowerCase(),
+    message.content.replace(/\s+/g, ' ').trim().toLowerCase(),
+  ].join('|')
+}
+
+function appendDedupedVisibleMessages(
+  existingMessages: PersistedCouncilMessage[],
+  incomingMessages: PersistedCouncilMessage[],
+): PersistedCouncilMessage[] {
+  const latestRael = latestRaelIndex(existingMessages)
+  const ids = new Set(existingMessages.map(m => m.id))
+  const visibleKeys = new Set(
+    existingMessages
+      .slice(Math.max(0, latestRael + 1))
+      .map(visibleOutputKey)
+      .filter(Boolean),
+  )
+  const out = [...existingMessages]
+  for (const message of incomingMessages) {
+    const key = visibleOutputKey(message)
+    if (ids.has(message.id) || (key && visibleKeys.has(key))) continue
+    ids.add(message.id)
+    if (key) visibleKeys.add(key)
+    out.push(message)
+  }
+  return out
 }
 
 export function councilSessionReducer(state: CouncilPersistedV1, action: CouncilSessionAction): CouncilPersistedV1 {
@@ -124,7 +164,11 @@ export function councilSessionReducer(state: CouncilPersistedV1, action: Council
       return { ...state, messages: action.payload, lastActivityAt: now }
 
     case 'ADD_MESSAGES':
-      return { ...state, messages: [...state.messages, ...action.payload], lastActivityAt: now }
+      return {
+        ...state,
+        messages: appendDedupedVisibleMessages(state.messages, action.payload),
+        lastActivityAt: now,
+      }
 
     case 'REMOVE_MESSAGES': {
       const ids = new Set(action.payload.ids)
@@ -132,6 +176,16 @@ export function councilSessionReducer(state: CouncilPersistedV1, action: Council
       return {
         ...state,
         messages: state.messages.filter(m => !ids.has(m.id)),
+        lastActivityAt: now,
+      }
+    }
+
+    case 'ADD_MESSAGES_REMOVING': {
+      const ids = new Set(action.payload.removeIds)
+      const kept = ids.size ? state.messages.filter(m => !ids.has(m.id)) : state.messages
+      return {
+        ...state,
+        messages: appendDedupedVisibleMessages(kept, action.payload.messages),
         lastActivityAt: now,
       }
     }
@@ -209,18 +263,19 @@ export function councilSessionReducer(state: CouncilPersistedV1, action: Council
     case 'ADD_SYSTEM_MESSAGE_DEDUPED': {
       const lastSystem = [...state.messages].reverse().find(m => m.familyName === 'SYSTEM')
       if (lastSystem?.content === action.payload.content) return state
+      const message = {
+        id: action.payload.id ?? createMessageId('system'),
+        familyName: 'SYSTEM',
+        content: action.payload.content,
+        timestamp: action.payload.timestamp,
+        color: '#FFD700',
+        icon: '⚙',
+        provider: '',
+        messageType: 'system',
+      }
       return {
         ...state,
-        messages: [...state.messages, {
-          id: action.payload.id ?? createMessageId('system'),
-          familyName: 'SYSTEM',
-          content: action.payload.content,
-          timestamp: action.payload.timestamp,
-          color: '#FFD700',
-          icon: '⚙',
-          provider: '',
-          messageType: 'system',
-        }],
+        messages: appendDedupedVisibleMessages(state.messages, [message]),
         lastActivityAt: now,
       }
     }
