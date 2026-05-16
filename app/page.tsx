@@ -5025,6 +5025,7 @@ function Home() {
     messageIds?: string[]
     includeGenericRecovery?: boolean
     keepMessageIds?: string[]
+    contentFallback?: boolean
   }): string[] => {
     const ids = new Set(args.messageIds ?? [])
     const keepIds = new Set(args.keepMessageIds ?? [])
@@ -5036,7 +5037,8 @@ function Home() {
       if (index <= latestRaelIndex) continue
       const matchesTrackedId = ids.has(message.id)
       const matchesTransientStatus =
-        message.familyName === 'SYSTEM'
+        args.contentFallback === true
+        && message.familyName === 'SYSTEM'
         && isTransientProviderStatusContent(message.content, args.family, {
           includeGenericRecovery: args.includeGenericRecovery,
         })
@@ -6175,7 +6177,11 @@ function Home() {
     family: CouncilOrchestrationFamily,
     text: string,
     inputText: string,
-    opts?: { councilRevealSource?: 'autonomous' | 'decree'; autonomousDecreeRoundAtFetch?: number },
+    opts?: {
+      councilRevealSource?: 'autonomous' | 'decree'
+      autonomousDecreeRoundAtFetch?: number
+      transientMessageIds?: string[]
+    },
   ) => {
     if (shouldSuppressProviderFailureFromChatStream(text, { diagnosticsOpen: operatorTab === 'diagnostics' })) {
       return
@@ -6217,6 +6223,7 @@ function Home() {
     const directInvocationRemoveIds = directInvocationFinal
       ? collectTransientProviderStatusMessageIds({
           family,
+          messageIds: opts?.transientMessageIds,
           includeGenericRecovery: true,
         })
       : []
@@ -6805,7 +6812,12 @@ function Home() {
       decreePacketFlushCompleteRef.current = false
       attendanceSoftGatherUiClosedRef.current = false
       decreePacketOpenedAtMsRef.current = Date.now()
-      const staged: { family: CouncilOrchestrationFamily; textOut: string }[] = []
+      type StagedCouncilLine = {
+        family: CouncilOrchestrationFamily
+        textOut: string
+        transientMessageIds?: string[]
+      }
+      const staged: StagedCouncilLine[] = []
 
       const batchCeilingMs = attendanceWave
         ? resolveAttendanceBatchCeilingMs({ familyCount: directedOrder.length })
@@ -6893,6 +6905,7 @@ function Home() {
         textOut: string | null
         runtime: ProviderFamilyOutcomeStatus
         runtimeDetail?: string
+        transientMessageIds?: string[]
       }
 
       const gatherFamily = async (family: CouncilOrchestrationFamily): Promise<GatherCell> => {
@@ -7172,7 +7185,13 @@ function Home() {
           setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
         }
 
-        return { family, textOut, runtime, runtimeDetail }
+        return {
+          family,
+          textOut,
+          runtime,
+          runtimeDetail,
+          transientMessageIds: transientDirectStatusMessageIds,
+        }
       }
 
       const outcomeByFamily = new Map<CouncilOrchestrationFamily, GatherCell>()
@@ -7327,7 +7346,11 @@ function Home() {
 
       const stagedCandidates = cells
         .filter(c => Boolean(c.textOut?.trim()))
-        .map(c => ({ family: c.family, textOut: c.textOut!.trim() }))
+        .map(c => ({
+          family: c.family,
+          textOut: c.textOut!.trim(),
+          transientMessageIds: c.transientMessageIds,
+        }))
 
       if (
         intent.tier === 'casual'
@@ -7366,8 +7389,10 @@ function Home() {
         const terminalMessageId = createMessageId(`direct-terminal-${directInvocationTarget}`)
         const removeIds = collectTransientProviderStatusMessageIds({
           family: directInvocationTarget,
+          messageIds: cell.transientMessageIds,
           includeGenericRecovery: true,
           keepMessageIds: [terminalMessageId],
+          contentFallback: !cell.transientMessageIds?.length,
         })
         const terminalMessage: CouncilMessage = {
           id: terminalMessageId,
@@ -7430,7 +7455,7 @@ function Home() {
       }
 
       const releaseAttendancePacket = async (
-        linesToRelease: { family: CouncilOrchestrationFamily; textOut: string }[],
+        linesToRelease: StagedCouncilLine[],
         runtimeStates: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>>,
       ) => {
         if (!linesToRelease.length) return []
@@ -7459,7 +7484,13 @@ function Home() {
             attendanceRevealedFamilies.add(line.family)
             continue
           }
-          await revealOrchestrationTurn(line.family, line.content, inputText(), { councilRevealSource: 'decree' })
+          const sourceLine =
+            linesToRelease.find(l => l.family === line.family && l.textOut.trim() === line.content.trim())
+            ?? linesToRelease.find(l => l.family === line.family)
+          await revealOrchestrationTurn(line.family, line.content, inputText(), {
+            councilRevealSource: 'decree',
+            transientMessageIds: sourceLine?.transientMessageIds,
+          })
           attendanceRevealedFamilies.add(line.family)
           const vis = orchestrationVisual(line.family)
           const bubble = vis.bubbleFamilyName ?? rosterLabel(line.family)
@@ -7562,11 +7593,15 @@ function Home() {
             directedFamilies: directedOrder,
           })
 
-          const lateLines: { family: CouncilOrchestrationFamily; textOut: string }[] = []
+          const lateLines: StagedCouncilLine[] = []
           for (const c of cells) {
             if (attendanceRevealedFamilies.has(c.family)) continue
             if (c.textOut?.trim()) {
-              lateLines.push({ family: c.family, textOut: c.textOut.trim() })
+              lateLines.push({
+                family: c.family,
+                textOut: c.textOut.trim(),
+                transientMessageIds: c.transientMessageIds,
+              })
               continue
             }
             const slotStatus =
