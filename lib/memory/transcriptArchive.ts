@@ -4,6 +4,12 @@ import type {
   RecallSummaryPreview,
   RecallTranscriptPreview,
 } from '@/lib/memory/recallCommands'
+import {
+  classifyMemoryImportance,
+  memoryCompressionKey,
+  type MemoryImportanceClassification,
+  type MemoryImportanceTier,
+} from '@/lib/memory/importance'
 
 export type ArchiveVisibility = 'private' | 'shared' | 'household'
 
@@ -25,6 +31,12 @@ export type ArchiveTranscriptInput = {
   visibility?: ArchiveVisibility
 }
 
+type CuratedArchiveMessage = ArchiveTranscriptInput & {
+  compressedCount: number
+  compressionKey: string
+  classification: MemoryImportanceClassification
+}
+
 export type ArchiveBatchSummary = {
   keyDecrees: string[]
   decisions: string[]
@@ -37,6 +49,7 @@ export type ArchiveBatchSummary = {
 
 const TABLE_ARCHIVE = 'war_room_archived_transcripts'
 const TABLE_SUMMARIES = 'war_room_session_summaries'
+const TABLE_STRATEGIC = 'war_room_strategic_memories'
 
 function cleanPreview(content: string, max = 220): string {
   const compact = content.replace(/\s+/g, ' ').trim()
@@ -56,6 +69,60 @@ function inferTopic(message: ArchiveTranscriptInput): string | null {
   if (/\beconomic ops\b|\bopportunity scout\b|\bincome radar\b/.test(text)) return 'economic_ops'
   if (/\bincome\b|\brevenue\b|\bopportunit(y|ies)\b|\bclient\b|\bleads?\b/.test(text)) return 'income_ideas'
   return null
+}
+
+function compressArchiveMessages(messages: ArchiveTranscriptInput[]): (ArchiveTranscriptInput & { compressedCount: number; compressionKey: string })[] {
+  const out: (ArchiveTranscriptInput & { compressedCount: number; compressionKey: string })[] = []
+  const indexByKey = new Map<string, number>()
+
+  for (const message of messages) {
+    const key = memoryCompressionKey(message)
+    const existingIndex = indexByKey.get(key)
+    if (existingIndex === undefined) {
+      indexByKey.set(key, out.length)
+      out.push({ ...message, compressedCount: 1, compressionKey: key })
+      continue
+    }
+
+    const existing = out[existingIndex]!
+    const nextCount = existing.compressedCount + 1
+    out[existingIndex] = {
+      ...existing,
+      compressedCount: nextCount,
+      id: existing.id,
+      content: nextCount === 2
+        ? `Repeated ${existing.messageType}: "${existing.content}" (${nextCount} times in archived window).`
+        : existing.content.replace(/\(\d+ times in archived window\)\.?$/i, `(${nextCount} times in archived window).`),
+      tags: [...new Set([...existing.tags, ...message.tags, 'duplicate_compressed'])],
+    }
+  }
+
+  return out
+}
+
+function curateArchiveMessages(messages: ArchiveTranscriptInput[]): {
+  curated: CuratedArchiveMessage[]
+  skipped: number
+  compressed: number
+  trivial: number
+} {
+  const compressed = compressArchiveMessages(messages.filter(message => message.content.trim()))
+  const curated: CuratedArchiveMessage[] = []
+  let skipped = 0
+  let trivial = 0
+
+  for (const message of compressed) {
+    const classification = classifyMemoryImportance(message)
+    if (!classification.preserve) {
+      skipped += message.compressedCount
+      trivial += message.compressedCount
+      continue
+    }
+    curated.push({ ...message, classification })
+  }
+
+  const compressedSavings = compressed.reduce((sum, message) => sum + Math.max(0, message.compressedCount - 1), 0)
+  return { curated, skipped, compressed: compressedSavings, trivial }
 }
 
 function summaryToText(summary: ArchiveBatchSummary): string {
@@ -122,10 +189,18 @@ export async function archiveTranscriptBatch(
     messages: ArchiveTranscriptInput[]
     createSummary?: boolean
   },
-): Promise<{ ok: true; archived: number; summary?: ArchiveBatchSummary } | { ok: false; error: string }> {
+): Promise<{
+  ok: true
+  archived: number
+  skipped: number
+  compressed: number
+  trivial: number
+  strategicPromoted: number
+  summary?: ArchiveBatchSummary
+} | { ok: false; error: string }> {
   const now = new Date().toISOString()
-  const rows = input.messages
-    .filter(message => message.content.trim())
+  const curation = curateArchiveMessages(input.messages)
+  const rows = curation.curated
     .map(message => ({
       source_message_id: message.id,
       session_id: message.sessionId ?? input.sessionId,
@@ -137,7 +212,7 @@ export async function archiveTranscriptBatch(
       provider: message.provider,
       content: message.content,
       message_type: message.messageType,
-      tags: message.tags,
+      tags: [...new Set([...message.tags, ...message.classification.tags])],
       topic: inferTopic(message),
       source_mode: message.sourceMode,
       archived_at: now,
@@ -145,19 +220,88 @@ export async function archiveTranscriptBatch(
       operator_id: message.operatorId ?? null,
       operator_name: message.operatorName ?? null,
       visibility: message.visibility ?? 'private',
+      importance_tier: message.classification.tier,
+      importance_score: message.classification.score,
+      decay_weight: message.classification.decayWeight,
+      memory_tags: message.classification.tags,
+      strategic_pinned: false,
+      mission_critical: message.classification.tier === 'critical',
+      compressed_count: message.compressedCount,
+      compression_key: message.compressionKey,
+      metadata: {
+        classificationReasons: message.classification.reasons,
+        repeated_decree_count: message.messageType === 'decree' && message.compressedCount > 1 ? message.compressedCount : undefined,
+      },
     }))
 
-  if (!rows.length) return { ok: true, archived: 0 }
+  if (!rows.length) {
+    return {
+      ok: true,
+      archived: 0,
+      skipped: curation.skipped,
+      compressed: curation.compressed,
+      trivial: curation.trivial,
+      strategicPromoted: 0,
+    }
+  }
 
-  const { error } = await client
+  const { data: archivedRows, error } = await client
     .from(TABLE_ARCHIVE)
     .upsert(rows, { onConflict: 'session_id,source_message_id' })
+    .select('id,session_id,content,topic,importance_tier,importance_score,memory_tags,operator_id,operator_name,visibility,mission_critical,strategic_pinned,metadata')
 
   if (error) return { ok: false, error: error.message }
 
+  const strategicRows = (archivedRows ?? [])
+    .filter(row => {
+      const tier = (row as { importance_tier?: string }).importance_tier
+      return tier === 'strategic' || tier === 'critical'
+    })
+    .map(row => {
+      const r = row as {
+        id: string
+        session_id: string | null
+        content: string
+        topic: string | null
+        importance_tier: MemoryImportanceTier
+        importance_score: number
+        memory_tags: string[] | null
+        operator_id: string | null
+        operator_name: string | null
+        visibility: ArchiveVisibility
+        mission_critical: boolean
+        strategic_pinned: boolean
+        metadata: Record<string, unknown> | null
+      }
+      return {
+        source_archive_id: r.id,
+        session_id: r.session_id,
+        title: cleanPreview(r.content, 96),
+        content: r.content,
+        memory_kind: r.topic ?? 'platform_evolution',
+        importance_tier: r.importance_tier,
+        importance_score: r.importance_score,
+        topic: r.topic,
+        tags: Array.isArray(r.memory_tags) ? r.memory_tags : [],
+        evidence: r.metadata ?? {},
+        pinned: r.strategic_pinned,
+        mission_critical: r.mission_critical,
+        operator_id: r.operator_id,
+        operator_name: r.operator_name,
+        visibility: r.visibility,
+      }
+    })
+
+  if (strategicRows.length) {
+    const { error: strategicError } = await client
+      .from(TABLE_STRATEGIC)
+      .upsert(strategicRows, { onConflict: 'source_archive_id' })
+    if (strategicError) return { ok: false, error: strategicError.message }
+  }
+
   let summary: ArchiveBatchSummary | undefined
   if (input.createSummary) {
-    summary = summarizeArchiveBatch(input.messages)
+    summary = summarizeArchiveBatch(curation.curated)
     const { error: summaryError } = await client
       .from(TABLE_SUMMARIES)
       .insert({
@@ -172,6 +316,11 @@ export async function archiveTranscriptBatch(
         provider_performance_notes: summary.providerPerformanceNotes,
         unfinished_tasks: summary.unfinishedTasks,
         next_recommended_action: summary.nextRecommendedAction,
+        importance_tier: strategicRows.length ? 'strategic' : 'operational',
+        importance_score: strategicRows.length ? 0.7 : 0.5,
+        decay_weight: strategicRows.length ? 0.85 : 0.55,
+        strategic_pinned: false,
+        mission_critical: strategicRows.some(row => row.mission_critical),
         operator_id: null,
         operator_name: null,
         visibility: 'private',
@@ -179,7 +328,15 @@ export async function archiveTranscriptBatch(
     if (summaryError) return { ok: false, error: summaryError.message }
   }
 
-  return { ok: true, archived: rows.length, summary }
+  return {
+    ok: true,
+    archived: rows.length,
+    skipped: curation.skipped,
+    compressed: curation.compressed,
+    trivial: curation.trivial,
+    strategicPromoted: strategicRows.length,
+    summary,
+  }
 }
 
 export async function recallArchivedTranscripts(
@@ -190,7 +347,9 @@ export async function recallArchivedTranscripts(
   const limit = Math.min(50, Math.max(1, opts?.limit ?? 20))
   let query = client
     .from(TABLE_ARCHIVE)
-    .select('id,message_timestamp,role,family,provider,content,message_type,tags,topic')
+    .select('id,message_timestamp,role,family,provider,content,message_type,tags,topic,importance_tier,importance_score,compressed_count')
+    .neq('importance_tier', 'trivial')
+    .order('importance_score', { ascending: false })
     .order('message_timestamp', { ascending: false })
     .limit(limit)
 
@@ -233,6 +392,9 @@ export async function recallArchivedTranscripts(
       message_type: string | null
       tags: string[] | null
       topic: string | null
+      importance_tier: MemoryImportanceTier | null
+      importance_score: number | null
+      compressed_count: number | null
     }
     return {
       id: r.id,
@@ -244,6 +406,9 @@ export async function recallArchivedTranscripts(
       content: opts?.fullContent ? r.content : cleanPreview(r.content, 500),
       tags: Array.isArray(r.tags) ? r.tags : [],
       topic: r.topic,
+      importanceTier: r.importance_tier,
+      importanceScore: r.importance_score,
+      compressedCount: r.compressed_count ?? 1,
     }
   })
 

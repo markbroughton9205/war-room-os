@@ -21,10 +21,25 @@ create table if not exists public.war_room_archived_transcripts (
   source_mode text not null default 'live_chat_window',
   archived_at timestamptz not null default now(),
   archive_date date not null default current_date,
+  importance_tier text not null default 'operational',
+  importance_score numeric(4,3) not null default 0.5,
+  decay_weight numeric(4,3) not null default 0.55,
+  memory_tags text[] not null default '{}'::text[],
+  last_recalled_at timestamptz,
+  recall_count integer not null default 0,
+  strategic_pinned boolean not null default false,
+  mission_critical boolean not null default false,
+  compressed_count integer not null default 1,
+  compression_key text,
+  promoted_to_strategic_at timestamptz,
+  promoted_by text,
   operator_id text,
   operator_name text,
   visibility text not null default 'private',
   metadata jsonb not null default '{}'::jsonb,
+  constraint war_room_archived_transcripts_importance_check check (
+    importance_tier in ('trivial', 'operational', 'strategic', 'critical')
+  ),
   constraint war_room_archived_transcripts_visibility_check check (
     visibility in ('private', 'shared', 'household')
   )
@@ -44,6 +59,12 @@ create index if not exists war_room_archived_transcripts_session_idx
 
 create index if not exists war_room_archived_transcripts_topic_idx
   on public.war_room_archived_transcripts (topic, message_timestamp desc);
+
+create index if not exists war_room_archived_transcripts_importance_idx
+  on public.war_room_archived_transcripts (importance_tier, importance_score desc, message_timestamp desc);
+
+create index if not exists war_room_archived_transcripts_compression_idx
+  on public.war_room_archived_transcripts (compression_key, message_timestamp desc);
 
 create index if not exists war_room_archived_transcripts_family_idx
   on public.war_room_archived_transcripts (family, message_timestamp desc);
@@ -71,11 +92,21 @@ create table if not exists public.war_room_session_summaries (
   unfinished_tasks text[] not null default '{}'::text[],
   next_recommended_action text,
   recall_index tsvector not null default ''::tsvector,
+  importance_tier text not null default 'operational',
+  importance_score numeric(4,3) not null default 0.5,
+  decay_weight numeric(4,3) not null default 0.55,
+  last_recalled_at timestamptz,
+  recall_count integer not null default 0,
+  strategic_pinned boolean not null default false,
+  mission_critical boolean not null default false,
   created_at timestamptz not null default now(),
   operator_id text,
   operator_name text,
   visibility text not null default 'private',
   metadata jsonb not null default '{}'::jsonb,
+  constraint war_room_session_summaries_importance_check check (
+    importance_tier in ('trivial', 'operational', 'strategic', 'critical')
+  ),
   constraint war_room_session_summaries_visibility_check check (
     visibility in ('private', 'shared', 'household')
   )
@@ -89,6 +120,9 @@ create index if not exists war_room_session_summaries_session_idx
 
 create index if not exists war_room_session_summaries_recall_idx
   on public.war_room_session_summaries using gin (recall_index);
+
+create index if not exists war_room_session_summaries_importance_idx
+  on public.war_room_session_summaries (importance_tier, importance_score desc, created_at desc);
 
 create or replace function public.set_war_room_session_summaries_recall_index()
 returns trigger
@@ -125,5 +159,54 @@ create policy war_room_session_summaries_service_role_all
   for all to service_role using (true) with check (true);
 
 grant select, insert, update, delete on table public.war_room_session_summaries to service_role;
+
+create table if not exists public.war_room_strategic_memories (
+  id uuid primary key default gen_random_uuid(),
+  source_archive_id uuid references public.war_room_archived_transcripts (id) on delete set null,
+  session_id text,
+  title text not null,
+  content text not null,
+  memory_kind text not null default 'platform_evolution',
+  importance_tier text not null default 'strategic',
+  importance_score numeric(4,3) not null default 0.7,
+  topic text,
+  tags text[] not null default '{}'::text[],
+  evidence jsonb not null default '{}'::jsonb,
+  promoted_at timestamptz not null default now(),
+  promoted_by text,
+  pinned boolean not null default false,
+  mission_critical boolean not null default false,
+  decay_weight numeric(4,3) not null default 0.85,
+  last_recalled_at timestamptz,
+  recall_count integer not null default 0,
+  operator_id text,
+  operator_name text,
+  visibility text not null default 'private',
+  metadata jsonb not null default '{}'::jsonb,
+  constraint war_room_strategic_memories_importance_check check (
+    importance_tier in ('strategic', 'critical')
+  ),
+  constraint war_room_strategic_memories_visibility_check check (
+    visibility in ('private', 'shared', 'household')
+  )
+);
+
+create unique index if not exists war_room_strategic_memories_source_idx
+  on public.war_room_strategic_memories (source_archive_id);
+
+create index if not exists war_room_strategic_memories_importance_idx
+  on public.war_room_strategic_memories (importance_tier, importance_score desc, promoted_at desc);
+
+create index if not exists war_room_strategic_memories_topic_idx
+  on public.war_room_strategic_memories (topic, promoted_at desc);
+
+alter table public.war_room_strategic_memories enable row level security;
+
+drop policy if exists war_room_strategic_memories_service_role_all on public.war_room_strategic_memories;
+create policy war_room_strategic_memories_service_role_all
+  on public.war_room_strategic_memories
+  for all to service_role using (true) with check (true);
+
+grant select, insert, update, delete on table public.war_room_strategic_memories to service_role;
 
 select pg_notify('pgrst', 'reload schema');

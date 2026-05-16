@@ -58,6 +58,9 @@ export type RecallTranscriptPreview = {
   content: string
   tags: string[]
   topic: string | null
+  importanceTier?: 'trivial' | 'operational' | 'strategic' | 'critical' | null
+  importanceScore?: number | null
+  compressedCount?: number
 }
 
 export type RecallSummaryPreview = {
