@@ -131,6 +131,77 @@ export function RuntimeIntegrityDashboard({
             </div>
           </div>
 
+          {(data.contradictions?.length ?? 0) > 0 && (
+            <div className="rounded-md border border-amber-500/30 bg-amber-950/25 px-3 py-2 text-xs text-amber-100/95">
+              <div className="font-semibold uppercase tracking-wide text-amber-200/80">Contradictions (do not suppress)</div>
+              <ul className="mt-1 list-inside list-disc space-y-1 text-white/75">
+                {data.contradictions!.map((c, i) => (
+                  <li key={`${c.kind}-${i}`}>{c.summary}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {(data.currentFailures?.length ?? 0) > 0 && (
+            <div className="rounded-md border border-rose-500/35 bg-rose-950/30 px-3 py-2 text-xs">
+              <div className="font-semibold uppercase tracking-wide text-rose-200/90">Current failures</div>
+              <ul className="mt-1 space-y-1.5 text-white/80">
+                {data.currentFailures!.map(f => (
+                  <li key={f.subsystemId}>
+                    <span className="text-rose-100/95">{f.label}</span>{' '}
+                    <span className="text-white/45">({f.severity})</span>
+                    <div className="mt-0.5 text-[11px] text-white/55">{f.evidence}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {(data.historicalWarnings?.length ?? 0) > 0 && (
+            <div className="rounded-md border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-xs text-white/80">
+              <div className="font-semibold uppercase tracking-wide text-amber-200/85">Historical warnings</div>
+              <ul className="mt-1 space-y-1.5">
+                {data.historicalWarnings!.map(w => (
+                  <li key={w.subsystemId}>
+                    <span className="text-amber-100/90">{w.label}</span>{' '}
+                    <span className="text-white/45">({w.severity})</span>
+                    <div className="mt-0.5 text-[11px] text-white/55">{w.message}</div>
+                    {w.staleAfter ? (
+                      <div className="text-[10px] text-white/40">staleAfter: {new Date(w.staleAfter).toLocaleString()}</div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {(data.optionalUnwired?.length ?? 0) > 0 && (
+            <div className="rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white/70">
+              <div className="font-semibold uppercase tracking-wide text-white/45">Optional / unwired</div>
+              <ul className="mt-1 space-y-1">
+                {data.optionalUnwired!.map(u => (
+                  <li key={u.subsystemId}>
+                    {u.label} <span className="text-white/40">({u.severity})</span>
+                    <div className="text-[11px] text-white/50">{u.message}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {(data.liveVerified?.length ?? 0) > 0 && (
+            <div className="rounded-md border border-emerald-500/25 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-100/90">
+              <div className="font-semibold uppercase tracking-wide text-emerald-200/80">Live verified</div>
+              <ul className="mt-1 space-y-1 font-mono text-[11px] text-emerald-100/85">
+                {data.liveVerified!.map((v, i) => (
+                  <li key={`${v.kind}-${i}`}>
+                    [{v.kind}] {v.label}: {v.detail}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {(data.deployment?.commitShort || data.deployment?.lastDeployment) && (
             <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/75">
               <span className="text-white/45">Deploy hint:</span>{' '}

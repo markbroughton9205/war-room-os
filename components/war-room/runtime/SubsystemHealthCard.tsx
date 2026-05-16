@@ -26,7 +26,10 @@ export function SubsystemHealthCard({ row }: { row: SubsystemRow }) {
         <div className="font-medium text-white/90">{row.label}</div>
         <div className={`text-xs font-semibold uppercase ${statusTone(row.status)}`}>{row.status}</div>
       </div>
-      <div className="mt-1 text-[11px] text-white/45">Truth: {row.truthLevel}</div>
+      <div className="mt-1 text-[11px] text-white/45">
+        Truth: {row.truthLevel}
+        {row.evidenceSeverity ? ` · weight: ${row.evidenceSeverity}` : ''}
+      </div>
       <p className="mt-2 text-xs leading-snug text-white/70">{row.evidence}</p>
       <p className="mt-2 text-xs text-emerald-200/90">{row.recommendation}</p>
     </div>

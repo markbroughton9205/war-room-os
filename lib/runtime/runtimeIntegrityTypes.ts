@@ -1,5 +1,40 @@
 /** War Room runtime integrity dashboard — subsystem health classification (read-only diagnostics). */
 
+import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+
+export type EvidenceSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFORMATIONAL'
+
+export type RuntimeContradiction = {
+  kind: 'provider_slot_vs_gather_success' | 'provider_hint_vs_engine_probe'
+  summary: string
+  providerSlotId?: string
+  councilFamily?: CouncilOrchestrationFamily
+  integritySays?: string
+  gatherSays?: string
+}
+
+export type RuntimeIntegrityFailureView = {
+  subsystemId: string
+  label: string
+  evidence: string
+  severity: EvidenceSeverity
+}
+
+export type RuntimeIntegrityWarningView = {
+  subsystemId: string
+  label: string
+  message: string
+  severity: EvidenceSeverity
+  /** When present, consumer may treat the warning as low priority after this ISO time. */
+  staleAfter?: string
+}
+
+export type RuntimeIntegrityLiveVerifiedItem = {
+  kind: 'provider' | 'internet' | 'persistence'
+  label: string
+  detail: string
+}
+
 export type OverallStatus = 'HEALTHY' | 'DEGRADED' | 'FAILING' | 'PARTIAL' | 'UNKNOWN'
 
 export type SubsystemOperationalStatus =
@@ -28,6 +63,8 @@ export type SubsystemRow = {
   configured: boolean
   reachable: boolean
   recommendation: string
+  /** Evidence weighting for headline `overallStatus` (Phase 3). */
+  evidenceSeverity?: EvidenceSeverity
 }
 
 /** Per-engine / cloud slot summary — only fields we can evidence from engine-control + provider hints. */
@@ -109,4 +146,10 @@ export type RuntimeIntegrityResponse = {
   runtimeHealth: RuntimeHealthRollup
   toolsLayer: ToolsLayerRollup
   deployment: DeploymentIntegrityRollup
+  /** Integrity-only or merged with gather-time checks (diagnostics). */
+  contradictions: RuntimeContradiction[]
+  currentFailures: RuntimeIntegrityFailureView[]
+  historicalWarnings: RuntimeIntegrityWarningView[]
+  optionalUnwired: RuntimeIntegrityWarningView[]
+  liveVerified: RuntimeIntegrityLiveVerifiedItem[]
 }

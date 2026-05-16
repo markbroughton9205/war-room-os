@@ -19,6 +19,7 @@ import type { IntentKind } from '@/lib/council/intentClassifier'
 import type { ActiveScope } from '@/lib/council/intentScope'
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
+import type { RuntimeEvidencePacket } from '@/lib/runtime/runtimeEvidencePacket'
 
 export type CouncilChatRequestBody = {
   message: string
@@ -36,6 +37,8 @@ export type CouncilChatRequestBody = {
   diagnosticOrder?: CouncilOrchestrationFamily[]
   /** Truncated JSON string from GET /api/runtime/integrity (diagnostic modes only; server re-validates). */
   runtimeIntegritySnapshot?: string
+  /** Optional client echo of `generatedAt` inside the snapshot — mismatch forces a server refetch. */
+  integrityGeneratedAt?: string
   /** Client echo of decree-derived diagnostic intent (server recomputes from `raelDirectiveText`). */
   diagnosticIntentMode?: DiagnosticIntentMode
   /** Structured discipline from latest Ra’el directive (client-authored). */
@@ -73,6 +76,8 @@ export type CouncilChatJson = {
     order: CouncilOrchestrationFamily[]
     hold: boolean
   }
+  /** Structured runtime evidence for diagnostics (server-built). */
+  runtimeEvidencePacket?: RuntimeEvidencePacket
 }
 
 export async function postCouncilChat(

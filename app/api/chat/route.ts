@@ -23,6 +23,19 @@ import { providerOutcomeToVerifiedContext } from '@/lib/council/runtimeTruth'
 import { ALL_ORCHESTRATION_FAMILIES } from '@/lib/council/commandParser'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
+import { finalizeRuntimeIntegrityResponse } from '@/lib/runtime/finalizeRuntimeIntegrityResponse'
+import { collectRuntimeIntegrityPartial } from '@/lib/runtime/runtimeIntegrityCollect'
+import {
+  isRuntimeIntegritySnapshotStale,
+  parseRuntimeIntegrityGeneratedAt,
+  tryParseRuntimeIntegrityPartial,
+} from '@/lib/runtime/runtimeIntegritySnapshot'
+import { detectProviderSlotVsGatherContradictions } from '@/lib/runtime/runtimeContradiction'
+import {
+  buildRuntimeDiagnosticGroundingBlock,
+  buildRuntimeEvidencePacket,
+  type RuntimeEvidencePacket,
+} from '@/lib/runtime/runtimeEvidencePacket'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
@@ -385,16 +398,6 @@ export async function POST(req: Request) {
   const runtimeSnapRaw =
     typeof body.runtimeIntegritySnapshot === 'string' ? body.runtimeIntegritySnapshot.trim() : ''
   const runtimeSnapTruncated = runtimeSnapRaw.length > 8000 ? runtimeSnapRaw.slice(0, 8000) : runtimeSnapRaw
-  const integrityAugment =
-    sequentialDiagnostic && diagnosticIntentMode !== 'none' && runtimeSnapTruncated.length > 0
-      ? `\n\n### Runtime integrity snapshot (truncated; diagnostics only)\n${runtimeSnapTruncated}`
-      : ''
-  const augmentBlock = [
-    orchestrationAugment.trim() ? `\n\nCouncil orchestration directives:\n${orchestrationAugment.trim()}` : '',
-    integrityAugment,
-  ]
-    .filter(Boolean)
-    .join('')
 
   const sup = tryWarRoomSupabase()
   const safeAudit = async (meta: Record<string, unknown>) => {
@@ -551,6 +554,44 @@ export async function POST(req: Request) {
   }
 
   try {
+    let diagnosticRuntimeEvidencePacket: RuntimeEvidencePacket | undefined
+
+    let snapForDiagnostics = runtimeSnapTruncated
+    let diagnosticRuntimeGrounding = ''
+    if (sequentialDiagnostic && diagnosticIntentMode !== 'none') {
+      const clientPartial = tryParseRuntimeIntegrityPartial(runtimeSnapTruncated)
+      const snapGen = parseRuntimeIntegrityGeneratedAt(runtimeSnapTruncated)
+      const claimedGen =
+        typeof body.integrityGeneratedAt === 'string' ? body.integrityGeneratedAt.trim() : ''
+      const genMismatch = Boolean(claimedGen && snapGen && claimedGen !== snapGen)
+      const partial =
+        clientPartial && !isRuntimeIntegritySnapshotStale(runtimeSnapTruncated) && !genMismatch
+          ? clientPartial
+          : await collectRuntimeIntegrityPartial(req, { councilMode: null })
+      const gatherC = detectProviderSlotVsGatherContradictions(partial.providers, providerRuntimeStates)
+      const effectiveIntegrity = finalizeRuntimeIntegrityResponse(partial, { gatherContradictions: gatherC })
+      diagnosticRuntimeEvidencePacket = buildRuntimeEvidencePacket(effectiveIntegrity, providerRuntimeStates)
+      snapForDiagnostics = JSON.stringify(effectiveIntegrity).slice(0, 8000)
+      diagnosticRuntimeGrounding = buildRuntimeDiagnosticGroundingBlock(diagnosticRuntimeEvidencePacket, {
+        forbidTotalCollapse:
+          diagnosticRuntimeEvidencePacket.overallStatus === 'PARTIAL'
+          || diagnosticRuntimeEvidencePacket.overallStatus === 'HEALTHY',
+      })
+    }
+
+    const integrityAugment =
+      sequentialDiagnostic && diagnosticIntentMode !== 'none' && snapForDiagnostics.length > 0
+        ? `\n\n### Runtime integrity snapshot (truncated; diagnostics only)\n${snapForDiagnostics}`
+        : ''
+
+    const augmentBlock = [
+      orchestrationAugment.trim() ? `\n\nCouncil orchestration directives:\n${orchestrationAugment.trim()}` : '',
+      diagnosticRuntimeGrounding ? `\n\n${diagnosticRuntimeGrounding}` : '',
+      integrityAugment,
+    ]
+      .filter(Boolean)
+      .join('')
+
     const baseUserPrompt = buildCouncilUserPrompt({
       raelDirectiveText,
       threadBlock: thread,
@@ -947,6 +988,9 @@ export async function POST(req: Request) {
         showContinue: true,
         ...(continuationRequest ? { continuationRequest } : {}),
         ...(dmOk ? { diagnosticMeta: dmOk } : {}),
+        ...(sequentialDiagnostic && diagnosticIntentMode !== 'none' && diagnosticRuntimeEvidencePacket
+          ? { runtimeEvidencePacket: diagnosticRuntimeEvidencePacket }
+          : {}),
       })
     }
 

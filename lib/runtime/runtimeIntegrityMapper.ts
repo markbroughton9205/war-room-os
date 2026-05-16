@@ -13,6 +13,10 @@ import type {
   ToolsLayerRollup,
   TruthLevel,
 } from '@/lib/runtime/runtimeIntegrityTypes'
+import {
+  applySubsystemEvidenceSeverities,
+  computeOverallStatusWeighted,
+} from '@/lib/runtime/runtimeEvidenceWeighting'
 
 function riskForStatus(status: SubsystemOperationalStatus): SubsystemRow['risk'] {
   if (status === 'FAILING' || status === 'UNWIRED') return 'high'
@@ -26,27 +30,14 @@ function row(
   return { ...partial, risk: partial.risk ?? riskForStatus(partial.status) }
 }
 
-/** Collapse subsystem states into a single headline status. */
+/**
+ * Collapse subsystem states into a single headline status.
+ * Uses Phase 3 evidence weighting so optional / informational rows can yield `PARTIAL`
+ * instead of forcing a full `FAILING` headline when core planes are healthy.
+ */
 export function computeOverallStatus(subsystems: SubsystemRow[]): OverallStatus {
-  if (!subsystems.length) return 'UNKNOWN'
-  const rank: Record<OverallStatus, number> = {
-    FAILING: 5,
-    DEGRADED: 4,
-    PARTIAL: 3,
-    UNKNOWN: 2,
-    HEALTHY: 1,
-  }
-  let worst: OverallStatus = 'HEALTHY'
-  for (const s of subsystems) {
-    let o: OverallStatus
-    if (s.status === 'FAILING') o = 'FAILING'
-    else if (s.status === 'DEGRADED' || s.status === 'MOCK') o = 'DEGRADED'
-    else if (s.status === 'UNWIRED' || s.status === 'UNKNOWN') o = 'PARTIAL'
-    else if (s.status === 'CONFIGURED_ONLY') o = 'PARTIAL'
-    else o = 'HEALTHY'
-    if (rank[o] > rank[worst]) worst = o
-  }
-  return worst
+  const weighted = applySubsystemEvidenceSeverities(subsystems)
+  return computeOverallStatusWeighted(weighted)
 }
 
 export function mapEngineControlJson(json: unknown): SubsystemRow {
@@ -525,6 +516,15 @@ export function buildInternetRollupFromInternetStatusJson(json: unknown): Intern
   }
 }
 
+/**
+ * Provider / engine slot rollup.
+ *
+ * **Precedence (Phase 3A):** rows derived from `GET /api/engine-control/status` are live probes.
+ * Keys under `/api/providers/health` are **credential hints only** and must not override a matching
+ * engine row's `functional` / `reachable` / `degraded` flags. Red Team in the cloud path uses the
+ * Claude engine — the synthetic `redteam` availability row must not mark the slot non-functional
+ * when the Claude engine probe is functional.
+ */
 export function buildProviderIntegritySlots(engineJson: unknown, providerHealthJson: unknown): ProviderIntegritySlot[] {
   const j = engineJson as { engines?: EngineStatus[] }
   const engines = Array.isArray(j.engines) ? j.engines : []
@@ -544,16 +544,20 @@ export function buildProviderIntegritySlots(engineJson: unknown, providerHealthJ
   const ph = providerHealthJson as { availability?: Record<string, string> }
   const av = ph.availability && typeof ph.availability === 'object' ? ph.availability : {}
   const rt = av.redteam
+  const claudeEngine = engines.find(e => e.id === 'claude')
   if (typeof rt === 'string') {
+    const engineSaysFunctional = Boolean(claudeEngine?.functional)
     slots.push({
       id: 'redteam',
       displayName: 'Red Team (provider slot)',
       configured: rt !== 'not_configured',
-      reachable: false,
-      functional: false,
-      degraded: rt === 'probe_required',
-      failed: false,
-      lastSuccess: null,
+      reachable: engineSaysFunctional ? Boolean(claudeEngine?.reachable) : false,
+      functional: engineSaysFunctional,
+      degraded: rt === 'probe_required' && !engineSaysFunctional,
+      failed: Boolean(claudeEngine?.configured && !engineSaysFunctional && !claudeEngine?.reachable),
+      lastSuccess: engineSaysFunctional && typeof claudeEngine?.lastSuccessfulProbeAt === 'string'
+        ? claudeEngine.lastSuccessfulProbeAt
+        : null,
       lastFailure: null,
       lastResponseMs: null,
     })

@@ -4413,6 +4413,7 @@ function Home() {
     order: CouncilOrchestrationFamily[]
   } | null>(null)
   const diagnosticIntegritySnapshotRef = useRef<string | null>(null)
+  const diagnosticIntegrityGeneratedAtRef = useRef<string | null>(null)
   const diagnosticHoldTimerRef = useRef<number | null>(null)
   const diagnosticHoldReleaseRef = useRef<(() => void) | null>(null)
   const sequentialDiagnostics = useSequentialDiagnostics()
@@ -6538,18 +6539,25 @@ function Home() {
       if (diagnosticSequential) {
         sequentialDiagnosticHoldRef.current = false
         diagnosticIntegritySnapshotRef.current = null
+        diagnosticIntegrityGeneratedAtRef.current = null
         void fetch('/api/runtime/integrity', { cache: 'no-store' })
           .then(r => (r.ok ? r.json() : null))
           .then(obj => {
             if (!obj) return
             try {
               diagnosticIntegritySnapshotRef.current = JSON.stringify(obj).slice(0, 12_000)
+              diagnosticIntegrityGeneratedAtRef.current =
+                typeof (obj as { generatedAt?: unknown }).generatedAt === 'string'
+                  ? (obj as { generatedAt: string }).generatedAt
+                  : null
             } catch {
               diagnosticIntegritySnapshotRef.current = null
+              diagnosticIntegrityGeneratedAtRef.current = null
             }
           })
           .catch(() => {
             diagnosticIntegritySnapshotRef.current = null
+            diagnosticIntegrityGeneratedAtRef.current = null
           })
         sequentialDiagnostics.start(orderForGather, diagnosticIntentMode)
       }
@@ -6710,7 +6718,12 @@ function Home() {
                       }
                     : {}),
                   ...(diagnosticSequential && diagnosticIntegritySnapshotRef.current
-                    ? { runtimeIntegritySnapshot: diagnosticIntegritySnapshotRef.current }
+                    ? {
+                        runtimeIntegritySnapshot: diagnosticIntegritySnapshotRef.current,
+                        ...(diagnosticIntegrityGeneratedAtRef.current
+                          ? { integrityGeneratedAt: diagnosticIntegrityGeneratedAtRef.current }
+                          : {}),
+                      }
                     : {}),
                   ...(diagnosticSequential ? { diagnosticIntentMode } : {}),
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
