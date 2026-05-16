@@ -67,6 +67,7 @@ import {
 } from '@/lib/council/familyRoster'
 import { extractProposedCouncilActions } from '@/lib/council/extractCouncilActions'
 import { classifyRaElMessage, type ClassifyRaElMessageResult } from '@/lib/council/conversationIntent'
+import { detectResearchIntent } from '@/lib/research/researchIntent'
 import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
 import { DEFAULT_COUNCIL_COMMAND, type CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { councilModeExtensionWarnings, resolveActiveCommand } from '@/lib/council/commandAuthority'
@@ -4412,6 +4413,8 @@ function Home() {
   const [liveResearchHud, setLiveResearchHud] = useState<LiveResearchClientUi | null>(null)
   const decreePacketFlushCompleteRef = useRef(false)
   const decreePacketOpenedAtMsRef = useRef(0)
+  const lastAutonomousResearchFamilyRef = useRef<CouncilOrchestrationFamily | null>(null)
+  const lastAutonomousHadLiveResearchRef = useRef(false)
   /** After attendance soft gather snapshot, block late gather error lines from chat / persistence. */
   const attendanceSoftGatherUiClosedRef = useRef(false)
   const [familyDuty, setFamilyDuty] = useState<Record<string, CouncilDutyState>>(() =>
@@ -6080,7 +6083,7 @@ function Home() {
   }
 
   const mergeContinuationFromChatJson = (data: CouncilChatJson) => {
-    if ('liveResearchUi' in data && data.liveResearchUi) {
+    if (data.liveResearchAttempted && data.liveResearchUi) {
       setLiveResearchHud(data.liveResearchUi)
     }
     const cr = data.continuationRequest
@@ -6169,6 +6172,22 @@ function Home() {
     }
     const augment = buildOrchestrationAugment(family, snap.deepDiscussionMode)
     const autonomousIntent = resolveCurrentIntent({ latestRaelDecreeText: lastRaelDirectiveContentRef.current })
+    const researchDecreeProbe = detectResearchIntent(lastRaelDirectiveContentRef.current, {
+      attendanceFlow: false,
+      sequentialDiagnostic: false,
+      councilGatherPhase: null,
+      intentKind: autonomousIntent.intent,
+    }).shouldResearch
+    if (
+      researchDecreeProbe
+      && lastAutonomousHadLiveResearchRef.current
+      && lastAutonomousResearchFamilyRef.current === family
+    ) {
+      autonomousOrchInFlightRef.current = false
+      councilDispatch({ type: 'SET_REQUIRES_RAEL', payload: true })
+      councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
+      return
+    }
     const threadHistory = messagesRef.current.map(m => ({ sender: m.familyName, content: m.content }))
     const inputText = `${decree}\n${threadHistory.map(m => `${m.sender}: ${m.content}`).join('\n')}`
 
@@ -6246,6 +6265,12 @@ function Home() {
           r = out.res
           data = out.data
           mergeContinuationFromChatJson(data)
+          if (data.liveResearchAttempted) {
+            lastAutonomousHadLiveResearchRef.current = true
+            lastAutonomousResearchFamilyRef.current = family
+          } else {
+            lastAutonomousHadLiveResearchRef.current = false
+          }
         } finally {
           window.clearTimeout(tid)
         }
@@ -6346,6 +6371,8 @@ function Home() {
   const submitDecree = async (decree: string, mode?: CouncilMode) => {
     const myRound = ++decreeRoundGenRef.current
     orchRedTeamEarlyLatchRef.current = false
+    lastAutonomousResearchFamilyRef.current = null
+    lastAutonomousHadLiveResearchRef.current = false
     const toolIntent = mode !== 'continue' && detectToolIntent(decree)
     if (toolIntent && toolRequestActiveRef.current) {
       addSystemMessage('Research already in progress.')
@@ -7076,6 +7103,13 @@ function Home() {
         directedFamilies: orderForGather,
       })
 
+      const researchLikeGather = detectResearchIntent(decree, {
+        attendanceFlow: attendanceWave,
+        sequentialDiagnostic: diagnosticSequential,
+        councilGatherPhase: null,
+        intentKind: councilIntentState.intent,
+      }).shouldResearch
+
       const stagedCandidates = cells
         .filter(c => Boolean(c.textOut?.trim()))
         .map(c => ({ family: c.family, textOut: c.textOut!.trim() }))
@@ -7085,6 +7119,7 @@ function Home() {
         && stagedCandidates.length
         && !attendanceWave
         && !diagnosticSequential
+        && !researchLikeGather
       ) {
         staged.push(stagedCandidates[0]!)
       } else {
@@ -7807,6 +7842,13 @@ function Home() {
   }, [loading, currentPacketProviderIssue, council.councilState])
   const councilContinueStatusLine = useMemo(() => {
     if (currentPacketProviderIssue) return 'Provider issue — see family status badges.'
+    if (liveResearchHud?.mode === 'completing' || liveResearchHud?.councilPhase === 'model_running') {
+      return 'Research completing'
+    }
+    if (liveResearchHud?.mode === 'failed') return 'Research failed'
+    if (liveResearchHud?.responseCompletion === 'truncated' || liveResearchHud?.responseCompletion === 'partial') {
+      return 'Council Active · response partial'
+    }
     if (council.councilState === 'paused') return 'Paused'
     if (council.councilState === 'idle') return 'Idle'
     if (council.councilState === 'waiting_for_rael') return 'Waiting for Ra’el'
@@ -7818,6 +7860,9 @@ function Home() {
     currentPacketProviderIssue,
     council.councilState,
     council.isAwaitingResponses,
+    liveResearchHud?.mode,
+    liveResearchHud?.councilPhase,
+    liveResearchHud?.responseCompletion,
   ])
   const providerHealthLabel = coreProviderStates.some(status => status === 'online' || status === 'standby')
     ? 'Ready'
@@ -8163,17 +8208,29 @@ function Home() {
                         ? '#86EFAC'
                         : liveResearchHud.mode === 'unavailable'
                           ? '#f87171'
-                          : liveResearchHud.mode === 'partial'
-                            ? '#fcd34d'
-                            : '#94a3b8',
+                          : liveResearchHud.mode === 'failed'
+                            ? '#f97316'
+                            : liveResearchHud.mode === 'completing'
+                              ? '#93C5FD'
+                              : liveResearchHud.mode === 'partial'
+                                ? '#fcd34d'
+                                : '#94a3b8',
                   }}
                   title={
                     liveResearchHud.mode === 'inactive'
                       ? 'Live internet research not invoked for this turn.'
-                      : 'Phase 5 live research HUD — see /api/chat liveResearchSummary when present.'
+                      : [
+                          'Phase 5/6 live research HUD.',
+                          liveResearchHud.responseCompletion
+                            ? ` Model completion: ${liveResearchHud.responseCompletion}.`
+                            : '',
+                        ].join('')
                   }
                 >
                   {liveResearchHud.mode === 'inactive' ? 'Research idle' : liveResearchHud.label}
+                  {liveResearchHud.responseCompletion && liveResearchHud.mode !== 'inactive'
+                    ? ` · ${liveResearchHud.responseCompletion}`
+                    : ''}
                   {liveResearchHud.sourcesCount > 0 ? ` · ${liveResearchHud.sourcesCount}` : ''}
                 </span>
               ) : null}

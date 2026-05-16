@@ -34,6 +34,8 @@ export function buildContinuationRequestFromModelOutput(args: {
   text: string
 }): ContinuationRequest | null {
   if (!detectContinuationPressure(args.text)) return null
+  const pf = (args.text.match(/\bprimary\s+finding\b/gi) ?? []).length
+  if (pf >= 2) return null
   const kind: ContinuationRequestKind = AUTONOMOUS_CONTINUE.test(args.text) ? 'autonomous_continuation' : 'analysis_depth'
   return {
     id: `cr-${Date.now()}-${args.family}`,

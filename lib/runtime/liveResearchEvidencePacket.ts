@@ -3,6 +3,8 @@
  * URLs must only originate from user-provided links (validated) or provider APIs — never invented.
  */
 
+import type { CouncilResponseCompletion } from '@/lib/council/responseCompletion'
+
 export type LiveResearchSourceKind = 'tavily' | 'grok_xai' | 'gemini' | 'direct_fetch'
 
 export type LiveResearchSourceRecord = {
@@ -32,10 +34,14 @@ export type LiveResearchEvidencePacket = {
 }
 
 export type LiveResearchClientUi = {
-  mode: 'inactive' | 'active' | 'sources_queried' | 'verified' | 'partial' | 'unavailable'
+  mode: 'inactive' | 'active' | 'sources_queried' | 'verified' | 'partial' | 'unavailable' | 'completing' | 'failed'
   sourcesCount: number
   /** Single-line label for compact UI. */
   label: string
+  /** Council-side phase for this request (evidence vs model vs released). */
+  councilPhase?: 'none' | 'evidence' | 'model_running' | 'released'
+  /** Present when server assessed model output boundary (Phase 6). */
+  responseCompletion?: CouncilResponseCompletion
 }
 
 export function emptyLiveResearchEvidencePacket(generatedAt: string, summary?: string): LiveResearchEvidencePacket {
@@ -84,28 +90,52 @@ export function buildLiveResearchGroundingBlock(packet: LiveResearchEvidencePack
   return lines.join('\n')
 }
 
+export type LiveResearchCouncilDraftPhase = 'none' | 'evidence' | 'model_running'
+
 export function computeLiveResearchClientUi(
   packet: LiveResearchEvidencePacket | undefined,
   researchAttempted: boolean,
+  opts?: { councilPhase?: LiveResearchCouncilDraftPhase },
 ): LiveResearchClientUi {
+  const councilPhase = opts?.councilPhase ?? 'none'
   if (!researchAttempted) {
-    return { mode: 'inactive', sourcesCount: 0, label: 'Live research idle' }
+    return { mode: 'inactive', sourcesCount: 0, label: 'Live research idle', councilPhase: 'none' }
   }
-  const sourcesCount = packet?.sources.filter(s => s.ok).length ?? 0
-  const queried = packet?.sources.length ?? 0
+  if (councilPhase === 'evidence') {
+    return {
+      mode: 'active',
+      sourcesCount: packet?.sources.length ?? 0,
+      label: 'Research — gathering evidence',
+      councilPhase: 'evidence',
+    }
+  }
+  if (councilPhase === 'model_running') {
+    const ok = packet?.sources.filter(s => s.ok).length ?? 0
+    return {
+      mode: 'completing',
+      sourcesCount: ok,
+      label: 'Research — council drafting',
+      councilPhase: 'model_running',
+    }
+  }
 
   if (!packet || packet.sources.every(s => !s.ok)) {
     return {
-      mode: 'unavailable',
+      mode: packet?.researchErrorSummary ? 'failed' : 'unavailable',
       sourcesCount: 0,
-      label: 'Research unavailable',
+      label: packet?.researchErrorSummary ? 'Research pipeline failed' : 'Research unavailable',
+      councilPhase: 'released',
     }
   }
+  const sourcesCount = packet.sources.filter(s => s.ok).length ?? 0
+  const queried = packet.sources.length ?? 0
+
   if (packet.usedLiveResearch && packet.confidence >= 0.72 && sourcesCount >= 2 && !packet.researchErrorSummary) {
     return {
       mode: 'verified',
       sourcesCount: queried,
       label: 'Current info verified (multi-source)',
+      councilPhase: 'released',
     }
   }
   if (packet.usedLiveResearch && sourcesCount >= 1) {
@@ -114,18 +144,25 @@ export function computeLiveResearchClientUi(
         mode: 'partial',
         sourcesCount: queried,
         label: 'Research partially available',
+        councilPhase: 'released',
       }
     }
     return {
       mode: 'sources_queried',
       sourcesCount: queried,
       label: 'Sources queried',
+      councilPhase: 'released',
     }
   }
   if (packet.usedLiveResearch) {
-    return { mode: 'active', sourcesCount: queried, label: 'Live research active' }
+    return { mode: 'active', sourcesCount: queried, label: 'Live research active', councilPhase: 'released' }
   }
-  return { mode: 'partial', sourcesCount: queried, label: 'Research partially available' }
+  return {
+    mode: 'partial',
+    sourcesCount: queried,
+    label: 'Research partially available',
+    councilPhase: 'released',
+  }
 }
 
 export type LiveResearchClientSummary = {
@@ -135,9 +172,14 @@ export type LiveResearchClientSummary = {
   sourceKinds: LiveResearchSourceKind[]
   sourcesQueried: number
   sourcesSucceeded: number
+  /** Model output quality signal for this turn (Phase 6). */
+  responseCompletion?: CouncilResponseCompletion
 }
 
-export function toLiveResearchClientSummary(packet: LiveResearchEvidencePacket | undefined): LiveResearchClientSummary | undefined {
+export function toLiveResearchClientSummary(
+  packet: LiveResearchEvidencePacket | undefined,
+  responseCompletion?: CouncilResponseCompletion,
+): LiveResearchClientSummary | undefined {
   if (!packet) return undefined
   return {
     usedLiveResearch: packet.usedLiveResearch,
@@ -146,5 +188,6 @@ export function toLiveResearchClientSummary(packet: LiveResearchEvidencePacket |
     sourceKinds: packet.sources.map(s => s.kind),
     sourcesQueried: packet.sources.length,
     sourcesSucceeded: packet.sources.filter(s => s.ok).length,
+    ...(responseCompletion ? { responseCompletion } : {}),
   }
 }

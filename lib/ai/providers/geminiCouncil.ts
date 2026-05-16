@@ -9,12 +9,12 @@ import {
 } from '@/lib/ai/providers/geminiGenerative'
 
 type GenJson = {
-  candidates?: { content?: { parts?: { text?: string }[] } }[]
+  candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[]
   error?: { message?: string }
 }
 
 export type GeminiCouncilMessageResult =
-  | { ok: true; text: string }
+  | { ok: true; text: string; finishReason?: string }
   | { ok: false; degraded: true; note: string; reason: GeminiHttpFailureKind }
   | { ok: false; degraded: false; error: string }
 
@@ -80,10 +80,14 @@ export async function completeGeminiCouncilMessage(params: {
         failureKinds.push('degraded')
         continue
       }
-      const text =
-        data.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join('') ?? ''
+      const cand0 = data.candidates?.[0]
+      const text = cand0?.content?.parts?.map(p => p.text).filter(Boolean).join('') ?? ''
+      const finishReason =
+        typeof cand0?.finishReason === 'string' && cand0.finishReason.trim()
+          ? cand0.finishReason.trim()
+          : undefined
       if (res.ok && text.trim()) {
-        return { ok: true, text: text.trim() }
+        return { ok: true, text: text.trim(), ...(finishReason ? { finishReason } : {}) }
       }
       if (!res.ok) {
         failureKinds.push(classifyGeminiGenerateFailure(res.status))

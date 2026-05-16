@@ -21,6 +21,7 @@ import type { ModeGovernor } from '@/lib/council/modeGovernor'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 import type { RuntimeEvidencePacket } from '@/lib/runtime/runtimeEvidencePacket'
 import type { LiveResearchClientSummary, LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
+import type { CouncilResponseCompletion } from '@/lib/council/responseCompletion'
 
 export type CouncilChatRequestBody = {
   message: string
@@ -82,6 +83,21 @@ export type CouncilChatJson = {
   /** Phase 5 — compact client-visible live research HUD. */
   liveResearchUi?: LiveResearchClientUi
   liveResearchSummary?: LiveResearchClientSummary
+  /** True when this `/api/chat` call ran the live research router (Phase 6). */
+  liveResearchAttempted?: boolean
+  /** Model output boundary assessment for this turn (Phase 6). */
+  councilResponseCompletion?: CouncilResponseCompletion
+  /** Single-family research accounting for this response (Phase 6). */
+  liveResearchTurnSurvey?: {
+    wave: 'single'
+    expectedFamilies: CouncilOrchestrationFamily[]
+    roster: Partial<
+      Record<
+        CouncilOrchestrationFamily,
+        'pending' | 'responding' | 'complete' | 'failed' | 'timed_out' | 'partial' | 'truncated'
+      >
+    >
+  }
 }
 
 export async function postCouncilChat(

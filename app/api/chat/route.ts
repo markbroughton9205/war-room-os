@@ -23,6 +23,7 @@ import { providerOutcomeToVerifiedContext } from '@/lib/council/runtimeTruth'
 import { ALL_ORCHESTRATION_FAMILIES } from '@/lib/council/commandParser'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
+import type { LiveResearchEvidencePacket } from '@/lib/runtime/liveResearchEvidencePacket'
 import { finalizeRuntimeIntegrityResponse } from '@/lib/runtime/finalizeRuntimeIntegrityResponse'
 import { collectRuntimeIntegrityPartial } from '@/lib/runtime/runtimeIntegrityCollect'
 import {
@@ -36,6 +37,7 @@ import {
   buildRuntimeEvidencePacket,
   type RuntimeEvidencePacket,
 } from '@/lib/runtime/runtimeEvidencePacket'
+import { assessCouncilTextCompletion, type CouncilResponseCompletion } from '@/lib/council/responseCompletion'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
 import { runLiveResearchRouter } from '@/lib/research/researchRouter'
 import { buildLiveResearchEvidencePacket, logLiveResearchEvidenceMetadata } from '@/lib/research/researchEvidence'
@@ -47,6 +49,18 @@ import {
   type LiveResearchClientSummary,
   type LiveResearchClientUi,
 } from '@/lib/runtime/liveResearchEvidencePacket'
+
+function buildResearchAntiLoopAugment(threadBlock: string): string {
+  const hits = threadBlock.match(/\bprimary\s+finding\b/gi) ?? []
+  if (hits.length < 2) return ''
+  return [
+    '',
+    '### Research discipline (anti-loop)',
+    '- Do not repeat the same **Primary finding** scaffold as prior turns unless new evidence appears in this packet.',
+    '- If there is nothing materially new, answer in at most two short sentences and ask Ra\'el what depth or angle to pursue next.',
+    '- Avoid recursive diagnostics or tool-call narration loops.',
+  ].join('\n')
+}
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
@@ -413,11 +427,27 @@ export async function POST(req: Request) {
   const sup = tryWarRoomSupabase()
   let liveResearchUi: LiveResearchClientUi | undefined
   let liveResearchSummary: LiveResearchClientSummary | undefined
+  let liveResearchAttempted = false
+  let liveResearchPacket: LiveResearchEvidencePacket | undefined
+  let councilResponseCompletion: CouncilResponseCompletion | undefined
+  type LiveResearchRosterStatus = 'pending' | 'responding' | 'complete' | 'failed' | 'timed_out' | 'partial' | 'truncated'
+  let liveResearchTurnSurvey:
+    | {
+        wave: 'single'
+        expectedFamilies: CouncilOrchestrationFamily[]
+        roster: Partial<Record<CouncilOrchestrationFamily, LiveResearchRosterStatus>>
+      }
+    | undefined
 
-  const liveResearchJson = () => ({
-    ...(liveResearchUi ? { liveResearchUi } : {}),
-    ...(liveResearchSummary ? { liveResearchSummary } : {}),
-  })
+  const liveResearchJson = () => {
+    if (!liveResearchAttempted) return {}
+    const o: Record<string, unknown> = { liveResearchAttempted: true }
+    if (liveResearchUi) o.liveResearchUi = liveResearchUi
+    if (liveResearchSummary) o.liveResearchSummary = liveResearchSummary
+    if (liveResearchTurnSurvey) o.liveResearchTurnSurvey = liveResearchTurnSurvey
+    if (councilResponseCompletion) o.councilResponseCompletion = councilResponseCompletion
+    return o
+  }
 
   const safeAudit = async (meta: Record<string, unknown>) => {
     try {
@@ -694,8 +724,19 @@ export async function POST(req: Request) {
     }
 
     if (mode === 'continue' && councilSingleFamily) {
-      liveResearchUi = computeLiveResearchClientUi(undefined, false)
-      liveResearchSummary = undefined
+      let providerFinishReason: string | undefined
+
+      const markLiveResearchProviderFailed = (roster: 'failed' | 'timed_out') => {
+        if (!liveResearchAttempted) return
+        const fam = councilSingleFamily as CouncilOrchestrationFamily
+        liveResearchTurnSurvey = { wave: 'single', expectedFamilies: [fam], roster: { [fam]: roster } }
+        councilResponseCompletion = 'partial'
+        liveResearchSummary = toLiveResearchClientSummary(liveResearchPacket, 'partial')
+        liveResearchUi = {
+          ...computeLiveResearchClientUi(liveResearchPacket, true),
+          responseCompletion: 'partial',
+        }
+      }
 
       if (councilSingleFamily === 'kimi' || councilSingleFamily === 'bridge_architect') {
         await safeAudit({
@@ -748,6 +789,13 @@ export async function POST(req: Request) {
           councilGatherPhase,
         })
         if (researchIntentEval.shouldResearch) {
+          liveResearchAttempted = true
+          liveResearchUi = computeLiveResearchClientUi(undefined, true, { councilPhase: 'evidence' })
+          liveResearchTurnSurvey = {
+            wave: 'single',
+            expectedFamilies: [councilSingleFamily as CouncilOrchestrationFamily],
+            roster: { [councilSingleFamily as CouncilOrchestrationFamily]: 'responding' },
+          }
           const rs = Date.now()
           try {
             const router = await runLiveResearchRouter({
@@ -760,9 +808,11 @@ export async function POST(req: Request) {
               router,
               intentConfidence: researchIntentEval.confidence,
             })
-            liveResearchUi = computeLiveResearchClientUi(packet, true)
+            liveResearchPacket = packet
+            liveResearchUi = computeLiveResearchClientUi(packet, true, { councilPhase: 'model_running' })
             liveResearchSummary = toLiveResearchClientSummary(packet)
             augmentBlock = [augmentBlock, '\n\n', buildLiveResearchGroundingBlock(packet)].join('')
+            augmentBlock = [augmentBlock, buildResearchAntiLoopAugment(thread)].join('')
             void logLiveResearchEvidenceMetadata(sup.ok ? sup.client : null, {
               conversationId,
               triggered: true,
@@ -773,9 +823,11 @@ export async function POST(req: Request) {
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err)
             const packet = emptyLiveResearchEvidencePacket(new Date().toISOString(), msg)
-            liveResearchUi = computeLiveResearchClientUi(packet, true)
+            liveResearchPacket = packet
+            liveResearchUi = computeLiveResearchClientUi(packet, true, { councilPhase: 'model_running' })
             liveResearchSummary = toLiveResearchClientSummary(packet)
             augmentBlock = [augmentBlock, '\n\n', buildLiveResearchGroundingBlock(packet)].join('')
+            augmentBlock = [augmentBlock, buildResearchAntiLoopAugment(thread)].join('')
             void logLiveResearchEvidenceMetadata(sup.ok ? sup.client : null, {
               conversationId,
               triggered: true,
@@ -784,13 +836,7 @@ export async function POST(req: Request) {
               routerMs: Date.now() - rs,
             })
           }
-        } else {
-          liveResearchUi = computeLiveResearchClientUi(undefined, false)
-          liveResearchSummary = undefined
         }
-      } else {
-        liveResearchUi = computeLiveResearchClientUi(undefined, false)
-        liveResearchSummary = undefined
       }
 
       const userPrompt = buildCouncilUserPrompt({
@@ -845,9 +891,11 @@ export async function POST(req: Request) {
                 councilSingleFamily: 'gemini',
                 reason: 'gemini_provider_error',
               })
+              markLiveResearchProviderFailed('failed')
               return degradedProviderResponse('gemini', 'failed', geminiResult.error)
             }
             responseText = geminiResult.text.trim()
+            providerFinishReason = geminiResult.finishReason
             if (!responseText) {
               await safeAudit({
                 success: false,
@@ -855,6 +903,7 @@ export async function POST(req: Request) {
                 councilSingleFamily: 'gemini',
                 reason: 'gemini_empty',
               })
+              markLiveResearchProviderFailed('failed')
               return degradedProviderResponse('gemini', 'failed', 'Gemini returned empty content')
             }
             break
@@ -901,10 +950,12 @@ export async function POST(req: Request) {
           timedOut,
         })
         if (timedOut) {
+          markLiveResearchProviderFailed('timed_out')
           return degradedProviderResponse(councilSingleFamily, 'timed_out', msg)
         }
         if (/\b(api[_ ]?key|not configured|missing|unauthorized|401)\b/i.test(msg)) {
           if (isAttendanceFlow) {
+            markLiveResearchProviderFailed('failed')
             return degradedProviderResponse(councilSingleFamily, 'failed', msg)
           }
           return NextResponse.json(
@@ -912,6 +963,7 @@ export async function POST(req: Request) {
             { status: 503 },
           )
         }
+        markLiveResearchProviderFailed('failed')
         return degradedProviderResponse(councilSingleFamily, 'failed', msg)
       }
 
@@ -922,6 +974,7 @@ export async function POST(req: Request) {
           councilSingleFamily,
           reason: 'empty_body',
         })
+        markLiveResearchProviderFailed('failed')
         return degradedProviderResponse(councilSingleFamily, 'failed', `${councilSingleFamily} returned empty body`)
       }
 
@@ -987,6 +1040,7 @@ export async function POST(req: Request) {
           councilSingleFamily,
           reason: 'empty_after_governor',
         })
+        markLiveResearchProviderFailed('failed')
         return degradedProviderResponse(
           councilSingleFamily,
           'failed',
@@ -994,13 +1048,43 @@ export async function POST(req: Request) {
         )
       }
 
-      const continuationRequest =
+      councilResponseCompletion = assessCouncilTextCompletion(responseText, {
+        providerFinishReason: councilSingleFamily === 'gemini' ? providerFinishReason : undefined,
+      })
+      if (geminiDegradedReason !== null && councilResponseCompletion === 'complete') {
+        councilResponseCompletion = 'partial'
+      }
+
+      if (liveResearchAttempted) {
+        const fam = councilSingleFamily as CouncilOrchestrationFamily
+        const rosterStatus =
+          councilResponseCompletion === 'complete'
+            ? 'complete'
+            : councilResponseCompletion === 'truncated'
+              ? 'truncated'
+              : 'partial'
+        liveResearchTurnSurvey = {
+          wave: 'single',
+          expectedFamilies: [fam],
+          roster: { [fam]: rosterStatus },
+        }
+        liveResearchSummary = toLiveResearchClientSummary(liveResearchPacket, councilResponseCompletion)
+        liveResearchUi = {
+          ...computeLiveResearchClientUi(liveResearchPacket, true),
+          ...(councilResponseCompletion ? { responseCompletion: councilResponseCompletion } : {}),
+        }
+      }
+
+      let continuationRequest =
         modeGovernor.continuationAllowed
           ? buildContinuationRequestFromModelOutput({
               family: councilSingleFamily,
               text: responseText,
             })
           : null
+      if (continuationRequest && liveResearchAttempted && councilResponseCompletion === 'truncated') {
+        continuationRequest = null
+      }
 
       await safeAudit({
         success: true,
