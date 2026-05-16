@@ -4373,6 +4373,10 @@ function Home() {
   const geminiUnavailableUserMessagedRef = useRef(false)
   const orchRedTeamEarlyLatchRef = useRef(false)
   const lastCouncilFamilyErrorRef = useRef<CouncilOrchestrationFamily | null>(null)
+  /** Latest decree `submitDecree` attempt id (`decreeRoundGenRef`); compared to packet-bound round for stale `provider_error`. */
+  const latestDecreeAttemptRoundRef = useRef(0)
+  /** `decreeRoundGenRef` value when `councilPacketRender` was last updated from the decree pipeline. */
+  const councilPacketRenderBoundRoundRef = useRef(0)
   const [geminiEngineRow, setGeminiEngineRow] = useState<EngineStatus | null>(null)
   const [engineList, setEngineList] = useState<EngineStatus[]>([])
   const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
@@ -4397,6 +4401,7 @@ function Home() {
   const [councilUiCommand, setCouncilUiCommand] = useState<CouncilCommand>(() => ({ ...DEFAULT_COUNCIL_COMMAND }))
   const [councilPacketRender, setCouncilPacketRender] = useState<CouncilRenderPacket | null>(null)
   const applyCouncilPacketRender = useCallback((packet: CouncilRenderPacket) => {
+    councilPacketRenderBoundRoundRef.current = decreeRoundGenRef.current
     setCouncilPacketRender(packet)
     if (
       packet.sessionState === 'CLOSED'
@@ -6357,6 +6362,7 @@ function Home() {
       councilDispatch({ type: 'BUMP_AUTONOMOUS_ROUND' })
       shouldScheduleNext = !willHitRaelGate
     } catch (e) {
+      lastCouncilFamilyErrorRef.current = family
       councilDispatch({
         type: 'SET_PROVIDER_ERROR',
         payload: e instanceof Error ? e.message : String(e),
@@ -6377,6 +6383,7 @@ function Home() {
 
   const submitDecree = async (decree: string, mode?: CouncilMode) => {
     const myRound = ++decreeRoundGenRef.current
+    latestDecreeAttemptRoundRef.current = myRound
     orchRedTeamEarlyLatchRef.current = false
     lastAutonomousResearchFamilyRef.current = null
     lastAutonomousHadLiveResearchRef.current = false
@@ -6475,6 +6482,7 @@ function Home() {
       void refreshQueueActions()
     }
 
+    let decreeSubmitFaultAnchor: CouncilOrchestrationFamily | undefined
     try {
       try {
         const er = await fetchEngineStatusWithTimeout()
@@ -6555,6 +6563,7 @@ function Home() {
       const diagnosticIntentMode = resolveDiagnosticIntentMode(decree)
       const diagnosticSequential = diagnosticIntentMode !== 'none' && !attendanceWave
       const orderForGather = diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder
+      decreeSubmitFaultAnchor = orderForGather[0] ?? directedOrder[0]
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
         allowBusinessTopicsFromIntent: councilIntentState.intent === 'business_ops',
       })
@@ -7434,6 +7443,7 @@ function Home() {
       if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return
       const msg = error instanceof Error ? error.message : 'Council unreachable.'
       addSystemMessage(`[Error] ${msg}`)
+      lastCouncilFamilyErrorRef.current = decreeSubmitFaultAnchor ?? 'chatgpt'
       councilDispatch({
         type: 'SET_PROVIDER_ERROR',
         payload: msg,
@@ -7869,14 +7879,35 @@ function Home() {
     ),
     [councilPacketRender],
   )
+  const packetTerminalProviderHealthy = useMemo(() => {
+    const p = councilPacketRender
+    if (!p) return false
+    if (p.sessionState !== 'CLOSED') return false
+    if (p.packetStatus !== 'released' && p.packetStatus !== 'idle') return false
+    return !packetHasActionableProviderIssues(p.providerRuntimeStates, p.providerRuntimeDetails)
+  }, [councilPacketRender])
+  /** Council latched `provider_error` that disagrees with current packet + decree attempt (stale latch after success). */
+  const councilProviderErrorFooterActive =
+    council.councilState === 'provider_error'
+    && !(
+      packetTerminalProviderHealthy
+      && councilPacketRenderBoundRoundRef.current === latestDecreeAttemptRoundRef.current
+      && lastCouncilFamilyErrorRef.current === null
+    )
+  const footerShowsPacketOrCouncilProviderIssue =
+    Boolean(currentPacketProviderIssue) || councilProviderErrorFooterActive
   const chatHealthLabel = useMemo(() => {
     if (loading) return 'Working'
-    if (currentPacketProviderIssue) return 'Error'
-    if (council.councilState === 'provider_error') return 'Error'
+    if (liveResearchHud?.mode === 'failed') return 'Error'
+    if (footerShowsPacketOrCouncilProviderIssue) return 'Error'
     return 'Ready'
-  }, [loading, currentPacketProviderIssue, council.councilState])
+  }, [
+    loading,
+    liveResearchHud?.mode,
+    footerShowsPacketOrCouncilProviderIssue,
+  ])
   const councilContinueStatusLine = useMemo(() => {
-    if (currentPacketProviderIssue) return 'Provider issue — see family status badges.'
+    if (footerShowsPacketOrCouncilProviderIssue) return 'Provider issue — see family status badges.'
     if (liveResearchHud?.mode === 'completing' || liveResearchHud?.councilPhase === 'model_running') {
       return 'Research completing'
     }
@@ -7892,7 +7923,7 @@ function Home() {
     if (council.councilState === 'active') return 'Council Active'
     return council.councilState
   }, [
-    currentPacketProviderIssue,
+    footerShowsPacketOrCouncilProviderIssue,
     council.councilState,
     council.isAwaitingResponses,
     liveResearchHud?.mode,
@@ -8094,7 +8125,7 @@ function Home() {
             }}>
             Deep discussion: {council.deepDiscussionMode ? 'ON' : 'OFF'}
           </button>
-          {(currentPacketProviderIssue || council.councilState === 'provider_error') && (
+          {footerShowsPacketOrCouncilProviderIssue && (
             <button type="button" onClick={() => startTransition(retryProvider)}
               className="text-xs px-3 py-1 rounded tracking-widest"
               style={{ background: '#F97316', color: '#000', fontWeight: 'bold' }}>
