@@ -8343,13 +8343,6 @@ function Home() {
                     Open runtime integrity dashboard →
                   </Link>
                 </div>
-                <div className="mb-3">
-                  <RuntimeContinuityIndicator
-                    mode={continuityMode}
-                    lastRecoveredAt={continuityRecoverAt}
-                    recoverBanner={recoverRuntimeBanner}
-                  />
-                </div>
                 {recoveredRedTeamHold ? (
                   <div
                     className="mb-3 rounded border border-amber-500/45 px-3 py-2 text-[10px]"
