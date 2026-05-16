@@ -12,8 +12,21 @@ export type LiveOpportunityScoutPipelineResult = {
   candidates: NormalizedScoutCandidate[]
   rankedCandidates: NormalizedScoutCandidate[]
   fallbackCreated: boolean
+  fallbackReason: string | null
   tavily: TavilyScoutResult
   firecrawl: FirecrawlScoutResult
+  diagnostics: {
+    tavily_enabled: boolean
+    tavily_query_count: number
+    tavily_results_count: number
+    firecrawl_enabled: boolean
+    firecrawl_targets_count: number
+    normalized_candidates_count: number
+    ranked_candidates_count: number
+    fallback_triggered: boolean
+    fallback_reason: string | null
+    ranked_preview: { title: string; score: number }[]
+  }
   telemetry: {
     scout_queries: number
     scout_success: number
@@ -54,28 +67,50 @@ export async function runLiveOpportunityScoutPipeline(input: {
   }
 
   let candidates = Array.from(candidatesByKey.values())
+  const normalizedCandidateCount = candidates.length
   let fallbackCreated = false
+  let fallbackReason: string | null = null
   if (!candidates.length) {
     fallbackCreated = true
+    fallbackReason = tavily.error ?? firecrawl.error ?? 'live_scout_empty'
     candidates = [buildDecreeFallbackCandidate({
       decree: input.decree,
       domainId: input.domainId,
       fallbackFamily: input.fallbackFamily,
-      reason: tavily.error ?? firecrawl.error ?? 'live_scout_empty',
+      reason: fallbackReason,
     })]
   }
 
   const rankedCandidates = candidates
     .sort((a, b) => b.rank_score - a.rank_score)
     .slice(0, 3)
+  const diagnostics = {
+    tavily_enabled: tavily.enabled,
+    tavily_query_count: tavily.queries.length,
+    tavily_results_count: tavily.results.length,
+    firecrawl_enabled: firecrawl.enabled,
+    firecrawl_targets_count: firecrawl.attempted,
+    normalized_candidates_count: normalizedCandidateCount,
+    ranked_candidates_count: rankedCandidates.length,
+    fallback_triggered: fallbackCreated,
+    fallback_reason: fallbackReason,
+    ranked_preview: rankedCandidates.map(candidate => ({
+      title: candidate.title,
+      score: candidate.rank_score,
+    })),
+  }
+
+  console.info('[economic-scout]', diagnostics)
 
   return {
     ok: !fallbackCreated && rankedCandidates.length > 0,
     candidates,
     rankedCandidates,
     fallbackCreated,
+    fallbackReason,
     tavily,
     firecrawl,
+    diagnostics,
     telemetry: {
       scout_queries: tavily.queries.length,
       scout_success: tavily.ok || firecrawl.ok ? 1 : 0,

@@ -77,6 +77,37 @@ async function recordExtractionTelemetry(args: {
   }))
 }
 
+async function recordScoutStage(args: {
+  client: WarRoomSupabase
+  domainId: EconomicOperationalDomainId
+  command: string
+  sessionId?: string | null
+  stage:
+    | 'scout_started'
+    | 'tavily_complete'
+    | 'firecrawl_complete'
+    | 'normalization_complete'
+    | 'ranking_complete'
+    | 'fallback_created'
+    | 'zero_candidates'
+  metricValue?: number
+  metadata?: Record<string, unknown>
+}) {
+  await recordExtractionTelemetry({
+    client: args.client,
+    domainId: args.domainId,
+    providerFamily: null,
+    command: args.command,
+    sessionId: args.sessionId,
+    metricName: 'scout_pipeline_stage',
+    metricValue: args.metricValue ?? 1,
+    metadata: {
+      stage: args.stage,
+      ...(args.metadata ?? {}),
+    },
+  })
+}
+
 function opportunityFromScoutCandidate(input: {
   candidate: NormalizedScoutCandidate
   decree: string
@@ -165,13 +196,114 @@ export async function POST(req: Request) {
     return jsonWithPersistence({ matched: false, summary: 'No Economic Ops command detected.' }, true)
   }
 
+  await recordScoutStage({
+    client: sup.client,
+    domainId: parsed.domain.id,
+    command: parsed.command,
+    sessionId: payload.sessionId,
+    stage: 'scout_started',
+    metadata: {
+      tavily_enabled: Boolean(process.env.TAVILY_API_KEY?.trim()),
+      firecrawl_enabled: Boolean(process.env.FIRECRAWL_API_KEY?.trim()),
+    },
+  })
+
   const scout = await runLiveOpportunityScoutPipeline({
     decree,
     domainId: parsed.domain.id,
     fallbackFamily: parsed.domain.providerPriority[0],
   })
+  const missingScoutKeys = [
+    ...(scout.tavily.enabled ? [] : ['TAVILY_API_KEY']),
+    ...(scout.firecrawl.enabled ? [] : ['FIRECRAWL_API_KEY']),
+  ]
+  const rawScoutPayloadPreview = scout.tavily.results.slice(0, 8).map(result => ({
+    provider: result.provider,
+    query: result.query,
+    title: result.title,
+    url: result.url,
+    snippet: result.snippet.slice(0, 500),
+    rawScore: result.rawScore ?? null,
+  }))
 
   await Promise.all([
+    recordScoutStage({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      stage: 'tavily_complete',
+      metricValue: scout.tavily.results.length,
+      metadata: {
+        tavily_enabled: scout.tavily.enabled,
+        tavily_query_count: scout.tavily.queries.length,
+        tavily_results_count: scout.tavily.results.length,
+        tavily_error: scout.tavily.error ?? null,
+      },
+    }),
+    recordScoutStage({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      stage: 'firecrawl_complete',
+      metricValue: scout.firecrawl.results.length,
+      metadata: {
+        firecrawl_enabled: scout.firecrawl.enabled,
+        firecrawl_targets_count: scout.firecrawl.attempted,
+        firecrawl_results_count: scout.firecrawl.results.length,
+        firecrawl_error: scout.firecrawl.error ?? null,
+      },
+    }),
+    recordScoutStage({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      stage: 'normalization_complete',
+      metricValue: scout.diagnostics.normalized_candidates_count,
+      metadata: {
+        ...scout.diagnostics,
+        raw_scout_payload_preview: scout.tavily.results.length > 0 && scout.diagnostics.normalized_candidates_count === 0
+          ? rawScoutPayloadPreview
+          : undefined,
+      },
+    }),
+    recordScoutStage({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      stage: 'ranking_complete',
+      metricValue: scout.diagnostics.ranked_candidates_count,
+      metadata: {
+        ranked_preview: scout.diagnostics.ranked_preview,
+      },
+    }),
+    ...(scout.fallbackCreated ? [recordScoutStage({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      stage: 'fallback_created' as const,
+      metricValue: 1,
+      metadata: {
+        fallback_reason: scout.fallbackReason,
+        missing_api_keys: missingScoutKeys,
+      },
+    })] : []),
+    ...(scout.diagnostics.normalized_candidates_count === 0 ? [recordScoutStage({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      stage: 'zero_candidates' as const,
+      metricValue: 1,
+      metadata: {
+        fallback_reason: scout.fallbackReason,
+        raw_scout_payload_preview: rawScoutPayloadPreview,
+      },
+    })] : []),
     recordExtractionTelemetry({
       client: sup.client,
       domainId: parsed.domain.id,
@@ -183,6 +315,7 @@ export async function POST(req: Request) {
       metadata: {
         tavily_queries: scout.tavily.queries,
         tavily_duration_ms: scout.tavily.durationMs,
+        diagnostics: scout.diagnostics,
       },
     }),
     recordExtractionTelemetry({
@@ -200,6 +333,7 @@ export async function POST(req: Request) {
         firecrawl_ok: scout.firecrawl.ok,
         firecrawl_attempted: scout.firecrawl.attempted,
         firecrawl_error: scout.firecrawl.error ?? null,
+        missing_api_keys: missingScoutKeys,
       },
     }),
     recordExtractionTelemetry({
@@ -464,6 +598,8 @@ export async function POST(req: Request) {
     matched: true,
     summary: failedProviderAnalyses.length && successfulProviderAnalyses.length === 0 && inserted === 0
       ? 'Economic Ops routed to Opportunity Scout, but provider analysis failed. Failure telemetry was stored without broadcasting family availability spam.'
+      : missingScoutKeys.length && scout.fallbackCreated
+        ? `Scout provider unavailable: missing API key. ${inserted} fallback investigation opportunity added to Opportunity Scout.`
       : `${inserted} opportunities discovered and added to Opportunity Scout.`,
     workflowId: workflow.value,
     opportunityCount: inserted,
@@ -475,6 +611,8 @@ export async function POST(req: Request) {
       candidatesRanked: scout.telemetry.candidates_ranked,
       tavilyOk: scout.tavily.ok,
       firecrawlOk: scout.firecrawl.ok,
+      diagnostics: scout.diagnostics,
+      missingApiKeys: missingScoutKeys,
     },
     compression,
     approvalRequired: true,

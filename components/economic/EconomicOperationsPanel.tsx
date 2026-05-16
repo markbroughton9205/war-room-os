@@ -53,6 +53,18 @@ function uniqueById<T extends { id: string }>(rows: T[]): T[] {
   return Array.from(new Map(rows.map(row => [row.id, row])).values())
 }
 
+function metadataOf(event: EconomicTelemetryEvent): Record<string, unknown> {
+  return event.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+}
+
+function boolMeta(value: unknown): boolean {
+  return value === true
+}
+
+function numberMeta(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
 export function EconomicOperationsPanel() {
   const [persistence, setPersistence] = useState('unknown')
   const [loading, setLoading] = useState(false)
@@ -127,6 +139,34 @@ export function EconomicOperationsPanel() {
 
   const stats = surface.stats
   const providerAssignments = useMemo(() => surface.assignmentHistory ?? [], [surface.assignmentHistory])
+  const scoutDiagnostics = useMemo(() => {
+    const events = surface.telemetry ?? []
+    const stages = events
+      .filter(event => event.metric_name === 'scout_pipeline_stage')
+      .sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime())
+    const latestByStage = new Map<string, EconomicTelemetryEvent>()
+    for (const event of stages) {
+      const stage = metadataOf(event).stage
+      if (typeof stage === 'string' && !latestByStage.has(stage)) latestByStage.set(stage, event)
+    }
+    const tavily = metadataOf(latestByStage.get('tavily_complete') ?? stages[0] ?? {} as EconomicTelemetryEvent)
+    const firecrawl = metadataOf(latestByStage.get('firecrawl_complete') ?? stages[0] ?? {} as EconomicTelemetryEvent)
+    const normalized = metadataOf(latestByStage.get('normalization_complete') ?? stages[0] ?? {} as EconomicTelemetryEvent)
+    const ranking = metadataOf(latestByStage.get('ranking_complete') ?? stages[0] ?? {} as EconomicTelemetryEvent)
+    const fallback = metadataOf(latestByStage.get('fallback_created') ?? stages[0] ?? {} as EconomicTelemetryEvent)
+    return {
+      tavilyOnline: boolMeta(tavily.tavily_enabled),
+      tavilyQueries: numberMeta(tavily.tavily_query_count),
+      tavilyResults: numberMeta(tavily.tavily_results_count),
+      firecrawlOnline: boolMeta(firecrawl.firecrawl_enabled),
+      firecrawlTargets: numberMeta(firecrawl.firecrawl_targets_count),
+      candidates: numberMeta(normalized.normalized_candidates_count),
+      ranked: numberMeta(ranking.ranked_candidates_count),
+      fallback: boolMeta(normalized.fallback_triggered) || latestByStage.has('fallback_created'),
+      fallbackReason: String(fallback.fallback_reason ?? normalized.fallback_reason ?? ''),
+      updatedAt: stages[0]?.recorded_at ?? null,
+    }
+  }, [surface.telemetry])
 
   return (
     <section className="mx-auto mt-10 max-w-6xl border-t border-emerald-900/50 pt-8">
@@ -162,6 +202,25 @@ export function EconomicOperationsPanel() {
           </div>
         ))}
       </div>
+
+      <section className="mb-4 rounded border border-cyan-500/25 bg-black/25 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[10px] font-bold tracking-widest text-cyan-300">SCOUT DIAGNOSTICS</span>
+          <span className="text-[10px] text-slate-500">{scoutDiagnostics.updatedAt ? new Date(scoutDiagnostics.updatedAt).toLocaleString() : 'no scout telemetry yet'}</span>
+        </div>
+        <div className="grid gap-2 text-[10px] text-slate-300 md:grid-cols-6">
+          <span className="rounded border border-white/10 px-2 py-1">Tavily {scoutDiagnostics.tavilyOnline ? 'ONLINE' : 'OFFLINE'}</span>
+          <span className="rounded border border-white/10 px-2 py-1">Firecrawl {scoutDiagnostics.firecrawlOnline ? 'ONLINE' : 'OFFLINE'}</span>
+          <span className="rounded border border-white/10 px-2 py-1">Queries {scoutDiagnostics.tavilyQueries}</span>
+          <span className="rounded border border-white/10 px-2 py-1">Candidates {scoutDiagnostics.candidates}</span>
+          <span className="rounded border border-white/10 px-2 py-1">Ranked {scoutDiagnostics.ranked}</span>
+          <span className="rounded border border-white/10 px-2 py-1">Fallback {scoutDiagnostics.fallback ? 'YES' : 'NO'}</span>
+        </div>
+        <div className="mt-2 text-[10px] text-slate-500">
+          Tavily results {scoutDiagnostics.tavilyResults} · Firecrawl targets {scoutDiagnostics.firecrawlTargets}
+          {scoutDiagnostics.fallbackReason ? ` · fallback: ${scoutDiagnostics.fallbackReason}` : ''}
+        </div>
+      </section>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(20rem,0.8fr)]">
         <section className="rounded border border-emerald-500/25 bg-black/25 p-3">

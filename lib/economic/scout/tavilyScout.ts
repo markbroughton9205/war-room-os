@@ -16,6 +16,7 @@ type TavilyResponse = {
 
 export type TavilyScoutResult = {
   ok: boolean
+  enabled: boolean
   provider: 'tavily'
   queries: string[]
   results: RawScoutResult[]
@@ -81,6 +82,7 @@ export async function runTavilyScout(input: {
   if (!apiKey) {
     return {
       ok: false,
+      enabled: false,
       provider: 'tavily',
       queries,
       results: [],
@@ -128,6 +130,7 @@ export async function runTavilyScout(input: {
 
     return {
       ok: results.length > 0,
+      enabled: true,
       provider: 'tavily',
       queries,
       results,
@@ -137,6 +140,7 @@ export async function runTavilyScout(input: {
   } catch (error) {
     return {
       ok: false,
+      enabled: true,
       provider: 'tavily',
       queries,
       results: [],

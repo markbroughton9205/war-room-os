@@ -15,6 +15,7 @@ type FirecrawlScrapeResponse = {
 
 export type FirecrawlScoutResult = {
   ok: boolean
+  enabled: boolean
   provider: 'firecrawl'
   attempted: number
   results: RawScoutResult[]
@@ -37,6 +38,7 @@ export async function runFirecrawlScout(input: {
   if (!targets.length) {
     return {
       ok: false,
+      enabled: Boolean(apiKey),
       provider: 'firecrawl',
       attempted: 0,
       results: [],
@@ -48,6 +50,7 @@ export async function runFirecrawlScout(input: {
   if (!apiKey) {
     return {
       ok: false,
+      enabled: false,
       provider: 'firecrawl',
       attempted: targets.length,
       results: [],
@@ -93,6 +96,7 @@ export async function runFirecrawlScout(input: {
 
   return {
     ok: results.length > 0,
+    enabled: true,
     provider: 'firecrawl',
     attempted: targets.length,
     results,

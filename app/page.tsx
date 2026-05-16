@@ -391,6 +391,21 @@ type OpportunityScoutState = {
   }
 }
 
+type EconomicScoutDiagnostics = {
+  tavily_enabled: boolean
+  tavily_query_count: number
+  tavily_results_count: number
+  firecrawl_enabled: boolean
+  firecrawl_targets_count: number
+  normalized_candidates_count: number
+  ranked_candidates_count: number
+  fallback_triggered: boolean
+  fallback_reason: string | null
+  ranked_preview?: { title: string; score: number }[]
+  missing_api_keys: string[]
+  last_updated_at: string | null
+}
+
 type OpportunityScoutResult = {
   title: string
   url: string
@@ -537,6 +552,20 @@ const INITIAL_OPPORTUNITY_SCOUT_STATE: OpportunityScoutState = {
     tavily: 'offline',
     firecrawl: 'offline',
   },
+}
+const INITIAL_ECONOMIC_SCOUT_DIAGNOSTICS: EconomicScoutDiagnostics = {
+  tavily_enabled: false,
+  tavily_query_count: 0,
+  tavily_results_count: 0,
+  firecrawl_enabled: false,
+  firecrawl_targets_count: 0,
+  normalized_candidates_count: 0,
+  ranked_candidates_count: 0,
+  fallback_triggered: false,
+  fallback_reason: null,
+  ranked_preview: [],
+  missing_api_keys: [],
+  last_updated_at: null,
 }
 const INITIAL_SMS_BRIDGE_STATE: SmsBridgeState = {
   status: 'standby',
@@ -2078,6 +2107,63 @@ function OpportunityScoutPanel({
         </div>
       )}
     </div>
+  )
+}
+
+function ScoutDiagnosticsPanel({ diagnostics }: { diagnostics: EconomicScoutDiagnostics }) {
+  const online = (enabled: boolean) => enabled ? 'ONLINE' : 'OFFLINE'
+  const color = (enabled: boolean) => enabled ? '#34D399' : '#FBBF24'
+
+  return (
+    <section className="rounded border border-cyan-500/20 p-3 text-[10px]" style={{ background: 'rgba(8,47,73,0.14)' }}>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="font-bold tracking-widest" style={{ color: '#67E8F9' }}>SCOUT DIAGNOSTICS</div>
+        <div style={{ color: '#64748B' }}>{diagnostics.last_updated_at ? new Date(diagnostics.last_updated_at).toLocaleTimeString() : 'no scout run yet'}</div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="rounded border border-white/10 px-2 py-1">
+          <div style={{ color: '#64748B' }}>Tavily</div>
+          <div className="font-bold" style={{ color: color(diagnostics.tavily_enabled) }}>{online(diagnostics.tavily_enabled)}</div>
+        </div>
+        <div className="rounded border border-white/10 px-2 py-1">
+          <div style={{ color: '#64748B' }}>Firecrawl</div>
+          <div className="font-bold" style={{ color: color(diagnostics.firecrawl_enabled) }}>{online(diagnostics.firecrawl_enabled)}</div>
+        </div>
+        <div className="rounded border border-white/10 px-2 py-1">
+          <div style={{ color: '#64748B' }}>Queries</div>
+          <div style={{ color: '#E5E7EB' }}>{diagnostics.tavily_query_count}</div>
+        </div>
+        <div className="rounded border border-white/10 px-2 py-1">
+          <div style={{ color: '#64748B' }}>Candidates</div>
+          <div style={{ color: '#E5E7EB' }}>{diagnostics.normalized_candidates_count}</div>
+        </div>
+        <div className="rounded border border-white/10 px-2 py-1">
+          <div style={{ color: '#64748B' }}>Ranked</div>
+          <div style={{ color: '#E5E7EB' }}>{diagnostics.ranked_candidates_count}</div>
+        </div>
+        <div className="rounded border border-white/10 px-2 py-1">
+          <div style={{ color: '#64748B' }}>Fallback</div>
+          <div className="font-bold" style={{ color: diagnostics.fallback_triggered ? '#FBBF24' : '#34D399' }}>
+            {diagnostics.fallback_triggered ? 'YES' : 'NO'}
+          </div>
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2" style={{ color: '#94A3B8' }}>
+        <span>tavily results: {diagnostics.tavily_results_count}</span>
+        <span>firecrawl targets: {diagnostics.firecrawl_targets_count}</span>
+        {diagnostics.missing_api_keys.length ? <span style={{ color: '#FBBF24' }}>missing: {diagnostics.missing_api_keys.join(', ')}</span> : null}
+        {diagnostics.fallback_reason ? <span>fallback: {diagnostics.fallback_reason}</span> : null}
+      </div>
+      {diagnostics.ranked_preview?.length ? (
+        <div className="mt-2 space-y-1">
+          {diagnostics.ranked_preview.slice(0, 3).map(row => (
+            <div key={`${row.title}:${row.score}`} className="truncate" style={{ color: '#CBD5E1' }}>
+              {row.title} · score {row.score}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
   )
 }
 
@@ -4325,6 +4411,7 @@ function Home() {
   const [incomeLoading, setIncomeLoading] = useState(false)
   const [incomeView, setIncomeView] = useState<IncomeRadarView>('active')
   const [opportunityScout, setOpportunityScout] = useState<OpportunityScoutState>(INITIAL_OPPORTUNITY_SCOUT_STATE)
+  const [economicScoutDiagnostics, setEconomicScoutDiagnostics] = useState<EconomicScoutDiagnostics>(INITIAL_ECONOMIC_SCOUT_DIAGNOSTICS)
   const [opportunityScoutLoading, setOpportunityScoutLoading] = useState(false)
   const [incomeWorkerScout, setIncomeWorkerScout] = useState<IncomeWorkerScoutResult>(INITIAL_INCOME_WORKER_SCOUT)
   const [incomeCouncilReviews, setIncomeCouncilReviews] = useState<IncomeCouncilReview[]>([])
@@ -6751,7 +6838,23 @@ function Home() {
         }),
         signal: controller.signal,
       })
-      const economicJson = await economicRes.json() as { summary?: string; error?: string; opportunityCount?: number }
+      const economicJson = await economicRes.json() as {
+        summary?: string
+        error?: string
+        opportunityCount?: number
+        scout?: {
+          diagnostics?: Omit<EconomicScoutDiagnostics, 'missing_api_keys' | 'last_updated_at'>
+          missingApiKeys?: string[]
+        }
+      }
+      if (economicJson.scout?.diagnostics) {
+        setEconomicScoutDiagnostics({
+          ...INITIAL_ECONOMIC_SCOUT_DIAGNOSTICS,
+          ...economicJson.scout.diagnostics,
+          missing_api_keys: economicJson.scout.missingApiKeys ?? [],
+          last_updated_at: new Date().toISOString(),
+        })
+      }
       console.info('[economic-ops-provider]', {
         event: 'extraction_completed',
         selectedProvider: selectedProviderFamily,
@@ -6762,6 +6865,9 @@ function Home() {
       const summary = economicJson.summary
         ?? economicJson.error
         ?? 'Economic Ops routed to Opportunity Scout.'
+      if (economicJson.scout?.missingApiKeys?.length) {
+        addSystemMessage('Scout provider unavailable: missing API key.')
+      }
       addSystemMessage(summary)
       void postLiveCouncilMessage({ role: 'system', content: summary, family: 'SYSTEM' })
       applyCouncilPacketRender(
@@ -8813,6 +8919,7 @@ function Home() {
                 </div>
               </section>
             )}
+            {operatorTab === 'command' && <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />}
             {operatorTab === 'agents' && (
               <>
                 <div className="mb-3 border-b border-yellow-900/40 pb-2">
