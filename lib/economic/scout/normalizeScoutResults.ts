@@ -32,6 +32,11 @@ export type ScoutFamilyScores = {
     strategic_positioning: number
     future_relevance: number
   }
+  red_team: {
+    fraud_risk: number
+    contradiction_risk: number
+    scam_risk: number
+  }
 }
 
 export type NormalizedScoutCandidate = {
@@ -142,6 +147,11 @@ function scoreFamilySignals(text: string, hasValue: boolean, risk: EconomicRiskL
       strategic_positioning: clamp(Math.max(demand, recurring) + riskPenalty),
       future_relevance: clamp((automation > 0.7 || /AI|future|emerging|digital/i.test(text) ? 0.8 : 0.48) + riskPenalty),
     },
+    red_team: {
+      fraud_risk: clamp(risk === 'high' ? 0.82 : risk === 'low' ? 0.24 : 0.48),
+      contradiction_risk: clamp(/\b(?:guaranteed|instant|no risk|too good|secret)\b/i.test(text) ? 0.72 : 0.36),
+      scam_risk: clamp(HIGH_RISK.test(text) ? 0.86 : 0.34),
+    },
   }
 }
 
@@ -156,7 +166,7 @@ function familyOverall(scores: ScoutFamilyScores): Record<EconomicFamily, number
     claude: average(Object.values(scores.claude)),
     grok: average(Object.values(scores.grok)),
     gemini: average(Object.values(scores.gemini)),
-    red_team: 0.5,
+    red_team: 1 - average(Object.values(scores.red_team)),
   }
 }
 

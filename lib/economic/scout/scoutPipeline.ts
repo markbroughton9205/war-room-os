@@ -117,7 +117,7 @@ export async function runLiveOpportunityScoutPipeline(input: {
       scout_failure: tavily.ok || firecrawl.ok ? 0 : 1,
       candidates_generated: candidates.length,
       candidates_ranked: rankedCandidates.length,
-      family_scores_created: rankedCandidates.length * 4,
+      family_scores_created: rankedCandidates.length * 5,
     },
   }
 }

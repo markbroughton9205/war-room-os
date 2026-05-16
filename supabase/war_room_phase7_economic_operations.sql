@@ -23,6 +23,7 @@ create table if not exists public.war_room_economic_opportunities (
   title text not null,
   category text not null references public.war_room_economic_operational_domains (id),
   source text not null,
+  source_provider text not null default 'unknown',
   confidence numeric not null default 0.5,
   estimated_value numeric,
   assigned_family text not null,
@@ -31,13 +32,18 @@ create table if not exists public.war_room_economic_opportunities (
   status text not null default 'discovered',
   discovered_at timestamptz not null default now(),
   expires_at timestamptz,
+  notes text not null default '',
+  source_details jsonb not null default '{}'::jsonb,
+  dedupe_key text not null,
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint war_room_economic_opportunities_confidence_check check (confidence >= 0 and confidence <= 1),
+  constraint war_room_economic_opportunities_source_provider_check check (source_provider in ('chatgpt','claude','grok','gemini','red_team','unknown')),
   constraint war_room_economic_opportunities_assigned_family_check check (assigned_family in ('chatgpt','claude','grok','gemini','red_team')),
   constraint war_room_economic_opportunities_risk_level_check check (risk_level in ('low','medium','high','critical')),
-  constraint war_room_economic_opportunities_status_check check (status in ('discovered','investigating','approved','executing','completed','rejected','archived'))
+  constraint war_room_economic_opportunities_status_check check (status in ('discovered','investigating','approved','queued','executing','completed','rejected','archived')),
+  constraint war_room_economic_opportunities_dedupe_key_key unique (dedupe_key)
 );
 
 create table if not exists public.war_room_economic_workflow_queue (
@@ -207,6 +213,7 @@ alter table public.war_room_economic_active_missions enable row level security;
 alter table public.war_room_economic_unresolved_operations enable row level security;
 
 grant usage on schema public to service_role;
+grant select, insert, update, delete on table public.war_room_economic_opportunities to service_role;
 grant select, insert, update, delete on table public.war_room_economic_workflow_queue to service_role;
 
 drop policy if exists war_room_economic_domains_service_role_all on public.war_room_economic_operational_domains;

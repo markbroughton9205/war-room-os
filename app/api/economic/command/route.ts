@@ -42,6 +42,49 @@ function isWorkflowQueuePermissionDenied(error: string): boolean {
     && /war_room_economic_workflow_queue/i.test(error)
 }
 
+type PersistenceFailureReason =
+  | 'missing_table'
+  | 'missing_column'
+  | 'permission_denied'
+  | 'schema_cache_stale'
+  | 'conflict_constraint_missing'
+  | 'malformed_payload'
+  | 'insert_failed'
+
+function classifyOpportunityPersistenceFailure(error: string): PersistenceFailureReason {
+  if (/permission denied/i.test(error)) return 'permission_denied'
+  if (/schema cache/i.test(error)) {
+    if (/column|could not find/i.test(error)) return 'missing_column'
+    return 'schema_cache_stale'
+  }
+  if (/relation .*war_room_economic_opportunities.* does not exist|could not find .*war_room_economic_opportunities|undefined table/i.test(error)) {
+    return 'missing_table'
+  }
+  if (/column .* does not exist|could not find .* column|dedupe_key|source_details|source_provider/i.test(error)) return 'missing_column'
+  if (/no unique or exclusion constraint matching the on conflict specification|42P10/i.test(error)) return 'conflict_constraint_missing'
+  if (/violates|invalid input|not-null|null value|check constraint|foreign key|json/i.test(error)) return 'malformed_payload'
+  return 'insert_failed'
+}
+
+function opportunityPersistenceSummary(reason: PersistenceFailureReason): string {
+  switch (reason) {
+    case 'missing_table':
+      return 'Opportunity Scout persistence failed: opportunity table is missing.'
+    case 'missing_column':
+      return 'Opportunity Scout persistence failed: opportunity table schema is missing required columns.'
+    case 'permission_denied':
+      return 'Opportunity Scout persistence failed: service_role lacks opportunity table access.'
+    case 'schema_cache_stale':
+      return 'Opportunity Scout persistence failed: Supabase schema cache is stale.'
+    case 'conflict_constraint_missing':
+      return 'Opportunity Scout persistence failed: dedupe_key unique constraint is missing.'
+    case 'malformed_payload':
+      return 'Opportunity Scout persistence failed: opportunity payload does not match database constraints.'
+    case 'insert_failed':
+      return 'Opportunity Scout persistence failed: opportunity insert/upsert failed.'
+  }
+}
+
 function looksLikeProviderFailureOnly(content: string): boolean {
   return /\b(provider analysis unavailable|family is currently unavailable|timed out|api[_ ]?key|not configured|unauthorized|provider_http_|returned empty|configuration_error)\b/i
     .test(content)
@@ -375,7 +418,7 @@ export async function POST(req: Request) {
       metricName: 'family_scores_created',
       metricValue: scout.telemetry.family_scores_created,
       metadata: {
-        scoring_families: ['chatgpt', 'claude', 'grok', 'gemini'],
+        scoring_families: ['grok', 'chatgpt', 'claude', 'gemini', 'red_team'],
         ranked_scores: scout.rankedCandidates.map(candidate => ({
           title: candidate.title,
           rank_score: candidate.rank_score,
@@ -534,6 +577,7 @@ export async function POST(req: Request) {
   }
 
   if (inserted === 0) {
+    const persistenceReason = classifyOpportunityPersistenceFailure(opportunityPersistenceErrors.join(' | '))
     await recordExtractionTelemetry({
       client: sup.client,
       domainId: parsed.domain.id,
@@ -546,14 +590,16 @@ export async function POST(req: Request) {
         fallback_attempted: true,
         fallback_reason: scout.fallbackReason ?? 'api_guarantee_no_inserted_opportunities',
         opportunity_persistence_errors: opportunityPersistenceErrors.slice(0, 5),
+        persistence_failure_reason: persistenceReason,
         diagnostics: scout.diagnostics,
       },
     })
 
     return jsonWithPersistence({
       matched: true,
-      error: 'opportunity_persistence_unavailable',
-      summary: 'Opportunity Scout persistence unavailable. No opportunity record could be created; failure telemetry was stored.',
+      error: persistenceReason,
+      summary: opportunityPersistenceSummary(persistenceReason),
+      migration: 'supabase/war_room_phase7c_opportunity_persistence_patch.sql',
       workflowId: workflow.value,
       opportunityCount: 0,
       providerFailures: failedProviderAnalyses.length,
@@ -567,7 +613,7 @@ export async function POST(req: Request) {
         diagnostics: {
           ...scout.diagnostics,
           fallback_triggered: true,
-          fallback_reason: scout.fallbackReason ?? opportunityPersistenceErrors[0] ?? 'opportunity_persistence_unavailable',
+          fallback_reason: scout.fallbackReason ?? opportunityPersistenceErrors[0] ?? persistenceReason,
         },
         missingApiKeys: missingScoutKeys,
       },
