@@ -4,7 +4,7 @@ export {
   COUNCIL_ORCHESTRATION_INTERVAL_MS,
   COUNCIL_SESSION_STORAGE_KEY,
 } from './councilConstants'
-export type { CouncilLifecycleState, CouncilOrchestrationFamily, CouncilPersistedV1, PersistedCouncilMessage } from './councilSessionTypes'
+export type { CouncilLifecycleState, CouncilMemoryRecallPreview, CouncilOrchestrationFamily, CouncilPersistedV1, PersistedCouncilMessage } from './councilSessionTypes'
 export { councilSessionReducer, createInitialCouncilPersisted, INITIAL_COUNCIL_MESSAGES } from './councilSessionReducer'
 export { buildOrchestrationAugment, buildCouncilPlanningAugment, buildDecreeFamilyAugment } from './councilPrompt'
 export type { CouncilAugmentContext } from './councilPrompt'

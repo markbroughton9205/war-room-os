@@ -35,7 +35,7 @@ import {
   pickNextOrchestrationFamily,
   useCouncilSession,
 } from '@/components/council'
-import type { CouncilOrchestrationFamily } from '@/components/council'
+import type { CouncilMemoryRecallPreview, CouncilOrchestrationFamily } from '@/components/council'
 import type { EngineControlStatusResponse, EngineId, EngineStatus } from '@/lib/engine-control/types'
 import type { RouteCommandResult } from '@/lib/engine-control/router'
 import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
@@ -191,6 +191,7 @@ type CouncilMessage = {
   icon: string
   provider: string
   messageType: string
+  recallPreview?: CouncilMemoryRecallPreview
 }
 
 const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Goal: Panama relocation. Motivated by vision of success. Wants truth about systems that harm Black and low income communities.`
@@ -301,6 +302,41 @@ function archiveTopicForMessage(message: CouncilMessage): string | null {
   if (/\beconomic ops\b|\bopportunity scout\b|\bincome radar\b/.test(text)) return 'economic_ops'
   if (/\bincome\b|\brevenue\b|\bopportunit(y|ies)\b|\bclient\b|\bleads?\b/.test(text)) return 'income_ideas'
   return null
+}
+
+function recallLabel(command: ParsedRecallCommand): string {
+  if (command.kind === 'recall today' || command.kind === 'summarize today') return "Today's Memory"
+  if (command.kind === 'recall last session' || command.kind === 'summarize last session') return 'Last Session Memory'
+  if (command.kind === 'recall grok') return 'Grok Memory'
+  if (command.kind === 'recall economic ops') return 'Economic Ops Memory'
+  if (command.kind === 'recall income ideas') return 'Income Ideas Memory'
+  return 'Memory Archive'
+}
+
+function compactRecallSnippet(value: string, max = 140): string {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact
+}
+
+function buildRecallPreview(args: {
+  command: ParsedRecallCommand
+  records: RecallTranscriptPreview[]
+  summaries: RecallSummaryPreview[]
+}): CouncilMemoryRecallPreview {
+  const summaryItems = args.summaries.map(summary => compactRecallSnippet(summary.summary))
+  const recordItems = args.records.map(record => compactRecallSnippet(record.content))
+  const topItems = [...summaryItems, ...recordItems].filter(Boolean).slice(0, 3)
+  const latestRecordTimestamp = args.records[0]?.timestamp ?? null
+  const latestSummaryTimestamp = args.summaries[0]?.createdAt ?? null
+  const latestTimestamp = latestRecordTimestamp ?? latestSummaryTimestamp
+
+  return {
+    label: recallLabel(args.command),
+    resultCount: args.records.length + args.summaries.length,
+    topItems,
+    latestTimestamp,
+    commandKind: args.command.kind,
+  }
 }
 
 type ToneMode = 'casual' | 'build' | 'business' | 'debate' | 'reflection'
@@ -1014,13 +1050,57 @@ function gatherCellsToProviderRuntimeDetails(
   return Object.keys(out).length ? out : undefined
 }
 
-const MessageBubble = memo(function MessageBubble({ msg, diagnosticsOpen }: { msg: CouncilMessage; diagnosticsOpen?: boolean }) {
+const MessageBubble = memo(function MessageBubble({
+  msg,
+  diagnosticsOpen,
+  onOpenFullMemory,
+}: {
+  msg: CouncilMessage
+  diagnosticsOpen?: boolean
+  onOpenFullMemory?: (preview: CouncilMemoryRecallPreview) => void
+}) {
   const isRael = msg.familyName === "RA'EL"
   if (
     msg.messageType === 'system'
     && shouldSuppressProviderFailureFromChatStream(msg.content, { diagnosticsOpen })
   ) {
     return null
+  }
+  if (msg.messageType === 'memory_recall_preview' && msg.recallPreview) {
+    const preview = msg.recallPreview
+    return (
+      <div className="message-fade-in mb-4 ml-11 rounded-lg p-3 text-sm"
+        style={{ background: 'rgba(96,165,250,0.07)', border: '1px solid rgba(96,165,250,0.25)' }}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-xs font-bold tracking-widest" style={{ color: '#93C5FD' }}>
+              {preview.label}
+            </div>
+            <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#64748B' }}>
+              {preview.resultCount} result{preview.resultCount === 1 ? '' : 's'}
+              {preview.latestTimestamp ? ` · latest ${new Date(preview.latestTimestamp).toLocaleString()}` : ''}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
+            style={{ border: '1px solid rgba(96,165,250,0.45)', color: '#BFDBFE' }}
+            onClick={() => onOpenFullMemory?.(preview)}
+          >
+            Open Full Memory
+          </button>
+        </div>
+        {preview.topItems.length ? (
+          <ul className="space-y-1 text-xs text-slate-300">
+            {preview.topItems.map((item, index) => (
+              <li key={`${preview.commandKind}-${index}`}>- {item}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-slate-400">No memory found for today yet.</p>
+        )}
+      </div>
+    )
   }
   return (
     <div className={`message-fade-in flex items-start gap-3 mb-4 ${isRael ? 'flex-row-reverse' : ''}`}>
@@ -1054,12 +1134,14 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   onViewArchive,
   onSummarizeSession,
   onRecallEconomicOps,
+  onOpenFullMemory,
 }: {
   messages: CouncilMessage[]
   hiddenCount: number
   onViewArchive: () => void
   onSummarizeSession: () => void
   onRecallEconomicOps: () => void
+  onOpenFullMemory: (preview: CouncilMemoryRecallPreview) => void
 }) {
   return (
     <>
@@ -1083,7 +1165,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
         </div>
       ) : null}
       {messages.map(msg => (
-        <MessageBubble key={msg.id} msg={msg} diagnosticsOpen={false} />
+        <MessageBubble key={msg.id} msg={msg} diagnosticsOpen={false} onOpenFullMemory={onOpenFullMemory} />
       ))}
     </>
   )
@@ -8264,28 +8346,32 @@ function Home() {
         error?: string
       }
       const persistenceAvailable = res.headers.get('x-war-room-persistence') === 'available'
+      const command = payload.command ?? recallCommand
+      const records = Array.isArray(payload.records) ? payload.records : []
+      const summaries = Array.isArray(payload.summaries) ? payload.summaries : []
       setMemoryRecallView({
-        command: payload.command ?? recallCommand,
-        records: Array.isArray(payload.records) ? payload.records : [],
-        summaries: Array.isArray(payload.summaries) ? payload.summaries : [],
+        command,
+        records,
+        summaries,
         recalledAt: new Date().toISOString(),
         persistenceAvailable,
         error: typeof payload.error === 'string' ? payload.error : null,
       })
-      setOperatorTab('memory')
+      const recallPreview = buildRecallPreview({ command, records, summaries })
       addMessages([{
         id: createMessageId('memory-recall'),
         familyName: 'MEMORY ARCHIVE',
         content: persistenceAvailable
-          ? 'Memory archive recalled in archive view.'
+          ? `${recallPreview.label}: ${recallPreview.resultCount} result${recallPreview.resultCount === 1 ? '' : 's'}.`
           : 'Memory archive recall unavailable; persistence is not configured.',
         timestamp: new Date().toLocaleTimeString(),
         color: '#60A5FA',
         icon: '◷',
         provider: 'archive',
-        messageType: 'recall',
+        messageType: 'memory_recall_preview',
+        recallPreview,
       }])
-      setMemoryNotification('Memory archive recalled in archive view.')
+      setMemoryNotification('Memory preview ready in Live Council.')
     } catch {
       setMemoryRecallView({
         command: recallCommand,
@@ -8295,7 +8381,6 @@ function Home() {
         persistenceAvailable: false,
         error: 'Memory archive recall failed. Raw transcript remains preserved; try again after persistence recovers.',
       })
-      setOperatorTab('memory')
       addMessages([{
         id: createMessageId('memory-recall-error'),
         familyName: 'MEMORY ARCHIVE',
@@ -8304,7 +8389,14 @@ function Home() {
         color: '#F87171',
         icon: '!',
         provider: 'archive',
-        messageType: 'system',
+        messageType: 'memory_recall_preview',
+        recallPreview: {
+          label: recallLabel(recallCommand),
+          resultCount: 0,
+          topItems: [],
+          latestTimestamp: null,
+          commandKind: recallCommand.kind,
+        },
       }])
     }
   }
@@ -8413,6 +8505,16 @@ function Home() {
   const handleRecallEconomicOps = () => {
     const parsed = parseRecallCommand('recall economic ops')
     if (parsed) void executeRecallCommand(parsed)
+  }
+
+  const handleOpenFullMemory = (preview: CouncilMemoryRecallPreview) => {
+    const parsed = parseRecallCommand(preview.commandKind)
+    const loaded = memoryRecallView?.command.kind === preview.commandKind
+    if (!loaded && parsed) {
+      void executeRecallCommand(parsed).then(() => setOperatorTab('memory'))
+      return
+    }
+    setOperatorTab('memory')
   }
 
   const cycleFamilyDuty = (fid: CouncilOrchestrationFamily) => {
@@ -9043,6 +9145,7 @@ function Home() {
             onViewArchive={handleViewArchive}
             onSummarizeSession={handleSummarizeSessionArchive}
             onRecallEconomicOps={handleRecallEconomicOps}
+            onOpenFullMemory={handleOpenFullMemory}
           />
 
           {expansionPrompt && (

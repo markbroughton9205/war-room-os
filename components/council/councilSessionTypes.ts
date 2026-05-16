@@ -17,6 +17,14 @@ export type CouncilOrchestrationFamily =
   | 'kimi'
   | 'bridge_architect'
 
+export type CouncilMemoryRecallPreview = {
+  label: string
+  resultCount: number
+  topItems: string[]
+  latestTimestamp: string | null
+  commandKind: string
+}
+
 export type PersistedCouncilMessage = {
   id: string
   familyName: string
@@ -26,6 +34,7 @@ export type PersistedCouncilMessage = {
   icon: string
   provider: string
   messageType: string
+  recallPreview?: CouncilMemoryRecallPreview
 }
 
 export type CouncilCooldownMap = Partial<Record<CouncilOrchestrationFamily, number>>
