@@ -61,6 +61,14 @@ type SentinelFinding = {
   detail?: Record<string, unknown>
 }
 
+function sentinelSeverityColor(severity: string): string {
+  if (severity === 'critical' || severity === 'error') return '#FCA5A5'
+  if (severity === 'warning' || severity === 'warn') return '#FDE047'
+  if (severity === 'architectural_future') return '#A78BFA'
+  if (severity === 'heuristic_only') return '#93C5FD'
+  return '#93C5FD'
+}
+
 function readPersistence(res: Response) {
   return res.headers.get('x-war-room-persistence') ?? 'unknown'
 }
@@ -608,7 +616,7 @@ export function Phase3WarRoomPanels({
                     </div>
                     {uiMode !== 'operator' ? (
                       <>
-                        <textarea className="w-full rounded bg-black px-2 py-1 font-mono text-[11px]" style={{ border: '1px solid #333', color: '#eee' }} rows={3} value={msgDraft} onChange={e => setMsgDraft(e.target.value)} placeholder="Message (user role)" />
+                        <textarea data-command-surface-id="phase3-thread-message" data-command-surface-role="database_thread_message" className="w-full rounded bg-black px-2 py-1 font-mono text-[11px]" style={{ border: '1px solid #333', color: '#eee' }} rows={3} value={msgDraft} onChange={e => setMsgDraft(e.target.value)} placeholder="Message (user role)" />
                         <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ background: '#444', color: '#fff' }} onClick={() => void postMessage()}>POST MESSAGE</button>
                       </>
                     ) : (
@@ -755,7 +763,7 @@ export function Phase3WarRoomPanels({
           <ul className="max-h-48 space-y-1 overflow-y-auto text-[9px]" style={{ color: '#ccc' }}>
             {sentinelFindings.map(f => (
               <li key={f.id} className="border-b border-white/5 pb-1">
-                <span style={{ color: f.severity === 'error' ? '#FCA5A5' : f.severity === 'warn' ? '#FDE047' : '#93C5FD' }}>{f.severity}</span>
+                <span style={{ color: sentinelSeverityColor(f.severity) }}>{f.severity}</span>
                 {' '}
                 <span className="opacity-80">{f.kind}</span>
                 {' — '}
@@ -904,7 +912,7 @@ export function Phase3WarRoomPanels({
         <ul className="max-h-48 space-y-1 overflow-y-auto text-[9px]" style={{ color: '#ccc' }}>
           {sentinelFindings.map(f => (
             <li key={f.id} className="border-b border-white/5 pb-1">
-              <span style={{ color: f.severity === 'error' ? '#FCA5A5' : f.severity === 'warn' ? '#FDE047' : '#93C5FD' }}>{f.severity}</span>
+              <span style={{ color: sentinelSeverityColor(f.severity) }}>{f.severity}</span>
               {' '}
               <span className="opacity-80">{f.kind}</span>
               {' — '}
@@ -961,7 +969,7 @@ export function Phase3WarRoomPanels({
                   </div>
                   {uiMode !== 'operator' ? (
                     <>
-                      <textarea className="w-full rounded bg-black px-2 py-1 font-mono text-[11px]" style={{ border: '1px solid #333', color: '#eee' }} rows={3} value={msgDraft} onChange={e => setMsgDraft(e.target.value)} placeholder="Message (user role)" />
+                      <textarea data-command-surface-id="phase3-thread-message" data-command-surface-role="database_thread_message" className="w-full rounded bg-black px-2 py-1 font-mono text-[11px]" style={{ border: '1px solid #333', color: '#eee' }} rows={3} value={msgDraft} onChange={e => setMsgDraft(e.target.value)} placeholder="Message (user role)" />
                       <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ background: '#444', color: '#fff' }} onClick={() => void postMessage()}>POST MESSAGE</button>
                     </>
                   ) : (

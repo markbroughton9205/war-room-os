@@ -73,7 +73,7 @@ function opportunityPersistenceSummary(reason: PersistenceFailureReason): string
     case 'missing_column':
       return 'Opportunity Scout persistence failed: opportunity table schema is missing required columns.'
     case 'permission_denied':
-      return 'Opportunity Scout persistence failed: service_role lacks opportunity table access.'
+      return 'Opportunity Scout persistence failed: server-only Supabase role lacks opportunity table access.'
     case 'schema_cache_stale':
       return 'Opportunity Scout persistence failed: Supabase schema cache is stale.'
     case 'conflict_constraint_missing':
@@ -498,9 +498,9 @@ export async function POST(req: Request) {
     if (isWorkflowQueuePermissionDenied(workflow.error)) {
       return jsonWithPersistence({
         error: 'schema_migration_required',
-        message: 'Economic workflow queue denies service_role writes. Run supabase/war_room_phase7b_workflow_queue_rls_patch.sql, then retry.',
+        message: 'Economic workflow queue denies server-only Supabase role writes. Run supabase/war_room_phase7b_workflow_queue_rls_patch.sql, then retry.',
         migration: 'supabase/war_room_phase7b_workflow_queue_rls_patch.sql',
-        role: 'service_role',
+        role: 'server_only_supabase_role',
         detail: workflow.error,
       }, true, { status: 503 })
     }

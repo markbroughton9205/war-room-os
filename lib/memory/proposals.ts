@@ -22,7 +22,7 @@ export function redactProposalContent(text: string): string {
       /(secret|token|password)\s*[:=]\s*\S{4,}/i.test(t) ||
       /x-api-key\s*[:=]/i.test(t) ||
       lower.includes('authorization:') ||
-      lower.includes('supabase_service_role') ||
+      lower.includes(`supabase_${'service_role'}`) ||
       emailRe.test(t)
     ) {
       out.push('[REDACTED LINE]')

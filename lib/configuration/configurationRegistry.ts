@@ -1,3 +1,5 @@
+import { SUPABASE_SERVICE_ROLE_ENV } from '@/lib/security/sensitiveEnv'
+
 export type ConfigurationStatus =
   | 'configured'
   | 'missing_provider'
@@ -227,7 +229,7 @@ export const PROVIDER_CONFIG_REGISTRY: ProviderConfigDefinition[] = [
     id: 'supabase',
     name: 'Supabase',
     category: 'operations',
-    requiredEnvVars: ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'],
+    requiredEnvVars: ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', SUPABASE_SERVICE_ROLE_ENV],
     optionalEnvVars: ['SUPABASE_FILES_BUCKET'],
     required: 'required',
     powers: ['persistence', 'memory archive', 'files vault', 'workflow queues'],
@@ -266,7 +268,7 @@ export const PROVIDER_CONFIG_REGISTRY: ProviderConfigDefinition[] = [
     id: 'memory_archive',
     name: 'Memory Archive',
     category: 'operations',
-    requiredEnvVars: ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+    requiredEnvVars: ['NEXT_PUBLIC_SUPABASE_URL', SUPABASE_SERVICE_ROLE_ENV],
     required: 'required',
     powers: ['memory recall', 'session summaries', 'strategic continuity'],
     affectedFeatures: ['Memory', 'Command Center'],
@@ -278,7 +280,7 @@ export const PROVIDER_CONFIG_REGISTRY: ProviderConfigDefinition[] = [
     id: 'strategic_memory',
     name: 'Strategic Memory',
     category: 'operations',
-    requiredEnvVars: ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+    requiredEnvVars: ['NEXT_PUBLIC_SUPABASE_URL', SUPABASE_SERVICE_ROLE_ENV],
     required: 'recommended',
     powers: ['long-term operator context', 'economic ops recall', 'council continuity'],
     affectedFeatures: ['Memory', 'Command Center', 'Income Operations'],
@@ -303,7 +305,7 @@ export const PROVIDER_CONFIG_REGISTRY: ProviderConfigDefinition[] = [
     id: 'workflow_queue',
     name: 'Workflow Queue',
     category: 'operations',
-    requiredEnvVars: ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+    requiredEnvVars: ['NEXT_PUBLIC_SUPABASE_URL', SUPABASE_SERVICE_ROLE_ENV],
     required: 'required',
     powers: ['queued actions', 'build requests', 'worker state'],
     affectedFeatures: ['Approvals', 'Agents', 'System Health'],
@@ -315,7 +317,7 @@ export const PROVIDER_CONFIG_REGISTRY: ProviderConfigDefinition[] = [
     id: 'approvals',
     name: 'Approvals',
     category: 'operations',
-    requiredEnvVars: ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+    requiredEnvVars: ['NEXT_PUBLIC_SUPABASE_URL', SUPABASE_SERVICE_ROLE_ENV],
     required: 'required',
     powers: ['operator approvals', 'standing permission persistence', 'write gates'],
     affectedFeatures: ['Approvals', 'Command Center', 'Diagnostics'],

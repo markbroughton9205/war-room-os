@@ -1,4 +1,5 @@
 import { PROVIDER_CONFIG_REGISTRY, type ConfigurationStatus, type ProviderConfigDefinition } from './configurationRegistry'
+import { redactServerOnlyEnvName, redactServerOnlyEnvNames } from '@/lib/security/sensitiveEnv'
 
 export type ProviderConfigStatus = {
   id: string
@@ -71,13 +72,13 @@ export function evaluateProviderConfig(def: ProviderConfigDefinition, env: NodeJ
     status,
     configured,
     required: def.required,
-    requiredEnvVars: unique([...def.requiredEnvVars, ...(def.alternativeEnvVarGroups ?? []).flat()]),
-    optionalEnvVars: unique([...(def.optionalEnvVars ?? []), ...(def.disabledByEnvVar ? [def.disabledByEnvVar] : [])]),
-    configuredEnvVars,
-    missingEnvVars,
+    requiredEnvVars: unique(redactServerOnlyEnvNames([...def.requiredEnvVars, ...(def.alternativeEnvVarGroups ?? []).flat()])),
+    optionalEnvVars: unique(redactServerOnlyEnvNames([...(def.optionalEnvVars ?? []), ...(def.disabledByEnvVar ? [def.disabledByEnvVar] : [])])),
+    configuredEnvVars: unique(redactServerOnlyEnvNames(configuredEnvVars)),
+    missingEnvVars: unique(redactServerOnlyEnvNames(missingEnvVars)),
     lastCheckResult: def.lastCheckResult,
     missingDependency: missingEnvVars.length > 0
-      ? `Missing ${missingEnvVars.join(' or ')}`
+      ? `Missing ${missingEnvVars.map(redactServerOnlyEnvName).join(' or ')}`
       : def.missingDependency ?? null,
     affectedFeatures: def.affectedFeatures,
     recommendedNextAction: status === 'ready' || status === 'configured'

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { assertDebugRouteAuthorized } from '@/lib/security/debugRouteGuard'
+import { SUPABASE_SERVICE_ROLE_ENV } from '@/lib/security/sensitiveEnv'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
   const denied = assertDebugRouteAuthorized(req)
   if (denied) return denied
 
-  const keyRaw = trimEnv('SUPABASE_SERVICE_ROLE_KEY')
+  const keyRaw = trimEnv(SUPABASE_SERVICE_ROLE_ENV)
   const keyPresent = keyRaw.length > 0
 
   const { projectUrlHost, expectedProjectRef } = parseProjectUrlHost()

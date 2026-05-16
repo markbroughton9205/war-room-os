@@ -36,7 +36,7 @@ export async function GET() {
 export async function POST(req: Request) {
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
-    return jsonWithPersistence({ error: 'Supabase is not configured.', hint: 'Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.' }, false, { status: 503 })
+    return jsonWithPersistence({ error: 'Supabase is not configured.', hint: 'Set NEXT_PUBLIC_SUPABASE_URL and the server-only Supabase role secret.' }, false, { status: 503 })
   }
 
   let body: { title?: string; metadata?: Record<string, unknown> }

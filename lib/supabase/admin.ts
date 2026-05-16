@@ -1,10 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
+import { SERVER_ONLY_SUPABASE_SECRET_LABEL, SUPABASE_SERVICE_ROLE_ENV } from '@/lib/security/sensitiveEnv'
 
 /**
  * Server-only Supabase client using the service role JWT only.
  * Do not import this module from client components or shared code that ships to the browser.
  *
- * Uses `NEXT_PUBLIC_SUPABASE_URL` (project URL) and `SUPABASE_SERVICE_ROLE_KEY` only.
+ * Uses `NEXT_PUBLIC_SUPABASE_URL` (project URL) and the server-only Supabase role secret only.
  * Never use `NEXT_PUBLIC_SUPABASE_ANON_KEY` here.
  */
 function assertSupabaseUrl(url: string | undefined): asserts url is string {
@@ -15,12 +16,12 @@ function assertSupabaseUrl(url: string | undefined): asserts url is string {
 
 function assertServiceRoleKeyShape(key: string | undefined): asserts key is string {
   if (!key?.trim()) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured')
+    throw new Error(`${SERVER_ONLY_SUPABASE_SECRET_LABEL} is not configured`)
   }
   const parts = key.trim().split('.')
   if (parts.length !== 3) {
     throw new Error(
-      'SUPABASE_SERVICE_ROLE_KEY must be the JWT-style secret from Supabase (Project Settings → API).',
+      `${SERVER_ONLY_SUPABASE_SECRET_LABEL} must be the JWT-style secret from Supabase (Project Settings API).`,
     )
   }
   try {
@@ -28,22 +29,22 @@ function assertServiceRoleKeyShape(key: string | undefined): asserts key is stri
     const role = payload.role
     if (role && role !== 'service_role') {
       throw new Error(
-        'SUPABASE_SERVICE_ROLE_KEY must be the service_role secret from Supabase (Project Settings → API), not the anon or publishable key.',
+        `${SERVER_ONLY_SUPABASE_SECRET_LABEL} must be the service_role secret from Supabase (Project Settings API), not the anon or publishable key.`,
       )
     }
   } catch (e) {
-    if (e instanceof Error && e.message.startsWith('SUPABASE_SERVICE_ROLE_KEY must be the service_role')) {
+    if (e instanceof Error && e.message.startsWith(`${SERVER_ONLY_SUPABASE_SECRET_LABEL} must be the service_role`)) {
       throw e
     }
     throw new Error(
-      'SUPABASE_SERVICE_ROLE_KEY could not be read; paste the full service_role secret from Supabase (Project Settings → API).',
+      `${SERVER_ONLY_SUPABASE_SECRET_LABEL} could not be read; paste the full service_role secret from Supabase (Project Settings API).`,
     )
   }
 }
 
 export function createSupabaseAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const serviceRoleKey = process.env[SUPABASE_SERVICE_ROLE_ENV]
 
   assertSupabaseUrl(supabaseUrl)
   assertServiceRoleKeyShape(serviceRoleKey)

@@ -1586,8 +1586,9 @@ function KernelStatusPanel() {
   const familyCount = Object.keys(AGENT_FAMILY_CAPABILITIES).length
   const gateCount = Object.keys(APPROVAL_RISK_GATES).length
   const memoryCategories = MEMORY_POLICY.categories.length
+  const kernelReady = routingCount > 0 && familyCount > 0 && gateCount > 0 && memoryCategories > 0
   const statusItems = [
-    { label: 'KERNEL', value: 'ONLINE', color: '#34D399' },
+    { label: 'KERNEL', value: kernelReady ? 'READY' : 'DEGRADED', color: kernelReady ? '#34D399' : '#FBBF24' },
     { label: 'ROUTING', value: 'ACTIVE', color: '#38BDF8' },
     { label: 'EVENT BUS', value: 'READY', color: '#A78BFA' },
     { label: 'MEMORY POLICY', value: 'ACTIVE', color: '#34D399' },
@@ -2307,8 +2308,17 @@ function OpportunityScoutPanel({
 }
 
 function ScoutDiagnosticsPanel({ diagnostics }: { diagnostics: EconomicScoutDiagnostics }) {
-  const online = (enabled: boolean) => enabled ? 'ONLINE' : 'OFFLINE'
-  const color = (enabled: boolean) => enabled ? '#34D399' : '#FBBF24'
+  const [nowMs, setNowMs] = useState<number | null>(null)
+  useEffect(() => {
+    const update = () => setNowMs(Date.now())
+    update()
+    const interval = window.setInterval(update, 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
+  const updatedAtMs = diagnostics.last_updated_at ? new Date(diagnostics.last_updated_at).getTime() : 0
+  const stale = !updatedAtMs || !nowMs || nowMs - updatedAtMs > 30 * 60 * 1000
+  const label = (enabled: boolean) => stale ? 'STALE' : enabled ? 'ONLINE' : 'OFFLINE'
+  const color = (enabled: boolean) => stale ? '#94A3B8' : enabled ? '#34D399' : '#FBBF24'
 
   return (
     <section className="rounded border border-cyan-500/20 p-3 text-[10px]" style={{ background: 'rgba(8,47,73,0.14)' }}>
@@ -2319,11 +2329,11 @@ function ScoutDiagnosticsPanel({ diagnostics }: { diagnostics: EconomicScoutDiag
       <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
         <div className="rounded border border-white/10 px-2 py-1">
           <div style={{ color: '#64748B' }}>Tavily</div>
-          <div className="font-bold" style={{ color: color(diagnostics.tavily_enabled) }}>{online(diagnostics.tavily_enabled)}</div>
+          <div className="font-bold" style={{ color: color(diagnostics.tavily_enabled) }}>{label(diagnostics.tavily_enabled)}</div>
         </div>
         <div className="rounded border border-white/10 px-2 py-1">
           <div style={{ color: '#64748B' }}>Firecrawl</div>
-          <div className="font-bold" style={{ color: color(diagnostics.firecrawl_enabled) }}>{online(diagnostics.firecrawl_enabled)}</div>
+          <div className="font-bold" style={{ color: color(diagnostics.firecrawl_enabled) }}>{label(diagnostics.firecrawl_enabled)}</div>
         </div>
         <div className="rounded border border-white/10 px-2 py-1">
           <div style={{ color: '#64748B' }}>Queries</div>
@@ -4580,6 +4590,8 @@ function CommandRouterPanel() {
         </button>
       </div>
       <textarea value={text} onChange={event => setText(event.target.value)} rows={3}
+        data-command-surface-id="engine-command-router-preview"
+        data-command-surface-role="secondary_router_preview"
         className="w-full rounded bg-black px-3 py-2 text-xs font-mono"
         style={{ border: '1px solid #222', color: '#ddd' }}
         placeholder="Tell War Room what you want done…" />
@@ -9624,6 +9636,8 @@ function Home() {
           >
             <span className="mt-1 shrink-0" style={{ color: '#FFD700' }}>⚔</span>
             <textarea
+              data-command-surface-id="live-council-primary-decree"
+              data-command-surface-role="primary_decree"
               value={command}
               onChange={(e) => setCommand(e.target.value)}
               onKeyDown={(e) => {

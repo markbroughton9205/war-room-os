@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SUPABASE_SERVICE_ROLE_ENV } from '@/lib/security/sensitiveEnv'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 
 type Row = Record<string, unknown>
@@ -11,7 +12,7 @@ function stringOrDefault(value: unknown, fallback = '') {
 }
 
 function isSupabaseConfigured() {
-  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env[SUPABASE_SERVICE_ROLE_ENV])
 }
 
 function normalizeRow(row: Row) {
@@ -36,7 +37,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     return NextResponse.json(
       {
         error: 'Supabase is not configured for build requests.',
-        hint: 'Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, then apply supabase/build_requests.sql.',
+        hint: 'Set NEXT_PUBLIC_SUPABASE_URL and the server-only Supabase role secret, then apply supabase/build_requests.sql.',
       },
       { status: 503 },
     )
@@ -49,7 +50,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : 'Supabase server client is not configured',
-        hint: 'Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
+        hint: 'Set NEXT_PUBLIC_SUPABASE_URL and the server-only Supabase role secret.',
       },
       { status: 503 },
     )

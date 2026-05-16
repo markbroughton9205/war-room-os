@@ -1,4 +1,5 @@
 import type { EnvReadinessGroupSummary, EnvVarPresence } from './types'
+import { redactServerOnlyEnvName, SUPABASE_SERVICE_ROLE_ENV } from '@/lib/security/sensitiveEnv'
 
 export type EnvVarGroupDef = {
   id: string
@@ -14,7 +15,7 @@ export const ENV_VAR_GROUPS: EnvVarGroupDef[] = [
   {
     id: 'supabase',
     label: 'Supabase',
-    required: ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'],
+    required: ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', SUPABASE_SERVICE_ROLE_ENV],
     optional: ['SUPABASE_FILES_BUCKET'],
   },
   {
@@ -106,7 +107,7 @@ export const ENV_VAR_GROUPS: EnvVarGroupDef[] = [
 ]
 
 function presence(name: string): EnvVarPresence {
-  return { name, present: Boolean(process.env[name]?.trim()) }
+  return { name: redactServerOnlyEnvName(name), present: Boolean(process.env[name]?.trim()) }
 }
 
 export function scanEnvReadiness(): EnvVarPresence[] {

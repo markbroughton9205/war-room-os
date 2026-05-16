@@ -9,6 +9,7 @@ import type {
   ProductionConfig,
   SupabaseDeployReadiness,
 } from './types'
+import { SERVER_ONLY_SUPABASE_SECRET_LABEL, SUPABASE_SERVICE_ROLE_ENV } from '@/lib/security/sensitiveEnv'
 
 const LOCAL_PROBE_MS = 2500
 const PRODUCTION_PROBE_MS = 5000
@@ -121,7 +122,7 @@ async function probeProductionUrl(url: string): Promise<Pick<ProductionConfig, '
 function buildSupabaseReadiness(): SupabaseDeployReadiness {
   const urlPresent = Boolean(trimEnv('NEXT_PUBLIC_SUPABASE_URL'))
   const anonKeyPresent = Boolean(trimEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'))
-  const serviceRolePresent = Boolean(trimEnv('SUPABASE_SERVICE_ROLE_KEY'))
+  const serviceRolePresent = Boolean(trimEnv(SUPABASE_SERVICE_ROLE_ENV))
   const serverPersistenceReady = urlPresent && serviceRolePresent
   const clientBundleReady = urlPresent && anonKeyPresent
   return {
@@ -139,7 +140,7 @@ function collectBlockers(supabase: SupabaseDeployReadiness): DeploymentBlocker[]
   if (!supabase.serviceRolePresent) {
     blockers.push({
       id: 'supabase_service_role',
-      message: 'SUPABASE_SERVICE_ROLE_KEY is missing — server persistence and elevated Supabase routes are unavailable.',
+      message: `${SERVER_ONLY_SUPABASE_SECRET_LABEL} is missing — server persistence and elevated Supabase routes are unavailable.`,
       severity: 'blocking',
     })
   }

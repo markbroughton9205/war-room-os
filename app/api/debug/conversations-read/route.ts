@@ -52,7 +52,7 @@ async function runSelectProbe(): Promise<ProbeResult> {
       code: 'config',
       message: msg,
       details: null,
-      hint: 'Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (service_role JWT) in the server environment.',
+      hint: 'Set NEXT_PUBLIC_SUPABASE_URL and the server-only Supabase role secret in the server environment.',
     }
   }
 

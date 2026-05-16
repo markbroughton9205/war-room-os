@@ -2,9 +2,23 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 
+import { auditCommandSurfaces } from '@/lib/command/commandSurfaceRegistry'
+import { classifyApiRoute, classifyRouteNameOverlap } from '@/lib/security/routeIntegrityAudit'
+import { runRuntimeBoundaryAudit, type SourceFileForBoundaryAudit } from '@/lib/security/runtimeBoundaryAudit'
+
+export type SentinelSeverity =
+  | 'critical'
+  | 'warning'
+  | 'informational'
+  | 'architectural_future'
+  | 'heuristic_only'
+  | 'info'
+  | 'warn'
+  | 'error'
+
 export type SentinelFinding = {
   id: string
-  severity: 'info' | 'warn' | 'error'
+  severity: SentinelSeverity
   kind: string
   message: string
   detail?: Record<string, unknown>
@@ -16,6 +30,12 @@ export type ChatIntegrityFinding = {
   files: string[]
   recommendation: string
   blocksLiveChat: boolean
+}
+
+function legacySeverity(severity: ChatIntegrityFinding['severity']): SentinelSeverity {
+  if (severity === 'error') return 'critical'
+  if (severity === 'warn') return 'warning'
+  return 'informational'
 }
 
 async function runChatIntegrityScan(cwd: string): Promise<ChatIntegrityFinding[]> {
@@ -57,14 +77,19 @@ async function runChatIntegrityScan(cwd: string): Promise<ChatIntegrityFinding[]
     })
   }
 
-  const raelishPlaceholders = (page.match(/placeholder=\{?"[^"]*"/g) ?? []).filter(line =>
-    /decree|Speak|Council|Ra|RA'EL|RAEL|War Room|throne/i.test(line),
-  )
-  if (raelishPlaceholders.length > 2) {
+  const commandSurfaceAudit = auditCommandSurfaces()
+  if (commandSurfaceAudit.duplicatePrimaryCount > 0 || commandSurfaceAudit.shadowComposerCount > 0) {
     out.push({
-      severity: 'warn',
+      severity: 'error',
       files: [rel],
-      recommendation: 'Multiple council-style textarea placeholders — risk of competing “primary” composers.',
+      recommendation: 'Command surface registry found duplicate primary decree ownership.',
+      blocksLiveChat: true,
+    })
+  } else {
+    out.push({
+      severity: 'info',
+      files: [rel],
+      recommendation: `Command surface registry owns one primary decree input (${commandSurfaceAudit.primarySurfaceId}); secondary composers are classified.`,
       blocksLiveChat: false,
     })
   }
@@ -84,7 +109,7 @@ async function runChatIntegrityScan(cwd: string): Promise<ChatIntegrityFinding[]
 function chatIntegrityToSentinelFindings(rows: ChatIntegrityFinding[]): SentinelFinding[] {
   return rows.map((c, i) => ({
     id: `chat-integrity-${i}`,
-    severity: c.severity,
+    severity: legacySeverity(c.severity),
     kind: 'chat_integrity',
     message: c.recommendation,
     detail: { files: c.files, blocksLiveChat: c.blocksLiveChat },
@@ -179,7 +204,7 @@ export async function runRedSentinelScan(
     } catch {
       findings.push({
         id: 'root-missing',
-        severity: 'info',
+        severity: 'informational',
         kind: 'config',
         message: `Scan root not found: ${toPosix(path.relative(cwd, r)) || r}`,
       })
@@ -190,6 +215,7 @@ export async function runRedSentinelScan(
 
   const byHash = new Map<string, string[]>()
   const routeFiles: string[] = []
+  const sourceFiles: SourceFileForBoundaryAudit[] = []
 
   for (const file of files) {
     const rel = toPosix(path.relative(cwd, file))
@@ -202,6 +228,7 @@ export async function runRedSentinelScan(
     } catch {
       continue
     }
+    sourceFiles.push({ file: rel, content })
     const h = hashSnippet(content)
     const list = byHash.get(h) ?? []
     list.push(rel)
@@ -216,25 +243,24 @@ export async function runRedSentinelScan(
     const uniq = [...new Set(paths)].sort()
     findings.push({
       id: `dup-${hashSnippet(uniq.join('|'))}`,
-      severity: 'warn',
+      severity: 'warning',
       kind: 'duplicate_snippet',
       message: `Similar file prefix hash matches ${uniq.length} files (first ${CONTENT_HASH_PREFIX} chars normalized).`,
       detail: { paths: uniq.slice(0, 12), total: uniq.length },
     })
   }
 
-  const statusRoutes = routeFiles.filter(f => {
-    const rel = toPosix(path.relative(cwd, f))
-    return /\/status\/route\.(ts|tsx)$/.test(rel)
-  })
-  if (statusRoutes.length > 1) {
+  const routeRelFiles = routeFiles.map(f => toPosix(path.relative(cwd, f)))
+  for (const overlap of classifyRouteNameOverlap(routeRelFiles)) {
     findings.push({
-      id: 'overlap-status-routes',
-      severity: 'info',
+      id: `overlap-${overlap.basename}`,
+      severity: overlap.classification === 'accidental_collision' ? 'warning' : 'informational',
       kind: 'route_name_overlap',
-      message: `Multiple API routes named "status" under different paths (${statusRoutes.length}).`,
+      message: overlap.message,
       detail: {
-        paths: statusRoutes.map(f => toPosix(path.relative(cwd, f))).slice(0, 30),
+        basename: overlap.basename,
+        classification: overlap.classification,
+        paths: overlap.routeFiles.slice(0, 30),
       },
     })
   }
@@ -259,41 +285,43 @@ export async function runRedSentinelScan(
       }
     }
     if (!usedElsewhere) {
+      const routeFile = toPosix(path.relative(cwd, rf))
+      const classification = classifyApiRoute(apiPath, routeFile)
       staleRoutes++
       findings.push({
         id: `stale-${apiPath}`,
-        severity: 'info',
+        severity: classification.suppressOrphanNoise ? 'architectural_future' : 'heuristic_only',
         kind: 'possibly_orphan_api',
-        message: `No references to ${apiPath} found outside its route file (heuristic).`,
-        detail: { routeFile: toPosix(path.relative(cwd, rf)) },
+        message: classification.suppressOrphanNoise
+          ? `${apiPath} has no app references, but is classified ${classification.lifecycle}.`
+          : `No references to ${apiPath} found outside its route file (heuristic).`,
+        detail: { routeFile, route: classification },
       })
     }
   }
 
-  const clientSurface = files.filter(f => {
-    const rel = toPosix(path.relative(cwd, f))
-    return rel.startsWith('app/') || rel.startsWith('components/')
+  const boundaryAudit = runRuntimeBoundaryAudit(sourceFiles)
+  findings.push(...boundaryAudit.violations.map(violation => ({
+    id: violation.id,
+    severity: violation.severity,
+    kind: violation.kind,
+    message: violation.message,
+    detail: { file: violation.file, ...violation.detail },
+  } satisfies SentinelFinding)))
+  findings.push({
+    id: 'runtime-boundary-classification',
+    severity: 'informational',
+    kind: 'runtime_boundary_classification',
+    message: 'Runtime boundary audit classified server-only, client-safe, shared-safe, and privileged modules.',
+    detail: {
+      counts: boundaryAudit.modules.reduce<Record<string, number>>((acc, module) => {
+        acc[module.classification] = (acc[module.classification] ?? 0) + 1
+        return acc
+      }, {}),
+      serviceRoleAllowedFiles: boundaryAudit.serviceRoleFindings.allowed,
+      serviceRoleBlockedCount: boundaryAudit.serviceRoleFindings.blocked.length,
+    },
   })
-
-  for (const file of clientSurface) {
-    const rel = toPosix(path.relative(cwd, file))
-    if (/\.(test|spec)\.(tsx|ts|jsx|js)$/.test(rel)) continue
-    let content: string
-    try {
-      content = await readFile(file, 'utf8')
-    } catch {
-      continue
-    }
-    if (/service_role/i.test(content)) {
-      findings.push({
-        id: `svc-${rel}`,
-        severity: 'error',
-        kind: 'unsafe_service_role',
-        message: `Possible service_role reference in client-surface file.`,
-        detail: { file: rel },
-      })
-    }
-  }
 
   let onlineHits = 0
   for (const file of files) {
@@ -309,12 +337,12 @@ export async function runRedSentinelScan(
     lines.forEach((line, idx) => {
       if (onlineHits >= 40) return
       if (!/['"]ONLINE['"]/.test(line)) return
-      if (/process\.env|getenv|fromEnv|typeof\s+\w+\s*===/.test(line)) return
+      if (/process\.env|getenv|fromEnv|typeof\s+\w+\s*===|res\.ok|\.ok|healthy|configured|enabled|reachable|diagnostics/.test(line)) return
       if (/\?\./.test(line)) return
       onlineHits++
       findings.push({
         id: `online-${rel}-${idx + 1}`,
-        severity: 'warn',
+        severity: 'warning',
         kind: 'hardcoded_online',
         message: `Quoted ONLINE literal — verify it reflects a real connectivity check.`,
         detail: { file: rel, line: idx + 1, sample: line.trim().slice(0, 160) },

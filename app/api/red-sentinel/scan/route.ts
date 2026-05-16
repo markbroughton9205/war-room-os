@@ -77,8 +77,8 @@ export async function POST(req: Request) {
     const { findings, scannedAt, chatIntegrity } = await runRedSentinelScan(cwd, { categories })
 
     if (sup.ok) {
-      const warnCount = findings.filter(f => f.severity === 'warn').length
-      const errorCount = findings.filter(f => f.severity === 'error').length
+      const warnCount = findings.filter(f => f.severity === 'warn' || f.severity === 'warning').length
+      const errorCount = findings.filter(f => f.severity === 'error' || f.severity === 'critical').length
       await sup.client.from('war_room_sentinel_scans').insert({
         findings_count: findings.length,
         metadata: {

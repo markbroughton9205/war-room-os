@@ -65,6 +65,12 @@ function numberMeta(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
+function expiringProviderLabel(enabled: boolean, updatedAt: string | null, nowMs: number | null): string {
+  const updatedAtMs = updatedAt ? new Date(updatedAt).getTime() : 0
+  if (!updatedAtMs || !nowMs || nowMs - updatedAtMs > 30 * 60 * 1000) return 'STALE'
+  return enabled ? 'ONLINE' : 'OFFLINE'
+}
+
 export function EconomicOperationsPanel() {
   const [persistence, setPersistence] = useState('unknown')
   const [loading, setLoading] = useState(false)
@@ -74,6 +80,7 @@ export function EconomicOperationsPanel() {
   const [commandSummary, setCommandSummary] = useState<string | null>(null)
   const [decree, setDecree] = useState('scan opportunities')
   const [analysis, setAnalysis] = useState('- Local service audit offer: $1500 monthly, medium risk, high confidence')
+  const [nowMs, setNowMs] = useState<number | null>(null)
 
   const loadSurface = useCallback(async () => {
     setLoading(true)
@@ -101,6 +108,13 @@ export function EconomicOperationsPanel() {
     const t = window.setTimeout(() => void loadSurface(), 0)
     return () => window.clearTimeout(t)
   }, [loadSurface])
+
+  useEffect(() => {
+    const update = () => setNowMs(Date.now())
+    update()
+    const interval = window.setInterval(update, 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
 
   const runCommand = async () => {
     setCommandBusy(true)
@@ -209,8 +223,8 @@ export function EconomicOperationsPanel() {
           <span className="text-[10px] text-slate-500">{scoutDiagnostics.updatedAt ? new Date(scoutDiagnostics.updatedAt).toLocaleString() : 'no scout telemetry yet'}</span>
         </div>
         <div className="grid gap-2 text-[10px] text-slate-300 md:grid-cols-6">
-          <span className="rounded border border-white/10 px-2 py-1">Tavily {scoutDiagnostics.tavilyOnline ? 'ONLINE' : 'OFFLINE'}</span>
-          <span className="rounded border border-white/10 px-2 py-1">Firecrawl {scoutDiagnostics.firecrawlOnline ? 'ONLINE' : 'OFFLINE'}</span>
+          <span className="rounded border border-white/10 px-2 py-1">Tavily {expiringProviderLabel(scoutDiagnostics.tavilyOnline, scoutDiagnostics.updatedAt, nowMs)}</span>
+          <span className="rounded border border-white/10 px-2 py-1">Firecrawl {expiringProviderLabel(scoutDiagnostics.firecrawlOnline, scoutDiagnostics.updatedAt, nowMs)}</span>
           <span className="rounded border border-white/10 px-2 py-1">Queries {scoutDiagnostics.tavilyQueries}</span>
           <span className="rounded border border-white/10 px-2 py-1">Candidates {scoutDiagnostics.candidates}</span>
           <span className="rounded border border-white/10 px-2 py-1">Ranked {scoutDiagnostics.ranked}</span>
