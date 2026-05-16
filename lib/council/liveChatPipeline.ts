@@ -20,6 +20,7 @@ import type { ActiveScope } from '@/lib/council/intentScope'
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 import type { RuntimeEvidencePacket } from '@/lib/runtime/runtimeEvidencePacket'
+import type { LiveResearchClientSummary, LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 
 export type CouncilChatRequestBody = {
   message: string
@@ -78,6 +79,9 @@ export type CouncilChatJson = {
   }
   /** Structured runtime evidence for diagnostics (server-built). */
   runtimeEvidencePacket?: RuntimeEvidencePacket
+  /** Phase 5 — compact client-visible live research HUD. */
+  liveResearchUi?: LiveResearchClientUi
+  liveResearchSummary?: LiveResearchClientSummary
 }
 
 export async function postCouncilChat(

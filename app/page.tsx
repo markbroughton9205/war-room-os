@@ -41,6 +41,7 @@ import type { RouteCommandResult } from '@/lib/engine-control/router'
 import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
+import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { ContinuationRequest } from '@/lib/council/continuationRequest'
 import { decreeAsksMultiFamilyGreeting } from '@/lib/council/greetingRouting'
 import { classifyCommand } from '@/lib/engine-control/permissions'
@@ -4408,6 +4409,7 @@ function Home() {
     }
   }, [councilDispatch])
   const [continuationRequests, setContinuationRequests] = useState<ContinuationRequest[]>([])
+  const [liveResearchHud, setLiveResearchHud] = useState<LiveResearchClientUi | null>(null)
   const decreePacketFlushCompleteRef = useRef(false)
   const decreePacketOpenedAtMsRef = useRef(0)
   /** After attendance soft gather snapshot, block late gather error lines from chat / persistence. */
@@ -6078,6 +6080,9 @@ function Home() {
   }
 
   const mergeContinuationFromChatJson = (data: CouncilChatJson) => {
+    if ('liveResearchUi' in data && data.liveResearchUi) {
+      setLiveResearchHud(data.liveResearchUi)
+    }
     const cr = data.continuationRequest
     if (!cr) return
     setContinuationRequests(prev => {
@@ -6350,6 +6355,9 @@ function Home() {
     const controller = new AbortController()
     abortControllerRef.current = controller
     setLoading(true)
+    if (mode !== 'continue') {
+      setLiveResearchHud(null)
+    }
     if (mode === 'continue') {
       addSystemMessage('Council channel continuing')
     } else if (toolIntent && !beginToolRequest(controller)) {
@@ -8145,6 +8153,30 @@ function Home() {
               <span className="text-xs tracking-widest" style={{ color: '#888' }}>
                 {councilContinueStatusLine}
               </span>
+              {liveResearchHud ? (
+                <span
+                  className="text-[9px] tracking-wide rounded px-2 py-0.5"
+                  style={{
+                    border: '1px solid #333',
+                    color:
+                      liveResearchHud.mode === 'verified'
+                        ? '#86EFAC'
+                        : liveResearchHud.mode === 'unavailable'
+                          ? '#f87171'
+                          : liveResearchHud.mode === 'partial'
+                            ? '#fcd34d'
+                            : '#94a3b8',
+                  }}
+                  title={
+                    liveResearchHud.mode === 'inactive'
+                      ? 'Live internet research not invoked for this turn.'
+                      : 'Phase 5 live research HUD — see /api/chat liveResearchSummary when present.'
+                  }
+                >
+                  {liveResearchHud.mode === 'inactive' ? 'Research idle' : liveResearchHud.label}
+                  {liveResearchHud.sourcesCount > 0 ? ` · ${liveResearchHud.sourcesCount}` : ''}
+                </span>
+              ) : null}
               <button type="button" onClick={() => startTransition(() => void handleSummarize())}
                 className="text-xs px-3 py-1 rounded tracking-widest"
                 style={{ border: '1px solid #FFD700', color: '#FFD700' }}>

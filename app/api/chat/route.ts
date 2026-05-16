@@ -36,6 +36,17 @@ import {
   buildRuntimeEvidencePacket,
   type RuntimeEvidencePacket,
 } from '@/lib/runtime/runtimeEvidencePacket'
+import { detectResearchIntent } from '@/lib/research/researchIntent'
+import { runLiveResearchRouter } from '@/lib/research/researchRouter'
+import { buildLiveResearchEvidencePacket, logLiveResearchEvidenceMetadata } from '@/lib/research/researchEvidence'
+import {
+  buildLiveResearchGroundingBlock,
+  computeLiveResearchClientUi,
+  emptyLiveResearchEvidencePacket,
+  toLiveResearchClientSummary,
+  type LiveResearchClientSummary,
+  type LiveResearchClientUi,
+} from '@/lib/runtime/liveResearchEvidencePacket'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
@@ -400,6 +411,14 @@ export async function POST(req: Request) {
   const runtimeSnapTruncated = runtimeSnapRaw.length > 8000 ? runtimeSnapRaw.slice(0, 8000) : runtimeSnapRaw
 
   const sup = tryWarRoomSupabase()
+  let liveResearchUi: LiveResearchClientUi | undefined
+  let liveResearchSummary: LiveResearchClientSummary | undefined
+
+  const liveResearchJson = () => ({
+    ...(liveResearchUi ? { liveResearchUi } : {}),
+    ...(liveResearchSummary ? { liveResearchSummary } : {}),
+  })
+
   const safeAudit = async (meta: Record<string, unknown>) => {
     try {
       await insertWarRoomAuditLog(sup.ok ? sup.client : null, {
@@ -459,6 +478,7 @@ export async function POST(req: Request) {
         councilProviderHttpStatus: status,
         councilProviderHttpDetail: detail,
         ...(dm ? { diagnosticMeta: dm } : {}),
+        ...liveResearchJson(),
       },
       { status: 200 },
     )
@@ -584,7 +604,7 @@ export async function POST(req: Request) {
         ? `\n\n### Runtime integrity snapshot (truncated; diagnostics only)\n${snapForDiagnostics}`
         : ''
 
-    const augmentBlock = [
+    let augmentBlock = [
       orchestrationAugment.trim() ? `\n\nCouncil orchestration directives:\n${orchestrationAugment.trim()}` : '',
       diagnosticRuntimeGrounding ? `\n\n${diagnosticRuntimeGrounding}` : '',
       integrityAugment,
@@ -674,6 +694,9 @@ export async function POST(req: Request) {
     }
 
     if (mode === 'continue' && councilSingleFamily) {
+      liveResearchUi = computeLiveResearchClientUi(undefined, false)
+      liveResearchSummary = undefined
+
       if (councilSingleFamily === 'kimi' || councilSingleFamily === 'bridge_architect') {
         await safeAudit({
           success: false,
@@ -712,7 +735,71 @@ export async function POST(req: Request) {
         }
       }
 
-      const userPrompt = baseUserPrompt
+      const researchEligible =
+        !isAttendanceFlow
+        && councilGatherPhase !== 'decree_soft'
+        && !sequentialDiagnostic
+
+      if (researchEligible) {
+        const researchIntentEval = detectResearchIntent(raelDirectiveText, {
+          attendanceFlow: isAttendanceFlow,
+          sequentialDiagnostic,
+          intentKind: intentState.intent,
+          councilGatherPhase,
+        })
+        if (researchIntentEval.shouldResearch) {
+          const rs = Date.now()
+          try {
+            const router = await runLiveResearchRouter({
+              decreeText: raelDirectiveText,
+              supabase: sup.ok ? sup.client : null,
+              conversationId,
+            })
+            const packet = await buildLiveResearchEvidencePacket({
+              decreeText: raelDirectiveText,
+              router,
+              intentConfidence: researchIntentEval.confidence,
+            })
+            liveResearchUi = computeLiveResearchClientUi(packet, true)
+            liveResearchSummary = toLiveResearchClientSummary(packet)
+            augmentBlock = [augmentBlock, '\n\n', buildLiveResearchGroundingBlock(packet)].join('')
+            void logLiveResearchEvidenceMetadata(sup.ok ? sup.client : null, {
+              conversationId,
+              triggered: true,
+              intentConfidence: researchIntentEval.confidence,
+              packet,
+              routerMs: Date.now() - rs,
+            })
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            const packet = emptyLiveResearchEvidencePacket(new Date().toISOString(), msg)
+            liveResearchUi = computeLiveResearchClientUi(packet, true)
+            liveResearchSummary = toLiveResearchClientSummary(packet)
+            augmentBlock = [augmentBlock, '\n\n', buildLiveResearchGroundingBlock(packet)].join('')
+            void logLiveResearchEvidenceMetadata(sup.ok ? sup.client : null, {
+              conversationId,
+              triggered: true,
+              intentConfidence: researchIntentEval.confidence,
+              packet,
+              routerMs: Date.now() - rs,
+            })
+          }
+        } else {
+          liveResearchUi = computeLiveResearchClientUi(undefined, false)
+          liveResearchSummary = undefined
+        }
+      } else {
+        liveResearchUi = computeLiveResearchClientUi(undefined, false)
+        liveResearchSummary = undefined
+      }
+
+      const userPrompt = buildCouncilUserPrompt({
+        raelDirectiveText,
+        threadBlock: thread,
+        augmentBlock,
+        intentLabel: intentState.intent,
+        modeGovernorBlock,
+      })
 
       let responseText = ''
       let geminiDegradedReason: string | null = null
@@ -799,7 +886,7 @@ export async function POST(req: Request) {
               reason: 'unknown_councilSingleFamily',
               councilSingleFamily: String(councilSingleFamily),
             })
-            return NextResponse.json({ error: 'Unknown councilSingleFamily' }, { status: 400 })
+            return NextResponse.json({ error: 'Unknown councilSingleFamily', ...liveResearchJson() }, { status: 400 })
         }
       } catch (providerErr) {
         const msg = providerErr instanceof Error ? providerErr.message : String(providerErr)
@@ -821,7 +908,7 @@ export async function POST(req: Request) {
             return degradedProviderResponse(councilSingleFamily, 'failed', msg)
           }
           return NextResponse.json(
-            { error: 'council_configuration_error', message: msg },
+            { error: 'council_configuration_error', message: msg, ...liveResearchJson() },
             { status: 503 },
           )
         }
@@ -889,6 +976,7 @@ export async function POST(req: Request) {
           showContinue: true,
           councilGovernorSkipped: true,
           ...(dmGov ? { diagnosticMeta: dmGov } : {}),
+          ...liveResearchJson(),
         })
       }
       responseText = governed.text
@@ -991,6 +1079,7 @@ export async function POST(req: Request) {
         ...(sequentialDiagnostic && diagnosticIntentMode !== 'none' && diagnosticRuntimeEvidencePacket
           ? { runtimeEvidencePacket: diagnosticRuntimeEvidencePacket }
           : {}),
+        ...liveResearchJson(),
       })
     }
 
