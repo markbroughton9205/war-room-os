@@ -104,14 +104,22 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
     return { shouldResearch: false, reasons: ['excluded_economic_ops'], confidence: 0 }
   }
 
+  const mandatoryRetrieval = evaluateMandatoryLiveRetrieval(t)
+
   if (ctx?.attendanceFlow) {
-    return { shouldResearch: false, reasons: ['excluded_attendance_flow'], confidence: 0 }
+    if (!mandatoryRetrieval.required) {
+      return { shouldResearch: false, reasons: ['excluded_attendance_flow'], confidence: 0 }
+    }
+    reasons.push(...mandatoryRetrieval.reasons.map(reason => `mandatory_retrieval:${reason}`))
   }
   if (ctx?.sequentialDiagnostic) {
     return { shouldResearch: false, reasons: ['excluded_sequential_diagnostic'], confidence: 0 }
   }
   if (ctx?.councilGatherPhase === 'decree_soft') {
-    return { shouldResearch: false, reasons: ['excluded_decree_soft_gather'], confidence: 0 }
+    if (!mandatoryRetrieval.required) {
+      return { shouldResearch: false, reasons: ['excluded_decree_soft_gather'], confidence: 0 }
+    }
+    reasons.push('decree_soft_overridden_by_mandatory_retrieval')
   }
 
   const internalHit = INTERNAL_ONLY_RUNTIME.some(p => p.test(t))
@@ -124,7 +132,6 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
   const casualIntent = intent === 'greeting' || intent === 'natural'
   const casualShape = CASUAL_ONLY.some(p => p.test(t)) && t.length < 220
   const explicitInternet = INTERNET_EXPLICIT.some(p => p.test(t))
-  const mandatoryRetrieval = evaluateMandatoryLiveRetrieval(t)
   const liveHits = countMatches(t, LIVE_CURRENT_TRIGGERS)
   const socialHits = countMatches(t, SOCIAL_REALTIME_TRIGGERS)
   const domainHits = countMatches(t, DOMAIN_TRIGGERS)

@@ -51,6 +51,13 @@ export type LiveResearchClientUi = {
   responseCompletion?: CouncilResponseCompletion
   /** Compact Phase 8A metadata for the Command Center; raw telemetry stays out of chat. */
   intelligence?: IntelligenceClientMetadata
+  retrievalStatus?: {
+    retrieval_required: boolean
+    retrieval_started: boolean
+    retrieval_complete: boolean
+    retrieval_failed: boolean
+    synthesis_allowed: boolean
+  }
 }
 
 export function emptyLiveResearchEvidencePacket(generatedAt: string, summary?: string): LiveResearchEvidencePacket {
@@ -114,6 +121,23 @@ export function computeLiveResearchClientUi(
 ): LiveResearchClientUi {
   const councilPhase = opts?.councilPhase ?? 'none'
   const intelligence = packet?.intelligencePacket ? toIntelligenceMetadata(packet.intelligencePacket) : undefined
+  const retrievalStatus = packet?.intelligencePacket?.retrieval
+    ? {
+        retrieval_required: packet.intelligencePacket.retrieval.retrieval_required,
+        retrieval_started: packet.intelligencePacket.retrieval.retrieval_started,
+        retrieval_complete: packet.intelligencePacket.retrieval.retrieval_complete,
+        retrieval_failed: packet.intelligencePacket.retrieval.retrieval_failed,
+        synthesis_allowed: packet.intelligencePacket.retrieval.synthesis_allowed,
+      }
+    : researchAttempted
+      ? {
+          retrieval_required: true,
+          retrieval_started: true,
+          retrieval_complete: false,
+          retrieval_failed: false,
+          synthesis_allowed: false,
+        }
+      : undefined
   if (!researchAttempted) {
     return { mode: 'inactive', sourcesCount: 0, label: 'Live research idle', councilPhase: 'none' }
   }
@@ -121,9 +145,10 @@ export function computeLiveResearchClientUi(
     return {
       mode: 'active',
       sourcesCount: packet?.sources.length ?? 0,
-      label: 'Research — gathering evidence',
+      label: 'Retrieving live intelligence...',
       councilPhase: 'evidence',
       ...(intelligence ? { intelligence } : {}),
+      ...(retrievalStatus ? { retrievalStatus } : {}),
     }
   }
   if (councilPhase === 'model_running') {
@@ -134,6 +159,7 @@ export function computeLiveResearchClientUi(
       label: 'Research — council drafting',
       councilPhase: 'model_running',
       ...(intelligence ? { intelligence } : {}),
+      ...(retrievalStatus ? { retrievalStatus } : {}),
     }
   }
 
@@ -144,6 +170,7 @@ export function computeLiveResearchClientUi(
       label: packet?.researchErrorSummary ? 'Research pipeline failed' : 'Research unavailable',
       councilPhase: 'released',
       ...(intelligence ? { intelligence } : {}),
+      ...(retrievalStatus ? { retrievalStatus } : {}),
     }
   }
   const sourcesCount = packet.sources.filter(s => s.ok).length ?? 0
@@ -156,6 +183,7 @@ export function computeLiveResearchClientUi(
       label: 'Current info verified (multi-source)',
       councilPhase: 'released',
       ...(intelligence ? { intelligence } : {}),
+      ...(retrievalStatus ? { retrievalStatus } : {}),
     }
   }
   if (packet.usedLiveResearch && sourcesCount >= 1) {
@@ -166,6 +194,7 @@ export function computeLiveResearchClientUi(
         label: 'Research partially available',
         councilPhase: 'released',
         ...(intelligence ? { intelligence } : {}),
+        ...(retrievalStatus ? { retrievalStatus } : {}),
       }
     }
     return {
@@ -174,10 +203,11 @@ export function computeLiveResearchClientUi(
       label: 'Sources queried',
       councilPhase: 'released',
       ...(intelligence ? { intelligence } : {}),
+      ...(retrievalStatus ? { retrievalStatus } : {}),
     }
   }
   if (packet.usedLiveResearch) {
-    return { mode: 'active', sourcesCount: queried, label: 'Live research active', councilPhase: 'released', ...(intelligence ? { intelligence } : {}) }
+    return { mode: 'active', sourcesCount: queried, label: 'Live research active', councilPhase: 'released', ...(intelligence ? { intelligence } : {}), ...(retrievalStatus ? { retrievalStatus } : {}) }
   }
   return {
     mode: 'partial',
@@ -185,6 +215,7 @@ export function computeLiveResearchClientUi(
     label: 'Research partially available',
     councilPhase: 'released',
     ...(intelligence ? { intelligence } : {}),
+    ...(retrievalStatus ? { retrievalStatus } : {}),
   }
 }
 

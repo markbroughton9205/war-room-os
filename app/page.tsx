@@ -7139,6 +7139,22 @@ function Home() {
     setCurrentDecreeCost(totalUsageCost(projectedUsage))
     const toneMode = detectToneMode(decree)
     const intent = lastDecreeIntentRef.current ?? classifyRaElMessage(decree)
+    const decreeRequiresLiveRetrieval = detectResearchIntent(decree).shouldResearch
+    if (mode !== 'continue' && decreeRequiresLiveRetrieval) {
+      setLiveResearchHud({
+        mode: 'active',
+        sourcesCount: 0,
+        label: 'Retrieving live intelligence...',
+        councilPhase: 'evidence',
+        retrievalStatus: {
+          retrieval_required: true,
+          retrieval_started: true,
+          retrieval_complete: false,
+          retrieval_failed: false,
+          synthesis_allowed: false,
+        },
+      })
+    }
 
     const rosterLabel = (fid: CouncilOrchestrationFamily) =>
       COUNCIL_ROSTER.find(r => r.id === fid)?.label ?? fid

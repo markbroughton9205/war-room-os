@@ -48,7 +48,11 @@ import { assessCouncilTextCompletion, type CouncilResponseCompletion } from '@/l
 import { detectResearchIntent } from '@/lib/research/researchIntent'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { runLiveResearchRouter } from '@/lib/research/researchRouter'
-import { buildLiveResearchEvidencePacket, logLiveResearchEvidenceMetadata } from '@/lib/research/researchEvidence'
+import {
+  buildLiveResearchEvidencePacket,
+  buildLiveResearchFailureEvidencePacket,
+  logLiveResearchEvidenceMetadata,
+} from '@/lib/research/researchEvidence'
 import {
   buildLiveResearchGroundingBlock,
   computeLiveResearchClientUi,
@@ -58,6 +62,7 @@ import {
   type LiveResearchClientUi,
 } from '@/lib/runtime/liveResearchEvidencePacket'
 import { buildFamilyIntelligenceFrame } from '@/lib/intelligence/familyFeedRouter'
+import { evaluateMandatoryLiveRetrieval } from '@/lib/intelligence/sources/retrievalOrchestrator'
 
 function buildResearchAntiLoopAugment(threadBlock: string): string {
   const hits = threadBlock.match(/\bprimary\s+finding\b/gi) ?? []
@@ -379,6 +384,7 @@ export async function POST(req: Request) {
 
   const thread = buildThread(threadHistory)
   const intentState = resolveCurrentIntent({ latestRaelDecreeText: raelDirectiveText })
+  const mandatoryRetrieval = evaluateMandatoryLiveRetrieval(raelDirectiveText)
 
   const isAttendanceFlow =
     councilCommand.mode === 'attendance'
@@ -890,18 +896,21 @@ export async function POST(req: Request) {
       }
 
       const researchEligible =
-        !isAttendanceFlow
+        (!isAttendanceFlow || mandatoryRetrieval.required)
         && councilGatherPhase !== 'decree_soft'
         && !sequentialDiagnostic
+      const mandatoryResearchEligible =
+        mandatoryRetrieval.required
+        && !sequentialDiagnostic
 
-      if (researchEligible) {
+      if (researchEligible || mandatoryResearchEligible) {
         const researchIntentEval = detectResearchIntent(raelDirectiveText, {
-          attendanceFlow: isAttendanceFlow,
+          attendanceFlow: isAttendanceFlow && !mandatoryRetrieval.required,
           sequentialDiagnostic,
           intentKind: intentState.intent,
-          councilGatherPhase,
+          councilGatherPhase: mandatoryRetrieval.required ? null : councilGatherPhase,
         })
-        if (researchIntentEval.shouldResearch) {
+        if (researchIntentEval.shouldResearch || mandatoryRetrieval.required) {
           liveResearchAttempted = true
           liveResearchUi = computeLiveResearchClientUi(undefined, true, { councilPhase: 'evidence' })
           liveResearchTurnSurvey = {
@@ -945,11 +954,26 @@ export async function POST(req: Request) {
             })
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err)
-            const packet = emptyLiveResearchEvidencePacket(new Date().toISOString(), msg)
+            const packet = mandatoryRetrieval.required
+              ? buildLiveResearchFailureEvidencePacket({
+                  decreeText: raelDirectiveText,
+                  error: msg,
+                })
+              : emptyLiveResearchEvidencePacket(new Date().toISOString(), msg)
             liveResearchPacket = packet
             liveResearchUi = computeLiveResearchClientUi(packet, true, { councilPhase: 'model_running' })
             liveResearchSummary = toLiveResearchClientSummary(packet)
             augmentBlock = [augmentBlock, '\n\n', buildLiveResearchGroundingBlock(packet)].join('')
+            if (packet.intelligencePacket) {
+              augmentBlock = [
+                augmentBlock,
+                '\n\n',
+                buildFamilyIntelligenceFrame(
+                  packet.intelligencePacket,
+                  councilSingleFamily as CouncilOrchestrationFamily,
+                ).prompt_block,
+              ].join('')
+            }
             augmentBlock = [augmentBlock, buildResearchAntiLoopAugment(thread)].join('')
             void logLiveResearchEvidenceMetadata(sup.ok ? sup.client : null, {
               conversationId,
@@ -969,6 +993,70 @@ export async function POST(req: Request) {
         intentLabel: intentState.intent,
         modeGovernorBlock,
       })
+
+      const packetForGate = liveResearchPacket?.intelligencePacket
+      const retrievalForGate = packetForGate?.retrieval
+      const mandatoryPacketMissing =
+        mandatoryRetrieval.required
+        && (
+          !packetForGate
+          || !retrievalForGate
+          || !retrievalForGate.retrieval_complete
+          || retrievalForGate.retrieval_failed
+          || !retrievalForGate.synthesis_allowed
+          || packetForGate.sources_used.length === 0
+        )
+
+      if (mandatoryPacketMissing) {
+        councilResponseCompletion = 'complete'
+        const gaps = [
+          ...(retrievalForGate?.retrieval_gaps ?? []),
+          ...(packetForGate?.gaps ?? []),
+          ...(!packetForGate ? ['Retrieval did not produce a hydrated intelligence packet.'] : []),
+          ...(packetForGate?.sources_used.length === 0 ? ['No source metadata was available in the hydrated packet.'] : []),
+        ]
+        const responseText = [
+          'No live intelligence packet available.',
+          '',
+          'Unknowns:',
+          ...(gaps.length ? [...new Set(gaps)].slice(0, 5).map(gap => `- ${gap}`) : ['- Live retrieval did not return source-backed evidence.']),
+        ].join('\n')
+        const fam = councilSingleFamily as CouncilOrchestrationFamily
+        liveResearchTurnSurvey = {
+          wave: 'single',
+          expectedFamilies: [fam],
+          roster: { [fam]: 'failed' },
+        }
+        liveResearchSummary = toLiveResearchClientSummary(liveResearchPacket, councilResponseCompletion)
+        liveResearchUi = {
+          ...computeLiveResearchClientUi(liveResearchPacket, true),
+          responseCompletion: councilResponseCompletion,
+        }
+        await safeAudit({
+          success: false,
+          flow: 'continue_single',
+          councilSingleFamily,
+          reason: 'mandatory_retrieval_packet_missing',
+          retrievalRequired: mandatoryRetrieval.required,
+          retrievalComplete: retrievalForGate?.retrieval_complete ?? false,
+          retrievalFailed: retrievalForGate?.retrieval_failed ?? true,
+          sourceCount: packetForGate?.sources_used.length ?? 0,
+        })
+        return NextResponse.json({
+          councilSingleResponse: responseText,
+          councilSingleFamily,
+          results: [
+            {
+              family: displayFamilyName(councilSingleFamily),
+              content: responseText,
+              status: 'OK',
+              messageType: 'retrieval_gate',
+            },
+          ],
+          showContinue: true,
+          ...liveResearchJson(),
+        })
+      }
 
       let responseText = ''
       let geminiDegradedReason: string | null = null

@@ -4,6 +4,7 @@ import type { WarRoomSupabase } from '@/lib/war-room/persistence'
 import type { LiveResearchEvidencePacket, LiveResearchSourceRecord } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { LiveResearchRouterResult } from '@/lib/research/researchRouter'
 import { hydrateLiveIntelligencePacket } from '@/lib/intelligence/sources/livePacketHydrator'
+import { buildRetrievalOrchestration } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import type { RawIntelligenceSourceRecord } from '@/lib/intelligence/sourceNormalizer'
 
 function parseLineList(text: string, prefix: string): string[] {
@@ -232,6 +233,44 @@ export async function buildLiveResearchEvidencePacket(args: {
     unresolvedQuestions: unresolvedQuestions.filter(c => c.toUpperCase() !== 'NONE'),
     intelligencePacket,
     ...(!usedLiveResearch ? { researchErrorSummary: 'Live research legs returned no usable evidence.' } : {}),
+  }
+}
+
+export function buildLiveResearchFailureEvidencePacket(args: {
+  decreeText: string
+  generatedAt?: string
+  error: string
+}): LiveResearchEvidencePacket {
+  const generatedAt = args.generatedAt ?? new Date().toISOString()
+  const retrieval = buildRetrievalOrchestration({
+    decree: args.decreeText,
+    generatedAt,
+    tavilyOk: false,
+    tavilyError: args.error,
+    grokOk: false,
+    grokError: args.error,
+    directOk: false,
+    directError: args.error,
+  })
+  const intelligencePacket = hydrateLiveIntelligencePacket({
+    decree: args.decreeText,
+    timestamp: generatedAt,
+    rawSources: [],
+    unsupportedClaims: ['No live intelligence packet available.', args.error],
+    retrieval,
+  })
+
+  return {
+    usedLiveResearch: false,
+    generatedAt,
+    sources: [],
+    findings: 'No live intelligence packet available.',
+    confidence: 0,
+    freshness: 'unknown',
+    contradictions: [],
+    unresolvedQuestions: retrieval.retrieval_gaps,
+    researchErrorSummary: args.error,
+    intelligencePacket,
   }
 }
 

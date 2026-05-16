@@ -24,6 +24,11 @@ export type RetrievalSourceMix = Partial<Record<SourceNetworkTier, number>>
 
 export type RetrievalOrchestration = {
   required: boolean
+  retrieval_required: boolean
+  retrieval_started: boolean
+  retrieval_complete: boolean
+  retrieval_failed: boolean
+  synthesis_allowed: boolean
   reasons: MandatoryRetrievalReason[]
   generated_at: string
   regional_resolution: RegionalResolution
@@ -111,9 +116,15 @@ export function buildRetrievalOrchestration(args: {
   const fallbackPlan = planSourceFallbacks({ plannedSources: planned, health })
   const healthSummary = summarizeSourceHealth(health)
   const retrievalSuccess = !requirement.required || health.some(record => record.success)
+  const retrievalFailed = requirement.required && !retrievalSuccess
 
   return {
     required: requirement.required,
+    retrieval_required: requirement.required,
+    retrieval_started: true,
+    retrieval_complete: true,
+    retrieval_failed: retrievalFailed,
+    synthesis_allowed: !retrievalFailed,
     reasons: requirement.reasons,
     generated_at: args.generatedAt,
     regional_resolution: regional,
@@ -125,7 +136,7 @@ export function buildRetrievalOrchestration(args: {
     retrieval_success: retrievalSuccess,
     retrieval_gaps: [
       ...fallbackPlan.gaps,
-      ...(!retrievalSuccess && requirement.required ? ['Mandatory retrieval failed; current/live answer must disclose failure and avoid current-event claims.'] : []),
+      ...(retrievalFailed ? ['Mandatory retrieval failed; current/live answer must disclose failure and avoid current-event claims.'] : []),
     ],
   }
 }

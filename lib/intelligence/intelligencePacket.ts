@@ -106,6 +106,10 @@ export type IntelligenceClientMetadata = {
   local?: LocalIntelligenceClientMetadata
   retrieval?: {
     required: boolean
+    started: boolean
+    complete: boolean
+    failed: boolean
+    synthesisAllowed: boolean
     success: boolean
     sourceMix: RetrievalSourceMix
     gaps: number
@@ -253,6 +257,10 @@ export function toIntelligenceClientMetadata(packet: IntelligencePacket): Intell
       ? {
           retrieval: {
             required: packet.retrieval.required,
+            started: packet.retrieval.retrieval_started,
+            complete: packet.retrieval.retrieval_complete,
+            failed: packet.retrieval.retrieval_failed,
+            synthesisAllowed: packet.retrieval.synthesis_allowed,
             success: packet.retrieval.retrieval_success,
             sourceMix: packet.retrieval.source_mix,
             gaps: packet.retrieval.retrieval_gaps.length,
@@ -292,6 +300,9 @@ export function buildIntelligenceGroundingBlock(packet: IntelligencePacket, fami
     const mix = Object.entries(retrieval.source_mix).map(([tier, count]) => `${tier}=${count}`).join(', ') || 'none'
     lines.push(
       `- retrieval: required=${retrieval.required} · success=${retrieval.retrieval_success} · reasons=${retrieval.reasons.join(', ') || 'none'} · mix=${mix}`,
+    )
+    lines.push(
+      `- packetStatus: retrieval_required=${retrieval.retrieval_required} · retrieval_started=${retrieval.retrieval_started} · retrieval_complete=${retrieval.retrieval_complete} · retrieval_failed=${retrieval.retrieval_failed} · synthesis_allowed=${retrieval.synthesis_allowed}`,
     )
     if (retrieval.retrieval_gaps.length) {
       lines.push(`- retrievalGaps: ${retrieval.retrieval_gaps.slice(0, 5).join(' || ')}`)
@@ -335,6 +346,9 @@ export function buildIntelligenceGroundingBlock(packet: IntelligencePacket, fami
   )
   lines.push(
     '- Mandatory retrieval doctrine: if retrieval.required=true and retrieval.success=false, state retrieval failure clearly and do not answer current/live facts from model priors.',
+  )
+  lines.push(
+    '- Do not answer current facts unless present in packet evidence.',
   )
   return lines.join('\n')
 }

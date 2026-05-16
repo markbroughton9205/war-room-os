@@ -41,6 +41,7 @@ export function buildFamilyIntelligenceFrame(
       '- Separate evidence from inference. Do not treat weak signals as operational truth.',
       '- For local questions, distinguish Verified, Emerging, Local chatter, Contradictions, and Unknowns. Never invent neighborhood facts, live crime, or current events not present in the packet.',
       '- If mandatory retrieval failed or has gaps, disclose that before synthesis and do not fill current/live facts from training memory.',
+      '- Do not answer current facts unless present in packet evidence.',
       '- Avoid Commander mission/business/philosophy framing unless the decree explicitly asks for it.',
     ].join('\n'),
   }
