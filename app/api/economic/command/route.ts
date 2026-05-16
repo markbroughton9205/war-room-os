@@ -1,4 +1,4 @@
-import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { jsonWithPersistence, tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persistence'
 import { extractEconomicOpportunities } from '@/lib/economic/extraction'
 import { compressEconomicOpsResponse } from '@/lib/economic/responseCompression'
 import {
@@ -9,7 +9,7 @@ import {
 } from '@/lib/economic/store'
 import { createTelemetryEvent } from '@/lib/economic/telemetry'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
-import type { EconomicFamily } from '@/lib/economic/types'
+import type { EconomicFamily, EconomicOperationalDomainId } from '@/lib/economic/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +37,30 @@ function isWorkflowQueueConflictConstraintMissing(error: string): boolean {
 function isWorkflowQueuePermissionDenied(error: string): boolean {
   return /permission denied/i.test(error)
     && /war_room_economic_workflow_queue/i.test(error)
+}
+
+async function recordExtractionTelemetry(args: {
+  client: WarRoomSupabase
+  domainId: EconomicOperationalDomainId
+  providerFamily: EconomicFamily | null
+  command: string
+  sessionId?: string | null
+  metricName: string
+  metricValue: number
+  metadata?: Record<string, unknown>
+}) {
+  await insertEconomicTelemetryEvent(args.client, createTelemetryEvent({
+    category: args.metricName === 'extraction_success' ? 'opportunity_count' : 'operational_throughput',
+    domain_id: args.domainId,
+    provider_family: args.providerFamily,
+    metric_name: args.metricName,
+    metric_value: args.metricValue,
+    metadata: {
+      command: args.command,
+      session_id: args.sessionId ?? null,
+      ...(args.metadata ?? {}),
+    },
+  }))
 }
 
 export async function POST(req: Request) {
@@ -77,11 +101,28 @@ export async function POST(req: Request) {
     return jsonWithPersistence({ matched: false, summary: 'No Economic Ops command detected.' }, true)
   }
 
-  const extraction = extractEconomicOpportunities({
-    decree,
-    sessionId: payload.sessionId,
-    providerAnalyses: successfulProviderAnalyses,
-  })
+  let extraction: ReturnType<typeof extractEconomicOpportunities>
+  try {
+    extraction = extractEconomicOpportunities({
+      decree,
+      sessionId: payload.sessionId,
+      providerAnalyses: successfulProviderAnalyses,
+    })
+  } catch (error) {
+    await recordExtractionTelemetry({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      providerFamily: parsed.domain.providerPriority[0],
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      metricName: 'extraction_failure',
+      metricValue: 1,
+      metadata: {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    })
+    return jsonWithPersistence({ error: 'Economic opportunity extraction failed.' }, true, { status: 500 })
+  }
   const workflowDedupeKey = `workflow:${payload.sessionId ?? 'global'}:${parsed.command}:${parsed.domain.id}:${decree.toLowerCase().replace(/\s+/g, ' ').trim()}`
   parsed.workflow.metadata = { ...(parsed.workflow.metadata ?? {}), dedupe_key: workflowDedupeKey }
   const workflow = await upsertEconomicWorkflow(sup.client, parsed.workflow)
@@ -115,6 +156,17 @@ export async function POST(req: Request) {
     return jsonWithPersistence({ error: workflow.error }, true, { status: 500 })
   }
 
+  await recordExtractionTelemetry({
+    client: sup.client,
+    domainId: parsed.domain.id,
+    providerFamily: extraction.assignedFamily,
+    command: parsed.command,
+    sessionId: payload.sessionId,
+    metricName: 'extraction_attempted',
+    metricValue: extraction.telemetry.attempted,
+    metadata: extraction.telemetry,
+  })
+
   let inserted = 0
   for (const opportunity of extraction.opportunities) {
     const saved = await upsertEconomicOpportunity(sup.client, opportunity)
@@ -136,6 +188,46 @@ export async function POST(req: Request) {
         },
       })
     }
+  }
+
+  await recordExtractionTelemetry({
+    client: sup.client,
+    domainId: parsed.domain.id,
+    providerFamily: extraction.assignedFamily,
+    command: parsed.command,
+    sessionId: payload.sessionId,
+    metricName: inserted > 0 ? 'extraction_success' : 'extraction_empty',
+    metricValue: inserted > 0 ? inserted : 1,
+    metadata: {
+      ...extraction.telemetry,
+      inserted_opportunities: inserted,
+    },
+  })
+
+  if (extraction.telemetry.fallbackStatus === 'created') {
+    await recordExtractionTelemetry({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      providerFamily: extraction.assignedFamily,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      metricName: 'extraction_empty_fallback',
+      metricValue: 1,
+      metadata: extraction.telemetry,
+    })
+  }
+
+  if (extraction.telemetry.fallbackStatus === 'skipped_low_quality') {
+    await recordExtractionTelemetry({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      providerFamily: extraction.assignedFamily,
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      metricName: 'extraction_fallback_skipped_low_quality',
+      metricValue: 1,
+      metadata: extraction.telemetry,
+    })
   }
 
   await insertEconomicTelemetryEvent(sup.client, createTelemetryEvent({
