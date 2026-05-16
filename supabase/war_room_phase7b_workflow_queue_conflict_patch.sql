@@ -1,5 +1,6 @@
--- War Room Phase 7B production patch: workflow queue dedupe schema.
--- Safe to run repeatedly. Preserves existing rows and asks PostgREST to reload schema cache.
+-- War Room Phase 7B production patch: align workflow queue upsert conflict target.
+-- PostgREST upsert uses on_conflict=dedupe_key, which requires a real unique
+-- constraint/index matching that column. Partial unique indexes do not satisfy it.
 
 alter table if exists public.war_room_economic_workflow_queue
   add column if not exists dedupe_key text;

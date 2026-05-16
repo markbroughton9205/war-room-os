@@ -57,8 +57,21 @@ alter table public.war_room_economic_workflow_queue
     status in ('pending','investigating','approved','queued','executing','completed','failed','archived')
   );
 
-create unique index if not exists war_room_economic_workflow_dedupe_idx
-  on public.war_room_economic_workflow_queue (dedupe_key);
+drop index if exists public.war_room_economic_workflow_dedupe_idx;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'war_room_economic_workflow_queue_dedupe_key_key'
+      and conrelid = 'public.war_room_economic_workflow_queue'::regclass
+  ) then
+    alter table public.war_room_economic_workflow_queue
+      add constraint war_room_economic_workflow_queue_dedupe_key_key unique (dedupe_key);
+  end if;
+end;
+$$;
 
 alter table public.war_room_economic_active_missions
   add column if not exists last_activity_at timestamptz not null default now();

@@ -51,13 +51,14 @@ create table if not exists public.war_room_economic_workflow_queue (
   summary text not null,
   domain_id text not null references public.war_room_economic_operational_domains (id),
   approval_required boolean not null default true,
-  dedupe_key text,
+  dedupe_key text not null,
   metadata jsonb not null default '{}'::jsonb,
   constraint war_room_economic_workflow_type_check check (workflow_type in ('leads','proposals','research_targets','outreach_drafts','automation_tasks','intelligence_reports','acquisition_targets')),
   constraint war_room_economic_workflow_status_check check (status in ('pending','active','completed','failed','archived')),
   constraint war_room_economic_workflow_assigned_family_check check (assigned_family in ('chatgpt','claude','grok','gemini','red_team')),
   constraint war_room_economic_workflow_priority_check check (priority between 1 and 5),
-  constraint war_room_economic_workflow_approval_required_check check (approval_required is true)
+  constraint war_room_economic_workflow_approval_required_check check (approval_required is true),
+  constraint war_room_economic_workflow_queue_dedupe_key_key unique (dedupe_key)
 );
 
 create table if not exists public.war_room_economic_proposals (
@@ -143,9 +144,6 @@ create index if not exists war_room_economic_workflow_status_idx
   on public.war_room_economic_workflow_queue (status, priority desc, created_at desc);
 create index if not exists war_room_economic_workflow_domain_idx
   on public.war_room_economic_workflow_queue (domain_id, created_at desc);
-create unique index if not exists war_room_economic_workflow_dedupe_idx
-  on public.war_room_economic_workflow_queue (dedupe_key)
-  where dedupe_key is not null;
 create index if not exists war_room_economic_proposals_status_idx
   on public.war_room_economic_proposals (status, created_at desc);
 create index if not exists war_room_economic_proposals_workflow_idx

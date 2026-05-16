@@ -30,6 +30,10 @@ function isWorkflowQueueDedupeSchemaMissing(error: string): boolean {
     && /(schema cache|column|could not find)/i.test(error)
 }
 
+function isWorkflowQueueConflictConstraintMissing(error: string): boolean {
+  return /no unique or exclusion constraint matching the on conflict specification/i.test(error)
+}
+
 export async function POST(req: Request) {
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
@@ -82,6 +86,15 @@ export async function POST(req: Request) {
         error: 'schema_migration_required',
         message: 'Economic workflow queue is missing dedupe_key in Supabase schema cache. Run supabase/war_room_phase7b_queue_schema_patch.sql, then retry.',
         migration: 'supabase/war_room_phase7b_queue_schema_patch.sql',
+        detail: workflow.error,
+      }, true, { status: 503 })
+    }
+    if (isWorkflowQueueConflictConstraintMissing(workflow.error)) {
+      return jsonWithPersistence({
+        error: 'schema_migration_required',
+        message: 'Economic workflow queue dedupe_key does not have a matching unique constraint for upsert. Run supabase/war_room_phase7b_workflow_queue_conflict_patch.sql, then retry.',
+        migration: 'supabase/war_room_phase7b_workflow_queue_conflict_patch.sql',
+        onConflict: 'dedupe_key',
         detail: workflow.error,
       }, true, { status: 503 })
     }
