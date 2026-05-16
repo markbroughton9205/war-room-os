@@ -223,7 +223,9 @@ export function buildDecreeFallbackCandidate(input: {
 }): NormalizedScoutCandidate {
   const scores = scoreFamilySignals(input.decree, false, 'medium')
   return {
-    title: `Investigate live market signal for ${input.decree.slice(0, 80)}`,
+    title: input.domainId === 'income_ops'
+      ? 'Investigate income generation opportunities'
+      : `Investigate ${input.domainId.replace(/_/g, ' ')} opportunities`,
     summary: `Live scout did not return usable external candidates. Create a low-confidence investigation packet for human review before any action. Reason: ${input.reason}`,
     url: null,
     source: 'decree_fallback',
@@ -232,7 +234,13 @@ export function buildDecreeFallbackCandidate(input: {
     estimated_value: null,
     confidence: 0.28,
     risk_level: 'medium',
-    required_actions: ['human_review', 'rerun_live_scout', 'validate_market_demand'],
+    required_actions: [
+      'Run live market scout',
+      'Identify 3 monetizable opportunities',
+      'Estimate speed to cash',
+      'Estimate startup cost',
+      "Rank top path for Ra'el",
+    ],
     family_scores: scores,
     rank_score: 0.25,
     assigned_family: input.fallbackFamily,

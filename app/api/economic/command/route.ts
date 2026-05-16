@@ -11,7 +11,7 @@ import {
 } from '@/lib/economic/store'
 import { createTelemetryEvent } from '@/lib/economic/telemetry'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
-import type { NormalizedScoutCandidate } from '@/lib/economic/scout/normalizeScoutResults'
+import { buildDecreeFallbackCandidate, type NormalizedScoutCandidate } from '@/lib/economic/scout/normalizeScoutResults'
 import type { EconomicFamily, EconomicOperationalDomainId, EconomicOpportunity } from '@/lib/economic/types'
 
 export const dynamic = 'force-dynamic'
@@ -115,10 +115,11 @@ function opportunityFromScoutCandidate(input: {
   command: string
   workflowId: string
 }): EconomicOpportunity {
+  const isDecreeFallback = input.candidate.source_provider === 'decree_fallback'
   return createOpportunityDraft({
     title: input.candidate.title,
     category: input.candidate.category,
-    source: input.decree,
+    source: isDecreeFallback ? 'decree_fallback' : input.decree,
     source_provider: 'unknown',
     confidence: input.candidate.confidence,
     estimated_value: input.candidate.estimated_value,
@@ -137,6 +138,7 @@ function opportunityFromScoutCandidate(input: {
       rank_score: input.candidate.rank_score,
       approval_required: true,
       external_action_allowed: false,
+      fallback_reason: isDecreeFallback ? input.candidate.summary : null,
     },
     dedupe_key: buildOpportunityDedupeKey({
       provider: input.candidate.source_provider,
@@ -484,11 +486,28 @@ export async function POST(req: Request) {
     command: parsed.command,
     workflowId: workflow.value,
   }))
-  const opportunitiesToPersist = scoutOpportunities.length
+  let opportunitiesToPersist = scoutOpportunities.length
     ? scoutOpportunities
     : extraction.opportunities.slice(0, 3)
 
+  if (!opportunitiesToPersist.length) {
+    const fallbackCandidate = buildDecreeFallbackCandidate({
+      decree,
+      domainId: parsed.domain.id,
+      fallbackFamily: parsed.domain.providerPriority[0],
+      reason: 'api_guarantee_no_candidates_or_provider_analysis',
+    })
+    opportunitiesToPersist = [opportunityFromScoutCandidate({
+      candidate: fallbackCandidate,
+      decree,
+      sessionId: payload.sessionId,
+      command: parsed.command,
+      workflowId: workflow.value,
+    })]
+  }
+
   let inserted = 0
+  const opportunityPersistenceErrors: string[] = []
   for (const opportunity of opportunitiesToPersist) {
     const saved = await upsertEconomicOpportunity(sup.client, opportunity)
     if (saved.ok) {
@@ -509,7 +528,51 @@ export async function POST(req: Request) {
           phase7c_live_scout: opportunity.metadata?.source === 'phase7c_live_opportunity_scout',
         },
       })
+    } else {
+      opportunityPersistenceErrors.push(saved.error)
     }
+  }
+
+  if (inserted === 0) {
+    await recordExtractionTelemetry({
+      client: sup.client,
+      domainId: parsed.domain.id,
+      providerFamily: parsed.domain.providerPriority[0],
+      command: parsed.command,
+      sessionId: payload.sessionId,
+      metricName: 'scout_persistence_failure',
+      metricValue: 1,
+      metadata: {
+        fallback_attempted: true,
+        fallback_reason: scout.fallbackReason ?? 'api_guarantee_no_inserted_opportunities',
+        opportunity_persistence_errors: opportunityPersistenceErrors.slice(0, 5),
+        diagnostics: scout.diagnostics,
+      },
+    })
+
+    return jsonWithPersistence({
+      matched: true,
+      error: 'opportunity_persistence_unavailable',
+      summary: 'Opportunity Scout persistence unavailable. No opportunity record could be created; failure telemetry was stored.',
+      workflowId: workflow.value,
+      opportunityCount: 0,
+      providerFailures: failedProviderAnalyses.length,
+      scout: {
+        ok: false,
+        fallbackCreated: true,
+        candidatesGenerated: scout.telemetry.candidates_generated,
+        candidatesRanked: scout.telemetry.candidates_ranked,
+        tavilyOk: scout.tavily.ok,
+        firecrawlOk: scout.firecrawl.ok,
+        diagnostics: {
+          ...scout.diagnostics,
+          fallback_triggered: true,
+          fallback_reason: scout.fallbackReason ?? opportunityPersistenceErrors[0] ?? 'opportunity_persistence_unavailable',
+        },
+        missingApiKeys: missingScoutKeys,
+      },
+      approvalRequired: true,
+    }, true, { status: 503 })
   }
 
   await recordExtractionTelemetry({
@@ -593,14 +656,17 @@ export async function POST(req: Request) {
       successfulProviderAnalyses.map(row => `[${row.provider_family}]\n${row.content}`).join('\n\n'),
     ].filter(Boolean).join('\n\n'),
   })
+  const scoutProviderUnavailable = scout.fallbackCreated
+    && (!scout.tavily.enabled || (!scout.tavily.ok && !scout.firecrawl.ok && Boolean(scout.tavily.error || scout.firecrawl.error)))
+  const economicSummary = scoutProviderUnavailable
+    ? 'Scout provider unavailable. 1 fallback investigation opportunity created.'
+    : scout.fallbackCreated
+      ? '1 investigation opportunity created because live scout returned no candidates.'
+      : `${inserted} opportunities discovered and added to Opportunity Scout.`
 
   return jsonWithPersistence({
     matched: true,
-    summary: failedProviderAnalyses.length && successfulProviderAnalyses.length === 0 && inserted === 0
-      ? 'Economic Ops routed to Opportunity Scout, but provider analysis failed. Failure telemetry was stored without broadcasting family availability spam.'
-      : missingScoutKeys.length && scout.fallbackCreated
-        ? `Scout provider unavailable: missing API key. ${inserted} fallback investigation opportunity added to Opportunity Scout.`
-      : `${inserted} opportunities discovered and added to Opportunity Scout.`,
+    summary: economicSummary,
     workflowId: workflow.value,
     opportunityCount: inserted,
     providerFailures: failedProviderAnalyses.length,
