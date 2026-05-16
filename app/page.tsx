@@ -9505,6 +9505,9 @@ function Home() {
                           liveResearchHud.intelligence?.local?.active
                             ? ` Local: source depth ${liveResearchHud.intelligence.local.sourceDepth}, locality ${liveResearchHud.intelligence.local.localityDepth}, corroboration ${liveResearchHud.intelligence.local.corroborationLevel}, weak signals ${liveResearchHud.intelligence.local.weakSignalCount}, contradictions ${liveResearchHud.intelligence.local.contradictionWarnings}.`
                             : '',
+                          liveResearchHud.intelligence?.retrieval
+                            ? ` Retrieval: required ${liveResearchHud.intelligence.retrieval.required ? 'yes' : 'no'}, success ${liveResearchHud.intelligence.retrieval.success ? 'yes' : 'no'}, gaps ${liveResearchHud.intelligence.retrieval.gaps}, mix ${Object.entries(liveResearchHud.intelligence.retrieval.sourceMix).map(([tier, count]) => `${tier}:${count}`).join(', ') || 'none'}.`
+                            : '',
                           liveResearchHud.responseCompletion
                             ? ` Model completion: ${liveResearchHud.responseCompletion}.`
                             : '',
@@ -9525,6 +9528,9 @@ function Home() {
                   {liveResearchHud.intelligence?.weakSignalDetected ? ' · weak signal' : ''}
                   {liveResearchHud.intelligence?.local?.active
                     ? ` · local ${liveResearchHud.intelligence.local.localityDepth}/${liveResearchHud.intelligence.local.corroborationLevel}`
+                    : ''}
+                  {liveResearchHud.intelligence?.retrieval
+                    ? ` · retrieval ${liveResearchHud.intelligence.retrieval.success ? 'ok' : 'gap'}`
                     : ''}
                 </span>
               ) : null}

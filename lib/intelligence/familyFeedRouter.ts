@@ -40,6 +40,7 @@ export function buildFamilyIntelligenceFrame(
       '- Keep visible provenance compact when answering: source count, freshness, confidence, and a short source preview when available.',
       '- Separate evidence from inference. Do not treat weak signals as operational truth.',
       '- For local questions, distinguish Verified, Emerging, Local chatter, Contradictions, and Unknowns. Never invent neighborhood facts, live crime, or current events not present in the packet.',
+      '- If mandatory retrieval failed or has gaps, disclose that before synthesis and do not fill current/live facts from training memory.',
       '- Avoid Commander mission/business/philosophy framing unless the decree explicitly asks for it.',
     ].join('\n'),
   }

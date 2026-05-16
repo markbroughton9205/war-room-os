@@ -3,10 +3,8 @@ import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import type { WarRoomSupabase } from '@/lib/war-room/persistence'
 import type { LiveResearchEvidencePacket, LiveResearchSourceRecord } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { LiveResearchRouterResult } from '@/lib/research/researchRouter'
-import {
-  buildIntelligencePacket,
-  type RawIntelligenceSourceRecord,
-} from '@/lib/intelligence'
+import { hydrateLiveIntelligencePacket } from '@/lib/intelligence/sources/livePacketHydrator'
+import type { RawIntelligenceSourceRecord } from '@/lib/intelligence/sourceNormalizer'
 
 function parseLineList(text: string, prefix: string): string[] {
   const line = text.split('\n').find(l => l.trim().toUpperCase().startsWith(prefix.toUpperCase()))
@@ -215,11 +213,12 @@ export async function buildLiveResearchEvidencePacket(args: {
   const freshness: LiveResearchEvidencePacket['freshness'] =
     router.tavily.ok || router.direct.some(d => d.ok) ? 'recent' : router.grok.ok ? 'unknown' : 'stale'
 
-  const intelligencePacket = buildIntelligencePacket({
+  const intelligencePacket = hydrateLiveIntelligencePacket({
     decree: decreeText,
     timestamp: router.generatedAt,
     rawSources: rawIntelligenceFromRouter(router),
     unsupportedClaims: unresolvedQuestions.filter(c => c.toUpperCase() !== 'NONE'),
+    retrieval: router.retrieval,
   })
 
   return {
@@ -272,6 +271,9 @@ export async function logLiveResearchEvidenceMetadata(
       intelligenceConfidence: packet.intelligencePacket?.confidence_summary.overall ?? null,
       intelligenceWeakSignalCount: packet.intelligencePacket?.weak_signals.length ?? 0,
       intelligenceContradictionCount: packet.intelligencePacket?.contradictions.length ?? 0,
+      retrievalRequired: packet.intelligencePacket?.retrieval?.required ?? false,
+      retrievalSuccess: packet.intelligencePacket?.retrieval?.retrieval_success ?? null,
+      retrievalGaps: packet.intelligencePacket?.retrieval?.retrieval_gaps.length ?? 0,
     },
   })
 }

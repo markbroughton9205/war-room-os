@@ -13,6 +13,7 @@ import { planIntelligenceQuery } from '@/lib/intelligence/queryPlanner'
 import { runRedTeamVerification, type RedTeamVerificationReport } from '@/lib/intelligence/redTeamVerification'
 import { normalizeSourceEvidence, type RawIntelligenceSourceRecord } from '@/lib/intelligence/sourceNormalizer'
 import type { IntelligenceSourceType, SourceVerifiedLevel } from '@/lib/intelligence/sourceRegistry'
+import type { RetrievalOrchestration, RetrievalSourceMix } from '@/lib/intelligence/sources/retrievalOrchestrator'
 
 export type EvidenceConfidenceTier =
   | 'verified'
@@ -87,6 +88,7 @@ export type IntelligencePacket = {
   gaps: string[]
   red_team_verification: RedTeamVerificationReport
   local_intelligence?: LocalIntelligenceLayer
+  retrieval?: RetrievalOrchestration
 }
 
 export type IntelligenceClientMetadata = {
@@ -102,6 +104,13 @@ export type IntelligenceClientMetadata = {
   unsupportedClaims: number
   redTeamWarnings: number
   local?: LocalIntelligenceClientMetadata
+  retrieval?: {
+    required: boolean
+    success: boolean
+    sourceMix: RetrievalSourceMix
+    gaps: number
+    health: RetrievalOrchestration['health_summary']
+  }
 }
 
 function makePacketId(timestamp: string, decree: string): string {
@@ -171,6 +180,7 @@ export function buildIntelligencePacket(args: {
   queryPlan?: IntelligenceQueryPlan
   rawSources: RawIntelligenceSourceRecord[]
   unsupportedClaims?: string[]
+  retrieval?: RetrievalOrchestration
 }): IntelligencePacket {
   const timestamp = args.timestamp ?? new Date().toISOString()
   const queryPlan = args.queryPlan ?? planIntelligenceQuery(args.decree)
@@ -220,6 +230,7 @@ export function buildIntelligencePacket(args: {
     gaps: [...new Set(gaps)],
     red_team_verification: redTeam,
     ...(localIntelligence.active ? { local_intelligence: localIntelligence } : {}),
+    ...(args.retrieval ? { retrieval: args.retrieval } : {}),
   }
 }
 
@@ -238,6 +249,17 @@ export function toIntelligenceClientMetadata(packet: IntelligencePacket): Intell
     unsupportedClaims: packet.unsupported_claims.length,
     redTeamWarnings: packet.red_team_verification.warnings.length,
     ...(packet.local_intelligence ? { local: toLocalIntelligenceClientMetadata(packet.local_intelligence) } : {}),
+    ...(packet.retrieval
+      ? {
+          retrieval: {
+            required: packet.retrieval.required,
+            success: packet.retrieval.retrieval_success,
+            sourceMix: packet.retrieval.source_mix,
+            gaps: packet.retrieval.retrieval_gaps.length,
+            health: packet.retrieval.health_summary,
+          },
+        }
+      : {}),
   }
 }
 
@@ -264,6 +286,16 @@ export function buildIntelligenceGroundingBlock(packet: IntelligencePacket, fami
   }
   if (packet.weak_signals.length) {
     lines.push(`- weakSignalNote: ${packet.weak_signals.length} item(s) may inform radar/trend analysis but are not operational truth.`)
+  }
+  if (packet.retrieval) {
+    const retrieval = packet.retrieval
+    const mix = Object.entries(retrieval.source_mix).map(([tier, count]) => `${tier}=${count}`).join(', ') || 'none'
+    lines.push(
+      `- retrieval: required=${retrieval.required} · success=${retrieval.retrieval_success} · reasons=${retrieval.reasons.join(', ') || 'none'} · mix=${mix}`,
+    )
+    if (retrieval.retrieval_gaps.length) {
+      lines.push(`- retrievalGaps: ${retrieval.retrieval_gaps.slice(0, 5).join(' || ')}`)
+    }
   }
   if (packet.local_intelligence) {
     const local = packet.local_intelligence
@@ -300,6 +332,9 @@ export function buildIntelligenceGroundingBlock(packet: IntelligencePacket, fami
   )
   lines.push(
     '- Operational truth doctrine: unverified information may be discussed only with uncertainty labels. Do not convert weak signals, rumors, stale evidence, inferred locality, or unsupported claims into facts. Do not imply live/current awareness beyond the packet freshness and connected sources.',
+  )
+  lines.push(
+    '- Mandatory retrieval doctrine: if retrieval.required=true and retrieval.success=false, state retrieval failure clearly and do not answer current/live facts from model priors.',
   )
   return lines.join('\n')
 }

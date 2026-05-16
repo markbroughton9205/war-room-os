@@ -1,5 +1,6 @@
 import type { IntentKind } from '@/lib/council/intentClassifier'
 import { isEconomicOpsCommand } from '@/lib/economic/routing'
+import { evaluateMandatoryLiveRetrieval } from '@/lib/intelligence/sources/retrievalOrchestrator'
 
 export type ResearchIntentContext = {
   /** Server-side attendance wave / attendance command — never triggers live research. */
@@ -123,6 +124,7 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
   const casualIntent = intent === 'greeting' || intent === 'natural'
   const casualShape = CASUAL_ONLY.some(p => p.test(t)) && t.length < 220
   const explicitInternet = INTERNET_EXPLICIT.some(p => p.test(t))
+  const mandatoryRetrieval = evaluateMandatoryLiveRetrieval(t)
   const liveHits = countMatches(t, LIVE_CURRENT_TRIGGERS)
   const socialHits = countMatches(t, SOCIAL_REALTIME_TRIGGERS)
   const domainHits = countMatches(t, DOMAIN_TRIGGERS)
@@ -139,6 +141,9 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
   if (domainHits) pushReason('domain_topic', DOMAIN_TRIGGERS)
   if (researchVerbHits) pushReason('research_verbs', RESEARCH_VERB_TRIGGERS)
   if (URL_PASTE_TRIGGER.test(t)) reasons.push('url_paste:https')
+  if (mandatoryRetrieval.required) {
+    reasons.push(...mandatoryRetrieval.reasons.map(reason => `mandatory_retrieval:${reason}`))
+  }
 
   if (intent === 'research' && (researchVerbHits || explicitInternet)) {
     reasons.push('intent_classifier:research')
@@ -153,7 +158,7 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
   }
 
   const breadth = new Set(reasons.map(r => r.split(':')[0] ?? r)).size
-  const confidence = Math.min(1, 0.35 + breadth * 0.18 + Math.min(3, reasons.length) * 0.12)
+  const confidence = Math.min(1, Math.max(mandatoryRetrieval.confidence, 0.35 + breadth * 0.18 + Math.min(3, reasons.length) * 0.12))
 
   return { shouldResearch: true, reasons, confidence }
 }

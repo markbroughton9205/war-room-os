@@ -1,4 +1,5 @@
 import { callXAIChat } from '@/lib/ai/providers/xai'
+import { buildRetrievalOrchestration, type RetrievalOrchestration } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import { tavilyWarRoomSearch } from '@/lib/internet/warRoomSearchProviders'
 import type { WarRoomSupabase } from '@/lib/war-room/persistence'
 
@@ -37,6 +38,7 @@ export type LiveResearchRouterResult = {
   tavily: TavilyLeg
   grok: GrokLeg
   direct: DirectFetchSnippet[]
+  retrieval: RetrievalOrchestration
 }
 
 const MAX_DIRECT = 2
@@ -208,6 +210,17 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
   const tavily: TavilyLeg = tRaw.ok
     ? { ok: true, results: tRaw.results, durationMs: tRaw.durationMs }
     : { ok: false, results: tRaw.results, error: tRaw.error, durationMs: tRaw.durationMs }
+  const retrieval = buildRetrievalOrchestration({
+    decree: input.decreeText,
+    generatedAt,
+    tavilyOk: tavily.ok && tavily.results.length > 0,
+    tavilyLatencyMs: tavily.durationMs,
+    tavilyError: tavily.error,
+    grokOk: grok.ok,
+    grokError: grok.error,
+    directOk: direct.some(item => item.ok),
+    directError: direct.filter(item => !item.ok && item.error).map(item => `${item.url}: ${item.error}`).join(' | ') || undefined,
+  })
 
   void input.supabase
   void input.conversationId
@@ -218,5 +231,6 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     tavily,
     grok,
     direct,
+    retrieval,
   }
 }
