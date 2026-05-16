@@ -4835,7 +4835,7 @@ function Home() {
     setFamilyPresence(prev => ({ ...prev, [familyName]: { status, label } }))
   }
 
-  const addSystemMessage = (content: string, opts?: { force?: boolean }) => {
+  const addSystemMessage = (content: string, opts?: { force?: boolean; id?: string }) => {
     if (
       !opts?.force
       && shouldSuppressProviderFailureFromChatStream(content, { diagnosticsOpen: operatorTab === 'diagnostics' })
@@ -4844,7 +4844,7 @@ function Home() {
     }
     councilDispatch({
       type: 'ADD_SYSTEM_MESSAGE_DEDUPED',
-      payload: { id: createMessageId('system'), content, timestamp: new Date().toLocaleTimeString() },
+      payload: { id: opts?.id ?? createMessageId('system'), content, timestamp: new Date().toLocaleTimeString() },
     })
   }
 
@@ -4942,28 +4942,29 @@ function Home() {
       applyAttendanceLateGatherSkip?: boolean
       responseSuccessful?: boolean
       providerRuntime?: ProviderFamilyOutcomeStatus
+      transientProviderStatus?: boolean
     },
-  ) => {
+  ): Promise<string | null> => {
     if (
       opts?.applyAttendanceLateGatherSkip
       && attendanceSoftGatherUiClosedRef.current
     ) {
-      return
+      return null
     }
     if (
       (input.role === 'system' || input.role === 'assistant')
       && shouldSuppressProviderFailureFromChatStream(input.content, { diagnosticsOpen: operatorTab === 'diagnostics' })
     ) {
-      return
+      return null
     }
     const persistable = councilMessageFromLivePost(input, {
       responseSuccessful: opts?.responseSuccessful,
       providerRuntime: opts?.providerRuntime,
     })
-    if (!shouldPersistCouncilMessage(persistable, councilPersistenceCtx)) return
-    if (!liveCouncilConvId || !persistenceAvailable) return
+    if (!shouldPersistCouncilMessage(persistable, councilPersistenceCtx)) return null
+    if (!liveCouncilConvId || !persistenceAvailable) return null
     try {
-      await fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
+      const res = await fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -4973,11 +4974,94 @@ function Home() {
           metadata: {
             responseSuccessful: opts?.responseSuccessful === true,
             ...(opts?.providerRuntime ? { providerRuntime: opts.providerRuntime } : {}),
+            ...(opts?.transientProviderStatus ? { transientProviderStatus: true } : {}),
           },
         }),
       })
+      if (!res.ok) return null
+      const data = await res.json() as { message?: { id?: unknown } }
+      return typeof data.message?.id === 'string' ? data.message.id : null
     } catch {
       /* session fallback */
+      return null
+    }
+  }
+
+  const deleteLiveCouncilMessages = async (messageIds: string[]) => {
+    const ids = [...new Set(messageIds.filter(id => typeof id === 'string' && id.trim()))]
+    if (!ids.length || !liveCouncilConvId || !persistenceAvailable) return
+    try {
+      await fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+    } catch {
+      /* cleanup is best-effort; audit/event history is untouched */
+    }
+  }
+
+  const isTransientProviderStatusContent = (
+    content: string,
+    family: CouncilOrchestrationFamily,
+    opts?: { includeGenericRecovery?: boolean },
+  ) => {
+    const text = content.replace(/\s+/g, ' ').trim()
+    if (!text) return false
+    if (opts?.includeGenericRecovery && /^Recovery ping requested\.$/i.test(text)) return true
+
+    const label = COUNCIL_ROSTER.find(r => r.id === family)?.label ?? family
+    const normalized = text.toLowerCase()
+    const normalizedLabel = label.toLowerCase()
+    const startsWithFamily =
+      normalized.startsWith(`${normalizedLabel}:`)
+      || normalized.startsWith(`${normalizedLabel} has `)
+      || normalized.startsWith(`${normalizedLabel} pending`)
+    if (!startsWithFamily) return false
+
+    return /\b(engine status unknown|unavailable|has not responded yet|pending|provider returned timeout|provider call failed|not configured|configured|not reachable|reachable|client_abort_or_budget|local_unavailable|engine_unavailable|empty_then_local_failed|cloud_and_local_failed|recovery)\b/i.test(text)
+  }
+
+  const clearTransientProviderStatusAfterSuccess = (args: {
+    family: CouncilOrchestrationFamily
+    messageIds?: string[]
+    persistedMessageIds?: string[]
+    includeGenericRecovery?: boolean
+  }) => {
+    const ids = new Set(args.messageIds ?? [])
+    const latestRaelIndex = messagesRef.current.findLastIndex(isRaelCouncilMessage)
+    let removed = false
+    const nextMessages = messagesRef.current.filter((message, index) => {
+      if (index <= latestRaelIndex) return true
+      const matchesTrackedId = ids.has(message.id)
+      const matchesTransientStatus =
+        message.familyName === 'SYSTEM'
+        && isTransientProviderStatusContent(message.content, args.family, {
+          includeGenericRecovery: args.includeGenericRecovery,
+        })
+      if (matchesTrackedId || matchesTransientStatus) {
+        removed = true
+        return false
+      }
+      return true
+    })
+
+    if (removed) {
+      councilDispatch({ type: 'SET_MESSAGES', payload: nextMessages })
+    }
+
+    const providerError = councilSnapRef.current.providerErrorMessage
+    if (
+      providerError
+      && isTransientProviderStatusContent(providerError, args.family, {
+        includeGenericRecovery: args.includeGenericRecovery,
+      })
+    ) {
+      councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+    }
+
+    if (args.persistedMessageIds?.length) {
+      void deleteLiveCouncilMessages(args.persistedMessageIds)
     }
   }
 
@@ -6077,6 +6161,17 @@ function Home() {
       console.warn('[council-session] suppressed_stale_autonomous_reveal')
       return
     }
+    if (
+      text.trim()
+      && councilRevealSource === 'decree'
+      && activeCouncilCommandRef.current.directInvocation
+      && activeCouncilCommandRef.current.targetFamilies[0] === family
+    ) {
+      clearTransientProviderStatusAfterSuccess({
+        family,
+        includeGenericRecovery: true,
+      })
+    }
     const inputTokens = estimateTokens(inputText)
     const usageName = mapOrchFamilyToUsage(family)
     const nextUsageRows = BASE_USAGE_ROWS.map(row => {
@@ -6662,12 +6757,19 @@ function Home() {
         ? resolveAttendanceBatchCeilingMs({ familyCount: directedOrder.length })
         : null
 
-      const gatherPostSystem = (line: string) => {
+      const gatherPostSystem = (line: string, opts?: { id?: string }) => {
         if (attendanceWave && attendanceSoftGatherUiClosedRef.current) return
-        addSystemMessage(line)
+        addSystemMessage(line, opts)
       }
-      const gatherPostLive = (input: { role: 'user' | 'assistant' | 'system'; content: string; family?: string | null }) =>
-        postLiveCouncilMessage(input, { applyAttendanceLateGatherSkip: attendanceWave })
+      const gatherPostLive = (
+        input: { role: 'user' | 'assistant' | 'system'; content: string; family?: string | null },
+        opts?: { transientProviderStatus?: boolean; providerRuntime?: ProviderFamilyOutcomeStatus },
+      ) =>
+        postLiveCouncilMessage(input, {
+          applyAttendanceLateGatherSkip: attendanceWave,
+          transientProviderStatus: opts?.transientProviderStatus,
+          providerRuntime: opts?.providerRuntime,
+        })
 
       let providerRuntimeStates: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
       let providerRuntimeDetails: CouncilProviderRuntimeDetails | undefined
@@ -6754,13 +6856,21 @@ function Home() {
         setFamilyDuty(prev => ({ ...prev, [family]: 'working' }))
         const label = rosterLabel(family)
         const isDirectInvoke = Boolean(cmd.directInvocation && cmd.targetFamilies[0] === family)
-        const postDirectUnavailable = (rt: ProviderFamilyOutcomeStatus, detail?: string) => {
+        const transientDirectStatusMessageIds: string[] = []
+        const transientDirectStatusPersistedIds: string[] = []
+        const postDirectUnavailable = async (rt: ProviderFamilyOutcomeStatus, detail?: string) => {
           const line = replaceWithRuntimeTruthLine(
             family,
             providerOutcomeToVerifiedContext({ family, runtime: rt, runtimeDetail: detail }),
           )
-          gatherPostSystem(line)
-          void gatherPostLive({ role: 'system', content: line })
+          const uiMessageId = createMessageId(`transient-${family}`)
+          transientDirectStatusMessageIds.push(uiMessageId)
+          gatherPostSystem(line, { id: uiMessageId })
+          const persistedId = await gatherPostLive(
+            { role: 'system', content: line, family },
+            { transientProviderStatus: true, providerRuntime: rt },
+          )
+          if (persistedId) transientDirectStatusPersistedIds.push(persistedId)
         }
         const deep = councilSnapRef.current.deepDiscussionMode
         const summarizeAugment = mode === 'summarize'
@@ -6831,7 +6941,7 @@ function Home() {
             textOut = await tryLocal()
             if (!textOut) {
               if (isDirectInvoke) {
-                postDirectUnavailable('FAILED', 'local_unavailable')
+                await postDirectUnavailable('FAILED', 'local_unavailable')
               } else {
                 const sys = `${label}: unavailable (local ${family} agent not functional or invoke failed)`
                 gatherPostSystem(sys)
@@ -6845,7 +6955,7 @@ function Home() {
           } else if (family === 'gemini' && skipGeminiForSessionRef.current) {
             runtime = 'SKIPPED'
             runtimeDetail = 'gemini_session_backoff'
-            if (isDirectInvoke) postDirectUnavailable('SKIPPED', runtimeDetail)
+            if (isDirectInvoke) await postDirectUnavailable('SKIPPED', runtimeDetail)
           } else {
             const eid = cloudEngineIdForCouncilFamily(family)
             const row = eid ? engineMapRef.current.get(eid) : undefined
@@ -6853,7 +6963,7 @@ function Home() {
               !attendanceWave && !isEngineFunctional(engineMapRef.current, eid)
             if (engineGateBlocksChat) {
               if (isDirectInvoke) {
-                postDirectUnavailable('SKIPPED', unavailableReason(row))
+                await postDirectUnavailable('SKIPPED', unavailableReason(row))
               } else {
                 const sys = `${label}: unavailable (${unavailableReason(row)})`
                 gatherPostSystem(sys)
@@ -6901,14 +7011,14 @@ function Home() {
                   runtime = 'TIMED_OUT'
                   runtimeDetail = chatData.councilProviderHttpDetail
                   textOut = null
-                  if (isDirectInvoke) postDirectUnavailable('TIMED_OUT', runtimeDetail)
+                  if (isDirectInvoke) await postDirectUnavailable('TIMED_OUT', runtimeDetail)
                 } else if (chatRes.ok && chatData.councilProviderHttpStatus === 'failed') {
                   runtime = 'FAILED'
                   runtimeDetail = chatData.councilProviderHttpDetail
                   textOut = null
                   if (isDirectInvoke) {
                     textOut = await tryLocal()
-                    if (!textOut) postDirectUnavailable('FAILED', runtimeDetail)
+                    if (!textOut) await postDirectUnavailable('FAILED', runtimeDetail)
                   }
                 } else if (!chatRes.ok) {
                   lastCouncilFamilyErrorRef.current = family
@@ -6929,7 +7039,7 @@ function Home() {
                   } else if (isDirectInvoke) {
                     textOut = await tryLocal()
                     if (!textOut) {
-                      postDirectUnavailable('FAILED', summary)
+                      await postDirectUnavailable('FAILED', summary)
                       runtime = 'FAILED'
                       runtimeDetail = 'cloud_and_local_failed'
                     } else {
@@ -6963,7 +7073,7 @@ function Home() {
                     }
                     textOut = await tryLocal()
                     if (!textOut) {
-                      if (isDirectInvoke) postDirectUnavailable('FAILED', 'empty_then_local_failed')
+                      if (isDirectInvoke) await postDirectUnavailable('FAILED', 'empty_then_local_failed')
                       runtime = 'FAILED'
                       runtimeDetail = 'empty_then_local_failed'
                     } else {
@@ -6979,12 +7089,12 @@ function Home() {
                   runtime = 'TIMED_OUT'
                   runtimeDetail = 'client_abort_or_budget'
                   textOut = null
-                  if (isDirectInvoke) postDirectUnavailable('TIMED_OUT', runtimeDetail)
+                  if (isDirectInvoke) await postDirectUnavailable('TIMED_OUT', runtimeDetail)
                 } else if (isDirectInvoke) {
                   textOut = await tryLocal()
                   if (!textOut) {
                     const summary = familyError instanceof Error ? familyError.message : String(familyError)
-                    postDirectUnavailable('FAILED', summary)
+                    await postDirectUnavailable('FAILED', summary)
                     runtime = 'FAILED'
                   } else {
                     runtime = 'RESPONDED'
@@ -7008,6 +7118,15 @@ function Home() {
           }
         } finally {
           setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
+        }
+
+        if (isDirectInvoke && textOut?.trim()) {
+          clearTransientProviderStatusAfterSuccess({
+            family,
+            messageIds: transientDirectStatusMessageIds,
+            persistedMessageIds: transientDirectStatusPersistedIds,
+            includeGenericRecovery: true,
+          })
         }
 
         return { family, textOut, runtime, runtimeDetail }

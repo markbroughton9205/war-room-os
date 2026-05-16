@@ -98,3 +98,53 @@ export async function POST(
 
   return jsonWithPersistence({ message: data }, true, { status: 201 })
 }
+
+export async function DELETE(
+  req: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const sup = tryWarRoomSupabase()
+  if (!sup.ok) {
+    return jsonWithPersistence({ error: 'Supabase is not configured.' }, false, { status: 503 })
+  }
+
+  const { id: conversationId } = await context.params
+  if (!conversationId) {
+    return jsonWithPersistence({ error: 'id required' }, true, { status: 400 })
+  }
+
+  let body: { ids?: unknown }
+  try {
+    body = await req.json()
+  } catch {
+    return jsonWithPersistence({ error: 'Invalid JSON body.' }, true, { status: 400 })
+  }
+
+  const ids = Array.isArray(body.ids)
+    ? body.ids.filter((id): id is string =>
+        typeof id === 'string'
+        && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id),
+      )
+    : []
+  if (!ids.length) {
+    return jsonWithPersistence({ deleted: 0 }, true)
+  }
+
+  const { error } = await sup.client
+    .from(TABLE_MESSAGES)
+    .delete()
+    .eq('conversation_id', conversationId)
+    .eq('role', 'system')
+    .in('id', ids)
+
+  if (error) {
+    const supabase = warRoomSupabaseFailurePayload(TABLE_MESSAGES, error, { operation: 'delete' })
+    return jsonWithPersistence(
+      { error: supabase.message, supabase },
+      true,
+      { status: httpStatusForSupabaseFailure(supabase, 500) },
+    )
+  }
+
+  return jsonWithPersistence({ deleted: ids.length }, true)
+}
