@@ -1,6 +1,6 @@
--- War Room Phase 7D: Memory + Conversation Separation.
--- Live chat windowing is UI-only. These tables preserve recallable raw transcript rows and additive summaries.
--- Server API uses SUPABASE_SERVICE_ROLE_KEY; no anon/public write policies are added.
+-- War Room Phase 7D immutable patch.
+-- Supabase/Postgres rejects non-immutable generated expressions for recall_index.
+-- Convert recall_index to a normal tsvector column maintained by a trigger.
 
 grant usage on schema public to service_role;
 
@@ -29,6 +29,9 @@ create table if not exists public.war_room_archived_transcripts (
     visibility in ('private', 'shared', 'household')
   )
 );
+
+alter table if exists public.war_room_archived_transcripts
+  add column if not exists archive_date date not null default current_date;
 
 create unique index if not exists war_room_archived_transcripts_source_idx
   on public.war_room_archived_transcripts (session_id, source_message_id);
@@ -81,14 +84,31 @@ create table if not exists public.war_room_session_summaries (
   )
 );
 
+do $$
+begin
+  if to_regclass('public.war_room_session_summaries') is not null then
+    if exists (
+      select 1
+      from pg_attribute
+      where attrelid = 'public.war_room_session_summaries'::regclass
+        and attname = 'recall_index'
+        and attgenerated <> ''
+    ) then
+      alter table public.war_room_session_summaries
+        drop column recall_index;
+    end if;
+
+    alter table public.war_room_session_summaries
+      add column if not exists recall_index tsvector not null default ''::tsvector;
+  end if;
+end;
+$$;
+
 create index if not exists war_room_session_summaries_date_idx
   on public.war_room_session_summaries (summary_date, created_at desc);
 
 create index if not exists war_room_session_summaries_session_idx
   on public.war_room_session_summaries (session_id, created_at desc);
-
-create index if not exists war_room_session_summaries_recall_idx
-  on public.war_room_session_summaries using gin (recall_index);
 
 create or replace function public.set_war_room_session_summaries_recall_index()
 returns trigger
@@ -110,12 +130,28 @@ begin
 end;
 $$;
 
+update public.war_room_session_summaries
+set recall_index =
+  to_tsvector(
+    'english',
+    coalesce(summary, '') || ' ' ||
+    coalesce(array_to_string(key_decrees, ' '), '') || ' ' ||
+    coalesce(array_to_string(decisions, ' '), '') || ' ' ||
+    coalesce(array_to_string(opportunities_created, ' '), '') || ' ' ||
+    coalesce(array_to_string(failures_errors, ' '), '') || ' ' ||
+    coalesce(array_to_string(provider_performance_notes, ' '), '') || ' ' ||
+    coalesce(array_to_string(unfinished_tasks, ' '), '')
+  );
+
 drop trigger if exists war_room_session_summaries_set_recall_index on public.war_room_session_summaries;
 create trigger war_room_session_summaries_set_recall_index
   before insert or update of summary, key_decrees, decisions, opportunities_created, failures_errors, provider_performance_notes, unfinished_tasks
   on public.war_room_session_summaries
   for each row
   execute procedure public.set_war_room_session_summaries_recall_index();
+
+create index if not exists war_room_session_summaries_recall_idx
+  on public.war_room_session_summaries using gin (recall_index);
 
 alter table public.war_room_session_summaries enable row level security;
 

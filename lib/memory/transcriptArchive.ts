@@ -141,6 +141,7 @@ export async function archiveTranscriptBatch(
       topic: inferTopic(message),
       source_mode: message.sourceMode,
       archived_at: now,
+      archive_date: archiveDate(now),
       operator_id: message.operatorId ?? null,
       operator_name: message.operatorName ?? null,
       visibility: message.visibility ?? 'private',
