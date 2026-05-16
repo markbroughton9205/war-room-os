@@ -45,6 +45,7 @@ function classifyFamilyFromEngineMap(
   if (!eid) return 'unavailable'
 
   const row = engineMap.get(eid)
+  if (!row) return 'degraded'
   if (!row?.configured) return 'unavailable'
   if (isEngineFunctional(engineMap, eid)) return 'healthy'
   // Key present but engine-status slow or probe failed — still attempt minimal attendance call.

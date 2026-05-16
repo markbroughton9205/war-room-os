@@ -9,7 +9,14 @@ import { getLMStudioModels, getOllamaModels, testLMStudioChat } from '@/lib/loca
 import { ENGINE_REGISTRY } from './registry'
 import { engineProviderDisplayLabel } from './provider-display'
 import { computeApprovalRequired, computeEnginePermissions } from './permissions'
-import type { EngineCapabilityId, EngineId, EngineStatus, EngineControlStatusResponse, ToolRoutingSnapshot } from './types'
+import type {
+  EngineCapabilityId,
+  EngineId,
+  EngineStatus,
+  EngineControlStatusResponse,
+  ProviderAvailabilityDiagnostic,
+  ToolRoutingSnapshot,
+} from './types'
 
 function windowlessTimeout(callback: () => void, ms: number) {
   return setTimeout(callback, ms)
@@ -32,6 +39,31 @@ function registryRow(id: EngineId) {
   const reg = ENGINE_REGISTRY.find(e => e.id === id)
   if (!reg) throw new Error(`Unknown engine ${id}`)
   return reg
+}
+
+const CLOUD_PROVIDER_FAMILY: Partial<Record<EngineId, string>> = {
+  chatgpt: 'chatgpt',
+  claude: 'claude',
+  grok: 'grok',
+  gemini: 'gemini',
+}
+
+function providerDiagnostic(args: {
+  id: EngineId
+  configured: boolean
+  apiKeyPresent: boolean
+  lastCheckResult: string
+  reason?: string
+}): ProviderAvailabilityDiagnostic {
+  return {
+    providerId: args.id,
+    familyId: CLOUD_PROVIDER_FAMILY[args.id] ?? null,
+    configured: args.configured,
+    apiKeyPresent: args.apiKeyPresent,
+    registryStatus: ENGINE_REGISTRY.some(e => e.id === args.id) ? 'registered' : 'missing',
+    lastCheckResult: args.lastCheckResult,
+    ...(args.reason ? { reason: args.reason } : {}),
+  }
 }
 
 function finalize(status: Omit<EngineStatus, 'permissions' | 'approvalRequired' | 'providerLabel'>): EngineStatus {
@@ -128,6 +160,13 @@ function cloudEngine(
     functional,
     capabilities: [...reg.defaultCapabilities],
     lastChecked,
+    providerDiagnostics: providerDiagnostic({
+      id,
+      configured,
+      apiKeyPresent: configured,
+      lastCheckResult: configured ? 'credential_present_call_allowed' : 'missing_api_key',
+      ...(configured ? {} : { reason: missingNotes }),
+    }),
     notes: configured
       ? `${configuredNotes} Credential present; outbound API health not probed in Phase 2.`
       : missingNotes,
@@ -318,7 +357,7 @@ export async function isGeminiFunctional(): Promise<boolean> {
   }
 }
 
-async function buildGemini(lastChecked: string, tools: ToolRoutingSnapshot): Promise<EngineStatus> {
+function buildGemini(lastChecked: string, tools: ToolRoutingSnapshot): EngineStatus {
   const reg = registryRow('gemini')
   const rawKey = process.env.GEMINI_API_KEY
   const configured = typeof rawKey === 'string' && rawKey.trim().length > 0
@@ -336,29 +375,20 @@ async function buildGemini(lastChecked: string, tools: ToolRoutingSnapshot): Pro
       capabilities: [...reg.defaultCapabilities],
       lastChecked,
       lastSuccessfulProbeAt: null,
+      providerDiagnostics: providerDiagnostic({
+        id: 'gemini',
+        configured: false,
+        apiKeyPresent: false,
+        lastCheckResult: 'missing_api_key',
+        reason: 'Set GEMINI_API_KEY for Gemini API access.',
+      }),
       notes: 'Set GEMINI_API_KEY for Gemini API access.',
       probedModelId: null,
     })
   }
 
-  const apiKey = rawKey.trim()
-  const controller = new AbortController()
-  const t = windowlessTimeout(() => controller.abort(), 10000)
-  let probe: {
-    reachable: boolean
-    functional: boolean
-    notes: string
-    lastSuccessfulProbeAt: string | null
-    functionalModelId: string | null
-  }
-  try {
-    probe = await probeGeminiApi(apiKey, controller.signal)
-  } finally {
-    clearTimeout(t)
-  }
-
   const capabilities: EngineCapabilityId[] = [...reg.defaultCapabilities]
-  if (tools.internetReachable && probe.functional) {
+  if (tools.internetReachable) {
     capabilities.push('chat', 'reasoning', 'research_assist')
   }
 
@@ -369,13 +399,19 @@ async function buildGemini(lastChecked: string, tools: ToolRoutingSnapshot): Pro
     providerType: reg.providerType,
     installed: true,
     configured: true,
-    reachable: probe.reachable,
-    functional: probe.functional,
+    reachable: true,
+    functional: true,
     capabilities,
     lastChecked,
-    lastSuccessfulProbeAt: probe.functional ? probe.lastSuccessfulProbeAt : null,
-    probedModelId: probe.functional ? probe.functionalModelId : null,
-    notes: probe.notes,
+    lastSuccessfulProbeAt: null,
+    probedModelId: null,
+    providerDiagnostics: providerDiagnostic({
+      id: 'gemini',
+      configured: true,
+      apiKeyPresent: true,
+      lastCheckResult: 'credential_present_call_allowed_probe_deferred',
+    }),
+    notes: 'Gemini credential present; live model probe is deferred so transient status checks do not block council calls.',
   })
 }
 
@@ -388,11 +424,11 @@ export async function collectEngineStatuses(
 ): Promise<EngineStatus[]> {
   const lastChecked = new Date().toISOString()
 
-  const [ollama, lmStudio, openhands, gemini] = await Promise.all([
+  const gemini = buildGemini(lastChecked, tools)
+  const [ollama, lmStudio, openhands] = await Promise.all([
     buildOllama(lastChecked),
     buildLmStudio(lastChecked),
     buildOpenHands(lastChecked),
-    buildGemini(lastChecked, tools),
   ])
 
   const ordered: EngineStatus[] = [

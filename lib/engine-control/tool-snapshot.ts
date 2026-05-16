@@ -11,8 +11,8 @@ export async function buildToolRoutingSnapshotFromOrigin(origin: string | null):
 
   try {
     const [internetRes, researchRes] = await Promise.all([
-      fetch(`${origin}/api/tools/internet/status`, { cache: 'no-store', signal: AbortSignal.timeout(25000) }),
-      fetch(`${origin}/api/tools/research`, { cache: 'no-store', signal: AbortSignal.timeout(8000) }),
+      fetch(`${origin}/api/tools/internet/status`, { cache: 'no-store', signal: AbortSignal.timeout(2000) }),
+      fetch(`${origin}/api/tools/research`, { cache: 'no-store', signal: AbortSignal.timeout(2000) }),
     ])
 
     type InternetJson = { canUseInternet?: boolean }

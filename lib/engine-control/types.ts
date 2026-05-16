@@ -58,6 +58,16 @@ export type EnginePermissions = {
   allowRepoWrite: boolean
 }
 
+export type ProviderAvailabilityDiagnostic = {
+  providerId: string
+  familyId: string | null
+  configured: boolean
+  apiKeyPresent: boolean
+  registryStatus: 'registered' | 'missing'
+  lastCheckResult: string
+  reason?: string
+}
+
 export type EngineStatus = {
   id: EngineId
   displayName: string
@@ -91,6 +101,7 @@ export type EngineStatus = {
   lastSuccessfulProbeAt?: string | null
   /** When a live probe picked a working `generateContent` model id (Gemini). */
   probedModelId?: string | null
+  providerDiagnostics?: ProviderAvailabilityDiagnostic
   notes: string
 }
 

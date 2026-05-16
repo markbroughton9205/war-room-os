@@ -4317,6 +4317,21 @@ function formatLastSuccessfulProbe(iso: string | null | undefined): string {
   return d.toLocaleString()
 }
 
+function formatProviderAvailabilityDiagnostic(engine: EngineStatus): string {
+  const d = engine.providerDiagnostics
+  if (!d) return '—'
+  const parts = [
+    `provider ${d.providerId}`,
+    `family ${d.familyId ?? '—'}`,
+    `configured ${d.configured ? 'true' : 'false'}`,
+    `apiKeyPresent ${d.apiKeyPresent ? 'true' : 'false'}`,
+    `registry ${d.registryStatus}`,
+    `lastCheck ${d.lastCheckResult}`,
+  ]
+  if (d.reason) parts.push(`reason ${d.reason}`)
+  return parts.join(' · ')
+}
+
 function UnifiedEngineControlPanel() {
   const { uiMode } = useWarRoomUiMode()
   const [mounted, setMounted] = useState(false)
@@ -4386,7 +4401,8 @@ function UnifiedEngineControlPanel() {
                   <th className="pb-2 pr-2 font-bold tracking-widest" title="End-to-end probe succeeded">FUNCTIONAL</th>
                   <th className="pb-2 pr-2 font-bold tracking-widest" title="Last successful probe">LAST OK</th>
                   <th className="pb-2 pr-2 font-bold tracking-widest">PROVIDER</th>
-                  <th className="pb-2 font-bold tracking-widest">READINESS</th>
+                  <th className="pb-2 pr-2 font-bold tracking-widest">READINESS</th>
+                  <th className="pb-2 pr-2 font-bold tracking-widest">DIAGNOSTIC</th>
                   <th className="pb-2 font-bold tracking-widest">NOTES</th>
                 </tr>
               </thead>
@@ -4420,6 +4436,9 @@ function UnifiedEngineControlPanel() {
                     <td className="py-2 pr-2 text-[10px] font-bold tracking-widest" style={{ color: '#9AE6B4' }}>
                       {['chatgpt', 'claude', 'grok', 'gemini'].includes(engine.id) ? cloudEngineReadinessLabel(engine) : '—'}
                     </td>
+                    <td className="py-2 pr-2 max-w-xs leading-snug" style={{ color: '#94a3b8' }}>
+                      {formatProviderAvailabilityDiagnostic(engine)}
+                    </td>
                     <td className="py-2 max-w-xs leading-snug md:max-w-md" style={{ color: '#777' }}>{engine.notes}</td>
                   </tr>
                 ))}
@@ -4444,6 +4463,7 @@ function UnifiedEngineControlPanel() {
                 <th className="pb-2 pr-2 font-bold tracking-widest" title="Last successful probe (Gemini: list-models + minimal generateContent)">LAST OK</th>
                 <th className="pb-2 pr-2 font-bold tracking-widest">PROVIDER</th>
                 <th className="pb-2 pr-2 font-bold tracking-widest">READINESS</th>
+                <th className="pb-2 pr-2 font-bold tracking-widest">DIAGNOSTIC</th>
                 <th className="pb-2 font-bold tracking-widest">NOTES</th>
               </tr>
             </thead>
@@ -4476,6 +4496,9 @@ function UnifiedEngineControlPanel() {
                   </td>
                   <td className="py-2 pr-2 text-[10px] font-bold tracking-widest" style={{ color: '#9AE6B4' }}>
                     {['chatgpt', 'claude', 'grok', 'gemini'].includes(engine.id) ? cloudEngineReadinessLabel(engine) : '—'}
+                  </td>
+                  <td className="py-2 pr-2 max-w-xs leading-snug" style={{ color: '#94a3b8' }}>
+                    {formatProviderAvailabilityDiagnostic(engine)}
                   </td>
                   <td className="py-2 max-w-xs leading-snug md:max-w-md" style={{ color: '#777' }}>{engine.notes}</td>
                 </tr>
@@ -7419,6 +7442,9 @@ function Home() {
         }
         if (family === 'gemini' && skipGeminiForSessionRef.current) return false
         const eid = cloudEngineIdForCouncilFamily(family)
+        if (!eid) return false
+        const row = engineMapRef.current.get(eid)
+        if (!row) return true
         return isEngineFunctional(engineMapRef.current, eid)
       }
 
@@ -7566,7 +7592,6 @@ function Home() {
         }
 
         setFamilyDuty(prev => ({ ...prev, [family]: 'working' }))
-        const label = rosterLabel(family)
         const isDirectInvoke = Boolean(cmd.directInvocation && cmd.targetFamilies[0] === family)
         const transientDirectStatusMessageIds: string[] = []
         const postDirectUnavailable = async (rt: ProviderFamilyOutcomeStatus, detail?: string) => {
@@ -7652,10 +7677,6 @@ function Home() {
             if (!textOut) {
               if (isDirectInvoke) {
                 await postDirectUnavailable('FAILED', 'local_unavailable')
-              } else {
-                const sys = `${label}: unavailable (local ${family} agent not functional or invoke failed)`
-                gatherPostSystem(sys)
-                void gatherPostLive({ role: 'system', content: sys })
               }
               runtime = 'FAILED'
               runtimeDetail = 'local_unavailable'
@@ -7670,17 +7691,14 @@ function Home() {
             const eid = cloudEngineIdForCouncilFamily(family)
             const row = eid ? engineMapRef.current.get(eid) : undefined
             const engineGateBlocksChat =
-              !attendanceWave && !isEngineFunctional(engineMapRef.current, eid)
+              !attendanceWave && Boolean(row) && !isEngineFunctional(engineMapRef.current, eid)
             if (engineGateBlocksChat) {
+              const reason = unavailableReason(row)
               if (isDirectInvoke) {
-                await postDirectUnavailable('SKIPPED', unavailableReason(row))
-              } else {
-                const sys = `${label}: unavailable (${unavailableReason(row)})`
-                gatherPostSystem(sys)
-                void gatherPostLive({ role: 'system', content: sys })
+                await postDirectUnavailable('SKIPPED', reason)
               }
               runtime = 'SKIPPED'
-              runtimeDetail = 'engine_unavailable'
+              runtimeDetail = reason
             } else {
               try {
                 const { res: chatRes, data: chatData } = await postCouncilChatDecreeGather({
@@ -7737,7 +7755,7 @@ function Home() {
                     geminiFailureCountRef.current += 1
                     geminiLastErrorSummaryRef.current = summary
                     skipGeminiForSessionRef.current = true
-                    if (!geminiUnavailableUserMessagedRef.current) {
+                    if (isDirectInvoke && !geminiUnavailableUserMessagedRef.current) {
                       geminiUnavailableUserMessagedRef.current = true
                       const line = `Gemini unavailable: ${summary.slice(0, 500)}`
                       gatherPostSystem(line)
@@ -7756,14 +7774,10 @@ function Home() {
                       runtime = 'RESPONDED'
                     }
                   } else {
-                    const err = `[Error] ${label}: ${summary}`
-                    gatherPostSystem(err)
-                    void gatherPostLive({ role: 'system', content: err })
                     textOut = await tryLocal()
                     if (!textOut) {
-                      gatherPostSystem(`${label}: cloud failed and local fallback unavailable.`)
                       runtime = 'FAILED'
-                      runtimeDetail = 'cloud_and_local_failed'
+                      runtimeDetail = summary
                     } else {
                       runtime = 'RESPONDED'
                     }
@@ -7776,10 +7790,7 @@ function Home() {
                   textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
                   if (!textOut) {
                     if (!isDirectInvoke) {
-                      const err = `[Error] ${label}: empty response`
                       lastCouncilFamilyErrorRef.current = family
-                      gatherPostSystem(err)
-                      void gatherPostLive({ role: 'system', content: err })
                     }
                     textOut = await tryLocal()
                     if (!textOut) {
@@ -7812,13 +7823,10 @@ function Home() {
                 } else {
                   lastCouncilFamilyErrorRef.current = family
                   const summary = familyError instanceof Error ? familyError.message : String(familyError)
-                  const err = `[Error] ${label}: ${summary}`
-                  gatherPostSystem(err)
-                  void gatherPostLive({ role: 'system', content: err })
                   textOut = await tryLocal()
                   if (!textOut) {
-                    gatherPostSystem(`${label}: provider failed and local fallback unavailable.`)
                     runtime = 'FAILED'
+                    runtimeDetail = summary
                   } else {
                     runtime = 'RESPONDED'
                   }
@@ -7991,6 +7999,18 @@ function Home() {
         }))
 
       for (const row of stagedCandidates) staged.push(row)
+
+      const allNonDirectProvidersFailed =
+        !attendanceWave
+        && !cmd.directInvocation
+        && orderForGather.length > 0
+        && stagedCandidates.length === 0
+        && cells.some(c => c.runtime === 'FAILED' || c.runtime === 'TIMED_OUT' || c.runtime === 'SKIPPED')
+      if (allNonDirectProvidersFailed) {
+        const line = 'Council provider calls did not return a response. See Diagnostics for per-family status.'
+        gatherPostSystem(line)
+        void gatherPostLive({ role: 'system', content: line, family: 'SYSTEM' })
+      }
 
       const attendanceRevealedFamilies = new Set<CouncilOrchestrationFamily>(
         staged.map(s => s.family),
