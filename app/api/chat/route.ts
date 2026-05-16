@@ -57,6 +57,7 @@ import {
   type LiveResearchClientSummary,
   type LiveResearchClientUi,
 } from '@/lib/runtime/liveResearchEvidencePacket'
+import { buildFamilyIntelligenceFrame } from '@/lib/intelligence/familyFeedRouter'
 
 function buildResearchAntiLoopAugment(threadBlock: string): string {
   const hits = threadBlock.match(/\bprimary\s+finding\b/gi) ?? []
@@ -924,6 +925,16 @@ export async function POST(req: Request) {
             liveResearchUi = computeLiveResearchClientUi(packet, true, { councilPhase: 'model_running' })
             liveResearchSummary = toLiveResearchClientSummary(packet)
             augmentBlock = [augmentBlock, '\n\n', buildLiveResearchGroundingBlock(packet)].join('')
+            if (packet.intelligencePacket) {
+              augmentBlock = [
+                augmentBlock,
+                '\n\n',
+                buildFamilyIntelligenceFrame(
+                  packet.intelligencePacket,
+                  councilSingleFamily as CouncilOrchestrationFamily,
+                ).prompt_block,
+              ].join('')
+            }
             augmentBlock = [augmentBlock, buildResearchAntiLoopAugment(thread)].join('')
             void logLiveResearchEvidenceMetadata(sup.ok ? sup.client : null, {
               conversationId,

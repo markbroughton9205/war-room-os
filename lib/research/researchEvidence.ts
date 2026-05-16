@@ -3,6 +3,10 @@ import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import type { WarRoomSupabase } from '@/lib/war-room/persistence'
 import type { LiveResearchEvidencePacket, LiveResearchSourceRecord } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { LiveResearchRouterResult } from '@/lib/research/researchRouter'
+import {
+  buildIntelligencePacket,
+  type RawIntelligenceSourceRecord,
+} from '@/lib/intelligence'
 
 function parseLineList(text: string, prefix: string): string[] {
   const line = text.split('\n').find(l => l.trim().toUpperCase().startsWith(prefix.toUpperCase()))
@@ -74,6 +78,58 @@ function fallbackFindings(router: LiveResearchRouterResult): string {
     if (d.ok) bits.push(`Direct page excerpt (${d.url}): ${d.contentSnippet.slice(0, 420)}`)
   }
   return bits.join('\n\n')
+}
+
+function rawIntelligenceFromRouter(router: LiveResearchRouterResult): RawIntelligenceSourceRecord[] {
+  const records: RawIntelligenceSourceRecord[] = [
+    {
+      source_id: 'tavily',
+      ok: router.tavily.ok && router.tavily.results.length > 0,
+      queried_at: router.generatedAt,
+      findings: router.tavily.results.map(result => ({
+        title: result.title,
+        url: result.url,
+        content: result.snippet,
+        observed_at: router.generatedAt,
+      })),
+      error: router.tavily.error,
+      failure_behavior: 'degrade',
+    },
+    {
+      source_id: 'x_twitter_discussions',
+      ok: router.grok.ok && Boolean(router.grok.text.trim()),
+      queried_at: router.generatedAt,
+      findings: router.grok.text.trim()
+        ? [{
+            title: 'Grok realtime / social signal framing',
+            content: router.grok.text,
+            observed_at: router.generatedAt,
+          }]
+        : [],
+      error: router.grok.error,
+      failure_behavior: 'skip',
+    },
+  ]
+
+  if (router.direct.length) {
+    records.push({
+      source_id: 'direct_fetch',
+      ok: router.direct.some(item => item.ok),
+      queried_at: router.generatedAt,
+      findings: router.direct
+        .filter(item => item.ok)
+        .map(item => ({
+          title: `Direct fetch: ${item.url}`,
+          url: item.url,
+          content: item.contentSnippet,
+          observed_at: router.generatedAt,
+        })),
+      error: router.direct.filter(item => !item.ok && item.error).map(item => `${item.url}: ${item.error}`).join(' | ') || undefined,
+      failure_behavior: 'degrade',
+    })
+  }
+
+  return records
 }
 
 /**
@@ -159,6 +215,13 @@ export async function buildLiveResearchEvidencePacket(args: {
   const freshness: LiveResearchEvidencePacket['freshness'] =
     router.tavily.ok || router.direct.some(d => d.ok) ? 'recent' : router.grok.ok ? 'unknown' : 'stale'
 
+  const intelligencePacket = buildIntelligencePacket({
+    decree: decreeText,
+    timestamp: router.generatedAt,
+    rawSources: rawIntelligenceFromRouter(router),
+    unsupportedClaims: unresolvedQuestions.filter(c => c.toUpperCase() !== 'NONE'),
+  })
+
   return {
     usedLiveResearch,
     generatedAt: router.generatedAt,
@@ -168,6 +231,7 @@ export async function buildLiveResearchEvidencePacket(args: {
     freshness,
     contradictions: contradictions.filter(c => c.toUpperCase() !== 'NONE'),
     unresolvedQuestions: unresolvedQuestions.filter(c => c.toUpperCase() !== 'NONE'),
+    intelligencePacket,
     ...(!usedLiveResearch ? { researchErrorSummary: 'Live research legs returned no usable evidence.' } : {}),
   }
 }
@@ -204,6 +268,10 @@ export async function logLiveResearchEvidenceMetadata(
       routerMs: routerMs ?? null,
       contradictionsCount: packet.contradictions.length,
       unresolvedCount: packet.unresolvedQuestions.length,
+      intelligencePacketId: packet.intelligencePacket?.id ?? null,
+      intelligenceConfidence: packet.intelligencePacket?.confidence_summary.overall ?? null,
+      intelligenceWeakSignalCount: packet.intelligencePacket?.weak_signals.length ?? 0,
+      intelligenceContradictionCount: packet.intelligencePacket?.contradictions.length ?? 0,
     },
   })
 }
