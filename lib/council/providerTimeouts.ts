@@ -1,5 +1,27 @@
+import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import type { IntentKind } from '@/lib/council/intentClassifier'
+
+/** xAI Grok fetch budget for Ra'el direct-address invocations (not council-wide gather). */
+export const DIRECT_INVOCATION_GROK_TIMEOUT_MS = 25_000
+
+/** User-visible copy when that budget elapses (keep in sync with `DIRECT_INVOCATION_GROK_TIMEOUT_MS`). */
+export const GROK_FAMILY_DIRECT_INVOCATION_TIMEOUT_MESSAGE = 'Grok Family timed out after 25s.'
+
+/**
+ * True when `/api/chat` should give Grok a longer direct-invocation budget (never during attendance / decree_soft).
+ */
+export function isGrokDirectInvocationEligible(args: {
+  isAttendanceFlow: boolean
+  councilCommand: CouncilCommand
+  councilSingleFamily?: CouncilOrchestrationFamily | null
+  directFamily?: CouncilOrchestrationFamily | null
+}): boolean {
+  if (args.isAttendanceFlow) return false
+  if (args.directFamily === 'grok') return true
+  if (args.councilSingleFamily === 'grok' && args.councilCommand.directInvocation) return true
+  return false
+}
 
 /** Client decree gather: user cancel only until this wall clock; avoids mirroring soft packet windows. */
 export const DECREE_GATHER_HARD_HANG_MS = 55_000

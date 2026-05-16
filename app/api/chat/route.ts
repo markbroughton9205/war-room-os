@@ -11,7 +11,13 @@ import { detectRedTeamRuntimeHold } from '@/lib/council/redTeamHold'
 import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { buildActiveScope } from '@/lib/council/intentScope'
-import { resolveProviderTimeoutMs, resolveDecreeSoftGatherServerBudgetMs } from '@/lib/council/providerTimeouts'
+import {
+  DIRECT_INVOCATION_GROK_TIMEOUT_MS,
+  GROK_FAMILY_DIRECT_INVOCATION_TIMEOUT_MESSAGE,
+  isGrokDirectInvocationEligible,
+  resolveProviderTimeoutMs,
+  resolveDecreeSoftGatherServerBudgetMs,
+} from '@/lib/council/providerTimeouts'
 import { buildContinuationRequestFromModelOutput } from '@/lib/council/continuationRequest'
 import { resolveModeGovernor } from '@/lib/council/modeGovernor'
 import {
@@ -98,6 +104,8 @@ type ProviderResult = {
   status: ProviderResultStatus
   messageType?: string
   error?: string
+  /** Wall-clock budget applied to this attempt (for integrity notes / timeouts). */
+  timeoutMs?: number
 }
 
 const PROVIDER_TIMEOUT_MS = 10_000
@@ -131,7 +139,7 @@ function withTimeout(
 ): Promise<ProviderResult> {
   return new Promise(resolve => {
     const timer = setTimeout(() => {
-      resolve({ family, content: '', status: 'TIMED_OUT' })
+      resolve({ family, content: '', status: 'TIMED_OUT', timeoutMs })
     }, timeoutMs)
     task
       .then(result => {
@@ -165,7 +173,8 @@ function validateProviderResults(
       violations.push(`⚠ ${result.family}: possible fabricated Ra'el dialogue marker`)
     }
     if (result.status === 'TIMED_OUT') {
-      violations.push(`⚠ ${result.family}: provider timed out after ${PROVIDER_TIMEOUT_MS}ms`)
+      const cap = result.timeoutMs ?? PROVIDER_TIMEOUT_MS
+      violations.push(`⚠ ${result.family}: provider timed out after ${cap}ms`)
     }
   }
   if (violations.length === 0) return results
@@ -256,7 +265,10 @@ async function callGrok(prompt: string, system: string, maxTokens = DEFAULT_MAX_
   })
 
   if (result.status !== 'online') {
-    throw new Error(result.error || result.text || 'Grok provider unavailable')
+    const message = (typeof result.text === 'string' && result.text.trim())
+      ? result.text.trim()
+      : (result.error || 'Grok provider unavailable')
+    throw new Error(message)
   }
   if (!result.text?.trim()) {
     throw new Error('Grok returned empty content')
@@ -517,6 +529,7 @@ export async function POST(req: Request) {
   const callCouncilProvider = async (
     family: CouncilSingleFamily,
     userPrompt: string,
+    opts?: { grokTimeoutMs?: number },
   ): Promise<ProviderResult> => {
     const familyName = displayFamilyName(family)
     if (family === 'kimi' || family === 'bridge_architect') {
@@ -555,7 +568,12 @@ export async function POST(req: Request) {
         }
       }
       if (family === 'grok') {
-        return { family: familyName, content: await callGrok(userPrompt, grokSystem, maxTokens, PROVIDER_TIMEOUT_MS), status: 'OK' }
+        const grokMs = opts?.grokTimeoutMs ?? PROVIDER_TIMEOUT_MS
+        return {
+          family: familyName,
+          content: await callGrok(userPrompt, grokSystem, maxTokens, grokMs),
+          status: 'OK',
+        }
       }
       if (family === 'gemini') {
         const geminiResult = await completeGeminiCouncilMessage({
@@ -651,19 +669,59 @@ export async function POST(req: Request) {
     })
 
     if (directFamily) {
+      const grokDirectEligible = isGrokDirectInvocationEligible({
+        isAttendanceFlow,
+        councilCommand,
+        councilSingleFamily: directFamily,
+        directFamily,
+      })
+      const directTimeoutMs =
+        directFamily === 'grok' && grokDirectEligible
+          ? DIRECT_INVOCATION_GROK_TIMEOUT_MS
+          : PROVIDER_TIMEOUT_MS
+      const directStarted = Date.now()
       const result = await withTimeout(
         displayFamilyName(directFamily),
-        callCouncilProvider(directFamily, baseUserPrompt),
-        PROVIDER_TIMEOUT_MS,
+        callCouncilProvider(directFamily, baseUserPrompt, {
+          grokTimeoutMs: directFamily === 'grok' ? directTimeoutMs : undefined,
+        }),
+        directTimeoutMs,
       )
-      const normalized = result.status === 'OK'
-        ? result
-        : { ...result, content: `${displayFamilyName(directFamily)} Family is currently unavailable.` }
+      const elapsedMs = Date.now() - directStarted
+      const grokDirectTimeoutFailure =
+        directFamily === 'grok'
+        && grokDirectEligible
+        && (
+          result.status === 'TIMED_OUT'
+          || (result.status === 'FAILED' && /\btimed out\b/i.test(result.error ?? ''))
+        )
+      const normalized =
+        result.status === 'OK'
+          ? result
+          : {
+              ...result,
+              content: grokDirectTimeoutFailure
+                ? GROK_FAMILY_DIRECT_INVOCATION_TIMEOUT_MESSAGE
+                : `${displayFamilyName(directFamily)} Family is currently unavailable.`,
+            }
       await safeAudit({
         success: normalized.status === 'OK',
         flow: 'direct_invocation',
         family: normalized.family,
         status: normalized.status,
+        ...(directFamily === 'grok' && grokDirectEligible
+          ? {
+              provider: 'xai',
+              mode: 'direct_invocation_grok',
+              timeoutMs: directTimeoutMs,
+              elapsedMs,
+              ...(normalized.status === 'OK'
+                ? { result: 'success' as const }
+                : grokDirectTimeoutFailure
+                  ? { result: 'timeout' as const }
+                  : {}),
+            }
+          : {}),
       })
       return NextResponse.json({
         result: normalized,
@@ -767,6 +825,16 @@ export async function POST(req: Request) {
               councilCommand,
             })
 
+      const grokContinueEligible = isGrokDirectInvocationEligible({
+        isAttendanceFlow,
+        councilCommand,
+        councilSingleFamily,
+        directFamily: null,
+      })
+      const grokContinueTimeoutMs = grokContinueEligible
+        ? DIRECT_INVOCATION_GROK_TIMEOUT_MS
+        : providerBudgetMs
+
       const withBudgetSignal = () => {
         const ac = new AbortController()
         const tid = setTimeout(() => ac.abort(), providerBudgetMs)
@@ -849,6 +917,8 @@ export async function POST(req: Request) {
 
       let responseText = ''
       let geminiDegradedReason: string | null = null
+      let grokContinueInvokeStartedAt: number | undefined
+      let grokContinueAuditTiming: { elapsedMs: number; timeoutMs: number } | null = null
       try {
         switch (councilSingleFamily) {
           case 'chatgpt': {
@@ -869,9 +939,17 @@ export async function POST(req: Request) {
             }
             break
           }
-          case 'grok':
-            responseText = await callGrok(userPrompt, grokSystem, maxTokens, providerBudgetMs)
+          case 'grok': {
+            if (grokContinueEligible) grokContinueInvokeStartedAt = Date.now()
+            responseText = await callGrok(userPrompt, grokSystem, maxTokens, grokContinueTimeoutMs)
+            if (grokContinueEligible && grokContinueInvokeStartedAt !== undefined) {
+              grokContinueAuditTiming = {
+                elapsedMs: Date.now() - grokContinueInvokeStartedAt,
+                timeoutMs: grokContinueTimeoutMs,
+              }
+            }
             break
+          }
           case 'gemini': {
             const geminiResult = await completeGeminiCouncilMessage({
               userPrompt,
@@ -941,17 +1019,36 @@ export async function POST(req: Request) {
         const msg = providerErr instanceof Error ? providerErr.message : String(providerErr)
         const timedOut =
           (providerErr instanceof DOMException && providerErr.name === 'AbortError')
-          || /\b(aborted|abort|timeout)\b/i.test(msg)
+          || /\b(aborted|abort|timeout|timed\s+out)\b/i.test(msg)
+        const grokContinueTimeoutFailure =
+          councilSingleFamily === 'grok'
+          && grokContinueEligible
+          && (timedOut || /\btimed out\b/i.test(msg))
+        const degradedDetail = grokContinueTimeoutFailure
+          ? GROK_FAMILY_DIRECT_INVOCATION_TIMEOUT_MESSAGE
+          : msg
         await safeAudit({
           success: false,
           flow: 'continue_single',
           councilSingleFamily,
           error: msg,
           timedOut,
+          ...(grokContinueTimeoutFailure
+            ? {
+                provider: 'xai',
+                mode: 'direct_invocation_grok',
+                timeoutMs: grokContinueTimeoutMs,
+                elapsedMs:
+                  grokContinueInvokeStartedAt !== undefined
+                    ? Date.now() - grokContinueInvokeStartedAt
+                    : null,
+                result: 'timeout' as const,
+              }
+            : {}),
         })
         if (timedOut) {
           markLiveResearchProviderFailed('timed_out')
-          return degradedProviderResponse(councilSingleFamily, 'timed_out', msg)
+          return degradedProviderResponse(councilSingleFamily, 'timed_out', degradedDetail)
         }
         if (/\b(api[_ ]?key|not configured|missing|unauthorized|401)\b/i.test(msg)) {
           if (isAttendanceFlow) {
@@ -1011,6 +1108,15 @@ export async function POST(req: Request) {
                 : councilSingleFamily === 'gemini'
                   ? { primary: 'google_gemini' }
                   : { primary: 'openai' },
+          ...(councilSingleFamily === 'grok' && grokContinueEligible && grokContinueAuditTiming
+            ? {
+                provider: 'xai',
+                mode: 'direct_invocation_grok',
+                timeoutMs: grokContinueAuditTiming.timeoutMs,
+                elapsedMs: grokContinueAuditTiming.elapsedMs,
+                result: 'success' as const,
+              }
+            : {}),
         })
         const dmGov = diagnosticMetaFor(councilSingleFamily)
         return NextResponse.json({
@@ -1106,6 +1212,15 @@ export async function POST(req: Request) {
               : councilSingleFamily === 'gemini'
                 ? { primary: 'google_gemini' }
                 : { primary: 'openai' },
+        ...(councilSingleFamily === 'grok' && grokContinueEligible && grokContinueAuditTiming
+          ? {
+              provider: 'xai',
+              mode: 'direct_invocation_grok',
+              timeoutMs: grokContinueAuditTiming.timeoutMs,
+              elapsedMs: grokContinueAuditTiming.elapsedMs,
+              result: 'success' as const,
+            }
+          : {}),
       })
 
       if (geminiDegradedReason === null) {

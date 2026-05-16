@@ -75,10 +75,11 @@ export async function callXAIChat({
     }
   } catch (error) {
     const timedOut = error instanceof Error && error.name === 'AbortError'
+    const seconds = Math.max(1, Math.round(timeoutMs / 1000))
     return {
       status: 'error',
       text: timedOut
-        ? 'Grok Family timed out before completing a response.'
+        ? `Grok Family timed out after ${seconds}s.`
         : `Grok Family request failed: ${error instanceof Error ? error.message : 'unknown error'}`,
       model,
       error: timedOut ? 'timeout' : error instanceof Error ? error.message : 'unknown error',
