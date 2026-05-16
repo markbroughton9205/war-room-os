@@ -152,6 +152,11 @@ export function replaceWithRuntimeTruthLine(family: string, ctx: VerifiedRuntime
     return `${label}: Provider call failed.`
   }
 
+  if (ctx.providerStatus === 'offline') {
+    const snippet = safeErrorSnippet(ctx.errorMessage)
+    if (snippet) return `${label}: ${snippet}`
+  }
+
   if (hasVerifiedPendingSignal(ctx) || ctx.providerStatus === 'offline') {
     return `${label} has not responded yet.`
   }

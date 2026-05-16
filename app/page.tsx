@@ -111,6 +111,7 @@ import {
 } from '@/lib/council/attendanceReadiness'
 import {
   DECREE_GATHER_HARD_HANG_MS,
+  DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS,
   resolveAttendanceBatchCeilingMs,
   resolveAttendanceHardCloseMs,
   resolveProviderTimeoutMs,
@@ -6268,11 +6269,23 @@ function Home() {
     let shouldScheduleNext = false
     try {
       if (!textOut) {
-        const autoBudget = resolveProviderTimeoutMs({
+        const baseAutoBudget = resolveProviderTimeoutMs({
           intentKind: autonomousIntent.intent,
           mode: 'continue',
           councilCommand: activeCouncilCommandRef.current,
         })
+        const directGrokAutonomous =
+          family === 'grok'
+          && (
+            (
+              activeCouncilCommandRef.current.directInvocation
+              && activeCouncilCommandRef.current.targetFamilies[0] === 'grok'
+            )
+            || (decreeDirect.invoked && decreeDirect.family === 'grok')
+          )
+        const autoBudget = directGrokAutonomous
+          ? DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS
+          : baseAutoBudget
         const famCtrl = new AbortController()
         const tid = window.setTimeout(() => famCtrl.abort(), autoBudget)
         let r: Response

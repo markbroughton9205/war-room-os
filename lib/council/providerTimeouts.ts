@@ -5,6 +5,9 @@ import type { IntentKind } from '@/lib/council/intentClassifier'
 /** xAI Grok fetch budget for Ra'el direct-address invocations (not council-wide gather). */
 export const DIRECT_INVOCATION_GROK_TIMEOUT_MS = 25_000
 
+/** Outer client/server wrapper budget for direct Grok; intentionally longer than provider timeout. */
+export const DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS = 28_000
+
 /** User-visible copy when that budget elapses (keep in sync with `DIRECT_INVOCATION_GROK_TIMEOUT_MS`). */
 export const GROK_FAMILY_DIRECT_INVOCATION_TIMEOUT_MESSAGE = 'Grok Family timed out after 25s.'
 

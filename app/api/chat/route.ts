@@ -12,6 +12,7 @@ import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/respo
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
 import { buildActiveScope } from '@/lib/council/intentScope'
 import {
+  DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS,
   DIRECT_INVOCATION_GROK_TIMEOUT_MS,
   GROK_FAMILY_DIRECT_INVOCATION_TIMEOUT_MESSAGE,
   isGrokDirectInvocationEligible,
@@ -679,13 +680,17 @@ export async function POST(req: Request) {
         directFamily === 'grok' && grokDirectEligible
           ? DIRECT_INVOCATION_GROK_TIMEOUT_MS
           : PROVIDER_TIMEOUT_MS
+      const outerDirectTimeoutMs =
+        directFamily === 'grok' && grokDirectEligible
+          ? DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS
+          : directTimeoutMs
       const directStarted = Date.now()
       const result = await withTimeout(
         displayFamilyName(directFamily),
         callCouncilProvider(directFamily, baseUserPrompt, {
           grokTimeoutMs: directFamily === 'grok' ? directTimeoutMs : undefined,
         }),
-        directTimeoutMs,
+        outerDirectTimeoutMs,
       )
       const elapsedMs = Date.now() - directStarted
       const grokDirectTimeoutFailure =
@@ -713,7 +718,8 @@ export async function POST(req: Request) {
           ? {
               provider: 'xai',
               mode: 'direct_invocation_grok',
-              timeoutMs: directTimeoutMs,
+              providerTimeoutMs: directTimeoutMs,
+              outerTimeoutMs: outerDirectTimeoutMs,
               elapsedMs,
               ...(normalized.status === 'OK'
                 ? { result: 'success' as const }
@@ -1037,7 +1043,8 @@ export async function POST(req: Request) {
             ? {
                 provider: 'xai',
                 mode: 'direct_invocation_grok',
-                timeoutMs: grokContinueTimeoutMs,
+                providerTimeoutMs: grokContinueTimeoutMs,
+                outerTimeoutMs: DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS,
                 elapsedMs:
                   grokContinueInvokeStartedAt !== undefined
                     ? Date.now() - grokContinueInvokeStartedAt
@@ -1112,7 +1119,8 @@ export async function POST(req: Request) {
             ? {
                 provider: 'xai',
                 mode: 'direct_invocation_grok',
-                timeoutMs: grokContinueAuditTiming.timeoutMs,
+                providerTimeoutMs: grokContinueAuditTiming.timeoutMs,
+                outerTimeoutMs: DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS,
                 elapsedMs: grokContinueAuditTiming.elapsedMs,
                 result: 'success' as const,
               }
@@ -1216,7 +1224,8 @@ export async function POST(req: Request) {
           ? {
               provider: 'xai',
               mode: 'direct_invocation_grok',
-              timeoutMs: grokContinueAuditTiming.timeoutMs,
+              providerTimeoutMs: grokContinueAuditTiming.timeoutMs,
+              outerTimeoutMs: DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS,
               elapsedMs: grokContinueAuditTiming.elapsedMs,
               result: 'success' as const,
             }
