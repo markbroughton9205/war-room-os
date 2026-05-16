@@ -69,6 +69,35 @@ function parseExceptFamilies(t: string): CouncilOrchestrationFamily[] {
   return [...new Set(out)]
 }
 
+function detectFamilyRoleTargets(t: string): CouncilOrchestrationFamily[] {
+  const out: CouncilOrchestrationFamily[] = []
+  const add = (family: CouncilOrchestrationFamily) => {
+    if (!out.includes(family)) out.push(family)
+  }
+
+  if (/\b(architecture|architect|build|implement|system design|refactor|code|deployment|migration|schema|technical plan)\b/i.test(t)) {
+    add('claude')
+  }
+  if (/\b(orchestrat|synthesi[sz]e|coordinate|sequence|operator|command flow|integrate)\b/i.test(t)) {
+    add('chatgpt')
+  }
+  if (/\b(live intelligence|scout|radar|signal|current|market|opportunit|x\/web|internet)\b/i.test(t)) {
+    add('grok')
+  }
+  if (/\b(summary|summari[sz]e|cross[-\s]?reference|compare|long context|source map|context map)\b/i.test(t)) {
+    add('gemini')
+  }
+  if (/\b(risk|failure|red\s*team|adversar|break|threat|safeguard|regression)\b/i.test(t)) {
+    add('red_team')
+  }
+  if (!out.length && /\b(build|operator|system|command center|war room)\b/i.test(t)) {
+    add('claude')
+    add('chatgpt')
+    add('red_team')
+  }
+  return out
+}
+
 function detectMode(t: string): CouncilDisciplineMode {
   if (/\b(emergency|code\s*red|drop\s*everything)\b/i.test(t)) return 'emergency'
   if (/\bred\s*team\s*only\b/i.test(t)) return 'red_team_only'
@@ -107,6 +136,9 @@ export function parseCouncilCommand(input: string): CouncilCommand {
 
   if (mode === 'red_team_only') {
     targetFamilies = ['red_team']
+  }
+  if (!targetFamilies.length) {
+    targetFamilies = detectFamilyRoleTargets(t)
   }
 
   let executionPermission: CouncilExecutionPermission = 'open'
@@ -196,7 +228,11 @@ export function filterOrchestrationOrderByCommand(
   }
 
   if (cmd.targetFamilies.length) {
-    next = next.filter(f => cmd.targetFamilies.includes(f))
+    const targets = cmd.targetFamilies.filter(f => !cmd.excludedFamilies.includes(f))
+    next = next.filter(f => targets.includes(f))
+    for (const family of targets) {
+      if (!next.includes(family)) next.push(family)
+    }
   }
 
   if (cmd.mode === 'silent') {

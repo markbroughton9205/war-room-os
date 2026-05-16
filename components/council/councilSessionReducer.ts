@@ -124,6 +124,7 @@ export function councilSessionReducer(state: CouncilPersistedV1, action: Council
     case 'CLEAR_SESSION': {
       const next = createInitialCouncilPersisted(action.payload.sessionId)
       next.lastActivityAt = now
+      next.messages = []
       next.councilChannelOpen = state.councilChannelOpen
       next.deepDiscussionMode = state.deepDiscussionMode
       next.councilState = state.councilState === 'paused' ? 'paused' : 'idle'

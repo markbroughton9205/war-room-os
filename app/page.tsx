@@ -29,6 +29,7 @@ import {
   COUNCIL_MAX_CONSECUTIVE_AUTONOMOUS,
   COUNCIL_MAX_CONSECUTIVE_AUTONOMOUS_DEEP,
   COUNCIL_ORCHESTRATION_INTERVAL_MS,
+  COUNCIL_SESSION_STORAGE_KEY,
   councilContentHash,
   orchestrationFamilyToLocalAgentId,
   orchestrationFamilyToTypingFamily,
@@ -7156,8 +7157,22 @@ function Home() {
       if (economicJson.scout?.missingApiKeys?.length) {
         addSystemMessage('Scout provider unavailable: missing API key.')
       }
-      addSystemMessage(summary)
-      void postLiveCouncilMessage({ role: 'system', content: summary, family: 'SYSTEM' })
+      const assignedVisual = orchestrationVisual(assignedFamily)
+      const assignedLabel = assignedVisual.bubbleFamilyName ?? rosterLabel(assignedFamily)
+      addMessages([{
+        id: createMessageId(`economic-${assignedFamily}`),
+        familyName: assignedLabel,
+        content: summary,
+        timestamp: new Date().toLocaleTimeString(),
+        color: assignedVisual.colorOverride ?? FAMILY_META[assignedVisual.presenceKey].color,
+        icon: assignedVisual.iconOverride ?? FAMILY_META[assignedVisual.presenceKey].icon,
+        provider: assignedVisual.provider,
+        messageType: 'response',
+      }])
+      void postLiveCouncilMessage(
+        { role: 'assistant', content: summary, family: assignedLabel },
+        { responseSuccessful: !economicJson.error },
+      )
       applyCouncilPacketRender(
         buildCouncilRenderPacket({
           command: cmdForEconomicOps,
@@ -8401,36 +8416,7 @@ function Home() {
     }
   }
 
-  const sendRaelDecree = async (decree: string, mode?: CouncilMode) => {
-    setExpansionPrompt(null)
-
-    const recallCommand = parseRecallCommand(decree)
-    if (recallCommand) {
-      await executeRecallCommand(recallCommand)
-      return
-    }
-
-    /*
-     * Ra’el directive source: Live Council composer (`sendRaelDecree` → `submitDecree`).
-     * `isRaelCouncilMessage` treats `messageType === 'decree'` or familyName containing RA'EL.
-     * If external channels are ambiguous, prefer user text containing "Ra'el" — not wired here.
-     */
-    const parsedCmd = resolveActiveCommand({ latestDecreeText: decree }).command
-    activeCouncilCommandRef.current = parsedCmd
-    setCouncilUiCommand(parsedCmd)
-    lastRaelDirectiveContentRef.current = decree
-
-    const intent = classifyRaElMessage(decree)
-    lastDecreeIntentRef.current = intent
-
-    if (councilSnapRef.current.councilState === 'provider_error') {
-      councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
-    }
-    councilDispatch({ type: 'RESET_AUTONOMOUS' })
-    if (councilSnapRef.current.councilState === 'idle') {
-      councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
-    }
-
+  const appendVisibleRaelDecree = (decree: string) => {
     addMessages([{
       id: createMessageId('rael'),
       familyName: "RA'EL",
@@ -8446,6 +8432,39 @@ function Home() {
       { role: 'user', content: decree, family: "RA'EL" },
       { responseSuccessful: true },
     )
+  }
+
+  const sendRaelDecree = async (decree: string, mode?: CouncilMode) => {
+    setExpansionPrompt(null)
+
+    /*
+     * Ra’el directive source: Live Council composer (`sendRaelDecree` → `submitDecree`).
+     * `isRaelCouncilMessage` treats `messageType === 'decree'` or familyName containing RA'EL.
+     * If external channels are ambiguous, prefer user text containing "Ra'el" — not wired here.
+     */
+    appendVisibleRaelDecree(decree)
+
+    const recallCommand = parseRecallCommand(decree)
+    if (recallCommand) {
+      await executeRecallCommand(recallCommand)
+      return
+    }
+
+    const parsedCmd = resolveActiveCommand({ latestDecreeText: decree }).command
+    activeCouncilCommandRef.current = parsedCmd
+    setCouncilUiCommand(parsedCmd)
+    lastRaelDirectiveContentRef.current = decree
+
+    const intent = classifyRaElMessage(decree)
+    lastDecreeIntentRef.current = intent
+
+    if (councilSnapRef.current.councilState === 'provider_error') {
+      councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+    }
+    councilDispatch({ type: 'RESET_AUTONOMOUS' })
+    if (councilSnapRef.current.councilState === 'idle') {
+      councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
+    }
     void emitDecreeEvents(decree, intent.shouldEmitBusEvents)
 
     if (intent.tier === 'income_ops') {
@@ -8593,6 +8612,7 @@ function Home() {
   }
 
   const clearCouncilSession = () => {
+    if (!window.confirm('Delete this session transcript permanently?')) return
     clearOrchestrationTimer()
     cancelActiveCouncilRequest()
     skipGeminiForSessionRef.current = false
@@ -8607,9 +8627,16 @@ function Home() {
     setCouncilPacketRender(null)
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY)
+      sessionStorage.removeItem(COUNCIL_SESSION_STORAGE_KEY)
     }
     councilDispatch({ type: 'CLEAR_SESSION', payload: { sessionId: newSessionId() } })
-    addSystemMessage('Council transcript cleared. Session counters reset.')
+    if (liveCouncilConvId && persistenceAvailable) {
+      void fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: 'all' }),
+      }).catch(() => undefined)
+    }
   }
 
   const toggleDeepDiscussion = () => {
@@ -8997,53 +9024,58 @@ function Home() {
         {operatorTab === 'command' && (
         <section data-testid="live-council-chat-card" className="mx-4 mt-4 overflow-hidden rounded border border-yellow-900/50" style={{ background: 'rgba(10,8,4,0.58)' }}>
         <div
-          className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-yellow-900/60 px-6 py-2"
+          className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-yellow-900/60 px-6 py-2"
           style={{ background: 'rgba(0,0,0,0.5)' }}
         >
-          {!councilPaused ? (
-            <button type="button" onClick={() => startTransition(pauseCouncil)}
-              className="text-xs px-3 py-1 rounded tracking-widest"
-              style={{ border: '1px solid #333', color: '#888' }}>
-              Pause Council
-            </button>
-          ) : (
-            <button type="button" onClick={() => startTransition(resumeCouncil)}
-              className="text-xs px-3 py-1 rounded tracking-widest"
-              style={{ background: '#34D399', color: '#000', fontWeight: 'bold' }}>
-              Resume Council
-            </button>
-          )}
-          <button type="button" onClick={() => startTransition(endCouncilSession)}
-            className="text-xs px-3 py-1 rounded tracking-widest"
-            style={{ border: '1px solid #EF4444', color: '#EF4444' }}>
-            End Session
-          </button>
-          <button type="button" onClick={() => startTransition(clearCouncilSession)}
-            className="text-xs px-3 py-1 rounded tracking-widest"
-            style={{ border: '1px solid #666', color: '#888' }}>
-            Clear Session
-          </button>
-          <button type="button" onClick={() => startTransition(toggleDeepDiscussion)}
-            className="text-xs px-3 py-1 rounded tracking-widest"
-            style={{
-              border: council.deepDiscussionMode ? '1px solid #34D399' : '1px solid #333',
-              color: council.deepDiscussionMode ? '#34D399' : '#888',
-            }}>
-            Deep discussion: {council.deepDiscussionMode ? 'ON' : 'OFF'}
-          </button>
-          {footerShowsPacketOrCouncilProviderIssue && (
-            <button type="button" onClick={() => startTransition(retryProvider)}
-              className="text-xs px-3 py-1 rounded tracking-widest"
-              style={{ background: '#F97316', color: '#000', fontWeight: 'bold' }}>
-              Retry provider
-            </button>
-          )}
-          {council.deepDiscussionMode && (
-            <span className="text-[10px] font-bold tracking-widest px-2 py-0.5 rounded"
-              style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#34D399' }}>
-              DEEP MODE
+          <div>
+            <span className="text-[10px] font-bold tracking-widest" style={{ color: '#93C5FD' }}>
+              FAMILY COMMAND FLOW
             </span>
-          )}
+            <p className="text-[9px] tracking-widest" style={{ color: '#555' }}>
+              Ra’el speaks to the AI families; infrastructure notices stay minimal.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[9px] tracking-widest" style={{ color: '#555' }}>Session controls</span>
+            {!councilPaused ? (
+              <button type="button" onClick={() => startTransition(pauseCouncil)}
+                className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+                style={{ border: '1px solid #333', color: '#888' }}>
+                Pause
+              </button>
+            ) : (
+              <button type="button" onClick={() => startTransition(resumeCouncil)}
+                className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+                style={{ background: '#34D399', color: '#000', fontWeight: 'bold' }}>
+                Resume
+              </button>
+            )}
+            <button type="button" onClick={() => startTransition(endCouncilSession)}
+              className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+              style={{ border: '1px solid rgba(239,68,68,0.55)', color: '#FCA5A5' }}>
+              End
+            </button>
+            <button type="button" onClick={() => startTransition(clearCouncilSession)}
+              className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+              style={{ border: '1px solid #555', color: '#888' }}>
+              Clear
+            </button>
+            <button type="button" onClick={() => startTransition(toggleDeepDiscussion)}
+              className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+              style={{
+                border: council.deepDiscussionMode ? '1px solid #34D399' : '1px solid #333',
+                color: council.deepDiscussionMode ? '#34D399' : '#888',
+              }}>
+              Deep {council.deepDiscussionMode ? 'ON' : 'OFF'}
+            </button>
+            {footerShowsPacketOrCouncilProviderIssue && (
+              <button type="button" onClick={() => startTransition(retryProvider)}
+                className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+                style={{ background: '#F97316', color: '#000', fontWeight: 'bold' }}>
+                Retry
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex-shrink-0 px-6 pt-3 pb-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -9225,11 +9257,19 @@ function Home() {
           <div ref={bottomRef} />
         </div>
 
-        <div className="flex-shrink-0 border-t border-yellow-900 px-6 py-3" style={{ background: 'rgba(255,215,0,0.07)' }}>
-          <p className="mb-2 text-[9px] tracking-widest" style={{ color: '#888' }}>Command console</p>
+        <div className="flex-shrink-0 border-t border-yellow-900 px-6 py-4" style={{ background: 'rgba(255,215,0,0.09)' }}>
+          <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }}>Speak to the AI families</p>
+              <p className="text-[9px] tracking-widest" style={{ color: '#666' }}>Claude builds, ChatGPT orchestrates, Grok scouts, Gemini cross-references, Red Team checks risk.</p>
+            </div>
+            <span className="rounded px-2 py-0.5 text-[9px] tracking-widest" style={{ border: '1px solid rgba(255,215,0,0.35)', color: '#FDE68A' }}>
+              Main command input
+            </span>
+          </div>
           <form
-            className="flex items-start gap-3 rounded p-3"
-            style={{ background: 'rgba(255,215,0,0.04)', border: '1px solid #3a2e00' }}
+            className="flex items-start gap-3 rounded p-4"
+            style={{ background: 'rgba(255,215,0,0.06)', border: '1px solid rgba(255,215,0,0.55)', boxShadow: '0 0 24px rgba(255,215,0,0.08)' }}
             onSubmit={handleDecree}
           >
             <span className="mt-1 shrink-0" style={{ color: '#FFD700' }}>⚔</span>
@@ -9243,14 +9283,14 @@ function Home() {
                 }
               }}
               rows={3}
-              placeholder="Speak to War Room…"
+              placeholder="Speak your decree to the families..."
               className="min-h-[3rem] flex-1 resize-y bg-transparent text-sm tracking-widest outline-none"
               style={{ color: '#FFD700', caretColor: '#FFD700' }}
               disabled={loading}
             />
             <button type="submit" disabled={loading}
-              className="mt-0.5 shrink-0 px-4 py-1.5 text-xs tracking-widest rounded disabled:opacity-30"
-              style={{ border: '1px solid #FFD700', color: '#FFD700', background: 'transparent' }}>
+              className="mt-0.5 shrink-0 rounded px-5 py-2 text-xs font-bold tracking-widest disabled:opacity-30"
+              style={{ border: '1px solid #FFD700', color: '#000', background: '#FFD700' }}>
               {loading ? '…' : 'Send'}
             </button>
           </form>

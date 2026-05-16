@@ -113,9 +113,10 @@ export async function DELETE(
     return jsonWithPersistence({ error: 'id required' }, true, { status: 400 })
   }
 
-  let body: { ids?: unknown }
+  let body: { ids?: unknown; scope?: unknown } = {}
   try {
-    body = await req.json()
+    const text = await req.text()
+    body = text.trim() ? (JSON.parse(text) as { ids?: unknown; scope?: unknown }) : {}
   } catch {
     return jsonWithPersistence({ error: 'Invalid JSON body.' }, true, { status: 400 })
   }
@@ -126,16 +127,22 @@ export async function DELETE(
         && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id),
       )
     : []
-  if (!ids.length) {
+  const deleteAll = body.scope === 'all'
+  if (!deleteAll && !ids.length) {
     return jsonWithPersistence({ deleted: 0 }, true)
   }
 
-  const { error } = await sup.client
+  let query = sup.client
     .from(TABLE_MESSAGES)
     .delete()
     .eq('conversation_id', conversationId)
-    .eq('role', 'system')
-    .in('id', ids)
+    .select('id')
+
+  if (!deleteAll) {
+    query = query.in('id', ids)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     const supabase = warRoomSupabaseFailurePayload(TABLE_MESSAGES, error, { operation: 'delete' })
@@ -146,5 +153,5 @@ export async function DELETE(
     )
   }
 
-  return jsonWithPersistence({ deleted: ids.length }, true)
+  return jsonWithPersistence({ deleted: data?.length ?? 0 }, true)
 }
