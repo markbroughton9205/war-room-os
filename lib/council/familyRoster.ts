@@ -193,9 +193,12 @@ export function buildDecreeFamilyOrder(params: {
     merged.length = 0
     merged.push('red_team', ...without)
   }
+  const planningCap = DEFAULT_CORE.length
+    + params.extraFamilies.length
+    + (params.leadWithRedTeam && !params.extraFamilies.includes('red_team') ? 1 : 0)
   const cap = Math.min(
     merged.length,
-    params.planningMode ? Math.min(params.maxFamilies, 4) : params.maxFamilies,
+    params.planningMode ? Math.min(params.maxFamilies, planningCap) : params.maxFamilies,
   )
   let result = merged.slice(0, cap)
   if (

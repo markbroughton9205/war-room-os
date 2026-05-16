@@ -44,7 +44,6 @@ import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permiss
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { ContinuationRequest } from '@/lib/council/continuationRequest'
-import { decreeAsksMultiFamilyGreeting } from '@/lib/council/greetingRouting'
 import { classifyCommand } from '@/lib/engine-control/permissions'
 import { ProviderSetupChecklistPanel } from '@/components/war-room/ProviderSetupChecklistPanel'
 import { Phase3WarRoomPanels } from '@/components/war-room/phase3/Phase3WarRoomPanels'
@@ -5185,10 +5184,20 @@ function Home() {
   }
 
   const addSystemMessage = (content: string, opts?: { force?: boolean; id?: string }) => {
+    const isSilentInfrastructureNotice = (line: string) =>
+      /\b(memory preview ready|archive loaded|telemetry updated|persistence synced|runtime continuity notice)\b/i.test(
+        line,
+      )
     if (
       !opts?.force
-      && shouldSuppressProviderFailureFromChatStream(content, { diagnosticsOpen: operatorTab === 'diagnostics' })
+      && (
+        isSilentInfrastructureNotice(content)
+        || shouldSuppressProviderFailureFromChatStream(content, { diagnosticsOpen: operatorTab === 'diagnostics' })
+      )
     ) {
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('[Live Council] Silent infrastructure notice:', content)
+      }
       return
     }
     councilDispatch({
@@ -7242,15 +7251,26 @@ function Home() {
       const cmd = activeCouncilCommandRef.current
       const councilIntentState = resolveCurrentIntent({ latestRaelDecreeText: decree })
       const attendanceWave = isAttendanceIntent(cmd, councilIntentState.intent)
+      const redTeamLeadOnly = injectLeadRed && !extra.includes('red_team')
+      const standardFamilyCap = Math.max(
+        intent.maxFamilies,
+        4 + extra.length + (redTeamLeadOnly ? 1 : 0),
+      )
 
       let order = buildDecreeFamilyOrder({
         incomeOperationsMode: incomeOperationsMode || intent.tier === 'income_ops',
         planningMode,
         extraFamilies: extra,
-        maxFamilies: cmd.directInvocation ? 1 : attendanceWave ? 8 : intent.maxFamilies,
+        maxFamilies: cmd.directInvocation
+          ? 1
+          : attendanceWave
+            ? 8
+            : cmd.mode === 'emergency'
+              ? intent.maxFamilies
+              : standardFamilyCap,
         singleFamilyRotate:
           cmd.directInvocation
-          || (councilIntentState.intent === 'greeting' && !decreeAsksMultiFamilyGreeting(decree))
+          || cmd.mode === 'emergency'
             ? undefined
             : intent.tier === 'casual'
               ? messagesRef.current.length
@@ -7861,13 +7881,6 @@ function Home() {
         directedFamilies: orderForGather,
       })
 
-      const researchLikeGather = detectResearchIntent(decree, {
-        attendanceFlow: attendanceWave,
-        sequentialDiagnostic: diagnosticSequential,
-        councilGatherPhase: null,
-        intentKind: councilIntentState.intent,
-      }).shouldResearch
-
       const stagedCandidates = cells
         .filter(c => Boolean(c.textOut?.trim()))
         .map(c => ({
@@ -7876,17 +7889,7 @@ function Home() {
           transientMessageIds: c.transientMessageIds,
         }))
 
-      if (
-        intent.tier === 'casual'
-        && stagedCandidates.length
-        && !attendanceWave
-        && !diagnosticSequential
-        && !researchLikeGather
-      ) {
-        staged.push(stagedCandidates[0]!)
-      } else {
-        for (const row of stagedCandidates) staged.push(row)
-      }
+      for (const row of stagedCandidates) staged.push(row)
 
       const attendanceRevealedFamilies = new Set<CouncilOrchestrationFamily>(
         staged.map(s => s.family),
@@ -8386,7 +8389,9 @@ function Home() {
         messageType: 'memory_recall_preview',
         recallPreview,
       }])
-      setMemoryNotification('Memory preview ready in Live Council.')
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('[Live Council] Memory preview ready in Live Council.')
+      }
     } catch {
       setMemoryRecallView({
         command: recallCommand,
