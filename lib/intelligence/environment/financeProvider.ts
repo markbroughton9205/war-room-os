@@ -3,7 +3,7 @@ import type { FinanceDashboardSnapshot, FinanceQuote } from '@/lib/intelligence/
 
 const FINANCE_TIMEOUT_MS = 8000
 const FINANCE_ENV_NAMES = [...getEnvAliasNames('financeApiKey'), ...getEnvAliasNames('financeProvider')]
-const DEFAULT_SYMBOLS = ['SPY', 'QQQ', 'DIA', 'GLD', 'BTC/USD']
+const DEFAULT_SYMBOLS = ['GLD', 'SPY', 'QQQ', 'BTC/USD']
 
 type AlphaVantageQuote = {
   'Global Quote'?: {
@@ -60,15 +60,21 @@ function unavailable(detail: string): FinanceDashboardSnapshot {
       aliasRecommendation,
       envAliasDiagnostics: aliasDiagnostics,
       blockedFeature: 'Finance and market Live Environment card',
-      recommendedSetup: aliasRecommendation ?? 'Set FINANCE_PROVIDER to alpha_vantage, finnhub, or twelvedata. Set FINANCE_API_KEY. Optional FINANCE_SYMBOLS controls the watchlist.',
+      recommendedSetup: aliasRecommendation ?? 'Set FINANCE_PROVIDER to alpha_vantage, finnhub, or twelvedata. Set FINANCE_API_KEY. Optional MARKET_WATCHLIST controls the watchlist; FINANCE_SYMBOLS remains supported.',
     },
   }
 }
 
 function symbols(): string[] {
-  const raw = process.env.FINANCE_SYMBOLS?.trim()
+  const raw = process.env.MARKET_WATCHLIST?.trim() || process.env.FINANCE_SYMBOLS?.trim()
   if (!raw) return DEFAULT_SYMBOLS
-  return raw.split(',').map(symbol => symbol.trim()).filter(Boolean).slice(0, 10)
+  return raw.split(',').map(symbol => normalizeWatchlistSymbol(symbol.trim())).filter(Boolean).slice(0, 10)
+}
+
+function normalizeWatchlistSymbol(symbol: string): string {
+  const upper = symbol.toUpperCase()
+  if (upper === 'BTC' || upper === 'ETH') return `${upper}/USD`
+  return symbol
 }
 
 function marketType(symbol: string): FinanceQuote['marketType'] {
@@ -85,6 +91,33 @@ function freshnessLabel(fetchedAt: string | null): string {
   const minutes = Math.round(ageMs / 60000)
   if (minutes < 1) return 'just now'
   return `${minutes}m old`
+}
+
+function quoteDirection(change: number | null, percentChange: number | null): FinanceQuote['direction'] {
+  const value = change ?? percentChange
+  if (value === null) return 'unknown'
+  if (value > 0) return 'up'
+  if (value < 0) return 'down'
+  return 'flat'
+}
+
+function movementSummary(symbol: string, change: number | null, percentChange: number | null): string {
+  const direction = quoteDirection(change, percentChange)
+  if (direction === 'unknown') return `${symbol} price returned, but the provider did not include session movement.`
+  if (direction === 'flat') return `${symbol} is flat in the provider's latest session data.`
+  const verb = direction === 'up' ? 'gained' : 'lost'
+  const dollar = change === null ? null : `$${Math.abs(change).toFixed(2)}`
+  const percent = percentChange === null ? null : `${Math.abs(percentChange).toFixed(2)}%`
+  return `${symbol} ${verb} ${[dollar, percent].filter(Boolean).join(' / ')} in the latest provider quote.`
+}
+
+function enrichQuote(quote: Omit<FinanceQuote, 'direction' | 'movementSummary' | 'marketStatus'>, marketStatus: string | null = null): FinanceQuote {
+  return {
+    ...quote,
+    direction: quoteDirection(quote.change, quote.percentChange),
+    movementSummary: movementSummary(quote.symbol, quote.change, quote.percentChange),
+    marketStatus,
+  }
 }
 
 function toNumber(value: unknown): number | null {
@@ -121,7 +154,7 @@ async function alphaVantageQuote(symbol: string, apiKey: string, fetchedAt: stri
     const rate = data['Realtime Currency Exchange Rate']
     const price = toNumber(rate?.['5. Exchange Rate'])
     if (price === null) return null
-    return {
+    return enrichQuote({
       symbol: `${rate?.['1. From_Currency Code'] ?? from}/${rate?.['3. To_Currency Code'] ?? to ?? 'USD'}`,
       price,
       change: null,
@@ -130,14 +163,14 @@ async function alphaVantageQuote(symbol: string, apiKey: string, fetchedAt: stri
       marketType: 'crypto',
       freshness: freshnessLabel(rate?.['6. Last Refreshed'] ?? fetchedAt),
       fetchedAt: rate?.['6. Last Refreshed'] ?? fetchedAt,
-    }
+    })
   }
 
   const data = await fetchJson<AlphaVantageQuote>(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(apiKey)}`)
   const quote = data['Global Quote']
   const price = toNumber(quote?.['05. price'])
   if (price === null) return null
-  return {
+  return enrichQuote({
     symbol: quote?.['01. symbol'] ?? symbol,
     price,
     change: toNumber(quote?.['09. change']),
@@ -146,7 +179,7 @@ async function alphaVantageQuote(symbol: string, apiKey: string, fetchedAt: stri
     marketType: marketType(symbol),
     freshness: freshnessLabel(fetchedAt),
     fetchedAt,
-  }
+  })
 }
 
 async function finnhubQuote(symbol: string, apiKey: string, fetchedAt: string): Promise<FinanceQuote | null> {
@@ -155,7 +188,7 @@ async function finnhubQuote(symbol: string, apiKey: string, fetchedAt: string): 
   const price = toNumber(data.c)
   if (price === null || price === 0) return null
   const providerTime = data.t ? new Date(data.t * 1000).toISOString() : fetchedAt
-  return {
+  return enrichQuote({
     symbol,
     price,
     change: toNumber(data.d),
@@ -164,7 +197,7 @@ async function finnhubQuote(symbol: string, apiKey: string, fetchedAt: string): 
     marketType: marketType(symbol),
     freshness: freshnessLabel(providerTime),
     fetchedAt: providerTime,
-  }
+  })
 }
 
 async function twelveDataQuote(symbol: string, apiKey: string, fetchedAt: string): Promise<FinanceQuote | null> {
@@ -172,7 +205,7 @@ async function twelveDataQuote(symbol: string, apiKey: string, fetchedAt: string
   const price = toNumber(data.price)
   if (price === null) return null
   const providerTime = data.datetime && Number.isFinite(Date.parse(data.datetime)) ? new Date(data.datetime).toISOString() : fetchedAt
-  return {
+  return enrichQuote({
     symbol: data.symbol ?? symbol,
     price,
     change: toNumber(data.change),
@@ -181,7 +214,7 @@ async function twelveDataQuote(symbol: string, apiKey: string, fetchedAt: string
     marketType: marketType(symbol),
     freshness: freshnessLabel(providerTime),
     fetchedAt: providerTime,
-  }
+  })
 }
 
 export async function buildFinanceDashboardSnapshot(): Promise<FinanceDashboardSnapshot> {

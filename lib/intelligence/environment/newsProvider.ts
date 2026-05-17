@@ -10,6 +10,23 @@ type FeedRegistration = {
   url: string
 }
 
+type NewsApiArticle = {
+  source?: { name?: string }
+  author?: string | null
+  title?: string
+  description?: string | null
+  url?: string
+  urlToImage?: string | null
+  publishedAt?: string
+}
+
+type NewsApiResponse = {
+  status?: string
+  totalResults?: number
+  articles?: NewsApiArticle[]
+  message?: string
+}
+
 function setupSnapshot(detail: string): NewsDashboardSnapshot {
   const aliasDiagnostics = [resolveEnvAlias('newsRssFeeds'), resolveEnvAlias('newsApiKey')]
   const primaryDiagnostic = aliasDiagnostics.find(diagnostic => diagnostic.configured) ?? aliasDiagnostics[0]
@@ -17,11 +34,11 @@ function setupSnapshot(detail: string): NewsDashboardSnapshot {
 
   return {
     status: 'unavailable',
-    provider: 'RSS feed registry',
+    provider: getEnvAliasValue('newsApiKey') ? 'NewsAPI' : 'RSS feed registry',
     cards: [],
     fetchedAt: null,
     freshness: 'unknown',
-    source: 'No RSS feeds configured',
+    source: 'No news source returned data',
     detail,
     setup: {
       envVarNames: NEWS_ENV_NAMES,
@@ -31,7 +48,7 @@ function setupSnapshot(detail: string): NewsDashboardSnapshot {
       aliasRecommendation,
       envAliasDiagnostics: aliasDiagnostics,
       blockedFeature: 'Live Environment news slideshow',
-      recommendedSetup: aliasRecommendation ?? 'Set NEWS_RSS_FEEDS or RSS_FEED_URLS to a semicolon-separated registry. Each entry may be category|source name|https://feed.url/rss.',
+      recommendedSetup: aliasRecommendation ?? 'Set NEWS_API_KEY for NewsAPI headlines or NEWS_RSS_FEEDS/RSS_FEED_URLS to a semicolon-separated registry. Each RSS entry may be category|source name|https://feed.url/rss.',
     },
   }
 }
@@ -130,6 +147,24 @@ async function fetchText(url: string): Promise<string> {
   }
 }
 
+async function fetchJson<T>(url: string): Promise<T> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), NEWS_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'WarRoomLiveEnvironment/1.0',
+      },
+    })
+    if (!res.ok) throw new Error(`News provider returned HTTP ${res.status}`)
+    return await res.json() as T
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 function parseFeedItems(feed: FeedRegistration, xml: string, fetchedAt: string): NewsDashboardCard[] {
   const itemBlocks = Array.from(xml.matchAll(/<(item|entry)\b[\s\S]*?<\/\1>/gi)).map(match => match[0])
   return itemBlocks.slice(0, 4).flatMap((item, index) => {
@@ -154,17 +189,67 @@ function parseFeedItems(feed: FeedRegistration, xml: string, fetchedAt: string):
   })
 }
 
+function parseNewsApiArticles(data: NewsApiResponse, fetchedAt: string): NewsDashboardCard[] {
+  if (data.status && data.status !== 'ok') throw new Error(data.message ?? 'NewsAPI returned an error')
+  return (data.articles ?? []).slice(0, 12).flatMap((article, index) => {
+    const title = article.title?.trim()
+    if (!title) return []
+    const publishedAt = article.publishedAt && Number.isFinite(Date.parse(article.publishedAt))
+      ? new Date(article.publishedAt).toISOString()
+      : null
+    const sourceName = article.source?.name?.trim() || 'NewsAPI source'
+    return [{
+      id: `newsapi-${sourceName}-${index}-${title}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80),
+      title,
+      url: article.url ?? null,
+      sourceName,
+      category: 'national',
+      imageUrl: article.urlToImage ?? null,
+      publishedAt,
+      freshness: freshnessLabel(publishedAt, fetchedAt),
+      confidenceLabel: 'verified',
+      signalLabel: 'verified',
+      detail: article.description?.trim()
+        ? `Source-backed NewsAPI headline. ${article.description.trim()}`
+        : 'Source-backed NewsAPI headline. Image is shown only when the source provides one.',
+    }]
+  })
+}
+
+async function fetchNewsApiCards(apiKey: string, fetchedAt: string): Promise<NewsDashboardCard[]> {
+  const url = `https://newsapi.org/v2/top-headlines?country=us&pageSize=12&apiKey=${encodeURIComponent(apiKey)}`
+  return parseNewsApiArticles(await fetchJson<NewsApiResponse>(url), fetchedAt)
+}
+
+function dedupeCards(cards: NewsDashboardCard[]): NewsDashboardCard[] {
+  const seen = new Set<string>()
+  return cards.filter(card => {
+    const key = (card.url ?? card.title).toLowerCase().replace(/\s+/g, ' ').trim()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 export async function buildNewsDashboardSnapshot(): Promise<NewsDashboardSnapshot> {
   const registry = parseRegistry()
-  if (!registry.length) return setupSnapshot('No bounded RSS feed registry is configured.')
+  const apiKey = getEnvAliasValue('newsApiKey')
+  if (!registry.length && !apiKey) return setupSnapshot('No bounded RSS feed registry or NewsAPI key is configured.')
   const fetchedAt = new Date().toISOString()
-  const results = await Promise.allSettled(registry.map(async feed => parseFeedItems(feed, await fetchText(feed.url), fetchedAt)))
-  const cards = results.flatMap(result => result.status === 'fulfilled' ? result.value : []).slice(0, 12)
-  const failures = results.filter(result => result.status === 'rejected').length
+  const rssResults = await Promise.allSettled(registry.map(async feed => parseFeedItems(feed, await fetchText(feed.url), fetchedAt)))
+  const apiResults = apiKey ? await Promise.allSettled([fetchNewsApiCards(apiKey, fetchedAt)]) : []
+  const rssCards = rssResults.flatMap(result => result.status === 'fulfilled' ? result.value : [])
+  const apiCards = apiResults.flatMap(result => result.status === 'fulfilled' ? result.value : [])
+  const cards = dedupeCards([...rssCards, ...apiCards]).slice(0, 12)
+  const failures = [...rssResults, ...apiResults].filter(result => result.status === 'rejected').length
+  const sourceParts = [
+    registry.length ? `${registry.length} configured RSS feed${registry.length === 1 ? '' : 's'}` : null,
+    apiKey ? 'NewsAPI top headlines' : null,
+  ].filter(Boolean)
 
   if (!cards.length) {
     return {
-      ...setupSnapshot(failures ? 'Configured RSS feeds were unreachable or returned no parseable items.' : 'Configured RSS feeds returned no items.'),
+      ...setupSnapshot(failures ? 'Configured news sources were unreachable or returned no parseable items.' : 'Configured news sources returned no items.'),
       status: failures ? 'error' : 'unavailable',
       fetchedAt,
       freshness: freshnessLabel(null, fetchedAt),
@@ -173,13 +258,13 @@ export async function buildNewsDashboardSnapshot(): Promise<NewsDashboardSnapsho
 
   return {
     status: failures ? 'error' : 'available',
-    provider: 'RSS feed registry',
+    provider: registry.length && apiKey ? 'RSS feed registry + NewsAPI' : apiKey ? 'NewsAPI' : 'RSS feed registry',
     cards,
     fetchedAt,
     freshness: freshnessLabel(null, fetchedAt),
-    source: `${registry.length} configured RSS feed${registry.length === 1 ? '' : 's'}`,
+    source: sourceParts.join(' + '),
     detail: failures
-      ? `${cards.length} source-backed news cards loaded; ${failures} feed request${failures === 1 ? '' : 's'} failed.`
-      : `${cards.length} source-backed news cards loaded from the bounded RSS registry.`,
+      ? `${cards.length} source-backed news cards loaded; ${failures} news request${failures === 1 ? '' : 's'} failed.`
+      : `${cards.length} source-backed news cards loaded from configured news sources.`,
   }
 }

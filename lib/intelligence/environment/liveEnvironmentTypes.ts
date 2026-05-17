@@ -2,6 +2,7 @@ import type { EvidenceConfidenceTier } from '@/lib/intelligence/intelligencePack
 import type { EnvAliasDiagnostic } from '@/lib/configuration/envAlias'
 
 export type ProviderAvailability = 'available' | 'unavailable' | 'error'
+export type WeatherProviderState = 'configured_but_fetch_failed' | 'configured_and_live' | 'missing_key' | 'missing_provider'
 
 export type EnvironmentSetupGuidance = {
   envVarNames: string[]
@@ -31,6 +32,7 @@ export type WeatherAlert = {
 
 export type WeatherDashboardSnapshot = {
   status: ProviderAvailability
+  providerState: WeatherProviderState
   provider: string
   locationLabel: string
   currentTempF: number | null
@@ -83,6 +85,9 @@ export type FinanceQuote = {
   percentChange: number | null
   currency: string | null
   marketType: 'index' | 'stock' | 'crypto' | 'commodity' | 'unknown'
+  direction: 'up' | 'down' | 'flat' | 'unknown'
+  movementSummary: string
+  marketStatus: string | null
   freshness: string
   fetchedAt: string | null
 }

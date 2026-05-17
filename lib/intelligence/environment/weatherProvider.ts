@@ -1,6 +1,6 @@
 import { getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/configuration/envAlias'
 import type { CommanderLocationState } from '@/lib/intelligence/environment/locationPolicy'
-import type { WeatherDashboardSnapshot, WeatherForecastPoint } from '@/lib/intelligence/environment/liveEnvironmentTypes'
+import type { WeatherDashboardSnapshot, WeatherForecastPoint, WeatherProviderState } from '@/lib/intelligence/environment/liveEnvironmentTypes'
 
 const WEATHER_ENV_NAMES = [...getEnvAliasNames('weatherApiKey'), ...getEnvAliasNames('weatherProvider')]
 const WEATHER_TIMEOUT_MS = 8000
@@ -77,17 +77,30 @@ type NwsAlerts = {
   }[]
 }
 
-function unavailable(locationLabel: string, detail: string, envVarNames = WEATHER_ENV_NAMES): WeatherDashboardSnapshot {
+function unavailable({
+  locationLabel,
+  detail,
+  providerState,
+  provider,
+  envVarNames = WEATHER_ENV_NAMES,
+}: {
+  locationLabel: string
+  detail: string
+  providerState: WeatherProviderState
+  provider?: string
+  envVarNames?: string[]
+}): WeatherDashboardSnapshot {
   const aliasDiagnostics = [resolveEnvAlias('weatherApiKey'), resolveEnvAlias('weatherProvider')]
   const primaryDiagnostic = aliasDiagnostics.find(diagnostic => diagnostic.configured) ?? aliasDiagnostics[0]
   const aliasRecommendation = aliasDiagnostics.find(diagnostic => diagnostic.recommendation)?.recommendation ?? null
 
   return {
     status: 'unavailable',
-    provider: getEnvAliasValue('weatherProvider') || 'not configured',
+    providerState,
+    provider: provider ?? getEnvAliasValue('weatherProvider') ?? 'not configured',
     locationLabel,
     currentTempF: null,
-    condition: 'Weather provider unavailable',
+    condition: providerState === 'configured_but_fetch_failed' ? 'Weather fetch failed' : 'Weather provider unavailable',
     highF: null,
     lowF: null,
     precipitationChance: null,
@@ -138,6 +151,12 @@ function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+function safeErrorMessage(error: unknown): string {
+  if (error instanceof DOMException && error.name === 'AbortError') return 'Weather provider request timed out'
+  if (error instanceof Error) return error.message.replace(/appid=[^&\s]+/gi, 'appid=[redacted]').replace(/key=[^&\s]+/gi, 'key=[redacted]')
+  return 'Weather provider request failed'
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), WEATHER_TIMEOUT_MS)
@@ -151,7 +170,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
         ...(init?.headers ?? {}),
       },
     })
-    if (!res.ok) throw new Error(`Weather provider returned ${res.status}`)
+    if (!res.ok) throw new Error(`Weather provider returned HTTP ${res.status}`)
     return await res.json() as T
   } finally {
     clearTimeout(timeout)
@@ -189,9 +208,23 @@ function toDailyForecast(list: NonNullable<OpenWeatherForecast['list']>): Weathe
 
 async function buildOpenWeather(location: CommanderLocationState, apiKey: string): Promise<WeatherDashboardSnapshot> {
   const city = location.city?.trim()
-  if (!city || location.mode === 'off') return unavailable(locationLabel(location), 'Weather is blocked until a city-level location is available.')
+  if (!city || location.mode === 'off') {
+    return unavailable({
+      locationLabel: locationLabel(location),
+      detail: 'Weather is blocked until a city-level location is available.',
+      providerState: 'missing_provider',
+      provider: 'OpenWeather',
+    })
+  }
   const geo = await geocodeOpenWeather(city, apiKey)
-  if (!geo) return unavailable(locationLabel(location), 'OpenWeather did not resolve the configured city.')
+  if (!geo) {
+    return unavailable({
+      locationLabel: locationLabel(location),
+      detail: 'OpenWeather did not resolve the configured city.',
+      providerState: 'configured_but_fetch_failed',
+      provider: 'OpenWeather',
+    })
+  }
 
   const [current, forecast] = await Promise.all([
     fetchJson<OpenWeatherCurrent>(`https://api.openweathermap.org/data/2.5/weather?lat=${geo.lat}&lon=${geo.lon}&units=imperial&appid=${encodeURIComponent(apiKey)}`),
@@ -209,6 +242,7 @@ async function buildOpenWeather(location: CommanderLocationState, apiKey: string
 
   return {
     status: 'available',
+    providerState: 'configured_and_live',
     provider: 'OpenWeather',
     locationLabel: geo.name,
     currentTempF: numberOrNull(current.main?.temp),
@@ -229,7 +263,14 @@ async function buildOpenWeather(location: CommanderLocationState, apiKey: string
 
 async function buildWeatherApi(location: CommanderLocationState, apiKey: string): Promise<WeatherDashboardSnapshot> {
   const city = location.city?.trim()
-  if (!city || location.mode === 'off') return unavailable(locationLabel(location), 'Weather is blocked until a city-level location is available.')
+  if (!city || location.mode === 'off') {
+    return unavailable({
+      locationLabel: locationLabel(location),
+      detail: 'Weather is blocked until a city-level location is available.',
+      providerState: 'missing_provider',
+      provider: 'WeatherAPI',
+    })
+  }
   const data = await fetchJson<WeatherApiForecast>(`https://api.weatherapi.com/v1/forecast.json?key=${encodeURIComponent(apiKey)}&q=${encodeURIComponent(city)}&days=7&aqi=no&alerts=yes`)
   const fetchedAt = new Date().toISOString()
   const hourly = data.forecast?.forecastday?.flatMap(day => day.hour ?? []).slice(0, 12).map(point => ({
@@ -249,6 +290,7 @@ async function buildWeatherApi(location: CommanderLocationState, apiKey: string)
 
   return {
     status: 'available',
+    providerState: 'configured_and_live',
     provider: 'WeatherAPI',
     locationLabel: [data.location?.name, data.location?.region].filter(Boolean).join(', ') || city,
     currentTempF: numberOrNull(data.current?.temp_f),
@@ -276,12 +318,25 @@ async function buildNoaa(location: CommanderLocationState): Promise<WeatherDashb
   const lat = Number(process.env.WEATHER_LATITUDE)
   const lon = Number(process.env.WEATHER_LONGITUDE)
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    return unavailable(locationLabel(location), 'NOAA/NWS fallback needs WEATHER_LATITUDE and WEATHER_LONGITUDE because no precise coordinates are stored in the client location state.', ['WEATHER_PROVIDER', 'WEATHER_LATITUDE', 'WEATHER_LONGITUDE'])
+    return unavailable({
+      locationLabel: locationLabel(location),
+      detail: 'NOAA/NWS fallback needs WEATHER_LATITUDE and WEATHER_LONGITUDE because no precise coordinates are stored in the client location state.',
+      providerState: 'missing_key',
+      provider: 'NOAA/NWS',
+      envVarNames: ['WEATHER_PROVIDER', 'WEATHER_LATITUDE', 'WEATHER_LONGITUDE'],
+    })
   }
   const point = await fetchJson<NwsPoints>(`https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`)
   const forecastUrl = point.properties?.forecast
   const hourlyUrl = point.properties?.forecastHourly
-  if (!forecastUrl || !hourlyUrl) return unavailable(locationLabel(location), 'NOAA/NWS did not return forecast endpoints for the configured coordinates.')
+  if (!forecastUrl || !hourlyUrl) {
+    return unavailable({
+      locationLabel: locationLabel(location),
+      detail: 'NOAA/NWS did not return forecast endpoints for the configured coordinates.',
+      providerState: 'configured_but_fetch_failed',
+      provider: 'NOAA/NWS',
+    })
+  }
 
   const [dailyData, hourlyData, alertsData] = await Promise.all([
     fetchJson<NwsForecast>(forecastUrl),
@@ -307,6 +362,7 @@ async function buildNoaa(location: CommanderLocationState): Promise<WeatherDashb
 
   return {
     status: 'available',
+    providerState: 'configured_and_live',
     provider: 'NOAA/NWS',
     locationLabel: [point.properties?.relativeLocation?.properties?.city, point.properties?.relativeLocation?.properties?.state].filter(Boolean).join(', ') || locationLabel(location),
     currentTempF: hourly[0]?.tempF ?? null,
@@ -333,19 +389,69 @@ async function buildNoaa(location: CommanderLocationState): Promise<WeatherDashb
 export async function buildWeatherDashboardSnapshot(location: CommanderLocationState): Promise<WeatherDashboardSnapshot> {
   const provider = (getEnvAliasValue('weatherProvider') || '').toLowerCase()
   const apiKey = getEnvAliasValue('weatherApiKey')
+  const hasNoaaCoordinates = Number.isFinite(Number(process.env.WEATHER_LATITUDE)) && Number.isFinite(Number(process.env.WEATHER_LONGITUDE))
 
-  try {
-    if (provider === 'noaa' || provider === 'nws') return await buildNoaa(location)
-    if (!apiKey) return unavailable(locationLabel(location), 'Set WEATHER_API_KEY and WEATHER_PROVIDER before live weather can be fetched.')
-    if (provider === 'weatherapi' || provider === 'weather_api') return await buildWeatherApi(location, apiKey)
-    if (provider === 'openweather' || provider === 'openweathermap' || provider === '') return await buildOpenWeather(location, apiKey)
-    return unavailable(locationLabel(location), `Unsupported WEATHER_PROVIDER "${provider}".`, WEATHER_ENV_NAMES)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Weather provider request failed'
-    return {
-      ...unavailable(locationLabel(location), message),
-      status: 'error',
-      provider: provider || 'weather provider',
+  if (provider === 'noaa' || provider === 'nws') {
+    try {
+      return await buildNoaa(location)
+    } catch (error) {
+      return {
+        ...unavailable({
+          locationLabel: locationLabel(location),
+          detail: safeErrorMessage(error),
+          providerState: 'configured_but_fetch_failed',
+          provider: 'NOAA/NWS',
+        }),
+        status: 'error',
+        fetchedAt: new Date().toISOString(),
+      }
     }
+  }
+
+  if (!apiKey && !hasNoaaCoordinates) {
+    return unavailable({
+      locationLabel: locationLabel(location),
+      detail: 'Set WEATHER_API_KEY for OpenWeather/WeatherAPI or WEATHER_LATITUDE and WEATHER_LONGITUDE for NOAA/NWS.',
+      providerState: 'missing_key',
+    })
+  }
+
+  const attempts: { name: string; load: () => Promise<WeatherDashboardSnapshot> }[] = []
+  if (apiKey) {
+    if (provider === 'weatherapi' || provider === 'weather_api') attempts.push({ name: 'WeatherAPI', load: () => buildWeatherApi(location, apiKey) })
+    else if (provider === 'openweather' || provider === 'openweathermap') attempts.push({ name: 'OpenWeather', load: () => buildOpenWeather(location, apiKey) })
+    else if (provider === '') {
+      attempts.push({ name: 'OpenWeather', load: () => buildOpenWeather(location, apiKey) })
+      attempts.push({ name: 'WeatherAPI', load: () => buildWeatherApi(location, apiKey) })
+    } else {
+      return unavailable({
+        locationLabel: locationLabel(location),
+        detail: `Unsupported WEATHER_PROVIDER "${provider}".`,
+        providerState: 'missing_provider',
+      })
+    }
+  }
+  if (hasNoaaCoordinates && (provider === '' || provider === 'noaa' || provider === 'nws')) {
+    attempts.push({ name: 'NOAA/NWS', load: () => buildNoaa(location) })
+  }
+
+  const errors: string[] = []
+  for (const attempt of attempts) {
+    try {
+      return await attempt.load()
+    } catch (error) {
+      errors.push(`${attempt.name}: ${safeErrorMessage(error)}`)
+    }
+  }
+
+  return {
+    ...unavailable({
+      locationLabel: locationLabel(location),
+      detail: errors.length ? errors.join('; ') : 'No weather adapter could be selected from the configured environment.',
+      providerState: 'configured_but_fetch_failed',
+      provider: provider || 'weather provider',
+    }),
+    status: 'error',
+    fetchedAt: new Date().toISOString(),
   }
 }

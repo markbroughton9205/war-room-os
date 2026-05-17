@@ -1,15 +1,34 @@
 export type AstrologyInterpretationMode = 'spiritual' | 'ancestral' | 'symbolic' | 'neutral' | 'entertainment'
 
+export type AstrologyProfile = {
+  sign: string
+  birthDate: string
+  birthTime: string
+  birthPlace: string
+}
+
+export type HoroscopeProviderState = 'configured_adapter_pending' | 'not_configured'
+
 export type HoroscopeSnapshot = {
   enabled: boolean
   mode: AstrologyInterpretationMode
   sign: string
   date: string
+  birthTime: string
+  birthPlace: string
   interpretation: string
   provider: string
+  providerState: HoroscopeProviderState
   moonPhase?: string
   planetaryFacts: string[]
   framingNote: string
+}
+
+export const COMMANDER_ASTROLOGY_PROFILE: AstrologyProfile = {
+  sign: 'Taurus',
+  birthDate: 'May 10',
+  birthTime: '3:14 PM',
+  birthPlace: 'Minneapolis, MN',
 }
 
 const MODE_FRAMING: Record<AstrologyInterpretationMode, string> = {
@@ -21,17 +40,22 @@ const MODE_FRAMING: Record<AstrologyInterpretationMode, string> = {
 }
 
 export function buildHoroscopeSnapshot(
-  sign = 'Aries',
-  date = new Date(),
+  profile: AstrologyProfile = COMMANDER_ASTROLOGY_PROFILE,
   mode: AstrologyInterpretationMode = 'spiritual',
+  configured = false,
 ): HoroscopeSnapshot {
   return {
     enabled: false,
     mode,
-    sign,
-    date: date.toISOString().slice(0, 10),
-    interpretation: 'Horoscope provider not configured.',
-    provider: 'None',
+    sign: profile.sign,
+    date: profile.birthDate,
+    birthTime: profile.birthTime,
+    birthPlace: profile.birthPlace,
+    interpretation: configured
+      ? `${profile.sign} Commander profile loaded; astrology adapter pending, so no live horoscope or planetary facts are displayed.`
+      : `${profile.sign} Commander profile loaded; add an astrology provider adapter for source-backed horoscope data.`,
+    provider: configured ? 'Configured, adapter pending' : 'Adapter pending',
+    providerState: configured ? 'configured_adapter_pending' : 'not_configured',
     moonPhase: undefined,
     planetaryFacts: [],
     framingNote: MODE_FRAMING[mode],
