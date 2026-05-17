@@ -49,6 +49,11 @@ export type BridgeRuntimeSnapshot = {
     lastRestartAt: string | null
     backoffMs: number | null
     launchMode: 'manual' | 'supervised' | 'task_scheduler'
+    serviceModeActive?: boolean
+    runtimePid?: number | null
+    startupMode?: 'manual' | 'login' | 'boot'
+    logPath?: string | null
+    lastCrashReason?: string | null
   }
   updatedAt: string
 }
@@ -158,6 +163,20 @@ export type BridgeRuntimeResponse = {
   primaryRuntime: BridgeRuntimeSnapshot | null
   statusHistory: BridgeStatusHistoryEntry[]
   providerStatus: Record<string, BridgeProviderStatus[]>
+}
+
+export type BridgeServiceStatusResponse = {
+  generatedAt: string
+  serviceModeActive: boolean
+  runtimePid: number | null
+  uptimeSeconds: number
+  restartCount: number
+  reconnectCount: number
+  lastCrashReason: string | null
+  runtimeHealth: BridgeRuntimeStatus
+  startupMode: 'manual' | 'login' | 'boot'
+  logPath: string | null
+  persistentNodeState: BridgeNodeRegistryEntry | null
 }
 
 export type BridgeInvocationRequest = {

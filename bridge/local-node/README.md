@@ -44,6 +44,22 @@ powershell -ExecutionPolicy Bypass -File .\bridge\local-node\unregister-task.ps1
 
 The registration script only creates a user-login scheduled task that runs `pnpm bridge:supervise` from this repository. It is never run automatically by War Room.
 
+## Headless Service Mode
+
+For persistent background execution independent from visible terminals, use the service-mode installer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bridge\local-node\install-service.ps1
+```
+
+Uninstall with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bridge\local-node\uninstall-service.ps1
+```
+
+See `bridge/local-node/README-service-mode.md` for service-mode startup, recovery, logs, and troubleshooting details.
+
 Optional provider configuration:
 
 ```powershell

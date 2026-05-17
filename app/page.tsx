@@ -3894,6 +3894,8 @@ function OfficialLocalBridgePanel({
   const activeNodes = status.nodes.filter(node => node.status === 'online').length
   const runtime = status.runtime
   const uptimeLabel = runtime ? `${Math.floor(runtime.uptimeSeconds / 3600)}h ${Math.floor((runtime.uptimeSeconds % 3600) / 60)}m` : 'not reported'
+  const serviceModeActive = Boolean(runtime?.supervisor.serviceModeActive)
+  const runtimePid = runtime?.supervisor.runtimePid ?? null
   const stabilityLabel = runtime
     ? runtime.nodeHealth === 'online' || runtime.nodeHealth === 'recovered'
       ? 'stable'
@@ -3977,6 +3979,34 @@ function OfficialLocalBridgePanel({
           <div className="tracking-widest" style={{ color: '#555' }}>DEGRADED MODE</div>
           <div className="mt-1 font-bold" style={{ color: degradedWarning ? '#FCA5A5' : '#86EFAC' }}>{degradedWarning ? 'warning' : 'clear'}</div>
           <div className="mt-1 text-[10px]" style={{ color: '#777' }}>latency {runtime?.heartbeatLatencyMs ? `${runtime.heartbeatLatencyMs}ms` : 'n/a'}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-5">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>SERVICE MODE</div>
+          <div className="mt-1 font-bold" style={{ color: serviceModeActive ? '#34D399' : '#94A3B8' }}>{serviceModeActive ? 'active' : 'inactive'}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{runtime?.supervisor.startupMode ?? 'manual'} startup</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>BACKGROUND RUNTIME</div>
+          <div className="mt-1 font-bold" style={{ color: runtimePid ? '#BAE6FD' : '#94A3B8' }}>PID {runtimePid ?? 'n/a'}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{runtime?.supervisor.logPath ?? 'no log path reported'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>RESTART RECOVERY</div>
+          <div className="mt-1 font-bold" style={{ color: runtime?.supervisor.restartCount ? '#FBBF24' : '#FDE68A' }}>{runtime?.supervisor.restartCount ?? 0} restart(s)</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{runtime?.supervisor.lastCrashReason ?? 'no crash reported'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>RUNTIME PID</div>
+          <div className="mt-1 font-bold" style={{ color: '#DDD6FE' }}>{runtimePid ?? 'not reported'}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{runtime?.supervisor.launchMode ?? 'manual'} launch</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>PERSISTENT NODE STATE</div>
+          <div className="mt-1 font-bold" style={{ color: status.node.online ? '#86EFAC' : '#FCA5A5' }}>{status.node.online ? 'heartbeat fresh' : 'stale/offline'}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.node.nodeId}</div>
         </div>
       </div>
 

@@ -22,6 +22,7 @@ import type {
   BridgeRuntimeResponse,
   BridgeRuntimeSnapshot,
   BridgeRuntimeStatus,
+  BridgeServiceStatusResponse,
   BridgeStatusResponse,
   BridgeStatusHistoryEntry,
   BridgeStatusTimelineEntry,
@@ -269,6 +270,13 @@ function runtimeFor(input: BridgeHeartbeatRequest, node: BridgeNodeRegistryEntry
       launchMode: input.runtime.supervisor?.launchMode === 'supervised' || input.runtime.supervisor?.launchMode === 'task_scheduler'
         ? input.runtime.supervisor.launchMode
         : 'manual',
+      serviceModeActive: Boolean(input.runtime.supervisor?.serviceModeActive),
+      runtimePid: typeof input.runtime.supervisor?.runtimePid === 'number' ? input.runtime.supervisor.runtimePid : null,
+      startupMode: input.runtime.supervisor?.startupMode === 'login' || input.runtime.supervisor?.startupMode === 'boot'
+        ? input.runtime.supervisor.startupMode
+        : 'manual',
+      logPath: input.runtime.supervisor?.logPath?.slice(0, 260) ?? null,
+      lastCrashReason: input.runtime.supervisor?.lastCrashReason?.slice(0, 300) ?? null,
     },
     updatedAt: nowIso(),
   }
@@ -638,6 +646,11 @@ export function getBridgeRuntime(): BridgeRuntimeResponse {
           lastRestartAt: null,
           backoffMs: null,
           launchMode: 'manual' as const,
+          serviceModeActive: false,
+          runtimePid: null,
+          startupMode: 'manual' as const,
+          logPath: null,
+          lastCrashReason: null,
         },
         updatedAt: node.last_heartbeat ?? nowIso(),
       }
@@ -662,5 +675,25 @@ export function getBridgeRuntime(): BridgeRuntimeResponse {
     primaryRuntime: primary ? runtimes.find(runtime => runtime.nodeId === primary.node_id) ?? null : null,
     statusHistory: state.statusHistory.slice(0, 50),
     providerStatus: state.providerSnapshots,
+  }
+}
+
+export function getBridgeServiceStatus(): BridgeServiceStatusResponse {
+  const runtime = getBridgeRuntime()
+  const primaryRuntime = runtime.primaryRuntime
+  const primaryNode = runtime.nodes.find(node => node.node_id === primaryRuntime?.nodeId) ?? runtime.nodes[0] ?? null
+
+  return {
+    generatedAt: runtime.generatedAt,
+    serviceModeActive: Boolean(primaryRuntime?.supervisor.serviceModeActive),
+    runtimePid: primaryRuntime?.supervisor.runtimePid ?? null,
+    uptimeSeconds: primaryRuntime?.uptimeSeconds ?? 0,
+    restartCount: primaryRuntime?.supervisor.restartCount ?? 0,
+    reconnectCount: primaryRuntime?.reconnectCount ?? 0,
+    lastCrashReason: primaryRuntime?.supervisor.lastCrashReason ?? null,
+    runtimeHealth: primaryRuntime?.nodeHealth ?? (primaryNode?.status === 'online' ? 'online' : 'disconnected'),
+    startupMode: primaryRuntime?.supervisor.startupMode ?? 'manual',
+    logPath: primaryRuntime?.supervisor.logPath ?? null,
+    persistentNodeState: primaryNode,
   }
 }

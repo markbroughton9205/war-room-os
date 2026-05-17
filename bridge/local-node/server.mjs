@@ -11,6 +11,10 @@ const NODE_TYPE = process.env.WAR_ROOM_BRIDGE_NODE_TYPE || 'commander_laptop'
 const TRUST_LEVEL = process.env.WAR_ROOM_BRIDGE_TRUST_LEVEL || 'engineering'
 const LAUNCH_MODE = process.env.WAR_ROOM_BRIDGE_LAUNCH_MODE || 'manual'
 const SUPERVISOR_ENABLED = process.env.WAR_ROOM_BRIDGE_SUPERVISED === '1' || LAUNCH_MODE === 'supervised' || LAUNCH_MODE === 'task_scheduler'
+const SERVICE_MODE_ACTIVE = process.env.WAR_ROOM_BRIDGE_SERVICE_MODE === '1'
+const STARTUP_MODE = process.env.WAR_ROOM_BRIDGE_STARTUP_MODE || (LAUNCH_MODE === 'task_scheduler' ? 'login' : 'manual')
+const RUNTIME_LOG_PATH = process.env.WAR_ROOM_BRIDGE_LOG_PATH || null
+const LAST_CRASH_REASON = process.env.WAR_ROOM_BRIDGE_LAST_CRASH_REASON || null
 
 const ALLOWED_ACTIONS = ['model_list', 'prompt_test', 'local_inference', 'diagnostics', 'health_check']
 const MAX_BACKOFF_MS = 60_000
@@ -196,6 +200,11 @@ async function sendHeartbeat() {
         lastRestartAt: supervisorLastRestartAt,
         backoffMs: currentBackoffMs,
         launchMode: LAUNCH_MODE === 'supervised' || LAUNCH_MODE === 'task_scheduler' ? LAUNCH_MODE : 'manual',
+        serviceModeActive: SERVICE_MODE_ACTIVE,
+        runtimePid: process.pid,
+        startupMode: STARTUP_MODE === 'login' || STARTUP_MODE === 'boot' ? STARTUP_MODE : 'manual',
+        logPath: RUNTIME_LOG_PATH,
+        lastCrashReason: LAST_CRASH_REASON,
       },
     },
     capabilities: ALLOWED_ACTIONS,
