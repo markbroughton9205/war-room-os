@@ -12,6 +12,7 @@ import { LOCAL_FAMILY_AGENTS } from '@/lib/local-agent/family-agents'
 import { LOCAL_AGENT_ENGINES, LOCAL_AGENT_RELIABILITY_PRINCIPLES, LOCAL_AGENT_TASK_LIFECYCLE } from '@/lib/local-agent/engines'
 import { LOCAL_TASK_CATEGORIES } from '@/lib/local-agent/router'
 import type { LocalAgentBridgeStatusResponse, LocalAgentEngineId, LocalFamilyAgentsResponse, LocalTaskCategory, LocalTaskRoutingDecision } from '@/lib/local-agent/types'
+import type { BridgeStatusResponse } from '@/lib/bridge/types'
 import { INCOME_WORKERS, INCOME_WORKER_WORKFLOW } from '@/lib/income-workers/registry'
 import type { IncomeWorkerCandidate, IncomeWorkerScoutResult } from '@/lib/income-workers/types'
 import type { IncomeCouncilReview } from '@/lib/income-workers/councilReview'
@@ -804,6 +805,36 @@ const INITIAL_LOCAL_AGENT_BRIDGE: LocalAgentBridgeStatusResponse = {
   rollbackCheckpointStatus: 'not created',
   checkedAt: '',
   lastSuccessfulHandshakeAt: null,
+}
+const INITIAL_OFFICIAL_BRIDGE_STATUS: BridgeStatusResponse = {
+  mode: 'DISCONNECTED',
+  authenticated: false,
+  stale: true,
+  tokenConfigured: false,
+  node: {
+    name: 'Commander Node',
+    online: false,
+    lastHeartbeat: null,
+    activeProvider: null,
+    activeModel: null,
+    latencyMs: null,
+  },
+  providers: [],
+  capabilities: ['model_list', 'prompt_test', 'local_inference', 'diagnostics', 'health_check'],
+  heartbeatIntervalSeconds: 20,
+  staleTimeoutSeconds: 50,
+  pendingInvocations: 0,
+  updatedAt: '',
+  securityBoundaries: [
+    'No shell execution',
+    'No arbitrary command execution',
+    'No arbitrary localhost forwarding',
+    'No filesystem writes',
+    'No deployment control',
+    'No OS automation',
+    'Approval gates remain external and explicit',
+  ],
+  futureConnectors: ['OpenHands', 'Continue', 'Aider', 'Goose', 'Codex'],
 }
 const INITIAL_LOCAL_FAMILY_AGENTS: LocalFamilyAgentsResponse = {
   ollamaDetected: false,
@@ -3812,6 +3843,109 @@ function formatLocalModelLabel(model: string | null | undefined) {
     .replace(/\b([a-z])/g, value => value.toUpperCase())
 }
 
+function OfficialLocalBridgePanel({
+  status,
+  onRefresh,
+}: {
+  status: BridgeStatusResponse
+  onRefresh: () => void
+}) {
+  const modeColor: Record<BridgeStatusResponse['mode'], string> = {
+    DISCONNECTED: '#F87171',
+    CONNECTING: '#FBBF24',
+    AUTHENTICATED: '#60A5FA',
+    'LOCAL AI ACTIVE': '#34D399',
+  }
+  const activeProvider = status.node.activeProvider === 'lm_studio'
+    ? 'LM Studio'
+    : status.node.activeProvider === 'ollama'
+      ? 'Ollama'
+      : 'none'
+  const lastHeartbeat = status.node.lastHeartbeat ? new Date(status.node.lastHeartbeat).toLocaleString() : 'none'
+
+  return (
+    <div className="relative z-20 flex-shrink-0 border-b border-yellow-900 px-6 py-3 pointer-events-auto"
+      style={{ background: 'linear-gradient(135deg, rgba(96,165,250,0.045), rgba(52,211,153,0.025), rgba(0,0,0,0.14))' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#60A5FA' }}>OFFICIAL CLOUD BRIDGE</h2>
+          <p className="mt-1 text-xs" style={{ color: '#777' }}>
+            Vercel War Room receives authenticated outbound heartbeats from Commander Node. Localhost is never exposed directly.
+          </p>
+        </div>
+        <button type="button" onClick={onRefresh}
+          className="relative z-30 cursor-pointer rounded px-3 py-2 text-xs font-bold tracking-widest pointer-events-auto"
+          style={{ border: '1px solid rgba(96,165,250,0.35)', color: '#BAE6FD', background: 'rgba(0,0,0,0.28)' }}>
+          Refresh Cloud Bridge
+        </button>
+      </div>
+
+      <div className="grid gap-2 text-xs md:grid-cols-5">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>BRIDGE MODE</div>
+          <div className="mt-1 font-bold" style={{ color: modeColor[status.mode] }}>{status.mode}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.tokenConfigured ? 'token configured' : 'token missing'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.20)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>NODE IDENTITY</div>
+          <div className="mt-1 font-bold" style={{ color: status.node.online ? '#34D399' : '#94A3B8' }}>{status.node.name}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.node.online ? 'online' : 'offline'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.20)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>ACTIVE PROVIDER</div>
+          <div className="mt-1 font-bold" style={{ color: status.node.activeProvider ? '#FDE68A' : '#777' }}>{activeProvider}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{formatLocalModelLabel(status.node.activeModel)}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.20)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>LAST HEARTBEAT</div>
+          <div className="mt-1 font-bold" style={{ color: status.stale ? '#FCA5A5' : '#DDD6FE' }}>{lastHeartbeat}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>stale timeout {status.staleTimeoutSeconds}s</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.20)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>HEARTBEAT</div>
+          <div className="mt-1 font-bold" style={{ color: '#A7F3D0' }}>{status.heartbeatIntervalSeconds}s outbound</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.pendingInvocations} pending invocation(s)</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(96,165,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#BAE6FD' }}>APPROVED ACTIONS</div>
+          <div className="flex flex-wrap gap-1">
+            {status.capabilities.map(capability => (
+              <span key={capability} className="rounded px-2 py-1 text-[10px] tracking-widest" style={{ border: '1px solid rgba(96,165,250,0.22)', color: '#BFDBFE' }}>{capability}</span>
+            ))}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#A7F3D0' }}>LOCAL PROVIDERS</div>
+          <div className="space-y-1">
+            {status.providers.length > 0 ? status.providers.map(provider => (
+              <div key={provider.provider} className="flex items-center justify-between gap-2 rounded px-2 py-1" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+                <span>{provider.provider === 'lm_studio' ? 'LM Studio' : 'Ollama'}</span>
+                <span style={{ color: provider.functional ? '#34D399' : provider.reachable ? '#FBBF24' : '#94A3B8' }}>
+                  {provider.functional ? 'functional' : provider.reachable ? 'reachable' : 'offline'}
+                </span>
+              </div>
+            )) : <div style={{ color: '#777' }}>No fresh provider heartbeat.</div>}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(248,113,113,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FCA5A5' }}>SECURITY BOUNDARIES</div>
+          <div className="flex flex-wrap gap-1">
+            {status.securityBoundaries.map(boundary => (
+              <span key={boundary} className="rounded px-2 py-1 text-[10px] tracking-widest" style={{ border: '1px solid rgba(248,113,113,0.18)', color: '#FCA5A5' }}>{boundary}</span>
+            ))}
+          </div>
+          <div className="mt-2 text-[10px]" style={{ color: '#94A3B8' }}>
+            Future connectors: {status.futureConnectors.join(', ')}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function LocalCodeAgentBridgePanel({
   bridge,
   onRefresh,
@@ -5568,6 +5702,7 @@ function Home() {
   const [repoAwareness, setRepoAwareness] = useState<RepoAwarenessState>(INITIAL_REPO_AWARENESS_STATE)
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
   const [redTeamCoder, setRedTeamCoder] = useState<RedTeamCoderUiState>(INITIAL_RED_TEAM_CODER_STATE)
+  const [officialBridgeStatus, setOfficialBridgeStatus] = useState<BridgeStatusResponse>(INITIAL_OFFICIAL_BRIDGE_STATUS)
   const [localAgentBridge, setLocalAgentBridge] = useState<LocalAgentBridgeStatusResponse>(INITIAL_LOCAL_AGENT_BRIDGE)
   const [localFamilyAgents, setLocalFamilyAgents] = useState<LocalFamilyAgentsResponse>(INITIAL_LOCAL_FAMILY_AGENTS)
   const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
@@ -6928,6 +7063,28 @@ function Home() {
     }
   }
 
+  const loadOfficialBridgeStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/bridge/status', { cache: 'no-store' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Official bridge status failed')
+      setOfficialBridgeStatus(data)
+    } catch {
+      setOfficialBridgeStatus(prev => ({
+        ...prev,
+        mode: 'DISCONNECTED',
+        authenticated: false,
+        stale: true,
+        node: {
+          ...prev.node,
+          online: false,
+        },
+        providers: [],
+        updatedAt: new Date().toISOString(),
+      }))
+    }
+  }, [])
+
   const loadLocalAgentBridge = useCallback(async () => {
     try {
       const res = await fetch('/api/local-agent/status', { cache: 'no-store' })
@@ -6960,8 +7117,8 @@ function Home() {
   }, [])
 
   const refreshLocalEngineeringState = useCallback(async () => {
-    await Promise.allSettled([loadLocalAgentBridge(), loadLocalFamilyAgents()])
-  }, [loadLocalAgentBridge, loadLocalFamilyAgents])
+    await Promise.allSettled([loadOfficialBridgeStatus(), loadLocalAgentBridge(), loadLocalFamilyAgents()])
+  }, [loadOfficialBridgeStatus, loadLocalAgentBridge, loadLocalFamilyAgents])
 
   useEffect(() => {
     if (operatorTab !== 'agents' && operatorTab !== 'diagnostics') return
@@ -10696,6 +10853,10 @@ function Home() {
                 </div>
                 <BridgeArchitectPanel engines={engineList} />
                 <EngineeringAgentBridgePanel status={engineeringStatusBridge} />
+                <OfficialLocalBridgePanel
+                  status={officialBridgeStatus}
+                  onRefresh={() => void loadOfficialBridgeStatus()}
+                />
                 <LocalCodeAgentBridgePanel
                   bridge={localAgentBridge}
                   onRefresh={refreshLocalEngineeringState}
@@ -10908,6 +11069,10 @@ function Home() {
                 <CommandRouterPanel />
                 <InternetAccessPanel internet={internetStatus} onRefresh={() => void loadInternetStatus()} />
                 <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
+                <OfficialLocalBridgePanel
+                  status={officialBridgeStatus}
+                  onRefresh={() => void loadOfficialBridgeStatus()}
+                />
                 <LocalCodeAgentBridgePanel
                   bridge={localAgentBridge}
                   onRefresh={refreshLocalEngineeringState}

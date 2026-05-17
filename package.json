@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "bridge:start": "node bridge/local-node/server.mjs",
     "lint": "eslint"
   },
   "dependencies": {
