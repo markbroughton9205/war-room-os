@@ -3399,7 +3399,7 @@ function FamilyPresencePanel({
                 </span>
               </div>
               <div className="relative mt-3 flex items-center justify-between">
-                <div className="absolute left-1 right-1 top-1/2 h-px -translate-y-1/2"
+                <div className="pointer-events-none absolute left-1 right-1 top-1/2 h-px -translate-y-1/2"
                   style={{ background: active ? `${group.color}55` : 'rgba(255,255,255,0.08)' }} />
                 {group.nodes.map((node, index) => {
                   const nodeActive = active && index === 0
@@ -3938,7 +3938,7 @@ function LocalCodeAgentBridgePanel({
   const handoff = (decree: string) => onCouncilHandoff(decree)
 
   return (
-    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+    <div data-agents-panel className="relative z-20 flex-shrink-0 border-b border-yellow-900 px-6 py-3 pointer-events-auto"
       style={{ background: 'linear-gradient(135deg, rgba(52,211,153,0.04), rgba(56,189,248,0.018), rgba(0,0,0,0.12))' }}>
       <div className="mb-3 rounded-xl px-3 py-3"
         style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.32)', boxShadow: '0 0 30px rgba(52,211,153,0.045)' }}>
@@ -3968,19 +3968,19 @@ function LocalCodeAgentBridgePanel({
             Operational hub for local AI, coding connectors, Cursor handoff, approval gates, and rollback-aware engineering flow.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="relative z-30 flex flex-wrap gap-2 pointer-events-auto">
           <button type="button" onClick={() => handoff('Claude Family, diagnose the local engineering bridge posture and recommend the safest next setup step for War Room.')}
-            className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            className="relative z-30 cursor-pointer rounded px-3 py-2 text-xs font-bold tracking-widest pointer-events-auto"
             style={{ border: '1px solid rgba(96,165,250,0.35)', color: '#BAE6FD', background: 'rgba(0,0,0,0.28)' }}>
             Diagnose
           </button>
           <button type="button" onClick={() => handoff('Bridge Architect, create a local engineering bridge setup plan that preserves approval gates, rollback protection, and runtime truth.')}
-            className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            className="relative z-30 cursor-pointer rounded px-3 py-2 text-xs font-bold tracking-widest pointer-events-auto"
             style={{ border: '1px solid rgba(255,215,0,0.35)', color: '#FDE68A', background: 'rgba(0,0,0,0.28)' }}>
             Setup Plan
           </button>
           <button type="button" onClick={onRefresh}
-            className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            className="relative z-30 cursor-pointer rounded px-3 py-2 text-xs font-bold tracking-widest pointer-events-auto"
             style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#34D399', background: 'rgba(0,0,0,0.28)' }}>
             Refresh Bridge
           </button>
@@ -4062,12 +4062,12 @@ function LocalCodeAgentBridgePanel({
                   )}
                   <div className="mt-2 flex flex-wrap gap-1">
                     <button type="button" onClick={() => handoff(councilPrompt)}
-                      className="rounded px-2 py-1 text-[9px] font-bold tracking-widest"
+                      className="relative z-30 cursor-pointer rounded px-2 py-1 text-[9px] font-bold tracking-widest pointer-events-auto"
                       style={{ border: '1px solid rgba(96,165,250,0.32)', color: '#BAE6FD' }}>
                       Ask Council
                     </button>
                     <button type="button" onClick={() => handoff(`${meta.councilFamily}, generate a complete ${engine.name} install and connection guide for War Room engineering operations. Include localhost expectations and no-execution guardrails.`)}
-                      className="rounded px-2 py-1 text-[9px] font-bold tracking-widest"
+                      className="relative z-30 cursor-pointer rounded px-2 py-1 text-[9px] font-bold tracking-widest pointer-events-auto"
                       style={{ border: '1px solid rgba(255,215,0,0.28)', color: '#FDE68A' }}>
                       Install Guide
                     </button>
@@ -4108,7 +4108,7 @@ function LocalCodeAgentBridgePanel({
             <div className="mt-1 text-[10px]" style={{ color: '#FDE68A' }}>Why now: strengthens the Cursor handoff lane without granting hidden execution.</div>
             <div className="mt-1 text-[10px]" style={{ color: '#A7F3D0' }}>Difficulty: {primaryRecommendation?.engine.configurable ? 'medium' : 'low to medium'} - Related family: {primaryRecommendation?.meta.councilFamily ?? 'Bridge Architect'}</div>
             <button type="button" onClick={() => primaryRecommendation && handoff(`${primaryRecommendation.meta.councilFamily}, prepare a setup plan for ${primaryRecommendation.engine.name} as the next high-impact War Room engineering bridge upgrade.`)}
-              className="mt-3 rounded px-3 py-2 text-[10px] font-bold tracking-widest"
+              className="relative z-30 mt-3 cursor-pointer rounded px-3 py-2 text-[10px] font-bold tracking-widest pointer-events-auto"
               style={{ border: '1px solid rgba(255,215,0,0.32)', color: '#FDE68A', background: 'rgba(0,0,0,0.2)' }}>
               Ask Council For Plan
             </button>
@@ -4160,7 +4160,7 @@ function LocalCodeAgentBridgePanel({
             </div>
           )}
           <button type="button" onClick={() => handoff('Claude Family, generate an actionable local model onboarding plan for War Room. Cover Ollama, LM Studio, localhost checks, family-agent benefits, and approval safeguards.')}
-            className="mt-3 rounded px-3 py-2 text-[10px] font-bold tracking-widest"
+            className="relative z-30 mt-3 cursor-pointer rounded px-3 py-2 text-[10px] font-bold tracking-widest pointer-events-auto"
             style={{ border: '1px solid rgba(52,211,153,0.32)', color: '#BBF7D0', background: 'rgba(0,0,0,0.2)' }}>
             Generate Onboarding Plan
           </button>
@@ -4637,7 +4637,7 @@ const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
   }
 
   return (
-    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+    <div data-agents-panel className="relative z-20 flex-shrink-0 border-b border-yellow-900 px-6 py-3 pointer-events-auto"
       style={{ background: 'rgba(167,139,250,0.016)' }}>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -4649,7 +4649,7 @@ const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
           </p>
         </div>
         <button type="button" onClick={onRefresh}
-          className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+          className="relative z-30 cursor-pointer rounded px-3 py-2 text-xs font-bold tracking-widest pointer-events-auto"
           style={{ border: '1px solid rgba(167,139,250,0.35)', color: '#A78BFA', background: 'rgba(0,0,0,0.28)' }}>
           Refresh Families
         </button>
@@ -10173,6 +10173,24 @@ function Home() {
           animation: tool-dot-pulse 900ms ease-in-out infinite;
         }
 
+        [data-agents-panel] {
+          isolation: isolate;
+          pointer-events: auto;
+        }
+
+        [data-agents-panel] button,
+        [data-agents-panel] input,
+        [data-agents-panel] select,
+        [data-agents-panel] summary {
+          pointer-events: auto;
+          position: relative;
+          z-index: 30;
+        }
+
+        [data-agents-panel] button:not(:disabled) {
+          cursor: pointer;
+        }
+
         @keyframes message-fade-in {
           from {
             opacity: 0;
@@ -10263,7 +10281,7 @@ function Home() {
       {standingPermissionStrip}
 
       {memoryNotification && (
-        <div className="fixed right-6 top-28 z-30 message-fade-in rounded px-3 py-2 text-xs font-bold tracking-widest"
+        <div className="pointer-events-none fixed right-6 top-28 z-30 message-fade-in rounded px-3 py-2 text-xs font-bold tracking-widest"
           style={{ background: 'rgba(52,211,153,0.14)', border: '1px solid rgba(52,211,153,0.35)', color: '#34D399' }}>
           {memoryNotification}
         </div>
