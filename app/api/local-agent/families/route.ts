@@ -88,9 +88,9 @@ export async function GET() {
         configuredModel: lmStudioModel,
         failureKind: lmStudioFunctionalTest.failureKind,
         handshakeState: lmStudioFunctionalTest.functional
-          ? 'prompt_test_passed'
+          ? 'prompt_verified'
           : lmStudioProbe.models.length > 0
-            ? 'handshake_failed'
+            ? 'degraded'
             : lmStudioProbe.handshakeState,
         latencyMs: lmStudioFunctionalTest.latencyMs,
         modelUsed: lmStudioFunctionalTest.modelUsed,

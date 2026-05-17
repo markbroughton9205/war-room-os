@@ -7,6 +7,7 @@ import type {
   LocalAgentEngine,
   LocalAgentEngineId,
   LocalAgentStatusEntry,
+  LocalProviderHandshakeState,
 } from '@/lib/local-agent/types'
 
 export const dynamic = 'force-dynamic'
@@ -58,8 +59,9 @@ async function detectLMStudio(engine: LocalAgentEngine): Promise<LocalAgentStatu
       modelUsed: configuredModel,
       latencyMs: null,
       failureKind: failureKind ?? 'model_not_loaded',
-      handshakeState: failureKind === 'connection_refused' || failureKind === 'timeout' ? 'handshake_failed' : 'no_model_loaded',
+      handshakeState: failureKind === 'connection_refused' || failureKind === 'timeout' ? 'awaiting_connection' : 'no_model_loaded',
       testResponsePreview: null,
+      lastSuccessfulHandshakeAt: null,
     }
   }
 
@@ -77,13 +79,14 @@ async function detectLMStudio(engine: LocalAgentEngine): Promise<LocalAgentStatu
     chatCompletionsReachable: functionalTest.functional,
     functional: functionalTest.functional,
     lastFunctionalTestAt: checkedAt,
+    lastSuccessfulHandshakeAt: functionalTest.functional ? checkedAt : null,
     error: functionalTest.error,
     configured,
     configuredModel,
     modelUsed: functionalTest.modelUsed,
     latencyMs: functionalTest.latencyMs,
     failureKind: functionalTest.failureKind,
-    handshakeState: functionalTest.functional ? 'prompt_test_passed' : 'handshake_failed',
+    handshakeState: functionalTest.functional ? 'prompt_verified' : 'degraded',
     testResponsePreview: functionalTest.text ? functionalTest.text.slice(0, 160) : null,
   }
 }
@@ -168,6 +171,26 @@ async function detectEngine(engine: LocalAgentEngine): Promise<LocalAgentStatusE
   }
 }
 
+function bridgeStateFromSelected(engine: LocalAgentStatusEntry | null): LocalProviderHandshakeState {
+  if (!engine) return 'awaiting_connection'
+  if (engine.handshakeState) return engine.handshakeState
+  if (engine.functional) return 'prompt_verified'
+  if (engine.modelsReachable) return 'model_loaded'
+  if (engine.status === 'reachable') return 'endpoint_reachable'
+  if (engine.status === 'error') return 'degraded'
+  return 'awaiting_connection'
+}
+
+function selectedEngineScore(engine: LocalAgentStatusEntry) {
+  if (engine.id === 'lm_studio' && engine.functional) return 100
+  if (engine.functional) return 90
+  if (engine.id === 'lm_studio' && engine.handshakeState === 'model_loaded') return 80
+  if (engine.id === 'lm_studio' && engine.status === 'reachable') return 70
+  if (engine.status === 'detected') return 60
+  if (engine.status === 'reachable') return 50
+  return 0
+}
+
 export async function GET() {
   try {
     const detectedEngines = await Promise.all(LOCAL_AGENT_ENGINES.map(detectEngine))
@@ -175,18 +198,25 @@ export async function GET() {
       acc[engine.id] = engine
       return acc
     }, {} as Record<LocalAgentEngineId, LocalAgentStatusEntry>)
-    const selectedEngine = detectedEngines.find(engine => engine.functional || engine.status === 'detected' || engine.status === 'reachable')?.id ?? null
+    const selectedEntry = [...detectedEngines].sort((a, b) => selectedEngineScore(b) - selectedEngineScore(a))[0] ?? null
+    const selectedEngine = selectedEntry && selectedEngineScore(selectedEntry) > 0 ? selectedEntry.id : null
+    const selectedStatus = selectedEngine ? engines[selectedEngine] : null
+    const bridgeState = bridgeStateFromSelected(selectedStatus)
     const bridge: LocalAgentBridgeStatus = selectedEngine ? 'online' : 'config_needed'
 
     const body: LocalAgentBridgeStatusResponse = {
       bridge,
+      bridgeState,
       engines,
       selectedEngine,
+      selectedEngineLabel: selectedStatus ? selectedStatus.name : null,
+      selectedModel: selectedStatus?.modelUsed ?? selectedStatus?.configuredModel ?? null,
       repoAccessStatus: 'read-only status bridge; write access not granted',
       lastTask: null,
       qaStatus: 'idle',
       rollbackCheckpointStatus: 'not created',
       checkedAt: new Date().toISOString(),
+      lastSuccessfulHandshakeAt: selectedStatus?.lastSuccessfulHandshakeAt ?? null,
     }
 
     return NextResponse.json(body)
@@ -205,13 +235,17 @@ export async function GET() {
     return NextResponse.json(
       {
         bridge: 'error',
+        bridgeState: 'degraded',
         engines,
         selectedEngine: null,
+        selectedEngineLabel: null,
+        selectedModel: null,
         repoAccessStatus: 'read-only status bridge; write access not granted',
         lastTask: null,
         qaStatus: 'error',
         rollbackCheckpointStatus: 'not created',
         checkedAt: new Date().toISOString(),
+        lastSuccessfulHandshakeAt: null,
       } satisfies LocalAgentBridgeStatusResponse,
       { status: 500 },
     )

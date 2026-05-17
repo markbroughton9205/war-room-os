@@ -784,6 +784,7 @@ const INITIAL_PAYMENT_LEDGER_STATE: PaymentLedgerState = {
 }
 const INITIAL_LOCAL_AGENT_BRIDGE: LocalAgentBridgeStatusResponse = {
   bridge: 'config_needed',
+  bridgeState: 'awaiting_connection',
   engines: LOCAL_AGENT_ENGINES.reduce((acc, engine) => {
     acc[engine.id] = {
       id: engine.id,
@@ -795,11 +796,14 @@ const INITIAL_LOCAL_AGENT_BRIDGE: LocalAgentBridgeStatusResponse = {
     return acc
   }, {} as LocalAgentBridgeStatusResponse['engines']),
   selectedEngine: null,
+  selectedEngineLabel: null,
+  selectedModel: null,
   repoAccessStatus: 'read-only status bridge; write access not granted',
   lastTask: null,
   qaStatus: 'idle',
   rollbackCheckpointStatus: 'not created',
   checkedAt: '',
+  lastSuccessfulHandshakeAt: null,
 }
 const INITIAL_LOCAL_FAMILY_AGENTS: LocalFamilyAgentsResponse = {
   ollamaDetected: false,
@@ -808,7 +812,7 @@ const INITIAL_LOCAL_FAMILY_AGENTS: LocalFamilyAgentsResponse = {
   lmStudioModels: [],
   providers: {
     ollama: { provider: 'ollama', detected: false, reachable: false, functional: false, models: [], error: null },
-    lmStudio: { provider: 'lm_studio', detected: false, reachable: false, functional: false, models: [], error: null },
+    lmStudio: { provider: 'lm_studio', detected: false, reachable: false, functional: false, models: [], error: null, handshakeState: 'awaiting_connection' },
   },
   preferredProvider: null,
   preferredModel: null,
@@ -3878,12 +3882,13 @@ function LocalCodeAgentBridgePanel({
       councilFamily: 'Kimi Family',
     },
   }
-  const operationalStateFor = (status: LocalAgentBridgeStatusResponse['engines'][LocalAgentEngineId]['status']): OperationalEngineState => {
-    if (status === 'detected') return 'available'
-    if (status === 'reachable') return 'standby'
-    if (status === 'config_needed') return 'install_ready'
-    if (status === 'not_detected') return 'disconnected'
-    if (status === 'error') return 'degraded'
+  const operationalStateFor = (status: LocalAgentBridgeStatusResponse['engines'][LocalAgentEngineId]): OperationalEngineState => {
+    if (status.handshakeState === 'prompt_verified' || status.handshakeState === 'prompt_test_passed' || status.functional) return 'available'
+    if (status.handshakeState === 'model_loaded' || status.handshakeState === 'endpoint_reachable' || status.status === 'reachable') return 'standby'
+    if (status.handshakeState === 'degraded' || status.handshakeState === 'handshake_failed' || status.status === 'error') return 'degraded'
+    if (status.status === 'detected') return 'available'
+    if (status.status === 'config_needed') return 'install_ready'
+    if (status.status === 'not_detected' || status.handshakeState === 'awaiting_connection') return 'disconnected'
     return 'unavailable'
   }
   const stateStyle: Record<OperationalEngineState, { color: string; border: string; bg: string; label: string }> = {
@@ -3897,7 +3902,7 @@ function LocalCodeAgentBridgePanel({
   const selectedEngine = bridge.selectedEngine ? bridge.engines[bridge.selectedEngine] : null
   const engineEntries = LOCAL_AGENT_ENGINES.map(engine => {
     const status = bridge.engines[engine.id]
-    const state = operationalStateFor(status.status)
+    const state = operationalStateFor(status)
     return { engine, status, state, style: stateStyle[state], meta: engineExperience[engine.id] }
   })
   const availableCount = engineEntries.filter(entry => entry.state === 'available' || entry.state === 'standby').length
@@ -3909,7 +3914,13 @@ function LocalCodeAgentBridgePanel({
     ?? engineEntries.find(entry => entry.engine.id === 'goose')
     ?? engineEntries[0]
   const bridgeHeadline =
-    bridge.bridge === 'online'
+    bridge.bridgeState === 'prompt_verified'
+      ? 'Engineering systems prompt verified'
+      : bridge.bridgeState === 'model_loaded'
+        ? 'Engineering model loaded'
+        : bridge.bridgeState === 'endpoint_reachable'
+          ? 'Engineering endpoint reachable'
+          : bridge.bridge === 'online'
       ? 'Engineering systems online'
       : availableCount > 0 || configuredCount > 0
         ? 'Engineering systems partially online'
@@ -3919,7 +3930,7 @@ function LocalCodeAgentBridgePanel({
     : repo?.gitAvailable
       ? 'Git detected, read bridge pending'
       : 'Repo bridge awaiting scan'
-  const workerState = bridge.bridge === 'online' ? 'Status bridge monitoring' : 'Workers standing by'
+  const workerState = bridge.bridgeState === 'prompt_verified' ? 'Prompt verified' : bridge.bridge === 'online' ? 'Status bridge monitoring' : 'Workers standing by'
   const activityLabel = latestEngineeringTask
     ? latestEngineeringTask.title
     : bridge.lastTask ?? 'No engineering task prepared yet'
@@ -3943,7 +3954,7 @@ function LocalCodeAgentBridgePanel({
             <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(96,165,250,0.22)', color: '#BFDBFE' }}>Local AI: {availableCount > 0 ? `${availableCount} ready` : 'onboarding'}</span>
             <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(255,215,0,0.22)', color: '#FDE68A' }}>Repo: {repoLabel}</span>
             <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(167,139,250,0.22)', color: '#DDD6FE' }}>Queue: {bridge.qaStatus}</span>
-            <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(52,211,153,0.22)', color: '#BBF7D0' }}>Last: {activityLabel}</span>
+            <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(52,211,153,0.22)', color: '#BBF7D0' }}>Last handshake: {bridge.lastSuccessfulHandshakeAt ? new Date(bridge.lastSuccessfulHandshakeAt).toLocaleTimeString() : 'none'}</span>
           </div>
         </div>
       </div>
@@ -3980,7 +3991,13 @@ function LocalCodeAgentBridgePanel({
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>BRIDGE STATUS</div>
           <div className="mt-1 font-bold" style={{ color: bridge.bridge === 'online' ? '#34D399' : bridge.bridge === 'error' ? '#F87171' : '#FBBF24' }}>
-            {bridge.bridge === 'online' ? 'Connected' : bridge.bridge === 'error' ? 'Needs attention' : 'Awaiting local bridge'}
+            {bridge.bridgeState === 'prompt_verified'
+              ? 'Prompt verified'
+              : bridge.bridgeState === 'model_loaded'
+                ? 'Model loaded'
+                : bridge.bridgeState === 'endpoint_reachable'
+                  ? 'Endpoint reachable'
+                  : bridge.bridge === 'online' ? 'Connected' : bridge.bridge === 'error' ? 'Needs attention' : 'Awaiting connection'}
           </div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
@@ -3992,7 +4009,7 @@ function LocalCodeAgentBridgePanel({
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>SELECTED ENGINE</div>
           <div className="mt-1 font-bold" style={{ color: selectedEngine ? '#FFD700' : '#777' }}>
-            {selectedEngine?.name ?? 'none'}
+            {selectedEngine ? `${bridge.selectedEngineLabel ?? selectedEngine.name}${bridge.selectedModel ? ` / ${bridge.selectedModel}` : ''}` : 'none'}
           </div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
@@ -4064,6 +4081,9 @@ function LocalCodeAgentBridgePanel({
                       {status.modelUsed ? <div>Model tested: {status.modelUsed}</div> : null}
                       {typeof status.latencyMs === 'number' ? <div>Latency: {status.latencyMs}ms</div> : null}
                       {status.failureKind ? <div>Failure kind: {status.failureKind}</div> : null}
+                      {status.handshakeState ? <div>Bridge state: {status.handshakeState}</div> : null}
+                      {status.lastSuccessfulHandshakeAt ? <div>Last successful handshake: {new Date(status.lastSuccessfulHandshakeAt).toLocaleString()}</div> : null}
+                      {status.testResponsePreview ? <div>Test preview: {status.testResponsePreview}</div> : null}
                       <div>Message: {status.message}</div>
                       {envHint ? <div>Config hint: {envHint}</div> : null}
                       {status.error ? <div style={{ color: '#FCA5A5' }}>Error: {status.error}</div> : null}
@@ -4158,6 +4178,7 @@ function LocalCodeAgentBridgePanel({
 
       <div className="mt-3 text-xs" style={{ color: '#555' }}>
         Last check: {bridge.checkedAt ? new Date(bridge.checkedAt).toLocaleString() : 'not checked yet'}
+        {bridge.lastSuccessfulHandshakeAt ? ` · last successful handshake ${new Date(bridge.lastSuccessfulHandshakeAt).toLocaleString()}` : ''}
       </div>
     </div>
   )
@@ -4644,7 +4665,7 @@ const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>LM STUDIO</div>
           <div className="mt-1 font-bold" style={{ color: lmStudioProvider.functional ? '#34D399' : families.lmStudioDetected ? '#FFD700' : '#777' }}>
-            {lmStudioProvider.handshakeState === 'prompt_test_passed'
+            {lmStudioProvider.handshakeState === 'prompt_verified' || lmStudioProvider.handshakeState === 'prompt_test_passed'
               ? 'PROMPT TEST PASSED'
               : lmStudioProvider.handshakeState === 'model_loaded'
                 ? 'MODEL LOADED'
@@ -6837,7 +6858,7 @@ function Home() {
 
   const loadLocalAgentBridge = useCallback(async () => {
     try {
-      const res = await fetch('/api/local-agent/status')
+      const res = await fetch('/api/local-agent/status', { cache: 'no-store' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Local agent bridge check failed')
       setLocalAgentBridge(data)
@@ -6853,7 +6874,7 @@ function Home() {
 
   const loadLocalFamilyAgents = useCallback(async () => {
     try {
-      const res = await fetch('/api/local-agent/families')
+      const res = await fetch('/api/local-agent/families', { cache: 'no-store' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Local family registry check failed')
       setLocalFamilyAgents(data)
@@ -6865,6 +6886,15 @@ function Home() {
       }))
     }
   }, [])
+
+  const refreshLocalEngineeringState = useCallback(async () => {
+    await Promise.allSettled([loadLocalAgentBridge(), loadLocalFamilyAgents()])
+  }, [loadLocalAgentBridge, loadLocalFamilyAgents])
+
+  useEffect(() => {
+    if (operatorTab !== 'agents' && operatorTab !== 'diagnostics') return
+    void refreshLocalEngineeringState()
+  }, [operatorTab, refreshLocalEngineeringState])
 
   const loadInternetStatus = useCallback(async () => {
     try {
@@ -10578,7 +10608,7 @@ function Home() {
                 <EngineeringAgentBridgePanel status={engineeringStatusBridge} />
                 <LocalCodeAgentBridgePanel
                   bridge={localAgentBridge}
-                  onRefresh={loadLocalAgentBridge}
+                  onRefresh={refreshLocalEngineeringState}
                   onCouncilHandoff={injectLiveEnvironmentDecree}
                   repo={repoStatus}
                   pendingApprovals={raelActions.filter(action => action.status === 'pending').length}
@@ -10790,7 +10820,7 @@ function Home() {
                 <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
                 <LocalCodeAgentBridgePanel
                   bridge={localAgentBridge}
-                  onRefresh={loadLocalAgentBridge}
+                  onRefresh={refreshLocalEngineeringState}
                   onCouncilHandoff={injectLiveEnvironmentDecree}
                   repo={repoStatus}
                   pendingApprovals={raelActions.filter(action => action.status === 'pending').length}

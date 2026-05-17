@@ -15,11 +15,15 @@ export type LocalAgentEngineStatus =
   | 'error'
 
 export type LocalProviderHandshakeState =
+  | 'awaiting_connection'
   | 'reachable'
+  | 'endpoint_reachable'
   | 'model_loaded'
   | 'prompt_test_passed'
+  | 'prompt_verified'
   | 'handshake_failed'
   | 'no_model_loaded'
+  | 'degraded'
 
 export type LocalModelProvider = 'ollama' | 'lm_studio'
 
@@ -72,6 +76,7 @@ export type LocalAgentStatusEntry = {
   chatCompletionsReachable?: boolean
   functional?: boolean
   lastFunctionalTestAt?: string | null
+  lastSuccessfulHandshakeAt?: string | null
   error?: string | null
   configured?: boolean
   configuredModel?: string | null
@@ -84,13 +89,17 @@ export type LocalAgentStatusEntry = {
 
 export type LocalAgentBridgeStatusResponse = {
   bridge: LocalAgentBridgeStatus
+  bridgeState?: LocalProviderHandshakeState
   engines: Record<LocalAgentEngineId, LocalAgentStatusEntry>
   selectedEngine: LocalAgentEngineId | null
+  selectedEngineLabel?: string | null
+  selectedModel?: string | null
   repoAccessStatus: string
   lastTask: string | null
   qaStatus: string
   rollbackCheckpointStatus: string
   checkedAt: string
+  lastSuccessfulHandshakeAt?: string | null
 }
 
 export type LocalFamilyAgent = {

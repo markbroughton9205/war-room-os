@@ -205,7 +205,7 @@ export async function getLMStudioModels(): Promise<LMStudioProbeResult> {
     configuredModel: config.model,
     modelFromEnv: config.modelFromEnv,
     apiKeyConfigured: Boolean(config.apiKey),
-    handshakeState: lastFailureKind === 'connection_refused' || lastFailureKind === 'timeout' ? 'handshake_failed' : 'no_model_loaded',
+    handshakeState: lastFailureKind === 'connection_refused' || lastFailureKind === 'timeout' ? 'awaiting_connection' : 'no_model_loaded',
   }
 }
 
