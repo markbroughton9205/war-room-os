@@ -15,6 +15,7 @@ type InvokeBody = {
   action?: string
   request?: {
     action?: string
+    nodeId?: string | null
     provider?: string | null
     model?: string | null
     prompt?: string | null
@@ -34,8 +35,9 @@ export async function GET(request: Request) {
     })
   }
 
+  const nodeId = searchParams.get('node_id') ?? searchParams.get('nodeId')
   return NextResponse.json({
-    request: claimNextBridgeInvocation(),
+    request: claimNextBridgeInvocation(nodeId),
   })
 }
 

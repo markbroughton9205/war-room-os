@@ -812,12 +812,19 @@ const INITIAL_OFFICIAL_BRIDGE_STATUS: BridgeStatusResponse = {
   stale: true,
   tokenConfigured: false,
   node: {
+    nodeId: 'commander-node',
     name: 'Commander Node',
+    nodeType: 'commander_laptop',
+    status: 'offline',
     online: false,
     lastHeartbeat: null,
     activeProvider: null,
     activeModel: null,
     latencyMs: null,
+    capabilities: ['model_list', 'prompt_test', 'local_inference', 'diagnostics', 'health_check'],
+    trustLevel: 'engineering',
+    reconnectStatus: 'reconnecting',
+    backoffMs: null,
   },
   providers: [],
   capabilities: ['model_list', 'prompt_test', 'local_inference', 'diagnostics', 'health_check'],
@@ -834,7 +841,27 @@ const INITIAL_OFFICIAL_BRIDGE_STATUS: BridgeStatusResponse = {
     'No OS automation',
     'Approval gates remain external and explicit',
   ],
-  futureConnectors: ['OpenHands', 'Continue', 'Aider', 'Goose', 'Codex'],
+  futureConnectors: ['OpenHands', 'Continue', 'Aider', 'Goose', 'Codex', 'Remote GPU nodes', 'VPS nodes', 'Mobile observer clients', 'Dedicated inference machines'],
+  nodes: [],
+  statusTimeline: [],
+  routingModel: [
+    {
+      taskType: 'coding tasks',
+      routeTo: 'Engineering Node',
+      preferredNodeType: 'engineering_node',
+      preferredProvider: null,
+      trustRequired: 'engineering',
+      notes: 'Bounded engineering requests only.',
+    },
+    {
+      taskType: 'local reasoning',
+      routeTo: 'LM Studio Node',
+      preferredNodeType: 'commander_laptop',
+      preferredProvider: 'lm_studio',
+      trustRequired: 'inference',
+      notes: 'Private local reasoning and prompt tests.',
+    },
+  ],
 }
 const INITIAL_LOCAL_FAMILY_AGENTS: LocalFamilyAgentsResponse = {
   ollamaDetected: false,
@@ -3862,6 +3889,13 @@ function OfficialLocalBridgePanel({
       ? 'Ollama'
       : 'none'
   const lastHeartbeat = status.node.lastHeartbeat ? new Date(status.node.lastHeartbeat).toLocaleString() : 'none'
+  const activeNodes = status.nodes.filter(node => node.status === 'online').length
+  const trustColor: Record<string, string> = {
+    observer: '#93C5FD',
+    inference: '#34D399',
+    engineering: '#FDE68A',
+    restricted: '#FCA5A5',
+  }
 
   return (
     <div className="relative z-20 flex-shrink-0 border-b border-yellow-900 px-6 py-3 pointer-events-auto"
@@ -3889,7 +3923,7 @@ function OfficialLocalBridgePanel({
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.20)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>NODE IDENTITY</div>
           <div className="mt-1 font-bold" style={{ color: status.node.online ? '#34D399' : '#94A3B8' }}>{status.node.name}</div>
-          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.node.online ? 'online' : 'offline'}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.node.status} - {status.node.nodeType}</div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.20)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>ACTIVE PROVIDER</div>
@@ -3904,7 +3938,37 @@ function OfficialLocalBridgePanel({
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.20)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>HEARTBEAT</div>
           <div className="mt-1 font-bold" style={{ color: '#A7F3D0' }}>{status.heartbeatIntervalSeconds}s outbound</div>
-          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.pendingInvocations} pending invocation(s)</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{activeNodes} active node(s) - {status.pendingInvocations} pending</div>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded px-3 py-3 text-xs" style={{ border: '1px solid rgba(96,165,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="font-bold tracking-widest" style={{ color: '#BAE6FD' }}>MULTI-NODE DASHBOARD</div>
+          <span className="rounded px-2 py-1 text-[10px] tracking-widest" style={{ border: '1px solid rgba(96,165,250,0.20)', color: '#93C5FD' }}>
+            ACTIVE NODES: {activeNodes}
+          </span>
+        </div>
+        <div className="grid gap-2 lg:grid-cols-4">
+          {status.nodes.length > 0 ? status.nodes.map(node => (
+            <div key={node.node_id} className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(0,0,0,0.20)' }}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold" style={{ color: '#E5E7EB' }}>{node.node_name}</span>
+                <span className="rounded px-2 py-0.5 text-[9px] tracking-widest" style={{ border: '1px solid rgba(255,255,255,0.12)', color: node.status === 'online' ? '#34D399' : node.status === 'degraded' ? '#FBBF24' : '#94A3B8' }}>{node.status}</span>
+              </div>
+              <div className="mt-2 grid gap-1 text-[10px]" style={{ color: '#94A3B8' }}>
+                <div>NODE HEALTH: {node.reconnect_status}</div>
+                <div>LAST HEARTBEAT: {node.last_heartbeat ? new Date(node.last_heartbeat).toLocaleTimeString() : 'none'}</div>
+                <div>ACTIVE MODEL: {formatLocalModelLabel(node.active_model)}</div>
+                <div>TRUST LEVEL: <span style={{ color: trustColor[node.trust_level] ?? '#CBD5E1' }}>{node.trust_level}</span></div>
+                <div>LATENCY: {typeof node.latency === 'number' ? `${node.latency}ms` : 'n/a'}</div>
+              </div>
+            </div>
+          )) : (
+            <div className="rounded px-3 py-3 text-center tracking-widest lg:col-span-4" style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#64748B' }}>
+              No node heartbeat recorded yet.
+            </div>
+          )}
         </div>
       </div>
 
@@ -3939,6 +4003,31 @@ function OfficialLocalBridgePanel({
           </div>
           <div className="mt-2 text-[10px]" style={{ color: '#94A3B8' }}>
             Future connectors: {status.futureConnectors.join(', ')}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#DDD6FE' }}>ROUTING MODEL</div>
+          <div className="space-y-1">
+            {status.routingModel.map(rule => (
+              <div key={`${rule.taskType}-${rule.routeTo}`} className="rounded px-2 py-2 text-[10px]" style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#CBD5E1' }}>
+                <b style={{ color: '#E9D5FF' }}>{rule.taskType}</b> - {rule.routeTo} - trust: {rule.trustRequired}
+                <div className="mt-1" style={{ color: '#94A3B8' }}>{rule.notes}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FDE68A' }}>STATUS TIMELINE</div>
+          <div className="space-y-1">
+            {status.statusTimeline.length > 0 ? status.statusTimeline.slice(0, 6).map(event => (
+              <div key={event.id} className="rounded px-2 py-2 text-[10px]" style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#CBD5E1' }}>
+                <span style={{ color: event.severity === 'warning' || event.severity === 'critical' ? '#FCA5A5' : '#A7F3D0' }}>{event.eventType}</span>
+                {' '}[{new Date(event.createdAt).toLocaleTimeString()}] {event.summary}
+              </div>
+            )) : <div style={{ color: '#777' }}>No bridge timeline events yet.</div>}
           </div>
         </div>
       </div>

@@ -5,11 +5,20 @@ const LM_STUDIO_BASE_URL = normalizeLMStudioBaseUrl(process.env.LM_STUDIO_BASE_U
 const LM_STUDIO_MODEL = process.env.LM_STUDIO_MODEL || ''
 const CLOUD_BASE_URL = trimTrailingSlash(process.env.WAR_ROOM_CLOUD_BASE_URL || 'http://localhost:3000')
 const BRIDGE_TOKEN = process.env.WAR_ROOM_BRIDGE_TOKEN || ''
+const NODE_ID = normalizeNodeId(process.env.WAR_ROOM_BRIDGE_NODE_ID || 'commander-node')
+const NODE_NAME = process.env.WAR_ROOM_BRIDGE_NODE_NAME || 'Commander Node'
+const NODE_TYPE = process.env.WAR_ROOM_BRIDGE_NODE_TYPE || 'commander_laptop'
+const TRUST_LEVEL = process.env.WAR_ROOM_BRIDGE_TRUST_LEVEL || 'engineering'
 
 const ALLOWED_ACTIONS = ['model_list', 'prompt_test', 'local_inference', 'diagnostics', 'health_check']
+const MAX_BACKOFF_MS = 60_000
 
 function trimTrailingSlash(value) {
   return value.replace(/\/+$/, '')
+}
+
+function normalizeNodeId(value) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'commander-node'
 }
 
 function normalizeLMStudioBaseUrl(value) {
@@ -129,13 +138,18 @@ async function sendHeartbeat() {
     .sort((a, b) => a - b)[0] ?? null
 
   const body = {
-    nodeName: 'Commander Node',
+    nodeId: NODE_ID,
+    nodeName: NODE_NAME,
+    nodeType: NODE_TYPE,
+    trustLevel: TRUST_LEVEL,
+    reconnectStatus: active ? 'online' : 'degraded',
+    backoffMs: null,
     activeProvider: active?.provider ?? null,
     activeModel: active?.activeModel ?? null,
     latencyMs,
     providers,
     capabilities: ALLOWED_ACTIONS,
-    version: 'phase-10c',
+    version: 'phase-10d',
   }
 
   const response = await fetch(`${CLOUD_BASE_URL}/api/bridge/heartbeat`, {
@@ -237,6 +251,7 @@ async function completeInvocation(id, action, output, error = null) {
       action: 'complete',
       result: {
         id,
+        nodeId: NODE_ID,
         action,
         provider: output?.provider ?? null,
         model: output?.model ?? null,
@@ -252,7 +267,7 @@ async function completeInvocation(id, action, output, error = null) {
 }
 
 async function pollInvocations() {
-  const response = await fetch(`${CLOUD_BASE_URL}/api/bridge/invoke?poll=1`, {
+  const response = await fetch(`${CLOUD_BASE_URL}/api/bridge/invoke?poll=1&node_id=${encodeURIComponent(NODE_ID)}`, {
     method: 'GET',
     headers: authHeaders(),
   })
@@ -270,13 +285,15 @@ async function pollInvocations() {
   }
 }
 
-async function loop(label, fn, intervalMs) {
+async function loop(label, fn, intervalMs, failureCount = 0) {
   try {
     await fn()
+    setTimeout(() => void loop(label, fn, intervalMs, 0), intervalMs)
   } catch (error) {
     console.error(`[bridge:${label}] ${error instanceof Error ? error.message : 'failed'}`)
-  } finally {
-    setTimeout(() => void loop(label, fn, intervalMs), intervalMs)
+    const nextFailureCount = failureCount + 1
+    const backoffMs = Math.min(intervalMs * 2 ** Math.min(nextFailureCount, 5), MAX_BACKOFF_MS)
+    setTimeout(() => void loop(label, fn, intervalMs, nextFailureCount), backoffMs)
   }
 }
 
@@ -285,6 +302,6 @@ if (!BRIDGE_TOKEN) {
   process.exit(1)
 }
 
-console.log(`Commander Node bridge starting. Cloud base: ${CLOUD_BASE_URL}`)
+console.log(`${NODE_NAME} bridge starting. Node: ${NODE_ID}. Cloud base: ${CLOUD_BASE_URL}`)
 void loop('heartbeat', sendHeartbeat, HEARTBEAT_MS)
 void loop('invoke', pollInvocations, POLL_MS)
