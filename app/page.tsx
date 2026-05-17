@@ -3795,55 +3795,198 @@ function BridgeArchitectPanel({ engines }: { engines: EngineStatus[] }) {
 function LocalCodeAgentBridgePanel({
   bridge,
   onRefresh,
+  onCouncilHandoff,
+  repo,
+  pendingApprovals = 0,
+  latestEngineeringTask,
 }: {
   bridge: LocalAgentBridgeStatusResponse
   onRefresh: () => void
+  onCouncilHandoff: (decree: string) => void
+  repo?: RepoStatus
+  pendingApprovals?: number
+  latestEngineeringTask?: EngineeringTaskPacket | null
 }) {
+  type OperationalEngineState = 'available' | 'standby' | 'install_ready' | 'disconnected' | 'unavailable' | 'degraded'
   const LOCAL_AGENT_ENV_HINT: Partial<Record<LocalAgentEngineId, string>> = {
     openhands: 'LOCAL_AGENT_OPENHANDS_URL',
     aider: 'LOCAL_AGENT_AIDER_PATH',
     continue: 'LOCAL_AGENT_CONTINUE_PATH',
     goose: 'LOCAL_AGENT_GOOSE_PATH',
   }
-  const bridgeColor = bridge.bridge === 'online' ? '#34D399' : bridge.bridge === 'error' ? '#EF4444' : '#FFD700'
-  const engineStatusStyle: Record<LocalAgentBridgeStatusResponse['engines'][LocalAgentEngineId]['status'], { color: string; label: string }> = {
-    detected: { color: '#34D399', label: 'DETECTED' },
-    reachable: { color: '#34D399', label: 'REACHABLE' },
-    not_detected: { color: '#555', label: 'NOT DETECTED' },
-    config_needed: { color: '#FFD700', label: 'CONFIG NEEDED' },
-    unreachable: { color: '#EF4444', label: 'UNREACHABLE' },
-    error: { color: '#EF4444', label: 'ERROR' },
+  const engineExperience: Record<LocalAgentEngineId, {
+    purpose: string
+    helpsWith: string
+    installSuggestion: string
+    familyRecommendation: string
+    suggestedUse: string
+    tags: string[]
+    councilFamily: string
+  }> = {
+    ollama: {
+      purpose: 'Local private reasoning and offline family-agent experiments.',
+      helpsWith: 'Memory-safe drafts, private architecture probes, local synthesis.',
+      installSuggestion: 'Install Ollama, pull a small model, then confirm localhost:11434 responds.',
+      familyRecommendation: 'Claude Family: private memory-safe experimentation.',
+      suggestedUse: 'Use for offline planning before sending a Cursor task packet.',
+      tags: ['private', 'offline', 'family babies'],
+      councilFamily: 'Claude Family',
+    },
+    lm_studio: {
+      purpose: 'Local OpenAI-compatible inference bench.',
+      helpsWith: 'Fast local model tests, provider fallback experiments, prompt quality checks.',
+      installSuggestion: 'Open LM Studio, load a model, and start the local server on port 1234.',
+      familyRecommendation: 'Grok Family: rapid local inference testing.',
+      suggestedUse: 'Use for quick local signal preparation and model comparisons.',
+      tags: ['local server', 'rapid tests', 'OpenAI-compatible'],
+      councilFamily: 'Grok Family',
+    },
+    openhands: {
+      purpose: 'Multi-file engineering workspace when explicitly configured.',
+      helpsWith: 'Complex repair planning and longer autonomous workflow experiments.',
+      installSuggestion: 'Configure LOCAL_AGENT_OPENHANDS_URL only after reviewing trust boundaries.',
+      familyRecommendation: 'Red Team: review risk before any local execution bridge.',
+      suggestedUse: 'Keep in planning mode until Commander approves connector scope.',
+      tags: ['planned', 'workflow', 'approval-gated'],
+      councilFamily: 'Red Team',
+    },
+    aider: {
+      purpose: 'CLI coding assistant connector for diff-first local repair loops.',
+      helpsWith: 'Patch drafting, small code edits, reviewable implementation plans.',
+      installSuggestion: 'Configure LOCAL_AGENT_AIDER_PATH after confirming CLI install and repo policy.',
+      familyRecommendation: 'Bridge Architect: translate diffs and rollback notes.',
+      suggestedUse: 'Use only after a visible task packet and approval.',
+      tags: ['CLI', 'diff-first', 'patches'],
+      councilFamily: 'Bridge Architect',
+    },
+    continue: {
+      purpose: 'AI-assisted coding bridge inside VS Code or Cursor.',
+      helpsWith: 'Iterative architecture execution, repo navigation, implementation review.',
+      installSuggestion: 'Install Continue, configure models, then keep repo mutation manual-approved.',
+      familyRecommendation: 'ChatGPT Family: improves iterative architecture execution.',
+      suggestedUse: 'Use as a guided coding companion after Council prepares scope.',
+      tags: ['IDE', 'iterative', 'repo-aware'],
+      councilFamily: 'ChatGPT Family',
+    },
+    goose: {
+      purpose: 'Multi-step engineering workflow runner, planned connector.',
+      helpsWith: 'Sequenced repair workflows, validation plans, task execution experiments.',
+      installSuggestion: 'Configure LOCAL_AGENT_GOOSE_PATH only after approval and rollback planning.',
+      familyRecommendation: 'Kimi Family: task decomposition for multi-step workflows.',
+      suggestedUse: 'Use for planned workflow dry-runs before any execution approval.',
+      tags: ['multi-step', 'workflow', 'planned'],
+      councilFamily: 'Kimi Family',
+    },
+  }
+  const operationalStateFor = (status: LocalAgentBridgeStatusResponse['engines'][LocalAgentEngineId]['status']): OperationalEngineState => {
+    if (status === 'detected') return 'available'
+    if (status === 'reachable') return 'standby'
+    if (status === 'config_needed') return 'install_ready'
+    if (status === 'not_detected') return 'disconnected'
+    if (status === 'error') return 'degraded'
+    return 'unavailable'
+  }
+  const stateStyle: Record<OperationalEngineState, { color: string; border: string; bg: string; label: string }> = {
+    available: { color: '#34D399', border: 'rgba(52,211,153,0.36)', bg: 'rgba(52,211,153,0.055)', label: 'Available' },
+    standby: { color: '#60A5FA', border: 'rgba(96,165,250,0.34)', bg: 'rgba(96,165,250,0.045)', label: 'Standby' },
+    install_ready: { color: '#FBBF24', border: 'rgba(251,191,36,0.34)', bg: 'rgba(251,191,36,0.045)', label: 'Install ready' },
+    disconnected: { color: '#94A3B8', border: 'rgba(148,163,184,0.18)', bg: 'rgba(15,23,42,0.30)', label: 'Disconnected' },
+    unavailable: { color: '#64748B', border: 'rgba(100,116,139,0.18)', bg: 'rgba(0,0,0,0.22)', label: 'Unavailable' },
+    degraded: { color: '#F87171', border: 'rgba(248,113,113,0.32)', bg: 'rgba(248,113,113,0.045)', label: 'Degraded' },
   }
   const selectedEngine = bridge.selectedEngine ? bridge.engines[bridge.selectedEngine] : null
+  const engineEntries = LOCAL_AGENT_ENGINES.map(engine => {
+    const status = bridge.engines[engine.id]
+    const state = operationalStateFor(status.status)
+    return { engine, status, state, style: stateStyle[state], meta: engineExperience[engine.id] }
+  })
+  const availableCount = engineEntries.filter(entry => entry.state === 'available' || entry.state === 'standby').length
+  const configuredCount = engineEntries.filter(entry => entry.state === 'available' || entry.state === 'standby' || entry.state === 'install_ready').length
+  const primaryRecommendation =
+    engineEntries.find(entry => entry.engine.id === 'ollama' && entry.state !== 'available')
+    ?? engineEntries.find(entry => entry.engine.id === 'continue' && entry.state !== 'available')
+    ?? engineEntries.find(entry => entry.engine.id === 'lm_studio' && entry.state !== 'available')
+    ?? engineEntries.find(entry => entry.engine.id === 'goose')
+    ?? engineEntries[0]
+  const bridgeHeadline =
+    bridge.bridge === 'online'
+      ? 'Engineering systems online'
+      : availableCount > 0 || configuredCount > 0
+        ? 'Engineering systems partially online'
+        : 'Engineering systems awaiting local engines'
+  const repoLabel = repo?.canReadRepo
+    ? 'Repo bridge connected'
+    : repo?.gitAvailable
+      ? 'Git detected, read bridge pending'
+      : 'Repo bridge awaiting scan'
+  const workerState = bridge.bridge === 'online' ? 'Status bridge monitoring' : 'Workers standing by'
+  const activityLabel = latestEngineeringTask
+    ? latestEngineeringTask.title
+    : bridge.lastTask ?? 'No engineering task prepared yet'
+  const lifecycleFocus = bridge.lastTask ? 'approval_required' : 'requested'
+  const handoff = (decree: string) => onCouncilHandoff(decree)
 
   return (
     <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
-      style={{ background: 'rgba(52,211,153,0.014)' }}>
+      style={{ background: 'linear-gradient(135deg, rgba(52,211,153,0.04), rgba(56,189,248,0.018), rgba(0,0,0,0.12))' }}>
+      <div className="mb-3 rounded-xl px-3 py-3"
+        style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.32)', boxShadow: '0 0 30px rgba(52,211,153,0.045)' }}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-[0.28em]" style={{ color: '#34D399' }}>Engineering overview</div>
+            <div className="mt-1 text-sm font-bold" style={{ color: '#E5E7EB' }}>{bridgeHeadline}</div>
+            <div className="mt-1 text-[10px] leading-relaxed" style={{ color: '#94A3B8' }}>
+              {availableCount} engines available or standby - {repoLabel} - {pendingApprovals} pending approvals - {workerState}
+            </div>
+          </div>
+          <div className="grid min-w-[18rem] gap-1 text-[10px] md:grid-cols-2">
+            <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(96,165,250,0.22)', color: '#BFDBFE' }}>Local AI: {availableCount > 0 ? `${availableCount} ready` : 'onboarding'}</span>
+            <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(255,215,0,0.22)', color: '#FDE68A' }}>Repo: {repoLabel}</span>
+            <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(167,139,250,0.22)', color: '#DDD6FE' }}>Queue: {bridge.qaStatus}</span>
+            <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(52,211,153,0.22)', color: '#BBF7D0' }}>Last: {activityLabel}</span>
+          </div>
+        </div>
+      </div>
+
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>
-            LOCAL CODE AGENT BRIDGE
+            LOCAL ENGINEERING BRIDGE
           </h2>
           <p className="mt-1 text-xs" style={{ color: '#666' }}>
-            Foundation for Ollama, LM Studio, OpenHands, Aider, Continue, and Goose.
+            Operational hub for local AI, coding connectors, Cursor handoff, approval gates, and rollback-aware engineering flow.
           </p>
         </div>
-        <button type="button" onClick={onRefresh}
-          className="rounded px-3 py-2 text-xs font-bold tracking-widest"
-          style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#34D399', background: 'rgba(0,0,0,0.28)' }}>
-          Refresh Bridge
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => handoff('Claude Family, diagnose the local engineering bridge posture and recommend the safest next setup step for War Room.')}
+            className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            style={{ border: '1px solid rgba(96,165,250,0.35)', color: '#BAE6FD', background: 'rgba(0,0,0,0.28)' }}>
+            Diagnose
+          </button>
+          <button type="button" onClick={() => handoff('Bridge Architect, create a local engineering bridge setup plan that preserves approval gates, rollback protection, and runtime truth.')}
+            className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            style={{ border: '1px solid rgba(255,215,0,0.35)', color: '#FDE68A', background: 'rgba(0,0,0,0.28)' }}>
+            Setup Plan
+          </button>
+          <button type="button" onClick={onRefresh}
+            className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#34D399', background: 'rgba(0,0,0,0.28)' }}>
+            Refresh Bridge
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-2 text-xs md:grid-cols-6">
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>BRIDGE STATUS</div>
-          <div className="mt-1 font-bold" style={{ color: bridgeColor }}>{bridge.bridge.toUpperCase().replace('_', ' ')}</div>
+          <div className="mt-1 font-bold" style={{ color: bridge.bridge === 'online' ? '#34D399' : bridge.bridge === 'error' ? '#F87171' : '#FBBF24' }}>
+            {bridge.bridge === 'online' ? 'Connected' : bridge.bridge === 'error' ? 'Needs attention' : 'Awaiting local bridge'}
+          </div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>AVAILABLE ENGINES</div>
           <div className="mt-1 font-bold" style={{ color: '#60A5FA' }}>
-            {Object.values(bridge.engines).filter(engine => engine.status === 'detected').length}
+            {availableCount}
           </div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.2)', background: 'rgba(0,0,0,0.28)' }}>
@@ -3854,7 +3997,7 @@ function LocalCodeAgentBridgePanel({
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>REPO ACCESS</div>
-          <div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{bridge.repoAccessStatus}</div>
+          <div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{repoLabel}</div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>QA STATUS</div>
@@ -3862,41 +4005,66 @@ function LocalCodeAgentBridgePanel({
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>ROLLBACK</div>
-          <div className="mt-1 font-bold" style={{ color: '#EF4444' }}>{bridge.rollbackCheckpointStatus}</div>
+          <div className="mt-1 font-bold" style={{ color: '#FCA5A5' }}>{bridge.rollbackCheckpointStatus === 'not created' ? 'Rollback protected' : bridge.rollbackCheckpointStatus}</div>
         </div>
       </div>
 
       <div className="mt-3 grid gap-2 lg:grid-cols-3">
         <div className="rounded px-3 py-2 text-xs lg:col-span-2" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
-          <div className="mb-2 font-bold tracking-widest" style={{ color: '#34D399' }}>ENGINE DETECTION</div>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#34D399' }}>ENGINE READINESS</div>
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {LOCAL_AGENT_ENGINES.map(engine => {
-              const status = bridge.engines[engine.id]
-              const style = engineStatusStyle[status.status]
-              const isCliFamily = engine.id === 'continue' || engine.id === 'aider' || engine.id === 'openhands' || engine.id === 'goose'
-              const rowLabel =
-                isCliFamily && (status.status === 'not_detected' || status.status === 'config_needed')
-                  ? 'NOT CONFIGURED'
-                  : style.label
+            {engineEntries.map(({ engine, status, state, style, meta }) => {
               const envHint = LOCAL_AGENT_ENV_HINT[engine.id]
+              const councilPrompt = `${meta.councilFamily}, explain ${engine.name} for War Room engineering operations, include setup steps, approval boundaries, rollback protections, and when Commander should use it.`
 
               return (
-                <div key={engine.id} className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+                <div key={engine.id} className="rounded-xl px-3 py-3" style={{ border: `1px solid ${style.border}`, background: style.bg }}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-bold tracking-widest" style={{ color: '#ddd' }}>{engine.name}</span>
-                    <span className="text-[10px] tracking-widest" style={{ color: style.color }}>{rowLabel}</span>
+                    <span className="rounded px-2 py-1 text-[10px] tracking-widest" style={{ color: style.color, border: `1px solid ${style.border}`, background: 'rgba(0,0,0,0.18)' }}>
+                      {style.label}
+                    </span>
                   </div>
-                  <div className="mt-1 text-[10px] leading-relaxed" style={{ color: '#666' }}>
-                    {status.message}
+                  <div className="mt-2 text-[10px] leading-relaxed" style={{ color: '#CBD5E1' }}>{meta.purpose}</div>
+                  <div className="mt-2 text-[10px] leading-relaxed" style={{ color: '#94A3B8' }}>
+                    <b style={{ color: '#E5E7EB' }}>Helps with:</b> {meta.helpsWith}
                   </div>
-                  {isCliFamily && !['detected', 'reachable'].includes(status.status) && envHint && (
-                    <div className="mt-1 text-[10px]" style={{ color: '#888' }}>
-                      Not installed/configured — install or connect to activate. Optional env: <span className="font-mono">{envHint}</span>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {meta.tags.map(tag => (
+                      <span key={tag} className="rounded px-2 py-0.5 text-[9px] tracking-widest" style={{ border: '1px solid rgba(255,255,255,0.10)', color: '#94A3B8' }}>{tag}</span>
+                    ))}
+                  </div>
+                  <div className="mt-2 rounded px-2 py-2 text-[10px] leading-relaxed" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.20)', color: '#A7F3D0' }}>
+                    <div><b>Family Recommendation:</b> {meta.familyRecommendation}</div>
+                    <div className="mt-1"><b>Suggested Use:</b> {meta.suggestedUse}</div>
+                  </div>
+                  {state !== 'available' && (
+                    <div className="mt-2 rounded px-2 py-2 text-[10px] leading-relaxed" style={{ border: '1px solid rgba(251,191,36,0.16)', color: '#FDE68A', background: 'rgba(251,191,36,0.045)' }}>
+                      {meta.installSuggestion}
                     </div>
                   )}
-                  <div className="mt-1 truncate text-[10px]" style={{ color: '#444' }}>
-                    {status.endpoint ?? 'endpoint not configured'}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <button type="button" onClick={() => handoff(councilPrompt)}
+                      className="rounded px-2 py-1 text-[9px] font-bold tracking-widest"
+                      style={{ border: '1px solid rgba(96,165,250,0.32)', color: '#BAE6FD' }}>
+                      Ask Council
+                    </button>
+                    <button type="button" onClick={() => handoff(`${meta.councilFamily}, generate a complete ${engine.name} install and connection guide for War Room engineering operations. Include localhost expectations and no-execution guardrails.`)}
+                      className="rounded px-2 py-1 text-[9px] font-bold tracking-widest"
+                      style={{ border: '1px solid rgba(255,215,0,0.28)', color: '#FDE68A' }}>
+                      Install Guide
+                    </button>
                   </div>
+                  <details className="mt-2 text-[10px]">
+                    <summary className="cursor-pointer tracking-widest" style={{ color: '#64748B' }}>Diagnostics</summary>
+                    <div className="mt-1 space-y-1 rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)', color: '#64748B' }}>
+                      <div>Raw status: {status.status}</div>
+                      <div>Endpoint: {status.endpoint ?? 'endpoint not configured'}</div>
+                      <div>Message: {status.message}</div>
+                      {envHint ? <div>Config hint: {envHint}</div> : null}
+                      {status.error ? <div style={{ color: '#FCA5A5' }}>Error: {status.error}</div> : null}
+                    </div>
+                  </details>
                 </div>
               )
             })}
@@ -3904,18 +4072,74 @@ function LocalCodeAgentBridgePanel({
         </div>
 
         <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
-          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FFD700' }}>TASK LIFECYCLE</div>
-          <div className="flex flex-wrap gap-1">
-            {LOCAL_AGENT_TASK_LIFECYCLE.map(step => (
-              <span key={step} className="rounded px-2 py-1 text-[10px] tracking-widest"
-                style={{ border: '1px solid #222', color: '#777' }}>
-                {step}
-              </span>
-            ))}
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FFD700' }}>ENGINEERING SUGGESTION</div>
+          <div className="rounded px-3 py-3" style={{ border: `1px solid ${primaryRecommendation?.style.border ?? 'rgba(255,215,0,0.18)'}`, background: 'rgba(0,0,0,0.22)' }}>
+            <div className="font-bold" style={{ color: primaryRecommendation?.style.color ?? '#FFD700' }}>
+              {primaryRecommendation ? `Connect ${primaryRecommendation.engine.name}` : 'Refresh bridge status'}
+            </div>
+            <div className="mt-2 leading-relaxed" style={{ color: '#CBD5E1' }}>{primaryRecommendation?.meta.installSuggestion ?? 'Refresh status to inspect local engineering engines.'}</div>
+            <div className="mt-2 text-[10px] leading-relaxed" style={{ color: '#94A3B8' }}>
+              Benefit: {primaryRecommendation?.meta.helpsWith ?? 'Clearer local readiness.'}
+            </div>
+            <div className="mt-1 text-[10px]" style={{ color: '#FDE68A' }}>Why now: strengthens the Cursor handoff lane without granting hidden execution.</div>
+            <div className="mt-1 text-[10px]" style={{ color: '#A7F3D0' }}>Difficulty: {primaryRecommendation?.engine.configurable ? 'medium' : 'low to medium'} - Related family: {primaryRecommendation?.meta.councilFamily ?? 'Bridge Architect'}</div>
+            <button type="button" onClick={() => primaryRecommendation && handoff(`${primaryRecommendation.meta.councilFamily}, prepare a setup plan for ${primaryRecommendation.engine.name} as the next high-impact War Room engineering bridge upgrade.`)}
+              className="mt-3 rounded px-3 py-2 text-[10px] font-bold tracking-widest"
+              style={{ border: '1px solid rgba(255,215,0,0.32)', color: '#FDE68A', background: 'rgba(0,0,0,0.2)' }}>
+              Ask Council For Plan
+            </button>
           </div>
-          <div className="mt-3 rounded px-2 py-2" style={{ border: '1px solid #222', color: '#555', background: 'rgba(0,0,0,0.22)' }}>
-            Last task: {bridge.lastTask ?? 'none'}
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        <div className="rounded px-3 py-3 text-xs lg:col-span-2" style={{ border: '1px solid rgba(96,165,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="font-bold tracking-widest" style={{ color: '#60A5FA' }}>TASK LIFECYCLE</div>
+            <span className="rounded px-2 py-1 text-[9px] tracking-widest" style={{ border: '1px solid rgba(96,165,250,0.22)', color: '#BAE6FD' }}>
+              Last successful operation: status refresh
+            </span>
           </div>
+          <div className="grid gap-2 md:grid-cols-4">
+            {LOCAL_AGENT_TASK_LIFECYCLE.map((step, index) => {
+              const active = step === lifecycleFocus
+              const passed = bridge.lastTask ? index <= LOCAL_AGENT_TASK_LIFECYCLE.indexOf('approval_required') : index === 0
+
+              return (
+                <div key={step} className="rounded px-2 py-2 text-[10px] tracking-widest"
+                  style={{
+                    border: active ? '1px solid rgba(96,165,250,0.55)' : passed ? '1px solid rgba(52,211,153,0.20)' : '1px solid #222',
+                    color: active ? '#BAE6FD' : passed ? '#86EFAC' : '#64748B',
+                    background: active ? 'rgba(96,165,250,0.08)' : 'rgba(0,0,0,0.20)',
+                    boxShadow: active ? '0 0 16px rgba(96,165,250,0.15)' : 'none',
+                  }}>
+                  {active ? 'pulse - ' : passed ? 'ready - ' : ''}{step}
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
+            <div className="rounded px-2 py-2" style={{ border: '1px solid #222', color: '#94A3B8' }}>Recent activity: {activityLabel}</div>
+            <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(255,215,0,0.18)', color: '#FDE68A' }}>Approval waits: {pendingApprovals}</div>
+            <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(248,113,113,0.18)', color: '#FCA5A5' }}>Rollback protection: {bridge.rollbackCheckpointStatus === 'not created' ? 'checkpoint recommended before changes' : bridge.rollbackCheckpointStatus}</div>
+          </div>
+        </div>
+        <div className="rounded px-3 py-3 text-xs" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#34D399' }}>LOCAL MODEL DISCOVERY</div>
+          {availableCount > 0 ? (
+            <div className="leading-relaxed" style={{ color: '#CBD5E1' }}>
+              Local engines are responding. Keep prompts safe, keep execution manual-approved, and use Council handoff buttons to shape the next move.
+            </div>
+          ) : (
+            <div className="leading-relaxed" style={{ color: '#CBD5E1' }}>
+              No local model engine is functional yet. War Room gains private local reasoning, faster experiments, and offline family-agent preparation after Ollama or LM Studio is installed and reachable on localhost.
+            </div>
+          )}
+          <button type="button" onClick={() => handoff('Claude Family, generate an actionable local model onboarding plan for War Room. Cover Ollama, LM Studio, localhost checks, family-agent benefits, and approval safeguards.')}
+            className="mt-3 rounded px-3 py-2 text-[10px] font-bold tracking-widest"
+            style={{ border: '1px solid rgba(52,211,153,0.32)', color: '#BBF7D0', background: 'rgba(0,0,0,0.2)' }}>
+            Generate Onboarding Plan
+          </button>
         </div>
       </div>
 
@@ -3996,55 +4220,118 @@ function InternetAccessPanel({ internet, onRefresh }: { internet: InternetStatus
   )
 }
 
-function RepoAccessPanel({ repo, onRefresh }: { repo: RepoStatus; onRefresh: () => void }) {
+function RepoAccessPanel({
+  repo,
+  onRefresh,
+  onCouncilHandoff,
+}: {
+  repo: RepoStatus
+  onRefresh: () => void
+  onCouncilHandoff: (decree: string) => void
+}) {
   const caps = repo.capabilities
+  const repoState = repo.canReadRepo ? 'Connected' : repo.gitAvailable ? 'Git detected' : 'Awaiting repo scan'
+  const accessState = repo.allowed.write ? 'Approval protected write lane' : 'Read-only secured'
+  const remoteState = repo.remoteConfigured ? 'Remote connected' : 'Remote not configured'
+  const rollbackState = caps.canCreateCheckpoint ? 'Rollback protected' : 'Rollback checkpoint unavailable'
+  const protectionRows = [
+    {
+      label: 'Read posture',
+      value: repo.canReadRepo ? 'Connected' : 'Awaiting local bridge',
+      detail: 'War Room can inspect repo state without applying changes.',
+      color: repo.canReadRepo ? '#34D399' : '#FBBF24',
+    },
+    {
+      label: 'Mutation policy',
+      value: accessState,
+      detail: 'Writes, commits, rollback apply, and deploy actions stay behind Commander approval.',
+      color: '#FDE68A',
+    },
+    {
+      label: 'Git status',
+      value: repo.gitAvailable ? 'Git detected' : 'Git unavailable',
+      detail: repo.gitAvailable ? `Branch ${repo.currentBranch} is visible to the status bridge.` : 'Install or expose git before repo-aware checks can run.',
+      color: repo.gitAvailable ? '#A7F3D0' : '#FCA5A5',
+    },
+    {
+      label: 'Remote',
+      value: remoteState,
+      detail: repo.remoteConfigured ? 'Remote metadata is visible; push still requires explicit approval.' : 'Remote status is not available from the bridge.',
+      color: repo.remoteConfigured ? '#93C5FD' : '#94A3B8',
+    },
+    {
+      label: 'Rollback',
+      value: rollbackState,
+      detail: 'Checkpoint readiness matters before any file-changing engineering packet is approved.',
+      color: caps.canCreateCheckpoint ? '#FCA5A5' : '#F87171',
+    },
+  ]
+
   return (
-    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(167,139,250,0.014)' }}>
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'linear-gradient(135deg, rgba(167,139,250,0.035), rgba(0,0,0,0.16))' }}>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#A78BFA' }}>REPO ACCESS</h2>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#A78BFA' }}>REPO ACCESS COMMAND POST</h2>
           <p className="mt-1 text-xs" style={{ color: '#666' }}>
-            Live git read from the server. <span style={{ color: '#9CA3AF' }}>Capabilities</span> report OS/git truth;{' '}
-            <span style={{ color: '#FFD700' }}>Allowed</span> is War Room policy (automation never granted write/commit/rollback without explicit approval).
+            Operational repo awareness without hidden mutation. Status labels explain what War Room can inspect and what remains approval protected.
           </p>
         </div>
-        <button type="button" onClick={onRefresh} className="rounded px-3 py-2 text-xs font-bold tracking-widest"
-          style={{ border: '1px solid rgba(167,139,250,0.35)', color: '#A78BFA', background: 'rgba(0,0,0,0.28)' }}>
-          Refresh Repo
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => onCouncilHandoff('Bridge Architect, explain the current War Room repo access posture, approval protections, rollback readiness, and safest next engineering step.')}
+            className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            style={{ border: '1px solid rgba(96,165,250,0.35)', color: '#BAE6FD', background: 'rgba(0,0,0,0.28)' }}>
+            Ask Council
+          </button>
+          <button type="button" onClick={onRefresh} className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            style={{ border: '1px solid rgba(167,139,250,0.35)', color: '#A78BFA', background: 'rgba(0,0,0,0.28)' }}>
+            Refresh Repo
+          </button>
+        </div>
       </div>
       <div className="grid gap-2 text-xs md:grid-cols-5">
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>PATH</div><div className="mt-1 truncate" style={{ color: '#ddd' }}>{repo.repoPath || 'unknown'}</div></div>
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>GIT</div><div className="mt-1 font-bold" style={{ color: repo.gitAvailable ? '#34D399' : '#EF4444' }}>{repo.gitAvailable ? 'AVAILABLE' : 'OFF'}</div></div>
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>BRANCH</div><div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{repo.currentBranch}</div></div>
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>WORKING TREE</div><div className="mt-1 font-bold" style={{ color: statusColor(repo.workingTreeStatus) }}>{repo.workingTreeStatus.toUpperCase()}</div></div>
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>CHANGED FILES</div><div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{repo.uncommittedFilesCount}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>REPO BRIDGE</div><div className="mt-1 font-bold" style={{ color: repo.canReadRepo ? '#34D399' : '#FFD700' }}>{repoState}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.22)', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>ACCESS LEVEL</div><div className="mt-1 font-bold" style={{ color: '#FDE68A' }}>{accessState}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.22)', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>BRANCH</div><div className="mt-1 font-bold" style={{ color: '#A78BFA' }}>{repo.currentBranch}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>WORKING TREE</div><div className="mt-1 font-bold" style={{ color: statusColor(repo.workingTreeStatus) }}>{repo.workingTreeStatus === 'clean' ? 'Clean' : repo.workingTreeStatus}</div></div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(239,68,68,0.22)', background: 'rgba(0,0,0,0.28)' }}><div style={{ color: '#555' }}>ROLLBACK</div><div className="mt-1 font-bold" style={{ color: caps.canCreateCheckpoint ? '#FCA5A5' : '#F87171' }}>{rollbackState}</div></div>
       </div>
-      <div className="mt-2 grid gap-2 text-xs md:grid-cols-4">
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}><div style={{ color: '#555' }}>LAST COMMIT (short)</div><div className="mt-1 font-mono" style={{ color: '#888' }}>{repo.lastCommitHash?.short ?? '—'}</div></div>
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}><div style={{ color: '#555' }}>REMOTE</div><div className="mt-1 font-bold" style={{ color: repo.remoteConfigured ? '#34D399' : '#777' }}>{repo.remoteConfigured ? 'CONFIGURED' : 'NONE'}</div></div>
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}><div style={{ color: '#555' }}>READ (API)</div><div className="mt-1 font-bold" style={{ color: repo.canReadRepo ? '#34D399' : '#EF4444' }}>{String(repo.canReadRepo)}</div></div>
-        <div className="rounded px-3 py-2 md:col-span-1" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}><div style={{ color: '#555' }}>POLICY FLAGS</div><div className="mt-1 text-[10px] leading-snug" style={{ color: '#888' }}>write/commit/rollback require approval</div></div>
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-5">
+        {protectionRows.map(row => (
+          <div key={row.label} className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>{row.label.toUpperCase()}</div>
+            <div className="mt-1 font-bold" style={{ color: row.color }}>{row.value}</div>
+            <div className="mt-2 text-[10px] leading-relaxed" style={{ color: '#94A3B8' }}>{row.detail}</div>
+          </div>
+        ))}
       </div>
-      <div className="mt-2 rounded px-3 py-2 text-[10px] tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.22)' }}>
-        <div className="mb-1 font-bold" style={{ color: '#9CA3AF' }}>CAPABILITIES (raw)</div>
-        <div className="flex flex-wrap gap-2">
-          <span style={{ color: caps.canWriteFilesystem ? '#34D399' : '#EF4444' }}>fs_write: {String(caps.canWriteFilesystem)}</span>
-          <span style={{ color: caps.canGitCommit ? '#34D399' : '#FFD700' }} title="user.name / user.email and not bare">git_commit_ready: {String(caps.canGitCommit)}</span>
-          <span style={{ color: caps.canCreateCheckpoint ? '#34D399' : '#EF4444' }}>checkpoint_dir_ok: {String(caps.canCreateCheckpoint)}</span>
+
+      <details className="mt-3 rounded px-3 py-2 text-[10px]" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.22)' }}>
+        <summary className="cursor-pointer font-bold tracking-widest" style={{ color: '#C4B5FD' }}>Deep repo diagnostics</summary>
+        <div className="mt-2 grid gap-2 md:grid-cols-2">
+          <div className="rounded px-3 py-2" style={{ border: '1px solid #222' }}>
+            <div className="mb-1 font-bold" style={{ color: '#9CA3AF' }}>CAPABILITIES (raw)</div>
+            <div className="flex flex-wrap gap-2">
+              <span style={{ color: caps.canWriteFilesystem ? '#34D399' : '#EF4444' }}>fs_write: {String(caps.canWriteFilesystem)}</span>
+              <span style={{ color: caps.canGitCommit ? '#34D399' : '#FFD700' }} title="user.name / user.email and not bare">git_commit_ready: {String(caps.canGitCommit)}</span>
+              <span style={{ color: caps.canCreateCheckpoint ? '#34D399' : '#EF4444' }}>checkpoint_dir_ok: {String(caps.canCreateCheckpoint)}</span>
+            </div>
+          </div>
+          <div className="rounded px-3 py-2" style={{ border: '1px solid #222' }}>
+            <div className="mb-1 font-bold" style={{ color: '#FFD700' }}>ALLOWED (War Room policy)</div>
+            <div className="flex flex-wrap gap-2">
+              <span style={{ color: repo.allowed.write ? '#34D399' : '#777' }}>write: {String(repo.allowed.write)}</span>
+              <span style={{ color: repo.allowed.commit ? '#34D399' : '#777' }}>commit: {String(repo.allowed.commit)}</span>
+              <span style={{ color: repo.allowed.rollback ? '#34D399' : '#777' }}>rollback_apply: {String(repo.allowed.rollback)}</span>
+            </div>
+          </div>
+          <div className="rounded px-3 py-2 md:col-span-2" style={{ border: '1px solid #222' }}>
+            <div style={{ color: '#555' }}>PATH</div>
+            <div className="mt-1 truncate" style={{ color: '#ddd' }}>{repo.repoPath || 'unknown'}</div>
+            <div className="mt-2" style={{ color: '#555' }}>LAST COMMIT</div>
+            <div className="mt-1 font-mono" style={{ color: '#888' }}>{repo.lastCommitHash?.short ?? '-'}</div>
+          </div>
         </div>
-      </div>
-      <div className="mt-2 rounded px-3 py-2 text-[10px] tracking-widest" style={{ border: '1px solid rgba(255,215,0,0.25)', background: 'rgba(0,0,0,0.22)' }}>
-        <div className="mb-1 font-bold" style={{ color: '#FFD700' }}>ALLOWED (War Room — mirrors canWriteRepo / canCommit / canRollback)</div>
-        <div className="flex flex-wrap gap-2">
-          <span style={{ color: repo.allowed.write ? '#34D399' : '#777' }}>write: {String(repo.allowed.write)}</span>
-          <span style={{ color: repo.allowed.commit ? '#34D399' : '#777' }}>commit: {String(repo.allowed.commit)}</span>
-          <span style={{ color: repo.allowed.rollback ? '#34D399' : '#777' }}>rollback_apply: {String(repo.allowed.rollback)}</span>
-        </div>
-        <div className="mt-1 text-[9px] normal-case leading-relaxed" style={{ color: '#666' }}>
-          Checkpoint JSON on disk is listed under Rollback Safety (`rollbackAvailable`), not here.
-        </div>
-      </div>
+      </details>
       <div className="mt-3 flex flex-wrap gap-2 text-[10px] tracking-widest">
         {Object.entries(repo.permissions).map(([key, value]) => (
           <span key={key} className="rounded px-2 py-1" style={{ border: '1px solid #222', color: value === true ? '#34D399' : value === false ? '#EF4444' : '#FFD700' }}>{key}: {String(value)}</span>
@@ -10252,7 +10539,14 @@ function Home() {
                 </div>
                 <BridgeArchitectPanel engines={engineList} />
                 <EngineeringAgentBridgePanel status={engineeringStatusBridge} />
-                <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={loadLocalAgentBridge} />
+                <LocalCodeAgentBridgePanel
+                  bridge={localAgentBridge}
+                  onRefresh={loadLocalAgentBridge}
+                  onCouncilHandoff={injectLiveEnvironmentDecree}
+                  repo={repoStatus}
+                  pendingApprovals={raelActions.filter(action => action.status === 'pending').length}
+                  latestEngineeringTask={latestEngineeringTaskPacket}
+                />
                 <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={loadLocalFamilyAgents} />
                 <CapabilityRouterPanel />
                 <CodexAgentPlaceholder />
@@ -10457,8 +10751,15 @@ function Home() {
                 <CommandRouterPanel />
                 <InternetAccessPanel internet={internetStatus} onRefresh={() => void loadInternetStatus()} />
                 <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
-                <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={loadLocalAgentBridge} />
-                <RepoAccessPanel repo={repoStatus} onRefresh={() => void loadRepoStatus()} />
+                <LocalCodeAgentBridgePanel
+                  bridge={localAgentBridge}
+                  onRefresh={loadLocalAgentBridge}
+                  onCouncilHandoff={injectLiveEnvironmentDecree}
+                  repo={repoStatus}
+                  pendingApprovals={raelActions.filter(action => action.status === 'pending').length}
+                  latestEngineeringTask={latestEngineeringTaskPacket}
+                />
+                <RepoAccessPanel repo={repoStatus} onRefresh={() => void loadRepoStatus()} onCouncilHandoff={injectLiveEnvironmentDecree} />
                 <RollbackSafetyPanel rollback={rollbackStatus} onRefresh={() => void loadRollbackStatus()} onCheckpoint={() => void createRollbackCheckpoint()} />
                 <DiffPreviewPanel
                   preview={diffPreview}
