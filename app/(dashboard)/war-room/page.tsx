@@ -6,6 +6,7 @@ import { EconomicOperationsPanel } from '@/components/economic/EconomicOperation
 import { Phase3WarRoomPanels } from '@/components/war-room/phase3/Phase3WarRoomPanels'
 import { Phase9BLearningPanels } from '@/components/war-room/learning/Phase9BLearningPanels'
 import { AgentFoundryPanel } from '@/components/war-room/agents/AgentFoundryPanel'
+import { AutomationGovernancePanel } from '@/components/war-room/automation/AutomationGovernancePanel'
 import { KpiGrid } from '@/components/war-room/KpiGrid'
 import { WarRoomShell } from '@/components/war-room/WarRoomShell'
 
@@ -24,6 +25,7 @@ export default function WarRoomDashboardPage() {
       <BuildAgentDivisionPanel />
       <Phase9BLearningPanels />
       <AgentFoundryPanel />
+      <AutomationGovernancePanel />
       <section className="mx-auto mt-14 max-w-6xl border-t border-white/10 pt-10">
         <header className="mb-6">
           <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-[#d4af37]">Council</p>
