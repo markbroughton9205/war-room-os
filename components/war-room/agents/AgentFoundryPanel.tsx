@@ -29,6 +29,23 @@ type FoundryWorker = {
   persistence: FoundryStatus
 }
 
+type ActivationSnapshot = {
+  generatedAt: string
+  integrationStatus: FoundryStatus
+  stages: string[]
+  tables: { table: string; records: number | null; status: FoundryStatus }[]
+  activationQueue: { id: string; agent_key: string; activation_stage: string; approval_state: string; updated_at: string }[]
+  candidates: { agentId: string; name: string; currentStage: string; requestedStage: string; riskLevel: string; source: FoundryStatus }[]
+  queueAssignments: { agentId: string; queueKey: string; queueType: string; concurrencyLimit: number; approvalBound: true; externalExecutionAllowed: false }[]
+  governance: { agentId: string; status: string; blockers: string[]; warnings: string[]; doctrineResolved: boolean; memoryValid: boolean; queuePresent: boolean }[]
+  memoryBindings: { agentId: string; domains: { id: string; label: string }[]; restrictions: string[]; valid: boolean; unrestrictedMemoryAccessAllowed: false; strategicAccessAllowed: false }[]
+  readiness: { agentId: string; score: number; state: string; blockers: string[]; warnings: string[]; queuePressure: string; canPrepareWorkerLaunch: boolean }[]
+  approvals: { agentId: string; decision: string; approvalState: string; canTransitionActive: boolean }[]
+  lifecycle: { events: { agentId: string; from: string; to: string; allowed: boolean; summary: string }[]; activeTransitions: number; blockedTransitions: number; lifecycleRule: string }
+  workerLaunch: { agentId: string; workerKey: string; launchState: string; blockedBy: string[]; executionStarted: false }[]
+  auditLog: { id: string; agentId: string; eventType: string; severity: string; summary: string }[]
+}
+
 type FoundrySnapshot = {
   generatedAt: string
   persistenceAvailable: boolean
@@ -60,6 +77,7 @@ type FoundrySnapshot = {
     performance: { scorecards: { agentId: string; name: string; reliabilityScore: number; warning: string }[] }
     health: { state: string; warnings: string[]; workerHealth: { total: number; ready: number; paused: number; degraded: number } }
   }
+  activation: ActivationSnapshot
 }
 
 function countLabel(value: number | null | undefined) {
@@ -134,6 +152,9 @@ export function AgentFoundryPanel() {
   const agents = snapshot?.foundry.agents ?? []
   const workers = snapshot?.foundry.workers ?? []
   const subsystem = snapshot?.subsystemStatuses
+  const activation = snapshot?.activation
+  const activationReady = activation?.readiness.filter(item => item.state === 'ready_for_commander_review').length ?? 0
+  const activationBlocked = activation?.readiness.filter(item => item.blockers.length > 0).length ?? 0
   const healthWarnings = [
     ...(snapshot?.validations.agentHealth ?? []),
     ...(snapshot?.validations.governance ?? []),
@@ -156,7 +177,7 @@ export function AgentFoundryPanel() {
           <div>
             <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Agent Foundry Truth Layer</div>
             <div className="mt-1 text-[10px] text-slate-500">
-              Snapshot: {snapshot?.generatedAt ?? (loading ? 'loading...' : 'not connected')} · persistence: {snapshot ? String(snapshot.persistenceAvailable) : 'unknown'} · source: /api/agents/integration · external execution: false
+              Snapshot: {snapshot?.generatedAt ?? (loading ? 'loading...' : 'not connected')} · persistence: {snapshot ? String(snapshot.persistenceAvailable) : 'unknown'} · source: /api/agents/integration · activation source: /api/agents/activation · external execution: false
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -177,7 +198,7 @@ export function AgentFoundryPanel() {
           <MiniCard label="Persisted Agents" value={countLabel(snapshot?.counts.persistedAgents)} />
           <MiniCard label="Active / Proposed" value={`${snapshot?.counts.activeAgents ?? 0}/${snapshot?.counts.proposedAgents ?? 0}`} />
           <MiniCard label="Queue Activity" value={`${snapshot?.counts.queuedWorkerItems ?? 0} durable`} />
-          <MiniCard label="Performance Rows" value={countLabel(snapshot?.counts.performanceRows)} />
+          <MiniCard label="Activation Ready" value={`${activationReady} ready / ${activationBlocked} blocked`} />
         </div>
       </div>
 
@@ -291,6 +312,160 @@ export function AgentFoundryPanel() {
               <li key={table.table}>{table.table}: {countLabel(table.records)} · {table.status}</li>
             ))}
             {!tables.length ? <li>Persistence tables are not connected or migration has not been applied.</li> : null}
+          </ul>
+        </section>
+
+        <section className="rounded border border-[#d4af37]/40 bg-black/25 p-3 text-xs">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-[#d4af37]">Agent Activation Queue</h3>
+            <Badge status={activation?.integrationStatus} />
+          </div>
+          <p className="mb-2 text-[10px] text-slate-500">
+            Proposed workers advance through blueprint, governance, memory, queue, readiness, Commander approval, and active stages. Active never means external execution.
+          </p>
+          <div className="mb-2 grid gap-2 text-[10px] sm:grid-cols-3">
+            <MiniCard label="Candidates" value={String(activation?.candidates.length ?? 0)} />
+            <MiniCard label="Queue Rows" value={countLabel(activation?.tables.find(table => table.table === 'war_room_agent_activation_queue')?.records)} />
+            <MiniCard label="Active Transitions" value={String(activation?.lifecycle.activeTransitions ?? 0)} />
+          </div>
+          <ul className="max-h-72 space-y-2 overflow-y-auto">
+            {(activation?.activationQueue.length ? activation.activationQueue : []).map(row => (
+              <li key={row.id} className="rounded border border-white/10 p-2 text-slate-300">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-[#f4d77a]">{row.agent_key}</span>
+                  <Badge status={row.approval_state} />
+                </div>
+                <div className="mt-1 text-[10px] text-slate-500">{row.activation_stage} · updated {row.updated_at}</div>
+              </li>
+            ))}
+            {!activation?.activationQueue.length ? (
+              activation?.candidates.slice(0, 5).map(candidate => (
+                <li key={candidate.agentId} className="rounded border border-white/10 p-2 text-slate-400">
+                  {candidate.name}: {candidate.currentStage} to {candidate.requestedStage} · {candidate.source}
+                </li>
+              ))
+            ) : null}
+          </ul>
+        </section>
+
+        <section className="rounded border border-lime-500/30 bg-black/25 p-3 text-xs">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-lime-300">Activation Readiness</h3>
+            <Badge status={activationBlocked ? 'degraded' : activationReady ? 'ready' : activation?.integrationStatus} />
+          </div>
+          <ul className="max-h-72 space-y-2 overflow-y-auto">
+            {(activation?.readiness ?? []).slice(0, 8).map(item => {
+              const candidate = activation?.candidates.find(agent => agent.agentId === item.agentId)
+              return (
+                <li key={item.agentId} className="rounded border border-white/10 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-lime-100">{candidate?.name ?? item.agentId}</span>
+                    <Badge status={item.state} />
+                  </div>
+                  <div className="mt-1 text-[10px] text-slate-500">score {item.score} · queue {item.queuePressure} · launch prep {String(item.canPrepareWorkerLaunch)}</div>
+                  {item.blockers.length ? <div className="mt-1 text-[10px] text-red-300">{item.blockers[0]}</div> : null}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+
+        <section className="rounded border border-fuchsia-500/30 bg-black/25 p-3 text-xs">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Governance Validation</h3>
+            <Badge status={activation?.governance.some(item => item.status === 'blocked') ? 'degraded' : activation?.integrationStatus} />
+          </div>
+          <ul className="max-h-72 space-y-2 overflow-y-auto">
+            {(activation?.governance ?? []).slice(0, 8).map(item => {
+              const candidate = activation?.candidates.find(agent => agent.agentId === item.agentId)
+              return (
+                <li key={item.agentId} className="rounded border border-white/10 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-fuchsia-100">{candidate?.name ?? item.agentId}</span>
+                    <Badge status={item.status} />
+                  </div>
+                  <div className="mt-1 text-[10px] text-slate-500">doctrine {String(item.doctrineResolved)} · memory {String(item.memoryValid)} · queue {String(item.queuePresent)}</div>
+                  {item.warnings[0] ? <div className="mt-1 text-[10px] text-amber-200">{item.warnings[0]}</div> : null}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+
+        <section className="rounded border border-cyan-500/30 bg-black/25 p-3 text-xs">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-cyan-300">Queue Assignment Viewer</h3>
+            <Badge status={activation?.integrationStatus} />
+          </div>
+          <ul className="max-h-72 space-y-2 overflow-y-auto">
+            {(activation?.queueAssignments ?? []).slice(0, 8).map(item => {
+              const candidate = activation?.candidates.find(agent => agent.agentId === item.agentId)
+              return (
+                <li key={item.agentId} className="rounded border border-white/10 p-2 text-slate-300">
+                  <div className="font-semibold text-cyan-100">{candidate?.name ?? item.agentId}</div>
+                  <div className="mt-1 text-[10px] text-slate-500">{item.queueType} · concurrency {item.concurrencyLimit} · approval-bound {String(item.approvalBound)} · external execution {String(item.externalExecutionAllowed)}</div>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+
+        <section className="rounded border border-emerald-500/30 bg-black/25 p-3 text-xs">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Memory Binding Viewer</h3>
+            <Badge status={activation?.memoryBindings.some(item => !item.valid) ? 'degraded' : activation?.integrationStatus} />
+          </div>
+          <ul className="max-h-72 space-y-2 overflow-y-auto">
+            {(activation?.memoryBindings ?? []).slice(0, 8).map(item => {
+              const candidate = activation?.candidates.find(agent => agent.agentId === item.agentId)
+              return (
+                <li key={item.agentId} className="rounded border border-white/10 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-emerald-100">{candidate?.name ?? item.agentId}</span>
+                    <Badge status={item.valid ? 'valid' : 'blocked'} />
+                  </div>
+                  <div className="mt-1 text-[10px] text-slate-500">{item.domains.map(domain => domain.label).join(', ')}</div>
+                  <div className="mt-1 text-[10px] text-slate-500">unrestricted {String(item.unrestrictedMemoryAccessAllowed)} · strategic {String(item.strategicAccessAllowed)}</div>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+
+        <section className="rounded border border-orange-500/30 bg-black/25 p-3 text-xs">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-orange-300">Lifecycle Transition Timeline</h3>
+            <Badge status={activation?.lifecycle.blockedTransitions ? 'degraded' : activation?.integrationStatus} />
+          </div>
+          <p className="mb-2 text-[10px] text-slate-500">{activation?.lifecycle.lifecycleRule ?? 'Lifecycle status loading.'}</p>
+          <ul className="max-h-72 space-y-2 overflow-y-auto">
+            {(activation?.lifecycle.events ?? []).slice(0, 10).map((event, index) => (
+              <li key={`${event.agentId}-${event.to}-${index}`} className="rounded border border-white/10 p-2 text-slate-300">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-orange-100">{event.from} to {event.to}</span>
+                  <Badge status={event.allowed ? 'allowed' : 'blocked'} />
+                </div>
+                <div className="mt-1 text-[10px] text-slate-500">{event.summary}</div>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="rounded border border-slate-500/30 bg-black/25 p-3 text-xs">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-300">Activation Audit Log</h3>
+            <Badge status={activation?.integrationStatus} />
+          </div>
+          <ul className="max-h-72 space-y-2 overflow-y-auto">
+            {(activation?.auditLog ?? []).slice(0, 12).map(event => (
+              <li key={event.id} className="rounded border border-white/10 p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-200">{event.eventType}</span>
+                  <Badge status={event.severity} />
+                </div>
+                <div className="mt-1 text-[10px] text-slate-500">{event.summary}</div>
+              </li>
+            ))}
           </ul>
         </section>
       </div>

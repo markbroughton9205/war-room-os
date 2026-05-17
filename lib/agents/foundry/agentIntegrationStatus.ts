@@ -7,6 +7,7 @@ import { getProviderScorecards } from '@/lib/learning/providerPerformanceTracker
 import { summarizePatchHistory } from '@/lib/repair/patchHistorySummarizer'
 import { buildUnresolvedRepairTracker } from '@/lib/repair/unresolvedRepairTracker'
 import { getWorkerLimitCounters } from '@/lib/workers/limits'
+import { buildAgentActivationSnapshot } from '@/lib/agents/activation/agentActivationWorkflow'
 import { tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persistence'
 import { AGENT_FOUNDRY_TABLES, type AgentFoundryTableName } from './agentBlueprints'
 import { getCapabilityRegistry } from './agentCapabilityRegistry'
@@ -109,6 +110,7 @@ export type AgentIntegrationSnapshot = {
     unresolvedRepairItems: number
   }
   foundry: Awaited<ReturnType<typeof buildAgentFoundrySnapshot>>
+  activation: Awaited<ReturnType<typeof buildAgentActivationSnapshot>>
 }
 
 type CountResult = {
@@ -289,7 +291,10 @@ export async function buildAgentIntegrationSnapshot(): Promise<AgentIntegrationS
   const generatedAt = new Date().toISOString()
   const sup = tryWarRoomSupabase()
   const client = sup.ok ? sup.client : null
-  const foundry = await buildAgentFoundrySnapshot()
+  const [foundry, activation] = await Promise.all([
+    buildAgentFoundrySnapshot(),
+    buildAgentActivationSnapshot(),
+  ])
   const persistence = await summarizeAgentPersistence()
   const tables = persistence.ok ? persistence.value : AGENT_FOUNDRY_TABLES.map(table => ({
     table,
@@ -670,5 +675,6 @@ export async function buildAgentIntegrationSnapshot(): Promise<AgentIntegrationS
       unresolvedRepairItems: unresolvedRepair.items.length,
     },
     foundry,
+    activation,
   }
 }
