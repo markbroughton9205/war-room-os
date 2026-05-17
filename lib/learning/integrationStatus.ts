@@ -5,8 +5,21 @@ import { buildUnresolvedRepairTracker } from '@/lib/repair/unresolvedRepairTrack
 import { getResourceSnapshot } from '@/lib/system/resourceMonitor'
 import { tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persistence'
 import { getWorkerLimitCounters } from '@/lib/workers/limits'
+import { listDoctrineStoreEntries } from './persistence/doctrinePersistence'
+import { listNotificationQueue } from './persistence/escalationPersistence'
+import { listForecastFeedback } from './persistence/forecastPersistence'
+import { countLearningTable, listOutcomeLedgerEntries } from './persistence/learningPersistence'
+import { listNarrativeGraphRows } from './persistence/narrativePersistence'
+import { listSpecializedAgents } from './persistence/specializedAgentPersistence'
 
-export type LearningIntegrationStatus = 'live_wired' | 'derived_from_existing_store' | 'static_seed' | 'not_connected'
+export type LearningIntegrationStatus =
+  | 'live_wired'
+  | 'derived_from_existing_store'
+  | 'static_seed'
+  | 'not_connected'
+  | 'persistent_store'
+  | 'live_persistent'
+  | 'awaiting_data'
 
 export type LearningPanelKey =
   | 'outcomeLedger'
@@ -58,6 +71,13 @@ export type LearningIntegrationSnapshot = {
     memoryProposalsPending: number | null
     approvedMemories: number | null
     redSentinelScans: number | null
+    learningOutcomes: number | null
+    doctrineEntries: number | null
+    narrativeGraphRows: number | null
+    forecastFeedback: number | null
+    notificationPreferences: number | null
+    notificationQueue: number | null
+    specializedAgents: number | null
   }
   providerRuntime: {
     configuredProviders: number
@@ -94,12 +114,36 @@ export type LearningIntegrationSnapshot = {
     cpuWarning: string
   }
   notConnectedGaps: string[]
+  learningStores: {
+    outcomeLedger: LearningStoreSummary
+    doctrineEntries: LearningStoreSummary
+    narrativeGraph: LearningStoreSummary
+    forecastFeedback: LearningStoreSummary
+    notificationPreferences: LearningStoreSummary
+    notificationQueue: LearningStoreSummary
+    specializedAgents: LearningStoreSummary
+  }
+  recentPersistent: {
+    outcomes: string[]
+    doctrine: string[]
+    narratives: string[]
+    forecasts: string[]
+    notifications: string[]
+    specializedAgents: string[]
+  }
 }
 
 type CountResult = {
   records: number | null
   lastEventAt: string | null
   error?: string
+}
+
+type LearningStoreSummary = {
+  status: LearningIntegrationStatus
+  records: number | null
+  lastEventAt: string | null
+  detail: string
 }
 
 async function countRows(
@@ -186,6 +230,39 @@ function statusFromRows(count: number | null, fallback: LearningIntegrationStatu
   return count > 0 ? 'live_wired' : fallback
 }
 
+function learningStoreSummary(count: CountResult | null, emptyLabel: string): LearningStoreSummary {
+  if (!count) {
+    return {
+      status: 'not_connected',
+      records: null,
+      lastEventAt: null,
+      detail: 'Persistence is unavailable or the learning storage migration has not been applied.',
+    }
+  }
+  if (count.error) {
+    return {
+      status: 'not_connected',
+      records: count.records,
+      lastEventAt: count.lastEventAt,
+      detail: count.error,
+    }
+  }
+  if ((count.records ?? 0) > 0) {
+    return {
+      status: 'live_persistent',
+      records: count.records,
+      lastEventAt: count.lastEventAt,
+      detail: `${count.records} persisted learning row(s) available.`,
+    }
+  }
+  return {
+    status: 'awaiting_data',
+    records: 0,
+    lastEventAt: null,
+    detail: emptyLabel,
+  }
+}
+
 export async function buildLearningIntegrationSnapshot(): Promise<LearningIntegrationSnapshot> {
   const generatedAt = new Date().toISOString()
   const sup = tryWarRoomSupabase()
@@ -206,6 +283,21 @@ export async function buildLearningIntegrationSnapshot(): Promise<LearningIntegr
   let memoryProposals: CountResult | null = null
   let approvedMemories: CountResult | null = null
   let redSentinelScans: CountResult | null = null
+  let learningOutcomes: CountResult | null = null
+  let doctrineEntries: CountResult | null = null
+  let narrativeGraphRows: CountResult | null = null
+  let forecastFeedback: CountResult | null = null
+  let notificationPreferences: CountResult | null = null
+  let notificationQueue: CountResult | null = null
+  let specializedAgents: CountResult | null = null
+  let recentPersistent: LearningIntegrationSnapshot['recentPersistent'] = {
+    outcomes: [],
+    doctrine: [],
+    narratives: [],
+    forecasts: [],
+    notifications: [],
+    specializedAgents: [],
+  }
   let economicStats: LearningIntegrationSnapshot['economic'] = {
     activeOpportunities: null,
     completedWorkflows: null,
@@ -226,6 +318,13 @@ export async function buildLearningIntegrationSnapshot(): Promise<LearningIntegr
       memoryProposals,
       approvedMemories,
       redSentinelScans,
+      learningOutcomes,
+      doctrineEntries,
+      narrativeGraphRows,
+      forecastFeedback,
+      notificationPreferences,
+      notificationQueue,
+      specializedAgents,
     ] = await Promise.all([
       countRows(client, 'war_room_audit_logs', 'created_at'),
       countRows(client, 'war_room_action_logs', 'created_at'),
@@ -237,7 +336,38 @@ export async function buildLearningIntegrationSnapshot(): Promise<LearningIntegr
       countRows(client, 'war_room_memory_proposals', 'created_at'),
       countRows(client, 'war_room_approved_memories', 'approved_at'),
       countRows(client, 'war_room_sentinel_scans', 'created_at'),
+      countLearningTable(client, 'war_room_outcome_ledger', 'created_at'),
+      countLearningTable(client, 'war_room_doctrine_entries', 'updated_at'),
+      countLearningTable(client, 'war_room_narrative_graph', 'observed_at'),
+      countLearningTable(client, 'war_room_forecast_feedback', 'created_at'),
+      countLearningTable(client, 'war_room_notification_preferences', 'updated_at'),
+      countLearningTable(client, 'war_room_notification_queue', 'created_at'),
+      countLearningTable(client, 'war_room_specialized_agents', 'updated_at'),
     ])
+
+    const [
+      outcomeRows,
+      doctrineRows,
+      narrativeRows,
+      forecastRows,
+      notificationRows,
+      specializedAgentRows,
+    ] = await Promise.all([
+      listOutcomeLedgerEntries(5),
+      listDoctrineStoreEntries(5),
+      listNarrativeGraphRows(5),
+      listForecastFeedback(5),
+      listNotificationQueue(5),
+      listSpecializedAgents(5),
+    ])
+    recentPersistent = {
+      outcomes: outcomeRows.ok ? outcomeRows.value.map(row => row.predicted_outcome ?? row.actual_outcome ?? row.decree_id ?? row.id).slice(0, 5) : [],
+      doctrine: doctrineRows.ok ? doctrineRows.value.map(row => row.principle).slice(0, 5) : [],
+      narratives: narrativeRows.ok ? narrativeRows.value.map(row => `Narrative graph ${row.id.slice(0, 8)} · confidence ${Math.round(row.confidence * 100)}%`).slice(0, 5) : [],
+      forecasts: forecastRows.ok ? forecastRows.value.map(row => `${row.forecast_id}: ${row.prediction}`).slice(0, 5) : [],
+      notifications: notificationRows.ok ? notificationRows.value.map(row => `${row.severity}: ${row.source}`).slice(0, 5) : [],
+      specializedAgents: specializedAgentRows.ok ? specializedAgentRows.value.map(row => `${row.proposed_agent} · ${row.status}`).slice(0, 5) : [],
+    }
 
     const surface = await listEconomicSurface(client, 80)
     if (surface.ok) {
@@ -272,6 +402,12 @@ export async function buildLearningIntegrationSnapshot(): Promise<LearningIntegr
     sourceConnection('memory_proposals', 'Strategic memory proposals', memoryProposals, persistenceAvailable, 'Connected; no memory proposals recorded.'),
     sourceConnection('approved_memories', 'Approved strategic memory', approvedMemories, persistenceAvailable, 'Connected; no approved memory rows recorded.'),
     sourceConnection('red_sentinel_scans', 'Red Sentinel scans', redSentinelScans, persistenceAvailable, 'Connected; awaiting scan rows.'),
+    sourceConnection('learning_outcomes', 'Persistent outcome ledger', learningOutcomes, persistenceAvailable, 'Learning storage connected; awaiting outcome feedback.'),
+    sourceConnection('learning_doctrine', 'Persistent doctrine', doctrineEntries, persistenceAvailable, 'Learning storage connected; awaiting doctrine entries.'),
+    sourceConnection('learning_narrative_graph', 'Persistent narrative graph', narrativeGraphRows, persistenceAvailable, 'Learning storage connected; awaiting narrative graph rows.'),
+    sourceConnection('learning_forecast_feedback', 'Persistent forecast feedback', forecastFeedback, persistenceAvailable, 'Learning storage connected; awaiting forecast feedback.'),
+    sourceConnection('learning_notification_queue', 'Persistent notification queue', notificationQueue, persistenceAvailable, 'Learning storage connected; no queued notifications.'),
+    sourceConnection('learning_specialized_agents', 'Persistent specialized agents', specializedAgents, persistenceAvailable, 'Learning storage connected; awaiting agent proposals.'),
   ]
 
   const counts = {
@@ -285,27 +421,50 @@ export async function buildLearningIntegrationSnapshot(): Promise<LearningIntegr
     memoryProposalsPending: memoryProposals?.records ?? null,
     approvedMemories: approvedMemories?.records ?? null,
     redSentinelScans: redSentinelScans?.records ?? null,
+    learningOutcomes: learningOutcomes?.records ?? null,
+    doctrineEntries: doctrineEntries?.records ?? null,
+    narrativeGraphRows: narrativeGraphRows?.records ?? null,
+    forecastFeedback: forecastFeedback?.records ?? null,
+    notificationPreferences: notificationPreferences?.records ?? null,
+    notificationQueue: notificationQueue?.records ?? null,
+    specializedAgents: specializedAgents?.records ?? null,
+  }
+
+  const learningStores: LearningIntegrationSnapshot['learningStores'] = {
+    outcomeLedger: learningStoreSummary(learningOutcomes, 'Outcome ledger table exists; awaiting persisted outcome feedback.'),
+    doctrineEntries: learningStoreSummary(doctrineEntries, 'Doctrine table exists; awaiting threshold-reviewed doctrine entries.'),
+    narrativeGraph: learningStoreSummary(narrativeGraphRows, 'Narrative graph table exists; awaiting persisted relationship observations.'),
+    forecastFeedback: learningStoreSummary(forecastFeedback, 'Forecast feedback table exists; awaiting resolved forecast outcomes.'),
+    notificationPreferences: learningStoreSummary(notificationPreferences, 'Notification preferences table exists; Commander preferences are not configured yet.'),
+    notificationQueue: learningStoreSummary(notificationQueue, 'Notification queue table exists; no queued alerts.'),
+    specializedAgents: learningStoreSummary(specializedAgents, 'Specialized agents table exists; awaiting Commander-reviewed proposals.'),
   }
 
   const providerStatus = statusFromRows(counts.economicProviderEffectiveness, 'derived_from_existing_store')
   const memoryStatus = typeof counts.memoryProposalsPending === 'number' || typeof counts.approvedMemories === 'number'
     ? 'live_wired'
     : 'not_connected'
-  const outcomeStatus = eventSources.some(source => ['audit_logs', 'action_logs'].includes(source.id) && source.status === 'live_wired')
-    ? 'live_wired'
-    : 'static_seed'
+  const outcomeStatus = learningStores.outcomeLedger.status === 'live_persistent'
+    ? 'live_persistent'
+    : learningStores.outcomeLedger.status === 'awaiting_data'
+      ? 'persistent_store'
+      : eventSources.some(source => ['audit_logs', 'action_logs'].includes(source.id) && source.status === 'live_wired')
+        ? 'derived_from_existing_store'
+        : 'awaiting_data'
   const retrievalStatus = statusFromRows(counts.internetLogs, 'not_connected')
   const economicWorkflowStatus = statusFromRows(counts.economicWorkflows, 'not_connected')
 
   const panelStatuses: LearningIntegrationSnapshot['panelStatuses'] = {
     outcomeLedger: panel(
       outcomeStatus,
-      outcomeStatus === 'live_wired' ? 'live_wired' : 'static_seed',
-      outcomeStatus === 'live_wired'
-        ? 'Displays seed outcomes plus real audit/action event-source counts.'
-        : 'Baseline outcomes are static seeds; persisted audit/action streams are awaiting connection or rows.',
-      ['lib/learning/outcomeLedger.ts', 'war_room_audit_logs', 'war_room_action_logs'],
-      outcomeStatus === 'live_wired' ? [] : ['No dedicated persisted Phase 9B outcome ledger table yet.'],
+      outcomeStatus,
+      outcomeStatus === 'live_persistent'
+        ? 'Outcome ledger is reading persisted Phase 9B outcome feedback rows.'
+        : outcomeStatus === 'persistent_store'
+          ? 'Outcome ledger storage is installed and awaiting real outcome feedback rows.'
+          : 'Outcome ledger falls back to audit/action-derived context until Phase 9B outcome rows arrive.',
+      ['war_room_outcome_ledger', 'war_room_audit_logs', 'war_room_action_logs'],
+      outcomeStatus === 'live_persistent' || outcomeStatus === 'persistent_store' ? [] : ['Apply Phase 9B learning storage and record outcome rows.'],
     ),
     providerScorecards: panel(
       providerStatus,
@@ -317,25 +476,29 @@ export async function buildLearningIntegrationSnapshot(): Promise<LearningIntegr
       counts.economicProviderEffectiveness ? [] : ['No measured provider scorecard history beyond configured provider/economic rows.'],
     ),
     doctrine: panel(
-      'static_seed',
-      'static_seed',
-      'Doctrine entries are promoted seed principles backed by local outcome/repair evidence, not a persisted doctrine table.',
-      ['lib/learning/doctrineEngine.ts', 'lib/repair/repairLedger.ts'],
-      ['No Commander-approved doctrine persistence table yet.'],
+      learningStores.doctrineEntries.status === 'live_persistent' ? 'live_persistent' : learningStores.doctrineEntries.status === 'awaiting_data' ? 'persistent_store' : 'awaiting_data',
+      learningStores.doctrineEntries.status === 'live_persistent' ? 'live_persistent' : learningStores.doctrineEntries.status === 'awaiting_data' ? 'persistent_store' : 'awaiting_data',
+      learningStores.doctrineEntries.status === 'live_persistent'
+        ? 'Doctrine panel can read persisted threshold-reviewed doctrine entries.'
+        : 'Doctrine persistence exists only after migration and remains candidate/awaiting data until threshold + Red Team + Commander gates are met.',
+      ['war_room_doctrine_entries', 'lib/learning/doctrineEngine.ts', 'lib/repair/repairLedger.ts'],
+      learningStores.doctrineEntries.status === 'not_connected' ? ['Doctrine storage is not connected yet.'] : [],
     ),
     narrativeGraph: panel(
-      'static_seed',
-      'static_seed',
-      'Narrative graph is a seed topology; no persisted event/person/source graph store exists yet.',
-      ['lib/learning/narrativeGraph.ts'],
-      ['No persisted narrative/event relationship graph yet.'],
+      learningStores.narrativeGraph.status === 'live_persistent' ? 'live_persistent' : learningStores.narrativeGraph.status === 'awaiting_data' ? 'persistent_store' : 'awaiting_data',
+      learningStores.narrativeGraph.status === 'live_persistent' ? 'live_persistent' : learningStores.narrativeGraph.status === 'awaiting_data' ? 'persistent_store' : 'awaiting_data',
+      learningStores.narrativeGraph.status === 'live_persistent'
+        ? 'Narrative graph panel can read persisted relationship and contradiction-cluster observations.'
+        : 'Narrative graph storage is ready after migration and awaits relationship observations.',
+      ['war_room_narrative_graph', 'lib/learning/narrativeGraph.ts'],
+      learningStores.narrativeGraph.status === 'not_connected' ? ['Narrative graph storage is not connected yet.'] : [],
     ),
     forecastSimulation: panel(
-      retrievalStatus === 'live_wired' || economicWorkflowStatus === 'live_wired' ? 'derived_from_existing_store' : 'static_seed',
-      retrievalStatus === 'live_wired' || economicWorkflowStatus === 'live_wired' ? 'derived_from_existing_store' : 'static_seed',
-      'Forecasts remain scenario support; retrieval/economic streams provide context but do not auto-trigger action.',
-      ['lib/learning/forecastingEngine.ts', 'war_room_internet_logs', 'war_room_economic_workflow_queue'],
-      ['No persisted forecast accuracy feedback table yet.'],
+      learningStores.forecastFeedback.status === 'live_persistent' ? 'live_persistent' : learningStores.forecastFeedback.status === 'awaiting_data' ? 'persistent_store' : retrievalStatus === 'live_wired' || economicWorkflowStatus === 'live_wired' ? 'derived_from_existing_store' : 'awaiting_data',
+      learningStores.forecastFeedback.status === 'live_persistent' ? 'live_persistent' : learningStores.forecastFeedback.status === 'awaiting_data' ? 'persistent_store' : 'awaiting_data',
+      'Forecasts remain scenario support; persistent feedback can compare predictions to actuals and record variance without triggering action.',
+      ['war_room_forecast_feedback', 'lib/learning/forecastingEngine.ts', 'war_room_internet_logs', 'war_room_economic_workflow_queue'],
+      learningStores.forecastFeedback.status === 'not_connected' ? ['Forecast feedback storage is not connected yet.'] : [],
     ),
     backgroundWorkers: panel(
       'live_wired',
@@ -350,18 +513,18 @@ export async function buildLearningIntegrationSnapshot(): Promise<LearningIntegr
       ['lib/system/resourceMonitor.ts', 'lib/workers/limits.ts', 'configuration sweep'],
     ),
     agentEvolution: panel(
-      'static_seed',
-      'static_seed',
-      'Agent proposals are derived from seed patterns and doctrine constraints; no autonomous agent expansion is enabled.',
-      ['lib/learning/agentEvolutionEngine.ts', 'lib/learning/strategicPatternDetector.ts'],
-      ['No Commander-approved specialized-agent registry table yet.'],
+      learningStores.specializedAgents.status === 'live_persistent' ? 'live_persistent' : learningStores.specializedAgents.status === 'awaiting_data' ? 'persistent_store' : 'awaiting_data',
+      learningStores.specializedAgents.status === 'live_persistent' ? 'live_persistent' : learningStores.specializedAgents.status === 'awaiting_data' ? 'persistent_store' : 'awaiting_data',
+      'Specialized agent proposals are persisted for Commander review; storage never spawns agents autonomously.',
+      ['war_room_specialized_agents', 'lib/learning/agentEvolutionEngine.ts', 'lib/learning/strategicPatternDetector.ts'],
+      learningStores.specializedAgents.status === 'not_connected' ? ['Specialized agent governance storage is not connected yet.'] : [],
     ),
     escalationQueue: panel(
-      'derived_from_existing_store',
-      'derived_from_existing_store',
-      'Escalations are planned from anomalies, repair warnings, and worker/forecast signals; notification delivery is disabled.',
-      ['lib/learning/escalationPlanner.ts', 'lib/repair/repairLedger.ts', 'worker counters'],
-      ['No persisted Commander notification preference/dispatch queue yet.'],
+      learningStores.notificationQueue.status === 'live_persistent' ? 'live_persistent' : learningStores.notificationQueue.status === 'awaiting_data' ? 'persistent_store' : 'derived_from_existing_store',
+      learningStores.notificationQueue.status === 'live_persistent' ? 'live_persistent' : learningStores.notificationQueue.status === 'awaiting_data' ? 'persistent_store' : 'derived_from_existing_store',
+      'Escalations can persist to a Commander-controlled queue; delivery readiness is dashboard-only and external dispatch remains disabled.',
+      ['war_room_notification_queue', 'war_room_notification_preferences', 'lib/learning/escalationPlanner.ts', 'worker counters'],
+      learningStores.notificationQueue.status === 'not_connected' ? ['Notification queue storage is not connected yet.'] : [],
     ),
     patternsWorkflow: panel(
       economicWorkflowStatus === 'live_wired' ? 'derived_from_existing_store' : 'static_seed',
@@ -418,5 +581,7 @@ export async function buildLearningIntegrationSnapshot(): Promise<LearningIntegr
       cpuWarning: resourceSnapshot.warnings.cpu,
     },
     notConnectedGaps,
+    learningStores,
+    recentPersistent,
   }
 }

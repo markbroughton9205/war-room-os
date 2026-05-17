@@ -26,6 +26,9 @@ function countLabel(value: number | null | undefined) {
 }
 
 function statusColor(status?: LearningIntegrationStatus) {
+  if (status === 'live_persistent') return '#2DD4BF'
+  if (status === 'persistent_store') return '#A78BFA'
+  if (status === 'awaiting_data') return '#FBBF24'
   if (status === 'live_wired') return '#34D399'
   if (status === 'derived_from_existing_store') return '#60A5FA'
   if (status === 'static_seed') return '#FBBF24'
@@ -193,10 +196,15 @@ export function Phase9BLearningPanels() {
             {outcomeLedger.summary.totalEntries} entries · {outcomeLedger.summary.unresolvedRiskCount} unresolved risks · {outcomeLedger.summary.contradictionMisses} contradiction misses
           </div>
           <div className="mb-2 grid gap-2 text-[10px] sm:grid-cols-3">
-            <div className="rounded border border-white/10 p-2 text-slate-400">Audit rows: {countLabel(integration?.counts.auditLogs)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Persistent outcomes: {countLabel(integration?.counts.learningOutcomes)}</div>
             <div className="rounded border border-white/10 p-2 text-slate-400">Action log rows: {countLabel(integration?.counts.actionLogs)}</div>
             <div className="rounded border border-white/10 p-2 text-slate-400">Pending approvals: {countLabel(integration?.counts.pendingApprovals)}</div>
           </div>
+          {integration?.recentPersistent.outcomes.length ? (
+            <ul className="mb-2 space-y-1 text-[10px] text-slate-500">
+              {integration.recentPersistent.outcomes.map(item => <li key={item}>Persistent: {item}</li>)}
+            </ul>
+          ) : null}
           <ul className="max-h-72 space-y-2 overflow-y-auto">
             {outcomeLedger.entries.map(entry => (
               <li key={entry.id} className="rounded border border-white/10 p-2 text-slate-300">
@@ -245,6 +253,14 @@ export function Phase9BLearningPanels() {
           <div className="mb-2 text-[10px] text-slate-500">
             {doctrineSummary.promoted} promoted · avg confidence {pct(doctrineSummary.averageConfidence)}
           </div>
+          <div className="mb-2 rounded border border-white/10 p-2 text-[10px] text-slate-400">
+            Persistent doctrine rows: {countLabel(integration?.counts.doctrineEntries)} · promotion requires recurrence, evidence, contradiction review, Red Team review, and Commander identity.
+          </div>
+          {integration?.recentPersistent.doctrine.length ? (
+            <ul className="mb-2 space-y-1 text-[10px] text-slate-500">
+              {integration.recentPersistent.doctrine.map(item => <li key={item}>Persistent: {item}</li>)}
+            </ul>
+          ) : null}
           <ul className="max-h-72 space-y-2 overflow-y-auto">
             {doctrine.map(entry => (
               <li key={entry.id} className="rounded border border-white/10 p-2 text-slate-300">
@@ -262,8 +278,13 @@ export function Phase9BLearningPanels() {
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="rounded border border-white/10 p-2 text-slate-300">{graph.nodes.length} nodes</div>
             <div className="rounded border border-white/10 p-2 text-slate-300">{graph.edges.length} edges</div>
-            <div className="rounded border border-white/10 p-2 text-slate-300">{graph.clusters.length} clusters</div>
+            <div className="rounded border border-white/10 p-2 text-slate-300">{countLabel(integration?.counts.narrativeGraphRows)} persisted</div>
           </div>
+          {integration?.recentPersistent.narratives.length ? (
+            <ul className="mt-2 space-y-1 text-[10px] text-slate-500">
+              {integration.recentPersistent.narratives.map(item => <li key={item}>Persistent: {item}</li>)}
+            </ul>
+          ) : null}
           <ul className="mt-2 max-h-56 space-y-2 overflow-y-auto">
             {graph.clusters.map(cluster => (
               <li key={cluster.id} className="rounded border border-white/10 p-2 text-slate-300">
@@ -281,9 +302,14 @@ export function Phase9BLearningPanels() {
             {forecastSummary.forecastCount} forecasts · avg risk {pct(forecastSummary.averageRisk)}
           </div>
           <div className="mb-2 grid gap-2 text-[10px] sm:grid-cols-2">
-            <div className="rounded border border-white/10 p-2 text-slate-400">Retrieval logs: {countLabel(integration?.counts.internetLogs)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Forecast feedback: {countLabel(integration?.counts.forecastFeedback)}</div>
             <div className="rounded border border-white/10 p-2 text-slate-400">Economic workflows: {countLabel(integration?.counts.economicWorkflows)}</div>
           </div>
+          {integration?.recentPersistent.forecasts.length ? (
+            <ul className="mb-2 space-y-1 text-[10px] text-slate-500">
+              {integration.recentPersistent.forecasts.map(item => <li key={item}>Persistent: {item}</li>)}
+            </ul>
+          ) : null}
           <ul className="max-h-72 space-y-2 overflow-y-auto">
             {forecasts.map(forecast => (
               <li key={forecast.id} className="rounded border border-white/10 p-2 text-slate-300">
@@ -339,6 +365,14 @@ export function Phase9BLearningPanels() {
           <div className="mb-2 text-[10px] text-slate-500">
             {agentSummary.proposed} proposed · approval-bound: {String(agentSummary.approvalBound)}
           </div>
+          <div className="mb-2 rounded border border-white/10 p-2 text-[10px] text-slate-400">
+            Persistent agent governance rows: {countLabel(integration?.counts.specializedAgents)} · proposals require Commander approval before active status.
+          </div>
+          {integration?.recentPersistent.specializedAgents.length ? (
+            <ul className="mb-2 space-y-1 text-[10px] text-slate-500">
+              {integration.recentPersistent.specializedAgents.map(item => <li key={item}>Persistent: {item}</li>)}
+            </ul>
+          ) : null}
           <ul className="max-h-72 space-y-2 overflow-y-auto">
             {agentProposals.map(proposal => (
               <li key={proposal.id} className="rounded border border-white/10 p-2 text-slate-300">
@@ -355,10 +389,15 @@ export function Phase9BLearningPanels() {
             {escalationSummary.queued} queued · high/critical {escalationSummary.highOrCritical} · auto-send: {String(escalationSummary.autoSendEnabled)}
           </div>
           <div className="mb-2 grid gap-2 text-[10px] sm:grid-cols-3">
-            <div className="rounded border border-white/10 p-2 text-slate-400">Repair warnings: {integration?.repair.unresolvedWarnings ?? '—'}</div>
-            <div className="rounded border border-white/10 p-2 text-slate-400">Rollback checkpoints: {integration?.repair.rollbackCheckpoints ?? '—'}</div>
-            <div className="rounded border border-white/10 p-2 text-slate-400">Sentinel scans: {countLabel(integration?.counts.redSentinelScans)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Queued alerts: {countLabel(integration?.counts.notificationQueue)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Preferences: {countLabel(integration?.counts.notificationPreferences)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">External dispatch: false</div>
           </div>
+          {integration?.recentPersistent.notifications.length ? (
+            <ul className="mb-2 space-y-1 text-[10px] text-slate-500">
+              {integration.recentPersistent.notifications.map(item => <li key={item}>Persistent: {item}</li>)}
+            </ul>
+          ) : null}
           <ul className="max-h-72 space-y-2 overflow-y-auto">
             {escalations.map(plan => (
               <li key={plan.id} className="rounded border border-white/10 p-2 text-slate-300">
