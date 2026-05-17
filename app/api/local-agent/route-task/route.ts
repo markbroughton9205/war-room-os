@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { LOCAL_TASK_CATEGORIES, routeLocalTask } from '@/lib/local-agent/router'
+import { getLMStudioModels, testLMStudioChat } from '@/lib/local-agent/providers'
 import type { LocalOllamaModel, LocalTaskCategory } from '@/lib/local-agent/types'
 
 export const dynamic = 'force-dynamic'
@@ -70,14 +71,31 @@ export async function POST(request: Request) {
     }, { status: 400 })
   }
 
-  const availableModels = await getOllamaModels()
+  const [availableModels, lmStudioProbe] = await Promise.all([
+    getOllamaModels(),
+    getLMStudioModels(),
+  ])
+  const lmStudioTest = lmStudioProbe.models.length > 0
+    ? await testLMStudioChat(lmStudioProbe.baseUrl, lmStudioProbe.configuredModel)
+    : null
+  const useLMStudio = Boolean(lmStudioTest?.functional)
   const decision = routeLocalTask({
     taskCategory: body.taskCategory,
     availableModels,
+    activeProvider: useLMStudio ? 'lm_studio' : 'ollama',
+    activeModel: useLMStudio ? lmStudioTest?.modelUsed ?? lmStudioProbe.configuredModel : null,
+    providerFunctional: useLMStudio,
   })
 
   return NextResponse.json({
     ...decision,
+    activeLocalEngine: useLMStudio ? 'lm_studio' : 'ollama',
+    lmStudio: {
+      reachable: lmStudioProbe.models.length > 0,
+      functional: Boolean(lmStudioTest?.functional),
+      modelUsed: lmStudioTest?.modelUsed ?? lmStudioProbe.configuredModel,
+      failureKind: lmStudioTest?.failureKind ?? lmStudioProbe.failureKind,
+    },
     promptReceived: Boolean(body.prompt?.trim()),
     approvalRequired: body.requireApproval ?? true,
     canExecute: false,

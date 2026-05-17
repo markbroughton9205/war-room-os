@@ -4060,6 +4060,10 @@ function LocalCodeAgentBridgePanel({
                     <div className="mt-1 space-y-1 rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.24)', color: '#64748B' }}>
                       <div>Raw status: {status.status}</div>
                       <div>Endpoint: {status.endpoint ?? 'endpoint not configured'}</div>
+                      {status.configuredModel ? <div>Configured model: {status.configuredModel}</div> : null}
+                      {status.modelUsed ? <div>Model tested: {status.modelUsed}</div> : null}
+                      {typeof status.latencyMs === 'number' ? <div>Latency: {status.latencyMs}ms</div> : null}
+                      {status.failureKind ? <div>Failure kind: {status.failureKind}</div> : null}
                       <div>Message: {status.message}</div>
                       {envHint ? <div>Config hint: {envHint}</div> : null}
                       {status.error ? <div style={{ color: '#FCA5A5' }}>Error: {status.error}</div> : null}
@@ -4578,6 +4582,8 @@ const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
   const [testError, setTestError] = useState<string | null>(null)
   const selectedAgent = families.familyAgents.find(agent => agent.id === selectedAgentId) ?? families.familyAgents[0]
   const availableCount = families.familyAgents.filter(agent => agent.modelInstalled).length
+  const lmStudioProvider = families.providers.lmStudio
+  const lmStudioDetectedModel = families.lmStudioModels[0]?.id ?? null
 
   const runLocalFamilyTest = async () => {
     if (!selectedAgent || !testPrompt.trim()) return
@@ -4637,8 +4643,16 @@ const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>LM STUDIO</div>
-          <div className="mt-1 font-bold" style={{ color: families.providers.lmStudio.functional ? '#34D399' : families.lmStudioDetected ? '#FFD700' : '#777' }}>
-            {families.providers.lmStudio.functional ? 'FUNCTIONAL' : families.lmStudioDetected ? 'DETECTED' : 'NOT DETECTED'}
+          <div className="mt-1 font-bold" style={{ color: lmStudioProvider.functional ? '#34D399' : families.lmStudioDetected ? '#FFD700' : '#777' }}>
+            {lmStudioProvider.handshakeState === 'prompt_test_passed'
+              ? 'PROMPT TEST PASSED'
+              : lmStudioProvider.handshakeState === 'model_loaded'
+                ? 'MODEL LOADED'
+                : lmStudioProvider.handshakeState === 'handshake_failed'
+                  ? 'HANDSHAKE FAILED'
+                  : lmStudioProvider.handshakeState === 'no_model_loaded'
+                    ? 'NO MODEL LOADED'
+                    : families.lmStudioDetected ? 'REACHABLE' : 'NOT DETECTED'}
           </div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
@@ -4723,6 +4737,27 @@ const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
         <details className="mt-3 rounded px-3 py-3 text-xs" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.26)' }}>
           <summary className="cursor-pointer font-bold tracking-widest" style={{ color: '#A78BFA' }}>Advanced Diagnostics (local model prompt test)</summary>
           <div className="mt-2">
+            <div className="mb-3 grid gap-2 md:grid-cols-3">
+              <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+                <div className="tracking-widest" style={{ color: '#555' }}>LM STUDIO ENDPOINT</div>
+                <div className="mt-1 font-mono text-[10px]" style={{ color: '#C4B5FD' }}>http://127.0.0.1:1234/v1</div>
+              </div>
+              <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+                <div className="tracking-widest" style={{ color: '#555' }}>MODEL DETECTED</div>
+                <div className="mt-1 font-mono text-[10px]" style={{ color: '#FFD700' }}>{lmStudioDetectedModel ?? 'none'}</div>
+                <div className="mt-1 text-[10px]" style={{ color: '#888' }}>configured: {lmStudioProvider.configuredModel ?? 'none'}</div>
+              </div>
+              <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+                <div className="tracking-widest" style={{ color: '#555' }}>HANDSHAKE</div>
+                <div className="mt-1" style={{ color: lmStudioProvider.functional ? '#34D399' : '#FBBF24' }}>{lmStudioProvider.handshakeState ?? 'unknown'}</div>
+                <div className="mt-1 text-[10px]" style={{ color: '#888' }}>latency: {typeof lmStudioProvider.latencyMs === 'number' ? `${lmStudioProvider.latencyMs}ms` : 'n/a'}</div>
+                <div className="mt-1 text-[10px]" style={{ color: '#888' }}>failure: {lmStudioProvider.failureKind ?? 'none'}</div>
+              </div>
+              <div className="rounded px-3 py-2 md:col-span-3" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+                <div className="tracking-widest" style={{ color: '#555' }}>TEST RESPONSE PREVIEW</div>
+                <div className="mt-1 leading-relaxed" style={{ color: '#bbb' }}>{lmStudioProvider.testResponsePreview || 'No prompt test response yet.'}</div>
+              </div>
+            </div>
             <div className="mb-2 font-bold tracking-widest" style={{ color: '#A78BFA' }}>LOCAL MODEL PROMPT</div>
             <div className="grid gap-2 md:grid-cols-[220px_1fr_auto]">
               <select value={selectedAgent?.id ?? ''} onChange={event => setSelectedAgentId(event.target.value)}
@@ -4869,9 +4904,11 @@ const CapabilityRouterPanel = memo(function CapabilityRouterPanel() {
           <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(52,211,153,0.22)', background: 'rgba(0,0,0,0.24)' }}>
             <div className="tracking-widest" style={{ color: '#555' }}>SELECTED MODEL</div>
             <div className="mt-1 font-bold" style={{ color: '#34D399' }}>{decision.selectedModel}</div>
+            <div className="mt-1" style={{ color: '#A78BFA' }}>provider: {decision.selectedProvider === 'lm_studio' ? 'LM Studio' : 'Ollama'}</div>
             <div className="mt-2" style={{ color: decision.modelInstalled ? '#34D399' : '#EF4444' }}>
               model installed: {String(decision.modelInstalled)}
             </div>
+            <div className="mt-1" style={{ color: decision.providerFunctional ? '#34D399' : '#EF4444' }}>provider functional: {String(decision.providerFunctional)}</div>
             <div className="mt-1" style={{ color: '#777' }}>approval required: {String(decision.approvalRequired)}</div>
             <div className="mt-1" style={{ color: '#777' }}>can execute: {String(decision.canExecute)}</div>
           </div>

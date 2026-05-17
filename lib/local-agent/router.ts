@@ -1,5 +1,5 @@
 import { LOCAL_FAMILY_AGENTS } from './family-agents'
-import type { LocalFamilyAgent, LocalOllamaModel, LocalTaskCategory, LocalTaskRoutingDecision } from './types'
+import type { LocalFamilyAgent, LocalModelProvider, LocalOllamaModel, LocalTaskCategory, LocalTaskRoutingDecision } from './types'
 
 type LocalTaskRoute = {
   primaryAgentId: string
@@ -112,6 +112,9 @@ export function findLocalFamilyAgent(agentId: string) {
 export function routeLocalTask(input: {
   taskCategory: LocalTaskCategory
   availableModels: LocalOllamaModel[]
+  activeProvider?: LocalModelProvider
+  activeModel?: string | null
+  providerFunctional?: boolean
 }): LocalTaskRoutingDecision {
   const route = LOCAL_TASK_ROUTING_MAP[input.taskCategory]
   const selectedAgent = findLocalFamilyAgent(route.primaryAgentId)
@@ -129,8 +132,12 @@ export function routeLocalTask(input: {
     taskCategory: input.taskCategory,
     selectedFamily: selectedAgent.family,
     selectedAgent,
-    selectedModel: selectedAgent.preferredModel,
-    modelInstalled: installedModelNames.has(selectedAgent.preferredModel),
+    selectedModel: input.activeModel || selectedAgent.preferredModel,
+    selectedProvider: input.activeProvider ?? 'ollama',
+    modelInstalled: input.activeProvider === 'lm_studio'
+      ? Boolean(input.activeModel && input.providerFunctional)
+      : installedModelNames.has(selectedAgent.preferredModel),
+    providerFunctional: Boolean(input.providerFunctional ?? installedModelNames.has(selectedAgent.preferredModel)),
     approvalRequired: true,
     canExecute: false,
     reasoning: route.reasoning,

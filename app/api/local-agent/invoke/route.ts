@@ -33,8 +33,8 @@ export async function POST(request: Request) {
     const result = provider === 'lm_studio'
       ? await (async () => {
         const lmStudio = await getLMStudioModels()
-        const model = body.model?.trim() || lmStudio.models[0]?.id
-        if (!model) throw new Error('LM Studio has no available model.')
+        const model = body.model?.trim() || lmStudio.configuredModel
+        if (!lmStudio.models.length && lmStudio.error) throw new Error(lmStudio.error)
         return invokeLMStudio(agent, prompt, model, lmStudio.baseUrl)
       })()
       : await invokeOllama(agent, prompt)

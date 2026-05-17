@@ -39,39 +39,52 @@ async function probeEndpoint(endpoint: string, requireModels = false): Promise<L
 
 async function detectLMStudio(engine: LocalAgentEngine): Promise<LocalAgentStatusEntry> {
   const checkedAt = new Date().toISOString()
-  const { baseUrl, models, error } = await getLMStudioModels()
+  const { baseUrl, models, error, failureKind, configured, configuredModel } = await getLMStudioModels()
 
   if (models.length === 0) {
     return {
       id: engine.id,
       name: engine.name,
       status: error ? 'unreachable' : 'not_detected',
-      endpoint: `${baseUrl}/v1/models`,
-      message: error ?? 'LM Studio models endpoint returned no models.',
+      endpoint: `${baseUrl}/models`,
+      message: error ?? 'LM Studio reachable, but no models were reported. Load a model in LM Studio.',
       modelsReachable: false,
       chatCompletionsReachable: false,
       functional: false,
       lastFunctionalTestAt: checkedAt,
       error,
+      configured,
+      configuredModel,
+      modelUsed: configuredModel,
+      latencyMs: null,
+      failureKind: failureKind ?? 'model_not_loaded',
+      handshakeState: failureKind === 'connection_refused' || failureKind === 'timeout' ? 'handshake_failed' : 'no_model_loaded',
+      testResponsePreview: null,
     }
   }
 
-  const model = models[0].id
-  const functionalTest = await testLMStudioChat(baseUrl, model)
+  const functionalTest = await testLMStudioChat(baseUrl, configuredModel)
 
   return {
     id: engine.id,
     name: engine.name,
     status: functionalTest.functional ? 'detected' : 'reachable',
-    endpoint: `${baseUrl}/v1/models`,
+    endpoint: `${baseUrl}/models`,
     message: functionalTest.functional
-      ? `LM Studio models and chat completions responded using ${model}.`
-      : `LM Studio models reachable, but chat completion failed using ${model}.`,
+      ? `LM Studio models and chat completions responded using ${functionalTest.modelUsed}.`
+      : `LM Studio models reachable, but chat completion failed using ${functionalTest.modelUsed}.`,
     modelsReachable: true,
     chatCompletionsReachable: functionalTest.functional,
     functional: functionalTest.functional,
     lastFunctionalTestAt: checkedAt,
     error: functionalTest.error,
+    configured,
+    configuredModel,
+    modelUsed: functionalTest.modelUsed,
+    latencyMs: functionalTest.latencyMs,
+    failureKind: functionalTest.failureKind,
+    handshakeState: functionalTest.functional ? 'prompt_test_passed' : 'handshake_failed',
+    testResponsePreview: functionalTest.text ? functionalTest.text.slice(0, 160) : null,
   }
 }
 

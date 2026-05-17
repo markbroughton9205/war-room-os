@@ -11,8 +11,8 @@ export const LOCAL_AGENT_ENGINES: LocalAgentEngine[] = [
   {
     id: 'lm_studio',
     name: 'LM Studio',
-    description: 'OpenAI-compatible local server, commonly available on port 1234.',
-    defaultEndpoint: 'http://localhost:1234/v1/models',
+    description: 'OpenAI-compatible local server, commonly available at http://127.0.0.1:1234/v1.',
+    defaultEndpoint: 'http://127.0.0.1:1234/v1/models',
     configurable: false,
   },
   {

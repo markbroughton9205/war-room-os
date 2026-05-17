@@ -14,6 +14,13 @@ export type LocalAgentEngineStatus =
   | 'unreachable'
   | 'error'
 
+export type LocalProviderHandshakeState =
+  | 'reachable'
+  | 'model_loaded'
+  | 'prompt_test_passed'
+  | 'handshake_failed'
+  | 'no_model_loaded'
+
 export type LocalModelProvider = 'ollama' | 'lm_studio'
 
 export type LocalAgentBridgeStatus = 'online' | 'config_needed' | 'error'
@@ -66,6 +73,13 @@ export type LocalAgentStatusEntry = {
   functional?: boolean
   lastFunctionalTestAt?: string | null
   error?: string | null
+  configured?: boolean
+  configuredModel?: string | null
+  modelUsed?: string | null
+  latencyMs?: number | null
+  failureKind?: 'connection_refused' | 'model_not_loaded' | 'invalid_model_id' | 'timeout' | 'http_error' | 'invalid_response' | 'unknown' | null
+  handshakeState?: LocalProviderHandshakeState | null
+  testResponsePreview?: string | null
 }
 
 export type LocalAgentBridgeStatusResponse = {
@@ -113,6 +127,13 @@ export type LocalProviderAvailability = {
   functional: boolean
   models: Array<LocalOllamaModel | LocalLMStudioModel>
   error: string | null
+  configured?: boolean
+  configuredModel?: string | null
+  failureKind?: LocalAgentStatusEntry['failureKind']
+  handshakeState?: LocalProviderHandshakeState | null
+  latencyMs?: number | null
+  modelUsed?: string | null
+  testResponsePreview?: string | null
 }
 
 export type LocalFamilyAgentAvailability = LocalFamilyAgent & {
@@ -143,7 +164,9 @@ export type LocalTaskRoutingDecision = {
   selectedFamily: string
   selectedAgent: LocalFamilyAgent
   selectedModel: string
+  selectedProvider: LocalModelProvider
   modelInstalled: boolean
+  providerFunctional: boolean
   approvalRequired: true
   canExecute: false
   reasoning: string
