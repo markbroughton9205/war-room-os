@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react'
+'use client'
+
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { getAgentEvolutionProposals, getAgentEvolutionSummary } from '@/lib/learning/agentEvolutionEngine'
 import { detectLearningAnomalies } from '@/lib/learning/anomalyDetection'
 import { getBackgroundWorkerPlans, getBackgroundWorkerSummary } from '@/lib/learning/backgroundWorkerCoordinator'
@@ -13,29 +15,64 @@ import { getResourceAwarenessSnapshot } from '@/lib/learning/resourceAwareness'
 import { compareSimulationToForecast, getSimulationScenarios } from '@/lib/learning/simulationPlanner'
 import { detectStrategicPatterns } from '@/lib/learning/strategicPatternDetector'
 import { getWorkflowOutcomes } from '@/lib/learning/workflowOutcomeTracker'
+import type { LearningIntegrationSnapshot, LearningIntegrationStatus, LearningPanelKey } from '@/lib/learning/integrationStatus'
 
 function pct(value: number) {
   return `${Math.round(value * 100)}%`
 }
 
+function countLabel(value: number | null | undefined) {
+  return typeof value === 'number' ? String(value) : 'not connected'
+}
+
+function statusColor(status?: LearningIntegrationStatus) {
+  if (status === 'live_wired') return '#34D399'
+  if (status === 'derived_from_existing_store') return '#60A5FA'
+  if (status === 'static_seed') return '#FBBF24'
+  return '#94A3B8'
+}
+
+function StatusBadge({ status }: { status?: LearningIntegrationStatus }) {
+  const label = status ?? 'checking'
+  return (
+    <span
+      className="rounded px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest"
+      style={{ border: `1px solid ${statusColor(status)}66`, color: statusColor(status), background: 'rgba(0,0,0,0.25)' }}
+    >
+      {label}
+    </span>
+  )
+}
+
 function Panel({
   title,
   accent,
+  integration,
   children,
 }: {
   title: string
   accent: string
+  integration?: LearningIntegrationSnapshot['panelStatuses'][LearningPanelKey]
   children: ReactNode
 }) {
   return (
     <section className="rounded p-3 text-xs" style={{ border: `1px solid ${accent}55`, background: 'rgba(0,0,0,0.28)' }}>
-      <h3 className="mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: accent }}>{title}</h3>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-[10px] font-bold uppercase tracking-widest" style={{ color: accent }}>{title}</h3>
+        <StatusBadge status={integration?.status} />
+      </div>
+      {integration ? (
+        <p className="mb-2 text-[10px] leading-snug text-slate-500">{integration.detail}</p>
+      ) : null}
       {children}
     </section>
   )
 }
 
 export function Phase9BLearningPanels() {
+  const [integration, setIntegration] = useState<LearningIntegrationSnapshot | null>(null)
+  const [integrationError, setIntegrationError] = useState<string | null>(null)
+  const [integrationLoading, setIntegrationLoading] = useState(false)
   const outcomeLedger = getOutcomeLedgerSnapshot()
   const providerScorecards = getProviderScorecards()
   const doctrine = getDoctrineEntries()
@@ -56,6 +93,31 @@ export function Phase9BLearningPanels() {
   const patterns = detectStrategicPatterns()
   const workflows = getWorkflowOutcomes()
 
+  const loadIntegration = useCallback(async () => {
+    setIntegrationLoading(true)
+    setIntegrationError(null)
+    try {
+      const res = await fetch('/api/learning/integration', { cache: 'no-store' })
+      const body = await res.json() as LearningIntegrationSnapshot & { error?: string }
+      if (!res.ok) throw new Error(body.error || 'Learning integration snapshot failed')
+      setIntegration(body)
+    } catch (error) {
+      setIntegration(null)
+      setIntegrationError(error instanceof Error ? error.message : 'Learning integration snapshot failed')
+    } finally {
+      setIntegrationLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadIntegration()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadIntegration])
+
+  const panelStatus = integration?.panelStatuses
+
   return (
     <section className="mx-auto mt-14 max-w-6xl border-t border-white/10 pt-10">
       <header className="mb-6">
@@ -67,6 +129,43 @@ export function Phase9BLearningPanels() {
           War Room can remember, evaluate, classify, forecast, and propose improvements. External execution remains approval-bound.
         </p>
       </header>
+
+      <div className="mb-4 rounded border border-white/10 bg-black/25 p-3 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Integration Truth Layer</div>
+            <div className="mt-1 text-[10px] text-slate-500">
+              Snapshot: {integration?.generatedAt ?? (integrationLoading ? 'loading…' : 'not connected')} · persistence: {integration ? String(integration.persistenceAvailable) : 'unknown'} · external execution: false
+            </div>
+          </div>
+          <button
+            type="button"
+            className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+            style={{ border: '1px solid #444', color: '#ccc' }}
+            onClick={() => void loadIntegration()}
+            disabled={integrationLoading}
+          >
+            REFRESH
+          </button>
+        </div>
+        {integrationError ? <div className="mt-2 text-[10px] text-red-300">{integrationError}</div> : null}
+        <div className="mt-3 grid gap-2 md:grid-cols-5">
+          {(integration?.eventSources ?? []).slice(0, 10).map(source => (
+            <div key={source.id} className="rounded border border-white/10 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-slate-300">{source.label}</span>
+                <StatusBadge status={source.status} />
+              </div>
+              <div className="mt-1 text-[10px] text-slate-500">
+                rows {countLabel(source.records)} · {source.lastEventAt?.slice(0, 10) ?? 'awaiting event stream'}
+              </div>
+            </div>
+          ))}
+          {!integration?.eventSources?.length ? (
+            <div className="rounded border border-white/10 p-2 text-slate-500">Event source status is loading or not connected.</div>
+          ) : null}
+        </div>
+      </div>
 
       <div className="mb-4 grid gap-3 md:grid-cols-4">
         <div className="rounded border border-emerald-500/30 bg-black/30 p-3">
@@ -88,10 +187,15 @@ export function Phase9BLearningPanels() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Panel title="Outcome Ledger" accent="#D4AF37">
+        <Panel title="Outcome Ledger" accent="#D4AF37" integration={panelStatus?.outcomeLedger}>
           <p className="mb-2 text-[10px] text-slate-400">{outcomeLedger.guardrail}</p>
           <div className="mb-2 text-[10px] text-slate-500">
             {outcomeLedger.summary.totalEntries} entries · {outcomeLedger.summary.unresolvedRiskCount} unresolved risks · {outcomeLedger.summary.contradictionMisses} contradiction misses
+          </div>
+          <div className="mb-2 grid gap-2 text-[10px] sm:grid-cols-3">
+            <div className="rounded border border-white/10 p-2 text-slate-400">Audit rows: {countLabel(integration?.counts.auditLogs)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Action log rows: {countLabel(integration?.counts.actionLogs)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Pending approvals: {countLabel(integration?.counts.pendingApprovals)}</div>
           </div>
           <ul className="max-h-72 space-y-2 overflow-y-auto">
             {outcomeLedger.entries.map(entry => (
@@ -104,7 +208,13 @@ export function Phase9BLearningPanels() {
           </ul>
         </Panel>
 
-        <Panel title="Provider Scorecards" accent="#60A5FA">
+        <Panel title="Provider Scorecards" accent="#60A5FA" integration={panelStatus?.providerScorecards}>
+          <div className="mb-2 grid gap-2 text-[10px] sm:grid-cols-4">
+            <div className="rounded border border-white/10 p-2 text-slate-400">Configured: {integration?.providerRuntime.configuredProviders ?? '—'} / {integration?.providerRuntime.totalProviders ?? '—'}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Degraded: {integration?.providerRuntime.degradedSystems ?? '—'}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Effectiveness rows: {countLabel(integration?.providerRuntime.economicProviderRows)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Source: config + economic</div>
+          </div>
           <div className="max-h-72 overflow-auto">
             <table className="w-full border-collapse text-[10px]">
               <thead>
@@ -131,7 +241,7 @@ export function Phase9BLearningPanels() {
           </div>
         </Panel>
 
-        <Panel title="Doctrine Engine" accent="#34D399">
+        <Panel title="Doctrine Engine" accent="#34D399" integration={panelStatus?.doctrine}>
           <div className="mb-2 text-[10px] text-slate-500">
             {doctrineSummary.promoted} promoted · avg confidence {pct(doctrineSummary.averageConfidence)}
           </div>
@@ -148,7 +258,7 @@ export function Phase9BLearningPanels() {
           </ul>
         </Panel>
 
-        <Panel title="Narrative + Event Graph" accent="#F472B6">
+        <Panel title="Narrative + Event Graph" accent="#F472B6" integration={panelStatus?.narrativeGraph}>
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="rounded border border-white/10 p-2 text-slate-300">{graph.nodes.length} nodes</div>
             <div className="rounded border border-white/10 p-2 text-slate-300">{graph.edges.length} edges</div>
@@ -166,9 +276,13 @@ export function Phase9BLearningPanels() {
           </ul>
         </Panel>
 
-        <Panel title="Forecast + Simulation" accent="#A78BFA">
+        <Panel title="Forecast + Simulation" accent="#A78BFA" integration={panelStatus?.forecastSimulation}>
           <div className="mb-2 text-[10px] text-slate-500">
             {forecastSummary.forecastCount} forecasts · avg risk {pct(forecastSummary.averageRisk)}
+          </div>
+          <div className="mb-2 grid gap-2 text-[10px] sm:grid-cols-2">
+            <div className="rounded border border-white/10 p-2 text-slate-400">Retrieval logs: {countLabel(integration?.counts.internetLogs)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Economic workflows: {countLabel(integration?.counts.economicWorkflows)}</div>
           </div>
           <ul className="max-h-72 space-y-2 overflow-y-auto">
             {forecasts.map(forecast => (
@@ -186,9 +300,15 @@ export function Phase9BLearningPanels() {
           </ul>
         </Panel>
 
-        <Panel title="Background Worker Monitor" accent="#FBBF24">
+        <Panel title="Background Worker Monitor" accent="#FBBF24" integration={panelStatus?.backgroundWorkers}>
           <div className="mb-2 text-[10px] text-slate-500">
             {workerSummary.total} monitors · ready {workerSummary.ready} · external execution allowed: {String(workerSummary.externalExecutionAllowed)}
+          </div>
+          <div className="mb-2 grid gap-2 text-[10px] sm:grid-cols-4">
+            <div className="rounded border border-white/10 p-2 text-slate-400">Active workers: {integration?.system.activeWorkers ?? '—'}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Active scans: {integration?.system.activeScans ?? '—'}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Queue depth: {integration?.system.workerQueueDepth ?? '—'}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Internet polls: {integration?.system.internetPollsInWindow ?? '—'}</div>
           </div>
           <ul className="max-h-72 space-y-2 overflow-y-auto">
             {workers.map(worker => (
@@ -201,19 +321,21 @@ export function Phase9BLearningPanels() {
           </ul>
         </Panel>
 
-        <Panel title="Resource Awareness" accent="#94A3B8">
+        <Panel title="Resource Awareness" accent="#94A3B8" integration={panelStatus?.resourceAwareness}>
           <div className="grid gap-2 text-[10px] sm:grid-cols-2">
             <div className="rounded border border-white/10 p-2 text-slate-300">Queue pressure: {resources.queuePressure}</div>
             <div className="rounded border border-white/10 p-2 text-slate-300">Worker health: {resources.workerHealth}</div>
             <div className="rounded border border-white/10 p-2 text-slate-300">Source health: {resources.sourceHealth}</div>
             <div className="rounded border border-white/10 p-2 text-slate-300">Retrieval success: {pct(resources.retrievalSuccess)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-300">Host memory: {integration ? pct(integration.system.memoryUsageRatio) : '—'} ({integration?.system.memoryWarning ?? 'unknown'})</div>
+            <div className="rounded border border-white/10 p-2 text-slate-300">CPU gate: {integration?.system.cpuWarning ?? 'unknown'}</div>
           </div>
           <ul className="mt-2 space-y-1 text-[10px] text-slate-400">
             {resources.scalingBottlenecks.map(item => <li key={item}>Bottleneck: {item}</li>)}
           </ul>
         </Panel>
 
-        <Panel title="Agent Evolution Proposals" accent="#2DD4BF">
+        <Panel title="Agent Evolution Proposals" accent="#2DD4BF" integration={panelStatus?.agentEvolution}>
           <div className="mb-2 text-[10px] text-slate-500">
             {agentSummary.proposed} proposed · approval-bound: {String(agentSummary.approvalBound)}
           </div>
@@ -228,9 +350,14 @@ export function Phase9BLearningPanels() {
           </ul>
         </Panel>
 
-        <Panel title="Escalation Queue" accent="#F87171">
+        <Panel title="Escalation Queue" accent="#F87171" integration={panelStatus?.escalationQueue}>
           <div className="mb-2 text-[10px] text-slate-500">
             {escalationSummary.queued} queued · high/critical {escalationSummary.highOrCritical} · auto-send: {String(escalationSummary.autoSendEnabled)}
+          </div>
+          <div className="mb-2 grid gap-2 text-[10px] sm:grid-cols-3">
+            <div className="rounded border border-white/10 p-2 text-slate-400">Repair warnings: {integration?.repair.unresolvedWarnings ?? '—'}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Rollback checkpoints: {integration?.repair.rollbackCheckpoints ?? '—'}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Sentinel scans: {countLabel(integration?.counts.redSentinelScans)}</div>
           </div>
           <ul className="max-h-72 space-y-2 overflow-y-auto">
             {escalations.map(plan => (
@@ -243,7 +370,13 @@ export function Phase9BLearningPanels() {
           </ul>
         </Panel>
 
-        <Panel title="Patterns + Workflow Learning" accent="#86EFAC">
+        <Panel title="Patterns + Workflow Learning" accent="#86EFAC" integration={panelStatus?.patternsWorkflow}>
+          <div className="mb-2 grid gap-2 text-[10px] sm:grid-cols-4">
+            <div className="rounded border border-white/10 p-2 text-slate-400">Repair entries: {integration?.repair.totalEntries ?? '—'}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Monitor repairs: {integration?.repair.monitorEntries ?? '—'}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Active opps: {countLabel(integration?.economic.activeOpportunities)}</div>
+            <div className="rounded border border-white/10 p-2 text-slate-400">Completed workflows: {countLabel(integration?.economic.completedWorkflows)}</div>
+          </div>
           <div className="grid gap-2 lg:grid-cols-2">
             <ul className="max-h-64 space-y-2 overflow-y-auto">
               {patterns.map(pattern => (
@@ -265,6 +398,14 @@ export function Phase9BLearningPanels() {
           <div className="mt-2 text-[10px] text-slate-500">
             Active anomaly watches: {anomalies.length}. Recommendations remain Commander-controlled.
           </div>
+          {integration?.notConnectedGaps.length ? (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-[10px] font-bold tracking-widest text-slate-500">Not-connected gaps</summary>
+              <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-[10px] text-slate-500">
+                {integration.notConnectedGaps.map(gap => <li key={gap}>{gap}</li>)}
+              </ul>
+            </details>
+          ) : null}
         </Panel>
       </div>
     </section>
