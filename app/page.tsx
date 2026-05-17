@@ -73,6 +73,7 @@ import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
 import { LiveEnvironmentPanel } from '@/components/intelligence/LiveEnvironmentPanel'
+import { AnalystOperationsPanel } from '@/components/war-room/analysts/AnalystOperationsPanel'
 import {
   DEFAULT_COMMANDER_LOCATION,
   forgetLocationHistory,
@@ -180,14 +181,16 @@ import type {
 } from '@/lib/red-team-coder/types'
 import { createEngineeringTaskPacket, type EngineeringTaskPacket } from '@/lib/engineering/engineeringTaskPacket'
 import { buildEngineeringStatusBridge, type EngineeringStatusBridge } from '@/lib/engineering/engineeringStatusBridge'
+import { createAnalystOperationsPacket, type AnalystOperationsPacket } from '@/lib/analysts/analystOutcomeEvaluator'
 import { createProjectOrchestrationPacket, type ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
 
-export type OperatorTab = 'command' | 'income' | 'agents' | 'approvals' | 'memory' | 'system' | 'diagnostics'
+export type OperatorTab = 'command' | 'income' | 'agents' | 'analysts' | 'approvals' | 'memory' | 'system' | 'diagnostics'
 
 const OPERATOR_TABS: { id: OperatorTab; label: string }[] = [
   { id: 'command', label: 'Command Center' },
   { id: 'income', label: 'Income Operations' },
   { id: 'agents', label: 'Agents' },
+  { id: 'analysts', label: 'Analysts' },
   { id: 'approvals', label: 'Approvals' },
   { id: 'memory', label: 'Memory' },
   { id: 'system', label: 'System Health' },
@@ -208,6 +211,7 @@ type CouncilMessage = {
   recallPreview?: CouncilMemoryRecallPreview
   engineeringTaskPacket?: EngineeringTaskPacket
   projectOrchestrationPacket?: ProjectOrchestrationPacket
+  analystOperationsPacket?: AnalystOperationsPacket
 }
 
 type WarRoomPerformanceDiagnostics = {
@@ -1238,6 +1242,33 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         </div>
 
+        <div className="mt-2 rounded px-2 py-2 text-xs" style={{ border: '1px solid rgba(56,189,248,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-1 font-bold tracking-widest" style={{ color: '#BAE6FD' }}>ANALYST FINDINGS</div>
+          <div style={{ color: '#CBD5E1' }}>{packet.approvalPacket.confidenceSummary}</div>
+          <div className="mt-2 grid gap-2 md:grid-cols-3">
+            <div>
+              <div className="font-bold tracking-widest" style={{ color: '#86EFAC' }}>TRENDS</div>
+              <ul className="mt-1 space-y-1" style={{ color: '#CBD5E1' }}>
+                {packet.approvalPacket.trendObservations.slice(0, 2).map(item => <li key={item}>- {item}</li>)}
+              </ul>
+            </div>
+            <div>
+              <div className="font-bold tracking-widest" style={{ color: '#FDE68A' }}>SCORES</div>
+              <ul className="mt-1 space-y-1" style={{ color: '#CBD5E1' }}>
+                {packet.approvalPacket.opportunityScores.slice(0, 2).map(item => (
+                  <li key={item.label}>- {item.label}: {item.score}/100 ({item.band})</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <div className="font-bold tracking-widest" style={{ color: '#FCA5A5' }}>ANOMALIES</div>
+              <ul className="mt-1 space-y-1" style={{ color: '#CBD5E1' }}>
+                {packet.approvalPacket.anomalyAlerts.slice(0, 2).map(item => <li key={item}>- {item}</li>)}
+              </ul>
+            </div>
+          </div>
+        </div>
+
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {([
             ['approve', 'Approve'],
@@ -1261,6 +1292,57 @@ const MessageBubble = memo(function MessageBubble({
         </div>
         <div className="mt-2 text-[10px] tracking-widest" style={{ color: '#64748B' }}>
           Prepared workflow only. Commander approval is required before execution, file mutation, commit, push, deploy, legal reliance, or external action.
+        </div>
+      </div>
+    )
+  }
+  if (msg.messageType === 'analyst_operations' && msg.analystOperationsPacket) {
+    const packet = msg.analystOperationsPacket
+    const copyPacket = () => {
+      if (typeof navigator === 'undefined' || !navigator.clipboard) return
+      void navigator.clipboard.writeText(JSON.stringify(packet, null, 2))
+    }
+
+    return (
+      <div className="message-fade-in mb-4 ml-11 rounded-lg p-3 text-sm"
+        style={{ background: 'rgba(56,189,248,0.07)', border: '1px solid rgba(56,189,248,0.28)' }}>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-xs font-bold tracking-widest" style={{ color: '#38BDF8' }}>
+              Analyst operations
+            </div>
+            <div className="mt-1 text-sm font-bold" style={{ color: '#E0F2FE' }}>{packet.report.title}</div>
+            <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#94A3B8' }}>
+              {packet.id} · {packet.status.replaceAll('_', ' ')}
+            </div>
+          </div>
+          <button type="button" onClick={copyPacket}
+            className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
+            style={{ border: '1px solid rgba(56,189,248,0.45)', color: '#BAE6FD' }}>
+            Copy Analyst Packet
+          </button>
+        </div>
+        <AnalystOperationsPanel packet={packet} compact />
+        <div className="mt-2 grid gap-2 text-xs md:grid-cols-3">
+          <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(52,211,153,0.16)', background: 'rgba(0,0,0,0.22)' }}>
+            <div className="font-bold tracking-widest" style={{ color: '#86EFAC' }}>CONFIDENCE</div>
+            <div style={{ color: '#CBD5E1' }}>{packet.report.confidenceSummary}</div>
+          </div>
+          <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(251,191,36,0.16)', background: 'rgba(0,0,0,0.22)' }}>
+            <div className="font-bold tracking-widest" style={{ color: '#FDE68A' }}>DATA GAPS / UNKNOWNS</div>
+            <ul className="mt-1 space-y-1" style={{ color: '#CBD5E1' }}>
+              {[...packet.report.dataGaps, ...packet.report.unknowns].slice(0, 3).map(item => <li key={item}>- {item}</li>)}
+            </ul>
+          </div>
+          <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(248,113,113,0.16)', background: 'rgba(0,0,0,0.22)' }}>
+            <div className="font-bold tracking-widest" style={{ color: '#FCA5A5' }}>RISKS</div>
+            <ul className="mt-1 space-y-1" style={{ color: '#CBD5E1' }}>
+              {packet.report.anomalyAlerts.slice(0, 3).map(item => <li key={item}>- {item}</li>)}
+            </ul>
+          </div>
+        </div>
+        <div className="mt-2 text-[10px] tracking-widest" style={{ color: '#64748B' }}>
+          Analyst lanes assist Commander decisions only. No external action, commit, push, deploy, outreach, purchase, or legal reliance is performed.
         </div>
       </div>
     )
@@ -5072,6 +5154,7 @@ function Home() {
   const [localAgentBridge, setLocalAgentBridge] = useState<LocalAgentBridgeStatusResponse>(INITIAL_LOCAL_AGENT_BRIDGE)
   const [localFamilyAgents, setLocalFamilyAgents] = useState<LocalFamilyAgentsResponse>(INITIAL_LOCAL_FAMILY_AGENTS)
   const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
+  const [latestAnalystPacket, setLatestAnalystPacket] = useState<AnalystOperationsPacket | null>(null)
   const engineeringStatusBridge = useMemo(
     () => buildEngineeringStatusBridge({
       localBridge: localAgentBridge,
@@ -9141,6 +9224,7 @@ function Home() {
       if (projectPacket.engineeringTaskPacket) {
         setLatestEngineeringTaskPacket(projectPacket.engineeringTaskPacket)
       }
+      setLatestAnalystPacket(projectPacket.analystPacket)
       addMessages([{
         id: createMessageId('project-orchestration'),
         familyName: 'PROJECT ORCHESTRATOR',
@@ -9164,6 +9248,29 @@ function Home() {
         }
         return next
       })
+    }
+
+    const analystPacket = createAnalystOperationsPacket(decree)
+    if (analystPacket) {
+      setLatestAnalystPacket(analystPacket)
+      addMessages([{
+        id: createMessageId('analyst-operations'),
+        familyName: 'ANALYST OPERATIONS',
+        content: `Analyst packet prepared: ${analystPacket.intake.analysisType}`,
+        timestamp: new Date().toLocaleTimeString(),
+        color: '#38BDF8',
+        icon: 'A',
+        provider: 'Data analyst lanes',
+        messageType: 'analyst_operations',
+        analystOperationsPacket: analystPacket,
+      }])
+      setFamilyDuty(prev => ({
+        ...prev,
+        chatgpt: 'working',
+        grok: 'working',
+        gemini: 'working',
+        red_team: 'working',
+      }))
     }
 
     const engineeringPacket = projectPacket?.engineeringTaskPacket ?? createEngineeringTaskPacket(decree)
@@ -10140,6 +10247,17 @@ function Home() {
                 <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={loadLocalFamilyAgents} />
                 <CapabilityRouterPanel />
                 <CodexAgentPlaceholder />
+              </>
+            )}
+            {operatorTab === 'analysts' && (
+              <>
+                <div className="mb-3 border-b border-yellow-900/40 pb-2">
+                  <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FBBF24' }}>ANALYST OPERATIONS</h2>
+                  <p className="mt-1 text-[9px] tracking-widest" style={{ color: '#666' }}>
+                    Outcome intelligence, scoring, trends, forecasts, bottlenecks, and learning signals remain advisory only.
+                  </p>
+                </div>
+                <AnalystOperationsPanel packet={latestAnalystPacket} />
               </>
             )}
             {operatorTab === 'income' && (

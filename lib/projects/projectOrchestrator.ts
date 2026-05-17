@@ -1,3 +1,4 @@
+import { createAnalystOperationsPacket, type AnalystOperationsPacket } from '@/lib/analysts/analystOutcomeEvaluator'
 import { createEngineeringTaskPacket, type EngineeringTaskPacket } from '@/lib/engineering/engineeringTaskPacket'
 import { buildProjectApprovalPacket, type ProjectApprovalPacket } from './projectApprovalPacket'
 import { buildProjectLaneAssignments, buildProjectTasks, type ProjectLaneAssignment } from './projectLaneRouter'
@@ -28,6 +29,7 @@ export type ProjectOrchestrationPacket = {
   synthesis: ProjectSynthesis
   qualityGate: ProjectQualityGate
   approvalPacket: ProjectApprovalPacket
+  analystPacket: AnalystOperationsPacket
   engineeringTaskPacket: EngineeringTaskPacket | null
   commanderControls: Array<'approve' | 'pause' | 'redirect' | 'deeper_work'>
   behaviorSummary: string
@@ -44,7 +46,11 @@ export function createProjectOrchestrationPacket(decree: string, now = new Date(
   const tasks = buildProjectTasks(intake)
   const synthesis = buildProjectSynthesis(intake, tasks)
   const qualityGate = buildProjectQualityGate(intake, tasks)
-  const approvalPacket = buildProjectApprovalPacket({ intake, tasks, synthesis, qualityGate })
+  const analystPacket = createAnalystOperationsPacket(decree, now, {
+    force: true,
+    analysisType: `${intake.projectType} outcome intelligence`,
+  })!
+  const approvalPacket = buildProjectApprovalPacket({ intake, tasks, synthesis, qualityGate, analystPacket })
   const engineeringTaskPacket = tasks.some(task => task.lane === 'engineering')
     ? createEngineeringTaskPacket(decree, now)
     : null
@@ -59,6 +65,7 @@ export function createProjectOrchestrationPacket(decree: string, now = new Date(
     synthesis,
     qualityGate,
     approvalPacket,
+    analystPacket,
     engineeringTaskPacket,
     commanderControls: ['approve', 'pause', 'redirect', 'deeper_work'],
     behaviorSummary:
