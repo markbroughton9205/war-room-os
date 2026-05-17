@@ -1,9 +1,11 @@
 export type EnvAliasKey =
   | 'weatherApiKey'
   | 'weatherProvider'
+  | 'weatherGovContact'
   | 'financeApiKey'
   | 'financeProvider'
   | 'newsApiKey'
+  | 'guardianApiKey'
   | 'newsRssFeeds'
   | 'horoscopeApiKey'
   | 'astrologyProvider'
@@ -34,6 +36,11 @@ const ENV_ALIAS_DEFINITIONS: EnvAliasDefinition[] = [
     aliases: ['WEATHER_PROVIDER'],
   },
   {
+    key: 'weatherGovContact',
+    preferredName: 'WEATHER_GOV_CONTACT',
+    aliases: ['WEATHER_GOV_CONTACT', 'NWS_CONTACT', 'WEATHER_CONTACT'],
+  },
+  {
     key: 'financeApiKey',
     preferredName: 'FINANCE_API_KEY',
     aliases: ['FINANCE_API_KEY', 'FINNHUB_API_KEY', 'Finnhub_API_Key', 'finance_api_key'],
@@ -47,6 +54,11 @@ const ENV_ALIAS_DEFINITIONS: EnvAliasDefinition[] = [
     key: 'newsApiKey',
     preferredName: 'NEWS_API_KEY',
     aliases: ['NEWS_API_KEY', 'News_API_Key', 'news_api_key'],
+  },
+  {
+    key: 'guardianApiKey',
+    preferredName: 'GUARDIAN_API_KEY',
+    aliases: ['GUARDIAN_API_KEY', 'THE_GUARDIAN_API_KEY'],
   },
   {
     key: 'newsRssFeeds',

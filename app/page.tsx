@@ -5329,6 +5329,14 @@ function Home() {
   const forgetCommanderLocation = useCallback(() => {
     setCommanderLocation(prev => forgetLocationHistory(prev))
   }, [])
+  const injectLiveEnvironmentDecree = useCallback((decree: string) => {
+    setCommand(decree)
+    setOperatorTab('command')
+    window.requestAnimationFrame(() => {
+      const input = document.querySelector<HTMLTextAreaElement>('[data-command-surface-id="live-council-primary-decree"]')
+      input?.focus()
+    })
+  }, [setOperatorTab])
   const decreePacketFlushCompleteRef = useRef(false)
   const decreePacketOpenedAtMsRef = useRef(0)
   const lastAutonomousResearchFamilyRef = useRef<CouncilOrchestrationFamily | null>(null)
@@ -9895,6 +9903,7 @@ function Home() {
         onForgetLocation={forgetCommanderLocation}
         onToggleHoroscope={() => setHoroscopeEnabled(prev => !prev)}
         onSetAstrologyMode={setAstrologyMode}
+        onCouncilHandoff={injectLiveEnvironmentDecree}
       />
 
       {standingPermissionStrip}

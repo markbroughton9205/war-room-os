@@ -48,6 +48,7 @@ export type WeatherDashboardSnapshot = {
   fetchedAt: string | null
   source: string
   detail: string
+  diagnostics?: string[]
   setup?: EnvironmentSetupGuidance
 }
 
@@ -65,6 +66,7 @@ export type NewsDashboardCard = {
   confidenceLabel: EvidenceConfidenceTier
   signalLabel: 'verified' | 'emerging' | 'weak-signal'
   detail: string
+  provider?: 'guardian' | 'newsapi' | 'rss' | 'intelligence'
 }
 
 export type NewsDashboardSnapshot = {
@@ -75,6 +77,7 @@ export type NewsDashboardSnapshot = {
   freshness: string
   source: string
   detail: string
+  diagnostics?: string[]
   setup?: EnvironmentSetupGuidance
 }
 

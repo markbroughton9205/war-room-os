@@ -9,6 +9,7 @@ import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/en
 import { describeLocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import { buildHoroscopeSnapshot, type AstrologyInterpretationMode, type HoroscopePeriod } from '@/lib/intelligence/environment/horoscopeEnvironment'
 import { buildNewsCardsFromIntelligence } from '@/lib/intelligence/environment/newsCards'
+import { familyTipsForPanel, type FamilyTip } from '@/lib/familyTips'
 import type {
   EnvironmentSetupGuidance,
   FinanceDashboardSnapshot,
@@ -24,11 +25,25 @@ type ImprovementStat = {
   color: string
 }
 
+type CouncilHandoffAction = 'ask_council' | 'investigate' | 'send_to_analysts' | 'create_opportunity'
+
+type CommanderSuggestion = {
+  suggestedMove: string
+  whyItMatters: string
+  expectedBenefit: string
+  nextAction: string
+  relatedPanel: string
+  familySource: string
+  decree: string
+}
+
 const EMPTY_NEWS_CARDS: NewsDashboardCard[] = []
 const HOROSCOPE_PERIODS: HoroscopePeriod[] = ['daily', 'weekly', 'monthly', 'yearly']
 const LOCAL_INTELLIGENCE_QUERIES = [
   'Akron news',
   'Summit County alerts',
+  'local economy',
+  'business signals',
   'weather alerts',
   'traffic',
   'public safety',
@@ -153,7 +168,7 @@ function weatherIcon(condition: string, status: WeatherDashboardSnapshot['status
 }
 
 function weatherConditionText(weather: WeatherDashboardSnapshot): string {
-  if (weather.status !== 'available') return 'Weather feed temporarily unavailable'
+  if (weather.status !== 'available') return 'Weather feed temporarily unavailable.'
   return weather.condition
 }
 
@@ -173,11 +188,12 @@ function localSignalState(args: {
   sourceNetworkProvider: ProviderConfigStatus | undefined
   localSourceProvider: ProviderConfigStatus | undefined
   weakSignals: number
-}): 'no_results_yet' | 'sources_loading' | 'feeds_online' | 'degraded' {
-  if (!args.sourceNetworkProvider && !args.localSourceProvider) return 'sources_loading'
-  if (isProviderReady(args.sourceNetworkProvider) && args.weakSignals > 0) return 'feeds_online'
-  if (isProviderReady(args.sourceNetworkProvider)) return 'no_results_yet'
-  if (isProviderReady(args.localSourceProvider)) return 'feeds_online'
+  localCards: number
+}): 'live_results' | 'feeds_online' | 'no_results_yet' | 'degraded' | 'missing_feeds' {
+  if (args.localCards > 0 || args.weakSignals > 0) return 'live_results'
+  if (isProviderReady(args.sourceNetworkProvider) || isProviderReady(args.localSourceProvider)) return 'feeds_online'
+  if (!args.sourceNetworkProvider && !args.localSourceProvider) return 'no_results_yet'
+  if (args.localSourceProvider?.status === 'missing_provider') return 'missing_feeds'
   return 'degraded'
 }
 
@@ -186,10 +202,81 @@ function localSignalLabel(state: ReturnType<typeof localSignalState>): string {
 }
 
 function localSignalSummary(state: ReturnType<typeof localSignalState>, weakSignals: number): string {
-  if (state === 'feeds_online') return weakSignals > 0 ? `${weakSignals} local weak signal${weakSignals === 1 ? '' : 's'} in current intelligence.` : 'Local source coverage is online.'
-  if (state === 'no_results_yet') return 'Akron/Summit watch is armed; no local signals returned yet.'
-  if (state === 'sources_loading') return 'Local source status is loading.'
+  if (state === 'live_results') return weakSignals > 0 ? `${weakSignals} Akron/Summit signal${weakSignals === 1 ? '' : 's'} surfaced in current intelligence.` : 'Source-backed local results are available.'
+  if (state === 'feeds_online') return 'Akron/Summit watch is online and scanning for useful local movement.'
+  if (state === 'no_results_yet') return 'Akron/Summit watch is armed; no local results returned yet.'
+  if (state === 'missing_feeds') return 'Add local feeds or enable search to strengthen Akron/Summit coverage.'
   return 'Local coverage degraded; diagnostics show source readiness.'
+}
+
+function buildCouncilDecree(action: CouncilHandoffAction, base: string): string {
+  if (action === 'investigate') return `${base} Include verified, emerging, contradictions, unknowns, and source links.`
+  if (action === 'send_to_analysts') return `Analysts, review this Live Environment signal and produce a concise operational brief: ${base}`
+  if (action === 'create_opportunity') return `Opportunity Scout, turn this Live Environment signal into vetted opportunity candidates with payout/risk/next action: ${base}`
+  return base
+}
+
+function buildCommanderSuggestion(args: {
+  weather: WeatherDashboardSnapshot
+  finance: FinanceDashboardSnapshot
+  activeNews: NewsDashboardCard | null
+  signalState: ReturnType<typeof localSignalState>
+  missingProviders: number
+  pendingActions: number
+}): CommanderSuggestion {
+  if (args.signalState === 'live_results' || args.activeNews?.category === 'local' || args.activeNews?.category === 'regional') {
+    return {
+      suggestedMove: 'Investigate Akron local opportunity signals.',
+      whyItMatters: 'Local movement is closest to execution: business openings, public safety, weather, events, and community activity can change timing.',
+      expectedBenefit: 'A verified local brief the Council can convert into income, logistics, or family planning next steps.',
+      nextAction: 'Ask Grok to gather local signals and Gemini to separate verified facts from unknowns.',
+      relatedPanel: 'Live Council / Analysts',
+      familySource: 'Grok Family',
+      decree: 'Grok, investigate Akron local business and opportunity signals and report verified, emerging, contradictions, and unknowns.',
+    }
+  }
+  if (args.finance.status === 'available') {
+    return {
+      suggestedMove: 'Use market context before income moves.',
+      whyItMatters: 'GLD, SPY, BTC, and QQQ can frame risk mood, but they should not trigger automatic trading decisions.',
+      expectedBenefit: 'Cleaner timing context for opportunity scouting and transport/business decisions.',
+      nextAction: 'Ask ChatGPT to translate market movement into non-trading operational considerations.',
+      relatedPanel: 'Market Feed / Opportunity Scout',
+      familySource: 'ChatGPT Family',
+      decree: 'ChatGPT, use current GLD, SPY, BTC, and QQQ movement as context for War Room operations, not trading advice, and recommend one grounded next move.',
+    }
+  }
+  if (args.weather.status !== 'available') {
+    return {
+      suggestedMove: 'Stabilize weather intelligence.',
+      whyItMatters: 'Weather affects local travel, family timing, public safety, and event planning.',
+      expectedBenefit: 'Reliable Akron/Summit operating context before local decisions.',
+      nextAction: 'Ask Claude to review weather provider readiness and NOAA fallback status.',
+      relatedPanel: 'Diagnostics / System Health',
+      familySource: 'Claude Family',
+      decree: 'Claude, review Live Environment weather provider readiness, NOAA fallback status, and the smallest safe fix without exposing secrets.',
+    }
+  }
+  if (args.pendingActions > 0 || args.missingProviders > 0) {
+    return {
+      suggestedMove: 'Clear blockers before expanding scope.',
+      whyItMatters: 'Pending approvals and missing providers can make the Council overpromise.',
+      expectedBenefit: 'A tighter action list grounded in current runtime readiness.',
+      nextAction: 'Ask Red Team to identify the most important blocker and approval gate.',
+      relatedPanel: 'Diagnostics / Approvals',
+      familySource: 'Red Team',
+      decree: 'Red Team, inspect current blockers, missing providers, and pending approvals. Recommend the safest next action only.',
+    }
+  }
+  return {
+    suggestedMove: 'Run a concise operating brief.',
+    whyItMatters: 'Weather, news, local signals, markets, memory, and provider state are most useful when turned into one decision.',
+    expectedBenefit: 'One clear move for the next War Room cycle.',
+    nextAction: 'Ask the Council for a short verified brief.',
+    relatedPanel: 'Live Council',
+    familySource: 'ChatGPT Family',
+    decree: 'ChatGPT, summarize the current Live Environment into one suggested move, why it matters, expected benefit, and next action.',
+  }
 }
 
 function buildFallbackWeather(location: CommanderLocationState): WeatherDashboardSnapshot {
@@ -299,6 +386,53 @@ function statList(args: {
   ]
 }
 
+function FamilyTipInline({ tip, onCouncilHandoff }: { tip: FamilyTip; onCouncilHandoff?: (decree: string) => void }) {
+  return (
+    <div className="mt-2 rounded border border-sky-300/10 bg-sky-950/10 p-1.5">
+      <p className="text-[7px] font-bold uppercase tracking-widest text-sky-200">Family Tip · {tip.family}</p>
+      <p className="mt-1 text-[9px] text-slate-200">{tip.title}</p>
+      <p className="mt-1 text-[8px] leading-snug text-slate-500">{tip.insight}</p>
+      <button
+        type="button"
+        className="mt-1 text-[7px] uppercase tracking-widest text-sky-300 underline"
+        onClick={() => onCouncilHandoff?.(tip.suggested_decree)}
+      >
+        Ask Council
+      </button>
+    </div>
+  )
+}
+
+function HandoffButtons({
+  decree,
+  onCouncilHandoff,
+}: {
+  decree: string
+  onCouncilHandoff?: (decree: string) => void
+}) {
+  if (!onCouncilHandoff) return null
+  const actions: { label: string; action: CouncilHandoffAction }[] = [
+    { label: 'Ask Council', action: 'ask_council' },
+    { label: 'Investigate', action: 'investigate' },
+    { label: 'Send Analysts', action: 'send_to_analysts' },
+    { label: 'Create Opp', action: 'create_opportunity' },
+  ]
+  return (
+    <div className="mt-2 flex flex-wrap gap-1">
+      {actions.map(item => (
+        <button
+          key={item.action}
+          type="button"
+          className="rounded border border-sky-300/20 px-1.5 py-0.5 text-[7px] uppercase tracking-widest text-sky-200 transition hover:border-sky-300/50 hover:text-sky-100"
+          onClick={() => onCouncilHandoff(buildCouncilDecree(item.action, decree))}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   liveResearchHud,
   location,
@@ -308,6 +442,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   onForgetLocation,
   onToggleHoroscope,
   onSetAstrologyMode,
+  onCouncilHandoff,
 }: {
   liveResearchHud: LiveResearchClientUi | null
   location: CommanderLocationState
@@ -317,6 +452,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   onForgetLocation: () => void
   onToggleHoroscope: () => void
   onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
+  onCouncilHandoff?: (decree: string) => void
 }) {
   const [configurationSweep, setConfigurationSweep] = useState<ConfigurationSweep | null>(null)
   const [dashboard, setDashboard] = useState<LiveEnvironmentDashboardPayload | null>(null)
@@ -352,6 +488,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
         confidenceLabel: card.badge,
         signalLabel: card.badge === 'weak_signal' ? 'weak-signal' : card.badge === 'verified' || card.badge === 'corroborated' ? 'verified' : 'emerging',
         detail: card.detail,
+        provider: 'intelligence',
       }))
     const seen = new Set<string>()
     return [...rssCards, ...fallbackCards].filter(card => {
@@ -362,6 +499,10 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
     })
   }, [intelligenceCards, rssCards])
   const activeNews = cards.length ? cards[activeNewsIndex % cards.length] : null
+  const localNewsCards = useMemo(
+    () => cards.filter(card => card.category === 'local' || card.category === 'regional' || /akron|summit county/i.test(`${card.title} ${card.detail}`)),
+    [cards],
+  )
   const sourceHealth = liveResearchHud?.intelligence?.retrieval
     ? liveResearchHud.intelligence.retrieval.success ? 'Retrieval ok' : 'Retrieval gap'
     : 'Retrieval idle'
@@ -380,13 +521,22 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
     () => buildHoroscopeSnapshot(undefined, astrologyMode, Boolean(horoscopeProvider?.configured), horoscopePeriod),
     [astrologyMode, horoscopePeriod, horoscopeProvider?.configured],
   )
-  const signalState = localSignalState({ sourceNetworkProvider, localSourceProvider, weakSignals })
+  const signalState = localSignalState({ sourceNetworkProvider, localSourceProvider, weakSignals, localCards: localNewsCards.length })
   const activeQuote = finance.quotes.length ? finance.quotes[activeMarketIndex % finance.quotes.length] : null
   const improvementStats = useMemo(
     () => statList({ configurationSweep, liveResearchHud, dashboard }),
     [configurationSweep, liveResearchHud, dashboard],
   )
   const activeStat = improvementStats[activeStatIndex % improvementStats.length]
+  const liveEnvironmentTip = familyTipsForPanel('live_environment')[0]
+  const commanderSuggestion = buildCommanderSuggestion({
+    weather,
+    finance,
+    activeNews,
+    signalState,
+    missingProviders: configurationSweep?.summary.missingProviders ?? 0,
+    pendingActions: liveResearchHud?.intelligence?.unsupportedClaims ?? 0,
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -448,18 +598,10 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   }, [cards.length, reducedMotion])
 
   useEffect(() => {
-    if (!cards.length) setActiveNewsIndex(0)
-  }, [cards.length])
-
-  useEffect(() => {
     if (reducedMotion || finance.quotes.length <= 1) return
     const interval = window.setInterval(() => setActiveMarketIndex(prev => (prev + 1) % finance.quotes.length), 7000)
     return () => window.clearInterval(interval)
   }, [finance.quotes.length, reducedMotion])
-
-  useEffect(() => {
-    if (!finance.quotes.length) setActiveMarketIndex(0)
-  }, [finance.quotes.length])
 
   useEffect(() => {
     if (reducedMotion || improvementStats.length <= 1) return
@@ -474,9 +616,28 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
           <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-sky-300">Live Environment</p>
           <p className="text-[9px] uppercase tracking-[0.2em] text-slate-500">Source-backed context only; no silent precise tracking.</p>
         </div>
-        <span className="rounded border border-white/10 px-2 py-1 text-[9px] uppercase tracking-widest text-slate-400">
-          {describeLocationMode(location)}
-        </span>
+        <details className="rounded border border-white/10 px-2 py-1 text-[9px] text-slate-400">
+          <summary className="cursor-pointer uppercase tracking-widest">{describeLocationMode(location)}</summary>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {(['off', 'city_only', 'neighborhood', 'precise_temporary'] as LocationMode[]).map(mode => (
+              <button
+                key={mode}
+                type="button"
+                className="rounded px-1.5 py-0.5 text-[8px] uppercase tracking-widest"
+                style={{
+                  border: location.mode === mode ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.12)',
+                  color: location.mode === mode ? '#7dd3fc' : '#94a3b8',
+                }}
+                onClick={() => onSetLocationMode(mode)}
+              >
+                {modeLabel(mode)}
+              </button>
+            ))}
+            <button type="button" className="text-[8px] uppercase tracking-widest text-slate-500 underline" onClick={onForgetLocation}>
+              Forget history
+            </button>
+          </div>
+        </details>
       </div>
       <style jsx>{`
         .environment-card-motion {
@@ -521,6 +682,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
             <p className="mt-2 text-[8px] uppercase tracking-widest" style={{ color: weather.status === 'available' ? providerStatusColor(weatherProvider) : weatherStateColor(weather.providerState) }}>
               {weather.status === 'available' ? `${weather.freshness} · source-backed` : 'feed paused'}
             </p>
+            <HandoffButtons decree="Council, review the current Akron weather, alerts, and operating risk. Recommend any family, travel, or local timing adjustments without guessing missing data." onCouncilHandoff={onCouncilHandoff} />
           </summary>
           <div className="mt-2 border-t border-white/10 pt-2 text-[8px] uppercase tracking-widest text-slate-500">
             <p>Status: {weather.status} · provider state: {weatherStateLabel(weather.providerState)}</p>
@@ -529,6 +691,9 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
             <p>Severe alerts: {weather.alerts.length ? `${weather.alerts.length} active` : 'none from configured source'}</p>
             <p>{weather.source} · {weather.freshness}</p>
             <p className="normal-case tracking-wide">{weather.detail}</p>
+            {weather.diagnostics?.map(item => (
+              <p key={item} className="normal-case tracking-wide">Diagnostic: {item}</p>
+            ))}
             {weather.hourlyForecast.length > 0 && (
               <div className="mt-2 space-y-1">
                 <p className="text-slate-400">Hourly forecast</p>
@@ -556,28 +721,22 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
           </div>
         </details>
 
-        <div className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
-          <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Track Me</p>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {(['off', 'city_only', 'neighborhood', 'precise_temporary'] as LocationMode[]).map(mode => (
-              <button
-                key={mode}
-                type="button"
-                className="rounded px-1.5 py-0.5 text-[8px] uppercase tracking-widest"
-                style={{
-                  border: location.mode === mode ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.12)',
-                  color: location.mode === mode ? '#7dd3fc' : '#94a3b8',
-                }}
-                onClick={() => onSetLocationMode(mode)}
-              >
-                {modeLabel(mode)}
-              </button>
-            ))}
+        <details className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
+          <summary className="cursor-pointer list-none">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Commander Suggestion</p>
+            <p className="mt-1 text-xs text-slate-100">{commanderSuggestion.suggestedMove}</p>
+            <p className="mt-1 text-[10px] leading-snug text-slate-300">{commanderSuggestion.whyItMatters}</p>
+            <p className="mt-2 text-[8px] uppercase tracking-widest text-emerald-200">{commanderSuggestion.familySource} · {commanderSuggestion.relatedPanel}</p>
+          </summary>
+          <div className="mt-2 border-t border-white/10 pt-2 text-[8px] text-slate-500">
+            <p className="uppercase tracking-widest text-slate-400">Expected benefit</p>
+            <p className="mt-1 leading-snug">{commanderSuggestion.expectedBenefit}</p>
+            <p className="mt-2 uppercase tracking-widest text-slate-400">Next action</p>
+            <p className="mt-1 leading-snug">{commanderSuggestion.nextAction}</p>
+            <HandoffButtons decree={commanderSuggestion.decree} onCouncilHandoff={onCouncilHandoff} />
+            {liveEnvironmentTip && <FamilyTipInline tip={liveEnvironmentTip} onCouncilHandoff={onCouncilHandoff} />}
           </div>
-          <button type="button" className="mt-2 text-[8px] uppercase tracking-widest text-slate-500 underline" onClick={onForgetLocation}>
-            Forget location history
-          </button>
-        </div>
+        </details>
 
         <details className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
           <summary className="cursor-pointer list-none">
@@ -594,10 +753,12 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
             <p className="mt-1 text-[8px] uppercase tracking-widest" style={{ color: providerStatusColor(sourceNetworkProvider) }}>
               {localSignalLabel(signalState)}
             </p>
+            <HandoffButtons decree="Grok, investigate Akron local news, Summit County alerts, local economy and business signals, weather alerts, public safety, traffic, and community events. Report verified, emerging, contradictions, and unknowns." onCouncilHandoff={onCouncilHandoff} />
           </summary>
           <div className="mt-2 border-t border-white/10 pt-2 text-[8px] uppercase tracking-widest text-slate-500">
             <p>Retrieval: {sourceHealth}</p>
             <p>Weak signals: {weakSignals}</p>
+            <p>Local news cards: {localNewsCards.length}</p>
             <p>Contradictions: {liveResearchHud?.intelligence?.contradictionWarnings ?? 0}</p>
             <p>Default query set: {LOCAL_INTELLIGENCE_QUERIES.join(' · ')}</p>
             <p style={{ color: providerStatusColor(sourceNetworkProvider) }}>
@@ -625,6 +786,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
             <p className="mt-2 text-[8px] uppercase tracking-widest text-purple-200">
               {astrologyMode} · interpretive fallback
             </p>
+            <HandoffButtons decree="Council, reflect on the current symbolic horoscope guidance as private interpretation only. Separate useful reflection from any factual or predictive claim." onCouncilHandoff={onCouncilHandoff} />
           </summary>
           <div className="mt-2 border-t border-white/10 pt-2">
             <div className="mb-2 flex flex-wrap gap-1">
@@ -661,7 +823,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
             </div>
             <div className="mt-2 text-[8px] uppercase tracking-widest text-slate-500">
               <p>Period: {horoscope.period}</p>
-              <p>Profile: internal commander astrology profile configured</p>
+              <p>Profile: internal config retained; hidden from primary view</p>
               <p>Provider state: {horoscope.providerState}</p>
               <p>Provider: {horoscope.provider}</p>
               <p>Moon phase: {horoscope.moonPhase ?? 'not loaded'}</p>
@@ -690,7 +852,9 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
                   {formatSignedNumber(activeQuote.change)} · {formatPercentMovement(activeQuote.percentChange)} · {marketDirectionText(activeQuote.direction)}
                 </p>
                 <p className="mt-1 text-[10px] leading-snug text-slate-300">{marketInterpretation(activeQuote)}</p>
+                <p className="mt-1 text-[8px] leading-snug text-amber-100">Commander Tip: Use market signals as context, not automatic trading decisions.</p>
                 <p className="mt-1 text-[8px] uppercase tracking-widest text-slate-500">{activeQuote.freshness} · watchlist rotation</p>
+                <HandoffButtons decree="ChatGPT, explain current GLD, SPY, BTC, and QQQ movement as operational context only, with caution notes and no automatic trading decisions." onCouncilHandoff={onCouncilHandoff} />
               </>
             ) : (
               <p className="mt-1 text-[10px] text-slate-500">Market feed temporarily unavailable.</p>
@@ -731,7 +895,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
                 <div className="p-1.5">
                   <p className="line-clamp-2 text-[9px] leading-snug text-slate-100">{activeNews.title}</p>
                   <p className="mt-1 truncate text-[8px] text-slate-500">
-                    {activeNews.sourceName} · {activeNews.freshness}
+                    {activeNews.sourceName} · {activeNews.freshness} · {activeNews.provider ?? 'source'}
                   </p>
                 </div>
               </div>
@@ -749,6 +913,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
                 {activeNews.confidenceLabel} · {activeNews.signalLabel}
               </p>
               <p className="mt-1 text-[8px] text-slate-600">{activeNews.detail}</p>
+              <HandoffButtons decree={`Council, review this source-backed news signal from ${activeNews.sourceName}: ${activeNews.title}. Identify verified facts, operational relevance, contradictions, and unknowns.`} onCouncilHandoff={onCouncilHandoff} />
               {cards.length > 1 && (
                 <div className="mt-2 flex gap-1">
                   {cards.slice(0, 6).map((card, index) => (
@@ -774,6 +939,9 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
               News source: {dashboard?.news.status === 'available' ? dashboard.news.provider : providerStatusLabel(newsProvider)}
             </p>
             <p>{dashboard?.news.source ?? 'news source pending'} · {dashboard?.news.freshness ?? 'unknown'}</p>
+            {dashboard?.news.diagnostics?.map(item => (
+              <p key={item} className="normal-case tracking-wide">Diagnostic: {item}</p>
+            ))}
             <p className="normal-case tracking-wide">{dashboard?.news.detail ?? setupGuidanceText(dashboard?.news.setup, providerSetupHint(newsProvider, 'News provider setup check pending.'))}</p>
           </div>
         </details>
@@ -783,6 +951,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
           <p className="mt-1 text-xs" style={{ color: activeStat.color }}>{activeStat.value}</p>
           <p className="text-[10px] text-slate-300">{activeStat.label}</p>
           <p className="mt-1 text-[8px] text-slate-600">{activeStat.detail}</p>
+          <HandoffButtons decree="Council, review War Room readiness across Live Environment, Analysts, Opportunity Scout, Agent Foundry, Learning, Automation, Diagnostics, System Health, Engineering, and Memory. Recommend one safe next move." onCouncilHandoff={onCouncilHandoff} />
           <div className="mt-2 flex gap-1">
             {improvementStats.map((stat, index) => (
               <button

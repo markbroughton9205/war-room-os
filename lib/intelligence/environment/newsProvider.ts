@@ -2,7 +2,7 @@ import { getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/confi
 import type { NewsCategory, NewsDashboardCard, NewsDashboardSnapshot } from '@/lib/intelligence/environment/liveEnvironmentTypes'
 
 const NEWS_TIMEOUT_MS = 8000
-const NEWS_ENV_NAMES = [...getEnvAliasNames('newsRssFeeds'), ...getEnvAliasNames('newsApiKey')]
+const NEWS_ENV_NAMES = [...getEnvAliasNames('newsRssFeeds'), ...getEnvAliasNames('newsApiKey'), ...getEnvAliasNames('guardianApiKey')]
 
 type FeedRegistration = {
   name: string
@@ -27,14 +27,32 @@ type NewsApiResponse = {
   message?: string
 }
 
+type GuardianResponse = {
+  response?: {
+    status?: string
+    results?: {
+      id?: string
+      webTitle?: string
+      webUrl?: string
+      sectionName?: string
+      webPublicationDate?: string
+      fields?: {
+        thumbnail?: string
+        trailText?: string
+      }
+    }[]
+  }
+  message?: string
+}
+
 function setupSnapshot(detail: string): NewsDashboardSnapshot {
-  const aliasDiagnostics = [resolveEnvAlias('newsRssFeeds'), resolveEnvAlias('newsApiKey')]
+  const aliasDiagnostics = [resolveEnvAlias('newsRssFeeds'), resolveEnvAlias('newsApiKey'), resolveEnvAlias('guardianApiKey')]
   const primaryDiagnostic = aliasDiagnostics.find(diagnostic => diagnostic.configured) ?? aliasDiagnostics[0]
   const aliasRecommendation = aliasDiagnostics.find(diagnostic => diagnostic.recommendation)?.recommendation ?? null
 
   return {
     status: 'unavailable',
-    provider: getEnvAliasValue('newsApiKey') ? 'NewsAPI' : 'RSS feed registry',
+    provider: getEnvAliasValue('guardianApiKey') ? 'Guardian' : getEnvAliasValue('newsApiKey') ? 'NewsAPI' : 'RSS feed registry',
     cards: [],
     fetchedAt: null,
     freshness: 'unknown',
@@ -47,8 +65,8 @@ function setupSnapshot(detail: string): NewsDashboardSnapshot {
       configured: aliasDiagnostics.some(diagnostic => diagnostic.configured),
       aliasRecommendation,
       envAliasDiagnostics: aliasDiagnostics,
-      blockedFeature: 'Live Environment news slideshow',
-      recommendedSetup: aliasRecommendation ?? 'Set NEWS_API_KEY for NewsAPI headlines or NEWS_RSS_FEEDS/RSS_FEED_URLS to a semicolon-separated registry. Each RSS entry may be category|source name|https://feed.url/rss.',
+      blockedFeature: 'Live Environment news intelligence cards',
+      recommendedSetup: aliasRecommendation ?? 'Set GUARDIAN_API_KEY for richer cards, NEWS_API_KEY for headlines, or NEWS_RSS_FEEDS/RSS_FEED_URLS to a semicolon-separated registry. Each RSS entry may be category|source name|https://feed.url/rss.',
     },
   }
 }
@@ -185,6 +203,7 @@ function parseFeedItems(feed: FeedRegistration, xml: string, fetchedAt: string):
       confidenceLabel: feed.category === 'local' || feed.category === 'regional' ? 'emerging' : 'verified',
       signalLabel: signalForCategory(feed.category),
       detail: `${feed.category} RSS item from a configured source. Thumbnail is shown only when the feed provides media metadata.`,
+      provider: 'rss',
     }]
   })
 }
@@ -212,6 +231,7 @@ function parseNewsApiArticles(data: NewsApiResponse, fetchedAt: string): NewsDas
       detail: article.description?.trim()
         ? `Source-backed NewsAPI headline. ${article.description.trim()}`
         : 'Source-backed NewsAPI headline. Image is shown only when the source provides one.',
+      provider: 'newsapi',
     }]
   })
 }
@@ -219,6 +239,46 @@ function parseNewsApiArticles(data: NewsApiResponse, fetchedAt: string): NewsDas
 async function fetchNewsApiCards(apiKey: string, fetchedAt: string): Promise<NewsDashboardCard[]> {
   const url = `https://newsapi.org/v2/top-headlines?country=us&pageSize=12&apiKey=${encodeURIComponent(apiKey)}`
   return parseNewsApiArticles(await fetchJson<NewsApiResponse>(url), fetchedAt)
+}
+
+function parseGuardianCards(data: GuardianResponse, fetchedAt: string): NewsDashboardCard[] {
+  if (data.response?.status && data.response.status !== 'ok') throw new Error(data.message ?? 'Guardian returned an error')
+  return (data.response?.results ?? []).slice(0, 12).flatMap((article, index) => {
+    const title = article.webTitle?.trim()
+    if (!title) return []
+    const publishedAt = article.webPublicationDate && Number.isFinite(Date.parse(article.webPublicationDate))
+      ? new Date(article.webPublicationDate).toISOString()
+      : null
+    const imageUrl = article.fields?.thumbnail?.startsWith('https://') ? article.fields.thumbnail : null
+    const section = article.sectionName?.toLowerCase()
+    const category: NewsCategory = section?.includes('world') ? 'international' : section?.includes('us') ? 'national' : 'national'
+    return [{
+      id: `guardian-${article.id ?? index}-${title}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80),
+      title,
+      url: article.webUrl ?? null,
+      sourceName: 'The Guardian',
+      category,
+      imageUrl,
+      publishedAt,
+      freshness: freshnessLabel(publishedAt, fetchedAt),
+      confidenceLabel: 'verified',
+      signalLabel: 'verified',
+      detail: article.fields?.trailText?.trim()
+        ? `Source-backed Guardian story. ${cleanXml(article.fields.trailText)}`
+        : 'Source-backed Guardian story. Thumbnail is shown only when Guardian provides one.',
+      provider: 'guardian',
+    }]
+  })
+}
+
+async function fetchGuardianCards(apiKey: string, fetchedAt: string): Promise<NewsDashboardCard[]> {
+  const params = new URLSearchParams({
+    'api-key': apiKey,
+    'show-fields': 'thumbnail,trailText',
+    'page-size': '12',
+    q: 'Akron OR "Summit County" OR business OR economy OR weather OR public safety',
+  })
+  return parseGuardianCards(await fetchJson<GuardianResponse>(`https://content.guardianapis.com/search?${params.toString()}`), fetchedAt)
 }
 
 function dedupeCards(cards: NewsDashboardCard[]): NewsDashboardCard[] {
@@ -234,15 +294,19 @@ function dedupeCards(cards: NewsDashboardCard[]): NewsDashboardCard[] {
 export async function buildNewsDashboardSnapshot(): Promise<NewsDashboardSnapshot> {
   const registry = parseRegistry()
   const apiKey = getEnvAliasValue('newsApiKey')
-  if (!registry.length && !apiKey) return setupSnapshot('No bounded RSS feed registry or NewsAPI key is configured.')
+  const guardianApiKey = getEnvAliasValue('guardianApiKey')
+  if (!registry.length && !apiKey && !guardianApiKey) return setupSnapshot('No bounded RSS feed registry, Guardian key, or NewsAPI key is configured.')
   const fetchedAt = new Date().toISOString()
+  const guardianResults = guardianApiKey ? await Promise.allSettled([fetchGuardianCards(guardianApiKey, fetchedAt)]) : []
   const rssResults = await Promise.allSettled(registry.map(async feed => parseFeedItems(feed, await fetchText(feed.url), fetchedAt)))
   const apiResults = apiKey ? await Promise.allSettled([fetchNewsApiCards(apiKey, fetchedAt)]) : []
+  const guardianCards = guardianResults.flatMap(result => result.status === 'fulfilled' ? result.value : [])
   const rssCards = rssResults.flatMap(result => result.status === 'fulfilled' ? result.value : [])
   const apiCards = apiResults.flatMap(result => result.status === 'fulfilled' ? result.value : [])
-  const cards = dedupeCards([...rssCards, ...apiCards]).slice(0, 12)
-  const failures = [...rssResults, ...apiResults].filter(result => result.status === 'rejected').length
+  const cards = dedupeCards([...guardianCards, ...rssCards, ...apiCards]).slice(0, 12)
+  const failures = [...guardianResults, ...rssResults, ...apiResults].filter(result => result.status === 'rejected').length
   const sourceParts = [
+    guardianApiKey ? 'Guardian content API' : null,
     registry.length ? `${registry.length} configured RSS feed${registry.length === 1 ? '' : 's'}` : null,
     apiKey ? 'NewsAPI top headlines' : null,
   ].filter(Boolean)
@@ -258,7 +322,7 @@ export async function buildNewsDashboardSnapshot(): Promise<NewsDashboardSnapsho
 
   return {
     status: failures ? 'error' : 'available',
-    provider: registry.length && apiKey ? 'RSS feed registry + NewsAPI' : apiKey ? 'NewsAPI' : 'RSS feed registry',
+    provider: sourceParts.join(' + '),
     cards,
     fetchedAt,
     freshness: freshnessLabel(null, fetchedAt),
@@ -266,5 +330,11 @@ export async function buildNewsDashboardSnapshot(): Promise<NewsDashboardSnapsho
     detail: failures
       ? `${cards.length} source-backed news cards loaded; ${failures} news request${failures === 1 ? '' : 's'} failed.`
       : `${cards.length} source-backed news cards loaded from configured news sources.`,
+    diagnostics: [
+      `Guardian cards: ${guardianCards.length}`,
+      `RSS cards: ${rssCards.length}`,
+      `NewsAPI cards: ${apiCards.length}`,
+      `Failed source requests: ${failures}`,
+    ],
   }
 }

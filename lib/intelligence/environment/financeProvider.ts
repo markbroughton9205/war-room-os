@@ -1,4 +1,4 @@
-import { getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/configuration/envAlias'
+import { configuredEnvName, getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/configuration/envAlias'
 import type { FinanceDashboardSnapshot, FinanceQuote } from '@/lib/intelligence/environment/liveEnvironmentTypes'
 
 const FINANCE_TIMEOUT_MS = 8000
@@ -218,7 +218,8 @@ async function twelveDataQuote(symbol: string, apiKey: string, fetchedAt: string
 }
 
 export async function buildFinanceDashboardSnapshot(): Promise<FinanceDashboardSnapshot> {
-  const provider = (getEnvAliasValue('financeProvider') || '').toLowerCase()
+  const detectedFinanceEnv = configuredEnvName(process.env, 'FINANCE_API_KEY')
+  const provider = (getEnvAliasValue('financeProvider') || (detectedFinanceEnv === 'FINNHUB_API_KEY' ? 'finnhub' : '')).toLowerCase()
   const apiKey = getEnvAliasValue('financeApiKey')
   if (!apiKey) return unavailable('Set FINANCE_API_KEY and FINANCE_PROVIDER before market data can be fetched.')
   const fetchedAt = new Date().toISOString()
