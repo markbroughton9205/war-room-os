@@ -35,11 +35,16 @@ export type LocalFamilyAgentStatus = 'planned' | 'inactive' | 'available'
 export type LocalTaskCategory =
   | 'synthesis'
   | 'architecture'
+  | 'code-repair'
   | 'coding-review'
   | 'realtime-signals'
   | 'planning'
+  | 'risk-review'
   | 'risk-analysis'
+  | 'task-decomposition'
+  | 'diff-explanation'
   | 'diff-review'
+  | 'rollback-planning'
   | 'qa-review'
 
 export type LocalAgentEngine = {

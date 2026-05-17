@@ -4,6 +4,7 @@ const cardClass =
   'rounded-xl border border-white/10 bg-black/40 p-4 shadow-[inset_0_0_0_1px_rgba(255,215,0,0.06),0_12px_40px_-20px_rgba(0,0,0,0.75)] backdrop-blur-sm'
 
 function connectionTone(label: BuildAgentDefinition['connection_label']) {
+  if (label === 'Available/manual') return 'text-emerald-300'
   if (label === 'Future integration') return 'text-slate-500'
   if (label === 'Standby') return 'text-slate-400'
   return 'text-slate-500'

@@ -11,8 +11,8 @@ export const BUILD_AGENT_DEFINITIONS: BuildAgentDefinition[] = [
   {
     id: 'cursor',
     name: 'Cursor Agent',
-    role: 'Iterates inside the IDE: refactors, multi-file edits, and agent-assisted review loops.',
-    connection_label: 'Not connected',
+    role: 'Preferred Commander-approved engineering workspace and repo-aware task packet receiver.',
+    connection_label: 'Available/manual',
   },
   {
     id: 'repo-analyst',

@@ -11,11 +11,16 @@ type LocalTaskRoute = {
 export const LOCAL_TASK_CATEGORIES: LocalTaskCategory[] = [
   'synthesis',
   'architecture',
+  'code-repair',
   'coding-review',
   'realtime-signals',
   'planning',
+  'risk-review',
   'risk-analysis',
+  'task-decomposition',
+  'diff-explanation',
   'diff-review',
+  'rollback-planning',
   'qa-review',
 ]
 
@@ -31,6 +36,12 @@ export const LOCAL_TASK_ROUTING_MAP: Record<LocalTaskCategory, LocalTaskRoute> =
     supportingAgentIds: [],
     reasoning: 'Architecture tasks route to Claude Family Baby because its role is systems reasoning and structure.',
     recommendedNextStep: 'Ask Claude Family Baby for a plan or critique through the safe invoke path after approval.',
+  },
+  'code-repair': {
+    primaryAgentId: 'bridge-architect-baby',
+    supportingAgentIds: ['claude-family-baby', 'red-team-baby'],
+    reasoning: 'Code repair routes to Bridge Architect Baby for diff/QA translation, with Claude and Red Team recommended for plan and risk review.',
+    recommendedNextStep: 'Prepare a Cursor engineering task packet if no functional local coding bridge is available; do not apply changes without Ra’el approval.',
   },
   'coding-review': {
     primaryAgentId: 'claude-family-baby',
@@ -50,17 +61,41 @@ export const LOCAL_TASK_ROUTING_MAP: Record<LocalTaskCategory, LocalTaskRoute> =
     reasoning: 'Planning routes to Kimi Family Baby because its role is task decomposition and sequencing.',
     recommendedNextStep: 'Ask for a task tree or sequence, then keep execution gated behind Ra’el approval.',
   },
+  'risk-review': {
+    primaryAgentId: 'red-team-baby',
+    supportingAgentIds: [],
+    reasoning: 'Risk review routes to Red Team Baby because its role is contradiction and risk review.',
+    recommendedNextStep: 'Request risks, assumptions, and failure modes; no action is taken automatically.',
+  },
   'risk-analysis': {
     primaryAgentId: 'red-team-baby',
     supportingAgentIds: [],
     reasoning: 'Risk analysis routes to Red Team Baby because its role is contradiction and risk review.',
     recommendedNextStep: 'Request risks, assumptions, and failure modes; no action is taken automatically.',
   },
+  'task-decomposition': {
+    primaryAgentId: 'kimi-family-baby',
+    supportingAgentIds: ['bridge-architect-baby'],
+    reasoning: 'Task decomposition routes to Kimi Family Baby for sequencing, with Bridge Architect Baby translating the plan into handoff format.',
+    recommendedNextStep: 'Turn the sequence into a Cursor task packet, then wait for Ra’el approval before any execution.',
+  },
+  'diff-explanation': {
+    primaryAgentId: 'bridge-architect-baby',
+    supportingAgentIds: [],
+    reasoning: 'Diff explanation routes to Bridge Architect Baby because it explains code changes, validation impact, and trust boundaries.',
+    recommendedNextStep: 'Provide the diff context through the safe invoke path, then require approval before apply/commit.',
+  },
   'diff-review': {
     primaryAgentId: 'bridge-architect-baby',
     supportingAgentIds: [],
     reasoning: 'Diff review routes to Bridge Architect Baby because it explains diffs, QA, rollback, and trust impact.',
     recommendedNextStep: 'Provide the diff context through the safe invoke path, then wait for approval before any apply step.',
+  },
+  'rollback-planning': {
+    primaryAgentId: 'bridge-architect-baby',
+    supportingAgentIds: ['red-team-baby'],
+    reasoning: 'Rollback planning routes to Bridge Architect Baby, with Red Team Baby checking failure and reversal assumptions.',
+    recommendedNextStep: 'Prepare rollback notes and validation gates; do not apply rollback automatically.',
   },
   'qa-review': {
     primaryAgentId: 'bridge-architect-baby',

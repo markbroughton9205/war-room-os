@@ -4,7 +4,7 @@ export type BuildRequestStatus = 'drafted' | 'reviewing' | 'ready' | 'blocked' |
 
 export type BuildPriority = 'low' | 'medium' | 'high'
 
-export type AgentConnectionLabel = 'Not connected' | 'Standby' | 'Future integration'
+export type AgentConnectionLabel = 'Available/manual' | 'Not connected' | 'Standby' | 'Future integration'
 
 export type BuildRequest = {
   id: string

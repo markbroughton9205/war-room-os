@@ -178,6 +178,8 @@ import type {
   RedTeamCoderSignal,
   RedTeamCoderStatus,
 } from '@/lib/red-team-coder/types'
+import { createEngineeringTaskPacket, type EngineeringTaskPacket } from '@/lib/engineering/engineeringTaskPacket'
+import { buildEngineeringStatusBridge, type EngineeringStatusBridge } from '@/lib/engineering/engineeringStatusBridge'
 
 export type OperatorTab = 'command' | 'income' | 'agents' | 'approvals' | 'memory' | 'system' | 'diagnostics'
 
@@ -201,6 +203,7 @@ type CouncilMessage = {
   provider: string
   messageType: string
   recallPreview?: CouncilMemoryRecallPreview
+  engineeringTaskPacket?: EngineeringTaskPacket
 }
 
 const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Goal: Panama relocation. Motivated by vision of success. Wants truth about systems that harm Black and low income communities.`
@@ -1152,6 +1155,61 @@ const MessageBubble = memo(function MessageBubble({
         ) : (
           <p className="text-xs text-slate-400">No memory found for today yet.</p>
         )}
+      </div>
+    )
+  }
+  if (msg.messageType === 'engineering_task' && msg.engineeringTaskPacket) {
+    const packet = msg.engineeringTaskPacket
+    const copyPacket = () => {
+      if (typeof navigator === 'undefined' || !navigator.clipboard) return
+      void navigator.clipboard.writeText(packet.cursorCommand)
+    }
+
+    return (
+      <div className="message-fade-in mb-4 ml-11 rounded-lg p-3 text-sm"
+        style={{ background: 'rgba(56,189,248,0.07)', border: '1px solid rgba(56,189,248,0.28)' }}>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-xs font-bold tracking-widest" style={{ color: '#38BDF8' }}>
+              Engineering task prepared
+            </div>
+            <div className="mt-1 text-sm font-bold" style={{ color: '#E0F2FE' }}>{packet.title}</div>
+            <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#94A3B8' }}>
+              Assigned executor: {packet.assignedExecutorLabel} · status: prepared / awaiting Commander approval
+            </div>
+          </div>
+          <button type="button" onClick={copyPacket}
+            className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
+            style={{ border: '1px solid rgba(56,189,248,0.45)', color: '#BAE6FD' }}>
+            Copy Cursor Packet
+          </button>
+        </div>
+        <div className="grid gap-2 text-xs md:grid-cols-3">
+          <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="mb-1 font-bold tracking-widest" style={{ color: '#94A3B8' }}>FILES TO INSPECT</div>
+            <ul className="space-y-1" style={{ color: '#CBD5E1' }}>
+              {packet.filesToInspect.map(file => <li key={file}>- {file}</li>)}
+            </ul>
+          </div>
+          <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="mb-1 font-bold tracking-widest" style={{ color: '#FDE68A' }}>VALIDATION</div>
+            <ul className="space-y-1" style={{ color: '#E5E7EB' }}>
+              {packet.validationCommands.map(command => <li key={command}>- {command}</li>)}
+            </ul>
+          </div>
+          <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(239,68,68,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="mb-1 font-bold tracking-widest" style={{ color: '#FCA5A5' }}>APPROVAL / AUDIT</div>
+            <div style={{ color: '#CBD5E1' }}>Commander approval required before execution or repo mutation.</div>
+            <div className="mt-1" style={{ color: '#94A3B8' }}>{packet.rollbackRecommendation}</div>
+          </div>
+        </div>
+        <textarea readOnly value={packet.cursorCommand}
+          className="mt-3 h-40 w-full resize-y rounded bg-black/40 p-3 font-mono text-[11px] leading-relaxed outline-none"
+          style={{ border: '1px solid rgba(56,189,248,0.18)', color: '#CBD5E1' }}
+          aria-label="Cursor task packet" />
+        <div className="mt-2 text-[10px] tracking-widest" style={{ color: '#64748B' }}>
+          Optional review lane: Claude architecture review / Red Team risk review. War Room does not invoke Cursor or mutate files from this card.
+        </div>
       </div>
     )
   }
@@ -4320,6 +4378,99 @@ function CapabilityRouterPanel() {
   )
 }
 
+function EngineeringAgentBridgePanel({ status }: { status: EngineeringStatusBridge }) {
+  const latest = status.latestTaskPacket
+
+  return (
+    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
+      style={{ background: 'rgba(56,189,248,0.016)' }}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#38BDF8' }}>
+            ENGINEERING AGENT LANE
+          </h2>
+          <p className="mt-1 text-xs" style={{ color: '#666' }}>
+            Live Council engineering decrees prepare Cursor task packets by default. Cursor is manual-approved; no direct Cursor API is assumed.
+          </p>
+        </div>
+        <span className="rounded px-3 py-2 text-[10px] font-bold tracking-widest"
+          style={{ border: '1px solid rgba(255,215,0,0.35)', color: '#FDE68A', background: 'rgba(0,0,0,0.28)' }}>
+          Approval required
+        </span>
+      </div>
+
+      <div className="grid gap-2 text-xs md:grid-cols-5">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>CURSOR</div>
+          <div className="mt-1 font-bold" style={{ color: '#34D399' }}>{status.cursor.status.toUpperCase()}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.cursor.repoAccessLevel}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>CODEX</div>
+          <div className="mt-1 font-bold" style={{ color: '#FFD700' }}>{status.codex.status.toUpperCase()}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.codex.missingConfiguration}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>LOCAL BRIDGE</div>
+          <div className="mt-1 font-bold" style={{ color: status.localBridge.status === 'unavailable' ? '#EF4444' : '#A78BFA' }}>{status.localBridge.status.toUpperCase()}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.localBridge.selectedEngine ?? 'no engine selected'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>LOCAL MODELS</div>
+          <div className="mt-1 font-bold" style={{ color: status.localModels.status === 'functional' ? '#34D399' : status.localModels.status === 'detected' ? '#FFD700' : '#777' }}>
+            {status.localModels.status.toUpperCase()}
+          </div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{status.localModels.functionalCount} functional / {status.localModels.detectedCount} detected</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(0,0,0,0.28)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>ROLLBACK</div>
+          <div className="mt-1 text-[10px] leading-relaxed" style={{ color: '#FCA5A5' }}>{status.rollbackStatus}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        <div className="rounded px-3 py-2 text-xs lg:col-span-2" style={{ border: '1px solid rgba(56,189,248,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#38BDF8' }}>ENGINEERING REGISTRY</div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {status.agents.map(agent => (
+              <div key={agent.id} className="rounded px-2 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.22)' }}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold tracking-widest" style={{ color: agent.id === 'cursor' ? '#34D399' : '#ddd' }}>{agent.name}</span>
+                  <span className="text-[10px] tracking-widest" style={{ color: agent.availability === 'not_connected' || agent.availability === 'unavailable' ? '#777' : '#FFD700' }}>
+                    {agent.availability.toUpperCase().replaceAll('_', ' ')}
+                  </span>
+                </div>
+                <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#888' }}>{agent.role}</div>
+                <div className="mt-1 text-[10px] leading-relaxed" style={{ color: '#666' }}>{agent.notes}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-2 font-bold tracking-widest" style={{ color: '#FFD700' }}>LATEST TASK PACKET</div>
+          {latest ? (
+            <div className="space-y-2">
+              <div className="font-bold" style={{ color: '#E0F2FE' }}>{latest.title}</div>
+              <div style={{ color: '#94A3B8' }}>status: {latest.status}</div>
+              <div style={{ color: '#94A3B8' }}>executor: {latest.assignedExecutorLabel}</div>
+              <div style={{ color: '#94A3B8' }}>validation: {status.lastValidationResult}</div>
+              <pre className="max-h-44 overflow-auto rounded p-2 text-[10px] leading-relaxed" style={{ border: '1px solid #222', color: '#CBD5E1', background: 'rgba(0,0,0,0.32)' }}>
+                {latest.cursorCommand}
+              </pre>
+            </div>
+          ) : (
+            <div style={{ color: '#666' }}>No engineering task prepared yet.</div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 rounded px-3 py-2 text-[10px] tracking-widest" style={{ border: '1px solid rgba(255,215,0,0.22)', color: '#FDE68A', background: 'rgba(0,0,0,0.24)' }}>
+        {status.approvalRequirement}
+      </div>
+    </div>
+  )
+}
+
 function EngineTriBool({ label, value }: { label: string; value: boolean }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -4718,6 +4869,15 @@ function Home() {
   const [redTeamCoder, setRedTeamCoder] = useState<RedTeamCoderUiState>(INITIAL_RED_TEAM_CODER_STATE)
   const [localAgentBridge, setLocalAgentBridge] = useState<LocalAgentBridgeStatusResponse>(INITIAL_LOCAL_AGENT_BRIDGE)
   const [localFamilyAgents, setLocalFamilyAgents] = useState<LocalFamilyAgentsResponse>(INITIAL_LOCAL_FAMILY_AGENTS)
+  const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
+  const engineeringStatusBridge = useMemo(
+    () => buildEngineeringStatusBridge({
+      localBridge: localAgentBridge,
+      localFamilies: localFamilyAgents,
+      latestTaskPacket: latestEngineeringTaskPacket,
+    }),
+    [localAgentBridge, localFamilyAgents, latestEngineeringTaskPacket],
+  )
   const councilPersistenceCtx = useMemo(
     () =>
       buildCouncilPersistenceContext({
@@ -8774,6 +8934,28 @@ function Home() {
       return
     }
 
+    const engineeringPacket = createEngineeringTaskPacket(decree)
+    if (engineeringPacket) {
+      setLatestEngineeringTaskPacket(engineeringPacket)
+      addMessages([{
+        id: createMessageId('engineering-task'),
+        familyName: 'ENGINEERING AGENT',
+        content: `Engineering task prepared for Cursor: ${engineeringPacket.title}`,
+        timestamp: new Date().toLocaleTimeString(),
+        color: '#38BDF8',
+        icon: '⌘',
+        provider: 'Cursor manual handoff',
+        messageType: 'engineering_task',
+        engineeringTaskPacket: engineeringPacket,
+      }])
+      setFamilyDuty(prev => ({
+        ...prev,
+        claude: 'working',
+        red_team: 'working',
+        bridge_architect: 'waiting_approval',
+      }))
+    }
+
     const parsedCmd = resolveActiveCommand({ latestDecreeText: decree }).command
     activeCouncilCommandRef.current = parsedCmd
     setCouncilUiCommand(parsedCmd)
@@ -9728,6 +9910,7 @@ function Home() {
                   <p className="mt-1 text-[9px] tracking-widest" style={{ color: '#666' }}>Local engines and bridge agents refresh only when requested.</p>
                 </div>
                 <BridgeArchitectPanel engines={engineList} />
+                <EngineeringAgentBridgePanel status={engineeringStatusBridge} />
                 <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={() => void loadLocalAgentBridge()} />
                 <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={() => void loadLocalFamilyAgents()} />
                 <CapabilityRouterPanel />
