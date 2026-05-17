@@ -12,6 +12,8 @@ export type BridgeTrustLevel = 'observer' | 'inference' | 'engineering' | 'restr
 
 export type BridgeNodeStatus = 'online' | 'offline' | 'connecting' | 'degraded' | 'reconnecting'
 
+export type BridgeRuntimeStatus = 'online' | 'degraded' | 'reconnecting' | 'disconnected' | 'recovered'
+
 export type BridgeAllowedAction =
   | 'model_list'
   | 'prompt_test'
@@ -30,6 +32,27 @@ export type BridgeProviderStatus = {
   checkedAt: string
 }
 
+export type BridgeRuntimeSnapshot = {
+  nodeId: string
+  uptimeSeconds: number
+  reconnectCount: number
+  heartbeatLatencyMs: number | null
+  memoryUsageMb: number | null
+  activeModel: string | null
+  activeProvider: BridgeProviderId | null
+  nodeHealth: BridgeRuntimeStatus
+  providerSwitchCount: number
+  lastProviderSwitchAt: string | null
+  supervisor: {
+    enabled: boolean
+    restartCount: number
+    lastRestartAt: string | null
+    backoffMs: number | null
+    launchMode: 'manual' | 'supervised' | 'task_scheduler'
+  }
+  updatedAt: string
+}
+
 export type BridgeHeartbeatRequest = {
   nodeId?: string
   nodeName?: string
@@ -41,6 +64,7 @@ export type BridgeHeartbeatRequest = {
   activeModel?: string | null
   latencyMs?: number | null
   providers?: BridgeProviderStatus[]
+  runtime?: Omit<BridgeRuntimeSnapshot, 'nodeId' | 'updatedAt'>
   capabilities?: BridgeAllowedAction[]
   version?: string
 }
@@ -80,7 +104,7 @@ export type BridgeStatusTimelineEntry = {
   id: string
   nodeId: string
   nodeName: string
-  eventType: 'heartbeat' | 'provider_change' | 'model_swap' | 'failure' | 'reconnect' | 'invoke_request' | 'node_action' | 'rejection'
+  eventType: 'heartbeat' | 'provider_change' | 'model_swap' | 'failure' | 'reconnect' | 'invoke_request' | 'node_action' | 'rejection' | 'runtime_status'
   summary: string
   severity: 'info' | 'watch' | 'warning' | 'critical'
   createdAt: string
@@ -112,6 +136,28 @@ export type BridgeStatusResponse = {
   nodes: BridgeNodeRegistryEntry[]
   statusTimeline: BridgeStatusTimelineEntry[]
   routingModel: BridgeRoutingRule[]
+  runtime: BridgeRuntimeSnapshot | null
+  statusHistory: BridgeStatusHistoryEntry[]
+}
+
+export type BridgeStatusHistoryEntry = {
+  id: string
+  nodeId: string
+  nodeName: string
+  status: BridgeRuntimeStatus
+  previousStatus: BridgeRuntimeStatus | null
+  summary: string
+  createdAt: string
+}
+
+export type BridgeRuntimeResponse = {
+  generatedAt: string
+  staleTimeoutSeconds: number
+  nodes: BridgeNodeRegistryEntry[]
+  runtimes: BridgeRuntimeSnapshot[]
+  primaryRuntime: BridgeRuntimeSnapshot | null
+  statusHistory: BridgeStatusHistoryEntry[]
+  providerStatus: Record<string, BridgeProviderStatus[]>
 }
 
 export type BridgeInvocationRequest = {

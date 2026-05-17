@@ -5,6 +5,8 @@ import {
   persistBridgeHeartbeat,
   persistBridgeNode,
   persistBridgeProviderEvent,
+  persistBridgeRuntimeSnapshot,
+  persistBridgeStatusHistory,
 } from './persistence'
 import type {
   BridgeAllowedAction,
@@ -17,7 +19,11 @@ import type {
   BridgeNodeType,
   BridgeProviderId,
   BridgeProviderStatus,
+  BridgeRuntimeResponse,
+  BridgeRuntimeSnapshot,
+  BridgeRuntimeStatus,
   BridgeStatusResponse,
+  BridgeStatusHistoryEntry,
   BridgeStatusTimelineEntry,
   BridgeTrustLevel,
 } from './types'
@@ -45,11 +51,14 @@ const PROVIDERS: BridgeProviderId[] = ['lm_studio', 'ollama']
 const NODE_TYPES: BridgeNodeType[] = ['commander_laptop', 'engineering_node', 'observer_node', 'future_gpu_node']
 const TRUST_LEVELS: BridgeTrustLevel[] = ['observer', 'inference', 'engineering', 'restricted']
 const STATUSES: BridgeNodeStatus[] = ['online', 'offline', 'connecting', 'degraded', 'reconnecting']
+const RUNTIME_STATUSES: BridgeRuntimeStatus[] = ['online', 'degraded', 'reconnecting', 'disconnected', 'recovered']
 
 type BridgeMemory = {
   authenticated: boolean
   nodes: Record<string, BridgeNodeRegistryEntry>
   providerSnapshots: Record<string, BridgeProviderStatus[]>
+  runtimes: Record<string, BridgeRuntimeSnapshot>
+  statusHistory: BridgeStatusHistoryEntry[]
   queue: BridgeInvocationRequest[]
   results: BridgeInvocationResult[]
   timeline: BridgeStatusTimelineEntry[]
@@ -64,6 +73,8 @@ function memory(): BridgeMemory {
     authenticated: false,
     nodes: {},
     providerSnapshots: {},
+    runtimes: {},
+    statusHistory: [],
     queue: [],
     results: [],
     timeline: [],
@@ -137,6 +148,10 @@ function cleanStatus(value: BridgeNodeStatus | undefined): BridgeNodeStatus {
   return value && STATUSES.includes(value) ? value : 'online'
 }
 
+function cleanRuntimeStatus(value: BridgeRuntimeStatus | undefined): BridgeRuntimeStatus {
+  return value && RUNTIME_STATUSES.includes(value) ? value : 'online'
+}
+
 function cleanProvider(provider: BridgeProviderStatus): BridgeProviderStatus {
   return {
     provider: provider.provider,
@@ -147,6 +162,48 @@ function cleanProvider(provider: BridgeProviderStatus): BridgeProviderStatus {
     latencyMs: typeof provider.latencyMs === 'number' ? provider.latencyMs : null,
     error: provider.error?.slice(0, 300) ?? null,
     checkedAt: provider.checkedAt || nowIso(),
+  }
+}
+
+function addStatusHistory(input: {
+  nodeId: string
+  nodeName: string
+  status: BridgeRuntimeStatus
+  previousStatus: BridgeRuntimeStatus | null
+  summary: string
+}) {
+  const state = memory()
+  const entry: BridgeStatusHistoryEntry = {
+    id: `bridge_status_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    ...input,
+    createdAt: nowIso(),
+  }
+  state.statusHistory.unshift(entry)
+  state.statusHistory = state.statusHistory.slice(0, 80)
+  void persistBridgeStatusHistory(entry)
+  addTimeline({
+    nodeId: input.nodeId,
+    nodeName: input.nodeName,
+    eventType: 'runtime_status',
+    severity: input.status === 'degraded' || input.status === 'disconnected' ? 'warning' : 'info',
+    summary: input.summary,
+  })
+  return entry
+}
+
+function recordStaleStatusHistory(state: BridgeMemory, nodes: BridgeNodeRegistryEntry[]) {
+  for (const node of nodes) {
+    const staleStatus: BridgeRuntimeStatus = node.status === 'degraded' ? 'degraded' : 'disconnected'
+    const latestForNode = state.statusHistory.find(entry => entry.nodeId === node.node_id)
+    if (node.status !== 'online' && latestForNode?.status !== staleStatus) {
+      addStatusHistory({
+        nodeId: node.node_id,
+        nodeName: node.node_name,
+        status: staleStatus,
+        previousStatus: state.runtimes[node.node_id]?.nodeHealth ?? null,
+        summary: `${node.node_name} runtime marked ${staleStatus} by cloud stale detection.`,
+      })
+    }
   }
 }
 
@@ -191,10 +248,37 @@ function registryEntryFor(input: BridgeHeartbeatRequest, providers: BridgeProvid
   }
 }
 
+function runtimeFor(input: BridgeHeartbeatRequest, node: BridgeNodeRegistryEntry): BridgeRuntimeSnapshot | null {
+  if (!input.runtime) return null
+  return {
+    nodeId: node.node_id,
+    uptimeSeconds: Math.max(0, Math.floor(input.runtime.uptimeSeconds ?? 0)),
+    reconnectCount: Math.max(0, Math.floor(input.runtime.reconnectCount ?? 0)),
+    heartbeatLatencyMs: typeof input.runtime.heartbeatLatencyMs === 'number' ? input.runtime.heartbeatLatencyMs : node.latency,
+    memoryUsageMb: typeof input.runtime.memoryUsageMb === 'number' ? input.runtime.memoryUsageMb : null,
+    activeModel: input.runtime.activeModel?.slice(0, 160) ?? node.active_model,
+    activeProvider: input.runtime.activeProvider && PROVIDERS.includes(input.runtime.activeProvider) ? input.runtime.activeProvider : node.provider,
+    nodeHealth: cleanRuntimeStatus(input.runtime.nodeHealth),
+    providerSwitchCount: Math.max(0, Math.floor(input.runtime.providerSwitchCount ?? 0)),
+    lastProviderSwitchAt: input.runtime.lastProviderSwitchAt ?? null,
+    supervisor: {
+      enabled: Boolean(input.runtime.supervisor?.enabled),
+      restartCount: Math.max(0, Math.floor(input.runtime.supervisor?.restartCount ?? 0)),
+      lastRestartAt: input.runtime.supervisor?.lastRestartAt ?? null,
+      backoffMs: typeof input.runtime.supervisor?.backoffMs === 'number' ? input.runtime.supervisor.backoffMs : input.backoffMs ?? null,
+      launchMode: input.runtime.supervisor?.launchMode === 'supervised' || input.runtime.supervisor?.launchMode === 'task_scheduler'
+        ? input.runtime.supervisor.launchMode
+        : 'manual',
+    },
+    updatedAt: nowIso(),
+  }
+}
+
 export function getBridgeStatus(): BridgeStatusResponse {
   const state = memory()
   const node = primaryNode(state)
   const nodes = liveNodes(state)
+  recordStaleStatusHistory(state, nodes)
   const isStale = !node || nodeIsStale(node)
   const activeProvider = isStale ? null : node.provider
   const activeModel = isStale ? null : node.active_model
@@ -230,6 +314,8 @@ export function getBridgeStatus(): BridgeStatusResponse {
     nodes,
     statusTimeline: state.timeline,
     routingModel: BRIDGE_ROUTING_MODEL,
+    runtime: node ? state.runtimes[node.node_id] ?? null : null,
+    statusHistory: state.statusHistory.slice(0, 20),
   }
 }
 
@@ -240,10 +326,13 @@ export function recordBridgeHeartbeat(input: BridgeHeartbeatRequest) {
     .map(cleanProvider)
   const previous = state.nodes[cleanId(input.nodeId)]
   const node = registryEntryFor(input, providers)
+  const previousRuntime = state.runtimes[node.node_id] ?? null
+  const runtime = runtimeFor(input, node)
 
   state.authenticated = true
   state.nodes[node.node_id] = node
   state.providerSnapshots[node.node_id] = providers
+  if (runtime) state.runtimes[node.node_id] = runtime
 
   const heartbeatEvent: 'heartbeat' | 'failure' | 'reconnect' =
     node.status === 'degraded' ? 'failure' : previous && previous.status !== 'online' ? 'reconnect' : 'heartbeat'
@@ -290,8 +379,27 @@ export function recordBridgeHeartbeat(input: BridgeHeartbeatRequest) {
     })
   }
 
+  if (runtime && previousRuntime?.nodeHealth !== runtime.nodeHealth) {
+    addStatusHistory({
+      nodeId: node.node_id,
+      nodeName: node.node_name,
+      status: runtime.nodeHealth,
+      previousStatus: previousRuntime?.nodeHealth ?? null,
+      summary: `${node.node_name} runtime ${previousRuntime ? `changed from ${previousRuntime.nodeHealth} to ${runtime.nodeHealth}` : `reported ${runtime.nodeHealth}`}.`,
+    })
+  } else if (runtime && !previousRuntime) {
+    addStatusHistory({
+      nodeId: node.node_id,
+      nodeName: node.node_name,
+      status: runtime.nodeHealth,
+      previousStatus: null,
+      summary: `${node.node_name} runtime reported ${runtime.nodeHealth}.`,
+    })
+  }
+
   void persistBridgeNode(node)
   void persistBridgeHeartbeat({ node, providers, eventType: heartbeatEvent })
+  if (runtime) void persistBridgeRuntimeSnapshot(runtime)
 
   return getBridgeStatus()
 }
@@ -503,5 +611,56 @@ export function listBridgeNodes() {
     statusTimeline: memory().timeline.slice(0, 40),
     staleTimeoutSeconds: STALE_TIMEOUT_SECONDS,
     generatedAt: nowIso(),
+  }
+}
+
+export function getBridgeRuntime(): BridgeRuntimeResponse {
+  const state = memory()
+  const nodes = liveNodes(state)
+  recordStaleStatusHistory(state, nodes)
+  const runtimes = nodes.map(node => {
+    const runtime = state.runtimes[node.node_id]
+    if (!runtime) {
+      return {
+        nodeId: node.node_id,
+        uptimeSeconds: 0,
+        reconnectCount: 0,
+        heartbeatLatencyMs: node.latency,
+        memoryUsageMb: null,
+        activeModel: node.active_model,
+        activeProvider: node.provider,
+        nodeHealth: node.status === 'online' ? 'online' as BridgeRuntimeStatus : 'disconnected' as BridgeRuntimeStatus,
+        providerSwitchCount: 0,
+        lastProviderSwitchAt: null,
+        supervisor: {
+          enabled: false,
+          restartCount: 0,
+          lastRestartAt: null,
+          backoffMs: null,
+          launchMode: 'manual' as const,
+        },
+        updatedAt: node.last_heartbeat ?? nowIso(),
+      }
+    }
+    if (node.status !== 'online') {
+      return {
+        ...runtime,
+        activeModel: null,
+        activeProvider: null,
+        nodeHealth: node.status === 'degraded' ? 'degraded' as BridgeRuntimeStatus : 'disconnected' as BridgeRuntimeStatus,
+      }
+    }
+    return runtime
+  })
+
+  const primary = primaryNode(state)
+  return {
+    generatedAt: nowIso(),
+    staleTimeoutSeconds: STALE_TIMEOUT_SECONDS,
+    nodes,
+    runtimes,
+    primaryRuntime: primary ? runtimes.find(runtime => runtime.nodeId === primary.node_id) ?? null : null,
+    statusHistory: state.statusHistory.slice(0, 50),
+    providerStatus: state.providerSnapshots,
   }
 }

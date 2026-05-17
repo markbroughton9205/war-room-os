@@ -14,6 +14,36 @@ pnpm bridge:start
 
 For local development, keep `WAR_ROOM_CLOUD_BASE_URL` unset or set it to `http://localhost:3000`.
 
+For a managed local runtime with crash restart:
+
+```powershell
+pnpm bridge:supervise
+```
+
+The supervisor starts `server.mjs`, restarts it after crashes with exponential backoff, and reports restart metadata through the normal authenticated heartbeat. It does not expose shell execution or any new remote control path.
+
+## Optional Windows Startup
+
+Task Scheduler registration is explicit. Review the command first, then run it yourself:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bridge\local-node\register-task.ps1
+```
+
+To launch hidden/background at user login:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bridge\local-node\register-task.ps1 -Hidden
+```
+
+To remove the task:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bridge\local-node\unregister-task.ps1
+```
+
+The registration script only creates a user-login scheduled task that runs `pnpm bridge:supervise` from this repository. It is never run automatically by War Room.
+
 Optional provider configuration:
 
 ```powershell
@@ -33,3 +63,5 @@ Additional future node presets are `engineering_node`, `observer_node`, and `fut
 The local node only detects approved local AI providers, sends heartbeats, polls for bounded inference requests, and returns model/latency/diagnostic results. It does not expose shell execution, arbitrary commands, arbitrary localhost forwarding, filesystem writes, deployment control, or OS automation.
 
 The worker retries failed heartbeat and poll calls with exponential backoff up to 60 seconds. The cloud marks nodes stale after the configured timeout instead of showing fake active state.
+
+Runtime telemetry sent to `/api/bridge/runtime` includes uptime, reconnect count, heartbeat latency, provider status, memory usage, active model, node health, provider switches, and supervisor restart metadata. Bridge tokens and local provider API keys are never sent.

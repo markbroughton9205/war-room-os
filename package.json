@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "bridge:start": "node bridge/local-node/server.mjs",
+    "bridge:supervise": "node bridge/local-node/supervisor.mjs",
     "lint": "eslint"
   },
   "dependencies": {

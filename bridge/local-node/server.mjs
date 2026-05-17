@@ -9,9 +9,22 @@ const NODE_ID = normalizeNodeId(process.env.WAR_ROOM_BRIDGE_NODE_ID || 'commande
 const NODE_NAME = process.env.WAR_ROOM_BRIDGE_NODE_NAME || 'Commander Node'
 const NODE_TYPE = process.env.WAR_ROOM_BRIDGE_NODE_TYPE || 'commander_laptop'
 const TRUST_LEVEL = process.env.WAR_ROOM_BRIDGE_TRUST_LEVEL || 'engineering'
+const LAUNCH_MODE = process.env.WAR_ROOM_BRIDGE_LAUNCH_MODE || 'manual'
+const SUPERVISOR_ENABLED = process.env.WAR_ROOM_BRIDGE_SUPERVISED === '1' || LAUNCH_MODE === 'supervised' || LAUNCH_MODE === 'task_scheduler'
 
 const ALLOWED_ACTIONS = ['model_list', 'prompt_test', 'local_inference', 'diagnostics', 'health_check']
 const MAX_BACKOFF_MS = 60_000
+const startedAt = Date.now()
+let reconnectCount = 0
+let lastHeartbeatLatencyMs = null
+let lastRuntimeHealth = 'online'
+let activeProviderId = null
+let activeModelId = null
+let providerSwitchCount = 0
+let lastProviderSwitchAt = null
+let supervisorRestartCount = Number.parseInt(process.env.WAR_ROOM_BRIDGE_RESTART_COUNT || '0', 10) || 0
+let supervisorLastRestartAt = process.env.WAR_ROOM_BRIDGE_LAST_RESTART_AT || null
+let currentBackoffMs = null
 
 function trimTrailingSlash(value) {
   return value.replace(/\/+$/, '')
@@ -31,6 +44,16 @@ function authHeaders() {
     Authorization: `Bearer ${BRIDGE_TOKEN}`,
     'Content-Type': 'application/json',
   }
+}
+
+function memoryUsageMb() {
+  return Math.round((process.memoryUsage().rss / 1024 / 1024) * 100) / 100
+}
+
+function runtimeHealthFor(active, providers) {
+  if (active && lastRuntimeHealth === 'degraded') return 'recovered'
+  if (active) return 'online'
+  return providers.some(provider => provider.reachable) ? 'degraded' : 'reconnecting'
 }
 
 function lmStudioHeaders() {
@@ -132,6 +155,15 @@ function pickActiveProvider(providers) {
 async function sendHeartbeat() {
   const providers = await detectProviders()
   const active = pickActiveProvider(providers)
+  const nextProvider = active?.provider ?? null
+  const nextModel = active?.activeModel ?? null
+  if ((nextProvider && nextProvider !== activeProviderId) || (nextModel && nextModel !== activeModelId)) {
+    providerSwitchCount += activeProviderId || activeModelId ? 1 : 0
+    lastProviderSwitchAt = new Date().toISOString()
+    activeProviderId = nextProvider
+    activeModelId = nextModel
+  }
+  const nodeHealth = runtimeHealthFor(active, providers)
   const latencyMs = providers
     .map(provider => provider.latencyMs)
     .filter(value => typeof value === 'number')
@@ -142,22 +174,44 @@ async function sendHeartbeat() {
     nodeName: NODE_NAME,
     nodeType: NODE_TYPE,
     trustLevel: TRUST_LEVEL,
-    reconnectStatus: active ? 'online' : 'degraded',
-    backoffMs: null,
+    reconnectStatus: nodeHealth === 'reconnecting' ? 'reconnecting' : active ? 'online' : 'degraded',
+    backoffMs: currentBackoffMs,
     activeProvider: active?.provider ?? null,
     activeModel: active?.activeModel ?? null,
     latencyMs,
     providers,
+    runtime: {
+      uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
+      reconnectCount,
+      heartbeatLatencyMs: lastHeartbeatLatencyMs,
+      memoryUsageMb: memoryUsageMb(),
+      activeModel: active?.activeModel ?? null,
+      activeProvider: active?.provider ?? null,
+      nodeHealth,
+      providerSwitchCount,
+      lastProviderSwitchAt,
+      supervisor: {
+        enabled: SUPERVISOR_ENABLED,
+        restartCount: supervisorRestartCount,
+        lastRestartAt: supervisorLastRestartAt,
+        backoffMs: currentBackoffMs,
+        launchMode: LAUNCH_MODE === 'supervised' || LAUNCH_MODE === 'task_scheduler' ? LAUNCH_MODE : 'manual',
+      },
+    },
     capabilities: ALLOWED_ACTIONS,
-    version: 'phase-10d',
+    version: 'phase-10e',
   }
 
+  const heartbeatStartedAt = Date.now()
   const response = await fetch(`${CLOUD_BASE_URL}/api/bridge/heartbeat`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify(body),
   })
   if (!response.ok) throw new Error(`Heartbeat rejected with HTTP ${response.status}`)
+  lastHeartbeatLatencyMs = Date.now() - heartbeatStartedAt
+  currentBackoffMs = null
+  lastRuntimeHealth = nodeHealth === 'recovered' ? 'online' : nodeHealth
 }
 
 async function lmStudioCompletion(prompt, model) {
@@ -293,6 +347,9 @@ async function loop(label, fn, intervalMs, failureCount = 0) {
     console.error(`[bridge:${label}] ${error instanceof Error ? error.message : 'failed'}`)
     const nextFailureCount = failureCount + 1
     const backoffMs = Math.min(intervalMs * 2 ** Math.min(nextFailureCount, 5), MAX_BACKOFF_MS)
+    reconnectCount += 1
+    currentBackoffMs = backoffMs
+    lastRuntimeHealth = 'reconnecting'
     setTimeout(() => void loop(label, fn, intervalMs, nextFailureCount), backoffMs)
   }
 }

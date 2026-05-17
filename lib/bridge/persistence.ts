@@ -1,5 +1,5 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
-import type { BridgeNodeRegistryEntry, BridgeStatusTimelineEntry } from './types'
+import type { BridgeNodeRegistryEntry, BridgeRuntimeSnapshot, BridgeStatusHistoryEntry, BridgeStatusTimelineEntry } from './types'
 
 type BridgeAuditInput = {
   nodeId?: string | null
@@ -113,6 +113,48 @@ export async function persistBridgeAuditLog(input: BridgeAuditInput) {
     filesystem_write_allowed: false,
     deployment_control_allowed: false,
     os_automation_allowed: false,
+  })
+
+  return { ok: !error, configured: true as const, tableMissing: relationMissing(error) }
+}
+
+export async function persistBridgeRuntimeSnapshot(runtime: BridgeRuntimeSnapshot) {
+  const supabase = getAdminOrNull()
+  if (!supabase) return { ok: false as const, configured: false as const }
+
+  const { error } = await supabase.from('war_room_bridge_runtime_snapshots').insert({
+    node_id: runtime.nodeId,
+    uptime_seconds: runtime.uptimeSeconds,
+    reconnect_count: runtime.reconnectCount,
+    heartbeat_latency_ms: runtime.heartbeatLatencyMs,
+    memory_usage_mb: runtime.memoryUsageMb,
+    active_provider: runtime.activeProvider,
+    active_model: runtime.activeModel,
+    node_health: runtime.nodeHealth,
+    provider_switch_count: runtime.providerSwitchCount,
+    last_provider_switch_at: runtime.lastProviderSwitchAt,
+    supervisor_enabled: runtime.supervisor.enabled,
+    supervisor_restart_count: runtime.supervisor.restartCount,
+    supervisor_last_restart_at: runtime.supervisor.lastRestartAt,
+    supervisor_backoff_ms: runtime.supervisor.backoffMs,
+    supervisor_launch_mode: runtime.supervisor.launchMode,
+    reported_at: runtime.updatedAt,
+  })
+
+  return { ok: !error, configured: true as const, tableMissing: relationMissing(error) }
+}
+
+export async function persistBridgeStatusHistory(entry: BridgeStatusHistoryEntry) {
+  const supabase = getAdminOrNull()
+  if (!supabase) return { ok: false as const, configured: false as const }
+
+  const { error } = await supabase.from('war_room_bridge_status_history').insert({
+    node_id: entry.nodeId,
+    node_name: entry.nodeName,
+    status: entry.status,
+    previous_status: entry.previousStatus,
+    summary: entry.summary,
+    created_at: entry.createdAt,
   })
 
   return { ok: !error, configured: true as const, tableMissing: relationMissing(error) }

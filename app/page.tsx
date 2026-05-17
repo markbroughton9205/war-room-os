@@ -862,6 +862,8 @@ const INITIAL_OFFICIAL_BRIDGE_STATUS: BridgeStatusResponse = {
       notes: 'Private local reasoning and prompt tests.',
     },
   ],
+  runtime: null,
+  statusHistory: [],
 }
 const INITIAL_LOCAL_FAMILY_AGENTS: LocalFamilyAgentsResponse = {
   ollamaDetected: false,
@@ -3890,6 +3892,14 @@ function OfficialLocalBridgePanel({
       : 'none'
   const lastHeartbeat = status.node.lastHeartbeat ? new Date(status.node.lastHeartbeat).toLocaleString() : 'none'
   const activeNodes = status.nodes.filter(node => node.status === 'online').length
+  const runtime = status.runtime
+  const uptimeLabel = runtime ? `${Math.floor(runtime.uptimeSeconds / 3600)}h ${Math.floor((runtime.uptimeSeconds % 3600) / 60)}m` : 'not reported'
+  const stabilityLabel = runtime
+    ? runtime.nodeHealth === 'online' || runtime.nodeHealth === 'recovered'
+      ? 'stable'
+      : runtime.nodeHealth
+    : status.stale ? 'disconnected' : 'unknown'
+  const degradedWarning = runtime?.nodeHealth === 'degraded' || runtime?.nodeHealth === 'reconnecting' || status.stale
   const trustColor: Record<string, string> = {
     observer: '#93C5FD',
     inference: '#34D399',
@@ -3939,6 +3949,34 @@ function OfficialLocalBridgePanel({
           <div className="tracking-widest" style={{ color: '#555' }}>HEARTBEAT</div>
           <div className="mt-1 font-bold" style={{ color: '#A7F3D0' }}>{status.heartbeatIntervalSeconds}s outbound</div>
           <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{activeNodes} active node(s) - {status.pendingInvocations} pending</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-5">
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>RUNTIME UPTIME</div>
+          <div className="mt-1 font-bold" style={{ color: runtime ? '#A7F3D0' : '#94A3B8' }}>{uptimeLabel}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>memory {runtime?.memoryUsageMb ? `${runtime.memoryUsageMb}MB` : 'n/a'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>RECONNECT HEALTH</div>
+          <div className="mt-1 font-bold" style={{ color: runtime?.reconnectCount ? '#FBBF24' : '#BAE6FD' }}>{runtime?.reconnectCount ?? 0} reconnects</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>backoff {runtime?.supervisor.backoffMs ? `${runtime.supervisor.backoffMs}ms` : 'idle'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>NODE STABILITY</div>
+          <div className="mt-1 font-bold" style={{ color: degradedWarning ? '#FCA5A5' : '#FDE68A' }}>{stabilityLabel}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{runtime?.supervisor.enabled ? `supervised: ${runtime.supervisor.launchMode}` : 'manual launch'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>PROVIDER SWITCHING</div>
+          <div className="mt-1 font-bold" style={{ color: '#DDD6FE' }}>{runtime?.providerSwitchCount ?? 0} switch(es)</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>{runtime?.lastProviderSwitchAt ? new Date(runtime.lastProviderSwitchAt).toLocaleTimeString() : 'none'}</div>
+        </div>
+        <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(248,113,113,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="tracking-widest" style={{ color: '#555' }}>DEGRADED MODE</div>
+          <div className="mt-1 font-bold" style={{ color: degradedWarning ? '#FCA5A5' : '#86EFAC' }}>{degradedWarning ? 'warning' : 'clear'}</div>
+          <div className="mt-1 text-[10px]" style={{ color: '#777' }}>latency {runtime?.heartbeatLatencyMs ? `${runtime.heartbeatLatencyMs}ms` : 'n/a'}</div>
         </div>
       </div>
 
@@ -4022,7 +4060,12 @@ function OfficialLocalBridgePanel({
         <div className="rounded px-3 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
           <div className="mb-2 font-bold tracking-widest" style={{ color: '#FDE68A' }}>STATUS TIMELINE</div>
           <div className="space-y-1">
-            {status.statusTimeline.length > 0 ? status.statusTimeline.slice(0, 6).map(event => (
+            {status.statusHistory.length > 0 ? status.statusHistory.slice(0, 5).map(event => (
+              <div key={event.id} className="rounded px-2 py-2 text-[10px]" style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#CBD5E1' }}>
+                <span style={{ color: event.status === 'degraded' || event.status === 'disconnected' ? '#FCA5A5' : '#A7F3D0' }}>{event.status}</span>
+                {' '}[{new Date(event.createdAt).toLocaleTimeString()}] {event.summary}
+              </div>
+            )) : status.statusTimeline.length > 0 ? status.statusTimeline.slice(0, 6).map(event => (
               <div key={event.id} className="rounded px-2 py-2 text-[10px]" style={{ border: '1px solid rgba(255,255,255,0.08)', color: '#CBD5E1' }}>
                 <span style={{ color: event.severity === 'warning' || event.severity === 'critical' ? '#FCA5A5' : '#A7F3D0' }}>{event.eventType}</span>
                 {' '}[{new Date(event.createdAt).toLocaleTimeString()}] {event.summary}
