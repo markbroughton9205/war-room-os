@@ -1,7 +1,8 @@
+import { getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/configuration/envAlias'
 import type { CommanderLocationState } from '@/lib/intelligence/environment/locationPolicy'
 import type { WeatherDashboardSnapshot, WeatherForecastPoint } from '@/lib/intelligence/environment/liveEnvironmentTypes'
 
-const WEATHER_ENV_NAMES = ['WEATHER_API_KEY', 'WEATHER_PROVIDER']
+const WEATHER_ENV_NAMES = [...getEnvAliasNames('weatherApiKey'), ...getEnvAliasNames('weatherProvider')]
 const WEATHER_TIMEOUT_MS = 8000
 
 type OpenWeatherCurrent = {
@@ -77,9 +78,13 @@ type NwsAlerts = {
 }
 
 function unavailable(locationLabel: string, detail: string, envVarNames = WEATHER_ENV_NAMES): WeatherDashboardSnapshot {
+  const aliasDiagnostics = [resolveEnvAlias('weatherApiKey'), resolveEnvAlias('weatherProvider')]
+  const primaryDiagnostic = aliasDiagnostics.find(diagnostic => diagnostic.configured) ?? aliasDiagnostics[0]
+  const aliasRecommendation = aliasDiagnostics.find(diagnostic => diagnostic.recommendation)?.recommendation ?? null
+
   return {
     status: 'unavailable',
-    provider: process.env.WEATHER_PROVIDER?.trim() || 'not configured',
+    provider: getEnvAliasValue('weatherProvider') || 'not configured',
     locationLabel,
     currentTempF: null,
     condition: 'Weather provider unavailable',
@@ -96,8 +101,13 @@ function unavailable(locationLabel: string, detail: string, envVarNames = WEATHE
     detail,
     setup: {
       envVarNames,
+      preferredEnvName: primaryDiagnostic.preferredEnvName,
+      aliasDetected: aliasDiagnostics.some(diagnostic => diagnostic.aliasDetected),
+      configured: aliasDiagnostics.some(diagnostic => diagnostic.configured),
+      aliasRecommendation,
+      envAliasDiagnostics: aliasDiagnostics,
       blockedFeature: 'Live weather, hourly forecast, 7-day outlook, and weather alerts',
-      recommendedSetup: 'Set WEATHER_PROVIDER to openweather, weatherapi, or noaa. Set WEATHER_API_KEY for OpenWeather or WeatherAPI. NOAA also requires WEATHER_LATITUDE and WEATHER_LONGITUDE.',
+      recommendedSetup: aliasRecommendation ?? 'Set WEATHER_PROVIDER to openweather, weatherapi, or noaa. Set WEATHER_API_KEY for OpenWeather or WeatherAPI. NOAA also requires WEATHER_LATITUDE and WEATHER_LONGITUDE.',
     },
   }
 }
@@ -321,8 +331,8 @@ async function buildNoaa(location: CommanderLocationState): Promise<WeatherDashb
 }
 
 export async function buildWeatherDashboardSnapshot(location: CommanderLocationState): Promise<WeatherDashboardSnapshot> {
-  const provider = (process.env.WEATHER_PROVIDER?.trim() || '').toLowerCase()
-  const apiKey = process.env.WEATHER_API_KEY?.trim()
+  const provider = (getEnvAliasValue('weatherProvider') || '').toLowerCase()
+  const apiKey = getEnvAliasValue('weatherApiKey')
 
   try {
     if (provider === 'noaa' || provider === 'nws') return await buildNoaa(location)

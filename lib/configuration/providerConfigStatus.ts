@@ -1,4 +1,5 @@
 import { PROVIDER_CONFIG_REGISTRY, type ConfigurationStatus, type ProviderConfigDefinition } from './configurationRegistry'
+import { configuredEnvName, envAliasDiagnosticsForPreferredNames, envNameConfigured, type EnvAliasDiagnostic } from './envAlias'
 import { redactServerOnlyEnvName, redactServerOnlyEnvNames } from '@/lib/security/sensitiveEnv'
 
 export type ProviderConfigStatus = {
@@ -12,6 +13,10 @@ export type ProviderConfigStatus = {
   optionalEnvVars: string[]
   configuredEnvVars: string[]
   missingEnvVars: string[]
+  preferredEnvName: string | null
+  aliasDetected: boolean
+  aliasRecommendation: string | null
+  envAliasDiagnostics: EnvAliasDiagnostic[]
   lastCheckResult: string
   missingDependency: string | null
   affectedFeatures: string[]
@@ -21,7 +26,7 @@ export type ProviderConfigStatus = {
 }
 
 function envPresent(env: NodeJS.ProcessEnv, name: string): boolean {
-  return Boolean(env[name]?.trim())
+  return envNameConfigured(env, name)
 }
 
 function unique(names: string[]): string[] {
@@ -61,7 +66,9 @@ export function evaluateProviderConfig(def: ProviderConfigDefinition, env: NodeJ
     ...(def.alternativeEnvVarGroups ?? []).flat(),
     ...(def.disabledByEnvVar ? [def.disabledByEnvVar] : []),
   ])
-  const configuredEnvVars = envVarNames.filter(name => envPresent(env, name))
+  const configuredEnvVars = unique(envVarNames.flatMap(name => configuredEnvName(env, name) ?? []))
+  const envAliasDiagnostics = envAliasDiagnosticsForPreferredNames(envVarNames, env)
+  const aliasRecommendation = envAliasDiagnostics.find(diagnostic => diagnostic.recommendation)?.recommendation ?? null
   const status = resolveStatus(def, env, missingEnvVars)
   const configured = status === 'ready' || status === 'configured' || (configuredEnvVars.length > 0 && status !== 'disabled_by_operator')
 
@@ -76,14 +83,19 @@ export function evaluateProviderConfig(def: ProviderConfigDefinition, env: NodeJ
     optionalEnvVars: unique(redactServerOnlyEnvNames([...(def.optionalEnvVars ?? []), ...(def.disabledByEnvVar ? [def.disabledByEnvVar] : [])])),
     configuredEnvVars: unique(redactServerOnlyEnvNames(configuredEnvVars)),
     missingEnvVars: unique(redactServerOnlyEnvNames(missingEnvVars)),
+    preferredEnvName: envAliasDiagnostics[0]?.preferredEnvName ?? null,
+    aliasDetected: envAliasDiagnostics.some(diagnostic => diagnostic.aliasDetected),
+    aliasRecommendation,
+    envAliasDiagnostics,
     lastCheckResult: def.lastCheckResult,
     missingDependency: missingEnvVars.length > 0
       ? `Missing ${missingEnvVars.map(redactServerOnlyEnvName).join(' or ')}`
       : def.missingDependency ?? null,
     affectedFeatures: def.affectedFeatures,
-    recommendedNextAction: status === 'ready' || status === 'configured'
-      ? 'No setup action required; use existing diagnostics for live checks.'
-      : def.recommendedNextAction,
+    recommendedNextAction: aliasRecommendation
+      ?? (status === 'ready' || status === 'configured'
+        ? 'No setup action required; use existing diagnostics for live checks.'
+        : def.recommendedNextAction),
     powers: def.powers,
     setupLocation: def.setupLocation,
   }

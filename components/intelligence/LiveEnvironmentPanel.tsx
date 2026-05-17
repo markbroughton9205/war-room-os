@@ -48,15 +48,21 @@ function providerStatusColor(provider: ProviderConfigStatus | undefined): string
 function providerSetupHint(provider: ProviderConfigStatus | undefined, fallback: string): string {
   if (!provider) return fallback
   const envNames = [...provider.requiredEnvVars, ...provider.optionalEnvVars].join(', ') || 'no env vars registered'
+  const aliasDetail = provider.preferredEnvName
+    ? ` Preferred env: ${provider.preferredEnvName}. Alias detected: ${String(provider.aliasDetected)}. Configured: ${String(provider.configured)}.${provider.aliasRecommendation ? ` ${provider.aliasRecommendation}` : ''}`
+    : ''
   if (provider.status === 'ready' || provider.status === 'configured') {
-    return `${provider.name}: configured. ${provider.lastCheckResult}`
+    return `${provider.name}: configured. ${provider.lastCheckResult}${aliasDetail}`
   }
-  return `${provider.name}: ${provider.recommendedNextAction} Env names: ${envNames}.`
+  return `${provider.name}: ${provider.recommendedNextAction} Env names: ${envNames}.${aliasDetail}`
 }
 
 function setupGuidanceText(setup: EnvironmentSetupGuidance | undefined, fallback: string): string {
   if (!setup) return fallback
-  return `${setup.blockedFeature}: ${setup.recommendedSetup} Env names: ${setup.envVarNames.join(', ')}.`
+  const aliasDetail = setup.preferredEnvName
+    ? ` Preferred env: ${setup.preferredEnvName}. Alias detected: ${String(setup.aliasDetected)}. Configured: ${String(setup.configured)}.${setup.aliasRecommendation ? ` ${setup.aliasRecommendation}` : ''}`
+    : ''
+  return `${setup.blockedFeature}: ${setup.recommendedSetup} Env names: ${setup.envVarNames.join(', ')}.${aliasDetail}`
 }
 
 function formatTemp(value: number | null): string {

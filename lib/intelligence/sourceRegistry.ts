@@ -1,3 +1,5 @@
+import { envNameConfigured } from '@/lib/configuration/envAlias'
+
 export type IntelligenceSourceCategory = 'verified_structured' | 'emerging_weak_signal'
 
 export type IntelligenceSourceType =
@@ -71,7 +73,7 @@ export type IntelligenceSourceDefinition = {
   failure_behavior: SourceFailureBehavior
 }
 
-const configured = (envName: string) => Boolean(process.env[envName]?.trim())
+const configured = (envName: string) => envNameConfigured(process.env, envName)
 
 export function getIntelligenceSourceRegistry(): IntelligenceSourceDefinition[] {
   return [
@@ -175,7 +177,7 @@ export function getIntelligenceSourceRegistry(): IntelligenceSourceDefinition[] 
       freshness_window: 'minutes-to-days',
       reliability_score: 0.68,
       cost_level: 'free',
-      configured: false,
+      configured: configured('NEWS_RSS_FEEDS') || configured('NEWS_API_KEY'),
       allowed_use_cases: ['general_research', 'local_awareness', 'market_research'],
       rate_limits: null,
       failure_behavior: 'skip',

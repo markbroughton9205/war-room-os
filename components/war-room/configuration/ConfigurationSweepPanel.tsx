@@ -197,6 +197,7 @@ export const ConfigurationSweepPanel = memo(function ConfigurationSweepPanel() {
                   <th className="px-2 py-2 font-bold tracking-widest">PROVIDER</th>
                   <th className="px-2 py-2 font-bold tracking-widest">STATUS</th>
                   <th className="px-2 py-2 font-bold tracking-widest">ENV VAR NAMES</th>
+                  <th className="px-2 py-2 font-bold tracking-widest">ALIAS</th>
                   <th className="px-2 py-2 font-bold tracking-widest">CONFIGURED</th>
                   <th className="px-2 py-2 font-bold tracking-widest">LAST CHECK</th>
                   <th className="px-2 py-2 font-bold tracking-widest">MISSING DEPENDENCY</th>
@@ -211,6 +212,11 @@ export const ConfigurationSweepPanel = memo(function ConfigurationSweepPanel() {
                     <td className="px-2 py-2 uppercase tracking-widest" style={{ color: statusColor(provider.status) }}>{statusLabel(provider.status)}</td>
                     <td className="px-2 py-2 font-mono" style={{ color: '#FDBA74' }}>
                       {[...provider.requiredEnvVars, ...provider.optionalEnvVars].join(', ') || 'none'}
+                    </td>
+                    <td className="px-2 py-2 leading-snug" style={{ color: provider.aliasDetected ? '#FBBF24' : '#94A3B8' }}>
+                      {provider.preferredEnvName
+                        ? `Preferred: ${provider.preferredEnvName}; alias detected: ${String(provider.aliasDetected)}`
+                        : 'none'}
                     </td>
                     <td className="px-2 py-2" style={{ color: provider.configured ? '#34D399' : '#F87171' }}>{String(provider.configured)}</td>
                     <td className="px-2 py-2 leading-snug" style={{ color: '#94A3B8' }}>{provider.lastCheckResult}</td>

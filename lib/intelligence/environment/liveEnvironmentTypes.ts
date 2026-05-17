@@ -1,9 +1,15 @@
 import type { EvidenceConfidenceTier } from '@/lib/intelligence/intelligencePacket'
+import type { EnvAliasDiagnostic } from '@/lib/configuration/envAlias'
 
 export type ProviderAvailability = 'available' | 'unavailable' | 'error'
 
 export type EnvironmentSetupGuidance = {
   envVarNames: string[]
+  preferredEnvName: string | null
+  aliasDetected: boolean
+  configured: boolean
+  aliasRecommendation: string | null
+  envAliasDiagnostics: EnvAliasDiagnostic[]
   blockedFeature: string
   recommendedSetup: string
 }

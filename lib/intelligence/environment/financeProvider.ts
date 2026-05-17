@@ -1,7 +1,8 @@
+import { getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/configuration/envAlias'
 import type { FinanceDashboardSnapshot, FinanceQuote } from '@/lib/intelligence/environment/liveEnvironmentTypes'
 
 const FINANCE_TIMEOUT_MS = 8000
-const FINANCE_ENV_NAMES = ['FINANCE_API_KEY', 'FINANCE_PROVIDER']
+const FINANCE_ENV_NAMES = [...getEnvAliasNames('financeApiKey'), ...getEnvAliasNames('financeProvider')]
 const DEFAULT_SYMBOLS = ['SPY', 'QQQ', 'DIA', 'GLD', 'BTC/USD']
 
 type AlphaVantageQuote = {
@@ -39,9 +40,13 @@ type TwelveDataQuote = {
 }
 
 function unavailable(detail: string): FinanceDashboardSnapshot {
+  const aliasDiagnostics = [resolveEnvAlias('financeApiKey'), resolveEnvAlias('financeProvider')]
+  const primaryDiagnostic = aliasDiagnostics.find(diagnostic => diagnostic.configured) ?? aliasDiagnostics[0]
+  const aliasRecommendation = aliasDiagnostics.find(diagnostic => diagnostic.recommendation)?.recommendation ?? null
+
   return {
     status: 'unavailable',
-    provider: process.env.FINANCE_PROVIDER?.trim() || 'not configured',
+    provider: getEnvAliasValue('financeProvider') || 'not configured',
     quotes: [],
     fetchedAt: null,
     freshness: 'unknown',
@@ -49,8 +54,13 @@ function unavailable(detail: string): FinanceDashboardSnapshot {
     detail,
     setup: {
       envVarNames: FINANCE_ENV_NAMES,
+      preferredEnvName: primaryDiagnostic.preferredEnvName,
+      aliasDetected: aliasDiagnostics.some(diagnostic => diagnostic.aliasDetected),
+      configured: aliasDiagnostics.some(diagnostic => diagnostic.configured),
+      aliasRecommendation,
+      envAliasDiagnostics: aliasDiagnostics,
       blockedFeature: 'Finance and market Live Environment card',
-      recommendedSetup: 'Set FINANCE_PROVIDER to alpha_vantage, finnhub, or twelvedata. Set FINANCE_API_KEY. Optional FINANCE_SYMBOLS controls the watchlist.',
+      recommendedSetup: aliasRecommendation ?? 'Set FINANCE_PROVIDER to alpha_vantage, finnhub, or twelvedata. Set FINANCE_API_KEY. Optional FINANCE_SYMBOLS controls the watchlist.',
     },
   }
 }
@@ -175,8 +185,8 @@ async function twelveDataQuote(symbol: string, apiKey: string, fetchedAt: string
 }
 
 export async function buildFinanceDashboardSnapshot(): Promise<FinanceDashboardSnapshot> {
-  const provider = (process.env.FINANCE_PROVIDER?.trim() || '').toLowerCase()
-  const apiKey = process.env.FINANCE_API_KEY?.trim()
+  const provider = (getEnvAliasValue('financeProvider') || '').toLowerCase()
+  const apiKey = getEnvAliasValue('financeApiKey')
   if (!apiKey) return unavailable('Set FINANCE_API_KEY and FINANCE_PROVIDER before market data can be fetched.')
   const fetchedAt = new Date().toISOString()
   const selected = symbols()

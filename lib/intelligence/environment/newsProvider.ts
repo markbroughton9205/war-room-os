@@ -1,7 +1,8 @@
+import { getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/configuration/envAlias'
 import type { NewsCategory, NewsDashboardCard, NewsDashboardSnapshot } from '@/lib/intelligence/environment/liveEnvironmentTypes'
 
 const NEWS_TIMEOUT_MS = 8000
-const NEWS_ENV_NAMES = ['NEWS_RSS_FEEDS', 'RSS_FEED_URLS']
+const NEWS_ENV_NAMES = [...getEnvAliasNames('newsRssFeeds'), ...getEnvAliasNames('newsApiKey')]
 
 type FeedRegistration = {
   name: string
@@ -10,6 +11,10 @@ type FeedRegistration = {
 }
 
 function setupSnapshot(detail: string): NewsDashboardSnapshot {
+  const aliasDiagnostics = [resolveEnvAlias('newsRssFeeds'), resolveEnvAlias('newsApiKey')]
+  const primaryDiagnostic = aliasDiagnostics.find(diagnostic => diagnostic.configured) ?? aliasDiagnostics[0]
+  const aliasRecommendation = aliasDiagnostics.find(diagnostic => diagnostic.recommendation)?.recommendation ?? null
+
   return {
     status: 'unavailable',
     provider: 'RSS feed registry',
@@ -20,8 +25,13 @@ function setupSnapshot(detail: string): NewsDashboardSnapshot {
     detail,
     setup: {
       envVarNames: NEWS_ENV_NAMES,
+      preferredEnvName: primaryDiagnostic.preferredEnvName,
+      aliasDetected: aliasDiagnostics.some(diagnostic => diagnostic.aliasDetected),
+      configured: aliasDiagnostics.some(diagnostic => diagnostic.configured),
+      aliasRecommendation,
+      envAliasDiagnostics: aliasDiagnostics,
       blockedFeature: 'Live Environment news slideshow',
-      recommendedSetup: 'Set NEWS_RSS_FEEDS or RSS_FEED_URLS to a semicolon-separated registry. Each entry may be category|source name|https://feed.url/rss.',
+      recommendedSetup: aliasRecommendation ?? 'Set NEWS_RSS_FEEDS or RSS_FEED_URLS to a semicolon-separated registry. Each entry may be category|source name|https://feed.url/rss.',
     },
   }
 }
@@ -62,7 +72,7 @@ function parseCategory(value: string | undefined): NewsCategory {
 }
 
 function parseRegistry(): FeedRegistration[] {
-  const raw = process.env.NEWS_RSS_FEEDS?.trim() || process.env.RSS_FEED_URLS?.trim()
+  const raw = getEnvAliasValue('newsRssFeeds')
   if (!raw) return []
   return raw
     .split(/[;\n]+/)
