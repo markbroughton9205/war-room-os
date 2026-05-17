@@ -193,6 +193,8 @@ const OPERATOR_TABS: { id: OperatorTab; label: string }[] = [
   { id: 'diagnostics', label: 'Diagnostics' },
 ]
 
+const TOOLBAR_HEALTH_POLL_INTERVAL_MS = 120_000
+
 type CouncilMessage = {
   id: string
   familyName: string
@@ -204,6 +206,15 @@ type CouncilMessage = {
   messageType: string
   recallPreview?: CouncilMemoryRecallPreview
   engineeringTaskPacket?: EngineeringTaskPacket
+}
+
+type WarRoomPerformanceDiagnostics = {
+  renderCount: number
+  lastRenderMs: number
+  slowPanel: string
+  lastRefreshDurationMs: number | null
+  lastRefreshAt: string | null
+  pollingIntervalMs: number
 }
 
 const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Goal: Panama relocation. Motivated by vision of success. Wants truth about systems that harm Black and low income communities.`
@@ -1424,6 +1435,50 @@ function ToolStatusPanel({
   )
 }
 
+const WarRoomPerformancePanel = memo(function WarRoomPerformancePanel({
+  diagnostics,
+  activeTab,
+}: {
+  diagnostics: WarRoomPerformanceDiagnostics
+  activeTab: OperatorTab
+}) {
+  const refreshLabel = diagnostics.lastRefreshDurationMs === null
+    ? 'not measured'
+    : `${Math.round(diagnostics.lastRefreshDurationMs)}ms`
+  const renderTone = diagnostics.lastRenderMs > 24 ? '#FBBF24' : '#34D399'
+
+  return (
+    <section className="mb-3 rounded border border-white/10 bg-black/25 px-3 py-2 text-[10px]">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="font-bold uppercase tracking-widest" style={{ color: '#A7F3D0' }}>UI Performance</div>
+        <div className="uppercase tracking-widest" style={{ color: '#64748B' }}>active tab: {activeTab}</div>
+      </div>
+      <div className="grid gap-2 md:grid-cols-4">
+        <div className="rounded border border-white/10 px-2 py-1">
+          <div style={{ color: '#64748B' }}>Render count</div>
+          <div className="mt-1 font-bold" style={{ color: '#E5E7EB' }}>{diagnostics.renderCount}</div>
+        </div>
+        <div className="rounded border border-white/10 px-2 py-1">
+          <div style={{ color: '#64748B' }}>Last commit</div>
+          <div className="mt-1 font-bold" style={{ color: renderTone }}>{diagnostics.lastRenderMs.toFixed(1)}ms</div>
+        </div>
+        <div className="rounded border border-white/10 px-2 py-1">
+          <div style={{ color: '#64748B' }}>Slow panel hint</div>
+          <div className="mt-1 font-bold uppercase" style={{ color: '#FDE68A' }}>{diagnostics.slowPanel}</div>
+        </div>
+        <div className="rounded border border-white/10 px-2 py-1">
+          <div style={{ color: '#64748B' }}>Toolbar refresh</div>
+          <div className="mt-1 font-bold" style={{ color: '#93C5FD' }}>{refreshLabel}</div>
+        </div>
+      </div>
+      <div className="mt-2 uppercase tracking-widest" style={{ color: '#64748B' }}>
+        Status polling interval: {Math.round(diagnostics.pollingIntervalMs / 1000)}s
+        {diagnostics.lastRefreshAt ? ` · last refresh ${new Date(diagnostics.lastRefreshAt).toLocaleTimeString()}` : ''}
+      </div>
+    </section>
+  )
+})
+
 function TokenUsagePanel({
   rows,
   currentCost,
@@ -2365,7 +2420,7 @@ function OpportunityScoutPanel({
   )
 }
 
-function ScoutDiagnosticsPanel({ diagnostics }: { diagnostics: EconomicScoutDiagnostics }) {
+const ScoutDiagnosticsPanel = memo(function ScoutDiagnosticsPanel({ diagnostics }: { diagnostics: EconomicScoutDiagnostics }) {
   const [nowMs, setNowMs] = useState<number | null>(null)
   useEffect(() => {
     const update = () => setNowMs(Date.now())
@@ -2429,7 +2484,7 @@ function ScoutDiagnosticsPanel({ diagnostics }: { diagnostics: EconomicScoutDiag
       ) : null}
     </section>
   )
-}
+})
 
 function IncomeRadarPanel({
   opportunities,
@@ -2730,7 +2785,7 @@ function IncomeRadarPanel({
   )
 }
 
-function MemoryPanel({ memories }: { memories: MemoryEntry[] }) {
+const MemoryPanel = memo(function MemoryPanel({ memories }: { memories: MemoryEntry[] }) {
   return (
     <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
       style={{ background: 'rgba(52,211,153,0.025)' }}>
@@ -2762,9 +2817,9 @@ function MemoryPanel({ memories }: { memories: MemoryEntry[] }) {
       </div>
     </div>
   )
-}
+})
 
-function MemoryRecallPanel({ recall }: { recall: MemoryRecallView | null }) {
+const MemoryRecallPanel = memo(function MemoryRecallPanel({ recall }: { recall: MemoryRecallView | null }) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
 
   const toggleExpanded = (id: string) => {
@@ -2864,7 +2919,7 @@ function MemoryRecallPanel({ recall }: { recall: MemoryRecallView | null }) {
       )}
     </div>
   )
-}
+})
 
 function SmsBridgePanel({
   bridge,
@@ -4033,7 +4088,7 @@ function DeploymentAwarenessPanel({ deploy, onRefresh }: { deploy: DeployStatusR
   )
 }
 
-function LocalFamilyAgentsPanel({
+const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
   families,
   onRefresh,
 }: {
@@ -4257,9 +4312,9 @@ function LocalFamilyAgentsPanel({
       )}
     </div>
   )
-}
+})
 
-function CapabilityRouterPanel() {
+const CapabilityRouterPanel = memo(function CapabilityRouterPanel() {
   const [taskCategory, setTaskCategory] = useState<LocalTaskCategory>('synthesis')
   const [prompt, setPrompt] = useState('')
   const [decision, setDecision] = useState<LocalTaskRoutingDecision | null>(null)
@@ -4376,9 +4431,9 @@ function CapabilityRouterPanel() {
       )}
     </div>
   )
-}
+})
 
-function EngineeringAgentBridgePanel({ status }: { status: EngineeringStatusBridge }) {
+const EngineeringAgentBridgePanel = memo(function EngineeringAgentBridgePanel({ status }: { status: EngineeringStatusBridge }) {
   const latest = status.latestTaskPacket
 
   return (
@@ -4469,7 +4524,7 @@ function EngineeringAgentBridgePanel({ status }: { status: EngineeringStatusBrid
       </div>
     </div>
   )
-}
+})
 
 function EngineTriBool({ label, value }: { label: string; value: boolean }) {
   return (
@@ -4502,7 +4557,7 @@ function formatProviderAvailabilityDiagnostic(engine: EngineStatus): string {
   return parts.join(' · ')
 }
 
-function UnifiedEngineControlPanel() {
+const UnifiedEngineControlPanel = memo(function UnifiedEngineControlPanel() {
   const { uiMode } = useWarRoomUiMode()
   const [mounted, setMounted] = useState(false)
   const [data, setData] = useState<EngineControlStatusResponse | null>(null)
@@ -4682,7 +4737,7 @@ function UnifiedEngineControlPanel() {
       )}
     </div>
   )
-}
+})
 
 type EngineRouteCommandApiResponse = RouteCommandResult & {
   enginesSummary?: Array<{ id: string; functional: boolean; reachable: boolean; configured: boolean }>
@@ -4843,6 +4898,7 @@ function ExpansionPermissionPrompt({
 }
 
 function Home() {
+  const renderStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
   const { uiMode, setUiMode } = useWarRoomUiMode()
   const [command, setCommand] = useState('')
 
@@ -4851,8 +4907,50 @@ function Home() {
   const [toolBarHealth, setToolBarHealth] = useState(initialToolBarHealth)
   const [toolBarActivity, setToolBarActivity] = useState<Partial<Record<ToolId, ToolBarLabel>>>({})
   const [operatorTab, setOperatorTab] = useState<OperatorTab>('command')
+  const renderCountRef = useRef(0)
+  const lastPerfPublishRef = useRef(0)
+  const [performanceDiagnostics, setPerformanceDiagnostics] = useState<WarRoomPerformanceDiagnostics>({
+    renderCount: 0,
+    lastRenderMs: 0,
+    slowPanel: 'boot',
+    lastRefreshDurationMs: null,
+    lastRefreshAt: null,
+    pollingIntervalMs: TOOLBAR_HEALTH_POLL_INTERVAL_MS,
+  })
+  const [recoveredAttendanceExpanded, setRecoveredAttendanceExpanded] = useState(false)
+  const [recoveredIntegrityExpanded, setRecoveredIntegrityExpanded] = useState(false)
+  renderCountRef.current += 1
 
-  const refreshToolBarHealthBars = () => fetchToolBarHealth().then(setToolBarHealth).catch(() => undefined)
+  useEffect(() => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    const elapsed = now - renderStartedAt
+    const shouldPublish = now - lastPerfPublishRef.current > 1000
+    if (!shouldPublish) return
+    lastPerfPublishRef.current = now
+    setPerformanceDiagnostics(prev => ({
+      ...prev,
+      renderCount: renderCountRef.current,
+      lastRenderMs: elapsed,
+      slowPanel: elapsed > 24 ? operatorTab : prev.slowPanel,
+    }))
+  }, [operatorTab, renderStartedAt])
+
+  const refreshToolBarHealthBars = useCallback(async () => {
+    const started = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    try {
+      const nextHealth = await fetchToolBarHealth()
+      setToolBarHealth(nextHealth)
+    } catch {
+      return
+    } finally {
+      const finished = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      setPerformanceDiagnostics(prev => ({
+        ...prev,
+        lastRefreshDurationMs: finished - started,
+        lastRefreshAt: new Date().toISOString(),
+      }))
+    }
+  }, [])
 
   useEffect(() => {
     if (operatorTab !== 'system') return
@@ -4860,9 +4958,9 @@ function Home() {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
       void refreshToolBarHealthBars()
     }
-    const id = window.setInterval(tick, 120_000)
+    const id = window.setInterval(tick, TOOLBAR_HEALTH_POLL_INTERVAL_MS)
     return () => window.clearInterval(id)
-  }, [operatorTab])
+  }, [operatorTab, refreshToolBarHealthBars])
   const [memories, setMemories] = useState<MemoryEntry[]>([])
   const [repoAwareness, setRepoAwareness] = useState<RepoAwarenessState>(INITIAL_REPO_AWARENESS_STATE)
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
@@ -6218,7 +6316,7 @@ function Home() {
     }
   }
 
-  const loadLocalAgentBridge = async () => {
+  const loadLocalAgentBridge = useCallback(async () => {
     try {
       const res = await fetch('/api/local-agent/status')
       const data = await res.json()
@@ -6232,9 +6330,9 @@ function Home() {
         checkedAt: new Date().toISOString(),
       }))
     }
-  }
+  }, [])
 
-  const loadLocalFamilyAgents = async () => {
+  const loadLocalFamilyAgents = useCallback(async () => {
     try {
       const res = await fetch('/api/local-agent/families')
       const data = await res.json()
@@ -6247,7 +6345,7 @@ function Home() {
         checkedAt: new Date().toISOString(),
       }))
     }
-  }
+  }, [])
 
   const loadInternetStatus = useCallback(async () => {
     try {
@@ -9485,6 +9583,14 @@ function Home() {
             transform: scale(1.2);
           }
         }
+
+        @media (prefers-reduced-motion: reduce) {
+          .message-fade-in,
+          .typing-dot,
+          .tool-dot-active {
+            animation: none !important;
+          }
+        }
       `}</style>
       <header className="relative z-10 flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-yellow-900 px-6 py-3">
         <div>
@@ -9852,44 +9958,6 @@ function Home() {
           <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
         )}
         {uiMode === 'operator' && operatorTab === 'command' && activeOrdersStrip}
-        {uiMode === 'operator' && (
-          <div className="hidden" style={{ background: 'rgba(0,0,0,0.35)' }}>
-            <span className="text-[10px]" style={{ color: '#94a3b8' }}>
-              System: {queueActions.length} queued · session {formatCost(sessionCost)} · heavy pages manual-refresh by default.
-            </span>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }} onClick={() => startTransition(() => setOperatorTab('system'))}>Open System</button>
-              <button type="button" className="text-[10px] tracking-widest" style={{ color: '#888' }} onClick={() => window.setTimeout(() => {
-                void loadProviderHealth()
-                void loadInternetStatus()
-              }, 0)}>Refresh provider summary</button>
-            </div>
-          </div>
-        )}
-
-        <div className="hidden" style={{ background: 'rgba(0,0,0,0.35)' }}>
-          <span className="text-[10px] tracking-widest" style={{ color: '#888' }}>UI mode</span>
-          <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: uiMode === 'operator' ? '1px solid #FFD700' : '1px solid #444', color: uiMode === 'operator' ? '#FFD700' : '#888' }} onClick={() => setUiMode('operator')}>Operator</button>
-          <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: uiMode === 'advanced' ? '1px solid #FFD700' : '1px solid #444', color: uiMode === 'advanced' ? '#FFD700' : '#888' }} onClick={() => setUiMode('advanced')}>Advanced</button>
-        </div>
-
-        <div className="hidden" style={{ background: 'rgba(0,0,0,0.45)' }}>
-          {OPERATOR_TABS.map(({ id: tab, label }) => (
-            <button
-              key={tab}
-              type="button"
-              className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
-              style={{
-                border: operatorTab === tab ? '1px solid #FFD700' : '1px solid #333',
-                color: operatorTab === tab ? '#FFD700' : '#888',
-              }}
-              onClick={() => setOperatorTab(tab)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
         <div className="px-6 py-4">
           <div className="space-y-4">
             {operatorTab === 'command' && (
@@ -9911,8 +9979,8 @@ function Home() {
                 </div>
                 <BridgeArchitectPanel engines={engineList} />
                 <EngineeringAgentBridgePanel status={engineeringStatusBridge} />
-                <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={() => void loadLocalAgentBridge()} />
-                <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={() => void loadLocalFamilyAgents()} />
+                <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={loadLocalAgentBridge} />
+                <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={loadLocalFamilyAgents} />
                 <CapabilityRouterPanel />
                 <CodexAgentPlaceholder />
               </>
@@ -9986,6 +10054,7 @@ function Home() {
             {operatorTab === 'system' && (
               <>
                 <ConfigurationHealthSummaryPanel />
+                <WarRoomPerformancePanel diagnostics={performanceDiagnostics} activeTab={operatorTab} />
                 <ToolStatusPanel health={toolBarHealth} activity={toolBarActivity} />
                 <button type="button" className="mb-3 rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void refreshToolBarHealthBars()}>Refresh tool bar</button>
                 <TokenUsagePanel rows={usageRows} currentCost={currentDecreeCost} sessionTotal={sessionCost} providerHealth={providerHealth} />
@@ -10002,6 +10071,7 @@ function Home() {
                     Open runtime integrity dashboard →
                   </Link>
                 </div>
+                <WarRoomPerformancePanel diagnostics={performanceDiagnostics} activeTab={operatorTab} />
                 {recoveredRedTeamHold ? (
                   <div
                     className="mb-3 rounded border border-amber-500/45 px-3 py-2 text-[10px]"
@@ -10019,15 +10089,23 @@ function Home() {
                   </div>
                 ) : null}
                 {recoveredAttendanceSummary ? (
-                  <div className="mb-3 rounded border border-white/10 px-3 py-2 text-[10px]" style={{ color: '#a8a29e' }}>
-                    <div className="font-bold tracking-widest text-white/70">LAST ATTENDANCE SUMMARY (HISTORICAL)</div>
+                  <details
+                    className="mb-3 rounded border border-white/10 px-3 py-2 text-[10px]"
+                    style={{ color: '#a8a29e' }}
+                    onToggle={event => setRecoveredAttendanceExpanded(event.currentTarget.open)}
+                  >
+                    <summary className="cursor-pointer font-bold tracking-widest text-white/70">LAST ATTENDANCE SUMMARY (HISTORICAL)</summary>
                     <div className="mt-1 text-white/55">
                       Captured {new Date(recoveredAttendanceSummary.capturedAt).toLocaleString()}
                     </div>
-                    <pre className="mt-1 max-h-28 overflow-auto text-[9px] text-white/60">
-                      {JSON.stringify(recoveredAttendanceSummary.providerRuntimeStates, null, 2)}
-                    </pre>
-                  </div>
+                    {recoveredAttendanceExpanded ? (
+                      <pre className="mt-1 max-h-28 overflow-auto text-[9px] text-white/60">
+                        {JSON.stringify(recoveredAttendanceSummary.providerRuntimeStates, null, 2)}
+                      </pre>
+                    ) : (
+                      <div className="mt-1 text-[9px] uppercase tracking-widest text-white/40">Provider runtime JSON deferred until expanded.</div>
+                    )}
+                  </details>
                 ) : null}
                 {recoveredDiagnosticHistory.length ? (
                   <div className="mb-3 rounded border border-white/10 px-3 py-2 text-[10px]" style={{ color: '#a8a29e' }}>
@@ -10043,7 +10121,11 @@ function Home() {
                   </div>
                 ) : null}
                 {recoveredIntegrityPartial ? (
-                  <details className="mb-3 rounded border border-white/10 px-3 py-2 text-[10px]" style={{ color: '#a8a29e' }}>
+                  <details
+                    className="mb-3 rounded border border-white/10 px-3 py-2 text-[10px]"
+                    style={{ color: '#a8a29e' }}
+                    onToggle={event => setRecoveredIntegrityExpanded(event.currentTarget.open)}
+                  >
                     <summary className="cursor-pointer font-bold tracking-widest text-white/70">
                       Historical runtime integrity snapshot (from storage)
                     </summary>
@@ -10051,17 +10133,21 @@ function Home() {
                       Generated {new Date(recoveredIntegrityPartial.generatedAt).toLocaleString()} — superseded after live
                       integrity refresh.
                     </div>
-                    <pre className="mt-1 max-h-48 overflow-auto text-[9px] text-white/60">
-                      {JSON.stringify(
-                        {
-                          overall: recoveredIntegrityPartial.subsystems?.length ?? 0,
-                          providers: recoveredIntegrityPartial.providers,
-                          persistence: recoveredIntegrityPartial.persistence,
-                        },
-                        null,
-                        2,
-                      )}
-                    </pre>
+                    {recoveredIntegrityExpanded ? (
+                      <pre className="mt-1 max-h-48 overflow-auto text-[9px] text-white/60">
+                        {JSON.stringify(
+                          {
+                            overall: recoveredIntegrityPartial.subsystems?.length ?? 0,
+                            providers: recoveredIntegrityPartial.providers,
+                            persistence: recoveredIntegrityPartial.persistence,
+                          },
+                          null,
+                          2,
+                        )}
+                      </pre>
+                    ) : (
+                      <div className="mt-1 text-[9px] uppercase tracking-widest text-white/40">Integrity JSON deferred until expanded.</div>
+                    )}
                   </details>
                 ) : null}
                 {sequentialDiagnostics.session?.active ? (
@@ -10087,7 +10173,7 @@ function Home() {
                 <CommandRouterPanel />
                 <InternetAccessPanel internet={internetStatus} onRefresh={() => void loadInternetStatus()} />
                 <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
-                <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={() => void loadLocalAgentBridge()} />
+                <LocalCodeAgentBridgePanel bridge={localAgentBridge} onRefresh={loadLocalAgentBridge} />
                 <RepoAccessPanel repo={repoStatus} onRefresh={() => void loadRepoStatus()} />
                 <RollbackSafetyPanel rollback={rollbackStatus} onRefresh={() => void loadRollbackStatus()} onCheckpoint={() => void createRollbackCheckpoint()} />
                 <DiffPreviewPanel
@@ -10114,7 +10200,7 @@ function Home() {
                 <Phase3WarRoomPanels uiMode={uiMode} homeBundle="diagnostics" />
                 <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
                 <BridgeArchitectPanel engines={engineList} />
-                <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={() => void loadLocalFamilyAgents()} />
+                <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={loadLocalFamilyAgents} />
                 <CapabilityRouterPanel />
                 <BabyAiObserverPanel memories={memories} actions={raelActions} opportunities={incomeOpportunities} />
                 <FamilyPresencePanel presence={familyPresence} geminiEngine={geminiEngineRow} />

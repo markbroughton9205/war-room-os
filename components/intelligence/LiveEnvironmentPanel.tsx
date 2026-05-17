@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { ConfigurationSweep } from '@/lib/configuration/configurationHealth'
@@ -23,6 +23,8 @@ type ImprovementStat = {
   detail: string
   color: string
 }
+
+const EMPTY_NEWS_CARDS: NewsDashboardCard[] = []
 
 function modeLabel(mode: LocationMode): string {
   if (mode === 'city_only') return 'City'
@@ -183,7 +185,7 @@ function statList(args: {
   ]
 }
 
-export function LiveEnvironmentPanel({
+export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   liveResearchHud,
   location,
   horoscopeEnabled,
@@ -208,12 +210,21 @@ export function LiveEnvironmentPanel({
   const [activeNewsIndex, setActiveNewsIndex] = useState(0)
   const [activeStatIndex, setActiveStatIndex] = useState(0)
   const [reducedMotion, setReducedMotion] = useState(false)
-  const weather = dashboard?.weather ?? buildFallbackWeather(location)
-  const finance = dashboard?.finance ?? buildFallbackFinance()
-  const horoscope = buildHoroscopeSnapshot('Aries', new Date(), astrologyMode)
-  const intelligenceCards = buildNewsCardsFromIntelligence(liveResearchHud?.intelligence)
-  const rssCards = dashboard?.news.cards ?? []
-  const cards: NewsDashboardCard[] = rssCards.length
+  const weather = useMemo(
+    () => dashboard?.weather ?? buildFallbackWeather(location),
+    [dashboard?.weather, location],
+  )
+  const finance = useMemo(
+    () => dashboard?.finance ?? buildFallbackFinance(),
+    [dashboard?.finance],
+  )
+  const horoscope = useMemo(() => buildHoroscopeSnapshot('Aries', new Date(), astrologyMode), [astrologyMode])
+  const intelligenceCards = useMemo(
+    () => buildNewsCardsFromIntelligence(liveResearchHud?.intelligence),
+    [liveResearchHud?.intelligence],
+  )
+  const rssCards = dashboard?.news.cards ?? EMPTY_NEWS_CARDS
+  const cards: NewsDashboardCard[] = useMemo(() => rssCards.length
     ? rssCards
     : intelligenceCards.map(card => ({
         id: card.id,
@@ -227,13 +238,16 @@ export function LiveEnvironmentPanel({
         confidenceLabel: card.badge,
         signalLabel: card.badge === 'weak_signal' ? 'weak-signal' : card.badge === 'verified' || card.badge === 'corroborated' ? 'verified' : 'emerging',
         detail: card.detail,
-      }))
+      })), [intelligenceCards, rssCards])
   const activeNews = cards.length ? cards[activeNewsIndex % cards.length] : null
   const sourceHealth = liveResearchHud?.intelligence?.retrieval
     ? liveResearchHud.intelligence.retrieval.success ? 'Retrieval ok' : 'Retrieval gap'
     : 'Retrieval idle'
   const weakSignals = liveResearchHud?.intelligence?.local?.weakSignalCount ?? (liveResearchHud?.intelligence?.weakSignalDetected ? 1 : 0)
-  const providerById = new Map((configurationSweep?.providers ?? []).map(provider => [provider.id, provider]))
+  const providerById = useMemo(
+    () => new Map((configurationSweep?.providers ?? []).map(provider => [provider.id, provider])),
+    [configurationSweep?.providers],
+  )
   const weatherProvider = providerById.get('weather_provider')
   const horoscopeProvider = providerById.get('horoscope_provider')
   const newsProvider = providerById.get('rss_news_sources')
@@ -568,4 +582,4 @@ export function LiveEnvironmentPanel({
       </div>
     </section>
   )
-}
+})

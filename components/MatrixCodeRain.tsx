@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 
 const CHARSET = '01ABCDEFGHIJKLMNOPQRSTUVWXYZ{}[]<>/\\|#$%+=*'
 const GOLD = '255, 215, 0'
@@ -40,20 +40,30 @@ function makeStreams(width: number, height: number) {
   })
 }
 
-export function MatrixCodeRain() {
+export const MatrixCodeRain = memo(function MatrixCodeRain() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
   const streamsRef = useRef<Stream[]>([])
   const lastTimeRef = useRef(0)
+  const [reducedMotion, setReducedMotion] = useState(false)
 
   useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const sync = () => setReducedMotion(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+
+  useEffect(() => {
+    if (reducedMotion) return
     const canvas = canvasRef.current
     if (!canvas) return
 
     const context = canvas.getContext('2d', { alpha: true })
     if (!context) return
 
-    const maxDpr = 2
+    const maxDpr = 1.5
     const resize = () => {
       const width = window.innerWidth
       const height = window.innerHeight
@@ -68,12 +78,22 @@ export function MatrixCodeRain() {
     }
 
     const draw = (time: number) => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        lastTimeRef.current = time
+        rafRef.current = window.requestAnimationFrame(draw)
+        return
+      }
+
       const width = window.innerWidth
       const height = window.innerHeight
       const delta = Math.min(48, time - (lastTimeRef.current || time))
+      if (delta < 30) {
+        rafRef.current = window.requestAnimationFrame(draw)
+        return
+      }
       lastTimeRef.current = time
 
-      context.fillStyle = 'rgba(0, 0, 0, 0.085)'
+      context.fillStyle = 'rgba(0, 0, 0, 0.11)'
       context.fillRect(0, 0, width, height)
       context.textAlign = 'center'
       context.textBaseline = 'middle'
@@ -118,7 +138,17 @@ export function MatrixCodeRain() {
       window.removeEventListener('resize', resize)
       if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current)
     }
-  }, [])
+  }, [reducedMotion])
+
+  if (reducedMotion) {
+    return (
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 z-0 h-screen w-screen"
+        style={{ background: 'radial-gradient(circle at top, rgba(0, 255, 65, 0.05), rgba(0, 0, 0, 0.2) 45%)' }}
+      />
+    )
+  }
 
   return (
     <canvas
@@ -131,4 +161,4 @@ export function MatrixCodeRain() {
       }}
     />
   )
-}
+})

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 
 import type { ConfigurationStatus } from '@/lib/configuration/configurationRegistry'
 import type { ConfigurationSweep } from '@/lib/configuration/configurationHealth'
@@ -60,7 +60,7 @@ function useConfigurationSweep(): SweepState {
   return state
 }
 
-export function ConfigurationHealthSummaryPanel() {
+export const ConfigurationHealthSummaryPanel = memo(function ConfigurationHealthSummaryPanel() {
   const state = useConfigurationSweep()
 
   if (state.phase === 'loading') {
@@ -128,10 +128,11 @@ export function ConfigurationHealthSummaryPanel() {
       ) : null}
     </section>
   )
-}
+})
 
-export function ConfigurationSweepPanel() {
+export const ConfigurationSweepPanel = memo(function ConfigurationSweepPanel() {
   const state = useConfigurationSweep()
+  const [providerTableOpen, setProviderTableOpen] = useState(false)
 
   if (state.phase === 'loading') {
     return (
@@ -181,38 +182,52 @@ export function ConfigurationSweepPanel() {
         ))}
       </div>
 
-      <div className="overflow-x-auto rounded border border-white/10">
-        <table className="w-full min-w-[1120px] border-collapse text-left text-[10px]">
-          <thead style={{ color: '#94A3B8' }}>
-            <tr className="border-b border-white/10">
-              <th className="px-2 py-2 font-bold tracking-widest">PROVIDER</th>
-              <th className="px-2 py-2 font-bold tracking-widest">STATUS</th>
-              <th className="px-2 py-2 font-bold tracking-widest">ENV VAR NAMES</th>
-              <th className="px-2 py-2 font-bold tracking-widest">CONFIGURED</th>
-              <th className="px-2 py-2 font-bold tracking-widest">LAST CHECK</th>
-              <th className="px-2 py-2 font-bold tracking-widest">MISSING DEPENDENCY</th>
-              <th className="px-2 py-2 font-bold tracking-widest">AFFECTED FEATURES</th>
-              <th className="px-2 py-2 font-bold tracking-widest">NEXT ACTION</th>
-            </tr>
-          </thead>
-          <tbody style={{ color: '#CBD5E1' }}>
-            {providers.map(provider => (
-              <tr key={provider.id} className="border-b border-white/5 align-top">
-                <td className="px-2 py-2 font-bold" style={{ color: '#E5E7EB' }}>{provider.name}</td>
-                <td className="px-2 py-2 uppercase tracking-widest" style={{ color: statusColor(provider.status) }}>{statusLabel(provider.status)}</td>
-                <td className="px-2 py-2 font-mono" style={{ color: '#FDBA74' }}>
-                  {[...provider.requiredEnvVars, ...provider.optionalEnvVars].join(', ') || 'none'}
-                </td>
-                <td className="px-2 py-2" style={{ color: provider.configured ? '#34D399' : '#F87171' }}>{String(provider.configured)}</td>
-                <td className="px-2 py-2 leading-snug" style={{ color: '#94A3B8' }}>{provider.lastCheckResult}</td>
-                <td className="px-2 py-2 leading-snug" style={{ color: provider.missingDependency ? '#FCA5A5' : '#64748B' }}>{provider.missingDependency ?? 'none'}</td>
-                <td className="px-2 py-2 leading-snug">{provider.affectedFeatures.join(', ')}</td>
-                <td className="px-2 py-2 leading-snug" style={{ color: '#BAE6FD' }}>{provider.recommendedNextAction}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <details
+        className="rounded border border-white/10 bg-black/20 px-3 py-2"
+        onToggle={event => setProviderTableOpen(event.currentTarget.open)}
+      >
+        <summary className="cursor-pointer font-bold uppercase tracking-widest" style={{ color: '#7DD3FC' }}>
+          Provider detail table ({providers.length}) {providerTableOpen ? 'expanded' : 'deferred'}
+        </summary>
+        {providerTableOpen ? (
+          <div className="mt-3 overflow-x-auto rounded border border-white/10">
+            <table className="w-full min-w-[1120px] border-collapse text-left text-[10px]">
+              <thead style={{ color: '#94A3B8' }}>
+                <tr className="border-b border-white/10">
+                  <th className="px-2 py-2 font-bold tracking-widest">PROVIDER</th>
+                  <th className="px-2 py-2 font-bold tracking-widest">STATUS</th>
+                  <th className="px-2 py-2 font-bold tracking-widest">ENV VAR NAMES</th>
+                  <th className="px-2 py-2 font-bold tracking-widest">CONFIGURED</th>
+                  <th className="px-2 py-2 font-bold tracking-widest">LAST CHECK</th>
+                  <th className="px-2 py-2 font-bold tracking-widest">MISSING DEPENDENCY</th>
+                  <th className="px-2 py-2 font-bold tracking-widest">AFFECTED FEATURES</th>
+                  <th className="px-2 py-2 font-bold tracking-widest">NEXT ACTION</th>
+                </tr>
+              </thead>
+              <tbody style={{ color: '#CBD5E1' }}>
+                {providers.map(provider => (
+                  <tr key={provider.id} className="border-b border-white/5 align-top">
+                    <td className="px-2 py-2 font-bold" style={{ color: '#E5E7EB' }}>{provider.name}</td>
+                    <td className="px-2 py-2 uppercase tracking-widest" style={{ color: statusColor(provider.status) }}>{statusLabel(provider.status)}</td>
+                    <td className="px-2 py-2 font-mono" style={{ color: '#FDBA74' }}>
+                      {[...provider.requiredEnvVars, ...provider.optionalEnvVars].join(', ') || 'none'}
+                    </td>
+                    <td className="px-2 py-2" style={{ color: provider.configured ? '#34D399' : '#F87171' }}>{String(provider.configured)}</td>
+                    <td className="px-2 py-2 leading-snug" style={{ color: '#94A3B8' }}>{provider.lastCheckResult}</td>
+                    <td className="px-2 py-2 leading-snug" style={{ color: provider.missingDependency ? '#FCA5A5' : '#64748B' }}>{provider.missingDependency ?? 'none'}</td>
+                    <td className="px-2 py-2 leading-snug">{provider.affectedFeatures.join(', ')}</td>
+                    <td className="px-2 py-2 leading-snug" style={{ color: '#BAE6FD' }}>{provider.recommendedNextAction}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="mt-2 text-[9px] uppercase tracking-widest" style={{ color: '#64748B' }}>
+            Full provider diagnostics are lazy-rendered until expanded to keep tab switching responsive.
+          </div>
+        )}
+      </details>
 
       {missingProviderGuide.length ? (
         <details className="mt-3 rounded border border-amber-500/20 bg-amber-950/5 px-3 py-2">
@@ -234,4 +249,4 @@ export function ConfigurationSweepPanel() {
       ) : null}
     </section>
   )
-}
+})
