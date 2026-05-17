@@ -180,6 +180,7 @@ import type {
 } from '@/lib/red-team-coder/types'
 import { createEngineeringTaskPacket, type EngineeringTaskPacket } from '@/lib/engineering/engineeringTaskPacket'
 import { buildEngineeringStatusBridge, type EngineeringStatusBridge } from '@/lib/engineering/engineeringStatusBridge'
+import { createProjectOrchestrationPacket, type ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
 
 export type OperatorTab = 'command' | 'income' | 'agents' | 'approvals' | 'memory' | 'system' | 'diagnostics'
 
@@ -206,6 +207,7 @@ type CouncilMessage = {
   messageType: string
   recallPreview?: CouncilMemoryRecallPreview
   engineeringTaskPacket?: EngineeringTaskPacket
+  projectOrchestrationPacket?: ProjectOrchestrationPacket
 }
 
 type WarRoomPerformanceDiagnostics = {
@@ -1121,10 +1123,12 @@ const MessageBubble = memo(function MessageBubble({
   msg,
   diagnosticsOpen,
   onOpenFullMemory,
+  onProjectAction,
 }: {
   msg: CouncilMessage
   diagnosticsOpen?: boolean
   onOpenFullMemory?: (preview: CouncilMemoryRecallPreview) => void
+  onProjectAction?: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
 }) {
   const isRael = msg.familyName === "RA'EL"
   if (
@@ -1166,6 +1170,98 @@ const MessageBubble = memo(function MessageBubble({
         ) : (
           <p className="text-xs text-slate-400">No memory found for today yet.</p>
         )}
+      </div>
+    )
+  }
+  if (msg.messageType === 'project_orchestration' && msg.projectOrchestrationPacket) {
+    const packet = msg.projectOrchestrationPacket
+    const copyPacket = () => {
+      if (typeof navigator === 'undefined' || !navigator.clipboard) return
+      void navigator.clipboard.writeText(JSON.stringify(packet.approvalPacket, null, 2))
+    }
+
+    return (
+      <div className="message-fade-in mb-4 ml-11 rounded-lg p-3 text-sm"
+        style={{ background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(52,211,153,0.28)' }}>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>
+              Project orchestration
+            </div>
+            <div className="mt-1 text-sm font-bold" style={{ color: '#D1FAE5' }}>{packet.intake.projectType}</div>
+            <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#94A3B8' }}>
+              {packet.id} · {packet.status.replaceAll('_', ' ')}
+            </div>
+          </div>
+          <button type="button" onClick={copyPacket}
+            className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
+            style={{ border: '1px solid rgba(52,211,153,0.45)', color: '#A7F3D0' }}>
+            Copy Approval Packet
+          </button>
+        </div>
+
+        <div className="grid gap-2 text-xs md:grid-cols-3">
+          <div className="rounded px-2 py-2 md:col-span-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="mb-1 font-bold tracking-widest" style={{ color: '#A7F3D0' }}>LANES ASSIGNED</div>
+            <div className="grid gap-1 sm:grid-cols-2">
+              {packet.lanes.map(lane => (
+                <div key={lane.lane} className="flex items-center justify-between gap-2 rounded px-2 py-1" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <span style={{ color: '#E5E7EB' }}>{lane.lane.replaceAll('_', '/')}</span>
+                  <span className="text-[10px]" style={{ color: lane.status === 'waiting_approval' ? '#FDE68A' : '#93C5FD' }}>
+                    {lane.family} · {lane.status.replaceAll('_', ' ')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(239,68,68,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="mb-1 font-bold tracking-widest" style={{ color: '#FCA5A5' }}>QUALITY GATE</div>
+            <div style={{ color: '#CBD5E1' }}>{packet.qualityGate.status.replaceAll('_', ' ')}</div>
+            <div className="mt-1" style={{ color: '#94A3B8' }}>{packet.qualityGate.redTeamSummary}</div>
+          </div>
+        </div>
+
+        <div className="mt-2 rounded px-2 py-2 text-xs" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+          <div className="mb-1 font-bold tracking-widest" style={{ color: '#FDE68A' }}>APPROVAL PACKET</div>
+          <div style={{ color: '#E5E7EB' }}>{packet.approvalPacket.executiveSummary}</div>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <div>
+              <div className="font-bold tracking-widest" style={{ color: '#93C5FD' }}>RECOMMENDED PATH</div>
+              <div className="mt-1" style={{ color: '#CBD5E1' }}>{packet.approvalPacket.recommendedPath}</div>
+            </div>
+            <div>
+              <div className="font-bold tracking-widest" style={{ color: '#FCA5A5' }}>OPEN RISKS</div>
+              <ul className="mt-1 space-y-1" style={{ color: '#CBD5E1' }}>
+                {packet.approvalPacket.openRisks.slice(0, 3).map(risk => <li key={risk}>- {risk}</li>)}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {([
+            ['approve', 'Approve'],
+            ['pause', 'Pause'],
+            ['redirect', 'Redirect'],
+            ['deeper_work', 'Deeper Work'],
+          ] as const).map(([action, label]) => (
+            <button
+              key={action}
+              type="button"
+              onClick={() => onProjectAction?.(action, packet)}
+              className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
+              style={{
+                border: action === 'approve' ? '1px solid #34D399' : action === 'pause' ? '1px solid #FBBF24' : '1px solid #60A5FA',
+                color: action === 'approve' ? '#34D399' : action === 'pause' ? '#FBBF24' : '#BFDBFE',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-2 text-[10px] tracking-widest" style={{ color: '#64748B' }}>
+          Prepared workflow only. Commander approval is required before execution, file mutation, commit, push, deploy, legal reliance, or external action.
+        </div>
       </div>
     )
   }
@@ -1257,6 +1353,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   onSummarizeSession,
   onRecallEconomicOps,
   onOpenFullMemory,
+  onProjectAction,
 }: {
   messages: CouncilMessage[]
   hiddenCount: number
@@ -1264,6 +1361,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   onSummarizeSession: () => void
   onRecallEconomicOps: () => void
   onOpenFullMemory: (preview: CouncilMemoryRecallPreview) => void
+  onProjectAction: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
 }) {
   return (
     <>
@@ -1287,7 +1385,13 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
         </div>
       ) : null}
       {messages.map(msg => (
-        <MessageBubble key={msg.id} msg={msg} diagnosticsOpen={false} onOpenFullMemory={onOpenFullMemory} />
+        <MessageBubble
+          key={msg.id}
+          msg={msg}
+          diagnosticsOpen={false}
+          onOpenFullMemory={onOpenFullMemory}
+          onProjectAction={onProjectAction}
+        />
       ))}
     </>
   )
@@ -9032,8 +9136,38 @@ function Home() {
       return
     }
 
-    const engineeringPacket = createEngineeringTaskPacket(decree)
-    if (engineeringPacket) {
+    const projectPacket = createProjectOrchestrationPacket(decree)
+    if (projectPacket) {
+      if (projectPacket.engineeringTaskPacket) {
+        setLatestEngineeringTaskPacket(projectPacket.engineeringTaskPacket)
+      }
+      addMessages([{
+        id: createMessageId('project-orchestration'),
+        familyName: 'PROJECT ORCHESTRATOR',
+        content: `Project orchestration prepared: ${projectPacket.intake.projectType}`,
+        timestamp: new Date().toLocaleTimeString(),
+        color: '#34D399',
+        icon: 'P',
+        provider: 'Live Council lanes',
+        messageType: 'project_orchestration',
+        projectOrchestrationPacket: projectPacket,
+      }])
+      setFamilyDuty(prev => {
+        const next: Record<string, CouncilDutyState> = { ...prev }
+        for (const lane of projectPacket.lanes) {
+          if ((ALL_ORCHESTRATION_FAMILIES as string[]).includes(String(lane.agent))) {
+            next[String(lane.agent)] = lane.status === 'waiting_approval' ? 'waiting_approval' : 'working'
+          }
+          if (lane.agent === 'cursor' || lane.agent === 'codex') {
+            next.bridge_architect = 'waiting_approval'
+          }
+        }
+        return next
+      })
+    }
+
+    const engineeringPacket = projectPacket?.engineeringTaskPacket ?? createEngineeringTaskPacket(decree)
+    if (engineeringPacket && !projectPacket) {
       setLatestEngineeringTaskPacket(engineeringPacket)
       addMessages([{
         id: createMessageId('engineering-task'),
@@ -9103,6 +9237,28 @@ function Home() {
     }
 
     await submitDecree(decree, mode)
+  }
+
+  const handleProjectAction = (
+    action: 'approve' | 'pause' | 'redirect' | 'deeper_work',
+    packet: ProjectOrchestrationPacket,
+  ) => {
+    const [approve, pause, deeper, redirect] = packet.approvalPacket.nextDecreeSuggestions
+    if (action === 'pause') {
+      appendVisibleRaelDecree(pause ?? `Pause project packet ${packet.id}.`)
+      activateCouncilHold(`Project packet ${packet.id} paused by Commander control.`)
+      return
+    }
+    if (action === 'redirect') {
+      setCommand(redirect ?? `Redirect project packet ${packet.id}: `)
+      addSystemMessage(`Redirect template loaded for ${packet.id}. Add Commander scope changes, then send.`, { force: true })
+      return
+    }
+    const decree =
+      action === 'approve'
+        ? approve ?? `Approve project packet ${packet.id} for lane work only; no external action without final approval.`
+        : deeper ?? `Deepen project packet ${packet.id}: require stronger evidence, alternate paths, and Red Team objections.`
+    void sendRaelDecree(decree)
   }
 
   const handleSummarize = () => {
@@ -9806,6 +9962,7 @@ function Home() {
             onSummarizeSession={handleSummarizeSessionArchive}
             onRecallEconomicOps={handleRecallEconomicOps}
             onOpenFullMemory={handleOpenFullMemory}
+            onProjectAction={handleProjectAction}
           />
 
           {expansionPrompt && (

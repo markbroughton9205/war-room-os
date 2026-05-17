@@ -1,4 +1,5 @@
 import type { EngineeringTaskPacket } from '@/lib/engineering/engineeringTaskPacket'
+import type { ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
 
 export type CouncilLifecycleState =
   | 'active'
@@ -38,6 +39,7 @@ export type PersistedCouncilMessage = {
   messageType: string
   recallPreview?: CouncilMemoryRecallPreview
   engineeringTaskPacket?: EngineeringTaskPacket
+  projectOrchestrationPacket?: ProjectOrchestrationPacket
 }
 
 export type CouncilCooldownMap = Partial<Record<CouncilOrchestrationFamily, number>>
