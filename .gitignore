@@ -39,6 +39,7 @@ yarn-error.log*
 
 # war room local checkpoints (metadata only)
 .war-room/
+bridge/local-node/.runtime/
 
 # typescript
 *.tsbuildinfo

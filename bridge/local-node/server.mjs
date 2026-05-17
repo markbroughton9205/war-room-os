@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs'
+
 const HEARTBEAT_MS = 20_000
 const POLL_MS = 5_000
 const OLLAMA_BASE_URL = trimTrailingSlash(process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434')
@@ -15,6 +17,7 @@ const SERVICE_MODE_ACTIVE = process.env.WAR_ROOM_BRIDGE_SERVICE_MODE === '1'
 const STARTUP_MODE = process.env.WAR_ROOM_BRIDGE_STARTUP_MODE || (LAUNCH_MODE === 'task_scheduler' ? 'login' : 'manual')
 const RUNTIME_LOG_PATH = process.env.WAR_ROOM_BRIDGE_LOG_PATH || null
 const LAST_CRASH_REASON = process.env.WAR_ROOM_BRIDGE_LAST_CRASH_REASON || null
+const HEARTBEAT_STATE_PATH = process.env.WAR_ROOM_BRIDGE_HEARTBEAT_STATE_PATH || null
 
 const ALLOWED_ACTIONS = ['model_list', 'prompt_test', 'local_inference', 'diagnostics', 'health_check']
 const MAX_BACKOFF_MS = 60_000
@@ -219,6 +222,17 @@ async function sendHeartbeat() {
   })
   if (!response.ok) throw new Error(`Heartbeat rejected with HTTP ${response.status}`)
   lastHeartbeatLatencyMs = Date.now() - heartbeatStartedAt
+  const heartbeatAt = new Date().toISOString()
+  if (HEARTBEAT_STATE_PATH) {
+    writeFileSync(HEARTBEAT_STATE_PATH, JSON.stringify({
+      lastHeartbeatAt: heartbeatAt,
+      latencyMs: lastHeartbeatLatencyMs,
+      nodeHealth,
+      activeProvider: active?.provider ?? null,
+      activeModel: active?.activeModel ?? null,
+    }, null, 2))
+  }
+  console.log(`[bridge:heartbeat] accepted at ${heartbeatAt} latency=${lastHeartbeatLatencyMs}ms health=${nodeHealth}`)
   currentBackoffMs = null
   lastRuntimeHealth = nodeHealth === 'recovered' ? 'online' : nodeHealth
 }

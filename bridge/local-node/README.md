@@ -52,6 +52,14 @@ For persistent background execution independent from visible terminals, use the 
 powershell -ExecutionPolicy Bypass -File .\bridge\local-node\install-service.ps1
 ```
 
+Run the installer from PowerShell as Administrator. It writes `bridge/local-node/.runtime/service.env` locally so Task Scheduler does not depend on inherited shell environment variables.
+
+Verify service state with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bridge\local-node\check-service.ps1
+```
+
 Uninstall with:
 
 ```powershell
