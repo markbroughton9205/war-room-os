@@ -3796,6 +3796,22 @@ function BridgeArchitectPanel({ engines }: { engines: EngineStatus[] }) {
   )
 }
 
+function formatLocalModelLabel(model: string | null | undefined) {
+  const value = model?.trim()
+  if (!value) return 'model not reported'
+
+  const normalized = value.split('/').pop() ?? value
+  const qwenSize = normalized.match(/qwen(?:2\.5)?[-_]?([0-9.]+)b/i)?.[1]
+  if (/qwen/i.test(normalized) && qwenSize) {
+    return `Qwen 2.5 ${qwenSize}B`
+  }
+
+  return normalized
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b(\d+(?:\.\d+)?)b\b/gi, '$1B')
+    .replace(/\b([a-z])/g, value => value.toUpperCase())
+}
+
 function LocalCodeAgentBridgePanel({
   bridge,
   onRefresh,
@@ -3900,6 +3916,18 @@ function LocalCodeAgentBridgePanel({
     degraded: { color: '#F87171', border: 'rgba(248,113,113,0.32)', bg: 'rgba(248,113,113,0.045)', label: 'Degraded' },
   }
   const selectedEngine = bridge.selectedEngine ? bridge.engines[bridge.selectedEngine] : null
+  const selectedModel = bridge.selectedModel ?? selectedEngine?.modelUsed ?? selectedEngine?.configuredModel ?? null
+  const selectedProviderLabel = selectedEngine?.id === 'lm_studio' ? 'LM Studio' : selectedEngine?.name ?? 'none'
+  const selectedModelLabel = formatLocalModelLabel(selectedModel)
+  const selectedPromptVerified = selectedEngine?.handshakeState === 'prompt_verified'
+    || selectedEngine?.handshakeState === 'prompt_test_passed'
+    || bridge.bridgeState === 'prompt_verified'
+  const selectedLatency = selectedEngine?.latencyMs
+  const lastHandshakeLabel = bridge.lastSuccessfulHandshakeAt
+    ? new Date(bridge.lastSuccessfulHandshakeAt).toLocaleTimeString()
+    : selectedEngine?.lastSuccessfulHandshakeAt
+      ? new Date(selectedEngine.lastSuccessfulHandshakeAt).toLocaleTimeString()
+      : 'none'
   const engineEntries = LOCAL_AGENT_ENGINES.map(engine => {
     const status = bridge.engines[engine.id]
     const state = operationalStateFor(status)
@@ -3914,8 +3942,8 @@ function LocalCodeAgentBridgePanel({
     ?? engineEntries.find(entry => entry.engine.id === 'goose')
     ?? engineEntries[0]
   const bridgeHeadline =
-    bridge.bridgeState === 'prompt_verified'
-      ? 'Engineering systems prompt verified'
+    selectedPromptVerified
+      ? 'Local AI ready'
       : bridge.bridgeState === 'model_loaded'
         ? 'Engineering model loaded'
         : bridge.bridgeState === 'endpoint_reachable'
@@ -3930,7 +3958,7 @@ function LocalCodeAgentBridgePanel({
     : repo?.gitAvailable
       ? 'Git detected, read bridge pending'
       : 'Repo bridge awaiting scan'
-  const workerState = bridge.bridgeState === 'prompt_verified' ? 'Prompt verified' : bridge.bridge === 'online' ? 'Status bridge monitoring' : 'Workers standing by'
+  const workerState = selectedPromptVerified ? 'Prompt test passed' : bridge.bridge === 'online' ? 'Status bridge monitoring' : 'Workers standing by'
   const activityLabel = latestEngineeringTask
     ? latestEngineeringTask.title
     : bridge.lastTask ?? 'No engineering task prepared yet'
@@ -3991,13 +4019,16 @@ function LocalCodeAgentBridgePanel({
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>BRIDGE STATUS</div>
           <div className="mt-1 font-bold" style={{ color: bridge.bridge === 'online' ? '#34D399' : bridge.bridge === 'error' ? '#F87171' : '#FBBF24' }}>
-            {bridge.bridgeState === 'prompt_verified'
-              ? 'Prompt verified'
+            {selectedPromptVerified
+              ? 'Bridge online'
               : bridge.bridgeState === 'model_loaded'
                 ? 'Model loaded'
                 : bridge.bridgeState === 'endpoint_reachable'
                   ? 'Endpoint reachable'
                   : bridge.bridge === 'online' ? 'Connected' : bridge.bridge === 'error' ? 'Needs attention' : 'Awaiting connection'}
+          </div>
+          <div className="mt-1 text-[10px]" style={{ color: selectedPromptVerified ? '#A7F3D0' : '#777' }}>
+            {selectedPromptVerified ? 'Prompt test passed' : bridge.bridgeState ?? 'awaiting_connection'}
           </div>
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
@@ -4008,9 +4039,15 @@ function LocalCodeAgentBridgePanel({
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>SELECTED ENGINE</div>
-          <div className="mt-1 font-bold" style={{ color: selectedEngine ? '#FFD700' : '#777' }}>
-            {selectedEngine ? `${bridge.selectedEngineLabel ?? selectedEngine.name}${bridge.selectedModel ? ` / ${bridge.selectedModel}` : ''}` : 'none'}
-          </div>
+          {selectedEngine ? (
+            <div className="mt-1 flex flex-wrap gap-1">
+              <span className="rounded px-2 py-0.5 font-bold" style={{ border: '1px solid rgba(255,215,0,0.24)', color: '#FFD700' }}>{selectedProviderLabel}</span>
+              <span className="rounded px-2 py-0.5 font-bold" style={{ border: '1px solid rgba(167,139,250,0.24)', color: '#DDD6FE' }}>{selectedModelLabel}</span>
+              {selectedPromptVerified ? <span className="rounded px-2 py-0.5 font-bold" style={{ border: '1px solid rgba(52,211,153,0.24)', color: '#A7F3D0' }}>Prompt verified</span> : null}
+            </div>
+          ) : (
+            <div className="mt-1 font-bold" style={{ color: '#777' }}>none</div>
+          )}
         </div>
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.2)', background: 'rgba(0,0,0,0.28)' }}>
           <div className="tracking-widest" style={{ color: '#555' }}>REPO ACCESS</div>
@@ -4026,6 +4063,27 @@ function LocalCodeAgentBridgePanel({
         </div>
       </div>
 
+      {selectedEngine && selectedPromptVerified ? (
+        <div className="mt-3 grid gap-2 text-[10px] md:grid-cols-4">
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <span style={{ color: '#555' }}>Provider</span>
+            <div className="mt-1 font-bold" style={{ color: '#A7F3D0' }}>{selectedProviderLabel}</div>
+          </div>
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(167,139,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <span style={{ color: '#555' }}>Model</span>
+            <div className="mt-1 font-bold" style={{ color: '#DDD6FE' }}>{selectedModelLabel}</div>
+          </div>
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <span style={{ color: '#555' }}>Last handshake</span>
+            <div className="mt-1 font-bold" style={{ color: '#BAE6FD' }}>{lastHandshakeLabel}</div>
+          </div>
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <span style={{ color: '#555' }}>Latency</span>
+            <div className="mt-1 font-bold" style={{ color: '#FDE68A' }}>{typeof selectedLatency === 'number' ? `${selectedLatency}ms` : 'n/a'}</div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="mt-3 grid gap-2 lg:grid-cols-3">
         <div className="rounded px-3 py-2 text-xs lg:col-span-2" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
           <div className="mb-2 font-bold tracking-widest" style={{ color: '#34D399' }}>ENGINE READINESS</div>
@@ -4033,13 +4091,21 @@ function LocalCodeAgentBridgePanel({
             {engineEntries.map(({ engine, status, state, style, meta }) => {
               const envHint = LOCAL_AGENT_ENV_HINT[engine.id]
               const councilPrompt = `${meta.councilFamily}, explain ${engine.name} for War Room engineering operations, include setup steps, approval boundaries, rollback protections, and when Commander should use it.`
+              const promptVerifiedForEngine = status.handshakeState === 'prompt_verified' || status.handshakeState === 'prompt_test_passed'
+              const activeEngine = bridge.selectedEngine === engine.id && promptVerifiedForEngine
+              const readinessLabel = activeEngine
+                ? 'Active'
+                : engine.id === 'ollama' && (state === 'available' || state === 'standby')
+                  ? 'Available / standby'
+                  : style.label
+              const readinessColor = activeEngine ? '#A7F3D0' : style.color
 
               return (
                 <div key={engine.id} className="rounded-xl px-3 py-3" style={{ border: `1px solid ${style.border}`, background: style.bg }}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-bold tracking-widest" style={{ color: '#ddd' }}>{engine.name}</span>
-                    <span className="rounded px-2 py-1 text-[10px] tracking-widest" style={{ color: style.color, border: `1px solid ${style.border}`, background: 'rgba(0,0,0,0.18)' }}>
-                      {style.label}
+                    <span className="rounded px-2 py-1 text-[10px] tracking-widest" style={{ color: readinessColor, border: `1px solid ${style.border}`, background: 'rgba(0,0,0,0.18)' }}>
+                      {readinessLabel}
                     </span>
                   </div>
                   <div className="mt-2 text-[10px] leading-relaxed" style={{ color: '#CBD5E1' }}>{meta.purpose}</div>
@@ -4605,6 +4671,10 @@ const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
   const availableCount = families.familyAgents.filter(agent => agent.modelInstalled).length
   const lmStudioProvider = families.providers.lmStudio
   const lmStudioDetectedModel = families.lmStudioModels[0]?.id ?? null
+  const activeLocalFamilyModel = families.preferredModel ?? lmStudioProvider.modelUsed ?? lmStudioProvider.configuredModel ?? lmStudioDetectedModel
+  const familiesBackedByLMStudio = lmStudioProvider.functional
+    && families.preferredProvider === 'lm_studio'
+    && families.familyAgents.some(agent => agent.provider === 'lm_studio' && agent.functional)
 
   const runLocalFamilyTest = async () => {
     if (!selectedAgent || !testPrompt.trim()) return
@@ -4645,7 +4715,9 @@ const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
             LOCAL FAMILY AGENTS
           </h2>
           <p className="mt-1 text-xs" style={{ color: '#666' }}>
-            War Room baby-family registry backed by local Ollama or LM Studio models. Prompt only, no execution permissions.
+            {familiesBackedByLMStudio
+              ? `Backed by active local model: LM Studio / ${formatLocalModelLabel(activeLocalFamilyModel)}. Prompt only, no execution permissions.`
+              : 'War Room baby-family registry backed by local Ollama or LM Studio models. Prompt only, no execution permissions.'}
           </p>
         </div>
         <button type="button" onClick={onRefresh}
