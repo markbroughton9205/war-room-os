@@ -3,7 +3,7 @@ import type { FinanceDashboardSnapshot, FinanceQuote } from '@/lib/intelligence/
 
 const FINANCE_TIMEOUT_MS = 8000
 const FINANCE_ENV_NAMES = [...getEnvAliasNames('financeApiKey'), ...getEnvAliasNames('financeProvider')]
-const DEFAULT_SYMBOLS = ['GLD', 'SPY', 'QQQ', 'BTC/USD']
+const DEFAULT_SYMBOLS = ['GLD', 'SPY', 'BTC', 'QQQ']
 
 type AlphaVantageQuote = {
   'Global Quote'?: {
@@ -67,7 +67,7 @@ function unavailable(detail: string): FinanceDashboardSnapshot {
 
 function symbols(): string[] {
   const raw = process.env.MARKET_WATCHLIST?.trim() || process.env.FINANCE_SYMBOLS?.trim()
-  if (!raw) return DEFAULT_SYMBOLS
+  if (!raw) return DEFAULT_SYMBOLS.map(normalizeWatchlistSymbol)
   return raw.split(',').map(symbol => normalizeWatchlistSymbol(symbol.trim())).filter(Boolean).slice(0, 10)
 }
 
