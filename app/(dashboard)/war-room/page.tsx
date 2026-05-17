@@ -5,6 +5,7 @@ import { BabyObserverNode, CouncilTable, SentinelStatusPanel } from '@/component
 import { EconomicOperationsPanel } from '@/components/economic/EconomicOperationsPanel'
 import { Phase3WarRoomPanels } from '@/components/war-room/phase3/Phase3WarRoomPanels'
 import { Phase9BLearningPanels } from '@/components/war-room/learning/Phase9BLearningPanels'
+import { AgentFoundryPanel } from '@/components/war-room/agents/AgentFoundryPanel'
 import { KpiGrid } from '@/components/war-room/KpiGrid'
 import { WarRoomShell } from '@/components/war-room/WarRoomShell'
 
@@ -22,6 +23,7 @@ export default function WarRoomDashboardPage() {
       <EconomicOperationsPanel />
       <BuildAgentDivisionPanel />
       <Phase9BLearningPanels />
+      <AgentFoundryPanel />
       <section className="mx-auto mt-14 max-w-6xl border-t border-white/10 pt-10">
         <header className="mb-6">
           <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-[#d4af37]">Council</p>
