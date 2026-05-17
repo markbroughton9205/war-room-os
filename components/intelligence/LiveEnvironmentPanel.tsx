@@ -1,15 +1,28 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { ConfigurationSweep } from '@/lib/configuration/configurationHealth'
 import type { ProviderConfigStatus } from '@/lib/configuration/providerConfigStatus'
 import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import { describeLocationMode } from '@/lib/intelligence/environment/locationPolicy'
-import { buildWeatherEnvironmentSnapshot } from '@/lib/intelligence/environment/weatherEnvironment'
 import { buildHoroscopeSnapshot, type AstrologyInterpretationMode } from '@/lib/intelligence/environment/horoscopeEnvironment'
 import { buildNewsCardsFromIntelligence } from '@/lib/intelligence/environment/newsCards'
+import type {
+  EnvironmentSetupGuidance,
+  FinanceDashboardSnapshot,
+  LiveEnvironmentDashboardPayload,
+  NewsDashboardCard,
+  WeatherDashboardSnapshot,
+} from '@/lib/intelligence/environment/liveEnvironmentTypes'
+
+type ImprovementStat = {
+  label: string
+  value: string
+  detail: string
+  color: string
+}
 
 function modeLabel(mode: LocationMode): string {
   if (mode === 'city_only') return 'City'
@@ -39,6 +52,137 @@ function providerSetupHint(provider: ProviderConfigStatus | undefined, fallback:
   return `${provider.name}: ${provider.recommendedNextAction} Env names: ${envNames}.`
 }
 
+function setupGuidanceText(setup: EnvironmentSetupGuidance | undefined, fallback: string): string {
+  if (!setup) return fallback
+  return `${setup.blockedFeature}: ${setup.recommendedSetup} Env names: ${setup.envVarNames.join(', ')}.`
+}
+
+function formatTemp(value: number | null): string {
+  return value === null ? '--' : `${Math.round(value)}F`
+}
+
+function formatPercent(value: number | null): string {
+  return value === null ? '--' : `${Math.round(value)}%`
+}
+
+function formatPrice(value: number | null, currency: string | null): string {
+  if (value === null) return '--'
+  return `${currency ?? 'USD'} ${value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 2 : 4 })}`
+}
+
+function changeColor(value: number | null): string {
+  if (value === null) return '#94A3B8'
+  if (value > 0) return '#34D399'
+  if (value < 0) return '#FB7185'
+  return '#94A3B8'
+}
+
+function buildFallbackWeather(location: CommanderLocationState): WeatherDashboardSnapshot {
+  const locationLabel =
+    location.mode === 'off'
+      ? 'Location off'
+      : location.neighborhood && location.mode === 'neighborhood'
+        ? location.neighborhood
+        : location.city ?? 'City not set'
+
+  return {
+    status: 'unavailable',
+    provider: 'not loaded',
+    locationLabel,
+    currentTempF: null,
+    condition: 'Weather provider not loaded',
+    highF: null,
+    lowF: null,
+    precipitationChance: null,
+    wind: null,
+    alerts: [],
+    hourlyForecast: [],
+    dailyForecast: [],
+    freshness: 'unknown',
+    fetchedAt: null,
+    source: 'Live Environment dashboard route',
+    detail: 'Waiting for the server-side weather adapter.',
+  }
+}
+
+function buildFallbackFinance(): FinanceDashboardSnapshot {
+  return {
+    status: 'unavailable',
+    provider: 'not loaded',
+    quotes: [],
+    fetchedAt: null,
+    freshness: 'unknown',
+    source: 'Live Environment dashboard route',
+    detail: 'Waiting for the server-side finance adapter.',
+  }
+}
+
+function statList(args: {
+  configurationSweep: ConfigurationSweep | null
+  liveResearchHud: LiveResearchClientUi | null
+  dashboard: LiveEnvironmentDashboardPayload | null
+}): ImprovementStat[] {
+  const configured = args.configurationSweep?.summary.totalProvidersConfigured ?? 0
+  const total = args.configurationSweep?.summary.totalProviders ?? 0
+  const missing = args.configurationSweep?.summary.missingProviders ?? 0
+  const retrieval = args.liveResearchHud?.intelligence?.retrieval
+  const providerCards = [args.dashboard?.weather, args.dashboard?.news, args.dashboard?.finance].filter(Boolean)
+  const sourceHealthImprovement = providerCards.length
+    ? `${providerCards.filter(card => card?.status === 'available').length}/${providerCards.length}`
+    : 'pending'
+
+  return [
+    {
+      label: 'Providers configured',
+      value: total ? `${configured}/${total}` : 'checking',
+      detail: 'Configuration Sweep readiness, env presence only.',
+      color: '#38BDF8',
+    },
+    {
+      label: 'Missing providers',
+      value: args.configurationSweep ? String(missing) : 'checking',
+      detail: 'Setup guidance names env vars only; no secret values.',
+      color: missing > 0 ? '#FB923C' : '#34D399',
+    },
+    {
+      label: 'Retrieval success rate',
+      value: retrieval ? (retrieval.success ? '100%' : '0%') : 'idle',
+      detail: retrieval ? `Source mix health: ${retrieval.health}` : 'No live retrieval run in this session.',
+      color: retrieval?.success ? '#34D399' : '#FBBF24',
+    },
+    {
+      label: 'Opportunities found',
+      value: 'not connected',
+      detail: 'Income Scout telemetry is preserved outside this panel until a shared stats feed exists.',
+      color: '#94A3B8',
+    },
+    {
+      label: 'Memory entries promoted',
+      value: 'not connected',
+      detail: 'Strategic memory promotion counts require a source-backed memory stats endpoint.',
+      color: '#94A3B8',
+    },
+    {
+      label: 'Repairs logged',
+      value: 'ledger ready',
+      detail: 'Repair ledger exists; live repair count is not inferred here.',
+      color: '#A78BFA',
+    },
+    {
+      label: 'Warnings resolved',
+      value: String(Math.max(0, (args.liveResearchHud?.intelligence?.redTeamWarnings ?? 0) - (args.liveResearchHud?.intelligence?.unsupportedClaims ?? 0))),
+      detail: 'Derived only from current intelligence metadata warnings and unsupported claims.',
+      color: '#FBBF24',
+    },
+    {
+      label: 'Source health improvement',
+      value: sourceHealthImprovement,
+      detail: 'Weather, RSS, and finance cards that returned source-backed data.',
+      color: sourceHealthImprovement.includes('/') ? '#38BDF8' : '#94A3B8',
+    },
+  ]
+}
+
 export function LiveEnvironmentPanel({
   liveResearchHud,
   location,
@@ -59,9 +203,32 @@ export function LiveEnvironmentPanel({
   onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
 }) {
   const [configurationSweep, setConfigurationSweep] = useState<ConfigurationSweep | null>(null)
-  const weather = buildWeatherEnvironmentSnapshot(location)
+  const [dashboard, setDashboard] = useState<LiveEnvironmentDashboardPayload | null>(null)
+  const [dashboardError, setDashboardError] = useState<string | null>(null)
+  const [activeNewsIndex, setActiveNewsIndex] = useState(0)
+  const [activeStatIndex, setActiveStatIndex] = useState(0)
+  const [reducedMotion, setReducedMotion] = useState(false)
+  const weather = dashboard?.weather ?? buildFallbackWeather(location)
+  const finance = dashboard?.finance ?? buildFallbackFinance()
   const horoscope = buildHoroscopeSnapshot('Aries', new Date(), astrologyMode)
-  const cards = buildNewsCardsFromIntelligence(liveResearchHud?.intelligence)
+  const intelligenceCards = buildNewsCardsFromIntelligence(liveResearchHud?.intelligence)
+  const rssCards = dashboard?.news.cards ?? []
+  const cards: NewsDashboardCard[] = rssCards.length
+    ? rssCards
+    : intelligenceCards.map(card => ({
+        id: card.id,
+        title: card.title,
+        url: null,
+        sourceName: card.sourceName,
+        category: 'national',
+        imageUrl: card.imageUrl ?? null,
+        publishedAt: null,
+        freshness: card.timestampLabel,
+        confidenceLabel: card.badge,
+        signalLabel: card.badge === 'weak_signal' ? 'weak-signal' : card.badge === 'verified' || card.badge === 'corroborated' ? 'verified' : 'emerging',
+        detail: card.detail,
+      }))
+  const activeNews = cards.length ? cards[activeNewsIndex % cards.length] : null
   const sourceHealth = liveResearchHud?.intelligence?.retrieval
     ? liveResearchHud.intelligence.retrieval.success ? 'Retrieval ok' : 'Retrieval gap'
     : 'Retrieval idle'
@@ -70,8 +237,14 @@ export function LiveEnvironmentPanel({
   const weatherProvider = providerById.get('weather_provider')
   const horoscopeProvider = providerById.get('horoscope_provider')
   const newsProvider = providerById.get('rss_news_sources')
+  const financeProvider = providerById.get('finance_market_data')
   const sourceNetworkProvider = providerById.get('persistent_source_network')
   const localSourceProvider = providerById.get('local_hyperlocal_sources')
+  const improvementStats = useMemo(
+    () => statList({ configurationSweep, liveResearchHud, dashboard }),
+    [configurationSweep, liveResearchHud, dashboard],
+  )
+  const activeStat = improvementStats[activeStatIndex % improvementStats.length]
 
   useEffect(() => {
     let cancelled = false
@@ -90,6 +263,54 @@ export function LiveEnvironmentPanel({
     }
   }, [])
 
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const sync = () => setReducedMotion(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadDashboard() {
+      try {
+        const res = await fetch('/api/environment/dashboard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({ location }),
+        })
+        const json = await res.json() as LiveEnvironmentDashboardPayload | { message?: string }
+        if (!res.ok) throw new Error('message' in json && json.message ? json.message : 'Live Environment dashboard unavailable')
+        if (!cancelled) {
+          setDashboard(json as LiveEnvironmentDashboardPayload)
+          setDashboardError(null)
+        }
+      } catch (error) {
+        if (!cancelled) setDashboardError(error instanceof Error ? error.message : 'Live Environment dashboard unavailable')
+      }
+    }
+    void loadDashboard()
+    const interval = window.setInterval(() => void loadDashboard(), 300000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [location])
+
+  useEffect(() => {
+    if (reducedMotion || cards.length <= 1) return
+    const interval = window.setInterval(() => setActiveNewsIndex(prev => (prev + 1) % cards.length), 8000)
+    return () => window.clearInterval(interval)
+  }, [cards.length, reducedMotion])
+
+  useEffect(() => {
+    if (reducedMotion || improvementStats.length <= 1) return
+    const interval = window.setInterval(() => setActiveStatIndex(prev => (prev + 1) % improvementStats.length), 9000)
+    return () => window.clearInterval(interval)
+  }, [improvementStats.length, reducedMotion])
+
   return (
     <section className="mx-4 mt-4 rounded border border-sky-500/20 bg-slate-950/45 px-4 py-3 font-mono shadow-[0_0_30px_rgba(56,189,248,0.08)]">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -101,30 +322,75 @@ export function LiveEnvironmentPanel({
           {describeLocationMode(location)}
         </span>
       </div>
+      <style jsx>{`
+        .environment-card-motion {
+          transition: opacity 420ms ease, transform 420ms ease, border-color 420ms ease;
+        }
+        .environment-card-motion:hover {
+          transform: translateY(-1px);
+          border-color: rgba(125, 211, 252, 0.35);
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .environment-card-motion {
+            transition: none;
+          }
+          .environment-card-motion:hover {
+            transform: none;
+          }
+        }
+      `}</style>
+      {dashboardError && (
+        <p className="mb-2 rounded border border-amber-400/20 bg-amber-950/20 px-2 py-1 text-[9px] uppercase tracking-widest text-amber-200">
+          Dashboard route unavailable: {dashboardError}
+        </p>
+      )}
 
-      <div className="grid gap-2 md:grid-cols-5">
-        <details className="rounded border border-white/10 bg-black/25 p-2">
+      <div className="grid gap-2 md:grid-cols-6">
+        <details className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
           <summary className="cursor-pointer list-none">
             <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Weather</p>
             <p className="mt-1 text-xs text-slate-200">{weather.locationLabel}</p>
             <p className="text-[10px] text-amber-200">{weather.condition}</p>
-            <p className="mt-1 text-[9px] text-slate-500">Temp -- · High/Low -- · Rain --</p>
+            <p className="mt-1 text-[9px] text-slate-500">
+              Temp {formatTemp(weather.currentTempF)} · High/Low {formatTemp(weather.highF)}/{formatTemp(weather.lowF)} · Rain {formatPercent(weather.precipitationChance)}
+            </p>
             <p className="mt-1 text-[8px] uppercase tracking-widest" style={{ color: providerStatusColor(weatherProvider) }}>
-              {providerStatusLabel(weatherProvider)}
+              {weather.status === 'available' ? weather.provider : providerStatusLabel(weatherProvider)}
             </p>
           </summary>
           <div className="mt-2 border-t border-white/10 pt-2 text-[8px] uppercase tracking-widest text-slate-500">
-            <p>Hourly report unavailable</p>
-            <p>Severe alerts: {weather.alertActive ? 'active' : 'none from configured source'}</p>
+            <p>Wind: {weather.wind ?? 'not returned'}</p>
+            <p>Severe alerts: {weather.alerts.length ? `${weather.alerts.length} active` : 'none from configured source'}</p>
             <p>{weather.source} · {weather.freshness}</p>
             <p className="normal-case tracking-wide">{weather.detail}</p>
+            {weather.hourlyForecast.length > 0 && (
+              <div className="mt-2 space-y-1">
+                <p className="text-slate-400">Hourly forecast</p>
+                {weather.hourlyForecast.slice(0, 4).map(point => (
+                  <p key={`${point.label}-${point.tempF}`}>{point.label}: {formatTemp(point.tempF)} · {point.condition} · rain {formatPercent(point.precipitationChance)}</p>
+                ))}
+              </div>
+            )}
+            {weather.dailyForecast.length > 0 && (
+              <div className="mt-2 space-y-1">
+                <p className="text-slate-400">7-day forecast</p>
+                {weather.dailyForecast.slice(0, 7).map(point => (
+                  <p key={`${point.label}-${point.condition}`}>{point.label}: {formatTemp(point.tempF)} · {point.condition}</p>
+                ))}
+              </div>
+            )}
+            {weather.alerts.map(alert => (
+              <p key={`${alert.title}-${alert.expiresAt}`} className="mt-1 text-amber-200">{alert.severity}: {alert.title} · {alert.source}</p>
+            ))}
             <p className="normal-case tracking-wide" style={{ color: providerStatusColor(weatherProvider) }}>
-              {providerSetupHint(weatherProvider, 'Weather provider setup check pending.')}
+              {weather.status === 'available'
+                ? `Provider details: ${weather.provider}; fetched ${weather.fetchedAt ?? 'unknown'}.`
+                : setupGuidanceText(weather.setup, providerSetupHint(weatherProvider, 'Weather provider setup check pending.'))}
             </p>
           </div>
         </details>
 
-        <div className="rounded border border-white/10 bg-black/25 p-2">
+        <div className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
           <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Track Me</p>
           <div className="mt-2 flex flex-wrap gap-1">
             {(['off', 'city_only', 'neighborhood', 'precise_temporary'] as LocationMode[]).map(mode => (
@@ -147,7 +413,7 @@ export function LiveEnvironmentPanel({
           </button>
         </div>
 
-        <div className="rounded border border-white/10 bg-black/25 p-2">
+        <div className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
           <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Signals</p>
           <p className="mt-1 text-xs text-slate-200">{sourceHealth}</p>
           <p className="text-[10px] text-slate-500">Weak signals: {weakSignals}</p>
@@ -162,7 +428,7 @@ export function LiveEnvironmentPanel({
           </p>
         </div>
 
-        <details className="rounded border border-white/10 bg-black/25 p-2">
+        <details className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
           <summary className="cursor-pointer list-none">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Horoscope</p>
@@ -206,28 +472,98 @@ export function LiveEnvironmentPanel({
           </div>
         </details>
 
-        <div className="rounded border border-white/10 bg-black/25 p-2">
-          <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">News Cards</p>
+        <details className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
+          <summary className="cursor-pointer list-none">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Market Feed</p>
+            <p className="mt-1 text-[8px] uppercase tracking-widest" style={{ color: providerStatusColor(financeProvider) }}>
+              {finance.status === 'available' ? finance.provider : providerStatusLabel(financeProvider)}
+            </p>
+            {finance.quotes[0] ? (
+              <>
+                <p className="mt-1 text-xs text-slate-200">{finance.quotes[0].symbol}</p>
+                <p className="text-[10px]" style={{ color: changeColor(finance.quotes[0].change) }}>
+                  {formatPrice(finance.quotes[0].price, finance.quotes[0].currency)} · {finance.quotes[0].change ?? '--'} · {formatPercent(finance.quotes[0].percentChange)}
+                </p>
+              </>
+            ) : (
+              <p className="mt-1 text-[10px] text-slate-500">No live quotes loaded.</p>
+            )}
+          </summary>
+          <div className="mt-2 space-y-1 border-t border-white/10 pt-2 text-[8px] uppercase tracking-widest text-slate-500">
+            <p>{finance.source} · {finance.freshness}</p>
+            <p className="normal-case tracking-wide">{finance.detail}</p>
+            {finance.quotes.map(quote => (
+              <p key={quote.symbol}>
+                {quote.symbol} [{quote.marketType}] {formatPrice(quote.price, quote.currency)} · change <span style={{ color: changeColor(quote.change) }}>{quote.change ?? '--'} / {formatPercent(quote.percentChange)}</span> · {quote.freshness}
+              </p>
+            ))}
+            <p className="normal-case tracking-wide" style={{ color: providerStatusColor(financeProvider) }}>
+              {finance.status === 'available'
+                ? `Provider details: ${finance.provider}; fetched ${finance.fetchedAt ?? 'unknown'}.`
+                : setupGuidanceText(finance.setup, providerSetupHint(financeProvider, 'Finance provider setup check pending.'))}
+            </p>
+          </div>
+        </details>
+
+        <div className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">News Slideshow</p>
           <p className="mt-1 text-[8px] uppercase tracking-widest" style={{ color: providerStatusColor(newsProvider) }}>
-            RSS/news: {providerStatusLabel(newsProvider)}
+            RSS/news: {dashboard?.news.status === 'available' ? dashboard.news.provider : providerStatusLabel(newsProvider)}
           </p>
-          {cards.length ? (
-            <div className="mt-1 space-y-1">
-              {cards.map(card => (
-                <details key={card.id} className="rounded border border-white/5 px-1.5 py-1">
-                  <summary className="cursor-pointer list-none">
-                    <p className="truncate text-[9px] text-slate-200">{card.title}</p>
-                    <p className="truncate text-[8px] text-slate-500">{card.sourceName} · {card.badge}</p>
-                  </summary>
-                  <p className="mt-1 text-[8px] text-slate-600">{card.detail}</p>
-                </details>
-              ))}
+          {activeNews ? (
+            <div className="mt-2 rounded border border-white/5 p-1.5">
+              {activeNews.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={activeNews.imageUrl} alt="" className="mb-1 h-16 w-full rounded object-cover opacity-85" />
+              ) : (
+                <div className="mb-1 flex h-16 items-center justify-center rounded border border-dashed border-white/10 text-[8px] uppercase tracking-widest text-slate-600">
+                  Text card; no source image
+                </div>
+              )}
+              <p className="line-clamp-2 text-[9px] text-slate-200">{activeNews.title}</p>
+              <p className="mt-1 truncate text-[8px] text-slate-500">
+                {activeNews.sourceName} · {activeNews.freshness} · {activeNews.confidenceLabel} · {activeNews.signalLabel}
+              </p>
+              <p className="mt-1 text-[8px] text-slate-600">{activeNews.detail}</p>
+              {cards.length > 1 && (
+                <div className="mt-2 flex gap-1">
+                  {cards.slice(0, 6).map((card, index) => (
+                    <button
+                      key={card.id}
+                      type="button"
+                      aria-label={`Show news card ${index + 1}`}
+                      className="h-1.5 flex-1 rounded-full"
+                      style={{ background: index === activeNewsIndex % cards.length ? '#38BDF8' : 'rgba(148,163,184,0.3)' }}
+                      onClick={() => setActiveNewsIndex(index)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <p className="mt-1 text-[10px] text-slate-500">
-              No source-backed image cards loaded. {providerSetupHint(newsProvider, 'News provider setup check pending.')}
+              No source-backed news cards loaded. {setupGuidanceText(dashboard?.news.setup, providerSetupHint(newsProvider, 'News provider setup check pending.'))}
             </p>
           )}
+        </div>
+
+        <div className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">War Room Evolution</p>
+          <p className="mt-1 text-xs" style={{ color: activeStat.color }}>{activeStat.value}</p>
+          <p className="text-[10px] text-slate-300">{activeStat.label}</p>
+          <p className="mt-1 text-[8px] text-slate-600">{activeStat.detail}</p>
+          <div className="mt-2 flex gap-1">
+            {improvementStats.map((stat, index) => (
+              <button
+                key={stat.label}
+                type="button"
+                aria-label={`Show ${stat.label}`}
+                className="h-1.5 flex-1 rounded-full"
+                style={{ background: index === activeStatIndex % improvementStats.length ? stat.color : 'rgba(148,163,184,0.25)' }}
+                onClick={() => setActiveStatIndex(index)}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </section>
