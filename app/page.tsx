@@ -887,6 +887,133 @@ const INITIAL_LOCAL_FAMILY_AGENTS: LocalFamilyAgentsResponse = {
   })),
   checkedAt: '',
 }
+
+function isFreshBridgeLocalAi(status: BridgeStatusResponse) {
+  const lastHeartbeatMs = status.node.lastHeartbeat ? Date.parse(status.node.lastHeartbeat) : NaN
+  const heartbeatFresh = Number.isFinite(lastHeartbeatMs)
+    && Date.now() - lastHeartbeatMs <= status.staleTimeoutSeconds * 1000
+  const provider = status.node.activeProvider ?? status.runtime?.activeProvider ?? null
+  const model = status.node.activeModel ?? status.runtime?.activeModel ?? null
+  const providerStatus = provider ? status.providers.find(item => item.provider === provider) : null
+
+  return {
+    active: Boolean(heartbeatFresh && !status.stale && status.node.online && provider && model && providerStatus?.functional),
+    provider,
+    model,
+    providerStatus,
+    checkedAt: status.node.lastHeartbeat ?? status.updatedAt,
+  }
+}
+
+function bridgeModelLabel(model: string) {
+  return model.trim().slice(0, 160)
+}
+
+function bridgeDerivedLocalAgentBridge(
+  legacy: LocalAgentBridgeStatusResponse,
+  bridgeStatus: BridgeStatusResponse,
+): LocalAgentBridgeStatusResponse {
+  const bridgeRuntime = isFreshBridgeLocalAi(bridgeStatus)
+  if (!bridgeRuntime.active || !bridgeRuntime.provider || !bridgeRuntime.model) return legacy
+
+  const activeEngine = bridgeRuntime.provider
+  const checkedAt = bridgeRuntime.checkedAt || new Date().toISOString()
+  const model = bridgeModelLabel(bridgeRuntime.model)
+  const engine = legacy.engines[activeEngine]
+
+  return {
+    ...legacy,
+    bridge: 'online',
+    bridgeState: 'prompt_verified',
+    selectedEngine: activeEngine,
+    selectedEngineLabel: activeEngine === 'lm_studio' ? 'LM Studio' : 'Ollama',
+    selectedModel: model,
+    checkedAt,
+    lastSuccessfulHandshakeAt: checkedAt,
+    engines: {
+      ...legacy.engines,
+      [activeEngine]: {
+        ...engine,
+        id: activeEngine,
+        name: activeEngine === 'lm_studio' ? 'LM Studio' : 'Ollama',
+        status: 'detected',
+        endpoint: engine.endpoint,
+        message: `Bridge heartbeat validated ${activeEngine === 'lm_studio' ? 'LM Studio' : 'Ollama'} with active model ${model}.`,
+        modelsReachable: true,
+        chatCompletionsReachable: true,
+        functional: true,
+        lastFunctionalTestAt: checkedAt,
+        lastSuccessfulHandshakeAt: checkedAt,
+        error: null,
+        configured: true,
+        configuredModel: model,
+        modelUsed: model,
+        latencyMs: bridgeRuntime.providerStatus?.latencyMs ?? bridgeStatus.node.latencyMs ?? bridgeStatus.runtime?.heartbeatLatencyMs ?? null,
+        failureKind: null,
+        handshakeState: 'prompt_verified',
+        testResponsePreview: 'Bridge heartbeat validated provider runtime.',
+      },
+    },
+  }
+}
+
+function bridgeDerivedLocalFamilies(
+  legacy: LocalFamilyAgentsResponse,
+  bridgeStatus: BridgeStatusResponse,
+): LocalFamilyAgentsResponse {
+  const bridgeRuntime = isFreshBridgeLocalAi(bridgeStatus)
+  if (!bridgeRuntime.active || !bridgeRuntime.provider || !bridgeRuntime.model) return legacy
+
+  const provider = bridgeRuntime.provider
+  const model = bridgeModelLabel(bridgeRuntime.model)
+  const checkedAt = bridgeRuntime.checkedAt || new Date().toISOString()
+  const lmStudioModel = { id: model, object: 'model', ownedBy: 'bridge-runtime' }
+  const ollamaModel = { name: model, family: null, parameterSize: null, quantization: null }
+  const bridgeProvider = {
+    provider,
+    detected: true,
+    reachable: true,
+    functional: true,
+    models: provider === 'lm_studio' ? [lmStudioModel] : [ollamaModel],
+    error: null,
+    configured: true,
+    configuredModel: model,
+    failureKind: null,
+    handshakeState: 'prompt_verified' as const,
+    latencyMs: bridgeRuntime.providerStatus?.latencyMs ?? bridgeStatus.node.latencyMs ?? bridgeStatus.runtime?.heartbeatLatencyMs ?? null,
+    modelUsed: model,
+    testResponsePreview: 'Bridge heartbeat validated provider runtime.',
+  }
+
+  return {
+    ...legacy,
+    ollamaDetected: provider === 'ollama' ? true : legacy.ollamaDetected,
+    lmStudioDetected: provider === 'lm_studio' ? true : legacy.lmStudioDetected,
+    availableModels: provider === 'ollama'
+      ? [ollamaModel, ...legacy.availableModels.filter(item => item.name !== model)]
+      : legacy.availableModels,
+    lmStudioModels: provider === 'lm_studio'
+      ? [lmStudioModel, ...legacy.lmStudioModels.filter(item => item.id !== model)]
+      : legacy.lmStudioModels,
+    providers: {
+      ...legacy.providers,
+      ollama: provider === 'ollama' ? bridgeProvider : legacy.providers.ollama,
+      lmStudio: provider === 'lm_studio' ? bridgeProvider : legacy.providers.lmStudio,
+    },
+    preferredProvider: provider,
+    preferredModel: model,
+    familyAgents: legacy.familyAgents.map(agent => ({
+      ...agent,
+      status: 'active',
+      modelInstalled: true,
+      provider,
+      model,
+      detected: true,
+      functional: true,
+    })),
+    checkedAt,
+  }
+}
 const INITIAL_INTERNET_STATUS: InternetStatusResponse = {
   tools: {
     tavily: { id: 'tavily', name: 'Tavily', status: 'config_needed', lastChecked: '', notes: 'Not checked yet.' },
@@ -5869,21 +5996,29 @@ function Home() {
   const [localFamilyAgents, setLocalFamilyAgents] = useState<LocalFamilyAgentsResponse>(INITIAL_LOCAL_FAMILY_AGENTS)
   const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
   const [latestAnalystPacket, setLatestAnalystPacket] = useState<AnalystOperationsPacket | null>(null)
+  const effectiveLocalAgentBridge = useMemo(
+    () => bridgeDerivedLocalAgentBridge(localAgentBridge, officialBridgeStatus),
+    [localAgentBridge, officialBridgeStatus],
+  )
+  const effectiveLocalFamilyAgents = useMemo(
+    () => bridgeDerivedLocalFamilies(localFamilyAgents, officialBridgeStatus),
+    [localFamilyAgents, officialBridgeStatus],
+  )
   const engineeringStatusBridge = useMemo(
     () => buildEngineeringStatusBridge({
-      localBridge: localAgentBridge,
-      localFamilies: localFamilyAgents,
+      localBridge: effectiveLocalAgentBridge,
+      localFamilies: effectiveLocalFamilyAgents,
       latestTaskPacket: latestEngineeringTaskPacket,
     }),
-    [localAgentBridge, localFamilyAgents, latestEngineeringTaskPacket],
+    [effectiveLocalAgentBridge, effectiveLocalFamilyAgents, latestEngineeringTaskPacket],
   )
   const councilPersistenceCtx = useMemo(
     () =>
       buildCouncilPersistenceContext({
-        localFamilyAgents,
+        localFamilyAgents: effectiveLocalFamilyAgents,
         orchestrationFamilyToLocalAgentId,
       }),
-    [localFamilyAgents],
+    [effectiveLocalFamilyAgents],
   )
   const { store: council, dispatch: councilDispatch, mounted: councilMounted, newSessionId } =
     useCouncilSession(councilPersistenceCtx)
@@ -8158,7 +8293,7 @@ function Home() {
     const inputText = `${decree}\n${threadHistory.map(m => `${m.sender}: ${m.content}`).join('\n')}`
 
     const agentId = orchestrationFamilyToLocalAgentId(family)
-    const agent = localFamilyAgents.familyAgents.find(a => a.id === (agentId ?? ''))
+    const agent = effectiveLocalFamilyAgents.familyAgents.find(a => a.id === (agentId ?? ''))
 
     let textOut: string | null = null
 
@@ -8676,7 +8811,7 @@ function Home() {
             cmd,
             decree,
             participationToggles,
-            localFamilyAgents,
+            localFamilyAgents: effectiveLocalFamilyAgents,
           })
         : filterOrchestrationOrderByCommand(order, cmd, decree)
       const diagnosticIntentMode = resolveDiagnosticIntentMode(decree)
@@ -8699,7 +8834,7 @@ function Home() {
         if (family === 'kimi' || family === 'bridge_architect') {
           const agentId = orchestrationFamilyToLocalAgentId(family)
           if (!agentId) return false
-          return Boolean(localFamilyAgents.familyAgents.find(a => a.id === agentId)?.functional)
+          return Boolean(effectiveLocalFamilyAgents.familyAgents.find(a => a.id === agentId)?.functional)
         }
         if (family === 'gemini' && skipGeminiForSessionRef.current) return false
         const eid = cloudEngineIdForCouncilFamily(family)
@@ -8776,7 +8911,7 @@ function Home() {
       if (attendanceWave) {
         attendancePreflightMap = await runAttendancePreflight(directedOrder, {
           engineMap: engineMapRef.current,
-          localFamilyAgents,
+          localFamilyAgents: effectiveLocalFamilyAgents,
           skipGeminiForSession: skipGeminiForSessionRef.current,
         })
         providerRuntimeStates = Object.fromEntries(
@@ -8878,7 +9013,7 @@ function Home() {
         const tryLocal = async (): Promise<string | null> => {
           const agentId = orchestrationFamilyToLocalAgentId(family)
           if (!agentId) return null
-          const agent = localFamilyAgents.familyAgents.find(a => a.id === agentId)
+          const agent = effectiveLocalFamilyAgents.familyAgents.find(a => a.id === agentId)
           if (!agent?.functional) return null
           const th = threadHistory().slice(-16).map(m => `${m.sender}: ${m.content}`).join('\n')
           const localPrompt = `${augment}\n\nCURRENT DECREE (authoritative):\n${decree}\n\nCouncil thread (continuity only, most recent last):\n${th}\n\nRespond with one concise in-character council message only.`
@@ -11020,14 +11155,14 @@ function Home() {
                   onRefresh={() => void loadOfficialBridgeStatus()}
                 />
                 <LocalCodeAgentBridgePanel
-                  bridge={localAgentBridge}
+                  bridge={effectiveLocalAgentBridge}
                   onRefresh={refreshLocalEngineeringState}
                   onCouncilHandoff={injectLiveEnvironmentDecree}
                   repo={repoStatus}
                   pendingApprovals={raelActions.filter(action => action.status === 'pending').length}
                   latestEngineeringTask={latestEngineeringTaskPacket}
                 />
-                <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={loadLocalFamilyAgents} />
+                <LocalFamilyAgentsPanel families={effectiveLocalFamilyAgents} onRefresh={loadLocalFamilyAgents} />
                 <CapabilityRouterPanel />
                 <CodexAgentPlaceholder />
               </>
@@ -11236,7 +11371,7 @@ function Home() {
                   onRefresh={() => void loadOfficialBridgeStatus()}
                 />
                 <LocalCodeAgentBridgePanel
-                  bridge={localAgentBridge}
+                  bridge={effectiveLocalAgentBridge}
                   onRefresh={refreshLocalEngineeringState}
                   onCouncilHandoff={injectLiveEnvironmentDecree}
                   repo={repoStatus}
@@ -11269,7 +11404,7 @@ function Home() {
                 <Phase3WarRoomPanels uiMode={uiMode} homeBundle="diagnostics" />
                 <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
                 <BridgeArchitectPanel engines={engineList} />
-                <LocalFamilyAgentsPanel families={localFamilyAgents} onRefresh={loadLocalFamilyAgents} />
+                <LocalFamilyAgentsPanel families={effectiveLocalFamilyAgents} onRefresh={loadLocalFamilyAgents} />
                 <CapabilityRouterPanel />
                 <BabyAiObserverPanel memories={memories} actions={raelActions} opportunities={incomeOpportunities} />
                 <FamilyPresencePanel presence={familyPresence} geminiEngine={geminiEngineRow} />

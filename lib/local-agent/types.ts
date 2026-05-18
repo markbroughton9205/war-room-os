@@ -41,7 +41,7 @@ export type LocalAgentTaskLifecycle =
   | 'failed'
   | 'rolled_back'
 
-export type LocalFamilyAgentStatus = 'planned' | 'inactive' | 'available'
+export type LocalFamilyAgentStatus = 'planned' | 'inactive' | 'available' | 'active'
 
 export type LocalTaskCategory =
   | 'synthesis'
