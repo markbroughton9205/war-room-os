@@ -10,6 +10,7 @@ import { AutomationGovernancePanel } from '@/components/war-room/automation/Auto
 import { BabyAiAcademyPanel } from '@/components/war-room/baby-ai/BabyAiAcademyPanel'
 import { FeatureBuilderPanel } from '@/components/war-room/feature-builder/FeatureBuilderPanel'
 import { RevenueEnginePanel } from '@/components/war-room/revenue-engine/RevenueEnginePanel'
+import { SignalRadarPanel } from '@/components/war-room/signals/SignalRadarPanel'
 import { KpiGrid } from '@/components/war-room/KpiGrid'
 import { WarRoomShell } from '@/components/war-room/WarRoomShell'
 
@@ -25,6 +26,7 @@ export default function WarRoomDashboardPage() {
       <KpiGrid />
       <AnalystOperationsPanel compact />
       <EconomicOperationsPanel />
+      <SignalRadarPanel />
       <RevenueEnginePanel />
       <BuildAgentDivisionPanel />
       <FeatureBuilderPanel />

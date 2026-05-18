@@ -23,6 +23,7 @@ import {
   rankRevenueOpportunities,
   seedRevenueOpportunities,
 } from './pipeline'
+import { listPersistedSignalSnapshot, type SignalResult } from '@/lib/signals'
 
 type Row = Record<string, unknown>
 
@@ -167,6 +168,77 @@ function leverageScoreFromOpportunity(opportunity: RevenueOpportunity): RevenueL
     score: opportunity.score,
     rationale: `Estimated from confidence, urgency, startup cost, scalability, automation potential, repeatability, time-to-profit, strategic alignment, stress, family impact, and compounding value.`,
     createdAt: opportunity.createdAt,
+  }
+}
+
+function revenueCategoryFromSignal(signal: SignalResult): RevenueEngineCategory {
+  switch (signal.category) {
+    case 'freight':
+    case 'load_board':
+      return 'freight'
+    case 'sprinter_van':
+      return 'sprinter_van_routes'
+    case 'local_delivery':
+      return 'local_delivery'
+    case 'job':
+    case 'gig':
+    case 'data_annotation':
+    case 'AI_evaluation':
+      return 'data_annotation_evaluation'
+    case 'SMB_automation':
+      return 'smb_automation'
+    case 'customer_operations':
+      return 'scheduling_intake_systems'
+    case 'call_center':
+      return 'call_center_customer_operations'
+    case 'AI_trends':
+      return 'ai_operations'
+    case 'app_factory_opportunity':
+      return 'app_factory_ideas'
+    case 'local_Akron':
+    case 'Ohio_business':
+      return 'agency_services'
+    case 'economic_warning':
+      return 'consulting'
+  }
+}
+
+function opportunityFromSignal(signal: SignalResult): RevenueOpportunity {
+  const opportunity = buildRevenueOpportunity({
+    title: signal.title,
+    category: revenueCategoryFromSignal(signal),
+    notes: `${signal.summary} Source-backed Phase 14 signal. No outreach, spend, application, dispatch, or income claim has been performed.`,
+    source: `${signal.source} (${signal.url})`,
+    estimatedRevenue: null,
+    estimatedTimeHours: null,
+    startupCostUsd: null,
+    regionalSignal: ['freight', 'sprinter_van', 'local_delivery', 'load_board', 'local_Akron', 'Ohio_business', 'economic_warning'].includes(signal.category) ? signal.summary : null,
+    shipperPainPoint: ['freight', 'sprinter_van', 'local_delivery', 'load_board'].includes(signal.category) ? signal.summary : null,
+    smbPainPoint: ['SMB_automation', 'customer_operations', 'call_center', 'app_factory_opportunity'].includes(signal.category) ? signal.summary : null,
+    nextReviewAction: signal.recommendedNextAction,
+    scores: {
+      confidence: signal.scores.confidence,
+      urgency: signal.scores.urgency,
+      startupCost: signal.scores.startupCost,
+      repeatability: signal.scores.repeatability,
+      timeToProfit: signal.scores.timeToProfit,
+      strategicAlignment: signal.scores.strategicAlignment,
+      familyImpact: signal.scores.familyImpact,
+      automationPotential: ['SMB_automation', 'customer_operations', 'call_center', 'AI_trends', 'app_factory_opportunity'].includes(signal.category) ? Math.max(signal.scores.strategicAlignment, 72) : 58,
+      scalability: ['SMB_automation', 'AI_trends', 'app_factory_opportunity'].includes(signal.category) ? 76 : 58,
+      longTermCompoundingValue: ['AI_trends', 'app_factory_opportunity', 'SMB_automation'].includes(signal.category) ? 80 : 62,
+    },
+  }, new Date(signal.capturedAt))
+  return {
+    ...opportunity,
+    id: `signal-${signal.id}`,
+    metadata: {
+      ...(opportunity.metadata ?? {}),
+      phase14SignalId: signal.id,
+      signalUrl: signal.url,
+      assignedBabyFamily: signal.assignedBabyFamily,
+      sourceBacked: true,
+    },
   }
 }
 
@@ -319,13 +391,18 @@ export async function createRevenueOpportunity(input: RevenueOpportunityInput): 
 
 export async function listRevenueEngineSnapshot(limit = 40): Promise<RevenueEngineSnapshot> {
   const generatedAt = new Date().toISOString()
+  const signalSnapshot = await listPersistedSignalSnapshot(12)
+  const signalOpportunities = signalSnapshot.results
+    .filter(signal => signal.approvalStatus === 'pending_review')
+    .slice(0, 6)
+    .map(opportunityFromSignal)
   const supabase = tryWarRoomSupabase()
   if (!supabase.ok) {
     return snapshot({
       generatedAt,
       persistenceAvailable: false,
       persistenceNote: `Supabase unavailable: ${supabase.configError}`,
-      opportunities: seedRevenueOpportunities(),
+      opportunities: [...signalOpportunities, ...seedRevenueOpportunities()],
     })
   }
 
@@ -355,8 +432,10 @@ export async function listRevenueEngineSnapshot(limit = 40): Promise<RevenueEngi
   return snapshot({
     generatedAt,
     persistenceAvailable: true,
-    persistenceNote: 'Revenue Engine persistence is available.',
-    opportunities: rows,
+    persistenceNote: signalOpportunities.length
+      ? 'Revenue Engine persistence is available; Phase 14 source-backed signals are included as review-only opportunities.'
+      : 'Revenue Engine persistence is available.',
+    opportunities: [...signalOpportunities, ...rows],
     outcomes: ((outcomes.data ?? []) as Row[]).map(mapOutcome),
     leverageScores: ((leverageScores.data ?? []) as Row[]).map(mapLeverageScore),
     executionPatterns: ((executionPatterns.data ?? []) as Row[]).map(mapPattern),

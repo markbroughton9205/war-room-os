@@ -11,6 +11,7 @@ import { getWorkflowOutcomes } from '@/lib/learning/workflowOutcomeTracker'
 import { buildOperationalMemorySnapshot } from '@/lib/memory/operationalSnapshot'
 import { listRecentApprovedMemories } from '@/lib/memory/store'
 import type { ApprovedMemory, OperationalMemorySnapshot } from '@/lib/memory/types'
+import { listPersistedSignalSnapshot, type SignalResult } from '@/lib/signals'
 import { tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persistence'
 
 export type BabyBriefingCategory =
@@ -42,7 +43,7 @@ export type BabyBriefingItem = {
   summary: string
   evidence: string[]
   confidence: number
-  source: 'persisted_memory' | 'operational_snapshot' | 'economic_store' | 'learning_store' | 'static_guardrail'
+  source: 'persisted_memory' | 'operational_snapshot' | 'economic_store' | 'signal_store' | 'learning_store' | 'static_guardrail'
 }
 
 export type BabyMemoryContext = {
@@ -122,7 +123,7 @@ export type BabyDailyBriefing = {
   briefingDate: string
   persistenceAvailable: boolean
   liveExternalData: {
-    available: false
+    available: boolean
     note: string
   }
   guardrails: typeof BABY_AI_GUARDRAILS
@@ -344,6 +345,18 @@ async function retrieveEconomicSurface(client: WarRoomSupabase | null): Promise<
   return { opportunities: surface.value.opportunities, note: 'Economic opportunities retrieved from War Room economic store.' }
 }
 
+async function retrieveSignalSurface(): Promise<{
+  signals: SignalResult[]
+  note: string
+}> {
+  const snapshot = await listPersistedSignalSnapshot(24)
+  if (!snapshot.results.length) return { signals: [], note: snapshot.persistenceNote }
+  return {
+    signals: snapshot.results,
+    note: `${snapshot.results.length} source-backed signal result(s) retrieved from Phase 14 Signal Radar.`,
+  }
+}
+
 function memoryContext(input: {
   approvedMemories: ApprovedMemory[]
   operational: OperationalMemorySnapshot
@@ -522,6 +535,24 @@ function buildOpportunityRadar(opportunities: EconomicOpportunity[], memory: Bab
   }))
 }
 
+function buildSignalRadarItems(signals: SignalResult[]): BabyOpportunityRadarItem[] {
+  return signals
+    .filter(signal => signal.approvalStatus === 'pending_review')
+    .slice(0, 8)
+    .map(signal => ({
+      id: signal.id,
+      title: signal.title,
+      categoryTags: categoriesForText(`${signal.title} ${signal.category} ${signal.summary}`),
+      opportunityScore: signal.scores.highestLeverage,
+      confidenceScore: signal.scores.confidence,
+      urgencyScore: signal.scores.urgency,
+      sourceAttribution: `${signal.source} via ${signal.url}`,
+      approvalStatus: 'pending_review',
+      riskLevel: signal.category === 'economic_warning' ? 'high' : 'unknown',
+      recommendedReview: signal.recommendedNextAction,
+    } satisfies BabyOpportunityRadarItem))
+}
+
 function buildLearningSignals(agents: PersistedBabyAgent[], memories: BabyMemoryRow[], outcomes: BabyOutcomeRow[]): BabyLearningSignal[] {
   return agents.map(agent => {
     const agentMemories = memories.filter(row => joinedAgent(row).key === agent.key)
@@ -605,6 +636,7 @@ function buildAlerts(input: {
   radar: BabyOpportunityRadarItem[]
   outcomes: BabyOutcomeRow[]
   economicNote: string
+  signalNote: string
 }): BabyStrategicAlert[] {
   const alerts: BabyStrategicAlert[] = []
 
@@ -662,12 +694,14 @@ function buildAlerts(input: {
   }
 
   alerts.push({
-    id: 'external-live-data-unavailable',
+    id: input.signalNote.includes('source-backed') ? 'external-live-data-available' : 'external-live-data-unavailable',
     kind: 'ai_ecosystem',
     severity: 'info',
-    title: 'No live external AI/economic feed used',
-    summary: 'Briefing is built from existing War Room memory, learning, and economic stores only; live external developments are marked unavailable.',
-    sourceAttribution: input.economicNote,
+    title: input.signalNote.includes('source-backed') ? 'Live signal store connected' : 'No live external signal rows available',
+    summary: input.signalNote.includes('source-backed')
+      ? 'Briefing includes Phase 14 source-backed signal rows. Baby AI still proposes review only and cannot execute outreach, spend, applications, or automations.'
+      : 'Briefing is built from existing War Room memory, learning, and economic stores; live external signal rows are unavailable until a scan/source returns evidence.',
+    sourceAttribution: input.signalNote || input.economicNote,
     approvalRequired: true,
     canExecute: false,
   })
@@ -681,6 +715,8 @@ function buildSections(input: {
   learningSummary: ReturnType<typeof getOutcomeLedgerSnapshot>['summary']
   workflowOutcomes: ReturnType<typeof getWorkflowOutcomes>
   economicNote: string
+  signalNote: string
+  signals: SignalResult[]
 }): BabyDailyBriefing['sections'] {
   const topRadar = input.radar.slice(0, 4).map(entry => item({
     title: entry.title,
@@ -689,32 +725,45 @@ function buildSections(input: {
     confidence: entry.confidenceScore / 100,
     source: entry.approvalStatus === 'unavailable' ? 'static_guardrail' : 'economic_store',
   }))
+  const signalItems = input.signals
+    .filter(signal => signal.approvalStatus === 'pending_review')
+    .slice(0, 6)
+    .map(signal => item({
+      title: signal.title,
+      summary: `Signal ${signal.scores.highestLeverage}, income ${signal.scores.incomePotential}, confidence ${signal.scores.confidence}. ${signal.recommendedNextAction}`,
+      evidence: [signal.url, `${signal.provider}:${signal.source}`],
+      confidence: signal.scores.confidence / 100,
+      source: 'signal_store' as const,
+    }))
 
   return {
     aiIndustryDevelopments: [
-      item({
+      ...(signalItems.filter(entry => /AI|automation|app|evaluation/i.test(`${entry.title} ${entry.summary}`)).slice(0, 3)),
+      ...(signalItems.length ? [] : [item({
         title: 'Live AI industry feed unavailable',
-        summary: 'No external AI industry source was queried for this briefing. Baby AI can only summarize stored War Room intelligence until a sourced feed is connected.',
-        evidence: ['No live external data call in /api/baby-ai/briefing'],
+        summary: 'No Phase 14 AI trend signal rows are available yet. Baby AI can only summarize stored War Room intelligence until a sourced scan returns evidence.',
+        evidence: [input.signalNote],
         confidence: 1,
         source: 'static_guardrail',
-      }),
+      })]),
       ...input.memory.recurringObjectives.filter(entry => /ai|model|agent|automation/i.test(`${entry.title} ${entry.summary}`)).slice(0, 3),
     ],
-    economicSignals: topRadar.length ? topRadar : [
+    economicSignals: signalItems.length ? signalItems : topRadar.length ? topRadar : [
       item({
         title: 'Economic store has no sourced opportunities',
-        summary: input.economicNote,
+        summary: `${input.economicNote} ${input.signalNote}`,
         evidence: ['war_room_economic_opportunities'],
         confidence: 0.8,
         source: 'economic_store',
       }),
     ],
     freightLogisticsRelevance: [
+      ...signalItems.filter(entry => /freight|logistics|lane|carrier|shipper|sprinter|delivery/i.test(`${entry.title} ${entry.summary}`)),
       ...topRadar.filter(entry => entry.title.toLowerCase().includes('freight') || entry.summary.toLowerCase().includes('freight')),
       ...input.memory.recurringObjectives.filter(entry => /freight|logistics|lane|carrier|shipper/i.test(`${entry.title} ${entry.summary}`)).slice(0, 3),
     ],
     smbOpportunities: [
+      ...signalItems.filter(entry => /smb|operations|automation|customer|call center|intake/i.test(`${entry.title} ${entry.summary}`)),
       ...topRadar.filter(entry => /smb|operations|automation|consulting/i.test(`${entry.title} ${entry.summary}`)),
       ...input.memory.previousRecommendations.filter(entry => /client|lead|smb|business/i.test(`${entry.title} ${entry.summary}`)).slice(0, 3),
     ],
@@ -743,6 +792,7 @@ function buildSections(input: {
       })),
     ],
     businessOperationsInsights: [
+      ...signalItems,
       ...topRadar,
       ...input.memory.approvedOutcomes.slice(0, 4),
     ],
@@ -792,11 +842,12 @@ export async function buildBabyDailyBriefing(): Promise<BabyDailyBriefing> {
   const generatedAt = new Date().toISOString()
   const supabase = tryWarRoomSupabase()
   const client = supabase.ok ? supabase.client : null
-  const [agents, babyRows, latestLessons, economic, outcomeLedger, workflows] = await Promise.all([
+  const [agents, babyRows, latestLessons, economic, signalSurface, outcomeLedger, workflows] = await Promise.all([
     listPersistedBabyAgents(client),
     listBabyOperationalRows(client),
     listLatestBabyLessons(client, 8),
     retrieveEconomicSurface(client),
+    retrieveSignalSurface(),
     Promise.resolve(getOutcomeLedgerSnapshot()),
     Promise.resolve(getWorkflowOutcomes()),
   ])
@@ -807,7 +858,8 @@ export async function buildBabyDailyBriefing(): Promise<BabyDailyBriefing> {
     babyOutcomes: babyRows.outcomes,
     economicOpportunities: economic.opportunities,
   })
-  const radar = buildOpportunityRadar(economic.opportunities, memory)
+  const signalRadar = buildSignalRadarItems(signalSurface.signals)
+  const radar = [...signalRadar, ...buildOpportunityRadar(economic.opportunities, memory)]
   const learning = buildLearningSignals(agents, babyRows.memories, babyRows.outcomes)
   const sections = buildSections({
     memory,
@@ -815,6 +867,8 @@ export async function buildBabyDailyBriefing(): Promise<BabyDailyBriefing> {
     learningSummary: outcomeLedger.summary,
     workflowOutcomes: workflows,
     economicNote: economic.note,
+    signalNote: signalSurface.note,
+    signals: signalSurface.signals,
   })
   const recommendations = buildRecommendations(agents, radar, memory)
   const strategicAlerts = buildAlerts({
@@ -823,6 +877,7 @@ export async function buildBabyDailyBriefing(): Promise<BabyDailyBriefing> {
     radar,
     outcomes: babyRows.outcomes,
     economicNote: economic.note,
+    signalNote: signalSurface.note,
   })
   const familyContributions = buildFamilyContributions(agents, memory, radar)
 
@@ -831,8 +886,10 @@ export async function buildBabyDailyBriefing(): Promise<BabyDailyBriefing> {
     briefingDate: generatedAt.slice(0, 10),
     persistenceAvailable: supabase.ok,
     liveExternalData: {
-      available: false,
-      note: 'No live external AI, economic, freight, or news source is queried by this endpoint. All claims are sourced to existing War Room stores or truth-labeled unavailable.',
+      available: signalSurface.signals.length > 0,
+      note: signalSurface.signals.length
+        ? `Phase 14 signal rows are included from persisted source-backed scans. ${signalSurface.note}`
+        : `No live external signal row is currently available to this briefing. ${signalSurface.note}`,
     },
     guardrails: BABY_AI_GUARDRAILS,
     executiveSummary: [
@@ -851,7 +908,9 @@ export async function buildBabyDailyBriefing(): Promise<BabyDailyBriefing> {
     truthLabels: [
       'Baby AI cannot execute shell commands, mutate files, deploy, spend, outreach, or self-approve actions.',
       'Recommendations are proposals for Commander review only.',
-      'Live external market and AI ecosystem data is unavailable unless a sourced feed is explicitly connected.',
+      signalSurface.signals.length
+        ? 'Live market and AI ecosystem rows are sourced from Phase 14 Signal Radar persistence; execution remains approval-gated.'
+        : 'Live external market and AI ecosystem data is unavailable unless a sourced feed is explicitly connected.',
       'Cloud-provider family context is preserved; no local bridge or connector stack is used.',
     ],
   }
