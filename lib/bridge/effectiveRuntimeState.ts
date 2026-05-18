@@ -82,7 +82,7 @@ function emptyFamilies(checkedAt: string): LocalFamilyAgentsResponse {
     preferredModel: null,
     familyAgents: LOCAL_FAMILY_AGENTS.map(agent => ({
       ...agent,
-      status: 'inactive',
+      status: 'planned',
       modelInstalled: false,
       provider: 'ollama',
       model: agent.preferredModel,

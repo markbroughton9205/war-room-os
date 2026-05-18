@@ -4195,7 +4195,7 @@ function LocalCodeAgentBridgePanel({
     ?? engineEntries[0]
   const bridgeHeadline =
     selectedPromptVerified
-      ? 'Local AI ready'
+      ? 'Local accelerator ready'
       : bridge.bridgeState === 'model_loaded'
         ? 'Engineering model loaded'
         : bridge.bridgeState === 'endpoint_reachable'
@@ -4204,7 +4204,7 @@ function LocalCodeAgentBridgePanel({
       ? 'Engineering systems online'
       : availableCount > 0 || configuredCount > 0
         ? 'Engineering systems partially online'
-        : 'Engineering systems awaiting local engines'
+        : 'Engineering systems available without local accelerator'
   const repoLabel = repo?.canReadRepo
     ? 'Repo bridge connected'
     : repo?.gitAvailable
@@ -4231,7 +4231,7 @@ function LocalCodeAgentBridgePanel({
             </div>
           </div>
           <div className="grid min-w-[18rem] gap-1 text-[10px] md:grid-cols-2">
-            <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(96,165,250,0.22)', color: '#BFDBFE' }}>Local AI: {availableCount > 0 ? `${availableCount} ready` : 'onboarding'}</span>
+            <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(96,165,250,0.22)', color: '#BFDBFE' }}>Local accelerator: {availableCount > 0 ? `${availableCount} ready` : 'optional/offline'}</span>
             <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(255,215,0,0.22)', color: '#FDE68A' }}>Repo: {repoLabel}</span>
             <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(167,139,250,0.22)', color: '#DDD6FE' }}>Queue: {bridge.qaStatus}</span>
             <span className="rounded px-2 py-1" style={{ border: '1px solid rgba(52,211,153,0.22)', color: '#BBF7D0' }}>Last handshake: {bridge.lastSuccessfulHandshakeAt ? new Date(bridge.lastSuccessfulHandshakeAt).toLocaleTimeString() : 'none'}</span>
@@ -4245,7 +4245,7 @@ function LocalCodeAgentBridgePanel({
             LOCAL ENGINEERING BRIDGE
           </h2>
           <p className="mt-1 text-xs" style={{ color: '#666' }}>
-            Operational hub for local AI, coding connectors, Cursor handoff, approval gates, and rollback-aware engineering flow.
+            Optional local AI acceleration for coding connectors, Cursor handoff, approval gates, and rollback-aware engineering flow. Baby AI growth does not require this bridge.
           </p>
         </div>
         <div className="relative z-30 flex flex-wrap gap-2 pointer-events-auto">

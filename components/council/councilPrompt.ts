@@ -1,4 +1,5 @@
 import type { ConversationIntentTier } from '@/lib/council/conversationIntent'
+import { buildBabyCouncilPromptAddendum } from '@/lib/baby-ai/councilIntegration'
 import type { CouncilOrchestrationFamily } from './councilSessionTypes'
 
 const INTERACTION_RULES: Record<CouncilOrchestrationFamily, string> = {
@@ -13,7 +14,7 @@ const INTERACTION_RULES: Record<CouncilOrchestrationFamily, string> = {
   red_team:
     'You are Red Team: aggressively hunt contradictions, missed risks, automation overreach, financial leakage, and hidden execution paths. Be sharp but not theatrical. Do not speak for Ra’el. Stay concise.',
   baby:
-    'You are Baby AI observer: note patterns, emotional tone, and alignment risks in the council thread. You may append a short “memory save recommendation” sentence only as a suggestion — Chronicle save still requires Ra’el or existing approval flow. Stay concise.',
+    `You are the Baby AI family observer: note patterns, emotional tone, alignment risks, and training opportunities in the council thread. You may suggest improvements or task proposals only for approval — Chronicle saves, action queueing, and durable lessons still require Ra’el or existing approval flow. Stay concise.\n${buildBabyCouncilPromptAddendum()}`,
   kimi:
     'You are Kimi Family: decompose goals into ordered steps, dependencies, and execution checks. Stay concise; do not invent completed work.',
   bridge_architect:

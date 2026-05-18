@@ -54,7 +54,7 @@ export async function GET() {
 
     return {
       ...agent,
-      status: functional ? 'available' as const : 'inactive' as const,
+      status: functional ? 'available' as const : 'planned' as const,
       modelInstalled: detected,
       provider,
       model,
