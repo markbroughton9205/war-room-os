@@ -15,11 +15,20 @@ import { tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persist
 
 export type BabyBriefingCategory =
   | 'freight'
+  | 'sprinter van routes'
+  | 'local delivery'
   | 'AI automation'
   | 'SMB systems'
+  | 'AI operations'
+  | 'call center/customer operations'
+  | 'scheduling/intake systems'
   | 'SaaS'
   | 'operations'
   | 'consulting'
+  | 'agency services'
+  | 'app factory ideas'
+  | 'data annotation/evaluation'
+  | 'operational dashboards'
   | 'arbitrage'
   | 'infrastructure'
   | 'media/content'
@@ -174,11 +183,20 @@ type BabyTrainingRow = {
 
 const CATEGORY_KEYWORDS: Array<[BabyBriefingCategory, RegExp]> = [
   ['freight', /\bfreight|logistics|lane|carrier|shipper|dispatch\b/i],
+  ['sprinter van routes', /\bsprinter|cargo van|van route|route density|deadhead\b/i],
+  ['local delivery', /\blocal delivery|courier|last mile|delivery route|route stop\b/i],
   ['AI automation', /\bai|automation|agent|workflow|retrieval|model\b/i],
+  ['AI operations', /\bai ops|ai operations|evaluation|prompt ops|model ops|qa workflow\b/i],
   ['SMB systems', /\bsmb|small business|client|lead|crm|operations\b/i],
+  ['call center/customer operations', /\bcall center|customer ops|customer operations|support queue|inbound call|follow-up\b/i],
+  ['scheduling/intake systems', /\bscheduling|booking|intake|appointment|no-show|calendar\b/i],
   ['SaaS', /\bsaas|software|subscription|platform\b/i],
   ['operations', /\bops|operation|queue|workflow|fulfillment\b/i],
   ['consulting', /\bconsult|advisory|proposal|service\b/i],
+  ['agency services', /\bagency|retainer|done-for-you|service package\b/i],
+  ['app factory ideas', /\bapp factory|micro app|internal app|build packet|feature builder\b/i],
+  ['data annotation/evaluation', /\bdata annotation|annotation|ai evaluation|eval work|labeling|rlhf\b/i],
+  ['operational dashboards', /\bdashboard|reporting|kpi|scorecard|ops visibility\b/i],
   ['arbitrage', /\barbitrage|spread|resale|margin\b/i],
   ['infrastructure', /\binfrastructure|runtime|build|deploy|database|supabase|vercel\b/i],
   ['media/content', /\bmedia|content|publishing|channel|audience\b/i],
@@ -555,7 +573,7 @@ function buildRecommendations(agents: PersistedBabyAgent[], radar: BabyOpportuni
       agentName: 'Income Operations Baby',
       kind: 'propose_review',
       title: `Review ${topOpportunity.title}`,
-      rationale: `Highest current opportunity score is ${topOpportunity.opportunityScore}; no outreach, spend, or execution is authorized by this recommendation.`,
+      rationale: `Highest current opportunity score is ${topOpportunity.opportunityScore}; prioritize income per unit of attention, repeatability, and low-friction validation. No outreach, spend, or execution is authorized by this recommendation.`,
       priority: topOpportunity.opportunityScore >= 70 ? 'high' : 'medium',
       approvalRequired: true,
       canExecute: false,
@@ -752,8 +770,8 @@ function buildFamilyContributions(agents: PersistedBabyAgent[], memory: BabyMemo
       'red-team-baby': `Flagged ${memory.rejectedPlans.length} rejected or negative plan(s) as contradiction checks.`,
       'analyst-baby': `Summarized persisted memories and learning outcomes; live external research unavailable.`,
       'income-operations-baby': topRadar
-        ? `Ranked "${topRadar.title}" for review with opportunity score ${topRadar.opportunityScore}.`
-        : 'No persisted income opportunity rows available; income claims remain unavailable.',
+        ? `Ranked "${topRadar.title}" for review with opportunity score ${topRadar.opportunityScore}; flagged repeatability, monetizable system shape, and low-ROI distraction risk for Commander review.`
+        : 'No persisted income opportunity rows available; income claims remain unavailable and low-evidence distractions should be rejected.',
       'kimi-family-baby': `Decomposed continuity into active projects, unfinished approvals, and reviewable next proposals.`,
       'bridge-architect-baby': `Observed system coordination through persistence, economic store, and learning snapshots without local bridge connectors.`,
     }
