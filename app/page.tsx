@@ -187,6 +187,7 @@ import {
   type CouncilCompressedSummary,
   type CouncilOutputMode,
 } from '@/lib/council/compression'
+import { buildCleanOperatorSummary, type OperatorSummary } from '@/lib/operator/summaryMapper'
 
 export type OperatorTab = 'command' | 'income' | 'agents' | 'analysts' | 'approvals' | 'memory' | 'system' | 'engineering' | 'diagnostics'
 
@@ -1638,33 +1639,21 @@ const CompressedCouncilPanel = memo(function CompressedCouncilPanel({
 })
 
 const OperatorMissionView = memo(function OperatorMissionView({
-  summary,
-  systemState,
-  activeRepairTitle,
-  topRevenueOpportunity,
-  todayGrowthBlock,
-  urgentWarning,
-  nextApprovedAction,
+  operatorSummary,
   onOpenEngineering,
 }: {
-  summary: CouncilCompressedSummary
-  systemState: string
-  activeRepairTitle: string
-  topRevenueOpportunity: string
-  todayGrowthBlock: string
-  urgentWarning: string
-  nextApprovedAction: string
+  operatorSummary: OperatorSummary
   onOpenEngineering: () => void
 }) {
   const cards = [
-    ['Highest Leverage Move', summary.nextAction],
-    ['Current System State', systemState],
-    ['Active Repair Packet', activeRepairTitle],
-    ['Top Revenue Opportunity', topRevenueOpportunity],
-    ["Today's Growth Block", todayGrowthBlock],
-    ['Urgent Warning', urgentWarning],
-    ['Council Summary', summary.decisionSummary[0] ?? 'No compressed council summary yet.'],
-    ['Next Approved Action', nextApprovedAction],
+    ['Highest Leverage Move', operatorSummary.highestLeverageMove],
+    ['Current System State', operatorSummary.currentSystemState],
+    ['Active Repair Packet', operatorSummary.activeRepairPacketTitle],
+    ['Top Revenue Opportunity', operatorSummary.topRevenueOpportunity],
+    ["Today's Growth Block", operatorSummary.growthBlock],
+    ['Urgent Warning', operatorSummary.urgentWarning],
+    ['Council Summary', operatorSummary.councilSummary],
+    ['Next Approved Action', operatorSummary.nextApprovedAction],
   ]
 
   return (
@@ -1682,7 +1671,7 @@ const OperatorMissionView = memo(function OperatorMissionView({
         {cards.map(([label, value]) => (
           <article key={label} className="rounded border border-white/10 bg-black/25 p-3">
             <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#94A3B8' }}>{label}</div>
-            <p className="mt-1 text-xs leading-relaxed" style={{ color: label === 'Urgent Warning' && value !== 'None' ? '#FCA5A5' : '#E5E7EB' }}>{value}</p>
+            <p className="mt-1 text-xs leading-relaxed" style={{ color: label === 'Urgent Warning' && value !== 'No verified urgent warning' ? '#FCA5A5' : '#E5E7EB' }}>{value}</p>
           </article>
         ))}
       </div>
@@ -9521,25 +9510,48 @@ function Home() {
     internetStatus.label,
     internetStatus.overallStatus,
   ])
-  const activeRepairTitle = latestRepairPacket?.title
-    ?? compressedCouncilSummary.repairPacket?.symptom
-    ?? 'None active'
-  const topRevenueOpportunity = incomeOpportunities.find(opportunity => opportunity.is_active)?.title
-    ?? compressedCouncilSummary.revenuePacket?.opportunity
-    ?? 'None identified'
   const todayGrowthBlock = memories.length
     ? `${memories.length} memory item${memories.length === 1 ? '' : 's'} available for lesson review`
     : 'No durable lesson evidence yet'
-  const urgentWarning = footerShowsPacketOrCouncilProviderIssue
-    ? councilContinueStatusLine
-    : pendingNeedsRael
-      ? 'Commander approval waiting'
-      : compressedCouncilSummary.risk.level === 'high'
-        ? compressedCouncilSummary.risk.summary
-        : 'None'
-  const nextApprovedAction = raelActions.find(action => action.status === 'pending')?.title
-    ?? queueActions[0]?.type
-    ?? 'No approved action queued'
+  const pendingOperatorAction = raelActions.find(action => action.status === 'pending')
+  const operatorSummary = useMemo(
+    () => buildCleanOperatorSummary({
+      councilSummary: compressedCouncilSummary,
+      systemState: `${chatHealthLabel} chat · ${providerHealthLabel} providers · ${persistenceHealthLabel}`,
+      activeRepairTitle: latestRepairPacket?.title ?? null,
+      incomeOpportunities: incomeOpportunities.map(opportunity => ({
+        title: opportunity.title,
+        isActive: opportunity.is_active,
+        platform: opportunity.platform,
+        applyUrl: opportunity.apply_url,
+      })),
+      signalResults: opportunityScout.results.map(result => ({
+        title: result.title,
+        source: result.source,
+        url: result.url,
+        verificationStatus: result.verificationStatus,
+      })),
+      growthBlock: todayGrowthBlock,
+      pendingApprovalCount: raelActions.filter(action => action.status === 'pending').length,
+      pendingActionTitle: pendingOperatorAction?.title ?? null,
+      queueActionType: queueActions[0]?.type ?? null,
+      hasRuntimeWarning: footerShowsPacketOrCouncilProviderIssue,
+    }),
+    [
+      chatHealthLabel,
+      compressedCouncilSummary,
+      footerShowsPacketOrCouncilProviderIssue,
+      incomeOpportunities,
+      latestRepairPacket?.title,
+      opportunityScout.results,
+      pendingOperatorAction?.title,
+      persistenceHealthLabel,
+      providerHealthLabel,
+      queueActions,
+      raelActions,
+      todayGrowthBlock,
+    ],
+  )
   const operatorNav = (
     <>
       {uiMode === 'operator' && (
@@ -9720,13 +9732,7 @@ function Home() {
         {operatorNav}
         {uiMode === 'operator' && operatorTab === 'command' && (
           <OperatorMissionView
-            summary={compressedCouncilSummary}
-            systemState={`${chatHealthLabel} chat · ${providerHealthLabel} providers · ${persistenceHealthLabel}`}
-            activeRepairTitle={activeRepairTitle}
-            topRevenueOpportunity={topRevenueOpportunity}
-            todayGrowthBlock={todayGrowthBlock}
-            urgentWarning={urgentWarning}
-            nextApprovedAction={nextApprovedAction}
+            operatorSummary={operatorSummary}
             onOpenEngineering={() => {
               setUiMode('advanced')
               setOperatorTab('engineering')
@@ -9841,12 +9847,6 @@ function Home() {
             />
           </div>
           <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />
-          <CompressedCouncilPanel
-            summary={compressedCouncilSummary}
-            onGenerateRepairPacket={generateRepairPacketFromCompression}
-            onGenerateRevenuePacket={generateRevenueActionPacket}
-            onSaveLessonCandidate={saveLessonCandidateFromCompression}
-          />
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"
@@ -10120,6 +10120,12 @@ function Home() {
                   <SystemResourcesPanel autoRefreshEnabled={false} tabActive={operatorTab === 'engineering'} />
                   <WorkerHealthPanel uiMode={uiMode} autoRefreshEnabled={false} tabActive={operatorTab === 'engineering'} />
                 </div>
+                <CompressedCouncilPanel
+                  summary={compressedCouncilSummary}
+                  onGenerateRepairPacket={generateRepairPacketFromCompression}
+                  onGenerateRevenuePacket={generateRevenueActionPacket}
+                  onSaveLessonCandidate={saveLessonCandidateFromCompression}
+                />
                 <EngineeringLaneManualPanel latest={latestEngineeringTaskPacket} />
                 <RepairPacketPanel latest={latestRepairPacket} />
                 <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
