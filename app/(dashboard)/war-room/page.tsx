@@ -8,6 +8,7 @@ import { Phase9BLearningPanels } from '@/components/war-room/learning/Phase9BLea
 import { AgentFoundryPanel } from '@/components/war-room/agents/AgentFoundryPanel'
 import { AutomationGovernancePanel } from '@/components/war-room/automation/AutomationGovernancePanel'
 import { BabyAiAcademyPanel } from '@/components/war-room/baby-ai/BabyAiAcademyPanel'
+import { FeatureBuilderPanel } from '@/components/war-room/feature-builder/FeatureBuilderPanel'
 import { KpiGrid } from '@/components/war-room/KpiGrid'
 import { WarRoomShell } from '@/components/war-room/WarRoomShell'
 
@@ -24,6 +25,7 @@ export default function WarRoomDashboardPage() {
       <AnalystOperationsPanel compact />
       <EconomicOperationsPanel />
       <BuildAgentDivisionPanel />
+      <FeatureBuilderPanel />
       <Phase9BLearningPanels />
       <AgentFoundryPanel />
       <AutomationGovernancePanel />
