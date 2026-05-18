@@ -11,6 +11,7 @@ import { BabyAiAcademyPanel } from '@/components/war-room/baby-ai/BabyAiAcademyP
 import { FeatureBuilderPanel } from '@/components/war-room/feature-builder/FeatureBuilderPanel'
 import { GrowthCalendarPanel } from '@/components/war-room/growth-calendar/GrowthCalendarPanel'
 import { OutcomeLedgerPanel } from '@/components/war-room/outcomes/OutcomeLedgerPanel'
+import { CommanderOsPanel } from '@/components/war-room/commander/CommanderOsPanel'
 import { RevenueEnginePanel } from '@/components/war-room/revenue-engine/RevenueEnginePanel'
 import { SignalRadarPanel } from '@/components/war-room/signals/SignalRadarPanel'
 import { KpiGrid } from '@/components/war-room/KpiGrid'
@@ -32,6 +33,7 @@ export default function WarRoomDashboardPage() {
       <RevenueEnginePanel />
       <GrowthCalendarPanel />
       <OutcomeLedgerPanel />
+      <CommanderOsPanel />
       <BuildAgentDivisionPanel />
       <FeatureBuilderPanel />
       <Phase9BLearningPanels />
