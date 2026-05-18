@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DailyBriefingPanel } from './DailyBriefingPanel'
 
 type BabyAiStatus = 'live_persistent' | 'persistent_store' | 'awaiting_data' | 'static_seed' | 'not_connected'
@@ -61,6 +61,20 @@ type BabyAiSnapshot = {
     statusCopy: string
   }
   governanceRules: string[]
+  growthProgress: {
+    state: 'listening' | 'extracting_lesson' | 'awaiting_commander_approval' | 'lesson_stored' | 'skill_improved' | 'blocked_by_missing_outcome' | 'blocked_by_missing_memory_table'
+    progress: number
+    currentLessonCandidate: string
+    needsNext: string
+    readiness: {
+      memory: boolean
+      outcome: boolean
+      signal: boolean
+      provider: boolean
+      futureOnline: boolean
+      futureOffline: boolean
+    }
+  }
   counts: {
     babyAgents: number
     persistedAgents: number | null
@@ -70,7 +84,25 @@ type BabyAiSnapshot = {
   }
 }
 
+type ProviderRuntimeHealth = 'CONNECTED' | 'DEGRADED' | 'MISSING_KEY' | 'RATE_LIMITED' | 'INVALID_KEY'
+
+type ProviderRuntimeSummary = {
+  generatedAt: string
+  providers: Array<{
+    id: string
+    provider: string
+    family: string
+    health: ProviderRuntimeHealth
+  }>
+  signalAvailability: {
+    liveSignalsAvailable: boolean
+  }
+}
+
 function statusColor(status?: string) {
+  if (status === 'CONNECTED') return '#34D399'
+  if (status === 'DEGRADED' || status === 'RATE_LIMITED') return '#FBBF24'
+  if (status === 'INVALID_KEY' || status === 'MISSING_KEY') return status === 'INVALID_KEY' ? '#F87171' : '#A78BFA'
   if (status === 'live_persistent') return '#34D399'
   if (status === 'persistent_store') return '#2DD4BF'
   if (status === 'awaiting_data') return '#FBBF24'
@@ -127,6 +159,7 @@ function SkillBar({ skill }: { skill: BabySkill }) {
 
 export function BabyAiAcademyPanel() {
   const [snapshot, setSnapshot] = useState<BabyAiSnapshot | null>(null)
+  const [providerRuntime, setProviderRuntime] = useState<ProviderRuntimeSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -134,10 +167,16 @@ export function BabyAiAcademyPanel() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/baby-ai/academy', { cache: 'no-store' })
-      const body = await res.json() as BabyAiSnapshot & { error?: string }
-      if (!res.ok) throw new Error(body.error || 'Baby AI Academy snapshot failed')
+      const [academyRes, providerRes] = await Promise.all([
+        fetch('/api/baby-ai/academy', { cache: 'no-store' }),
+        fetch('/api/providers/status', { cache: 'no-store' }),
+      ])
+      const body = await academyRes.json() as BabyAiSnapshot & { error?: string }
+      const providerBody = await providerRes.json() as ProviderRuntimeSummary & { error?: string }
+      if (!academyRes.ok) throw new Error(body.error || 'Baby AI Academy snapshot failed')
+      if (!providerRes.ok) throw new Error(providerBody.error || 'Provider runtime status failed')
       setSnapshot(body)
+      setProviderRuntime(providerBody)
     } catch (err) {
       setSnapshot(null)
       setError(err instanceof Error ? err.message : 'Baby AI Academy snapshot failed')
@@ -156,6 +195,18 @@ export function BabyAiAcademyPanel() {
   const agents = snapshot?.agents ?? []
   const observations = snapshot?.council.observations ?? []
   const latestLessons = snapshot?.latestLessons ?? []
+  const providerByName = useMemo(() => {
+    const pairs = (providerRuntime?.providers ?? []).map(provider => [provider.provider.toLowerCase(), provider] as const)
+    return new Map(pairs)
+  }, [providerRuntime?.providers])
+  const runtimeForAgent = useCallback((agent: BabyAgent) => {
+    const cloud = agent.cloudProvider.toLowerCase()
+    if (cloud.includes('openai') || cloud.includes('chatgpt')) return providerByName.get('openai')
+    if (cloud.includes('anthropic') || cloud.includes('claude')) return providerByName.get('anthropic')
+    if (cloud.includes('google') || cloud.includes('gemini')) return providerByName.get('google gemini')
+    if (cloud.includes('tavily')) return providerByName.get('tavily')
+    return null
+  }, [providerByName])
 
   return (
     <section className="mx-auto mt-14 max-w-6xl border-t border-white/10 pt-10">
@@ -201,6 +252,9 @@ export function BabyAiAcademyPanel() {
           <MiniCard label="Outcomes" value={countLabel(snapshot?.counts.outcomes)} />
         </div>
         <div className="mt-3 rounded border border-sky-500/20 bg-sky-500/5 p-2 text-[10px] leading-relaxed text-sky-100">
+          Provider binding source: /api/providers/status · Baby cards inherit CONNECTED, DEGRADED, MISSING_KEY, INVALID_KEY, or RATE_LIMITED directly from sanitized runtime health. Last provider check: {providerRuntime?.generatedAt ?? 'checking'}.
+        </div>
+        <div className="mt-3 rounded border border-sky-500/20 bg-sky-500/5 p-2 text-[10px] leading-relaxed text-sky-100">
           {snapshot?.cloudOnly.statusCopy ?? 'Baby AI growth is cloud-only and remains available through War Room persistence and approved outcomes.'}
         </div>
       </div>
@@ -214,6 +268,10 @@ export function BabyAiAcademyPanel() {
           <div className="grid gap-3 lg:grid-cols-2">
             {agents.map(agent => (
               <article key={agent.key} className="rounded border border-white/10 bg-black/20 p-3">
+                {(() => {
+                  const runtime = runtimeForAgent(agent)
+                  return (
+                    <>
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <h4 className="font-semibold text-white">{agent.displayName}</h4>
@@ -222,15 +280,19 @@ export function BabyAiAcademyPanel() {
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <Badge status={agent.growthLevel} />
-                    <Badge status={agent.persistence} />
+                    <Badge status={runtime?.health ?? agent.persistence} />
                   </div>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <MiniCard label="Family" value={agent.familyIdentity} />
                   <MiniCard label="Cloud Provider" value={agent.cloudProvider} />
+                  <MiniCard label="Provider Health" value={runtime?.health ?? 'checking'} />
                   <MiniCard label="Confidence" value={pct(agent.confidenceScore)} />
                   <MiniCard label="Usefulness" value={pct(agent.usefulnessScore)} />
                 </div>
+                    </>
+                  )
+                })()}
                 <div className="mt-3 rounded border border-white/10 p-2 text-[10px] text-slate-400">
                   <div><span className="text-slate-500">Memory scope:</span> {agent.memoryScope.join(', ')}</div>
                 </div>
@@ -253,6 +315,18 @@ export function BabyAiAcademyPanel() {
           <section className="rounded border border-teal-500/30 bg-black/25 p-3 text-xs">
             <h3 className="text-[10px] font-bold uppercase tracking-widest text-teal-300">Learning Lifecycle</h3>
             <p className="mt-2 text-[10px] leading-relaxed text-slate-400">{snapshot?.lifecycle.rule ?? 'Lifecycle loading.'}</p>
+            <div className="mt-3 rounded border border-white/10 bg-black/20 p-2">
+              <div className="mb-1 flex items-center justify-between gap-2 text-[9px] text-slate-500">
+                <span>Growth progress: {snapshot?.growthProgress.state.replaceAll('_', ' ') ?? 'checking'}</span>
+                <span>{snapshot?.growthProgress.progress ?? 0}%</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded bg-white/10">
+                <div className="h-full rounded bg-teal-300" style={{ width: `${Math.max(0, Math.min(100, snapshot?.growthProgress.progress ?? 0))}%` }} />
+              </div>
+              <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
+                Lesson candidate: {snapshot?.growthProgress.currentLessonCandidate ?? 'loading'} Needs next: {snapshot?.growthProgress.needsNext ?? 'loading'}.
+              </p>
+            </div>
             <div className="mt-3 flex flex-wrap gap-1">
               {(snapshot?.lifecycle.stages ?? ['seed', 'observing', 'learning', 'useful', 'specialist', 'senior']).map(stage => (
                 <Badge key={stage} status={stage} />

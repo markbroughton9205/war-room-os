@@ -188,10 +188,16 @@ export function SignalRadarPanel() {
       <div className="mb-4 grid gap-3 md:grid-cols-5">
         <MiniMetric label="Configured Sources" value={`${sourceStats.configured}/${sourceStats.total}`} />
         <MiniMetric label="Providers" value={String(sourceStats.providers)} />
+        <MiniMetric label="Migration" value={snapshot?.migrationStatus ?? 'checking'} />
         <MiniMetric label="Latest Scan" value={snapshot?.latestScan?.status ?? 'none'} />
         <MiniMetric label="Results" value={String(snapshot?.results.length ?? 0)} />
-        <MiniMetric label="Low Confidence" value={String(snapshot?.rejectedOrLowConfidence.length ?? 0)} />
       </div>
+
+      {snapshot?.migrationStatus === 'MIGRATION_REQUIRED' ? (
+        <div className="mb-4 rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-100">
+          MIGRATION_REQUIRED: apply `supabase/war_room_phase14_signals.sql` or `supabase/war_room_phase17_signal_schema_cache_patch.sql`, then reload the Supabase/PostgREST schema cache. No fake signal rows are shown.
+        </div>
+      ) : null}
 
       <section className="mb-4 rounded border border-cyan-400/30 bg-cyan-400/5 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">

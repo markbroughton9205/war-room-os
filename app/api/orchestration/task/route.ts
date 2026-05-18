@@ -4,6 +4,7 @@ import { enqueueOrchestrationTask, getOrchestrationQueueDepth, runNextOrchestrat
 import { isOrchestrationTaskKind } from '@/lib/orchestration/types'
 import { fetchWarRoomPermissionsState } from '@/lib/war-room/permissionsState'
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { setLastOrchestrationStepResult } from '@/lib/war-room/diagnostics'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -71,13 +72,30 @@ export async function POST(req: Request) {
     maxSteps,
     correlationId,
   })
+  setLastOrchestrationStepResult({
+    generatedAt: new Date().toISOString(),
+    taskId: enq.task.id,
+    kind: enq.task.kind,
+    steps: ran.steps,
+    ok: ran.steps.every(step => step.ok),
+  })
 
   return jsonWithPersistence(
     {
       ok: true,
+      message: ran.steps.every(step => step.ok)
+        ? 'One bounded orchestration step completed and was logged to the system ledger/activity stream. No shell, file mutation, deployment, spend, outreach, or hidden action was performed.'
+        : 'One bounded orchestration step finished with a failure. The failure was logged to the system ledger/activity stream.',
       task: enq.task,
       steps: ran.steps,
       queueDepth: getOrchestrationQueueDepth(),
+      guardrails: {
+        shellExecuted: false,
+        fileMutationPerformed: false,
+        deploymentPerformed: false,
+        spendOrOutreachPerformed: false,
+        hiddenActionPerformed: false,
+      },
     },
     sup.ok,
     { status: 201 },

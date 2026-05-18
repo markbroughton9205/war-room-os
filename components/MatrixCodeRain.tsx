@@ -22,7 +22,7 @@ function pickChar() {
 
 function makeStreams(width: number, height: number) {
   const fontSize = width < 640 ? 13 : 15
-  const columnWidth = fontSize * 1.35
+  const columnWidth = fontSize * 2
   const columnCount = Math.ceil(width / columnWidth)
 
   return Array.from({ length: columnCount }, (_, index): Stream => {
@@ -63,7 +63,7 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
     const context = canvas.getContext('2d', { alpha: true })
     if (!context) return
 
-    const maxDpr = 1.5
+    const maxDpr = 1
     const resize = () => {
       const width = window.innerWidth
       const height = window.innerHeight
@@ -87,7 +87,7 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
       const width = window.innerWidth
       const height = window.innerHeight
       const delta = Math.min(48, time - (lastTimeRef.current || time))
-      if (delta < 30) {
+      if (delta < 50) {
         rafRef.current = window.requestAnimationFrame(draw)
         return
       }

@@ -36,6 +36,20 @@ export type BabyAiAcademySnapshot = {
     statusCopy: string
   }
   governanceRules: string[]
+  growthProgress: {
+    state: 'listening' | 'extracting_lesson' | 'awaiting_commander_approval' | 'lesson_stored' | 'skill_improved' | 'blocked_by_missing_outcome' | 'blocked_by_missing_memory_table'
+    progress: number
+    currentLessonCandidate: string
+    needsNext: string
+    readiness: {
+      memory: boolean
+      outcome: boolean
+      signal: boolean
+      provider: boolean
+      futureOnline: boolean
+      futureOffline: boolean
+    }
+  }
   counts: {
     babyAgents: number
     persistedAgents: number | null
@@ -66,6 +80,61 @@ function countFor(tables: BabyAiTableSummary[], table: string): number | null {
   return tables.find(item => item.table === table)?.records ?? null
 }
 
+function buildGrowthProgress(input: {
+  tables: BabyAiTableSummary[]
+  latestLessons: string[]
+  persistenceAvailable: boolean
+}): BabyAiAcademySnapshot['growthProgress'] {
+  const memoryCount = countFor(input.tables, 'war_room_baby_agent_memories')
+  const outcomeCount = countFor(input.tables, 'war_room_baby_agent_outcomes')
+  const trainingCount = countFor(input.tables, 'war_room_baby_agent_training_events')
+  const memoryReady = typeof memoryCount === 'number'
+  const outcomeReady = typeof outcomeCount === 'number'
+  const hasLesson = input.latestLessons.length > 0
+  const state: BabyAiAcademySnapshot['growthProgress']['state'] = !input.persistenceAvailable || !memoryReady
+    ? 'blocked_by_missing_memory_table'
+    : !outcomeReady
+      ? 'blocked_by_missing_outcome'
+      : hasLesson && outcomeCount > 0
+        ? 'skill_improved'
+        : hasLesson
+          ? 'lesson_stored'
+          : trainingCount && trainingCount > 0
+            ? 'awaiting_commander_approval'
+            : 'listening'
+  const base = state === 'blocked_by_missing_memory_table' ? 10
+    : state === 'blocked_by_missing_outcome' ? 25
+      : state === 'listening' ? 35
+        : state === 'awaiting_commander_approval' ? 55
+          : state === 'lesson_stored' ? 75
+            : 90
+
+  return {
+    state,
+    progress: base,
+    currentLessonCandidate: input.latestLessons[0] ?? 'Awaiting a Commander-approved outcome or rejected-plan correction.',
+    needsNext: state === 'skill_improved'
+      ? 'Validate the improved skill against a real outcome before raising autonomy.'
+      : state === 'lesson_stored'
+        ? 'Connect the lesson to a measured outcome.'
+        : state === 'awaiting_commander_approval'
+          ? 'Commander approval or rejection for the extracted lesson.'
+          : state === 'blocked_by_missing_memory_table'
+            ? 'Apply Baby AI memory migration before lessons can persist.'
+            : state === 'blocked_by_missing_outcome'
+              ? 'Create or repair the Baby AI outcome table before skill growth can complete.'
+              : 'More Live Council conversation, approved outcomes, rejected plans, and Commander corrections.',
+    readiness: {
+      memory: memoryReady,
+      outcome: outcomeReady,
+      signal: false,
+      provider: false,
+      futureOnline: input.persistenceAvailable,
+      futureOffline: false,
+    },
+  }
+}
+
 export async function buildBabyAiAcademySnapshot(): Promise<BabyAiAcademySnapshot> {
   const generatedAt = new Date().toISOString()
   const sup = tryWarRoomSupabase()
@@ -76,6 +145,7 @@ export async function buildBabyAiAcademySnapshot(): Promise<BabyAiAcademySnapsho
     listLatestBabyLessons(client),
   ])
   const status = overallStatus(tables, sup.ok)
+  const growthProgress = buildGrowthProgress({ tables, latestLessons, persistenceAvailable: sup.ok })
 
   return {
     generatedAt,
@@ -104,6 +174,7 @@ export async function buildBabyAiAcademySnapshot(): Promise<BabyAiAcademySnapsho
       statusCopy: 'Baby AI growth uses War Room persistence, approved outcomes, and cloud provider families only. No offline connector stack is used.',
     },
     governanceRules: babyAiGovernanceRules(),
+    growthProgress,
     counts: {
       babyAgents: BABY_AI_AGENTS.length,
       persistedAgents: countFor(tables, 'war_room_baby_agents'),

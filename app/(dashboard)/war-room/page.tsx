@@ -13,6 +13,7 @@ import { GrowthCalendarPanel } from '@/components/war-room/growth-calendar/Growt
 import { OutcomeLedgerPanel } from '@/components/war-room/outcomes/OutcomeLedgerPanel'
 import { CommanderOsPanel } from '@/components/war-room/commander/CommanderOsPanel'
 import { ProviderRuntimePanel } from '@/components/war-room/providers/ProviderRuntimePanel'
+import { ProductionDiagnosticsPanel } from '@/components/war-room/diagnostics/ProductionDiagnosticsPanel'
 import { RevenueEnginePanel } from '@/components/war-room/revenue-engine/RevenueEnginePanel'
 import { SignalRadarPanel } from '@/components/war-room/signals/SignalRadarPanel'
 import { KpiGrid } from '@/components/war-room/KpiGrid'
@@ -31,6 +32,7 @@ export default function WarRoomDashboardPage() {
       <AnalystOperationsPanel compact />
       <EconomicOperationsPanel />
       <ProviderRuntimePanel />
+      <ProductionDiagnosticsPanel />
       <SignalRadarPanel />
       <RevenueEnginePanel />
       <GrowthCalendarPanel />

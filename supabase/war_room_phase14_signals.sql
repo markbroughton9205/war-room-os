@@ -281,3 +281,5 @@ grant select, insert, update, delete on table public.war_room_signal_scans to se
 grant select, insert, update, delete on table public.war_room_signal_results to service_role;
 grant select, insert, update, delete on table public.war_room_signal_scores to service_role;
 grant select, insert, update, delete on table public.war_room_signal_alerts to service_role;
+
+select pg_notify('pgrst', 'reload schema');

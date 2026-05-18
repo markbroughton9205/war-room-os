@@ -152,6 +152,7 @@ export type SignalSnapshot = {
   generatedAt: string
   persistenceAvailable: boolean
   persistenceNote: string
+  migrationStatus: 'READY' | 'MIGRATION_REQUIRED' | 'UNAVAILABLE'
   sources: SignalSourceDefinition[]
   latestScan: SignalScan | null
   results: SignalResult[]

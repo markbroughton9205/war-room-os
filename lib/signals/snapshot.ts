@@ -81,6 +81,7 @@ export function buildSignalSnapshot(input: {
   generatedAt: string
   persistenceAvailable: boolean
   persistenceNote: string
+  migrationStatus?: SignalSnapshot['migrationStatus']
   sources: SignalSourceDefinition[]
   latestScan: SignalScan | null
   results: SignalResult[]
@@ -93,6 +94,7 @@ export function buildSignalSnapshot(input: {
     generatedAt: input.generatedAt,
     persistenceAvailable: input.persistenceAvailable,
     persistenceNote: input.persistenceNote,
+    migrationStatus: input.migrationStatus ?? (input.persistenceAvailable ? 'READY' : 'UNAVAILABLE'),
     sources: input.sources,
     latestScan: input.latestScan,
     results: sourceBacked,

@@ -30,6 +30,7 @@ export function Phase4WarRoomPanels({ uiMode }: { uiMode: WarRoomUiMode }) {
   const [runBusy, setRunBusy] = useState<string | null>(null)
 
   const [orchOut, setOrchOut] = useState<string | null>(null)
+  const [orchMessage, setOrchMessage] = useState<string | null>(null)
   const [orchBusy, setOrchBusy] = useState(false)
 
   const [permSnap, setPermSnap] = useState<{ mode: StandingPermissionMode; safetyLock: boolean } | null>(null)
@@ -115,6 +116,7 @@ export function Phase4WarRoomPanels({ uiMode }: { uiMode: WarRoomUiMode }) {
   const runOrchestration = async () => {
     setOrchBusy(true)
     setOrchOut(null)
+    setOrchMessage(null)
     try {
       const gate = standingPostExtra('route_planning')
       if (!gate.proceed) {
@@ -129,10 +131,13 @@ export function Phase4WarRoomPanels({ uiMode }: { uiMode: WarRoomUiMode }) {
       })
       setPersistence(readPersistence(res))
       const j = await res.json()
+      setOrchMessage(typeof j.message === 'string' ? j.message : res.ok ? 'Bounded orchestration step completed.' : 'Orchestration step failed.')
       setOrchOut(JSON.stringify(j, null, 2))
       void loadEvents()
     } catch (e) {
-      setOrchOut(e instanceof Error ? e.message : 'orchestration failed')
+      const message = e instanceof Error ? e.message : 'orchestration failed'
+      setOrchMessage(message)
+      setOrchOut(message)
     } finally {
       setOrchBusy(false)
     }
@@ -144,6 +149,7 @@ export function Phase4WarRoomPanels({ uiMode }: { uiMode: WarRoomUiMode }) {
       <button type="button" className="mb-2 rounded px-2 py-1 text-[10px] font-bold" style={{ background: '#1D4ED8', color: '#fff' }} disabled={orchBusy} onClick={() => void runOrchestration()}>
         {orchBusy ? 'RUNNING…' : 'RUN ORCHESTRATION STEP'}
       </button>
+      {orchMessage ? <p className="mb-2 rounded border border-white/10 bg-black/25 p-2 text-[10px]" style={{ color: '#BAE6FD' }}>{orchMessage}</p> : null}
       <textarea className="h-32 w-full rounded bg-black px-2 py-1 font-mono text-[9px]" style={{ border: '1px solid #333', color: '#94a3b8' }} readOnly value={orchOut ?? ''} placeholder="Last orchestration response (JSON)" />
     </>
   )

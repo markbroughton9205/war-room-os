@@ -68,7 +68,7 @@ function numberMeta(value: unknown): number {
 function expiringProviderLabel(enabled: boolean, updatedAt: string | null, nowMs: number | null): string {
   const updatedAtMs = updatedAt ? new Date(updatedAt).getTime() : 0
   if (!updatedAtMs || !nowMs || nowMs - updatedAtMs > 30 * 60 * 1000) return 'STALE'
-  return enabled ? 'ONLINE' : 'OFFLINE'
+  return enabled ? 'CONFIGURED' : 'OFFLINE'
 }
 
 export function EconomicOperationsPanel() {

@@ -23,13 +23,18 @@ export async function POST() {
       },
     })
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Signal scan failed.'
+    const migrationRequired = /schema cache|could not find table|relation .*war_room_signal_|war_room_signal_sources/i.test(message)
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : 'Signal scan failed.',
+        error: migrationRequired
+          ? 'MIGRATION_REQUIRED: Phase 14 signal tables are missing from Supabase schema cache. Apply supabase/war_room_phase14_signals.sql or the phase17 patch, then reload PostgREST schema.'
+          : message,
+        migrationStatus: migrationRequired ? 'MIGRATION_REQUIRED' : 'UNAVAILABLE',
         approvalRequired: true,
         canExecuteExternalActions: false,
       },
-      { status: 500 },
+      { status: migrationRequired ? 503 : 500 },
     )
   }
 }

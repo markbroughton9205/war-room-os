@@ -1539,10 +1539,9 @@ function ToolStatusPanel({
         {TOOL_REGISTRY.map(tool => {
           const label = activity[tool.id] ?? health[tool.id] ?? '—'
           const tone = toolBarTone(label)
-          const tooltipSynonym =
-            label === 'ONLINE' && tool.id === 'memory'
-              ? ' (memory store reachable; same as API complete)'
-              : ''
+          const tooltipSynonym = label === 'REACHABLE' && tool.id === 'memory'
+            ? ' (memory store reachable; same as API complete)'
+            : ''
 
           return (
             <div key={tool.id}
@@ -2568,7 +2567,7 @@ const ScoutDiagnosticsPanel = memo(function ScoutDiagnosticsPanel({ diagnostics 
   }, [])
   const updatedAtMs = diagnostics.last_updated_at ? new Date(diagnostics.last_updated_at).getTime() : 0
   const stale = !updatedAtMs || !nowMs || nowMs - updatedAtMs > 30 * 60 * 1000
-  const label = (enabled: boolean) => stale ? 'STALE' : enabled ? 'ONLINE' : 'OFFLINE'
+  const label = (enabled: boolean) => stale ? 'STALE' : enabled ? 'CONFIGURED' : 'OFFLINE'
   const color = (enabled: boolean) => stale ? '#94A3B8' : enabled ? '#34D399' : '#FBBF24'
 
   return (
@@ -3688,6 +3687,38 @@ function AgentGrowthTrainingPanel() {
 }
 
 function EngineeringLaneManualPanel({ latest }: { latest: EngineeringTaskPacket | null }) {
+  const [generated, setGenerated] = useState<EngineeringTaskPacket | null>(null)
+  const [source, setSource] = useState<string>('not_generated')
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const packet = generated ?? latest
+  const generatePacket = async () => {
+    if (busy) return
+    setBusy(true)
+    setNotice(null)
+    try {
+      const res = await fetch('/api/engineering/task-packet', { cache: 'no-store' })
+      const body = await res.json() as { packet?: EngineeringTaskPacket; diagnostics?: { packetSource?: string }; error?: string }
+      if (!res.ok || !body.packet) throw new Error(body.error || 'Engineering task packet generation failed')
+      setGenerated(body.packet)
+      setSource(body.diagnostics?.packetSource ?? body.packet.packetSource)
+      setNotice('Cursor task packet generated for manual copy only. War Room did not invoke Cursor or mutate files.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Engineering task packet generation failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const copyPacket = async () => {
+    if (!packet) return
+    try {
+      await navigator.clipboard.writeText(packet.cursorCommand)
+      setNotice('Cursor task packet copied. Manual approval/execution remains outside War Room.')
+    } catch {
+      setNotice('Clipboard unavailable; use the visible packet text. War Room did not invoke Cursor.')
+    }
+  }
+
   return (
     <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(52,211,153,0.014)' }}>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -3695,15 +3726,27 @@ function EngineeringLaneManualPanel({ latest }: { latest: EngineeringTaskPacket 
           <h2 className="text-xs font-bold tracking-widest" style={{ color: '#86EFAC' }}>ENGINEERING LANE: CURSOR MANUAL ONLY</h2>
           <p className="mt-1 text-xs" style={{ color: '#777' }}>War Room may prepare task packets, validation expectations, and review prompts. Code edits, commits, pushes, and deployments stay in the manual Cursor workspace lane.</p>
         </div>
-        <span className="rounded px-3 py-2 text-[10px] font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.32)', color: '#BBF7D0', background: 'rgba(0,0,0,0.28)' }}>Manual workspace</span>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void generatePacket()} disabled={busy} className="rounded px-3 py-2 text-[10px] font-bold tracking-widest disabled:opacity-50" style={{ border: '1px solid rgba(52,211,153,0.32)', color: '#BBF7D0', background: 'rgba(0,0,0,0.28)' }}>{busy ? 'Preparing...' : 'Generate Packet'}</button>
+          <button type="button" onClick={() => void copyPacket()} disabled={!packet} className="rounded px-3 py-2 text-[10px] font-bold tracking-widest disabled:opacity-50" style={{ border: '1px solid rgba(56,189,248,0.32)', color: '#BAE6FD', background: 'rgba(0,0,0,0.28)' }}>Copy Packet</button>
+        </div>
       </div>
+      {notice ? <div className="mb-2 rounded border border-white/10 bg-black/25 px-3 py-2 text-[10px]" style={{ color: '#BAE6FD' }}>{notice}</div> : null}
       <div className="rounded px-3 py-3 text-xs" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
-        {latest ? (
+        {packet ? (
           <div className="space-y-1" style={{ color: '#CBD5E1' }}>
-            <div className="font-bold" style={{ color: '#E0F2FE' }}>{latest.title}</div>
-            <div>Executor: {latest.assignedExecutorLabel}</div>
-            <div>Status: {latest.status}</div>
-            <div>Rollback: {latest.rollbackRecommendation}</div>
+            <div className="font-bold" style={{ color: '#E0F2FE' }}>{packet.title}</div>
+            <div>Executor: {packet.assignedExecutorLabel}</div>
+            <div>Approval status: {packet.approvalStatus}</div>
+            <div>Packet source: {source === 'not_generated' ? packet.packetSource : source}</div>
+            <div>Last generated: {packet.createdAt}</div>
+            <div>Rollback: {packet.rollbackRecommendation}</div>
+            <div className="mt-2 grid gap-2 md:grid-cols-3">
+              <div className="rounded border border-white/10 p-2">Validation checklist: {packet.validationChecklist.slice(0, 2).join(' | ')}</div>
+              <div className="rounded border border-white/10 p-2">Risk notes: {packet.riskNotes.slice(0, 2).join(' | ')}</div>
+              <div className="rounded border border-white/10 p-2">Boundary: no direct Cursor API execution or autonomous code mutation.</div>
+            </div>
+            <textarea readOnly value={packet.cursorCommand} className="mt-2 h-36 w-full resize-y rounded bg-black/40 p-2 font-mono text-[10px] outline-none" style={{ border: '1px solid rgba(56,189,248,0.18)', color: '#CBD5E1' }} />
           </div>
         ) : <div style={{ color: '#777' }}>No Cursor task packet prepared yet.</div>}
       </div>
@@ -3978,6 +4021,73 @@ const LiveCouncilHealthBadgesRow = memo(function LiveCouncilHealthBadgesRow({
       <span className="rounded border border-white/10 px-2 py-1">Persistence: {persistenceHealthLabel}</span>
       <span className="rounded border border-white/10 px-2 py-1">Internet: {internetHealthLabel}</span>
     </div>
+  )
+})
+
+const LiveCouncilBabyObserverLane = memo(function LiveCouncilBabyObserverLane({
+  memoryCount,
+  pendingApprovals,
+  opportunityCount,
+  providerReady,
+}: {
+  memoryCount: number
+  pendingApprovals: number
+  opportunityCount: number
+  providerReady: boolean
+}) {
+  const hasMemory = memoryCount > 0
+  const hasOutcomeCue = pendingApprovals > 0 || opportunityCount > 0
+  const progress = providerReady
+    ? hasMemory && hasOutcomeCue ? 72 : hasMemory ? 52 : 34
+    : 18
+  const state = !providerReady
+    ? 'blocked by provider readiness'
+    : hasMemory && hasOutcomeCue
+      ? 'extracting lesson'
+      : hasMemory
+        ? 'listening'
+        : 'blocked by missing memory table'
+  const readiness = [
+    `memory ${hasMemory ? 'ready' : 'missing'}`,
+    `outcome ${hasOutcomeCue ? 'ready' : 'awaiting'}`,
+    `signal ${opportunityCount > 0 ? 'ready' : 'awaiting'}`,
+    `provider ${providerReady ? 'ready' : 'degraded'}`,
+    'future online ready',
+    'future offline not enabled',
+  ]
+
+  return (
+    <section className="mt-3 rounded border border-sky-500/20 bg-sky-500/5 p-3 text-[10px]" style={{ color: '#BAE6FD' }}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="font-bold uppercase tracking-widest" style={{ color: '#67E8F9' }}>Baby AI Observer</div>
+          <p className="mt-1 leading-relaxed" style={{ color: '#94A3B8' }}>
+            Observes Live Council conversation, approved outcomes, rejected plans, Commander corrections, Feature Builder packets, Revenue Engine moves, Signal Radar rows, and Outcome Ledger results. Observe/propose only.
+          </p>
+        </div>
+        <span className="rounded border border-sky-300/30 px-2 py-1 font-bold uppercase tracking-widest">{state}</span>
+      </div>
+      <div className="mt-2">
+        <div className="mb-1 flex justify-between gap-2" style={{ color: '#64748B' }}>
+          <span>Learning progress</span>
+          <span>{progress}%</span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded bg-white/10">
+          <div className="h-full rounded bg-sky-300" style={{ width: `${progress}%` }} />
+        </div>
+      </div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <div className="rounded border border-white/10 bg-black/20 p-2">
+          Current lesson candidate: {hasOutcomeCue ? 'Compare council recommendation with approval/outcome evidence.' : 'Waiting for outcome or Commander correction before lesson storage.'}
+        </div>
+        <div className="rounded border border-white/10 bg-black/20 p-2">
+          Needs next: {providerReady ? 'Commander approval, rejection, or measured outcome.' : 'Provider health recovery from sanitized runtime status.'}
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1" style={{ color: '#94A3B8' }}>
+        {readiness.map(item => <span key={item} className="rounded border border-white/10 px-2 py-0.5">{item}</span>)}
+      </div>
+    </section>
   )
 })
 
@@ -5897,20 +6007,16 @@ function Home() {
       if (!res.ok) throw new Error(data.message || 'Provider health check failed')
       const prov = data.providers ?? INITIAL_PROVIDER_HEALTH.providers
       const lab = data.labels ?? INITIAL_PROVIDER_HEALTH.labels
-      const { gemini: _gp, ...provOther } = prov
-      const { gemini: _gl, ...labOther } = lab
-      void _gp
-      void _gl
       setProviderHealth(prev => ({
         providers: {
           ...INITIAL_PROVIDER_HEALTH.providers,
-          ...provOther,
-          gemini: prev.providers.gemini,
+          ...prev.providers,
+          ...prov,
         },
         labels: {
           ...INITIAL_PROVIDER_HEALTH.labels,
-          ...labOther,
-          gemini: prev.labels.gemini,
+          ...prev.labels,
+          ...lab,
         },
       }))
     } catch {
@@ -9046,7 +9152,7 @@ function Home() {
               border: operatorTab === tab ? '1px solid #FFD700' : '1px solid #333',
               color: operatorTab === tab ? '#FFD700' : '#888',
             }}
-            onClick={() => setOperatorTab(tab)}
+            onClick={() => startTransition(() => setOperatorTab(tab))}
           >
             {label}
           </button>
@@ -9269,6 +9375,12 @@ function Home() {
             providerHealthLabel={providerHealthLabel}
             persistenceHealthLabel={persistenceHealthLabel}
             internetHealthLabel={internetHealthLabel}
+          />
+          <LiveCouncilBabyObserverLane
+            memoryCount={memories.length}
+            pendingApprovals={raelActions.filter(action => action.status === 'pending').length}
+            opportunityCount={incomeOpportunities.length}
+            providerReady={coreProviderStates.some(status => status === 'online' || status === 'standby')}
           />
           <div className="mt-1">
             <RuntimeContinuityIndicator

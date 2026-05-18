@@ -32,6 +32,10 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
+function signalMigrationRequired(message: string): boolean {
+  return /schema cache|could not find table|relation .*war_room_signal_|war_room_signal_sources/i.test(message)
+}
+
 function arrayValue(value: unknown): string[] {
   return Array.isArray(value) ? value.map(item => String(item)).filter(Boolean) : []
 }
@@ -254,7 +258,7 @@ export async function persistSignalScan(input: {
 
   return {
     persistenceAvailable: true,
-    persistenceNote: 'Signal sources, scan, results, scores, and alerts persisted with service-role access.',
+    persistenceNote: 'Signal sources, scan, results, scores, and alerts persisted through a server-only route.',
   }
 }
 
@@ -266,6 +270,7 @@ export async function listPersistedSignalSnapshot(limit = 40): Promise<SignalSna
       generatedAt,
       persistenceAvailable: false,
       persistenceNote: `Supabase unavailable: ${supabase.configError}`,
+      migrationStatus: 'UNAVAILABLE',
       sources: getSignalSources(),
       latestScan: null,
       results: [],
@@ -282,10 +287,14 @@ export async function listPersistedSignalSnapshot(limit = 40): Promise<SignalSna
 
   const firstError = [sources.error, scans.error, results.error, alerts.error].find(Boolean)
   if (firstError) {
+    const migrationRequired = signalMigrationRequired(firstError.message)
     return buildSignalSnapshot({
       generatedAt,
-      persistenceAvailable: true,
-      persistenceNote: `Signal tables unavailable or not migrated: ${firstError.message}`,
+      persistenceAvailable: !migrationRequired,
+      persistenceNote: migrationRequired
+        ? `MIGRATION_REQUIRED: Phase 14 signal tables are missing from Supabase schema cache. Apply supabase/war_room_phase14_signals.sql or the phase17 patch, then reload PostgREST schema.`
+        : `Signal tables unavailable: ${firstError.message}`,
+      migrationStatus: migrationRequired ? 'MIGRATION_REQUIRED' : 'UNAVAILABLE',
       sources: getSignalSources(),
       latestScan: null,
       results: [],
@@ -297,6 +306,7 @@ export async function listPersistedSignalSnapshot(limit = 40): Promise<SignalSna
     generatedAt,
     persistenceAvailable: true,
     persistenceNote: 'Signal persistence is available.',
+    migrationStatus: 'READY',
     sources: ((sources.data ?? []) as Row[]).map(mapSource),
     latestScan: ((scans.data ?? []) as Row[]).map(mapScan)[0] ?? null,
     results: ((results.data ?? []) as Row[]).map(mapResult),

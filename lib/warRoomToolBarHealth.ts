@@ -2,7 +2,8 @@ import type { ToolId } from '@/lib/tools/toolRegistry'
 
 export type ToolBarLabel =
   | '—'
-  | 'ONLINE'
+  | 'READY'
+  | 'REACHABLE'
   | 'STANDBY'
   | 'COMPLETE'
   | 'PARTIAL'
@@ -50,7 +51,7 @@ export async function fetchToolBarHealth(): Promise<Record<ToolId, ToolBarLabel>
   try {
     const j = await memoryRes.json()
     if (memoryRes.ok && j.healthy) {
-      next.memory = 'ONLINE'
+      next.memory = 'REACHABLE'
     } else {
       next.memory = 'ERROR'
     }
@@ -63,7 +64,7 @@ export async function fetchToolBarHealth(): Promise<Record<ToolId, ToolBarLabel>
     if (!filesRes.ok) {
       next.files = 'ERROR'
     } else if (j.configured && j.bucketReady && j.tableReady) {
-      next.files = j.uploading ? 'ACTIVE' : 'ONLINE'
+      next.files = j.uploading ? 'ACTIVE' : 'READY'
     } else {
       next.files = 'CONFIG NEEDED'
     }
@@ -106,7 +107,7 @@ export async function fetchToolBarHealth(): Promise<Record<ToolId, ToolBarLabel>
     } else if (j.scanning) {
       next.repo = 'SCANNING'
     } else {
-      next.repo = 'ONLINE'
+      next.repo = 'READY'
     }
   } catch {
     next.repo = 'ERROR'
@@ -125,7 +126,7 @@ export async function fetchToolBarHealth(): Promise<Record<ToolId, ToolBarLabel>
     next.deployments = 'ERROR'
   }
 
-  next.build = buildRes.ok ? 'ONLINE' : 'ERROR'
+  next.build = buildRes.ok ? 'READY' : 'ERROR'
 
   return next
 }
