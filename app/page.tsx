@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, useMemo, memo, startTransition } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, memo, startTransition, useDeferredValue } from 'react'
 import type { FormEvent } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
 import { APPROVAL_RISK_GATES, SECURE_APPROVAL_RISKS } from '@/lib/kernel/approvals'
 import { KERNEL_EVENT_SCHEMA, KERNEL_EVENT_TYPES } from '@/lib/kernel/events'
@@ -177,10 +178,17 @@ import type {
 import { createEngineeringTaskPacket, type EngineeringTaskPacket } from '@/lib/engineering/engineeringTaskPacket'
 import { createAnalystOperationsPacket, type AnalystOperationsPacket } from '@/lib/analysts/analystOutcomeEvaluator'
 import { createProjectOrchestrationPacket, type ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
-import { RepairPacketPanel } from '@/components/war-room/engineering/RepairPacketPanel'
 import type { CouncilRepairPacket } from '@/lib/council-repair'
+import {
+  COUNCIL_OUTPUT_MODES,
+  buildCouncilOutputModeInstruction,
+  compressCouncilOutput,
+  councilOutputModeLabel,
+  type CouncilCompressedSummary,
+  type CouncilOutputMode,
+} from '@/lib/council/compression'
 
-export type OperatorTab = 'command' | 'income' | 'agents' | 'analysts' | 'approvals' | 'memory' | 'system' | 'diagnostics'
+export type OperatorTab = 'command' | 'income' | 'agents' | 'analysts' | 'approvals' | 'memory' | 'system' | 'engineering' | 'diagnostics'
 
 const OPERATOR_TABS: { id: OperatorTab; label: string }[] = [
   { id: 'command', label: 'Command Center' },
@@ -190,10 +198,25 @@ const OPERATOR_TABS: { id: OperatorTab; label: string }[] = [
   { id: 'approvals', label: 'Approvals' },
   { id: 'memory', label: 'Memory' },
   { id: 'system', label: 'System Health' },
+  { id: 'engineering', label: 'Engineering View' },
   { id: 'diagnostics', label: 'Diagnostics' },
 ]
 
 const TOOLBAR_HEALTH_POLL_INTERVAL_MS = 120_000
+
+const ENGINEERING_TABS: OperatorTab[] = ['agents', 'analysts', 'system', 'engineering', 'diagnostics']
+
+const RepairPacketPanel = dynamic(
+  () => import('@/components/war-room/engineering/RepairPacketPanel').then(mod => mod.RepairPacketPanel),
+  {
+    ssr: false,
+    loading: () => (
+      <section className="rounded border border-sky-500/20 bg-black/20 p-3 text-[10px] tracking-widest text-sky-200">
+        Repair packets loading on demand.
+      </section>
+    ),
+  },
+)
 
 type CouncilMessage = {
   id: string
@@ -1504,6 +1527,166 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
         />
       ))}
     </>
+  )
+})
+
+function EvidencePill({ weight }: { weight: CouncilCompressedSummary['evidence'][number]['evidenceWeight'] }) {
+  const color =
+    weight === 'verified'
+      ? '#34D399'
+      : weight === 'source-backed'
+        ? '#38BDF8'
+        : weight === 'inferred'
+          ? '#FBBF24'
+          : weight === 'uncertain'
+            ? '#A78BFA'
+            : '#F87171'
+  return (
+    <span className="rounded px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest" style={{ border: `1px solid ${color}66`, color }}>
+      {weight}
+    </span>
+  )
+}
+
+const CompressedCouncilPanel = memo(function CompressedCouncilPanel({
+  summary,
+  onGenerateRepairPacket,
+  onGenerateRevenuePacket,
+  onSaveLessonCandidate,
+}: {
+  summary: CouncilCompressedSummary
+  onGenerateRepairPacket: () => void
+  onGenerateRevenuePacket: () => void
+  onSaveLessonCandidate: () => void
+}) {
+  const isBrief = summary.mode === 'brief'
+  const bullets = isBrief
+    ? [
+        `Priority: ${summary.nextAction}`,
+        `Risk: ${summary.risk.summary}`,
+        `Evidence: ${summary.evidence[0]?.text ?? 'No current evidence note.'}`,
+        ...summary.decisionSummary.slice(0, 2),
+      ].slice(0, 5)
+    : summary.decisionSummary
+
+  return (
+    <section className="mt-3 rounded border border-emerald-500/20 bg-emerald-950/10 p-3 text-xs">
+      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>
+            Compressed Council Intelligence · {councilOutputModeLabel(summary.mode)}
+          </div>
+          <p className="mt-1 text-[10px]" style={{ color: '#94A3B8' }}>
+            Duplicate findings collapsed: {summary.duplicateReduction.rawFindingCount} raw to {summary.duplicateReduction.collapsedFindingCount} shared.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {summary.repairPacket?.applicable ? (
+            <button type="button" onClick={onGenerateRepairPacket} className="rounded px-2 py-1 text-[9px] font-bold tracking-widest" style={{ border: '1px solid rgba(14,165,233,0.45)', color: '#BAE6FD' }}>
+              Generate Repair Packet
+            </button>
+          ) : null}
+          {summary.revenuePacket?.applicable ? (
+            <button type="button" onClick={onGenerateRevenuePacket} className="rounded px-2 py-1 text-[9px] font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.45)', color: '#A7F3D0' }}>
+              Generate Revenue Action Packet
+            </button>
+          ) : null}
+          {summary.evidence.some(item => /lesson|pattern|durable|remember/i.test(item.text)) ? (
+            <button type="button" onClick={onSaveLessonCandidate} className="rounded px-2 py-1 text-[9px] font-bold tracking-widest" style={{ border: '1px solid rgba(167,139,250,0.45)', color: '#DDD6FE' }}>
+              Save Lesson Candidate
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(16rem,0.65fr)]">
+        <div>
+          <div className="mb-1 text-[9px] font-bold uppercase tracking-widest" style={{ color: '#D1FAE5' }}>Decision Summary</div>
+          <ul className="space-y-1" style={{ color: '#E5E7EB' }}>
+            {bullets.map((item, index) => <li key={`${index}-${item}`}>- {item}</li>)}
+          </ul>
+        </div>
+        <div className="rounded border border-white/10 bg-black/20 p-2">
+          <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#FDE68A' }}>Next Action</div>
+          <p className="mt-1" style={{ color: '#F8FAFC' }}>{summary.nextAction}</p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            <span className="rounded border border-white/10 px-1.5 py-0.5 text-[8px] uppercase tracking-widest" style={{ color: '#CBD5E1' }}>
+              risk {summary.risk.level}
+            </span>
+            <span className="rounded border border-white/10 px-1.5 py-0.5 text-[8px] uppercase tracking-widest" style={{ color: '#CBD5E1' }}>
+              {summary.risk.redTeamCalibration.replaceAll('_', ' ')}
+            </span>
+          </div>
+        </div>
+      </div>
+      {summary.evidence.length ? (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {summary.evidence.slice(0, summary.mode === 'deep' ? 6 : 4).map(item => (
+            <article key={item.id} className="rounded border border-white/10 bg-black/20 p-2">
+              <div className="mb-1 flex flex-wrap items-center gap-1">
+                <EvidencePill weight={item.evidenceWeight} />
+                <span className="text-[8px] uppercase tracking-widest" style={{ color: '#64748B' }}>
+                  {item.supportingFamilies.join(' + ')}
+                </span>
+              </div>
+              <p style={{ color: '#CBD5E1' }}>{item.text}</p>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  )
+})
+
+const OperatorMissionView = memo(function OperatorMissionView({
+  summary,
+  systemState,
+  activeRepairTitle,
+  topRevenueOpportunity,
+  todayGrowthBlock,
+  urgentWarning,
+  nextApprovedAction,
+  onOpenEngineering,
+}: {
+  summary: CouncilCompressedSummary
+  systemState: string
+  activeRepairTitle: string
+  topRevenueOpportunity: string
+  todayGrowthBlock: string
+  urgentWarning: string
+  nextApprovedAction: string
+  onOpenEngineering: () => void
+}) {
+  const cards = [
+    ['Highest Leverage Move', summary.nextAction],
+    ['Current System State', systemState],
+    ['Active Repair Packet', activeRepairTitle],
+    ['Top Revenue Opportunity', topRevenueOpportunity],
+    ["Today's Growth Block", todayGrowthBlock],
+    ['Urgent Warning', urgentWarning],
+    ['Council Summary', summary.decisionSummary[0] ?? 'No compressed council summary yet.'],
+    ['Next Approved Action', nextApprovedAction],
+  ]
+
+  return (
+    <section className="mx-4 mt-4 rounded border border-emerald-500/25 bg-emerald-950/10 p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>Operator View</div>
+          <p className="mt-1 text-[10px]" style={{ color: '#94A3B8' }}>Mission-grade brief only. Diagnostics stay in Engineering View.</p>
+        </div>
+        <button type="button" onClick={onOpenEngineering} className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid rgba(56,189,248,0.4)', color: '#BAE6FD' }}>
+          Open Engineering View
+        </button>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {cards.map(([label, value]) => (
+          <article key={label} className="rounded border border-white/10 bg-black/25 p-3">
+            <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#94A3B8' }}>{label}</div>
+            <p className="mt-1 text-xs leading-relaxed" style={{ color: label === 'Urgent Warning' && value !== 'None' ? '#FCA5A5' : '#E5E7EB' }}>{value}</p>
+          </article>
+        ))}
+      </div>
+    </section>
   )
 })
 
@@ -4772,12 +4955,18 @@ function Home() {
   const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
   const [latestRepairPacket, setLatestRepairPacket] = useState<CouncilRepairPacket | null>(null)
   const [latestAnalystPacket, setLatestAnalystPacket] = useState<AnalystOperationsPacket | null>(null)
+  const [councilOutputMode, setCouncilOutputMode] = useState<CouncilOutputMode>('standard')
   const councilPersistenceCtx = useMemo(() => buildCouncilPersistenceContext(), [])
   const { store: council, dispatch: councilDispatch, mounted: councilMounted, newSessionId } =
     useCouncilSession(councilPersistenceCtx)
   const messages = council.messages
   const liveChatWindow = useMemo(() => windowLiveChatMessages(messages), [messages])
   const visibleCouncilMessages = liveChatWindow.visibleMessages
+  const deferredVisibleCouncilMessages = useDeferredValue(visibleCouncilMessages)
+  const compressedCouncilSummary = useMemo(
+    () => compressCouncilOutput(deferredVisibleCouncilMessages, councilOutputMode),
+    [deferredVisibleCouncilMessages, councilOutputMode],
+  )
   const archivedCouncilMessages = liveChatWindow.archivedMessages
   const hiddenCouncilMessageCount = liveChatWindow.hiddenCount
   const [internetStatus, setInternetStatus] = useState<InternetStatusResponse>(INITIAL_INTERNET_STATUS)
@@ -5451,6 +5640,68 @@ function Home() {
     } catch (error) {
       addSystemMessage(error instanceof Error ? error.message : 'Repair packet generation failed.', { force: true })
     }
+  }
+
+  const generateRepairPacketFromCompression = () => {
+    const repair = compressedCouncilSummary.repairPacket
+    const latestResponse = [...messagesRef.current].reverse().find(isCouncilFamilyResponse)
+    void prepareRepairPacketFromCouncilMessage({
+      id: latestResponse?.id ?? createMessageId('compressed-repair-source'),
+      familyName: latestResponse?.familyName ?? 'COUNCIL COMPRESSION',
+      content: repair
+        ? [
+            `Symptom: ${repair.symptom}`,
+            `Root cause: ${repair.rootCause}`,
+            `Fix plan: ${repair.fixPlan.join('; ')}`,
+          ].join('\n')
+        : compressedCouncilSummary.nextAction,
+      timestamp: new Date().toLocaleTimeString(),
+      color: '#7DD3FC',
+      icon: 'R',
+      provider: 'Council compression',
+      messageType: 'response',
+    })
+  }
+
+  const generateRevenueActionPacket = () => {
+    const revenue = compressedCouncilSummary.revenuePacket
+    if (!revenue?.applicable) return
+    addRaelAction({
+      action_id: `revenue-action-${Date.now()}`,
+      related_opportunity_id: null,
+      title: 'Revenue action packet',
+      question: [
+        `Opportunity: ${revenue.opportunity}`,
+        `Leverage score: ${revenue.leverageScore}`,
+        `Time-to-money: ${revenue.timeToMoney}`,
+        `Next action: ${revenue.nextAction}`,
+        `Risk: ${revenue.risk}`,
+        `Required evidence: ${revenue.requiredEvidence.join(', ')}`,
+      ].join('\n'),
+      response_options: ['Approve review', 'Needs evidence', 'Reject'],
+      urgency: revenue.leverageScore >= 75 ? 'high' : 'medium',
+      expires_at: null,
+      source_agent: 'Council Compression',
+    })
+    addSystemMessage('Revenue action packet queued for Commander approval. No outreach, spend, or income claim was executed.', { force: true })
+  }
+
+  const saveLessonCandidateFromCompression = () => {
+    const candidate =
+      compressedCouncilSummary.evidence.find(item => /lesson|pattern|durable|remember/i.test(item.text))
+      ?? compressedCouncilSummary.evidence[0]
+    if (!candidate) return
+    addRaelAction({
+      action_id: `lesson-candidate-${Date.now()}`,
+      related_opportunity_id: null,
+      title: 'Baby Observer lesson candidate',
+      question: `Save as durable lesson candidate after approval? ${candidate.text}`,
+      response_options: ['Approve lesson candidate', 'Hold for outcome', 'Reject'],
+      urgency: 'medium',
+      expires_at: null,
+      source_agent: 'Baby Observer',
+    })
+    addSystemMessage('Lesson candidate queued for approval. Durable memory was not written automatically.', { force: true })
   }
 
   useEffect(() => {
@@ -7004,7 +7255,10 @@ function Home() {
       }, 0)
       return
     }
-    const augment = buildOrchestrationAugment(family, snap.deepDiscussionMode)
+    const augment = [
+      buildOrchestrationAugment(family, snap.deepDiscussionMode),
+      buildCouncilOutputModeInstruction(councilOutputMode),
+    ].join('\n\n')
     const autonomousIntent = resolveCurrentIntent({ latestRaelDecreeText: lastRaelDirectiveContentRef.current })
     const researchDecreeProbe = detectResearchIntent(lastRaelDirectiveContentRef.current, {
       attendanceFlow: false,
@@ -7213,6 +7467,7 @@ function Home() {
     setUsageRows(projectedUsage)
     setCurrentDecreeCost(totalUsageCost(projectedUsage))
     const toneMode = detectToneMode(decree)
+    const outputModeInstruction = buildCouncilOutputModeInstruction(councilOutputMode)
     const intent = lastDecreeIntentRef.current ?? classifyRaElMessage(decree)
     const decreeRequiresLiveRetrieval = detectResearchIntent(decree).shouldResearch
     if (mode !== 'continue' && decreeRequiresLiveRetrieval) {
@@ -7695,8 +7950,11 @@ function Home() {
         const summarizeAugment = mode === 'summarize'
           ? `${buildDecreeFamilyAugment(family, deep, augmentCtx)}\n\nTASK: Summarize the council thread so far for Ra'el in concise bullets. Do not invent facts beyond the thread.`
           : null
-        const augment = summarizeAugment
-          ?? (planningMode ? buildCouncilPlanningAugment(family, deep, augmentCtx) : buildDecreeFamilyAugment(family, deep, augmentCtx))
+        const augment = [
+          summarizeAugment
+            ?? (planningMode ? buildCouncilPlanningAugment(family, deep, augmentCtx) : buildDecreeFamilyAugment(family, deep, augmentCtx)),
+          outputModeInstruction,
+        ].join('\n\n')
 
         let textOut: string | null = null
         let runtime: ProviderFamilyOutcomeStatus = 'SKIPPED'
@@ -9170,6 +9428,15 @@ function Home() {
   }
 
   const pendingNeedsRael = raelActions.some(a => a.status === 'pending')
+  const visibleOperatorTabs = useMemo(
+    () => OPERATOR_TABS.filter(tab => uiMode === 'advanced' || !ENGINEERING_TABS.includes(tab.id)),
+    [uiMode],
+  )
+  useEffect(() => {
+    if (uiMode === 'operator' && ENGINEERING_TABS.includes(operatorTab)) {
+      setOperatorTab('command')
+    }
+  }, [operatorTab, uiMode])
   const providerStripKeys: ProviderFamilyKey[] = ['claude', 'chatgpt', 'grok', 'gemini', 'redteam']
   const providerStatusStyles: Record<ProviderConnectionStatus, { color: string; dot: string; shadow: string }> = {
     online: { color: '#9AE6B4', dot: '#00ff41', shadow: '0 0 8px #00ff41' },
@@ -9254,6 +9521,25 @@ function Home() {
     internetStatus.label,
     internetStatus.overallStatus,
   ])
+  const activeRepairTitle = latestRepairPacket?.title
+    ?? compressedCouncilSummary.repairPacket?.symptom
+    ?? 'None active'
+  const topRevenueOpportunity = incomeOpportunities.find(opportunity => opportunity.is_active)?.title
+    ?? compressedCouncilSummary.revenuePacket?.opportunity
+    ?? 'None identified'
+  const todayGrowthBlock = memories.length
+    ? `${memories.length} memory item${memories.length === 1 ? '' : 's'} available for lesson review`
+    : 'No durable lesson evidence yet'
+  const urgentWarning = footerShowsPacketOrCouncilProviderIssue
+    ? councilContinueStatusLine
+    : pendingNeedsRael
+      ? 'Commander approval waiting'
+      : compressedCouncilSummary.risk.level === 'high'
+        ? compressedCouncilSummary.risk.summary
+        : 'None'
+  const nextApprovedAction = raelActions.find(action => action.status === 'pending')?.title
+    ?? queueActions[0]?.type
+    ?? 'No approved action queued'
   const operatorNav = (
     <>
       {uiMode === 'operator' && (
@@ -9274,11 +9560,11 @@ function Home() {
       <div className="flex flex-wrap items-center justify-end gap-2 border-b border-yellow-900 px-6 py-2" style={{ background: 'rgba(0,0,0,0.35)' }}>
         <span className="text-[10px] tracking-widest" style={{ color: '#888' }}>UI mode</span>
         <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: uiMode === 'operator' ? '1px solid #FFD700' : '1px solid #444', color: uiMode === 'operator' ? '#FFD700' : '#888' }} onClick={() => setUiMode('operator')}>Operator</button>
-        <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: uiMode === 'advanced' ? '1px solid #FFD700' : '1px solid #444', color: uiMode === 'advanced' ? '#FFD700' : '#888' }} onClick={() => setUiMode('advanced')}>Advanced</button>
+        <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: uiMode === 'advanced' ? '1px solid #FFD700' : '1px solid #444', color: uiMode === 'advanced' ? '#FFD700' : '#888' }} onClick={() => setUiMode('advanced')}>Engineering</button>
       </div>
 
       <div className="relative z-10 flex flex-wrap gap-1 border-b border-yellow-900 px-4 py-2" style={{ background: 'rgba(0,0,0,0.45)' }}>
-        {OPERATOR_TABS.map(({ id: tab, label }) => (
+        {visibleOperatorTabs.map(({ id: tab, label }) => (
           <button
             key={tab}
             type="button"
@@ -9432,6 +9718,21 @@ function Home() {
       <div className="relative z-10 flex flex-col">
         <WriteApprovalBanner />
         {operatorNav}
+        {uiMode === 'operator' && operatorTab === 'command' && (
+          <OperatorMissionView
+            summary={compressedCouncilSummary}
+            systemState={`${chatHealthLabel} chat · ${providerHealthLabel} providers · ${persistenceHealthLabel}`}
+            activeRepairTitle={activeRepairTitle}
+            topRevenueOpportunity={topRevenueOpportunity}
+            todayGrowthBlock={todayGrowthBlock}
+            urgentWarning={urgentWarning}
+            nextApprovedAction={nextApprovedAction}
+            onOpenEngineering={() => {
+              setUiMode('advanced')
+              setOperatorTab('engineering')
+            }}
+          />
+        )}
         {operatorTab === 'command' && (
         <section data-testid="live-council-chat-card" className="mx-4 mt-4 overflow-hidden rounded border border-yellow-900/50" style={{ background: 'rgba(10,8,4,0.58)' }}>
         <div
@@ -9448,6 +9749,20 @@ function Home() {
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-[9px] tracking-widest" style={{ color: '#555' }}>Session controls</span>
+            <label className="flex items-center gap-1 rounded px-2 py-0.5 text-[9px] tracking-widest" style={{ border: '1px solid #333', color: '#888' }}>
+              Mode
+              <select
+                value={councilOutputMode}
+                onChange={event => setCouncilOutputMode(event.target.value as CouncilOutputMode)}
+                className="bg-black text-[9px] outline-none"
+                style={{ color: '#FDE68A' }}
+                aria-label="Council response mode"
+              >
+                {COUNCIL_OUTPUT_MODES.map(mode => (
+                  <option key={mode} value={mode}>{councilOutputModeLabel(mode)}</option>
+                ))}
+              </select>
+            </label>
             {!councilPaused ? (
               <button type="button" onClick={() => startTransition(pauseCouncil)}
                 className="rounded px-2 py-0.5 text-[9px] tracking-widest"
@@ -9526,6 +9841,12 @@ function Home() {
             />
           </div>
           <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />
+          <CompressedCouncilPanel
+            summary={compressedCouncilSummary}
+            onGenerateRepairPacket={generateRepairPacketFromCompression}
+            onGenerateRevenuePacket={generateRevenueActionPacket}
+            onSaveLessonCandidate={saveLessonCandidateFromCompression}
+          />
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"
@@ -9764,7 +10085,7 @@ function Home() {
                 </div>
               </section>
             )}
-            {operatorTab === 'command' && <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />}
+            {uiMode === 'advanced' && operatorTab === 'command' && <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />}
             {operatorTab === 'agents' && (
               <>
                 <div className="mb-3 border-b border-yellow-900/40 pb-2">
@@ -9775,10 +10096,47 @@ function Home() {
                 <BabyAiAcademyPanel />
                 <ProviderConfigurationPanel engines={engineList} />
                 <AgentGrowthTrainingPanel />
-                <EngineeringLaneManualPanel latest={latestEngineeringTaskPacket} />
-                <RepairPacketPanel latest={latestRepairPacket} />
                 <ApprovalQueueSummaryPanel pendingApprovals={raelActions.filter(action => action.status === 'pending').length} />
                 <RedTeamReviewSummaryPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
+              </>
+            )}
+            {uiMode === 'advanced' && operatorTab === 'engineering' && (
+              <>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-yellow-900/40 pb-2">
+                  <div>
+                    <h2 className="text-xs font-bold tracking-widest" style={{ color: '#38BDF8' }}>ENGINEERING VIEW</h2>
+                    <p className="mt-1 text-[9px] tracking-widest" style={{ color: '#666' }}>
+                      Runtime diagnostics, provider tables, repair packets, logs, system health, and dependency checks. Manual approval gates remain active.
+                    </p>
+                  </div>
+                  <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void refreshToolBarHealthBars()}>Refresh engineering status</button>
+                </div>
+                <WarRoomPerformancePanel diagnostics={performanceDiagnostics} activeTab={operatorTab} />
+                <ConfigurationHealthSummaryPanel />
+                <ProviderSetupChecklistPanel />
+                <UnifiedEngineControlPanel />
+                <ToolStatusPanel health={toolBarHealth} activity={toolBarActivity} />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <SystemResourcesPanel autoRefreshEnabled={false} tabActive={operatorTab === 'engineering'} />
+                  <WorkerHealthPanel uiMode={uiMode} autoRefreshEnabled={false} tabActive={operatorTab === 'engineering'} />
+                </div>
+                <EngineeringLaneManualPanel latest={latestEngineeringTaskPacket} />
+                <RepairPacketPanel latest={latestRepairPacket} />
+                <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
+                <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
+                {uiMode === 'advanced' && (
+                  <section className="rounded border border-white/10 p-2 text-[10px]" style={{ color: '#aaa' }}>
+                    <div className="mb-1 flex items-center justify-between font-bold" style={{ color: '#94A3B8' }}>
+                      <span>SYSTEM LEDGER</span>
+                      <button type="button" className="text-[9px]" style={{ color: '#666' }} onClick={() => void refreshLedger()}>Refresh</button>
+                    </div>
+                    <ul className="max-h-48 space-y-1 overflow-y-auto font-mono text-[9px]">
+                      {ledgerEvents.length === 0 ? <li style={{ color: '#555' }}>No recent events.</li> : ledgerEvents.map(ev => (
+                        <li key={ev.id}><span style={{ color: '#7dd3fc' }}>{ev.type}</span> {ev.createdAt?.slice(5, 22)}</li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
               </>
             )}
             {operatorTab === 'analysts' && (
