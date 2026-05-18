@@ -132,7 +132,6 @@ function inferFilesToInspect(raw: string, intentKind: EngineeringIntentKind): st
     files.add('lib/repo')
   }
   if (intentKind === 'wire_integration') {
-    files.add('lib/local-agent')
     files.add('lib/engine-control')
   }
 

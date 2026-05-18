@@ -1,4 +1,3 @@
-import type { LocalAgentBridgeStatusResponse, LocalFamilyAgentsResponse } from '@/lib/local-agent/types'
 import { listEngineeringAgents, type EngineeringAgentRegistryEntry } from './engineeringAgentRegistry'
 import type { EngineeringTaskPacket } from './engineeringTaskPacket'
 
@@ -10,18 +9,8 @@ export type EngineeringStatusBridge = {
     approvalRequired: true
   }
   codex: {
-    status: 'not connected'
+    status: 'cloud provider only'
     missingConfiguration: string
-  }
-  localBridge: {
-    status: 'detected' | 'configured' | 'unavailable'
-    selectedEngine: string | null
-    repoAccessLevel: string
-  }
-  localModels: {
-    status: 'functional' | 'detected' | 'unavailable'
-    functionalCount: number
-    detectedCount: number
   }
   latestTaskPacket: EngineeringTaskPacket | null
   lastValidationResult: string
@@ -30,19 +19,8 @@ export type EngineeringStatusBridge = {
 }
 
 export function buildEngineeringStatusBridge(input: {
-  localBridge: LocalAgentBridgeStatusResponse
-  localFamilies: LocalFamilyAgentsResponse
   latestTaskPacket: EngineeringTaskPacket | null
 }): EngineeringStatusBridge {
-  const functionalLocalModels = input.localFamilies.familyAgents.filter(agent => agent.functional).length
-  const detectedLocalModels = input.localFamilies.familyAgents.filter(agent => agent.detected).length
-  const localBridgeStatus =
-    input.localBridge.bridge === 'online'
-      ? 'detected'
-      : input.localBridge.selectedEngine
-        ? 'configured'
-        : 'unavailable'
-
   return {
     agents: listEngineeringAgents(),
     cursor: {
@@ -51,22 +29,12 @@ export function buildEngineeringStatusBridge(input: {
       approvalRequired: true,
     },
     codex: {
-      status: 'not connected',
-      missingConfiguration: 'Codex provider/bridge not configured.',
-    },
-    localBridge: {
-      status: localBridgeStatus,
-      selectedEngine: input.localBridge.selectedEngine,
-      repoAccessLevel: input.localBridge.repoAccessStatus,
-    },
-    localModels: {
-      status: functionalLocalModels > 0 ? 'functional' : detectedLocalModels > 0 ? 'detected' : 'unavailable',
-      functionalCount: functionalLocalModels,
-      detectedCount: detectedLocalModels,
+      status: 'cloud provider only',
+      missingConfiguration: 'No autonomous engineering executor is wired. Cursor remains manual-only.',
     },
     latestTaskPacket: input.latestTaskPacket,
     lastValidationResult: input.latestTaskPacket ? 'pending Commander-approved execution' : 'none',
-    rollbackStatus: input.latestTaskPacket ? input.latestTaskPacket.rollbackRecommendation : input.localBridge.rollbackCheckpointStatus,
+    rollbackStatus: input.latestTaskPacket ? input.latestTaskPacket.rollbackRecommendation : 'manual checkpoint required before changes',
     approvalRequirement: 'Commander approval required before execution, file mutation, commit, push, deploy, or delete.',
   }
 }

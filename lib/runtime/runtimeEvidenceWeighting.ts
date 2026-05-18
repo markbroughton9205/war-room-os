@@ -20,7 +20,6 @@ export function evidenceSeverityForSubsystemId(id: string): EvidenceSeverity {
       return 'MEDIUM'
     case 'red_sentinel':
     case 'red_team_coder':
-    case 'local_agent':
       return 'LOW'
     case 'orchestration':
     case 'providers_health':

@@ -14,7 +14,7 @@ export type BabyCouncilObservation = {
 export type BabyCouncilIntegration = {
   liveCouncilRole: 'observation_and_task_proposal'
   executionAllowed: false
-  localBridgeDependency: 'optional_accelerator'
+  providerDependency: 'cloud_only'
   observations: BabyCouncilObservation[]
   proposals: BabyAiProposal[]
   rules: string[]
@@ -44,7 +44,7 @@ export function buildBabyCouncilIntegration(agents: BabyAgent[] = BABY_AI_AGENTS
   return {
     liveCouncilRole: 'observation_and_task_proposal',
     executionAllowed: false,
-    localBridgeDependency: 'optional_accelerator',
+    providerDependency: 'cloud_only',
     observations: buildBabyCouncilObservations(agents),
     proposals: agents.map(agent => buildBabyAiProposal(agent, 'task_proposal', sourceForAgent(agent))),
     rules: babyAiGovernanceRules(),
@@ -55,6 +55,6 @@ export function buildBabyCouncilPromptAddendum(): string {
   return [
     'Baby AI Family Growth System: Baby agents may contribute observations, improvement suggestions, and approval-gated task proposals.',
     'They cannot execute actions, mutate files, run shell commands, control deployments, spend money, or self-approve lessons.',
-    'Treat local LM Studio/Ollama as optional acceleration only; Baby AI learning remains available when the local node is offline.',
+    'Use cloud provider families only; Baby AI learning remains gated by War Room persistence, approvals, and validated outcomes.',
   ].join('\n')
 }

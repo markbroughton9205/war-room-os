@@ -36,9 +36,9 @@ export function evaluateBabyAiProposal(input: {
   const permanentMemoryAllowed = input.commanderApproved || input.repeatedValidatedOutcomes >= 3
   const reasons = [
     `${input.agent.displayName} may contribute observations and task proposals only.`,
-    BABY_AI_GUARDRAILS.localBridgeRequired
-      ? 'Local bridge is required.'
-      : 'Local LM Studio/Ollama bridge is optional acceleration only.',
+    BABY_AI_GUARDRAILS.cloudProviderRequired
+      ? 'Cloud provider family context is required.'
+      : 'Cloud provider context is not required.',
     'No Baby AI can execute shell, filesystem, deployment, financial, or destructive actions.',
     permanentMemoryAllowed
       ? 'Lesson can become durable because Commander approval or repeated validation exists.'
@@ -78,7 +78,7 @@ export function babyAiGovernanceRules(): string[] {
     'Baby AI output is observation, lesson candidate, or approval-gated task proposal only.',
     'No hidden execution, shell command exposure, filesystem mutation, deployment control, or destructive action path.',
     'Permanent lessons require Commander approval or repeated validated outcomes.',
-    'Local LM Studio/Ollama bridge can accelerate inference but cannot determine whether Baby AI growth is active.',
+    'Baby AI uses cloud provider families only; offline connector stacks do not participate in growth or training.',
     'Rejected actions remain negative training data and cannot self-promote into lessons.',
   ]
 }

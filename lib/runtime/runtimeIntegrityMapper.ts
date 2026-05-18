@@ -317,43 +317,6 @@ export function mapInternetStatusJson(json: unknown, httpStatus: number): Subsys
   })
 }
 
-export function mapLocalAgentJson(json: unknown): SubsystemRow {
-  const j = json as {
-    bridge?: string
-    checkedAt?: string
-    selectedEngine?: string | null
-    engines?: Record<string, { functional?: boolean; status?: string }>
-  }
-  const engines = j.engines && typeof j.engines === 'object' ? Object.values(j.engines) : []
-  const functional = engines.filter(e => e.functional).length
-  const evidence = `bridge=${j.bridge ?? 'unknown'}; selectedEngine=${j.selectedEngine ?? 'none'}; functionalEntries=${functional}; checkedAt=${j.checkedAt ?? 'n/a'}`
-
-  let status: SubsystemOperationalStatus = 'UNKNOWN'
-  if (j.bridge === 'online') {
-    status = functional > 0 ? 'HEALTHY' : 'DEGRADED'
-  } else if (j.bridge === 'config_needed') {
-    status = 'CONFIGURED_ONLY'
-  } else if (j.bridge === 'error') {
-    status = 'FAILING'
-  } else {
-    status = 'DEGRADED'
-  }
-
-  return row({
-    id: 'local_agent',
-    label: 'Local agent bridge',
-    status,
-    truthLevel: functional > 0 ? 'VERIFIED' : 'DECLARED',
-    evidence,
-    source: 'fetch',
-    mock: false,
-    unwired: j.bridge === 'config_needed',
-    configured: j.bridge !== 'config_needed',
-    reachable: j.bridge === 'online',
-    recommendation: 'Moonshot/Kimi and Bridge Architect use /api/local-agent/invoke when this bridge is functional.',
-  })
-}
-
 export function mapDeployStatusJson(json: unknown): SubsystemRow {
   const j = json as { error?: string; checkedAt?: string; runtime?: string; engines?: unknown[] }
   if (typeof j.error === 'string') {

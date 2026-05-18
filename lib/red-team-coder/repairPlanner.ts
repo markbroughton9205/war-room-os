@@ -10,7 +10,7 @@ const DEFAULT_VERIFICATION_STEPS = [
   'Confirm failed providers produce non-blocking system notes only.',
   '.\\node_modules\\.bin\\eslint.CMD app components lib --max-warnings=0',
   '.\\node_modules\\.bin\\tsc.CMD --noEmit',
-  'Load localhost:3000 and confirm the chat input remains usable.',
+  'Open the dev app and confirm the chat input remains usable.',
 ]
 
 function commonFiles(...files: string[]): string[] {
@@ -19,7 +19,7 @@ function commonFiles(...files: string[]): string[] {
 
 function recommendedAgentFor(issue: RedTeamCoderIssue): RedTeamCoderRecommendedAgent {
   if (issue.code === 'layout_regression' || issue.code === 'input_stuck_disabled') return 'Cursor'
-  if (issue.code === 'duplicate_system_notes') return 'Aider'
+  if (issue.code === 'duplicate_system_notes') return 'Claude'
   if (issue.code === 'browser_console_error' || issue.code === 'hydration_error') return 'Codex'
   return 'Codex'
 }

@@ -7,7 +7,7 @@
  *
  * **Unified:** all council `/api/chat` traffic from `app/page.tsx` goes through `postCouncilChat`.
  *
- * **Remains:** `/api/local-agent/invoke` for local Kimi/Bridge; engine status refresh; `postLiveCouncilMessage` for dual-write.
+ * **Remains:** engine status refresh and `postLiveCouncilMessage` for dual-write.
  *
  * **Throne send:** `sendLiveCouncilThroneMessage` sequences expansion gate → caller-provided append + council round.
  */

@@ -2,7 +2,7 @@ export type RedTeamCoderSeverity = 'info' | 'warn' | 'error' | 'critical'
 
 export type RedTeamCoderStatus = 'idle' | 'watching' | 'issue_detected' | 'repair_planned' | 'error'
 
-export type RedTeamCoderRecommendedAgent = 'Codex' | 'Cursor' | 'Aider' | 'Continue' | 'local model'
+export type RedTeamCoderRecommendedAgent = 'Codex' | 'Cursor' | 'Claude' | 'Red Team'
 
 export type RedTeamCoderProviderStatus =
   | 'online'

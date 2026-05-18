@@ -37,9 +37,8 @@ yarn-error.log*
 # vercel
 .vercel
 
-# war room local checkpoints (metadata only)
+# war room checkpoints (metadata only)
 .war-room/
-bridge/local-node/.runtime/
 
 # typescript
 *.tsbuildinfo

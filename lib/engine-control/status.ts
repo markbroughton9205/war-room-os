@@ -4,7 +4,6 @@ import {
   geminiAllowedGenerateContentIds,
   geminiOrderedCandidates,
 } from '@/lib/ai/providers/geminiGenerative'
-import { getLMStudioModels, getOllamaModels, testLMStudioChat } from '@/lib/local-agent/providers'
 
 import { ENGINE_REGISTRY } from './registry'
 import { engineProviderDisplayLabel } from './provider-display'
@@ -20,19 +19,6 @@ import type {
 
 function windowlessTimeout(callback: () => void, ms: number) {
   return setTimeout(callback, ms)
-}
-
-async function probeUrl(url: string, ms: number): Promise<boolean> {
-  const controller = new AbortController()
-  const t = windowlessTimeout(() => controller.abort(), ms)
-  try {
-    const res = await fetch(url, { method: 'GET', signal: controller.signal, cache: 'no-store' })
-    return res.ok
-  } catch {
-    return false
-  } finally {
-    clearTimeout(t)
-  }
 }
 
 function registryRow(id: EngineId) {
@@ -73,72 +59,6 @@ function finalize(status: Omit<EngineStatus, 'permissions' | 'approvalRequired' 
   return { ...status, providerLabel, permissions, approvalRequired }
 }
 
-async function buildOllama(lastChecked: string): Promise<EngineStatus> {
-  const reg = registryRow('ollama')
-  try {
-    const models = await getOllamaModels()
-    const ok = models.length > 0
-    return finalize({
-      id: 'ollama',
-      displayName: reg.displayName,
-      category: reg.category,
-      providerType: reg.providerType,
-      installed: ok,
-      configured: true,
-      reachable: ok,
-      functional: ok,
-      capabilities: [...reg.defaultCapabilities],
-      lastChecked,
-      notes: ok
-        ? `Ollama responded on 127.0.0.1:11434 with ${models.length} model(s).`
-        : 'Ollama reachable but returned no models (or tags empty).',
-    })
-  } catch {
-    return finalize({
-      id: 'ollama',
-      displayName: reg.displayName,
-      category: reg.category,
-      providerType: reg.providerType,
-      installed: false,
-      configured: true,
-      reachable: false,
-      functional: false,
-      capabilities: [...reg.defaultCapabilities],
-      lastChecked,
-      notes: 'Ollama probe to http://127.0.0.1:11434/api/tags failed.',
-    })
-  }
-}
-
-async function buildLmStudio(lastChecked: string): Promise<EngineStatus> {
-  const reg = registryRow('lm_studio')
-  const { baseUrl, models, error } = await getLMStudioModels()
-  const modelsOk = models.length > 0
-  let functional = false
-  if (modelsOk) {
-    const chat = await testLMStudioChat(baseUrl, models[0]!.id)
-    functional = chat.functional
-  }
-  const reachable = modelsOk
-  return finalize({
-    id: 'lm_studio',
-    displayName: reg.displayName,
-    category: reg.category,
-    providerType: reg.providerType,
-    installed: reachable,
-    configured: true,
-    reachable,
-    functional,
-    capabilities: [...reg.defaultCapabilities],
-    lastChecked,
-    notes: functional
-      ? `LM Studio responded at ${baseUrl} (chat completion OK).`
-      : reachable
-        ? `LM Studio models at ${baseUrl} but chat completion failed. ${error ?? ''}`
-        : `LM Studio not detected on 127.0.0.1:1234 or localhost:1234. ${error ?? ''}`,
-  })
-}
-
 function cloudEngine(
   id: 'grok' | 'claude' | 'chatgpt',
   lastChecked: string,
@@ -173,10 +93,9 @@ function cloudEngine(
   })
 }
 
-function ideEngine(id: 'cursor' | 'continue' | 'codex', lastChecked: string): EngineStatus {
+function ideEngine(id: 'cursor' | 'codex', lastChecked: string): EngineStatus {
   const reg = registryRow(id)
-  const cursorEnv = Boolean(process.env.CURSOR_API_KEY?.trim() || process.env.LOCAL_AGENT_CURSOR_TOKEN?.trim())
-  const configured = id === 'cursor' ? cursorEnv : id === 'codex' ? Boolean(process.env.OPENAI_API_KEY?.trim()) : false
+  const configured = id === 'codex' ? Boolean(process.env.OPENAI_API_KEY?.trim()) : true
   return finalize({
     id,
     displayName: reg.displayName,
@@ -190,78 +109,8 @@ function ideEngine(id: 'cursor' | 'continue' | 'codex', lastChecked: string): En
     lastChecked,
     notes:
       id === 'cursor'
-        ? 'External IDE — not probed from War Room server. Optional CURSOR_API_KEY / LOCAL_AGENT_CURSOR_TOKEN if you wire a bridge.'
-        : id === 'continue'
-          ? 'IDE extension — not probed from server. Optional LOCAL_AGENT_CONTINUE_PATH for a future bridge endpoint.'
-          : 'Codex / IDE flows — OPENAI_API_KEY marks provider configuration only; IDE runtime not probed here.',
-  })
-}
-
-function cliEngineStatic(id: 'aider' | 'goose', lastChecked: string): EngineStatus {
-  const reg = registryRow(id)
-  const path =
-    id === 'aider'
-      ? process.env.LOCAL_AGENT_AIDER_PATH?.trim()
-      : process.env.LOCAL_AGENT_GOOSE_PATH?.trim()
-  const configured = Boolean(path)
-  return finalize({
-    id,
-    displayName: reg.displayName,
-    category: reg.category,
-    providerType: reg.providerType,
-    installed: configured,
-    configured,
-    reachable: false,
-    functional: false,
-    capabilities: [...reg.defaultCapabilities],
-    lastChecked,
-    notes: configured
-      ? id === 'aider'
-        ? 'LOCAL_AGENT_AIDER_PATH set (CLI binary or bridge path); reachability not HTTP-probed.'
-        : 'LOCAL_AGENT_GOOSE_PATH set (CLI binary or bridge path); reachability not HTTP-probed.'
-      : id === 'aider'
-        ? 'Set LOCAL_AGENT_AIDER_PATH for Aider bridge hints.'
-        : 'Set LOCAL_AGENT_GOOSE_PATH for Goose bridge hints.',
-  })
-}
-
-async function buildOpenHands(lastChecked: string): Promise<EngineStatus> {
-  const reg = registryRow('openhands')
-  const url = process.env.LOCAL_AGENT_OPENHANDS_URL?.trim()
-  if (!url) {
-    return finalize({
-      id: 'openhands',
-      displayName: reg.displayName,
-      category: reg.category,
-      providerType: reg.providerType,
-      installed: false,
-      configured: false,
-      reachable: false,
-      functional: false,
-      capabilities: [...reg.defaultCapabilities],
-      lastChecked,
-      notes: 'Set LOCAL_AGENT_OPENHANDS_URL to enable OpenHands HTTP checks.',
-    })
-  }
-
-  const trimmed = url.replace(/\/$/, '')
-  const ok =
-    (await probeUrl(`${trimmed}/health`, 1500)) ||
-    (await probeUrl(`${trimmed}/api/health`, 1500)) ||
-    (await probeUrl(trimmed, 1500))
-
-  return finalize({
-    id: 'openhands',
-    displayName: reg.displayName,
-    category: reg.category,
-    providerType: reg.providerType,
-    installed: ok,
-    configured: true,
-    reachable: ok,
-    functional: ok,
-    capabilities: [...reg.defaultCapabilities],
-    lastChecked,
-    notes: ok ? `OpenHands responded to GET ${trimmed} (health or root).` : `LOCAL_AGENT_OPENHANDS_URL set but probe failed for ${url}.`,
+        ? 'Cursor is a manual engineering workspace. War Room prepares handoff packets but does not invoke the IDE.'
+        : 'Codex / IDE flows — OPENAI_API_KEY marks provider configuration only; IDE runtime not probed here.',
   })
 }
 
@@ -416,7 +265,7 @@ function buildGemini(lastChecked: string, tools: ToolRoutingSnapshot): EngineSta
 }
 
 /**
- * Build a truthful `EngineStatus` row for every registered engine (async probes for local HTTP engines).
+ * Build a truthful `EngineStatus` row for every registered engine.
  * Pass `tools` from `buildToolRoutingSnapshotFromOrigin` so Gemini can merge `research_assist` / related caps when the same-origin internet tool is available.
  */
 export async function collectEngineStatuses(
@@ -425,19 +274,8 @@ export async function collectEngineStatuses(
   const lastChecked = new Date().toISOString()
 
   const gemini = buildGemini(lastChecked, tools)
-  const [ollama, lmStudio, openhands] = await Promise.all([
-    buildOllama(lastChecked),
-    buildLmStudio(lastChecked),
-    buildOpenHands(lastChecked),
-  ])
 
   const ordered: EngineStatus[] = [
-    ollama,
-    lmStudio,
-    ideEngine('continue', lastChecked),
-    cliEngineStatic('aider', lastChecked),
-    openhands,
-    cliEngineStatic('goose', lastChecked),
     ideEngine('cursor', lastChecked),
     ideEngine('codex', lastChecked),
     cloudEngine('grok', lastChecked, Boolean(process.env.XAI_API_KEY?.trim()), 'xAI Grok.', 'Set XAI_API_KEY for Grok API access.'),

@@ -22,12 +22,6 @@ const CLOUD_ENV: Record<EngineId, string> = {
   claude: 'ANTHROPIC_API_KEY',
   grok: 'XAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
-  ollama: '',
-  lm_studio: '',
-  continue: '',
-  aider: '',
-  openhands: '',
-  goose: '',
   cursor: '',
   codex: 'OPENAI_API_KEY',
 }

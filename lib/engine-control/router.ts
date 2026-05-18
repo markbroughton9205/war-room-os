@@ -48,15 +48,6 @@ function engineById(engines: EngineStatus[], id: EngineId): EngineStatus | undef
   return engines.find(e => e.id === id)
 }
 
-function pickLocalEngine(engines: EngineStatus[]): EngineStatus | null {
-  const order: EngineId[] = ['ollama', 'lm_studio']
-  for (const id of order) {
-    const e = engineById(engines, id)
-    if (e?.functional && e.reachable) return e
-  }
-  return null
-}
-
 function familyToPreferredEngine(family: CouncilFamilyName): EngineId {
   const map: Record<CouncilFamilyName, EngineId> = {
     Claude: 'claude',
@@ -114,13 +105,6 @@ export function routeCommand(input: RouteCommandInput): RouteCommandResult {
   const preferredId = familyToPreferredEngine(decree.selectedFamily)
   let selected = engineById(input.engines, preferredId)
 
-  if (!selected?.functional || !selected?.reachable) {
-    const local = pickLocalEngine(input.engines)
-    if (local && (commandClass === 'read_only_query' || commandClass === 'repo_read')) {
-      selected = local
-    }
-  }
-
   if (!selected) {
     selected = engineById(input.engines, 'chatgpt') ?? input.engines[0] ?? fallbackEngine()
   }
@@ -160,7 +144,7 @@ export function routeCommand(input: RouteCommandInput): RouteCommandResult {
     && (commandClass !== 'internet' || tools.internetReachable)
     && (commandClass !== 'research' || tools.researchConfigured)
 
-  let recommendedNextStep = 'No execution in Phase 2 — use council or local agent flows after policy review.'
+  let recommendedNextStep = 'No execution in Phase 2 - use council or Cursor manual handoff after policy review.'
   if (!selected.functional || !selected.reachable) {
     recommendedNextStep = `Bring ${selected.displayName} online (see engine notes) or switch decree keywords to a council family with a configured provider.`
   } else if (approvalRequired && !exec) {

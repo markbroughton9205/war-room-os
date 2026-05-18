@@ -10,7 +10,6 @@ export { buildOrchestrationAugment, buildCouncilPlanningAugment, buildDecreeFami
 export type { CouncilAugmentContext } from './councilPrompt'
 export {
   councilContentHash,
-  orchestrationFamilyToLocalAgentId,
   orchestrationFamilyToTypingFamily,
   pickNextOrchestrationFamily,
 } from './councilOrchestration'

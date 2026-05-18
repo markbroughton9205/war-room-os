@@ -1,5 +1,4 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
-import { orchestrationFamilyToLocalAgentId } from '@/components/council/councilOrchestration'
 import type { EngineControlStatusResponse, EngineId, EngineStatus } from '@/lib/engine-control/types'
 import { engineRowMap, isEngineFunctional } from '@/lib/council/familyRoster'
 import { raceWithTimeout } from '@/lib/council/providerIsolation'
@@ -14,7 +13,6 @@ export type AttendancePreflightOpts = {
   perFamilyTimeoutMs?: number
   statusFetchTimeoutMs?: number
   engineMap?: Map<EngineId, EngineStatus>
-  localFamilyAgents?: { familyAgents: { id: string; functional: boolean }[] }
   skipGeminiForSession?: boolean
   signal?: AbortSignal
 }
@@ -35,10 +33,7 @@ function classifyFamilyFromEngineMap(
   if (family === 'gemini' && opts.skipGeminiForSession) return 'unavailable'
 
   if (family === 'kimi' || family === 'bridge_architect') {
-    const agentId = orchestrationFamilyToLocalAgentId(family)
-    if (!agentId) return 'unavailable'
-    const agent = opts.localFamilyAgents?.familyAgents.find(a => a.id === agentId)
-    return agent?.functional ? 'healthy' : 'unavailable'
+    return 'unavailable'
   }
 
   const eid = cloudEngineIdForFamily(family)

@@ -1,5 +1,4 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
-import { orchestrationFamilyToLocalAgentId } from '@/components/council/councilOrchestration'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { filterOrchestrationOrderByCommand } from '@/lib/council/commandParser'
 import { decreeRequestsKimi } from '@/lib/council/familyRoster'
@@ -36,14 +35,9 @@ export function buildAttendanceDirectedOrder(args: {
   cmd: CouncilCommand
   decree: string
   participationToggles: CouncilParticipationToggles
-  localFamilyAgents: { familyAgents: { id: string; functional: boolean }[] }
 }): CouncilOrchestrationFamily[] {
   const merged: CouncilOrchestrationFamily[] = [...ATTENDANCE_REQUIRED_CORE]
-  const kimiId = orchestrationFamilyToLocalAgentId('kimi')
-  const kimiFunctional = Boolean(
-    kimiId && args.localFamilyAgents.familyAgents.find(a => a.id === kimiId)?.functional,
-  )
-  if (args.participationToggles.includeKimi || decreeRequestsKimi(args.decree) || kimiFunctional) {
+  if (args.participationToggles.includeKimi || decreeRequestsKimi(args.decree)) {
     if (!merged.includes('kimi')) merged.push('kimi')
   }
   return filterOrchestrationOrderByCommand(merged, args.cmd, args.decree)

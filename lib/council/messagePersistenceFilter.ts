@@ -42,7 +42,7 @@ export type CouncilPersistableMessage = {
 }
 
 export type CouncilMessagePersistenceContext = {
-  localAgentsFunctional?: Partial<Record<CouncilOrchestrationFamily, boolean>>
+  cloudOnly?: true
 }
 
 function resolveMessageType(message: CouncilPersistableMessage): string {
@@ -82,15 +82,12 @@ function rosterIdForSender(sender: string): CouncilOrchestrationFamily | null {
   return null
 }
 
-function isPersistableFamilySender(
-  sender: string,
-  ctx?: CouncilMessagePersistenceContext,
-): boolean {
+function isPersistableFamilySender(sender: string): boolean {
   const u = sender.toUpperCase()
   if (PERSISTABLE_FAMILY_LABELS.has(u)) return true
   const id = rosterIdForSender(sender)
   if (!id) return false
-  if (id === 'kimi') return Boolean(ctx?.localAgentsFunctional?.kimi)
+  if (id === 'kimi') return false
   if (id === 'bridge_architect' || id === 'baby') return false
   return CORE_PERSISTABLE_FAMILY_IDS.has(id)
 }
@@ -143,7 +140,8 @@ export function shouldPersistCouncilMessage(
   }
 
   if (messageType !== 'response') return false
-  if (!isPersistableFamilySender(sender, ctx)) return false
+  void ctx
+  if (!isPersistableFamilySender(sender)) return false
   return isSuccessfulVisibleMessage(message)
 }
 
@@ -200,17 +198,6 @@ export function councilMessageFromWarRoomRow(row: {
   }
 }
 
-export function buildCouncilPersistenceContext(input: {
-  localFamilyAgents?: { familyAgents: { id: string; functional: boolean }[] }
-  orchestrationFamilyToLocalAgentId: (f: CouncilOrchestrationFamily) => string | null
-}): CouncilMessagePersistenceContext {
-  const functional: Partial<Record<CouncilOrchestrationFamily, boolean>> = {}
-  for (const id of ['kimi', 'bridge_architect'] as const) {
-    const agentId = input.orchestrationFamilyToLocalAgentId(id)
-    if (!agentId) continue
-    functional[id] = Boolean(
-      input.localFamilyAgents?.familyAgents.find(a => a.id === agentId)?.functional,
-    )
-  }
-  return { localAgentsFunctional: functional }
+export function buildCouncilPersistenceContext(): CouncilMessagePersistenceContext {
+  return { cloudOnly: true }
 }

@@ -1,4 +1,3 @@
-import type { LocalTaskCategory } from '@/lib/local-agent/types'
 import { detectEngineeringIntentFromDecree, type EngineeringIntentDetection } from './engineeringTaskPacket'
 
 export type EngineeringCapability =
@@ -14,7 +13,6 @@ export type EngineeringCapabilityRoute = {
   capability: EngineeringCapability
   primary: string
   fallback: string
-  localTaskCategory: LocalTaskCategory
   unavailableMessage: string
 }
 
@@ -23,49 +21,42 @@ export const ENGINEERING_CAPABILITY_ROUTES: EngineeringCapabilityRoute[] = [
     capability: 'synthesis',
     primary: 'ChatGPT Baby',
     fallback: 'Cursor task packet',
-    localTaskCategory: 'synthesis',
-    unavailableMessage: 'Missing functional local synthesis model; use Cursor packet fallback.',
+    unavailableMessage: 'Use cloud provider synthesis or Cursor packet fallback.',
   },
   {
     capability: 'architecture',
     primary: 'Claude',
     fallback: 'Claude Baby or Cursor task packet',
-    localTaskCategory: 'architecture',
-    unavailableMessage: 'Claude/local architecture route unavailable; prepare Cursor packet and optional Claude review prompt.',
+    unavailableMessage: 'Prepare Cursor packet and optional Claude review prompt.',
   },
   {
     capability: 'code_repair',
     primary: 'Cursor',
-    fallback: 'Local Code Agent Bridge if explicitly configured',
-    localTaskCategory: 'coding-review',
+    fallback: 'Claude architecture review plus Red Team risk review',
     unavailableMessage: 'No autonomous code executor is enabled. Cursor manual task packet is the safe fallback.',
   },
   {
     capability: 'risk_review',
     primary: 'Red Team',
     fallback: 'Red Team Baby',
-    localTaskCategory: 'risk-analysis',
-    unavailableMessage: 'Red Team local model unavailable; route risk checklist into Cursor packet.',
+    unavailableMessage: 'Route risk checklist into Cursor packet.',
   },
   {
     capability: 'task_decomposition',
-    primary: 'Kimi Baby',
+    primary: 'Cloud council family',
     fallback: 'Cursor task packet checklist',
-    localTaskCategory: 'planning',
-    unavailableMessage: 'Kimi local model unavailable; include task decomposition in Cursor packet.',
+    unavailableMessage: 'Include task decomposition in Cursor packet.',
   },
   {
     capability: 'diff_explanation',
-    primary: 'Bridge Architect Baby',
+    primary: 'Cursor validation return format',
     fallback: 'Cursor validation return format',
-    localTaskCategory: 'diff-review',
-    unavailableMessage: 'Bridge Architect local model unavailable; ask Cursor executor for diff explanation.',
+    unavailableMessage: 'Ask Cursor executor for diff explanation.',
   },
   {
     capability: 'rollback_planning',
-    primary: 'Bridge Architect Baby',
+    primary: 'Repair ledger rollback recommendation',
     fallback: 'Repair ledger rollback recommendation',
-    localTaskCategory: 'qa-review',
     unavailableMessage: 'Rollback planning route unavailable; use packet rollback recommendation.',
   },
 ]

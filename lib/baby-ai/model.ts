@@ -32,6 +32,7 @@ export type BabyAgent = {
   key: BabyAgentKey
   displayName: string
   familyIdentity: string
+  cloudProvider: string
   role: string
   memoryScope: string[]
   growthLevel: BabyGrowthLevel
@@ -80,8 +81,7 @@ export const BABY_AI_GUARDRAILS = {
   deploymentControlAllowed: false,
   destructiveActionsAllowed: false,
   fakeAutonomyAllowed: false,
-  localBridgeRequired: false,
-  localBridgeRole: 'optional_accelerator',
+  cloudProviderRequired: true,
 } as const
 
 export const BABY_AI_AGENTS: BabyAgent[] = [
@@ -89,6 +89,7 @@ export const BABY_AI_AGENTS: BabyAgent[] = [
     key: 'chatgpt-family-baby',
     displayName: 'ChatGPT Family Baby',
     familyIdentity: 'ChatGPT Family',
+    cloudProvider: 'OpenAI',
     role: 'Strategy synthesis, council coherence, and next-step framing.',
     memoryScope: ['approved council outputs', 'Commander corrections', 'completed project summaries'],
     growthLevel: 'observing',
@@ -106,6 +107,7 @@ export const BABY_AI_AGENTS: BabyAgent[] = [
     key: 'claude-family-baby',
     displayName: 'Claude Family Baby',
     familyIdentity: 'Claude Family',
+    cloudProvider: 'Anthropic',
     role: 'Architecture review, runtime truth, and boundary protection.',
     memoryScope: ['architecture decisions', 'repair outcomes', 'rejected unsafe actions'],
     growthLevel: 'observing',
@@ -123,6 +125,7 @@ export const BABY_AI_AGENTS: BabyAgent[] = [
     key: 'grok-family-baby',
     displayName: 'Grok Family Baby',
     familyIdentity: 'Grok Family',
+    cloudProvider: 'xAI',
     role: 'Signal triage, contradiction spotting, and opportunity framing.',
     memoryScope: ['opportunity results', 'analyst findings', 'rejected claims'],
     growthLevel: 'seed',
@@ -140,6 +143,7 @@ export const BABY_AI_AGENTS: BabyAgent[] = [
     key: 'kimi-family-baby',
     displayName: 'Kimi Family Baby',
     familyIdentity: 'Kimi Family',
+    cloudProvider: 'Moonshot cloud',
     role: 'Task decomposition, dependency mapping, and sequence checks.',
     memoryScope: ['completed projects', 'workflow outcomes', 'Commander corrections'],
     growthLevel: 'seed',
@@ -157,6 +161,7 @@ export const BABY_AI_AGENTS: BabyAgent[] = [
     key: 'red-team-baby',
     displayName: 'Red Team Baby',
     familyIdentity: 'Red Team',
+    cloudProvider: 'Anthropic',
     role: 'Adversarial review for overreach, hidden execution, and weak evidence.',
     memoryScope: ['rejected actions', 'repair outcomes', 'approval denials'],
     growthLevel: 'observing',
@@ -172,18 +177,19 @@ export const BABY_AI_AGENTS: BabyAgent[] = [
   },
   {
     key: 'bridge-architect-baby',
-    displayName: 'Bridge Architect Baby',
-    familyIdentity: 'Bridge Architect',
-    role: 'Bridge/runtime mapping and optional local accelerator guidance.',
-    memoryScope: ['bridge telemetry', 'runtime truth', 'repair outcomes'],
+    displayName: 'Architecture Review Baby',
+    familyIdentity: 'Claude Architecture Review',
+    cloudProvider: 'Anthropic',
+    role: 'Architecture review, runtime truth, and cloud-only integration guidance.',
+    memoryScope: ['architecture decisions', 'runtime truth', 'repair outcomes'],
     growthLevel: 'observing',
     confidenceScore: 0.43,
     usefulnessScore: 0.39,
-    nextTrainingNeed: 'Compare local bridge availability with Baby AI growth continuity.',
-    latestLesson: 'Local LM Studio/Ollama is an accelerator, not the source of agency.',
+    nextTrainingNeed: 'Compare cloud provider readiness with Baby AI growth continuity.',
+    latestLesson: 'Cloud provider readiness and approval gates define the Baby AI lane.',
     skillTree: [
-      skill('bridge_boundary_mapping', 'Bridge boundary mapping', 'Explain what the bridge can and cannot do.', 0.47),
-      skill('runtime_degradation', 'Runtime degradation', 'Keep useful status when local nodes are offline.', 0.42),
+      skill('architecture_boundary_mapping', 'Architecture boundary mapping', 'Explain what each cloud-only lane can and cannot do.', 0.47),
+      skill('runtime_degradation', 'Runtime degradation', 'Keep useful status when cloud providers are unavailable.', 0.42),
       skill('integration_review', 'Integration review', 'Find weak joins between app modules.', 0.34),
     ],
   },
@@ -191,6 +197,7 @@ export const BABY_AI_AGENTS: BabyAgent[] = [
     key: 'analyst-baby',
     displayName: 'Analyst Baby',
     familyIdentity: 'Analyst Family',
+    cloudProvider: 'Cloud provider council',
     role: 'Finding review, evidence grading, and insight-to-lesson conversion.',
     memoryScope: ['analyst findings', 'validated outcomes', 'Commander corrections'],
     growthLevel: 'seed',
@@ -208,6 +215,7 @@ export const BABY_AI_AGENTS: BabyAgent[] = [
     key: 'income-operations-baby',
     displayName: 'Income Operations Baby',
     familyIdentity: 'Income Operations',
+    cloudProvider: 'Cloud provider council',
     role: 'Income workflow observation, payout risk notes, and approval-ready task proposals.',
     memoryScope: ['opportunity results', 'economic workflows', 'payment guard findings'],
     growthLevel: 'seed',

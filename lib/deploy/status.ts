@@ -187,7 +187,7 @@ export async function collectDeployStatus(): Promise<DeployStatusResponse> {
     localDevProbeDetail = p.localDevProbeDetail
     devServerReachable = p.devServerReachable
   } else {
-    localDevProbeDetail = 'Set DEPLOY_STATUS_PROBE_LOCALHOST=1 to allow a short GET to http://127.0.0.1:3000.'
+    localDevProbeDetail = 'Set DEPLOY_STATUS_PROBE_LOCALHOST=1 to allow a short development-server reachability check.'
   }
 
   const localDev: DevServerHint = {

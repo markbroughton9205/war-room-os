@@ -131,6 +131,7 @@ function rowToAgent(row: BabyAgentRow): PersistedBabyAgent {
     key: fallback.key,
     displayName: row.display_name || fallback.displayName,
     familyIdentity: row.family_identity || fallback.familyIdentity,
+    cloudProvider: fallback.cloudProvider,
     role: row.role || fallback.role,
     memoryScope: row.memory_scope ?? fallback.memoryScope,
     growthLevel,

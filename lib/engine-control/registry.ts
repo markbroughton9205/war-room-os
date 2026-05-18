@@ -2,10 +2,8 @@ import type { EngineCategory, EngineCapabilityId, EngineId, ProviderType } from 
 
 /**
  * Optional env vars consulted by `collectEngineStatuses` (see `lib/engine-control/status.ts`):
- * - Local: Ollama/LM Studio probed on loopback; no env required for default ports.
  * - Cloud: OPENAI_API_KEY (chatgpt, codex), ANTHROPIC_API_KEY (claude), XAI_API_KEY (grok), GEMINI_API_KEY (gemini).
- * - CLI/service bridges: LOCAL_AGENT_OPENHANDS_URL, LOCAL_AGENT_AIDER_PATH, LOCAL_AGENT_CONTINUE_PATH, LOCAL_AGENT_GOOSE_PATH.
- * - IDE (cursor): optional CURSOR_* or LOCAL_AGENT_CURSOR_* if you add probes later — not required for Phase 2.
+ * - Cursor remains a manual workspace lane and is not probed from War Room.
  */
 
 export type EngineRegistryEntry = {
@@ -21,60 +19,12 @@ export type EngineRegistryEntry = {
 
 export const ENGINE_REGISTRY: readonly EngineRegistryEntry[] = [
   {
-    id: 'ollama',
-    displayName: 'Ollama',
-    category: 'local',
-    providerType: 'ollama',
-    defaultCapabilities: ['chat_completion', 'code_assist', 'repo_read'],
-    defaultPermissionHints: 'Local inference; no cloud key required.',
-  },
-  {
-    id: 'lm_studio',
-    displayName: 'LM Studio',
-    category: 'local',
-    providerType: 'openai_compatible',
-    defaultCapabilities: ['chat_completion', 'code_assist', 'repo_read'],
-    defaultPermissionHints: 'OpenAI-compatible server on loopback.',
-  },
-  {
-    id: 'continue',
-    displayName: 'Continue',
-    category: 'ide',
-    providerType: 'ide_external',
-    defaultCapabilities: ['chat_completion', 'code_assist', 'repo_read'],
-    defaultPermissionHints: 'IDE extension — not probed from War Room server.',
-  },
-  {
-    id: 'aider',
-    displayName: 'Aider',
-    category: 'cli',
-    providerType: 'cli_external',
-    defaultCapabilities: ['chat_completion', 'code_assist', 'agent_loop', 'repo_read', 'repo_write', 'terminal'],
-    defaultPermissionHints: 'CLI agent — configure LOCAL_AGENT_AIDER_PATH to expose status endpoint.',
-  },
-  {
-    id: 'openhands',
-    displayName: 'OpenHands',
-    category: 'cli',
-    providerType: 'http_service',
-    defaultCapabilities: ['chat_completion', 'agent_loop', 'repo_read', 'repo_write', 'terminal'],
-    defaultPermissionHints: 'Service URL via LOCAL_AGENT_OPENHANDS_URL when available.',
-  },
-  {
-    id: 'goose',
-    displayName: 'Goose',
-    category: 'cli',
-    providerType: 'cli_external',
-    defaultCapabilities: ['chat_completion', 'agent_loop', 'repo_read', 'terminal'],
-    defaultPermissionHints: 'CLI/framework bridge — LOCAL_AGENT_GOOSE_PATH optional.',
-  },
-  {
     id: 'cursor',
     displayName: 'Cursor',
-    category: 'ide',
+    category: 'manual_workspace',
     providerType: 'ide_external',
     defaultCapabilities: ['chat_completion', 'code_assist', 'agent_loop', 'repo_read'],
-    defaultPermissionHints: 'External IDE — not probed from server.',
+    defaultPermissionHints: 'Manual engineering workspace; War Room does not invoke Cursor automatically.',
   },
   {
     id: 'codex',

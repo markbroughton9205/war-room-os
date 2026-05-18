@@ -36,7 +36,6 @@ export {
   mapDeployStatusJson,
   mapEngineControlJson,
   mapInternetStatusJson,
-  mapLocalAgentJson,
   mapMemoryProbe,
   mapOrchestrationState,
   mapProvidersHealthJson,

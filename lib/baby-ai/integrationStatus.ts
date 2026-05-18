@@ -31,8 +31,8 @@ export type BabyAiAcademySnapshot = {
   agents: PersistedBabyAgent[]
   latestLessons: string[]
   council: ReturnType<typeof buildBabyCouncilIntegration>
-  localBridge: {
-    dependency: 'optional_accelerator'
+  cloudOnly: {
+    dependency: 'required_cloud_provider'
     statusCopy: string
   }
   governanceRules: string[]
@@ -99,9 +99,9 @@ export async function buildBabyAiAcademySnapshot(): Promise<BabyAiAcademySnapsho
     agents,
     latestLessons,
     council: buildBabyCouncilIntegration(agents.length ? agents : BABY_AI_AGENTS),
-    localBridge: {
-      dependency: 'optional_accelerator',
-      statusCopy: 'Baby AI growth uses War Room persistence and approved outcomes. LM Studio/Ollama can accelerate local reasoning but offline local nodes do not disable the nursery.',
+    cloudOnly: {
+      dependency: 'required_cloud_provider',
+      statusCopy: 'Baby AI growth uses War Room persistence, approved outcomes, and cloud provider families only. No offline connector stack is used.',
     },
     governanceRules: babyAiGovernanceRules(),
     counts: {

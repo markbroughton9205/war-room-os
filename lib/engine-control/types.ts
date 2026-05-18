@@ -3,12 +3,6 @@
  */
 
 export type EngineId =
-  | 'ollama'
-  | 'lm_studio'
-  | 'continue'
-  | 'aider'
-  | 'openhands'
-  | 'goose'
   | 'cursor'
   | 'codex'
   | 'grok'
@@ -17,19 +11,15 @@ export type EngineId =
   | 'gemini'
 
 /** Where the engine typically runs. */
-export type EngineCategory = 'local' | 'cli' | 'ide' | 'cloud' | 'cloud_model'
+export type EngineCategory = 'manual_workspace' | 'ide' | 'cloud' | 'cloud_model'
 
 /** Upstream or transport kind (routing hints only). */
 export type ProviderType =
-  | 'ollama'
-  | 'openai_compatible'
   | 'openai'
   | 'anthropic'
   | 'xai'
   | 'google'
   | 'ide_external'
-  | 'cli_external'
-  | 'http_service'
 
 /** Capability tags for routing and permission hints. */
 export type EngineCapabilityId =

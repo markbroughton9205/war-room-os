@@ -852,12 +852,12 @@ export async function POST(req: Request) {
           success: false,
           flow: 'continue_single',
           councilSingleFamily,
-          reason: 'cloud_path_unavailable_use_local_agent',
+          reason: 'cloud_provider_unavailable',
         })
         return NextResponse.json(
           {
-            error: 'use_local_agent',
-            message: `${councilSingleFamily} is invoked via POST /api/local-agent/invoke only.`,
+            error: 'cloud_provider_unavailable',
+            message: `${councilSingleFamily} has no cloud provider route configured in War Room.`,
           },
           { status: 400 },
         )

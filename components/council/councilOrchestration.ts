@@ -97,21 +97,3 @@ export function orchestrationFamilyToTypingFamily(
   return 'CHATGPT FAMILY'
 }
 
-export function orchestrationFamilyToLocalAgentId(f: CouncilOrchestrationFamily): string | null {
-  switch (f) {
-    case 'chatgpt':
-    case 'baby':
-      return 'chatgpt-family-baby'
-    case 'claude':
-    case 'red_team':
-      return f === 'red_team' ? 'red-team-baby' : 'claude-family-baby'
-    case 'grok':
-      return 'grok-family-baby'
-    case 'kimi':
-      return 'kimi-family-baby'
-    case 'bridge_architect':
-      return 'bridge-architect-baby'
-    default:
-      return null
-  }
-}

@@ -307,8 +307,8 @@ values
     '[{"key":"bridge_boundary_mapping","label":"Bridge boundary mapping","description":"Explain what the bridge can and cannot do.","progress":0.47},{"key":"runtime_degradation","label":"Runtime degradation","description":"Keep useful status when local nodes are offline.","progress":0.42},{"key":"integration_review","label":"Integration review","description":"Find weak joins between app modules.","progress":0.34}]'::jsonb,
     0.43,
     0.39,
-    'Local LM Studio/Ollama is an accelerator, not the source of agency.',
-    'Compare local bridge availability with Baby AI growth continuity.'
+    'Cloud provider readiness and approval gates define the Baby AI lane.',
+    'Compare cloud provider readiness with Baby AI growth continuity.'
   ),
   (
     'analyst-baby',

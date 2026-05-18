@@ -8,8 +8,6 @@ export function engineProviderDisplayLabel(id: EngineId, providerType: ProviderT
   if (providerType === 'anthropic') return 'Anthropic'
   if (providerType === 'xai') return 'xAI'
   if (providerType === 'google') return 'Google'
-  if (providerType === 'ollama') return 'Ollama'
-  if (providerType === 'openai_compatible') return 'LM Studio (OpenAI-compatible)'
   const reg = ENGINE_REGISTRY_BY_ID.get(id)
   return reg?.displayName ?? providerType
 }

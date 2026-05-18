@@ -10,7 +10,7 @@ export type RouteClassification = {
 }
 
 const EXPERIMENTAL_PREFIXES = ['/api/debug']
-const RESERVED_PREFIXES = ['/api/local-agent', '/api/orchestration', '/api/workers', '/api/income-workers']
+const RESERVED_PREFIXES = ['/api/orchestration', '/api/workers', '/api/income-workers']
 const PLANNED_PREFIXES = ['/api/income/grok']
 
 function startsWithAny(apiPath: string, prefixes: string[]): boolean {

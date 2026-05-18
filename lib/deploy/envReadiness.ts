@@ -55,19 +55,6 @@ export const ENV_VAR_GROUPS: EnvVarGroupDef[] = [
     optional: ['XAI_API_KEY', 'XAI_MODEL'],
   },
   {
-    id: 'local_agent',
-    label: 'Local agent bridges',
-    required: [],
-    optional: [
-      'LOCAL_AGENT_OPENHANDS_URL',
-      'LOCAL_AGENT_AIDER_PATH',
-      'LOCAL_AGENT_CONTINUE_PATH',
-      'LOCAL_AGENT_GOOSE_PATH',
-      'CURSOR_API_KEY',
-      'LOCAL_AGENT_CURSOR_TOKEN',
-    ],
-  },
-  {
     id: 'deploy_platform',
     label: 'Deploy / platform',
     required: [],

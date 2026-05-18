@@ -15,6 +15,7 @@ type BabyAgent = {
   key: string
   displayName: string
   familyIdentity: string
+  cloudProvider: string
   role: string
   memoryScope: string[]
   growthLevel: string
@@ -51,11 +52,11 @@ type BabyAiSnapshot = {
   council: {
     liveCouncilRole: 'observation_and_task_proposal'
     executionAllowed: false
-    localBridgeDependency: 'optional_accelerator'
+    providerDependency: 'cloud_only'
     observations: BabyCouncilObservation[]
   }
-  localBridge: {
-    dependency: 'optional_accelerator'
+  cloudOnly: {
+    dependency: 'required_cloud_provider'
     statusCopy: string
   }
   governanceRules: string[]
@@ -197,7 +198,7 @@ export function BabyAiAcademyPanel() {
           <MiniCard label="Outcomes" value={countLabel(snapshot?.counts.outcomes)} />
         </div>
         <div className="mt-3 rounded border border-sky-500/20 bg-sky-500/5 p-2 text-[10px] leading-relaxed text-sky-100">
-          {snapshot?.localBridge.statusCopy ?? 'Local LM Studio/Ollama is optional acceleration only; Baby AI growth remains available through War Room persistence and approved outcomes.'}
+          {snapshot?.cloudOnly.statusCopy ?? 'Baby AI growth is cloud-only and remains available through War Room persistence and approved outcomes.'}
         </div>
       </div>
 
@@ -205,7 +206,7 @@ export function BabyAiAcademyPanel() {
         <section className="rounded border border-[#d4af37]/30 bg-black/25 p-3 text-xs">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-[10px] font-bold uppercase tracking-widest text-[#d4af37]">Active Family Babies</h3>
-            <Badge status={snapshot?.localBridge.dependency ?? 'optional_accelerator'} />
+            <Badge status={snapshot?.cloudOnly.dependency ?? 'required_cloud_provider'} />
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
             {agents.map(agent => (
@@ -213,7 +214,8 @@ export function BabyAiAcademyPanel() {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <h4 className="font-semibold text-white">{agent.displayName}</h4>
-                    <p className="mt-0.5 text-[10px] text-slate-500">{agent.familyIdentity} · {agent.role}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-500">{agent.familyIdentity} · {agent.cloudProvider}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-400">{agent.role}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <Badge status={agent.growthLevel} />
@@ -221,8 +223,13 @@ export function BabyAiAcademyPanel() {
                   </div>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <MiniCard label="Family" value={agent.familyIdentity} />
+                  <MiniCard label="Cloud Provider" value={agent.cloudProvider} />
                   <MiniCard label="Confidence" value={pct(agent.confidenceScore)} />
                   <MiniCard label="Usefulness" value={pct(agent.usefulnessScore)} />
+                </div>
+                <div className="mt-3 rounded border border-white/10 p-2 text-[10px] text-slate-400">
+                  <div><span className="text-slate-500">Memory scope:</span> {agent.memoryScope.join(', ')}</div>
                 </div>
                 <div className="mt-3 space-y-2">
                   {agent.skillTree.slice(0, 3).map(skill => <SkillBar key={skill.key} skill={skill} />)}

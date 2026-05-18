@@ -27,8 +27,6 @@ const internetPollTimestamps: number[] = []
 let lastRedSentinelRunAt = 0
 /** Monotonic depth: concurrent workers + scans (bounded gate). */
 let workerQueueDepth = 0
-let ollamaHeavyLock = false
-let lmStudioHeavyLock = false
 
 function trimInternetPollRing(now: number) {
   const cutoff = now - INTERNET_POLL_WINDOW_MS
@@ -45,8 +43,6 @@ export function getWorkerLimitCounters() {
     internetPollsInWindow: internetPollTimestamps.length,
     lastRedSentinelRunAt,
     workerQueueDepth,
-    ollamaHeavyLock,
-    lmStudioHeavyLock,
   }
 }
 
@@ -126,45 +122,6 @@ export function tryReserveRedSentinelInterval(): { ok: true } | { ok: false; ret
   }
   lastRedSentinelRunAt = now
   return { ok: true }
-}
-
-export type HeavyLocalProvider = 'ollama' | 'lmstudio'
-
-export type HeavyLocalOpts = {
-  allowParallelHeavyLocal?: boolean
-}
-
-export function tryAcquireHeavyLocalInference(
-  provider: HeavyLocalProvider,
-  opts: HeavyLocalOpts = {},
-): AcquireResult {
-  if (opts.allowParallelHeavyLocal) return { ok: true }
-  if (provider === 'ollama') {
-    if (lmStudioHeavyLock) {
-      return { ok: false, error: 'LM Studio heavy job in progress; Ollama heavy request blocked.', retryAfterMs: 2000 }
-    }
-    if (ollamaHeavyLock) {
-      return { ok: false, error: 'Ollama heavy job already in progress.', retryAfterMs: 1500 }
-    }
-    ollamaHeavyLock = true
-    return { ok: true }
-  }
-  if (provider === 'lmstudio') {
-    if (ollamaHeavyLock) {
-      return { ok: false, error: 'Ollama heavy job in progress; LM Studio heavy request blocked.', retryAfterMs: 2000 }
-    }
-    if (lmStudioHeavyLock) {
-      return { ok: false, error: 'LM Studio heavy job already in progress.', retryAfterMs: 1500 }
-    }
-    lmStudioHeavyLock = true
-    return { ok: true }
-  }
-  return { ok: true }
-}
-
-export function releaseHeavyLocalInference(provider: HeavyLocalProvider) {
-  if (provider === 'ollama') ollamaHeavyLock = false
-  if (provider === 'lmstudio') lmStudioHeavyLock = false
 }
 
 export function getLimitConstants() {

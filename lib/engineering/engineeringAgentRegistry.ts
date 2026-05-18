@@ -1,24 +1,14 @@
-import { CODEX_ENGINEERING_AGENT } from './codexEngineeringAgent'
 import { CURSOR_ENGINEERING_AGENT } from './cursorEngineeringAgent'
 
 export type EngineeringAgentId =
   | 'cursor'
-  | 'codex'
   | 'claude_architecture_reviewer'
   | 'red_team_risk_reviewer'
-  | 'local_code_agent_bridge'
-  | 'aider'
-  | 'openhands'
-  | 'continue'
-  | 'goose'
 
 export type EngineeringAgentRole =
   | 'preferred_manual_executor'
-  | 'planned/cloud_engineering_executor'
   | 'architecture_reviewer'
   | 'risk_reviewer'
-  | 'local_execution_bridge'
-  | 'optional_local_engineering_connector'
 
 export type EngineeringAgentAvailability =
   | 'available_manual'
@@ -50,15 +40,6 @@ export const ENGINEERING_AGENT_REGISTRY: EngineeringAgentRegistryEntry[] = [
     notes: CURSOR_ENGINEERING_AGENT.notes,
   },
   {
-    id: CODEX_ENGINEERING_AGENT.id,
-    name: CODEX_ENGINEERING_AGENT.name,
-    role: CODEX_ENGINEERING_AGENT.role,
-    availability: CODEX_ENGINEERING_AGENT.availability,
-    approvalRequired: true,
-    canMutateFromWarRoom: false,
-    notes: CODEX_ENGINEERING_AGENT.missingConfiguration,
-  },
-  {
     id: 'claude_architecture_reviewer',
     name: 'Claude',
     role: 'architecture_reviewer',
@@ -75,51 +56,6 @@ export const ENGINEERING_AGENT_REGISTRY: EngineeringAgentRegistryEntry[] = [
     approvalRequired: true,
     canMutateFromWarRoom: false,
     notes: 'Reviews failure modes, approval boundaries, rollback risk, and regression exposure.',
-  },
-  {
-    id: 'local_code_agent_bridge',
-    name: 'Local Code Agent Bridge',
-    role: 'local_execution_bridge',
-    availability: 'planned',
-    approvalRequired: true,
-    canMutateFromWarRoom: false,
-    notes: 'Status bridge for local engineering engines. No autonomous repo writes are granted.',
-  },
-  {
-    id: 'aider',
-    name: 'Aider',
-    role: 'optional_local_engineering_connector',
-    availability: 'not_connected',
-    approvalRequired: true,
-    canMutateFromWarRoom: false,
-    notes: 'Optional local connector. Requires explicit configuration and approval before use.',
-  },
-  {
-    id: 'openhands',
-    name: 'OpenHands',
-    role: 'optional_local_engineering_connector',
-    availability: 'not_connected',
-    approvalRequired: true,
-    canMutateFromWarRoom: false,
-    notes: 'Optional local connector. Requires explicit configuration and approval before use.',
-  },
-  {
-    id: 'continue',
-    name: 'Continue',
-    role: 'optional_local_engineering_connector',
-    availability: 'not_connected',
-    approvalRequired: true,
-    canMutateFromWarRoom: false,
-    notes: 'Optional IDE connector. Requires explicit configuration and approval before use.',
-  },
-  {
-    id: 'goose',
-    name: 'Goose',
-    role: 'optional_local_engineering_connector',
-    availability: 'not_connected',
-    approvalRequired: true,
-    canMutateFromWarRoom: false,
-    notes: 'Optional local connector. Requires explicit configuration and approval before use.',
   },
 ]
 
