@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { CanonicalStatusBadge } from '@/components/war-room/runtime/CanonicalStatusBadge'
 
 type BriefingCategory =
   | 'freight'
@@ -311,7 +312,10 @@ export function DailyBriefingPanel() {
       <div className="mt-3 rounded border border-sky-500/20 bg-sky-500/5 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h4 className="text-[10px] font-bold uppercase tracking-widest text-sky-300">Provider Readiness Inherited</h4>
-          <Badge label={briefing?.providerRuntime.signalAvailability.liveSignalsAvailable ? 'available' : 'unavailable'} />
+          <div className="flex flex-wrap gap-2">
+            <CanonicalStatusBadge subsystemId="daily_briefing" label="Canonical Briefing" />
+            <Badge label={briefing?.providerRuntime.signalAvailability.liveSignalsAvailable ? 'available' : 'unavailable'} />
+          </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           {(briefing?.providerRuntime.providers ?? []).map(provider => (

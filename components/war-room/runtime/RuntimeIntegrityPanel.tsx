@@ -3,6 +3,29 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { RuntimeReliabilitySnapshot, TruthBoundaryLabel } from '@/lib/runtime/operationalReliabilityTypes'
 
+type CanonicalSubsystemStatus = {
+  id: string
+  label: string
+  truthBoundary: TruthBoundaryLabel
+  health: 'healthy' | 'degraded' | 'unavailable' | 'unknown'
+  confidence: number
+  evidence: string[]
+  missingEvidence: string[]
+  downstreamImpact: string[]
+  recommendedRecovery: string[]
+  lastChecked: string
+}
+
+type CanonicalRuntimeStatus = {
+  generatedAt: string
+  summary: {
+    health: string
+    confidence: number
+    uncertaintyDampening: string
+  }
+  subsystems: CanonicalSubsystemStatus[]
+}
+
 function Badge({ value }: { value: string }) {
   const tone =
     value === 'VERIFIED' || value === 'STABLE' || value === 'verified'
@@ -38,6 +61,7 @@ function timeLabel(value: string | null) {
 
 export function RuntimeIntegrityPanel() {
   const [snapshot, setSnapshot] = useState<RuntimeReliabilitySnapshot | null>(null)
+  const [canonical, setCanonical] = useState<CanonicalRuntimeStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -46,9 +70,15 @@ export function RuntimeIntegrityPanel() {
     setError(null)
     try {
       const res = await fetch(`/api/runtime/snapshots${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' })
-      const body = await res.json() as RuntimeReliabilitySnapshot & { error?: string }
+      const canonicalRes = await fetch(`/api/runtime/canonical-status${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' })
+      const [body, canonicalBody] = await Promise.all([
+        res.json() as Promise<RuntimeReliabilitySnapshot & { error?: string }>,
+        canonicalRes.json() as Promise<CanonicalRuntimeStatus & { error?: string }>,
+      ])
       if (!res.ok) throw new Error(body.error || 'Runtime reliability snapshot failed')
+      if (!canonicalRes.ok) throw new Error(canonicalBody.error || 'Canonical runtime status failed')
       setSnapshot(body)
+      setCanonical(canonicalBody)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Runtime reliability snapshot failed')
     } finally {
@@ -90,6 +120,7 @@ export function RuntimeIntegrityPanel() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge value={snapshot?.mode ?? 'OBSERVATION_ONLY'} />
+          <Badge value={canonical ? `${canonical.summary.confidence}%` : 'CONFIDENCE_LOADING'} />
           <button
             type="button"
             onClick={() => void load(true)}
@@ -182,6 +213,46 @@ export function RuntimeIntegrityPanel() {
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="rounded border border-white/10 bg-black/25 p-3 lg:col-span-2">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-white">Canonical evidence cards</h3>
+            <Badge value={canonical?.summary.health ?? 'UNKNOWN'} />
+          </div>
+          <p className="mb-3 text-[10px] leading-relaxed text-slate-500">
+            {canonical?.summary.uncertaintyDampening ?? 'Canonical runtime status has not loaded.'}
+          </p>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {(canonical?.subsystems ?? []).map(system => (
+              <article key={system.id} className="rounded border border-white/10 bg-black/25 p-2">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-white">{system.label}</div>
+                    <div className="mt-1 text-[10px] text-slate-500">confidence: {system.confidence}%</div>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    <Badge value={system.truthBoundary} />
+                    <Badge value={system.health} />
+                  </div>
+                </div>
+                <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
+                  Evidence: {system.evidence.join(' · ')}
+                </p>
+                {system.missingEvidence.length ? (
+                  <p className="mt-1 text-[10px] leading-relaxed text-amber-100/80">
+                    Missing: {system.missingEvidence.join(' · ')}
+                  </p>
+                ) : null}
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                  Impact: {system.downstreamImpact.join(' · ') || 'No direct downstream impact.'}
+                </p>
+                <p className="mt-1 text-[10px] leading-relaxed text-emerald-100/70">
+                  Recovery: {system.recommendedRecovery.join(' · ')}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+
         <div className="rounded border border-white/10 bg-black/25 p-3">
           <h3 className="text-sm font-semibold text-white">Degraded intelligence</h3>
           <div className="mt-3 space-y-2">

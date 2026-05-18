@@ -2,45 +2,32 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-type ProviderRuntimeHealth =
-  | 'CONNECTED'
-  | 'DEGRADED'
-  | 'MISSING_KEY'
-  | 'RATE_LIMITED'
-  | 'INVALID_KEY'
-
 type ProviderRuntimeStatus = {
-  id: string
-  provider: string
   family: string
-  optional: boolean
+  providerId: string
+  label: string
   configured: boolean
-  health: ProviderRuntimeHealth
-  latencyMs: number | null
-  checkedAt: string
-  lastSuccessAt: string | null
-  quotaState: 'ok' | 'rate_limited' | 'unknown'
-  rateLimitResetAt: string | null
-  activeModels: string[]
-  signalAvailability: boolean
-  note: string
+  connected: boolean
+  availability: string
+  connectionStatus: string
+  health: 'healthy' | 'degraded' | 'unavailable' | 'unknown'
+  confidence: number
+  evidence: string[]
+  missingEvidence: string[]
+  lastChecked: string
 }
 
 type ProviderRuntimeSummary = {
   generatedAt: string
-  providers: ProviderRuntimeStatus[]
-  signalAvailability: {
-    tavily: boolean
-    firecrawl: boolean
-    liveSignalsAvailable: boolean
-    note: string
+  summary: {
+    health: string
+    confidence: number
   }
+  providers: ProviderRuntimeStatus[]
   guardrails: {
-    serverSideOnly: true
-    apiKeysSerialized: false
-    timeoutProtected: true
-    providerFailureIsolation: true
-    autonomousExecution: false
+    apiKeysExposed: false
+    hiddenExecution: false
+    fakeConnectedStates: false
   }
 }
 
@@ -49,10 +36,10 @@ function label(value: string) {
 }
 
 function colorFor(value: string) {
-  if (value === 'CONNECTED' || value === 'ok') return '#34D399'
-  if (value === 'DEGRADED' || value === 'RATE_LIMITED' || value === 'rate_limited') return '#FBBF24'
+  if (value === 'CONNECTED' || value === 'healthy' || value === 'online') return '#34D399'
+  if (value === 'DEGRADED' || value === 'RATE_LIMITED' || value === 'degraded' || value === 'standby') return '#FBBF24'
   if (value === 'INVALID_KEY') return '#F87171'
-  if (value === 'MISSING_KEY') return '#A78BFA'
+  if (value === 'MISSING_KEY' || value === 'unavailable' || value === 'not_connected') return '#A78BFA'
   return '#94A3B8'
 }
 
@@ -91,7 +78,7 @@ export function ProviderRuntimePanel() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/providers/status${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' })
+      const res = await fetch(`/api/runtime/canonical-status${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' })
       const body = await res.json() as ProviderRuntimeSummary & { error?: string }
       if (!res.ok) throw new Error(body.error || 'Provider runtime status failed')
       setRuntime(body)
@@ -110,10 +97,10 @@ export function ProviderRuntimePanel() {
   const stats = useMemo(() => {
     const providers = runtime?.providers ?? []
     return {
-      connected: providers.filter(provider => provider.health === 'CONNECTED').length,
+      connected: providers.filter(provider => provider.connected).length,
       configured: providers.filter(provider => provider.configured).length,
       total: providers.length,
-      signalProviders: providers.filter(provider => provider.signalAvailability).length,
+      degraded: providers.filter(provider => provider.health === 'degraded').length,
     }
   }, [runtime?.providers])
 
@@ -128,7 +115,7 @@ export function ProviderRuntimePanel() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge value={runtime?.signalAvailability.liveSignalsAvailable ? 'CONNECTED' : 'DEGRADED'} />
+          <Badge value={runtime?.summary.health ?? 'unknown'} />
           <button
             type="button"
             onClick={() => void load(true)}
@@ -145,43 +132,44 @@ export function ProviderRuntimePanel() {
       <div className="mb-4 grid gap-3 md:grid-cols-5">
         <MiniMetric label="Connected" value={`${stats.connected}/${stats.total}`} />
         <MiniMetric label="Configured" value={`${stats.configured}/${stats.total}`} />
-        <MiniMetric label="Signal Providers" value={String(stats.signalProviders)} />
-        <MiniMetric label="Tavily" value={runtime?.signalAvailability.tavily ? 'ready' : 'unavailable'} />
-        <MiniMetric label="Firecrawl" value={runtime?.signalAvailability.firecrawl ? 'ready' : 'optional/unavailable'} />
+        <MiniMetric label="Degraded" value={String(stats.degraded)} />
+        <MiniMetric label="Confidence" value={runtime ? `${runtime.summary.confidence}%` : 'loading'} />
+        <MiniMetric label="Truth Source" value="canonical" />
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
         {(runtime?.providers ?? []).map(provider => (
-          <article key={provider.id} className="rounded border border-white/10 bg-black/25 p-3">
+          <article key={provider.family} className="rounded border border-white/10 bg-black/25 p-3">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-sm font-semibold text-white">{provider.provider}</h3>
-                  {provider.optional ? <Badge value="optional" /> : null}
+                  <h3 className="text-sm font-semibold text-white">{provider.label}</h3>
                 </div>
-                <p className="mt-1 text-[10px] text-slate-500">{provider.family}</p>
+                <p className="mt-1 text-[10px] text-slate-500">{provider.providerId}</p>
               </div>
               <div className="flex flex-wrap gap-1">
+                <Badge value={provider.availability} />
                 <Badge value={provider.health} />
-                <Badge value={provider.quotaState} />
               </div>
             </div>
-            <p className="mt-2 text-[10px] leading-relaxed text-slate-400">{provider.note}</p>
+            <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
+              Env presence is CONFIGURED only; CONNECTED requires a successful live server-side probe.
+            </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              <MiniMetric label="Latency" value={provider.latencyMs == null ? 'n/a' : `${provider.latencyMs}ms`} />
-              <MiniMetric label="Last Success" value={timeLabel(provider.lastSuccessAt)} />
-              <MiniMetric label="Signals" value={provider.signalAvailability ? 'available' : 'unavailable'} />
+              <MiniMetric label="Configured" value={provider.configured ? 'yes' : 'no'} />
+              <MiniMetric label="Connected" value={provider.connected ? 'yes' : 'no'} />
+              <MiniMetric label="Confidence" value={`${provider.confidence}%`} />
             </div>
             <div className="mt-3 rounded border border-white/10 bg-black/20 p-2 text-[10px] text-slate-500">
-              <span className="font-semibold text-slate-300">Active models:</span> {provider.activeModels.length ? provider.activeModels.join(', ') : 'none reported'}
-              {provider.rateLimitResetAt ? <span> · reset {timeLabel(provider.rateLimitResetAt)}</span> : null}
+              <span className="font-semibold text-slate-300">Evidence:</span> {provider.evidence.join(' · ')}
+              {provider.missingEvidence.length ? <span> · Missing: {provider.missingEvidence.join(' · ')}</span> : null}
             </div>
           </article>
         ))}
       </div>
 
       <div className="mt-4 rounded border border-white/10 bg-black/25 p-3 text-[10px] leading-relaxed text-slate-500">
-        {runtime?.signalAvailability.note ?? 'Provider runtime has not loaded yet.'} Safeguards: server-side only, timeout protected, failure isolated, no autonomous execution, no serialized API keys. Last checked: {runtime?.generatedAt ?? 'loading'}.
+        Canonical provider status is shared by runtime panels and council summaries. Safeguards: server-side only, timeout protected, failure isolated, no autonomous execution, no serialized API keys. Last checked: {runtime?.generatedAt ? timeLabel(runtime.generatedAt) : 'loading'}.
       </div>
     </section>
   )

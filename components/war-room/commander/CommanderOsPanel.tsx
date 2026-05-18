@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { CanonicalStatusBadge } from '@/components/war-room/runtime/CanonicalStatusBadge'
 import type {
   CommanderHighestLeverageMove,
   CommanderLifePositioning,
@@ -167,6 +168,7 @@ export function CommanderOsPanel() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <CanonicalStatusBadge subsystemId="commander_os" label="Canonical" />
           <Badge value={leverage?.persistenceAvailable ? 'persistence_available' : 'fallback'} />
           <button
             type="button"

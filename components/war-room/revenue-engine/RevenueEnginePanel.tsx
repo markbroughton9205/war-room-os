@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { CanonicalStatusBadge } from '@/components/war-room/runtime/CanonicalStatusBadge'
 import type { RevenueEngineCategory, RevenueEngineSnapshot, RevenueOpportunity } from '@/lib/revenue-engine/model'
 import { REVENUE_ENGINE_CATEGORIES } from '@/lib/revenue-engine/model'
 
@@ -204,6 +205,7 @@ export function RevenueEnginePanel() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <CanonicalStatusBadge subsystemId="revenue_engine" label="Canonical" />
           <Badge label={snapshot?.persistenceAvailable ? 'persistent_available' : 'fallback'} />
           <button
             type="button"

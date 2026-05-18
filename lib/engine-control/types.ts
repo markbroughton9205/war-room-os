@@ -97,6 +97,13 @@ export type EngineStatus = {
 
 export type EngineControlStatusResponse = {
   engines: EngineStatus[]
+  configuredProviders: EngineId[]
+  reachableProviders: EngineId[]
+  functionalProviders: EngineId[]
+  routingReadiness: 'ready' | 'degraded' | 'unavailable'
+  approvalRequired: boolean
+  timestamp: string
+  degradedReason: string | null
   checkedAt: string
 }
 

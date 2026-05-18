@@ -17,6 +17,11 @@ export type VerifiedRuntimeContext = {
 
 /** Literal phrases + patterns aligned with modeGovernorFilters recovery blocks. */
 const SPECULATIVE_PHRASE_PATTERNS: RegExp[] = [
+  /\bcompromised\s+telemetry\b/i,
+  /\brunaway\s+automation\b/i,
+  /\bsilent\s+bleeding\b/i,
+  /\bfinancial\s+danger\b/i,
+  /\bno\s+kill\s+switch\b/i,
   /\bnetwork\s+interplay\b/i,
   /\bbackend\s+(?:sync(?:hronization)?|synchronization)\s+problem\b/i,
   /\bbackend\s+synchronization\b/i,

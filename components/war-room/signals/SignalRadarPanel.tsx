@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { CanonicalStatusBadge } from '@/components/war-room/runtime/CanonicalStatusBadge'
 import type { SignalResult, SignalSnapshot, SignalSourceDefinition } from '@/lib/signals/model'
 
 function label(value: string) {
@@ -172,6 +173,7 @@ export function SignalRadarPanel() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <CanonicalStatusBadge subsystemId="signal_radar" label="Canonical" />
           <Badge value={snapshot?.persistenceAvailable ? 'persistence_available' : 'persistence_unavailable'} />
           <button type="button" onClick={() => void load()} disabled={loading || scanning} className="rounded border border-white/15 px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-300">
             {loading ? 'Refreshing' : 'Refresh'}

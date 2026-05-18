@@ -4,6 +4,7 @@ import {
   geminiAllowedGenerateContentIds,
   geminiOrderedCandidates,
 } from '@/lib/ai/providers/geminiGenerative'
+import { getProviderRuntimeHealth, type ProviderRuntimeId, type ProviderRuntimeStatus } from '@/lib/providers/health'
 
 import { ENGINE_REGISTRY } from './registry'
 import { engineProviderDisplayLabel } from './provider-display'
@@ -34,6 +35,13 @@ const CLOUD_PROVIDER_FAMILY: Partial<Record<EngineId, string>> = {
   gemini: 'gemini',
 }
 
+const ENGINE_PROVIDER_RUNTIME_ID: Partial<Record<EngineId, ProviderRuntimeId>> = {
+  chatgpt: 'openai',
+  claude: 'anthropic',
+  grok: 'xai',
+  gemini: 'google',
+}
+
 function providerDiagnostic(args: {
   id: EngineId
   configured: boolean
@@ -62,13 +70,16 @@ function finalize(status: Omit<EngineStatus, 'permissions' | 'approvalRequired' 
 function cloudEngine(
   id: 'grok' | 'claude' | 'chatgpt',
   lastChecked: string,
-  configured: boolean,
+  provider: ProviderRuntimeStatus | undefined,
   configuredNotes: string,
   missingNotes: string,
 ): EngineStatus {
   const reg = registryRow(id)
-  const reachable = configured
-  const functional = configured
+  const configured = Boolean(provider?.configured)
+  const connected = provider?.health === 'CONNECTED'
+  const degraded = Boolean(provider?.configured && provider.health !== 'CONNECTED')
+  const reachable = connected
+  const functional = connected
   return finalize({
     id,
     displayName: reg.displayName,
@@ -84,12 +95,19 @@ function cloudEngine(
       id,
       configured,
       apiKeyPresent: configured,
-      lastCheckResult: configured ? 'credential_present_call_allowed' : 'missing_api_key',
-      ...(configured ? {} : { reason: missingNotes }),
+      lastCheckResult: connected
+        ? 'live_provider_connected'
+        : configured
+          ? `live_provider_${provider?.health.toLowerCase() ?? 'unknown'}`
+          : 'missing_api_key',
+      ...(!configured ? { reason: missingNotes } : {}),
+      ...(degraded ? { reason: provider?.note ?? 'Live provider check did not report CONNECTED.' } : {}),
     }),
-    notes: configured
-      ? `${configuredNotes} Credential present; outbound API health not probed in Phase 2.`
-      : missingNotes,
+    notes: connected
+      ? `${configuredNotes} Live provider health check connected.`
+      : configured
+        ? `${configuredNotes} Configured but not connected: ${provider?.note ?? 'live provider health unknown.'}`
+        : missingNotes,
   })
 }
 
@@ -206,10 +224,10 @@ export async function isGeminiFunctional(): Promise<boolean> {
   }
 }
 
-function buildGemini(lastChecked: string, tools: ToolRoutingSnapshot): EngineStatus {
+function buildGemini(lastChecked: string, tools: ToolRoutingSnapshot, provider: ProviderRuntimeStatus | undefined): EngineStatus {
   const reg = registryRow('gemini')
-  const rawKey = process.env.GEMINI_API_KEY
-  const configured = typeof rawKey === 'string' && rawKey.trim().length > 0
+  const configured = Boolean(provider?.configured)
+  const connected = provider?.health === 'CONNECTED'
 
   if (!configured) {
     return finalize({
@@ -237,7 +255,7 @@ function buildGemini(lastChecked: string, tools: ToolRoutingSnapshot): EngineSta
   }
 
   const capabilities: EngineCapabilityId[] = [...reg.defaultCapabilities]
-  if (tools.internetReachable) {
+  if (tools.internetReachable && connected) {
     capabilities.push('chat', 'reasoning', 'research_assist')
   }
 
@@ -248,19 +266,24 @@ function buildGemini(lastChecked: string, tools: ToolRoutingSnapshot): EngineSta
     providerType: reg.providerType,
     installed: true,
     configured: true,
-    reachable: true,
-    functional: true,
+    reachable: connected,
+    functional: connected,
     capabilities,
     lastChecked,
-    lastSuccessfulProbeAt: null,
-    probedModelId: null,
+    lastSuccessfulProbeAt: provider?.lastSuccessAt ?? null,
+    probedModelId: provider?.activeModels[0] ?? null,
     providerDiagnostics: providerDiagnostic({
       id: 'gemini',
       configured: true,
       apiKeyPresent: true,
-      lastCheckResult: 'credential_present_call_allowed_probe_deferred',
+      lastCheckResult: connected
+        ? 'live_provider_connected'
+        : `live_provider_${provider?.health.toLowerCase() ?? 'unknown'}`,
+      ...(connected ? {} : { reason: provider?.note ?? 'Live provider check did not report CONNECTED.' }),
     }),
-    notes: 'Gemini credential present; live model probe is deferred so transient status checks do not block council calls.',
+    notes: connected
+      ? 'Gemini live provider health check connected.'
+      : `Gemini configured but not connected: ${provider?.note ?? 'live provider health unknown.'}`,
   })
 }
 
@@ -272,15 +295,17 @@ export async function collectEngineStatuses(
   tools: ToolRoutingSnapshot = { internetReachable: false, researchConfigured: false },
 ): Promise<EngineStatus[]> {
   const lastChecked = new Date().toISOString()
+  const providerRuntime = await getProviderRuntimeHealth()
+  const providerById = new Map(providerRuntime.providers.map(provider => [provider.id, provider]))
 
-  const gemini = buildGemini(lastChecked, tools)
+  const gemini = buildGemini(lastChecked, tools, providerById.get(ENGINE_PROVIDER_RUNTIME_ID.gemini!))
 
   const ordered: EngineStatus[] = [
     ideEngine('cursor', lastChecked),
     ideEngine('codex', lastChecked),
-    cloudEngine('grok', lastChecked, Boolean(process.env.XAI_API_KEY?.trim()), 'xAI Grok.', 'Set XAI_API_KEY for Grok API access.'),
-    cloudEngine('claude', lastChecked, Boolean(process.env.ANTHROPIC_API_KEY?.trim()), 'Anthropic Claude.', 'Set ANTHROPIC_API_KEY for Claude API access.'),
-    cloudEngine('chatgpt', lastChecked, Boolean(process.env.OPENAI_API_KEY?.trim()), 'OpenAI Chat Completions.', 'Set OPENAI_API_KEY for OpenAI API access.'),
+    cloudEngine('grok', lastChecked, providerById.get(ENGINE_PROVIDER_RUNTIME_ID.grok!), 'xAI Grok.', 'Set XAI_API_KEY for Grok API access.'),
+    cloudEngine('claude', lastChecked, providerById.get(ENGINE_PROVIDER_RUNTIME_ID.claude!), 'Anthropic Claude.', 'Set ANTHROPIC_API_KEY for Claude API access.'),
+    cloudEngine('chatgpt', lastChecked, providerById.get(ENGINE_PROVIDER_RUNTIME_ID.chatgpt!), 'OpenAI Chat Completions.', 'Set OPENAI_API_KEY for OpenAI API access.'),
     gemini,
   ]
 
@@ -288,9 +313,35 @@ export async function collectEngineStatuses(
 }
 
 export function buildEngineControlStatusResponse(engines: EngineStatus[]): EngineControlStatusResponse {
+  const timestamp = new Date().toISOString()
+  const configuredProviders = engines.filter(engine => engine.configured).map(engine => engine.id)
+  const reachableProviders = engines.filter(engine => engine.reachable).map(engine => engine.id)
+  const functionalProviders = engines.filter(engine => engine.functional).map(engine => engine.id)
+  const cloudEngines = engines.filter(engine => engine.category === 'cloud' || engine.category === 'cloud_model')
+  const functionalCloud = cloudEngines.filter(engine => engine.functional)
+  const routingReadiness: EngineControlStatusResponse['routingReadiness'] =
+    functionalCloud.length > 0
+      ? functionalCloud.length === cloudEngines.length
+        ? 'ready'
+        : 'degraded'
+      : 'unavailable'
+  const degradedReason = routingReadiness === 'ready'
+    ? null
+    : cloudEngines
+      .filter(engine => !engine.functional)
+      .map(engine => `${engine.id}: ${engine.notes}`)
+      .join(' | ') || 'No functional cloud engine reported.'
+
   return {
     engines,
-    checkedAt: new Date().toISOString(),
+    configuredProviders,
+    reachableProviders,
+    functionalProviders,
+    routingReadiness,
+    approvalRequired: engines.some(engine => engine.approvalRequired),
+    timestamp,
+    degradedReason,
+    checkedAt: timestamp,
   }
 }
 

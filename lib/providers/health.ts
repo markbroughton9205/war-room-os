@@ -7,7 +7,7 @@ export type ProviderRuntimeHealth =
   | 'RATE_LIMITED'
   | 'INVALID_KEY'
 
-export type ProviderRuntimeId = 'openai' | 'anthropic' | 'google' | 'tavily' | 'firecrawl'
+export type ProviderRuntimeId = 'openai' | 'anthropic' | 'google' | 'xai' | 'tavily' | 'firecrawl'
 
 export type ProviderRuntimeStatus = {
   id: ProviderRuntimeId
@@ -191,6 +191,20 @@ async function probeGoogle(apiKey: string): Promise<ProbeResult> {
   }
 }
 
+async function probeXai(apiKey: string): Promise<ProbeResult> {
+  type XaiModels = { data?: Array<{ id?: string }> }
+  const { data } = await jsonFetch<XaiModels>('https://api.x.ai/v1/models', {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: 'application/json',
+    },
+  })
+  return {
+    activeModels: compactModels((data.data ?? []).map(model => model.id ?? '').filter(model => /grok/i.test(model))),
+    note: 'xAI models endpoint responded.',
+  }
+}
+
 async function probeTavily(apiKey: string): Promise<ProbeResult> {
   await jsonFetch<unknown>('https://api.tavily.com/search', {
     method: 'POST',
@@ -256,6 +270,13 @@ const PROVIDERS: ProviderDefinition[] = [
     family: 'Gemini family',
     envNames: ['GOOGLE_API_KEY', 'GEMINI_API_KEY'],
     probe: probeGoogle,
+  },
+  {
+    id: 'xai',
+    provider: 'xAI',
+    family: 'Grok family',
+    envNames: ['XAI_API_KEY'],
+    probe: probeXai,
   },
   {
     id: 'tavily',

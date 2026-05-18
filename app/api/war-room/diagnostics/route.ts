@@ -15,8 +15,8 @@ export async function GET() {
 
   return NextResponse.json({
     generatedAt: new Date().toISOString(),
-    providerStatusSource: '/api/providers/status',
-    babyProviderBindingSource: '/api/providers/status',
+    providerStatusSource: '/api/runtime/canonical-status',
+    babyProviderBindingSource: '/api/runtime/canonical-status',
     signalMigrationStatus: signals.migrationStatus,
     signalPersistenceNote: signals.persistenceNote,
     lastOrchestrationStepResult: getLastOrchestrationStepResult(),

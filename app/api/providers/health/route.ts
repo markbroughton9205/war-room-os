@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getProviderRuntimeHealth, type ProviderRuntimeHealth } from '@/lib/providers/health'
+import { getProviderRuntimeHealth } from '@/lib/providers/health'
+import { buildCanonicalProviderFamilies } from '@/lib/runtime/canonicalStatus'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -8,10 +9,6 @@ type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'redteam'
 
 /** Presence/config classification — does not assert live API connectivity. */
 export type ProviderAvailability = 'configured' | 'not_configured' | 'probe_required' | 'live_connected' | 'degraded' | 'rate_limited' | 'invalid_key'
-
-function trimmedEnv(key: string): boolean {
-  return Boolean(process.env[key]?.trim())
-}
 
 /**
  * Maps availability to the legacy `providers` map consumed by older UI code.
@@ -25,58 +22,42 @@ function legacyConnectionStatus(avail: ProviderAvailability): 'online' | 'standb
   return 'standby'
 }
 
-function availabilityFromRuntime(health: ProviderRuntimeHealth | undefined): ProviderAvailability {
-  if (health === 'CONNECTED') return 'live_connected'
-  if (health === 'MISSING_KEY') return 'not_configured'
-  if (health === 'INVALID_KEY') return 'invalid_key'
-  if (health === 'RATE_LIMITED') return 'rate_limited'
-  if (health === 'DEGRADED') return 'degraded'
+function availabilityFromCanonical(value: string | undefined): ProviderAvailability {
+  if (value === 'CONNECTED') return 'live_connected'
+  if (value === 'NOT_CONFIGURED') return 'not_configured'
+  if (value === 'INVALID_KEY') return 'invalid_key'
+  if (value === 'RATE_LIMITED') return 'rate_limited'
+  if (value === 'DEGRADED') return 'degraded'
+  if (value === 'CONFIGURED') return 'configured'
   return 'probe_required'
 }
 
 export async function GET() {
   const runtime = await getProviderRuntimeHealth()
-  const byId = Object.fromEntries(runtime.providers.map(provider => [provider.id, provider]))
+  const canonicalProviders = buildCanonicalProviderFamilies(runtime)
+  const byFamily = Object.fromEntries(canonicalProviders.map(provider => [provider.family, provider]))
   const availability: Record<ProviderFamilyKey, ProviderAvailability> = {
-    claude: availabilityFromRuntime(byId.anthropic?.health),
-    chatgpt: availabilityFromRuntime(byId.openai?.health),
-    grok: trimmedEnv('XAI_API_KEY') ? 'configured' : 'not_configured',
-    gemini: availabilityFromRuntime(byId.google?.health),
-    redteam: 'probe_required',
+    claude: availabilityFromCanonical(byFamily.claude?.availability),
+    chatgpt: availabilityFromCanonical(byFamily.chatgpt?.availability),
+    grok: availabilityFromCanonical(byFamily.grok?.availability),
+    gemini: availabilityFromCanonical(byFamily.gemini?.availability),
+    redteam: availabilityFromCanonical(byFamily.redteam?.availability),
   }
 
   const providers = {
-    claude: legacyConnectionStatus(availability.claude),
-    chatgpt: legacyConnectionStatus(availability.chatgpt),
-    grok: legacyConnectionStatus(availability.grok),
-    gemini: legacyConnectionStatus(availability.gemini),
-    redteam: 'standby' as const,
+    claude: byFamily.claude?.connectionStatus ?? legacyConnectionStatus(availability.claude),
+    chatgpt: byFamily.chatgpt?.connectionStatus ?? legacyConnectionStatus(availability.chatgpt),
+    grok: byFamily.grok?.connectionStatus ?? legacyConnectionStatus(availability.grok),
+    gemini: byFamily.gemini?.connectionStatus ?? legacyConnectionStatus(availability.gemini),
+    redteam: byFamily.redteam?.connectionStatus ?? 'standby' as const,
   }
 
   const labels = {
-    claude:
-      availability.claude === 'live_connected'
-        ? 'Anthropic · Claude · live connected'
-        : availability.claude === 'not_configured'
-          ? 'Anthropic · Claude · not configured'
-          : `Anthropic · Claude · ${availability.claude}`,
-    chatgpt:
-      availability.chatgpt === 'live_connected'
-        ? 'OpenAI · ChatGPT · live connected'
-        : availability.chatgpt === 'not_configured'
-          ? 'OpenAI · ChatGPT · not configured'
-          : `OpenAI · ChatGPT · ${availability.chatgpt}`,
-    grok:
-      availability.grok === 'not_configured'
-        ? 'xAI · Grok · not configured'
-        : 'xAI · Grok · key configured (live probe required)',
-    gemini:
-      availability.gemini === 'live_connected'
-        ? 'Google · Gemini · live connected'
-        : availability.gemini === 'not_configured'
-          ? 'Google · Gemini · not configured'
-          : `Google · Gemini · ${availability.gemini}`,
-    redteam: 'War Room · Red Team · standby',
+    claude: byFamily.claude?.label ?? 'Anthropic · Claude · unknown',
+    chatgpt: byFamily.chatgpt?.label ?? 'OpenAI · ChatGPT · unknown',
+    grok: byFamily.grok?.label ?? 'xAI · Grok · unknown',
+    gemini: byFamily.gemini?.label ?? 'Google · Gemini · unknown',
+    redteam: byFamily.redteam?.label ?? 'War Room · Red Team · unknown',
   }
 
   return NextResponse.json({
@@ -85,10 +66,11 @@ export async function GET() {
     availability,
     providers,
     labels,
+    canonicalProviders,
     runtimeProviders: runtime.providers,
     signalAvailability: runtime.signalAvailability,
     guidance:
-      '`availability` now reflects live bounded server-side probes for OpenAI, Anthropic, Google/Gemini, Tavily, and Firecrawl where configured. API keys are never serialized.',
+      '`availability` now reflects live bounded server-side probes for OpenAI, Anthropic, xAI/Grok, Google/Gemini, Tavily, and Firecrawl where configured. API keys are never serialized.',
     deprecatedSemantics: {
       providersOnlineFromKeysOnly:
         'Removed: keys alone no longer imply `providers.* === "online"`; only CONNECTED live checks map to online.',

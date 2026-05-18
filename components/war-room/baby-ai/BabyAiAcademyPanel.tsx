@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { CanonicalStatusBadge } from '@/components/war-room/runtime/CanonicalStatusBadge'
 import { DailyBriefingPanel } from './DailyBriefingPanel'
 
 type BabyAiStatus = 'live_persistent' | 'persistent_store' | 'awaiting_data' | 'static_seed' | 'not_connected'
@@ -84,22 +85,20 @@ type BabyAiSnapshot = {
   }
 }
 
-type ProviderRuntimeHealth = 'CONNECTED' | 'DEGRADED' | 'MISSING_KEY' | 'RATE_LIMITED' | 'INVALID_KEY'
-
 type ProviderRuntimeSummary = {
   generatedAt: string
   providers: Array<{
-    id: string
-    provider: string
     family: string
-    health: ProviderRuntimeHealth
+    providerId: string
+    label: string
+    health: string
   }>
-  signalAvailability: {
-    liveSignalsAvailable: boolean
-  }
 }
 
 function statusColor(status?: string) {
+  if (status === 'healthy') return '#34D399'
+  if (status === 'degraded' || status === 'unknown') return '#FBBF24'
+  if (status === 'unavailable') return '#F87171'
   if (status === 'CONNECTED') return '#34D399'
   if (status === 'DEGRADED' || status === 'RATE_LIMITED') return '#FBBF24'
   if (status === 'INVALID_KEY' || status === 'MISSING_KEY') return status === 'INVALID_KEY' ? '#F87171' : '#A78BFA'
@@ -169,7 +168,7 @@ export function BabyAiAcademyPanel() {
     try {
       const [academyRes, providerRes] = await Promise.all([
         fetch('/api/baby-ai/academy', { cache: 'no-store' }),
-        fetch('/api/providers/status', { cache: 'no-store' }),
+        fetch('/api/runtime/canonical-status', { cache: 'no-store' }),
       ])
       const body = await academyRes.json() as BabyAiSnapshot & { error?: string }
       const providerBody = await providerRes.json() as ProviderRuntimeSummary & { error?: string }
@@ -196,15 +195,15 @@ export function BabyAiAcademyPanel() {
   const observations = snapshot?.council.observations ?? []
   const latestLessons = snapshot?.latestLessons ?? []
   const providerByName = useMemo(() => {
-    const pairs = (providerRuntime?.providers ?? []).map(provider => [provider.provider.toLowerCase(), provider] as const)
+    const pairs = (providerRuntime?.providers ?? []).map(provider => [provider.providerId.toLowerCase(), provider] as const)
     return new Map(pairs)
   }, [providerRuntime?.providers])
   const runtimeForAgent = useCallback((agent: BabyAgent) => {
     const cloud = agent.cloudProvider.toLowerCase()
     if (cloud.includes('openai') || cloud.includes('chatgpt')) return providerByName.get('openai')
     if (cloud.includes('anthropic') || cloud.includes('claude')) return providerByName.get('anthropic')
-    if (cloud.includes('google') || cloud.includes('gemini')) return providerByName.get('google gemini')
-    if (cloud.includes('tavily')) return providerByName.get('tavily')
+    if (cloud.includes('google') || cloud.includes('gemini')) return providerByName.get('google')
+    if (cloud.includes('xai') || cloud.includes('grok')) return providerByName.get('xai')
     return null
   }, [providerByName])
 
@@ -251,8 +250,9 @@ export function BabyAiAcademyPanel() {
           <MiniCard label="Approved Lessons" value={countLabel(snapshot?.counts.approvedLessons)} />
           <MiniCard label="Outcomes" value={countLabel(snapshot?.counts.outcomes)} />
         </div>
-        <div className="mt-3 rounded border border-sky-500/20 bg-sky-500/5 p-2 text-[10px] leading-relaxed text-sky-100">
-          Provider binding source: /api/providers/status · Baby cards inherit CONNECTED, DEGRADED, MISSING_KEY, INVALID_KEY, or RATE_LIMITED directly from sanitized runtime health. Last provider check: {providerRuntime?.generatedAt ?? 'checking'}.
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded border border-sky-500/20 bg-sky-500/5 p-2 text-[10px] leading-relaxed text-sky-100">
+          <CanonicalStatusBadge subsystemId="baby_ai" label="Canonical Baby AI" />
+          <span>Provider binding source: canonical provider runtime · Baby cards inherit live provider health from sanitized runtime checks. Last provider check: {providerRuntime?.generatedAt ?? 'checking'}.</span>
         </div>
         <div className="mt-3 rounded border border-sky-500/20 bg-sky-500/5 p-2 text-[10px] leading-relaxed text-sky-100">
           {snapshot?.cloudOnly.statusCopy ?? 'Baby AI growth is cloud-only and remains available through War Room persistence and approved outcomes.'}
