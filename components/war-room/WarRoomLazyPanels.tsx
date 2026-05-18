@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { BabyObserverNode, CouncilTable, SentinelStatusPanel } from '@/components/war-room/council'
+import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoundary'
 
 function PanelSkeleton({ label }: { label: string }) {
   return (
@@ -20,6 +21,10 @@ const EconomicOperationsPanel = dynamic(
 const ProviderRuntimePanel = dynamic(
   () => import('@/components/war-room/providers/ProviderRuntimePanel').then(mod => mod.ProviderRuntimePanel),
   { ssr: false, loading: () => <PanelSkeleton label="Provider Runtime loading" /> },
+)
+const RuntimeIntegrityPanel = dynamic(
+  () => import('@/components/war-room/runtime/RuntimeIntegrityPanel').then(mod => mod.RuntimeIntegrityPanel),
+  { ssr: false, loading: () => <PanelSkeleton label="Runtime Integrity loading" /> },
 )
 const ProductionDiagnosticsPanel = dynamic(
   () => import('@/components/war-room/diagnostics/ProductionDiagnosticsPanel').then(mod => mod.ProductionDiagnosticsPanel),
@@ -123,7 +128,7 @@ function LazyPanel({
 
   return (
     <div ref={ref} data-war-room-lazy-panel={id}>
-      {shouldMount ? children : <PanelSkeleton label={`${label} deferred`} />}
+      {shouldMount ? <PanelErrorBoundary label={label}>{children}</PanelErrorBoundary> : <PanelSkeleton label={`${label} deferred`} />}
     </div>
   )
 }
@@ -158,6 +163,7 @@ export function WarRoomLazyPanels() {
     <>
       <LazyPanel id="economic-ops" label="Economic Ops"><EconomicOperationsPanel /></LazyPanel>
       <LazyPanel id="provider-runtime" label="Provider Runtime"><ProviderRuntimePanel /></LazyPanel>
+      <LazyPanel id="runtime-integrity" label="Runtime Integrity"><RuntimeIntegrityPanel /></LazyPanel>
       <LazyPanel id="production-diagnostics" label="Production Diagnostics"><ProductionDiagnosticsPanel /></LazyPanel>
       <LazyPanel id="signal-radar" label="Signal Radar"><SignalRadarPanel /></LazyPanel>
       <LazyPanel id="revenue-engine" label="Revenue Engine"><RevenueEnginePanel /></LazyPanel>

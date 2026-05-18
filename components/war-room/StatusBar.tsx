@@ -31,11 +31,11 @@ export function StatusBar() {
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10px] tracking-[0.2em] text-slate-500">
         <span className="text-slate-300">
-          Lat <span className="text-[#38bdf8]">42ms</span>
+          Runtime <span className="text-[#38bdf8]">truth-labeled</span>
         </span>
-        <span>Edge · ORD</span>
+        <span>No synthetic telemetry</span>
         <span className="rounded border border-[#d4af37]/25 bg-[#d4af37]/5 px-2 py-0.5 text-[#d4af37]">
-          Mock
+          Observation
         </span>
       </div>
     </footer>
