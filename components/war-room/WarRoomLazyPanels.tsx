@@ -58,6 +58,10 @@ const FeatureBuilderPanel = dynamic(
   () => import('@/components/war-room/feature-builder/FeatureBuilderPanel').then(mod => mod.FeatureBuilderPanel),
   { ssr: false, loading: () => <PanelSkeleton label="Feature Builder loading" /> },
 )
+const RepairPacketPanel = dynamic(
+  () => import('@/components/war-room/engineering/RepairPacketPanel').then(mod => mod.RepairPacketPanel),
+  { ssr: false, loading: () => <PanelSkeleton label="Repair Packets loading" /> },
+)
 const Phase9BLearningPanels = dynamic(
   () => import('@/components/war-room/learning/Phase9BLearningPanels').then(mod => mod.Phase9BLearningPanels),
   { ssr: false, loading: () => <PanelSkeleton label="Learning Panels loading" /> },
@@ -172,6 +176,7 @@ export function WarRoomLazyPanels() {
       <LazyPanel id="commander-os" label="Commander OS"><CommanderOsPanel /></LazyPanel>
       <LazyPanel id="build-agent" label="Build Agent"><BuildAgentDivisionPanel /></LazyPanel>
       <LazyPanel id="feature-builder" label="Feature Builder"><FeatureBuilderPanel /></LazyPanel>
+      <LazyPanel id="repair-packets" label="Repair Packets"><RepairPacketPanel /></LazyPanel>
       <LazyPanel id="learning" label="Learning Panels"><Phase9BLearningPanels /></LazyPanel>
       <LazyPanel id="agent-foundry" label="Agent Foundry"><AgentFoundryPanel /></LazyPanel>
       <LazyPanel id="automation-governance" label="Automation Governance"><AutomationGovernancePanel /></LazyPanel>

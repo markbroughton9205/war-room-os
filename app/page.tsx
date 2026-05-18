@@ -177,6 +177,8 @@ import type {
 import { createEngineeringTaskPacket, type EngineeringTaskPacket } from '@/lib/engineering/engineeringTaskPacket'
 import { createAnalystOperationsPacket, type AnalystOperationsPacket } from '@/lib/analysts/analystOutcomeEvaluator'
 import { createProjectOrchestrationPacket, type ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
+import { RepairPacketPanel } from '@/components/war-room/engineering/RepairPacketPanel'
+import type { CouncilRepairPacket } from '@/lib/council-repair'
 
 export type OperatorTab = 'command' | 'income' | 'agents' | 'analysts' | 'approvals' | 'memory' | 'system' | 'diagnostics'
 
@@ -204,6 +206,7 @@ type CouncilMessage = {
   messageType: string
   recallPreview?: CouncilMemoryRecallPreview
   engineeringTaskPacket?: EngineeringTaskPacket
+  repairPacket?: CouncilRepairPacket
   projectOrchestrationPacket?: ProjectOrchestrationPacket
   analystOperationsPacket?: AnalystOperationsPacket
 }
@@ -1063,6 +1066,10 @@ function isExplicitMemoryRequest(message: string) {
   return /\b(remember this|save this|save memory|commit this to memory|add this to memory)\b/i.test(message)
 }
 
+function isRepairPacketDecree(message: string) {
+  return /\b(fix this|repair war room|diagnose this panel|why is this broken|create a repair packet|send this to cursor|prepare engineering task)\b/i.test(message)
+}
+
 const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
 
 function gatherCellsToProviderRuntimeDetails(
@@ -1080,11 +1087,13 @@ const MessageBubble = memo(function MessageBubble({
   diagnosticsOpen,
   onOpenFullMemory,
   onProjectAction,
+  onPrepareRepairPacket,
 }: {
   msg: CouncilMessage
   diagnosticsOpen?: boolean
   onOpenFullMemory?: (preview: CouncilMemoryRecallPreview) => void
   onProjectAction?: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
+  onPrepareRepairPacket?: (message: CouncilMessage) => void
 }) {
   const isRael = msg.familyName === "RA'EL"
   if (
@@ -1354,6 +1363,60 @@ const MessageBubble = memo(function MessageBubble({
       </div>
     )
   }
+  if (msg.messageType === 'repair_packet' && msg.repairPacket) {
+    const packet = msg.repairPacket
+    const copyPacket = () => {
+      if (typeof navigator === 'undefined' || !navigator.clipboard) return
+      void navigator.clipboard.writeText(packet.cursorReadyPrompt)
+    }
+
+    return (
+      <div className="message-fade-in mb-4 ml-11 rounded-lg p-3 text-sm"
+        style={{ background: 'rgba(14,165,233,0.07)', border: '1px solid rgba(14,165,233,0.3)' }}>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-xs font-bold tracking-widest" style={{ color: '#7DD3FC' }}>
+              Repair packet prepared
+            </div>
+            <div className="mt-1 text-sm font-bold" style={{ color: '#E0F2FE' }}>{packet.title}</div>
+            <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#94A3B8' }}>
+              {packet.classification.replaceAll('_', ' ')} · {packet.approvalStatus.replaceAll('_', ' ')} · manual Cursor copy only
+            </div>
+          </div>
+          <button type="button" onClick={copyPacket}
+            className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
+            style={{ border: '1px solid rgba(14,165,233,0.45)', color: '#BAE6FD' }}>
+            Copy Cursor Packet
+          </button>
+        </div>
+        <div className="grid gap-2 text-xs md:grid-cols-3">
+          <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="mb-1 font-bold tracking-widest" style={{ color: '#94A3B8' }}>SYMPTOMS</div>
+            <ul className="space-y-1" style={{ color: '#CBD5E1' }}>
+              {packet.observedSymptoms.slice(0, 3).map(item => <li key={item}>- {item}</li>)}
+            </ul>
+          </div>
+          <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(255,215,0,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="mb-1 font-bold tracking-widest" style={{ color: '#FDE68A' }}>INSPECT</div>
+            <ul className="space-y-1" style={{ color: '#E5E7EB' }}>
+              {packet.filesRoutesToInspect.slice(0, 5).map(file => <li key={file}>- {file}</li>)}
+            </ul>
+          </div>
+          <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(239,68,68,0.18)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="mb-1 font-bold tracking-widest" style={{ color: '#FCA5A5' }}>GUARDRAILS</div>
+            <div style={{ color: '#CBD5E1' }}>Advisory only. Approval required. No browser execution, file mutation, Cursor API, deploy, commit, push, or fake completion.</div>
+          </div>
+        </div>
+        <textarea readOnly value={packet.cursorReadyPrompt}
+          className="mt-3 h-36 w-full resize-y rounded bg-black/40 p-3 font-mono text-[11px] leading-relaxed outline-none"
+          style={{ border: '1px solid rgba(14,165,233,0.18)', color: '#CBD5E1' }}
+          aria-label="Cursor repair packet" />
+        <div className="mt-2 text-[10px] tracking-widest" style={{ color: '#64748B' }}>
+          Logged to System Ledger / Activity Stream when available. Baby Observer lesson remains a candidate until approved or validated.
+        </div>
+      </div>
+    )
+  }
   return (
     <div className={`message-fade-in flex items-start gap-3 mb-4 ${isRael ? 'flex-row-reverse' : ''}`}>
       <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm"
@@ -1375,6 +1438,16 @@ const MessageBubble = memo(function MessageBubble({
           }}>
           {msg.content}
         </div>
+        {!isRael && msg.messageType === 'response' ? (
+          <button
+            type="button"
+            onClick={() => onPrepareRepairPacket?.(msg)}
+            className="mt-2 self-start rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+            style={{ border: '1px solid rgba(14,165,233,0.35)', color: '#7DD3FC', background: 'rgba(0,0,0,0.24)' }}
+          >
+            Prepare Repair Packet
+          </button>
+        ) : null}
       </div>
     </div>
   )
@@ -1388,6 +1461,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   onRecallEconomicOps,
   onOpenFullMemory,
   onProjectAction,
+  onPrepareRepairPacket,
 }: {
   messages: CouncilMessage[]
   hiddenCount: number
@@ -1396,6 +1470,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   onRecallEconomicOps: () => void
   onOpenFullMemory: (preview: CouncilMemoryRecallPreview) => void
   onProjectAction: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
+  onPrepareRepairPacket: (message: CouncilMessage) => void
 }) {
   return (
     <>
@@ -1425,6 +1500,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           diagnosticsOpen={false}
           onOpenFullMemory={onOpenFullMemory}
           onProjectAction={onProjectAction}
+          onPrepareRepairPacket={onPrepareRepairPacket}
         />
       ))}
     </>
@@ -4694,6 +4770,7 @@ function Home() {
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
   const [redTeamCoder, setRedTeamCoder] = useState<RedTeamCoderUiState>(INITIAL_RED_TEAM_CODER_STATE)
   const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
+  const [latestRepairPacket, setLatestRepairPacket] = useState<CouncilRepairPacket | null>(null)
   const [latestAnalystPacket, setLatestAnalystPacket] = useState<AnalystOperationsPacket | null>(null)
   const councilPersistenceCtx = useMemo(() => buildCouncilPersistenceContext(), [])
   const { store: council, dispatch: councilDispatch, mounted: councilMounted, newSessionId } =
@@ -5329,6 +5406,51 @@ function Home() {
       type: 'ADD_SYSTEM_MESSAGE_DEDUPED',
       payload: { id: opts?.id ?? createMessageId('system'), content, timestamp: new Date().toLocaleTimeString() },
     })
+  }
+
+  const prepareRepairPacketFromCouncilMessage = async (message: CouncilMessage) => {
+    const latestDecree = [...messagesRef.current].reverse().find(isRaelCouncilMessage)
+    const decree = latestDecree?.content || message.content || 'create a repair packet'
+    try {
+      const res = await fetch('/api/council/repair-packet', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          decree,
+          sourceMessageId: message.id,
+          sourceFamily: message.familyName,
+          sourceContent: message.content,
+        }),
+      })
+      const body = await res.json() as { packet?: CouncilRepairPacket; error?: string }
+      if (!res.ok || !body.packet) throw new Error(body.error || 'Repair packet generation failed')
+      setLatestRepairPacket(body.packet)
+      addMessages([{
+        id: createMessageId('repair-packet'),
+        familyName: 'ENGINEERING LANE',
+        content: `Repair packet prepared: ${body.packet.title}`,
+        timestamp: new Date().toLocaleTimeString(),
+        color: '#7DD3FC',
+        icon: 'R',
+        provider: 'Council repair pipeline',
+        messageType: 'repair_packet',
+        repairPacket: body.packet,
+      }])
+      setFamilyDuty(prev => ({
+        ...prev,
+        chatgpt: 'working',
+        claude: 'working',
+        grok: 'working',
+        gemini: 'working',
+        red_team: 'working',
+        baby: 'working',
+        bridge_architect: 'waiting_approval',
+      }))
+      addSystemMessage('Repair packet creation logged. Engineering Lane is manual copy only; no code was executed or mutated.', { force: true })
+      void refreshLedger()
+    } catch (error) {
+      addSystemMessage(error instanceof Error ? error.message : 'Repair packet generation failed.', { force: true })
+    }
   }
 
   useEffect(() => {
@@ -8664,6 +8786,19 @@ function Home() {
       }))
     }
 
+    if (isRepairPacketDecree(decree)) {
+      void prepareRepairPacketFromCouncilMessage({
+        id: createMessageId('repair-decree-source'),
+        familyName: "RA'EL",
+        content: decree,
+        timestamp: new Date().toLocaleTimeString(),
+        color: '#FFD700',
+        icon: '⚔',
+        provider: '',
+        messageType: 'decree',
+      })
+    }
+
     const parsedCmd = resolveActiveCommand({ latestDecreeText: decree }).command
     activeCouncilCommandRef.current = parsedCmd
     setCouncilUiCommand(parsedCmd)
@@ -9464,6 +9599,7 @@ function Home() {
             onRecallEconomicOps={handleRecallEconomicOps}
             onOpenFullMemory={handleOpenFullMemory}
             onProjectAction={handleProjectAction}
+            onPrepareRepairPacket={prepareRepairPacketFromCouncilMessage}
           />
 
           {expansionPrompt && (
@@ -9640,6 +9776,7 @@ function Home() {
                 <ProviderConfigurationPanel engines={engineList} />
                 <AgentGrowthTrainingPanel />
                 <EngineeringLaneManualPanel latest={latestEngineeringTaskPacket} />
+                <RepairPacketPanel latest={latestRepairPacket} />
                 <ApprovalQueueSummaryPanel pendingApprovals={raelActions.filter(action => action.status === 'pending').length} />
                 <RedTeamReviewSummaryPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
               </>
@@ -9869,6 +10006,7 @@ function Home() {
                 <Phase3WarRoomPanels uiMode={uiMode} homeBundle="diagnostics" />
                 <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
                 <EngineeringLaneManualPanel latest={latestEngineeringTaskPacket} />
+                <RepairPacketPanel latest={latestRepairPacket} />
                 <CloudAgentFamiliesPanel engines={engineList} />
                 <BabyAiObserverPanel memories={memories} actions={raelActions} opportunities={incomeOpportunities} />
                 <FamilyPresencePanel presence={familyPresence} geminiEngine={geminiEngineRow} />

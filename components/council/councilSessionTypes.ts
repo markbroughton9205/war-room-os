@@ -1,6 +1,7 @@
 import type { EngineeringTaskPacket } from '@/lib/engineering/engineeringTaskPacket'
 import type { AnalystOperationsPacket } from '@/lib/analysts/analystOutcomeEvaluator'
 import type { ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
+import type { CouncilRepairPacket } from '@/lib/council-repair'
 
 export type CouncilLifecycleState =
   | 'active'
@@ -40,6 +41,7 @@ export type PersistedCouncilMessage = {
   messageType: string
   recallPreview?: CouncilMemoryRecallPreview
   engineeringTaskPacket?: EngineeringTaskPacket
+  repairPacket?: CouncilRepairPacket
   projectOrchestrationPacket?: ProjectOrchestrationPacket
   analystOperationsPacket?: AnalystOperationsPacket
 }

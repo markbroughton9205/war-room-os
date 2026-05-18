@@ -22,6 +22,7 @@ export const WAR_ROOM_EVENT_TYPES = [
   'income.deposit.confirmed',
   'income.deposit.notified',
   'memory.proposal.created',
+  'council.repair_packet.created',
   'audit.logged',
 ] as const
 
