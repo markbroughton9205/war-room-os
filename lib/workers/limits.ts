@@ -8,7 +8,7 @@ import { getResourceSnapshot, type ResourceSnapshot } from '@/lib/system/resourc
 export const MAX_CONCURRENT_BACKGROUND_WORKERS = 4
 export const MAX_CONCURRENT_SCANS = 2
 export const MAX_INTERNET_POLLS_PER_MINUTE = 30
-export const RED_SENTINEL_MIN_INTERVAL_MS = 15_000
+export const RED_SENTINEL_MIN_INTERVAL_MS = 60_000
 export const WORKER_QUEUE_MAX_DEPTH = 8
 export const RESOURCE_PAUSE_MEMORY_RATIO = 0.9
 

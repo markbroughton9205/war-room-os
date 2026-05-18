@@ -43,6 +43,7 @@ function makeStreams(width: number, height: number) {
 export const MatrixCodeRain = memo(function MatrixCodeRain() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
+  const timeoutRef = useRef<number | null>(null)
   const streamsRef = useRef<Stream[]>([])
   const lastTimeRef = useRef(0)
   const [reducedMotion, setReducedMotion] = useState(false)
@@ -77,20 +78,24 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
       streamsRef.current = makeStreams(width, height)
     }
 
+    const targetFrameMs = 83
+    const scheduleNext = (delay = targetFrameMs) => {
+      timeoutRef.current = window.setTimeout(() => {
+        timeoutRef.current = null
+        rafRef.current = window.requestAnimationFrame(draw)
+      }, delay)
+    }
+
     const draw = (time: number) => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         lastTimeRef.current = time
-        rafRef.current = window.requestAnimationFrame(draw)
+        scheduleNext(1000)
         return
       }
 
       const width = window.innerWidth
       const height = window.innerHeight
-      const delta = Math.min(48, time - (lastTimeRef.current || time))
-      if (delta < 50) {
-        rafRef.current = window.requestAnimationFrame(draw)
-        return
-      }
+      const delta = Math.min(96, time - (lastTimeRef.current || time))
       lastTimeRef.current = time
 
       context.fillStyle = 'rgba(0, 0, 0, 0.11)'
@@ -127,7 +132,7 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
         }
       }
 
-      rafRef.current = window.requestAnimationFrame(draw)
+      scheduleNext()
     }
 
     resize()
@@ -137,6 +142,7 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
     return () => {
       window.removeEventListener('resize', resize)
       if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current)
+      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current)
     }
   }, [reducedMotion])
 

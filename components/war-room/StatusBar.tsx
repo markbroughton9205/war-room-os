@@ -3,14 +3,14 @@
 import { useEffect, useState } from 'react'
 
 function formatTime(d: Date) {
-  return d.toISOString().slice(11, 19) + ' UTC'
+  return d.toISOString().slice(11, 16) + ' UTC'
 }
 
 export function StatusBar() {
   const [now, setNow] = useState(() => new Date())
 
   useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 1000)
+    const id = window.setInterval(() => setNow(new Date()), 60_000)
     return () => window.clearInterval(id)
   }, [])
 
