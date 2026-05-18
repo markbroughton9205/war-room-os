@@ -9,6 +9,7 @@ import { AgentFoundryPanel } from '@/components/war-room/agents/AgentFoundryPane
 import { AutomationGovernancePanel } from '@/components/war-room/automation/AutomationGovernancePanel'
 import { BabyAiAcademyPanel } from '@/components/war-room/baby-ai/BabyAiAcademyPanel'
 import { FeatureBuilderPanel } from '@/components/war-room/feature-builder/FeatureBuilderPanel'
+import { GrowthCalendarPanel } from '@/components/war-room/growth-calendar/GrowthCalendarPanel'
 import { RevenueEnginePanel } from '@/components/war-room/revenue-engine/RevenueEnginePanel'
 import { SignalRadarPanel } from '@/components/war-room/signals/SignalRadarPanel'
 import { KpiGrid } from '@/components/war-room/KpiGrid'
@@ -28,6 +29,7 @@ export default function WarRoomDashboardPage() {
       <EconomicOperationsPanel />
       <SignalRadarPanel />
       <RevenueEnginePanel />
+      <GrowthCalendarPanel />
       <BuildAgentDivisionPanel />
       <FeatureBuilderPanel />
       <Phase9BLearningPanels />
