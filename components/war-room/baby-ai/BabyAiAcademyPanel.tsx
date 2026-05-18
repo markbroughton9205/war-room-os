@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { DailyBriefingPanel } from './DailyBriefingPanel'
 
 type BabyAiStatus = 'live_persistent' | 'persistent_store' | 'awaiting_data' | 'static_seed' | 'not_connected'
 
@@ -159,14 +160,16 @@ export function BabyAiAcademyPanel() {
   return (
     <section className="mx-auto mt-14 max-w-6xl border-t border-white/10 pt-10">
       <header className="mb-6">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-[#d4af37]">Phase 11</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-[#d4af37]">Phase 12</p>
         <h2 className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-2xl">
-          Baby AI Nursery / Academy
+          Baby AI Operational Intelligence
         </h2>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
-          Family growth, training, and council observations. This is a learning and proposal surface only: no hidden execution, shell access, filesystem mutation, deployment control, or destructive action path.
+          Family growth, strategic briefing, opportunity radar, learning, and council observations. This is a learning and proposal surface only: no hidden execution, shell access, filesystem mutation, deployment control, or destructive action path.
         </p>
       </header>
+
+      <DailyBriefingPanel />
 
       <div className="mb-4 rounded border border-white/10 bg-black/25 p-3 text-xs">
         <div className="flex flex-wrap items-center justify-between gap-2">
