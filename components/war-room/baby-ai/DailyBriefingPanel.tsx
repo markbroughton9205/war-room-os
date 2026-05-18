@@ -90,11 +90,35 @@ type FamilyContribution = {
   canExecute: false
 }
 
+type ProviderRuntimeHealth = 'CONNECTED' | 'DEGRADED' | 'MISSING_KEY' | 'RATE_LIMITED' | 'INVALID_KEY'
+
+type ProviderRuntimeStatus = {
+  id: string
+  provider: string
+  family: string
+  health: ProviderRuntimeHealth
+  latencyMs: number | null
+  lastSuccessAt: string | null
+  quotaState: 'ok' | 'rate_limited' | 'unknown'
+  activeModels: string[]
+  signalAvailability: boolean
+}
+
 type DailyBriefing = {
   generatedAt: string
   briefingDate: string
   persistenceAvailable: boolean
-  liveExternalData: { available: false; note: string }
+  liveExternalData: { available: boolean; note: string }
+  providerRuntime: {
+    generatedAt: string
+    providers: ProviderRuntimeStatus[]
+    signalAvailability: {
+      tavily: boolean
+      firecrawl: boolean
+      liveSignalsAvailable: boolean
+      note: string
+    }
+  }
   executiveSummary: string
   sections: {
     aiIndustryDevelopments: BriefingItem[]
@@ -141,6 +165,10 @@ const SECTION_LABELS: Record<keyof DailyBriefing['sections'], string> = {
 }
 
 function colorFor(value: string) {
+  if (value === 'CONNECTED') return '#34D399'
+  if (value === 'DEGRADED' || value === 'RATE_LIMITED') return '#FBBF24'
+  if (value === 'INVALID_KEY') return '#F87171'
+  if (value === 'MISSING_KEY') return '#A78BFA'
   if (value === 'critical' || value === 'high' || value === 'down' || value === 'rejected') return '#F87171'
   if (value === 'important' || value === 'watch' || value === 'medium' || value === 'pending_review') return '#FBBF24'
   if (value === 'up' || value === 'approved' || value === 'completed') return '#34D399'
@@ -269,7 +297,7 @@ export function DailyBriefingPanel() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Latest Briefing</div>
           <div className="text-[10px] text-slate-500">
-            {briefing?.generatedAt ?? (loading ? 'loading...' : 'not connected')} · source: /api/baby-ai/briefing
+            {briefing?.generatedAt ?? (loading ? 'loading...' : 'unavailable')} · source: /api/baby-ai/briefing
           </div>
         </div>
         <p className="mt-2 text-[11px] leading-relaxed text-slate-300">
@@ -278,6 +306,25 @@ export function DailyBriefingPanel() {
         <p className="mt-2 rounded border border-violet-500/20 bg-violet-500/5 p-2 text-[10px] leading-relaxed text-violet-100">
           {briefing?.liveExternalData.note ?? 'Live external data availability is checking.'}
         </p>
+      </div>
+
+      <div className="mt-3 rounded border border-sky-500/20 bg-sky-500/5 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-[10px] font-bold uppercase tracking-widest text-sky-300">Provider Readiness Inherited</h4>
+          <Badge label={briefing?.providerRuntime.signalAvailability.liveSignalsAvailable ? 'available' : 'unavailable'} />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          {(briefing?.providerRuntime.providers ?? []).map(provider => (
+            <div key={provider.id} className="rounded border border-white/10 bg-black/20 p-2 text-[10px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-slate-200">{provider.provider}</span>
+                <Badge label={provider.health} />
+              </div>
+              <p className="mt-1 text-slate-500">{provider.family}</p>
+              <p className="mt-1 text-slate-600">Latency: {provider.latencyMs == null ? 'n/a' : `${provider.latencyMs}ms`} · signals: {provider.signalAvailability ? 'yes' : 'no'}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">

@@ -11,6 +11,7 @@ import { getWorkflowOutcomes } from '@/lib/learning/workflowOutcomeTracker'
 import { buildOperationalMemorySnapshot } from '@/lib/memory/operationalSnapshot'
 import { listRecentApprovedMemories } from '@/lib/memory/store'
 import type { ApprovedMemory, OperationalMemorySnapshot } from '@/lib/memory/types'
+import { getProviderRuntimeHealth, type ProviderRuntimeSummary } from '@/lib/providers/health'
 import { listPersistedSignalSnapshot, type SignalResult } from '@/lib/signals'
 import { tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persistence'
 
@@ -126,6 +127,7 @@ export type BabyDailyBriefing = {
     available: boolean
     note: string
   }
+  providerRuntime: Pick<ProviderRuntimeSummary, 'generatedAt' | 'providers' | 'signalAvailability' | 'guardrails'>
   guardrails: typeof BABY_AI_GUARDRAILS
   executiveSummary: string
   sections: {
@@ -842,12 +844,13 @@ export async function buildBabyDailyBriefing(): Promise<BabyDailyBriefing> {
   const generatedAt = new Date().toISOString()
   const supabase = tryWarRoomSupabase()
   const client = supabase.ok ? supabase.client : null
-  const [agents, babyRows, latestLessons, economic, signalSurface, outcomeLedger, workflows] = await Promise.all([
+  const [agents, babyRows, latestLessons, economic, signalSurface, providerRuntime, outcomeLedger, workflows] = await Promise.all([
     listPersistedBabyAgents(client),
     listBabyOperationalRows(client),
     listLatestBabyLessons(client, 8),
     retrieveEconomicSurface(client),
     retrieveSignalSurface(),
+    getProviderRuntimeHealth(),
     Promise.resolve(getOutcomeLedgerSnapshot()),
     Promise.resolve(getWorkflowOutcomes()),
   ])
@@ -886,10 +889,16 @@ export async function buildBabyDailyBriefing(): Promise<BabyDailyBriefing> {
     briefingDate: generatedAt.slice(0, 10),
     persistenceAvailable: supabase.ok,
     liveExternalData: {
-      available: signalSurface.signals.length > 0,
+      available: signalSurface.signals.length > 0 && providerRuntime.signalAvailability.liveSignalsAvailable,
       note: signalSurface.signals.length
-        ? `Phase 14 signal rows are included from persisted source-backed scans. ${signalSurface.note}`
-        : `No live external signal row is currently available to this briefing. ${signalSurface.note}`,
+        ? `Phase 14 signal rows are included from persisted source-backed scans. ${signalSurface.note} Provider runtime: ${providerRuntime.signalAvailability.note}`
+        : `No live external signal row is currently available to this briefing. ${signalSurface.note} Provider runtime: ${providerRuntime.signalAvailability.note}`,
+    },
+    providerRuntime: {
+      generatedAt: providerRuntime.generatedAt,
+      providers: providerRuntime.providers,
+      signalAvailability: providerRuntime.signalAvailability,
+      guardrails: providerRuntime.guardrails,
     },
     guardrails: BABY_AI_GUARDRAILS,
     executiveSummary: [
@@ -911,6 +920,10 @@ export async function buildBabyDailyBriefing(): Promise<BabyDailyBriefing> {
       signalSurface.signals.length
         ? 'Live market and AI ecosystem rows are sourced from Phase 14 Signal Radar persistence; execution remains approval-gated.'
         : 'Live external market and AI ecosystem data is unavailable unless a sourced feed is explicitly connected.',
+      providerRuntime.providers
+        .filter(provider => provider.health !== 'CONNECTED')
+        .map(provider => `${provider.provider}: ${provider.health}`)
+        .join('; ') || 'All configured cloud provider families responded successfully.',
       'Cloud-provider family context is preserved; no local bridge or connector stack is used.',
     ],
   }

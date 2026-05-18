@@ -402,7 +402,7 @@ export async function listRevenueEngineSnapshot(limit = 40): Promise<RevenueEngi
       generatedAt,
       persistenceAvailable: false,
       persistenceNote: `Supabase unavailable: ${supabase.configError}`,
-      opportunities: [...signalOpportunities, ...seedRevenueOpportunities()],
+      opportunities: signalOpportunities.length ? signalOpportunities : seedRevenueOpportunities(),
     })
   }
 
@@ -419,7 +419,7 @@ export async function listRevenueEngineSnapshot(limit = 40): Promise<RevenueEngi
       generatedAt,
       persistenceAvailable: true,
       persistenceNote: `Revenue Engine tables unavailable or not migrated: ${firstError.message}`,
-      opportunities: seedRevenueOpportunities(),
+      opportunities: signalOpportunities.length ? signalOpportunities : seedRevenueOpportunities(),
     })
   }
 
@@ -435,7 +435,7 @@ export async function listRevenueEngineSnapshot(limit = 40): Promise<RevenueEngi
     persistenceNote: signalOpportunities.length
       ? 'Revenue Engine persistence is available; Phase 14 source-backed signals are included as review-only opportunities.'
       : 'Revenue Engine persistence is available.',
-    opportunities: [...signalOpportunities, ...rows],
+    opportunities: signalOpportunities.length ? [...signalOpportunities, ...rows] : rows,
     outcomes: ((outcomes.data ?? []) as Row[]).map(mapOutcome),
     leverageScores: ((leverageScores.data ?? []) as Row[]).map(mapLeverageScore),
     executionPatterns: ((executionPatterns.data ?? []) as Row[]).map(mapPattern),
