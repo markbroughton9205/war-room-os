@@ -8,10 +8,10 @@ import { APPROVAL_RISK_GATES, SECURE_APPROVAL_RISKS } from '@/lib/kernel/approva
 import { KERNEL_EVENT_SCHEMA, KERNEL_EVENT_TYPES } from '@/lib/kernel/events'
 import { MEMORY_POLICY } from '@/lib/kernel/memoryPolicy'
 import { AGENT_FAMILY_CAPABILITIES, CAPABILITY_ROUTES } from '@/lib/kernel/routing'
-import { LOCAL_FAMILY_AGENTS } from '@/lib/local-agent/family-agents'
 import { LOCAL_AGENT_ENGINES, LOCAL_AGENT_RELIABILITY_PRINCIPLES, LOCAL_AGENT_TASK_LIFECYCLE } from '@/lib/local-agent/engines'
 import { LOCAL_TASK_CATEGORIES } from '@/lib/local-agent/router'
 import type { LocalAgentBridgeStatusResponse, LocalAgentEngineId, LocalFamilyAgentsResponse, LocalTaskCategory, LocalTaskRoutingDecision } from '@/lib/local-agent/types'
+import { getEffectiveBridgeRuntimeState, type EffectiveBridgeRuntimeDebug } from '@/lib/bridge/effectiveRuntimeState'
 import type { BridgeStatusResponse } from '@/lib/bridge/types'
 import { INCOME_WORKERS, INCOME_WORKER_WORKFLOW } from '@/lib/income-workers/registry'
 import type { IncomeWorkerCandidate, IncomeWorkerScoutResult } from '@/lib/income-workers/types'
@@ -88,7 +88,6 @@ import {
   ALL_ORCHESTRATION_FAMILIES,
   filterOrchestrationOrderByCommand,
 } from '@/lib/council/commandParser'
-import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
 import { deriveTopicScopeLock } from '@/lib/council/topicScope'
 import { runFinalModerator } from '@/lib/council/finalModerator'
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
@@ -783,29 +782,6 @@ const INITIAL_PAYMENT_LEDGER_STATE: PaymentLedgerState = {
   },
   message: 'Deposit ledger not loaded yet.',
 }
-const INITIAL_LOCAL_AGENT_BRIDGE: LocalAgentBridgeStatusResponse = {
-  bridge: 'config_needed',
-  bridgeState: 'awaiting_connection',
-  engines: LOCAL_AGENT_ENGINES.reduce((acc, engine) => {
-    acc[engine.id] = {
-      id: engine.id,
-      name: engine.name,
-      status: 'not_detected',
-      endpoint: engine.defaultEndpoint,
-      message: 'Not checked yet.',
-    }
-    return acc
-  }, {} as LocalAgentBridgeStatusResponse['engines']),
-  selectedEngine: null,
-  selectedEngineLabel: null,
-  selectedModel: null,
-  repoAccessStatus: 'read-only status bridge; write access not granted',
-  lastTask: null,
-  qaStatus: 'idle',
-  rollbackCheckpointStatus: 'not created',
-  checkedAt: '',
-  lastSuccessfulHandshakeAt: null,
-}
 const INITIAL_OFFICIAL_BRIDGE_STATUS: BridgeStatusResponse = {
   mode: 'DISCONNECTED',
   authenticated: false,
@@ -864,155 +840,6 @@ const INITIAL_OFFICIAL_BRIDGE_STATUS: BridgeStatusResponse = {
   ],
   runtime: null,
   statusHistory: [],
-}
-const INITIAL_LOCAL_FAMILY_AGENTS: LocalFamilyAgentsResponse = {
-  ollamaDetected: false,
-  lmStudioDetected: false,
-  availableModels: [],
-  lmStudioModels: [],
-  providers: {
-    ollama: { provider: 'ollama', detected: false, reachable: false, functional: false, models: [], error: null },
-    lmStudio: { provider: 'lm_studio', detected: false, reachable: false, functional: false, models: [], error: null, handshakeState: 'awaiting_connection' },
-  },
-  preferredProvider: null,
-  preferredModel: null,
-  familyAgents: LOCAL_FAMILY_AGENTS.map(agent => ({
-    ...agent,
-    status: 'inactive',
-    modelInstalled: false,
-    provider: 'ollama',
-    model: agent.preferredModel,
-    detected: false,
-    functional: false,
-  })),
-  checkedAt: '',
-}
-
-function isFreshBridgeLocalAi(status: BridgeStatusResponse) {
-  const lastHeartbeatMs = status.node.lastHeartbeat ? Date.parse(status.node.lastHeartbeat) : NaN
-  const heartbeatFresh = Number.isFinite(lastHeartbeatMs)
-    && Date.now() - lastHeartbeatMs <= status.staleTimeoutSeconds * 1000
-  const provider = status.node.activeProvider ?? status.runtime?.activeProvider ?? null
-  const model = status.node.activeModel ?? status.runtime?.activeModel ?? null
-  const providerStatus = provider ? status.providers.find(item => item.provider === provider) : null
-
-  return {
-    active: Boolean(heartbeatFresh && !status.stale && status.node.online && provider && model && providerStatus?.functional),
-    provider,
-    model,
-    providerStatus,
-    checkedAt: status.node.lastHeartbeat ?? status.updatedAt,
-  }
-}
-
-function bridgeModelLabel(model: string) {
-  return model.trim().slice(0, 160)
-}
-
-function bridgeDerivedLocalAgentBridge(
-  legacy: LocalAgentBridgeStatusResponse,
-  bridgeStatus: BridgeStatusResponse,
-): LocalAgentBridgeStatusResponse {
-  const bridgeRuntime = isFreshBridgeLocalAi(bridgeStatus)
-  if (!bridgeRuntime.active || !bridgeRuntime.provider || !bridgeRuntime.model) return legacy
-
-  const activeEngine = bridgeRuntime.provider
-  const checkedAt = bridgeRuntime.checkedAt || new Date().toISOString()
-  const model = bridgeModelLabel(bridgeRuntime.model)
-  const engine = legacy.engines[activeEngine]
-
-  return {
-    ...legacy,
-    bridge: 'online',
-    bridgeState: 'prompt_verified',
-    selectedEngine: activeEngine,
-    selectedEngineLabel: activeEngine === 'lm_studio' ? 'LM Studio' : 'Ollama',
-    selectedModel: model,
-    checkedAt,
-    lastSuccessfulHandshakeAt: checkedAt,
-    engines: {
-      ...legacy.engines,
-      [activeEngine]: {
-        ...engine,
-        id: activeEngine,
-        name: activeEngine === 'lm_studio' ? 'LM Studio' : 'Ollama',
-        status: 'detected',
-        endpoint: engine.endpoint,
-        message: `Bridge heartbeat validated ${activeEngine === 'lm_studio' ? 'LM Studio' : 'Ollama'} with active model ${model}.`,
-        modelsReachable: true,
-        chatCompletionsReachable: true,
-        functional: true,
-        lastFunctionalTestAt: checkedAt,
-        lastSuccessfulHandshakeAt: checkedAt,
-        error: null,
-        configured: true,
-        configuredModel: model,
-        modelUsed: model,
-        latencyMs: bridgeRuntime.providerStatus?.latencyMs ?? bridgeStatus.node.latencyMs ?? bridgeStatus.runtime?.heartbeatLatencyMs ?? null,
-        failureKind: null,
-        handshakeState: 'prompt_verified',
-        testResponsePreview: 'Bridge heartbeat validated provider runtime.',
-      },
-    },
-  }
-}
-
-function bridgeDerivedLocalFamilies(
-  legacy: LocalFamilyAgentsResponse,
-  bridgeStatus: BridgeStatusResponse,
-): LocalFamilyAgentsResponse {
-  const bridgeRuntime = isFreshBridgeLocalAi(bridgeStatus)
-  if (!bridgeRuntime.active || !bridgeRuntime.provider || !bridgeRuntime.model) return legacy
-
-  const provider = bridgeRuntime.provider
-  const model = bridgeModelLabel(bridgeRuntime.model)
-  const checkedAt = bridgeRuntime.checkedAt || new Date().toISOString()
-  const lmStudioModel = { id: model, object: 'model', ownedBy: 'bridge-runtime' }
-  const ollamaModel = { name: model, family: null, parameterSize: null, quantization: null }
-  const bridgeProvider = {
-    provider,
-    detected: true,
-    reachable: true,
-    functional: true,
-    models: provider === 'lm_studio' ? [lmStudioModel] : [ollamaModel],
-    error: null,
-    configured: true,
-    configuredModel: model,
-    failureKind: null,
-    handshakeState: 'prompt_verified' as const,
-    latencyMs: bridgeRuntime.providerStatus?.latencyMs ?? bridgeStatus.node.latencyMs ?? bridgeStatus.runtime?.heartbeatLatencyMs ?? null,
-    modelUsed: model,
-    testResponsePreview: 'Bridge heartbeat validated provider runtime.',
-  }
-
-  return {
-    ...legacy,
-    ollamaDetected: provider === 'ollama' ? true : legacy.ollamaDetected,
-    lmStudioDetected: provider === 'lm_studio' ? true : legacy.lmStudioDetected,
-    availableModels: provider === 'ollama'
-      ? [ollamaModel, ...legacy.availableModels.filter(item => item.name !== model)]
-      : legacy.availableModels,
-    lmStudioModels: provider === 'lm_studio'
-      ? [lmStudioModel, ...legacy.lmStudioModels.filter(item => item.id !== model)]
-      : legacy.lmStudioModels,
-    providers: {
-      ...legacy.providers,
-      ollama: provider === 'ollama' ? bridgeProvider : legacy.providers.ollama,
-      lmStudio: provider === 'lm_studio' ? bridgeProvider : legacy.providers.lmStudio,
-    },
-    preferredProvider: provider,
-    preferredModel: model,
-    familyAgents: legacy.familyAgents.map(agent => ({
-      ...agent,
-      status: 'active',
-      modelInstalled: true,
-      provider,
-      model,
-      detected: true,
-      functional: true,
-    })),
-    checkedAt,
-  }
 }
 const INITIAL_INTERNET_STATUS: InternetStatusResponse = {
   tools: {
@@ -4237,6 +4064,7 @@ function OfficialLocalBridgePanel({
 
 function LocalCodeAgentBridgePanel({
   bridge,
+  runtimeDebug,
   onRefresh,
   onCouncilHandoff,
   repo,
@@ -4244,6 +4072,7 @@ function LocalCodeAgentBridgePanel({
   latestEngineeringTask,
 }: {
   bridge: LocalAgentBridgeStatusResponse
+  runtimeDebug: EffectiveBridgeRuntimeDebug
   onRefresh: () => void
   onCouncilHandoff: (decree: string) => void
   repo?: RepoStatus
@@ -4506,6 +4335,27 @@ function LocalCodeAgentBridgePanel({
           </div>
         </div>
       ) : null}
+
+      <div className="mt-3 grid gap-2 text-[10px] md:grid-cols-6">
+        <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(96,165,250,0.18)', color: '#BAE6FD', background: 'rgba(0,0,0,0.22)' }}>
+          Heartbeat age: {runtimeDebug.heartbeatAgeMs === null ? 'none' : `${Math.max(0, Math.round(runtimeDebug.heartbeatAgeMs / 1000))}s`}
+        </div>
+        <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(52,211,153,0.18)', color: '#A7F3D0', background: 'rgba(0,0,0,0.22)' }}>
+          Source: {runtimeDebug.providerSource}
+        </div>
+        <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(255,215,0,0.18)', color: runtimeDebug.selectorResult === 'active' ? '#A7F3D0' : '#FDE68A', background: 'rgba(0,0,0,0.22)' }}>
+          Selector: {runtimeDebug.selectorResult}
+        </div>
+        <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(248,113,113,0.18)', color: runtimeDebug.stale ? '#FCA5A5' : '#86EFAC', background: 'rgba(0,0,0,0.22)' }}>
+          Stale: {String(runtimeDebug.stale)}
+        </div>
+        <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(167,139,250,0.18)', color: '#DDD6FE', background: 'rgba(0,0,0,0.22)' }}>
+          Provider/model: {runtimeDebug.activeProvider ?? 'none'} / {formatLocalModelLabel(runtimeDebug.activeModel)}
+        </div>
+        <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(52,211,153,0.18)', color: '#A7F3D0', background: 'rgba(0,0,0,0.22)' }}>
+          Engines: {runtimeDebug.effectiveEngineCount}
+        </div>
+      </div>
 
       <div className="mt-3 grid gap-2 lg:grid-cols-3">
         <div className="rounded px-3 py-2 text-xs lg:col-span-2" style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(0,0,0,0.24)' }}>
@@ -5106,27 +4956,9 @@ const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
     setTestError(null)
     setTestResponse('')
 
-    try {
-      const res = await fetch('/api/local-agent/invoke', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          familyAgentId: selectedAgent.id,
-          prompt: testPrompt,
-          provider: selectedAgent.provider,
-          model: selectedAgent.model,
-        }),
-      })
-      const data = await res.json()
-
-      if (!res.ok) throw new Error(data.message || 'Local model invocation failed')
-      setTestLabel(data.label ?? 'local model response')
-      setTestResponse(data.response ?? '')
-    } catch (error) {
-      setTestError(error instanceof Error ? error.message : 'Local model invocation failed')
-    } finally {
-      setTestLoading(false)
-    }
+    setTestLabel('bridge runtime selector')
+    setTestResponse(`Bridge runtime reports ${selectedAgent.provider} / ${selectedAgent.model} as ${selectedAgent.functional ? 'functional' : 'unavailable'}. Direct browser-side legacy local invokes are disabled; use the bounded outbound bridge invoke flow.`)
+    setTestLoading(false)
   }
 
   return (
@@ -5338,31 +5170,43 @@ const LocalFamilyAgentsPanel = memo(function LocalFamilyAgentsPanel({
   )
 })
 
-const CapabilityRouterPanel = memo(function CapabilityRouterPanel() {
+const CapabilityRouterPanel = memo(function CapabilityRouterPanel({ families }: { families: LocalFamilyAgentsResponse }) {
   const [taskCategory, setTaskCategory] = useState<LocalTaskCategory>('synthesis')
   const [prompt, setPrompt] = useState('')
   const [decision, setDecision] = useState<LocalTaskRoutingDecision | null>(null)
   const [routing, setRouting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const routeTask = async () => {
+  const routeTask = () => {
     setRouting(true)
     setError(null)
 
     try {
-      const res = await fetch('/api/local-agent/route-task', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          taskCategory,
-          prompt,
-          requireApproval: true,
-        }),
-      })
-      const data = await res.json()
+      const selectedAgent = families.familyAgents.find(agent => agent.functional)
+        ?? families.familyAgents[0]
+      if (!selectedAgent) throw new Error('No local family agents are available for routing.')
+      const supportingAgents = families.familyAgents
+        .filter(agent => agent.id !== selectedAgent.id)
+        .slice(0, 2)
 
-      if (!res.ok) throw new Error(data.message || 'Capability routing failed')
-      setDecision(data)
+      setDecision({
+        taskCategory,
+        selectedFamily: selectedAgent.family,
+        selectedAgent,
+        selectedModel: selectedAgent.model,
+        selectedProvider: selectedAgent.provider,
+        modelInstalled: selectedAgent.modelInstalled,
+        providerFunctional: selectedAgent.functional,
+        approvalRequired: true,
+        canExecute: false,
+        reasoning: selectedAgent.functional
+          ? `Bridge runtime selector routes ${taskCategory} to ${selectedAgent.displayName} using ${selectedAgent.provider} / ${selectedAgent.model}.`
+          : 'Bridge runtime selector has no fresh functional provider; routing remains advisory only.',
+        recommendedNextStep: selectedAgent.functional
+          ? 'Use bounded bridge invoke only after Commander intent and approval are clear.'
+          : 'Restore a fresh Commander Node heartbeat with a functional provider and active model.',
+        recommendedSupportingAgents: supportingAgents,
+      })
     } catch (routeError) {
       setError(routeError instanceof Error ? routeError.message : 'Capability routing failed')
     } finally {
@@ -5382,7 +5226,7 @@ const CapabilityRouterPanel = memo(function CapabilityRouterPanel() {
             Routes task types to the right local family baby. Routing only; safe invoke remains separate.
           </p>
         </div>
-        <button type="button" onClick={() => void routeTask()} disabled={routing}
+        <button type="button" onClick={routeTask} disabled={routing}
           className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
           style={{ background: '#38BDF8', color: '#000' }}>
           {routing ? 'ROUTING...' : 'ROUTE TASK'}
@@ -5992,18 +5836,15 @@ function Home() {
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
   const [redTeamCoder, setRedTeamCoder] = useState<RedTeamCoderUiState>(INITIAL_RED_TEAM_CODER_STATE)
   const [officialBridgeStatus, setOfficialBridgeStatus] = useState<BridgeStatusResponse>(INITIAL_OFFICIAL_BRIDGE_STATUS)
-  const [localAgentBridge, setLocalAgentBridge] = useState<LocalAgentBridgeStatusResponse>(INITIAL_LOCAL_AGENT_BRIDGE)
-  const [localFamilyAgents, setLocalFamilyAgents] = useState<LocalFamilyAgentsResponse>(INITIAL_LOCAL_FAMILY_AGENTS)
   const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
   const [latestAnalystPacket, setLatestAnalystPacket] = useState<AnalystOperationsPacket | null>(null)
-  const effectiveLocalAgentBridge = useMemo(
-    () => bridgeDerivedLocalAgentBridge(localAgentBridge, officialBridgeStatus),
-    [localAgentBridge, officialBridgeStatus],
+  const effectiveBridgeRuntimeState = useMemo(
+    () => getEffectiveBridgeRuntimeState(officialBridgeStatus),
+    [officialBridgeStatus],
   )
-  const effectiveLocalFamilyAgents = useMemo(
-    () => bridgeDerivedLocalFamilies(localFamilyAgents, officialBridgeStatus),
-    [localFamilyAgents, officialBridgeStatus],
-  )
+  const effectiveLocalAgentBridge = effectiveBridgeRuntimeState.localBridge
+  const effectiveLocalFamilyAgents = effectiveBridgeRuntimeState.localFamilies
+  const effectiveBridgeRuntimeDebug = effectiveBridgeRuntimeState.debug
   const engineeringStatusBridge = useMemo(
     () => buildEngineeringStatusBridge({
       localBridge: effectiveLocalAgentBridge,
@@ -7382,40 +7223,9 @@ function Home() {
     }
   }, [])
 
-  const loadLocalAgentBridge = useCallback(async () => {
-    try {
-      const res = await fetch('/api/local-agent/status', { cache: 'no-store' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.message || 'Local agent bridge check failed')
-      setLocalAgentBridge(data)
-    } catch {
-      setLocalAgentBridge(prev => ({
-        ...prev,
-        bridge: 'error',
-        qaStatus: 'error',
-        checkedAt: new Date().toISOString(),
-      }))
-    }
-  }, [])
-
-  const loadLocalFamilyAgents = useCallback(async () => {
-    try {
-      const res = await fetch('/api/local-agent/families', { cache: 'no-store' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.message || 'Local family registry check failed')
-      setLocalFamilyAgents(data)
-    } catch {
-      setLocalFamilyAgents(prev => ({
-        ...prev,
-        ollamaDetected: false,
-        checkedAt: new Date().toISOString(),
-      }))
-    }
-  }, [])
-
   const refreshLocalEngineeringState = useCallback(async () => {
-    await Promise.allSettled([loadOfficialBridgeStatus(), loadLocalAgentBridge(), loadLocalFamilyAgents()])
-  }, [loadOfficialBridgeStatus, loadLocalAgentBridge, loadLocalFamilyAgents])
+    await loadOfficialBridgeStatus()
+  }, [loadOfficialBridgeStatus])
 
   useEffect(() => {
     if (operatorTab !== 'agents' && operatorTab !== 'diagnostics') return
@@ -8297,40 +8107,7 @@ function Home() {
 
     let textOut: string | null = null
 
-    if (agent?.functional && agentId) {
-      const threadBlock = threadHistory.slice(-16).map(m => `${m.sender}: ${m.content}`).join('\n')
-      const authoritativeDecree = lastRaelDirectiveContentRef.current.trim() || decree
-      const localPrompt = `${augment}\n\nCURRENT DECREE (authoritative):\n${authoritativeDecree}\n\nCouncil thread (continuity only, most recent last):\n${threadBlock}\n\nRespond with one concise in-character council message only.`
-      try {
-        const r = await fetch('/api/local-agent/invoke', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            familyAgentId: agentId,
-            prompt: localPrompt,
-            provider: agent.provider,
-            model: agent.model,
-          }),
-        })
-        if (r.ok) {
-          const d = await r.json() as { response?: string }
-          const t = typeof d.response === 'string' ? d.response.trim() : ''
-          if (t) {
-            const gov = applyGovernor(t, family, activeCouncilCommandRef.current, {
-              raelDirectiveText: lastRaelDirectiveContentRef.current,
-              councilIntentKind: autonomousIntent.intent,
-              councilActiveScope: autonomousIntent.scope,
-              verifiedRuntimeContext: { family },
-            })
-            if (!gov.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
-              textOut = gov.text
-            }
-          }
-        }
-      } catch {
-        textOut = null
-      }
-    }
+    if (agent?.functional && agentId) textOut = null
 
     councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: true })
     let shouldScheduleNext = false
@@ -9015,52 +8792,7 @@ function Home() {
           if (!agentId) return null
           const agent = effectiveLocalFamilyAgents.familyAgents.find(a => a.id === agentId)
           if (!agent?.functional) return null
-          const th = threadHistory().slice(-16).map(m => `${m.sender}: ${m.content}`).join('\n')
-          const localPrompt = `${augment}\n\nCURRENT DECREE (authoritative):\n${decree}\n\nCouncil thread (continuity only, most recent last):\n${th}\n\nRespond with one concise in-character council message only.`
-          const localController = new AbortController()
-          const abortLocal = () => localController.abort()
-          controller.signal.addEventListener('abort', abortLocal, { once: true })
-          const localTimeoutId = window.setTimeout(() => localController.abort(), 18_000)
-          try {
-            const r = await fetch('/api/local-agent/invoke', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                familyAgentId: agentId,
-                prompt: localPrompt,
-                provider: agent.provider,
-                model: agent.model,
-              }),
-              signal: localController.signal,
-            })
-            if (!r.ok) return null
-            const d = await r.json() as { response?: string }
-            const t = typeof d.response === 'string' ? d.response.trim() : ''
-            if (!t) return null
-            const gov = applyGovernor(t, family, activeCouncilCommandRef.current, {
-              raelDirectiveText: decree,
-              councilIntentKind: councilIntentState.intent,
-              councilActiveScope: councilIntentState.scope,
-              modeGovernor,
-              verifiedRuntimeContext: providerRuntimeStates[family]
-                ? providerOutcomeToVerifiedContext({
-                    family,
-                    runtime: providerRuntimeStates[family]!,
-                  })
-                : { family },
-              roomStatuses: buildRoomStatusesFromProviderStates(
-                providerRuntimeStates,
-                orderForGather,
-              ),
-            })
-            if (gov.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) return null
-            return gov.text || null
-          } catch {
-            return null
-          } finally {
-            window.clearTimeout(localTimeoutId)
-            controller.signal.removeEventListener('abort', abortLocal)
-          }
+          return null
         }
 
         let textOut: string | null = null
@@ -11156,14 +10888,15 @@ function Home() {
                 />
                 <LocalCodeAgentBridgePanel
                   bridge={effectiveLocalAgentBridge}
+                  runtimeDebug={effectiveBridgeRuntimeDebug}
                   onRefresh={refreshLocalEngineeringState}
                   onCouncilHandoff={injectLiveEnvironmentDecree}
                   repo={repoStatus}
                   pendingApprovals={raelActions.filter(action => action.status === 'pending').length}
                   latestEngineeringTask={latestEngineeringTaskPacket}
                 />
-                <LocalFamilyAgentsPanel families={effectiveLocalFamilyAgents} onRefresh={loadLocalFamilyAgents} />
-                <CapabilityRouterPanel />
+                <LocalFamilyAgentsPanel families={effectiveLocalFamilyAgents} onRefresh={refreshLocalEngineeringState} />
+                <CapabilityRouterPanel families={effectiveLocalFamilyAgents} />
                 <CodexAgentPlaceholder />
               </>
             )}
@@ -11372,6 +11105,7 @@ function Home() {
                 />
                 <LocalCodeAgentBridgePanel
                   bridge={effectiveLocalAgentBridge}
+                  runtimeDebug={effectiveBridgeRuntimeDebug}
                   onRefresh={refreshLocalEngineeringState}
                   onCouncilHandoff={injectLiveEnvironmentDecree}
                   repo={repoStatus}
@@ -11404,8 +11138,8 @@ function Home() {
                 <Phase3WarRoomPanels uiMode={uiMode} homeBundle="diagnostics" />
                 <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
                 <BridgeArchitectPanel engines={engineList} />
-                <LocalFamilyAgentsPanel families={effectiveLocalFamilyAgents} onRefresh={loadLocalFamilyAgents} />
-                <CapabilityRouterPanel />
+                <LocalFamilyAgentsPanel families={effectiveLocalFamilyAgents} onRefresh={refreshLocalEngineeringState} />
+                <CapabilityRouterPanel families={effectiveLocalFamilyAgents} />
                 <BabyAiObserverPanel memories={memories} actions={raelActions} opportunities={incomeOpportunities} />
                 <FamilyPresencePanel presence={familyPresence} geminiEngine={geminiEngineRow} />
                 {uiMode === 'advanced' && (
