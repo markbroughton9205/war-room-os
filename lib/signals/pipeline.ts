@@ -47,6 +47,53 @@ function alertsForDiagnostics(diagnostics: Record<string, unknown>): SignalAlert
   return alerts
 }
 
+function numberField(record: Record<string, unknown>, key: string): number {
+  const value = record[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function nullableNumberField(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function freshnessSummary(
+  completedAt: string,
+  diagnostics: Record<string, unknown>,
+  resultCount: number,
+): SignalScan['freshnessSummary'] {
+  let maxAgeDays = 14
+  let staleDiscardedCount = 0
+  let unknownDateDiscardedCount = 0
+  let liveCount = 0
+  let recentCount = 0
+  let oldestAcceptedAgeDays: number | null = null
+
+  for (const detail of Object.values(diagnostics)) {
+    if (!detail || typeof detail !== 'object') continue
+    const record = detail as Record<string, unknown>
+    const providerMaxAgeDays = nullableNumberField(record, 'maxAgeDays')
+    if (providerMaxAgeDays !== null) maxAgeDays = Math.max(maxAgeDays, providerMaxAgeDays)
+    staleDiscardedCount += numberField(record, 'staleDiscardedCount')
+    unknownDateDiscardedCount += numberField(record, 'unknownDateDiscardedCount')
+    liveCount += numberField(record, 'liveCount')
+    recentCount += numberField(record, 'recentCount')
+    const oldest = nullableNumberField(record, 'oldestAcceptedAgeDays')
+    if (oldest !== null) oldestAcceptedAgeDays = oldestAcceptedAgeDays === null ? oldest : Math.max(oldestAcceptedAgeDays, oldest)
+  }
+
+  return {
+    latestScanTime: completedAt,
+    maxAgeDays,
+    freshResultCount: resultCount,
+    staleDiscardedCount,
+    unknownDateDiscardedCount,
+    oldestAcceptedAgeDays,
+    liveCount,
+    recentCount,
+  }
+}
+
 export async function runSignalScan(): Promise<SignalSnapshot> {
   const startedAt = new Date().toISOString()
   const id = scanId(startedAt)
@@ -77,6 +124,7 @@ export async function runSignalScan(): Promise<SignalSnapshot> {
 
   const results = dedupeAndRankSignals(rawItems.map(item => scoreSignalItem(item, id))).slice(0, 40)
   const completedAt = new Date().toISOString()
+  const scanFreshnessSummary = freshnessSummary(completedAt, diagnostics, results.length)
   const scan: SignalScan = {
     id,
     status: results.length ? (Object.values(diagnostics).some(value => typeof value === 'object' && value && 'firstError' in value && (value as { firstError?: unknown }).firstError) ? 'partial' : 'completed') : 'failed',
@@ -84,6 +132,7 @@ export async function runSignalScan(): Promise<SignalSnapshot> {
     completedAt,
     sourceCount: sources.filter(source => source.configured).length,
     resultCount: results.length,
+    freshnessSummary: scanFreshnessSummary,
     providerDiagnostics: diagnostics,
     error: results.length ? null : 'No configured cloud source returned source-backed signal results.',
   }

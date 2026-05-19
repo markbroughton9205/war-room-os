@@ -50,6 +50,19 @@ function MiniMetric({ label: metricLabel, value }: { label: string; value: strin
   )
 }
 
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return 'none'
+  const parsed = new Date(value)
+  return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString() : value
+}
+
+function signalAgeLabel(signal: SignalResult) {
+  const status = typeof signal.metadata.freshnessStatus === 'string' ? signal.metadata.freshnessStatus : null
+  const ageDays = typeof signal.metadata.ageDays === 'number' ? signal.metadata.ageDays : null
+  if (!status) return null
+  return ageDays === null ? status : `${status} · ${ageDays}d`
+}
+
 function SourcePill({ source }: { source: SignalSourceDefinition }) {
   return (
     <li className="rounded border border-white/10 p-2 text-[10px]">
@@ -71,6 +84,7 @@ function SignalCard({ signal, compact = false }: { signal: SignalResult; compact
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-sm font-semibold text-white">{signal.title}</h4>
             <Badge value={signal.approvalStatus} />
+            {signalAgeLabel(signal) ? <Badge value={signalAgeLabel(signal) ?? ''} /> : null}
           </div>
           <p className="mt-1 text-[10px] text-slate-500">
             {label(signal.category)} · {signal.source} · {signal.provider}
@@ -161,6 +175,7 @@ export function SignalRadarPanel() {
     () => (snapshot?.results ?? []).filter(result => result.approvalStatus === 'pending_review').slice(0, 8),
     [snapshot?.results],
   )
+  const freshness = snapshot?.latestScan?.freshnessSummary
 
   return (
     <section className="mx-auto mt-14 max-w-6xl border-t border-cyan-900/50 pt-10">
@@ -193,6 +208,14 @@ export function SignalRadarPanel() {
         <MiniMetric label="Migration" value={snapshot?.migrationStatus ?? 'checking'} />
         <MiniMetric label="Latest Scan" value={snapshot?.latestScan?.status ?? 'none'} />
         <MiniMetric label="Results" value={String(snapshot?.results.length ?? 0)} />
+      </div>
+
+      <div className="mb-4 grid gap-3 md:grid-cols-5">
+        <MiniMetric label="Latest Scan Time" value={formatDateTime(freshness?.latestScanTime ?? snapshot?.latestScan?.completedAt)} />
+        <MiniMetric label="Max Age" value={`${freshness?.maxAgeDays ?? 14}d`} />
+        <MiniMetric label="Fresh Accepted" value={String(freshness?.freshResultCount ?? snapshot?.results.length ?? 0)} />
+        <MiniMetric label="Stale Discarded" value={String(freshness?.staleDiscardedCount ?? 0)} />
+        <MiniMetric label="Oldest Accepted" value={freshness?.oldestAcceptedAgeDays === null || freshness?.oldestAcceptedAgeDays === undefined ? 'none' : `${freshness.oldestAcceptedAgeDays}d`} />
       </div>
 
       {snapshot?.migrationStatus === 'MIGRATION_REQUIRED' ? (
@@ -283,7 +306,7 @@ export function SignalRadarPanel() {
       </div>
 
       <div className="mt-4 rounded border border-white/10 bg-black/25 p-3 text-[10px] leading-relaxed text-slate-500">
-        Guardrails: cloud-only ingestion, no localhost, no local agents, no Ollama/LM Studio/bridge, no fake signals, no outreach/spend/applications/hidden execution, and approval required before action. Latest scan: {snapshot?.latestScan?.completedAt ?? 'none'}.
+        Guardrails: cloud-only ingestion, no localhost, no local agents, no Ollama/LM Studio/bridge, no fake signals, no stale/unknown-date news as live opportunities, no outreach/spend/applications/hidden execution, and approval required before action. Latest scan: {snapshot?.latestScan?.completedAt ?? 'none'}.
       </div>
     </section>
   )

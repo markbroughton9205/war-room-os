@@ -1,4 +1,5 @@
 import type { SignalAlert, SignalResult, SignalScan, SignalSnapshot, SignalSourceDefinition } from './model'
+import { isLiveSignalResult } from './freshness'
 
 function guardrails(): SignalSnapshot['guardrails'] {
   return {
@@ -88,7 +89,11 @@ export function buildSignalSnapshot(input: {
   alerts: SignalAlert[]
 }): SignalSnapshot {
   const ranked = [...input.results].sort((a, b) => b.scores.highestLeverage - a.scores.highestLeverage)
-  const sourceBacked = ranked.filter(result => result.guardrails.sourceBacked && result.url.startsWith('https://'))
+  const sourceBacked = ranked.filter(result => (
+    result.guardrails.sourceBacked
+    && result.url.startsWith('https://')
+    && isLiveSignalResult(result)
+  ))
   const strongestSignal = sourceBacked.find(result => result.approvalStatus === 'pending_review') ?? null
   return {
     generatedAt: input.generatedAt,

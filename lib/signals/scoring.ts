@@ -1,4 +1,5 @@
 import type { BabySignalFamily, SignalCategory, SignalRawItem, SignalResult, SignalScores } from './model'
+import { recencyPenaltyForItem } from './freshness'
 
 const CATEGORY_DEFAULTS: Record<SignalCategory, Partial<SignalScores>> = {
   freight: { incomePotential: 74, urgency: 68, startupCost: 48, timeToProfit: 64, repeatability: 70, strategicAlignment: 72, familyImpact: 48 },
@@ -120,7 +121,8 @@ export function scoreSignalItem(item: SignalRawItem, scanId: string | null): Sig
           : item.provider === 'rss' ? 68
             : 58
   const rawScoreBoost = typeof item.rawScore === 'number' ? Math.min(12, Math.max(0, item.rawScore <= 1 ? item.rawScore * 12 : item.rawScore / 8)) : 0
-  const confidence = clampScore(providerConfidence + rawScoreBoost + (item.summary.length > 180 ? 4 : -6))
+  const recencyPenalty = recencyPenaltyForItem(item)
+  const confidence = clampScore(providerConfidence + rawScoreBoost + (item.summary.length > 180 ? 4 : -6) - recencyPenalty)
   const incomePotential = clampScore((defaults.incomePotential ?? 55) + (relevance - 60) * 0.18)
   const urgency = clampScore(defaults.urgency ?? 55)
   const startupCost = clampScore(defaults.startupCost ?? 65)

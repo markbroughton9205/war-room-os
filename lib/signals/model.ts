@@ -51,6 +51,12 @@ export type SignalSourceKind =
   | 'ai_trend_url'
   | 'local_economic_url'
 
+export type SignalFreshnessStatus =
+  | 'LIVE'
+  | 'RECENT'
+  | 'STALE'
+  | 'UNKNOWN_DATE'
+
 export type BabySignalFamily =
   | 'Income Operations Baby'
   | 'Analyst Baby'
@@ -144,8 +150,20 @@ export type SignalScan = {
   completedAt: string
   sourceCount: number
   resultCount: number
+  freshnessSummary?: SignalFreshnessSummary
   providerDiagnostics: Record<string, unknown>
   error: string | null
+}
+
+export type SignalFreshnessSummary = {
+  latestScanTime: string
+  maxAgeDays: number
+  freshResultCount: number
+  staleDiscardedCount: number
+  unknownDateDiscardedCount: number
+  oldestAcceptedAgeDays: number | null
+  liveCount: number
+  recentCount: number
 }
 
 export type SignalSnapshot = {

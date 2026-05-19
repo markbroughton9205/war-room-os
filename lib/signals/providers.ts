@@ -2,6 +2,15 @@ import 'server-only'
 
 import { getEnvAliasValue } from '@/lib/configuration/envAlias'
 import type { SignalRawItem, SignalSourceDefinition } from './model'
+import {
+  createFreshnessCounters,
+  evaluateFreshness,
+  freshnessDiagnostics,
+  maxAgeDaysForProvider,
+  newsDateWindow,
+  recordFreshness,
+  withFreshnessMetadata,
+} from './freshness'
 import { isAllowedCloudUrl } from './sources'
 
 type TavilyResult = {
@@ -10,6 +19,8 @@ type TavilyResult = {
   content?: string
   raw_content?: string | null
   score?: number
+  published_date?: string
+  publishedDate?: string
 }
 
 type TavilyResponse = {
@@ -155,6 +166,8 @@ export async function runTavilySignalSearch(capturedAt: string): Promise<Provide
     return { items: [], diagnostics: { configured: false, error: 'TAVILY_API_KEY is not configured' } }
   }
 
+  const maxAgeDays = maxAgeDaysForProvider('tavily')
+  const counters = createFreshnessCounters(maxAgeDays)
   const settled = await Promise.allSettled(TAVILY_QUERIES.map(async search => {
     const response = await fetch('https://api.tavily.com/search', {
       method: 'POST',
@@ -181,6 +194,12 @@ export async function runTavilySignalSearch(capturedAt: string): Promise<Provide
       const url = String(result.url ?? '')
       const title = String(result.title ?? '').trim()
       if (!title || !isAllowedCloudUrl(url)) return []
+      const publishedAt = result.published_date ?? result.publishedDate
+      const freshness = publishedAt ? evaluateFreshness(publishedAt, { maxAgeDays }) : null
+      if (freshness) {
+        recordFreshness(counters, freshness)
+        if (!freshness.acceptedForLiveSignal) return []
+      }
       return [{
         provider: 'tavily',
         sourceId: search.sourceId,
@@ -192,7 +211,9 @@ export async function runTavilySignalSearch(capturedAt: string): Promise<Provide
         categories: [...search.categories],
         rawScore: typeof result.score === 'number' ? result.score : null,
         capturedAt,
-        metadata: { query: search.query },
+        metadata: freshness
+          ? withFreshnessMetadata({ query: search.query }, freshness)
+          : { query: search.query, maxAgeDays },
       }]
     })
   }))
@@ -208,6 +229,7 @@ export async function runTavilySignalSearch(capturedAt: string): Promise<Provide
       configured: true,
       queryCount: TAVILY_QUERIES.length,
       resultCount: items.length,
+      ...freshnessDiagnostics(counters),
       failures: errors.length,
       firstError: errors[0] ?? null,
     },
@@ -294,6 +316,8 @@ export async function runFirecrawlOrDirectSources(sources: SignalSourceDefinitio
 
 export async function runRssSources(sources: SignalSourceDefinition[], capturedAt: string): Promise<ProviderRunResult> {
   const feeds = sources.filter(source => source.provider === 'rss' && source.url && isAllowedCloudUrl(source.url)).slice(0, 12)
+  const maxAgeDays = maxAgeDaysForProvider('rss')
+  const counters = createFreshnessCounters(maxAgeDays)
   const settled = await Promise.allSettled(feeds.map(async source => {
     if (!source.url) return []
     const xml = await fetchText(source.url)
@@ -302,7 +326,11 @@ export async function runRssSources(sources: SignalSourceDefinition[], capturedA
       const title = textBetween(block, 'title')
       const link = textBetween(block, 'link') ?? attr(block.match(/<link\b[^>]*>/i)?.[0] ?? '', 'href')
       const description = textBetween(block, 'description') ?? textBetween(block, 'summary') ?? textBetween(block, 'content') ?? title
+      const publishedAt = textBetween(block, 'pubDate') ?? textBetween(block, 'published') ?? textBetween(block, 'updated') ?? textBetween(block, 'dc:date')
       if (!title || !link || !isAllowedCloudUrl(link)) return []
+      const freshness = evaluateFreshness(publishedAt, { maxAgeDays })
+      recordFreshness(counters, freshness)
+      if (!freshness.acceptedForLiveSignal) return []
       return [{
         provider: 'rss',
         sourceId: source.id,
@@ -314,7 +342,7 @@ export async function runRssSources(sources: SignalSourceDefinition[], capturedA
         categories: source.categories,
         rawScore: source.reliabilityScore,
         capturedAt,
-        metadata: { feedUrl: source.url, itemIndex: index },
+        metadata: withFreshnessMetadata({ feedUrl: source.url, itemIndex: index }, freshness),
       }]
     })
   }))
@@ -329,6 +357,7 @@ export async function runRssSources(sources: SignalSourceDefinition[], capturedA
       configured: feeds.length > 0,
       feedCount: feeds.length,
       resultCount: items.length,
+      ...freshnessDiagnostics(counters),
       failures: errors.length,
       firstError: errors[0] ?? null,
     },
@@ -339,13 +368,21 @@ export async function runNewsProviders(capturedAt: string): Promise<ProviderRunR
   const newsApiKey = getEnvAliasValue('newsApiKey')
   const guardianKey = getEnvAliasValue('guardianApiKey')
   const tasks: Array<Promise<SignalRawItem[]>> = []
+  const newsApiMaxAgeDays = maxAgeDaysForProvider('newsapi')
+  const guardianMaxAgeDays = maxAgeDaysForProvider('guardian')
+  const newsApiCounters = createFreshnessCounters(newsApiMaxAgeDays)
+  const guardianCounters = createFreshnessCounters(guardianMaxAgeDays)
+  const now = new Date(capturedAt)
 
   if (newsApiKey) {
+    const { fromDate, toDate } = newsDateWindow(newsApiMaxAgeDays, now)
     const params = new URLSearchParams({
       q: 'Akron Ohio business economy AI jobs logistics automation',
       language: 'en',
       pageSize: '10',
       sortBy: 'publishedAt',
+      from: fromDate,
+      to: toDate,
       apiKey: newsApiKey,
     })
     tasks.push(fetchJson<NewsApiResponse>(`https://newsapi.org/v2/everything?${params.toString()}`).then(data => {
@@ -354,6 +391,9 @@ export async function runNewsProviders(capturedAt: string): Promise<ProviderRunR
         const title = article.title?.trim()
         const url = article.url?.trim()
         if (!title || !url || !isAllowedCloudUrl(url)) return []
+        const freshness = evaluateFreshness(article.publishedAt, { now, maxAgeDays: newsApiMaxAgeDays })
+        recordFreshness(newsApiCounters, freshness)
+        if (!freshness.acceptedForLiveSignal) return []
         return [{
           provider: 'newsapi',
           sourceId: 'newsapi-economic-news',
@@ -365,17 +405,21 @@ export async function runNewsProviders(capturedAt: string): Promise<ProviderRunR
           categories: ['AI_trends', 'Ohio_business', 'economic_warning', 'app_factory_opportunity'],
           rawScore: 0.76,
           capturedAt,
-          metadata: { publishedAt: article.publishedAt ?? null },
+          metadata: withFreshnessMetadata({ providerDateField: 'publishedAt' }, freshness),
         }]
       })
     }))
   }
 
   if (guardianKey) {
+    const { fromDate, toDate } = newsDateWindow(guardianMaxAgeDays, now)
     const params = new URLSearchParams({
       'api-key': guardianKey,
       'show-fields': 'trailText',
       'page-size': '10',
+      'from-date': fromDate,
+      'to-date': toDate,
+      'order-by': 'newest',
       q: 'Akron OR Ohio OR business OR economy OR AI OR logistics OR jobs',
     })
     tasks.push(fetchJson<GuardianResponse>(`https://content.guardianapis.com/search?${params.toString()}`).then(data => {
@@ -384,6 +428,9 @@ export async function runNewsProviders(capturedAt: string): Promise<ProviderRunR
         const title = article.webTitle?.trim()
         const url = article.webUrl?.trim()
         if (!title || !url || !isAllowedCloudUrl(url)) return []
+        const freshness = evaluateFreshness(article.webPublicationDate, { now, maxAgeDays: guardianMaxAgeDays })
+        recordFreshness(guardianCounters, freshness)
+        if (!freshness.acceptedForLiveSignal) return []
         return [{
           provider: 'guardian',
           sourceId: 'guardian-economic-news',
@@ -395,7 +442,11 @@ export async function runNewsProviders(capturedAt: string): Promise<ProviderRunR
           categories: ['AI_trends', 'Ohio_business', 'economic_warning', 'app_factory_opportunity'],
           rawScore: 0.82,
           capturedAt,
-          metadata: { section: article.sectionName ?? null, publishedAt: article.webPublicationDate ?? null, guardianId: article.id ?? null },
+          metadata: withFreshnessMetadata({
+            section: article.sectionName ?? null,
+            providerDateField: 'webPublicationDate',
+            guardianId: article.id ?? null,
+          }, freshness),
         }]
       })
     }))
@@ -417,6 +468,18 @@ export async function runNewsProviders(capturedAt: string): Promise<ProviderRunR
       newsapiConfigured: Boolean(newsApiKey),
       guardianConfigured: Boolean(guardianKey),
       resultCount: items.length,
+      maxAgeDays: Math.max(newsApiMaxAgeDays, guardianMaxAgeDays),
+      freshResultCount: newsApiCounters.accepted + guardianCounters.accepted,
+      liveCount: newsApiCounters.live + guardianCounters.live,
+      recentCount: newsApiCounters.recent + guardianCounters.recent,
+      staleDiscardedCount: newsApiCounters.staleDiscarded + guardianCounters.staleDiscarded,
+      staleDiscarded: newsApiCounters.staleDiscarded + guardianCounters.staleDiscarded,
+      unknownDateDiscardedCount: newsApiCounters.unknownDateDiscarded + guardianCounters.unknownDateDiscarded,
+      oldestAcceptedAgeDays: [newsApiCounters.oldestAcceptedAgeDays, guardianCounters.oldestAcceptedAgeDays]
+        .filter((value): value is number => typeof value === 'number')
+        .reduce<number | null>((oldest, value) => oldest === null ? value : Math.max(oldest, value), null),
+      newsapi: freshnessDiagnostics(newsApiCounters),
+      guardian: freshnessDiagnostics(guardianCounters),
       failures: errors.length,
       firstError: errors[0] ?? null,
     },

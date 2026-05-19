@@ -1,4 +1,5 @@
 export * from './model'
+export * from './freshness'
 export * from './persistence'
 export * from './pipeline'
 export * from './sources'

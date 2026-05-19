@@ -32,6 +32,25 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
+function freshnessSummary(value: unknown): SignalScan['freshnessSummary'] | undefined {
+  const record = objectValue(value)
+  if (!Object.keys(record).length) return undefined
+  const nullableNum = (key: string): number | null => {
+    const item = record[key]
+    return typeof item === 'number' && Number.isFinite(item) ? item : null
+  }
+  return {
+    latestScanTime: text(record.latestScanTime, new Date().toISOString()),
+    maxAgeDays: num(record.maxAgeDays, 14),
+    freshResultCount: num(record.freshResultCount, 0),
+    staleDiscardedCount: num(record.staleDiscardedCount, 0),
+    unknownDateDiscardedCount: num(record.unknownDateDiscardedCount, 0),
+    oldestAcceptedAgeDays: nullableNum('oldestAcceptedAgeDays'),
+    liveCount: num(record.liveCount, 0),
+    recentCount: num(record.recentCount, 0),
+  }
+}
+
 function signalMigrationRequired(message: string): boolean {
   return /schema cache|could not find table|relation .*war_room_signal_|war_room_signal_sources/i.test(message)
 }
@@ -56,6 +75,7 @@ function mapSource(row: Row): SignalSourceDefinition {
 }
 
 function mapScan(row: Row): SignalScan {
+  const providerDiagnostics = objectValue(row.provider_diagnostics)
   return {
     id: text(row.id),
     status: text(row.status, 'failed') as SignalScan['status'],
@@ -63,7 +83,8 @@ function mapScan(row: Row): SignalScan {
     completedAt: text(row.completed_at, new Date().toISOString()),
     sourceCount: num(row.source_count, 0),
     resultCount: num(row.result_count, 0),
-    providerDiagnostics: objectValue(row.provider_diagnostics),
+    freshnessSummary: freshnessSummary(providerDiagnostics.freshnessSummary),
+    providerDiagnostics,
     error: nullableText(row.error),
   }
 }
@@ -149,7 +170,10 @@ async function insertScan(client: WarRoomSupabase, scan: SignalScan) {
       completed_at: scan.completedAt,
       source_count: scan.sourceCount,
       result_count: scan.resultCount,
-      provider_diagnostics: scan.providerDiagnostics,
+      provider_diagnostics: {
+        ...scan.providerDiagnostics,
+        freshnessSummary: scan.freshnessSummary,
+      },
       error: scan.error,
       approval_required: true,
       external_execution_performed: false,
