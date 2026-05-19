@@ -42,6 +42,21 @@ where freshness_status is null
    or operational_status is null
    or (published_at < now() - interval '30 days' and operational_status <> 'EXCLUDED');
 
-create index if not exists war_room_signal_results_published_active_idx
-  on public.war_room_signal_results (published_at desc, highest_leverage_score desc)
-  where operational_status = 'ACTIONABLE' and published_at >= now() - interval '30 days';
+-- Drop legacy partial index if a prior run created it (volatile now() predicate is invalid).
+drop index if exists public.war_room_signal_results_published_active_idx;
+
+-- Plain btree indexes; 30-day active window is enforced in application queries.
+create index if not exists war_room_signal_results_published_at_idx
+  on public.war_room_signal_results (published_at desc);
+
+create index if not exists war_room_signal_results_operational_status_idx
+  on public.war_room_signal_results (operational_status);
+
+create index if not exists war_room_signal_results_freshness_status_idx
+  on public.war_room_signal_results (freshness_status);
+
+create index if not exists war_room_signal_results_provider_idx
+  on public.war_room_signal_results (provider);
+
+create index if not exists war_room_signal_results_active_query_idx
+  on public.war_room_signal_results (operational_status, published_at desc, highest_leverage_score desc);
