@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 import { getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/configuration/envAlias'
 import type { NewsCategory, NewsDashboardCard, NewsDashboardSnapshot, NewsFreshnessDiagnostics } from '@/lib/intelligence/environment/liveEnvironmentTypes'
 import {
@@ -86,8 +87,10 @@ function textBetween(source: string, tag: string): string | null {
   return match ? cleanXml(match[1]) : null
 }
 
-function cleanXml(value: string): string {
-  return value
+function cleanXml(value: unknown): string {
+  const text = toDisplayText(value)
+  if (!text) return ''
+  return text
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
     .replace(/<[^>]+>/g, '')
     .replace(/&amp;/g, '&')
@@ -296,7 +299,7 @@ function parseFeedItems(feed: FeedRegistration, xml: string, fetchedAt: string):
 function parseNewsApiArticles(data: NewsApiResponse, fetchedAt: string): NewsDashboardCard[] {
   if (data.status && data.status !== 'ok') throw new Error(data.message ?? 'NewsAPI returned an error')
   return (data.articles ?? []).slice(0, 12).flatMap((article, index) => {
-    const title = article.title?.trim()
+    const title = toDisplayText(article.title)
     if (!title) return []
     const publishedAt = article.publishedAt && Number.isFinite(Date.parse(article.publishedAt))
       ? new Date(article.publishedAt).toISOString()
@@ -329,7 +332,7 @@ async function fetchNewsApiCards(apiKey: string, fetchedAt: string): Promise<New
 function parseGuardianCards(data: GuardianResponse, fetchedAt: string): NewsDashboardCard[] {
   if (data.response?.status && data.response.status !== 'ok') throw new Error(data.message ?? 'Guardian returned an error')
   return (data.response?.results ?? []).slice(0, 12).flatMap((article, index) => {
-    const title = article.webTitle?.trim()
+    const title = toDisplayText(article.webTitle)
     if (!title) return []
     const publishedAt = article.webPublicationDate && Number.isFinite(Date.parse(article.webPublicationDate))
       ? new Date(article.webPublicationDate).toISOString()
@@ -373,7 +376,7 @@ async function fetchGuardianCards(apiKey: string, fetchedAt: string): Promise<Ne
 function dedupeCards(cards: NewsDashboardCard[]): NewsDashboardCard[] {
   const seen = new Set<string>()
   return cards.filter(card => {
-    const key = (card.url ?? card.title).toLowerCase().replace(/\s+/g, ' ').trim()
+    const key = compactDisplayWhitespace(card.url ?? card.title).toLowerCase()
     if (seen.has(key)) return false
     seen.add(key)
     return true

@@ -1,8 +1,8 @@
+import { compactDisplayWhitespace, formatDisplayText, toDisplayText } from '@/lib/council/toDisplayText'
 import type { IntelligenceCategory, IntelligenceOperationalClass, IntelligenceSeverity } from './types'
 
-function compact(value: string, limit = 320): string {
-  const clean = value.replace(/\s+/g, ' ').trim()
-  return clean.length > limit ? `${clean.slice(0, limit - 1)}...` : clean
+function compact(value: unknown, limit = 320): string {
+  return compactDisplayWhitespace(value, limit)
 }
 
 export function buildCanonicalSummary(input: {
@@ -18,7 +18,7 @@ export function buildCanonicalSummary(input: {
   truthLabel: string
   contradictionPeerCount: number
 }): string {
-  const categoryLabel = input.intelligenceCategory.replace(/_/g, ' ')
+  const categoryLabel = formatDisplayText(input.intelligenceCategory, category => category.replace(/_/g, ' '))
   const classNote = input.operationalClass === 'CONFLICTED'
     ? `Conflicting source narratives detected (${input.contradictionPeerCount} peer signal(s)); do not treat as settled fact.`
     : input.operationalClass === 'ACTIONABLE'
@@ -30,8 +30,8 @@ export function buildCanonicalSummary(input: {
   return compact([
     `[${categoryLabel.toUpperCase()} · ${input.intelligenceSeverity} · ${input.operationalClass}]`,
     `Source: ${input.sourceLabel} (${input.provider}, truth=${input.truthLabel}).`,
-    `Headline evidence: "${input.rawHeadline}".`,
-    input.evidenceSummary,
+    `Headline evidence: "${toDisplayText(input.rawHeadline)}".`,
+    toDisplayText(input.evidenceSummary),
     classNote,
     `Classification confidence ${input.classificationConfidence}% (credibility ${input.sourceCredibilityScore}%).`,
     'Council should use this summary, not the raw headline alone, and retain approval gating before any external action.',

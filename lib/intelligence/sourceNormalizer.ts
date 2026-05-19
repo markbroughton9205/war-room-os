@@ -1,3 +1,4 @@
+import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 import { detectWeakSignal } from '@/lib/intelligence/signalDetection'
 import type {
   EvidenceFreshness,
@@ -12,9 +13,9 @@ import {
 } from '@/lib/intelligence/sourceRegistry'
 
 export type RawIntelligenceFinding = {
-  title?: string
+  title?: unknown
   url?: string
-  content: string
+  content: unknown
   observed_at?: string
   score?: number
 }
@@ -59,8 +60,8 @@ function freshnessFromObservedAt(observedAt: string | undefined, nowIso: string)
   return 'stale'
 }
 
-function evidenceDensity(text: string): number {
-  const clean = text.replace(/\s+/g, ' ').trim()
+function evidenceDensity(text: unknown): number {
+  const clean = compactDisplayWhitespace(text)
   if (!clean) return 0
   const urlBonus = /https?:\/\//i.test(clean) ? 0.1 : 0
   const numberBonus = /\b\d+(?:\.\d+)?%?\b/.test(clean) ? 0.12 : 0
@@ -69,8 +70,8 @@ function evidenceDensity(text: string): number {
 }
 
 function claimFromFinding(finding: RawIntelligenceFinding): string {
-  const title = finding.title?.trim()
-  const content = finding.content.replace(/\s+/g, ' ').trim()
+  const title = toDisplayText(finding.title)
+  const content = compactDisplayWhitespace(finding.content)
   if (title && content) return `${title}: ${content.slice(0, 360)}`
   if (title) return title
   return content.slice(0, 420) || 'Source returned an empty finding.'
@@ -86,8 +87,8 @@ export function normalizeSourceEvidence(
     if (!record.ok) continue
     const source = getIntelligenceSource(record.source_id) ?? fallbackSource(record.source_id)
     record.findings.forEach((finding, index) => {
-      const title = finding.title?.trim() || source.label
-      const content = finding.content.replace(/\s+/g, ' ').trim()
+      const title = toDisplayText(finding.title) || source.label
+      const content = compactDisplayWhitespace(finding.content)
       if (!content && !title) return
       const signal = detectWeakSignal({ source, title, content })
       const freshness = freshnessFromObservedAt(finding.observed_at ?? record.queried_at, nowIso)

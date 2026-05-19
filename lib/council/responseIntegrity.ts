@@ -1,3 +1,5 @@
+import { toDisplayText } from '@/lib/council/toDisplayText'
+
 const TRUNCATED_WORD = /\b\w{2,}\s*$/m
 const BROKEN_BULLET = /(?:^|\n)\s*[-*•]\s*$/m
 const CLIPPED_ELLIPSIS_END = /…\s*$/
@@ -55,9 +57,9 @@ function detectIntegrityIssues(text: string): string[] {
  * Conservative repair: trim back to last sentence boundary only.
  * If still malformed, keep best-effort text and emit drift warnings (no LLM regen).
  */
-export function repairOrFlagResponse(raw: string): ResponseIntegrityResult {
+export function repairOrFlagResponse(raw: unknown): ResponseIntegrityResult {
   const integrityWarnings: string[] = []
-  let text = (raw ?? '').replace(/\r\n/g, '\n').trim()
+  let text = toDisplayText(raw).replace(/\r\n/g, '\n').trim()
   if (!text) return { text: '', integrityWarnings: [] }
 
   if (BROKEN_SYNC_TAIL.test(text)) {

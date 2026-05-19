@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { toDisplayText } from '@/lib/council/toDisplayText'
 import type { ProviderPacketIntegrityStatus, StructuredProviderPacket } from '@/lib/cognitive-bus/types'
 
 export type BuildProviderPacketInput = {
@@ -29,7 +30,7 @@ function extractBulletLines(text: string, prefix: RegExp): string[] {
 
 /** Derive structured fields from sanitized provider text without fabricating consensus. */
 export function buildStructuredProviderPacket(input: BuildProviderPacketInput): StructuredProviderPacket {
-  const text = (input.displayText ?? '').trim()
+  const text = toDisplayText(input.displayText)
   const observations =
     extractBulletLines(text, /^[-*•]\s*(?:observation|finding)[:\s]*/i).length > 0
       ? extractBulletLines(text, /^[-*•]\s*(?:observation|finding)[:\s]*/i)

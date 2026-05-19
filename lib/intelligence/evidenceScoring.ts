@@ -1,3 +1,4 @@
+import { formatDisplayText } from '@/lib/council/toDisplayText'
 import { classifyEvidenceConfidence } from '@/lib/intelligence/confidenceClassifier'
 import type { IntelligenceEvidenceItem } from '@/lib/intelligence/intelligencePacket'
 
@@ -16,11 +17,14 @@ function verifiedLevelScore(item: IntelligenceEvidenceItem): number {
 }
 
 function canonicalClaimTokens(item: IntelligenceEvidenceItem): Set<string> {
-  return new Set(
-    item.claim
+  const normalized = formatDisplayText(item.claim, claim =>
+    claim
       .toLowerCase()
       .replace(/https?:\/\/\S+/g, '')
-      .replace(/[^\w\s]/g, ' ')
+      .replace(/[^\w\s]/g, ' '),
+  )
+  return new Set(
+    normalized
       .split(/\s+/)
       .filter(word => word.length > 5)
       .slice(0, 24),

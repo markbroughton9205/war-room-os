@@ -2,6 +2,7 @@ import {
   councilFamilyIntegrityLabel,
   sanitizeCouncilFamilyResponse,
 } from '@/lib/council/providerResponseSanitizer'
+import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 
 export const COUNCIL_OUTPUT_MODES = ['brief', 'standard', 'deep', 'repair', 'revenue', 'red_team'] as const
@@ -25,7 +26,7 @@ export type RedTeamCalibration =
 export type CouncilCompressionMessage = {
   id?: string
   familyName: string
-  content: string
+  content: unknown
   provider?: string
   messageType: string
   repairPacket?: unknown
@@ -160,24 +161,28 @@ export function buildCouncilOutputModeInstruction(mode: CouncilOutputMode): stri
   return [...common, ...specific[mode]].join('\n')
 }
 
-function normalizeFamilyName(value: string) {
-  return value.replace(/\s+family$/i, '').trim() || 'Council'
+function normalizeFamilyName(value: unknown) {
+  return compactDisplayWhitespace(toDisplayText(value).replace(/\s+family$/i, '')) || 'Council'
 }
 
-function compactWhitespace(value: string) {
-  return value.replace(/\s+/g, ' ').trim()
+function compactWhitespace(value: unknown) {
+  return compactDisplayWhitespace(value)
 }
 
-function sentenceCandidates(content: string): string[] {
-  return content
+function sentenceCandidates(content: unknown): string[] {
+  const text = toDisplayText(content)
+  if (!text) return []
+  return text
     .split(/\n+|(?:^|\s)[*-]\s+|(?<=[.!?])\s+/)
     .map(line => compactWhitespace(line.replace(/^\d+\.\s+/, '')))
     .filter(line => line.length >= 24)
     .slice(0, 8)
 }
 
-function keyForClaim(text: string) {
-  const words = text
+function keyForClaim(text: unknown) {
+  const normalized = toDisplayText(text)
+  if (!normalized) return ''
+  const words = normalized
     .toLowerCase()
     .replace(/https?:\/\/\S+/g, ' source ')
     .replace(/[`"'()[\]{}:;,.!?/\\|]+/g, ' ')
@@ -222,8 +227,10 @@ function rankWeight(weight: CouncilEvidenceWeight) {
   }
 }
 
-function softenUnsupported(text: string) {
-  return text
+function softenUnsupported(text: unknown) {
+  const normalized = toDisplayText(text)
+  if (!normalized) return ''
+  return normalized
     .replace(/\bcatastrophic\b/gi, 'material')
     .replace(/\bcompromised telemetry\b/gi, 'telemetry gap')
     .replace(/\brunaway automation\b/gi, 'automation risk to verify')
@@ -242,11 +249,11 @@ function hasRevenueSignal(text: string) {
 
 function redTeamCalibrationFor(messages: CouncilCompressionMessage[]): RedTeamCalibration {
   const redText = messages
-    .filter(message => /red.?team/i.test(message.familyName))
-    .map(message => message.content)
+    .filter(message => /red.?team/i.test(toDisplayText(message.familyName)))
+    .map(message => toDisplayText(message.content))
     .join('\n')
     .toLowerCase()
-  const allText = messages.map(message => message.content).join('\n').toLowerCase()
+  const allText = messages.map(message => toDisplayText(message.content)).join('\n').toLowerCase()
 
   if (/\b(confirmed|verified|reproduced|observed|logged|evidence shows)\b/.test(redText)) return 'confirmed_issue'
   if (/\b(missing evidence|insufficient evidence|unknown|telemetry gap|unavailable)\b/.test(redText)) return 'missing_evidence'
@@ -257,7 +264,7 @@ function redTeamCalibrationFor(messages: CouncilCompressionMessage[]): RedTeamCa
 }
 
 function riskLevel(messages: CouncilCompressionMessage[], findings: CouncilCompressedFinding[]): 'low' | 'medium' | 'high' {
-  const text = messages.map(message => message.content).join('\n').toLowerCase()
+  const text = messages.map(message => toDisplayText(message.content)).join('\n').toLowerCase()
   const verifiedRisk = findings.some(
     finding => finding.evidenceWeight === 'verified' && /\b(security|data loss|payment|production|failed|broken)\b/i.test(finding.text),
   )
@@ -273,8 +280,8 @@ function latestDecreeIndex(messages: CouncilCompressionMessage[]) {
   })
 }
 
-function normalizeOrchestrationFamily(familyName: string): CouncilOrchestrationFamily | null {
-  const raw = familyName.replace(/\s+family$/i, '').trim().toLowerCase()
+function normalizeOrchestrationFamily(familyName: unknown): CouncilOrchestrationFamily | null {
+  const raw = toDisplayText(familyName).replace(/\s+family$/i, '').trim().toLowerCase()
   if (/red\s*team/.test(raw)) return 'red_team'
   const key = raw.replace(/\s+/g, '_')
   const map: Record<string, CouncilOrchestrationFamily> = {
@@ -295,11 +302,12 @@ function responseMessages(messages: CouncilCompressionMessage[]) {
   return messages
     .slice(start >= 0 ? start + 1 : 0)
     .filter(message => message.messageType === 'response' || message.messageType === 'repair_packet')
-    .filter(message => message.content.trim())
+    .filter(message => toDisplayText(message.content).trim())
     .map(message => {
+      const content = toDisplayText(message.content)
       const family = normalizeOrchestrationFamily(message.familyName)
-      if (!family) return message
-      const sanitized = sanitizeCouncilFamilyResponse(family, message.content)
+      if (!family) return { ...message, content }
+      const sanitized = sanitizeCouncilFamilyResponse(family, content)
       if (!sanitized.incomplete) return message
       const label = councilFamilyIntegrityLabel(family, true)
       return {
@@ -364,7 +372,7 @@ function filesRoutesFromText(text: string) {
 }
 
 function buildRepairPacket(messages: CouncilCompressionMessage[], findings: CouncilCompressedFinding[]) {
-  const text = messages.map(message => message.content).join('\n')
+  const text = messages.map(message => toDisplayText(message.content)).join('\n')
   const applicable = messages.some(message => message.repairPacket) || hasRepairSignal(text)
   if (!applicable) return null
   const top = findings[0]?.text ?? 'System issue detected; inspect the latest council turn before acting.'
@@ -380,7 +388,7 @@ function buildRepairPacket(messages: CouncilCompressionMessage[], findings: Coun
 }
 
 function buildRevenuePacket(messages: CouncilCompressionMessage[], findings: CouncilCompressedFinding[]) {
-  const text = messages.map(message => message.content).join('\n')
+  const text = messages.map(message => toDisplayText(message.content)).join('\n')
   if (!hasRevenueSignal(text)) return null
   const verifiedCount = findings.filter(finding => finding.evidenceWeight === 'verified' || finding.evidenceWeight === 'source-backed').length
   const leverageScore = Math.max(35, Math.min(95, 50 + verifiedCount * 10 + (/\b(client|contract|proposal|lead)\b/i.test(text) ? 15 : 0)))

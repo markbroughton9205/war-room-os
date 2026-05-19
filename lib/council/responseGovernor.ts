@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { toDisplayText } from '@/lib/council/toDisplayText'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { familyMentionedInDirective } from '@/lib/council/commandParser'
 import { effectiveMaxCharsForFamily } from '@/lib/council/familyPermissions'
@@ -276,14 +277,14 @@ function applyActiveScopeTail(args: {
  * Post-process model output before UI / API returns. Pure function — no I/O.
  */
 export function applyGovernor(
-  text: string,
+  text: unknown,
   family: string,
   cmd: CouncilCommand,
   context?: GovernorContext,
 ): { text: string; warnings?: string[] } {
   const warnings: string[] = []
   const orch = family as CouncilOrchestrationFamily
-  let t = (text ?? '').trim()
+  let t = toDisplayText(text)
   const intent = context?.councilIntentKind
   const scope = context?.councilActiveScope
 

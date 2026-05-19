@@ -159,6 +159,7 @@ import {
 } from '@/lib/council/redTeamTriggers'
 import { formatActionQueuePersistFailureMessage, isActionQueuePostSucceeded, type ActionQueuePostFailureBody } from '@/lib/war-room/actionQueueClient'
 import { buildPlatformBrief } from '@/lib/council/platformBrief'
+import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 import { createMessageId } from '@/lib/council/messageIds'
 import { cloudEngineReadinessLabel, cloudEngineStripStatus, internetToolReadinessParts } from '@/lib/warRoom/providerReadiness'
 import { windowLiveChatMessages } from '@/lib/conversation/liveWindow'
@@ -271,13 +272,13 @@ type WarRoomPerformanceDiagnostics = {
 
 function sanitizedCouncilMessage(message: CouncilMessage): CouncilMessage {
   if (message.messageType === 'decree') return message
-  const content = sanitizeMemoryRuntimeText(message.content)
-  return content === message.content ? message : { ...message, content }
+  const content = sanitizeMemoryRuntimeText(toDisplayText(message.content))
+  return content === toDisplayText(message.content) ? message : { ...message, content }
 }
 
 function councilNoiseKey(message: CouncilMessage): string | null {
   if (message.messageType === 'decree') return null
-  const content = sanitizeMemoryRuntimeText(message.content).replace(/\s+/g, ' ').trim().toLowerCase()
+  const content = compactDisplayWhitespace(sanitizeMemoryRuntimeText(toDisplayText(message.content))).toLowerCase()
   if (!content) return null
   if (
     /\b(warning|provider notice|runtime notice|runtime continuity|persistence|temporary learning|session-only learning|durable memory offline|learning persistence unavailable)\b/i.test(content)
@@ -459,8 +460,8 @@ function recallLabel(command: ParsedRecallCommand): string {
   return 'Memory Archive'
 }
 
-function compactRecallSnippet(value: string, max = 140): string {
-  const compact = value.replace(/\s+/g, ' ').trim()
+function compactRecallSnippet(value: unknown, max = 140): string {
+  const compact = compactDisplayWhitespace(value)
   return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact
 }
 
@@ -6012,11 +6013,11 @@ function Home() {
   }, [archivedCouncilMessages, liveCouncilConvId, persistenceAvailable])
 
   const isTransientProviderStatusContent = (
-    content: string,
+    content: unknown,
     family: CouncilOrchestrationFamily,
     opts?: { includeGenericRecovery?: boolean },
   ) => {
-    const text = content.replace(/\s+/g, ' ').trim()
+    const text = compactDisplayWhitespace(content)
     if (!text) return false
     if (opts?.includeGenericRecovery && /^Recovery ping requested\.$/i.test(text)) return true
 
@@ -6082,7 +6083,7 @@ function Home() {
     }
     if (reason === 'unavailable') return `${label} unavailable.`
     if (reason === 'error') {
-      const clean = detail?.replace(/\s+/g, ' ').trim().slice(0, 180)
+      const clean = compactDisplayWhitespace(detail, 180)
       return clean ? `${label}: ${clean}` : `${label} unavailable.`
     }
     return `${label} did not return a response in time.`
@@ -8545,7 +8546,7 @@ function Home() {
               providerRuntime: runtimeStates[line.family],
             },
           )
-          const focusSnippet = line.content.replace(/\s+/g, ' ').trim().slice(0, 120)
+          const focusSnippet = compactDisplayWhitespace(line.content, 120)
           setFamilyCurrentFocus(prev => ({ ...prev, [line.family]: focusSnippet }))
           void enqueueCouncilProposals(line.content, line.family)
         }

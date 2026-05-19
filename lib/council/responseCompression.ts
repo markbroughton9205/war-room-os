@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { formatDisplayText, toDisplayText } from '@/lib/council/toDisplayText'
 import type { ModeGovernor } from '@/lib/council/modeGovernor'
 import { applyModeGovernorFilters } from '@/lib/council/modeGovernorFilters'
 import {
@@ -68,7 +69,7 @@ function truncateAtWordBoundary(text: string, maxLen: number): string {
 
 /** Attendance packet shaping — single line: "{Family} present." / unavailable / confirming. */
 export function shapeAttendanceForModeGovernor(
-  text: string,
+  text: unknown,
   family: CouncilOrchestrationFamily,
   slotStatus: AttendanceSlotStatus = 'PRESENT',
 ): string {
@@ -76,7 +77,7 @@ export function shapeAttendanceForModeGovernor(
     return attendancePresenceLine(family, slotStatus)
   }
 
-  let t = stripAttendanceDisplayNoise(text)
+  let t = stripAttendanceDisplayNoise(toDisplayText(text))
   t = t.replace(/\[(?:error|timeout)\][^\n]*/gi, ' ').trim()
   const shaped = enforceAttendancePresenceShape(t)
   t = shaped.text
@@ -96,11 +97,11 @@ export function shapeAttendanceForModeGovernor(
 }
 
 export function compressForModeGovernor(
-  text: string,
+  text: unknown,
   governor: ModeGovernor,
   opts?: { family?: CouncilOrchestrationFamily; verifiedContext?: VerifiedRuntimeContext },
 ): string {
-  let t = (text ?? '').trim()
+  let t = formatDisplayText(text, value => value.trim())
   if (!t) return t
 
   const informative = governor.mode === 'council' || governor.mode === 'deep_analysis'

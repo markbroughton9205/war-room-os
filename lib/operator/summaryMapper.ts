@@ -1,4 +1,5 @@
 import type { CouncilCompressedFinding, CouncilCompressedSummary } from '@/lib/council/compression'
+import { compactDisplayWhitespace, formatDisplayText } from '@/lib/council/toDisplayText'
 import { isConcreteRepairPacketTitle, isVagueRepairLanguage } from '@/lib/council-repair/scope'
 import { sanitizeMemoryRuntimeText } from '@/lib/memory/runtimeState'
 import { isOperatorUnsafeProviderFragment } from '@/lib/providers/responseIntegrity'
@@ -63,13 +64,14 @@ const SPECULATIVE_RISK_LANGUAGE =
 const RUNTIME_WARNING_AS_REVENUE =
   /\b(runtime|system|provider|telemetry|diagnostic|warning|risk|security|leakage|compromised|catastrophic|threat|kill switch)\b/i
 
-function compactWhitespace(value: string): string {
-  return value.replace(/\s+/g, ' ').trim()
+function compactWhitespace(value: unknown): string {
+  return compactDisplayWhitespace(value)
 }
 
-export function stripOperatorTextArtifacts(value: string): string {
-  return compactWhitespace(
-    sanitizeMemoryRuntimeText(value)
+export function stripOperatorTextArtifacts(value: unknown): string {
+  return formatDisplayText(value, text =>
+    compactWhitespace(
+      sanitizeMemoryRuntimeText(text)
       .replace(/```[\s\S]*?```/g, ' ')
       .replace(/`([^`]*)`/g, '$1')
       .replace(/\*\*([^*]+)\*\*/g, '$1')
@@ -78,6 +80,7 @@ export function stripOperatorTextArtifacts(value: string): string {
       .replace(/\b(?:priority|risk|evidence|finding|recommended action|next action|summary)\s*[:—-]\s*/gi, '')
       .replace(/[{}[\]"\\]/g, ' ')
       .replace(/\s*[:,]\s*/g, ' '),
+    ),
   )
 }
 
@@ -140,7 +143,7 @@ function cleanOpportunityTitle(opportunities: OperatorRevenueOpportunitySource[]
 function cleanRepairTitle(title: string | null | undefined): string | null {
   const clean = stripOperatorTextArtifacts(title ?? '')
   if (!clean || !isConcreteRepairPacketTitle(clean)) return null
-  if (isVagueRepairLanguage(clean.replace(/^repair packet:\s*/i, ''))) return null
+  if (isVagueRepairLanguage(formatDisplayText(clean, value => value.replace(/^repair packet:\s*/i, '')))) return null
   return clean.slice(0, 140)
 }
 

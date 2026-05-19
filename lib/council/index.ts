@@ -1,3 +1,4 @@
+export * from '@/lib/council/toDisplayText'
 export * from '@/lib/council/councilCommandTypes'
 export * from '@/lib/council/intentClassifier'
 export * from '@/lib/council/intentScope'

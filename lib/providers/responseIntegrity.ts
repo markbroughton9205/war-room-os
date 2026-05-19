@@ -1,3 +1,5 @@
+import { toDisplayText } from '@/lib/council/toDisplayText'
+
 /**
  * Provider response integrity validation — pure heuristics; no I/O.
  * HTTP 200 alone does not imply a complete, usable council/operator response.
@@ -131,11 +133,11 @@ function refusalOrErrorText(text: string): string | null {
  * Validate provider text for completeness and structure.
  */
 export function validateProviderResponseIntegrity(
-  raw: string,
+  raw: unknown,
   expectation: ResponseIntegrityExpectation = {},
 ): ResponseIntegrityResult {
   const minLength = expectation.minLength ?? DEFAULT_MIN_LENGTH
-  let text = (raw ?? '').replace(/\r\n/g, '\n').trim()
+  let text = toDisplayText(raw).replace(/\r\n/g, '\n').trim()
 
   if (BROKEN_SYNC_TAIL.test(text)) {
     text = text.replace(BROKEN_SYNC_TAIL, '').trim()

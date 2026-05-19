@@ -1,3 +1,4 @@
+import { formatDisplayText } from '@/lib/council/toDisplayText'
 import type { IntelligenceEvidenceItem } from '@/lib/intelligence/intelligencePacket'
 
 const CONTRADICTION_PAIRS: [RegExp, RegExp, string][] = [
@@ -8,14 +9,16 @@ const CONTRADICTION_PAIRS: [RegExp, RegExp, string][] = [
 ]
 
 function normalizedSubject(item: IntelligenceEvidenceItem): string {
-  return item.claim
-    .toLowerCase()
-    .replace(/https?:\/\/\S+/g, '')
-    .replace(/[^\w\s]/g, ' ')
-    .split(/\s+/)
-    .filter(word => word.length > 4)
-    .slice(0, 10)
-    .join(' ')
+  return formatDisplayText(item.claim, claim =>
+    claim
+      .toLowerCase()
+      .replace(/https?:\/\/\S+/g, '')
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(word => word.length > 4)
+      .slice(0, 10)
+      .join(' '),
+  )
 }
 
 function overlaps(a: string, b: string): boolean {

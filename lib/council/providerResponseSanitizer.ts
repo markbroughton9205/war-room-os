@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { toDisplayText } from '@/lib/council/toDisplayText'
 import {
   isOperatorUnsafeProviderFragment,
   operatorSafeIncompleteMessage,
@@ -15,13 +16,14 @@ export type SanitizedFamilyResponse = {
 
 export function sanitizeCouncilFamilyResponse(
   family: CouncilOrchestrationFamily,
-  raw: string,
+  raw: unknown,
 ): SanitizedFamilyResponse {
-  const integrity = validateProviderResponseIntegrity(raw, { minLength: family === 'red_team' ? 60 : 80 })
+  const text = toDisplayText(raw)
+  const integrity = validateProviderResponseIntegrity(text, { minLength: family === 'red_team' ? 60 : 80 })
   const incomplete = integrity.integrity_status !== 'COMPLETE'
-  if (!incomplete && !isOperatorUnsafeProviderFragment(raw)) {
+  if (!incomplete && !isOperatorUnsafeProviderFragment(text)) {
     return {
-      displayText: raw.trim(),
+      displayText: text,
       integrityStatus: integrity.integrity_status,
       incomplete: false,
       operatorSafe: true,

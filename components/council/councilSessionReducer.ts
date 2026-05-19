@@ -3,6 +3,7 @@ import {
   COUNCIL_MAX_CONSECUTIVE_AUTONOMOUS_DEEP,
 } from './councilConstants'
 import { createMessageId } from '@/lib/council/messageIds'
+import { compactDisplayWhitespace } from '@/lib/council/toDisplayText'
 import type {
   CouncilLifecycleState,
   CouncilOrchestrationFamily,
@@ -81,7 +82,7 @@ function visibleOutputKey(message: PersistedCouncilMessage): string {
     message.familyName.trim().toLowerCase(),
     message.messageType.trim().toLowerCase(),
     message.provider.trim().toLowerCase(),
-    message.content.replace(/\s+/g, ' ').trim().toLowerCase(),
+    compactDisplayWhitespace(message.content).toLowerCase(),
   ].join('|')
 }
 

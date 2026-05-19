@@ -6,6 +6,7 @@ import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePac
 import type { ConfigurationSweep } from '@/lib/configuration/configurationHealth'
 import type { ProviderConfigStatus } from '@/lib/configuration/providerConfigStatus'
 import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/environment/locationPolicy'
+import { compactDisplayWhitespace } from '@/lib/council/toDisplayText'
 import { describeLocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import { buildHoroscopeSnapshot, type AstrologyInterpretationMode, type HoroscopePeriod } from '@/lib/intelligence/environment/horoscopeEnvironment'
 import { familyTipsForPanel, type FamilyTip } from '@/lib/familyTips'
@@ -474,7 +475,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
     const seen = new Set<string>()
     return rssCards.filter(card => {
       if (card.operationalStatus !== 'ACTIONABLE') return false
-      const key = (card.url ?? card.title).toLowerCase().replace(/\s+/g, ' ').trim()
+      const key = compactDisplayWhitespace(card.url ?? card.title).toLowerCase()
       if (seen.has(key)) return false
       seen.add(key)
       return true
