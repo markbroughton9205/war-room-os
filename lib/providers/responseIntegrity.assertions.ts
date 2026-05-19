@@ -1,3 +1,4 @@
+import { assertGeminiGreetingGateFixtures } from '@/lib/providers/geminiGreetingGate.assert'
 import {
   detectGreetingOnlyResponse,
   isOperatorUnsafeProviderFragment,
@@ -31,4 +32,6 @@ export function assertResponseIntegrityFixtures(): void {
     isOperatorUnsafeProviderFragment("Hey Ra'el! Council Active"),
     'greeting-only is operator unsafe',
   )
+
+  assertGeminiGreetingGateFixtures()
 }

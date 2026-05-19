@@ -4,6 +4,8 @@ import { logProviderIntegrityAudit } from '@/lib/providers/integrityAudit'
 import { getProviderIntegritySnapshot, recordProviderIntegrityOutcome } from '@/lib/providers/integrityRuntime'
 import {
   buildGeminiSimplifiedRetryPrompt,
+  countMeaningfulTokens,
+  detectGreetingOnlyResponse,
   isDegradedResponseQuality,
   operatorSafeIncompleteMessage,
   shortenPromptForRetry,
@@ -13,6 +15,7 @@ import {
   type ResponseIntegrityResult,
 } from '@/lib/providers/responseIntegrity'
 import type { WarRoomSupabase } from '@/lib/war-room/persistence'
+import type { GeminiRenderDiagnostics } from '@/lib/council/councilRenderGate'
 
 export type ProviderCallOutcome = {
   text: string
@@ -32,6 +35,7 @@ export type ProviderCallOutcome = {
     completionChars: number
     truncationDetected: boolean
     retryStrategies: string[]
+    gemini?: GeminiRenderDiagnostics
   }
 }
 
@@ -272,11 +276,24 @@ export async function orchestrateProviderResponse(args: {
     integrity.integrity_status === 'TRUNCATED'
     || /MAX_TOKENS|LENGTH/i.test(args.finishReason ?? '')
 
+  const geminiDiagnostics =
+    args.family === 'gemini'
+      ? {
+          rawLength: text.length,
+          meaningfulTokenCount: countMeaningfulTokens(text),
+          matchedGreetingOnly: detectGreetingOnlyResponse(text),
+          retryAttempted: retryCount > 0,
+          fallbackUsed,
+          finalIntegrityStatus: integrity.integrity_status,
+        }
+      : undefined
+
   const diagnostics = {
     promptChars,
     completionChars: text.length,
     truncationDetected,
     retryStrategies,
+    ...(geminiDiagnostics ? { gemini: geminiDiagnostics } : {}),
   }
 
   if (integrity.integrity_status !== 'COMPLETE') {
@@ -284,7 +301,7 @@ export async function orchestrateProviderResponse(args: {
     const snap = getProviderIntegritySnapshot(providerId)
     const degradedLabel =
       args.family === 'gemini'
-        ? 'Gemini response incomplete — retry/fallback used'
+        ? 'Gemini response incomplete — retry/fallback required.'
         : undefined
     const displayText =
       args.family === 'gemini' && (isDegradedResponseQuality(integrity.integrity_status) || snap.consecutive_integrity_failures >= 1)

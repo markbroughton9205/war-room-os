@@ -64,6 +64,7 @@ import {
 import { buildFamilyIntelligenceFrame } from '@/lib/intelligence/familyFeedRouter'
 import { buildGrokRssIntelligenceAugment } from '@/lib/intelligence/grokRssFallback'
 import { evaluateMandatoryLiveRetrieval } from '@/lib/intelligence/sources/retrievalOrchestrator'
+import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
 import { orchestrateProviderResponse } from '@/lib/providers/retryOrchestration'
 import { registerCouncilProviderPacketOnBus } from '@/lib/orchestration/deliberation'
 import {
@@ -428,7 +429,9 @@ export async function POST(req: Request) {
       ? familyFromDirectValue(DIRECT_KEYS[directKey])
       : null
 
-  const skipProviderIntegrityCheck = Boolean(councilSingleFamilyEarly && isAttendanceFlow)
+  const skipProviderIntegrityCheck = Boolean(
+    councilSingleFamilyEarly && isAttendanceFlow && councilSingleFamilyEarly !== 'gemini',
+  )
   const scopeForGovernor = buildActiveScope({
     decreeText: raelDirectiveText,
     councilCommand,
@@ -1287,6 +1290,7 @@ export async function POST(req: Request) {
           truncationDetected: orchestrated.diagnostics?.truncationDetected ?? false,
           retryStrategies: orchestrated.diagnostics?.retryStrategies ?? [],
           degradedQuality: orchestrated.integrity.degraded_quality ?? false,
+          ...(orchestrated.diagnostics?.gemini ? { gemini: orchestrated.diagnostics.gemini } : {}),
           ...(orchestrated.diagnosticFragment
             ? { diagnosticFragment: orchestrated.diagnosticFragment }
             : {}),
@@ -1373,6 +1377,26 @@ export async function POST(req: Request) {
         })
       }
       responseText = governed.text
+
+      if (councilSingleFamily === 'gemini' && responseText.trim()) {
+        const renderGate = applyCouncilRenderGate('gemini', responseText, {
+          retryAttempted: Number(providerIntegrityDiagnostics?.retryCount ?? 0) > 0,
+          fallbackUsed: Boolean(providerIntegrityDiagnostics?.fallbackUsed),
+        })
+        if (!renderGate.renderable) {
+          responseText = renderGate.displayText
+          providerIntegrityDiagnostics = {
+            ...(providerIntegrityDiagnostics ?? {}),
+            integrityStatus: renderGate.integrityStatus,
+            degradedQuality: true,
+            ...(renderGate.diagnostics ? { gemini: renderGate.diagnostics } : {}),
+          }
+          if (councilResponseCompletion === 'complete') {
+            councilResponseCompletion = 'partial'
+          }
+        }
+      }
+
       if (!responseText.trim()) {
         await safeAudit({
           success: false,

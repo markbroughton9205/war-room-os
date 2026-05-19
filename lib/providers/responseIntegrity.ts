@@ -405,7 +405,7 @@ export function isDegradedResponseQuality(status: ResponseIntegrityStatus): bool
 
 /** Operator/council-safe placeholder when integrity fails. */
 export function operatorSafeIncompleteMessage(kind: 'fallback' | 'unavailable' | 'gemini'): string {
-  if (kind === 'gemini') return 'Gemini response incomplete.'
+  if (kind === 'gemini') return 'Gemini response incomplete — retry/fallback required.'
   if (kind === 'fallback') return 'Provider response incomplete; fallback summary used'
   return 'Provider response unavailable'
 }

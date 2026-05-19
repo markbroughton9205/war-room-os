@@ -159,7 +159,14 @@ import {
 } from '@/lib/council/redTeamTriggers'
 import { formatActionQueuePersistFailureMessage, isActionQueuePostSucceeded, type ActionQueuePostFailureBody } from '@/lib/war-room/actionQueueClient'
 import { buildPlatformBrief } from '@/lib/council/platformBrief'
+import {
+  applyCouncilRenderGate,
+  isCouncilMessageRepairPacketEligible,
+  parseCouncilMessageFamily,
+  type GeminiRenderDiagnostics,
+} from '@/lib/council/councilRenderGate'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
+import type { ResponseIntegrityStatus } from '@/lib/providers/responseIntegrity'
 import { createMessageId } from '@/lib/council/messageIds'
 import { cloudEngineReadinessLabel, cloudEngineStripStatus, internetToolReadinessParts } from '@/lib/warRoom/providerReadiness'
 import { windowLiveChatMessages } from '@/lib/conversation/liveWindow'
@@ -247,6 +254,9 @@ type CouncilMessage = {
   icon: string
   provider: string
   messageType: string
+  degraded?: boolean
+  integrityStatus?: ResponseIntegrityStatus
+  renderDiagnostics?: GeminiRenderDiagnostics
   recallPreview?: CouncilMemoryRecallPreview
   engineeringTaskPacket?: EngineeringTaskPacket
   repairPacket?: CouncilRepairPacket
@@ -270,10 +280,37 @@ type WarRoomPerformanceDiagnostics = {
   pollingIntervalMs: number
 }
 
+function applyLiveCouncilRenderGate(message: CouncilMessage): CouncilMessage {
+  if (message.messageType === 'decree' || message.messageType === 'system') return message
+  const family = parseCouncilMessageFamily(message.familyName)
+  if (!family || message.messageType !== 'response') {
+    const content = sanitizeMemoryRuntimeText(toDisplayText(message.content))
+    return content === toDisplayText(message.content) ? message : { ...message, content }
+  }
+  const gate = applyCouncilRenderGate(family, message.content)
+  const content = sanitizeMemoryRuntimeText(gate.displayText)
+  if (
+    content === toDisplayText(message.content)
+    && !message.degraded
+    && message.integrityStatus === gate.integrityStatus
+  ) {
+    return message
+  }
+  return {
+    ...message,
+    content,
+    degraded: gate.degraded,
+    integrityStatus: gate.integrityStatus,
+    renderDiagnostics: gate.diagnostics ?? message.renderDiagnostics,
+  }
+}
+
 function sanitizedCouncilMessage(message: CouncilMessage): CouncilMessage {
-  if (message.messageType === 'decree') return message
-  const content = sanitizeMemoryRuntimeText(toDisplayText(message.content))
-  return content === toDisplayText(message.content) ? message : { ...message, content }
+  return applyLiveCouncilRenderGate(message)
+}
+
+function councilProviderTextAfterRenderGate(family: CouncilOrchestrationFamily, text: string): string {
+  return applyCouncilRenderGate(family, text).displayText
 }
 
 function councilNoiseKey(message: CouncilMessage): string | null {
@@ -403,7 +440,7 @@ function mapWarRoomRowToCouncilMessage(row: {
     }
   }
   const fam = (row.family && row.family.trim()) || 'Council'
-  return {
+  const base: CouncilMessage = {
     id: row.id,
     familyName: fam,
     content: sanitizeMemoryRuntimeText(row.content),
@@ -413,6 +450,7 @@ function mapWarRoomRowToCouncilMessage(row: {
     provider: '',
     messageType: 'response',
   }
+  return applyLiveCouncilRenderGate(base)
 }
 
 function normalizeCouncilMessageIds(input: CouncilMessage[], scope = 'hydrated'): CouncilMessage[] {
@@ -1526,7 +1564,7 @@ const MessageBubble = memo(function MessageBubble({
           }}>
           {msg.content}
         </div>
-        {!isRael && msg.messageType === 'response' ? (
+        {!isRael && msg.messageType === 'response' && isCouncilMessageRepairPacketEligible(msg) ? (
           <button
             type="button"
             onClick={() => onPrepareRepairPacket?.(msg)}
@@ -1535,6 +1573,11 @@ const MessageBubble = memo(function MessageBubble({
           >
             Prepare Repair Packet
           </button>
+        ) : null}
+        {msg.degraded && msg.messageType === 'response' ? (
+          <p className="mt-2 text-[10px] tracking-widest" style={{ color: '#FBBF24' }}>
+            Degraded response quality — excluded from synthesis and repair packets.
+          </p>
         ) : null}
       </div>
     </div>
@@ -5712,6 +5755,13 @@ function Home() {
   }
 
   const prepareRepairPacketFromCouncilMessage = async (message: CouncilMessage) => {
+    if (!isCouncilMessageRepairPacketEligible(message)) {
+      addSystemMessage(
+        'Repair packet cannot use greeting-only or degraded council placeholders. Describe the broken panel, symptom, and expected behavior in a decree first.',
+        { force: true },
+      )
+      return
+    }
     const latestDecree = [...messagesRef.current].reverse().find(isRaelCouncilMessage)
     const decree = latestDecree?.content || message.content
     if (!decree?.trim()) {
@@ -7023,17 +7073,23 @@ function Home() {
     const label = bubbleFamilyName ?? familyName
     const now = new Date().toLocaleTimeString()
     const resolvedMessageId = messageId || createMessageId(label)
+    const orchFamily = parseCouncilMessageFamily(label) ?? parseCouncilMessageFamily(familyName)
+    const renderGate = orchFamily ? applyCouncilRenderGate(orchFamily, content) : null
+    const visibleContent = renderGate?.displayText ?? content
 
     if (instant) {
       addMessages([{
         id: resolvedMessageId,
         familyName: label,
-        content,
+        content: visibleContent,
         timestamp: now,
         color: family.color,
         icon: family.icon,
         provider,
         messageType: 'response',
+        degraded: renderGate?.degraded,
+        integrityStatus: renderGate?.integrityStatus,
+        renderDiagnostics: renderGate?.diagnostics,
       }], removeMessageIds?.length ? { removeIds: removeMessageIds } : undefined)
       setPresence(familyName, 'idle', 'standby')
       return
@@ -7066,13 +7122,13 @@ function Home() {
     setTypingFamily(null)
     setPresence(familyName, 'streaming', streamingLabel)
 
-    for (let i = 0; i < content.length; i += STREAM_CHUNK_SIZE) {
+    for (let i = 0; i < visibleContent.length; i += STREAM_CHUNK_SIZE) {
       if (councilPausedRef.current || !councilChannelOpenRef.current) return
-      updateMessageContent(resolvedMessageId, content.slice(0, i + STREAM_CHUNK_SIZE))
+      updateMessageContent(resolvedMessageId, visibleContent.slice(0, i + STREAM_CHUNK_SIZE))
       await wait(STREAM_CHUNK_DELAY_MS)
     }
 
-    updateMessageContent(resolvedMessageId, content)
+    updateMessageContent(resolvedMessageId, visibleContent)
     setPresence(familyName, 'complete', 'complete')
     await wait(350)
     setPresence(familyName, 'idle', 'standby')
@@ -7515,6 +7571,9 @@ function Home() {
           return
         }
         textOut = typeof data.councilSingleResponse === 'string' ? data.councilSingleResponse.trim() : ''
+        if (textOut) {
+          textOut = councilProviderTextAfterRenderGate(family, textOut)
+        }
         if (!textOut) {
           const famLabel = COUNCIL_ROSTER.find(ro => ro.id === family)?.label ?? family
           const errLine = `[Error] ${famLabel}: empty response`
@@ -8198,6 +8257,9 @@ function Home() {
                   runtimeDetail = 'governor_silent_skip'
                 } else {
                   textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
+                  if (textOut) {
+                    textOut = councilProviderTextAfterRenderGate(family, textOut)
+                  }
                   if (!textOut) {
                     if (!isDirectInvoke) {
                       lastCouncilFamilyErrorRef.current = family
@@ -8390,7 +8452,7 @@ function Home() {
         .filter(c => Boolean(c.textOut?.trim()))
         .map(c => ({
           family: c.family,
-          textOut: c.textOut!.trim(),
+          textOut: councilProviderTextAfterRenderGate(c.family, c.textOut!.trim()),
           transientMessageIds: c.transientMessageIds,
         }))
 

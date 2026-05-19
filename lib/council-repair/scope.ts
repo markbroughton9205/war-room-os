@@ -1,5 +1,11 @@
 import { matchedRepairTriggers } from './classifier'
 import type { RepairClassification } from './model'
+import {
+  detectGreetingOnlyResponse,
+  isDegradedResponseQuality,
+  validateProviderResponseIntegrity,
+} from '@/lib/providers/responseIntegrity'
+import { GEMINI_DEGRADED_COUNCIL_DISPLAY } from '@/lib/council/councilRenderGate'
 
 const VAGUE_DECREE_ONLY =
   /^(?:please\s+)?(?:fix|repair|diagnose|create|send|prepare)(?:\s+(?:this|war room|it|panel))?(?:\s+please)?[.!?]*$/i
@@ -20,6 +26,15 @@ export type RepairScopeAssessment = {
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
+}
+
+export function isGreetingOnlyRepairSource(content: string | null | undefined): boolean {
+  const normalized = (content ?? '').replace(/\s+/g, ' ').trim()
+  if (!normalized) return false
+  if (normalized === GEMINI_DEGRADED_COUNCIL_DISPLAY) return true
+  if (detectGreetingOnlyResponse(normalized)) return true
+  const integrity = validateProviderResponseIntegrity(normalized, { councilMode: true })
+  return isDegradedResponseQuality(integrity.integrity_status)
 }
 
 export function isVagueRepairLanguage(text: string): boolean {
@@ -57,6 +72,17 @@ export function assessRepairScope(input: {
   sourceContent?: string | null
   classification: RepairClassification
 }): RepairScopeAssessment {
+  if (isGreetingOnlyRepairSource(input.sourceContent)) {
+    return {
+      scope: 'needs_scope',
+      clarification:
+        'The selected council response is a greeting-only or degraded placeholder. Describe the broken panel, visible symptom, and expected behavior before generating a repair packet.',
+      concreteIssue: null,
+      affectedPanelRoute: inferAffectedSurface(input.decree),
+      evidenceHints: ['Greeting-only or degraded Gemini output cannot be used as repair evidence.'],
+    }
+  }
+
   const combined = [input.decree, input.sourceContent].filter(Boolean).join(' ')
   const vague = isVagueRepairLanguage(combined)
   const affectedPanelRoute = inferAffectedSurface(combined)

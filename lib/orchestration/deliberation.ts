@@ -4,7 +4,9 @@ import {
   listCognitiveBusEvents,
   patchCouncilThreadState,
 } from '@/lib/cognitive-bus/bus'
+import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
 import { buildStructuredProviderPacket, packetsConflict } from '@/lib/cognitive-bus/packet'
+import type { ProviderPacketIntegrityStatus } from '@/lib/cognitive-bus/types'
 import { publishAndPersistBusEvent, persistCouncilThreadState } from '@/lib/cognitive-bus/persistence'
 import type { OperatorPacket, StructuredProviderPacket } from '@/lib/cognitive-bus/types'
 import { priorProviderPacketsInThread } from '@/lib/council-routing/threadContext'
@@ -15,6 +17,13 @@ import { scoreOrchestrationPriority } from '@/lib/orchestration/priority'
 import { buildProviderMemoryInjection } from '@/lib/provider-memory/inject'
 import { inferCouncilTaskType, rankedFamiliesForDecree, routeFamiliesForTask } from '@/lib/provider-specialization/routing'
 import type { WarRoomSupabase } from '@/lib/war-room/persistence'
+
+function mapRenderGateIntegrity(status: string): ProviderPacketIntegrityStatus {
+  if (status === 'COMPLETE') return 'verified'
+  if (status === 'DEGRADED_RESPONSE_QUALITY') return 'degraded'
+  if (status === 'EMPTY' || status === 'UNKNOWN') return 'unknown'
+  return 'incomplete'
+}
 
 export type DeliberationStepKind =
   | 'intake'
@@ -164,28 +173,33 @@ export async function runDeliberationStep(
   }
 
   if (input.kind === 'register_packet' && input.family && input.displayText) {
-    const packet = buildStructuredProviderPacket({
-      family: input.family,
-      displayText: input.displayText,
-      integrityStatus: 'verified',
-    })
-    await publishAndPersistBusEvent(client, {
-      threadId,
-      type: 'provider_packet',
-      correlationId: input.correlationId,
-      payload: { packet },
-    })
-    const peers = collectPackets(threadId)
-    for (const peer of peers) {
-      if (packetsConflict(packet, peer)) {
-        await publishAndPersistBusEvent(client, {
-          threadId,
-          type: 'contradiction_raised',
-          payload: {
-            families: [packet.family, peer.family],
-            summary: `Structured outputs conflict between ${packet.family} and ${peer.family}.`,
-          },
-        })
+    const gate = applyCouncilRenderGate(input.family, input.displayText)
+    if (gate.displayText.trim()) {
+      const integrityStatus = mapRenderGateIntegrity(gate.integrityStatus)
+      const packet = buildStructuredProviderPacket({
+        family: input.family,
+        displayText: gate.displayText,
+        integrityStatus,
+        confidence: gate.degraded ? 0.35 : integrityStatus === 'verified' ? 0.85 : undefined,
+      })
+      await publishAndPersistBusEvent(client, {
+        threadId,
+        type: 'provider_packet',
+        correlationId: input.correlationId,
+        payload: { packet },
+      })
+      const peers = collectPackets(threadId)
+      for (const peer of peers) {
+        if (packetsConflict(packet, peer)) {
+          await publishAndPersistBusEvent(client, {
+            threadId,
+            type: 'contradiction_raised',
+            payload: {
+              families: [packet.family, peer.family],
+              summary: `Structured outputs conflict between ${packet.family} and ${peer.family}.`,
+            },
+          })
+        }
       }
     }
   }
