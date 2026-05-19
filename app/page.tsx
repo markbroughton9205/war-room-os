@@ -31,6 +31,7 @@ import {
   orchestrationFamilyToTypingFamily,
   pickNextOrchestrationFamily,
   useCouncilSession,
+  useConversationRuntime,
 } from '@/components/council'
 import type { CouncilMemoryRecallPreview, CouncilOrchestrationFamily } from '@/components/council'
 import type { EngineControlStatusResponse, EngineId, EngineStatus } from '@/lib/engine-control/types'
@@ -243,6 +244,18 @@ const SchemaSweepPanel = dynamic(
 const CouncilDeliberationStream = dynamic(
   () => import('@/components/war-room/council/CouncilDeliberationStream').then(mod => mod.CouncilDeliberationStream),
   { ssr: false },
+)
+
+const ConversationStatePanel = dynamic(
+  () => import('@/components/war-room/council/ConversationStatePanel').then(mod => mod.ConversationStatePanel),
+  {
+    ssr: false,
+    loading: () => (
+      <section className="rounded-xl border border-white/10 bg-black/30 p-3 text-[9px] tracking-widest text-slate-600">
+        Council state loading…
+      </section>
+    ),
+  },
 )
 
 type CouncilMessage = {
@@ -5203,6 +5216,12 @@ function Home() {
   const [engineList, setEngineList] = useState<EngineStatus[]>([])
   const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
   const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
+  const { snapshot: conversationRuntimeSnapshot } = useConversationRuntime(
+    council,
+    liveCouncilConvId,
+    councilOutputMode,
+    councilMounted,
+  )
   const [persistenceAvailable, setPersistenceAvailable] = useState(false)
   const [continuityMode, setContinuityMode] = useState<RuntimeContinuityIndicatorMode>('Unknown')
   const [continuityRecoverAt, setContinuityRecoverAt] = useState<string | null>(null)
@@ -10110,6 +10129,7 @@ function Home() {
             />
           </div>
           <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />
+          <ConversationStatePanel runtime={conversationRuntimeSnapshot} className="mt-2" />
           <CouncilDeliberationStream threadId={liveCouncilConvId} enabled={operatorTab === 'command'} />
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div

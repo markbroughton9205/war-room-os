@@ -371,8 +371,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  const conversationalTurn = body.conversationalTurn === true
   const message = typeof body.message === 'string' ? body.message : ''
-  if (!message) return NextResponse.json({ error: 'No message' }, { status: 400 })
+  if (!message && !conversationalTurn) return NextResponse.json({ error: 'No message' }, { status: 400 })
 
   const profile = typeof body.profile === 'string' ? body.profile : ''
   const threadHistory = body.threadHistory
@@ -391,7 +392,11 @@ export async function POST(req: Request) {
   const raelDirectiveText =
     typeof body.raelDirectiveText === 'string' && body.raelDirectiveText.trim()
       ? body.raelDirectiveText.trim()
-      : message
+      : message.trim()
+        ? message
+        : conversationalTurn
+          ? 'Continue council dialogue on the active topic without a new decree. Respond once; challenge only if material.'
+          : message
 
   const sequentialDiagnostic = body.sequentialDiagnostic === true
   const diagnosticTurnIndex = typeof body.diagnosticTurnIndex === 'number' ? body.diagnosticTurnIndex : undefined

@@ -14,3 +14,4 @@ export {
   pickNextOrchestrationFamily,
 } from './councilOrchestration'
 export { useCouncilSession } from './useCouncilSession'
+export { useConversationRuntime } from './useConversationRuntime'

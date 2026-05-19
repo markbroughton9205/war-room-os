@@ -3,6 +3,10 @@
 import { startTransition, useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { COUNCIL_SESSION_STORAGE_KEY } from './councilConstants'
 import {
+  loadConversationRuntimeFromStorage,
+  saveConversationRuntimeToStorage,
+} from '@/lib/conversation-runtime/sessionStore'
+import {
   councilSessionReducer,
   createInitialCouncilPersisted,
 } from './councilSessionReducer'
@@ -79,9 +83,15 @@ export function useCouncilSession(persistenceCtx?: CouncilMessagePersistenceCont
   }, [store])
 
   useEffect(() => {
-    const raw = typeof window !== 'undefined' ? window.sessionStorage.getItem(COUNCIL_SESSION_STORAGE_KEY) : null
-    const parsed = parsePersisted(raw)
+    if (typeof window === 'undefined') return
+    const sessionRaw = window.sessionStorage.getItem(COUNCIL_SESSION_STORAGE_KEY)
+    const localRaw = window.localStorage.getItem(COUNCIL_SESSION_STORAGE_KEY)
+    const parsed = parsePersisted(sessionRaw) ?? parsePersisted(localRaw)
     if (parsed) dispatch({ type: 'HYDRATE', payload: parsed })
+    const runtime = loadConversationRuntimeFromStorage(parsed?.sessionId)
+    if (runtime && parsed) {
+      saveConversationRuntimeToStorage({ ...runtime, sessionId: parsed.sessionId, lastActivityAt: parsed.lastActivityAt })
+    }
     skipNextPersist.current = true
     startTransition(() => setMounted(true))
   }, [])
@@ -95,6 +105,19 @@ export function useCouncilSession(persistenceCtx?: CouncilMessagePersistenceCont
     try {
       const clipped = clipMessages(store, persistenceCtx)
       window.sessionStorage.setItem(COUNCIL_SESSION_STORAGE_KEY, JSON.stringify(clipped))
+      try {
+        window.localStorage.setItem(COUNCIL_SESSION_STORAGE_KEY, JSON.stringify(clipped))
+      } catch {
+        /* quota */
+      }
+      const runtime = loadConversationRuntimeFromStorage(clipped.sessionId)
+      if (runtime) {
+        saveConversationRuntimeToStorage({
+          ...runtime,
+          sessionId: clipped.sessionId,
+          lastActivityAt: clipped.lastActivityAt,
+        })
+      }
     } catch {
       // Quota or privacy mode — council still works in-memory for this tab.
     }
