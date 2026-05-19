@@ -1,7 +1,8 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 import {
-  isOperatorUnsafeProviderFragment,
+  detectGreetingOnlyResponse,
+  isDegradedResponseQuality,
   operatorSafeIncompleteMessage,
   validateProviderResponseIntegrity,
 } from '@/lib/providers/responseIntegrity'
@@ -19,9 +20,15 @@ export function sanitizeCouncilFamilyResponse(
   raw: unknown,
 ): SanitizedFamilyResponse {
   const text = toDisplayText(raw)
-  const integrity = validateProviderResponseIntegrity(text, { minLength: family === 'red_team' ? 60 : 80 })
-  const incomplete = integrity.integrity_status !== 'COMPLETE'
-  if (!incomplete && !isOperatorUnsafeProviderFragment(text)) {
+  const integrity = validateProviderResponseIntegrity(text, {
+    minLength: family === 'red_team' ? 60 : 80,
+    councilMode: true,
+  })
+  const greetingOnly = detectGreetingOnlyResponse(text)
+  const incomplete =
+    integrity.integrity_status !== 'COMPLETE' || greetingOnly || isDegradedResponseQuality(integrity.integrity_status)
+
+  if (!incomplete) {
     return {
       displayText: text,
       integrityStatus: integrity.integrity_status,
@@ -29,13 +36,20 @@ export function sanitizeCouncilFamilyResponse(
       operatorSafe: true,
     }
   }
+
+  const displayText =
+    family === 'gemini'
+      ? operatorSafeIncompleteMessage('gemini')
+      : operatorSafeIncompleteMessage(integrity.fallback_recommended ? 'fallback' : 'unavailable')
+
   const label =
     family === 'gemini'
       ? 'Gemini response incomplete — retry/fallback used'
       : `${family} response incomplete`
+
   return {
-    displayText: operatorSafeIncompleteMessage(integrity.fallback_recommended ? 'fallback' : 'unavailable'),
-    integrityStatus: integrity.integrity_status,
+    displayText,
+    integrityStatus: greetingOnly ? 'DEGRADED_RESPONSE_QUALITY' : integrity.integrity_status,
     incomplete: true,
     operatorSafe: false,
     label,

@@ -48,6 +48,11 @@ export type CanonicalProviderFamilyStatus = {
   retryCount: number
   fallbackUsed: boolean
   degradedReason: string | null
+  promptChars: number | null
+  completionChars: number | null
+  truncationDetected: boolean
+  integrityFailureCount: number
+  lastRetryStrategy: string | null
 }
 
 export type CanonicalRuntimeStatus = {
@@ -101,6 +106,7 @@ function statusFromProvider(provider: ProviderRuntimeStatus | undefined): Pick<
     provider.integrity.consecutive_integrity_failures >= 2
     || provider.integrity.response_integrity_status === 'TRUNCATED'
     || provider.integrity.response_integrity_status === 'INCOMPLETE'
+    || provider.integrity.response_integrity_status === 'DEGRADED_RESPONSE_QUALITY'
   const degradedReason = provider.integrity.degraded_reason ?? (integrityDegraded ? 'response integrity degraded' : null)
   if (provider.health === 'CONNECTED' && !integrityDegraded) {
     return { availability: 'CONNECTED', connectionStatus: 'online', health: 'healthy', confidence: 95, degradedReason: null }
@@ -171,6 +177,11 @@ export function buildCanonicalProviderFamilies(runtime: ProviderRuntimeSummary):
       consecutiveIntegrityFailures: provider?.integrity.consecutive_integrity_failures ?? 0,
       retryCount: provider?.integrity.retry_count ?? 0,
       fallbackUsed: provider?.integrity.fallback_used ?? false,
+      promptChars: provider?.integrity.diagnostics?.prompt_chars ?? null,
+      completionChars: provider?.integrity.diagnostics?.completion_chars ?? null,
+      truncationDetected: provider?.integrity.diagnostics?.truncation_detected ?? false,
+      integrityFailureCount: provider?.integrity.diagnostics?.integrity_failures ?? 0,
+      lastRetryStrategy: provider?.integrity.diagnostics?.last_retry_strategy ?? null,
     }
   })
 }

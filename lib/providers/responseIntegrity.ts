@@ -11,6 +11,7 @@ export type ResponseIntegrityStatus =
   | 'TRUNCATED'
   | 'MALFORMED'
   | 'EMPTY'
+  | 'DEGRADED_RESPONSE_QUALITY'
   | 'UNKNOWN'
 
 export type ResponseIntegrityExpectation = {
@@ -22,6 +23,10 @@ export type ResponseIntegrityExpectation = {
   jsonSchema?: { requiredKeys?: string[] }
   /** Section headers that should appear (case-insensitive substring match). */
   requiredSections?: string[]
+  /** Council synthesis mode — enforces contribution minimum (reasoning/evidence/synthesis). */
+  councilMode?: boolean
+  /** Minimum meaningful tokens for council contributions (default 24). */
+  minMeaningfulTokens?: number
 }
 
 export type ResponseIntegrityResult = {
@@ -30,6 +35,8 @@ export type ResponseIntegrityResult = {
   reason: string
   retry_recommended: boolean
   fallback_recommended: boolean
+  /** Set when greeting-only or missing council substance. */
+  degraded_quality?: boolean
 }
 
 const SENTENCE_END = /[.!?…]["')\]]*\s*$/u
@@ -45,6 +52,28 @@ const PARTIAL_HEADING_TAIL =
 const ABRUPT_SECTION_STUB = /:\s*(?:the\s+)?(?:incomplete|partial|war\s+room\s+can)\s*$/i
 const REPEATED_PARTIAL_PHRASE = /^(?:decision\s+summary:\s*)?(?:the\s+)?(?:war\s+room|incomplete)\b/i
 
+const GREETING_ONLY_PATTERNS = [
+  /^hey\s+ra['’]?el\b/i,
+  /\bcouncil\s+active\b/i,
+  /\bwar\s+room\s+(?:online|active|ready)\b/i,
+  /\b(?:good\s+)?(?:morning|evening|afternoon)\b[^.!?\n]{0,40}\bra['’]?el\b/i,
+  /\bstanding\s+by\b/i,
+  /\ball\s+(?:nodes|families)\s+(?:aligned|present|online)\b/i,
+]
+
+const FALLBACK_PHRASE_PATTERNS = [
+  /\bprovider\s+response\s+incomplete\b/i,
+  /\bfallback\s+summary\s+used\b/i,
+  /\btelemetry\s+gap\b/i,
+  /\bunavailable\s+right\s+now\b/i,
+]
+
+const COUNCIL_CONTRIBUTION_MARKERS = [
+  /\b(?:because|therefore|however|evidence|source|verified|inferred|hypothesis|contradiction)\b/i,
+  /\b(?:primary\s+finding|recommended\s+action|risk|synthesis|analysis|reasoning)\b/i,
+  /\b(?:compare|correlat|pattern|implication|uncertain|confidence)\b/i,
+]
+
 const REFUSAL_PATTERNS = [
   /\b(i\s+can(?:not|'t)|i'm\s+unable\s+to|as\s+an\s+ai)\b[^.!?]{0,80}\b(assist|help|comply|provide)\b/i,
   /\b(safety|content)\s+policy\b/i,
@@ -59,6 +88,8 @@ const STREAM_INTERRUPT_MARKERS = [
 ]
 
 const DEFAULT_MIN_LENGTH = 80
+const DEFAULT_MIN_MEANINGFUL_TOKENS = 24
+const GREETING_ONLY_MAX_CHARS = 140
 
 function clampConfidence(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)))
@@ -89,6 +120,42 @@ function validateJson(text: string, requiredKeys?: string[]): string | null {
   } catch {
     return 'invalid JSON'
   }
+}
+
+export function countMeaningfulTokens(text: string): number {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9'\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 3)
+    .length
+}
+
+export function detectGreetingOnlyResponse(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  if (t.length > GREETING_ONLY_MAX_CHARS) return false
+  const greetingHit = GREETING_ONLY_PATTERNS.some(p => p.test(t))
+  if (!greetingHit) return false
+  const tokens = countMeaningfulTokens(t)
+  if (tokens >= 18) return false
+  if (COUNCIL_CONTRIBUTION_MARKERS.some(p => p.test(t))) return false
+  return true
+}
+
+export function detectRepeatedFallbackPhrases(text: string): boolean {
+  const hits = FALLBACK_PHRASE_PATTERNS.filter(p => p.test(text)).length
+  return hits >= 2 || (hits >= 1 && text.trim().length < 120)
+}
+
+export function hasCouncilContributionSubstance(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  if (countMeaningfulTokens(t) < DEFAULT_MIN_MEANINGFUL_TOKENS) return false
+  if (COUNCIL_CONTRIBUTION_MARKERS.some(p => p.test(t))) return true
+  const lines = t.split('\n').filter(l => l.trim().length > 0)
+  if (lines.length >= 3 && t.length >= 160) return true
+  return t.length >= 200 && SENTENCE_END.test(t)
 }
 
 function detectRepeatedPartialPhrase(text: string): boolean {
@@ -129,6 +196,59 @@ function refusalOrErrorText(text: string): string | null {
   return null
 }
 
+function assessDegradedResponseQuality(
+  text: string,
+  expectation: ResponseIntegrityExpectation,
+): ResponseIntegrityResult | null {
+  if (detectGreetingOnlyResponse(text)) {
+    return {
+      integrity_status: 'DEGRADED_RESPONSE_QUALITY',
+      confidence: 92,
+      reason: 'greeting-only or attendance stub without council substance',
+      retry_recommended: true,
+      fallback_recommended: true,
+      degraded_quality: true,
+    }
+  }
+
+  if (detectRepeatedFallbackPhrases(text)) {
+    return {
+      integrity_status: 'DEGRADED_RESPONSE_QUALITY',
+      confidence: 88,
+      reason: 'repeated fallback or telemetry-gap phrasing without synthesis',
+      retry_recommended: true,
+      fallback_recommended: true,
+      degraded_quality: true,
+    }
+  }
+
+  const minTokens = expectation.minMeaningfulTokens ?? DEFAULT_MIN_MEANINGFUL_TOKENS
+  const tokens = countMeaningfulTokens(text)
+  if (expectation.councilMode && tokens < minTokens && text.length < (expectation.minLength ?? DEFAULT_MIN_LENGTH)) {
+    return {
+      integrity_status: 'DEGRADED_RESPONSE_QUALITY',
+      confidence: 86,
+      reason: `low meaningful token count (${tokens}/${minTokens}) for council mode`,
+      retry_recommended: true,
+      fallback_recommended: true,
+      degraded_quality: true,
+    }
+  }
+
+  if (expectation.councilMode && !hasCouncilContributionSubstance(text)) {
+    return {
+      integrity_status: 'DEGRADED_RESPONSE_QUALITY',
+      confidence: 84,
+      reason: 'missing reasoning, evidence, or synthesis markers for council contribution',
+      retry_recommended: true,
+      fallback_recommended: true,
+      degraded_quality: true,
+    }
+  }
+
+  return null
+}
+
 /**
  * Validate provider text for completeness and structure.
  */
@@ -162,6 +282,9 @@ export function validateProviderResponseIntegrity(
       fallback_recommended: true,
     }
   }
+
+  const degradedQuality = assessDegradedResponseQuality(text, expectation)
+  if (degradedQuality) return degradedQuality
 
   const refusal = refusalOrErrorText(text)
   if (refusal) {
@@ -222,6 +345,17 @@ export function validateProviderResponseIntegrity(
 
   if (text.length < minLength) {
     const truncatedLike = abruptEnding(text) || PARTIAL_HEADING_TAIL.test(text)
+    const greetingStub = detectGreetingOnlyResponse(text)
+    if (greetingStub) {
+      return {
+        integrity_status: 'DEGRADED_RESPONSE_QUALITY',
+        confidence: 90,
+        reason: 'short greeting-only response under council minimum length',
+        retry_recommended: true,
+        fallback_recommended: true,
+        degraded_quality: true,
+      }
+    }
     return {
       integrity_status: truncatedLike ? 'TRUNCATED' : 'INCOMPLETE',
       confidence: truncatedLike ? 84 : 72,
@@ -251,6 +385,11 @@ export function validateProviderResponseIntegrity(
     }
   }
 
+  if (expectation.councilMode) {
+    const lateDegraded = assessDegradedResponseQuality(text, expectation)
+    if (lateDegraded) return lateDegraded
+  }
+
   return {
     integrity_status: 'COMPLETE',
     confidence: clampConfidence(92 - (text.length < minLength + 40 ? 8 : 0)),
@@ -260,8 +399,13 @@ export function validateProviderResponseIntegrity(
   }
 }
 
+export function isDegradedResponseQuality(status: ResponseIntegrityStatus): boolean {
+  return status === 'DEGRADED_RESPONSE_QUALITY'
+}
+
 /** Operator/council-safe placeholder when integrity fails. */
-export function operatorSafeIncompleteMessage(kind: 'fallback' | 'unavailable'): string {
+export function operatorSafeIncompleteMessage(kind: 'fallback' | 'unavailable' | 'gemini'): string {
+  if (kind === 'gemini') return 'Gemini response incomplete.'
   if (kind === 'fallback') return 'Provider response incomplete; fallback summary used'
   return 'Provider response unavailable'
 }
@@ -270,8 +414,9 @@ export function operatorSafeIncompleteMessage(kind: 'fallback' | 'unavailable'):
 export function isOperatorUnsafeProviderFragment(text: string): boolean {
   const t = text.trim()
   if (!t) return true
-  const integrity = validateProviderResponseIntegrity(t, { minLength: 60 })
+  const integrity = validateProviderResponseIntegrity(t, { minLength: 60, councilMode: true })
   if (integrity.integrity_status !== 'COMPLETE') return true
+  if (detectGreetingOnlyResponse(t)) return true
   if (PARTIAL_HEADING_TAIL.test(t) && t.length < 200) return true
   if (REPEATED_PARTIAL_PHRASE.test(t)) return true
   return false
@@ -283,4 +428,31 @@ export function shortenPromptForRetry(prompt: string, maxChars = 1200): string {
   const head = trimmed.slice(0, Math.floor(maxChars * 0.65)).trim()
   const tail = trimmed.slice(-Math.floor(maxChars * 0.25)).trim()
   return `${head}\n\n[… context trimmed for retry …]\n\n${tail}`
+}
+
+/** Strip heavy council augment blocks for Gemini integrity retries. */
+export function stripCouncilCompressionForRetry(prompt: string): string {
+  const sections = prompt.split(/\n(?=### )/)
+  const kept = sections.filter(section => {
+    const head = section.slice(0, 80).toLowerCase()
+    if (head.includes('runtime integrity snapshot')) return false
+    if (head.includes('live research evidence')) return false
+    if (head.includes('analysis frame')) return false
+    if (head.includes('research discipline')) return false
+    if (head.includes('council orchestration directives')) return false
+    return true
+  })
+  const simplified = kept.join('\n').trim()
+  return simplified.length >= 80 ? simplified : prompt.slice(0, 900).trim()
+}
+
+export function buildGeminiSimplifiedRetryPrompt(decreeHint: string, maxChars = 700): string {
+  const base = [
+    'Council retry — respond with substance only.',
+    'Required: at least one of reasoning, evidence citation, or synthesis.',
+    'Do not greet. Do not say "Council Active". Answer the decree directly in 3–6 sentences.',
+    '',
+    decreeHint.trim(),
+  ].join('\n')
+  return shortenPromptForRetry(base, maxChars)
 }

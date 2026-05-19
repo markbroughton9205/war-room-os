@@ -3,8 +3,11 @@ import type { ProviderRuntimeId } from '@/lib/providers/health'
 import { logProviderIntegrityAudit } from '@/lib/providers/integrityAudit'
 import { getProviderIntegritySnapshot, recordProviderIntegrityOutcome } from '@/lib/providers/integrityRuntime'
 import {
+  buildGeminiSimplifiedRetryPrompt,
+  isDegradedResponseQuality,
   operatorSafeIncompleteMessage,
   shortenPromptForRetry,
+  stripCouncilCompressionForRetry,
   validateProviderResponseIntegrity,
   type ResponseIntegrityExpectation,
   type ResponseIntegrityResult,
@@ -24,7 +27,15 @@ export type ProviderCallOutcome = {
   /** Original incomplete body — diagnostics only; never for Operator View */
   diagnosticFragment?: string
   degradedLabel?: string
+  diagnostics?: {
+    promptChars: number
+    completionChars: number
+    truncationDetected: boolean
+    retryStrategies: string[]
+  }
 }
+
+export type GeminiRetryStrategy = 'simplified' | 'no_compression' | 'short_context'
 
 const FAMILY_TO_PROVIDER: Record<CouncilOrchestrationFamily, ProviderRuntimeId> = {
   chatgpt: 'openai',
@@ -65,8 +76,27 @@ function councilExpectation(family: CouncilOrchestrationFamily): ResponseIntegri
   return {
     minLength: family === 'red_team' ? 60 : 80,
     markdown: true,
-    requiredSections:
-      family === 'gemini' || family === 'chatgpt' ? undefined : undefined,
+    councilMode: true,
+    minMeaningfulTokens: family === 'gemini' ? 20 : 24,
+  }
+}
+
+function geminiRetryPrompts(originalPrompt: string, strategy: GeminiRetryStrategy): string {
+  const decreeHint =
+    originalPrompt.match(/Ra'el[\s\S]*?(?=\n\n###|\n\nCouncil|$)/)?.[0]
+    ?? originalPrompt.slice(0, 400)
+
+  switch (strategy) {
+    case 'simplified':
+      return buildGeminiSimplifiedRetryPrompt(decreeHint, 700)
+    case 'no_compression':
+      return stripCouncilCompressionForRetry(
+        `${buildGeminiSimplifiedRetryPrompt(decreeHint, 500)}\n\n${stripCouncilCompressionForRetry(originalPrompt)}`,
+      )
+    case 'short_context':
+      return shortenPromptForRetry(buildGeminiSimplifiedRetryPrompt(decreeHint, 400), 550)
+    default:
+      return shortenPromptForRetry(originalPrompt)
   }
 }
 
@@ -74,10 +104,11 @@ export type InvokeProviderFn = (args: {
   family: CouncilOrchestrationFamily
   prompt: string
   shorter?: boolean
+  retryStrategy?: GeminiRetryStrategy | 'default'
 }) => Promise<string>
 
 /**
- * Run integrity validation, optional single retry with shorter prompt, then optional fallback family.
+ * Run integrity validation, optional Gemini-specific retries, then optional fallback family.
  */
 export async function orchestrateProviderResponse(args: {
   family: CouncilOrchestrationFamily
@@ -88,27 +119,51 @@ export async function orchestrateProviderResponse(args: {
   finishReason?: string | null
 }): Promise<ProviderCallOutcome> {
   const providerId = FAMILY_TO_PROVIDER[args.family]
+  const promptChars = args.prompt.trim().length
   let text = args.rawText.trim()
   let retryCount = 0
   let fallbackUsed = false
   let fallbackProvider: ProviderRuntimeId | null = null
   let diagnosticFragment: string | undefined
+  const retryStrategies: string[] = []
 
-  const assess = () =>
-    validateProviderResponseIntegrity(text, {
-      ...councilExpectation(args.family),
-      ...(args.finishReason && /MAX_TOKENS|LENGTH/i.test(args.finishReason)
-        ? { minLength: 40 }
-        : {}),
-    })
+  const baseExpectation = (): ResponseIntegrityExpectation => ({
+    ...councilExpectation(args.family),
+    ...(args.finishReason && /MAX_TOKENS|LENGTH/i.test(args.finishReason)
+      ? { minLength: 40 }
+      : {}),
+  })
+
+  const assess = () => validateProviderResponseIntegrity(text, baseExpectation())
 
   let integrity = assess()
 
-  recordProviderIntegrityOutcome({
-    providerId,
-    integrityStatus: integrity.integrity_status,
-    reason: integrity.reason,
-  })
+  const recordOutcome = (
+    integrityStatus: ResponseIntegrityResult['integrity_status'],
+    reason: string,
+    extra?: { retryIncrement?: number; fallbackProvider?: ProviderRuntimeId | null; strategy?: string },
+  ) => {
+    recordProviderIntegrityOutcome({
+      providerId,
+      integrityStatus,
+      reason,
+      retryIncrement: extra?.retryIncrement,
+      fallbackProvider: extra?.fallbackProvider,
+      diagnostics: {
+        prompt_chars: promptChars,
+        completion_chars: text.length,
+        truncation_detected:
+          integrityStatus === 'TRUNCATED'
+          || /truncat|max_tokens|length/i.test(args.finishReason ?? ''),
+        integrity_failures: integrityStatus === 'COMPLETE' ? undefined : 1,
+        fallback_used: fallbackUsed,
+        last_retry_strategy: extra?.strategy ?? null,
+        finish_reason: args.finishReason ?? null,
+      },
+    })
+  }
+
+  recordOutcome(integrity.integrity_status, integrity.reason)
 
   await logProviderIntegrityAudit(args.auditClient ?? null, {
     provider: providerId,
@@ -118,30 +173,56 @@ export async function orchestrateProviderResponse(args: {
     family: args.family,
   })
 
-  if (integrity.integrity_status !== 'COMPLETE' && integrity.retry_recommended) {
-    retryCount += 1
-    const shorterPrompt = shortenPromptForRetry(args.prompt)
-    try {
-      const retryText = (await args.invoke({ family: args.family, prompt: shorterPrompt, shorter: true })).trim()
-      if (retryText) {
-        text = retryText
-        integrity = assess()
-        recordProviderIntegrityOutcome({
-          providerId,
-          integrityStatus: integrity.integrity_status,
-          reason: integrity.reason,
-          retryIncrement: 1,
-        })
-        await logProviderIntegrityAudit(args.auditClient ?? null, {
-          provider: providerId,
-          integrityStatus: integrity.integrity_status,
-          retryAttempt: 1,
-          reason: integrity.reason,
-          family: args.family,
-        })
+  const needsRetry =
+    integrity.integrity_status !== 'COMPLETE'
+    && (integrity.retry_recommended || isDegradedResponseQuality(integrity.integrity_status))
+
+  if (needsRetry) {
+    const strategies: GeminiRetryStrategy[] =
+      args.family === 'gemini'
+        ? ['simplified', 'no_compression', 'short_context']
+        : ['simplified']
+
+    for (const strategy of strategies) {
+      if (integrity.integrity_status === 'COMPLETE') break
+      if (!integrity.retry_recommended && !isDegradedResponseQuality(integrity.integrity_status)) break
+
+      retryCount += 1
+      retryStrategies.push(strategy)
+      const retryPrompt =
+        args.family === 'gemini'
+          ? geminiRetryPrompts(args.prompt, strategy)
+          : shortenPromptForRetry(args.prompt)
+
+      try {
+        const retryText = (
+          await args.invoke({
+            family: args.family,
+            prompt: retryPrompt,
+            shorter: true,
+            retryStrategy: strategy,
+          })
+        ).trim()
+        if (retryText) {
+          text = retryText
+          integrity = assess()
+          recordOutcome(integrity.integrity_status, integrity.reason, {
+            retryIncrement: 1,
+            strategy,
+          })
+          await logProviderIntegrityAudit(args.auditClient ?? null, {
+            provider: providerId,
+            integrityStatus: integrity.integrity_status,
+            retryAttempt: retryCount,
+            reason: `${integrity.reason} (strategy=${strategy})`,
+            family: args.family,
+          })
+        }
+      } catch {
+        /* keep prior integrity */
       }
-    } catch {
-      /* keep first integrity result */
+
+      if (args.family !== 'gemini') break
     }
   }
 
@@ -168,10 +249,7 @@ export async function orchestrateProviderResponse(args: {
           fallbackProvider = fallbackId
           text = fallbackText
           integrity = fbIntegrity
-          recordProviderIntegrityOutcome({
-            providerId,
-            integrityStatus: 'INCOMPLETE',
-            reason: `primary incomplete; fallback ${fallbackFamily} succeeded`,
+          recordOutcome('INCOMPLETE', `primary incomplete; fallback ${fallbackFamily} succeeded`, {
             fallbackProvider: fallbackId,
           })
           await logProviderIntegrityAudit(args.auditClient ?? null, {
@@ -190,23 +268,34 @@ export async function orchestrateProviderResponse(args: {
     }
   }
 
+  const truncationDetected =
+    integrity.integrity_status === 'TRUNCATED'
+    || /MAX_TOKENS|LENGTH/i.test(args.finishReason ?? '')
+
+  const diagnostics = {
+    promptChars,
+    completionChars: text.length,
+    truncationDetected,
+    retryStrategies,
+  }
+
   if (integrity.integrity_status !== 'COMPLETE') {
-    recordProviderIntegrityOutcome({
-      providerId,
-      integrityStatus: integrity.integrity_status,
-      reason: integrity.reason,
-      retryIncrement: 0,
-    })
+    recordOutcome(integrity.integrity_status, integrity.reason)
     const snap = getProviderIntegritySnapshot(providerId)
     const degradedLabel =
-      args.family === 'gemini' && snap.consecutive_integrity_failures >= 1
+      args.family === 'gemini'
         ? 'Gemini response incomplete — retry/fallback used'
         : undefined
+    const displayText =
+      args.family === 'gemini' && (isDegradedResponseQuality(integrity.integrity_status) || snap.consecutive_integrity_failures >= 1)
+        ? operatorSafeIncompleteMessage('gemini')
+        : fallbackUsed
+          ? operatorSafeIncompleteMessage('fallback')
+          : operatorSafeIncompleteMessage('unavailable')
+
     return {
       text,
-      displayText: fallbackUsed
-        ? operatorSafeIncompleteMessage('fallback')
-        : operatorSafeIncompleteMessage('unavailable'),
+      displayText,
       integrity,
       providerId,
       family: args.family,
@@ -215,6 +304,7 @@ export async function orchestrateProviderResponse(args: {
       fallbackProvider,
       diagnosticFragment,
       degradedLabel,
+      diagnostics,
     }
   }
 
@@ -227,6 +317,7 @@ export async function orchestrateProviderResponse(args: {
     retryCount,
     fallbackUsed,
     fallbackProvider,
+    diagnostics,
   }
 }
 

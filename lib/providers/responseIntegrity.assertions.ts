@@ -1,4 +1,5 @@
 import {
+  detectGreetingOnlyResponse,
   isOperatorUnsafeProviderFragment,
   validateProviderResponseIntegrity,
 } from '@/lib/providers/responseIntegrity'
@@ -14,11 +15,20 @@ export function assertResponseIntegrityFixtures(): void {
 
   const complete = validateProviderResponseIntegrity(
     'Decision Summary: Provider runtime now validates response integrity before marking families connected. Next action: refresh canonical status after deploy.',
+    { councilMode: true },
   )
   assert(complete.integrity_status === 'COMPLETE', 'full sentence passes complete')
+
+  const greeting = validateProviderResponseIntegrity("Hey Ra'el! Council Active", { councilMode: true })
+  assert(greeting.integrity_status === 'DEGRADED_RESPONSE_QUALITY', 'greeting-only is degraded quality')
+  assert(detectGreetingOnlyResponse("Hey Ra'el! Council Active"), 'greeting detector')
 
   assert(
     isOperatorUnsafeProviderFragment('Decision Summary: The incomplete'),
     'operator unsafe fragment detected',
+  )
+  assert(
+    isOperatorUnsafeProviderFragment("Hey Ra'el! Council Active"),
+    'greeting-only is operator unsafe',
   )
 }

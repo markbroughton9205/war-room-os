@@ -5,6 +5,17 @@ export type ProviderTransportStatus = 'reachable' | 'unreachable' | 'unknown'
 export type ProviderAuthStatus = 'authenticated' | 'missing_key' | 'invalid_key' | 'unknown'
 export type ProviderLatencyStatus = 'ok' | 'slow' | 'timeout' | 'unknown'
 
+export type ProviderCallDiagnostics = {
+  prompt_chars: number | null
+  completion_chars: number | null
+  truncation_detected: boolean
+  retry_attempts: number
+  integrity_failures: number
+  fallback_used: boolean
+  last_retry_strategy: string | null
+  finish_reason: string | null
+}
+
 export type ProviderIntegrityRuntimeSnapshot = {
   transport_status: ProviderTransportStatus
   auth_status: ProviderAuthStatus
@@ -17,9 +28,23 @@ export type ProviderIntegrityRuntimeSnapshot = {
   retry_count: number
   fallback_used: boolean
   last_fallback_provider: ProviderRuntimeId | null
+  diagnostics: ProviderCallDiagnostics
 }
 
 const snapshots: Partial<Record<ProviderRuntimeId, ProviderIntegrityRuntimeSnapshot>> = {}
+
+function defaultDiagnostics(): ProviderCallDiagnostics {
+  return {
+    prompt_chars: null,
+    completion_chars: null,
+    truncation_detected: false,
+    retry_attempts: 0,
+    integrity_failures: 0,
+    fallback_used: false,
+    last_retry_strategy: null,
+    finish_reason: null,
+  }
+}
 
 function defaultSnapshot(): ProviderIntegrityRuntimeSnapshot {
   return {
@@ -34,6 +59,7 @@ function defaultSnapshot(): ProviderIntegrityRuntimeSnapshot {
     retry_count: 0,
     fallback_used: false,
     last_fallback_provider: null,
+    diagnostics: defaultDiagnostics(),
   }
 }
 
@@ -58,6 +84,7 @@ export function recordProviderIntegrityOutcome(args: {
   latencyMs?: number | null
   retryIncrement?: number
   fallbackProvider?: ProviderRuntimeId | null
+  diagnostics?: Partial<ProviderCallDiagnostics>
 }): ProviderIntegrityRuntimeSnapshot {
   const prev = snapshots[args.providerId] ?? defaultSnapshot()
   const now = new Date().toISOString()
@@ -69,6 +96,29 @@ export function recordProviderIntegrityOutcome(args: {
       : args.latencyMs > 12_000
         ? 'slow'
         : 'ok'
+
+  const diagIn = args.diagnostics ?? {}
+  const truncationDetected =
+    diagIn.truncation_detected
+    ?? (args.integrityStatus === 'TRUNCATED' || /truncat|max_tokens|length/i.test(args.reason))
+
+  const nextDiagnostics: ProviderCallDiagnostics = {
+    prompt_chars: diagIn.prompt_chars ?? prev.diagnostics.prompt_chars,
+    completion_chars: diagIn.completion_chars ?? prev.diagnostics.completion_chars,
+    truncation_detected: truncationDetected,
+    retry_attempts:
+      diagIn.retry_attempts ?? prev.diagnostics.retry_attempts + (args.retryIncrement ?? 0),
+    integrity_failures:
+      complete
+        ? prev.diagnostics.integrity_failures
+        : (diagIn.integrity_failures ?? prev.diagnostics.integrity_failures + 1),
+    fallback_used: Boolean(args.fallbackProvider) || diagIn.fallback_used === true || prev.diagnostics.fallback_used,
+    last_retry_strategy: diagIn.last_retry_strategy ?? prev.diagnostics.last_retry_strategy,
+    finish_reason: diagIn.finish_reason ?? prev.diagnostics.finish_reason,
+  }
+
+  const degradedQuality = args.integrityStatus === 'DEGRADED_RESPONSE_QUALITY'
+  const degradedPrefix = degradedQuality ? 'DEGRADED_RESPONSE_QUALITY' : 'DEGRADED_RESPONSE_INTEGRITY'
 
   const next: ProviderIntegrityRuntimeSnapshot = {
     transport_status: args.transportStatus ?? prev.transport_status,
@@ -82,16 +132,17 @@ export function recordProviderIntegrityOutcome(args: {
       ? failures > 0
         ? prev.degraded_reason
         : null
-      : failures >= 2
-        ? `DEGRADED_RESPONSE_INTEGRITY: ${args.reason}`
+      : failures >= 1
+        ? `${degradedPrefix}: ${args.reason}`
         : args.reason,
     retry_count: prev.retry_count + (args.retryIncrement ?? 0),
     fallback_used: Boolean(args.fallbackProvider) || prev.fallback_used,
     last_fallback_provider: args.fallbackProvider ?? prev.last_fallback_provider,
+    diagnostics: nextDiagnostics,
   }
 
   if (!complete && failures >= 2) {
-    next.degraded_reason = `DEGRADED_RESPONSE_INTEGRITY: ${args.reason}`
+    next.degraded_reason = `${degradedPrefix}: ${args.reason}`
   }
 
   snapshots[args.providerId] = next
@@ -101,5 +152,9 @@ export function recordProviderIntegrityOutcome(args: {
 export function resetProviderIntegrityRetryCount(providerId: ProviderRuntimeId): void {
   const prev = snapshots[providerId]
   if (!prev) return
-  snapshots[providerId] = { ...prev, retry_count: 0 }
+  snapshots[providerId] = {
+    ...prev,
+    retry_count: 0,
+    diagnostics: { ...prev.diagnostics, retry_attempts: 0, last_retry_strategy: null },
+  }
 }

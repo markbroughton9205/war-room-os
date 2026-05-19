@@ -62,6 +62,7 @@ import {
   type LiveResearchClientUi,
 } from '@/lib/runtime/liveResearchEvidencePacket'
 import { buildFamilyIntelligenceFrame } from '@/lib/intelligence/familyFeedRouter'
+import { buildGrokRssIntelligenceAugment } from '@/lib/intelligence/grokRssFallback'
 import { evaluateMandatoryLiveRetrieval } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import { orchestrateProviderResponse } from '@/lib/providers/retryOrchestration'
 import { registerCouncilProviderPacketOnBus } from '@/lib/orchestration/deliberation'
@@ -195,7 +196,7 @@ function validateProviderResults(
       violations.push(`⚠ ${result.family}: provider timed out after ${cap}ms`)
     }
     if (result.status === 'OK' && content.length >= 5) {
-      const integrity = validateProviderResponseIntegrity(content, { minLength: 60 })
+      const integrity = validateProviderResponseIntegrity(content, { minLength: 60, councilMode: true })
       if (integrity.integrity_status !== 'COMPLETE') {
         violations.push(
           `⚠ ${result.family}: response integrity ${integrity.integrity_status} (${integrity.reason})`,
@@ -1013,10 +1014,21 @@ export async function POST(req: Request) {
         }
       }
 
+      let grokAugmentBlock = augmentBlock
+      if (
+        councilSingleFamily === 'grok'
+        && (!liveResearchPacket?.usedLiveResearch || !liveResearchPacket?.intelligencePacket)
+      ) {
+        const rssAugment = await buildGrokRssIntelligenceAugment()
+        if (rssAugment) {
+          grokAugmentBlock = [grokAugmentBlock, '\n\n', rssAugment].join('')
+        }
+      }
+
       const userPrompt = buildCouncilUserPrompt({
         raelDirectiveText,
         threadBlock: thread,
-        augmentBlock,
+        augmentBlock: grokAugmentBlock,
         intentLabel: intentState.intent,
         modeGovernorBlock,
       })
@@ -1270,6 +1282,11 @@ export async function POST(req: Request) {
           retryCount: orchestrated.retryCount,
           fallbackUsed: orchestrated.fallbackUsed,
           fallbackProvider: orchestrated.fallbackProvider,
+          promptChars: orchestrated.diagnostics?.promptChars ?? userPrompt.length,
+          completionLength: orchestrated.diagnostics?.completionChars ?? responseText.length,
+          truncationDetected: orchestrated.diagnostics?.truncationDetected ?? false,
+          retryStrategies: orchestrated.diagnostics?.retryStrategies ?? [],
+          degradedQuality: orchestrated.integrity.degraded_quality ?? false,
           ...(orchestrated.diagnosticFragment
             ? { diagnosticFragment: orchestrated.diagnosticFragment }
             : {}),
@@ -1278,7 +1295,11 @@ export async function POST(req: Request) {
         responseText = orchestrated.displayText
         if (orchestrated.integrity.integrity_status !== 'COMPLETE') {
           councilResponseCompletion =
-            orchestrated.integrity.integrity_status === 'TRUNCATED' ? 'truncated' : 'partial'
+            orchestrated.integrity.integrity_status === 'TRUNCATED'
+              ? 'truncated'
+              : orchestrated.integrity.integrity_status === 'DEGRADED_RESPONSE_QUALITY'
+                ? 'partial'
+                : 'partial'
         }
       }
 

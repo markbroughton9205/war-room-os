@@ -22,6 +22,11 @@ type ProviderRuntimeStatus = {
   retryCount?: number
   fallbackUsed?: boolean
   degradedReason?: string | null
+  promptChars?: number | null
+  completionChars?: number | null
+  truncationDetected?: boolean
+  integrityFailureCount?: number
+  lastRetryStrategy?: string | null
 }
 
 type ProviderRuntimeSummary = {
@@ -204,6 +209,15 @@ export function ProviderRuntimePanel() {
               <MiniMetric label="Last incomplete" value={timeLabel(provider.lastIncompleteResponseAt ?? null)} />
               <MiniMetric label="Retry count" value={String(provider.retryCount ?? 0)} />
               <MiniMetric label="Fallback used" value={provider.fallbackUsed ? 'yes' : 'no'} />
+              {provider.family === 'gemini' ? (
+                <>
+                  <MiniMetric label="Prompt size" value={provider.promptChars != null ? String(provider.promptChars) : '—'} />
+                  <MiniMetric label="Completion len" value={provider.completionChars != null ? String(provider.completionChars) : '—'} />
+                  <MiniMetric label="Truncation" value={provider.truncationDetected ? 'yes' : 'no'} />
+                  <MiniMetric label="Integrity fails" value={String(provider.integrityFailureCount ?? 0)} />
+                  <MiniMetric label="Last retry" value={provider.lastRetryStrategy ?? 'none'} />
+                </>
+              ) : null}
             </div>
             {provider.degradedReason ? (
               <p className="mt-2 text-[10px] text-amber-200/90">{provider.degradedReason}</p>

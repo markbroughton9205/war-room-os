@@ -19,6 +19,16 @@ function mockIntegrity(
     degraded_reason: null,
     retry_count: 0,
     fallback_used: false,
+    diagnostics: {
+      prompt_chars: null,
+      completion_chars: null,
+      truncation_detected: false,
+      retry_attempts: 0,
+      integrity_failures: 0,
+      fallback_used: false,
+      last_retry_strategy: null,
+      finish_reason: null,
+    },
     ...overrides,
   }
 }

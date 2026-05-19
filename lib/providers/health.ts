@@ -26,6 +26,7 @@ export type ProviderResponseIntegrityFields = Pick<
   | 'degraded_reason'
   | 'retry_count'
   | 'fallback_used'
+  | 'diagnostics'
 >
 
 export type ProviderRuntimeStatus = {
@@ -145,6 +146,7 @@ function integrityFieldsFor(id: ProviderRuntimeId, health: ProviderRuntimeHealth
     degraded_reason: snap.degraded_reason,
     retry_count: snap.retry_count,
     fallback_used: snap.fallback_used,
+    diagnostics: { ...snap.diagnostics },
   }
 }
 
