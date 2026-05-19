@@ -220,6 +220,11 @@ const RepairPacketPanel = dynamic(
   },
 )
 
+const CouncilDeliberationStream = dynamic(
+  () => import('@/components/war-room/council/CouncilDeliberationStream').then(mod => mod.CouncilDeliberationStream),
+  { ssr: false },
+)
+
 type CouncilMessage = {
   id: string
   familyName: string
@@ -10030,6 +10035,7 @@ function Home() {
             />
           </div>
           <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />
+          <CouncilDeliberationStream threadId={liveCouncilConvId} enabled={operatorTab === 'command'} />
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"

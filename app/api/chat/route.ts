@@ -64,6 +64,7 @@ import {
 import { buildFamilyIntelligenceFrame } from '@/lib/intelligence/familyFeedRouter'
 import { evaluateMandatoryLiveRetrieval } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import { orchestrateProviderResponse } from '@/lib/providers/retryOrchestration'
+import { registerCouncilProviderPacketOnBus } from '@/lib/orchestration/deliberation'
 import {
   operatorSafeIncompleteMessage,
   validateProviderResponseIntegrity,
@@ -1447,6 +1448,16 @@ export async function POST(req: Request) {
           conversationId,
           extraMetadata: { councilSingleFamily, route: '/api/chat' },
         })
+      }
+
+      if (conversationId && councilSingleFamily) {
+        await registerCouncilProviderPacketOnBus({
+          client: sup.ok ? sup.client : null,
+          threadId: conversationId,
+          family: councilSingleFamily,
+          displayText: responseText,
+          correlationId: conversationId,
+        }).catch(() => undefined)
       }
 
       if (sequentialDiagnostic && diagnosticIntentMode !== 'none' && councilSingleFamily) {

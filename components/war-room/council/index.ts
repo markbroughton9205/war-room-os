@@ -1,4 +1,5 @@
 export { BabyObserverNode } from './BabyObserverNode'
+export { CouncilDeliberationStream } from './CouncilDeliberationStream'
 export { CouncilTable } from './CouncilTable'
 export { FamilySeat } from './FamilySeat'
 export { SentinelStatusPanel } from './SentinelStatusPanel'
