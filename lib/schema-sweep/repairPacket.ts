@@ -131,6 +131,16 @@ export function issuesForTable(table: ExpectedTable, diagnostic: SchemaTableDiag
       severity: 'medium',
     }))
   }
+  for (const constraint of diagnostic.missingConstraints) {
+    issues.push(createSchemaIssue({
+      kind: 'app_schema_drift',
+      table,
+      title: `${constraint} constraint needs verification`,
+      missingObject: objectLabel('app_schema_drift', table.name, constraint),
+      impact: `${table.label} may be missing a check or integrity constraint from the canonical migration.`,
+      severity: 'medium',
+    }))
+  }
   if (diagnostic.rlsStatus === 'missing') {
     issues.push(createSchemaIssue({
       kind: 'missing_rls',

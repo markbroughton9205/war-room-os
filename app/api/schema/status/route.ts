@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { runSchemaSweep } from '@/lib/schema-sweep'
+import { runSchemaSweep, sanitizePersistenceNote } from '@/lib/schema-sweep'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -10,7 +10,7 @@ export async function GET() {
   return NextResponse.json({
     generatedAt: snapshot.generatedAt,
     persistenceHealth: snapshot.persistenceHealth,
-    persistenceNote: snapshot.persistenceNote,
+    persistenceNote: sanitizePersistenceNote(snapshot.persistenceNote),
     summary: snapshot.summary,
     affectedFeatures: snapshot.affectedFeatures,
     missingTables: snapshot.tables.filter(table => table.status === 'missing'),

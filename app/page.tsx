@@ -220,6 +220,18 @@ const RepairPacketPanel = dynamic(
   },
 )
 
+const SchemaSweepPanel = dynamic(
+  () => import('@/components/war-room/schema/SchemaSweepPanel').then(mod => mod.SchemaSweepPanel),
+  {
+    ssr: false,
+    loading: () => (
+      <section className="rounded border border-violet-500/20 bg-black/20 p-3 text-[10px] tracking-widest text-violet-200">
+        Schema sweep loading on demand.
+      </section>
+    ),
+  },
+)
+
 const CouncilDeliberationStream = dynamic(
   () => import('@/components/war-room/council/CouncilDeliberationStream').then(mod => mod.CouncilDeliberationStream),
   { ssr: false },
@@ -10317,6 +10329,7 @@ function Home() {
                   onGenerateRevenuePacket={generateRevenueActionPacket}
                   onSaveLessonCandidate={saveLessonCandidateFromCompression}
                 />
+                <SchemaSweepPanel />
                 <EngineeringLaneManualPanel latest={latestEngineeringTaskPacket} />
                 <RepairPacketPanel latest={latestRepairPacket} />
                 <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />

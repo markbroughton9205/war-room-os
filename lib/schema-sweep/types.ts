@@ -13,42 +13,14 @@ export type SchemaIssueKind =
 
 export type SchemaIssueSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info'
 
-export type SchemaFeatureId =
-  | 'baby_ai'
-  | 'signals'
-  | 'revenue'
-  | 'outcomes'
-  | 'growth_calendar'
-  | 'commander'
-  | 'runtime'
-  | 'council_repair'
-  | 'memory'
-  | 'files_evidence'
-  | 'approvals'
+import type {
+  ExpectedColumn,
+  ExpectedMigration,
+  ExpectedTable,
+  SchemaFeatureId,
+} from '@/schema/war-room-schema-manifest'
 
-export type ExpectedColumn = {
-  name: string
-  type?: string
-  nullable?: boolean
-}
-
-export type ExpectedTable = {
-  name: string
-  feature: SchemaFeatureId
-  label: string
-  migrationFile: string
-  columns: ExpectedColumn[]
-  indexes: string[]
-  rlsRequired: boolean
-  serviceRolePolicy: string | null
-  exactRepairSql?: string
-}
-
-export type ExpectedMigration = {
-  file: string
-  feature: SchemaFeatureId
-  label: string
-}
+export type { ExpectedColumn, ExpectedMigration, ExpectedTable, SchemaFeatureId }
 
 export type SchemaTableDiagnostic = {
   table: string
@@ -59,6 +31,7 @@ export type SchemaTableDiagnostic = {
   checkedColumns: string[]
   missingColumns: string[]
   missingIndexes: string[]
+  missingConstraints: string[]
   rlsStatus: 'required' | 'verified' | 'missing' | 'unknown'
   policyStatus: 'required' | 'verified' | 'missing' | 'unknown'
   permission: 'ok' | 'failed' | 'unknown'
@@ -73,6 +46,34 @@ export type SchemaMigrationDiagnostic = {
   missingMigrations: string[]
   orphanedMigrations: string[]
   detail: string
+  heuristic?: boolean
+}
+
+export type SchemaSweepStatus = 'healthy' | 'drift_detected' | 'incomplete' | 'error'
+
+export type SchemaSweepDiff = {
+  missingTables: string[]
+  missingColumns: Array<{ table: string; column: string }>
+  missingIndexes: Array<{ table: string; index: string }>
+  missingConstraints: Array<{ table: string; constraint: string }>
+  schemaDrift: boolean
+  introspectionMode: 'catalog_rpc' | 'information_schema' | 'postgrest_probe'
+  introspectionNote: string
+}
+
+export type SchemaSweepApiResponse = {
+  status: SchemaSweepStatus
+  missingTables: string[]
+  missingColumns: Array<{ table: string; column: string }>
+  missingIndexes: Array<{ table: string; index: string }>
+  missingConstraints: Array<{ table: string; constraint: string }>
+  checkedAt: string
+  recommendedNextAction: string
+  introspectionMode: SchemaSweepDiff['introspectionMode']
+  introspectionNote: string
+  migrations: SchemaMigrationDiagnostic
+  repairPacketAvailable: boolean
+  snapshot: SchemaSweepSnapshot
 }
 
 export type SchemaSweepIssue = {
@@ -115,6 +116,8 @@ export type SchemaSweepSnapshot = {
     readyTables: number
     missingTables: number
     missingColumns: number
+    missingIndexes: number
+    missingConstraints: number
     permissionFailures: number
     staleSchemaCacheSymptoms: number
     missingPolicies: number
