@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CanonicalStatusBadge } from '@/components/war-room/runtime/CanonicalStatusBadge'
 import type { SignalResult, SignalSnapshot, SignalSourceDefinition } from '@/lib/signals/model'
+import { signalCardDisplayLabel } from '@/lib/signals/freshness'
 
 function label(value: string) {
   return value.replace(/_/g, ' ')
@@ -56,13 +57,6 @@ function formatDateTime(value: string | null | undefined) {
   return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString() : value
 }
 
-function signalAgeLabel(signal: SignalResult) {
-  const status = typeof signal.metadata.freshnessStatus === 'string' ? signal.metadata.freshnessStatus : null
-  const ageDays = typeof signal.metadata.ageDays === 'number' ? signal.metadata.ageDays : null
-  if (!status) return null
-  return ageDays === null ? status : `${status} · ${ageDays}d`
-}
-
 function SourcePill({ source }: { source: SignalSourceDefinition }) {
   return (
     <li className="rounded border border-white/10 p-2 text-[10px]">
@@ -82,9 +76,17 @@ function SignalCard({ signal, compact = false }: { signal: SignalResult; compact
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h4 className="text-sm font-semibold text-white">{signal.title}</h4>
+            {signal.url.startsWith('https://') ? (
+              <h4 className="text-sm font-semibold text-white">
+                <a href={signal.url} target="_blank" rel="noopener noreferrer" className="underline decoration-cyan-500/40 hover:text-cyan-100">
+                  {signal.title}
+                </a>
+              </h4>
+            ) : (
+              <h4 className="text-sm font-semibold text-white">{signal.title}</h4>
+            )}
             <Badge value={signal.approvalStatus} />
-            {signalAgeLabel(signal) ? <Badge value={signalAgeLabel(signal) ?? ''} /> : null}
+            <Badge value={signalCardDisplayLabel(signal.metadata)} />
           </div>
           <p className="mt-1 text-[10px] text-slate-500">
             {label(signal.category)} · {signal.source} · {signal.provider}
@@ -108,9 +110,18 @@ function SignalCard({ signal, compact = false }: { signal: SignalResult; compact
           <div className="mt-3 rounded border border-cyan-500/20 bg-cyan-500/5 p-2 text-[10px] leading-relaxed text-cyan-100">
             Recommended next action: {signal.recommendedNextAction}
           </div>
-          <a className="mt-2 block truncate text-[10px] text-slate-500 underline decoration-slate-700" href={signal.url} target="_blank" rel="noreferrer">
-            {signal.url}
-          </a>
+          {signal.url.startsWith('https://') ? (
+            <a
+              href={signal.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex rounded border border-cyan-400/30 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-cyan-200 hover:bg-cyan-400/10"
+            >
+              Open Source
+            </a>
+          ) : (
+            <p className="mt-2 text-[10px] uppercase tracking-widest text-slate-500">Source URL unavailable</p>
+          )}
         </>
       ) : null}
     </article>
@@ -176,6 +187,7 @@ export function SignalRadarPanel() {
     [snapshot?.results],
   )
   const freshness = snapshot?.latestScan?.freshnessSummary
+  const cacheDiagnostics = snapshot?.cacheDiagnostics
 
   return (
     <section className="mx-auto mt-14 max-w-6xl border-t border-cyan-900/50 pt-10">
@@ -212,10 +224,16 @@ export function SignalRadarPanel() {
 
       <div className="mb-4 grid gap-3 md:grid-cols-5">
         <MiniMetric label="Latest Scan Time" value={formatDateTime(freshness?.latestScanTime ?? snapshot?.latestScan?.completedAt)} />
-        <MiniMetric label="Max Age" value={`${freshness?.maxAgeDays ?? 14}d`} />
-        <MiniMetric label="Fresh Accepted" value={String(freshness?.freshResultCount ?? snapshot?.results.length ?? 0)} />
-        <MiniMetric label="Stale Discarded" value={String(freshness?.staleDiscardedCount ?? 0)} />
-        <MiniMetric label="Oldest Accepted" value={freshness?.oldestAcceptedAgeDays === null || freshness?.oldestAcceptedAgeDays === undefined ? 'none' : `${freshness.oldestAcceptedAgeDays}d`} />
+        <MiniMetric label="Max Age" value={`${freshness?.maxAgeDays ?? 30}d`} />
+        <MiniMetric label="Fresh Accepted" value={String(cacheDiagnostics?.freshAcceptedCount ?? freshness?.liveCount ?? 0)} />
+        <MiniMetric label="Recent Accepted" value={String(cacheDiagnostics?.recentAcceptedCount ?? freshness?.recentCount ?? 0)} />
+        <MiniMetric label="Stale Suppressed" value={String(cacheDiagnostics?.staleSuppressedCount ?? freshness?.staleDiscardedCount ?? 0)} />
+      </div>
+
+      <div className="mb-4 grid gap-3 md:grid-cols-3">
+        <MiniMetric label="Oldest Active" value={cacheDiagnostics?.oldestActiveResultAgeDays === null || cacheDiagnostics?.oldestActiveResultAgeDays === undefined ? 'none' : `${cacheDiagnostics.oldestActiveResultAgeDays}d`} />
+        <MiniMetric label="Oldest Stored" value={cacheDiagnostics?.oldestStoredResultAgeDays === null || cacheDiagnostics?.oldestStoredResultAgeDays === undefined ? 'none' : `${cacheDiagnostics.oldestStoredResultAgeDays}d`} />
+        <MiniMetric label="Cache Filtered" value={String(cacheDiagnostics?.cacheFilteredCount ?? freshness?.cacheFilteredCount ?? 0)} />
       </div>
 
       {snapshot?.migrationStatus === 'MIGRATION_REQUIRED' ? (

@@ -1,5 +1,11 @@
 import { getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/configuration/envAlias'
-import type { NewsCategory, NewsDashboardCard, NewsDashboardSnapshot } from '@/lib/intelligence/environment/liveEnvironmentTypes'
+import type { NewsCategory, NewsDashboardCard, NewsDashboardSnapshot, NewsFreshnessDiagnostics } from '@/lib/intelligence/environment/liveEnvironmentTypes'
+import {
+  evaluateFreshness,
+  LIVE_SIGNAL_MAX_AGE_DAYS,
+  newsCardDisplayLabel,
+  newsDateWindow,
+} from '@/lib/signals/freshness'
 
 const NEWS_TIMEOUT_MS = 8000
 const NEWS_ENV_NAMES = [...getEnvAliasNames('newsRssFeeds'), ...getEnvAliasNames('newsApiKey'), ...getEnvAliasNames('guardianApiKey')]
@@ -147,6 +153,80 @@ function signalForCategory(category: NewsCategory): NewsDashboardCard['signalLab
   return 'verified'
 }
 
+function buildNewsCard(input: {
+  id: string
+  title: string
+  url: string | null
+  sourceName: string
+  category: NewsCategory
+  imageUrl: string | null
+  publishedAt: string | null
+  fetchedAt: string
+  detail: string
+  provider: NonNullable<NewsDashboardCard['provider']>
+  confidenceLabel: NewsDashboardCard['confidenceLabel']
+}): NewsDashboardCard | null {
+  const freshness = evaluateFreshness(input.publishedAt, {
+    maxAgeDays: LIVE_SIGNAL_MAX_AGE_DAYS,
+    provider: input.provider === 'newsapi' || input.provider === 'guardian' ? input.provider : 'rss',
+  })
+  if (!freshness.acceptedForLiveSignal) return null
+  return {
+    id: input.id,
+    title: input.title,
+    url: input.url,
+    sourceName: input.sourceName,
+    category: input.category,
+    imageUrl: input.imageUrl,
+    publishedAt: freshness.publishedAt,
+    freshness: freshnessLabel(freshness.publishedAt, input.fetchedAt),
+    sourceStatus: freshness.sourceStatus,
+    freshnessStatus: freshness.status,
+    operationalStatus: freshness.operationalStatus,
+    displayLabel: newsCardDisplayLabel({
+      sourceStatus: freshness.sourceStatus,
+      freshnessStatus: freshness.status,
+      operationalStatus: freshness.operationalStatus,
+    }),
+    confidenceLabel: input.confidenceLabel,
+    signalLabel: signalForCategory(input.category),
+    detail: input.detail,
+    provider: input.provider,
+  }
+}
+
+function newsFreshnessDiagnostics(stored: NewsDashboardCard[], active: NewsDashboardCard[]): NewsFreshnessDiagnostics {
+  let oldestStoredAgeDays: number | null = null
+  for (const card of stored) {
+    const provider = card.provider === 'newsapi' || card.provider === 'guardian' ? card.provider : 'rss'
+    const freshness = evaluateFreshness(card.publishedAt, { maxAgeDays: LIVE_SIGNAL_MAX_AGE_DAYS, provider })
+    if (freshness.ageDays !== null) {
+      oldestStoredAgeDays = oldestStoredAgeDays === null ? freshness.ageDays : Math.max(oldestStoredAgeDays, freshness.ageDays)
+    }
+  }
+  let oldestActiveResultAgeDays: number | null = null
+  let freshAcceptedCount = 0
+  let recentAcceptedCount = 0
+  for (const card of active) {
+    if (card.freshnessStatus === 'LIVE') freshAcceptedCount += 1
+    if (card.freshnessStatus === 'RECENT') recentAcceptedCount += 1
+    const provider = card.provider === 'newsapi' || card.provider === 'guardian' ? card.provider : 'rss'
+    const freshness = evaluateFreshness(card.publishedAt, { maxAgeDays: LIVE_SIGNAL_MAX_AGE_DAYS, provider })
+    if (freshness.ageDays !== null) {
+      oldestActiveResultAgeDays = oldestActiveResultAgeDays === null ? freshness.ageDays : Math.max(oldestActiveResultAgeDays, freshness.ageDays)
+    }
+  }
+  const cacheFilteredCount = Math.max(0, stored.length - active.length)
+  return {
+    freshAcceptedCount,
+    recentAcceptedCount,
+    staleSuppressedCount: cacheFilteredCount,
+    oldestActiveResultAgeDays,
+    oldestStoredResultAgeDays: oldestStoredAgeDays,
+    cacheFilteredCount,
+  }
+}
+
 async function fetchText(url: string): Promise<string> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), NEWS_TIMEOUT_MS)
@@ -191,7 +271,7 @@ function parseFeedItems(feed: FeedRegistration, xml: string, fetchedAt: string):
     const link = textBetween(item, 'link') ?? attr(item.match(/<link\b[^>]*>/i)?.[0] ?? '', 'href')
     const publishedRaw = textBetween(item, 'pubDate') ?? textBetween(item, 'published') ?? textBetween(item, 'updated')
     const publishedAt = publishedRaw && Number.isFinite(Date.parse(publishedRaw)) ? new Date(publishedRaw).toISOString() : null
-    return [{
+    const card = buildNewsCard({
       id: `${feed.name}-${index}-${title}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80),
       title,
       url: link,
@@ -199,12 +279,12 @@ function parseFeedItems(feed: FeedRegistration, xml: string, fetchedAt: string):
       category: feed.category,
       imageUrl: imageFromItem(item),
       publishedAt,
-      freshness: freshnessLabel(publishedAt, fetchedAt),
+      fetchedAt,
       confidenceLabel: feed.category === 'local' || feed.category === 'regional' ? 'emerging' : 'verified',
-      signalLabel: signalForCategory(feed.category),
       detail: `${feed.category} RSS item from a configured source. Thumbnail is shown only when the feed provides media metadata.`,
       provider: 'rss',
-    }]
+    })
+    return card ? [card] : []
   })
 }
 
@@ -217,7 +297,7 @@ function parseNewsApiArticles(data: NewsApiResponse, fetchedAt: string): NewsDas
       ? new Date(article.publishedAt).toISOString()
       : null
     const sourceName = article.source?.name?.trim() || 'NewsAPI source'
-    return [{
+    const card = buildNewsCard({
       id: `newsapi-${sourceName}-${index}-${title}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80),
       title,
       url: article.url ?? null,
@@ -225,14 +305,14 @@ function parseNewsApiArticles(data: NewsApiResponse, fetchedAt: string): NewsDas
       category: 'national',
       imageUrl: article.urlToImage ?? null,
       publishedAt,
-      freshness: freshnessLabel(publishedAt, fetchedAt),
+      fetchedAt,
       confidenceLabel: 'verified',
-      signalLabel: 'verified',
       detail: article.description?.trim()
         ? `Source-backed NewsAPI headline. ${article.description.trim()}`
         : 'Source-backed NewsAPI headline. Image is shown only when the source provides one.',
       provider: 'newsapi',
-    }]
+    })
+    return card ? [card] : []
   })
 }
 
@@ -252,7 +332,7 @@ function parseGuardianCards(data: GuardianResponse, fetchedAt: string): NewsDash
     const imageUrl = article.fields?.thumbnail?.startsWith('https://') ? article.fields.thumbnail : null
     const section = article.sectionName?.toLowerCase()
     const category: NewsCategory = section?.includes('world') ? 'international' : section?.includes('us') ? 'national' : 'national'
-    return [{
+    const card = buildNewsCard({
       id: `guardian-${article.id ?? index}-${title}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80),
       title,
       url: article.webUrl ?? null,
@@ -260,22 +340,26 @@ function parseGuardianCards(data: GuardianResponse, fetchedAt: string): NewsDash
       category,
       imageUrl,
       publishedAt,
-      freshness: freshnessLabel(publishedAt, fetchedAt),
+      fetchedAt,
       confidenceLabel: 'verified',
-      signalLabel: 'verified',
       detail: article.fields?.trailText?.trim()
         ? `Source-backed Guardian story. ${cleanXml(article.fields.trailText)}`
         : 'Source-backed Guardian story. Thumbnail is shown only when Guardian provides one.',
       provider: 'guardian',
-    }]
+    })
+    return card ? [card] : []
   })
 }
 
 async function fetchGuardianCards(apiKey: string, fetchedAt: string): Promise<NewsDashboardCard[]> {
+  const { fromDate, toDate } = newsDateWindow(LIVE_SIGNAL_MAX_AGE_DAYS)
   const params = new URLSearchParams({
     'api-key': apiKey,
     'show-fields': 'thumbnail,trailText',
     'page-size': '12',
+    'from-date': fromDate,
+    'to-date': toDate,
+    'order-by': 'newest',
     q: 'Akron OR "Summit County" OR business OR economy OR weather OR public safety',
   })
   return parseGuardianCards(await fetchJson<GuardianResponse>(`https://content.guardianapis.com/search?${params.toString()}`), fetchedAt)
@@ -303,7 +387,11 @@ export async function buildNewsDashboardSnapshot(): Promise<NewsDashboardSnapsho
   const guardianCards = guardianResults.flatMap(result => result.status === 'fulfilled' ? result.value : [])
   const rssCards = rssResults.flatMap(result => result.status === 'fulfilled' ? result.value : [])
   const apiCards = apiResults.flatMap(result => result.status === 'fulfilled' ? result.value : [])
-  const cards = dedupeCards([...guardianCards, ...rssCards, ...apiCards]).slice(0, 12)
+  const storedCards = dedupeCards([...guardianCards, ...rssCards, ...apiCards])
+  const cards = storedCards
+    .filter(card => card.operationalStatus === 'ACTIONABLE')
+    .slice(0, 12)
+  const freshnessDiagnostics = newsFreshnessDiagnostics(storedCards, cards)
   const failures = [...guardianResults, ...rssResults, ...apiResults].filter(result => result.status === 'rejected').length
   const sourceParts = [
     guardianApiKey ? 'Guardian content API' : null,
@@ -335,6 +423,13 @@ export async function buildNewsDashboardSnapshot(): Promise<NewsDashboardSnapsho
       `RSS cards: ${rssCards.length}`,
       `NewsAPI cards: ${apiCards.length}`,
       `Failed source requests: ${failures}`,
+      `Fresh accepted: ${freshnessDiagnostics.freshAcceptedCount}`,
+      `Recent accepted: ${freshnessDiagnostics.recentAcceptedCount}`,
+      `Stale suppressed: ${freshnessDiagnostics.staleSuppressedCount}`,
+      `Cache filtered: ${freshnessDiagnostics.cacheFilteredCount}`,
+      `Oldest active age: ${freshnessDiagnostics.oldestActiveResultAgeDays ?? 'none'}d`,
+      `Oldest stored age: ${freshnessDiagnostics.oldestStoredResultAgeDays ?? 'none'}d`,
     ],
+    freshnessDiagnostics,
   }
 }

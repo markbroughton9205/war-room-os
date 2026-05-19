@@ -89,8 +89,10 @@ function freshnessSummary(
     staleDiscardedCount,
     unknownDateDiscardedCount,
     oldestAcceptedAgeDays,
+    oldestStoredAgeDays: oldestAcceptedAgeDays,
     liveCount,
     recentCount,
+    cacheFilteredCount: 0,
   }
 }
 

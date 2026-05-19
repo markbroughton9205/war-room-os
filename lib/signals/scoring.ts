@@ -1,5 +1,5 @@
 import type { BabySignalFamily, SignalCategory, SignalRawItem, SignalResult, SignalScores } from './model'
-import { recencyPenaltyForItem } from './freshness'
+import { enrichSignalResult, recencyPenaltyForItem } from './freshness'
 
 const CATEGORY_DEFAULTS: Record<SignalCategory, Partial<SignalScores>> = {
   freight: { incomePotential: 74, urgency: 68, startupCost: 48, timeToProfit: 64, repeatability: 70, strategicAlignment: 72, familyImpact: 48 },
@@ -153,7 +153,7 @@ export function scoreSignalItem(item: SignalRawItem, scanId: string | null): Sig
     highestLeverage,
   }
 
-  return {
+  return enrichSignalResult({
     id: `sig-${slug(item.url)}-${slug(item.title).slice(0, 24)}`,
     scanId,
     title: compact(item.title, 180),
@@ -179,7 +179,7 @@ export function scoreSignalItem(item: SignalRawItem, scanId: string | null): Sig
       hiddenExecutionAllowed: false,
       incomeClaimed: false,
     },
-  }
+  })
 }
 
 export function dedupeAndRankSignals(results: SignalResult[]): SignalResult[] {

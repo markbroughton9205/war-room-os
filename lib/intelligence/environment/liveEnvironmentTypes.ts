@@ -1,5 +1,6 @@
 import type { EvidenceConfidenceTier } from '@/lib/intelligence/intelligencePacket'
 import type { EnvAliasDiagnostic } from '@/lib/configuration/envAlias'
+import type { SignalFreshnessStatus, SignalOperationalStatus, SignalSourceStatus } from '@/lib/signals/model'
 
 export type ProviderAvailability = 'available' | 'unavailable' | 'error'
 export type WeatherProviderState = 'configured_but_fetch_failed' | 'configured_and_live' | 'missing_key' | 'missing_provider'
@@ -63,10 +64,23 @@ export type NewsDashboardCard = {
   imageUrl: string | null
   publishedAt: string | null
   freshness: string
+  sourceStatus: SignalSourceStatus
+  freshnessStatus: SignalFreshnessStatus
+  operationalStatus: SignalOperationalStatus
+  displayLabel: string
   confidenceLabel: EvidenceConfidenceTier
   signalLabel: 'verified' | 'emerging' | 'weak-signal'
   detail: string
   provider?: 'guardian' | 'newsapi' | 'rss' | 'intelligence'
+}
+
+export type NewsFreshnessDiagnostics = {
+  freshAcceptedCount: number
+  recentAcceptedCount: number
+  staleSuppressedCount: number
+  oldestActiveResultAgeDays: number | null
+  oldestStoredResultAgeDays: number | null
+  cacheFilteredCount: number
 }
 
 export type NewsDashboardSnapshot = {
@@ -78,6 +92,7 @@ export type NewsDashboardSnapshot = {
   source: string
   detail: string
   diagnostics?: string[]
+  freshnessDiagnostics?: NewsFreshnessDiagnostics
   setup?: EnvironmentSetupGuidance
 }
 

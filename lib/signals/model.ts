@@ -55,7 +55,12 @@ export type SignalFreshnessStatus =
   | 'LIVE'
   | 'RECENT'
   | 'STALE'
+  | 'ARCHIVAL'
   | 'UNKNOWN_DATE'
+
+export type SignalSourceStatus = 'VERIFIED' | 'UNVERIFIED' | 'UNKNOWN'
+
+export type SignalOperationalStatus = 'ACTIONABLE' | 'CONTEXT_ONLY' | 'EXCLUDED'
 
 export type BabySignalFamily =
   | 'Income Operations Baby'
@@ -162,8 +167,19 @@ export type SignalFreshnessSummary = {
   staleDiscardedCount: number
   unknownDateDiscardedCount: number
   oldestAcceptedAgeDays: number | null
+  oldestStoredAgeDays: number | null
   liveCount: number
   recentCount: number
+  cacheFilteredCount: number
+}
+
+export type SignalCacheFreshnessDiagnostics = {
+  freshAcceptedCount: number
+  recentAcceptedCount: number
+  staleSuppressedCount: number
+  oldestActiveResultAgeDays: number | null
+  oldestStoredResultAgeDays: number | null
+  cacheFilteredCount: number
 }
 
 export type SignalSnapshot = {
@@ -177,6 +193,7 @@ export type SignalSnapshot = {
   strongestSignal: SignalResult | null
   rejectedOrLowConfidence: SignalResult[]
   alerts: SignalAlert[]
+  cacheDiagnostics?: SignalCacheFreshnessDiagnostics
   integrations: {
     revenueEngine: string[]
     babyDailyBriefing: string[]

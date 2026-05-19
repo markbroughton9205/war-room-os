@@ -8,7 +8,6 @@ import type { ProviderConfigStatus } from '@/lib/configuration/providerConfigSta
 import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import { describeLocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import { buildHoroscopeSnapshot, type AstrologyInterpretationMode, type HoroscopePeriod } from '@/lib/intelligence/environment/horoscopeEnvironment'
-import { buildNewsCardsFromIntelligence } from '@/lib/intelligence/environment/newsCards'
 import { familyTipsForPanel, type FamilyTip } from '@/lib/familyTips'
 import type {
   EnvironmentSetupGuidance,
@@ -470,34 +469,17 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
     () => dashboard?.finance ?? buildFallbackFinance(),
     [dashboard?.finance],
   )
-  const intelligenceCards = useMemo(
-    () => buildNewsCardsFromIntelligence(liveResearchHud?.intelligence),
-    [liveResearchHud?.intelligence],
-  )
   const rssCards = dashboard?.news.cards ?? EMPTY_NEWS_CARDS
   const cards: NewsDashboardCard[] = useMemo(() => {
-    const fallbackCards: NewsDashboardCard[] = intelligenceCards.map(card => ({
-        id: card.id,
-        title: card.title,
-        url: null,
-        sourceName: card.sourceName,
-        category: 'national',
-        imageUrl: card.imageUrl ?? null,
-        publishedAt: null,
-        freshness: card.timestampLabel,
-        confidenceLabel: card.badge,
-        signalLabel: card.badge === 'weak_signal' ? 'weak-signal' : card.badge === 'verified' || card.badge === 'corroborated' ? 'verified' : 'emerging',
-        detail: card.detail,
-        provider: 'intelligence',
-      }))
     const seen = new Set<string>()
-    return [...rssCards, ...fallbackCards].filter(card => {
+    return rssCards.filter(card => {
+      if (card.operationalStatus !== 'ACTIONABLE') return false
       const key = (card.url ?? card.title).toLowerCase().replace(/\s+/g, ' ').trim()
       if (seen.has(key)) return false
       seen.add(key)
       return true
     })
-  }, [intelligenceCards, rssCards])
+  }, [rssCards])
   const activeNews = cards.length ? cards[activeNewsIndex % cards.length] : null
   const localNewsCards = useMemo(
     () => cards.filter(card => card.category === 'local' || card.category === 'regional' || /akron|summit county/i.test(`${card.title} ${card.detail}`)),
@@ -893,7 +875,13 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
                   </div>
                 )}
                 <div className="p-1.5">
-                  <p className="line-clamp-2 text-[9px] leading-snug text-slate-100">{activeNews.title}</p>
+                  {activeNews.url ? (
+                    <a href={activeNews.url} target="_blank" rel="noopener noreferrer" className="line-clamp-2 text-[9px] leading-snug text-slate-100 underline decoration-cyan-500/40 hover:text-cyan-100">
+                      {activeNews.title}
+                    </a>
+                  ) : (
+                    <p className="line-clamp-2 text-[9px] leading-snug text-slate-100">{activeNews.title}</p>
+                  )}
                   <p className="mt-1 truncate text-[8px] text-slate-500">
                     {activeNews.sourceName} · {activeNews.freshness} · {activeNews.provider ?? 'source'}
                   </p>
@@ -905,14 +893,32 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
           </summary>
           {activeNews ? (
             <div className="mt-2 rounded border border-white/5 p-1.5">
-              <p className="line-clamp-2 text-[9px] text-slate-200">{activeNews.title}</p>
+              {activeNews.url ? (
+                <a href={activeNews.url} target="_blank" rel="noopener noreferrer" className="line-clamp-2 text-[9px] text-slate-200 underline decoration-cyan-500/40 hover:text-cyan-100">
+                  {activeNews.title}
+                </a>
+              ) : (
+                <p className="line-clamp-2 text-[9px] text-slate-200">{activeNews.title}</p>
+              )}
               <p className="mt-1 truncate text-[8px] text-slate-500">
                 {activeNews.sourceName} · {activeNews.freshness} · {activeNews.category}
               </p>
               <p className="mt-1 inline-flex rounded border border-emerald-300/20 px-1.5 py-0.5 text-[7px] uppercase tracking-widest text-emerald-200">
-                {activeNews.confidenceLabel} · {activeNews.signalLabel}
+                {activeNews.displayLabel}
               </p>
               <p className="mt-1 text-[8px] text-slate-600">{activeNews.detail}</p>
+              {activeNews.url ? (
+                <a
+                  href={activeNews.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex rounded border border-cyan-400/30 px-2 py-1 text-[8px] font-bold uppercase tracking-widest text-cyan-200 hover:bg-cyan-400/10"
+                >
+                  Open Source
+                </a>
+              ) : (
+                <p className="mt-2 text-[8px] uppercase tracking-widest text-slate-500">Source URL unavailable</p>
+              )}
               <HandoffButtons decree={`Council, review this source-backed news signal from ${activeNews.sourceName}: ${activeNews.title}. Identify verified facts, operational relevance, contradictions, and unknowns.`} onCouncilHandoff={onCouncilHandoff} />
               {cards.length > 1 && (
                 <div className="mt-2 flex gap-1">

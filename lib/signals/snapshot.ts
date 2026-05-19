@@ -1,5 +1,5 @@
-import type { SignalAlert, SignalResult, SignalScan, SignalSnapshot, SignalSourceDefinition } from './model'
-import { isLiveSignalResult } from './freshness'
+import type { SignalAlert, SignalCacheFreshnessDiagnostics, SignalResult, SignalScan, SignalSnapshot, SignalSourceDefinition } from './model'
+import { isActiveSignalResult } from './freshness'
 
 function guardrails(): SignalSnapshot['guardrails'] {
   return {
@@ -87,12 +87,13 @@ export function buildSignalSnapshot(input: {
   latestScan: SignalScan | null
   results: SignalResult[]
   alerts: SignalAlert[]
+  cacheDiagnostics?: SignalCacheFreshnessDiagnostics
 }): SignalSnapshot {
   const ranked = [...input.results].sort((a, b) => b.scores.highestLeverage - a.scores.highestLeverage)
   const sourceBacked = ranked.filter(result => (
     result.guardrails.sourceBacked
     && result.url.startsWith('https://')
-    && isLiveSignalResult(result)
+    && isActiveSignalResult(result)
   ))
   const strongestSignal = sourceBacked.find(result => result.approvalStatus === 'pending_review') ?? null
   return {
@@ -106,6 +107,7 @@ export function buildSignalSnapshot(input: {
     strongestSignal,
     rejectedOrLowConfidence: sourceBacked.filter(result => result.approvalStatus === 'rejected' || result.approvalStatus === 'low_confidence'),
     alerts: buildAlerts(sourceBacked, input.alerts),
+    cacheDiagnostics: input.cacheDiagnostics,
     integrations: integrationLines(sourceBacked),
     guardrails: guardrails(),
   }

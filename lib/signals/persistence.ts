@@ -4,6 +4,14 @@ import { tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persist
 import type { SignalAlert, SignalResult, SignalScan, SignalSnapshot, SignalSourceDefinition } from './model'
 import { getSignalSources } from './sources'
 import { buildSignalSnapshot } from './snapshot'
+import {
+  activePublishedAtCutoff,
+  collectCacheFreshnessDiagnostics,
+  enrichSignalResult,
+  evaluateFreshness,
+  isActiveSignalResult,
+  publicationDateFromMetadata,
+} from './freshness'
 
 type Row = Record<string, unknown>
 
@@ -46,13 +54,19 @@ function freshnessSummary(value: unknown): SignalScan['freshnessSummary'] | unde
     staleDiscardedCount: num(record.staleDiscardedCount, 0),
     unknownDateDiscardedCount: num(record.unknownDateDiscardedCount, 0),
     oldestAcceptedAgeDays: nullableNum('oldestAcceptedAgeDays'),
+    oldestStoredAgeDays: nullableNum('oldestStoredAgeDays'),
     liveCount: num(record.liveCount, 0),
     recentCount: num(record.recentCount, 0),
+    cacheFilteredCount: num(record.cacheFilteredCount, 0),
   }
 }
 
 function signalMigrationRequired(message: string): boolean {
   return /schema cache|could not find table|relation .*war_room_signal_|war_room_signal_sources/i.test(message)
+}
+
+function publishedAtColumnMissing(message: string): boolean {
+  return /published_at|column .* does not exist/i.test(message)
 }
 
 function arrayValue(value: unknown): string[] {
@@ -89,13 +103,23 @@ function mapScan(row: Row): SignalScan {
   }
 }
 
+function publishedAtForRow(row: Row, metadata: Record<string, unknown>): string | null {
+  const column = nullableText(row.published_at)
+  if (column) return column
+  const freshness = evaluateFreshness(publicationDateFromMetadata(metadata), { provider: text(row.provider, 'manual_registry') as SignalResult['provider'] })
+  return freshness.publishedAt
+}
+
 function mapResult(row: Row): SignalResult {
-  return {
+  const metadata = objectValue(row.metadata)
+  const provider = text(row.provider, 'manual_registry') as SignalResult['provider']
+  const publishedAt = publishedAtForRow(row, metadata)
+  const base: SignalResult = {
     id: text(row.id),
     scanId: nullableText(row.scan_id),
     title: text(row.title),
     source: text(row.source),
-    provider: text(row.provider, 'manual_registry') as SignalResult['provider'],
+    provider,
     sourceKind: text(row.source_kind, 'manual_registry') as SignalResult['sourceKind'],
     url: text(row.url),
     summary: text(row.summary),
@@ -118,7 +142,7 @@ function mapResult(row: Row): SignalResult {
     assignedBabyFamily: text(row.assigned_baby_family, 'Analyst Baby') as SignalResult['assignedBabyFamily'],
     approvalStatus: text(row.approval_status, 'pending_review') as SignalResult['approvalStatus'],
     capturedAt: text(row.captured_at, new Date().toISOString()),
-    metadata: objectValue(row.metadata),
+    metadata: publishedAt && !metadata.publishedAt ? { ...metadata, publishedAt } : metadata,
     guardrails: {
       sourceBacked: true,
       recommendationOnly: true,
@@ -128,6 +152,7 @@ function mapResult(row: Row): SignalResult {
       incomeClaimed: false,
     },
   }
+  return enrichSignalResult(base)
 }
 
 function mapAlert(row: Row): SignalAlert {
@@ -139,6 +164,20 @@ function mapAlert(row: Row): SignalAlert {
     sourceAttribution: text(row.source_attribution),
     approvalRequired: true,
     canExecute: false,
+  }
+}
+
+function rowFreshnessFields(result: SignalResult): {
+  published_at: string | null
+  source_status: string
+  freshness_status: string
+  operational_status: string
+} {
+  return {
+    published_at: typeof result.metadata.publishedAt === 'string' ? result.metadata.publishedAt : null,
+    source_status: text(result.metadata.sourceStatus, 'UNKNOWN'),
+    freshness_status: text(result.metadata.freshnessStatus, 'UNKNOWN_DATE'),
+    operational_status: text(result.metadata.operationalStatus, 'EXCLUDED'),
   }
 }
 
@@ -184,9 +223,10 @@ async function insertScan(client: WarRoomSupabase, scan: SignalScan) {
 
 async function insertResults(client: WarRoomSupabase, results: SignalResult[]) {
   if (!results.length) return
+  const enriched = results.map(result => enrichSignalResult(result))
   const { error } = await client
     .from('war_room_signal_results')
-    .upsert(results.map(result => ({
+    .upsert(enriched.map(result => ({
       id: result.id,
       scan_id: result.scanId,
       title: result.title,
@@ -219,12 +259,13 @@ async function insertResults(client: WarRoomSupabase, results: SignalResult[]) {
       hidden_execution_allowed: false,
       income_claimed: false,
       metadata: result.metadata,
+      ...rowFreshnessFields(result),
     })), { onConflict: 'id' })
   if (error) throw new Error(error.message)
 
   const { error: scoreError } = await client
     .from('war_room_signal_scores')
-    .insert(results.map(result => ({
+    .insert(enriched.map(result => ({
       result_id: result.id,
       scan_id: result.scanId,
       category: result.category,
@@ -259,6 +300,30 @@ async function insertAlerts(client: WarRoomSupabase, scanId: string, alerts: Sig
       can_execute: false,
     })))
   if (error) throw new Error(error.message)
+}
+
+async function fetchActiveSignalRows(client: WarRoomSupabase, limit: number): Promise<{ rows: Row[]; usedDbFreshnessGate: boolean }> {
+  const cutoff = activePublishedAtCutoff()
+  const gated = await client
+    .from('war_room_signal_results')
+    .select('*')
+    .gte('published_at', cutoff)
+    .eq('operational_status', 'ACTIONABLE')
+    .order('highest_leverage_score', { ascending: false })
+    .limit(limit)
+
+  if (!gated.error) return { rows: (gated.data ?? []) as Row[], usedDbFreshnessGate: true }
+
+  if (!publishedAtColumnMissing(gated.error.message)) throw new Error(gated.error.message)
+
+  const fallback = await client
+    .from('war_room_signal_results')
+    .select('*')
+    .order('highest_leverage_score', { ascending: false })
+    .limit(Math.max(limit, 80))
+
+  if (fallback.error) throw new Error(fallback.error.message)
+  return { rows: (fallback.data ?? []) as Row[], usedDbFreshnessGate: false }
 }
 
 export async function persistSignalScan(input: {
@@ -302,14 +367,14 @@ export async function listPersistedSignalSnapshot(limit = 40): Promise<SignalSna
     })
   }
 
-  const [sources, scans, results, alerts] = await Promise.all([
+  const [sources, scans, resultsQuery, alerts] = await Promise.all([
     supabase.client.from('war_room_signal_sources').select('*').order('label', { ascending: true }),
     supabase.client.from('war_room_signal_scans').select('*').order('completed_at', { ascending: false }).limit(1),
-    supabase.client.from('war_room_signal_results').select('*').order('highest_leverage_score', { ascending: false }).limit(limit),
+    fetchActiveSignalRows(supabase.client, limit),
     supabase.client.from('war_room_signal_alerts').select('*').order('created_at', { ascending: false }).limit(limit),
   ])
 
-  const firstError = [sources.error, scans.error, results.error, alerts.error].find(Boolean)
+  const firstError = [sources.error, scans.error, alerts.error].find(Boolean)
   if (firstError) {
     const migrationRequired = signalMigrationRequired(firstError.message)
     return buildSignalSnapshot({
@@ -326,14 +391,25 @@ export async function listPersistedSignalSnapshot(limit = 40): Promise<SignalSna
     })
   }
 
+  const mappedStored = resultsQuery.rows.map(mapResult)
+  const activeResults = mappedStored.filter(result => (
+    isActiveSignalResult(result)
+    && result.url.startsWith('https://')
+    && result.guardrails.sourceBacked
+  ))
+  const cacheDiagnostics = collectCacheFreshnessDiagnostics(mappedStored, activeResults)
+
   return buildSignalSnapshot({
     generatedAt,
     persistenceAvailable: true,
-    persistenceNote: 'Signal persistence is available.',
+    persistenceNote: resultsQuery.usedDbFreshnessGate
+      ? 'Signal persistence is available; active results gated at query level by published_at.'
+      : 'Signal persistence is available; apply supabase/war_room_phase26_signal_freshness.sql for DB-level published_at gating.',
     migrationStatus: 'READY',
     sources: ((sources.data ?? []) as Row[]).map(mapSource),
     latestScan: ((scans.data ?? []) as Row[]).map(mapScan)[0] ?? null,
-    results: ((results.data ?? []) as Row[]).map(mapResult),
+    results: activeResults,
     alerts: ((alerts.data ?? []) as Row[]).map(mapAlert),
+    cacheDiagnostics,
   })
 }
