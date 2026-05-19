@@ -4,8 +4,8 @@ import { listMissionSnapshot } from '@/lib/missions/persistence'
 import { PERSISTENT_MISSION_IDS } from '@/lib/missions/definitions'
 import type { Mission, MissionId } from '@/lib/missions/types'
 import { createOutcomeEntry, listOutcomeSnapshot } from '@/lib/outcomes'
-import { collectPriorityEngine } from '@/lib/priority-engine/collect'
-import type { PriorityActionCandidate } from '@/lib/priority-engine/types'
+import { collectQueueSnapshot } from '@/lib/queues'
+import { collectRuntimeGraph } from '@/lib/runtime-graph/collect'
 import { tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persistence'
 import type {
   OperatorAction,
@@ -73,46 +73,8 @@ function timeLabel(minutes: number | null, fallback: string): string {
   return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hr`
 }
 
-function estimateMinutes(value: string): number | null {
-  const matches = [...value.matchAll(/(\d+(?:\.\d+)?)/g)].map(match => Number(match[1])).filter(Number.isFinite)
-  if (!matches.length) return null
-  const avg = matches.reduce((sum, item) => sum + item, 0) / matches.length
-  return /\bhr|hour/i.test(value) ? Math.round(avg * 60) : Math.round(avg)
-}
-
-function estimatePay(value: string): number | null {
-  const match = value.match(/\$?\s*(\d+(?:,\d{3})*(?:\.\d+)?)/)
-  if (!match || !/\$/.test(value)) return null
-  const parsed = Number(match[1].replace(/,/g, ''))
-  return Number.isFinite(parsed) ? parsed : null
-}
-
 function missionTitleMap(missions: Mission[]): Map<MissionId, string> {
   return new Map(missions.map(mission => [mission.id, mission.title]))
-}
-
-function actionFromCandidate(candidate: PriorityActionCandidate, missions: Map<MissionId, string>): OperatorAction {
-  const estimatedPay = estimatePay(candidate.estimatedValue)
-  const minutes = estimateMinutes(candidate.estimatedTime)
-  return {
-    id: candidate.id,
-    title: candidate.title,
-    linkedMission: candidate.linkedMission,
-    linkedMissionTitle: missions.get(candidate.linkedMission) ?? candidate.linkedMission.replace(/-/g, ' '),
-    estimatedPay,
-    estimatedPayLabel: estimatedPay == null ? candidate.estimatedValue : money(estimatedPay),
-    estimatedTimeMinutes: minutes,
-    estimatedTimeLabel: candidate.estimatedTime,
-    source: candidate.source,
-    sourceId: candidate.sourceId,
-    confidence: candidate.confidence,
-    approvalState: candidate.approvalState,
-    status: 'proposed',
-    optionalLink: null,
-    createdAt: new Date().toISOString(),
-    truthLabel: candidate.approvalState === 'not_required' ? 'PROPOSED' : 'APPROVAL_REQUIRED',
-    evidence: candidate.evidence,
-  }
 }
 
 function actionFromRow(row: Row, missions: Map<MissionId, string>): OperatorAction | null {
@@ -234,8 +196,9 @@ function financialTelemetry(earningsRows: Row[], outcomesActualRevenue: number, 
 }
 
 export async function collectOperatorDeck(req: Request): Promise<OperatorDeckSnapshot> {
-  const [priority, missionSnapshot, outcomeSnapshot] = await Promise.all([
-    collectPriorityEngine(req),
+  const [operatorQueue, graph, missionSnapshot, outcomeSnapshot] = await Promise.all([
+    collectQueueSnapshot(req, 'operator_priority_queue'),
+    collectRuntimeGraph(req),
     listMissionSnapshot(),
     listOutcomeSnapshot(80),
   ])
@@ -244,8 +207,8 @@ export async function collectOperatorDeck(req: Request): Promise<OperatorDeckSna
   const supabase = tryWarRoomSupabase()
   const operatorRows = supabase.ok ? await listOperatorRows(supabase.client) : null
   const persistedActions = operatorRows?.actions.map(row => actionFromRow(row, missionTitles)).filter(Boolean) as OperatorAction[] | undefined
-  const proposedActions = priority.actionQueue.slice(0, 4).map(candidate => actionFromCandidate(candidate, missionTitles))
-  const actionQueue = (persistedActions?.length ? persistedActions : proposedActions).slice(0, 4)
+  const proposedActions = operatorQueue.actions ?? []
+  const actionQueue = (proposedActions.length ? proposedActions : persistedActions ?? []).slice(0, 4)
   const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
   const weeklyOutcomeActual = outcomeSnapshot.outcomes
     .filter(outcome => outcome.actualRevenue != null && Date.parse(outcome.createdAt) >= oneWeekAgo)
@@ -266,12 +229,12 @@ export async function collectOperatorDeck(req: Request): Promise<OperatorDeckSna
     integrations: {
       liveCouncil: 'PROPOSED',
       babyAiObserver: 'PROPOSED',
-      revenueEngine: priority.graph.nodes.some(node => node.kind === 'revenue') ? 'SOURCE_BACKED' : 'UNAVAILABLE',
-      signalRadar: priority.graph.nodes.some(node => node.kind === 'signal') ? 'SOURCE_BACKED' : 'UNAVAILABLE',
+      revenueEngine: graph.nodes.some(node => node.kind === 'revenue') ? 'SOURCE_BACKED' : 'UNAVAILABLE',
+      signalRadar: graph.nodes.some(node => node.kind === 'signal') ? 'SOURCE_BACKED' : 'UNAVAILABLE',
       growthCalendar: 'PROPOSED',
       outcomeLedger: outcomeSnapshot.outcomes.length ? 'MANUAL_LOGGED' : 'UNAVAILABLE',
       commanderOs: 'PROPOSED',
-      approvalQueue: priority.graph.nodes.some(node => node.kind === 'approval') ? 'APPROVAL_REQUIRED' : 'UNAVAILABLE',
+      approvalQueue: graph.nodes.some(node => node.kind === 'approval') ? 'APPROVAL_REQUIRED' : 'UNAVAILABLE',
     },
     guardrails: {
       noFakeEarnings: true,

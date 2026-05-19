@@ -60,9 +60,9 @@ export const ActionQueueMini = memo(function ActionQueueMini({
                 <TruthBadge value={action.truthLabel} />
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-slate-300 sm:grid-cols-4">
-                <span className="rounded border border-white/10 px-2 py-1">Pay: {action.estimatedPayLabel}</span>
+                <span className="rounded border border-white/10 px-2 py-1">Reward: {action.estimatedPayLabel}</span>
                 <span className="rounded border border-white/10 px-2 py-1">Time: {action.estimatedTimeLabel}</span>
-                <span className="rounded border border-white/10 px-2 py-1">Source: {action.source}</span>
+                <span className="rounded border border-white/10 px-2 py-1">Approval: {action.approvalState.replace(/_/g, ' ')}</span>
                 <span className="rounded border border-white/10 px-2 py-1">Conf: {action.confidence}%</span>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2">

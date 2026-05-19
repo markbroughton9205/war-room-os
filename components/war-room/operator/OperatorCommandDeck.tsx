@@ -61,9 +61,13 @@ export const OperatorCommandDeck = memo(function OperatorCommandDeck() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/operator/deck', { cache: 'no-store' })
-      const body = await res.json() as OperatorDeckSnapshot
-      if (res.ok) setSnapshot(body)
+      const [deckRes, queueRes] = await Promise.all([
+        fetch('/api/operator/deck', { cache: 'no-store' }),
+        fetch('/api/operator/queue', { cache: 'no-store' }),
+      ])
+      const body = await deckRes.json() as OperatorDeckSnapshot
+      const queueBody = await queueRes.json() as { actions?: OperatorAction[] }
+      if (deckRes.ok) setSnapshot({ ...body, actionQueue: queueRes.ok ? queueBody.actions ?? [] : [] })
       else setSnapshot(emptySnapshot())
     } catch {
       setSnapshot(emptySnapshot())
