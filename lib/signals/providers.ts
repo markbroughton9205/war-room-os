@@ -131,11 +131,6 @@ function textBetween(source: string, tag: string): string | null {
   return match ? cleanXml(match[1]) : null
 }
 
-function attr(source: string, name: string): string | null {
-  const match = source.match(new RegExp(`${name}=["']([^"']+)["']`, 'i'))
-  return match?.[1] ?? null
-}
-
 async function fetchText(url: string): Promise<string> {
   const response = await fetch(url, {
     headers: {
@@ -315,48 +310,38 @@ export async function runFirecrawlOrDirectSources(sources: SignalSourceDefinitio
 }
 
 export async function runRssSources(sources: SignalSourceDefinition[], capturedAt: string): Promise<ProviderRunResult> {
+  const { pollRssFeed } = await import('./rss/runtime')
   const feeds = sources.filter(source => source.provider === 'rss' && source.url && isAllowedCloudUrl(source.url)).slice(0, 12)
   const maxAgeDays = maxAgeDaysForProvider('rss')
   const counters = createFreshnessCounters(maxAgeDays)
-  const settled = await Promise.allSettled(feeds.map(async source => {
-    if (!source.url) return []
-    const xml = await fetchText(source.url)
-    const itemBlocks = Array.from(xml.matchAll(/<(item|entry)\b[\s\S]*?<\/\1>/gi)).map(match => match[0])
-    return itemBlocks.slice(0, 3).flatMap((block, index): SignalRawItem[] => {
-      const title = textBetween(block, 'title')
-      const link = textBetween(block, 'link') ?? attr(block.match(/<link\b[^>]*>/i)?.[0] ?? '', 'href')
-      const description = textBetween(block, 'description') ?? textBetween(block, 'summary') ?? textBetween(block, 'content') ?? title
-      const publishedAt = textBetween(block, 'pubDate') ?? textBetween(block, 'published') ?? textBetween(block, 'updated') ?? textBetween(block, 'dc:date')
-      if (!title || !link || !isAllowedCloudUrl(link)) return []
-      const freshness = evaluateFreshness(publishedAt, { maxAgeDays })
-      recordFreshness(counters, freshness)
-      if (!freshness.acceptedForLiveSignal) return []
-      return [{
-        provider: 'rss',
-        sourceId: source.id,
-        sourceLabel: source.label,
-        sourceKind: 'rss',
-        title,
-        url: link,
-        summary: compact(description ?? title, 900),
-        categories: source.categories,
-        rawScore: source.reliabilityScore,
-        capturedAt,
-        metadata: withFreshnessMetadata({ feedUrl: source.url, itemIndex: index }, freshness, capturedAt),
-      }]
-    })
-  }))
+  const settled = await Promise.allSettled(feeds.map(source => pollRssFeed(source, capturedAt)))
 
-  const items = settled.flatMap(result => result.status === 'fulfilled' ? result.value : [])
+  const items = settled.flatMap(result => {
+    if (result.status !== 'fulfilled') return []
+    for (const item of result.value.items) {
+      const publishedAt = item.metadata?.articlePublishedAt ?? item.metadata?.publishedAt
+      const freshness = evaluateFreshness(publishedAt, { maxAgeDays, provider: 'rss' })
+      recordFreshness(counters, freshness)
+    }
+    return result.value.items
+  })
   const errors = settled
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     .map(result => result.reason instanceof Error ? result.reason.message : String(result.reason))
+    .concat(
+      settled
+        .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof pollRssFeed>>> => result.status === 'fulfilled')
+        .map(result => result.value.error)
+        .filter((error): error is string => Boolean(error)),
+    )
+
   return {
     items,
     diagnostics: {
       configured: feeds.length > 0,
       feedCount: feeds.length,
       resultCount: items.length,
+      ingestionRuntime: 'rss_modules',
       ...freshnessDiagnostics(counters),
       failures: errors.length,
       firstError: errors[0] ?? null,

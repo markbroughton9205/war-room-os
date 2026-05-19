@@ -197,7 +197,7 @@ function rowFreshnessFields(result: SignalResult): {
   }
 }
 
-async function upsertSources(client: WarRoomSupabase, sources: SignalSourceDefinition[]) {
+export async function upsertSources(client: WarRoomSupabase, sources: SignalSourceDefinition[]) {
   const { error } = await client
     .from('war_room_signal_sources')
     .upsert(sources.map(source => ({
@@ -237,7 +237,7 @@ async function insertScan(client: WarRoomSupabase, scan: SignalScan) {
   if (error) throw new Error(error.message)
 }
 
-async function insertResults(client: WarRoomSupabase, results: SignalResult[]) {
+export async function insertResults(client: WarRoomSupabase, results: SignalResult[]) {
   if (!results.length) return
   const enriched = results.map(result => enrichSignalResult(result))
   const { error } = await client

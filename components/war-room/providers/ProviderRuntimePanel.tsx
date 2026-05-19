@@ -38,6 +38,27 @@ type ProviderRuntimeSummary = {
   }
 }
 
+type RssIngestionRuntimeStatus = {
+  generatedAt: string
+  aggregateHealth: 'healthy' | 'degraded' | 'unavailable' | 'unknown'
+  pollIntervalMinutes: number
+  enabledFeedCount: number
+  configuredFeedCount: number
+  staleFeedCount: number
+  lastPollAt: string | null
+  lastSuccessAt: string | null
+  lastErrorAt: string | null
+  feeds: Array<{
+    sourceId: string
+    label: string
+    health: string
+    staleFeedDetection: boolean
+    lastPollAt: string | null
+    lastItemCount: number | null
+    lastErrorMessage: string | null
+  }>
+}
+
 function label(value: string) {
   return value.replace(/_/g, ' ')
 }
@@ -78,6 +99,7 @@ function timeLabel(value: string | null) {
 
 export function ProviderRuntimePanel() {
   const [runtime, setRuntime] = useState<ProviderRuntimeSummary | null>(null)
+  const [rssRuntime, setRssRuntime] = useState<RssIngestionRuntimeStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -85,10 +107,18 @@ export function ProviderRuntimePanel() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/runtime/canonical-status${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' })
-      const body = await res.json() as ProviderRuntimeSummary & { error?: string }
-      if (!res.ok) throw new Error(body.error || 'Provider runtime status failed')
+      const [canonicalRes, rssRes] = await Promise.all([
+        fetch(`/api/runtime/canonical-status${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' }),
+        fetch('/api/signals/rss/status', { cache: 'no-store' }),
+      ])
+      const body = await canonicalRes.json() as ProviderRuntimeSummary & { error?: string }
+      if (!canonicalRes.ok) throw new Error(body.error || 'Provider runtime status failed')
       setRuntime(body)
+      if (rssRes.ok) {
+        setRssRuntime(await rssRes.json() as RssIngestionRuntimeStatus)
+      } else {
+        setRssRuntime(null)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Provider runtime status failed')
     } finally {
@@ -185,6 +215,47 @@ export function ProviderRuntimePanel() {
           </article>
         ))}
       </div>
+
+      <section className="mt-8 border-t border-white/10 pt-6">
+        <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-sky-300">Signals</p>
+            <h3 className="mt-1 text-lg font-semibold text-white">RSS Ingestion Runtime</h3>
+            <p className="mt-1 max-w-3xl text-[10px] text-slate-500">
+              Server-side feed polling only. Health reflects last poll outcomes — feeds are not marked healthy when polls fail or time out.
+            </p>
+          </div>
+          <Badge value={rssRuntime?.aggregateHealth ?? 'unknown'} />
+        </header>
+        <div className="mb-3 grid gap-3 md:grid-cols-4">
+          <MiniMetric label="Enabled feeds" value={rssRuntime ? `${rssRuntime.enabledFeedCount}/${rssRuntime.configuredFeedCount}` : '—'} />
+          <MiniMetric label="Poll interval" value={rssRuntime ? `${rssRuntime.pollIntervalMinutes}m` : '—'} />
+          <MiniMetric label="Stale feeds" value={rssRuntime ? String(rssRuntime.staleFeedCount) : '—'} />
+          <MiniMetric label="Last poll" value={timeLabel(rssRuntime?.lastPollAt ?? null)} />
+        </div>
+        <div className="grid gap-2 lg:grid-cols-2">
+          {(rssRuntime?.feeds ?? []).map(feed => (
+            <article key={feed.sourceId} className="rounded border border-white/10 bg-black/25 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold text-white">{feed.label}</h4>
+                <Badge value={feed.health} />
+              </div>
+              <p className="mt-1 text-[10px] text-slate-500">{feed.sourceId}</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <MiniMetric label="Last poll" value={timeLabel(feed.lastPollAt)} />
+                <MiniMetric label="Items" value={feed.lastItemCount === null ? '—' : String(feed.lastItemCount)} />
+                <MiniMetric label="Stale" value={feed.staleFeedDetection ? 'yes' : 'no'} />
+              </div>
+              {feed.lastErrorMessage ? (
+                <p className="mt-2 text-[10px] text-amber-200/90">{feed.lastErrorMessage}</p>
+              ) : null}
+            </article>
+          ))}
+        </div>
+        {!rssRuntime?.feeds.length ? (
+          <p className="text-[10px] text-slate-500">No RSS feeds configured. Set NEWS_RSS_FEEDS or enable RSS rows in signal sources.</p>
+        ) : null}
+      </section>
 
       <div className="mt-4 rounded border border-white/10 bg-black/25 p-3 text-[10px] leading-relaxed text-slate-500">
         Canonical provider status is shared by runtime panels and council summaries. Safeguards: server-side only, timeout protected, failure isolated, no autonomous execution, no serialized API keys. Last checked: {runtime?.generatedAt ? timeLabel(runtime.generatedAt) : 'loading'}.

@@ -1,3 +1,5 @@
+import 'server-only'
+
 import { getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/configuration/envAlias'
 import type { NewsCategory, NewsDashboardCard, NewsDashboardSnapshot, NewsFreshnessDiagnostics } from '@/lib/intelligence/environment/liveEnvironmentTypes'
 import {
