@@ -1,4 +1,5 @@
 import type { CouncilCompressedFinding, CouncilCompressedSummary } from '@/lib/council/compression'
+import { sanitizeMemoryRuntimeText } from '@/lib/memory/runtimeState'
 
 export const OPERATOR_ACTION_LABELS = [
   'Review telemetry confidence',
@@ -66,7 +67,7 @@ function compactWhitespace(value: string): string {
 
 export function stripOperatorTextArtifacts(value: string): string {
   return compactWhitespace(
-    value
+    sanitizeMemoryRuntimeText(value)
       .replace(/```[\s\S]*?```/g, ' ')
       .replace(/`([^`]*)`/g, '$1')
       .replace(/\*\*([^*]+)\*\*/g, '$1')

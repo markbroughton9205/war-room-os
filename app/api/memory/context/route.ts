@@ -1,6 +1,7 @@
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { buildFamilyContext } from '@/lib/memory/familyMemory'
 import { buildOperationalMemorySnapshot } from '@/lib/memory/operationalSnapshot'
+import { mapRawMemoryRuntimeState, sanitizeMemoryRuntimeText } from '@/lib/memory/runtimeState'
 import type { MemoryContextResponse, MemoryContextSnippet, MemoryFamilyPartition } from '@/lib/memory/types'
 import { isMemoryFamilyPartition } from '@/lib/memory/types'
 import { listApprovedMemoriesByPartition, listRecentApprovedMemories } from '@/lib/memory/store'
@@ -28,13 +29,14 @@ export async function GET(req: Request) {
     partitionRaw && isMemoryFamilyPartition(partitionRaw) ? partitionRaw : null
 
   if (!sup.ok) {
+    const runtime = mapRawMemoryRuntimeState(sup.configError, { configured: false })
     const empty: MemoryContextResponse = {
       partition,
       limit,
       snippets: [],
       familyContext: '',
       operational: {},
-      operationalNote: 'Persistence unavailable; operational snapshot empty.',
+      operationalNote: runtime.commanderPhrase,
     }
     return jsonWithPersistence(empty, false)
   }
@@ -72,7 +74,7 @@ export async function GET(req: Request) {
     snippets: toSnippets(approvedRows, 360),
     familyContext,
     operational: op.snapshot,
-    operationalNote: op.note,
+    operationalNote: op.note ? sanitizeMemoryRuntimeText(op.note) : op.note,
   }
 
   return jsonWithPersistence(body, true)

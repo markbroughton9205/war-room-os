@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { mapRawMemoryRuntimeState } from '@/lib/memory/runtimeState'
 
 type MemoryEntry = {
   id?: string
@@ -30,21 +31,23 @@ export async function GET(req: Request) {
   try {
     supabase = createSupabaseServerClient()
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Supabase server client is not configured'
+    const runtime = mapRawMemoryRuntimeState(error, { configured: false })
     if (healthOnly) {
       return NextResponse.json({
         tool: 'memory',
         healthy: false,
-        status: 'error',
-        message,
-      }, { status: 503 })
+        status: runtime.state.toLowerCase(),
+        message: runtime.commanderPhrase,
+        runtime,
+      })
     }
     return NextResponse.json({
       tool: 'memory',
-      status: 'error',
-      message,
+      status: runtime.state.toLowerCase(),
+      message: runtime.commanderPhrase,
+      runtime,
       memories: [],
-    }, { status: 500 })
+    })
   }
 
   if (healthOnly) {
@@ -56,12 +59,14 @@ export async function GET(req: Request) {
     if (error) {
       const fallback = await supabase.from('memories').select('id').limit(1)
       if (fallback.error) {
+        const runtime = mapRawMemoryRuntimeState(fallback.error)
         return NextResponse.json({
           tool: 'memory',
           healthy: false,
-          status: 'error',
-          message: fallback.error.message,
-        }, { status: 500 })
+          status: runtime.state.toLowerCase(),
+          message: runtime.commanderPhrase,
+          runtime,
+        })
       }
     }
 
@@ -70,6 +75,7 @@ export async function GET(req: Request) {
       healthy: true,
       status: 'complete',
       message: 'Memory store reachable.',
+      runtime: mapRawMemoryRuntimeState(null),
     })
   }
 
@@ -83,6 +89,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       tool: 'memory',
       status: 'complete',
+      runtime: mapRawMemoryRuntimeState(null),
       memories: (data ?? []).map(normalizeMemory),
     })
   }
@@ -94,17 +101,20 @@ export async function GET(req: Request) {
     .limit(10)
 
   if (fallback.error) {
+    const runtime = mapRawMemoryRuntimeState(fallback.error)
     return NextResponse.json({
       tool: 'memory',
-      status: 'error',
-      message: fallback.error.message,
+      status: runtime.state.toLowerCase(),
+      message: runtime.commanderPhrase,
+      runtime,
       memories: [],
-    }, { status: 500 })
+    })
   }
 
   return NextResponse.json({
     tool: 'memory',
     status: 'complete',
+    runtime: mapRawMemoryRuntimeState(null),
     memories: (fallback.data ?? []).map(normalizeMemory),
   })
 }
@@ -114,11 +124,13 @@ export async function POST(req: Request) {
   try {
     supabase = createSupabaseServerClient()
   } catch (error) {
+    const runtime = mapRawMemoryRuntimeState(error, { configured: false })
     return NextResponse.json({
       tool: 'memory',
-      status: 'error',
-      message: error instanceof Error ? error.message : 'Supabase server client is not configured',
-    }, { status: 500 })
+      status: runtime.state.toLowerCase(),
+      message: runtime.commanderPhrase,
+      runtime,
+    }, { status: 202 })
   }
 
   const body = await req.json()
@@ -149,6 +161,7 @@ export async function POST(req: Request) {
       tool: 'memory',
       status: 'complete',
       message: 'Memory saved',
+      runtime: mapRawMemoryRuntimeState(null),
       memory: normalizeMemory(data as Record<string, unknown>),
     })
   }
@@ -160,17 +173,20 @@ export async function POST(req: Request) {
     .single()
 
   if (fallback.error) {
+    const runtime = mapRawMemoryRuntimeState(fallback.error)
     return NextResponse.json({
       tool: 'memory',
-      status: 'error',
-      message: fallback.error.message,
-    }, { status: 500 })
+      status: runtime.state.toLowerCase(),
+      message: runtime.commanderPhrase,
+      runtime,
+    }, { status: 202 })
   }
 
   return NextResponse.json({
     tool: 'memory',
     status: 'complete',
     message: 'Memory saved',
+    runtime: mapRawMemoryRuntimeState(null),
     memory: {
       ...normalizeMemory(fallback.data as Record<string, unknown>),
       source: memory.source,

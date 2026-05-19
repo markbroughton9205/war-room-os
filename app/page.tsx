@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo, memo, startTransition, useDeferredValue } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
@@ -168,6 +168,7 @@ import {
   type RecallSummaryPreview,
   type RecallTranscriptPreview,
 } from '@/lib/memory/recallCommands'
+import { mapRawMemoryRuntimeState, sanitizeMemoryRuntimeText, type MemoryRuntimeState } from '@/lib/memory/runtimeState'
 import type {
   RedTeamCoderDiagnosisResult,
   RedTeamCoderIssue,
@@ -235,6 +236,13 @@ type CouncilMessage = {
   analystOperationsPacket?: AnalystOperationsPacket
 }
 
+type CouncilSessionLifecycle = 'active' | 'archived'
+
+type CouncilThreadHygieneResult = {
+  visibleMessages: CouncilMessage[]
+  collapsedCount: number
+}
+
 type WarRoomPerformanceDiagnostics = {
   renderCount: number
   lastRenderMs: number
@@ -242,6 +250,44 @@ type WarRoomPerformanceDiagnostics = {
   lastRefreshDurationMs: number | null
   lastRefreshAt: string | null
   pollingIntervalMs: number
+}
+
+function sanitizedCouncilMessage(message: CouncilMessage): CouncilMessage {
+  if (message.messageType === 'decree') return message
+  const content = sanitizeMemoryRuntimeText(message.content)
+  return content === message.content ? message : { ...message, content }
+}
+
+function councilNoiseKey(message: CouncilMessage): string | null {
+  if (message.messageType === 'decree') return null
+  const content = sanitizeMemoryRuntimeText(message.content).replace(/\s+/g, ' ').trim().toLowerCase()
+  if (!content) return null
+  if (
+    /\b(warning|provider notice|runtime notice|runtime continuity|persistence|temporary learning|session-only learning|durable memory offline|learning persistence unavailable)\b/i.test(content)
+    || /^(confirmed|acknowledged|understood|copy|standing by|noted)[.! ]*$/i.test(content)
+  ) {
+    return `${message.familyName.toLowerCase()}|${message.messageType.toLowerCase()}|${content}`
+  }
+  return null
+}
+
+function applyCouncilThreadHygiene(messages: CouncilMessage[]): CouncilThreadHygieneResult {
+  const seenNoise = new Set<string>()
+  const visibleMessages: CouncilMessage[] = []
+  let collapsedCount = 0
+
+  for (const raw of messages) {
+    const message = sanitizedCouncilMessage(raw)
+    const key = councilNoiseKey(message)
+    if (key && seenNoise.has(key)) {
+      collapsedCount += 1
+      continue
+    }
+    if (key) seenNoise.add(key)
+    visibleMessages.push(message)
+  }
+
+  return { visibleMessages, collapsedCount }
 }
 
 const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Goal: Panama relocation. Motivated by vision of success. Wants truth about systems that harm Black and low income communities.`
@@ -330,7 +376,7 @@ function mapWarRoomRowToCouncilMessage(row: {
     return {
       id: row.id,
       familyName: 'SYSTEM',
-      content: row.content,
+      content: sanitizeMemoryRuntimeText(row.content),
       timestamp: ts,
       color: '#FFD700',
       icon: '⚙',
@@ -342,7 +388,7 @@ function mapWarRoomRowToCouncilMessage(row: {
   return {
     id: row.id,
     familyName: fam,
-    content: row.content,
+    content: sanitizeMemoryRuntimeText(row.content),
     timestamp: ts,
     color: '#9CA3AF',
     icon: '•',
@@ -1480,6 +1526,7 @@ const MessageBubble = memo(function MessageBubble({
 const CouncilMessageRows = memo(function CouncilMessageRows({
   messages,
   hiddenCount,
+  collapsedNoiseCount,
   onViewArchive,
   onSummarizeSession,
   onRecallEconomicOps,
@@ -1489,6 +1536,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
 }: {
   messages: CouncilMessage[]
   hiddenCount: number
+  collapsedNoiseCount: number
   onViewArchive: () => void
   onSummarizeSession: () => void
   onRecallEconomicOps: () => void
@@ -1515,6 +1563,14 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           <button type="button" onClick={onRecallEconomicOps} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #34D399', color: '#86EFAC' }}>
             Recall Economic Ops
           </button>
+        </div>
+      ) : null}
+      {collapsedNoiseCount > 0 ? (
+        <div
+          className="mb-4 ml-11 rounded px-3 py-2 text-[10px] tracking-widest"
+          style={{ background: 'rgba(148,163,184,0.07)', border: '1px solid rgba(148,163,184,0.22)', color: '#CBD5E1' }}
+        >
+          Clear Noise active: {collapsedNoiseCount} repeated notice{collapsedNoiseCount === 1 ? '' : 's'} collapsed from the live view.
         </div>
       ) : null}
       {messages.map(msg => (
@@ -1638,11 +1694,89 @@ const CompressedCouncilPanel = memo(function CompressedCouncilPanel({
   )
 })
 
+type CouncilSessionControlHandlers = {
+  onNewSession: () => void
+  onClearChat: () => void
+  onSoftReset: () => void
+  onArchiveSession: () => void
+  onClearNoise: () => void
+  onExportSession: () => void
+}
+
+const sessionControlButtonStyle = {
+  border: '1px solid rgba(148,163,184,0.35)',
+  color: '#CBD5E1',
+  background: 'rgba(0,0,0,0.22)',
+}
+
+const CouncilSessionControls = memo(function CouncilSessionControls({
+  compact = false,
+  onNewSession,
+  onClearChat,
+  onSoftReset,
+  onArchiveSession,
+  onClearNoise,
+  onExportSession,
+}: CouncilSessionControlHandlers & { compact?: boolean }) {
+  return (
+    <div className={`flex flex-wrap items-center gap-1.5 ${compact ? 'justify-start' : 'justify-end'}`}>
+      <button type="button" onClick={onNewSession} className="rounded px-2 py-1 text-[9px] font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.45)', color: '#A7F3D0', background: 'rgba(0,0,0,0.22)' }}>
+        New Council Session
+      </button>
+      <button type="button" onClick={onClearChat} className="rounded px-2 py-1 text-[9px] tracking-widest" style={sessionControlButtonStyle}>
+        Clear Chat
+      </button>
+      <button type="button" onClick={onSoftReset} className="rounded px-2 py-1 text-[9px] tracking-widest" style={sessionControlButtonStyle}>
+        Soft Reset
+      </button>
+      <button type="button" onClick={onArchiveSession} className="rounded px-2 py-1 text-[9px] tracking-widest" style={{ border: '1px solid rgba(96,165,250,0.45)', color: '#BFDBFE', background: 'rgba(0,0,0,0.22)' }}>
+        Archive Session
+      </button>
+      <button type="button" onClick={onClearNoise} className="rounded px-2 py-1 text-[9px] tracking-widest" style={sessionControlButtonStyle}>
+        Clear Noise
+      </button>
+      <button type="button" onClick={onExportSession} className="rounded px-2 py-1 text-[9px] tracking-widest" style={sessionControlButtonStyle}>
+        Export Session
+      </button>
+    </div>
+  )
+})
+
+const CouncilLifecycleIndicators = memo(function CouncilLifecycleIndicators({
+  lifecycle,
+  memoryState,
+  sessionOnly,
+}: {
+  lifecycle: CouncilSessionLifecycle
+  memoryState: MemoryRuntimeState
+  sessionOnly: boolean
+}) {
+  const indicators = [
+    lifecycle === 'archived' ? 'Session Archived' : 'Session Active',
+    sessionOnly ? 'Temporary Learning' : 'Durable Memory Online',
+    sessionOnly || memoryState !== 'ONLINE' ? 'Observer Session Mode' : 'Durable Memory Online',
+  ]
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5 text-[9px] tracking-widest">
+      {[...new Set(indicators)].map(item => (
+        <span key={item} className="rounded border border-white/10 px-2 py-1" style={{ color: item.includes('Online') ? '#86EFAC' : '#FDE68A', background: 'rgba(0,0,0,0.2)' }}>
+          {item}
+        </span>
+      ))}
+    </div>
+  )
+})
+
 const OperatorMissionView = memo(function OperatorMissionView({
   operatorSummary,
+  sessionControls,
+  sessionIndicators,
   onOpenEngineering,
 }: {
   operatorSummary: OperatorSummary
+  sessionControls: ReactNode
+  sessionIndicators: ReactNode
   onOpenEngineering: () => void
 }) {
   const cards = [
@@ -1662,10 +1796,14 @@ const OperatorMissionView = memo(function OperatorMissionView({
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>Operator View</div>
           <p className="mt-1 text-[10px]" style={{ color: '#94A3B8' }}>Mission-grade brief only. Diagnostics stay in Engineering View.</p>
+          {sessionIndicators}
         </div>
-        <button type="button" onClick={onOpenEngineering} className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid rgba(56,189,248,0.4)', color: '#BAE6FD' }}>
-          Open Engineering View
-        </button>
+        <div className="flex max-w-full flex-col items-start gap-2 sm:items-end">
+          {sessionControls}
+          <button type="button" onClick={onOpenEngineering} className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid rgba(56,189,248,0.4)', color: '#BAE6FD' }}>
+            Open Engineering View
+          </button>
+        </div>
       </div>
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         {cards.map(([label, value]) => (
@@ -4274,11 +4412,17 @@ const LiveCouncilHealthBadgesRow = memo(function LiveCouncilHealthBadgesRow({
 
 const LiveCouncilBabyObserverLane = memo(function LiveCouncilBabyObserverLane({
   memoryCount,
+  memoryRuntimeState,
+  memoryRuntimeLabel,
+  sessionOnlyLearning,
   pendingApprovals,
   opportunityCount,
   providerReady,
 }: {
   memoryCount: number
+  memoryRuntimeState: MemoryRuntimeState
+  memoryRuntimeLabel: string
+  sessionOnlyLearning: boolean
   pendingApprovals: number
   opportunityCount: number
   providerReady: boolean
@@ -4289,14 +4433,16 @@ const LiveCouncilBabyObserverLane = memo(function LiveCouncilBabyObserverLane({
     ? hasMemory && hasOutcomeCue ? 72 : hasMemory ? 52 : 34
     : 18
   const state = !providerReady
-    ? 'blocked by provider readiness'
+    ? 'provider readiness degraded'
     : hasMemory && hasOutcomeCue
       ? 'extracting lesson'
       : hasMemory
         ? 'listening'
-        : 'blocked by missing memory table'
+        : sessionOnlyLearning
+          ? 'session-only learning active'
+          : 'observer in temporary learning mode'
   const readiness = [
-    `memory ${hasMemory ? 'ready' : 'missing'}`,
+    sessionOnlyLearning ? memoryRuntimeLabel : `memory ${memoryRuntimeState === 'ONLINE' ? 'ready' : 'temporary'}`,
     `outcome ${hasOutcomeCue ? 'ready' : 'awaiting'}`,
     `signal ${opportunityCount > 0 ? 'ready' : 'awaiting'}`,
     `provider ${providerReady ? 'ready' : 'degraded'}`,
@@ -4945,12 +5091,18 @@ function Home() {
   const [latestRepairPacket, setLatestRepairPacket] = useState<CouncilRepairPacket | null>(null)
   const [latestAnalystPacket, setLatestAnalystPacket] = useState<AnalystOperationsPacket | null>(null)
   const [councilOutputMode, setCouncilOutputMode] = useState<CouncilOutputMode>('standard')
+  const [sessionLifecycle, setSessionLifecycle] = useState<CouncilSessionLifecycle>('active')
   const councilPersistenceCtx = useMemo(() => buildCouncilPersistenceContext(), [])
   const { store: council, dispatch: councilDispatch, mounted: councilMounted, newSessionId } =
     useCouncilSession(councilPersistenceCtx)
   const messages = council.messages
   const liveChatWindow = useMemo(() => windowLiveChatMessages(messages), [messages])
-  const visibleCouncilMessages = liveChatWindow.visibleMessages
+  const liveCouncilHygiene = useMemo(
+    () => applyCouncilThreadHygiene(liveChatWindow.visibleMessages),
+    [liveChatWindow.visibleMessages],
+  )
+  const visibleCouncilMessages = liveCouncilHygiene.visibleMessages
+  const collapsedCouncilNoiseCount = liveCouncilHygiene.collapsedCount
   const deferredVisibleCouncilMessages = useDeferredValue(visibleCouncilMessages)
   const compressedCouncilSummary = useMemo(
     () => compressCouncilOutput(deferredVisibleCouncilMessages, councilOutputMode),
@@ -5564,6 +5716,7 @@ function Home() {
   }
 
   const addSystemMessage = (content: string, opts?: { force?: boolean; id?: string }) => {
+    const safeContent = sanitizeMemoryRuntimeText(content)
     const isSilentInfrastructureNotice = (line: string) =>
       /\b(memory preview ready|archive loaded|telemetry updated|persistence synced|runtime continuity notice)\b/i.test(
         line,
@@ -5571,18 +5724,18 @@ function Home() {
     if (
       !opts?.force
       && (
-        isSilentInfrastructureNotice(content)
-        || shouldSuppressProviderFailureFromChatStream(content, { diagnosticsOpen: operatorTab === 'diagnostics' })
+        isSilentInfrastructureNotice(safeContent)
+        || shouldSuppressProviderFailureFromChatStream(safeContent, { diagnosticsOpen: operatorTab === 'diagnostics' })
       )
     ) {
       if (process.env.NODE_ENV === 'development') {
-        console.debug('[Live Council] Silent infrastructure notice:', content)
+        console.debug('[Live Council] Silent infrastructure notice:', safeContent)
       }
       return
     }
     councilDispatch({
       type: 'ADD_SYSTEM_MESSAGE_DEDUPED',
-      payload: { id: opts?.id ?? createMessageId('system'), content, timestamp: new Date().toLocaleTimeString() },
+      payload: { id: opts?.id ?? createMessageId('system'), content: safeContent, timestamp: new Date().toLocaleTimeString() },
     })
   }
 
@@ -6214,9 +6367,17 @@ function Home() {
     setToolBarActivity(prev => ({ ...prev, memory: 'ACTIVE' }))
     try {
       const res = await fetch('/api/tools/memory')
-      const data = await res.json()
+      const data = await res.json() as {
+        memories?: MemoryEntry[]
+        message?: string
+        runtime?: ReturnType<typeof mapRawMemoryRuntimeState>
+      }
       if (!res.ok) throw new Error(data.message || 'Memory retrieval failed')
       setMemories(data.memories ?? [])
+      if (data.runtime?.sessionOnly) {
+        setMemoryNotification(data.runtime.commanderPhrase)
+        window.setTimeout(() => setMemoryNotification(null), 2400)
+      }
     } catch {
       setToolBarHealth(prev => ({ ...prev, memory: 'ERROR' }))
     } finally {
@@ -6818,18 +6979,28 @@ function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(memory),
       })
-      const data = await res.json()
+      const data = await res.json() as {
+        memory?: MemoryEntry
+        message?: string
+        runtime?: ReturnType<typeof mapRawMemoryRuntimeState>
+      }
       if (!res.ok) throw new Error(data.message || 'Memory save failed')
 
-      if (data.memory) {
-        setMemories(prev => [data.memory, ...prev].slice(0, 10))
+      const savedMemory = data.memory
+      if (savedMemory) {
+        setMemories(prev => [savedMemory, ...prev].slice(0, 10))
+        addSystemMessage('Memory saved')
+        setMemoryNotification('Memory Saved')
+        window.setTimeout(() => setMemoryNotification(null), 2400)
+        return
       }
-      addSystemMessage('Memory saved')
-      setMemoryNotification('Memory Saved')
+      const runtime = data.runtime ?? mapRawMemoryRuntimeState('Memory initialization required')
+      addSystemMessage(runtime.commanderPhrase, { force: true })
+      setMemoryNotification(runtime.commanderPhrase)
       window.setTimeout(() => setMemoryNotification(null), 2400)
     } catch {
       setToolBarHealth(prev => ({ ...prev, memory: 'ERROR' }))
-      addSystemMessage('Memory save failed')
+      addSystemMessage('Session-only learning active', { force: true })
     } finally {
       setToolBarActivity(prev => {
         const next = { ...prev }
@@ -7327,7 +7498,7 @@ function Home() {
         }
         if (!r.ok) {
           lastCouncilFamilyErrorRef.current = family
-          const summary = typeof data.message === 'string' ? data.message : (data.error ?? `HTTP ${r.status}`)
+          const summary = sanitizeMemoryRuntimeText(typeof data.message === 'string' ? data.message : (data.error ?? `HTTP ${r.status}`))
           if (isGeminiCouncilBackoffFailure(family, r, data)) {
             geminiFailureCountRef.current += 1
             geminiLastErrorSummaryRef.current = summary
@@ -7404,7 +7575,7 @@ function Home() {
       lastCouncilFamilyErrorRef.current = family
       councilDispatch({
         type: 'SET_PROVIDER_ERROR',
-        payload: e instanceof Error ? e.message : String(e),
+        payload: sanitizeMemoryRuntimeText(e instanceof Error ? e.message : String(e)),
       })
     } finally {
       autonomousOrchInFlightRef.current = false
@@ -8631,7 +8802,7 @@ function Home() {
       }
     } catch (error) {
       if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return
-      const msg = error instanceof Error ? error.message : 'Council unreachable.'
+      const msg = sanitizeMemoryRuntimeText(error instanceof Error ? error.message : 'Council unreachable.')
       addSystemMessage(`[Error] ${msg}`)
       lastCouncilFamilyErrorRef.current = decreeSubmitFaultAnchor ?? 'chatgpt'
       councilDispatch({
@@ -9207,7 +9378,7 @@ function Home() {
     }
   }
 
-  const endCouncilSession = () => {
+  const resetCouncilTemporaryRuntime = () => {
     clearOrchestrationTimer()
     cancelActiveCouncilRequest()
     skipGeminiForSessionRef.current = false
@@ -9225,38 +9396,114 @@ function Home() {
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY)
     }
+  }
+
+  const startFreshCouncilSession = async (reason: 'new' | 'archive') => {
+    resetCouncilTemporaryRuntime()
+    setSessionLifecycle(reason === 'archive' ? 'archived' : 'active')
+    const nextSessionId = newSessionId()
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(COUNCIL_SESSION_STORAGE_KEY)
+      sessionStorage.removeItem(LIVE_COUNCIL_CONV_STORAGE_KEY)
+    }
+    councilDispatch({ type: 'END_SESSION', payload: { sessionId: nextSessionId } })
+    if (persistenceAvailable) {
+      try {
+        const res = await fetch('/api/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: reason === 'archive' ? 'Live Council Archive Follow-up' : 'Live Council',
+            metadata: { council: { source: 'live_council', incomeOperationsMode, previousSession: liveCouncilConvId ?? councilSnapRef.current.sessionId } },
+          }),
+        })
+        if (res.ok) {
+          const body = await res.json() as { conversation?: { id?: string } }
+          const id = typeof body.conversation?.id === 'string' ? body.conversation.id : null
+          if (id) {
+            sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
+            setLiveCouncilConvId(id)
+          }
+        }
+      } catch {
+        /* session-only fallback */
+      }
+    }
+    addSystemMessage(reason === 'archive'
+      ? 'Session archived. Clean council session is ready.'
+      : 'New Council Session ready. Approved memory and provider state preserved.', { force: true })
+  }
+
+  const endCouncilSession = () => {
+    resetCouncilTemporaryRuntime()
+    setSessionLifecycle('active')
     councilDispatch({ type: 'END_SESSION', payload: { sessionId: newSessionId() } })
     addSystemMessage('Council session ended. Speak your decree when ready.')
   }
 
   const clearCouncilSession = () => {
-    if (!window.confirm('Delete this session transcript permanently?')) return
-    clearOrchestrationTimer()
-    cancelActiveCouncilRequest()
-    skipGeminiForSessionRef.current = false
-    geminiFailureCountRef.current = 0
-    geminiLastErrorSummaryRef.current = null
-    geminiUnavailableUserMessagedRef.current = false
-    orchRedTeamEarlyLatchRef.current = false
-    lastCouncilFamilyErrorRef.current = null
-    activeCouncilCommandRef.current = { ...DEFAULT_COUNCIL_COMMAND }
-    lastRaelDirectiveContentRef.current = ''
-    continuationThrottleRef.current = {}
-    setContinuationRequests([])
-    setCouncilUiCommand({ ...DEFAULT_COUNCIL_COMMAND })
-    setCouncilPacketRender(null)
-    if (typeof sessionStorage !== 'undefined') {
-      sessionStorage.removeItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY)
-      sessionStorage.removeItem(COUNCIL_SESSION_STORAGE_KEY)
-    }
-    councilDispatch({ type: 'CLEAR_SESSION', payload: { sessionId: newSessionId() } })
-    if (liveCouncilConvId && persistenceAvailable) {
-      void fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
-        method: 'DELETE',
+    councilDispatch({ type: 'SET_MESSAGES', payload: [] })
+    addSystemMessage('Visible council thread cleared. Durable archive and audit history were not deleted.', { force: true })
+  }
+
+  const softResetCouncilSession = () => {
+    resetCouncilTemporaryRuntime()
+    setSessionLifecycle('active')
+    councilDispatch({ type: 'CLEAR_SESSION', payload: { sessionId: councilSnapRef.current.sessionId } })
+    addSystemMessage('Soft reset complete. Temporary family context cleared; approved memory preserved.', { force: true })
+  }
+
+  const archiveCurrentCouncilSession = () => {
+    const snapshot = messagesRef.current
+    if (snapshot.length && liveCouncilConvId && persistenceAvailable) {
+      const latestDecree = [...snapshot].reverse().find(isRaelCouncilMessage)
+      void fetch('/api/memory/archive', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: 'all' }),
+        body: JSON.stringify({
+          sessionId: liveCouncilConvId,
+          createSummary: true,
+          messages: snapshot.map(message => ({
+            id: message.id,
+            sessionId: liveCouncilConvId,
+            decreeId: latestDecree?.id ?? null,
+            timestamp: new Date().toISOString(),
+            role: archiveRoleForMessage(message),
+            family: message.familyName,
+            provider: message.provider || null,
+            content: message.content,
+            messageType: message.messageType,
+            tags: [message.messageType, message.familyName, 'manual_archive'].filter(Boolean),
+            topic: archiveTopicForMessage(message),
+            sourceMode: 'manual_archive',
+            operatorId: null,
+            operatorName: "Ra'el",
+            visibility: 'private',
+          })),
+        }),
       }).catch(() => undefined)
     }
+    void startFreshCouncilSession('archive')
+  }
+
+  const clearCouncilNoise = () => {
+    addSystemMessage(`Clear Noise active. ${collapsedCouncilNoiseCount} repeated notice${collapsedCouncilNoiseCount === 1 ? '' : 's'} collapsed; persisted history unchanged.`, { force: true })
+  }
+
+  const exportCouncilSession = () => {
+    const payload = {
+      sessionId: councilSnapRef.current.sessionId,
+      conversationId: liveCouncilConvId,
+      exportedAt: new Date().toISOString(),
+      messages: messagesRef.current.map(sanitizedCouncilMessage),
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `council-session-${payload.sessionId}.json`
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   const toggleDeepDiscussion = () => {
@@ -9496,6 +9743,17 @@ function Home() {
     ? 'Ready'
     : 'Degraded'
   const persistenceHealthLabel = persistenceAvailable ? 'Ready' : 'Session only'
+  const memoryRuntime = useMemo(
+    () => mapRawMemoryRuntimeState(
+      persistenceAvailable
+        ? null
+        : memories.length > 0
+          ? 'Durable memory offline'
+          : 'Memory initialization required',
+      { configured: true },
+    ),
+    [memories.length, persistenceAvailable],
+  )
   const internetHealthLabel = useMemo(() => {
     const live = internetStatus.overallStatus === 'live' || internetStatus.canUseInternet === true
     if (live) {
@@ -9551,6 +9809,23 @@ function Home() {
       raelActions,
       todayGrowthBlock,
     ],
+  )
+  const councilSessionControls = (
+    <CouncilSessionControls
+      onNewSession={() => startTransition(() => { void startFreshCouncilSession('new') })}
+      onClearChat={() => startTransition(clearCouncilSession)}
+      onSoftReset={() => startTransition(softResetCouncilSession)}
+      onArchiveSession={() => startTransition(archiveCurrentCouncilSession)}
+      onClearNoise={() => startTransition(clearCouncilNoise)}
+      onExportSession={exportCouncilSession}
+    />
+  )
+  const councilSessionIndicators = (
+    <CouncilLifecycleIndicators
+      lifecycle={sessionLifecycle}
+      memoryState={memoryRuntime.state}
+      sessionOnly={memoryRuntime.sessionOnly}
+    />
   )
   const operatorNav = (
     <>
@@ -9733,6 +10008,8 @@ function Home() {
         {uiMode === 'operator' && operatorTab === 'command' && (
           <OperatorMissionView
             operatorSummary={operatorSummary}
+            sessionControls={councilSessionControls}
+            sessionIndicators={councilSessionIndicators}
             onOpenEngineering={() => {
               setUiMode('advanced')
               setOperatorTab('engineering')
@@ -9752,9 +10029,11 @@ function Home() {
             <p className="text-[9px] tracking-widest" style={{ color: '#555' }}>
               Ra’el speaks to the AI families; infrastructure notices stay minimal.
             </p>
+            {councilSessionIndicators}
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex max-w-full flex-wrap items-center justify-start gap-1.5 sm:justify-end">
             <span className="mr-1 text-[9px] tracking-widest" style={{ color: '#555' }}>Session controls</span>
+            {councilSessionControls}
             <label className="flex items-center gap-1 rounded px-2 py-0.5 text-[9px] tracking-widest" style={{ border: '1px solid #333', color: '#888' }}>
               Mode
               <select
@@ -9834,6 +10113,9 @@ function Home() {
           />
           <LiveCouncilBabyObserverLane
             memoryCount={memories.length}
+            memoryRuntimeState={memoryRuntime.state}
+            memoryRuntimeLabel={memoryRuntime.label}
+            sessionOnlyLearning={memoryRuntime.sessionOnly}
             pendingApprovals={raelActions.filter(action => action.status === 'pending').length}
             opportunityCount={incomeOpportunities.length}
             providerReady={coreProviderStates.some(status => status === 'online' || status === 'standby')}
@@ -9915,6 +10197,7 @@ function Home() {
           <CouncilMessageRows
             messages={visibleCouncilMessages}
             hiddenCount={hiddenCouncilMessageCount}
+            collapsedNoiseCount={collapsedCouncilNoiseCount}
             onViewArchive={handleViewArchive}
             onSummarizeSession={handleSummarizeSessionArchive}
             onRecallEconomicOps={handleRecallEconomicOps}

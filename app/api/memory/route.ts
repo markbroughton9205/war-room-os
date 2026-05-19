@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { mapRawMemoryRuntimeState } from '@/lib/memory/runtimeState'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,7 +15,10 @@ export async function POST(req: Request) {
     .insert([{ category, content }])
     .select()
 
-  if (error) return NextResponse.json({ error }, { status: 500 })
+  if (error) {
+    const runtime = mapRawMemoryRuntimeState(error)
+    return NextResponse.json({ error: runtime.commanderPhrase, runtime }, { status: 202 })
+  }
   return NextResponse.json({ data })
 }
 
@@ -24,6 +28,9 @@ export async function GET() {
     .select('*')
     .order('created_at', { ascending: false })
 
-  if (error) return NextResponse.json({ error }, { status: 500 })
+  if (error) {
+    const runtime = mapRawMemoryRuntimeState(error)
+    return NextResponse.json({ error: runtime.commanderPhrase, runtime, data: [] })
+  }
   return NextResponse.json({ data })
 }

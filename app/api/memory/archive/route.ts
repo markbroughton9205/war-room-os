@@ -1,8 +1,8 @@
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import {
-  httpStatusForSupabaseFailure,
   warRoomSupabaseFailurePayload,
 } from '@/lib/war-room/warRoomSupabaseError'
+import { mapRawMemoryRuntimeState } from '@/lib/memory/runtimeState'
 import { parseRecallCommand } from '@/lib/memory/recallCommands'
 import { archiveTranscriptBatch, recallArchivedTranscripts, type ArchiveTranscriptInput } from '@/lib/memory/transcriptArchive'
 
@@ -60,7 +60,8 @@ function coerceArchiveMessage(value: unknown, sessionId: string | null): Archive
 export async function POST(req: Request) {
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
-    return jsonWithPersistence({ archived: 0, error: 'Supabase is not configured.' }, false, { status: 503 })
+    const runtime = mapRawMemoryRuntimeState(sup.configError, { configured: false })
+    return jsonWithPersistence({ archived: 0, error: runtime.commanderPhrase, runtime }, false)
   }
 
   let body: { sessionId?: unknown; messages?: unknown; createSummary?: unknown }
@@ -89,10 +90,11 @@ export async function POST(req: Request) {
 
   if (!result.ok) {
     const payload = warRoomSupabaseFailurePayload(TABLE_ARCHIVE, { message: result.error }, { operation: 'upsert' })
+    const runtime = mapRawMemoryRuntimeState(payload)
     return jsonWithPersistence(
-      { error: payload.message, supabase: payload },
+      { archived: 0, error: runtime.commanderPhrase, runtime },
       true,
-      { status: httpStatusForSupabaseFailure(payload, 500) },
+      { status: 202 },
     )
   }
 
@@ -109,7 +111,8 @@ export async function GET(req: Request) {
   const fullContent = url.searchParams.get('full') === '1'
 
   if (!sup.ok) {
-    return jsonWithPersistence({ command, records: [], summaries: [] }, false)
+    const runtime = mapRawMemoryRuntimeState(sup.configError, { configured: false })
+    return jsonWithPersistence({ command, records: [], summaries: [], runtime }, false)
   }
 
   const result = await recallArchivedTranscripts(sup.client, command, {
@@ -120,10 +123,11 @@ export async function GET(req: Request) {
 
   if (!result.ok) {
     const payload = warRoomSupabaseFailurePayload(TABLE_ARCHIVE, { message: result.error }, { operation: 'select' })
+    const runtime = mapRawMemoryRuntimeState(payload)
     return jsonWithPersistence(
-      { error: payload.message, command, records: [], summaries: [], supabase: payload },
+      { error: runtime.commanderPhrase, command, records: [], summaries: [], runtime },
       true,
-      { status: httpStatusForSupabaseFailure(payload, 500) },
+      { status: 202 },
     )
   }
 

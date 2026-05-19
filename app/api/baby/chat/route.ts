@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
 import { sourceFromUrl } from '@/lib/income/tavily'
 import { tryPersistMemoryProposalFromModelOutput } from '@/lib/memory/ingestFromModel'
+import { mapRawMemoryRuntimeState } from '@/lib/memory/runtimeState'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
@@ -57,10 +58,12 @@ async function loadMemoryContext() {
       .order('created_at', { ascending: false })
       .limit(MAX_MEMORY_ITEMS)
 
-    if (error) return []
-    return data ?? []
-  } catch {
-    return []
+    if (error) {
+      return { memories: [], runtime: mapRawMemoryRuntimeState(error) }
+    }
+    return { memories: data ?? [], runtime: mapRawMemoryRuntimeState(null) }
+  } catch (error) {
+    return { memories: [], runtime: mapRawMemoryRuntimeState(error, { configured: false }) }
   }
 }
 
@@ -193,7 +196,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'No message' }, { status: 400 })
   }
 
-  const memories = await loadMemoryContext()
+  const memoryContextResult = await loadMemoryContext()
+  const memories = memoryContextResult.memories
   const researchIntent = detectResearchIntent(userMessage)
   const research = researchIntent
     ? await runBabyResearch(userMessage)
@@ -205,7 +209,7 @@ export async function POST(req: Request) {
     }
   const memoryContext = memories.length
     ? memories.map(memory => `- ${memory.content}`).join('\n')
-    : 'No saved memory context available.'
+    : `${memoryContextResult.runtime.commanderPhrase}. Temporary session context only.`
   const researchContext = research.researchUsed && research.sources.length
     ? research.sources.map((item, index) => `${index + 1}. ${item.title} (${item.url})\n${item.snippet}`).join('\n\n')
     : researchIntent
@@ -266,6 +270,7 @@ Respond as Baby AI Observer in private mode. Keep it natural, useful, and concis
     providerLabel: 'War Room Native',
     memoryContextCount: memories.length,
     memoryContextActive: memories.length > 0,
+    memoryRuntime: memoryContextResult.runtime,
     researchUsed: research.researchUsed,
     researchError: research.researchError,
     researchSourceCount: research.sources.length,
