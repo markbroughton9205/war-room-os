@@ -2,6 +2,7 @@ export type RepairClassification =
   | 'bug'
   | 'ui_issue'
   | 'provider_runtime_issue'
+  | 'needs_scope'
   | 'supabase_schema_issue'
   | 'performance_issue'
   | 'routing_orchestration_issue'
@@ -47,6 +48,9 @@ export type CouncilRepairPacket = {
   requestId: string
   title: string
   classification: RepairClassification
+  concreteIssue: string
+  affectedPanelRoute: string
+  evidence: string[]
   source: {
     decree: string
     sourceMessageId: string | null
@@ -93,6 +97,10 @@ export type CouncilRepairSnapshot = {
   persistenceNote: string
   guardrails: CouncilRepairPacket['guardrails']
 }
+
+export type RepairPacketCreateResult =
+  | { ok: true; request: CouncilRepairRequest; packet: CouncilRepairPacket }
+  | { ok: false; scope: 'needs_scope'; request: CouncilRepairRequest; clarification: string; affectedPanelRoute: string | null }
 
 export type CreateRepairRequestInput = {
   decree: string

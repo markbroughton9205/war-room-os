@@ -44,24 +44,28 @@ export function mapEngineControlJson(json: unknown): SubsystemRow {
   const j = json as {
     engines?: { functional?: boolean; reachable?: boolean; configured?: boolean; id?: string }[]
     checkedAt?: string
+    timestamp?: string
+    routingReadiness?: 'ready' | 'degraded' | 'unavailable'
+    degradedReason?: string | null
   }
   const engines = Array.isArray(j.engines) ? j.engines : []
   const configured = engines.filter(e => e.configured).length
   const functional = engines.filter(e => e.functional).length
   const reachable = engines.filter(e => e.reachable).length
+  const checkedAt = j.checkedAt ?? j.timestamp ?? 'n/a'
   const evidence = engines.length
-    ? `${functional}/${engines.length} engines report functional; ${configured} configured; ${reachable} reachable. Checked ${j.checkedAt ?? 'n/a'}.`
-    : 'Engine status payload missing engine list.'
+    ? `${functional}/${engines.length} engines report functional; ${configured} configured; ${reachable} reachable; routingReadiness=${j.routingReadiness ?? 'unknown'}. Checked ${checkedAt}.`
+    : `Engine status payload missing engine list. routingReadiness=${j.routingReadiness ?? 'unknown'}.`
 
   let status: SubsystemOperationalStatus = 'UNKNOWN'
   let truth: TruthLevel = 'UNKNOWN'
   if (!engines.length) {
-    status = 'FAILING'
+    status = j.routingReadiness === 'unavailable' ? 'FAILING' : 'UNKNOWN'
     truth = 'UNKNOWN'
-  } else if (functional === engines.length) {
+  } else if (j.routingReadiness === 'ready' || functional === engines.length) {
     status = 'HEALTHY'
     truth = 'VERIFIED'
-  } else if (functional > 0) {
+  } else if (j.routingReadiness === 'degraded' || functional > 0) {
     status = 'DEGRADED'
     truth = 'VERIFIED'
   } else if (configured > 0) {
@@ -95,28 +99,54 @@ export function mapProvidersHealthJson(json: unknown): SubsystemRow {
     availability?: Record<string, string>
     tool?: string
     status?: string
+    source?: string
+    generatedAt?: string
   }
   const av = j.availability && typeof j.availability === 'object' ? j.availability : {}
   const keys = Object.keys(av)
-  const configured = keys.filter(k => av[k] === 'configured').length
+  const liveConnected = keys.filter(k => av[k] === 'live_connected').length
+  const configured = keys.filter(k => av[k] === 'configured' || av[k] === 'live_connected').length
   const notConfigured = keys.filter(k => av[k] === 'not_configured').length
+  const degraded = keys.filter(k => av[k] === 'degraded' || av[k] === 'rate_limited' || av[k] === 'invalid_key').length
+  const fromCanonical = j.source === '/api/runtime/canonical-status'
   const evidence = keys.length
-    ? `Credential hints: ${configured} configured provider slots, ${notConfigured} missing keys (declared only, no live LLM probe in this route).`
+    ? fromCanonical
+      ? `Canonical provider runtime: ${liveConnected}/${keys.length} families live connected; ${configured} configured; ${notConfigured} missing keys. Generated ${j.generatedAt ?? 'n/a'}.`
+      : `Credential hints: ${configured} configured provider slots, ${notConfigured} missing keys (declared only, no live LLM probe in this route).`
     : 'Provider health response missing availability map.'
+
+  let status: SubsystemOperationalStatus = 'UNKNOWN'
+  let truth: TruthLevel = 'UNKNOWN'
+  if (!keys.length) {
+    status = 'FAILING'
+  } else if (liveConnected === keys.length) {
+    status = 'HEALTHY'
+    truth = 'VERIFIED'
+  } else if (liveConnected > 0) {
+    status = 'DEGRADED'
+    truth = 'VERIFIED'
+  } else if (configured > 0 || degraded > 0) {
+    status = 'DEGRADED'
+    truth = fromCanonical ? 'VERIFIED' : 'PARTIAL'
+  } else {
+    status = 'UNWIRED'
+    truth = 'DECLARED'
+  }
 
   return row({
     id: 'providers_health',
-    label: 'Provider configuration',
-    status: configured > 0 ? 'CONFIGURED_ONLY' : 'UNWIRED',
-    truthLevel: 'DECLARED',
+    label: fromCanonical ? 'Provider runtime (canonical)' : 'Provider configuration',
+    status,
+    truthLevel: truth,
     evidence,
     source: 'fetch',
     mock: false,
-    unwired: configured === 0,
+    unwired: configured === 0 && liveConnected === 0,
     configured: configured > 0,
-    reachable: false,
-    recommendation:
-      'Use /api/engine-control/status for live functional probes; this route is configuration hints only.',
+    reachable: liveConnected > 0,
+    recommendation: fromCanonical
+      ? 'Refresh /api/runtime/canonical-status after repairing keys, quotas, or provider reachability.'
+      : 'Use /api/runtime/canonical-status for live functional probes aligned with council and operator panels.',
   })
 }
 

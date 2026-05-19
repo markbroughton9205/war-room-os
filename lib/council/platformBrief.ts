@@ -9,6 +9,7 @@ const STAGGER_MS = 120
 
 export type PlatformBrief = {
   fetchedAt: string
+  canonicalRuntime?: unknown
   deployStatus?: unknown
   workerLimits?: unknown
   permissions?: unknown
@@ -51,6 +52,8 @@ export async function buildPlatformBrief(fetchImpl: typeof fetch = fetch): Promi
 
   inFlight = (async () => {
     const errors: string[] = []
+    const canonicalRuntime = await safeJson(fetchImpl, '/api/runtime/canonical-status', errors)
+    await sleep(STAGGER_MS)
     const deployStatus = await safeJson(fetchImpl, '/api/deploy/status', errors)
     await sleep(STAGGER_MS)
     const workerLimits = await safeJson(fetchImpl, '/api/workers/limits', errors)
@@ -58,11 +61,13 @@ export async function buildPlatformBrief(fetchImpl: typeof fetch = fetch): Promi
     const permissions = await safeJson(fetchImpl, '/api/permissions/status', errors)
     await sleep(STAGGER_MS)
     const actionQueue = await safeJson(fetchImpl, '/api/actions/queue?limit=5', errors)
-    await sleep(STAGGER_MS)
-    const engineControl = await safeJson(fetchImpl, '/api/engine-control/status', errors)
+    const engineControl = canonicalRuntime && typeof canonicalRuntime === 'object' && !Array.isArray(canonicalRuntime)
+      ? (canonicalRuntime as { engineControl?: unknown }).engineControl
+      : await safeJson(fetchImpl, '/api/engine-control/status', errors)
 
     const value: PlatformBrief = {
       fetchedAt: new Date().toISOString(),
+      canonicalRuntime,
       deployStatus,
       workerLimits,
       permissions,

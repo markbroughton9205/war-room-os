@@ -1,4 +1,5 @@
 import type { CouncilCompressedFinding, CouncilCompressedSummary } from '@/lib/council/compression'
+import { isConcreteRepairPacketTitle, isVagueRepairLanguage } from '@/lib/council-repair/scope'
 import { sanitizeMemoryRuntimeText } from '@/lib/memory/runtimeState'
 
 export const OPERATOR_ACTION_LABELS = [
@@ -135,7 +136,10 @@ function cleanOpportunityTitle(opportunities: OperatorRevenueOpportunitySource[]
 }
 
 function cleanRepairTitle(title: string | null | undefined): string | null {
-  return cleanDisplayContent(title)
+  const clean = stripOperatorTextArtifacts(title ?? '')
+  if (!clean || !isConcreteRepairPacketTitle(clean)) return null
+  if (isVagueRepairLanguage(clean.replace(/^repair packet:\s*/i, ''))) return null
+  return clean.slice(0, 140)
 }
 
 function councilFindingSummary(summary: CouncilCompressedSummary): string {

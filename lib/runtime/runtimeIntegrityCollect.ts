@@ -22,6 +22,7 @@ import {
   mapRedTeamCoderJson,
   type SupabaseProbe,
 } from '@/lib/runtime/runtimeIntegrityMapper'
+import { collectCanonicalRuntimeStatus } from '@/lib/runtime/canonicalStatus'
 import { finalizeRuntimeIntegrityResponse, type RuntimeIntegrityPartial } from '@/lib/runtime/finalizeRuntimeIntegrityResponse'
 import type { RuntimeIntegrityResponse } from '@/lib/runtime/runtimeIntegrityTypes'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
@@ -107,8 +108,7 @@ export async function collectRuntimeIntegrityPartial(
   const councilMode = opts?.councilMode?.trim() || null
 
   const [
-    engineRes,
-    providersRes,
+    canonical,
     sentinelRes,
     rtcRes,
     internetRes,
@@ -121,8 +121,7 @@ export async function collectRuntimeIntegrityPartial(
     auditProbe,
     memoryProbe,
   ] = await Promise.all([
-    fetchJson(base, '/api/engine-control/status'),
-    fetchJson(base, '/api/providers/health'),
+    collectCanonicalRuntimeStatus(req),
     fetchJson(base, '/api/red-sentinel/status'),
     fetchJson(base, '/api/red-team-coder/status'),
     fetchJson(base, '/api/internet/status'),
@@ -136,8 +135,30 @@ export async function collectRuntimeIntegrityPartial(
     probeTable('war_room_memory_proposals', 'id'),
   ])
 
-  const engineJson = engineRes.ok ? engineRes.json : {}
-  const providersJson = providersRes.ok ? providersRes.json : {}
+  const engineJson = canonical.engineControl
+  const providersJson = {
+    availability: Object.fromEntries(
+      canonical.providers.map(provider => {
+        const value = provider.availability === 'CONNECTED'
+          ? 'live_connected'
+          : provider.availability === 'NOT_CONFIGURED'
+            ? 'not_configured'
+            : provider.availability === 'INVALID_KEY'
+              ? 'invalid_key'
+              : provider.availability === 'RATE_LIMITED'
+                ? 'rate_limited'
+                : provider.availability === 'DEGRADED'
+                  ? 'degraded'
+                  : provider.configured
+                    ? 'configured'
+                    : 'probe_required'
+        return [provider.family, value]
+      }),
+    ),
+    canonicalProviders: canonical.providers,
+    source: '/api/runtime/canonical-status',
+    generatedAt: canonical.generatedAt,
+  }
 
   const subsystems = [
     mapEngineControlJson(engineJson),

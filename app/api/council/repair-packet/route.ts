@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server'
 
 import {
-  createCouncilRepairPacket,
-  createCouncilRepairRequest,
   getRepairSnapshot,
   rememberRepairPacket,
   rememberRepairRequest,
+  tryCreateCouncilRepairPacket,
 } from '@/lib/council-repair'
 import { emitEvent } from '@/lib/events/bus'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
@@ -44,14 +43,40 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'decree is required.' }, { status: 400 })
   }
 
-  const request = createCouncilRepairRequest({
+  const created = tryCreateCouncilRepairPacket({
     decree,
     sourceMessageId: text(input.sourceMessageId) || null,
     sourceFamily: text(input.sourceFamily) || null,
     sourceContent: text(input.sourceContent) || null,
   })
-  const packet = createCouncilRepairPacket({ request, decree })
-  rememberRepairRequest(request)
+
+  rememberRepairRequest(created.request)
+
+  if (!created.ok) {
+    return NextResponse.json(
+      {
+        scope: created.scope,
+        clarification: created.clarification,
+        affectedPanelRoute: created.affectedPanelRoute,
+        request: created.request,
+        guardrails: {
+          advisoryOnly: true,
+          approvalRequired: true,
+          canExecute: false,
+          canMutateFiles: false,
+        },
+      },
+      {
+        status: 422,
+        headers: {
+          'cache-control': 'no-store',
+          'x-war-room-repair': 'needs-scope',
+        },
+      },
+    )
+  }
+
+  const { packet, request } = created
   rememberRepairPacket(packet)
 
   const supabase = tryWarRoomSupabase()
@@ -65,6 +90,8 @@ export async function POST(req: Request) {
       requestId: request.id,
       classification: packet.classification,
       title: packet.title,
+      concreteIssue: packet.concreteIssue,
+      affectedPanelRoute: packet.affectedPanelRoute,
       approvalStatus: packet.approvalStatus,
       sourceFamily: packet.source.sourceFamily,
       connectedSurfaces: packet.connectedSurfaces,

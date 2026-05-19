@@ -1,4 +1,5 @@
 export * from './model'
 export * from './classifier'
+export * from './scope'
 export * from './pipeline'
 export * from './store'

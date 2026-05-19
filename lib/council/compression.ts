@@ -383,7 +383,8 @@ export function compressCouncilOutput(
     : [fallbackDecision(messages)]
   const nextAction =
     mode === 'repair' && repairPacket
-      ? repairPacket.fixPlan[0] ?? 'Generate a manual repair packet and validate before code changes.'
+      ? repairPacket.fixPlan.find(plan => plan.trim().length >= 24 && !/^(prepare|generate|create)\s+(a\s+)?repair/i.test(plan.trim()))
+        ?? 'Describe the broken panel, symptom, and expected behavior before generating a repair packet.'
       : mode === 'revenue' && revenuePacket
         ? revenuePacket.nextAction
         : topFindings[0]?.text ?? 'Ask the council for a concrete next action.'

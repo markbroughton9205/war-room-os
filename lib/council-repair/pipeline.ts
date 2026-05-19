@@ -9,15 +9,18 @@ import {
   type RepairFamilyContribution,
 } from './model'
 import { classifyRepairRequest, compactRepairText, matchedRepairTriggers } from './classifier'
+import type { RepairPacketCreateResult } from './model'
+import { assessRepairScope, isConcreteRepairPacketTitle } from './scope'
 
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'repair'
 }
 
-function titleFromRequest(request: CouncilRepairRequest): string {
-  const clean = compactRepairText(request.decree, 90).replace(/[.?!]+$/g, '')
+function titleFromRequest(request: CouncilRepairRequest, concreteIssue: string): string {
+  const clean = compactRepairText(concreteIssue || request.decree, 90).replace(/[.?!]+$/g, '')
   const base = clean.replace(/^(please\s+)?(fix|repair|diagnose|create|send|prepare)\s+/i, '')
-  return `Repair packet: ${base || request.classification.replace(/_/g, ' ')}`
+  const title = `Repair packet: ${base || request.classification.replace(/_/g, ' ')}`
+  return isConcreteRepairPacketTitle(title) ? title : 'Repair packet: scoped runtime issue'
 }
 
 function sourceText(input: CreateRepairRequestInput): string {
@@ -28,13 +31,18 @@ export function createCouncilRepairRequest(input: CreateRepairRequestInput, now 
   const decree = compactRepairText(input.decree, 4000)
   const text = sourceText({ ...input, decree })
   const rule = classifyRepairRequest(text)
+  const scope = assessRepairScope({
+    decree,
+    sourceContent: input.sourceContent ? compactRepairText(input.sourceContent, 1200) : null,
+    classification: rule.classification,
+  })
   return {
     id: `crr-${now.getTime()}-${slug(decree)}`,
     decree,
     sourceMessageId: input.sourceMessageId?.trim() || null,
     sourceFamily: input.sourceFamily?.trim() || null,
     sourceContent: input.sourceContent ? compactRepairText(input.sourceContent, 1200) : null,
-    classification: rule.classification,
+    classification: scope.scope === 'needs_scope' ? 'needs_scope' : rule.classification,
     matchedTriggers: matchedRepairTriggers(text),
     createdAt: now.toISOString(),
     advisoryOnly: true,
@@ -118,9 +126,14 @@ function cursorPrompt(packet: Omit<CouncilRepairPacket, 'cursorReadyPrompt'>): s
     'Prepare this War Room repair manually in Cursor after Commander approval. This packet is advisory only.',
     '',
     `Title: ${packet.title}`,
+    `Concrete issue: ${packet.concreteIssue}`,
+    `Affected panel/route: ${packet.affectedPanelRoute}`,
     `Classification: ${packet.classification}`,
     `Approval status: ${packet.approvalStatus}`,
     `Packet source: ${packet.source.packetSource}`,
+    '',
+    'Evidence:',
+    ...packet.evidence.map(item => `- ${item}`),
     '',
     'Observed symptoms:',
     ...packet.observedSymptoms.map(item => `- ${item}`),
@@ -154,8 +167,37 @@ function cursorPrompt(packet: Omit<CouncilRepairPacket, 'cursorReadyPrompt'>): s
   ].join('\n')
 }
 
-export function createCouncilRepairPacket(input: CreateRepairPacketInput, now = new Date()): CouncilRepairPacket {
+export function tryCreateCouncilRepairPacket(input: CreateRepairPacketInput, now = new Date()): RepairPacketCreateResult {
   const request = input.request ?? createCouncilRepairRequest(input, now)
+  const scope = assessRepairScope({
+    decree: request.decree,
+    sourceContent: request.sourceContent,
+    classification: request.classification,
+  })
+  if (scope.scope === 'needs_scope' || request.classification === 'needs_scope') {
+    return {
+      ok: false,
+      scope: 'needs_scope',
+      request,
+      clarification: scope.clarification ?? 'Add a concrete symptom, affected panel, and expected behavior before generating a repair packet.',
+      affectedPanelRoute: scope.affectedPanelRoute,
+    }
+  }
+  return { ok: true, request, packet: createCouncilRepairPacket(input, now, request, scope) }
+}
+
+export function createCouncilRepairPacket(
+  input: CreateRepairPacketInput,
+  now = new Date(),
+  requestOverride?: CouncilRepairRequest,
+  scopeOverride?: ReturnType<typeof assessRepairScope>,
+): CouncilRepairPacket {
+  const request = requestOverride ?? input.request ?? createCouncilRepairRequest(input, now)
+  const scope = scopeOverride ?? assessRepairScope({
+    decree: request.decree,
+    sourceContent: request.sourceContent,
+    classification: request.classification,
+  })
   const rule = classifyRepairRequest(sourceText({
     decree: request.decree,
     sourceFamily: request.sourceFamily,
@@ -163,6 +205,13 @@ export function createCouncilRepairPacket(input: CreateRepairPacketInput, now = 
   }))
   const symptoms = observedSymptoms(request)
   const family = familyContributions(request, symptoms, rule.rootCause)
+  const concreteIssue = scope.concreteIssue ?? compactRepairText(request.decree, 280)
+  const affectedPanelRoute = scope.affectedPanelRoute ?? connectedSurfaces(request.classification)[0] ?? 'War Room runtime surfaces'
+  const evidence = [
+    ...scope.evidenceHints,
+    ...symptoms.slice(0, 2).map(item => compactRepairText(item, 220)),
+    `Classification: ${request.classification.replace(/_/g, ' ')}.`,
+  ]
   const babyLessonCandidate: BabyRepairLessonCandidate = {
     id: `${request.id}:baby-lesson`,
     summary: `When ${request.classification.replace(/_/g, ' ')} repair work is requested, preserve evidence, approval gates, and validation output before treating it as a lesson.`,
@@ -174,8 +223,11 @@ export function createCouncilRepairPacket(input: CreateRepairPacketInput, now = 
   const packetBase = {
     id: `crp-${now.getTime()}-${slug(request.decree)}`,
     requestId: request.id,
-    title: titleFromRequest(request),
+    title: titleFromRequest(request, concreteIssue),
     classification: request.classification,
+    concreteIssue,
+    affectedPanelRoute,
+    evidence,
     source: {
       decree: request.decree,
       sourceMessageId: request.sourceMessageId,
@@ -187,7 +239,7 @@ export function createCouncilRepairPacket(input: CreateRepairPacketInput, now = 
     },
     observedSymptoms: symptoms,
     suspectedRootCause: rule.rootCause,
-    filesRoutesToInspect: [...new Set(rule.files)].slice(0, 12),
+    filesRoutesToInspect: [...new Set([affectedPanelRoute, ...rule.files])].slice(0, 12),
     recommendedFix: rule.recommendedFix,
     validationCommands: REPAIR_VALIDATION_COMMANDS,
     riskNotes: [

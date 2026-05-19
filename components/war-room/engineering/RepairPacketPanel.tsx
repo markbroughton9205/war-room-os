@@ -161,6 +161,9 @@ export function RepairPacketPanel({ latest }: { latest?: CouncilRepairPacket | n
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
+                <FieldList title="Concrete Issue" items={[activePacket.concreteIssue]} />
+                <FieldList title="Affected Panel / Route" items={[activePacket.affectedPanelRoute]} />
+                <FieldList title="Evidence" items={activePacket.evidence} />
                 <FieldList title="Observed Symptoms" items={activePacket.observedSymptoms} />
                 <FieldList title="Files / Routes To Inspect" items={activePacket.filesRoutesToInspect} />
                 <FieldList title="Recommended Fix" items={activePacket.recommendedFix} />

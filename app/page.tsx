@@ -4166,8 +4166,11 @@ const UnifiedEngineControlPanel = memo(function UnifiedEngineControlPanel() {
     try {
       const res = await fetch('/api/engine-control/status', { cache: 'no-store' })
       const json = await res.json() as EngineControlStatusResponse & { message?: string }
-      if (!res.ok) throw new Error(json.message || 'Engine status failed')
+      if (!Array.isArray(json.engines) || !json.routingReadiness || !json.timestamp) {
+        throw new Error('Engine status payload missing required fields')
+      }
       setData(json)
+      if (!res.ok) setError(json.degradedReason ?? 'Engine routing unavailable')
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Engine status failed')
     } finally {
@@ -5692,7 +5695,11 @@ function Home() {
 
   const prepareRepairPacketFromCouncilMessage = async (message: CouncilMessage) => {
     const latestDecree = [...messagesRef.current].reverse().find(isRaelCouncilMessage)
-    const decree = latestDecree?.content || message.content || 'create a repair packet'
+    const decree = latestDecree?.content || message.content
+    if (!decree?.trim()) {
+      addSystemMessage('Repair packet needs a concrete Commander decree describing the broken panel, symptom, and expected behavior.', { force: true })
+      return
+    }
     try {
       const res = await fetch('/api/council/repair-packet', {
         method: 'POST',
@@ -5704,7 +5711,16 @@ function Home() {
           sourceContent: message.content,
         }),
       })
-      const body = await res.json() as { packet?: CouncilRepairPacket; error?: string }
+      const body = await res.json() as {
+        packet?: CouncilRepairPacket
+        error?: string
+        scope?: string
+        clarification?: string
+      }
+      if (res.status === 422 && body.scope === 'needs_scope') {
+        addSystemMessage(body.clarification || 'Repair packet needs a more concrete issue description before Engineering Lane handoff.', { force: true })
+        return
+      }
       if (!res.ok || !body.packet) throw new Error(body.error || 'Repair packet generation failed')
       setLatestRepairPacket(body.packet)
       addMessages([{
@@ -6472,27 +6488,21 @@ function Home() {
 
   const loadProviderHealth = async () => {
     try {
-      const res = await fetch('/api/providers/health')
+      const res = await fetch('/api/runtime/canonical-status', { cache: 'no-store' })
       const data = await res.json() as {
-        providers?: ProviderHealthState['providers']
-        labels?: ProviderHealthState['labels']
-        message?: string
+        providers?: { family: ProviderFamilyKey; connectionStatus: ProviderConnectionStatus; label: string }[]
+        error?: string
       }
-      if (!res.ok) throw new Error(data.message || 'Provider health check failed')
-      const prov = data.providers ?? INITIAL_PROVIDER_HEALTH.providers
-      const lab = data.labels ?? INITIAL_PROVIDER_HEALTH.labels
-      setProviderHealth(prev => ({
-        providers: {
-          ...INITIAL_PROVIDER_HEALTH.providers,
-          ...prev.providers,
-          ...prov,
-        },
-        labels: {
-          ...INITIAL_PROVIDER_HEALTH.labels,
-          ...prev.labels,
-          ...lab,
-        },
-      }))
+      if (!res.ok) throw new Error(data.error || 'Canonical provider status failed')
+      const prov = { ...INITIAL_PROVIDER_HEALTH.providers }
+      const lab = { ...INITIAL_PROVIDER_HEALTH.labels }
+      for (const row of data.providers ?? []) {
+        if (row.family in prov) {
+          prov[row.family] = row.connectionStatus
+          lab[row.family] = row.label
+        }
+      }
+      setProviderHealth({ providers: prov, labels: lab })
     } catch {
       setProviderHealth(prev => ({
         ...prev,

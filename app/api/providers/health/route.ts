@@ -1,19 +1,15 @@
 import { NextResponse } from 'next/server'
-import { getProviderRuntimeHealth } from '@/lib/providers/health'
-import { buildCanonicalProviderFamilies } from '@/lib/runtime/canonicalStatus'
+
+import { collectCanonicalRuntimeStatus } from '@/lib/runtime/canonicalStatus'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'redteam'
 
-/** Presence/config classification — does not assert live API connectivity. */
+/** Presence/config classification — does not assert live API connectivity without canonical CONNECTED. */
 export type ProviderAvailability = 'configured' | 'not_configured' | 'probe_required' | 'live_connected' | 'degraded' | 'rate_limited' | 'invalid_key'
 
-/**
- * Maps availability to the legacy `providers` map consumed by older UI code.
- * Avoids reporting `online` from credential presence alone.
- */
 function legacyConnectionStatus(avail: ProviderAvailability): 'online' | 'standby' | 'error' | 'not_connected' {
   if (avail === 'live_connected') return 'online'
   if (avail === 'not_configured') return 'not_connected'
@@ -32,9 +28,9 @@ function availabilityFromCanonical(value: string | undefined): ProviderAvailabil
   return 'probe_required'
 }
 
-export async function GET() {
-  const runtime = await getProviderRuntimeHealth()
-  const canonicalProviders = buildCanonicalProviderFamilies(runtime)
+export async function GET(req: Request) {
+  const canonical = await collectCanonicalRuntimeStatus(req)
+  const canonicalProviders = canonical.providers
   const byFamily = Object.fromEntries(canonicalProviders.map(provider => [provider.family, provider]))
   const availability: Record<ProviderFamilyKey, ProviderAvailability> = {
     claude: availabilityFromCanonical(byFamily.claude?.availability),
@@ -63,17 +59,26 @@ export async function GET() {
   return NextResponse.json({
     tool: 'provider-health',
     status: 'complete',
+    source: '/api/runtime/canonical-status',
+    generatedAt: canonical.generatedAt,
     availability,
     providers,
     labels,
     canonicalProviders,
-    runtimeProviders: runtime.providers,
-    signalAvailability: runtime.signalAvailability,
+    engineControl: canonical.engineControl,
+    signalAvailability: {
+      liveSignalsAvailable: canonical.subsystems.find(subsystem => subsystem.id === 'signal_radar')?.health === 'healthy',
+    },
     guidance:
-      '`availability` now reflects live bounded server-side probes for OpenAI, Anthropic, xAI/Grok, Google/Gemini, Tavily, and Firecrawl where configured. API keys are never serialized.',
+      '`availability` reflects the canonical runtime snapshot with live bounded server-side probes. API keys are never serialized.',
     deprecatedSemantics: {
       providersOnlineFromKeysOnly:
         'Removed: keys alone no longer imply `providers.* === "online"`; only CONNECTED live checks map to online.',
+    },
+  }, {
+    headers: {
+      'cache-control': 'no-store',
+      'x-war-room-canonical-runtime': canonical.summary.health,
     },
   })
 }
