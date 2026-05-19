@@ -212,8 +212,8 @@ export async function runTavilySignalSearch(capturedAt: string): Promise<Provide
         rawScore: typeof result.score === 'number' ? result.score : null,
         capturedAt,
         metadata: freshness
-          ? withFreshnessMetadata({ query: search.query }, freshness)
-          : { query: search.query, maxAgeDays },
+          ? withFreshnessMetadata({ query: search.query }, freshness, capturedAt)
+          : { query: search.query, maxAgeDays, signalIngestedAt: capturedAt },
       }]
     })
   }))
@@ -342,7 +342,7 @@ export async function runRssSources(sources: SignalSourceDefinition[], capturedA
         categories: source.categories,
         rawScore: source.reliabilityScore,
         capturedAt,
-        metadata: withFreshnessMetadata({ feedUrl: source.url, itemIndex: index }, freshness),
+        metadata: withFreshnessMetadata({ feedUrl: source.url, itemIndex: index }, freshness, capturedAt),
       }]
     })
   }))
@@ -405,7 +405,7 @@ export async function runNewsProviders(capturedAt: string): Promise<ProviderRunR
           categories: ['AI_trends', 'Ohio_business', 'economic_warning', 'app_factory_opportunity'],
           rawScore: 0.76,
           capturedAt,
-          metadata: withFreshnessMetadata({ providerDateField: 'publishedAt' }, freshness),
+          metadata: withFreshnessMetadata({ providerDateField: 'publishedAt' }, freshness, capturedAt),
         }]
       })
     }))
@@ -446,7 +446,7 @@ export async function runNewsProviders(capturedAt: string): Promise<ProviderRunR
             section: article.sectionName ?? null,
             providerDateField: 'webPublicationDate',
             guardianId: article.id ?? null,
-          }, freshness),
+          }, freshness, capturedAt),
         }]
       })
     }))

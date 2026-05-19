@@ -1,10 +1,12 @@
 import { getEnvAliasNames, getEnvAliasValue, resolveEnvAlias } from '@/lib/configuration/envAlias'
 import type { NewsCategory, NewsDashboardCard, NewsDashboardSnapshot, NewsFreshnessDiagnostics } from '@/lib/intelligence/environment/liveEnvironmentTypes'
 import {
-  evaluateFreshness,
+  classifyFreshness,
   LIVE_SIGNAL_MAX_AGE_DAYS,
   newsCardDisplayLabel,
+  newsCardTimestampLabel,
   newsDateWindow,
+  PUBLICATION_TIME_UNAVAILABLE,
 } from '@/lib/signals/freshness'
 
 const NEWS_TIMEOUT_MS = 8000
@@ -137,17 +139,6 @@ function parseRegistry(): FeedRegistration[] {
     })
 }
 
-function freshnessLabel(publishedAt: string | null, fetchedAt: string): string {
-  const basis = publishedAt ?? fetchedAt
-  const ageMs = Date.now() - Date.parse(basis)
-  if (!Number.isFinite(ageMs) || ageMs < 0) return 'fresh'
-  const minutes = Math.round(ageMs / 60000)
-  if (minutes < 60) return `${Math.max(1, minutes)}m old`
-  const hours = Math.round(minutes / 60)
-  if (hours < 48) return `${hours}h old`
-  return `${Math.round(hours / 24)}d old`
-}
-
 function signalForCategory(category: NewsCategory): NewsDashboardCard['signalLabel'] {
   if (category === 'local' || category === 'regional') return 'emerging'
   return 'verified'
@@ -166,11 +157,18 @@ function buildNewsCard(input: {
   provider: NonNullable<NewsDashboardCard['provider']>
   confidenceLabel: NewsDashboardCard['confidenceLabel']
 }): NewsDashboardCard | null {
-  const freshness = evaluateFreshness(input.publishedAt, {
+  const freshness = classifyFreshness(input.publishedAt, {
     maxAgeDays: LIVE_SIGNAL_MAX_AGE_DAYS,
     provider: input.provider === 'newsapi' || input.provider === 'guardian' ? input.provider : 'rss',
   })
   if (!freshness.acceptedForLiveSignal) return null
+  const articlePublishedAt = freshness.articlePublishedAt
+  const signalIngestedAt = input.fetchedAt
+  const timestampLabel = newsCardTimestampLabel({
+    articlePublishedAt,
+    signalIngestedAt,
+    sourceName: input.sourceName,
+  })
   return {
     id: input.id,
     title: input.title,
@@ -178,11 +176,16 @@ function buildNewsCard(input: {
     sourceName: input.sourceName,
     category: input.category,
     imageUrl: input.imageUrl,
-    publishedAt: freshness.publishedAt,
-    freshness: freshnessLabel(freshness.publishedAt, input.fetchedAt),
+    articlePublishedAt,
+    signalIngestedAt,
+    signalVerifiedAt: freshness.sourceStatus === 'VERIFIED' ? signalIngestedAt : null,
+    publishedAt: articlePublishedAt,
+    timestampLabel,
+    freshness: timestampLabel,
     sourceStatus: freshness.sourceStatus,
     freshnessStatus: freshness.status,
     operationalStatus: freshness.operationalStatus,
+    timeIntegrityStatus: freshness.timeIntegrityStatus,
     displayLabel: newsCardDisplayLabel({
       sourceStatus: freshness.sourceStatus,
       freshnessStatus: freshness.status,
@@ -199,7 +202,7 @@ function newsFreshnessDiagnostics(stored: NewsDashboardCard[], active: NewsDashb
   let oldestStoredAgeDays: number | null = null
   for (const card of stored) {
     const provider = card.provider === 'newsapi' || card.provider === 'guardian' ? card.provider : 'rss'
-    const freshness = evaluateFreshness(card.publishedAt, { maxAgeDays: LIVE_SIGNAL_MAX_AGE_DAYS, provider })
+    const freshness = classifyFreshness(card.articlePublishedAt, { maxAgeDays: LIVE_SIGNAL_MAX_AGE_DAYS, provider })
     if (freshness.ageDays !== null) {
       oldestStoredAgeDays = oldestStoredAgeDays === null ? freshness.ageDays : Math.max(oldestStoredAgeDays, freshness.ageDays)
     }
@@ -211,7 +214,7 @@ function newsFreshnessDiagnostics(stored: NewsDashboardCard[], active: NewsDashb
     if (card.freshnessStatus === 'LIVE') freshAcceptedCount += 1
     if (card.freshnessStatus === 'RECENT') recentAcceptedCount += 1
     const provider = card.provider === 'newsapi' || card.provider === 'guardian' ? card.provider : 'rss'
-    const freshness = evaluateFreshness(card.publishedAt, { maxAgeDays: LIVE_SIGNAL_MAX_AGE_DAYS, provider })
+    const freshness = classifyFreshness(card.articlePublishedAt, { maxAgeDays: LIVE_SIGNAL_MAX_AGE_DAYS, provider })
     if (freshness.ageDays !== null) {
       oldestActiveResultAgeDays = oldestActiveResultAgeDays === null ? freshness.ageDays : Math.max(oldestActiveResultAgeDays, freshness.ageDays)
     }
@@ -404,16 +407,22 @@ export async function buildNewsDashboardSnapshot(): Promise<NewsDashboardSnapsho
       ...setupSnapshot(failures ? 'Configured news sources were unreachable or returned no parseable items.' : 'Configured news sources returned no items.'),
       status: failures ? 'error' : 'unavailable',
       fetchedAt,
-      freshness: freshnessLabel(null, fetchedAt),
+      freshness: PUBLICATION_TIME_UNAVAILABLE,
     }
   }
+
+  const snapshotTimestampLabel = newsCardTimestampLabel({
+    articlePublishedAt: cards[0]?.articlePublishedAt ?? null,
+    signalIngestedAt: fetchedAt,
+    sourceName: sourceParts[0] ?? 'news',
+  })
 
   return {
     status: failures ? 'error' : 'available',
     provider: sourceParts.join(' + '),
     cards,
     fetchedAt,
-    freshness: freshnessLabel(null, fetchedAt),
+    freshness: snapshotTimestampLabel,
     source: sourceParts.join(' + '),
     detail: failures
       ? `${cards.length} source-backed news cards loaded; ${failures} news request${failures === 1 ? '' : 's'} failed.`
@@ -422,6 +431,7 @@ export async function buildNewsDashboardSnapshot(): Promise<NewsDashboardSnapsho
       `Guardian cards: ${guardianCards.length}`,
       `RSS cards: ${rssCards.length}`,
       `NewsAPI cards: ${apiCards.length}`,
+      `Snapshot ingested at: ${fetchedAt}`,
       `Failed source requests: ${failures}`,
       `Fresh accepted: ${freshnessDiagnostics.freshAcceptedCount}`,
       `Recent accepted: ${freshnessDiagnostics.recentAcceptedCount}`,

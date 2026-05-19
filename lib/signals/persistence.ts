@@ -6,11 +6,10 @@ import { getSignalSources } from './sources'
 import { buildSignalSnapshot } from './snapshot'
 import {
   activePublishedAtCutoff,
+  articlePublishedAtFromMetadata,
   collectCacheFreshnessDiagnostics,
   enrichSignalResult,
-  evaluateFreshness,
   isActiveSignalResult,
-  publicationDateFromMetadata,
 } from './freshness'
 
 type Row = Record<string, unknown>
@@ -103,17 +102,26 @@ function mapScan(row: Row): SignalScan {
   }
 }
 
-function publishedAtForRow(row: Row, metadata: Record<string, unknown>): string | null {
+function articlePublishedAtForRow(row: Row, metadata: Record<string, unknown>): string | null {
   const column = nullableText(row.published_at)
   if (column) return column
-  const freshness = evaluateFreshness(publicationDateFromMetadata(metadata), { provider: text(row.provider, 'manual_registry') as SignalResult['provider'] })
-  return freshness.publishedAt
+  const fromMetadata = articlePublishedAtFromMetadata(metadata)
+  if (typeof fromMetadata === 'string' && fromMetadata.trim()) {
+    const parsed = new Date(fromMetadata)
+    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null
+  }
+  return null
+}
+
+function signalIngestedAtForRow(row: Row): string {
+  return text(row.captured_at, new Date().toISOString())
 }
 
 function mapResult(row: Row): SignalResult {
   const metadata = objectValue(row.metadata)
   const provider = text(row.provider, 'manual_registry') as SignalResult['provider']
-  const publishedAt = publishedAtForRow(row, metadata)
+  const articlePublishedAt = articlePublishedAtForRow(row, metadata)
+  const signalIngestedAt = signalIngestedAtForRow(row)
   const base: SignalResult = {
     id: text(row.id),
     scanId: nullableText(row.scan_id),
@@ -141,8 +149,12 @@ function mapResult(row: Row): SignalResult {
     recommendedNextAction: text(row.recommended_next_action),
     assignedBabyFamily: text(row.assigned_baby_family, 'Analyst Baby') as SignalResult['assignedBabyFamily'],
     approvalStatus: text(row.approval_status, 'pending_review') as SignalResult['approvalStatus'],
-    capturedAt: text(row.captured_at, new Date().toISOString()),
-    metadata: publishedAt && !metadata.publishedAt ? { ...metadata, publishedAt } : metadata,
+    capturedAt: signalIngestedAt,
+    metadata: {
+      ...metadata,
+      ...(articlePublishedAt ? { publishedAt: articlePublishedAt, articlePublishedAt } : {}),
+      signalIngestedAt,
+    },
     guardrails: {
       sourceBacked: true,
       recommendationOnly: true,
@@ -174,7 +186,11 @@ function rowFreshnessFields(result: SignalResult): {
   operational_status: string
 } {
   return {
-    published_at: typeof result.metadata.publishedAt === 'string' ? result.metadata.publishedAt : null,
+    published_at: typeof result.metadata.articlePublishedAt === 'string'
+      ? result.metadata.articlePublishedAt
+      : typeof result.metadata.publishedAt === 'string'
+        ? result.metadata.publishedAt
+        : null,
     source_status: text(result.metadata.sourceStatus, 'UNKNOWN'),
     freshness_status: text(result.metadata.freshnessStatus, 'UNKNOWN_DATE'),
     operational_status: text(result.metadata.operationalStatus, 'EXCLUDED'),

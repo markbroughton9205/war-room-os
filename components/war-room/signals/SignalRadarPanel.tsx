@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CanonicalStatusBadge } from '@/components/war-room/runtime/CanonicalStatusBadge'
 import type { SignalResult, SignalSnapshot, SignalSourceDefinition } from '@/lib/signals/model'
-import { signalCardDisplayLabel } from '@/lib/signals/freshness'
+import { newsCardTimestampLabel, signalCardDisplayLabel, signalIngestedAtFromResult } from '@/lib/signals/freshness'
 
 function label(value: string) {
   return value.replace(/_/g, ' ')
@@ -89,7 +89,19 @@ function SignalCard({ signal, compact = false }: { signal: SignalResult; compact
             <Badge value={signalCardDisplayLabel(signal.metadata)} />
           </div>
           <p className="mt-1 text-[10px] text-slate-500">
-            {label(signal.category)} · {signal.source} · {signal.provider}
+            {newsCardTimestampLabel({
+              articlePublishedAt: typeof signal.metadata.articlePublishedAt === 'string'
+                ? signal.metadata.articlePublishedAt
+                : typeof signal.metadata.publishedAt === 'string'
+                  ? signal.metadata.publishedAt
+                  : null,
+              signalIngestedAt: signalIngestedAtFromResult(signal),
+              sourceName: signal.source,
+            })}
+            {signal.metadata.timeIntegrityStatus === 'TIME_INTEGRITY_WARNING' ? ' · TIME INTEGRITY WARNING' : ''}
+          </p>
+          <p className="mt-0.5 text-[9px] text-slate-600">
+            {label(signal.category)} · {signal.provider}
           </p>
         </div>
         <MiniMetric label="Leverage" value={String(Math.round(signal.scores.highestLeverage))} />

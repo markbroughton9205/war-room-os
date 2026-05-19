@@ -1,6 +1,11 @@
 import type { EvidenceConfidenceTier } from '@/lib/intelligence/intelligencePacket'
 import type { EnvAliasDiagnostic } from '@/lib/configuration/envAlias'
-import type { SignalFreshnessStatus, SignalOperationalStatus, SignalSourceStatus } from '@/lib/signals/model'
+import type {
+  SignalFreshnessStatus,
+  SignalOperationalStatus,
+  SignalSourceStatus,
+  SignalTimeIntegrityStatus,
+} from '@/lib/signals/model'
 
 export type ProviderAvailability = 'available' | 'unavailable' | 'error'
 export type WeatherProviderState = 'configured_but_fetch_failed' | 'configured_and_live' | 'missing_key' | 'missing_provider'
@@ -62,11 +67,21 @@ export type NewsDashboardCard = {
   sourceName: string
   category: NewsCategory
   imageUrl: string | null
+  /** Article publication instant — never ingestion time. */
+  articlePublishedAt: string | null
+  /** When War Room ingested/cached the card. */
+  signalIngestedAt: string
+  signalVerifiedAt: string | null
+  /** @deprecated Use timestampLabel — kept for API compatibility. */
   publishedAt: string | null
+  /** Primary card line: Published … · Ingested … · Source */
+  timestampLabel: string
+  /** @deprecated Use timestampLabel */
   freshness: string
   sourceStatus: SignalSourceStatus
   freshnessStatus: SignalFreshnessStatus
   operationalStatus: SignalOperationalStatus
+  timeIntegrityStatus: SignalTimeIntegrityStatus
   displayLabel: string
   confidenceLabel: EvidenceConfidenceTier
   signalLabel: 'verified' | 'emerging' | 'weak-signal'

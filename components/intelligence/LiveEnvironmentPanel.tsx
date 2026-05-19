@@ -883,7 +883,8 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
                     <p className="line-clamp-2 text-[9px] leading-snug text-slate-100">{activeNews.title}</p>
                   )}
                   <p className="mt-1 truncate text-[8px] text-slate-500">
-                    {activeNews.sourceName} · {activeNews.freshness} · {activeNews.provider ?? 'source'}
+                    {activeNews.timestampLabel}
+                    {activeNews.timeIntegrityStatus === 'TIME_INTEGRITY_WARNING' ? ' · TIME INTEGRITY WARNING' : ''}
                   </p>
                 </div>
               </div>
@@ -901,8 +902,13 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
                 <p className="line-clamp-2 text-[9px] text-slate-200">{activeNews.title}</p>
               )}
               <p className="mt-1 truncate text-[8px] text-slate-500">
-                {activeNews.sourceName} · {activeNews.freshness} · {activeNews.category}
+                {activeNews.timestampLabel} · {activeNews.category}
               </p>
+              {activeNews.signalVerifiedAt ? (
+                <p className="mt-0.5 truncate text-[7px] text-slate-600">
+                  Verified {new Date(activeNews.signalVerifiedAt).toLocaleString()}
+                </p>
+              ) : null}
               <p className="mt-1 inline-flex rounded border border-emerald-300/20 px-1.5 py-0.5 text-[7px] uppercase tracking-widest text-emerald-200">
                 {activeNews.displayLabel}
               </p>
@@ -945,6 +951,9 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
               News source: {dashboard?.news.status === 'available' ? dashboard.news.provider : providerStatusLabel(newsProvider)}
             </p>
             <p>{dashboard?.news.source ?? 'news source pending'} · {dashboard?.news.freshness ?? 'unknown'}</p>
+            {dashboard?.news.fetchedAt ? (
+              <p className="normal-case tracking-wide">Signal ingested at: {dashboard.news.fetchedAt}</p>
+            ) : null}
             {dashboard?.news.diagnostics?.map(item => (
               <p key={item} className="normal-case tracking-wide">Diagnostic: {item}</p>
             ))}

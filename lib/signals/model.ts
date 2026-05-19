@@ -58,6 +58,9 @@ export type SignalFreshnessStatus =
   | 'ARCHIVAL'
   | 'UNKNOWN_DATE'
 
+/** Publication clock integrity — distinct from ingestion freshness. */
+export type SignalTimeIntegrityStatus = 'OK' | 'TIME_INTEGRITY_WARNING'
+
 export type SignalSourceStatus = 'VERIFIED' | 'UNVERIFIED' | 'UNKNOWN'
 
 export type SignalOperationalStatus = 'ACTIONABLE' | 'CONTEXT_ONLY' | 'EXCLUDED'

@@ -5,6 +5,7 @@ import type {
   SignalRawItem,
   SignalResult,
   SignalSourceStatus,
+  SignalTimeIntegrityStatus,
 } from './model'
 
 export const DEFAULT_NEWS_MAX_AGE_DAYS = 14
@@ -20,13 +21,18 @@ const PROVIDER_MAX_AGE_ENV: Partial<Record<SignalProviderId, string[]>> = {
 
 export type FreshnessEvaluation = {
   status: SignalFreshnessStatus
+  /** Canonical article publication instant (ISO), never ingestion time. */
   publishedAt: string | null
+  articlePublishedAt: string | null
   ageDays: number | null
   acceptedForLiveSignal: boolean
   recencyPenalty: number
   sourceStatus: SignalSourceStatus
   operationalStatus: SignalOperationalStatus
+  timeIntegrityStatus: SignalTimeIntegrityStatus
 }
+
+export const PUBLICATION_TIME_UNAVAILABLE = 'Publication time unavailable'
 
 export type FreshnessCounters = {
   maxAgeDays: number
@@ -69,17 +75,75 @@ export function newsDateWindow(maxAgeDays: number, now = new Date()): { fromDate
   return { fromDate: dateOnly(from), toDate: dateOnly(now) }
 }
 
-function parsePublicationDate(value: unknown): Date | null {
+function parseArticlePublishedAt(value: unknown): Date | null {
   if (typeof value !== 'string' || !value.trim()) return null
   const parsed = new Date(value)
   return Number.isFinite(parsed.getTime()) ? parsed : null
 }
 
-export function publicationDateFromMetadata(metadata: Record<string, unknown>): unknown {
-  return metadata.publishedAt
+/** Article publication fields only — never ingestion/cache timestamps. */
+export function articlePublishedAtFromMetadata(metadata: Record<string, unknown>): unknown {
+  return metadata.articlePublishedAt
+    ?? metadata.publishedAt
     ?? metadata.webPublicationDate
     ?? metadata.pubDate
-    ?? metadata.updated
+}
+
+/** @deprecated Prefer articlePublishedAtFromMetadata — excludes ingestion timestamps. */
+export function publicationDateFromMetadata(metadata: Record<string, unknown>): unknown {
+  return articlePublishedAtFromMetadata(metadata)
+}
+
+export function signalIngestedAtFromResult(result: Pick<SignalResult, 'capturedAt' | 'metadata'>): string {
+  const fromMetadata = result.metadata.signalIngestedAt
+  if (typeof fromMetadata === 'string' && fromMetadata.trim()) return fromMetadata
+  return result.capturedAt
+}
+
+export function signalVerifiedAtFromMetadata(metadata: Record<string, unknown>): string | null {
+  const value = metadata.signalVerifiedAt
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+export function evaluatePublicationIntegrity(
+  articlePublishedAt: unknown,
+  now = new Date(),
+): { parsed: Date | null; timeIntegrityStatus: SignalTimeIntegrityStatus } {
+  const parsed = parseArticlePublishedAt(articlePublishedAt)
+  if (!parsed) {
+    return { parsed: null, timeIntegrityStatus: 'TIME_INTEGRITY_WARNING' }
+  }
+  if (parsed.getTime() > now.getTime()) {
+    return { parsed, timeIntegrityStatus: 'TIME_INTEGRITY_WARNING' }
+  }
+  return { parsed, timeIntegrityStatus: 'OK' }
+}
+
+export function formatRelativeAgeAgo(iso: string | null | undefined, now = new Date()): string | null {
+  if (!iso) return null
+  const parsed = parseArticlePublishedAt(iso)
+  if (!parsed) return null
+  const ageMs = now.getTime() - parsed.getTime()
+  if (!Number.isFinite(ageMs) || ageMs < 0) return null
+  const minutes = Math.round(ageMs / 60_000)
+  if (minutes < 60) return `${Math.max(1, minutes)}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
+}
+
+export function newsCardTimestampLabel(input: {
+  articlePublishedAt: string | null
+  signalIngestedAt: string | null
+  sourceName: string
+  now?: Date
+}): string {
+  const now = input.now ?? new Date()
+  const publishedAgo = formatRelativeAgeAgo(input.articlePublishedAt, now)
+  const ingestedAgo = formatRelativeAgeAgo(input.signalIngestedAt, now)
+  const publishedPart = publishedAgo ? `Published ${publishedAgo}` : PUBLICATION_TIME_UNAVAILABLE
+  const ingestedPart = ingestedAgo ? `Ingested ${ingestedAgo}` : null
+  return [publishedPart, ingestedPart, input.sourceName].filter(Boolean).join(' · ')
 }
 
 function statusForAge(ageDays: number): SignalFreshnessStatus {
@@ -112,39 +176,53 @@ export function resolveOperationalStatus(
   return 'CONTEXT_ONLY'
 }
 
+/** Classify freshness from article publication time only (never ingestion timestamps). */
+export function classifyFreshness(
+  articlePublishedAt: unknown,
+  options?: { now?: Date; maxAgeDays?: number; provider?: SignalProviderId },
+): FreshnessEvaluation {
+  return evaluateFreshness(articlePublishedAt, options)
+}
+
 export function evaluateFreshness(
-  publishedAt: unknown,
+  articlePublishedAt: unknown,
   options?: { now?: Date; maxAgeDays?: number; provider?: SignalProviderId },
 ): FreshnessEvaluation {
   const maxAgeDays = resolveMaxAgeDays(options?.maxAgeDays)
   const sourceStatus = resolveSourceStatus(options?.provider ?? 'manual_registry')
-  const parsed = parsePublicationDate(publishedAt)
+  const now = options?.now ?? new Date()
+  const integrity = evaluatePublicationIntegrity(articlePublishedAt, now)
+  const parsed = integrity.parsed
   if (!parsed) {
     return {
       status: 'UNKNOWN_DATE',
       publishedAt: null,
+      articlePublishedAt: null,
       ageDays: null,
       acceptedForLiveSignal: false,
       recencyPenalty: 100,
       sourceStatus,
       operationalStatus: 'EXCLUDED',
+      timeIntegrityStatus: 'TIME_INTEGRITY_WARNING',
     }
   }
 
-  const now = options?.now ?? new Date()
-  const ageDays = Math.max(0, Math.floor((now.getTime() - parsed.getTime()) / DAY_MS))
-  const status = statusForAge(ageDays)
-  const withinActiveWindow = ageDays <= LIVE_SIGNAL_MAX_AGE_DAYS
-  const withinProviderWindow = ageDays <= Math.min(maxAgeDays, LIVE_SIGNAL_MAX_AGE_DAYS)
-  const acceptedForLiveSignal = withinActiveWindow && withinProviderWindow
+  const isFuture = integrity.timeIntegrityStatus === 'TIME_INTEGRITY_WARNING'
+  const ageDays = isFuture ? null : Math.max(0, Math.floor((now.getTime() - parsed.getTime()) / DAY_MS))
+  const status = ageDays === null ? 'UNKNOWN_DATE' : statusForAge(ageDays)
+  const withinActiveWindow = ageDays !== null && ageDays <= LIVE_SIGNAL_MAX_AGE_DAYS
+  const withinProviderWindow = ageDays !== null && ageDays <= Math.min(maxAgeDays, LIVE_SIGNAL_MAX_AGE_DAYS)
+  const acceptedForLiveSignal = !isFuture && withinActiveWindow && withinProviderWindow
   const evaluation: FreshnessEvaluation = {
-    status: withinActiveWindow ? status : 'ARCHIVAL',
+    status: ageDays === null ? 'UNKNOWN_DATE' : (withinActiveWindow ? status : 'ARCHIVAL'),
     publishedAt: parsed.toISOString(),
+    articlePublishedAt: parsed.toISOString(),
     ageDays,
     acceptedForLiveSignal,
-    recencyPenalty: penaltyForAge(ageDays),
+    recencyPenalty: ageDays === null ? 100 : penaltyForAge(ageDays),
     sourceStatus,
     operationalStatus: 'EXCLUDED',
+    timeIntegrityStatus: integrity.timeIntegrityStatus,
   }
   evaluation.operationalStatus = resolveOperationalStatus(evaluation)
   return evaluation
@@ -153,27 +231,32 @@ export function evaluateFreshness(
 export function withFreshnessMetadata(
   metadata: Record<string, unknown> | undefined,
   freshness: FreshnessEvaluation,
+  signalIngestedAt?: string,
 ): Record<string, unknown> {
   return {
     ...(metadata ?? {}),
     publishedAt: freshness.publishedAt,
+    articlePublishedAt: freshness.articlePublishedAt,
+    signalIngestedAt: signalIngestedAt ?? metadata?.signalIngestedAt,
     freshnessStatus: freshness.status,
     sourceStatus: freshness.sourceStatus,
     operationalStatus: freshness.operationalStatus,
+    timeIntegrityStatus: freshness.timeIntegrityStatus,
     ageDays: freshness.ageDays,
     recencyPenalty: freshness.recencyPenalty,
   }
 }
 
 export function enrichSignalResult(result: SignalResult, now = new Date()): SignalResult {
-  const freshness = evaluateFreshness(publicationDateFromMetadata(result.metadata), {
+  const signalIngestedAt = signalIngestedAtFromResult(result)
+  const freshness = classifyFreshness(articlePublishedAtFromMetadata(result.metadata), {
     now,
     maxAgeDays: maxAgeDaysForProvider(result.provider),
     provider: result.provider,
   })
   return {
     ...result,
-    metadata: withFreshnessMetadata(result.metadata, freshness),
+    metadata: withFreshnessMetadata(result.metadata, freshness, signalIngestedAt),
   }
 }
 
