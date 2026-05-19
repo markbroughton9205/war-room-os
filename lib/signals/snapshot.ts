@@ -1,4 +1,5 @@
-import type { SignalAlert, SignalCacheFreshnessDiagnostics, SignalResult, SignalScan, SignalSnapshot, SignalSourceDefinition } from './model'
+import type { SignalAlert, SignalCacheFreshnessDiagnostics, SignalClassificationDiagnostics, SignalResult, SignalScan, SignalSnapshot, SignalSourceDefinition } from './model'
+import { isOperatorActionableClassifiedSignal, partitionClassifiedSignals } from './classification'
 import { isActiveSignalResult } from './freshness'
 
 function guardrails(): SignalSnapshot['guardrails'] {
@@ -88,6 +89,7 @@ export function buildSignalSnapshot(input: {
   results: SignalResult[]
   alerts: SignalAlert[]
   cacheDiagnostics?: SignalCacheFreshnessDiagnostics
+  classificationDiagnostics?: SignalClassificationDiagnostics
 }): SignalSnapshot {
   const ranked = [...input.results].sort((a, b) => b.scores.highestLeverage - a.scores.highestLeverage)
   const sourceBacked = ranked.filter(result => (
@@ -95,7 +97,11 @@ export function buildSignalSnapshot(input: {
     && result.url.startsWith('https://')
     && isActiveSignalResult(result)
   ))
-  const strongestSignal = sourceBacked.find(result => result.approvalStatus === 'pending_review') ?? null
+  const operatorActionable = sourceBacked.filter(isOperatorActionableClassifiedSignal)
+  const strongestSignal = operatorActionable.find(result => result.approvalStatus === 'pending_review')
+    ?? sourceBacked.find(result => result.approvalStatus === 'pending_review')
+    ?? null
+  const classification = partitionClassifiedSignals(ranked)
   return {
     generatedAt: input.generatedAt,
     persistenceAvailable: input.persistenceAvailable,
@@ -108,7 +114,9 @@ export function buildSignalSnapshot(input: {
     rejectedOrLowConfidence: sourceBacked.filter(result => result.approvalStatus === 'rejected' || result.approvalStatus === 'low_confidence'),
     alerts: buildAlerts(sourceBacked, input.alerts),
     cacheDiagnostics: input.cacheDiagnostics,
-    integrations: integrationLines(sourceBacked),
+    classification,
+    classificationDiagnostics: input.classificationDiagnostics,
+    integrations: integrationLines(operatorActionable.length ? operatorActionable : sourceBacked),
     guardrails: guardrails(),
   }
 }

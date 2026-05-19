@@ -3,6 +3,7 @@ import 'server-only'
 import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import type { SignalRawItem, SignalResult, SignalSourceDefinition } from '../model'
 import { getSignalSources } from '../sources'
+import { applySignalClassificationPipeline } from '../classification'
 import { dedupeAndRankSignals, scoreSignalItem } from '../scoring'
 import { dedupeRssInputs } from './dedupe'
 import { normalizeRssFeedItems, toSignalRawItem } from './normalize'
@@ -277,9 +278,9 @@ export async function runRssIngestionPoll(options?: { force?: boolean }): Promis
     if (poll.items.length) rawItems.push(...poll.items)
   }
 
-  const results: SignalResult[] = dedupeAndRankSignals(
-    rawItems.map(item => scoreSignalItem(item, scanId)),
-  )
+  const scored = dedupeAndRankSignals(rawItems.map(item => scoreSignalItem(item, scanId)))
+  const classified = applySignalClassificationPipeline(scored, { sources: registrySources })
+  const results: SignalResult[] = classified.results
 
   const persistence = await persistRssPollResults({
     sources,

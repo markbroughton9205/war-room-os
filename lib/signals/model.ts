@@ -185,6 +185,24 @@ export type SignalCacheFreshnessDiagnostics = {
   cacheFilteredCount: number
 }
 
+export type SignalClassificationBuckets = {
+  actionable: SignalResult[]
+  watchlist: SignalResult[]
+  conflicted: SignalResult[]
+  stale: SignalResult[]
+}
+
+export type SignalClassificationDiagnostics = {
+  processedCount: number
+  actionableCount: number
+  watchlistCount: number
+  archivalCount: number
+  conflictedCount: number
+  collapsedNarrativeCount: number
+  contradictionGroups: number
+  failures: Array<{ signalId: string; error: string }>
+}
+
 export type SignalSnapshot = {
   generatedAt: string
   persistenceAvailable: boolean
@@ -197,6 +215,8 @@ export type SignalSnapshot = {
   rejectedOrLowConfidence: SignalResult[]
   alerts: SignalAlert[]
   cacheDiagnostics?: SignalCacheFreshnessDiagnostics
+  classification?: SignalClassificationBuckets
+  classificationDiagnostics?: SignalClassificationDiagnostics
   integrations: {
     revenueEngine: string[]
     babyDailyBriefing: string[]

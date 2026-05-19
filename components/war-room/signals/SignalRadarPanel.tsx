@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CanonicalStatusBadge } from '@/components/war-room/runtime/CanonicalStatusBadge'
-import type { SignalResult, SignalSnapshot, SignalSourceDefinition } from '@/lib/signals/model'
+import type { SignalClassificationBuckets, SignalResult, SignalSnapshot, SignalSourceDefinition } from '@/lib/signals/model'
 import { newsCardTimestampLabel, signalCardDisplayLabel, signalIngestedAtFromResult } from '@/lib/signals/freshness'
 
 function label(value: string) {
@@ -71,6 +71,14 @@ function SourcePill({ source }: { source: SignalSourceDefinition }) {
 }
 
 function SignalCard({ signal, compact = false }: { signal: SignalResult; compact?: boolean }) {
+  const rawHeadline = typeof signal.metadata.rawHeadline === 'string' ? signal.metadata.rawHeadline : null
+  const intelligenceCategory = typeof signal.metadata.intelligenceCategory === 'string'
+    ? signal.metadata.intelligenceCategory
+    : null
+  const intelligenceSeverity = typeof signal.metadata.intelligenceSeverity === 'string'
+    ? signal.metadata.intelligenceSeverity
+    : null
+
   return (
     <article className="rounded border border-white/10 bg-slate-950/70 p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -79,14 +87,16 @@ function SignalCard({ signal, compact = false }: { signal: SignalResult; compact
             {signal.url.startsWith('https://') ? (
               <h4 className="text-sm font-semibold text-white">
                 <a href={signal.url} target="_blank" rel="noopener noreferrer" className="underline decoration-cyan-500/40 hover:text-cyan-100">
-                  {signal.title}
+                  {rawHeadline ?? signal.title}
                 </a>
               </h4>
             ) : (
-              <h4 className="text-sm font-semibold text-white">{signal.title}</h4>
+              <h4 className="text-sm font-semibold text-white">{rawHeadline ?? signal.title}</h4>
             )}
             <Badge value={signal.approvalStatus} />
             <Badge value={signalCardDisplayLabel(signal.metadata)} />
+            {intelligenceCategory ? <Badge value={intelligenceCategory} /> : null}
+            {intelligenceSeverity ? <Badge value={intelligenceSeverity} /> : null}
           </div>
           <p className="mt-1 text-[10px] text-slate-500">
             {newsCardTimestampLabel({
@@ -194,21 +204,25 @@ export function SignalRadarPanel() {
     }
   }, [snapshot?.sources])
 
-  const opportunities = useMemo(
-    () => (snapshot?.results ?? []).filter(result => result.approvalStatus === 'pending_review').slice(0, 8),
-    [snapshot?.results],
-  )
+  const classification = snapshot?.classification
+  const classificationBuckets: SignalClassificationBuckets = classification ?? {
+    actionable: [],
+    watchlist: [],
+    conflicted: [],
+    stale: [],
+  }
   const freshness = snapshot?.latestScan?.freshnessSummary
   const cacheDiagnostics = snapshot?.cacheDiagnostics
+  const classificationDiagnostics = snapshot?.classificationDiagnostics
 
   return (
     <section className="mx-auto mt-14 max-w-6xl border-t border-cyan-900/50 pt-10">
       <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-cyan-300">Phase 14</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-2xl">Live Economic Signal Radar</h2>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-cyan-300">Phase 29</p>
+          <h2 className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-2xl">Intelligence Signal Radar</h2>
           <p className="mt-2 max-w-3xl text-sm text-slate-500">
-            Bounded cloud-source ingestion for income, freight, SMB automation, AI trends, jobs/gigs, and Akron/Ohio opportunities. Results are source-backed recommendations only; approval is required before action.
+            Classified operational intelligence with credibility weighting, contradiction detection, and canonical council summaries. Unverified RSS remains PROPOSED — never operator truth without review.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -246,6 +260,14 @@ export function SignalRadarPanel() {
         <MiniMetric label="Oldest Active" value={cacheDiagnostics?.oldestActiveResultAgeDays === null || cacheDiagnostics?.oldestActiveResultAgeDays === undefined ? 'none' : `${cacheDiagnostics.oldestActiveResultAgeDays}d`} />
         <MiniMetric label="Oldest Stored" value={cacheDiagnostics?.oldestStoredResultAgeDays === null || cacheDiagnostics?.oldestStoredResultAgeDays === undefined ? 'none' : `${cacheDiagnostics.oldestStoredResultAgeDays}d`} />
         <MiniMetric label="Cache Filtered" value={String(cacheDiagnostics?.cacheFilteredCount ?? freshness?.cacheFilteredCount ?? 0)} />
+      </div>
+
+      <div className="mb-4 grid gap-3 md:grid-cols-5">
+        <MiniMetric label="Actionable" value={String(classificationBuckets.actionable.length)} />
+        <MiniMetric label="Watchlist" value={String(classificationBuckets.watchlist.length)} />
+        <MiniMetric label="Conflicted" value={String(classificationBuckets.conflicted.length)} />
+        <MiniMetric label="Stale / Archival" value={String(classificationBuckets.stale.length)} />
+        <MiniMetric label="Classify Failures" value={String(classificationDiagnostics?.failures.length ?? 0)} />
       </div>
 
       {snapshot?.migrationStatus === 'MIGRATION_REQUIRED' ? (
@@ -301,14 +323,45 @@ export function SignalRadarPanel() {
         <section className="space-y-4">
           <div className="rounded border border-white/10 bg-black/25 p-3">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-cyan-300">Source-Backed Opportunities</h3>
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Actionable Intelligence</h3>
               <span className="text-[10px] text-slate-500">source: /api/signals/results</span>
             </div>
             <div className="max-h-[44rem] space-y-3 overflow-y-auto">
-              {opportunities.length ? opportunities.map(signal => <SignalCard key={signal.id} signal={signal} />) : (
-                <div className="rounded border border-white/10 p-3 text-xs text-slate-500">No pending source-backed signals yet.</div>
+              {classificationBuckets.actionable.length ? classificationBuckets.actionable.slice(0, 6).map(signal => <SignalCard key={signal.id} signal={signal} />) : (
+                <div className="rounded border border-white/10 p-3 text-xs text-slate-500">No actionable classified signals. RSS remains watchlist until corroborated.</div>
               )}
             </div>
+          </div>
+
+          <section className="rounded border border-yellow-500/30 bg-black/25 p-3">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-yellow-300">Watchlist</h3>
+            <div className="mt-2 max-h-[16rem] space-y-2 overflow-y-auto">
+              {classificationBuckets.watchlist.slice(0, 5).map(signal => <SignalCard key={signal.id} signal={signal} compact />)}
+              {!classificationBuckets.watchlist.length ? (
+                <div className="rounded border border-white/10 p-2 text-[10px] text-slate-500">No watchlist signals.</div>
+              ) : null}
+            </div>
+          </section>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="rounded border border-red-500/30 bg-black/25 p-3">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-red-300">Conflicting Reports</h3>
+              <div className="mt-2 space-y-2">
+                {classificationBuckets.conflicted.slice(0, 4).map(signal => <SignalCard key={signal.id} signal={signal} compact />)}
+                {!classificationBuckets.conflicted.length ? (
+                  <div className="rounded border border-white/10 p-2 text-[10px] text-slate-500">No contradictory narratives detected.</div>
+                ) : null}
+              </div>
+            </section>
+            <section className="rounded border border-slate-500/30 bg-black/25 p-3">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-300">Stale / Archival</h3>
+              <div className="mt-2 space-y-2">
+                {classificationBuckets.stale.slice(0, 4).map(signal => <SignalCard key={signal.id} signal={signal} compact />)}
+                {!classificationBuckets.stale.length ? (
+                  <div className="rounded border border-white/10 p-2 text-[10px] text-slate-500">No stale or archival signals.</div>
+                ) : null}
+              </div>
+            </section>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">

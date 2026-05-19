@@ -5,6 +5,7 @@ import { PERSISTENT_MISSION_IDS } from '@/lib/missions/definitions'
 import type { Mission, MissionId } from '@/lib/missions/types'
 import { createOutcomeEntry, listOutcomeSnapshot } from '@/lib/outcomes'
 import { collectQueueSnapshot } from '@/lib/queues'
+import { listOperatorClassifiedSignalActions } from '@/lib/signals/operatorIntelligence'
 import { collectRuntimeGraph } from '@/lib/runtime-graph/collect'
 import { tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persistence'
 import type {
@@ -207,8 +208,22 @@ export async function collectOperatorDeck(req: Request): Promise<OperatorDeckSna
   const supabase = tryWarRoomSupabase()
   const operatorRows = supabase.ok ? await listOperatorRows(supabase.client) : null
   const persistedActions = operatorRows?.actions.map(row => actionFromRow(row, missionTitles)).filter(Boolean) as OperatorAction[] | undefined
-  const proposedActions = operatorQueue.actions ?? []
-  const actionQueue = (proposedActions.length ? proposedActions : persistedActions ?? []).slice(0, 4)
+  const classifiedSignalActions = await listOperatorClassifiedSignalActions(missions)
+  const proposedActions = (operatorQueue.actions ?? []).filter(action => {
+    if (action.source !== 'signal') return true
+    return classifiedSignalActions.some(candidate => candidate.id === action.id)
+  })
+  const mergedActions = [
+    ...classifiedSignalActions,
+    ...(proposedActions.length ? proposedActions : persistedActions ?? []),
+  ]
+  const seen = new Set<string>()
+  const actionQueue = mergedActions.filter(action => {
+    if (seen.has(action.id)) return false
+    seen.add(action.id)
+    if (action.source === 'signal') return classifiedSignalActions.some(candidate => candidate.id === action.id)
+    return true
+  }).slice(0, 4)
   const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
   const weeklyOutcomeActual = outcomeSnapshot.outcomes
     .filter(outcome => outcome.actualRevenue != null && Date.parse(outcome.createdAt) >= oneWeekAgo)

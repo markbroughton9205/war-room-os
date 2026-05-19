@@ -4,6 +4,7 @@ import { tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persist
 import type { SignalAlert, SignalResult, SignalScan, SignalSnapshot, SignalSourceDefinition } from './model'
 import { getSignalSources } from './sources'
 import { buildSignalSnapshot } from './snapshot'
+import { applySignalClassificationPipeline } from './classification'
 import {
   activePublishedAtCutoff,
   articlePublishedAtFromMetadata,
@@ -197,6 +198,23 @@ function rowFreshnessFields(result: SignalResult): {
   }
 }
 
+function rowClassificationFields(result: SignalResult): {
+  intelligence_category: string | null
+  operational_class: string | null
+  intelligence_severity: string | null
+  classification_confidence: number | null
+} {
+  return {
+    intelligence_category: nullableText(result.metadata.intelligenceCategory),
+    operational_class: nullableText(result.metadata.operationalClass),
+    intelligence_severity: nullableText(result.metadata.intelligenceSeverity),
+    classification_confidence: typeof result.metadata.classificationConfidence === 'number'
+      && Number.isFinite(result.metadata.classificationConfidence)
+      ? result.metadata.classificationConfidence
+      : null,
+  }
+}
+
 export async function upsertSources(client: WarRoomSupabase, sources: SignalSourceDefinition[]) {
   const { error } = await client
     .from('war_room_signal_sources')
@@ -276,6 +294,7 @@ export async function insertResults(client: WarRoomSupabase, results: SignalResu
       income_claimed: false,
       metadata: result.metadata,
       ...rowFreshnessFields(result),
+      ...rowClassificationFields(result),
     })), { onConflict: 'id' })
   if (error) throw new Error(error.message)
 
@@ -408,7 +427,8 @@ export async function listPersistedSignalSnapshot(limit = 40): Promise<SignalSna
   }
 
   const mappedStored = resultsQuery.rows.map(mapResult)
-  const activeResults = mappedStored.filter(result => (
+  const classified = applySignalClassificationPipeline(mappedStored, { sources: getSignalSources() })
+  const activeResults = classified.results.filter(result => (
     isActiveSignalResult(result)
     && result.url.startsWith('https://')
     && result.guardrails.sourceBacked
@@ -427,5 +447,6 @@ export async function listPersistedSignalSnapshot(limit = 40): Promise<SignalSna
     results: activeResults,
     alerts: ((alerts.data ?? []) as Row[]).map(mapAlert),
     cacheDiagnostics,
+    classificationDiagnostics: classified.diagnostics,
   })
 }

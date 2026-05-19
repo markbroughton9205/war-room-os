@@ -7,6 +7,7 @@ import type { OperatorAction } from '@/lib/operator/deckTypes'
 import { listRevenueEngineSnapshot } from '@/lib/revenue-engine/persistence'
 import { collectRuntimeGraph } from '@/lib/runtime-graph/collect'
 import type { RuntimeGraphNode, RuntimeGraphSnapshot } from '@/lib/runtime-graph/types'
+import { listOperatorClassifiedSignalActions } from '@/lib/signals/operatorIntelligence'
 import { tryWarRoomSupabase, type WarRoomSupabase } from '@/lib/war-room/persistence'
 import type { QueueDomain, QueueItem, QueueSeverity, QueueSnapshot, QueueSourceType, QueueTruthLabel, QueueWeights } from './types'
 
@@ -19,6 +20,7 @@ const OPERATOR_ALLOWED_TYPES: ReadonlySet<QueueSourceType> = new Set([
   'debt_progress',
   'operator_review',
   'income_task',
+  'strategic_recommendation',
 ])
 
 const OPERATOR_BLOCKED_TYPES: ReadonlySet<QueueSourceType> = new Set([
@@ -252,6 +254,30 @@ async function listPersistedItems(client: WarRoomSupabase, queueType: QueueDomai
 
   if (error) return null
   return ((data ?? []) as Row[]).map(row => itemFromRow(row, queueType)).filter(Boolean) as QueueItem[]
+}
+
+async function operatorSignalIntelligenceItems(missions: Mission[]): Promise<QueueItem[]> {
+  const actions = await listOperatorClassifiedSignalActions(missions)
+  return actions.map(action => buildItem({
+    id: action.id,
+    queueType: 'operator_priority_queue',
+    title: action.title,
+    description: action.linkedMissionTitle,
+    sourceType: 'strategic_recommendation',
+    confidence: action.confidence,
+    revenueImpact: 35,
+    missionImpact: 70,
+    urgency: action.confidence >= 75 ? 78 : 58,
+    dependency: 40,
+    estimatedMinutes: action.estimatedTimeMinutes,
+    approvalRequired: true,
+    truthLabel: action.truthLabel === 'SOURCE_BACKED'
+      ? 'SOURCE_BACKED'
+      : action.truthLabel === 'APPROVAL_REQUIRED'
+        ? 'APPROVAL_REQUIRED'
+        : 'PROPOSED',
+    severity: action.confidence >= 80 ? 'important' : 'watch',
+  }))
 }
 
 function operatorItemsFromSources(graph: RuntimeGraphSnapshot, missions: Mission[]): QueueItem[] {
@@ -525,7 +551,11 @@ async function derivedItems(queueType: QueueDomain, req: Request): Promise<Queue
     collectRuntimeGraph(req),
     listMissionSnapshot(),
   ])
-  if (queueType === 'operator_priority_queue') return operatorItemsFromSources(graph, missionSnapshot.missions)
+  if (queueType === 'operator_priority_queue') {
+    const base = operatorItemsFromSources(graph, missionSnapshot.missions)
+    const signals = await operatorSignalIntelligenceItems(missionSnapshot.missions)
+    return [...signals, ...base]
+  }
   if (queueType === 'engineering_queue') return engineeringItemsFromGraph(graph)
   return runtimeItemsFromGraph(graph)
 }

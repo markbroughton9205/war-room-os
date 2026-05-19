@@ -275,9 +275,23 @@ export function isActiveSignalResult(result: SignalResult, now = new Date()): bo
 }
 
 export function signalCardDisplayLabel(metadata: Record<string, unknown>): string {
+  const intelligenceClass = metadata.operationalClass
+  const truthLabel = metadata.intelligenceTruthLabel
   const sourceStatus = metadata.sourceStatus
   const freshnessStatus = metadata.freshnessStatus
   const operationalStatus = metadata.operationalStatus
+
+  if (intelligenceClass === 'CONFLICTED') {
+    return `CONFLICTED · ${truthLabel === 'PROPOSED' ? 'UNVERIFIED' : String(truthLabel ?? 'PROPOSED')}`
+  }
+  if (intelligenceClass === 'ACTIONABLE') {
+    return `ACTIONABLE · ${String(truthLabel ?? 'APPROVAL_REQUIRED')}`
+  }
+  if (intelligenceClass === 'WATCHLIST') {
+    return `WATCHLIST · ${truthLabel === 'PROPOSED' ? 'RSS UNVERIFIED' : String(truthLabel ?? 'PROPOSED')}`
+  }
+  if (intelligenceClass === 'ARCHIVAL') return 'ARCHIVAL · CONTEXT ONLY'
+
   const sourcePrefix = sourceStatus === 'VERIFIED'
     ? 'SOURCE VERIFIED'
     : sourceStatus === 'UNVERIFIED'

@@ -3,6 +3,7 @@ import 'server-only'
 import type { SignalAlert, SignalRawItem, SignalScan, SignalSnapshot } from './model'
 import { persistSignalScan } from './persistence'
 import { runFirecrawlOrDirectSources, runNewsProviders, runRssSources, runTavilySignalSearch } from './providers'
+import { applySignalClassificationPipeline } from './classification'
 import { dedupeAndRankSignals, scoreSignalItem } from './scoring'
 import { buildSignalSnapshot } from './snapshot'
 import { getSignalSources } from './sources'
@@ -124,7 +125,9 @@ export async function runSignalScan(): Promise<SignalSnapshot> {
     }
   }
 
-  const results = dedupeAndRankSignals(rawItems.map(item => scoreSignalItem(item, id))).slice(0, 40)
+  const scored = dedupeAndRankSignals(rawItems.map(item => scoreSignalItem(item, id))).slice(0, 40)
+  const classified = applySignalClassificationPipeline(scored, { sources })
+  const results = classified.results
   const completedAt = new Date().toISOString()
   const scanFreshnessSummary = freshnessSummary(completedAt, diagnostics, results.length)
   const scan: SignalScan = {
@@ -135,7 +138,10 @@ export async function runSignalScan(): Promise<SignalSnapshot> {
     sourceCount: sources.filter(source => source.configured).length,
     resultCount: results.length,
     freshnessSummary: scanFreshnessSummary,
-    providerDiagnostics: diagnostics,
+    providerDiagnostics: {
+      ...diagnostics,
+      classification: classified.diagnostics,
+    },
     error: results.length ? null : 'No configured cloud source returned source-backed signal results.',
   }
   const alerts = alertsForDiagnostics(diagnostics)
@@ -149,5 +155,6 @@ export async function runSignalScan(): Promise<SignalSnapshot> {
     latestScan: scan,
     results,
     alerts,
+    classificationDiagnostics: classified.diagnostics,
   })
 }
