@@ -6,6 +6,10 @@ import {
 } from '@/lib/cognitive-bus/bus'
 import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
 import { buildStructuredProviderPacket, packetsConflict } from '@/lib/cognitive-bus/packet'
+import { parseOpportunitiesFromText } from '@/lib/opportunities/parse'
+import { registerScoutOpportunities } from '@/lib/opportunities/store'
+import { validateOpportunityResponse } from '@/lib/opportunities/validate'
+import { familyRequiresOpportunity } from '@/lib/opportunities/schema'
 import type { ProviderPacketIntegrityStatus } from '@/lib/cognitive-bus/types'
 import { publishAndPersistBusEvent, persistCouncilThreadState } from '@/lib/cognitive-bus/persistence'
 import type { OperatorPacket, StructuredProviderPacket } from '@/lib/cognitive-bus/types'
@@ -175,13 +179,27 @@ export async function runDeliberationStep(
   if (input.kind === 'register_packet' && input.family && input.displayText) {
     const gate = applyCouncilRenderGate(input.family, input.displayText)
     if (gate.displayText.trim()) {
-      const integrityStatus = mapRenderGateIntegrity(gate.integrityStatus)
+      const opportunities = parseOpportunitiesFromText(gate.displayText)
+      const oppValidation = familyRequiresOpportunity(input.family)
+        ? validateOpportunityResponse(gate.displayText, opportunities)
+        : { ok: true }
+      const integrityStatus: ProviderPacketIntegrityStatus =
+        !oppValidation.ok ? 'degraded' : mapRenderGateIntegrity(gate.integrityStatus)
       const packet = buildStructuredProviderPacket({
         family: input.family,
         displayText: gate.displayText,
         integrityStatus,
-        confidence: gate.degraded ? 0.35 : integrityStatus === 'verified' ? 0.85 : undefined,
+        opportunities,
+        confidence: gate.degraded || !oppValidation.ok ? 0.35 : integrityStatus === 'verified' ? 0.85 : undefined,
       })
+      if (opportunities.length) {
+        registerScoutOpportunities({
+          threadId,
+          family: input.family,
+          packets: opportunities,
+          liveSignalsAvailable: Boolean(state.inheritedContext.liveSignalsAvailable),
+        })
+      }
       await publishAndPersistBusEvent(client, {
         threadId,
         type: 'provider_packet',
@@ -291,8 +309,17 @@ export async function registerCouncilProviderPacketOnBus(opts: {
   family: CouncilOrchestrationFamily
   displayText: string
   correlationId?: string
+  liveSignalsAvailable?: boolean
 }): Promise<void> {
   if (!opts.displayText.trim()) return
+  if (opts.liveSignalsAvailable !== undefined) {
+    patchCouncilThreadState(opts.threadId, {
+      inheritedContext: {
+        ...getCouncilThreadState(opts.threadId).inheritedContext,
+        liveSignalsAvailable: opts.liveSignalsAvailable,
+      },
+    })
+  }
   await runDeliberationStep(opts.client, {
     threadId: opts.threadId,
     kind: 'register_packet',

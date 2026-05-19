@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import type { OpportunityPacket } from '@/lib/opportunities/schema'
 
 export const COGNITIVE_BUS_EVENT_TYPES = [
   'signal_received',
@@ -38,6 +39,8 @@ export type StructuredProviderPacket = {
   contradictions: string[]
   recommendations: string[]
   escalation_requests: string[]
+  /** Phase 32B — actionable opportunity packets (PROPOSED until Commander approves). */
+  opportunities: OpportunityPacket[]
 }
 
 export type OperatorPacketStatus = 'PROPOSED' | 'APPROVED' | 'REJECTED'

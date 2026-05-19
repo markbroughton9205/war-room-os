@@ -1,4 +1,6 @@
 import { toDisplayText } from '@/lib/council/toDisplayText'
+import type { OpportunityPacket } from '@/lib/opportunities/schema'
+import { validateOpportunityResponse } from '@/lib/opportunities/validate'
 
 /**
  * Provider response integrity validation — pure heuristics; no I/O.
@@ -27,7 +29,13 @@ export type ResponseIntegrityExpectation = {
   councilMode?: boolean
   /** Minimum meaningful tokens for council contributions (default 24). */
   minMeaningfulTokens?: number
+  /** Phase 32B — require parsed actionable opportunity packets. */
+  requireActionableOpportunity?: boolean
+  /** Pre-parsed opportunities (when available). */
+  opportunities?: OpportunityPacket[]
 }
+
+export { hasActionableOpportunity } from '@/lib/opportunities/validate'
 
 export type ResponseIntegrityResult = {
   integrity_status: ResponseIntegrityStatus
@@ -388,6 +396,21 @@ export function validateProviderResponseIntegrity(
   if (expectation.councilMode) {
     const lateDegraded = assessDegradedResponseQuality(text, expectation)
     if (lateDegraded) return lateDegraded
+  }
+
+  if (expectation.requireActionableOpportunity) {
+    const opportunities = expectation.opportunities ?? []
+    const oppValidation = validateOpportunityResponse(text, opportunities)
+    if (!oppValidation.ok) {
+      return {
+        integrity_status: 'DEGRADED_RESPONSE_QUALITY',
+        confidence: 88,
+        reason: oppValidation.reason,
+        retry_recommended: true,
+        fallback_recommended: false,
+        degraded_quality: true,
+      }
+    }
   }
 
   return {

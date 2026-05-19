@@ -1,6 +1,8 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 import type { ProviderPacketIntegrityStatus, StructuredProviderPacket } from '@/lib/cognitive-bus/types'
+import { parseOpportunitiesFromText } from '@/lib/opportunities/parse'
+import type { OpportunityPacket } from '@/lib/opportunities/schema'
 
 export type BuildProviderPacketInput = {
   family: CouncilOrchestrationFamily
@@ -11,6 +13,7 @@ export type BuildProviderPacketInput = {
   contradictions?: string[]
   recommendations?: string[]
   escalationRequests?: string[]
+  opportunities?: OpportunityPacket[]
 }
 
 function clampConfidence(value: number): number {
@@ -58,6 +61,9 @@ export function buildStructuredProviderPacket(input: BuildProviderPacketInput): 
     else confidence = 0.5
   }
 
+  const opportunities =
+    input.opportunities?.length ? input.opportunities : parseOpportunitiesFromText(text)
+
   return {
     provider_id: input.providerId ?? input.family,
     family: input.family,
@@ -68,6 +74,7 @@ export function buildStructuredProviderPacket(input: BuildProviderPacketInput): 
     contradictions,
     recommendations,
     escalation_requests,
+    opportunities,
   }
 }
 

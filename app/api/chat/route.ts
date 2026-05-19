@@ -68,6 +68,14 @@ import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
 import { orchestrateProviderResponse } from '@/lib/providers/retryOrchestration'
 import { registerCouncilProviderPacketOnBus } from '@/lib/orchestration/deliberation'
 import {
+  appendOpportunityMandateToSystem,
+  buildOpportunityRetryPrompt,
+  enforceCouncilOpportunities,
+  familyRequiresOpportunity,
+  liveSignalsAvailable,
+  stripOpportunityJsonBlock,
+} from '@/lib/opportunities'
+import {
   operatorSafeIncompleteMessage,
   validateProviderResponseIntegrity,
 } from '@/lib/providers/responseIntegrity'
@@ -470,11 +478,26 @@ export async function POST(req: Request) {
     ? 'Expanded analysis approved. You may go deeper, but stay organized and avoid filler.'
     : 'Cost-control mode is active. Keep the answer concise by default.'
   const maxTokens = expandedAnalysis ? EXPANDED_MAX_TOKENS : DEFAULT_MAX_TOKENS
-  const gptSystem = `You are ChatGPT Family in Ra'el's War Room. Role: synthesize, prioritize, and convert distinct family inputs into a coherent plan without repeating labels unless adding new value. Personality: confident, direct, witty. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
-  const claudeSystem = `You are Claude Family in Ra'el's War Room. Role: architecture, invariants, truth boundaries, persistence, rollback, and evidence restraint. Personality: honest, direct, dry humor. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
-  const grokSystem = `You are Grok Family in Ra'el's War Room. Role: external signal volatility only when sources or live intelligence evidence are present, plus sharp contradiction spotting. Personality: fast, candid, observant, a little mischievous but grounded. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Important: if live tools or intelligence evidence are not provided in the prompt, do not pretend you searched X or the web; call it a telemetry gap or hypothesis. Use Ra'el profile only when directly relevant to the decree: ${profile}`
-  const geminiSystem = `You are Gemini Family in Ra'el's War Room. Role: large-context reasoning, long evidence comparison, cross-source correlation, and multimodal interpretation only when the thread actually includes images/PDFs or pasted excerpts. Personality: structured, curious, precise. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not claim live web, image/PDF ingestion, or tools you were not given in the prompt. Use Ra'el profile only when directly relevant to the decree: ${profile}`
-  const redTeamSystem = `You are Red Team in Ra'el's War Room — internal adversary and risk assumption challenger. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
+  const gptSystem = appendOpportunityMandateToSystem(
+    `You are ChatGPT Family in Ra'el's War Room. Role: synthesize, prioritize, and convert distinct family inputs into a coherent plan without repeating labels unless adding new value. Personality: confident, direct, witty. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    'chatgpt',
+  )
+  const claudeSystem = appendOpportunityMandateToSystem(
+    `You are Claude Family in Ra'el's War Room. Role: architecture, invariants, truth boundaries, persistence, rollback, and evidence restraint. Personality: honest, direct, dry humor. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    'claude',
+  )
+  const grokSystem = appendOpportunityMandateToSystem(
+    `You are Grok Family in Ra'el's War Room. Role: external signal volatility only when sources or live intelligence evidence are present, plus sharp contradiction spotting. Personality: fast, candid, observant, a little mischievous but grounded. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Important: if live tools or intelligence evidence are not provided in the prompt, do not pretend you searched X or the web; call it a telemetry gap or hypothesis. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    'grok',
+  )
+  const geminiSystem = appendOpportunityMandateToSystem(
+    `You are Gemini Family in Ra'el's War Room. Role: large-context reasoning, long evidence comparison, cross-source correlation, and multimodal interpretation only when the thread actually includes images/PDFs or pasted excerpts. Personality: structured, curious, precise. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not claim live web, image/PDF ingestion, or tools you were not given in the prompt. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    'gemini',
+  )
+  const redTeamSystem = appendOpportunityMandateToSystem(
+    `You are Red Team in Ra'el's War Room — internal adversary and risk assumption challenger. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    'red_team',
+  )
   const babySystem = `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
 
   const runtimeSnapRaw =
@@ -1177,7 +1200,10 @@ export async function POST(req: Request) {
             break
           }
           case 'red_team': {
-            const redSystem = `You are Red Team in Ra'el's War Room — internal adversary and risk assumption challenger. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
+            const redSystem = appendOpportunityMandateToSystem(
+              `You are Red Team in Ra'el's War Room — internal adversary and risk assumption challenger. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+              'red_team',
+            )
             const { signal, dispose } = withBudgetSignal()
             try {
               responseText = await callClaude(userPrompt, redSystem, maxTokens, signal)
@@ -1309,6 +1335,60 @@ export async function POST(req: Request) {
               : orchestrated.integrity.integrity_status === 'DEGRADED_RESPONSE_QUALITY'
                 ? 'partial'
                 : 'partial'
+        }
+      }
+
+      let opportunityDiagnostics: Record<string, unknown> | undefined
+      if (familyRequiresOpportunity(councilSingleFamily)) {
+        const threadKey = conversationId?.trim() || 'ephemeral'
+        let enforced = enforceCouncilOpportunities({
+          family: councilSingleFamily,
+          text: responseText,
+          threadId: threadKey,
+          liveResearchPacket,
+        })
+        if (!enforced.validation.ok) {
+          try {
+            const retried = await callCouncilProvider(
+              councilSingleFamily,
+              buildOpportunityRetryPrompt(userPrompt),
+              {
+                grokTimeoutMs:
+                  councilSingleFamily === 'grok' && grokContinueEligible ? grokContinueTimeoutMs : undefined,
+              },
+            )
+            if (retried.status === 'OK' && retried.content.trim()) {
+              const retryEnforced = enforceCouncilOpportunities({
+                family: councilSingleFamily,
+                text: retried.content,
+                threadId: threadKey,
+                liveResearchPacket,
+              })
+              if (retryEnforced.validation.ok) {
+                responseText = retried.content
+                enforced = retryEnforced
+              }
+            }
+          } catch {
+            /* keep prior enforcement result */
+          }
+        }
+        responseText = stripOpportunityJsonBlock(responseText)
+        opportunityDiagnostics = {
+          opportunityIntegrityOk: enforced.validation.ok,
+          opportunityReason: enforced.validation.reason,
+          opportunityCount: enforced.registered.length,
+          evidenceLabel: enforced.registered[0]?.evidenceLabel ?? (liveSignalsAvailable(liveResearchPacket) ? 'LIVE_SIGNAL_BACKED' : 'HISTORICAL_PATTERN_BASED'),
+          vagueOnly: enforced.validation.vagueOnly,
+        }
+        if (!enforced.validation.ok) {
+          providerIntegrityDiagnostics = {
+            ...(providerIntegrityDiagnostics ?? {}),
+            integrityStatus: 'DEGRADED_RESPONSE_QUALITY',
+            opportunityIntegrity: enforced.validation.reason,
+            degradedQuality: true,
+          }
+          if (councilResponseCompletion === 'complete') councilResponseCompletion = 'partial'
         }
       }
 
@@ -1507,6 +1587,7 @@ export async function POST(req: Request) {
           family: councilSingleFamily,
           displayText: responseText,
           correlationId: conversationId,
+          liveSignalsAvailable: liveSignalsAvailable(liveResearchPacket),
         }).catch(() => undefined)
       }
 
@@ -1560,6 +1641,7 @@ export async function POST(req: Request) {
           ? { runtimeEvidencePacket: diagnosticRuntimeEvidencePacket }
           : {}),
         ...(providerIntegrityDiagnostics ? { providerIntegrityDiagnostics } : {}),
+        ...(opportunityDiagnostics ? { opportunityDiagnostics } : {}),
         ...liveResearchJson(),
       })
     }

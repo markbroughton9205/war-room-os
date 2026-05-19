@@ -34,6 +34,10 @@ const SignalRadarPanel = dynamic(
   () => import('@/components/war-room/signals/SignalRadarPanel').then(mod => mod.SignalRadarPanel),
   { ssr: false, loading: () => <PanelSkeleton label="Signal Radar loading" /> },
 )
+const OpportunityScoutPanel = dynamic(
+  () => import('@/components/war-room/opportunities/OpportunityScoutPanel').then(mod => mod.OpportunityScoutPanel),
+  { ssr: false, loading: () => <PanelSkeleton label="Opportunity Scout loading" /> },
+)
 const RevenueEnginePanel = dynamic(
   () => import('@/components/war-room/revenue-engine/RevenueEnginePanel').then(mod => mod.RevenueEnginePanel),
   { ssr: false, loading: () => <PanelSkeleton label="Revenue Engine loading" /> },
@@ -174,6 +178,7 @@ export function WarRoomLazyPanels() {
       <LazyPanel id="runtime-integrity" label="Runtime Integrity"><RuntimeIntegrityPanel /></LazyPanel>
       <LazyPanel id="production-diagnostics" label="Production Diagnostics"><ProductionDiagnosticsPanel /></LazyPanel>
       <LazyPanel id="signal-radar" label="Signal Radar"><SignalRadarPanel /></LazyPanel>
+      <LazyPanel id="opportunity-scout" label="Opportunity Scout"><OpportunityScoutPanel /></LazyPanel>
       <LazyPanel id="revenue-engine" label="Revenue Engine"><RevenueEnginePanel /></LazyPanel>
       <LazyPanel id="growth-calendar" label="Growth Calendar"><GrowthCalendarPanel /></LazyPanel>
       <LazyPanel id="outcome-ledger" label="Outcome Ledger"><OutcomeLedgerPanel /></LazyPanel>
