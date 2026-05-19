@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo, memo, startTransition, useDeferredValue } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
@@ -188,7 +188,7 @@ import {
   type CouncilCompressedSummary,
   type CouncilOutputMode,
 } from '@/lib/council/compression'
-import { buildCleanOperatorSummary, type OperatorSummary } from '@/lib/operator/summaryMapper'
+import { OperatorCommandEnvironment } from '@/components/war-room/operator'
 
 export type OperatorTab = 'command' | 'income' | 'agents' | 'analysts' | 'approvals' | 'memory' | 'system' | 'engineering' | 'diagnostics'
 
@@ -1765,52 +1765,6 @@ const CouncilLifecycleIndicators = memo(function CouncilLifecycleIndicators({
         </span>
       ))}
     </div>
-  )
-})
-
-const OperatorMissionView = memo(function OperatorMissionView({
-  operatorSummary,
-  sessionIndicators,
-  onOpenEngineering,
-}: {
-  operatorSummary: OperatorSummary
-  sessionIndicators: ReactNode
-  onOpenEngineering: () => void
-}) {
-  const cards = [
-    ['Highest Leverage Move', operatorSummary.highestLeverageMove],
-    ['Current System State', operatorSummary.currentSystemState],
-    ['Active Repair Packet', operatorSummary.activeRepairPacketTitle],
-    ['Top Revenue Opportunity', operatorSummary.topRevenueOpportunity],
-    ["Today's Growth Block", operatorSummary.growthBlock],
-    ['Urgent Warning', operatorSummary.urgentWarning],
-    ['Council Summary', operatorSummary.councilSummary],
-    ['Next Approved Action', operatorSummary.nextApprovedAction],
-  ]
-
-  return (
-    <section className="mx-4 mt-4 rounded border border-emerald-500/25 bg-emerald-950/10 p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>Operator View</div>
-          <p className="mt-1 text-[10px]" style={{ color: '#94A3B8' }}>Mission-grade brief only. Diagnostics stay in Engineering View.</p>
-          {sessionIndicators}
-        </div>
-        <div className="flex max-w-full flex-col items-start gap-2 sm:items-end">
-          <button type="button" onClick={onOpenEngineering} className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid rgba(56,189,248,0.4)', color: '#BAE6FD' }}>
-            Open Engineering View
-          </button>
-        </div>
-      </div>
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        {cards.map(([label, value]) => (
-          <article key={label} className="rounded border border-white/10 bg-black/25 p-3">
-            <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#94A3B8' }}>{label}</div>
-            <p className="mt-1 text-xs leading-relaxed" style={{ color: label === 'Urgent Warning' && value !== 'No verified urgent warning' ? '#FCA5A5' : '#E5E7EB' }}>{value}</p>
-          </article>
-        ))}
-      </div>
-    </section>
   )
 })
 
@@ -9758,48 +9712,6 @@ function Home() {
     internetStatus.label,
     internetStatus.overallStatus,
   ])
-  const todayGrowthBlock = memories.length
-    ? `${memories.length} memory item${memories.length === 1 ? '' : 's'} available for lesson review`
-    : 'No durable lesson evidence yet'
-  const pendingOperatorAction = raelActions.find(action => action.status === 'pending')
-  const operatorSummary = useMemo(
-    () => buildCleanOperatorSummary({
-      councilSummary: compressedCouncilSummary,
-      systemState: `${chatHealthLabel} chat · ${providerHealthLabel} providers · ${persistenceHealthLabel}`,
-      activeRepairTitle: latestRepairPacket?.title ?? null,
-      incomeOpportunities: incomeOpportunities.map(opportunity => ({
-        title: opportunity.title,
-        isActive: opportunity.is_active,
-        platform: opportunity.platform,
-        applyUrl: opportunity.apply_url,
-      })),
-      signalResults: opportunityScout.results.map(result => ({
-        title: result.title,
-        source: result.source,
-        url: result.url,
-        verificationStatus: result.verificationStatus,
-      })),
-      growthBlock: todayGrowthBlock,
-      pendingApprovalCount: raelActions.filter(action => action.status === 'pending').length,
-      pendingActionTitle: pendingOperatorAction?.title ?? null,
-      queueActionType: queueActions[0]?.type ?? null,
-      hasRuntimeWarning: footerShowsPacketOrCouncilProviderIssue,
-    }),
-    [
-      chatHealthLabel,
-      compressedCouncilSummary,
-      footerShowsPacketOrCouncilProviderIssue,
-      incomeOpportunities,
-      latestRepairPacket?.title,
-      opportunityScout.results,
-      pendingOperatorAction?.title,
-      persistenceHealthLabel,
-      providerHealthLabel,
-      queueActions,
-      raelActions,
-      todayGrowthBlock,
-    ],
-  )
   const councilSessionControls = (
     <CouncilSessionControls
       onNewSession={() => startTransition(() => { void startFreshCouncilSession('new') })}
@@ -9996,8 +9908,8 @@ function Home() {
         <WriteApprovalBanner />
         {operatorNav}
         {uiMode === 'operator' && operatorTab === 'command' && (
-          <OperatorMissionView
-            operatorSummary={operatorSummary}
+          <OperatorCommandEnvironment
+            version="23"
             sessionIndicators={councilSessionIndicators}
             onOpenEngineering={() => {
               setUiMode('advanced')
