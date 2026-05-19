@@ -1,3 +1,9 @@
+import {
+  councilFamilyIntegrityLabel,
+  sanitizeCouncilFamilyResponse,
+} from '@/lib/council/providerResponseSanitizer'
+import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+
 export const COUNCIL_OUTPUT_MODES = ['brief', 'standard', 'deep', 'repair', 'revenue', 'red_team'] as const
 
 export type CouncilOutputMode = (typeof COUNCIL_OUTPUT_MODES)[number]
@@ -23,6 +29,7 @@ export type CouncilCompressionMessage = {
   provider?: string
   messageType: string
   repairPacket?: unknown
+  integrityIncomplete?: boolean
 }
 
 export type CouncilCompressedFinding = {
@@ -266,18 +273,51 @@ function latestDecreeIndex(messages: CouncilCompressionMessage[]) {
   })
 }
 
+function normalizeOrchestrationFamily(familyName: string): CouncilOrchestrationFamily | null {
+  const raw = familyName.replace(/\s+family$/i, '').trim().toLowerCase()
+  if (/red\s*team/.test(raw)) return 'red_team'
+  const key = raw.replace(/\s+/g, '_')
+  const map: Record<string, CouncilOrchestrationFamily> = {
+    chatgpt: 'chatgpt',
+    claude: 'claude',
+    grok: 'grok',
+    gemini: 'gemini',
+    red_team: 'red_team',
+    baby: 'baby',
+    kimi: 'kimi',
+    bridge_architect: 'bridge_architect',
+  }
+  return map[key] ?? null
+}
+
 function responseMessages(messages: CouncilCompressionMessage[]) {
   const start = latestDecreeIndex(messages)
   return messages
     .slice(start >= 0 ? start + 1 : 0)
     .filter(message => message.messageType === 'response' || message.messageType === 'repair_packet')
     .filter(message => message.content.trim())
+    .map(message => {
+      const family = normalizeOrchestrationFamily(message.familyName)
+      if (!family) return message
+      const sanitized = sanitizeCouncilFamilyResponse(family, message.content)
+      if (!sanitized.incomplete) return message
+      const label = councilFamilyIntegrityLabel(family, true)
+      return {
+        ...message,
+        content: label ? `${label}\n${sanitized.displayText}` : sanitized.displayText,
+        integrityIncomplete: true,
+      }
+    })
+}
+
+function synthesisEligibleMessages(messages: CouncilCompressionMessage[]) {
+  return responseMessages(messages).filter(message => !message.integrityIncomplete)
 }
 
 function buildFindings(messages: CouncilCompressionMessage[]): CouncilCompressedFinding[] {
   const groups = new Map<string, CouncilCompressedFinding>()
   let rawIndex = 0
-  for (const message of responseMessages(messages)) {
+  for (const message of synthesisEligibleMessages(messages)) {
     const family = normalizeFamilyName(message.familyName)
     for (const candidate of sentenceCandidates(message.content)) {
       rawIndex += 1
@@ -361,8 +401,17 @@ function buildRevenuePacket(messages: CouncilCompressionMessage[], findings: Cou
 }
 
 function fallbackDecision(messages: CouncilCompressionMessage[]) {
-  const last = responseMessages(messages).at(-1)
-  if (!last) return 'Council is waiting for a new decree or provider response.'
+  const eligible = synthesisEligibleMessages(messages)
+  const last = eligible.at(-1)
+  if (!last) {
+    const incompleteFamilies = responseMessages(messages)
+      .filter(message => message.integrityIncomplete)
+      .map(message => normalizeFamilyName(message.familyName))
+    if (incompleteFamilies.length) {
+      return `Council received incomplete provider response(s) from ${incompleteFamilies.join(', ')}; awaiting fallback or retry.`
+    }
+    return 'Council is waiting for a new decree or provider response.'
+  }
   return compactWhitespace(last.content).slice(0, 220)
 }
 

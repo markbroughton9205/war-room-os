@@ -1,6 +1,7 @@
 import type { CouncilCompressedFinding, CouncilCompressedSummary } from '@/lib/council/compression'
 import { isConcreteRepairPacketTitle, isVagueRepairLanguage } from '@/lib/council-repair/scope'
 import { sanitizeMemoryRuntimeText } from '@/lib/memory/runtimeState'
+import { isOperatorUnsafeProviderFragment } from '@/lib/providers/responseIntegrity'
 
 export const OPERATOR_ACTION_LABELS = [
   'Review telemetry confidence',
@@ -126,6 +127,7 @@ function isDisplayableOperatorContent(value: string): boolean {
 
 function cleanDisplayContent(value: string | null | undefined): string | null {
   const clean = stripOperatorTextArtifacts(value ?? '')
+  if (isOperatorUnsafeProviderFragment(clean)) return null
   if (!isDisplayableOperatorContent(clean)) return null
   return clean.slice(0, 140)
 }
@@ -152,7 +154,12 @@ function councilFindingSummary(summary: CouncilCompressedSummary): string {
   const cleanDecision = summary.decisionSummary
     .map(item => cleanDisplayContent(item))
     .find(Boolean)
-  return cleanDecision ?? 'No council summary yet'
+  if (cleanDecision) return cleanDecision
+  const incompleteNote = summary.decisionSummary.find(item =>
+    /incomplete provider response|fallback summary used|response unavailable/i.test(item),
+  )
+  if (incompleteNote) return stripOperatorTextArtifacts(incompleteNote).slice(0, 140)
+  return 'No council summary yet'
 }
 
 function highestLeverageMoveFor(input: OperatorSummaryInput, revenueTitle: string | null, signalTitle: string | null): string {

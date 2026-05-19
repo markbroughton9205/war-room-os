@@ -1,5 +1,10 @@
 import 'server-only'
 
+import {
+  getProviderIntegritySnapshot,
+  type ProviderIntegrityRuntimeSnapshot,
+} from '@/lib/providers/integrityRuntime'
+
 export type ProviderRuntimeHealth =
   | 'CONNECTED'
   | 'DEGRADED'
@@ -8,6 +13,20 @@ export type ProviderRuntimeHealth =
   | 'INVALID_KEY'
 
 export type ProviderRuntimeId = 'openai' | 'anthropic' | 'google' | 'xai' | 'tavily' | 'firecrawl'
+
+export type ProviderResponseIntegrityFields = Pick<
+  ProviderIntegrityRuntimeSnapshot,
+  | 'transport_status'
+  | 'auth_status'
+  | 'latency_status'
+  | 'response_integrity_status'
+  | 'last_complete_response_at'
+  | 'last_incomplete_response_at'
+  | 'consecutive_integrity_failures'
+  | 'degraded_reason'
+  | 'retry_count'
+  | 'fallback_used'
+>
 
 export type ProviderRuntimeStatus = {
   id: ProviderRuntimeId
@@ -24,6 +43,7 @@ export type ProviderRuntimeStatus = {
   activeModels: string[]
   signalAvailability: boolean
   note: string
+  integrity: ProviderResponseIntegrityFields
 }
 
 export type ProviderRuntimeSummary = {
@@ -100,6 +120,40 @@ function classifyError(error: unknown): { health: ProviderRuntimeHealth; note: s
 
 function compactModels(models: string[]): string[] {
   return [...new Set(models.map(model => model.trim()).filter(Boolean))].slice(0, 8)
+}
+
+function integrityFieldsFor(id: ProviderRuntimeId, health: ProviderRuntimeHealth): ProviderResponseIntegrityFields {
+  const snap = getProviderIntegritySnapshot(id)
+  const transport_status =
+    health === 'CONNECTED' ? 'reachable' : health === 'MISSING_KEY' || health === 'INVALID_KEY' ? 'unreachable' : 'unknown'
+  const auth_status =
+    health === 'MISSING_KEY'
+      ? 'missing_key'
+      : health === 'INVALID_KEY'
+        ? 'invalid_key'
+        : health === 'CONNECTED'
+          ? 'authenticated'
+          : 'unknown'
+  return {
+    transport_status,
+    auth_status,
+    latency_status: snap.latency_status,
+    response_integrity_status: snap.response_integrity_status,
+    last_complete_response_at: snap.last_complete_response_at,
+    last_incomplete_response_at: snap.last_incomplete_response_at,
+    consecutive_integrity_failures: snap.consecutive_integrity_failures,
+    degraded_reason: snap.degraded_reason,
+    retry_count: snap.retry_count,
+    fallback_used: snap.fallback_used,
+  }
+}
+
+function mergeIntegrityDegradedHealth(
+  health: ProviderRuntimeHealth,
+  integrity: ProviderResponseIntegrityFields,
+): ProviderRuntimeHealth {
+  if (integrity.consecutive_integrity_failures >= 2 && health === 'CONNECTED') return 'DEGRADED'
+  return health
 }
 
 function rateLimitReset(headers: Headers): string | null {
@@ -301,6 +355,7 @@ async function checkProvider(definition: ProviderDefinition): Promise<ProviderRu
   const checkedAt = new Date().toISOString()
   const apiKey = envValue(definition.envNames)
   if (!apiKey) {
+    const integrity = integrityFieldsFor(definition.id, 'MISSING_KEY')
     return {
       id: definition.id,
       provider: definition.provider,
@@ -316,6 +371,7 @@ async function checkProvider(definition: ProviderDefinition): Promise<ProviderRu
       activeModels: [],
       signalAvailability: false,
       note: definition.optional ? 'Optional provider key is not configured.' : 'Required provider key is not configured.',
+      integrity,
     }
   }
 
@@ -324,24 +380,32 @@ async function checkProvider(definition: ProviderDefinition): Promise<ProviderRu
     const result = await definition.probe(apiKey)
     const successAt = new Date().toISOString()
     lastSuccessByProvider[definition.id] = successAt
+    const latencyMs = Date.now() - started
+    const integrity = integrityFieldsFor(definition.id, 'CONNECTED')
+    const health = mergeIntegrityDegradedHealth('CONNECTED', integrity)
     return {
       id: definition.id,
       provider: definition.provider,
       family: definition.family,
       optional: Boolean(definition.optional),
       configured: true,
-      health: 'CONNECTED',
-      latencyMs: Date.now() - started,
+      health,
+      latencyMs,
       checkedAt,
       lastSuccessAt: successAt,
       quotaState: 'ok',
       rateLimitResetAt: null,
       activeModels: compactModels(result.activeModels ?? []),
       signalAvailability: Boolean(definition.signalProvider),
-      note: result.note ?? 'Provider responded successfully.',
+      note:
+        health === 'DEGRADED' && integrity.degraded_reason
+          ? integrity.degraded_reason
+          : result.note ?? 'Provider responded successfully.',
+      integrity: { ...integrity, latency_status: latencyMs > 8_000 ? 'slow' : 'ok' },
     }
   } catch (error) {
     const classified = classifyError(error)
+    const integrity = integrityFieldsFor(definition.id, classified.health)
     return {
       id: definition.id,
       provider: definition.provider,
@@ -357,6 +421,7 @@ async function checkProvider(definition: ProviderDefinition): Promise<ProviderRu
       activeModels: [],
       signalAvailability: false,
       note: classified.note,
+      integrity,
     }
   }
 }

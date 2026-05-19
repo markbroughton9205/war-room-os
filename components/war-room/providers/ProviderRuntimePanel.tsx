@@ -15,6 +15,13 @@ type ProviderRuntimeStatus = {
   evidence: string[]
   missingEvidence: string[]
   lastChecked: string
+  responseIntegrityStatus?: string
+  lastCompleteResponseAt?: string | null
+  lastIncompleteResponseAt?: string | null
+  consecutiveIntegrityFailures?: number
+  retryCount?: number
+  fallbackUsed?: boolean
+  degradedReason?: string | null
 }
 
 type ProviderRuntimeSummary = {
@@ -153,13 +160,24 @@ export function ProviderRuntimePanel() {
               </div>
             </div>
             <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
-              Env presence is CONFIGURED only; CONNECTED requires a successful live server-side probe.
+              CONNECTED requires live probe plus recent complete council responses (integrity).
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-3">
               <MiniMetric label="Configured" value={provider.configured ? 'yes' : 'no'} />
               <MiniMetric label="Connected" value={provider.connected ? 'yes' : 'no'} />
               <MiniMetric label="Confidence" value={`${provider.confidence}%`} />
             </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <MiniMetric label="Integrity" value={provider.responseIntegrityStatus ?? 'unknown'} />
+              <MiniMetric label="Integrity failures" value={String(provider.consecutiveIntegrityFailures ?? 0)} />
+              <MiniMetric label="Last complete" value={timeLabel(provider.lastCompleteResponseAt ?? null)} />
+              <MiniMetric label="Last incomplete" value={timeLabel(provider.lastIncompleteResponseAt ?? null)} />
+              <MiniMetric label="Retry count" value={String(provider.retryCount ?? 0)} />
+              <MiniMetric label="Fallback used" value={provider.fallbackUsed ? 'yes' : 'no'} />
+            </div>
+            {provider.degradedReason ? (
+              <p className="mt-2 text-[10px] text-amber-200/90">{provider.degradedReason}</p>
+            ) : null}
             <div className="mt-3 rounded border border-white/10 bg-black/20 p-2 text-[10px] text-slate-500">
               <span className="font-semibold text-slate-300">Evidence:</span> {provider.evidence.join(' · ')}
               {provider.missingEvidence.length ? <span> · Missing: {provider.missingEvidence.join(' · ')}</span> : null}

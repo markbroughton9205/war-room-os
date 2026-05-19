@@ -41,6 +41,13 @@ export type CanonicalProviderFamilyStatus = {
   evidence: string[]
   missingEvidence: string[]
   lastChecked: string
+  responseIntegrityStatus: string
+  lastCompleteResponseAt: string | null
+  lastIncompleteResponseAt: string | null
+  consecutiveIntegrityFailures: number
+  retryCount: number
+  fallbackUsed: boolean
+  degradedReason: string | null
 }
 
 export type CanonicalRuntimeStatus = {
@@ -83,23 +90,40 @@ function requestOrigin(req: Request): string | null {
   return `${url.protocol}//${url.host}`
 }
 
-function statusFromProvider(provider: ProviderRuntimeStatus | undefined): Pick<CanonicalProviderFamilyStatus, 'availability' | 'connectionStatus' | 'health' | 'confidence'> {
+function statusFromProvider(provider: ProviderRuntimeStatus | undefined): Pick<
+  CanonicalProviderFamilyStatus,
+  'availability' | 'connectionStatus' | 'health' | 'confidence' | 'degradedReason'
+> {
   if (!provider) {
-    return { availability: 'UNKNOWN', connectionStatus: 'standby', health: 'unknown', confidence: 20 }
+    return { availability: 'UNKNOWN', connectionStatus: 'standby', health: 'unknown', confidence: 20, degradedReason: null }
   }
-  if (provider.health === 'CONNECTED') {
-    return { availability: 'CONNECTED', connectionStatus: 'online', health: 'healthy', confidence: 95 }
+  const integrityDegraded =
+    provider.integrity.consecutive_integrity_failures >= 2
+    || provider.integrity.response_integrity_status === 'TRUNCATED'
+    || provider.integrity.response_integrity_status === 'INCOMPLETE'
+  const degradedReason = provider.integrity.degraded_reason ?? (integrityDegraded ? 'response integrity degraded' : null)
+  if (provider.health === 'CONNECTED' && !integrityDegraded) {
+    return { availability: 'CONNECTED', connectionStatus: 'online', health: 'healthy', confidence: 95, degradedReason: null }
+  }
+  if (provider.health === 'CONNECTED' && integrityDegraded) {
+    return {
+      availability: 'DEGRADED',
+      connectionStatus: 'error',
+      health: 'degraded',
+      confidence: 62,
+      degradedReason,
+    }
   }
   if (provider.health === 'MISSING_KEY') {
-    return { availability: 'NOT_CONFIGURED', connectionStatus: 'not_connected', health: 'unavailable', confidence: 90 }
+    return { availability: 'NOT_CONFIGURED', connectionStatus: 'not_connected', health: 'unavailable', confidence: 90, degradedReason: null }
   }
   if (provider.health === 'INVALID_KEY') {
-    return { availability: 'INVALID_KEY', connectionStatus: 'error', health: 'unavailable', confidence: 90 }
+    return { availability: 'INVALID_KEY', connectionStatus: 'error', health: 'unavailable', confidence: 90, degradedReason: null }
   }
   if (provider.health === 'RATE_LIMITED') {
-    return { availability: 'RATE_LIMITED', connectionStatus: 'error', health: 'degraded', confidence: 80 }
+    return { availability: 'RATE_LIMITED', connectionStatus: 'error', health: 'degraded', confidence: 80, degradedReason: provider.note }
   }
-  return { availability: 'DEGRADED', connectionStatus: 'error', health: 'degraded', confidence: 75 }
+  return { availability: 'DEGRADED', connectionStatus: 'error', health: 'degraded', confidence: 75, degradedReason: provider.note }
 }
 
 export function buildCanonicalProviderFamilies(runtime: ProviderRuntimeSummary): CanonicalProviderFamilyStatus[] {
@@ -109,26 +133,44 @@ export function buildCanonicalProviderFamilies(runtime: ProviderRuntimeSummary):
     const provider = byId.get(meta.providerId as ProviderRuntimeStatus['id'])
     const status = statusFromProvider(provider)
     const connected = status.availability === 'CONNECTED'
+    const integrityConnected =
+      connected && (provider?.integrity.consecutive_integrity_failures ?? 0) < 2
     return {
       family,
       providerId: meta.providerId,
-      label: connected
+      label: integrityConnected
         ? `${meta.label} · live connected`
-        : provider?.configured
-          ? `${meta.label} · configured, live check ${provider.health.toLowerCase()}`
-          : `${meta.label} · not configured`,
+        : connected
+          ? `${meta.label} · reachable, response integrity degraded`
+          : provider?.configured
+            ? `${meta.label} · configured, live check ${provider.health.toLowerCase()}`
+            : `${meta.label} · not configured`,
       configured: Boolean(provider?.configured),
-      connected,
+      connected: integrityConnected,
       ...status,
       evidence: provider
         ? [
             `server-side provider probe health=${provider.health}`,
+            `transport=${provider.integrity.transport_status}`,
+            `response_integrity=${provider.integrity.response_integrity_status}`,
             `configured=${provider.configured}`,
             `checkedAt=${provider.checkedAt}`,
           ]
         : ['No canonical provider probe row was present.'],
-      missingEvidence: connected ? [] : ['No successful live provider response for this family in the current canonical snapshot.'],
+      missingEvidence: integrityConnected
+        ? []
+        : [
+            connected
+              ? 'Provider probe connected but recent council responses failed integrity checks.'
+              : 'No successful live provider response for this family in the current canonical snapshot.',
+          ],
       lastChecked: provider?.checkedAt ?? runtime.generatedAt,
+      responseIntegrityStatus: provider?.integrity.response_integrity_status ?? 'UNKNOWN',
+      lastCompleteResponseAt: provider?.integrity.last_complete_response_at ?? null,
+      lastIncompleteResponseAt: provider?.integrity.last_incomplete_response_at ?? null,
+      consecutiveIntegrityFailures: provider?.integrity.consecutive_integrity_failures ?? 0,
+      retryCount: provider?.integrity.retry_count ?? 0,
+      fallbackUsed: provider?.integrity.fallback_used ?? false,
     }
   })
 }

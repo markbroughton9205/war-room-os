@@ -109,7 +109,9 @@ function buildProviderSnapshots(providers: ProviderRuntimeStatus[]): ProviderRun
       checkedAt: provider.checkedAt,
       lastSuccessAt: provider.lastSuccessAt,
       failureCount: failed ? 1 : 0,
-      degradedReason: provider.health === 'CONNECTED' ? null : provider.note,
+      degradedReason:
+        provider.integrity.degraded_reason
+        ?? (provider.health === 'CONNECTED' ? null : provider.note),
       timeoutCount: timeout ? 1 : 0,
       rateLimitState: provider.quotaState,
       rateLimitResetAt: provider.rateLimitResetAt,

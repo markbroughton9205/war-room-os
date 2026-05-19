@@ -63,6 +63,11 @@ import {
 } from '@/lib/runtime/liveResearchEvidencePacket'
 import { buildFamilyIntelligenceFrame } from '@/lib/intelligence/familyFeedRouter'
 import { evaluateMandatoryLiveRetrieval } from '@/lib/intelligence/sources/retrievalOrchestrator'
+import { orchestrateProviderResponse } from '@/lib/providers/retryOrchestration'
+import {
+  operatorSafeIncompleteMessage,
+  validateProviderResponseIntegrity,
+} from '@/lib/providers/responseIntegrity'
 
 function buildResearchAntiLoopAugment(threadBlock: string): string {
   const hits = threadBlock.match(/\bprimary\s+finding\b/gi) ?? []
@@ -175,6 +180,7 @@ function validateProviderResults(
 ): ProviderResult[] {
   if (opts?.integrityCheck === false) return results
   const violations: string[] = []
+  const sanitized: ProviderResult[] = []
   for (const result of results) {
     const content = result.content.trim()
     if (content.length < 5) {
@@ -187,10 +193,27 @@ function validateProviderResults(
       const cap = result.timeoutMs ?? PROVIDER_TIMEOUT_MS
       violations.push(`⚠ ${result.family}: provider timed out after ${cap}ms`)
     }
+    if (result.status === 'OK' && content.length >= 5) {
+      const integrity = validateProviderResponseIntegrity(content, { minLength: 60 })
+      if (integrity.integrity_status !== 'COMPLETE') {
+        violations.push(
+          `⚠ ${result.family}: response integrity ${integrity.integrity_status} (${integrity.reason})`,
+        )
+        sanitized.push({
+          ...result,
+          content: operatorSafeIncompleteMessage(
+            integrity.fallback_recommended ? 'fallback' : 'unavailable',
+          ),
+          messageType: 'integrity_incomplete',
+        })
+        continue
+      }
+    }
+    sanitized.push(result)
   }
-  if (violations.length === 0) return results
+  if (violations.length === 0) return sanitized
   return [
-    ...results,
+    ...sanitized,
     {
       family: 'RED TEAM',
       content: violations.join('\n'),
@@ -1222,6 +1245,42 @@ export async function POST(req: Request) {
         return degradedProviderResponse(councilSingleFamily, 'failed', `${councilSingleFamily} returned empty body`)
       }
 
+      let providerIntegrityDiagnostics: Record<string, unknown> | undefined
+      if (!skipProviderIntegrityCheck && geminiDegradedReason === null) {
+        const orchestrated = await orchestrateProviderResponse({
+          family: councilSingleFamily,
+          prompt: userPrompt,
+          rawText: responseText,
+          finishReason: providerFinishReason,
+          auditClient: sup.ok ? sup.client : null,
+          invoke: async ({ family, prompt }) => {
+            const retried = await callCouncilProvider(family, prompt, {
+              grokTimeoutMs:
+                family === 'grok' && grokContinueEligible ? grokContinueTimeoutMs : undefined,
+            })
+            if (retried.status !== 'OK' || !retried.content.trim()) {
+              throw new Error(retried.error ?? `${family} returned empty on integrity retry`)
+            }
+            return retried.content
+          },
+        })
+        providerIntegrityDiagnostics = {
+          integrityStatus: orchestrated.integrity.integrity_status,
+          retryCount: orchestrated.retryCount,
+          fallbackUsed: orchestrated.fallbackUsed,
+          fallbackProvider: orchestrated.fallbackProvider,
+          ...(orchestrated.diagnosticFragment
+            ? { diagnosticFragment: orchestrated.diagnosticFragment }
+            : {}),
+          ...(orchestrated.degradedLabel ? { degradedLabel: orchestrated.degradedLabel } : {}),
+        }
+        responseText = orchestrated.displayText
+        if (orchestrated.integrity.integrity_status !== 'COMPLETE') {
+          councilResponseCompletion =
+            orchestrated.integrity.integrity_status === 'TRUNCATED' ? 'truncated' : 'partial'
+        }
+      }
+
       const economicOpsRawProviderAnalysis =
         councilCommand.mode === 'economic_ops' || economicRouting.mode === 'economic_ops'
           ? responseText.trim()
@@ -1439,6 +1498,7 @@ export async function POST(req: Request) {
         ...(sequentialDiagnostic && diagnosticIntentMode !== 'none' && diagnosticRuntimeEvidencePacket
           ? { runtimeEvidencePacket: diagnosticRuntimeEvidencePacket }
           : {}),
+        ...(providerIntegrityDiagnostics ? { providerIntegrityDiagnostics } : {}),
         ...liveResearchJson(),
       })
     }

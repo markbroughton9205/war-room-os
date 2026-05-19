@@ -5,6 +5,24 @@ function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(`canonical status assertion failed: ${message}`)
 }
 
+function mockIntegrity(
+  overrides: Partial<ProviderRuntimeSummary['providers'][number]['integrity']> = {},
+): ProviderRuntimeSummary['providers'][number]['integrity'] {
+  return {
+    transport_status: 'unknown',
+    auth_status: 'unknown',
+    latency_status: 'unknown',
+    response_integrity_status: 'UNKNOWN',
+    last_complete_response_at: null,
+    last_incomplete_response_at: null,
+    consecutive_integrity_failures: 0,
+    degraded_reason: null,
+    retry_count: 0,
+    fallback_used: false,
+    ...overrides,
+  }
+}
+
 function providerSummary(overrides: Partial<ProviderRuntimeSummary> = {}): ProviderRuntimeSummary {
   const generatedAt = '2026-01-01T00:00:00.000Z'
   return {
@@ -26,6 +44,7 @@ function providerSummary(overrides: Partial<ProviderRuntimeSummary> = {}): Provi
         activeModels: [],
         signalAvailability: false,
         note: 'Provider health check timed out.',
+        integrity: mockIntegrity({ transport_status: 'reachable', auth_status: 'authenticated' }),
       },
       {
         id: 'anthropic',
@@ -42,6 +61,7 @@ function providerSummary(overrides: Partial<ProviderRuntimeSummary> = {}): Provi
         activeModels: ['claude'],
         signalAvailability: false,
         note: 'Anthropic models endpoint responded.',
+        integrity: mockIntegrity({ transport_status: 'reachable', auth_status: 'authenticated', response_integrity_status: 'COMPLETE' }),
       },
       {
         id: 'google',
@@ -58,6 +78,7 @@ function providerSummary(overrides: Partial<ProviderRuntimeSummary> = {}): Provi
         activeModels: [],
         signalAvailability: false,
         note: 'Required provider key is not configured.',
+        integrity: mockIntegrity({ auth_status: 'missing_key' }),
       },
       {
         id: 'xai',
@@ -74,6 +95,7 @@ function providerSummary(overrides: Partial<ProviderRuntimeSummary> = {}): Provi
         activeModels: ['grok'],
         signalAvailability: false,
         note: 'xAI models endpoint responded.',
+        integrity: mockIntegrity({ transport_status: 'reachable', auth_status: 'authenticated', response_integrity_status: 'COMPLETE' }),
       },
     ],
     families: {},
