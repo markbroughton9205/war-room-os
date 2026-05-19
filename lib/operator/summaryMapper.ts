@@ -4,7 +4,7 @@ import { sanitizeMemoryRuntimeText } from '@/lib/memory/runtimeState'
 export const OPERATOR_ACTION_LABELS = [
   'Review telemetry confidence',
   'Prepare repair packet',
-  'Check approval queue',
+  'Review approval queue',
   'Run signal scan',
   'Log outcome',
   'Review revenue opportunity',
@@ -45,14 +45,14 @@ export type OperatorSummaryInput = {
 }
 
 export type OperatorSummary = {
-  highestLeverageMove: OperatorActionLabel
+  highestLeverageMove: string
   currentSystemState: string
   activeRepairPacketTitle: string
   topRevenueOpportunity: string
   growthBlock: string
   urgentWarning: string
-  councilSummary: OperatorActionLabel
-  nextApprovedAction: OperatorActionLabel
+  councilSummary: string
+  nextApprovedAction: string
 }
 
 const SPECULATIVE_RISK_LANGUAGE =
@@ -108,44 +108,65 @@ function sourceBackedOpportunity(opportunity: OperatorRevenueOpportunitySource):
   return statusAllowsReview && (hasUrl || hasSource)
 }
 
-function cleanOpportunityTitle(opportunities: OperatorRevenueOpportunitySource[]): string | null {
-  const backed = opportunities.find(sourceBackedOpportunity)
-  if (!backed?.title) return null
-  return stripOperatorTextArtifacts(backed.title).slice(0, 140)
+function isOperatorActionLabel(value: string): boolean {
+  return OPERATOR_ACTION_LABELS.some(label => label.toLowerCase() === value.toLowerCase())
 }
 
-function cleanRepairTitle(title: string | null | undefined): string {
-  const clean = stripOperatorTextArtifacts(title ?? '')
-  if (!clean || clean === 'None active') return 'No urgent action'
-  if (SPECULATIVE_RISK_LANGUAGE.test(clean)) return 'Prepare repair packet'
+function isDisplayableOperatorContent(value: string): boolean {
+  if (!value) return false
+  if (isOperatorActionLabel(value)) return false
+  if (/^prepare repair packet$/i.test(value)) return false
+  if (/^(none active|no urgent action|loading|pending|not available yet)$/i.test(value)) return false
+  if (/^no (current evidence note|action recommended|source-backed signal loaded|durable lesson evidence)/i.test(value)) return false
+  if (/^(council is waiting|ask the council|generate a manual repair packet)/i.test(value)) return false
+  if (/\bmemory items? available\b/i.test(value)) return false
+  return true
+}
+
+function cleanDisplayContent(value: string | null | undefined): string | null {
+  const clean = stripOperatorTextArtifacts(value ?? '')
+  if (!isDisplayableOperatorContent(clean)) return null
   return clean.slice(0, 140)
 }
 
-function mapCouncilToAction(summary: CouncilCompressedSummary): OperatorActionLabel {
-  const rawText = stripOperatorTextArtifacts([
-    summary.nextAction,
-    summary.decisionSummary.join(' '),
-    summary.risk.summary,
-  ].join(' '))
-  const classification = strongestCouncilClassification(summary)
+function cleanOpportunityTitle(opportunities: OperatorRevenueOpportunitySource[]): string | null {
+  const backed = opportunities.find(sourceBackedOpportunity)
+  return cleanDisplayContent(backed?.title)
+}
 
-  if (SPECULATIVE_RISK_LANGUAGE.test(rawText) && !isTrustedClassification(classification)) {
-    return 'Review telemetry confidence'
-  }
-  if (summary.repairPacket?.applicable) return 'Prepare repair packet'
-  if (summary.revenuePacket?.applicable && !RUNTIME_WARNING_AS_REVENUE.test(summary.revenuePacket.opportunity)) {
-    return 'Review revenue opportunity'
-  }
-  if (/\b(signal|scan|radar|source-backed)\b/i.test(rawText)) return 'Run signal scan'
-  if (/\b(approval|queue|commander)\b/i.test(rawText)) return 'Check approval queue'
-  if (/\b(outcome|lesson|memory|ledger)\b/i.test(rawText)) return 'Log outcome'
-  if (/\b(runtime|diagnostic|provider|telemetry)\b/i.test(rawText)) return 'Open engineering diagnostics'
-  return 'Review telemetry confidence'
+function cleanRepairTitle(title: string | null | undefined): string | null {
+  return cleanDisplayContent(title)
+}
+
+function councilFindingSummary(summary: CouncilCompressedSummary): string {
+  const finding =
+    summary.evidence.find(item => item.evidenceWeight === 'verified' || item.evidenceWeight === 'source-backed')
+    ?? summary.evidence.find(item => item.evidenceWeight === 'inferred' || item.evidenceWeight === 'uncertain')
+  const cleanFinding = cleanDisplayContent(finding?.text)
+  if (cleanFinding) return cleanFinding
+
+  const cleanDecision = summary.decisionSummary
+    .map(item => cleanDisplayContent(item))
+    .find(Boolean)
+  return cleanDecision ?? 'No council summary yet'
+}
+
+function highestLeverageMoveFor(input: OperatorSummaryInput, revenueTitle: string | null, signalTitle: string | null): string {
+  const pendingTitle = cleanDisplayContent(input.pendingActionTitle)
+  if (pendingTitle) return pendingTitle
+  if (revenueTitle) return revenueTitle
+  if (signalTitle) return signalTitle
+
+  const growthBlock = cleanDisplayContent(input.growthBlock)
+  if (growthBlock) return growthBlock
+
+  if (input.pendingApprovalCount > 0 || input.queueActionType) return 'Review approval queue'
+  return input.hasRuntimeWarning ? 'Review approval queue' : 'Run signal scan'
 }
 
 function urgentWarningFor(input: OperatorSummaryInput): string {
   if (input.hasRuntimeWarning) return 'Open engineering diagnostics'
-  if (input.pendingApprovalCount > 0) return 'Check approval queue'
+  if (input.pendingApprovalCount > 0) return 'Review approval queue'
 
   const classification = strongestCouncilClassification(input.councilSummary)
   const riskText = stripOperatorTextArtifacts(input.councilSummary.risk.summary)
@@ -157,37 +178,20 @@ function urgentWarningFor(input: OperatorSummaryInput): string {
 }
 
 export function buildCleanOperatorSummary(input: OperatorSummaryInput): OperatorSummary {
-  const sourceBackedRevenueTitle =
-    cleanOpportunityTitle(input.incomeOpportunities.filter(opportunity => opportunity.isActive !== false))
-    ?? cleanOpportunityTitle(input.signalResults)
-  const councilAction = mapCouncilToAction(input.councilSummary)
-  const hasRepair = Boolean(input.activeRepairTitle || input.councilSummary.repairPacket?.applicable)
+  const sourceBackedRevenueTitle = cleanOpportunityTitle(input.incomeOpportunities.filter(opportunity => opportunity.isActive !== false))
+  const sourceBackedSignalTitle = cleanOpportunityTitle(input.signalResults)
+  const topOpportunityTitle = sourceBackedRevenueTitle ?? sourceBackedSignalTitle
   const hasPendingApproval = input.pendingApprovalCount > 0 || Boolean(input.pendingActionTitle || input.queueActionType)
-
-  const highestLeverageMove: OperatorActionLabel = sourceBackedRevenueTitle
-    ? 'Review revenue opportunity'
-    : hasRepair
-      ? 'Prepare repair packet'
-      : hasPendingApproval
-        ? 'Check approval queue'
-        : input.hasRuntimeWarning
-          ? 'Open engineering diagnostics'
-          : councilAction === 'Open engineering diagnostics'
-            ? 'Review telemetry confidence'
-            : councilAction
+  const repairTitle = cleanRepairTitle(input.activeRepairTitle)
 
   return {
-    highestLeverageMove,
+    highestLeverageMove: highestLeverageMoveFor(input, sourceBackedRevenueTitle, sourceBackedSignalTitle),
     currentSystemState: stripOperatorTextArtifacts(input.systemState),
-    activeRepairPacketTitle: input.activeRepairTitle
-      ? cleanRepairTitle(input.activeRepairTitle)
-      : hasRepair
-        ? 'Prepare repair packet'
-        : 'No urgent action',
-    topRevenueOpportunity: sourceBackedRevenueTitle ?? 'No source-backed revenue opportunity',
-    growthBlock: stripOperatorTextArtifacts(input.growthBlock),
+    activeRepairPacketTitle: repairTitle ?? 'No active repair packet',
+    topRevenueOpportunity: topOpportunityTitle ?? 'No source-backed revenue opportunity',
+    growthBlock: cleanDisplayContent(input.growthBlock) ?? 'No growth block yet',
     urgentWarning: urgentWarningFor(input),
-    councilSummary: councilAction,
-    nextApprovedAction: hasPendingApproval ? 'Check approval queue' : 'No urgent action',
+    councilSummary: councilFindingSummary(input.councilSummary),
+    nextApprovedAction: hasPendingApproval ? 'Review approval queue' : 'No approved action queued',
   }
 }

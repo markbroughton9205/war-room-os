@@ -1770,12 +1770,10 @@ const CouncilLifecycleIndicators = memo(function CouncilLifecycleIndicators({
 
 const OperatorMissionView = memo(function OperatorMissionView({
   operatorSummary,
-  sessionControls,
   sessionIndicators,
   onOpenEngineering,
 }: {
   operatorSummary: OperatorSummary
-  sessionControls: ReactNode
   sessionIndicators: ReactNode
   onOpenEngineering: () => void
 }) {
@@ -1799,7 +1797,6 @@ const OperatorMissionView = memo(function OperatorMissionView({
           {sessionIndicators}
         </div>
         <div className="flex max-w-full flex-col items-start gap-2 sm:items-end">
-          {sessionControls}
           <button type="button" onClick={onOpenEngineering} className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid rgba(56,189,248,0.4)', color: '#BAE6FD' }}>
             Open Engineering View
           </button>
@@ -9434,13 +9431,6 @@ function Home() {
       : 'New Council Session ready. Approved memory and provider state preserved.', { force: true })
   }
 
-  const endCouncilSession = () => {
-    resetCouncilTemporaryRuntime()
-    setSessionLifecycle('active')
-    councilDispatch({ type: 'END_SESSION', payload: { sessionId: newSessionId() } })
-    addSystemMessage('Council session ended. Speak your decree when ready.')
-  }
-
   const clearCouncilSession = () => {
     councilDispatch({ type: 'SET_MESSAGES', payload: [] })
     addSystemMessage('Visible council thread cleared. Durable archive and audit history were not deleted.', { force: true })
@@ -10008,7 +9998,6 @@ function Home() {
         {uiMode === 'operator' && operatorTab === 'command' && (
           <OperatorMissionView
             operatorSummary={operatorSummary}
-            sessionControls={councilSessionControls}
             sessionIndicators={councilSessionIndicators}
             onOpenEngineering={() => {
               setUiMode('advanced')
@@ -10061,16 +10050,6 @@ function Home() {
                 Resume
               </button>
             )}
-            <button type="button" onClick={() => startTransition(endCouncilSession)}
-              className="rounded px-2 py-0.5 text-[9px] tracking-widest"
-              style={{ border: '1px solid rgba(239,68,68,0.55)', color: '#FCA5A5' }}>
-              End
-            </button>
-            <button type="button" onClick={() => startTransition(clearCouncilSession)}
-              className="rounded px-2 py-0.5 text-[9px] tracking-widest"
-              style={{ border: '1px solid #555', color: '#888' }}>
-              Clear
-            </button>
             <button type="button" onClick={() => startTransition(toggleDeepDiscussion)}
               className="rounded px-2 py-0.5 text-[9px] tracking-widest"
               style={{
