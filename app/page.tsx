@@ -188,7 +188,7 @@ import {
   type CouncilCompressedSummary,
   type CouncilOutputMode,
 } from '@/lib/council/compression'
-import { OperatorCommandEnvironment } from '@/components/war-room/operator'
+import { OperatorCommandDeck, OperatorCommandEnvironment } from '@/components/war-room/operator'
 
 export type OperatorTab = 'command' | 'income' | 'agents' | 'analysts' | 'approvals' | 'memory' | 'system' | 'engineering' | 'diagnostics'
 
@@ -9909,7 +9909,7 @@ function Home() {
         {operatorNav}
         {uiMode === 'operator' && operatorTab === 'command' && (
           <OperatorCommandEnvironment
-            version="23"
+            version="24"
             sessionIndicators={councilSessionIndicators}
             onOpenEngineering={() => {
               setUiMode('advanced')
@@ -10242,6 +10242,7 @@ function Home() {
         </section>
         )}
 
+        {uiMode === 'operator' && operatorTab === 'command' && <OperatorCommandDeck />}
         {uiMode === 'operator' && operatorTab === 'command' && activeFamiliesSection}
         {uiMode === 'operator' && operatorTab === 'command' && pendingNeedsRael && (
           <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
