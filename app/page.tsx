@@ -201,7 +201,6 @@ import {
   type CouncilCompressedSummary,
   type CouncilOutputMode,
 } from '@/lib/council/compression'
-import { OperatorCommandDeck } from '@/components/war-room/operator'
 import {
   CouncilWorkspace,
   DockPanelContent,
@@ -10585,7 +10584,6 @@ function Home() {
           </p>
         </>
           )}
-          commandCenter={<OperatorCommandDeck />}
         />
           )}
         />

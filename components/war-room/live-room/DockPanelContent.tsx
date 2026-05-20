@@ -5,7 +5,6 @@ import { memo, type ReactNode } from 'react'
 import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoundary'
 import { LiveEnvironmentPanel } from '@/components/intelligence/LiveEnvironmentPanel'
 import { WarRoomEvolutionPanel } from '@/components/war-room/evolution'
-import { OperatorCommandDeck, OperatorCommandEnvironment } from '@/components/war-room/operator'
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import type { AstrologyInterpretationMode } from '@/lib/intelligence/environment/horoscopeEnvironment'
@@ -56,6 +55,14 @@ const Phase6MemoryPanels = dynamic(
 const RuntimeIntegrityPanel = dynamic(
   () => import('@/components/war-room/runtime/RuntimeIntegrityPanel').then(m => m.RuntimeIntegrityPanel),
   { ssr: false, loading: () => <PanelSkeleton label="Runtime pressure" /> },
+)
+const OperatorCommandEnvironment = dynamic(
+  () => import('@/components/war-room/operator').then(m => m.OperatorCommandEnvironment),
+  { ssr: false, loading: () => <PanelSkeleton label="Command environment" /> },
+)
+const OperatorCommandDeck = dynamic(
+  () => import('@/components/war-room/operator').then(m => m.OperatorCommandDeck),
+  { ssr: false, loading: () => <PanelSkeleton label="My Command Center" /> },
 )
 
 export type DockPanelContentProps = {

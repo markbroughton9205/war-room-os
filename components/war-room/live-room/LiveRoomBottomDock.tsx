@@ -2,8 +2,6 @@
 
 import dynamic from 'next/dynamic'
 import { memo, type ReactNode } from 'react'
-import { OperatorCommandDeck } from '@/components/war-room/operator'
-
 const OpportunityScoutPanel = dynamic(
   () => import('@/components/war-room/opportunities/OpportunityScoutPanel').then(mod => mod.OpportunityScoutPanel),
   {
@@ -43,7 +41,6 @@ export const LiveRoomBottomDock = memo(function LiveRoomBottomDock({
       {ordersStrip}
       {needsRaelPanel}
       <div className="mb-2">{familiesStrip}</div>
-      <OperatorCommandDeck />
       {showOpportunityScout ? (
         <details className="mt-2 rounded border border-white/10 bg-black/30">
           <summary className="cursor-pointer px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-amber-200/90">

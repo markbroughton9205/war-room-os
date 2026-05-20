@@ -10,7 +10,6 @@ export type CouncilWorkspaceProps = {
   preamble?: ReactNode
   thread: ReactNode
   composer: ReactNode
-  commandCenter?: ReactNode
   inlineBelowThread?: ReactNode
 }
 
@@ -21,7 +20,6 @@ export function CouncilWorkspace({
   preamble,
   thread,
   composer,
-  commandCenter,
   inlineBelowThread,
 }: CouncilWorkspaceProps) {
   return (
@@ -32,16 +30,7 @@ export function CouncilWorkspace({
         toolbar={toolbar}
         preamble={preamble}
         thread={thread}
-        composer={(
-          <>
-            {composer}
-            {commandCenter ? (
-              <div className="mt-3 border-t border-yellow-900/40 pt-3" data-testid="my-command-center">
-                {commandCenter}
-              </div>
-            ) : null}
-          </>
-        )}
+        composer={composer}
         inlineBelowThread={inlineBelowThread}
       />
     </div>
