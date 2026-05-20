@@ -9,6 +9,7 @@ import {
   isRelaxedPromptIntent,
 } from '@/lib/council/promptIntent'
 import { SKIP_TERMINAL_TRUNCATION_BELOW } from '@/lib/council/responseIntegrity'
+import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 import type { OpportunityPacket } from '@/lib/opportunities/schema'
 import { validateOpportunityResponse } from '@/lib/opportunities/validate'
@@ -293,6 +294,26 @@ export function validateProviderResponseIntegrity(
   raw: unknown,
   expectation: ResponseIntegrityExpectation = {},
 ): ResponseIntegrityResult {
+  if (isCouncilStabilityMode()) {
+    const text = toDisplayText(raw).replace(/\r\n/g, '\n').trim()
+    if (!text || text.length < 12) {
+      return {
+        integrity_status: text ? 'EMPTY' : 'EMPTY',
+        confidence: 95,
+        reason: 'empty or whitespace-only response',
+        retry_recommended: true,
+        fallback_recommended: true,
+      }
+    }
+    return {
+      integrity_status: 'COMPLETE',
+      confidence: 92,
+      reason: 'council stability mode — integrity checks bypassed',
+      retry_recommended: false,
+      fallback_recommended: false,
+    }
+  }
+
   const resolvedExpectation = expectation.promptIntent
     ? buildIntegrityExpectationForPrompt(expectation.promptIntent, expectation)
     : expectation.relaxedCasual

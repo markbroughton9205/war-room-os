@@ -21,6 +21,8 @@ export type IntegrityDebugPayload = {
   degraded?: boolean
   stabilityMode?: boolean
   relaxedCasual?: boolean
+  provider?: string
+  fallbackSkipped?: boolean
 }
 
 export function logIntegrityDebug(payload: IntegrityDebugPayload): void {

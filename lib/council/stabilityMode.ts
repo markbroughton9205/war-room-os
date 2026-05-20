@@ -86,3 +86,23 @@ export function stabilityModeResponseMeta(): { councilStabilityMode: boolean; st
     stabilityFlags: getStabilityModeFlags(),
   }
 }
+
+/** Always-on render diagnostic when stability mode is active (no secrets). */
+export function logCouncilStabilityRender(args: {
+  provider: string
+  rawLength: number
+  renderedLength: number
+  fallbackSkipped: boolean
+}): void {
+  if (!isCouncilStabilityMode()) return
+  console.log(
+    '[council-stability]',
+    JSON.stringify({
+      provider: args.provider,
+      rawLength: args.rawLength,
+      renderedLength: args.renderedLength,
+      stabilityMode: true,
+      fallbackSkipped: args.fallbackSkipped,
+    }),
+  )
+}

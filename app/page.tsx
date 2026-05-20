@@ -320,7 +320,7 @@ type WarRoomPerformanceDiagnostics = {
 
 function applyLiveCouncilRenderGate(
   message: CouncilMessage,
-  opts?: { decreeText?: string; promptIntent?: PromptIntent },
+  opts?: { decreeText?: string; promptIntent?: PromptIntent; stabilityMode?: boolean },
 ): CouncilMessage {
   if (message.messageType === 'decree' || message.messageType === 'system') return message
   const family = parseCouncilMessageFamily(message.familyName)
@@ -328,9 +328,15 @@ function applyLiveCouncilRenderGate(
     const content = sanitizeMemoryRuntimeText(toDisplayText(message.content))
     return content === toDisplayText(message.content) ? message : { ...message, content }
   }
+  if (opts?.stabilityMode) {
+    const content = sanitizeMemoryRuntimeText(toDisplayText(message.content))
+    if (content === toDisplayText(message.content) && !message.degraded) return message
+    return { ...message, content, degraded: false, integrityStatus: content ? 'COMPLETE' : 'EMPTY' }
+  }
   const gate = applyCouncilRenderGate(family, message.content, {
     decreeText: opts?.decreeText,
     promptIntent: opts?.promptIntent,
+    stabilityMode: opts?.stabilityMode,
   })
   const content = sanitizeMemoryRuntimeText(gate.displayText)
   if (
@@ -351,7 +357,7 @@ function applyLiveCouncilRenderGate(
 
 function sanitizedCouncilMessage(
   message: CouncilMessage,
-  opts?: { decreeText?: string; promptIntent?: PromptIntent },
+  opts?: { decreeText?: string; promptIntent?: PromptIntent; stabilityMode?: boolean },
 ): CouncilMessage {
   return applyLiveCouncilRenderGate(message, opts)
 }
@@ -360,8 +366,10 @@ function councilProviderTextAfterRenderGate(
   family: CouncilOrchestrationFamily,
   text: string,
   decreeText?: string,
+  stabilityMode?: boolean,
 ): string {
-  return applyCouncilRenderGate(family, text, { decreeText }).displayText
+  if (stabilityMode) return sanitizeMemoryRuntimeText(toDisplayText(text))
+  return applyCouncilRenderGate(family, text, { decreeText, stabilityMode }).displayText
 }
 
 function councilNoiseKey(message: CouncilMessage): string | null {
@@ -377,7 +385,10 @@ function councilNoiseKey(message: CouncilMessage): string | null {
   return null
 }
 
-function applyCouncilThreadHygiene(messages: CouncilMessage[]): CouncilThreadHygieneResult {
+function applyCouncilThreadHygiene(
+  messages: CouncilMessage[],
+  stabilityMode = false,
+): CouncilThreadHygieneResult {
   const seenNoise = new Set<string>()
   const visibleMessages: CouncilMessage[] = []
   let collapsedCount = 0
@@ -386,7 +397,7 @@ function applyCouncilThreadHygiene(messages: CouncilMessage[]): CouncilThreadHyg
   const promptIntent = decreeText ? detectPromptIntent(decreeText) : undefined
 
   for (const raw of messages) {
-    const message = sanitizedCouncilMessage(raw, { decreeText, promptIntent })
+    const message = sanitizedCouncilMessage(raw, { decreeText, promptIntent, stabilityMode })
     const key = councilNoiseKey(message)
     if (key && seenNoise.has(key)) {
       collapsedCount += 1
@@ -1634,7 +1645,7 @@ const MessageBubble = memo(function MessageBubble({
             Prepare Repair Packet
           </button>
         ) : null}
-        {msg.degraded && msg.messageType === 'response' ? (
+        {msg.degraded && !councilStabilityMode && msg.messageType === 'response' ? (
           <p className="mt-2 text-[10px] tracking-widest" style={{ color: '#FBBF24' }}>
             Degraded response quality — excluded from synthesis and repair packets.
           </p>
@@ -5259,8 +5270,8 @@ function Home() {
   const messages = council.messages
   const liveChatWindow = useMemo(() => windowLiveChatMessages(messages), [messages])
   const liveCouncilHygiene = useMemo(
-    () => applyCouncilThreadHygiene(liveChatWindow.visibleMessages),
-    [liveChatWindow.visibleMessages],
+    () => applyCouncilThreadHygiene(liveChatWindow.visibleMessages, councilStabilityMode),
+    [liveChatWindow.visibleMessages, councilStabilityMode],
   )
   const visibleCouncilMessages = liveCouncilHygiene.visibleMessages
   const collapsedCouncilNoiseCount = liveCouncilHygiene.collapsedCount
@@ -7276,7 +7287,9 @@ function Home() {
     const orchFamily = parseCouncilMessageFamily(label) ?? parseCouncilMessageFamily(familyName)
     const latestDecree = [...messagesRef.current].reverse().find(m => m.messageType === 'decree')
     const decreeText = latestDecree ? toDisplayText(latestDecree.content).trim() : ''
-    const renderGate = orchFamily ? applyCouncilRenderGate(orchFamily, content, { decreeText }) : null
+    const renderGate = orchFamily && !councilStabilityMode
+      ? applyCouncilRenderGate(orchFamily, content, { decreeText, stabilityMode: councilStabilityMode })
+      : null
     const visibleContent = renderGate?.displayText ?? content
 
     if (instant) {
@@ -7778,7 +7791,7 @@ function Home() {
         }
         textOut = typeof data.councilSingleResponse === 'string' ? data.councilSingleResponse.trim() : ''
         if (textOut) {
-          textOut = councilProviderTextAfterRenderGate(family, textOut)
+          textOut = councilProviderTextAfterRenderGate(family, textOut, decree, councilStabilityMode)
         }
         if (!textOut) {
           const famLabel = COUNCIL_ROSTER.find(ro => ro.id === family)?.label ?? family
@@ -8594,7 +8607,7 @@ function Home() {
                 } else {
                   textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
                   if (textOut) {
-                    textOut = councilProviderTextAfterRenderGate(family, textOut)
+                    textOut = councilProviderTextAfterRenderGate(family, textOut, decree, councilStabilityMode)
                   }
                   if (!textOut) {
                     if (!isDirectInvoke) {
@@ -8788,7 +8801,7 @@ function Home() {
         .filter(c => Boolean(c.textOut?.trim()))
         .map(c => ({
           family: c.family,
-          textOut: councilProviderTextAfterRenderGate(c.family, c.textOut!.trim()),
+          textOut: councilProviderTextAfterRenderGate(c.family, c.textOut!.trim(), decree, councilStabilityMode),
           transientMessageIds: c.transientMessageIds,
         }))
 

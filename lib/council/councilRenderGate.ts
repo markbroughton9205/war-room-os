@@ -9,7 +9,7 @@ import {
   isRelaxedPromptIntent,
   type PromptIntent,
 } from '@/lib/council/promptIntent'
-import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
+import { isCouncilStabilityMode, logCouncilStabilityRender } from '@/lib/council/stabilityMode'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 import {
   countMeaningfulTokens,
@@ -108,13 +108,50 @@ export function applyCouncilRenderGate(
     /** Operator decree text — drives relaxed integrity for greetings/casual chat. */
     decreeText?: string
     promptIntent?: PromptIntent
+    /** Client echo of stability mode (server reads env when omitted). */
+    stabilityMode?: boolean
   },
 ): CouncilRenderGateResult {
   const rawText = toDisplayText(raw).trim()
   const councilMode = opts?.councilMode ?? true
   const promptIntent = opts?.promptIntent ?? (opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined)
   const relaxedCasual = promptIntent ? isRelaxedPromptIntent(promptIntent) : false
-  const stabilityMode = isCouncilStabilityMode()
+  const stabilityMode = opts?.stabilityMode ?? isCouncilStabilityMode()
+
+  if (stabilityMode && family && rawText) {
+    const displayText = rawText
+    logCouncilStabilityRender({
+      provider: family,
+      rawLength: rawText.length,
+      renderedLength: displayText.length,
+      fallbackSkipped: true,
+    })
+    logIntegrityDebug({
+      phase: 'applyCouncilRenderGate',
+      provider: family,
+      rawLength: rawText.length,
+      normalizedLength: rawText.length,
+      renderedLength: displayText.length,
+      last30: integrityDebugTail(rawText),
+      ruleTriggered: 'stability_mode_minimal_path',
+      gateResult: 'stability_mode_pass',
+      integrityStatus: 'COMPLETE',
+      renderable: true,
+      degraded: false,
+      stabilityMode: true,
+      fallbackSkipped: true,
+      relaxedCasual,
+      promptIntent,
+    })
+    return {
+      displayText,
+      rawText,
+      renderable: true,
+      integrityStatus: 'COMPLETE',
+      degraded: false,
+      promptIntent,
+    }
+  }
 
   if (!family || !rawText) {
     return {

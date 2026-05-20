@@ -89,6 +89,7 @@ import {
   COUNCIL_STABILITY_FAILURE_MESSAGE,
   getStabilityModeFlags,
   isCouncilStabilityMode,
+  logCouncilStabilityRender,
   stabilityModeResponseMeta,
 } from '@/lib/council/stabilityMode'
 import { logCouncilPacketMetrics } from '@/lib/council/packetSizeLog'
@@ -1005,7 +1006,10 @@ export async function POST(req: Request) {
           ),
         ),
       )
-      const results = validateProviderResults(providerResults, { decreeText: raelDirectiveText })
+      const results = validateProviderResults(providerResults, {
+        integrityCheck: !skipProviderIntegrityCheck,
+        decreeText: raelDirectiveText,
+      })
       await safeAudit({
         success: true,
         flow: 'parallel_providers',
@@ -1475,7 +1479,14 @@ export async function POST(req: Request) {
       }
 
       if (councilStabilityMode) {
+        const rawLen = responseText.length
         responseText = compactDisplayWhitespace(toDisplayText(responseText))
+        logCouncilStabilityRender({
+          provider: councilSingleFamily,
+          rawLength: rawLen,
+          renderedLength: responseText.length,
+          fallbackSkipped: true,
+        })
       }
 
       let opportunityDiagnostics: Record<string, unknown> | undefined
@@ -1605,7 +1616,7 @@ export async function POST(req: Request) {
       }
       responseText = governed.text
 
-      if (councilSingleFamily === 'gemini' && responseText.trim()) {
+      if (!councilStabilityMode && councilSingleFamily === 'gemini' && responseText.trim()) {
         const renderGate = applyCouncilRenderGate('gemini', responseText, {
           decreeText: raelDirectiveText,
           retryAttempted: Number(providerIntegrityDiagnostics?.retryCount ?? 0) > 0,
@@ -1640,9 +1651,13 @@ export async function POST(req: Request) {
         )
       }
 
-      councilResponseCompletion = assessCouncilTextCompletion(responseText, {
-        providerFinishReason: councilSingleFamily === 'gemini' ? providerFinishReason : undefined,
-      })
+      if (!councilStabilityMode) {
+        councilResponseCompletion = assessCouncilTextCompletion(responseText, {
+          providerFinishReason: councilSingleFamily === 'gemini' ? providerFinishReason : undefined,
+        })
+      } else if (!councilResponseCompletion) {
+        councilResponseCompletion = responseText.trim() ? 'complete' : 'partial'
+      }
       if (geminiDegradedReason !== null && councilResponseCompletion === 'complete') {
         councilResponseCompletion = 'partial'
       }
