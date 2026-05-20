@@ -10,6 +10,7 @@ import { compactDisplayWhitespace } from '@/lib/council/toDisplayText'
 import { describeLocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import { buildHoroscopeSnapshot, type AstrologyInterpretationMode, type HoroscopePeriod } from '@/lib/intelligence/environment/horoscopeEnvironment'
 import { familyTipsForPanel, type FamilyTip } from '@/lib/familyTips'
+import { WarRoomEvolutionPanel } from '@/components/war-room/evolution'
 import type {
   EnvironmentSetupGuidance,
   FinanceDashboardSnapshot,
@@ -17,13 +18,6 @@ import type {
   NewsDashboardCard,
   WeatherDashboardSnapshot,
 } from '@/lib/intelligence/environment/liveEnvironmentTypes'
-
-type ImprovementStat = {
-  label: string
-  value: string
-  detail: string
-  color: string
-}
 
 type CouncilHandoffAction = 'ask_council' | 'investigate' | 'send_to_analysts' | 'create_opportunity'
 
@@ -320,72 +314,6 @@ function buildFallbackFinance(): FinanceDashboardSnapshot {
   }
 }
 
-function statList(args: {
-  configurationSweep: ConfigurationSweep | null
-  liveResearchHud: LiveResearchClientUi | null
-  dashboard: LiveEnvironmentDashboardPayload | null
-}): ImprovementStat[] {
-  const configured = args.configurationSweep?.summary.totalProvidersConfigured ?? 0
-  const total = args.configurationSweep?.summary.totalProviders ?? 0
-  const missing = args.configurationSweep?.summary.missingProviders ?? 0
-  const retrieval = args.liveResearchHud?.intelligence?.retrieval
-  const providerCards = [args.dashboard?.weather, args.dashboard?.news, args.dashboard?.finance].filter(Boolean)
-  const sourceHealthImprovement = providerCards.length
-    ? `${providerCards.filter(card => card?.status === 'available').length}/${providerCards.length}`
-    : 'pending'
-
-  return [
-    {
-      label: 'Providers configured',
-      value: total ? `${configured}/${total}` : 'checking',
-      detail: 'Configuration Sweep readiness, env presence only.',
-      color: '#38BDF8',
-    },
-    {
-      label: 'Missing providers',
-      value: args.configurationSweep ? String(missing) : 'checking',
-      detail: 'Setup guidance names env vars only; no secret values.',
-      color: missing > 0 ? '#FB923C' : '#34D399',
-    },
-    {
-      label: 'Retrieval success rate',
-      value: retrieval ? (retrieval.success ? '100%' : '0%') : 'idle',
-      detail: retrieval ? `Source mix health: ${retrieval.health}` : 'No live retrieval run in this session.',
-      color: retrieval?.success ? '#34D399' : '#FBBF24',
-    },
-    {
-      label: 'Opportunities found',
-      value: 'not connected',
-      detail: 'Income Scout telemetry is preserved outside this panel until a shared stats feed exists.',
-      color: '#94A3B8',
-    },
-    {
-      label: 'Memory entries promoted',
-      value: 'not connected',
-      detail: 'Strategic memory promotion counts require a source-backed memory stats endpoint.',
-      color: '#94A3B8',
-    },
-    {
-      label: 'Repairs logged',
-      value: 'ledger ready',
-      detail: 'Repair ledger exists; live repair count is not inferred here.',
-      color: '#A78BFA',
-    },
-    {
-      label: 'Warnings resolved',
-      value: String(Math.max(0, (args.liveResearchHud?.intelligence?.redTeamWarnings ?? 0) - (args.liveResearchHud?.intelligence?.unsupportedClaims ?? 0))),
-      detail: 'Derived only from current intelligence metadata warnings and unsupported claims.',
-      color: '#FBBF24',
-    },
-    {
-      label: 'Source health improvement',
-      value: sourceHealthImprovement,
-      detail: 'Weather, RSS, and finance cards that returned source-backed data.',
-      color: sourceHealthImprovement.includes('/') ? '#38BDF8' : '#94A3B8',
-    },
-  ]
-}
-
 function FamilyTipInline({ tip, onCouncilHandoff }: { tip: FamilyTip; onCouncilHandoff?: (decree: string) => void }) {
   return (
     <div className="mt-2 rounded border border-sky-300/10 bg-sky-950/10 p-1.5">
@@ -459,7 +387,6 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   const [dashboardError, setDashboardError] = useState<string | null>(null)
   const [activeNewsIndex, setActiveNewsIndex] = useState(0)
   const [activeMarketIndex, setActiveMarketIndex] = useState(0)
-  const [activeStatIndex, setActiveStatIndex] = useState(0)
   const [horoscopePeriod, setHoroscopePeriod] = useState<HoroscopePeriod>('daily')
   const [reducedMotion, setReducedMotion] = useState(false)
   const weather = useMemo(
@@ -506,11 +433,6 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   )
   const signalState = localSignalState({ sourceNetworkProvider, localSourceProvider, weakSignals, localCards: localNewsCards.length })
   const activeQuote = finance.quotes.length ? finance.quotes[activeMarketIndex % finance.quotes.length] : null
-  const improvementStats = useMemo(
-    () => statList({ configurationSweep, liveResearchHud, dashboard }),
-    [configurationSweep, liveResearchHud, dashboard],
-  )
-  const activeStat = improvementStats[activeStatIndex % improvementStats.length]
   const liveEnvironmentTip = familyTipsForPanel('live_environment')[0]
   const commanderSuggestion = buildCommanderSuggestion({
     weather,
@@ -585,12 +507,6 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
     const interval = window.setInterval(() => setActiveMarketIndex(prev => (prev + 1) % finance.quotes.length), 7000)
     return () => window.clearInterval(interval)
   }, [finance.quotes.length, reducedMotion])
-
-  useEffect(() => {
-    if (reducedMotion || improvementStats.length <= 1) return
-    const interval = window.setInterval(() => setActiveStatIndex(prev => (prev + 1) % improvementStats.length), 9000)
-    return () => window.clearInterval(interval)
-  }, [improvementStats.length, reducedMotion])
 
   return (
     <section className="mx-4 mt-4 rounded border border-sky-500/20 bg-slate-950/45 px-4 py-3 font-mono shadow-[0_0_30px_rgba(56,189,248,0.08)]">
@@ -962,25 +878,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
           </div>
         </details>
 
-        <div className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
-          <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">War Room Evolution</p>
-          <p className="mt-1 text-xs" style={{ color: activeStat.color }}>{activeStat.value}</p>
-          <p className="text-[10px] text-slate-300">{activeStat.label}</p>
-          <p className="mt-1 text-[8px] text-slate-600">{activeStat.detail}</p>
-          <HandoffButtons decree="Council, review War Room readiness across Live Environment, Analysts, Opportunity Scout, Agent Foundry, Learning, Automation, Diagnostics, System Health, Engineering, and Memory. Recommend one safe next move." onCouncilHandoff={onCouncilHandoff} />
-          <div className="mt-2 flex gap-1">
-            {improvementStats.map((stat, index) => (
-              <button
-                key={stat.label}
-                type="button"
-                aria-label={`Show ${stat.label}`}
-                className="h-1.5 flex-1 rounded-full"
-                style={{ background: index === activeStatIndex % improvementStats.length ? stat.color : 'rgba(148,163,184,0.25)' }}
-                onClick={() => setActiveStatIndex(index)}
-              />
-            ))}
-          </div>
-        </div>
+        <WarRoomEvolutionPanel onCouncilHandoff={onCouncilHandoff} />
       </div>
     </section>
   )
