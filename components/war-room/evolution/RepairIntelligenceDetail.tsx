@@ -2,6 +2,8 @@
 
 import type { RepairIntelligenceItem, RepairIntelligenceSection, RepairIntelligenceSnapshot } from '@/lib/evolution/types'
 
+import { OperatorNextStepsBlock } from './OperatorNextStepsBlock'
+
 const SECTION_LABELS: Record<RepairIntelligenceSection, string> = {
   system_readiness: 'System Readiness',
   missing_configuration: 'Missing Configuration',
@@ -84,6 +86,11 @@ function ItemHeader({ item }: { item: RepairIntelligenceItem }) {
 export function RepairIntelligenceDetail({ snapshot }: { snapshot: RepairIntelligenceSnapshot }) {
   return (
     <div className="mt-2 max-h-80 space-y-3 overflow-y-auto pr-1">
+      <OperatorNextStepsBlock
+        report={snapshot.operatorNextSteps}
+        markdown={snapshot.operatorNextStepsMarkdown}
+        compact
+      />
       {SECTION_ORDER.map(section => {
         const items = snapshot.sections[section]
         if (!items.length) return null

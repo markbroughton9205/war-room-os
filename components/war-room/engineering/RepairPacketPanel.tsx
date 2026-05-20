@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CouncilRepairPacket, CouncilRepairSnapshot } from '@/lib/council-repair'
 
+import { OperatorNextStepsBlock } from '@/components/war-room/evolution/OperatorNextStepsBlock'
+
 function Badge({ label }: { label: string }) {
   const color = /risk|security|rejected|broken/i.test(label)
     ? '#F87171'
@@ -171,6 +173,11 @@ export function RepairPacketPanel({ latest }: { latest?: CouncilRepairPacket | n
                 <FieldList title="Risk Notes" items={activePacket.riskNotes} />
                 <FieldList title="Rollback Notes" items={activePacket.rollbackNotes} />
               </div>
+
+              <OperatorNextStepsBlock
+                report={activePacket.operatorNextSteps}
+                markdown={activePacket.operatorNextStepsMarkdown}
+              />
 
               <section className="rounded border border-amber-500/25 bg-amber-500/5 p-3 text-xs text-amber-100">
                 <h4 className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Suspected Root Cause</h4>

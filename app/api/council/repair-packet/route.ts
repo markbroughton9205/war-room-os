@@ -110,6 +110,8 @@ export async function POST(req: Request) {
   return NextResponse.json({
     request,
     packet,
+    operatorNextSteps: packet.operatorNextSteps,
+    operatorNextStepsMarkdown: packet.operatorNextStepsMarkdown,
     ledger: {
       eventType: 'council.repair_packet.created',
       eventId: event.event?.id ?? null,

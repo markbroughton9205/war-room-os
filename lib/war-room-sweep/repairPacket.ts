@@ -1,5 +1,12 @@
 import 'server-only'
 
+import {
+  appendOperatorNextStepsToPrompt,
+  toOperatorNextStepsPayload,
+  type OperatorNextStepsPayload,
+} from '@/lib/operator/nextStepsReport'
+import { buildSweepFindingOperatorNextSteps } from '@/lib/operator/repairPacketNextSteps'
+
 import type { SweepFinding } from './types'
 
 export type SweepRepairPacket = {
@@ -12,6 +19,8 @@ export type SweepRepairPacket = {
   riskRollback: string
   commitMessage: string
   cursorReadyPrompt: string
+  operatorNextSteps: OperatorNextStepsPayload['report']
+  operatorNextStepsMarkdown: string
 }
 
 export function buildRepairPacketFromFinding(finding: SweepFinding): SweepRepairPacket {
@@ -44,6 +53,8 @@ export function buildRepairPacketFromFinding(finding: SweepFinding): SweepRepair
     `Commit message: ${commitMessageForFinding(finding)}`,
   ].join('\n')
 
+  const operatorPayload = toOperatorNextStepsPayload(buildSweepFindingOperatorNextSteps(finding))
+
   return {
     findingId: finding.id,
     title: finding.title,
@@ -53,7 +64,9 @@ export function buildRepairPacketFromFinding(finding: SweepFinding): SweepRepair
     validationCommands,
     riskRollback: 'Manual review required. Roll back via git revert after validating in a branch; never run destructive SQL from War Room UI.',
     commitMessage: commitMessageForFinding(finding),
-    cursorReadyPrompt,
+    cursorReadyPrompt: appendOperatorNextStepsToPrompt(cursorReadyPrompt, operatorPayload.report),
+    operatorNextSteps: operatorPayload.report,
+    operatorNextStepsMarkdown: operatorPayload.markdown,
   }
 }
 

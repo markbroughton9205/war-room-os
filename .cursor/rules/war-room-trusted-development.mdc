@@ -25,6 +25,8 @@ When working inside this repository, treat the following as trusted normal devel
 
 Keep normal visibility: summarize files changed, commands executed, validation results, and any commits created.
 
+Engineering completions must include **NEXT STEPS FOR OPERATOR** (see `docs/ENGINEERING_COMPLETION_STANDARD.md` and `.cursor/rules/operator-next-steps-reporting.mdc`).
+
 ## Approval Still Required
 
 Ask for approval before performing actions in any of these categories:

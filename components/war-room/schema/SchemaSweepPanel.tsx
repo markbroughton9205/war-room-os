@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import { OperatorNextStepsBlock } from '@/components/war-room/evolution/OperatorNextStepsBlock'
+import type { OperatorNextStepsReport } from '@/lib/operator/nextStepsReport'
+
 type SchemaSweepStatus = 'healthy' | 'drift_detected' | 'incomplete' | 'error'
 
 type SweepPayload = {
@@ -15,6 +18,8 @@ type SweepPayload = {
   introspectionMode?: string
   introspectionNote?: string
   repairPacketAvailable?: boolean
+  operatorNextSteps?: OperatorNextStepsReport
+  operatorNextStepsMarkdown?: string
 }
 
 type RepairPacketPayload = {
@@ -23,6 +28,8 @@ type RepairPacketPayload = {
     summary: string
     combinedSql: string
     combinedCursorPrompt: string
+    operatorNextSteps?: OperatorNextStepsReport
+    operatorNextStepsMarkdown?: string
   }
 }
 
@@ -143,7 +150,15 @@ export function SchemaSweepPanel() {
         ) : null}
       </div>
 
-      {sweep?.recommendedNextAction ? (
+      {sweep?.operatorNextSteps || sweep?.operatorNextStepsMarkdown ? (
+        <div className="mb-3">
+          <OperatorNextStepsBlock
+            report={sweep.operatorNextSteps}
+            markdown={sweep.operatorNextStepsMarkdown}
+            compact
+          />
+        </div>
+      ) : sweep?.recommendedNextAction ? (
         <div className="mb-3 rounded border border-white/10 bg-black/25 p-2 text-[10px] leading-relaxed text-slate-300">
           {sweep.recommendedNextAction}
         </div>
@@ -196,6 +211,15 @@ export function SchemaSweepPanel() {
               </button>
             </div>
           </div>
+          {repair?.operatorNextSteps || repair?.operatorNextStepsMarkdown ? (
+            <div className="mt-2">
+              <OperatorNextStepsBlock
+                report={repair.operatorNextSteps}
+                markdown={repair.operatorNextStepsMarkdown}
+                compact
+              />
+            </div>
+          ) : null}
           {repair ? (
             <textarea
               readOnly

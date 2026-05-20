@@ -1,0 +1,27 @@
+---
+alwaysApply: true
+description: Require NEXT STEPS FOR OPERATOR on engineering completions
+---
+
+# Operator next steps reporting
+
+When completing implementation work in `C:\Users\markb\warroom`, always end the user-facing summary with:
+
+## NEXT STEPS FOR OPERATOR
+
+Include all eight subsections (see `docs/ENGINEERING_COMPLETION_STANDARD.md`):
+
+1. Required environment changes
+2. Required SQL/migrations
+3. Restart requirements
+4. Verification URLs/routes
+5. Expected successful output
+6. Feature flags enabled/disabled
+7. What should visibly change in UI
+8. Safe rollback instruction if needed
+
+Use plain language, numbered steps, no assumptions. If the entire change needs no operator work, state **No operator action required.**
+
+Never expose secret values — env var **names** and placeholders only.
+
+Prefer `formatOperatorNextStepsMarkdown` / `buildNextStepsFromContext` from `@/lib/operator` when generating repair packets or API payloads.

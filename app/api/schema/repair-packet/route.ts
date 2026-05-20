@@ -11,6 +11,8 @@ async function response() {
     generatedAt: snapshot.generatedAt,
     persistenceHealth: snapshot.persistenceHealth,
     repairPacket: snapshot.repairPacket,
+    operatorNextSteps: snapshot.repairPacket.operatorNextSteps,
+    operatorNextStepsMarkdown: snapshot.repairPacket.operatorNextStepsMarkdown,
     issues: snapshot.issues,
     guardrails: snapshot.guardrails,
   }, {

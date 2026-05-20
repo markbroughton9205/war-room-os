@@ -1,4 +1,9 @@
 import {
+  appendOperatorNextStepsToPrompt,
+  toOperatorNextStepsPayload,
+} from '@/lib/operator/nextStepsReport'
+import { buildCouncilRepairOperatorNextSteps } from '@/lib/operator/repairPacketNextSteps'
+import {
   COUNCIL_REPAIR_GUARDRAILS,
   REPAIR_VALIDATION_COMMANDS,
   type BabyRepairLessonCandidate,
@@ -121,7 +126,9 @@ function connectedSurfaces(classification: CouncilRepairRequest['classification'
   return base
 }
 
-function cursorPrompt(packet: Omit<CouncilRepairPacket, 'cursorReadyPrompt'>): string {
+function cursorPrompt(
+  packet: Omit<CouncilRepairPacket, 'cursorReadyPrompt' | 'operatorNextSteps' | 'operatorNextStepsMarkdown'>,
+): string {
   return [
     'Prepare this War Room repair manually in Cursor after Commander approval. This packet is advisory only.',
     '',
@@ -259,10 +266,20 @@ export function createCouncilRepairPacket(
     connectedSurfaces: connectedSurfaces(request.classification),
     guardrails: COUNCIL_REPAIR_GUARDRAILS,
     createdAt: now.toISOString(),
-  } satisfies Omit<CouncilRepairPacket, 'cursorReadyPrompt'>
+  } satisfies Omit<CouncilRepairPacket, 'cursorReadyPrompt' | 'operatorNextSteps' | 'operatorNextStepsMarkdown'>
+
+  const operatorPayload = toOperatorNextStepsPayload(
+    buildCouncilRepairOperatorNextSteps({
+      classification: request.classification,
+      affectedPanelRoute,
+      validationCommands: [...packetBase.validationCommands],
+    }),
+  )
 
   return {
     ...packetBase,
-    cursorReadyPrompt: cursorPrompt(packetBase),
+    operatorNextSteps: operatorPayload.report,
+    operatorNextStepsMarkdown: operatorPayload.markdown,
+    cursorReadyPrompt: appendOperatorNextStepsToPrompt(cursorPrompt(packetBase), operatorPayload.report),
   }
 }

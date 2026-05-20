@@ -1,3 +1,6 @@
+import { appendOperatorNextStepsToPrompt, toOperatorNextStepsPayload } from '@/lib/operator/nextStepsReport'
+import { buildSchemaRepairOperatorNextSteps } from '@/lib/operator/repairPacketNextSteps'
+
 import { SCHEMA_SWEEP_GUARDRAILS, SCHEMA_VALIDATION_CHECKLIST } from './expectedSchema'
 import type { ExpectedTable, SchemaIssueKind, SchemaRepairPacket, SchemaSweepIssue, SchemaTableDiagnostic } from './types'
 
@@ -164,7 +167,11 @@ export function issuesForTable(table: ExpectedTable, diagnostic: SchemaTableDiag
   return issues
 }
 
-export function createRepairPacket(issues: SchemaSweepIssue[], createdAt = new Date().toISOString()): SchemaRepairPacket {
+export function createRepairPacket(
+  issues: SchemaSweepIssue[],
+  createdAt = new Date().toISOString(),
+  status: 'healthy' | 'drift_detected' | 'incomplete' | 'error' = issues.length ? 'drift_detected' : 'healthy',
+): SchemaRepairPacket {
   const uniqueSql = [...new Map(issues.map(issue => [issue.safeSqlMigration, issue.safeSqlMigration])).values()]
   const combinedSql = uniqueSql.length
     ? uniqueSql.join('\n\n-- ---- next repair ----\n\n')
@@ -172,6 +179,9 @@ export function createRepairPacket(issues: SchemaSweepIssue[], createdAt = new D
   const combinedCursorPrompt = issues.length
     ? issues.map(issue => issue.cursorReadyPrompt).join('\n\n---\n\n')
     : 'Latest schema sweep found no repair packet issues.'
+
+  const operatorPayload = toOperatorNextStepsPayload(buildSchemaRepairOperatorNextSteps({ status, issues }))
+  const cursorWithOperator = appendOperatorNextStepsToPrompt(combinedCursorPrompt, operatorPayload.report)
 
   return {
     id: `schema-repair-${Date.parse(createdAt) || Date.now()}`,
@@ -184,8 +194,10 @@ export function createRepairPacket(issues: SchemaSweepIssue[], createdAt = new D
       : 'Schema sweep did not find actionable missing table or column issues.',
     issues,
     combinedSql,
-    combinedCursorPrompt,
+    combinedCursorPrompt: cursorWithOperator,
     validationChecklist: SCHEMA_VALIDATION_CHECKLIST,
     guardrails: SCHEMA_SWEEP_GUARDRAILS,
+    operatorNextSteps: operatorPayload.report,
+    operatorNextStepsMarkdown: operatorPayload.markdown,
   }
 }

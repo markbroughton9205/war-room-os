@@ -11,6 +11,8 @@ export type RepairClassification =
 
 export type RepairApprovalStatus = 'awaiting_commander_approval' | 'approved_for_manual_cursor' | 'rejected'
 
+import type { OperatorNextStepsPayload } from '@/lib/operator/nextStepsReport'
+
 export type RepairFamilyKey = 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'red_team' | 'baby_observer'
 
 export type RepairFamilyContribution = {
@@ -85,6 +87,8 @@ export type CouncilRepairPacket = {
     fakeRepairCompletion: false
   }
   cursorReadyPrompt: string
+  operatorNextSteps: OperatorNextStepsPayload['report']
+  operatorNextStepsMarkdown: string
   createdAt: string
 }
 

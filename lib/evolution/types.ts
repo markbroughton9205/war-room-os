@@ -1,3 +1,5 @@
+import type { OperatorNextStepsPayload } from '@/lib/operator/nextStepsReport'
+
 export type RepairSeverity = 'BLOCKER' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO'
 
 export type MissingConfigCategory =
@@ -74,6 +76,8 @@ export type RepairIntelligenceSnapshot = {
   missingConfiguration: MissingConfigItem[]
   sections: Record<RepairIntelligenceSection, RepairIntelligenceItem[]>
   nextRequiredAction: RepairIntelligenceItem | null
+  operatorNextSteps: OperatorNextStepsPayload['report']
+  operatorNextStepsMarkdown: string
   repairQueue: RepairIntelligenceItem[]
   sources: Array<{ id: string; label: string; status: 'ok' | 'degraded' | 'error' }>
   guardrails: {

@@ -10,6 +10,9 @@ import type {
   SchemaSweepStatus,
   SchemaTableDiagnostic,
 } from './types'
+import { formatOperatorNextStepsMarkdown } from '@/lib/operator/nextStepsReport'
+import { buildSchemaRepairOperatorNextSteps } from '@/lib/operator/repairPacketNextSteps'
+
 import { createRepairPacket, createSchemaIssue, issuesForTable } from './repairPacket'
 import {
   CONNECTED_SCHEMA_SURFACES,
@@ -270,6 +273,10 @@ export function toApiResponse(
   diff: SchemaSweepDiff,
   status: SchemaSweepStatus,
 ): SchemaSweepApiResponse {
+  const operatorReport = buildSchemaRepairOperatorNextSteps({ status, issues: snapshot.issues })
+  const operatorMarkdown = formatOperatorNextStepsMarkdown(operatorReport)
+  const actionLine = recommendedNextAction(status, diff)
+
   return {
     status,
     missingTables: diff.missingTables,
@@ -277,7 +284,9 @@ export function toApiResponse(
     missingIndexes: diff.missingIndexes,
     missingConstraints: diff.missingConstraints,
     checkedAt: snapshot.generatedAt,
-    recommendedNextAction: recommendedNextAction(status, diff),
+    recommendedNextAction: `${actionLine}\n\n${operatorMarkdown}`,
+    operatorNextSteps: operatorReport,
+    operatorNextStepsMarkdown: operatorMarkdown,
     introspectionMode: diff.introspectionMode,
     introspectionNote: diff.introspectionNote,
     migrations: snapshot.migrations,
@@ -324,8 +333,18 @@ export function buildSnapshot(input: {
     }))
   }
 
-  const repairPacket = createRepairPacket(issues, input.generatedAt)
-  const missingTables = input.tables.filter(table => table.status === 'missing').length
+  const missingTables = input.tables.filter(table => table.status === 'missing').map(table => table.table)
+  const sweepStatus = deriveSweepStatus({
+    missingTables,
+    missingColumns: input.diff.missingColumns,
+    missingIndexes: input.diff.missingIndexes,
+    missingConstraints: input.diff.missingConstraints,
+    migrationStatus: input.migrations.status,
+    missingMigrations: input.migrations.missingMigrations,
+    schemaDrift: input.diff.schemaDrift,
+  })
+  const repairPacket = createRepairPacket(issues, input.generatedAt, sweepStatus)
+  const missingTableCount = missingTables.length
   const missingColumns = input.tables.reduce((sum, table) => sum + table.missingColumns.length, 0)
   const permissionFailures = input.tables.filter(table => table.permission === 'failed').length
   const staleSchemaCacheSymptoms = input.tables.filter(table => table.staleSchemaCache).length
@@ -338,7 +357,7 @@ export function buildSnapshot(input: {
     summary: {
       expectedTables: EXPECTED_TABLES.length,
       readyTables: input.tables.filter(table => table.status === 'ready').length,
-      missingTables,
+      missingTables: missingTableCount,
       missingColumns,
       missingIndexes: input.diff.missingIndexes.length,
       missingConstraints: input.diff.missingConstraints.length,

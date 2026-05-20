@@ -12,6 +12,8 @@ import { sanitizePersistenceNote, sanitizeSchemaError } from '@/lib/schema-sweep
 import type { SchemaSweepApiResponse } from '@/lib/schema-sweep/types'
 import { getSignalSources } from '@/lib/signals/sources'
 import { getRssIngestionRuntimeStatus } from '@/lib/signals/rss/runtime'
+import { formatOperatorNextStepsMarkdown } from '@/lib/operator/nextStepsReport'
+import { buildRepairIntelligenceOperatorNextSteps } from '@/lib/operator/repairPacketNextSteps'
 import type {
   MissingConfigItem,
   RepairApprovalState,
@@ -465,6 +467,24 @@ export async function collectRepairIntelligence(req: Request): Promise<RepairInt
   ])
 
   const nextRequiredAction = pickNextAction(allActionable)
+  const operatorReport = nextRequiredAction
+    ? buildRepairIntelligenceOperatorNextSteps({
+        title: nextRequiredAction.title,
+        affectedPanel: nextRequiredAction.affectedPanel,
+        affectedRoute: nextRequiredAction.affectedRoute,
+        validationCommands: nextRequiredAction.validationCommands,
+        envVarNames: missingConfiguration.find(item => item.name === nextRequiredAction.title)?.envVarNames,
+        suggestedSqlMigration: nextRequiredAction.suggestedSqlMigration,
+        repairPacketAvailable: nextRequiredAction.repairPacketAvailable,
+      })
+    : buildRepairIntelligenceOperatorNextSteps({
+        title: 'No blocker detected in current snapshot',
+        affectedPanel: 'War Room Evolution',
+        validationCommands: ['GET /api/evolution/repair-intelligence'],
+        repairPacketAvailable: false,
+      })
+  const operatorNextStepsMarkdown = formatOperatorNextStepsMarkdown(operatorReport)
+
   const nextSection: RepairIntelligenceItem[] = nextRequiredAction
     ? [{ ...nextRequiredAction, section: 'next_required_action' }]
     : [{
@@ -510,6 +530,8 @@ export async function collectRepairIntelligence(req: Request): Promise<RepairInt
     missingConfiguration,
     sections,
     nextRequiredAction,
+    operatorNextSteps: operatorReport,
+    operatorNextStepsMarkdown,
     repairQueue,
     sources,
     guardrails: {

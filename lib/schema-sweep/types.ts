@@ -13,6 +13,7 @@ export type SchemaIssueKind =
 
 export type SchemaIssueSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info'
 
+import type { OperatorNextStepsPayload } from '@/lib/operator/nextStepsReport'
 import type {
   ExpectedColumn,
   ExpectedMigration,
@@ -73,6 +74,8 @@ export type SchemaSweepApiResponse = {
   introspectionNote: string
   migrations: SchemaMigrationDiagnostic
   repairPacketAvailable: boolean
+  operatorNextSteps?: OperatorNextStepsPayload['report']
+  operatorNextStepsMarkdown?: string
   snapshot: SchemaSweepSnapshot
 }
 
@@ -105,6 +108,8 @@ export type SchemaRepairPacket = {
   combinedCursorPrompt: string
   validationChecklist: string[]
   guardrails: string[]
+  operatorNextSteps: OperatorNextStepsPayload['report']
+  operatorNextStepsMarkdown: string
 }
 
 export type SchemaSweepSnapshot = {
