@@ -235,6 +235,11 @@ const TOOLBAR_HEALTH_POLL_INTERVAL_MS = 120_000
 
 const ENGINEERING_TABS: OperatorTab[] = ['agents', 'analysts', 'system', 'engineering', 'diagnostics']
 
+const WarRoomIntro = dynamic(
+  () => import('@/components/war-room/intro/WarRoomIntro').then(mod => mod.WarRoomIntro),
+  { ssr: false },
+)
+
 const RepairPacketPanel = dynamic(
   () => import('@/components/war-room/engineering/RepairPacketPanel').then(mod => mod.RepairPacketPanel),
   {
@@ -11067,6 +11072,7 @@ export default function HomePage() {
     <WarRoomUiModeProvider>
       <LiveRoomModeProvider>
         <Home />
+        <WarRoomIntro />
       </LiveRoomModeProvider>
     </WarRoomUiModeProvider>
   )

@@ -1,0 +1,246 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.overlayExiting {
+  animation: overlayFadeOut 0.55s ease forwards;
+}
+
+.skip {
+  position: absolute;
+  top: max(0.75rem, env(safe-area-inset-top, 0.75rem));
+  right: max(0.75rem, env(safe-area-inset-right, 0.75rem));
+  z-index: 2;
+  padding: 0.45rem 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 215, 0, 0.75);
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 215, 0, 0.28);
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.skip:hover,
+.skip:focus-visible {
+  color: #ffd700;
+  border-color: rgba(255, 215, 0, 0.55);
+  outline: none;
+}
+
+.stage {
+  position: relative;
+  width: min(92vw, 22rem);
+  height: min(52vw, 12rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.symbol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  opacity: 0;
+  transform: scale(0.92);
+  animation: symbolIn 0.42s ease forwards;
+}
+
+.symbolPulse {
+  animation:
+    symbolIn 0.42s ease forwards,
+    symbolGlow 0.55s ease-in-out 0.42s 1;
+}
+
+.symbolDissolve {
+  animation: symbolDissolve 0.55s ease forwards;
+}
+
+.symbolIcon {
+  font-size: clamp(2.5rem, 10vw, 3.25rem);
+  line-height: 1;
+  filter: drop-shadow(0 0 12px rgba(255, 215, 0, 0.45));
+}
+
+.symbolText {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: clamp(0.75rem, 3.2vw, 0.95rem);
+  font-weight: 700;
+  letter-spacing: 0.42em;
+  color: #ffd700;
+  text-indent: 0.42em;
+}
+
+.particles {
+  position: absolute;
+  inset: -15vh -8vw;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.particlesActive {
+  animation: particlesIn 0.25s ease forwards;
+}
+
+.particle {
+  position: absolute;
+  top: 38%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: clamp(0.55rem, 2.4vw, 0.7rem);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  color: rgba(52, 211, 153, 0.92);
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.35);
+  opacity: 0;
+  animation: particleFall var(--fall-duration, 0.9s) ease-in var(--fall-delay, 0s) forwards;
+}
+
+.particleLine {
+  color: rgba(255, 215, 0, 0.82);
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.25);
+  font-size: clamp(0.6rem, 2.6vw, 0.75rem);
+}
+
+.particleBit {
+  color: rgba(0, 255, 65, 0.55);
+  font-size: clamp(0.45rem, 2vw, 0.55rem);
+  letter-spacing: 0;
+}
+
+/* Reduced motion: simple fade only */
+.reducedMotion .symbol {
+  animation: symbolFadeSimple 0.45s ease forwards;
+}
+
+.reducedMotion .symbolPulse,
+.reducedMotion .symbolDissolve {
+  animation: symbolFadeSimple 0.45s ease forwards;
+}
+
+.reducedMotion .particles {
+  display: none;
+}
+
+.reducedMotion.overlayExiting {
+  animation: overlayFadeOut 0.35s ease forwards;
+}
+
+@keyframes symbolIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes symbolGlow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.35));
+  }
+
+  50% {
+    filter: drop-shadow(0 0 28px rgba(255, 215, 0, 0.85));
+    transform: scale(1.04);
+  }
+}
+
+@keyframes symbolDissolve {
+  from {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(1.12);
+    filter: blur(6px);
+  }
+}
+
+@keyframes particlesIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes particleFall {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(1);
+  }
+
+  12% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(var(--fall-distance, 42vh)) scale(0.94);
+  }
+}
+
+@keyframes overlayFadeOut {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+@keyframes symbolFadeSimple {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .symbol,
+  .symbolPulse,
+  .symbolDissolve,
+  .particlesActive,
+  .particle,
+  .overlayExiting {
+    animation: none !important;
+  }
+
+  .symbol {
+    opacity: 1;
+    transform: none;
+  }
+
+  .particles {
+    display: none;
+  }
+}
