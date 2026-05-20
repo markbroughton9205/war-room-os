@@ -7,8 +7,26 @@ import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-export async function POST() {
-  const result = await scoutIncomeWorkerOpportunities()
+function sanitizeClientMessage(message: string): string {
+  if (/api[_-]?key|secret|token|bearer|stack trace|at\s+\w+\./i.test(message)) {
+    return 'Income Worker scout completed in degraded mode. Review fallback opportunities.'
+  }
+  return message
+}
+
+export async function POST(req: Request) {
+  let threadId = 'income-workers'
+  try {
+    const raw = await req.json().catch(() => ({}))
+    if (raw && typeof raw === 'object' && typeof (raw as { threadId?: string }).threadId === 'string') {
+      const trimmed = (raw as { threadId: string }).threadId.trim()
+      if (trimmed) threadId = trimmed
+    }
+  } catch {
+    // empty body is fine
+  }
+
+  const result = await scoutIncomeWorkerOpportunities(threadId)
   const sup = tryWarRoomSupabase()
   const reviews = result.candidates.map(candidate => createIncomeCouncilReview(candidate))
 
@@ -24,15 +42,23 @@ export async function POST() {
       riskLevel: review.riskLevel,
       incomePotential: review.incomePotential,
       nextAction: review.nextAction,
+      degradedMode: Boolean(result.degradedMode),
+      evidenceLabel: result.degradedMode ? 'HISTORICAL_PATTERN_BASED' : 'LIVE_SIGNAL_BACKED',
     },
   })))
 
-  const httpStatus = result.status === 'error' ? 503 : 200
+  const hasResults = result.candidates.length > 0
+  const httpStatus = result.status === 'error' && !hasResults ? 503 : 200
 
   return NextResponse.json({
     tool: 'income-workers-scout',
+    state: result.executionState ?? (hasResults ? 'awaiting_commander_review' : 'failed'),
     ...result,
+    message: sanitizeClientMessage(result.message),
     councilReviews: reviews,
+    diagnostics: result.diagnostics,
+    activityLog: result.activityLog ?? [],
+    opportunities: result.opportunityPackets ?? [],
     eventBus: {
       emitted: reviews.length,
       type: 'income.opportunity.discovered',

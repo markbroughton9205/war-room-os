@@ -10,7 +10,11 @@ import { KERNEL_EVENT_SCHEMA, KERNEL_EVENT_TYPES } from '@/lib/kernel/events'
 import { MEMORY_POLICY } from '@/lib/kernel/memoryPolicy'
 import { AGENT_FAMILY_CAPABILITIES, CAPABILITY_ROUTES } from '@/lib/kernel/routing'
 import { INCOME_WORKERS, INCOME_WORKER_WORKFLOW } from '@/lib/income-workers/registry'
-import type { IncomeWorkerCandidate, IncomeWorkerScoutResult } from '@/lib/income-workers/types'
+import type {
+  IncomeWorkerCandidate,
+  IncomeWorkerScoutExecutionState,
+  IncomeWorkerScoutResult,
+} from '@/lib/income-workers/types'
 import type { IncomeCouncilReview } from '@/lib/income-workers/councilReview'
 import type { DeployStatusResponse } from '@/lib/deploy/types'
 import type { DiffPreviewResponse, RepoStatus, RollbackStatus } from '@/lib/repo/types'
@@ -905,6 +909,10 @@ const INITIAL_INCOME_WORKER_SCOUT: IncomeWorkerScoutResult = {
   sourcesChecked: 0,
   candidates: [],
   rejected: [],
+  executionState: 'scouting',
+  activityLog: [],
+  degradedMode: false,
+  opportunityPackets: [],
 }
 const INITIAL_PAYMENT_LEDGER_STATE: PaymentLedgerState = {
   deposits: [],
@@ -2653,6 +2661,15 @@ function FilesEvidenceVaultPanel({
   )
 }
 
+const INCOME_SCOUT_STATE_COLORS: Record<IncomeWorkerScoutExecutionState, string> = {
+  scouting: '#94A3B8',
+  provider_offline: '#F87171',
+  fallback_active: '#FBBF24',
+  opportunities_generated: '#34D399',
+  awaiting_commander_review: '#60A5FA',
+  failed: '#EF4444',
+}
+
 function IncomeWorkersPanel({
   opportunities,
   actions,
@@ -2679,6 +2696,10 @@ function IncomeWorkersPanel({
   const completedWork = opportunities.filter(opportunity => opportunity.status === 'paid')
   const needsApproval = actions.filter(action => action.status === 'pending' && action.source_agent === 'Income Workers')
   const latestReview = councilReviews[0] ?? null
+  const executionState = scout.executionState ?? (loading ? 'scouting' : scout.candidates.length ? 'awaiting_commander_review' : 'provider_offline')
+  const stateColor = INCOME_SCOUT_STATE_COLORS[executionState] ?? '#94A3B8'
+  const activityLog = scout.activityLog ?? []
+  const diagnostics = scout.diagnostics
 
   return (
     <section className="rounded border border-emerald-500/20 p-3 text-xs" style={{ background: 'rgba(6,78,59,0.10)' }}>
@@ -2687,16 +2708,59 @@ function IncomeWorkersPanel({
           <h2 className="text-xs font-bold tracking-widest" style={{ color: '#34D399' }}>INCOME WORKERS</h2>
           <p className="mt-1" style={{ color: '#888' }}>Revenue-focused worker layer for source-linked missions, approvals, payout tracking, and proof-gated completion.</p>
         </div>
-        <button
-          type="button"
-          disabled={loading}
-          className="rounded px-3 py-1 text-[10px] font-bold tracking-widest disabled:opacity-40"
-          style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#86EFAC' }}
-          onClick={onScout}
-        >
-          {loading ? 'Scouting...' : 'Scout with Income Workers'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className="rounded px-2 py-1 text-[9px] font-bold uppercase tracking-widest"
+            style={{ border: `1px solid ${stateColor}55`, color: stateColor }}
+          >
+            {executionState.replace(/_/g, ' ')}
+          </span>
+          {scout.degradedMode ? (
+            <span className="rounded px-2 py-1 text-[9px] font-bold uppercase tracking-widest" style={{ border: '1px solid rgba(251,191,36,0.4)', color: '#FBBF24' }}>
+              degraded mode
+            </span>
+          ) : null}
+          <button
+            type="button"
+            disabled={loading}
+            className="rounded px-3 py-1 text-[10px] font-bold tracking-widest disabled:opacity-40"
+            style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#86EFAC' }}
+            onClick={onScout}
+          >
+            {loading ? 'Scouting...' : 'Scout with Income Workers'}
+          </button>
+        </div>
       </div>
+
+      {diagnostics ? (
+        <div className="mb-3 grid gap-2 md:grid-cols-4">
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>PROVIDER</div>
+            <div className="mt-1 font-mono" style={{ color: '#93C5FD' }}>{diagnostics.selectedProvider}</div>
+          </div>
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>SOURCE</div>
+            <div className="mt-1 font-mono" style={{ color: '#A7F3D0' }}>{diagnostics.sourceType.replace(/_/g, ' ')}</div>
+          </div>
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>RESULTS</div>
+            <div className="mt-1 font-bold" style={{ color: '#FBBF24' }}>{diagnostics.resultCount}</div>
+          </div>
+          <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
+            <div className="tracking-widest" style={{ color: '#555' }}>DURATION</div>
+            <div className="mt-1 font-mono" style={{ color: '#888' }}>{diagnostics.scoutDurationMs}ms</div>
+          </div>
+        </div>
+      ) : null}
+
+      {activityLog.length > 0 ? (
+        <div className="mb-3 max-h-28 overflow-y-auto rounded px-3 py-2 font-mono text-[10px]" style={{ border: '1px solid rgba(52,211,153,0.16)', background: 'rgba(0,0,0,0.35)' }}>
+          <div className="mb-1 font-bold tracking-widest" style={{ color: '#86EFAC' }}>SCOUT ACTIVITY</div>
+          {activityLog.map((entry, index) => (
+            <div key={`${entry.at}-${index}`} style={{ color: '#9CA3AF' }}>{entry.message}</div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="grid gap-2 md:grid-cols-5">
         <div className="rounded px-3 py-2" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.24)' }}>
@@ -2777,15 +2841,22 @@ function IncomeWorkersPanel({
           <div style={{ color: '#666' }}>{scout.message}</div>
         </div>
         {scout.candidates.length === 0 ? (
-          <div style={{ color: '#666' }}>No source-linked worker candidates loaded.</div>
+          <div style={{ color: '#FBBF24' }}>Scout running or awaiting fallback — click Scout with Income Workers to generate operator-safe opportunities.</div>
         ) : (
           <div className="grid gap-2">
-            {scout.candidates.slice(0, 5).map(candidate => (
+            {scout.candidates.slice(0, 8).map(candidate => (
               <div key={candidate.url} className="rounded border border-white/10 px-3 py-2">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <a href={candidate.url} target="_blank" rel="noreferrer" className="font-bold underline-offset-2 hover:underline" style={{ color: '#E5E7EB' }}>{candidate.title}</a>
-                    <div className="mt-1" style={{ color: '#777' }}>{candidate.source} · {candidate.type} · score {candidate.score}</div>
+                    {candidate.url.startsWith('http') ? (
+                      <a href={candidate.url} target="_blank" rel="noreferrer" className="font-bold underline-offset-2 hover:underline" style={{ color: '#E5E7EB' }}>{candidate.title}</a>
+                    ) : (
+                      <span className="font-bold" style={{ color: '#E5E7EB' }}>{candidate.title}</span>
+                    )}
+                    <div className="mt-1" style={{ color: '#777' }}>
+                      {candidate.source} · {candidate.type} · score {candidate.score}
+                      {candidate.evidenceLabel ? ` · ${candidate.evidenceLabel.replace(/_/g, ' ')}` : ''}
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -6922,33 +6993,59 @@ function Home() {
     setIncomeWorkerScout(prev => ({
       ...prev,
       status: 'no_results',
+      executionState: 'scouting',
       message: 'Income Workers scanning real source-linked opportunities...',
       scannedAt: new Date().toISOString(),
+      activityLog: [{ at: new Date().toISOString(), message: '[Income Worker] Scout execution started' }],
     }))
 
     try {
       const res = await fetch('/api/income-workers/scout', { method: 'POST' })
-      const data = await res.json() as IncomeWorkerScoutResult & { message?: string }
+      const data = await res.json() as IncomeWorkerScoutResult & {
+        message?: string
+        councilReviews?: IncomeCouncilReview[]
+        state?: IncomeWorkerScoutResult['executionState']
+      }
+      const candidates = Array.isArray(data.candidates) ? data.candidates : []
       setIncomeWorkerScout({
-        status: data.status,
+        status: candidates.length > 0 ? 'found' : (data.status ?? 'no_results'),
         message: data.message ?? 'Income Worker scout complete.',
         scannedAt: data.scannedAt ?? new Date().toISOString(),
         providerUsed: data.providerUsed ?? 'none',
         sourcesChecked: Number(data.sourcesChecked ?? 0),
-        candidates: Array.isArray(data.candidates) ? data.candidates : [],
+        candidates,
         rejected: Array.isArray(data.rejected) ? data.rejected : [],
+        executionState: data.executionState ?? data.state ?? (candidates.length ? 'awaiting_commander_review' : 'failed'),
+        diagnostics: data.diagnostics,
+        activityLog: Array.isArray(data.activityLog) ? data.activityLog : [],
+        degradedMode: Boolean(data.degradedMode),
+        opportunityPackets: Array.isArray(data.opportunityPackets) ? data.opportunityPackets : [],
       })
-      const reviewPayload = data as IncomeWorkerScoutResult & { councilReviews?: IncomeCouncilReview[] }
-      setIncomeCouncilReviews(Array.isArray(reviewPayload.councilReviews)
-        ? reviewPayload.councilReviews
-        : [])
-    } catch (error) {
+      setIncomeCouncilReviews(Array.isArray(data.councilReviews) ? data.councilReviews : [])
+      if (candidates.length > 0) {
+        addRaelAction({
+          action_id: `income-worker-scout-${data.scannedAt ?? Date.now()}`,
+          related_opportunity_id: null,
+          title: 'Income Worker scout review',
+          question: `Income Workers surfaced ${candidates.length} opportunities${data.degradedMode ? ' (degraded / historical pattern mode)' : ''}. Review before queueing missions?`,
+          response_options: ['Review now', 'Later', 'Dismiss'],
+          urgency: data.degradedMode ? 'medium' : 'low',
+          expires_at: null,
+          source_agent: 'Income Workers',
+        })
+      }
+    } catch {
       setIncomeWorkerScout(prev => ({
         ...prev,
         status: 'error',
-        message: error instanceof Error ? error.message : 'Income Worker scout failed.',
+        executionState: 'failed',
+        message: 'Income Worker scout could not reach the server. Retry or check API route.',
         scannedAt: new Date().toISOString(),
-        candidates: [],
+        candidates: prev.candidates.length ? prev.candidates : [],
+        activityLog: [
+          ...(prev.activityLog ?? []),
+          { at: new Date().toISOString(), message: '[Income Worker] Scout request failed — no silent empty state' },
+        ],
       }))
     } finally {
       setIncomeWorkerLoading(false)

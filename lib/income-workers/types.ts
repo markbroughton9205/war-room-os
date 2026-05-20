@@ -43,6 +43,38 @@ export type IncomeWorkerWorkflowStep = {
   approvalRequired: boolean
 }
 
+export type IncomeWorkerEvidenceLabel = 'LIVE_SIGNAL_BACKED' | 'HISTORICAL_PATTERN_BASED'
+
+export type IncomeWorkerScoutExecutionState =
+  | 'scouting'
+  | 'provider_offline'
+  | 'fallback_active'
+  | 'opportunities_generated'
+  | 'awaiting_commander_review'
+  | 'failed'
+
+export type IncomeWorkerScoutSourceType =
+  | 'tavily_live'
+  | 'firecrawl_live'
+  | 'rss_intelligence'
+  | 'cached_opportunities'
+  | 'historical_pattern'
+  | 'local_manual'
+
+export type IncomeWorkerScoutActivityLogEntry = {
+  at: string
+  message: string
+}
+
+export type IncomeWorkerScoutDiagnostics = {
+  selectedProvider: string
+  fallbackPath: string[]
+  scoutDurationMs: number
+  resultCount: number
+  sourceType: IncomeWorkerScoutSourceType
+  degradedMode: boolean
+}
+
 export type IncomeWorkerCandidate = {
   title: string
   url: string
@@ -58,6 +90,7 @@ export type IncomeWorkerCandidate = {
   provider: string
   score: number
   eligibleWorkers: IncomeWorkerId[]
+  evidenceLabel?: IncomeWorkerEvidenceLabel
 }
 
 export type IncomeWorkerScoutResult = {
@@ -68,6 +101,11 @@ export type IncomeWorkerScoutResult = {
   sourcesChecked: number
   candidates: IncomeWorkerCandidate[]
   rejected: IncomeWorkerCandidate[]
+  executionState?: IncomeWorkerScoutExecutionState
+  diagnostics?: IncomeWorkerScoutDiagnostics
+  activityLog?: IncomeWorkerScoutActivityLogEntry[]
+  degradedMode?: boolean
+  opportunityPackets?: import('@/lib/opportunities/schema').ScoutOpportunity[]
 }
 
 export type IncomeWorkerAssignmentRequest = {
