@@ -201,19 +201,15 @@ import {
   type CouncilCompressedSummary,
   type CouncilOutputMode,
 } from '@/lib/council/compression'
-import { OperatorCommandEnvironment } from '@/components/war-room/operator'
+import { OperatorCommandDeck } from '@/components/war-room/operator'
 import {
-  AmbientActivityFeed,
-  LiveRoomBottomDock,
-  LiveRoomCenter,
-  LiveRoomEngineeringDrawer,
-  LiveRoomLeftRail,
-  LiveRoomModeBar,
-  LiveRoomModeProvider,
-  LiveRoomRightRail,
+  CouncilWorkspace,
+  DockPanelContent,
   LiveRoomShell,
-  LiveRoomTopBar,
+  LiveRoomModeProvider,
+  TopIntelBar,
   useLiveRoomMode,
+  type DockPanelId,
 } from '@/components/war-room/live-room'
 import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
 import { formatCouncilOsSweepMarkdown } from '@/lib/war-room-sweep/formatCouncilResponse'
@@ -5135,7 +5131,7 @@ function ExpansionPermissionPrompt({
 }
 
 function Home() {
-  const { engineeringDrawerOpen, setEngineeringDrawerOpen } = useLiveRoomMode()
+  const { setEngineeringDrawerOpen } = useLiveRoomMode()
   const renderStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
   const { uiMode, setUiMode } = useWarRoomUiMode()
   const [command, setCommand] = useState('')
@@ -5145,6 +5141,7 @@ function Home() {
   const [toolBarHealth, setToolBarHealth] = useState(initialToolBarHealth)
   const [toolBarActivity, setToolBarActivity] = useState<Partial<Record<ToolId, ToolBarLabel>>>({})
   const [operatorTab, setOperatorTab] = useState<OperatorTab>('command')
+  const [dockPanelId, setDockPanelId] = useState<DockPanelId | null>(null)
   const renderCountRef = useRef(0)
   const lastPerfPublishRef = useRef(0)
   const [performanceDiagnostics, setPerformanceDiagnostics] = useState<WarRoomPerformanceDiagnostics>({
@@ -6664,7 +6661,11 @@ function Home() {
   const loadProviderHealth = async () => {
     try {
       const res = await fetch('/api/runtime/canonical-status', { cache: 'no-store' })
-      const data = await res.json() as {
+      const raw = await res.text()
+      if (res.headers.get('content-type')?.includes('text/html') || raw.trimStart().startsWith('<')) {
+        throw new Error('connection_timeout')
+      }
+      const data = JSON.parse(raw) as {
         providers?: { family: ProviderFamilyKey; connectionStatus: ProviderConnectionStatus; label: string }[]
         error?: string
       }
@@ -10173,76 +10174,117 @@ function Home() {
 
       <div className="relative z-10 flex flex-col">
         <WriteApprovalBanner />
-        {operatorNav}
+        {!isUnifiedLiveRoom ? operatorNav : null}
         {isUnifiedLiveRoom && (
         <LiveRoomShell
-          modeBar={<LiveRoomModeBar />}
           topBar={(
-            <LiveRoomTopBar
-              providerStripKeys={providerStripKeys}
-              providerHealth={providerHealth}
-              chatHealthLabel={chatHealthLabel}
-              councilStateLabel={councilContinueStatusLine}
-              missionExtra={liveResearchHud && liveResearchHud.mode !== 'inactive' ? liveResearchHud.label : undefined}
-            />
+            <>
+              <TopIntelBar
+                opportunityCount={incomeOpportunities.length}
+                headlineOverride={
+                  liveResearchHud && liveResearchHud.mode !== 'inactive'
+                    ? liveResearchHud.label
+                    : null
+                }
+                urgentWarning={
+                  chatHealthLabel && chatHealthLabel !== 'Ready'
+                    ? chatHealthLabel
+                    : null
+                }
+              />
+              <div className="flex flex-wrap gap-1 border-t border-yellow-900/40 px-4 py-1.5">
+                {visibleOperatorTabs.map(({ id: tab, label }) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    className="rounded px-2 py-0.5 text-[9px] font-bold tracking-widest"
+                    style={{
+                      border: operatorTab === tab ? '1px solid #FFD700' : '1px solid #333',
+                      color: operatorTab === tab ? '#FFD700' : '#888',
+                    }}
+                    onClick={() => startTransition(() => setOperatorTab(tab))}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
-          ambientFeed={(
-            <AmbientActivityFeed
-              familyPresence={familyPresence}
-              typingFamily={typingFamily}
-              runtime={conversationRuntimeSnapshot}
-              scoutStatus={opportunityScout.status}
-              incomeWorkerStatus={incomeWorkerScout.executionState ?? 'idle'}
-            />
-          )}
-          leftRail={(
-            <LiveRoomLeftRail
-              sessionIndicators={councilSessionIndicators}
-              onCouncilHandoff={injectLiveEnvironmentDecree}
-              onOpenEngineering={() => {
-                setUiMode('advanced')
-                setEngineeringDrawerOpen(true)
-              }}
-            />
-          )}
-          rightRail={(
-            <LiveRoomRightRail
-              enabled
-              liveEnvironment={{
-                liveResearchHud,
-                location: commanderLocation,
-                horoscopeEnabled,
-                astrologyMode,
-                onSetLocationMode: setLocationMode,
-                onForgetLocation: forgetCommanderLocation,
-                onToggleHoroscope: () => setHoroscopeEnabled(prev => !prev),
-                onSetAstrologyMode: setAstrologyMode,
-                onCouncilHandoff: injectLiveEnvironmentDecree,
-                threadId: liveCouncilConvId ?? undefined,
-                hideEvolutionPanel: true,
-              }}
-            />
-          )}
-          engineeringDrawer={(
-            <LiveRoomEngineeringDrawer
-              open={engineeringDrawerOpen}
-              latestRepairPacket={latestRepairPacket}
-            />
-          )}
-          bottomDock={(
-            <LiveRoomBottomDock
-              pendingApprovals={raelActions.filter(a => a.status === 'pending').length}
-              queueActionCount={queueActions.length}
-              opportunityCount={incomeOpportunities.length}
-              familiesStrip={activeFamiliesSection}
-              ordersStrip={activeOrdersStrip}
-              needsRaelPanel={pendingNeedsRael ? (
-                <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
-              ) : null}
-            />
-          )}
-          center={(
-        <LiveRoomCenter
+          activePanelId={dockPanelId}
+          onPanelChange={id => {
+            setDockPanelId(id)
+            if (id === 'builder-tools') {
+              setUiMode('advanced')
+              setEngineeringDrawerOpen(true)
+            }
+          }}
+          dockPanel={
+            dockPanelId ? (
+              <DockPanelContent
+                panelId={dockPanelId}
+                latestRepairPacket={latestRepairPacket}
+                sessionIndicators={councilSessionIndicators}
+                onCouncilHandoff={injectLiveEnvironmentDecree}
+                onOpenEngineering={() => {
+                  setUiMode('advanced')
+                  setEngineeringDrawerOpen(true)
+                }}
+                liveEnvironment={{
+                  liveResearchHud,
+                  location: commanderLocation,
+                  horoscopeEnabled,
+                  astrologyMode,
+                  onSetLocationMode: setLocationMode,
+                  onForgetLocation: forgetCommanderLocation,
+                  onToggleHoroscope: () => setHoroscopeEnabled(prev => !prev),
+                  onSetAstrologyMode: setAstrologyMode,
+                  onCouncilHandoff: injectLiveEnvironmentDecree,
+                  threadId: liveCouncilConvId ?? undefined,
+                }}
+                babyObserver={(
+                  <LiveCouncilBabyObserverLane
+                    memoryCount={memories.length}
+                    memoryRuntimeState={memoryRuntime.state}
+                    memoryRuntimeLabel={memoryRuntime.label}
+                    sessionOnlyLearning={memoryRuntime.sessionOnly}
+                    pendingApprovals={raelActions.filter(action => action.status === 'pending').length}
+                    opportunityCount={incomeOpportunities.length}
+                    providerReady={coreProviderStates.some(status => status === 'online' || status === 'standby')}
+                  />
+                )}
+                commandCenterExtras={(
+                  <>
+                    {activeFamiliesSection}
+                    {activeOrdersStrip}
+                    {pendingNeedsRael ? (
+                      <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
+                    ) : null}
+                  </>
+                )}
+                builderExtras={(
+                  <div className="col-span-full space-y-3 border-t border-white/10 pt-3">
+                    <RuntimeContinuityIndicator
+                      mode={continuityMode}
+                      lastRecoveredAt={continuityRecoverAt}
+                      recoverBanner={recoverRuntimeBanner}
+                      persistNote={runtimePersistenceBanner}
+                    />
+                    <LiveCouncilHealthBadgesRow
+                      chatHealthLabel={chatHealthLabel}
+                      providerHealthLabel={providerHealthLabel}
+                      persistenceHealthLabel={persistenceHealthLabel}
+                      internetHealthLabel={internetHealthLabel}
+                    />
+                    <ConversationStatePanel runtime={conversationRuntimeSnapshot} />
+                    <CouncilDeliberationStream threadId={liveCouncilConvId} enabled />
+                    <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />
+                  </div>
+                )}
+              />
+            ) : null
+          }
+          council={(
+        <CouncilWorkspace
           scrollContainerRef={scrollContainerRef}
           onScroll={handleScroll}
           toolbar={(
@@ -10324,32 +10366,7 @@ function Home() {
           <p className="text-[9px] tracking-widest" style={{ color: '#666' }}>
             Council thread below — type at the bottom to speak with the families (Enter sends, Shift+Enter newline).
           </p>
-          <LiveCouncilHealthBadgesRow
-            chatHealthLabel={chatHealthLabel}
-            providerHealthLabel={providerHealthLabel}
-            persistenceHealthLabel={persistenceHealthLabel}
-            internetHealthLabel={internetHealthLabel}
-          />
-          <LiveCouncilBabyObserverLane
-            memoryCount={memories.length}
-            memoryRuntimeState={memoryRuntime.state}
-            memoryRuntimeLabel={memoryRuntime.label}
-            sessionOnlyLearning={memoryRuntime.sessionOnly}
-            pendingApprovals={raelActions.filter(action => action.status === 'pending').length}
-            opportunityCount={incomeOpportunities.length}
-            providerReady={coreProviderStates.some(status => status === 'online' || status === 'standby')}
-          />
-          <div className="mt-1">
-            <RuntimeContinuityIndicator
-              mode={continuityMode}
-              lastRecoveredAt={continuityRecoverAt}
-              recoverBanner={recoverRuntimeBanner}
-              persistNote={runtimePersistenceBanner}
-            />
-          </div>
           <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />
-          <ConversationStatePanel runtime={conversationRuntimeSnapshot} className="mt-2" />
-          <CouncilDeliberationStream threadId={liveCouncilConvId} enabled={operatorTab === 'command'} />
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"
@@ -10568,24 +10585,14 @@ function Home() {
           </p>
         </>
           )}
-          inlineBelowThread={latestRepairPacket ? <RepairPacketPanel latest={latestRepairPacket} /> : null}
+          commandCenter={<OperatorCommandDeck />}
         />
           )}
         />
         )}
+        {!isUnifiedLiveRoom ? (
         <div className="px-6 py-4">
           <div className="space-y-4">
-            {operatorTab === 'command' && !isUnifiedLiveRoom && (
-              <section className="rounded border border-white/10 p-3 text-[10px]" style={{ background: 'rgba(0,0,0,0.24)', color: '#94a3b8' }}>
-                <div className="mb-2 font-bold tracking-widest" style={{ color: '#86EFAC' }}>COMMAND CENTER</div>
-                <div className="flex flex-wrap gap-2">
-                  <span className="rounded border border-white/10 px-2 py-1">Pending approvals: {raelActions.filter(a => a.status === 'pending').length}</span>
-                  <span className="rounded border border-white/10 px-2 py-1">Active orders: {queueActions.length}</span>
-                  <span className="rounded border border-white/10 px-2 py-1">Providers: {providerStripKeys.filter(k => providerHealth.providers[k] === 'online').length} online</span>
-                </div>
-              </section>
-            )}
-            {uiMode === 'advanced' && operatorTab === 'command' && !isUnifiedLiveRoom && <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />}
             {operatorTab === 'agents' && (
               <>
                 <div className="mb-3 border-b border-yellow-900/40 pb-2">
@@ -10892,6 +10899,7 @@ function Home() {
             )}
           </div>
         </div>
+        ) : null}
       </div>
 
     </main>
