@@ -1,5 +1,6 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
+import { detectPromptIntent, type PromptIntent } from '@/lib/council/promptIntent'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 
 export type SanitizedFamilyResponse = {
@@ -13,9 +14,11 @@ export type SanitizedFamilyResponse = {
 export function sanitizeCouncilFamilyResponse(
   family: CouncilOrchestrationFamily,
   raw: unknown,
+  opts?: { decreeText?: string; promptIntent?: PromptIntent },
 ): SanitizedFamilyResponse {
   const text = toDisplayText(raw)
-  const gate = applyCouncilRenderGate(family, text, { councilMode: true })
+  const promptIntent = opts?.promptIntent ?? (opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined)
+  const gate = applyCouncilRenderGate(family, text, { councilMode: true, promptIntent, decreeText: opts?.decreeText })
   const incomplete = !gate.renderable || gate.degraded
 
   if (!incomplete) {

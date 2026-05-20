@@ -70,6 +70,7 @@ import { buildFamilyIntelligenceFrame } from '@/lib/intelligence/familyFeedRoute
 import { buildGrokRssIntelligenceAugment } from '@/lib/intelligence/grokRssFallback'
 import { evaluateMandatoryLiveRetrieval } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
+import { buildIntegrityExpectationForPrompt, detectPromptIntent, isRelaxedPromptIntent } from '@/lib/council/promptIntent'
 import { orchestrateProviderResponse } from '@/lib/providers/retryOrchestration'
 import { registerCouncilProviderPacketOnBus } from '@/lib/orchestration/deliberation'
 import {
@@ -200,9 +201,11 @@ function withTimeout(
 
 function validateProviderResults(
   results: ProviderResult[],
-  opts?: { integrityCheck?: boolean },
+  opts?: { integrityCheck?: boolean; decreeText?: string },
 ): ProviderResult[] {
   if (opts?.integrityCheck === false) return results
+  const promptIntent = opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined
+  const relaxedCasual = promptIntent ? isRelaxedPromptIntent(promptIntent) : false
   const violations: string[] = []
   const sanitized: ProviderResult[] = []
   for (const result of results) {
@@ -218,8 +221,13 @@ function validateProviderResults(
       violations.push(`⚠ ${result.family}: provider timed out after ${cap}ms`)
     }
     if (result.status === 'OK' && content.length >= 5) {
-      const integrity = validateProviderResponseIntegrity(content, { minLength: 60, councilMode: true })
-      if (integrity.integrity_status !== 'COMPLETE') {
+      const integrity = validateProviderResponseIntegrity(
+        content,
+        promptIntent
+          ? buildIntegrityExpectationForPrompt(promptIntent, { minLength: 60, councilMode: !relaxedCasual })
+          : { minLength: 60, councilMode: true },
+      )
+      if (!relaxedCasual && integrity.integrity_status !== 'COMPLETE') {
         violations.push(
           `⚠ ${result.family}: response integrity ${integrity.integrity_status} (${integrity.reason})`,
         )
@@ -723,7 +731,7 @@ export async function POST(req: Request) {
           error: detail,
         },
       ],
-      { integrityCheck: !skipProviderIntegrityCheck },
+      { integrityCheck: !skipProviderIntegrityCheck, decreeText: raelDirectiveText },
     )
     void logCouncilPacketMetrics(sup.ok ? sup.client : null, {
       route: '/api/chat',
@@ -997,7 +1005,7 @@ export async function POST(req: Request) {
           ),
         ),
       )
-      const results = validateProviderResults(providerResults)
+      const results = validateProviderResults(providerResults, { decreeText: raelDirectiveText })
       await safeAudit({
         success: true,
         flow: 'parallel_providers',
@@ -1587,7 +1595,7 @@ export async function POST(req: Request) {
                 status: 'OK',
               },
             ],
-            { integrityCheck: !skipProviderIntegrityCheck },
+            { integrityCheck: !skipProviderIntegrityCheck, decreeText: raelDirectiveText },
           ),
           showContinue: true,
           councilGovernorSkipped: true,
@@ -1597,8 +1605,9 @@ export async function POST(req: Request) {
       }
       responseText = governed.text
 
-      if (!councilStabilityMode && councilSingleFamily === 'gemini' && responseText.trim()) {
+      if (councilSingleFamily === 'gemini' && responseText.trim()) {
         const renderGate = applyCouncilRenderGate('gemini', responseText, {
+          decreeText: raelDirectiveText,
           retryAttempted: Number(providerIntegrityDiagnostics?.retryCount ?? 0) > 0,
           fallbackUsed: Boolean(providerIntegrityDiagnostics?.fallbackUsed),
         })
@@ -1783,7 +1792,7 @@ export async function POST(req: Request) {
               status: 'OK',
             },
           ],
-          { integrityCheck: !skipProviderIntegrityCheck },
+          { integrityCheck: !skipProviderIntegrityCheck, decreeText: raelDirectiveText },
         ),
         showContinue: true,
         ...(continuationRequest ? { continuationRequest } : {}),

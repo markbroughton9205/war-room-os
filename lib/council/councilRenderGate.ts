@@ -1,10 +1,17 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
-import { toDisplayText } from '@/lib/council/toDisplayText'
+import {
+  buildIntegrityExpectationForPrompt,
+  detectPromptIntent,
+  isRelaxedPromptIntent,
+  type PromptIntent,
+} from '@/lib/council/promptIntent'
 import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
+import { toDisplayText } from '@/lib/council/toDisplayText'
 import {
   countMeaningfulTokens,
   detectGreetingOnlyResponse,
   isDegradedResponseQuality,
+  isHardRenderIntegrityFailure,
   validateProviderResponseIntegrity,
   type ResponseIntegrityStatus,
 } from '@/lib/providers/responseIntegrity'
@@ -19,6 +26,7 @@ export type GeminiRenderDiagnostics = {
   retryAttempted?: boolean
   fallbackUsed?: boolean
   finalIntegrityStatus: ResponseIntegrityStatus
+  promptIntent?: PromptIntent
 }
 
 export type CouncilRenderGateResult = {
@@ -28,6 +36,7 @@ export type CouncilRenderGateResult = {
   integrityStatus: ResponseIntegrityStatus
   degraded: boolean
   diagnostics?: GeminiRenderDiagnostics
+  promptIntent?: PromptIntent
 }
 
 export function parseCouncilMessageFamily(familyName: unknown): CouncilOrchestrationFamily | null {
@@ -50,7 +59,7 @@ export function parseCouncilMessageFamily(familyName: unknown): CouncilOrchestra
 function buildGeminiDiagnostics(
   rawText: string,
   integrityStatus: ResponseIntegrityStatus,
-  opts?: { retryAttempted?: boolean; fallbackUsed?: boolean },
+  opts?: { retryAttempted?: boolean; fallbackUsed?: boolean; promptIntent?: PromptIntent },
 ): GeminiRenderDiagnostics {
   return {
     rawLength: rawText.length,
@@ -59,12 +68,31 @@ function buildGeminiDiagnostics(
     retryAttempted: opts?.retryAttempted ?? false,
     fallbackUsed: opts?.fallbackUsed ?? false,
     finalIntegrityStatus: integrityStatus,
+    promptIntent: opts?.promptIntent,
   }
+}
+
+function resolveRenderDegraded(
+  rawText: string,
+  integrityStatus: ResponseIntegrityStatus,
+  relaxedCasual: boolean,
+): boolean {
+  if (!rawText.trim()) return false
+  if (relaxedCasual) {
+    return isHardRenderIntegrityFailure(integrityStatus, { relaxedCasual: true })
+  }
+  const matchedGreetingOnly = detectGreetingOnlyResponse(rawText)
+  return (
+    matchedGreetingOnly
+    || isDegradedResponseQuality(integrityStatus)
+    || integrityStatus !== 'COMPLETE'
+  )
 }
 
 /**
  * Final render boundary for Live Council and downstream council consumers.
- * Greeting-only Gemini (and other degraded council stubs) must not render as valid responses.
+ * Greeting-only Gemini (and other degraded council stubs) must not render as valid responses
+ * unless the decree intent is greeting/casual (short friendly replies are valid).
  */
 export function applyCouncilRenderGate(
   family: CouncilOrchestrationFamily | null,
@@ -73,10 +101,16 @@ export function applyCouncilRenderGate(
     councilMode?: boolean
     retryAttempted?: boolean
     fallbackUsed?: boolean
+    /** Operator decree text — drives relaxed integrity for greetings/casual chat. */
+    decreeText?: string
+    promptIntent?: PromptIntent
   },
 ): CouncilRenderGateResult {
   const rawText = toDisplayText(raw).trim()
   const councilMode = opts?.councilMode ?? true
+  const promptIntent = opts?.promptIntent ?? (opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined)
+  const relaxedCasual = promptIntent ? isRelaxedPromptIntent(promptIntent) : false
+  const stabilityMode = isCouncilStabilityMode()
 
   if (!family || !rawText) {
     return {
@@ -85,20 +119,25 @@ export function applyCouncilRenderGate(
       renderable: Boolean(rawText),
       integrityStatus: rawText ? 'UNKNOWN' : 'EMPTY',
       degraded: false,
+      promptIntent,
     }
   }
 
-  const integrity = validateProviderResponseIntegrity(rawText, {
-    minLength: family === 'red_team' ? 60 : 80,
-    councilMode,
-  })
-  const matchedGreetingOnly = detectGreetingOnlyResponse(rawText)
-  const degraded =
-    matchedGreetingOnly
-    || isDegradedResponseQuality(integrity.integrity_status)
-    || integrity.integrity_status !== 'COMPLETE'
+  const integrityExpectation = promptIntent
+    ? buildIntegrityExpectationForPrompt(promptIntent, {
+        minLength: family === 'red_team' ? 60 : 80,
+        councilMode,
+      })
+    : {
+        minLength: family === 'red_team' ? 60 : 80,
+        councilMode,
+      }
 
-  if (family === 'gemini' && degraded) {
+  const integrity = validateProviderResponseIntegrity(rawText, integrityExpectation)
+  const matchedGreetingOnly = !relaxedCasual && detectGreetingOnlyResponse(rawText)
+  const degraded = resolveRenderDegraded(rawText, integrity.integrity_status, relaxedCasual)
+
+  if (family === 'gemini' && degraded && !relaxedCasual) {
     const integrityStatus: ResponseIntegrityStatus = matchedGreetingOnly
       ? 'DEGRADED_RESPONSE_QUALITY'
       : integrity.integrity_status
@@ -108,10 +147,32 @@ export function applyCouncilRenderGate(
       renderable: false,
       integrityStatus,
       degraded: true,
+      promptIntent,
       diagnostics: buildGeminiDiagnostics(rawText, integrityStatus, {
         retryAttempted: opts?.retryAttempted,
         fallbackUsed: opts?.fallbackUsed,
+        promptIntent,
       }),
+    }
+  }
+
+  if (relaxedCasual && (stabilityMode || integrity.integrity_status === 'COMPLETE')) {
+    return {
+      displayText: rawText,
+      rawText,
+      renderable: true,
+      integrityStatus: integrity.integrity_status === 'INCOMPLETE' ? 'COMPLETE' : integrity.integrity_status,
+      degraded: false,
+      promptIntent,
+      ...(family === 'gemini'
+        ? {
+            diagnostics: buildGeminiDiagnostics(rawText, integrity.integrity_status, {
+              retryAttempted: opts?.retryAttempted,
+              fallbackUsed: opts?.fallbackUsed,
+              promptIntent,
+            }),
+          }
+        : {}),
     }
   }
 
@@ -125,6 +186,7 @@ export function applyCouncilRenderGate(
       renderable: false,
       integrityStatus: matchedGreetingOnly ? 'DEGRADED_RESPONSE_QUALITY' : integrity.integrity_status,
       degraded: true,
+      promptIntent,
     }
   }
 
@@ -134,11 +196,13 @@ export function applyCouncilRenderGate(
     renderable: true,
     integrityStatus: integrity.integrity_status,
     degraded: false,
+    promptIntent,
     ...(family === 'gemini'
       ? {
           diagnostics: buildGeminiDiagnostics(rawText, integrity.integrity_status, {
             retryAttempted: opts?.retryAttempted,
             fallbackUsed: opts?.fallbackUsed,
+            promptIntent,
           }),
         }
       : {}),
@@ -150,6 +214,8 @@ export function isCouncilMessageRepairPacketEligible(message: {
   integrityStatus?: string
   content?: unknown
   messageType?: string
+  decreeText?: string
+  promptIntent?: PromptIntent
 }): boolean {
   if (isCouncilStabilityMode()) return false
   if (message.messageType !== 'response') return false
@@ -158,6 +224,10 @@ export function isCouncilMessageRepairPacketEligible(message: {
   const text = toDisplayText(message.content).trim()
   if (!text) return false
   if (text === GEMINI_DEGRADED_COUNCIL_DISPLAY) return false
+
+  const intent = message.promptIntent ?? (message.decreeText ? detectPromptIntent(message.decreeText) : undefined)
+  if (intent && isRelaxedPromptIntent(intent)) return false
+
   if (detectGreetingOnlyResponse(text)) return false
   const integrity = validateProviderResponseIntegrity(text, { councilMode: true })
   return integrity.integrity_status === 'COMPLETE' && !isDegradedResponseQuality(integrity.integrity_status)

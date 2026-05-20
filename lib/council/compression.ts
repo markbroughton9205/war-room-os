@@ -2,6 +2,7 @@ import {
   councilFamilyIntegrityLabel,
   sanitizeCouncilFamilyResponse,
 } from '@/lib/council/providerResponseSanitizer'
+import { detectPromptIntent } from '@/lib/council/promptIntent'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
@@ -298,8 +299,16 @@ function normalizeOrchestrationFamily(familyName: unknown): CouncilOrchestration
   return map[key] ?? null
 }
 
+function latestDecreeText(messages: CouncilCompressionMessage[]): string {
+  const idx = latestDecreeIndex(messages)
+  if (idx < 0) return ''
+  return toDisplayText(messages[idx]?.content).trim()
+}
+
 function responseMessages(messages: CouncilCompressionMessage[]) {
   const start = latestDecreeIndex(messages)
+  const decreeText = latestDecreeText(messages)
+  const promptIntent = decreeText ? detectPromptIntent(decreeText) : undefined
   return messages
     .slice(start >= 0 ? start + 1 : 0)
     .filter(message => message.messageType === 'response' || message.messageType === 'repair_packet')
@@ -308,7 +317,7 @@ function responseMessages(messages: CouncilCompressionMessage[]) {
       const content = toDisplayText(message.content)
       const family = normalizeOrchestrationFamily(message.familyName)
       if (!family) return { ...message, content }
-      const sanitized = sanitizeCouncilFamilyResponse(family, content)
+      const sanitized = sanitizeCouncilFamilyResponse(family, content, { decreeText, promptIntent })
       if (!sanitized.incomplete) return message
       const label = councilFamilyIntegrityLabel(family, true)
       return {

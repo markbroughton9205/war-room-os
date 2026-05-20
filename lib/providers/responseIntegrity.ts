@@ -1,3 +1,8 @@
+import type { PromptIntent } from '@/lib/council/promptIntent'
+import {
+  buildIntegrityExpectationForPrompt,
+  isRelaxedPromptIntent,
+} from '@/lib/council/promptIntent'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 import type { OpportunityPacket } from '@/lib/opportunities/schema'
 import { validateOpportunityResponse } from '@/lib/opportunities/validate'
@@ -33,6 +38,10 @@ export type ResponseIntegrityExpectation = {
   requireActionableOpportunity?: boolean
   /** Pre-parsed opportunities (when available). */
   opportunities?: OpportunityPacket[]
+  /** Decree intent — relaxes greeting/casual response rules when set. */
+  promptIntent?: PromptIntent
+  /** Skip council substance / greeting-only degradation (greeting & casual decrees). */
+  relaxedCasual?: boolean
 }
 
 export { hasActionableOpportunity } from '@/lib/opportunities/validate'
@@ -208,6 +217,10 @@ function assessDegradedResponseQuality(
   text: string,
   expectation: ResponseIntegrityExpectation,
 ): ResponseIntegrityResult | null {
+  if (expectation.relaxedCasual || (expectation.promptIntent && isRelaxedPromptIntent(expectation.promptIntent))) {
+    return null
+  }
+
   if (detectGreetingOnlyResponse(text)) {
     return {
       integrity_status: 'DEGRADED_RESPONSE_QUALITY',
@@ -264,7 +277,17 @@ export function validateProviderResponseIntegrity(
   raw: unknown,
   expectation: ResponseIntegrityExpectation = {},
 ): ResponseIntegrityResult {
-  const minLength = expectation.minLength ?? DEFAULT_MIN_LENGTH
+  const resolvedExpectation = expectation.promptIntent
+    ? buildIntegrityExpectationForPrompt(expectation.promptIntent, expectation)
+    : expectation.relaxedCasual
+      ? { ...expectation, councilMode: false, minLength: expectation.minLength ?? 12, minMeaningfulTokens: expectation.minMeaningfulTokens ?? 4 }
+      : expectation
+
+  const minLength = resolvedExpectation.minLength ?? DEFAULT_MIN_LENGTH
+  const relaxedCasual = Boolean(
+    resolvedExpectation.relaxedCasual
+    || (resolvedExpectation.promptIntent && isRelaxedPromptIntent(resolvedExpectation.promptIntent)),
+  )
   let text = toDisplayText(raw).replace(/\r\n/g, '\n').trim()
 
   if (BROKEN_SYNC_TAIL.test(text)) {
@@ -291,7 +314,7 @@ export function validateProviderResponseIntegrity(
     }
   }
 
-  const degradedQuality = assessDegradedResponseQuality(text, expectation)
+  const degradedQuality = assessDegradedResponseQuality(text, resolvedExpectation)
   if (degradedQuality) return degradedQuality
 
   const refusal = refusalOrErrorText(text)
@@ -315,8 +338,8 @@ export function validateProviderResponseIntegrity(
     }
   }
 
-  if (expectation.jsonSchema || text.startsWith('{') || text.startsWith('[')) {
-    const jsonErr = validateJson(text, expectation.jsonSchema?.requiredKeys)
+  if (resolvedExpectation.jsonSchema || text.startsWith('{') || text.startsWith('[')) {
+    const jsonErr = validateJson(text, resolvedExpectation.jsonSchema?.requiredKeys)
     if (jsonErr) {
       return {
         integrity_status: 'MALFORMED',
@@ -328,7 +351,7 @@ export function validateProviderResponseIntegrity(
     }
   }
 
-  if (expectation.markdown !== false && fenceOpenCount(text) === 1) {
+  if (resolvedExpectation.markdown !== false && fenceOpenCount(text) === 1) {
     return {
       integrity_status: 'TRUNCATED',
       confidence: 86,
@@ -338,8 +361,8 @@ export function validateProviderResponseIntegrity(
     }
   }
 
-  if (expectation.requiredSections?.length) {
-    const sectionErr = hasRequiredSections(text, expectation.requiredSections)
+  if (resolvedExpectation.requiredSections?.length) {
+    const sectionErr = hasRequiredSections(text, resolvedExpectation.requiredSections)
     if (sectionErr) {
       return {
         integrity_status: 'INCOMPLETE',
@@ -353,7 +376,7 @@ export function validateProviderResponseIntegrity(
 
   if (text.length < minLength) {
     const truncatedLike = abruptEnding(text) || PARTIAL_HEADING_TAIL.test(text)
-    const greetingStub = detectGreetingOnlyResponse(text)
+    const greetingStub = !relaxedCasual && detectGreetingOnlyResponse(text)
     if (greetingStub) {
       return {
         integrity_status: 'DEGRADED_RESPONSE_QUALITY',
@@ -364,12 +387,21 @@ export function validateProviderResponseIntegrity(
         degraded_quality: true,
       }
     }
+    if (relaxedCasual && !truncatedLike && SENTENCE_END.test(text)) {
+      return {
+        integrity_status: 'COMPLETE',
+        confidence: 88,
+        reason: 'casual decree — short complete reply accepted',
+        retry_recommended: false,
+        fallback_recommended: false,
+      }
+    }
     return {
-      integrity_status: truncatedLike ? 'TRUNCATED' : 'INCOMPLETE',
+      integrity_status: truncatedLike ? 'TRUNCATED' : relaxedCasual ? 'INCOMPLETE' : 'INCOMPLETE',
       confidence: truncatedLike ? 84 : 72,
       reason: `response under minimum length (${text.length}/${minLength})`,
-      retry_recommended: true,
-      fallback_recommended: true,
+      retry_recommended: !relaxedCasual || truncatedLike,
+      fallback_recommended: truncatedLike,
     }
   }
 
@@ -393,13 +425,13 @@ export function validateProviderResponseIntegrity(
     }
   }
 
-  if (expectation.councilMode) {
-    const lateDegraded = assessDegradedResponseQuality(text, expectation)
+  if (resolvedExpectation.councilMode) {
+    const lateDegraded = assessDegradedResponseQuality(text, resolvedExpectation)
     if (lateDegraded) return lateDegraded
   }
 
-  if (expectation.requireActionableOpportunity) {
-    const opportunities = expectation.opportunities ?? []
+  if (resolvedExpectation.requireActionableOpportunity) {
+    const opportunities = resolvedExpectation.opportunities ?? []
     const oppValidation = validateOpportunityResponse(text, opportunities)
     if (!oppValidation.ok) {
       return {
@@ -424,6 +456,18 @@ export function validateProviderResponseIntegrity(
 
 export function isDegradedResponseQuality(status: ResponseIntegrityStatus): boolean {
   return status === 'DEGRADED_RESPONSE_QUALITY'
+}
+
+/** Render gate: block display only for empty, malformed, or truly truncated provider output. */
+export function isHardRenderIntegrityFailure(
+  status: ResponseIntegrityStatus,
+  opts?: { relaxedCasual?: boolean },
+): boolean {
+  if (status === 'EMPTY' || status === 'MALFORMED') return true
+  if (status === 'TRUNCATED') return true
+  if (opts?.relaxedCasual) return false
+  if (status === 'DEGRADED_RESPONSE_QUALITY' || status === 'INCOMPLETE') return true
+  return false
 }
 
 /** Operator/council-safe placeholder when integrity fails. */

@@ -1,3 +1,4 @@
+import { assertPromptIntentFixtures } from '@/lib/council/promptIntent.assert'
 import { assertGeminiGreetingGateFixtures } from '@/lib/providers/geminiGreetingGate.assert'
 import {
   detectGreetingOnlyResponse,
@@ -15,10 +16,10 @@ export function assertResponseIntegrityFixtures(): void {
   assert(truncated.retry_recommended, 'truncated stub recommends retry')
 
   const complete = validateProviderResponseIntegrity(
-    'Decision Summary: Provider runtime now validates response integrity before marking families connected. Next action: refresh canonical status after deploy.',
+    'Because the provider runtime validates integrity before marking families connected, the recommended action is to refresh canonical status after deploy. Evidence from staging shows connected families remain stable under council load.',
     { councilMode: true },
   )
-  assert(complete.integrity_status === 'COMPLETE', 'full sentence passes complete')
+  assert(complete.integrity_status === 'COMPLETE', 'substantive council sentence passes complete')
 
   const greeting = validateProviderResponseIntegrity("Hey Ra'el! Council Active", { councilMode: true })
   assert(greeting.integrity_status === 'DEGRADED_RESPONSE_QUALITY', 'greeting-only is degraded quality')
@@ -34,4 +35,5 @@ export function assertResponseIntegrityFixtures(): void {
   )
 
   assertGeminiGreetingGateFixtures()
+  assertPromptIntentFixtures()
 }

@@ -173,6 +173,7 @@ import {
   parseCouncilMessageFamily,
   type GeminiRenderDiagnostics,
 } from '@/lib/council/councilRenderGate'
+import { detectPromptIntent, type PromptIntent } from '@/lib/council/promptIntent'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 import { COUNCIL_STABILITY_FAILURE_MESSAGE } from '@/lib/council/stabilityMode'
 import type { ResponseIntegrityStatus } from '@/lib/providers/responseIntegrity'
@@ -317,14 +318,20 @@ type WarRoomPerformanceDiagnostics = {
   pollingIntervalMs: number
 }
 
-function applyLiveCouncilRenderGate(message: CouncilMessage): CouncilMessage {
+function applyLiveCouncilRenderGate(
+  message: CouncilMessage,
+  opts?: { decreeText?: string; promptIntent?: PromptIntent },
+): CouncilMessage {
   if (message.messageType === 'decree' || message.messageType === 'system') return message
   const family = parseCouncilMessageFamily(message.familyName)
   if (!family || message.messageType !== 'response') {
     const content = sanitizeMemoryRuntimeText(toDisplayText(message.content))
     return content === toDisplayText(message.content) ? message : { ...message, content }
   }
-  const gate = applyCouncilRenderGate(family, message.content)
+  const gate = applyCouncilRenderGate(family, message.content, {
+    decreeText: opts?.decreeText,
+    promptIntent: opts?.promptIntent,
+  })
   const content = sanitizeMemoryRuntimeText(gate.displayText)
   if (
     content === toDisplayText(message.content)
@@ -342,12 +349,19 @@ function applyLiveCouncilRenderGate(message: CouncilMessage): CouncilMessage {
   }
 }
 
-function sanitizedCouncilMessage(message: CouncilMessage): CouncilMessage {
-  return applyLiveCouncilRenderGate(message)
+function sanitizedCouncilMessage(
+  message: CouncilMessage,
+  opts?: { decreeText?: string; promptIntent?: PromptIntent },
+): CouncilMessage {
+  return applyLiveCouncilRenderGate(message, opts)
 }
 
-function councilProviderTextAfterRenderGate(family: CouncilOrchestrationFamily, text: string): string {
-  return applyCouncilRenderGate(family, text).displayText
+function councilProviderTextAfterRenderGate(
+  family: CouncilOrchestrationFamily,
+  text: string,
+  decreeText?: string,
+): string {
+  return applyCouncilRenderGate(family, text, { decreeText }).displayText
 }
 
 function councilNoiseKey(message: CouncilMessage): string | null {
@@ -367,9 +381,12 @@ function applyCouncilThreadHygiene(messages: CouncilMessage[]): CouncilThreadHyg
   const seenNoise = new Set<string>()
   const visibleMessages: CouncilMessage[] = []
   let collapsedCount = 0
+  const latestDecree = [...messages].reverse().find(m => m.messageType === 'decree')
+  const decreeText = latestDecree ? toDisplayText(latestDecree.content).trim() : ''
+  const promptIntent = decreeText ? detectPromptIntent(decreeText) : undefined
 
   for (const raw of messages) {
-    const message = sanitizedCouncilMessage(raw)
+    const message = sanitizedCouncilMessage(raw, { decreeText, promptIntent })
     const key = councilNoiseKey(message)
     if (key && seenNoise.has(key)) {
       collapsedCount += 1
@@ -7257,7 +7274,9 @@ function Home() {
     const now = new Date().toLocaleTimeString()
     const resolvedMessageId = messageId || createMessageId(label)
     const orchFamily = parseCouncilMessageFamily(label) ?? parseCouncilMessageFamily(familyName)
-    const renderGate = orchFamily ? applyCouncilRenderGate(orchFamily, content) : null
+    const latestDecree = [...messagesRef.current].reverse().find(m => m.messageType === 'decree')
+    const decreeText = latestDecree ? toDisplayText(latestDecree.content).trim() : ''
+    const renderGate = orchFamily ? applyCouncilRenderGate(orchFamily, content, { decreeText }) : null
     const visibleContent = renderGate?.displayText ?? content
 
     if (instant) {
@@ -9883,7 +9902,7 @@ function Home() {
       sessionId: councilSnapRef.current.sessionId,
       conversationId: liveCouncilConvId,
       exportedAt: new Date().toISOString(),
-      messages: messagesRef.current.map(sanitizedCouncilMessage),
+      messages: messagesRef.current.map(m => sanitizedCouncilMessage(m)),
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
