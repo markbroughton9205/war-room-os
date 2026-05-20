@@ -176,6 +176,15 @@ import {
 import { detectPromptIntent, type PromptIntent } from '@/lib/council/promptIntent'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 import { COUNCIL_STABILITY_FAILURE_MESSAGE } from '@/lib/council/stabilityMode'
+import {
+  COUNCIL_FLOW_MODE_LABELS,
+  COUNCIL_FLOW_MODE_STORAGE_KEY,
+  getDefaultCouncilFlowMode,
+  parseCouncilFlowMode,
+  STABLE_GROUP_FAMILY_ORDER,
+  type CouncilFlowMode,
+} from '@/lib/council/councilMode'
+import type { StableGroupPriorReply } from '@/lib/council/stableGroupChat'
 import type { ResponseIntegrityStatus } from '@/lib/providers/responseIntegrity'
 import { createMessageId } from '@/lib/council/messageIds'
 import { cloudEngineReadinessLabel, cloudEngineStripStatus, internetToolReadinessParts } from '@/lib/warRoom/providerReadiness'
@@ -5382,6 +5391,30 @@ function Home() {
     includeBaby: false,
     includeBridgeArchitect: false,
   })
+  const [councilFlowMode, setCouncilFlowMode] = useState<CouncilFlowMode>(() => getDefaultCouncilFlowMode())
+  useEffect(() => {
+    if (typeof sessionStorage === 'undefined') return
+    const stored = parseCouncilFlowMode(sessionStorage.getItem(COUNCIL_FLOW_MODE_STORAGE_KEY))
+    if (stored) {
+      setCouncilFlowMode(stored)
+      return
+    }
+    void fetch('/api/council/mode', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => {
+        const parsed = parseCouncilFlowMode((j as { defaultMode?: string } | null)?.defaultMode)
+        if (parsed) setCouncilFlowMode(parsed)
+      })
+      .catch(() => undefined)
+  }, [])
+  const persistCouncilFlowMode = useCallback((mode: CouncilFlowMode) => {
+    setCouncilFlowMode(mode)
+    try {
+      sessionStorage.setItem(COUNCIL_FLOW_MODE_STORAGE_KEY, mode)
+    } catch {
+      /* private mode */
+    }
+  }, [])
   const activeCouncilCommandRef = useRef<CouncilCommand>({ ...DEFAULT_COUNCIL_COMMAND })
   const lastRaelDirectiveContentRef = useRef('')
   const [councilUiCommand, setCouncilUiCommand] = useState<CouncilCommand>(() => ({ ...DEFAULT_COUNCIL_COMMAND }))
@@ -8266,6 +8299,10 @@ function Home() {
       if (errSnap && injectLeadRed) lastCouncilFamilyErrorRef.current = null
 
       const cmd = activeCouncilCommandRef.current
+      const decreeDirectProbe = detectDirectInvocation(decree)
+      const councilFlowModeEffective: CouncilFlowMode =
+        cmd.directInvocation || decreeDirectProbe.invoked ? 'direct' : councilFlowMode
+      const stableGroupPriorThisTurn: StableGroupPriorReply[] = []
       const councilIntentState = resolveCurrentIntent({ latestRaelDecreeText: decree })
       const attendanceWave = isAttendanceIntent(cmd, councilIntentState.intent)
       const redTeamLeadOnly = injectLeadRed && !extra.includes('red_team')
@@ -8294,6 +8331,15 @@ function Home() {
               : undefined,
         leadWithRedTeam: injectLeadRed && !cmd.directInvocation,
       })
+      if (
+        councilFlowModeEffective === 'stable_group'
+        && !cmd.directInvocation
+        && !attendanceWave
+      ) {
+        order = STABLE_GROUP_FAMILY_ORDER.filter(
+          f => !(f === 'gemini' && skipGeminiForSessionRef.current),
+        ) as CouncilOrchestrationFamily[]
+      }
       if (cmd.directInvocation && cmd.targetFamilies[0]) {
         order = [cmd.targetFamilies[0]]
       }
@@ -8311,7 +8357,12 @@ function Home() {
           })
         : filterOrchestrationOrderByCommand(order, cmd, decree)
       const diagnosticIntentMode = resolveDiagnosticIntentMode(decree)
-      const diagnosticSequential = diagnosticIntentMode !== 'none' && !attendanceWave
+      const diagnosticSequential =
+        councilFlowModeEffective !== 'stable_group'
+        && diagnosticIntentMode !== 'none'
+        && !attendanceWave
+      const stableGroupSequential =
+        councilFlowModeEffective === 'stable_group' && !attendanceWave && !cmd.directInvocation
       const orderForGather = diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder
       decreeSubmitFaultAnchor = orderForGather[0] ?? directedOrder[0]
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
@@ -8544,6 +8595,11 @@ function Home() {
                   councilActiveScope: councilIntentState.scope,
                   councilModeGovernor: modeGovernor,
                   councilProviderRuntimeStates: providerRuntimeStates,
+                  councilFlowMode: councilFlowModeEffective,
+                  activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
+                  ...(councilFlowModeEffective === 'stable_group'
+                    ? { stableGroupPriorReplies: stableGroupPriorThisTurn }
+                    : {}),
                   ...(sequentialDiagnosticApiRef.current
                     ? {
                         sequentialDiagnostic: true,
@@ -8606,6 +8662,12 @@ function Home() {
                   runtimeDetail = 'governor_silent_skip'
                 } else {
                   textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
+                  if (textOut && councilFlowModeEffective === 'stable_group' && !chatData.stableGroupSkipped) {
+                    stableGroupPriorThisTurn.push({
+                      family: rosterLabel(family),
+                      content: textOut,
+                    })
+                  }
                   if (textOut) {
                     textOut = councilProviderTextAfterRenderGate(family, textOut, decree, councilStabilityMode)
                   }
@@ -8656,7 +8718,7 @@ function Home() {
 
       const outcomeByFamily = new Map<CouncilOrchestrationFamily, GatherCell>()
       /** Parallel in-flight gathers only for non-sequential decree gathers (sequential diagnostics must not fan out). */
-      const gatherPromises = diagnosticSequential
+      const gatherPromises = diagnosticSequential || stableGroupSequential
         ? []
         : orderForGather.map(family =>
             gatherFamily(family).then(cell => {
@@ -8758,6 +8820,52 @@ function Home() {
           })
         }
         sequentialDiagnosticApiRef.current = null
+      } else if (stableGroupSequential) {
+        for (const family of orderForGather) {
+          if (controller.signal.aborted || councilPausedRef.current) break
+          const cell = await gatherFamily(family)
+          const prev = outcomeByFamily.get(family)
+          if (prev?.textOut?.trim() && cell.textOut?.trim()) continue
+          outcomeByFamily.set(family, cell)
+          await wait(250)
+        }
+        if (
+          stableGroupPriorThisTurn.length > 0
+          && !controller.signal.aborted
+          && !councilPausedRef.current
+        ) {
+          try {
+            const { res: finalRes, data: finalData } = await postCouncilChatDecreeGather({
+              message: decree,
+              profile: RAEL_PROFILE,
+              threadHistory: threadHistory(),
+              mode: 'continue',
+              toneMode,
+              councilSingleFamily: 'chatgpt',
+              orchestrationAugment: '',
+              councilCommand: activeCouncilCommandRef.current,
+              raelDirectiveText: decree,
+              councilIntentKind: councilIntentState.intent,
+              councilActiveScope: councilIntentState.scope,
+              councilFlowMode: 'stable_group',
+              activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
+              stableGroupPriorReplies: stableGroupPriorThisTurn,
+              stableGroupFinalSynthesis: true,
+              councilProviderRuntimeStates: providerRuntimeStates,
+            })
+            if (finalRes.ok && finalData.councilSingleResponse?.trim()) {
+              const synthText = finalData.councilSingleResponse.trim()
+              outcomeByFamily.set('chatgpt', {
+                family: 'chatgpt',
+                textOut: synthText,
+                runtime: 'RESPONDED',
+                runtimeDetail: 'stable_group_final_synthesis',
+              })
+            }
+          } catch {
+            /* optional final synthesis — skip on failure */
+          }
+        }
       } else {
         await Promise.allSettled(gatherPromises)
       }
@@ -10591,6 +10699,30 @@ function Home() {
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FFD700' }}>LIVE COUNCIL</h2>
+            <div
+              className="flex flex-wrap items-center gap-1"
+              role="radiogroup"
+              aria-label="Council conversation mode"
+            >
+              {(['direct', 'stable_group', 'full_council'] as const).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={councilFlowMode === mode}
+                  title={COUNCIL_FLOW_MODE_LABELS[mode]}
+                  onClick={() => persistCouncilFlowMode(mode)}
+                  className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+                  style={{
+                    border: councilFlowMode === mode ? '1px solid #FFD700' : '1px solid #333',
+                    color: councilFlowMode === mode ? '#FFD700' : '#888',
+                    fontWeight: councilFlowMode === mode ? 'bold' : 'normal',
+                  }}
+                >
+                  {mode === 'direct' ? 'Direct' : mode === 'stable_group' ? 'Stable Group' : 'Full Council'}
+                </button>
+              ))}
+            </div>
             {!autoScrollEnabled && (
               <button
                 type="button"

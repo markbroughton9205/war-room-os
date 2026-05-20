@@ -16,6 +16,9 @@
  * Set `COUNCIL_STABILITY_MODE=false` only after all layers pass on mobile + desktop.
  */
 
+import type { CouncilFlowMode } from '@/lib/council/councilMode'
+import { isStableGroupChatMode } from '@/lib/council/councilMode'
+
 export const COUNCIL_STABILITY_ENV = 'COUNCIL_STABILITY_MODE'
 
 export const COUNCIL_STABILITY_FAILURE_MESSAGE =
@@ -75,15 +78,25 @@ export function isCouncilStabilityMode(): boolean {
   return raw === 'true' || raw === '1'
 }
 
-/** Feature flags for the active mode (disabled layers are off when stability mode is on). */
-export function getStabilityModeFlags(): StabilityModeFlags {
-  return isCouncilStabilityMode() ? DISABLED_WHEN_STABLE : ENABLED_WHEN_NORMAL
+/** Heavy systems off when env stability is on or flow is stable group chat. */
+export function isMinimalCouncilSystemsPath(councilFlowMode?: CouncilFlowMode | null): boolean {
+  return isCouncilStabilityMode() || isStableGroupChatMode(councilFlowMode)
 }
 
-export function stabilityModeResponseMeta(): { councilStabilityMode: boolean; stabilityFlags: StabilityModeFlags } {
+/** Feature flags for the active mode (disabled layers are off when minimal path is active). */
+export function getStabilityModeFlags(councilFlowMode?: CouncilFlowMode | null): StabilityModeFlags {
+  return isMinimalCouncilSystemsPath(councilFlowMode) ? DISABLED_WHEN_STABLE : ENABLED_WHEN_NORMAL
+}
+
+export function stabilityModeResponseMeta(councilFlowMode?: CouncilFlowMode | null): {
+  councilStabilityMode: boolean
+  councilFlowMode?: CouncilFlowMode
+  stabilityFlags: StabilityModeFlags
+} {
   return {
     councilStabilityMode: isCouncilStabilityMode(),
-    stabilityFlags: getStabilityModeFlags(),
+    ...(councilFlowMode ? { councilFlowMode } : {}),
+    stabilityFlags: getStabilityModeFlags(councilFlowMode),
   }
 }
 
@@ -94,7 +107,7 @@ export function logCouncilStabilityRender(args: {
   renderedLength: number
   fallbackSkipped: boolean
 }): void {
-  if (!isCouncilStabilityMode()) return
+  if (!isCouncilStabilityMode() && !isStableGroupChatMode()) return
   console.log(
     '[council-stability]',
     JSON.stringify({

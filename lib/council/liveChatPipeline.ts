@@ -22,6 +22,8 @@ import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolatio
 import type { RuntimeEvidencePacket } from '@/lib/runtime/runtimeEvidencePacket'
 import type { LiveResearchClientSummary, LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { CouncilResponseCompletion } from '@/lib/council/responseCompletion'
+import type { CouncilFlowMode } from '@/lib/council/councilMode'
+import type { StableGroupPriorReply } from '@/lib/council/stableGroupChat'
 
 export type CouncilChatRequestBody = {
   message: string
@@ -57,6 +59,14 @@ export type CouncilChatRequestBody = {
   councilModeGovernor?: ModeGovernor
   /** Per-family runtime outcomes for prompt room-status block. */
   councilProviderRuntimeStates?: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>>
+  /** Live Council flow: direct | stable_group | full_council */
+  councilFlowMode?: CouncilFlowMode
+  /** Conversation-runtime active topic (stable group slim context). */
+  activeTopic?: string
+  /** Prior replies in the current stable-group turn (server builds prompts from these). */
+  stableGroupPriorReplies?: StableGroupPriorReply[]
+  /** Optional closing ChatGPT synthesis after Red Team in stable group mode. */
+  stableGroupFinalSynthesis?: boolean
 }
 
 export type CouncilChatJson = {
@@ -91,6 +101,8 @@ export type CouncilChatJson = {
   councilResponseCompletion?: CouncilResponseCompletion
   councilStabilityMode?: boolean
   councilStabilityIssue?: boolean
+  councilFlowMode?: CouncilFlowMode
+  stableGroupSkipped?: boolean
   /** Single-family research accounting for this response (Phase 6). */
   liveResearchTurnSurvey?: {
     wave: 'single'

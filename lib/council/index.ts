@@ -1,5 +1,7 @@
 export * from '@/lib/council/toDisplayText'
 export * from '@/lib/council/stabilityMode'
+export * from '@/lib/council/councilMode'
+export * from '@/lib/council/stableGroupChat'
 export * from '@/lib/council/packetSizeLog'
 export * from '@/lib/council/councilCommandTypes'
 export * from '@/lib/council/intentClassifier'

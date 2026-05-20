@@ -86,9 +86,24 @@ import {
   validateProviderResponseIntegrity,
 } from '@/lib/providers/responseIntegrity'
 import {
+  resolveCouncilFlowMode,
+  isStableGroupChatMode,
+  STABLE_GROUP_FAMILY_ORDER,
+  type CouncilFlowMode,
+} from '@/lib/council/councilMode'
+import {
+  buildStableGroupSystemPrompt,
+  buildStableGroupUserPrompt,
+  extractLastTwoFamilyReplies,
+  formatProviderStatusBlock,
+  isStableGroupFamily,
+  type StableGroupPriorReply,
+} from '@/lib/council/stableGroupChat'
+import {
   COUNCIL_STABILITY_FAILURE_MESSAGE,
   getStabilityModeFlags,
   isCouncilStabilityMode,
+  isMinimalCouncilSystemsPath,
   logCouncilStabilityRender,
   stabilityModeResponseMeta,
 } from '@/lib/council/stabilityMode'
@@ -112,6 +127,7 @@ const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514'
 const DEFAULT_MAX_TOKENS = 220
 const EXPANDED_MAX_TOKENS = 520
+const STABLE_GROUP_MAX_TOKENS = 200
 
 const COUNCIL_THREAD_MESSAGES = 16
 
@@ -200,9 +216,22 @@ function withTimeout(
   })
 }
 
+function coerceStableGroupPriorReplies(raw: unknown): StableGroupPriorReply[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: StableGroupPriorReply[] = []
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue
+    const o = row as Record<string, unknown>
+    const family = typeof o.family === 'string' ? o.family.trim() : ''
+    const content = typeof o.content === 'string' ? o.content.trim() : ''
+    if (family && content) out.push({ family, content })
+  }
+  return out.length ? out : undefined
+}
+
 function validateProviderResults(
   results: ProviderResult[],
-  opts?: { integrityCheck?: boolean; decreeText?: string },
+  opts?: { integrityCheck?: boolean; decreeText?: string; suppressSyncWarnings?: boolean },
 ): ProviderResult[] {
   if (opts?.integrityCheck === false) return results
   const promptIntent = opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined
@@ -245,6 +274,7 @@ function validateProviderResults(
     sanitized.push(result)
   }
   if (violations.length === 0) return sanitized
+  if (opts?.suppressSyncWarnings) return sanitized
   return [
     ...sanitized,
     {
@@ -401,9 +431,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  const councilFlowMode: CouncilFlowMode = resolveCouncilFlowMode(body.councilFlowMode, body.councilMode)
+  const stableGroupTurn = isStableGroupChatMode(councilFlowMode)
   const councilStabilityMode = isCouncilStabilityMode()
-  const stabilityFlags = getStabilityModeFlags()
-  const stabilityMeta = stabilityModeResponseMeta()
+  const minimalCouncilPath = isMinimalCouncilSystemsPath(councilFlowMode)
+  const stabilityFlags = getStabilityModeFlags(councilFlowMode)
+  const stabilityMeta = stabilityModeResponseMeta(councilFlowMode)
+  const stableGroupPriorFromClient = coerceStableGroupPriorReplies(body.stableGroupPriorReplies)
+  const stableGroupFinalSynthesis = body.stableGroupFinalSynthesis === true
+  const activeTopicFromBody =
+    typeof body.activeTopic === 'string' && body.activeTopic.trim() ? body.activeTopic.trim() : ''
 
   const conversationalTurn = body.conversationalTurn === true
   const message = typeof body.message === 'string' ? body.message : ''
@@ -469,9 +506,10 @@ export async function POST(req: Request) {
       : null
 
   const skipProviderIntegrityCheck = Boolean(
-    councilStabilityMode
+    minimalCouncilPath
     || (councilSingleFamilyEarly && isAttendanceFlow && councilSingleFamilyEarly !== 'gemini'),
   )
+  const suppressIntegritySyncWarnings = stableGroupTurn
   const scopeForGovernor = buildActiveScope({
     decreeText: raelDirectiveText,
     councilCommand,
@@ -722,7 +760,12 @@ export async function POST(req: Request) {
     detail: string,
   ) => {
     const resultStatus: ProviderResultStatus = status === 'timed_out' ? 'TIMED_OUT' : 'FAILED'
-    const stabilityMessage = councilStabilityMode ? COUNCIL_STABILITY_FAILURE_MESSAGE : ''
+    const stabilityMessage =
+      stableGroupTurn
+        ? ''
+        : councilStabilityMode
+          ? COUNCIL_STABILITY_FAILURE_MESSAGE
+          : ''
     const results = validateProviderResults(
       [
         {
@@ -732,7 +775,11 @@ export async function POST(req: Request) {
           error: detail,
         },
       ],
-      { integrityCheck: !skipProviderIntegrityCheck, decreeText: raelDirectiveText },
+      {
+        integrityCheck: !skipProviderIntegrityCheck,
+        decreeText: raelDirectiveText,
+        suppressSyncWarnings: suppressIntegritySyncWarnings,
+      },
     )
     void logCouncilPacketMetrics(sup.ok ? sup.client : null, {
       route: '/api/chat',
@@ -885,7 +932,7 @@ export async function POST(req: Request) {
         ? `\n\n### Runtime integrity snapshot (truncated; diagnostics only)\n${snapForDiagnostics}`
         : ''
 
-    let augmentBlock = councilStabilityMode
+    let augmentBlock = minimalCouncilPath
       ? ''
       : [
           orchestrationAugment.trim() ? `\n\nCouncil orchestration directives:\n${orchestrationAugment.trim()}` : '',
@@ -1088,12 +1135,14 @@ export async function POST(req: Request) {
       }
 
       const researchEligible =
-        stabilityFlags.liveResearchRouter
+        !stableGroupTurn
+        && stabilityFlags.liveResearchRouter
         && (!isAttendanceFlow || mandatoryRetrieval.required)
         && councilGatherPhase !== 'decree_soft'
         && !sequentialDiagnostic
       const mandatoryResearchEligible =
-        stabilityFlags.liveResearchRouter
+        !stableGroupTurn
+        && stabilityFlags.liveResearchRouter
         && mandatoryRetrieval.required
         && !sequentialDiagnostic
 
@@ -1192,13 +1241,57 @@ export async function POST(req: Request) {
         }
       }
 
-      const userPrompt = buildCouncilUserPrompt({
-        raelDirectiveText,
-        threadBlock: thread,
-        augmentBlock: grokAugmentBlock,
-        intentLabel: intentState.intent,
-        modeGovernorBlock: councilStabilityMode ? '' : modeGovernorBlock,
-      })
+      const activeTopic = activeTopicFromBody || raelDirectiveText
+      const stableGroupPrior =
+        stableGroupPriorFromClient ?? extractLastTwoFamilyReplies(threadHistory)
+      const stableGroupStatusBlock = formatProviderStatusBlock(providerRuntimeStates)
+
+      let userPrompt: string
+      let stableGroupSystemForFamily: string | null = null
+      let tokensForCall = maxTokens
+
+      if (stableGroupTurn) {
+        tokensForCall = STABLE_GROUP_MAX_TOKENS
+        const finalSynth = stableGroupFinalSynthesis && councilSingleFamily === 'chatgpt'
+        if (finalSynth || isStableGroupFamily(councilSingleFamily)) {
+          const sgFamily = (finalSynth ? 'chatgpt' : councilSingleFamily) as (typeof STABLE_GROUP_FAMILY_ORDER)[number]
+          stableGroupSystemForFamily = buildStableGroupSystemPrompt({
+            family: sgFamily,
+            toneInstruction,
+            finalSynthesis: finalSynth,
+          })
+          userPrompt = buildStableGroupUserPrompt({
+            commanderMessage: raelDirectiveText,
+            activeTopic,
+            priorReplies: extractLastTwoFamilyReplies(threadHistory),
+            providerStatusBlock: stableGroupStatusBlock,
+            turnPriorFromClient: stableGroupPrior,
+          })
+        } else {
+          await safeAudit({
+            success: true,
+            flow: 'stable_group_skip',
+            councilSingleFamily,
+          })
+          return NextResponse.json({
+            councilSingleResponse: '',
+            councilSingleFamily,
+            results: [],
+            showContinue: true,
+            councilFlowMode,
+            stableGroupSkipped: true,
+            ...stabilityMeta,
+          })
+        }
+      } else {
+        userPrompt = buildCouncilUserPrompt({
+          raelDirectiveText,
+          threadBlock: thread,
+          augmentBlock: grokAugmentBlock,
+          intentLabel: intentState.intent,
+          modeGovernorBlock: minimalCouncilPath ? '' : modeGovernorBlock,
+        })
+      }
 
       const packetForGate = liveResearchPacket?.intelligencePacket
       const retrievalForGate = packetForGate?.retrieval
@@ -1273,7 +1366,12 @@ export async function POST(req: Request) {
           case 'chatgpt': {
             const { signal, dispose } = withBudgetSignal()
             try {
-              responseText = await callChatGPT(userPrompt, gptSystem, maxTokens, signal)
+              responseText = await callChatGPT(
+                userPrompt,
+                stableGroupSystemForFamily ?? gptSystem,
+                tokensForCall,
+                signal,
+              )
             } finally {
               dispose()
             }
@@ -1282,7 +1380,12 @@ export async function POST(req: Request) {
           case 'claude': {
             const { signal, dispose } = withBudgetSignal()
             try {
-              responseText = await callClaude(userPrompt, claudeSystem, maxTokens, signal)
+              responseText = await callClaude(
+                userPrompt,
+                stableGroupSystemForFamily ?? claudeSystem,
+                tokensForCall,
+                signal,
+              )
             } finally {
               dispose()
             }
@@ -1290,7 +1393,12 @@ export async function POST(req: Request) {
           }
           case 'grok': {
             if (grokContinueEligible) grokContinueInvokeStartedAt = Date.now()
-            responseText = await callGrok(userPrompt, grokSystem, maxTokens, grokContinueTimeoutMs)
+            responseText = await callGrok(
+              userPrompt,
+              stableGroupSystemForFamily ?? grokSystem,
+              tokensForCall,
+              grokContinueTimeoutMs,
+            )
             if (grokContinueEligible && grokContinueInvokeStartedAt !== undefined) {
               grokContinueAuditTiming = {
                 elapsedMs: Date.now() - grokContinueInvokeStartedAt,
@@ -1302,8 +1410,8 @@ export async function POST(req: Request) {
           case 'gemini': {
             const geminiResult = await completeGeminiCouncilMessage({
               userPrompt,
-              systemPrompt: geminiSystem,
-              maxOutputTokens: maxTokens,
+              systemPrompt: stableGroupSystemForFamily ?? geminiSystem,
+              maxOutputTokens: tokensForCall,
               timeoutMs: providerBudgetMs,
             })
             if (!geminiResult.ok) {
@@ -1336,13 +1444,14 @@ export async function POST(req: Request) {
             break
           }
           case 'red_team': {
-            const redSystem = appendOpportunityMandateToSystem(
-              `You are Red Team in Ra'el's War Room — internal adversary and risk assumption challenger. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
-              'red_team',
-            )
+            const redSystem = stableGroupSystemForFamily
+              ?? appendOpportunityMandateToSystem(
+                `You are Red Team in Ra'el's War Room — internal adversary and risk assumption challenger. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+                'red_team',
+              )
             const { signal, dispose } = withBudgetSignal()
             try {
-              responseText = await callClaude(userPrompt, redSystem, maxTokens, signal)
+              responseText = await callClaude(userPrompt, redSystem, tokensForCall, signal)
             } finally {
               dispose()
             }
@@ -1478,7 +1587,7 @@ export async function POST(req: Request) {
         }
       }
 
-      if (councilStabilityMode) {
+      if (minimalCouncilPath) {
         const rawLen = responseText.length
         responseText = compactDisplayWhitespace(toDisplayText(responseText))
         logCouncilStabilityRender({
@@ -1606,7 +1715,11 @@ export async function POST(req: Request) {
                 status: 'OK',
               },
             ],
-            { integrityCheck: !skipProviderIntegrityCheck, decreeText: raelDirectiveText },
+            {
+              integrityCheck: !skipProviderIntegrityCheck,
+              decreeText: raelDirectiveText,
+              suppressSyncWarnings: suppressIntegritySyncWarnings,
+            },
           ),
           showContinue: true,
           councilGovernorSkipped: true,
@@ -1616,7 +1729,7 @@ export async function POST(req: Request) {
       }
       responseText = governed.text
 
-      if (!councilStabilityMode && councilSingleFamily === 'gemini' && responseText.trim()) {
+      if (!minimalCouncilPath && councilSingleFamily === 'gemini' && responseText.trim()) {
         const renderGate = applyCouncilRenderGate('gemini', responseText, {
           decreeText: raelDirectiveText,
           retryAttempted: Number(providerIntegrityDiagnostics?.retryCount ?? 0) > 0,
@@ -1651,7 +1764,7 @@ export async function POST(req: Request) {
         )
       }
 
-      if (!councilStabilityMode) {
+      if (!minimalCouncilPath) {
         councilResponseCompletion = assessCouncilTextCompletion(responseText, {
           providerFinishReason: councilSingleFamily === 'gemini' ? providerFinishReason : undefined,
         })
@@ -1683,7 +1796,7 @@ export async function POST(req: Request) {
       }
 
       let continuationRequest =
-        !councilStabilityMode
+        !minimalCouncilPath
         && modeGovernor.continuationAllowed
           ? buildContinuationRequestFromModelOutput({
               family: councilSingleFamily,
@@ -1807,9 +1920,14 @@ export async function POST(req: Request) {
               status: 'OK',
             },
           ],
-          { integrityCheck: !skipProviderIntegrityCheck, decreeText: raelDirectiveText },
+          {
+            integrityCheck: !skipProviderIntegrityCheck,
+            decreeText: raelDirectiveText,
+            suppressSyncWarnings: suppressIntegritySyncWarnings,
+          },
         ),
         showContinue: true,
+        councilFlowMode,
         ...(continuationRequest ? { continuationRequest } : {}),
         ...(dmOk ? { diagnosticMeta: dmOk } : {}),
         ...(sequentialDiagnostic && diagnosticIntentMode !== 'none' && diagnosticRuntimeEvidencePacket
