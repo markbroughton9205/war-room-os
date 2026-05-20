@@ -1,8 +1,14 @@
+import {
+  integrityDebugTail,
+  isIntegrityDebugEnabled,
+  logIntegrityDebug,
+} from '@/lib/council/integrityDebug'
 import type { PromptIntent } from '@/lib/council/promptIntent'
 import {
   buildIntegrityExpectationForPrompt,
   isRelaxedPromptIntent,
 } from '@/lib/council/promptIntent'
+import { SKIP_TERMINAL_TRUNCATION_BELOW } from '@/lib/council/responseIntegrity'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 import type { OpportunityPacket } from '@/lib/opportunities/schema'
 import { validateOpportunityResponse } from '@/lib/opportunities/validate'
@@ -175,26 +181,36 @@ export function hasCouncilContributionSubstance(text: string): boolean {
   return t.length >= 200 && SENTENCE_END.test(t)
 }
 
-function detectRepeatedPartialPhrase(text: string): boolean {
+function detectRepeatedPartialPhrase(text: string, relaxedCasual = false): boolean {
   const t = text.trim()
+  if (relaxedCasual || t.length < SKIP_TERMINAL_TRUNCATION_BELOW) return false
   if (t.length > 200) return false
   if (REPEATED_PARTIAL_PHRASE.test(t)) return true
   if (PARTIAL_HEADING_TAIL.test(t) && t.length < 160) return true
   const firstLine = t.split('\n')[0]?.trim() ?? ''
   if (firstLine.length >= 12 && firstLine === t) {
     const words = firstLine.split(/\s+/)
-    if (words.length <= 8 && !SENTENCE_END.test(firstLine)) return true
+    if (words.length <= 6 && !SENTENCE_END.test(firstLine)) return true
   }
   return false
 }
 
-function abruptEnding(text: string): boolean {
+function abruptEnding(text: string, relaxedCasual = false): boolean {
   const t = text.trim()
   if (!t) return false
   if (SENTENCE_END.test(t)) return false
+  if (relaxedCasual) {
+    return (
+      ABRUPT_SECTION_STUB.test(t)
+      || PARTIAL_HEADING_TAIL.test(t)
+      || BROKEN_BULLET.test(t)
+      || BROKEN_SYNC_TAIL.test(t)
+    )
+  }
   if (ABRUPT_SECTION_STUB.test(t)) return true
   if (PARTIAL_HEADING_TAIL.test(t)) return true
-  if (TRUNCATED_WORD.test(t) && t.length < 220) return true
+  if (t.length < SKIP_TERMINAL_TRUNCATION_BELOW) return false
+  if (TRUNCATED_WORD.test(t) && t.length < 220 && OPEN_TAIL.test(t)) return true
   if (OPEN_TAIL.test(t) && t.length >= 40) return true
   if (BROKEN_BULLET.test(t)) return true
   if (CLIPPED_ELLIPSIS_END.test(t)) return true
@@ -328,7 +344,7 @@ export function validateProviderResponseIntegrity(
     }
   }
 
-  if (detectRepeatedPartialPhrase(text)) {
+  if (detectRepeatedPartialPhrase(text, relaxedCasual)) {
     return {
       integrity_status: 'TRUNCATED',
       confidence: 88,
@@ -375,7 +391,7 @@ export function validateProviderResponseIntegrity(
   }
 
   if (text.length < minLength) {
-    const truncatedLike = abruptEnding(text) || PARTIAL_HEADING_TAIL.test(text)
+    const truncatedLike = abruptEnding(text, relaxedCasual) || (!relaxedCasual && PARTIAL_HEADING_TAIL.test(text))
     const greetingStub = !relaxedCasual && detectGreetingOnlyResponse(text)
     if (greetingStub) {
       return {
@@ -405,7 +421,7 @@ export function validateProviderResponseIntegrity(
     }
   }
 
-  if (abruptEnding(text)) {
+  if (abruptEnding(text, relaxedCasual)) {
     return {
       integrity_status: 'TRUNCATED',
       confidence: 80,
@@ -415,7 +431,7 @@ export function validateProviderResponseIntegrity(
     }
   }
 
-  if (!SENTENCE_END.test(text) && text.length >= 120) {
+  if (!relaxedCasual && !SENTENCE_END.test(text) && text.length >= 120) {
     return {
       integrity_status: 'INCOMPLETE',
       confidence: 68,
@@ -445,13 +461,28 @@ export function validateProviderResponseIntegrity(
     }
   }
 
-  return {
+  const complete: ResponseIntegrityResult = {
     integrity_status: 'COMPLETE',
     confidence: clampConfidence(92 - (text.length < minLength + 40 ? 8 : 0)),
     reason: 'response passed integrity heuristics',
     retry_recommended: false,
     fallback_recommended: false,
   }
+
+  if (isIntegrityDebugEnabled()) {
+    logIntegrityDebug({
+      phase: 'validateProviderResponseIntegrity',
+      rawLength: toDisplayText(raw).length,
+      normalizedLength: text.length,
+      last30: integrityDebugTail(text),
+      ruleTriggered: complete.reason,
+      integrityStatus: complete.integrity_status,
+      relaxedCasual,
+      promptIntent: resolvedExpectation.promptIntent,
+    })
+  }
+
+  return complete
 }
 
 export function isDegradedResponseQuality(status: ResponseIntegrityStatus): boolean {
@@ -464,8 +495,8 @@ export function isHardRenderIntegrityFailure(
   opts?: { relaxedCasual?: boolean },
 ): boolean {
   if (status === 'EMPTY' || status === 'MALFORMED') return true
-  if (status === 'TRUNCATED') return true
   if (opts?.relaxedCasual) return false
+  if (status === 'TRUNCATED') return true
   if (status === 'DEGRADED_RESPONSE_QUALITY' || status === 'INCOMPLETE') return true
   return false
 }

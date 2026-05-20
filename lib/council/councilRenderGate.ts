@@ -1,5 +1,9 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import {
+  integrityDebugTail,
+  logIntegrityDebug,
+} from '@/lib/council/integrityDebug'
+import {
   buildIntegrityExpectationForPrompt,
   detectPromptIntent,
   isRelaxedPromptIntent,
@@ -137,11 +141,57 @@ export function applyCouncilRenderGate(
   const matchedGreetingOnly = !relaxedCasual && detectGreetingOnlyResponse(rawText)
   const degraded = resolveRenderDegraded(rawText, integrity.integrity_status, relaxedCasual)
 
+  const logGate = (gateResult: string, renderable: boolean, displayText: string) => {
+    logIntegrityDebug({
+      phase: 'applyCouncilRenderGate',
+      rawLength: rawText.length,
+      normalizedLength: rawText.trim().length,
+      renderedLength: displayText.length,
+      last30: integrityDebugTail(rawText),
+      ruleTriggered: integrity.reason,
+      gateResult,
+      integrityStatus: integrity.integrity_status,
+      renderable,
+      degraded,
+      stabilityMode,
+      relaxedCasual,
+      promptIntent,
+    })
+  }
+
+  const relaxedStabilityPass =
+    relaxedCasual
+    && stabilityMode
+    && integrity.integrity_status !== 'EMPTY'
+    && integrity.integrity_status !== 'MALFORMED'
+
+  if (relaxedStabilityPass) {
+    const out: CouncilRenderGateResult = {
+      displayText: rawText,
+      rawText,
+      renderable: true,
+      integrityStatus: integrity.integrity_status,
+      degraded: false,
+      promptIntent,
+      ...(family === 'gemini'
+        ? {
+            diagnostics: buildGeminiDiagnostics(rawText, integrity.integrity_status, {
+              retryAttempted: opts?.retryAttempted,
+              fallbackUsed: opts?.fallbackUsed,
+              promptIntent,
+            }),
+          }
+        : {}),
+    }
+    logGate('relaxed_stability_pass', true, rawText)
+    return out
+  }
+
   if (family === 'gemini' && degraded && !relaxedCasual) {
     const integrityStatus: ResponseIntegrityStatus = matchedGreetingOnly
       ? 'DEGRADED_RESPONSE_QUALITY'
       : integrity.integrity_status
-    return {
+    const blocked: CouncilRenderGateResult = {
       displayText: GEMINI_DEGRADED_COUNCIL_DISPLAY,
       rawText,
       renderable: false,
@@ -154,10 +204,12 @@ export function applyCouncilRenderGate(
         promptIntent,
       }),
     }
+    logGate('gemini_degraded_block', false, blocked.displayText)
+    return blocked
   }
 
   if (relaxedCasual && (stabilityMode || integrity.integrity_status === 'COMPLETE')) {
-    return {
+    const out: CouncilRenderGateResult = {
       displayText: rawText,
       rawText,
       renderable: true,
@@ -174,10 +226,28 @@ export function applyCouncilRenderGate(
           }
         : {}),
     }
+    logGate('relaxed_casual_pass', true, rawText)
+    return out
   }
 
   if (degraded) {
-    return {
+    const shouldBlock =
+      !relaxedCasual
+      || integrity.integrity_status === 'EMPTY'
+      || integrity.integrity_status === 'MALFORMED'
+    if (!shouldBlock) {
+      const out: CouncilRenderGateResult = {
+        displayText: rawText,
+        rawText,
+        renderable: true,
+        integrityStatus: integrity.integrity_status,
+        degraded: false,
+        promptIntent,
+      }
+      logGate('relaxed_non_hard_pass', true, rawText)
+      return out
+    }
+    const blocked: CouncilRenderGateResult = {
       displayText:
         integrity.fallback_recommended
           ? 'Provider response incomplete; fallback summary used'
@@ -188,9 +258,11 @@ export function applyCouncilRenderGate(
       degraded: true,
       promptIntent,
     }
+    logGate('degraded_fallback', false, blocked.displayText)
+    return blocked
   }
 
-  return {
+  const out: CouncilRenderGateResult = {
     displayText: rawText,
     rawText,
     renderable: true,
@@ -207,6 +279,8 @@ export function applyCouncilRenderGate(
         }
       : {}),
   }
+  logGate('complete_pass', true, rawText)
+  return out
 }
 
 export function isCouncilMessageRepairPacketEligible(message: {

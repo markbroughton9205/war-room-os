@@ -15,6 +15,9 @@ function assert(condition: boolean, message: string): void {
 
 export function assertPromptIntentFixtures(): void {
   assert(detectPromptIntent('hey family') === 'GREETING', 'hey family is GREETING')
+  assert(detectPromptIntent('hello') === 'GREETING', 'hello is GREETING')
+  assert(detectPromptIntent("what's up") === 'GREETING', "what's up is GREETING")
+  assert(detectPromptIntent('good morning') === 'GREETING', 'good morning is GREETING')
   assert(isRelaxedPromptIntent('GREETING'), 'GREETING is relaxed')
   assert(detectPromptIntent('gemini what do you think') === 'ANALYSIS', 'gemini what do you think is ANALYSIS')
   assert(
@@ -39,6 +42,19 @@ export function assertPromptIntentFixtures(): void {
   assert(gate.renderable, 'hey family gemini reply is renderable')
   assert(!gate.degraded, 'hey family gemini reply is not degraded')
   assert(gate.displayText === casualReply, 'hey family keeps provider text')
+
+  const shortNoPeriod = "Hey Ra'el — council is here and ready"
+  const shortIntegrity = validateProviderResponseIntegrity(
+    shortNoPeriod,
+    buildIntegrityExpectationForPrompt('GREETING', { councilMode: true }),
+  )
+  assert(
+    shortIntegrity.integrity_status !== 'TRUNCATED',
+    'short greeting reply without terminal period is not TRUNCATED',
+  )
+  const shortGate = applyCouncilRenderGate('gemini', shortNoPeriod, { decreeText: 'hello' })
+  assert(shortGate.renderable, 'short hello gemini reply is renderable')
+  assert(shortGate.displayText === shortNoPeriod, 'short hello keeps provider text')
 
   const analysisIntent = detectPromptIntent('gemini what do you think')
   assert(analysisIntent === 'ANALYSIS', 'directed what-do-you-think is analysis intent')

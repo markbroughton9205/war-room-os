@@ -1,3 +1,4 @@
+import { assertCouncilResponseIntegrityFixtures } from '@/lib/council/responseIntegrity.assert'
 import { assertPromptIntentFixtures } from '@/lib/council/promptIntent.assert'
 import { assertGeminiGreetingGateFixtures } from '@/lib/providers/geminiGreetingGate.assert'
 import {
@@ -34,6 +35,13 @@ export function assertResponseIntegrityFixtures(): void {
     'greeting-only is operator unsafe',
   )
 
+  const shortCasual = validateProviderResponseIntegrity(
+    "Hey Ra'el — council is here and ready",
+    { relaxedCasual: true, minLength: 12, councilMode: false },
+  )
+  assert(shortCasual.integrity_status === 'COMPLETE', 'short relaxed casual reply is COMPLETE')
+
   assertGeminiGreetingGateFixtures()
   assertPromptIntentFixtures()
+  assertCouncilResponseIntegrityFixtures()
 }

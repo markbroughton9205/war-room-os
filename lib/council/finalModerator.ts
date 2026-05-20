@@ -121,7 +121,9 @@ export function runFinalModerator(input: FinalModeratorInput): ModeratedFamilyLi
       continue
     }
 
-    const integ = repairOrFlagResponse(content)
+    const relaxedCasual =
+      activeScope?.intent === 'greeting' || activeScope?.intent === 'natural'
+    const integ = repairOrFlagResponse(content, { relaxedCasual })
     content = integ.text
     warnings.push(...integ.integrityWarnings)
 

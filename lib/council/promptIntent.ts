@@ -20,9 +20,12 @@ function norm(s: string): string {
 }
 
 const GREETING_LINE =
-  /^\s*(hi+|hello|hey+|yo+|sup|what'?s up|good\s+(morning|afternoon|evening)|howdy)\b[!?.\s,]*$/i
-const GREETING_PREFIX = /^\s*(hi+|hello|hey+|yo+)\b[,!\s]/i
-const FAMILY_GREETING = /^\s*(?:hi+|hello|hey+)\b[^.!?\n]{0,40}\b(?:family|council|team|everyone|folks)\b/i
+  /^\s*(hi+|hello|hey+|yo+|sup|what'?s up|whats\s+up|good\s+(morning|afternoon|evening)|howdy)\b[!?.\s,]*$/i
+const GREETING_PREFIX = /^\s*(hi+|hello|hey+|yo+|good\s+morning)\b[,!\s]/i
+const FAMILY_GREETING =
+  /^\s*(?:hey\s+family|hi+\s+family|hello\s+family|hey+)\b[^.!?\n]{0,48}\b(?:family|council|team|everyone|folks|ra['']?el)\b/i
+const CONVERSATIONAL_OPEN =
+  /^\s*(?:hello|hey|hi|good\s+morning|good\s+afternoon|good\s+evening|what'?s\s+up)\b[!?.,\s]/i
 const THANKS_ONLY =
   /^\s*(thanks|thank you|thx|ty|appreciate it|much appreciated|cheers)\b[!?.\s]*$/i
 
@@ -89,6 +92,7 @@ export function detectPromptIntent(message: string): PromptIntent {
   if (
     GREETING_LINE.test(trimmed)
     || FAMILY_GREETING.test(trimmed)
+    || (CONVERSATIONAL_OPEN.test(trimmed) && trimmed.length < 96)
     || (GREETING_PREFIX.test(trimmed) && trimmed.length < 80)
   ) {
     return 'GREETING'
@@ -98,7 +102,12 @@ export function detectPromptIntent(message: string): PromptIntent {
   if (DIRECT_FAMILY.test(t) && ANALYSIS_MARKERS.test(t)) return 'ANALYSIS'
   if (ANALYSIS_MARKERS.test(t)) return 'ANALYSIS'
 
-  if (CASUAL_MARKERS.test(t) && t.length < 120) return 'CASUAL'
+  if (
+    (CASUAL_MARKERS.test(t) || /\b(?:hey\s+family|what'?s\s+up|good\s+morning)\b/i.test(t))
+    && t.length < 120
+  ) {
+    return 'CASUAL'
+  }
   if (SIMPLE_HELP_MARKERS.test(t) && t.length < 160) return 'SIMPLE_HELP'
 
   if (t.length < 48 && !RESEARCH_MARKERS.test(t) && !OPPORTUNITY_MARKERS.test(t)) {
