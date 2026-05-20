@@ -209,7 +209,7 @@ import {
   DockPanelContent,
   LiveRoomShell,
   LiveRoomModeProvider,
-  TopIntelRibbon,
+  LivingIntelligenceRibbon,
   useLiveRoomMode,
   type DockPanelId,
 } from '@/components/war-room/live-room'
@@ -10326,7 +10326,7 @@ function Home() {
         <LiveRoomShell
           topBar={(
             <>
-              <TopIntelRibbon
+              <LivingIntelligenceRibbon
                 location={commanderLocation}
                 threadId={liveCouncilConvId ?? undefined}
                 onCouncilHandoff={injectLiveEnvironmentDecree}
