@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic'
 import { memo, useEffect, useMemo, useState } from 'react'
 
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
+import type { CouncilResearchHandoff } from '@/lib/council-research/types'
 import type { ConfigurationSweep } from '@/lib/configuration/configurationHealth'
 import type { ProviderConfigStatus } from '@/lib/configuration/providerConfigStatus'
 import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/environment/locationPolicy'
@@ -340,11 +341,13 @@ function FamilyTipInline({ tip, onCouncilHandoff }: { tip: FamilyTip; onCouncilH
 function HandoffButtons({
   decree,
   onCouncilHandoff,
+  onCouncilResearchHandoff,
 }: {
   decree: string
   onCouncilHandoff?: (decree: string) => void
+  onCouncilResearchHandoff?: (payload: CouncilResearchHandoff) => void
 }) {
-  if (!onCouncilHandoff) return null
+  if (!onCouncilHandoff && !onCouncilResearchHandoff) return null
   const actions: { label: string; action: CouncilHandoffAction }[] = [
     { label: 'Ask Council', action: 'ask_council' },
     { label: 'Investigate', action: 'investigate' },
@@ -353,16 +356,28 @@ function HandoffButtons({
   ]
   return (
     <div className="mt-2 flex flex-wrap gap-1">
-      {actions.map(item => (
-        <button
-          key={item.action}
-          type="button"
-          className="rounded border border-sky-300/20 px-1.5 py-0.5 text-[7px] uppercase tracking-widest text-sky-200 transition hover:border-sky-300/50 hover:text-sky-100"
-          onClick={() => onCouncilHandoff(buildCouncilDecree(item.action, decree))}
-        >
-          {item.label}
-        </button>
-      ))}
+      {actions.map(item => {
+        const built = buildCouncilDecree(item.action, decree)
+        const useResearch =
+          onCouncilResearchHandoff
+          && (item.action === 'ask_council' || item.action === 'investigate' || item.action === 'send_to_analysts')
+        return (
+          <button
+            key={item.action}
+            type="button"
+            className="rounded border border-sky-300/20 px-1.5 py-0.5 text-[7px] uppercase tracking-widest text-sky-200 transition hover:border-sky-300/50 hover:text-sky-100"
+            onClick={() => {
+              if (useResearch) {
+                onCouncilResearchHandoff({ decree: built, action: item.action })
+              } else {
+                onCouncilHandoff?.(built)
+              }
+            }}
+          >
+            {item.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -377,6 +392,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   onToggleHoroscope,
   onSetAstrologyMode,
   onCouncilHandoff,
+  onCouncilResearchHandoff,
   threadId,
   hideEvolutionPanel,
 }: {
@@ -389,6 +405,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   onToggleHoroscope: () => void
   onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
   onCouncilHandoff?: (decree: string) => void
+  onCouncilResearchHandoff?: (payload: CouncilResearchHandoff) => void
   threadId?: string
   /** When true, evolution summary lives in Live Room left rail only. */
   hideEvolutionPanel?: boolean
@@ -593,7 +610,8 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
             <p className="mt-2 text-[8px] uppercase tracking-widest" style={{ color: weather.status === 'available' ? providerStatusColor(weatherProvider) : weatherStateColor(weather.providerState) }}>
               {weather.status === 'available' ? `${weather.freshness} · source-backed` : 'feed paused'}
             </p>
-            <HandoffButtons decree="Council, review the current Akron weather, alerts, and operating risk. Recommend any family, travel, or local timing adjustments without guessing missing data." onCouncilHandoff={onCouncilHandoff} />
+            <HandoffButtons decree="Council, review the current Akron weather, alerts, and operating risk. Recommend any family, travel, or local timing adjustments without guessing missing data." onCouncilHandoff={onCouncilHandoff}
+          onCouncilResearchHandoff={onCouncilResearchHandoff} />
           </summary>
           <div className="mt-2 border-t border-white/10 pt-2 text-[8px] uppercase tracking-widest text-slate-500">
             <p>Status: {weather.status} · provider state: {weatherStateLabel(weather.providerState)}</p>
@@ -644,7 +662,8 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
             <p className="mt-1 leading-snug">{commanderSuggestion.expectedBenefit}</p>
             <p className="mt-2 uppercase tracking-widest text-slate-400">Next action</p>
             <p className="mt-1 leading-snug">{commanderSuggestion.nextAction}</p>
-            <HandoffButtons decree={commanderSuggestion.decree} onCouncilHandoff={onCouncilHandoff} />
+            <HandoffButtons decree={commanderSuggestion.decree} onCouncilHandoff={onCouncilHandoff}
+          onCouncilResearchHandoff={onCouncilResearchHandoff} />
             {liveEnvironmentTip && <FamilyTipInline tip={liveEnvironmentTip} onCouncilHandoff={onCouncilHandoff} />}
           </div>
         </details>
@@ -664,7 +683,8 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
             <p className="mt-1 text-[8px] uppercase tracking-widest" style={{ color: providerStatusColor(sourceNetworkProvider) }}>
               {localSignalLabel(signalState)}
             </p>
-            <HandoffButtons decree="Grok, investigate Akron local news, Summit County alerts, local economy and business signals, weather alerts, public safety, traffic, and community events. Report verified, emerging, contradictions, and unknowns." onCouncilHandoff={onCouncilHandoff} />
+            <HandoffButtons decree="Grok, investigate Akron local news, Summit County alerts, local economy and business signals, weather alerts, public safety, traffic, and community events. Report verified, emerging, contradictions, and unknowns." onCouncilHandoff={onCouncilHandoff}
+          onCouncilResearchHandoff={onCouncilResearchHandoff} />
           </summary>
           <div className="mt-2 border-t border-white/10 pt-2 text-[8px] uppercase tracking-widest text-slate-500">
             <p>Retrieval: {sourceHealth}</p>
@@ -697,7 +717,8 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
             <p className="mt-2 text-[8px] uppercase tracking-widest text-purple-200">
               {astrologyMode} · interpretive fallback
             </p>
-            <HandoffButtons decree="Council, reflect on the current symbolic horoscope guidance as private interpretation only. Separate useful reflection from any factual or predictive claim." onCouncilHandoff={onCouncilHandoff} />
+            <HandoffButtons decree="Council, reflect on the current symbolic horoscope guidance as private interpretation only. Separate useful reflection from any factual or predictive claim." onCouncilHandoff={onCouncilHandoff}
+          onCouncilResearchHandoff={onCouncilResearchHandoff} />
           </summary>
           <div className="mt-2 border-t border-white/10 pt-2">
             <div className="mb-2 flex flex-wrap gap-1">
@@ -765,7 +786,8 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
                 <p className="mt-1 text-[10px] leading-snug text-slate-300">{marketInterpretation(activeQuote)}</p>
                 <p className="mt-1 text-[8px] leading-snug text-amber-100">Commander Tip: Use market signals as context, not automatic trading decisions.</p>
                 <p className="mt-1 text-[8px] uppercase tracking-widest text-slate-500">{activeQuote.freshness} · watchlist rotation</p>
-                <HandoffButtons decree="ChatGPT, explain current GLD, SPY, BTC, and QQQ movement as operational context only, with caution notes and no automatic trading decisions." onCouncilHandoff={onCouncilHandoff} />
+                <HandoffButtons decree="ChatGPT, explain current GLD, SPY, BTC, and QQQ movement as operational context only, with caution notes and no automatic trading decisions." onCouncilHandoff={onCouncilHandoff}
+          onCouncilResearchHandoff={onCouncilResearchHandoff} />
               </>
             ) : (
               <p className="mt-1 text-[10px] text-slate-500">Market feed temporarily unavailable.</p>
@@ -854,7 +876,8 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
               ) : (
                 <p className="mt-2 text-[8px] uppercase tracking-widest text-slate-500">Source URL unavailable</p>
               )}
-              <HandoffButtons decree={`Council, review this source-backed news signal from ${activeNews.sourceName}: ${activeNews.title}. Identify verified facts, operational relevance, contradictions, and unknowns.`} onCouncilHandoff={onCouncilHandoff} />
+              <HandoffButtons decree={`Council, review this source-backed news signal from ${activeNews.sourceName}: ${activeNews.title}. Identify verified facts, operational relevance, contradictions, and unknowns.`} onCouncilHandoff={onCouncilHandoff}
+          onCouncilResearchHandoff={onCouncilResearchHandoff} />
               {cards.length > 1 && (
                 <div className="mt-2 flex gap-1">
                   {cards.slice(0, 6).map((card, index) => (
@@ -898,6 +921,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
           onClose={() => setIntelWallOpen(false)}
           location={location}
           onCouncilHandoff={onCouncilHandoff}
+          onCouncilResearchHandoff={onCouncilResearchHandoff}
           threadId={threadId}
         />
       ) : null}

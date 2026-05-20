@@ -7,6 +7,7 @@ import { LiveEnvironmentPanel } from '@/components/intelligence/LiveEnvironmentP
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import type { AstrologyInterpretationMode } from '@/lib/intelligence/environment/horoscopeEnvironment'
+import type { CouncilResearchHandoff } from '@/lib/council-research/types'
 
 function RailSkeleton({ label }: { label: string }) {
   return (
@@ -39,6 +40,7 @@ export type LiveRoomRightRailProps = {
     onToggleHoroscope: () => void
     onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
     onCouncilHandoff: (decree: string) => void
+    onCouncilResearchHandoff?: (payload: CouncilResearchHandoff) => void
     threadId?: string
     hideEvolutionPanel?: boolean
   }
@@ -69,6 +71,7 @@ export const LiveRoomRightRail = memo(function LiveRoomRightRail({ enabled, live
           onToggleHoroscope={liveEnvironment.onToggleHoroscope}
           onSetAstrologyMode={liveEnvironment.onSetAstrologyMode}
           onCouncilHandoff={liveEnvironment.onCouncilHandoff}
+          onCouncilResearchHandoff={liveEnvironment.onCouncilResearchHandoff}
           threadId={liveEnvironment.threadId}
           hideEvolutionPanel={liveEnvironment.hideEvolutionPanel}
         />

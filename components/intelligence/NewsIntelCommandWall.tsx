@@ -16,6 +16,8 @@ import {
   type NewsIntelWatchSection,
 } from '@/lib/intelligence/newsIntelWall'
 import { NewsIntelStoryCard } from '@/components/intelligence/NewsIntelStoryCard'
+import { storyToResearchHandoff } from '@/lib/council-research/handoff'
+import type { CouncilResearchHandoff } from '@/lib/council-research/types'
 
 const SOURCE_MIX_LABELS: Record<NewsIntelSourceMixKey, string> = {
   rss: 'RSS',
@@ -44,12 +46,14 @@ export const NewsIntelCommandWall = memo(function NewsIntelCommandWall({
   onClose,
   location,
   onCouncilHandoff,
+  onCouncilResearchHandoff,
   threadId,
 }: {
   open: boolean
   onClose: () => void
   location: CommanderLocationState
   onCouncilHandoff?: (decree: string) => void
+  onCouncilResearchHandoff?: (payload: CouncilResearchHandoff) => void
   threadId?: string
 }) {
   const [payload, setPayload] = useState<NewsIntelWallPayload | null>(null)
@@ -85,10 +89,22 @@ export const NewsIntelCommandWall = memo(function NewsIntelCommandWall({
   }, [payload, filters])
 
   const handleAskCouncil = useCallback((story: NewsIntelStory) => {
-    onCouncilHandoff?.(
-      `Council, review this source-backed news signal from ${story.source}: ${story.headline}. Identify verified facts, operational relevance, contradictions, and unknowns. Summary: ${story.shortSummary}`,
-    )
-  }, [onCouncilHandoff])
+    const payload = storyToResearchHandoff(story, 'ask_council')
+    if (onCouncilResearchHandoff) {
+      onCouncilResearchHandoff(payload)
+      return
+    }
+    onCouncilHandoff?.(payload.decree)
+  }, [onCouncilHandoff, onCouncilResearchHandoff])
+
+  const handleInvestigate = useCallback((story: NewsIntelStory) => {
+    const payload = storyToResearchHandoff(story, 'investigate')
+    if (onCouncilResearchHandoff) {
+      onCouncilResearchHandoff(payload)
+      return
+    }
+    onCouncilHandoff?.(payload.decree)
+  }, [onCouncilHandoff, onCouncilResearchHandoff])
 
   const handleSendToGrok = useCallback((story: NewsIntelStory) => {
     onCouncilHandoff?.(
@@ -179,6 +195,7 @@ export const NewsIntelCommandWall = memo(function NewsIntelCommandWall({
                   contradictionGroups={section === 'contradictions' ? payload.contradictionGroups : undefined}
                   allStories={payload.stories}
                   onAskCouncil={handleAskCouncil}
+                  onInvestigate={handleInvestigate}
                   onSendToGrok={handleSendToGrok}
                   onCreateOpportunity={story => void handleCreateOpportunity(story)}
                 />
@@ -344,6 +361,7 @@ function WallSection({
   contradictionGroups,
   allStories,
   onAskCouncil,
+  onInvestigate,
   onSendToGrok,
   onCreateOpportunity,
 }: {
@@ -352,6 +370,7 @@ function WallSection({
   contradictionGroups?: NewsIntelWallPayload['contradictionGroups']
   allStories: NewsIntelStory[]
   onAskCouncil: (story: NewsIntelStory) => void
+  onInvestigate: (story: NewsIntelStory) => void
   onSendToGrok: (story: NewsIntelStory) => void
   onCreateOpportunity: (story: NewsIntelStory) => void
 }) {
@@ -370,7 +389,7 @@ function WallSection({
             const groupStories = allStories.filter(s => group.storyIds.includes(s.id))
             if (!groupStories.length) return null
             return (
-              <ContradictionGroupBlock key={group.id} group={group} stories={groupStories} onAskCouncil={onAskCouncil} onSendToGrok={onSendToGrok} onCreateOpportunity={onCreateOpportunity} />
+              <ContradictionGroupBlock key={group.id} group={group} stories={groupStories} onAskCouncil={onAskCouncil} onInvestigate={onInvestigate} onSendToGrok={onSendToGrok} onCreateOpportunity={onCreateOpportunity} />
             )
           })}
         </div>
@@ -383,6 +402,7 @@ function WallSection({
               key={story.id}
               story={story}
               onAskCouncil={onAskCouncil}
+              onInvestigate={onInvestigate}
               onSendToGrok={onSendToGrok}
               onCreateOpportunity={onCreateOpportunity}
             />
@@ -399,12 +419,14 @@ function ContradictionGroupBlock({
   group,
   stories,
   onAskCouncil,
+  onInvestigate,
   onSendToGrok,
   onCreateOpportunity,
 }: {
   group: NewsIntelWallPayload['contradictionGroups'][number]
   stories: NewsIntelStory[]
   onAskCouncil: (story: NewsIntelStory) => void
+  onInvestigate: (story: NewsIntelStory) => void
   onSendToGrok: (story: NewsIntelStory) => void
   onCreateOpportunity: (story: NewsIntelStory) => void
 }) {
@@ -419,6 +441,7 @@ function ContradictionGroupBlock({
             key={story.id}
             story={story}
             onAskCouncil={onAskCouncil}
+            onInvestigate={onInvestigate}
             onSendToGrok={onSendToGrok}
             onCreateOpportunity={onCreateOpportunity}
             compact

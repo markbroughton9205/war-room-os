@@ -71,6 +71,9 @@ import {
 import { extractProposedCouncilActions } from '@/lib/council/extractCouncilActions'
 import { classifyRaElMessage, type ClassifyRaElMessageResult } from '@/lib/council/conversationIntent'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
+import { detectCouncilResearchIntent } from '@/lib/council-research/intent'
+import type { CouncilResearchHandoff, CouncilStoryContext, ResearchReport, ResearchStatus } from '@/lib/council-research/types'
+import { CouncilResearchStatus } from '@/components/war-room/council/CouncilResearchStatus'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
@@ -5353,6 +5356,10 @@ function Home() {
     holdSuppressions: 0,
   })
   const [liveResearchHud, setLiveResearchHud] = useState<LiveResearchClientUi | null>(null)
+  const [councilResearchActive, setCouncilResearchActive] = useState(false)
+  const [councilResearchPhase, setCouncilResearchPhase] = useState<ResearchStatus | null>(null)
+  const [councilResearchFailed, setCouncilResearchFailed] = useState(false)
+  const pendingCouncilResearchContextRef = useRef<CouncilStoryContext | null>(null)
   const [commanderLocation, setCommanderLocation] = useState<CommanderLocationState>(DEFAULT_COMMANDER_LOCATION)
   const [horoscopeEnabled, setHoroscopeEnabled] = useState(false)
   const [astrologyMode, setAstrologyMode] = useState<AstrologyInterpretationMode>('spiritual')
@@ -5381,6 +5388,16 @@ function Home() {
   }, [])
   const injectLiveEnvironmentDecree = useCallback((decree: string) => {
     setCommand(decree)
+    setOperatorTab('command')
+    window.requestAnimationFrame(() => {
+      const input = document.querySelector<HTMLTextAreaElement>('[data-command-surface-id="live-council-primary-decree"]')
+      input?.focus()
+    })
+  }, [setOperatorTab])
+
+  const handleCouncilResearchHandoff = useCallback((payload: CouncilResearchHandoff) => {
+    pendingCouncilResearchContextRef.current = payload.storyContext ?? null
+    setCommand(payload.decree)
     setOperatorTab('command')
     window.requestAnimationFrame(() => {
       const input = document.querySelector<HTMLTextAreaElement>('[data-command-surface-id="live-council-primary-decree"]')
@@ -7765,6 +7782,116 @@ function Home() {
     }
   }
 
+  const runCouncilResearchDecreeFlow = async (args: {
+    decree: string
+    storyContext: CouncilStoryContext | null
+    controller: AbortController
+  }) => {
+    const { decree, storyContext, controller } = args
+    setCouncilResearchActive(true)
+    setCouncilResearchFailed(false)
+    setCouncilResearchPhase('gathering_sources')
+    councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'researching' })
+    addSystemMessage('Council Research Team mobilized — gathering source-backed intelligence.')
+    const phaseTimers = [
+      window.setTimeout(() => setCouncilResearchPhase('comparing_sources'), 3_000),
+      window.setTimeout(() => setCouncilResearchPhase('red_team_check'), 9_000),
+    ]
+    try {
+      const res = await fetch('/api/council/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          decree,
+          storyContext: storyContext ?? undefined,
+          threadId: liveCouncilConvId ?? undefined,
+          forceTeamResearch: true,
+        }),
+      })
+      const body = await res.json() as { ok?: boolean; report?: ResearchReport; error?: string }
+      if (!res.ok || !body.report) {
+        throw new Error(body.error ?? `Council research failed (${res.status})`)
+      }
+      const report = body.report
+      setCouncilResearchPhase('final_answer_ready')
+      setLiveResearchHud({
+        mode: report.sourcesUnavailable ? 'unavailable' : 'verified',
+        sourcesCount: report.sources.length,
+        label: report.sourcesUnavailable ? 'Research — no live sources' : 'Council Research Team',
+        councilPhase: 'model_running',
+        responseCompletion: 'complete',
+      })
+      await streamFamilyMessage({
+        familyName: 'CHATGPT FAMILY',
+        bubbleFamilyName: 'CHATGPT FAMILY',
+        content: report.markdown,
+        provider: 'Council Research Team',
+        messageId: createMessageId('chatgpt'),
+        thinkingLabel: 'Council Research Team',
+        streamingLabel: 'Council Research Team',
+        instant: true,
+      })
+      void postLiveCouncilMessage({
+        role: 'assistant',
+        content: report.markdown,
+        family: 'CHATGPT FAMILY',
+      })
+      if (report.babyLessonCandidate) {
+        addRaelAction({
+          action_id: `lesson-candidate-${Date.now()}`,
+          related_opportunity_id: null,
+          title: 'Baby Observer lesson candidate',
+          question: `Save as durable lesson candidate after approval? ${report.babyLessonCandidate.text}`,
+          response_options: ['Approve lesson candidate', 'Hold for outcome', 'Reject'],
+          urgency: 'low',
+          expires_at: null,
+          source_agent: 'Baby Observer',
+        })
+      }
+      if (report.proposedOpportunity && liveCouncilConvId) {
+        try {
+          const oppRes = await fetch('/api/opportunities', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              threadId: liveCouncilConvId,
+              family: 'chatgpt',
+              story: {
+                headline: report.proposedOpportunity.title,
+                source: 'Council Research Team',
+                url: report.sources.find(s => s.url)?.url ?? null,
+                whyNow: report.proposedOpportunity.whyNow,
+                confidence: Math.round(report.confidenceScore * 100),
+              },
+            }),
+          })
+          const oppBody = await oppRes.json() as { commanderNote?: string }
+          if (oppRes.ok && oppBody.commanderNote) {
+            addSystemMessage(oppBody.commanderNote)
+          }
+        } catch {
+          /* opportunity registration optional */
+        }
+      }
+      councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
+      councilDispatch({ type: 'SET_COUNCIL_CHANNEL_OPEN', payload: true })
+    } catch (err) {
+      setCouncilResearchFailed(true)
+      addSystemMessage(
+        err instanceof Error ? err.message : 'Council Research Team could not complete.',
+      )
+      councilDispatch({ type: 'SET_COUNCIL_STATE', payload: councilSnapRef.current.councilChannelOpen ? 'active' : 'idle' })
+    } finally {
+      phaseTimers.forEach(id => window.clearTimeout(id))
+      window.setTimeout(() => {
+        setCouncilResearchActive(false)
+        setCouncilResearchPhase(null)
+        setCouncilResearchFailed(false)
+      }, 2_500)
+    }
+  }
+
   const submitDecree = async (decree: string, mode?: CouncilMode) => {
     const myRound = ++decreeRoundGenRef.current
     latestDecreeAttemptRoundRef.current = myRound
@@ -7800,6 +7927,26 @@ function Home() {
     const toneMode = detectToneMode(decree)
     const outputModeInstruction = buildCouncilOutputModeInstruction(councilOutputMode)
     const intent = lastDecreeIntentRef.current ?? classifyRaElMessage(decree)
+    const teamResearchIntent = detectCouncilResearchIntent(decree, {
+      forceTeamResearch: Boolean(pendingCouncilResearchContextRef.current),
+    })
+    if (
+      mode !== 'continue'
+      && teamResearchIntent.triggered
+      && !detectOsSweepIntent(decree)
+      && resolveEconomicOpsRouting(decree).mode !== 'economic_ops'
+    ) {
+      const storyContext = pendingCouncilResearchContextRef.current
+      pendingCouncilResearchContextRef.current = null
+      try {
+        await runCouncilResearchDecreeFlow({ decree, storyContext, controller })
+      } finally {
+        endToolRequest()
+        setLoading(false)
+        if (abortControllerRef.current === controller) abortControllerRef.current = null
+      }
+      return
+    }
     const decreeRequiresLiveRetrieval = detectResearchIntent(decree).shouldResearch
     if (mode !== 'continue' && decreeRequiresLiveRetrieval) {
       setLiveResearchHud({
@@ -10158,6 +10305,7 @@ function Home() {
         onToggleHoroscope={() => setHoroscopeEnabled(prev => !prev)}
         onSetAstrologyMode={setAstrologyMode}
         onCouncilHandoff={injectLiveEnvironmentDecree}
+        onCouncilResearchHandoff={handleCouncilResearchHandoff}
       />
       </>
       ) : null}
@@ -10182,6 +10330,7 @@ function Home() {
                 location={commanderLocation}
                 threadId={liveCouncilConvId ?? undefined}
                 onCouncilHandoff={injectLiveEnvironmentDecree}
+                onCouncilResearchHandoff={handleCouncilResearchHandoff}
                 opportunityCount={incomeOpportunities.length}
                 headlineOverride={
                   liveResearchHud && liveResearchHud.mode !== 'inactive'
@@ -10241,6 +10390,7 @@ function Home() {
                   onToggleHoroscope: () => setHoroscopeEnabled(prev => !prev),
                   onSetAstrologyMode: setAstrologyMode,
                   onCouncilHandoff: injectLiveEnvironmentDecree,
+                  onCouncilResearchHandoff: handleCouncilResearchHandoff,
                   threadId: liveCouncilConvId ?? undefined,
                 }}
                 babyObserver={(
@@ -10473,6 +10623,11 @@ function Home() {
               <span className="text-xs tracking-widest" style={{ color: '#888' }}>
                 {councilContinueStatusLine}
               </span>
+              <CouncilResearchStatus
+                active={councilResearchActive}
+                phase={councilResearchPhase}
+                failed={councilResearchFailed}
+              />
               {liveResearchHud ? (
                 <span
                   className="text-[9px] tracking-wide rounded px-2 py-0.5"

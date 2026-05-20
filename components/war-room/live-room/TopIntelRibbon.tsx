@@ -7,6 +7,7 @@ import type { CommanderLocationState } from '@/lib/intelligence/environment/loca
 import type { LiveEnvironmentDashboardPayload } from '@/lib/intelligence/environment/liveEnvironmentTypes'
 import { DEFAULT_COMMANDER_LOCATION } from '@/lib/intelligence/environment/locationPolicy'
 import { buildNewsIntelWall, fetchNewsIntelWallData } from '@/lib/intelligence/newsIntelWall'
+import type { CouncilResearchHandoff } from '@/lib/council-research/types'
 import { fetchJsonSafe, sanitizeConnectionError } from '@/lib/war-room/sanitizeConnectionError'
 
 const NewsIntelCommandWall = dynamic(
@@ -86,6 +87,7 @@ export type TopIntelRibbonProps = {
   location?: CommanderLocationState
   threadId?: string
   onCouncilHandoff?: (decree: string) => void
+  onCouncilResearchHandoff?: (payload: CouncilResearchHandoff) => void
   opportunityCount?: number
   urgentWarning?: string | null
   headlineOverride?: string | null
@@ -96,6 +98,7 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
   location = DEFAULT_COMMANDER_LOCATION,
   threadId,
   onCouncilHandoff,
+  onCouncilResearchHandoff,
   opportunityCount: opportunityCountProp,
   urgentWarning: urgentWarningProp,
   headlineOverride,
@@ -235,6 +238,7 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
           onClose={() => setIntelWallOpen(false)}
           location={location}
           onCouncilHandoff={onCouncilHandoff}
+          onCouncilResearchHandoff={onCouncilResearchHandoff}
           threadId={threadId}
         />
       ) : null}

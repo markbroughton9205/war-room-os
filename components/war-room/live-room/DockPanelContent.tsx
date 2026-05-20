@@ -8,6 +8,7 @@ import { WarRoomEvolutionPanel } from '@/components/war-room/evolution'
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/environment/locationPolicy'
 import type { AstrologyInterpretationMode } from '@/lib/intelligence/environment/horoscopeEnvironment'
+import type { CouncilResearchHandoff } from '@/lib/council-research/types'
 import type { CouncilRepairPacket } from '@/lib/council-repair'
 import type { DockPanelId } from './FeatureDock'
 import { useLiveRoomMode } from './LiveRoomModeContext'
@@ -81,6 +82,7 @@ export type DockPanelContentProps = {
     onToggleHoroscope: () => void
     onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
     onCouncilHandoff: (decree: string) => void
+    onCouncilResearchHandoff?: (payload: CouncilResearchHandoff) => void
     threadId?: string
   }
   babyObserver?: ReactNode

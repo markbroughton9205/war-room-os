@@ -33,12 +33,14 @@ function StatusPill({
 export const NewsIntelStoryCard = memo(function NewsIntelStoryCard({
   story,
   onAskCouncil,
+  onInvestigate,
   onSendToGrok,
   onCreateOpportunity,
   compact = false,
 }: {
   story: NewsIntelStory
   onAskCouncil: (story: NewsIntelStory) => void
+  onInvestigate?: (story: NewsIntelStory) => void
   onSendToGrok: (story: NewsIntelStory) => void
   onCreateOpportunity: (story: NewsIntelStory) => void
   compact?: boolean
@@ -107,6 +109,15 @@ export const NewsIntelStoryCard = memo(function NewsIntelStoryCard({
         >
           Ask Council
         </button>
+        {onInvestigate ? (
+          <button
+            type="button"
+            className="rounded border border-violet-400/25 px-2 py-1 text-[8px] font-bold uppercase tracking-widest text-violet-200 transition hover:border-violet-400/50"
+            onClick={() => onInvestigate(story)}
+          >
+            Investigate
+          </button>
+        ) : null}
         <button
           type="button"
           className="rounded border border-orange-400/25 px-2 py-1 text-[8px] font-bold uppercase tracking-widest text-orange-200 transition hover:border-orange-400/50"

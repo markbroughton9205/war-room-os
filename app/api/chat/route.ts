@@ -47,6 +47,8 @@ import {
 import { assessCouncilTextCompletion, type CouncilResponseCompletion } from '@/lib/council/responseCompletion'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
 import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
+import { detectCouncilResearchIntent } from '@/lib/council-research/intent'
+import { runCouncilResearchTeam } from '@/lib/council-research/orchestrator'
 import { formatCouncilOsSweepMarkdown } from '@/lib/war-room-sweep/formatCouncilResponse'
 import { runWarRoomOsSweep } from '@/lib/war-room-sweep/orchestrator'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
@@ -578,6 +580,59 @@ export async function POST(req: Request) {
         }],
         hardStop: true,
         mode: 'os_sweep',
+      })
+    }
+  }
+
+  const councilResearchTeamRequested = body.councilResearchTeam === true
+  const councilResearchIntent = detectCouncilResearchIntent(raelDirectiveText, {
+    forceTeamResearch: councilResearchTeamRequested || Boolean(body.storyContext),
+  })
+  if (
+    councilResearchTeamRequested
+    || (councilResearchIntent.triggered && body.councilResearchTeam !== false && !councilSingleFamilyEarly)
+  ) {
+    try {
+      const report = await runCouncilResearchTeam({
+        decree: raelDirectiveText,
+        threadId: conversationId,
+        profile,
+      })
+      await safeAudit({
+        success: true,
+        flow: 'council_research_team',
+        sourceCount: report.sources.length,
+        confidenceLevel: report.confidenceLevel,
+      })
+      return NextResponse.json({
+        results: [{ family: 'ChatGPT', content: report.markdown, status: 'OK' }],
+        councilSingleResponse: report.markdown,
+        councilSingleFamily: 'chatgpt',
+        hardStop: true,
+        mode: 'council_research_team',
+        councilResearchReport: report,
+        councilResearchPhases: report.phases,
+        showContinue: true,
+        liveResearchAttempted: true,
+        liveResearchUi: {
+          mode: report.sourcesUnavailable ? 'unavailable' : 'verified',
+          sourcesCount: report.sources.length,
+          label: 'Council Research Team',
+          councilPhase: 'model_running',
+          responseCompletion: 'complete',
+        },
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Council research team failed.'
+      await safeAudit({ success: false, flow: 'council_research_team', reason: message })
+      return NextResponse.json({
+        results: [{
+          family: 'SYSTEM',
+          content: `Council Research Team could not complete. ${message}`,
+          status: 'FAILED',
+        }],
+        hardStop: true,
+        mode: 'council_research_team',
       })
     }
   }
