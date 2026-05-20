@@ -46,6 +46,9 @@ import {
 } from '@/lib/runtime/runtimeEvidencePacket'
 import { assessCouncilTextCompletion, type CouncilResponseCompletion } from '@/lib/council/responseCompletion'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
+import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
+import { formatCouncilOsSweepMarkdown } from '@/lib/war-room-sweep/formatCouncilResponse'
+import { runWarRoomOsSweep } from '@/lib/war-room-sweep/orchestrator'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { runLiveResearchRouter } from '@/lib/research/researchRouter'
 import {
@@ -544,6 +547,38 @@ export async function POST(req: Request) {
       })
     } catch (err) {
       console.warn('[war-room-audit] insertWarRoomAuditLog failed:', err)
+    }
+  }
+
+  if (detectOsSweepIntent(raelDirectiveText)) {
+    try {
+      const report = await runWarRoomOsSweep(req)
+      const markdown = formatCouncilOsSweepMarkdown(report)
+      await safeAudit({
+        success: true,
+        flow: 'os_sweep',
+        readiness: report.summary.readinessScore,
+        findingCount: report.findings.length,
+      })
+      return NextResponse.json({
+        results: [{ family: 'SYSTEM', content: markdown, status: 'OK' }],
+        hardStop: true,
+        mode: 'os_sweep',
+        osSweepReport: report,
+        councilSingleResponse: markdown,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'War Room OS sweep failed.'
+      await safeAudit({ success: false, flow: 'os_sweep', reason: message })
+      return NextResponse.json({
+        results: [{
+          family: 'SYSTEM',
+          content: `War Room OS sweep could not complete. ${message} Open War Room Evolution → Run OS Sweep for structured results.`,
+          status: 'FAILED',
+        }],
+        hardStop: true,
+        mode: 'os_sweep',
+      })
     }
   }
 

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useWarRoomUiMode } from '@/components/war-room/WarRoomUiModeContext'
 import { buildEvolutionOperatorSummary } from '@/lib/operator/evolutionSummary'
 import type { RepairIntelligenceSnapshot } from '@/lib/evolution/types'
+import type { SweepReport } from '@/lib/war-room-sweep/types'
 import { RepairIntelligenceDetail } from './RepairIntelligenceDetail'
 
 type SchemaRepairPacketResponse = {
@@ -30,6 +31,8 @@ export function WarRoomEvolutionPanel({
   const [error, setError] = useState<string | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [sweepSummary, setSweepSummary] = useState<SweepReport['summary'] | null>(null)
+  const [lastSweepAt, setLastSweepAt] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -55,6 +58,46 @@ export function WarRoomEvolutionPanel({
     () => (snapshot ? buildEvolutionOperatorSummary(snapshot) : null),
     [snapshot],
   )
+
+  const runOsSweep = async () => {
+    setNotice(null)
+    try {
+      const res = await fetch('/api/war-room/sweep', { method: 'POST', cache: 'no-store' })
+      const body = await res.json() as SweepReport & { error?: string }
+      if (!res.ok) throw new Error(body.error || 'OS sweep failed')
+      setSweepSummary(body.summary)
+      setLastSweepAt(body.generatedAt)
+      setNotice(
+        `OS sweep: ${body.summary.readinessScore}% · ${body.summary.missingConfigCount} config · ${body.summary.repairCount} fixes`,
+      )
+      await load()
+    } catch {
+      setNotice('OS sweep request failed.')
+    }
+  }
+
+  const generateNextRepairPacket = async () => {
+    const findingId = sweepSummary?.recommendedNextRepairPacketId
+    if (!findingId) {
+      await generateRepairPacket()
+      return
+    }
+    setNotice(null)
+    try {
+      const res = await fetch(`/api/war-room/sweep?findingId=${encodeURIComponent(findingId)}`, {
+        method: 'PATCH',
+        cache: 'no-store',
+      })
+      const body = await res.json() as { repairPacket?: { cursorReadyPrompt?: string }; error?: string }
+      if (!res.ok || !body.repairPacket?.cursorReadyPrompt) {
+        throw new Error(body.error || 'Sweep repair packet unavailable')
+      }
+      await navigator.clipboard.writeText(body.repairPacket.cursorReadyPrompt)
+      setNotice('Next repair packet from OS sweep copied for Cursor handoff.')
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Repair packet generation failed.')
+    }
+  }
 
   const runSchemaSweep = async () => {
     setNotice(null)
@@ -163,6 +206,13 @@ export function WarRoomEvolutionPanel({
           {!engineering ? (
             <p className="text-[8px] text-slate-600">{operatorSummary.nextActionDetail}</p>
           ) : null}
+          {sweepSummary ? (
+            <p className="mt-1 text-[8px] text-violet-200">
+              Sweep: {sweepSummary.readinessScore}% · dupes {sweepSummary.duplicateCount} · stale{' '}
+              {sweepSummary.staleDegradedCount}
+              {lastSweepAt ? ` · ${new Date(lastSweepAt).toLocaleTimeString()}` : ''}
+            </p>
+          ) : null}
         </>
       ) : null}
 
@@ -175,7 +225,11 @@ export function WarRoomEvolutionPanel({
             onClick={() => setDetailsOpen(value => !value)}
           />
         ) : null}
-        <ActionButton label="Schema sweep" onClick={() => void runSchemaSweep()} disabled={loading} />
+        <ActionButton label="OS sweep" onClick={() => void runOsSweep()} disabled={loading} />
+        <ActionButton label="Next packet" onClick={() => void generateNextRepairPacket()} disabled={loading} />
+        {engineering ? (
+          <ActionButton label="Schema sweep" onClick={() => void runSchemaSweep()} disabled={loading} />
+        ) : null}
         <ActionButton label="Refresh runtime" onClick={() => void refreshRuntime()} disabled={loading} />
         {engineering ? (
           <>
@@ -196,7 +250,7 @@ export function WarRoomEvolutionPanel({
           className="mt-2 text-[7px] uppercase tracking-widest text-sky-300 underline"
           onClick={() =>
             onCouncilHandoff(
-              'Council, review War Room repair intelligence: missing configuration, schema drift, provider issues, and the next required action. Recommend one safe manual fix.',
+              'Council, run a War Room OS sweep: what needs fixed, added, or removed? Return top fixes with evidence — no vague answers.',
             )
           }
         >

@@ -378,6 +378,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   onSetAstrologyMode,
   onCouncilHandoff,
   threadId,
+  hideEvolutionPanel,
 }: {
   liveResearchHud: LiveResearchClientUi | null
   location: CommanderLocationState
@@ -389,6 +390,8 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
   onCouncilHandoff?: (decree: string) => void
   threadId?: string
+  /** When true, evolution summary lives in Live Room left rail only. */
+  hideEvolutionPanel?: boolean
 }) {
   const [intelWallOpen, setIntelWallOpen] = useState(false)
   const [configurationSweep, setConfigurationSweep] = useState<ConfigurationSweep | null>(null)
@@ -887,7 +890,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
           </div>
         </details>
 
-        <WarRoomEvolutionPanel onCouncilHandoff={onCouncilHandoff} />
+        {hideEvolutionPanel ? null : <WarRoomEvolutionPanel onCouncilHandoff={onCouncilHandoff} />}
       </div>
       {intelWallOpen ? (
         <NewsIntelCommandWall

@@ -206,10 +206,18 @@ import {
   AmbientActivityFeed,
   LiveRoomBottomDock,
   LiveRoomCenter,
+  LiveRoomEngineeringDrawer,
+  LiveRoomLeftRail,
+  LiveRoomModeBar,
+  LiveRoomModeProvider,
   LiveRoomRightRail,
   LiveRoomShell,
   LiveRoomTopBar,
+  useLiveRoomMode,
 } from '@/components/war-room/live-room'
+import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
+import { formatCouncilOsSweepMarkdown } from '@/lib/war-room-sweep/formatCouncilResponse'
+import type { SweepReport } from '@/lib/war-room-sweep/types'
 
 export type OperatorTab = 'command' | 'income' | 'agents' | 'analysts' | 'approvals' | 'memory' | 'system' | 'engineering' | 'diagnostics'
 
@@ -5127,6 +5135,7 @@ function ExpansionPermissionPrompt({
 }
 
 function Home() {
+  const { engineeringDrawerOpen, setEngineeringDrawerOpen } = useLiveRoomMode()
   const renderStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
   const { uiMode, setUiMode } = useWarRoomUiMode()
   const [command, setCommand] = useState('')
@@ -9293,6 +9302,43 @@ function Home() {
       return
     }
 
+    if (detectOsSweepIntent(decree)) {
+      addSystemMessage('Running War Room OS sweep…')
+      try {
+        const res = await fetch('/api/war-room/sweep', { method: 'POST', cache: 'no-store' })
+        const report = await res.json() as SweepReport & { error?: string }
+        if (!res.ok) throw new Error(report.error || 'OS sweep failed')
+        const markdown = formatCouncilOsSweepMarkdown(report)
+        addMessages([
+          {
+            id: createMessageId('os-sweep-system'),
+            familyName: 'SYSTEM',
+            content: 'War Room OS sweep complete (diagnostic only — no mutations applied).',
+            timestamp: new Date().toLocaleTimeString(),
+            color: '#94A3B8',
+            icon: '◆',
+            provider: 'War Room Evolution',
+            messageType: 'system',
+          },
+          {
+            id: createMessageId('os-sweep-council'),
+            familyName: 'CHATGPT',
+            content: markdown,
+            timestamp: new Date().toLocaleTimeString(),
+            color: '#93C5FD',
+            icon: '⚡',
+            provider: 'OS Sweep',
+            messageType: 'council',
+          },
+        ])
+      } catch (err) {
+        addSystemMessage(
+          err instanceof Error ? err.message : 'OS sweep failed. Use War Room Evolution → Run OS Sweep.',
+        )
+      }
+      return
+    }
+
     const projectPacket = createProjectOrchestrationPacket(decree)
     if (projectPacket) {
       if (projectPacket.engineeringTaskPacket) {
@@ -9823,10 +9869,13 @@ function Home() {
 
   const pendingNeedsRael = raelActions.some(a => a.status === 'pending')
   const isUnifiedLiveRoom = operatorTab === 'command'
-  const visibleOperatorTabs = useMemo(
-    () => OPERATOR_TABS.filter(tab => uiMode === 'advanced' || !ENGINEERING_TABS.includes(tab.id)),
-    [uiMode],
-  )
+  const visibleOperatorTabs = useMemo(() => {
+    const base = OPERATOR_TABS.filter(tab => uiMode === 'advanced' || !ENGINEERING_TABS.includes(tab.id))
+    if (operatorTab === 'command') {
+      return base.filter(tab => !ENGINEERING_TABS.includes(tab.id))
+    }
+    return base
+  }, [uiMode, operatorTab])
   useEffect(() => {
     if (uiMode === 'operator' && ENGINEERING_TABS.includes(operatorTab)) {
       setOperatorTab('command')
@@ -10125,18 +10174,9 @@ function Home() {
       <div className="relative z-10 flex flex-col">
         <WriteApprovalBanner />
         {operatorNav}
-        {uiMode === 'operator' && operatorTab === 'command' && (
-          <OperatorCommandEnvironment
-            version="24"
-            sessionIndicators={councilSessionIndicators}
-            onOpenEngineering={() => {
-              setUiMode('advanced')
-              setOperatorTab('engineering')
-            }}
-          />
-        )}
         {isUnifiedLiveRoom && (
         <LiveRoomShell
+          modeBar={<LiveRoomModeBar />}
           topBar={(
             <LiveRoomTopBar
               providerStripKeys={providerStripKeys}
@@ -10155,6 +10195,16 @@ function Home() {
               incomeWorkerStatus={incomeWorkerScout.executionState ?? 'idle'}
             />
           )}
+          leftRail={(
+            <LiveRoomLeftRail
+              sessionIndicators={councilSessionIndicators}
+              onCouncilHandoff={injectLiveEnvironmentDecree}
+              onOpenEngineering={() => {
+                setUiMode('advanced')
+                setEngineeringDrawerOpen(true)
+              }}
+            />
+          )}
           rightRail={(
             <LiveRoomRightRail
               enabled
@@ -10169,7 +10219,14 @@ function Home() {
                 onSetAstrologyMode: setAstrologyMode,
                 onCouncilHandoff: injectLiveEnvironmentDecree,
                 threadId: liveCouncilConvId ?? undefined,
+                hideEvolutionPanel: true,
               }}
+            />
+          )}
+          engineeringDrawer={(
+            <LiveRoomEngineeringDrawer
+              open={engineeringDrawerOpen}
+              latestRepairPacket={latestRepairPacket}
             />
           )}
           bottomDock={(
@@ -10844,7 +10901,9 @@ function Home() {
 export default function HomePage() {
   return (
     <WarRoomUiModeProvider>
-      <Home />
+      <LiveRoomModeProvider>
+        <Home />
+      </LiveRoomModeProvider>
     </WarRoomUiModeProvider>
   )
 }

@@ -40,6 +40,7 @@ export type LiveRoomRightRailProps = {
     onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
     onCouncilHandoff: (decree: string) => void
     threadId?: string
+    hideEvolutionPanel?: boolean
   }
 }
 
@@ -69,6 +70,7 @@ export const LiveRoomRightRail = memo(function LiveRoomRightRail({ enabled, live
           onSetAstrologyMode={liveEnvironment.onSetAstrologyMode}
           onCouncilHandoff={liveEnvironment.onCouncilHandoff}
           threadId={liveEnvironment.threadId}
+          hideEvolutionPanel={liveEnvironment.hideEvolutionPanel}
         />
       </PanelErrorBoundary>
       <PanelErrorBoundary label="Runtime alerts">
