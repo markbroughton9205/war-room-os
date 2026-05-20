@@ -27,7 +27,7 @@ export function LiveRoomShell({
       data-testid="live-room-shell"
     >
       <header
-        className="live-room-top flex-shrink-0 border-b border-yellow-900/70"
+        className="live-room-top w-full flex-shrink-0 border-b border-yellow-900/70"
         style={{ background: 'rgba(0,0,0,0.5)' }}
       >
         {topBar}

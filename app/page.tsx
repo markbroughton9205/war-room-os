@@ -206,7 +206,7 @@ import {
   DockPanelContent,
   LiveRoomShell,
   LiveRoomModeProvider,
-  TopIntelBar,
+  TopIntelRibbon,
   useLiveRoomMode,
   type DockPanelId,
 } from '@/components/war-room/live-room'
@@ -10178,7 +10178,10 @@ function Home() {
         <LiveRoomShell
           topBar={(
             <>
-              <TopIntelBar
+              <TopIntelRibbon
+                location={commanderLocation}
+                threadId={liveCouncilConvId ?? undefined}
+                onCouncilHandoff={injectLiveEnvironmentDecree}
                 opportunityCount={incomeOpportunities.length}
                 headlineOverride={
                   liveResearchHud && liveResearchHud.mode !== 'inactive'

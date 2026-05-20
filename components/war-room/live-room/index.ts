@@ -1,5 +1,6 @@
 export { LiveRoomShell } from './LiveRoomShell'
 export { TopIntelBar } from './TopIntelBar'
+export { TopIntelRibbon } from './TopIntelRibbon'
 export { CouncilWorkspace } from './CouncilWorkspace'
 export { FeatureDock, DOCK_ICONS, type DockPanelId } from './FeatureDock'
 export { DockPanel } from './DockPanel'
