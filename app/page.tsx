@@ -201,7 +201,15 @@ import {
   type CouncilCompressedSummary,
   type CouncilOutputMode,
 } from '@/lib/council/compression'
-import { OperatorCommandDeck, OperatorCommandEnvironment } from '@/components/war-room/operator'
+import { OperatorCommandEnvironment } from '@/components/war-room/operator'
+import {
+  AmbientActivityFeed,
+  LiveRoomBottomDock,
+  LiveRoomCenter,
+  LiveRoomRightRail,
+  LiveRoomShell,
+  LiveRoomTopBar,
+} from '@/components/war-room/live-room'
 
 export type OperatorTab = 'command' | 'income' | 'agents' | 'analysts' | 'approvals' | 'memory' | 'system' | 'engineering' | 'diagnostics'
 
@@ -9814,6 +9822,7 @@ function Home() {
   }
 
   const pendingNeedsRael = raelActions.some(a => a.status === 'pending')
+  const isUnifiedLiveRoom = operatorTab === 'command'
   const visibleOperatorTabs = useMemo(
     () => OPERATOR_TABS.filter(tab => uiMode === 'advanced' || !ENGINEERING_TABS.includes(tab.id)),
     [uiMode],
@@ -10072,6 +10081,8 @@ function Home() {
         </Link>
       </header>
 
+      {!isUnifiedLiveRoom ? (
+      <>
       <div
         className="relative z-10 flex flex-shrink-0 flex-wrap items-center gap-3 border-b border-yellow-900/80 px-6 py-2"
         style={{ background: 'rgba(0,0,0,0.45)' }}
@@ -10088,7 +10099,6 @@ function Home() {
           )
         })}
       </div>
-
       <LiveEnvironmentPanel
         liveResearchHud={liveResearchHud}
         location={commanderLocation}
@@ -10100,6 +10110,8 @@ function Home() {
         onSetAstrologyMode={setAstrologyMode}
         onCouncilHandoff={injectLiveEnvironmentDecree}
       />
+      </>
+      ) : null}
 
       {standingPermissionStrip}
 
@@ -10123,12 +10135,61 @@ function Home() {
             }}
           />
         )}
-        {operatorTab === 'command' && (
-        <section data-testid="live-council-chat-card" className="mx-4 mt-4 overflow-hidden rounded border border-yellow-900/50" style={{ background: 'rgba(10,8,4,0.58)' }}>
-        <div
-          className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-yellow-900/60 px-6 py-2"
-          style={{ background: 'rgba(0,0,0,0.5)' }}
-        >
+        {isUnifiedLiveRoom && (
+        <LiveRoomShell
+          topBar={(
+            <LiveRoomTopBar
+              providerStripKeys={providerStripKeys}
+              providerHealth={providerHealth}
+              chatHealthLabel={chatHealthLabel}
+              councilStateLabel={councilContinueStatusLine}
+              missionExtra={liveResearchHud && liveResearchHud.mode !== 'inactive' ? liveResearchHud.label : undefined}
+            />
+          )}
+          ambientFeed={(
+            <AmbientActivityFeed
+              familyPresence={familyPresence}
+              typingFamily={typingFamily}
+              runtime={conversationRuntimeSnapshot}
+              scoutStatus={opportunityScout.status}
+              incomeWorkerStatus={incomeWorkerScout.executionState ?? 'idle'}
+            />
+          )}
+          rightRail={(
+            <LiveRoomRightRail
+              enabled
+              liveEnvironment={{
+                liveResearchHud,
+                location: commanderLocation,
+                horoscopeEnabled,
+                astrologyMode,
+                onSetLocationMode: setLocationMode,
+                onForgetLocation: forgetCommanderLocation,
+                onToggleHoroscope: () => setHoroscopeEnabled(prev => !prev),
+                onSetAstrologyMode: setAstrologyMode,
+                onCouncilHandoff: injectLiveEnvironmentDecree,
+              }}
+            />
+          )}
+          bottomDock={(
+            <LiveRoomBottomDock
+              pendingApprovals={raelActions.filter(a => a.status === 'pending').length}
+              queueActionCount={queueActions.length}
+              opportunityCount={incomeOpportunities.length}
+              familiesStrip={activeFamiliesSection}
+              ordersStrip={activeOrdersStrip}
+              needsRaelPanel={pendingNeedsRael ? (
+                <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
+              ) : null}
+            />
+          )}
+          center={(
+        <LiveRoomCenter
+          scrollContainerRef={scrollContainerRef}
+          onScroll={handleScroll}
+          toolbar={(
+        <>
+          <div className="flex w-full flex-wrap items-center justify-between gap-2">
           <div>
             <span className="text-[10px] font-bold tracking-widest" style={{ color: '#93C5FD' }}>
               FAMILY COMMAND FLOW
@@ -10184,8 +10245,11 @@ function Home() {
               </button>
             )}
           </div>
-        </div>
-        <div className="flex-shrink-0 px-6 pt-3 pb-2">
+          </div>
+        </>
+          )}
+          preamble={(
+        <>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FFD700' }}>LIVE COUNCIL</h2>
             {!autoScrollEnabled && (
@@ -10286,13 +10350,10 @@ function Home() {
               </ul>
             </div>
           ) : null}
-        </div>
-        <div
-          data-testid="live-council-messages"
-          ref={scrollContainerRef}
-          onScroll={handleScroll}
-          className="max-h-[58vh] min-h-[22rem] overflow-y-auto px-6 py-2"
-        >
+        </>
+          )}
+          thread={(
+        <>
           <CouncilMessageRows
             messages={visibleCouncilMessages}
             hiddenCount={hiddenCouncilMessageCount}
@@ -10402,9 +10463,10 @@ function Home() {
           )}
 
           <div ref={bottomRef} />
-        </div>
-
-        <div className="flex-shrink-0 border-t border-yellow-900 px-6 py-4" style={{ background: 'rgba(255,215,0,0.09)' }}>
+        </>
+          )}
+          composer={(
+        <>
           <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
             <div>
               <p className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }}>Speak to the AI families</p>
@@ -10446,19 +10508,16 @@ function Home() {
           <p className="mt-2 text-[9px] tracking-widest" style={{ color: '#555' }}>
             Messages persist to Supabase when configured; otherwise this tab uses sessionStorage. Cloud order: ChatGPT → Claude → Grok → Gemini (Income Operations: Grok → Gemini → ChatGPT → Claude).
           </p>
-        </div>
-        </section>
+        </>
+          )}
+          inlineBelowThread={latestRepairPacket ? <RepairPacketPanel latest={latestRepairPacket} /> : null}
+        />
+          )}
+        />
         )}
-
-        {uiMode === 'operator' && operatorTab === 'command' && <OperatorCommandDeck />}
-        {uiMode === 'operator' && operatorTab === 'command' && activeFamiliesSection}
-        {uiMode === 'operator' && operatorTab === 'command' && pendingNeedsRael && (
-          <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
-        )}
-        {uiMode === 'operator' && operatorTab === 'command' && activeOrdersStrip}
         <div className="px-6 py-4">
           <div className="space-y-4">
-            {operatorTab === 'command' && (
+            {operatorTab === 'command' && !isUnifiedLiveRoom && (
               <section className="rounded border border-white/10 p-3 text-[10px]" style={{ background: 'rgba(0,0,0,0.24)', color: '#94a3b8' }}>
                 <div className="mb-2 font-bold tracking-widest" style={{ color: '#86EFAC' }}>COMMAND CENTER</div>
                 <div className="flex flex-wrap gap-2">
@@ -10468,7 +10527,7 @@ function Home() {
                 </div>
               </section>
             )}
-            {uiMode === 'advanced' && operatorTab === 'command' && <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />}
+            {uiMode === 'advanced' && operatorTab === 'command' && !isUnifiedLiveRoom && <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />}
             {operatorTab === 'agents' && (
               <>
                 <div className="mb-3 border-b border-yellow-900/40 pb-2">
