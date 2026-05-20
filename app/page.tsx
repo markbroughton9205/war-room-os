@@ -10168,6 +10168,7 @@ function Home() {
                 onToggleHoroscope: () => setHoroscopeEnabled(prev => !prev),
                 onSetAstrologyMode: setAstrologyMode,
                 onCouncilHandoff: injectLiveEnvironmentDecree,
+                threadId: liveCouncilConvId ?? undefined,
               }}
             />
           )}

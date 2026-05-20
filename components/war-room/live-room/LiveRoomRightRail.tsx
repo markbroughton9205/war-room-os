@@ -39,6 +39,7 @@ export type LiveRoomRightRailProps = {
     onToggleHoroscope: () => void
     onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
     onCouncilHandoff: (decree: string) => void
+    threadId?: string
   }
 }
 
@@ -67,6 +68,7 @@ export const LiveRoomRightRail = memo(function LiveRoomRightRail({ enabled, live
           onToggleHoroscope={liveEnvironment.onToggleHoroscope}
           onSetAstrologyMode={liveEnvironment.onSetAstrologyMode}
           onCouncilHandoff={liveEnvironment.onCouncilHandoff}
+          threadId={liveEnvironment.threadId}
         />
       </PanelErrorBoundary>
       <PanelErrorBoundary label="Runtime alerts">

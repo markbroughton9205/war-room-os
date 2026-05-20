@@ -1,5 +1,6 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { memo, useEffect, useMemo, useState } from 'react'
 
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
@@ -11,6 +12,11 @@ import { describeLocationMode } from '@/lib/intelligence/environment/locationPol
 import { buildHoroscopeSnapshot, type AstrologyInterpretationMode, type HoroscopePeriod } from '@/lib/intelligence/environment/horoscopeEnvironment'
 import { familyTipsForPanel, type FamilyTip } from '@/lib/familyTips'
 import { WarRoomEvolutionPanel } from '@/components/war-room/evolution'
+
+const NewsIntelCommandWall = dynamic(
+  () => import('@/components/intelligence/NewsIntelCommandWall').then(mod => mod.NewsIntelCommandWall),
+  { ssr: false },
+)
 import type {
   EnvironmentSetupGuidance,
   FinanceDashboardSnapshot,
@@ -371,6 +377,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   onToggleHoroscope,
   onSetAstrologyMode,
   onCouncilHandoff,
+  threadId,
 }: {
   liveResearchHud: LiveResearchClientUi | null
   location: CommanderLocationState
@@ -381,7 +388,9 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
   onToggleHoroscope: () => void
   onSetAstrologyMode: (mode: AstrologyInterpretationMode) => void
   onCouncilHandoff?: (decree: string) => void
+  threadId?: string
 }) {
+  const [intelWallOpen, setIntelWallOpen] = useState(false)
   const [configurationSweep, setConfigurationSweep] = useState<ConfigurationSweep | null>(null)
   const [dashboard, setDashboard] = useState<LiveEnvironmentDashboardPayload | null>(null)
   const [dashboardError, setDashboardError] = useState<string | null>(null)
@@ -780,7 +789,7 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
 
         <details className="environment-card-motion rounded border border-white/10 bg-black/25 p-2">
           <summary className="cursor-pointer list-none">
-            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">News Intel</p>
+            <NewsIntelCardHeader onExpand={() => setIntelWallOpen(true)} />
             {activeNews ? (
               <div className="mt-2 overflow-hidden rounded border border-white/10 bg-slate-950/60">
                 {activeNews.imageUrl ? (
@@ -880,6 +889,33 @@ export const LiveEnvironmentPanel = memo(function LiveEnvironmentPanel({
 
         <WarRoomEvolutionPanel onCouncilHandoff={onCouncilHandoff} />
       </div>
+      {intelWallOpen ? (
+        <NewsIntelCommandWall
+          open={intelWallOpen}
+          onClose={() => setIntelWallOpen(false)}
+          location={location}
+          onCouncilHandoff={onCouncilHandoff}
+          threadId={threadId}
+        />
+      ) : null}
     </section>
   )
 })
+
+function NewsIntelCardHeader({ onExpand }: { onExpand: () => void }) {
+  return (
+    <div className="flex items-start justify-between gap-2">
+      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">News Intel</p>
+      <button
+        type="button"
+        className="shrink-0 rounded border border-cyan-400/30 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-widest text-cyan-200 hover:bg-cyan-400/10"
+        onClick={e => {
+          e.preventDefault()
+          onExpand()
+        }}
+      >
+        Expand Intel
+      </button>
+    </div>
+  )
+}

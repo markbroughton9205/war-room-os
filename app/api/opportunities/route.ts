@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { priorProviderPacketsInThread } from '@/lib/council-routing/threadContext'
 import { loadCouncilThreadFromStore } from '@/lib/cognitive-bus/persistence'
+import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { OperatorOpportunityFilterId, ScoutOpportunity } from '@/lib/opportunities/schema'
 import type { OperatorOpportunityFilters } from '@/lib/opportunities/filters'
-import { collectOpportunitiesFromBusPackets, listScoutOpportunities, setOpportunityApproval } from '@/lib/opportunities/store'
+import type { OpportunityPacket } from '@/lib/opportunities/schema'
+import { collectOpportunitiesFromBusPackets, listScoutOpportunities, registerScoutOpportunities, setOpportunityApproval } from '@/lib/opportunities/store'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 
 export const dynamic = 'force-dynamic'
@@ -77,6 +79,57 @@ export async function GET(req: Request) {
     filters,
     opportunities,
     commanderNote: 'Opportunities remain PROPOSED until Commander approval; no autonomous execution.',
+  })
+}
+
+export async function POST(req: Request) {
+  let body: Record<string, unknown> = {}
+  try {
+    const raw = await req.json()
+    if (raw && typeof raw === 'object') body = raw as Record<string, unknown>
+  } catch {
+    return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 })
+  }
+
+  const threadId = typeof body.threadId === 'string' && body.threadId.trim() ? body.threadId.trim() : 'live-environment'
+  const familyRaw = typeof body.family === 'string' ? body.family : 'grok'
+  const family = familyRaw as CouncilOrchestrationFamily
+  const story = body.story && typeof body.story === 'object' ? body.story as Record<string, unknown> : null
+  if (!story || typeof story.headline !== 'string' || !story.headline.trim()) {
+    return NextResponse.json({ ok: false, error: 'story.headline required' }, { status: 400 })
+  }
+
+  const confidence = typeof story.confidence === 'number' && Number.isFinite(story.confidence)
+    ? Math.max(1, Math.min(100, Math.round(story.confidence)))
+    : 50
+
+  const packet: OpportunityPacket = {
+    opportunityTitle: story.headline.trim().slice(0, 120),
+    startupCost: 'TBD — Commander review',
+    estimatedRevenue: 'TBD — verify source',
+    timeToLaunch: '7+ days',
+    toolsRequired: ['War Room', 'Source verification'],
+    targetCustomer: typeof story.source === 'string' ? story.source : 'Intel-derived',
+    executionDifficulty: 'medium',
+    confidence,
+    risks: ['Source-backed intel only — verify payout and terms before action'],
+    whyNow: typeof story.whyNow === 'string' && story.whyNow.trim()
+      ? story.whyNow.trim()
+      : 'News Intel signal flagged for opportunity review.',
+  }
+
+  const registered = registerScoutOpportunities({
+    threadId,
+    family,
+    packets: [packet],
+    liveSignalsAvailable: true,
+  })
+
+  return NextResponse.json({
+    ok: true,
+    opportunity: registered[0] ?? null,
+    commanderNote: 'Opportunity registered as PROPOSED from News Intel — Commander approval required before execution.',
+    externalExecution: false,
   })
 }
 
