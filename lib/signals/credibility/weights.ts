@@ -6,7 +6,10 @@ const PROVIDER_BASE: Record<SignalProviderId, number> = {
   newsapi: 76,
   rss: 48,
   tavily: 44,
+  brave: 50,
   firecrawl: 46,
+  cached: 38,
+  historical: 32,
   manual_registry: 55,
   source_url: 40,
 }

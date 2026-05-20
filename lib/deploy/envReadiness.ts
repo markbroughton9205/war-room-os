@@ -31,6 +31,12 @@ export const ENV_VAR_GROUPS: EnvVarGroupDef[] = [
     optional: ['ANTHROPIC_API_KEY'],
   },
   {
+    id: 'brave',
+    label: 'Brave Search',
+    required: [],
+    optional: ['BRAVE_API_KEY'],
+  },
+  {
     id: 'tavily',
     label: 'Tavily',
     required: [],

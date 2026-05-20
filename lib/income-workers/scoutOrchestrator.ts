@@ -5,6 +5,7 @@ import { searchTavilyIncomeOpportunities, type OpportunityScoutCandidate } from 
 import { listScoutOpportunities, registerScoutOpportunities } from '@/lib/opportunities/store'
 import type { OpportunityPacket, ScoutOpportunity } from '@/lib/opportunities/schema'
 import { listPersistedSignalSnapshot } from '@/lib/signals'
+import { runBraveSignalSearch } from '@/lib/signals/providers/brave'
 import {
   buildHistoricalFallbackCandidates,
   buildHistoricalFallbackPackets,
@@ -216,6 +217,58 @@ async function tryFirecrawl(ctx: ScoutContext): Promise<{
   }
 }
 
+async function tryBrave(ctx: ScoutContext): Promise<IncomeWorkerCandidate[]> {
+  if (!process.env.BRAVE_API_KEY) {
+    log(ctx, 'Brave unavailable (not configured)')
+    return []
+  }
+  try {
+    log(ctx, 'Switching to Brave search fallback')
+    const capturedAt = new Date().toISOString()
+    const scan = await runBraveSignalSearch(capturedAt)
+    const rows = scan.items.filter(item => item.url.startsWith('https://')).slice(0, 6)
+    if (!rows.length) {
+      log(ctx, 'Brave online but no https candidates')
+      return []
+    }
+    ctx.fallbackPath.push('brave_live')
+    log(ctx, `Brave returned ${rows.length} intelligence rows`)
+    return rows.map(row => ({
+      title: row.title,
+      url: row.url,
+      source: row.sourceLabel,
+      country: 'remote',
+      type: 'brave_intelligence',
+      payout: null,
+      currency: null,
+      expiration: null,
+      riskLevel: 'medium' as const,
+      verificationStatus: 'candidate' as const,
+      reason: row.summary.slice(0, 200),
+      provider: 'brave',
+      score: 58,
+      eligibleWorkers: eligibleWorkersFor({
+        title: row.title,
+        url: row.url,
+        source: row.sourceLabel,
+        country: 'remote',
+        type: 'brave_intelligence',
+        payout: null,
+        currency: null,
+        expiration: null,
+        riskLevel: 'medium',
+        verificationStatus: 'candidate',
+        reason: row.summary,
+        provider: 'brave',
+      }),
+      evidenceLabel: 'LIVE_SIGNAL_BACKED' as const,
+    }))
+  } catch (error) {
+    log(ctx, `Brave unavailable (${sanitizeErrorMessage(error)})`)
+    return []
+  }
+}
+
 async function tryRss(ctx: ScoutContext): Promise<IncomeWorkerCandidate[]> {
   log(ctx, 'Switching to RSS intelligence fallback')
   try {
@@ -363,7 +416,26 @@ export async function orchestrateIncomeWorkerScout(
 
   if (!candidates.length) {
     degradedMode = true
-    log(ctx, 'Provider offline — live scouts unavailable or empty')
+    log(ctx, 'Tavily empty — walking federation fallback chain')
+    const rssCandidates = await tryRss(ctx)
+    if (rssCandidates.length) {
+      candidates = rssCandidates
+      selectedProvider = 'rss'
+      sourceType = 'rss_intelligence'
+    }
+  }
+
+  if (!candidates.length) {
+    const braveCandidates = await tryBrave(ctx)
+    if (braveCandidates.length) {
+      candidates = braveCandidates
+      selectedProvider = 'brave'
+      sourceType = 'brave_live'
+      liveSignalsAvailable = true
+    }
+  }
+
+  if (!candidates.length) {
     const firecrawl = await tryFirecrawl(ctx)
     if (firecrawl?.candidates.length) {
       candidates = firecrawl.candidates
@@ -376,15 +448,6 @@ export async function orchestrateIncomeWorkerScout(
     } else if (firecrawl) {
       rejected = [...rejected, ...firecrawl.rejected]
       sourcesChecked += firecrawl.sourcesChecked
-    }
-  }
-
-  if (!candidates.length) {
-    const rssCandidates = await tryRss(ctx)
-    if (rssCandidates.length) {
-      candidates = rssCandidates
-      selectedProvider = 'rss'
-      sourceType = 'rss_intelligence'
     }
   }
 

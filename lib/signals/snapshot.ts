@@ -1,4 +1,4 @@
-import type { SignalAlert, SignalCacheFreshnessDiagnostics, SignalClassificationDiagnostics, SignalResult, SignalScan, SignalSnapshot, SignalSourceDefinition } from './model'
+import type { SignalAlert, SignalCacheFreshnessDiagnostics, SignalClassificationDiagnostics, SignalFederationMetadata, SignalResult, SignalScan, SignalSnapshot, SignalSourceDefinition } from './model'
 import { isOperatorActionableClassifiedSignal, partitionClassifiedSignals } from './classification'
 import { isActiveSignalResult } from './freshness'
 
@@ -90,6 +90,7 @@ export function buildSignalSnapshot(input: {
   alerts: SignalAlert[]
   cacheDiagnostics?: SignalCacheFreshnessDiagnostics
   classificationDiagnostics?: SignalClassificationDiagnostics
+  federationMetadata?: SignalFederationMetadata
 }): SignalSnapshot {
   const ranked = [...input.results].sort((a, b) => b.scores.highestLeverage - a.scores.highestLeverage)
   const sourceBacked = ranked.filter(result => (
@@ -116,6 +117,7 @@ export function buildSignalSnapshot(input: {
     cacheDiagnostics: input.cacheDiagnostics,
     classification,
     classificationDiagnostics: input.classificationDiagnostics,
+    federationMetadata: input.federationMetadata,
     integrations: integrationLines(operatorActionable.length ? operatorActionable : sourceBacked),
     guardrails: guardrails(),
   }

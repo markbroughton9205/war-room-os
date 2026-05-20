@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CanonicalStatusBadge } from '@/components/war-room/runtime/CanonicalStatusBadge'
 import type { SignalClassificationBuckets, SignalResult, SignalSnapshot, SignalSourceDefinition } from '@/lib/signals/model'
 import { newsCardTimestampLabel, signalCardDisplayLabel, signalIngestedAtFromResult } from '@/lib/signals/freshness'
+import { SignalFederationPanel } from '@/components/war-room/signals/SignalFederationPanel'
 
 function label(value: string) {
   return value.replace(/_/g, ' ')
@@ -239,6 +240,14 @@ export function SignalRadarPanel() {
 
       {error ? <div className="mb-4 rounded border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">{error}</div> : null}
       {notice ? <div className="mb-4 rounded border border-cyan-500/30 bg-cyan-500/10 p-3 text-xs text-cyan-100">{notice}</div> : null}
+
+      <SignalFederationPanel embedded />
+
+      {snapshot?.federationMetadata?.fallbackActivated ? (
+        <div className="mb-4 rounded border border-violet-500/30 bg-violet-500/5 p-3 text-xs text-violet-100">
+          Federation: {snapshot.federationMetadata.activeSource} — {snapshot.federationMetadata.confidenceImpact}
+        </div>
+      ) : null}
 
       <div className="mb-4 grid gap-3 md:grid-cols-5">
         <MiniMetric label="Configured Sources" value={`${sourceStats.configured}/${sourceStats.total}`} />

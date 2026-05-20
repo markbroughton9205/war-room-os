@@ -31,10 +31,13 @@ export type SignalApprovalStatus = (typeof SIGNAL_APPROVAL_STATUSES)[number]
 
 export type SignalProviderId =
   | 'tavily'
+  | 'brave'
   | 'firecrawl'
   | 'rss'
   | 'newsapi'
   | 'guardian'
+  | 'cached'
+  | 'historical'
   | 'manual_registry'
   | 'source_url'
 
@@ -203,6 +206,17 @@ export type SignalClassificationDiagnostics = {
   failures: Array<{ signalId: string; error: string }>
 }
 
+export type SignalFederationMetadata = {
+  activeSource: string
+  fallbackActivated: boolean
+  fallbackReason: string | null
+  confidenceImpact: string
+  mode: 'live' | 'degraded' | 'historical'
+  operatorGuidance: string
+  fallbackChain: string[]
+  degradedSources: string[]
+}
+
 export type SignalSnapshot = {
   generatedAt: string
   persistenceAvailable: boolean
@@ -217,6 +231,7 @@ export type SignalSnapshot = {
   cacheDiagnostics?: SignalCacheFreshnessDiagnostics
   classification?: SignalClassificationBuckets
   classificationDiagnostics?: SignalClassificationDiagnostics
+  federationMetadata?: SignalFederationMetadata
   integrations: {
     revenueEngine: string[]
     babyDailyBriefing: string[]

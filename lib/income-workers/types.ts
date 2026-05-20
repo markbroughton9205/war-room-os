@@ -55,6 +55,7 @@ export type IncomeWorkerScoutExecutionState =
 
 export type IncomeWorkerScoutSourceType =
   | 'tavily_live'
+  | 'brave_live'
   | 'firecrawl_live'
   | 'rss_intelligence'
   | 'cached_opportunities'
