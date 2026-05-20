@@ -174,6 +174,7 @@ import {
   type GeminiRenderDiagnostics,
 } from '@/lib/council/councilRenderGate'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
+import { COUNCIL_STABILITY_FAILURE_MESSAGE } from '@/lib/council/stabilityMode'
 import type { ResponseIntegrityStatus } from '@/lib/providers/responseIntegrity'
 import { createMessageId } from '@/lib/council/messageIds'
 import { cloudEngineReadinessLabel, cloudEngineStripStatus, internetToolReadinessParts } from '@/lib/warRoom/providerReadiness'
@@ -1251,12 +1252,14 @@ function gatherCellsToProviderRuntimeDetails(
 const MessageBubble = memo(function MessageBubble({
   msg,
   diagnosticsOpen,
+  councilStabilityMode,
   onOpenFullMemory,
   onProjectAction,
   onPrepareRepairPacket,
 }: {
   msg: CouncilMessage
   diagnosticsOpen?: boolean
+  councilStabilityMode?: boolean
   onOpenFullMemory?: (preview: CouncilMemoryRecallPreview) => void
   onProjectAction?: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
   onPrepareRepairPacket?: (message: CouncilMessage) => void
@@ -1604,7 +1607,7 @@ const MessageBubble = memo(function MessageBubble({
           }}>
           {msg.content}
         </div>
-        {!isRael && msg.messageType === 'response' && isCouncilMessageRepairPacketEligible(msg) ? (
+        {!isRael && !councilStabilityMode && msg.messageType === 'response' && isCouncilMessageRepairPacketEligible(msg) ? (
           <button
             type="button"
             onClick={() => onPrepareRepairPacket?.(msg)}
@@ -1628,6 +1631,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   messages,
   hiddenCount,
   collapsedNoiseCount,
+  councilStabilityMode,
   onViewArchive,
   onSummarizeSession,
   onRecallEconomicOps,
@@ -1638,6 +1642,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   messages: CouncilMessage[]
   hiddenCount: number
   collapsedNoiseCount: number
+  councilStabilityMode?: boolean
   onViewArchive: () => void
   onSummarizeSession: () => void
   onRecallEconomicOps: () => void
@@ -1679,6 +1684,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           key={msg.id}
           msg={msg}
           diagnosticsOpen={false}
+          councilStabilityMode={councilStabilityMode}
           onOpenFullMemory={onOpenFullMemory}
           onProjectAction={onProjectAction}
           onPrepareRepairPacket={onPrepareRepairPacket}
@@ -5203,6 +5209,23 @@ function Home() {
     const id = window.setInterval(tick, TOOLBAR_HEALTH_POLL_INTERVAL_MS)
     return () => window.clearInterval(id)
   }, [operatorTab, refreshToolBarHealthBars])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/council/stability-mode', { cache: 'no-store' })
+        if (!res.ok) return
+        const body = (await res.json()) as { active?: boolean }
+        if (!cancelled) setCouncilStabilityMode(body.active === true)
+      } catch {
+        /* ignore */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const [memories, setMemories] = useState<MemoryEntry[]>([])
   const [repoAwareness, setRepoAwareness] = useState<RepoAwarenessState>(INITIAL_REPO_AWARENESS_STATE)
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
@@ -5211,6 +5234,7 @@ function Home() {
   const [latestRepairPacket, setLatestRepairPacket] = useState<CouncilRepairPacket | null>(null)
   const [latestAnalystPacket, setLatestAnalystPacket] = useState<AnalystOperationsPacket | null>(null)
   const [councilOutputMode, setCouncilOutputMode] = useState<CouncilOutputMode>('standard')
+  const [councilStabilityMode, setCouncilStabilityMode] = useState(false)
   const [sessionLifecycle, setSessionLifecycle] = useState<CouncilSessionLifecycle>('active')
   const councilPersistenceCtx = useMemo(() => buildCouncilPersistenceContext(), [])
   const { store: council, dispatch: councilDispatch, mounted: councilMounted, newSessionId } =
@@ -5880,6 +5904,10 @@ function Home() {
   }
 
   const prepareRepairPacketFromCouncilMessage = async (message: CouncilMessage) => {
+    if (councilStabilityMode) {
+      addSystemMessage('Repair packets are disabled while Minimal Stable Council Mode is active.', { force: true })
+      return
+    }
     if (!isCouncilMessageRepairPacketEligible(message)) {
       addSystemMessage(
         'Repair packet cannot use greeting-only or degraded council placeholders. Describe the broken panel, symptom, and expected behavior in a decree first.',
@@ -7531,6 +7559,7 @@ function Home() {
   }
 
   const scheduleNextOrchestration = () => {
+    if (councilStabilityMode) return
     clearOrchestrationTimer()
     const sid = councilSnapRef.current.sessionId
     orchestrationTimerRef.current = window.setTimeout(() => {
@@ -7540,6 +7569,7 @@ function Home() {
   }
 
   const runAutonomousOrchestration = async (expectedSessionId: string) => {
+    if (councilStabilityMode) return
     const snap = councilSnapRef.current
     if (snap.sessionId !== expectedSessionId) return
     if (autonomousOrchInFlightRef.current) return
@@ -7706,7 +7736,9 @@ function Home() {
             return
           }
           const famLabel = COUNCIL_ROSTER.find(ro => ro.id === family)?.label ?? family
-          const errLine = `[Error] ${famLabel}: ${summary}`
+          const errLine = councilStabilityMode || data.councilStabilityIssue
+            ? COUNCIL_STABILITY_FAILURE_MESSAGE
+            : `[Error] ${famLabel}: ${summary}`
           addSystemMessage(errLine)
           void postLiveCouncilMessage({ role: 'system', content: errLine })
           councilDispatch({ type: 'SET_PROVIDER_ERROR', payload: errLine })
@@ -10076,6 +10108,9 @@ function Home() {
     footerShowsPacketOrCouncilProviderIssue,
   ])
   const councilContinueStatusLine = useMemo(() => {
+    if (councilStabilityMode && council.councilState === 'provider_error') {
+      return COUNCIL_STABILITY_FAILURE_MESSAGE
+    }
     if (footerShowsPacketOrCouncilProviderIssue) return 'Provider issue — see family status badges.'
     if (liveResearchHud?.mode === 'completing' || liveResearchHud?.councilPhase === 'model_running') {
       return 'Research completing'
@@ -10092,6 +10127,7 @@ function Home() {
     if (council.councilState === 'active') return 'Council Active'
     return council.councilState
   }, [
+    councilStabilityMode,
     footerShowsPacketOrCouncilProviderIssue,
     council.councilState,
     council.isAwaitingResponses,
@@ -10281,6 +10317,20 @@ function Home() {
           Baby AI Private
         </Link>
       </header>
+
+      {councilStabilityMode ? (
+        <div
+          className="relative z-20 border-b px-6 py-2 text-[10px] font-bold tracking-widest"
+          style={{
+            borderColor: 'rgba(251,191,36,0.45)',
+            background: 'rgba(251,191,36,0.08)',
+            color: '#FCD34D',
+          }}
+          role="status"
+        >
+          Minimal Stable Council Mode active — memory, federation, repair packets, and synthesis layers are disabled.
+        </div>
+      ) : null}
 
       {!isUnifiedLiveRoom ? (
       <>
@@ -10590,6 +10640,7 @@ function Home() {
             messages={visibleCouncilMessages}
             hiddenCount={hiddenCouncilMessageCount}
             collapsedNoiseCount={collapsedCouncilNoiseCount}
+            councilStabilityMode={councilStabilityMode}
             onViewArchive={handleViewArchive}
             onSummarizeSession={handleSummarizeSessionArchive}
             onRecallEconomicOps={handleRecallEconomicOps}

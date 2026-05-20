@@ -84,6 +84,14 @@ import {
   operatorSafeIncompleteMessage,
   validateProviderResponseIntegrity,
 } from '@/lib/providers/responseIntegrity'
+import {
+  COUNCIL_STABILITY_FAILURE_MESSAGE,
+  getStabilityModeFlags,
+  isCouncilStabilityMode,
+  stabilityModeResponseMeta,
+} from '@/lib/council/stabilityMode'
+import { logCouncilPacketMetrics } from '@/lib/council/packetSizeLog'
+import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 
 function buildResearchAntiLoopAugment(threadBlock: string): string {
   const hits = threadBlock.match(/\bprimary\s+finding\b/gi) ?? []
@@ -384,6 +392,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  const councilStabilityMode = isCouncilStabilityMode()
+  const stabilityFlags = getStabilityModeFlags()
+  const stabilityMeta = stabilityModeResponseMeta()
+
   const conversationalTurn = body.conversationalTurn === true
   const message = typeof body.message === 'string' ? body.message : ''
   if (!message && !conversationalTurn) return NextResponse.json({ error: 'No message' }, { status: 400 })
@@ -448,7 +460,8 @@ export async function POST(req: Request) {
       : null
 
   const skipProviderIntegrityCheck = Boolean(
-    councilSingleFamilyEarly && isAttendanceFlow && councilSingleFamilyEarly !== 'gemini',
+    councilStabilityMode
+    || (councilSingleFamilyEarly && isAttendanceFlow && councilSingleFamilyEarly !== 'gemini'),
   )
   const scopeForGovernor = buildActiveScope({
     decreeText: raelDirectiveText,
@@ -483,23 +496,26 @@ export async function POST(req: Request) {
     ? 'Expanded analysis approved. You may go deeper, but stay organized and avoid filler.'
     : 'Cost-control mode is active. Keep the answer concise by default.'
   const maxTokens = expandedAnalysis ? EXPANDED_MAX_TOKENS : DEFAULT_MAX_TOKENS
-  const gptSystem = appendOpportunityMandateToSystem(
+  const withOpportunityMandate = (system: string, family: Parameters<typeof appendOpportunityMandateToSystem>[1]) =>
+    stabilityFlags.opportunityScanning ? appendOpportunityMandateToSystem(system, family) : system
+
+  const gptSystem = withOpportunityMandate(
     `You are ChatGPT Family in Ra'el's War Room. Role: synthesize, prioritize, and convert distinct family inputs into a coherent plan without repeating labels unless adding new value. Personality: confident, direct, witty. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
     'chatgpt',
   )
-  const claudeSystem = appendOpportunityMandateToSystem(
+  const claudeSystem = withOpportunityMandate(
     `You are Claude Family in Ra'el's War Room. Role: architecture, invariants, truth boundaries, persistence, rollback, and evidence restraint. Personality: honest, direct, dry humor. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
     'claude',
   )
-  const grokSystem = appendOpportunityMandateToSystem(
+  const grokSystem = withOpportunityMandate(
     `You are Grok Family in Ra'el's War Room. Role: external signal volatility only when sources or live intelligence evidence are present, plus sharp contradiction spotting. Personality: fast, candid, observant, a little mischievous but grounded. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Important: if live tools or intelligence evidence are not provided in the prompt, do not pretend you searched X or the web; call it a telemetry gap or hypothesis. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
     'grok',
   )
-  const geminiSystem = appendOpportunityMandateToSystem(
+  const geminiSystem = withOpportunityMandate(
     `You are Gemini Family in Ra'el's War Room. Role: large-context reasoning, long evidence comparison, cross-source correlation, and multimodal interpretation only when the thread actually includes images/PDFs or pasted excerpts. Personality: structured, curious, precise. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not claim live web, image/PDF ingestion, or tools you were not given in the prompt. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
     'gemini',
   )
-  const redTeamSystem = appendOpportunityMandateToSystem(
+  const redTeamSystem = withOpportunityMandate(
     `You are Red Team in Ra'el's War Room — internal adversary and risk assumption challenger. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
     'red_team',
   )
@@ -552,7 +568,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (detectOsSweepIntent(raelDirectiveText)) {
+  if (!stabilityFlags.osSweepAndResearchTeam && detectOsSweepIntent(raelDirectiveText)) {
     try {
       const report = await runWarRoomOsSweep(req)
       const markdown = formatCouncilOsSweepMarkdown(report)
@@ -589,8 +605,11 @@ export async function POST(req: Request) {
     forceTeamResearch: councilResearchTeamRequested || Boolean(body.storyContext),
   })
   if (
-    councilResearchTeamRequested
-    || (councilResearchIntent.triggered && body.councilResearchTeam !== false && !councilSingleFamilyEarly)
+    stabilityFlags.osSweepAndResearchTeam
+    && (
+      councilResearchTeamRequested
+      || (councilResearchIntent.triggered && body.councilResearchTeam !== false && !councilSingleFamilyEarly)
+    )
   ) {
     try {
       const report = await runCouncilResearchTeam({
@@ -655,7 +674,7 @@ export async function POST(req: Request) {
     reason: economicRouting.reason,
   })
 
-  if (economicRouting.mode === 'economic_ops' && !councilSingleFamily) {
+  if (stabilityFlags.opportunityScanning && economicRouting.mode === 'economic_ops' && !councilSingleFamily) {
     await safeAudit({
       success: true,
       flow: 'economic_ops_bypass',
@@ -694,28 +713,38 @@ export async function POST(req: Request) {
     detail: string,
   ) => {
     const resultStatus: ProviderResultStatus = status === 'timed_out' ? 'TIMED_OUT' : 'FAILED'
+    const stabilityMessage = councilStabilityMode ? COUNCIL_STABILITY_FAILURE_MESSAGE : ''
     const results = validateProviderResults(
       [
         {
           family: displayFamilyName(councilFam),
-          content: '',
+          content: stabilityMessage,
           status: resultStatus,
           error: detail,
         },
       ],
       { integrityCheck: !skipProviderIntegrityCheck },
     )
+    void logCouncilPacketMetrics(sup.ok ? sup.client : null, {
+      route: '/api/chat',
+      provider: councilFam,
+      integrityRejectionReason: detail,
+      timedOut: status === 'timed_out',
+      councilStabilityMode,
+    })
     const dm = diagnosticMetaFor(councilFam)
     return NextResponse.json(
       {
-        councilSingleResponse: '',
+        councilSingleResponse: stabilityMessage,
         councilSingleFamily: councilFam,
         results,
         showContinue: true,
         councilProviderHttpStatus: status,
         councilProviderHttpDetail: detail,
+        councilStabilityIssue: councilStabilityMode,
         ...(dm ? { diagnosticMeta: dm } : {}),
         ...liveResearchJson(),
+        ...stabilityMeta,
       },
       { status: 200 },
     )
@@ -847,20 +876,22 @@ export async function POST(req: Request) {
         ? `\n\n### Runtime integrity snapshot (truncated; diagnostics only)\n${snapForDiagnostics}`
         : ''
 
-    let augmentBlock = [
-      orchestrationAugment.trim() ? `\n\nCouncil orchestration directives:\n${orchestrationAugment.trim()}` : '',
-      diagnosticRuntimeGrounding ? `\n\n${diagnosticRuntimeGrounding}` : '',
-      integrityAugment,
-    ]
-      .filter(Boolean)
-      .join('')
+    let augmentBlock = councilStabilityMode
+      ? ''
+      : [
+          orchestrationAugment.trim() ? `\n\nCouncil orchestration directives:\n${orchestrationAugment.trim()}` : '',
+          diagnosticRuntimeGrounding ? `\n\n${diagnosticRuntimeGrounding}` : '',
+          integrityAugment,
+        ]
+          .filter(Boolean)
+          .join('')
 
     const baseUserPrompt = buildCouncilUserPrompt({
       raelDirectiveText,
       threadBlock: thread,
       augmentBlock,
       intentLabel: intentState.intent,
-      modeGovernorBlock,
+      modeGovernorBlock: councilStabilityMode ? '' : modeGovernorBlock,
     })
 
     if (directFamily) {
@@ -1045,11 +1076,13 @@ export async function POST(req: Request) {
       }
 
       const researchEligible =
-        (!isAttendanceFlow || mandatoryRetrieval.required)
+        stabilityFlags.liveResearchRouter
+        && (!isAttendanceFlow || mandatoryRetrieval.required)
         && councilGatherPhase !== 'decree_soft'
         && !sequentialDiagnostic
       const mandatoryResearchEligible =
-        mandatoryRetrieval.required
+        stabilityFlags.liveResearchRouter
+        && mandatoryRetrieval.required
         && !sequentialDiagnostic
 
       if (researchEligible || mandatoryResearchEligible) {
@@ -1137,7 +1170,8 @@ export async function POST(req: Request) {
 
       let grokAugmentBlock = augmentBlock
       if (
-        councilSingleFamily === 'grok'
+        stabilityFlags.rssFederationContext
+        && councilSingleFamily === 'grok'
         && (!liveResearchPacket?.usedLiveResearch || !liveResearchPacket?.intelligencePacket)
       ) {
         const rssAugment = await buildGrokRssIntelligenceAugment()
@@ -1151,7 +1185,7 @@ export async function POST(req: Request) {
         threadBlock: thread,
         augmentBlock: grokAugmentBlock,
         intentLabel: intentState.intent,
-        modeGovernorBlock,
+        modeGovernorBlock: councilStabilityMode ? '' : modeGovernorBlock,
       })
 
       const packetForGate = liveResearchPacket?.intelligencePacket
@@ -1167,7 +1201,7 @@ export async function POST(req: Request) {
           || packetForGate.sources_used.length === 0
         )
 
-      if (mandatoryPacketMissing) {
+      if (stabilityFlags.liveResearchRouter && mandatoryPacketMissing) {
         councilResponseCompletion = 'complete'
         const gaps = [
           ...(retrievalForGate?.retrieval_gaps ?? []),
@@ -1383,7 +1417,11 @@ export async function POST(req: Request) {
       }
 
       let providerIntegrityDiagnostics: Record<string, unknown> | undefined
-      if (!skipProviderIntegrityCheck && geminiDegradedReason === null) {
+      if (
+        stabilityFlags.integrityOrchestrationRetries
+        && !skipProviderIntegrityCheck
+        && geminiDegradedReason === null
+      ) {
         const orchestrated = await orchestrateProviderResponse({
           family: councilSingleFamily,
           prompt: userPrompt,
@@ -1428,8 +1466,12 @@ export async function POST(req: Request) {
         }
       }
 
+      if (councilStabilityMode) {
+        responseText = compactDisplayWhitespace(toDisplayText(responseText))
+      }
+
       let opportunityDiagnostics: Record<string, unknown> | undefined
-      if (familyRequiresOpportunity(councilSingleFamily)) {
+      if (stabilityFlags.opportunityScanning && familyRequiresOpportunity(councilSingleFamily)) {
         const threadKey = conversationId?.trim() || 'ephemeral'
         let enforced = enforceCouncilOpportunities({
           family: councilSingleFamily,
@@ -1487,19 +1529,21 @@ export async function POST(req: Request) {
           ? responseText.trim()
           : undefined
       const preCallRuntime = providerRuntimeStates?.[councilSingleFamily]
-      const governed = applyGovernor(responseText, councilSingleFamily, councilCommand, {
-        raelDirectiveText,
-        councilIntentKind: intentState.intent,
-        councilActiveScope: scopeForGovernor,
-        modeGovernor,
-        roomStatuses,
-        verifiedRuntimeContext: preCallRuntime
-          ? providerOutcomeToVerifiedContext({
-              family: councilSingleFamily,
-              runtime: preCallRuntime,
-            })
-          : { family: councilSingleFamily },
-      })
+      const governed = stabilityFlags.responseGovernor
+        ? applyGovernor(responseText, councilSingleFamily, councilCommand, {
+            raelDirectiveText,
+            councilIntentKind: intentState.intent,
+            councilActiveScope: scopeForGovernor,
+            modeGovernor,
+            roomStatuses,
+            verifiedRuntimeContext: preCallRuntime
+              ? providerOutcomeToVerifiedContext({
+                  family: councilSingleFamily,
+                  runtime: preCallRuntime,
+                })
+              : { family: councilSingleFamily },
+          })
+        : { text: compactDisplayWhitespace(toDisplayText(responseText)), warnings: [] as string[] }
       if (governed.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
         await safeAudit({
           success: true,
@@ -1553,7 +1597,7 @@ export async function POST(req: Request) {
       }
       responseText = governed.text
 
-      if (councilSingleFamily === 'gemini' && responseText.trim()) {
+      if (!councilStabilityMode && councilSingleFamily === 'gemini' && responseText.trim()) {
         const renderGate = applyCouncilRenderGate('gemini', responseText, {
           retryAttempted: Number(providerIntegrityDiagnostics?.retryCount ?? 0) > 0,
           fallbackUsed: Boolean(providerIntegrityDiagnostics?.fallbackUsed),
@@ -1615,7 +1659,8 @@ export async function POST(req: Request) {
       }
 
       let continuationRequest =
-        modeGovernor.continuationAllowed
+        !councilStabilityMode
+        && modeGovernor.continuationAllowed
           ? buildContinuationRequestFromModelOutput({
               family: councilSingleFamily,
               text: responseText,
@@ -1660,7 +1705,7 @@ export async function POST(req: Request) {
           : {}),
       })
 
-      if (geminiDegradedReason === null) {
+      if (stabilityFlags.memoryInjection && geminiDegradedReason === null) {
         await tryPersistMemoryProposalFromModelOutput({
           client: sup.ok ? sup.client : null,
           responseText,
@@ -1670,7 +1715,7 @@ export async function POST(req: Request) {
         })
       }
 
-      if (conversationId && councilSingleFamily) {
+      if (stabilityFlags.packetClassification && conversationId && councilSingleFamily) {
         await registerCouncilProviderPacketOnBus({
           client: sup.ok ? sup.client : null,
           threadId: conversationId,
@@ -1710,6 +1755,22 @@ export async function POST(req: Request) {
       const dmOk = diagnosticMetaFor(councilSingleFamily, {
         hold: councilSingleFamily === 'red_team' && detectRedTeamRuntimeHold(responseText),
       })
+      void logCouncilPacketMetrics(sup.ok ? sup.client : null, {
+        route: '/api/chat',
+        provider: councilSingleFamily,
+        promptCharCount: userPrompt.length,
+        contextCharCount: thread.length + augmentBlock.length,
+        providerResponseCharCount: responseText.length,
+        integrityRejectionReason:
+          providerIntegrityDiagnostics?.integrityStatus &&
+          providerIntegrityDiagnostics.integrityStatus !== 'COMPLETE'
+            ? String(providerIntegrityDiagnostics.integrityStatus)
+            : null,
+        timedOut: false,
+        fallbackUsed: Boolean(providerIntegrityDiagnostics?.fallbackUsed),
+        councilStabilityMode,
+      })
+
       return NextResponse.json({
         councilSingleResponse: responseText,
         ...(economicOpsRawProviderAnalysis ? { economicOpsRawProviderAnalysis } : {}),
@@ -1733,6 +1794,7 @@ export async function POST(req: Request) {
         ...(providerIntegrityDiagnostics ? { providerIntegrityDiagnostics } : {}),
         ...(opportunityDiagnostics ? { opportunityDiagnostics } : {}),
         ...liveResearchJson(),
+        ...stabilityMeta,
       })
     }
 

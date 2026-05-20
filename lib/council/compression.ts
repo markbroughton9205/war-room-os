@@ -3,6 +3,7 @@ import {
   sanitizeCouncilFamilyResponse,
 } from '@/lib/council/providerResponseSanitizer'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
+import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 
 export const COUNCIL_OUTPUT_MODES = ['brief', 'standard', 'deep', 'repair', 'revenue', 'red_team'] as const
@@ -427,6 +428,38 @@ export function compressCouncilOutput(
   messages: CouncilCompressionMessage[],
   mode: CouncilOutputMode = 'standard',
 ): CouncilCompressedSummary {
+  if (isCouncilStabilityMode()) {
+    const relevant = responseMessages(messages)
+    const last = relevant.at(-1)
+    const summary = last
+      ? compactDisplayWhitespace(toDisplayText(last.content)).slice(0, 220)
+      : 'Council stability mode — synthesis compression disabled.'
+    return {
+      mode,
+      generatedAt: new Date().toISOString(),
+      decisionSummary: summary ? [summary] : ['Awaiting provider response.'],
+      evidence: [],
+      disagreements: [],
+      risk: {
+        level: 'low',
+        summary: 'Stability mode: compression and repair synthesis disabled.',
+        redTeamCalibration: 'recommended_verification',
+      },
+      nextAction: 'Continue council dialogue with provider routing only.',
+      duplicateReduction: { collapsedFindingCount: 0, rawFindingCount: 0 },
+      guardrails: {
+        providerTruthPreserved: true,
+        auditLogsPreserved: true,
+        approvalGatesPreserved: true,
+        noHiddenExecution: true,
+        noAutomaticMutation: true,
+        noAutomaticOutreachOrSpend: true,
+      },
+      repairPacket: null,
+      revenuePacket: null,
+    }
+  }
+
   const relevant = responseMessages(messages)
   const findings = buildFindings(messages)
   const repairPacket = buildRepairPacket(relevant, findings)

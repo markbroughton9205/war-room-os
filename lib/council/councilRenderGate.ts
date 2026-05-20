@@ -1,5 +1,6 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { toDisplayText } from '@/lib/council/toDisplayText'
+import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
 import {
   countMeaningfulTokens,
   detectGreetingOnlyResponse,
@@ -150,6 +151,7 @@ export function isCouncilMessageRepairPacketEligible(message: {
   content?: unknown
   messageType?: string
 }): boolean {
+  if (isCouncilStabilityMode()) return false
   if (message.messageType !== 'response') return false
   if (message.degraded) return false
   if (message.integrityStatus === 'DEGRADED_RESPONSE_QUALITY') return false

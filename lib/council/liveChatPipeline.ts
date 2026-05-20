@@ -89,6 +89,8 @@ export type CouncilChatJson = {
   liveResearchAttempted?: boolean
   /** Model output boundary assessment for this turn (Phase 6). */
   councilResponseCompletion?: CouncilResponseCompletion
+  councilStabilityMode?: boolean
+  councilStabilityIssue?: boolean
   /** Single-family research accounting for this response (Phase 6). */
   liveResearchTurnSurvey?: {
     wave: 'single'

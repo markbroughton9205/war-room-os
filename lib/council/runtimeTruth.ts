@@ -51,7 +51,7 @@ function rosterLabel(family: string): string {
 }
 
 function safeErrorSnippet(msg: string | undefined): string | undefined {
-  if (!msg) return undefined
+  if (!msg || typeof msg !== 'string') return undefined
   const t = msg.replace(/\s+/g, ' ').trim().slice(0, 160)
   if (!t || SECRET_LIKE.test(t)) return undefined
   return t

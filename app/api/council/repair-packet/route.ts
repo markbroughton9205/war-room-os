@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
 
 import {
   getRepairSnapshot,
@@ -26,6 +27,12 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  if (isCouncilStabilityMode()) {
+    return NextResponse.json(
+      { error: 'repair_packet_disabled', message: 'Repair packets are disabled while Minimal Stable Council Mode is active.' },
+      { status: 503 },
+    )
+  }
   let body: unknown
   try {
     body = await req.json()

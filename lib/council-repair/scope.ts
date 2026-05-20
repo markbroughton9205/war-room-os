@@ -6,6 +6,7 @@ import {
   validateProviderResponseIntegrity,
 } from '@/lib/providers/responseIntegrity'
 import { GEMINI_DEGRADED_COUNCIL_DISPLAY } from '@/lib/council/councilRenderGate'
+import { formatDisplayText } from '@/lib/council/toDisplayText'
 
 const VAGUE_DECREE_ONLY =
   /^(?:please\s+)?(?:fix|repair|diagnose|create|send|prepare)(?:\s+(?:this|war room|it|panel))?(?:\s+please)?[.!?]*$/i
@@ -29,7 +30,7 @@ function wordCount(text: string): number {
 }
 
 export function isGreetingOnlyRepairSource(content: string | null | undefined): boolean {
-  const normalized = (content ?? '').replace(/\s+/g, ' ').trim()
+  const normalized = formatDisplayText(content, text => text.replace(/\s+/g, ' ').trim())
   if (!normalized) return false
   if (normalized === GEMINI_DEGRADED_COUNCIL_DISPLAY) return true
   if (detectGreetingOnlyResponse(normalized)) return true
@@ -38,7 +39,7 @@ export function isGreetingOnlyRepairSource(content: string | null | undefined): 
 }
 
 export function isVagueRepairLanguage(text: string): boolean {
-  const normalized = text.replace(/\s+/g, ' ').trim()
+  const normalized = formatDisplayText(text, t => t.replace(/\s+/g, ' ').trim())
   if (!normalized) return true
   if (normalized.length < 24 && !CONCRETE_ISSUE_MARKERS.test(normalized)) return true
   if (VAGUE_DECREE_ONLY.test(normalized)) return true
@@ -102,7 +103,8 @@ export function assessRepairScope(input: {
     }
   }
 
-  const concreteIssue = combined.replace(/\s+/g, ' ').trim().slice(0, 280) || null
+  const concreteIssue =
+    formatDisplayText(combined, t => t.replace(/\s+/g, ' ').trim().slice(0, 280)) || null
   return {
     scope: 'concrete',
     clarification: null,
@@ -113,11 +115,11 @@ export function assessRepairScope(input: {
 }
 
 export function isConcreteRepairPacketTitle(title: string): boolean {
-  const clean = title.replace(/\s+/g, ' ').trim()
+  const clean = formatDisplayText(title, t => t.replace(/\s+/g, ' ').trim())
   if (!clean || /^no active repair packet\.?$/i.test(clean)) return false
   if (/^repair packet:\s*(fix|repair|diagnose|create|send|prepare)\b/i.test(clean) && clean.length < 72) return false
   if (/^repair packet:\s*provider runtime issue$/i.test(clean)) return false
   if (/^repair packet:\s*bug$/i.test(clean)) return false
-  if (isVagueRepairLanguage(clean.replace(/^repair packet:\s*/i, ''))) return false
+  if (isVagueRepairLanguage(formatDisplayText(clean, t => t.replace(/^repair packet:\s*/i, '')))) return false
   return true
 }
