@@ -9,7 +9,7 @@ import {
   isRelaxedPromptIntent,
 } from '@/lib/council/promptIntent'
 import { SKIP_TERMINAL_TRUNCATION_BELOW } from '@/lib/council/responseIntegrity'
-import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
+import { shouldPassthroughCouncilProviderText } from '@/lib/council/stabilityMode'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 import type { OpportunityPacket } from '@/lib/opportunities/schema'
 import { validateOpportunityResponse } from '@/lib/opportunities/validate'
@@ -294,15 +294,15 @@ export function validateProviderResponseIntegrity(
   raw: unknown,
   expectation: ResponseIntegrityExpectation = {},
 ): ResponseIntegrityResult {
-  if (isCouncilStabilityMode()) {
+  if (shouldPassthroughCouncilProviderText()) {
     const text = toDisplayText(raw).replace(/\r\n/g, '\n').trim()
-    if (!text || text.length < 12) {
+    if (!text) {
       return {
-        integrity_status: text ? 'EMPTY' : 'EMPTY',
+        integrity_status: 'EMPTY',
         confidence: 95,
         reason: 'empty or whitespace-only response',
         retry_recommended: true,
-        fallback_recommended: true,
+        fallback_recommended: false,
       }
     }
     return {

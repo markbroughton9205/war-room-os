@@ -1,4 +1,4 @@
-import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
+import { shouldPassthroughCouncilProviderText } from '@/lib/council/stabilityMode'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 
 const TRUNCATED_WORD = /\b\w{2,}\s*$/m
@@ -43,7 +43,7 @@ function detectIntegrityIssues(text: string, opts?: { relaxedCasual?: boolean })
   const w: string[] = []
   const t = text.trim()
   if (!t) return w
-  if (isCouncilStabilityMode()) return w
+  if (shouldPassthroughCouncilProviderText()) return w
   if (opts?.relaxedCasual) return w
   if (t.length < SKIP_TERMINAL_TRUNCATION_BELOW) return w
 
@@ -78,7 +78,7 @@ export function repairOrFlagResponse(
   const integrityWarnings: string[] = []
   let text = toDisplayText(raw).replace(/\r\n/g, '\n').trim()
   if (!text) return { text: '', integrityWarnings: [] }
-  if (isCouncilStabilityMode()) return { text, integrityWarnings: [] }
+  if (shouldPassthroughCouncilProviderText()) return { text, integrityWarnings: [] }
 
   if (BROKEN_SYNC_TAIL.test(text)) {
     text = text.replace(BROKEN_SYNC_TAIL, '').trim()

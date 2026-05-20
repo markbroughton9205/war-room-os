@@ -16,6 +16,7 @@ import {
 } from '@/lib/providers/responseIntegrity'
 import type { WarRoomSupabase } from '@/lib/war-room/persistence'
 import type { GeminiRenderDiagnostics } from '@/lib/council/councilRenderGate'
+import { shouldPassthroughCouncilProviderText } from '@/lib/council/stabilityMode'
 
 export type ProviderCallOutcome = {
   text: string
@@ -125,6 +126,40 @@ export async function orchestrateProviderResponse(args: {
   const providerId = FAMILY_TO_PROVIDER[args.family]
   const promptChars = args.prompt.trim().length
   let text = args.rawText.trim()
+
+  if (shouldPassthroughCouncilProviderText()) {
+    const integrity: ResponseIntegrityResult = text
+      ? {
+          integrity_status: 'COMPLETE',
+          confidence: 92,
+          reason: 'council stability mode — orchestration bypassed',
+          retry_recommended: false,
+          fallback_recommended: false,
+        }
+      : {
+          integrity_status: 'EMPTY',
+          confidence: 95,
+          reason: 'empty provider response',
+          retry_recommended: true,
+          fallback_recommended: false,
+        }
+    return {
+      text,
+      displayText: text,
+      integrity,
+      providerId,
+      family: args.family,
+      retryCount: 0,
+      fallbackUsed: false,
+      fallbackProvider: null,
+      diagnostics: {
+        promptChars,
+        completionChars: text.length,
+        truncationDetected: false,
+        retryStrategies: [],
+      },
+    }
+  }
   let retryCount = 0
   let fallbackUsed = false
   let fallbackProvider: ProviderRuntimeId | null = null

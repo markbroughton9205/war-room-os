@@ -1289,14 +1289,14 @@ function gatherCellsToProviderRuntimeDetails(
 const MessageBubble = memo(function MessageBubble({
   msg,
   diagnosticsOpen,
-  councilStabilityMode,
+  councilPassthroughMode,
   onOpenFullMemory,
   onProjectAction,
   onPrepareRepairPacket,
 }: {
   msg: CouncilMessage
   diagnosticsOpen?: boolean
-  councilStabilityMode?: boolean
+  councilPassthroughMode?: boolean
   onOpenFullMemory?: (preview: CouncilMemoryRecallPreview) => void
   onProjectAction?: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
   onPrepareRepairPacket?: (message: CouncilMessage) => void
@@ -1644,7 +1644,7 @@ const MessageBubble = memo(function MessageBubble({
           }}>
           {msg.content}
         </div>
-        {!isRael && !councilStabilityMode && msg.messageType === 'response' && isCouncilMessageRepairPacketEligible(msg) ? (
+        {!isRael && !councilPassthroughMode && msg.messageType === 'response' && isCouncilMessageRepairPacketEligible(msg) ? (
           <button
             type="button"
             onClick={() => onPrepareRepairPacket?.(msg)}
@@ -1654,7 +1654,7 @@ const MessageBubble = memo(function MessageBubble({
             Prepare Repair Packet
           </button>
         ) : null}
-        {msg.degraded && !councilStabilityMode && msg.messageType === 'response' ? (
+        {msg.degraded && !councilPassthroughMode && msg.messageType === 'response' ? (
           <p className="mt-2 text-[10px] tracking-widest" style={{ color: '#FBBF24' }}>
             Degraded response quality — excluded from synthesis and repair packets.
           </p>
@@ -1668,7 +1668,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   messages,
   hiddenCount,
   collapsedNoiseCount,
-  councilStabilityMode,
+  councilPassthroughMode,
   onViewArchive,
   onSummarizeSession,
   onRecallEconomicOps,
@@ -1679,7 +1679,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   messages: CouncilMessage[]
   hiddenCount: number
   collapsedNoiseCount: number
-  councilStabilityMode?: boolean
+  councilPassthroughMode?: boolean
   onViewArchive: () => void
   onSummarizeSession: () => void
   onRecallEconomicOps: () => void
@@ -1721,7 +1721,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           key={msg.id}
           msg={msg}
           diagnosticsOpen={false}
-          councilStabilityMode={councilStabilityMode}
+          councilPassthroughMode={councilPassthroughMode}
           onOpenFullMemory={onOpenFullMemory}
           onProjectAction={onProjectAction}
           onPrepareRepairPacket={onPrepareRepairPacket}
@@ -5278,17 +5278,6 @@ function Home() {
     useCouncilSession(councilPersistenceCtx)
   const messages = council.messages
   const liveChatWindow = useMemo(() => windowLiveChatMessages(messages), [messages])
-  const liveCouncilHygiene = useMemo(
-    () => applyCouncilThreadHygiene(liveChatWindow.visibleMessages, councilStabilityMode),
-    [liveChatWindow.visibleMessages, councilStabilityMode],
-  )
-  const visibleCouncilMessages = liveCouncilHygiene.visibleMessages
-  const collapsedCouncilNoiseCount = liveCouncilHygiene.collapsedCount
-  const deferredVisibleCouncilMessages = useDeferredValue(visibleCouncilMessages)
-  const compressedCouncilSummary = useMemo(
-    () => compressCouncilOutput(deferredVisibleCouncilMessages, councilOutputMode),
-    [deferredVisibleCouncilMessages, councilOutputMode],
-  )
   const archivedCouncilMessages = liveChatWindow.archivedMessages
   const hiddenCouncilMessageCount = liveChatWindow.hiddenCount
   const [internetStatus, setInternetStatus] = useState<InternetStatusResponse>(INITIAL_INTERNET_STATUS)
@@ -5415,6 +5404,18 @@ function Home() {
       /* private mode */
     }
   }, [])
+  const councilPassthroughMode = councilStabilityMode || councilFlowMode === 'stable_group'
+  const liveCouncilHygiene = useMemo(
+    () => applyCouncilThreadHygiene(liveChatWindow.visibleMessages, councilPassthroughMode),
+    [liveChatWindow.visibleMessages, councilPassthroughMode],
+  )
+  const visibleCouncilMessages = liveCouncilHygiene.visibleMessages
+  const collapsedCouncilNoiseCount = liveCouncilHygiene.collapsedCount
+  const deferredVisibleCouncilMessages = useDeferredValue(visibleCouncilMessages)
+  const compressedCouncilSummary = useMemo(
+    () => compressCouncilOutput(deferredVisibleCouncilMessages, councilOutputMode),
+    [deferredVisibleCouncilMessages, councilOutputMode],
+  )
   const activeCouncilCommandRef = useRef<CouncilCommand>({ ...DEFAULT_COUNCIL_COMMAND })
   const lastRaelDirectiveContentRef = useRef('')
   const [councilUiCommand, setCouncilUiCommand] = useState<CouncilCommand>(() => ({ ...DEFAULT_COUNCIL_COMMAND }))
@@ -7320,8 +7321,12 @@ function Home() {
     const orchFamily = parseCouncilMessageFamily(label) ?? parseCouncilMessageFamily(familyName)
     const latestDecree = [...messagesRef.current].reverse().find(m => m.messageType === 'decree')
     const decreeText = latestDecree ? toDisplayText(latestDecree.content).trim() : ''
-    const renderGate = orchFamily && !councilStabilityMode
-      ? applyCouncilRenderGate(orchFamily, content, { decreeText, stabilityMode: councilStabilityMode })
+    const renderGate = orchFamily && !councilPassthroughMode
+      ? applyCouncilRenderGate(orchFamily, content, {
+          decreeText,
+          stabilityMode: councilPassthroughMode,
+          councilFlowMode,
+        })
       : null
     const visibleContent = renderGate?.displayText ?? content
 
@@ -7583,6 +7588,7 @@ function Home() {
   }
 
   const mergeContinuationFromChatJson = (data: CouncilChatJson, opts?: { ignoreContinuation?: boolean }) => {
+    if (data.councilStabilityMode) setCouncilStabilityMode(true)
     if (data.liveResearchAttempted && data.liveResearchUi) {
       setLiveResearchHud(data.liveResearchUi)
     }
@@ -7824,7 +7830,7 @@ function Home() {
         }
         textOut = typeof data.councilSingleResponse === 'string' ? data.councilSingleResponse.trim() : ''
         if (textOut) {
-          textOut = councilProviderTextAfterRenderGate(family, textOut, decree, councilStabilityMode)
+          textOut = councilProviderTextAfterRenderGate(family, textOut, decree, councilPassthroughMode)
         }
         if (!textOut) {
           const famLabel = COUNCIL_ROSTER.find(ro => ro.id === family)?.label ?? family
@@ -8669,7 +8675,7 @@ function Home() {
                     })
                   }
                   if (textOut) {
-                    textOut = councilProviderTextAfterRenderGate(family, textOut, decree, councilStabilityMode)
+                    textOut = councilProviderTextAfterRenderGate(family, textOut, decree, councilPassthroughMode)
                   }
                   if (!textOut) {
                     if (!isDirectInvoke) {
@@ -8909,7 +8915,7 @@ function Home() {
         .filter(c => Boolean(c.textOut?.trim()))
         .map(c => ({
           family: c.family,
-          textOut: councilProviderTextAfterRenderGate(c.family, c.textOut!.trim(), decree, councilStabilityMode),
+          textOut: councilProviderTextAfterRenderGate(c.family, c.textOut!.trim(), decree, councilPassthroughMode),
           transientMessageIds: c.transientMessageIds,
         }))
 
@@ -10804,7 +10810,7 @@ function Home() {
             messages={visibleCouncilMessages}
             hiddenCount={hiddenCouncilMessageCount}
             collapsedNoiseCount={collapsedCouncilNoiseCount}
-            councilStabilityMode={councilStabilityMode}
+            councilPassthroughMode={councilPassthroughMode}
             onViewArchive={handleViewArchive}
             onSummarizeSession={handleSummarizeSessionArchive}
             onRecallEconomicOps={handleRecallEconomicOps}

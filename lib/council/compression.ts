@@ -4,7 +4,7 @@ import {
 } from '@/lib/council/providerResponseSanitizer'
 import { detectPromptIntent } from '@/lib/council/promptIntent'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
-import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
+import { shouldPassthroughCouncilProviderText } from '@/lib/council/stabilityMode'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 
 export const COUNCIL_OUTPUT_MODES = ['brief', 'standard', 'deep', 'repair', 'revenue', 'red_team'] as const
@@ -437,7 +437,7 @@ export function compressCouncilOutput(
   messages: CouncilCompressionMessage[],
   mode: CouncilOutputMode = 'standard',
 ): CouncilCompressedSummary {
-  if (isCouncilStabilityMode()) {
+  if (shouldPassthroughCouncilProviderText()) {
     const relevant = responseMessages(messages)
     const last = relevant.at(-1)
     const summary = last

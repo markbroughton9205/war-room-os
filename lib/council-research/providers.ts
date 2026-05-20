@@ -3,6 +3,7 @@ import 'server-only'
 import { callXAIChat } from '@/lib/ai/providers/xai'
 import { completeGeminiCouncilMessage } from '@/lib/ai/providers/geminiCouncil'
 import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
+import { shouldPassthroughCouncilProviderText } from '@/lib/council/stabilityMode'
 import type { CouncilResearchRole } from './roles'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
@@ -81,8 +82,10 @@ async function callGemini(user: string, system: string, maxTokens: number): Prom
     throw new Error(result.degraded ? result.note : ('error' in result ? result.error : 'Gemini unavailable'))
   }
   let text = result.text.trim()
-  const gate = applyCouncilRenderGate('gemini', text)
-  if (!gate.renderable) text = gate.displayText
+  if (!shouldPassthroughCouncilProviderText()) {
+    const gate = applyCouncilRenderGate('gemini', text)
+    if (!gate.renderable) text = gate.displayText
+  }
   return text
 }
 

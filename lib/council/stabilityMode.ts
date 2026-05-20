@@ -83,6 +83,14 @@ export function isMinimalCouncilSystemsPath(councilFlowMode?: CouncilFlowMode | 
   return isCouncilStabilityMode() || isStableGroupChatMode(councilFlowMode)
 }
 
+/**
+ * Pass provider text through without integrity substitution, fallback summaries, or degraded flags.
+ * Active for `COUNCIL_STABILITY_MODE` and stable group chat flow.
+ */
+export function shouldPassthroughCouncilProviderText(councilFlowMode?: CouncilFlowMode | null): boolean {
+  return isMinimalCouncilSystemsPath(councilFlowMode)
+}
+
 /** Feature flags for the active mode (disabled layers are off when minimal path is active). */
 export function getStabilityModeFlags(councilFlowMode?: CouncilFlowMode | null): StabilityModeFlags {
   return isMinimalCouncilSystemsPath(councilFlowMode) ? DISABLED_WHEN_STABLE : ENABLED_WHEN_NORMAL

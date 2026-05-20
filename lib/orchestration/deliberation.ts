@@ -5,6 +5,7 @@ import {
   patchCouncilThreadState,
 } from '@/lib/cognitive-bus/bus'
 import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
+import { shouldPassthroughCouncilProviderText } from '@/lib/council/stabilityMode'
 import { buildStructuredProviderPacket, packetsConflict } from '@/lib/cognitive-bus/packet'
 import { parseOpportunitiesFromText } from '@/lib/opportunities/parse'
 import { registerScoutOpportunities } from '@/lib/opportunities/store'
@@ -177,7 +178,13 @@ export async function runDeliberationStep(
   }
 
   if (input.kind === 'register_packet' && input.family && input.displayText) {
-    const gate = applyCouncilRenderGate(input.family, input.displayText)
+    const gate = shouldPassthroughCouncilProviderText()
+      ? {
+          displayText: input.displayText,
+          integrityStatus: 'COMPLETE' as const,
+          degraded: false,
+        }
+      : applyCouncilRenderGate(input.family, input.displayText)
     if (gate.displayText.trim()) {
       const opportunities = parseOpportunitiesFromText(gate.displayText)
       const oppValidation = familyRequiresOpportunity(input.family)

@@ -1,7 +1,8 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
 import { detectPromptIntent, type PromptIntent } from '@/lib/council/promptIntent'
-import { isCouncilStabilityMode } from '@/lib/council/stabilityMode'
+import { shouldPassthroughCouncilProviderText } from '@/lib/council/stabilityMode'
+import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 
 export type SanitizedFamilyResponse = {
@@ -15,11 +16,11 @@ export type SanitizedFamilyResponse = {
 export function sanitizeCouncilFamilyResponse(
   family: CouncilOrchestrationFamily,
   raw: unknown,
-  opts?: { decreeText?: string; promptIntent?: PromptIntent },
+  opts?: { decreeText?: string; promptIntent?: PromptIntent; councilFlowMode?: CouncilFlowMode | null },
 ): SanitizedFamilyResponse {
   const text = toDisplayText(raw).trim()
   const promptIntent = opts?.promptIntent ?? (opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined)
-  if (isCouncilStabilityMode()) {
+  if (shouldPassthroughCouncilProviderText(opts?.councilFlowMode)) {
     return {
       displayText: text,
       integrityStatus: text ? 'COMPLETE' : 'EMPTY',

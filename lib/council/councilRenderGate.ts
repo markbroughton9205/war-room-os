@@ -9,7 +9,12 @@ import {
   isRelaxedPromptIntent,
   type PromptIntent,
 } from '@/lib/council/promptIntent'
-import { isCouncilStabilityMode, logCouncilStabilityRender } from '@/lib/council/stabilityMode'
+import {
+  isCouncilStabilityMode,
+  logCouncilStabilityRender,
+  shouldPassthroughCouncilProviderText,
+} from '@/lib/council/stabilityMode'
+import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import { toDisplayText } from '@/lib/council/toDisplayText'
 import {
   countMeaningfulTokens,
@@ -110,15 +115,18 @@ export function applyCouncilRenderGate(
     promptIntent?: PromptIntent
     /** Client echo of stability mode (server reads env when omitted). */
     stabilityMode?: boolean
+    /** Live Council flow — stable group enables passthrough when env stability is off. */
+    councilFlowMode?: CouncilFlowMode | null
   },
 ): CouncilRenderGateResult {
   const rawText = toDisplayText(raw).trim()
   const councilMode = opts?.councilMode ?? true
   const promptIntent = opts?.promptIntent ?? (opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined)
   const relaxedCasual = promptIntent ? isRelaxedPromptIntent(promptIntent) : false
-  const stabilityMode = opts?.stabilityMode ?? isCouncilStabilityMode()
+  const passthroughMode =
+    opts?.stabilityMode ?? shouldPassthroughCouncilProviderText(opts?.councilFlowMode)
 
-  if (stabilityMode && family && rawText) {
+  if (passthroughMode && family) {
     const displayText = rawText
     logCouncilStabilityRender({
       provider: family,
@@ -138,7 +146,7 @@ export function applyCouncilRenderGate(
       integrityStatus: 'COMPLETE',
       renderable: true,
       degraded: false,
-      stabilityMode: true,
+      stabilityMode: passthroughMode,
       fallbackSkipped: true,
       relaxedCasual,
       promptIntent,
@@ -146,8 +154,8 @@ export function applyCouncilRenderGate(
     return {
       displayText,
       rawText,
-      renderable: true,
-      integrityStatus: 'COMPLETE',
+      renderable: Boolean(rawText),
+      integrityStatus: rawText ? 'COMPLETE' : 'EMPTY',
       degraded: false,
       promptIntent,
     }
@@ -190,7 +198,7 @@ export function applyCouncilRenderGate(
       integrityStatus: integrity.integrity_status,
       renderable,
       degraded,
-      stabilityMode,
+      stabilityMode: passthroughMode,
       relaxedCasual,
       promptIntent,
     })
@@ -198,7 +206,7 @@ export function applyCouncilRenderGate(
 
   const relaxedStabilityPass =
     relaxedCasual
-    && stabilityMode
+    && passthroughMode
     && integrity.integrity_status !== 'EMPTY'
     && integrity.integrity_status !== 'MALFORMED'
 
@@ -245,7 +253,7 @@ export function applyCouncilRenderGate(
     return blocked
   }
 
-  if (relaxedCasual && (stabilityMode || integrity.integrity_status === 'COMPLETE')) {
+  if (relaxedCasual && (passthroughMode || integrity.integrity_status === 'COMPLETE')) {
     const out: CouncilRenderGateResult = {
       displayText: rawText,
       rawText,

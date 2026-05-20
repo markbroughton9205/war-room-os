@@ -231,9 +231,14 @@ function coerceStableGroupPriorReplies(raw: unknown): StableGroupPriorReply[] | 
 
 function validateProviderResults(
   results: ProviderResult[],
-  opts?: { integrityCheck?: boolean; decreeText?: string; suppressSyncWarnings?: boolean },
+  opts?: {
+    integrityCheck?: boolean
+    decreeText?: string
+    suppressSyncWarnings?: boolean
+    minimalCouncilPath?: boolean
+  },
 ): ProviderResult[] {
-  if (opts?.integrityCheck === false) return results
+  if (opts?.integrityCheck === false || opts?.minimalCouncilPath) return results
   const promptIntent = opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined
   const relaxedCasual = promptIntent ? isRelaxedPromptIntent(promptIntent) : false
   const violations: string[] = []
@@ -777,6 +782,7 @@ export async function POST(req: Request) {
       ],
       {
         integrityCheck: !skipProviderIntegrityCheck,
+        minimalCouncilPath,
         decreeText: raelDirectiveText,
         suppressSyncWarnings: suppressIntegritySyncWarnings,
       },
@@ -1055,6 +1061,7 @@ export async function POST(req: Request) {
       )
       const results = validateProviderResults(providerResults, {
         integrityCheck: !skipProviderIntegrityCheck,
+        minimalCouncilPath,
         decreeText: raelDirectiveText,
       })
       await safeAudit({
@@ -1717,6 +1724,7 @@ export async function POST(req: Request) {
             ],
             {
               integrityCheck: !skipProviderIntegrityCheck,
+              minimalCouncilPath,
               decreeText: raelDirectiveText,
               suppressSyncWarnings: suppressIntegritySyncWarnings,
             },
@@ -1734,6 +1742,8 @@ export async function POST(req: Request) {
           decreeText: raelDirectiveText,
           retryAttempted: Number(providerIntegrityDiagnostics?.retryCount ?? 0) > 0,
           fallbackUsed: Boolean(providerIntegrityDiagnostics?.fallbackUsed),
+          stabilityMode: councilStabilityMode,
+          councilFlowMode,
         })
         if (!renderGate.renderable) {
           responseText = renderGate.displayText
@@ -1922,6 +1932,7 @@ export async function POST(req: Request) {
           ],
           {
             integrityCheck: !skipProviderIntegrityCheck,
+            minimalCouncilPath,
             decreeText: raelDirectiveText,
             suppressSyncWarnings: suppressIntegritySyncWarnings,
           },
