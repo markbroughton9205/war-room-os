@@ -88,8 +88,10 @@ import {
 import {
   resolveCouncilFlowMode,
   isStableGroupChatMode,
+  isFullCouncilFlowMode,
   STABLE_GROUP_FAMILY_ORDER,
   type CouncilFlowMode,
+  type StableGroupFamily,
 } from '@/lib/council/councilMode'
 import {
   buildStableGroupSystemPrompt,
@@ -97,8 +99,18 @@ import {
   extractLastTwoFamilyReplies,
   formatProviderStatusBlock,
   isStableGroupFamily,
+  trimStableGroupPriorForCeiling,
   type StableGroupPriorReply,
 } from '@/lib/council/stableGroupChat'
+import { appendProviderIdentityToCouncilSystem } from '@/lib/council/providerIdentity'
+import {
+  buildProviderTokenDiagnostics,
+  logProviderTokenDiagnostics,
+} from '@/lib/council/providerTokenDiagnostics'
+import {
+  computeCouncilFamilyConfidence,
+  councilConfidenceToPercent,
+} from '@/lib/council/confidenceScore'
 import {
   COUNCIL_STABILITY_FAILURE_MESSAGE,
   getStabilityModeFlags,
@@ -551,24 +563,44 @@ export async function POST(req: Request) {
   const withOpportunityMandate = (system: string, family: Parameters<typeof appendOpportunityMandateToSystem>[1]) =>
     stabilityFlags.opportunityScanning ? appendOpportunityMandateToSystem(system, family) : system
 
-  const gptSystem = withOpportunityMandate(
-    `You are ChatGPT Family in Ra'el's War Room. Role: synthesize, prioritize, and convert distinct family inputs into a coherent plan without repeating labels unless adding new value. Personality: confident, direct, witty. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  const withCouncilIdentityLayer = (system: string, family: StableGroupFamily) =>
+    isFullCouncilFlowMode(councilFlowMode) || councilFlowMode === 'direct'
+      ? appendProviderIdentityToCouncilSystem(system, family)
+      : system
+
+  const gptSystem = withCouncilIdentityLayer(
+    withOpportunityMandate(
+      `You are ChatGPT Family in Ra'el's War Room. Role: synthesize, prioritize, and convert distinct family inputs into a coherent plan without repeating labels unless adding new value. Personality: confident, direct, witty. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+      'chatgpt',
+    ),
     'chatgpt',
   )
-  const claudeSystem = withOpportunityMandate(
-    `You are Claude Family in Ra'el's War Room. Role: architecture, invariants, truth boundaries, persistence, rollback, and evidence restraint. Personality: honest, direct, dry humor. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  const claudeSystem = withCouncilIdentityLayer(
+    withOpportunityMandate(
+      `You are Claude Family in Ra'el's War Room. Role: architecture, invariants, truth boundaries, persistence, rollback, and evidence restraint. Personality: honest, direct, dry humor. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+      'claude',
+    ),
     'claude',
   )
-  const grokSystem = withOpportunityMandate(
-    `You are Grok Family in Ra'el's War Room. Role: external signal volatility only when sources or live intelligence evidence are present, plus sharp contradiction spotting. Personality: fast, candid, observant, a little mischievous but grounded. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Important: if live tools or intelligence evidence are not provided in the prompt, do not pretend you searched X or the web; call it a telemetry gap or hypothesis. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  const grokSystem = withCouncilIdentityLayer(
+    withOpportunityMandate(
+      `You are Grok Family in Ra'el's War Room. Role: external signal volatility only when sources or live intelligence evidence are present, plus sharp contradiction spotting. Personality: fast, candid, observant, a little mischievous but grounded. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Important: if live tools or intelligence evidence are not provided in the prompt, do not pretend you searched X or the web; call it a telemetry gap or hypothesis. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+      'grok',
+    ),
     'grok',
   )
-  const geminiSystem = withOpportunityMandate(
-    `You are Gemini Family in Ra'el's War Room. Role: large-context reasoning, long evidence comparison, cross-source correlation, and multimodal interpretation only when the thread actually includes images/PDFs or pasted excerpts. Personality: structured, curious, precise. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not claim live web, image/PDF ingestion, or tools you were not given in the prompt. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  const geminiSystem = withCouncilIdentityLayer(
+    withOpportunityMandate(
+      `You are Gemini Family in Ra'el's War Room. Role: large-context reasoning, long evidence comparison, cross-source correlation, and multimodal interpretation only when the thread actually includes images/PDFs or pasted excerpts. Personality: structured, curious, precise. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not claim live web, image/PDF ingestion, or tools you were not given in the prompt. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+      'gemini',
+    ),
     'gemini',
   )
-  const redTeamSystem = withOpportunityMandate(
-    `You are Red Team in Ra'el's War Room — internal adversary and risk assumption challenger. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  const redTeamSystem = withCouncilIdentityLayer(
+    withOpportunityMandate(
+      `You are Red Team in Ra'el's War Room — internal adversary and risk assumption challenger. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+      'red_team',
+    ),
     'red_team',
   )
   const babySystem = `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
@@ -1255,6 +1287,8 @@ export async function POST(req: Request) {
 
       let userPrompt: string
       let stableGroupSystemForFamily: string | null = null
+      let stableGroupPriorTrimmed = false
+      let stableGroupPriorForTurn = stableGroupPrior
       let tokensForCall = maxTokens
 
       if (stableGroupTurn) {
@@ -1267,12 +1301,21 @@ export async function POST(req: Request) {
             toneInstruction,
             finalSynthesis: finalSynth,
           })
+          const trimResult = trimStableGroupPriorForCeiling({
+            prior: stableGroupPrior,
+            commanderMessage: raelDirectiveText,
+            activeTopic,
+            providerStatusBlock: stableGroupStatusBlock,
+            systemPrompt: stableGroupSystemForFamily,
+          })
+          stableGroupPriorForTurn = trimResult.prior
+          stableGroupPriorTrimmed = trimResult.trimmed
           userPrompt = buildStableGroupUserPrompt({
             commanderMessage: raelDirectiveText,
             activeTopic,
             priorReplies: extractLastTwoFamilyReplies(threadHistory),
             providerStatusBlock: stableGroupStatusBlock,
-            turnPriorFromClient: stableGroupPrior,
+            turnPriorFromClient: stableGroupPriorForTurn,
           })
         } else {
           await safeAudit({
@@ -1918,10 +1961,55 @@ export async function POST(req: Request) {
         councilStabilityMode,
       })
 
+      const activeCouncilSystemPrompt =
+        stableGroupSystemForFamily
+        ?? (councilSingleFamily === 'claude'
+          ? claudeSystem
+          : councilSingleFamily === 'grok'
+            ? grokSystem
+            : councilSingleFamily === 'gemini'
+              ? geminiSystem
+              : councilSingleFamily === 'red_team'
+                ? redTeamSystem
+                : gptSystem)
+
+      if (stableGroupTurn || councilFlowMode === 'direct') {
+        logProviderTokenDiagnostics(
+          buildProviderTokenDiagnostics({
+            mode: councilFlowMode,
+            family: councilSingleFamily,
+            promptText: `${activeCouncilSystemPrompt}\n${userPrompt}`,
+            responseText,
+            trimmed: stableGroupPriorTrimmed,
+          }),
+        )
+      }
+
+      const scoreCouncilFamilyConfidence =
+        councilSingleFamily
+        && isStableGroupFamily(councilSingleFamily)
+        && (stableGroupTurn || isFullCouncilFlowMode(councilFlowMode) || councilFlowMode === 'direct')
+
+      const councilFamilyConfidenceScore = scoreCouncilFamilyConfidence
+        ? computeCouncilFamilyConfidence({
+            responseText,
+            decreeText: raelDirectiveText,
+            priorReplies: stableGroupTurn ? stableGroupPriorForTurn : stableGroupPrior,
+            family: councilSingleFamily as StableGroupFamily,
+            hasLiveSignals: liveSignalsAvailable(liveResearchPacket),
+          })
+        : null
+
       return NextResponse.json({
         councilSingleResponse: responseText,
         ...(economicOpsRawProviderAnalysis ? { economicOpsRawProviderAnalysis } : {}),
         councilSingleFamily,
+        ...(councilFamilyConfidenceScore != null
+          ? {
+              councilFamilyConfidence: councilFamilyConfidenceScore,
+              councilFamilyConfidencePercent: councilConfidenceToPercent(councilFamilyConfidenceScore),
+            }
+          : {}),
         results: validateProviderResults(
           [
             {

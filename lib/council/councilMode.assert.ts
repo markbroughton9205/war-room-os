@@ -10,7 +10,13 @@ import {
   resolveCouncilFlowMode,
   STABLE_GROUP_FAMILY_ORDER,
 } from '@/lib/council/councilMode'
-import { extractLastTwoFamilyReplies, isStableGroupFamily } from '@/lib/council/stableGroupChat'
+import { PROVIDER_IDENTITY_PROFILES } from '@/lib/council/providerIdentity'
+import {
+  extractLastTwoFamilyReplies,
+  isStableGroupFamily,
+  trimStableGroupPriorForCeiling,
+} from '@/lib/council/stableGroupChat'
+import { STABLE_GROUP_PROMPT_TOKEN_CEILING } from '@/lib/council/providerTokenDiagnostics'
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(msg)
@@ -35,6 +41,25 @@ assert(isStableGroupFamily('grok'), 'grok in roster')
 
 assert(resolveCouncilFlowMode('direct') === 'direct', 'client direct wins')
 assert(typeof getDefaultCouncilFlowMode() === 'string', 'default mode string')
+
+for (const [family, profile] of Object.entries(PROVIDER_IDENTITY_PROFILES)) {
+  assert(profile.length > 0 && profile.length < 250, `identity profile length ${family}`)
+}
+
+const longPrior = Array.from({ length: 6 }, (_, i) => ({
+  family: `Family${i}`,
+  content: 'x'.repeat(900),
+}))
+const trimmed = trimStableGroupPriorForCeiling({
+  prior: longPrior,
+  commanderMessage: "Ra'el: focus today",
+  activeTopic: 'focus',
+  providerStatusBlock: 'Provider status: ok',
+  systemPrompt: 'system',
+  ceiling: STABLE_GROUP_PROMPT_TOKEN_CEILING,
+})
+assert(trimmed.trimmed, 'ceiling trims oldest prior')
+assert(trimmed.prior.length < longPrior.length, 'prior count reduced')
 
 console.log('[councilMode.assert] ok', {
   defaultMode: getDefaultCouncilFlowMode(),

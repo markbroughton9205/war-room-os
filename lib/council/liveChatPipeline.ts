@@ -103,6 +103,10 @@ export type CouncilChatJson = {
   councilStabilityIssue?: boolean
   councilFlowMode?: CouncilFlowMode
   stableGroupSkipped?: boolean
+  /** Lightweight per-family confidence (0–1) from Phase 40 scoring. */
+  councilFamilyConfidence?: number
+  /** Same score as 0–100 for UI meters. */
+  councilFamilyConfidencePercent?: number
   /** Single-family research accounting for this response (Phase 6). */
   liveResearchTurnSurvey?: {
     wave: 'single'
