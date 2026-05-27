@@ -1,6 +1,11 @@
 import { completeGeminiCouncilMessage } from '@/lib/ai/providers/geminiCouncil'
 import { callXAIChat } from '@/lib/ai/providers/xai'
-import { completeKimiChat, isKimiConfigured } from '@/lib/providers/kimi'
+import {
+  completeKimiChat,
+  isKimiConfigured,
+  type KimiDiagnostics,
+  type KimiErrorKind,
+} from '@/lib/providers/kimi'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
@@ -26,6 +31,8 @@ export type DirectProviderCallResult = {
   text: string
   transportStatus: number | 'timeout' | 'unavailable'
   error?: string
+  kimiErrorKind?: KimiErrorKind
+  kimiDiagnostics?: KimiDiagnostics
 }
 
 function sanitizeProviderError(message: string): string {
@@ -137,7 +144,7 @@ async function callGrokDirect(prompt: string, system: string, timeoutMs: number)
 
 async function callKimiDirect(prompt: string, system: string, timeoutMs: number): Promise<DirectProviderCallResult> {
   if (!isKimiConfigured()) {
-    return { ok: false, text: '', transportStatus: 'unavailable', error: 'Kimi not configured' }
+    return { ok: false, text: '', transportStatus: 'unavailable', error: 'Kimi key missing', kimiErrorKind: 'key_missing' }
   }
   const result = await completeKimiChat({
     system,
@@ -153,12 +160,19 @@ async function callKimiDirect(prompt: string, system: string, timeoutMs: number)
       text: '',
       transportStatus: timedOut ? 'timeout' : 'unavailable',
       error: sanitizeProviderError(err),
+      kimiErrorKind: result.kind,
+      kimiDiagnostics: result.diagnostics,
     }
   }
   if (!result.data.text?.trim()) {
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'empty response body' }
   }
-  return { ok: true, text: compactDisplayWhitespace(result.data.text), transportStatus: 200 }
+  return {
+    ok: true,
+    text: compactDisplayWhitespace(result.data.text),
+    transportStatus: 200,
+    kimiDiagnostics: result.diagnostics,
+  }
 }
 
 async function callGeminiDirect(prompt: string, system: string): Promise<DirectProviderCallResult> {

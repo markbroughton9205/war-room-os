@@ -6,6 +6,7 @@ import {
 import { logCouncilPacketMetrics } from '@/lib/council/packetSizeLog'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { toDisplayText } from '@/lib/council/toDisplayText'
+import { KIMI_DEFAULT_MODEL, MOONSHOT_API_BASE } from '@/lib/providers/kimi'
 
 const DIRECT_PROVIDERS = new Set<DirectProviderFamily>([
   'chatgpt',
@@ -55,6 +56,29 @@ async function runDirectTest(provider: DirectProviderFamily, prompt: string, ful
     fallbackUsed,
   })
 
+  const kimiDiagnostics =
+    provider === 'kimi'
+      ? {
+          hasKimiApiKey: result.kimiDiagnostics?.hasKimiApiKey ?? Boolean(process.env.KIMI_API_KEY?.trim()),
+          hasMoonshotApiKey: result.kimiDiagnostics?.hasMoonshotApiKey ?? Boolean(process.env.MOONSHOT_API_KEY?.trim()),
+          selectedEnvKeyName: result.kimiDiagnostics?.selectedEnvKeyName ?? null,
+          baseUrl: result.kimiDiagnostics?.baseUrl ?? MOONSHOT_API_BASE,
+          model: result.kimiDiagnostics?.model ?? KIMI_DEFAULT_MODEL,
+          upstreamStatus: result.kimiDiagnostics?.upstreamStatus ?? null,
+          sanitizedUpstreamErrorMessage: result.kimiDiagnostics?.sanitizedUpstreamErrorMessage ?? null,
+        }
+      : null
+
+  if (provider === 'kimi') {
+    console.info('[providers/direct-test][kimi]', {
+      success: result.ok,
+      transportStatus: result.transportStatus,
+      errorKind: result.kimiErrorKind ?? null,
+      error: result.ok ? null : result.error ?? 'provider call failed',
+      diagnostics: kimiDiagnostics,
+    })
+  }
+
   return {
     provider,
     transportStatus: result.transportStatus,
@@ -65,6 +89,20 @@ async function runDirectTest(provider: DirectProviderFamily, prompt: string, ful
     error: result.ok ? null : result.error ?? 'provider call failed',
     fallbackUsed,
     fullRetryEnabled: fullRetry,
+    ...(provider === 'kimi'
+      ? {
+          kimiDiagnostics: {
+            hasKimiApiKey: kimiDiagnostics?.hasKimiApiKey ?? false,
+            hasMoonshotApiKey: kimiDiagnostics?.hasMoonshotApiKey ?? false,
+            selectedEnvKeyName: kimiDiagnostics?.selectedEnvKeyName ?? null,
+            baseUrl: kimiDiagnostics?.baseUrl ?? MOONSHOT_API_BASE,
+            model: kimiDiagnostics?.model ?? KIMI_DEFAULT_MODEL,
+            upstreamStatus: kimiDiagnostics?.upstreamStatus ?? null,
+            sanitizedUpstreamErrorMessage: kimiDiagnostics?.sanitizedUpstreamErrorMessage ?? null,
+          },
+          kimiErrorKind: result.kimiErrorKind ?? null,
+        }
+      : {}),
   }
 }
 

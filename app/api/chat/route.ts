@@ -929,10 +929,11 @@ export async function POST(req: Request) {
           timeoutMs: PROVIDER_TIMEOUT_MS,
         })
         if (!kimiResult.ok) {
+          const kimiUnavailable = kimiResult.kind === 'key_missing'
           return {
             family: familyName,
-            content: kimiResult.error === 'Kimi not configured' ? 'Kimi not configured' : '',
-            status: kimiResult.error === 'Kimi not configured' ? 'UNAVAILABLE' : 'FAILED',
+            content: kimiUnavailable ? 'Kimi not configured' : '',
+            status: kimiUnavailable ? 'UNAVAILABLE' : 'FAILED',
             error: kimiResult.error,
           }
         }
@@ -1544,13 +1545,14 @@ export async function POST(req: Request) {
               timeoutMs: providerBudgetMs,
             })
             if (!kimiResult.ok) {
+          const kimiUnavailable = kimiResult.kind === 'key_missing'
               await safeAudit({
                 success: false,
                 flow: 'continue_single',
                 councilSingleFamily: 'kimi',
-                reason: kimiResult.error === 'Kimi not configured' ? 'kimi_not_configured' : 'kimi_provider_error',
+            reason: kimiUnavailable ? 'kimi_not_configured' : 'kimi_provider_error',
               })
-              if (kimiResult.error === 'Kimi not configured') {
+          if (kimiUnavailable) {
                 return NextResponse.json({
                   councilSingleResponse: 'Kimi not configured',
                   councilSingleFamily: 'kimi',
