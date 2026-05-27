@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 
 import { CopyCouncilButton } from '@/components/war-room/council/CopyCouncilButton'
 import { useMatrixStatus } from '@/hooks/useMatrixStatus'
+import { formatMergedSourcesLine } from '@/lib/operator/canonicalIssues'
 import {
   COMMANDER_MANUAL_FIX_EVIDENCE,
   countOpenOperatorGaps,
@@ -350,6 +351,9 @@ function GapRow({
       </div>
       <p className="mt-1 text-emerald-100/90">{gap.plainLanguage}</p>
       <p className="mt-1 text-slate-500">{gap.meaning}</p>
+      {formatMergedSourcesLine(gap) ? (
+        <p className="mt-1 text-[8px] text-sky-300/70">{formatMergedSourcesLine(gap)}</p>
+      ) : null}
       <p className="mt-1 text-[9px] text-emerald-200/80">{gap.recommendedFix}</p>
       {gap.verificationEvidence?.length ? (
         <ul className="mt-2 list-inside list-disc text-[9px] text-sky-200/80">

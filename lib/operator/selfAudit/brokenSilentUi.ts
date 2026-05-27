@@ -1,3 +1,4 @@
+import { CANONICAL_ISSUE_IDS } from '../canonicalIssues'
 import type { OperatorGap } from '../gapFinder'
 import { selfAuditGap } from './gapFactory'
 import type { SelfAuditContext } from './types'
@@ -9,8 +10,8 @@ export function auditBrokenSilentUi(ctx: SelfAuditContext): OperatorGap[] {
   if (silent.archiveRecallNotConnected) {
     gaps.push(
       selfAuditGap({
-        id: 'self-audit-archive-recall-silent',
-        title: 'Archive recall button not wired',
+        id: CANONICAL_ISSUE_IDS.ARCHIVE_RECALL_NOT_WIRED,
+        title: 'Archive recall not connected',
         plainLanguage: 'The archive recall action tells you it is not connected yet.',
         meaning: 'View Archive / recall path is advertised but does not load hidden transcript rows.',
         area: 'Live Council',

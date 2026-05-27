@@ -1,3 +1,4 @@
+import { normalizeSelfRepairGapIds } from '../canonicalIssues'
 import type { SelfRepairRecord, SelfRepairSnapshot } from './types'
 import { SELF_REPAIR_STORAGE_KEY } from './types'
 
@@ -21,6 +22,7 @@ function isValidRecord(value: unknown): value is SelfRepairRecord {
 
 export function loadSelfRepairSnapshot(): SelfRepairSnapshot {
   if (!isBrowser()) return { ...EMPTY, records: [] }
+  normalizeSelfRepairGapIds()
   try {
     const raw = sessionStorage.getItem(SELF_REPAIR_STORAGE_KEY)
     if (!raw) return { ...EMPTY, records: [] }

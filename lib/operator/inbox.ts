@@ -3,6 +3,12 @@
  * Persists in sessionStorage (no Supabase).
  */
 
+import {
+  applyInboxUpgradeQueueReconciliation,
+  canonicalizeIssueId,
+  normalizeOperatorInboxSnapshot,
+  normalizeOperatorSessionStorage,
+} from './canonicalIssues'
 import type { GapFinderContext, GapSeverity, OperatorGap } from './gapFinder'
 
 export type OperatorInboxCategory =
@@ -28,6 +34,10 @@ export type OperatorInboxItem = {
   lastCheckedAt: string
   copyCursorCommand: string
   fixedAt?: string | null
+  /** When multiple audit paths reported the same canonical issue. */
+  mergedSources?: string[]
+  /** Display-only label (e.g. approved upgrade queued). */
+  statusNote?: string
 }
 
 export type OperatorInboxSnapshot = {
@@ -41,8 +51,8 @@ export type OperatorInboxSnapshot = {
 
 export const OPERATOR_INBOX_STORAGE_KEY = 'war-room-operator-inbox'
 
-export const ARCHIVE_RECALL_INBOX_ID = 'operator-inbox-archive-recall'
-export const COUNCIL_BURST_INBOX_ID = 'operator-inbox-council-trigger-burst'
+export const ARCHIVE_RECALL_INBOX_ID = 'archive-recall-not-wired'
+export const COUNCIL_BURST_INBOX_ID = 'council-trigger-burst'
 
 const EMPTY_SNAPSHOT: OperatorInboxSnapshot = {
   version: 1,
@@ -57,6 +67,7 @@ function isBrowser(): boolean {
 
 export function loadOperatorInboxSnapshot(): OperatorInboxSnapshot {
   if (!isBrowser()) return { ...EMPTY_SNAPSHOT, items: [] }
+  normalizeOperatorSessionStorage()
   try {
     const raw = sessionStorage.getItem(OPERATOR_INBOX_STORAGE_KEY)
     if (!raw) return { ...EMPTY_SNAPSHOT, items: [] }
@@ -64,14 +75,14 @@ export function loadOperatorInboxSnapshot(): OperatorInboxSnapshot {
     if (parsed.version !== 1 || !Array.isArray(parsed.items)) {
       return { ...EMPTY_SNAPSHOT, items: [] }
     }
-    return {
+    return normalizeOperatorInboxSnapshot({
       version: 1,
       items: parsed.items.filter(isValidInboxItem),
       commanderManualFixedAt: { ...(parsed.commanderManualFixedAt ?? {}) },
       commanderDismissedIds: { ...(parsed.commanderDismissedIds ?? {}) },
       councilBurstNoteDismissed: parsed.councilBurstNoteDismissed === true,
       lastSyncAt: typeof parsed.lastSyncAt === 'string' ? parsed.lastSyncAt : undefined,
-    }
+    })
   } catch {
     return { ...EMPTY_SNAPSHOT, items: [] }
   }
@@ -124,12 +135,13 @@ export function inboxStatusFromGap(gap: OperatorGap): OperatorInboxStatus {
   if (gap.verificationEvidence?.some(line => line.includes('not important'))) return 'dismissed'
   if (gap.status === 'fixed') return 'fixed'
   if (gap.status === 'needs_review') return 'fixed'
+  if (gap.verificationEvidence?.length && gap.status !== 'open') return 'fixed'
   return 'open'
 }
 
 export function gapToInboxItem(gap: OperatorGap, checkedAt: string): OperatorInboxItem {
   return {
-    id: gap.id,
+    id: canonicalizeIssueId(gap.id),
     title: gap.title,
     category: categoryFromGap(gap),
     severity: gap.severity,
@@ -141,6 +153,7 @@ export function gapToInboxItem(gap: OperatorGap, checkedAt: string): OperatorInb
     lastCheckedAt: gap.lastCheckedAt ?? checkedAt,
     copyCursorCommand: gap.cursorCommand,
     fixedAt: gap.fixedAt ?? null,
+    mergedSources: gap.mergedSources,
   }
 }
 
@@ -153,7 +166,7 @@ export type InboxContextExtras = {
 function archiveRecallItem(checkedAt: string): OperatorInboxItem {
   return {
     id: ARCHIVE_RECALL_INBOX_ID,
-    title: 'Archive recall not wired yet',
+    title: 'Archive recall not connected',
     category: 'setup',
     severity: 'medium',
     plainMeaning: 'The View Archive button does not load hidden transcript rows yet.',
@@ -222,19 +235,28 @@ export function syncOperatorInboxFromGaps(
   ]
 
   for (const row of incoming) {
-    const prev = byId.get(row.id)
+    const canonicalId = canonicalizeIssueId(row.id)
+    const prev = byId.get(canonicalId)
     let status = row.status
 
-    if (dismissed[row.id]) status = 'dismissed'
-    else if (manual[row.id] && status === 'open') status = 'fixed'
+    if (dismissed[canonicalId] || dismissed[row.id]) status = 'dismissed'
+    else if ((manual[canonicalId] || manual[row.id]) && status === 'open') status = 'fixed'
     else if (prev?.status === 'in_progress' && status === 'open') status = 'in_progress'
     else if (prev?.status === 'dismissed' && status !== 'fixed') status = 'dismissed'
 
-    byId.set(row.id, {
+    const mergedSources = [
+      ...new Set([...(prev?.mergedSources ?? []), ...(row.mergedSources ?? []), row.source, prev?.source].filter(Boolean)),
+    ] as string[]
+
+    byId.set(canonicalId, {
       ...row,
+      id: canonicalId,
       status,
+      statusNote: undefined,
       createdAt: prev?.createdAt ?? row.createdAt,
-      fixedAt: status === 'fixed' ? manual[row.id] ?? prev?.fixedAt ?? row.fixedAt : row.fixedAt,
+      fixedAt: status === 'fixed' ? manual[canonicalId] ?? manual[row.id] ?? prev?.fixedAt ?? row.fixedAt : row.fixedAt,
+      mergedSources: mergedSources.length > 1 ? mergedSources : row.mergedSources ?? prev?.mergedSources,
+      source: mergedSources.length ? mergedSources.join(', ') : row.source,
     })
   }
 
@@ -247,7 +269,9 @@ export function syncOperatorInboxFromGaps(
 
   const snapshot: OperatorInboxSnapshot = {
     version: 1,
-    items: [...byId.values()].sort((a, b) => rankSeverity(b.severity) - rankSeverity(a.severity)),
+    items: applyInboxUpgradeQueueReconciliation(
+      [...byId.values()].sort((a, b) => rankSeverity(b.severity) - rankSeverity(a.severity)),
+    ),
     commanderManualFixedAt: manual,
     commanderDismissedIds: dismissed,
     councilBurstNoteDismissed: base.councilBurstNoteDismissed,
@@ -311,6 +335,7 @@ export function countOpenOperatorInboxItems(
 ): number {
   return items.filter(item => {
     if (item.status === 'dismissed' || item.status === 'fixed') return false
+    if (item.statusNote === 'Approved upgrade queued') return false
     if (item.status === 'in_progress') return options?.includeInProgress === true
     return true
   }).length

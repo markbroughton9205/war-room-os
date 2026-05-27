@@ -319,14 +319,21 @@ function InboxRow({
           {item.severity}
         </span>
         <span className="text-[8px] uppercase tracking-widest" style={{ color: statusColor }}>
-          {item.status.replace('_', ' ')}
+          {item.statusNote ?? item.status.replace('_', ' ')}
         </span>
         <span className="text-[8px] uppercase tracking-widest text-slate-600">
           {categoryLabel(item.category)}
         </span>
       </div>
       <p className="mt-1 text-emerald-100/90">{item.plainMeaning}</p>
-      <p className="mt-1 text-[9px] text-emerald-200/80">{item.recommendedAction}</p>
+      <p className="mt-1 text-[9px] text-emerald-200/80">
+        {item.statusNote ?? item.recommendedAction}
+      </p>
+      {item.mergedSources && item.mergedSources.length > 1 ? (
+        <p className="mt-1 text-[8px] text-sky-300/70">
+          Merged sources: {item.mergedSources.join(' · ')}
+        </p>
+      ) : null}
       <p className="mt-1 text-[8px] text-slate-600">
         Source: {item.source} · Checked {new Date(item.lastCheckedAt).toLocaleString()}
       </p>

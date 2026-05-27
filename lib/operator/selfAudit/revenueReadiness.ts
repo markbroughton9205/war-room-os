@@ -1,3 +1,4 @@
+import { CANONICAL_ISSUE_IDS } from '../canonicalIssues'
 import type { OperatorGap } from '../gapFinder'
 import { selfAuditGap } from './gapFactory'
 import type { SelfAuditContext } from './types'
@@ -11,7 +12,7 @@ export function auditRevenueReadiness(ctx: SelfAuditContext): OperatorGap[] {
   if (count === 0) {
     gaps.push(
       selfAuditGap({
-        id: 'self-audit-revenue-no-opportunities',
+        id: CANONICAL_ISSUE_IDS.NO_INCOME_OPPORTUNITIES,
         title: 'No income opportunities tracked',
         plainLanguage: 'The operations deck has no opportunities yet — revenue lane is empty.',
         meaning: 'Operator deck / Opportunity Scout has zero rows.',
@@ -28,7 +29,7 @@ export function auditRevenueReadiness(ctx: SelfAuditContext): OperatorGap[] {
   if (count > 0 && paid === 0) {
     gaps.push(
       selfAuditGap({
-        id: 'self-audit-revenue-no-paid',
+        id: CANONICAL_ISSUE_IDS.REVENUE_NO_PAID,
         title: 'Opportunities tracked but none paid',
         plainLanguage: `${count} opportunity(ies) exist but none are marked paid yet.`,
         meaning: 'Pipeline exists without closed-won signal in operator deck.',
@@ -45,7 +46,7 @@ export function auditRevenueReadiness(ctx: SelfAuditContext): OperatorGap[] {
   if (rev.scoutError) {
     gaps.push(
       selfAuditGap({
-        id: 'self-audit-revenue-scout-error',
+        id: CANONICAL_ISSUE_IDS.OPPORTUNITY_SCOUT_ERROR,
         title: 'Opportunity Scout last run failed',
         plainLanguage: 'Scout could not finish — new leads may be stale.',
         meaning: 'OpportunityScoutState reports error.',
@@ -62,7 +63,7 @@ export function auditRevenueReadiness(ctx: SelfAuditContext): OperatorGap[] {
   if (rev.scoutStatus === 'idle' && count === 0) {
     gaps.push(
       selfAuditGap({
-        id: 'self-audit-revenue-scout-never-run',
+        id: CANONICAL_ISSUE_IDS.OPPORTUNITY_SCOUT_IDLE,
         title: 'Opportunity Scout never run this session',
         plainLanguage: 'Scout is idle and there are no opportunities — revenue intel has not started.',
         meaning: 'No scout activity in current session.',

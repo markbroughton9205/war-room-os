@@ -1,3 +1,4 @@
+import { CANONICAL_ISSUE_IDS } from '../canonicalIssues'
 import type { OperatorGap } from '../gapFinder'
 import { selfAuditGap } from './gapFactory'
 import type { SelfAuditContext } from './types'
@@ -61,8 +62,8 @@ export function auditOverOrchestration(ctx: SelfAuditContext): OperatorGap[] {
   if ((orch.recentCouncilTriggers ?? 0) > 8) {
     gaps.push(
       selfAuditGap({
-        id: 'self-audit-orchestration-trigger-burst',
-        title: 'Burst of recent council triggers',
+        id: CANONICAL_ISSUE_IDS.COUNCIL_TRIGGER_BURST,
+        title: 'High council activity recently',
         plainLanguage: `${orch.recentCouncilTriggers} orchestration triggers recently — risk of overlapping waves.`,
         meaning: 'High trigger count in session window.',
         area: 'Live Council',

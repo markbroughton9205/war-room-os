@@ -2,6 +2,7 @@ import type { OperatorGap } from '../gapFinder'
 import { auditBrokenSilentUi } from './brokenSilentUi'
 import { auditConfusingLabels } from './confusingLabels'
 import { auditDuplicateFeatures } from './duplicateFeatures'
+import { mergeCanonicalGaps } from '../canonicalIssues'
 import { dedupeGaps } from './merge'
 import { auditMemoryUsefulness } from './memoryUsefulness'
 import { auditMobileLayout } from './mobileLayout'
@@ -26,5 +27,5 @@ export function runSelfAudit(ctx: SelfAuditContext): OperatorGap[] {
     auditOverOrchestration,
   ]
   const merged = modules.flatMap(fn => fn(ctx))
-  return dedupeGaps(merged)
+  return mergeCanonicalGaps(dedupeGaps(merged))
 }

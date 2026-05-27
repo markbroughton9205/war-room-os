@@ -148,5 +148,5 @@ export function summarizeSelfRepairHealth(
 }
 
 export function listActiveRepairs(snapshot = loadSelfRepairSnapshot()): SelfRepairRecord[] {
-  return snapshot.records.filter(r => r.state !== 'ARCHIVED')
+  return snapshot.records.filter(r => r.state !== 'ARCHIVED' && r.state !== 'APPROVED')
 }

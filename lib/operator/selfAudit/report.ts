@@ -47,6 +47,9 @@ export function formatSelfAuditReport(gaps: OperatorGap[]): string {
       lines.push(`### ${i + 1}. ${g.title} [${g.severity}] · ${g.status}`)
       lines.push(`Category: ${g.category}`)
       lines.push(`Plain language: ${g.plainLanguage}`)
+      if (g.mergedSources && g.mergedSources.length > 1) {
+        lines.push(`Merged sources: ${g.mergedSources.join(' · ')}`)
+      }
       lines.push(`Meaning: ${g.meaning}`)
       lines.push(`Recommended: ${g.recommendedFix}`)
       lines.push(`Cursor: ${g.cursorCommand}`)

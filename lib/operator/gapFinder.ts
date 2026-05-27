@@ -12,6 +12,7 @@ import {
 } from './gapVerification'
 import { isOldOperatorDiagnosticMessage } from '@/lib/war-room/operatorDiagnosticsUi'
 import { gapFinderToSelfAuditContext } from './selfAudit/context'
+import { mergeCanonicalGaps } from './canonicalIssues'
 import {
   applyCommanderDismissals,
   countActionableOpenGaps,
@@ -58,6 +59,8 @@ export type OperatorGap = {
   fixedAt?: string | null
   verificationEvidence?: string[]
   lastCheckedAt?: string
+  /** Populated when multiple audit paths reported the same canonical issue. */
+  mergedSources?: string[]
 }
 
 export type CanonicalGapSnapshot = {
@@ -144,7 +147,11 @@ function gap(
 }
 
 function isKnownGapId(id: string): id is KnownGapId {
-  return id === KNOWN_GAP_IDS.OLD_DIAGNOSTICS_UX || id === KNOWN_GAP_IDS.ARCHIVE_COPY_CLARITY
+  return (
+    id === KNOWN_GAP_IDS.OLD_DIAGNOSTICS_UX ||
+    id === KNOWN_GAP_IDS.ARCHIVE_COPY_CLARITY ||
+    id === KNOWN_GAP_IDS.ARCHIVE_RECALL_NOT_WIRED
+  )
 }
 
 function verificationMap(ctx: GapFinderContext): Map<string, { verified: boolean; evidence: string[] }> {
@@ -216,6 +223,16 @@ const KNOWN_GAP_DISPLAY: Record<
     cursorCommand:
       'Document in operator UI that Copy Visible Log uses visibleCouncilMessages only; link to archive recall if needed.',
   },
+  [KNOWN_GAP_IDS.ARCHIVE_RECALL_NOT_WIRED]: {
+    title: 'Archive recall not connected',
+    plainLanguage: 'View Archive does not load hidden transcript rows yet.',
+    meaning: 'Archive recall control is visible but not wired to a transcript viewer.',
+    area: 'Live Council',
+    category: 'Broken/Silent UI',
+    severity: 'medium',
+    recommendedFix: 'Wire Archive Viewer or disable the control until recall is available.',
+    cursorCommand: 'Wire View Archive to client-side ArchiveViewer or disable with Copy Session hint.',
+  },
 }
 
 function injectVerifiedFixedKnownGaps(gaps: OperatorGap[], ctx: GapFinderContext): OperatorGap[] {
@@ -247,7 +264,7 @@ export function resolveOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
   const merged = mergeSelfAuditWithLegacyGaps(legacy, selfAudit)
   const withStatus = applyGapVerification(merged, ctx)
   const withDismissals = applyCommanderDismissals(withStatus, ctx.commanderDismissedIds)
-  return injectVerifiedFixedKnownGaps(withDismissals, ctx)
+  return mergeCanonicalGaps(injectVerifiedFixedKnownGaps(withDismissals, ctx))
 }
 
 export function countOpenOperatorGaps(gaps: OperatorGap[]): number {
@@ -414,6 +431,9 @@ export function formatGapReport(gaps: OperatorGap[]): string {
       lines.push(`Meaning: ${g.meaning}`)
       lines.push(`Recommended fix: ${g.recommendedFix}`)
       lines.push(`Cursor command: ${g.cursorCommand}`)
+      if (g.mergedSources && g.mergedSources.length > 1) {
+        lines.push(`Merged sources: ${g.mergedSources.join(' · ')}`)
+      }
       if (g.verificationEvidence?.length) {
         lines.push(`Verification: ${g.verificationEvidence.join('; ')}`)
       }
