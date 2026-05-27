@@ -1726,8 +1726,8 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   hiddenCount,
   collapsedNoiseCount,
   councilPassthroughMode,
-  hideOldDiagnostics = false,
-  onToggleHideOldDiagnostics,
+  showOldDiagnostics = false,
+  onToggleShowOldDiagnostics,
   onViewArchive,
   onSummarizeSession,
   onRecallEconomicOps,
@@ -1739,8 +1739,8 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   hiddenCount: number
   collapsedNoiseCount: number
   councilPassthroughMode?: boolean
-  hideOldDiagnostics?: boolean
-  onToggleHideOldDiagnostics?: () => void
+  showOldDiagnostics?: boolean
+  onToggleShowOldDiagnostics?: () => void
   onViewArchive: () => void
   onSummarizeSession: () => void
   onRecallEconomicOps: () => void
@@ -1756,7 +1756,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           style={{ background: 'rgba(96,165,250,0.07)', border: '1px solid rgba(96,165,250,0.24)', color: '#93C5FD' }}
         >
           <span className="tracking-widest">
-            Older messages archived. Use recall to retrieve. {hiddenCount} hidden from live view.
+            {hiddenCount} older message{hiddenCount === 1 ? '' : 's'} are archived. Use Copy Session or View Archive for full history.
           </span>
           <button type="button" onClick={onViewArchive} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #60A5FA', color: '#BFDBFE' }}>
             View Archive
@@ -1777,18 +1777,18 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           Clear Noise active: {collapsedNoiseCount} repeated notice{collapsedNoiseCount === 1 ? '' : 's'} collapsed from the live view.
         </div>
       ) : null}
-      {onToggleHideOldDiagnostics ? (
+      {onToggleShowOldDiagnostics ? (
         <div className="mb-3 ml-11 flex flex-wrap items-center gap-2 text-[9px] tracking-widest text-slate-500">
           <label className="flex cursor-pointer items-center gap-1.5">
             <input
               type="checkbox"
-              checked={hideOldDiagnostics}
-              onChange={onToggleHideOldDiagnostics}
+              checked={showOldDiagnostics}
+              onChange={onToggleShowOldDiagnostics}
               className="accent-emerald-500"
             />
-            Hide old diagnostics
+            Show old diagnostics
           </label>
-          <span className="text-slate-600">Fallback / degraded notices stay in history; toggle only affects the live view.</span>
+          <span className="text-slate-600">Off by default. Fallback / degraded notices stay in history; toggle only affects the live view.</span>
         </div>
       ) : null}
       {messages.map(msg => (
@@ -1797,7 +1797,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           msg={msg}
           diagnosticsOpen={false}
           councilPassthroughMode={councilPassthroughMode}
-          operatorDiagnosticsMuted={hideOldDiagnostics}
+          operatorDiagnosticsMuted={!showOldDiagnostics}
           onOpenFullMemory={onOpenFullMemory}
           onProjectAction={onProjectAction}
           onPrepareRepairPacket={onPrepareRepairPacket}
@@ -5487,7 +5487,7 @@ function Home() {
   )
   const visibleCouncilMessages = liveCouncilHygiene.visibleMessages
   const collapsedCouncilNoiseCount = liveCouncilHygiene.collapsedCount
-  const [hideOldCouncilDiagnostics, setHideOldCouncilDiagnostics] = useState(false)
+  const [showOldCouncilDiagnostics, setShowOldCouncilDiagnostics] = useState(false)
   const [operatorGapCount, setOperatorGapCount] = useState(0)
   const [viewportNarrow, setViewportNarrow] = useState(false)
   useEffect(() => {
@@ -9954,8 +9954,16 @@ function Home() {
   }
 
   const handleViewArchive = () => {
+    if (!persistenceAvailable) {
+      addSystemMessageRef.current?.(
+        'Archive recall is not connected yet. Use Copy Session for the full transcript.',
+      )
+      return
+    }
     const parsed = parseRecallCommand('show archive')
-    if (parsed) void executeRecallCommand(parsed)
+    if (parsed) {
+      void executeRecallCommand(parsed).then(() => setOperatorTab('memory'))
+    }
   }
 
   const handleSummarizeSessionArchive = () => {
@@ -10443,7 +10451,7 @@ function Home() {
       persistenceHealthLabel,
       councilPaused: council.councilState === 'paused',
       councilFlowMode,
-      hideOldDiagnostics: hideOldCouncilDiagnostics,
+      showOldDiagnostics: showOldCouncilDiagnostics,
       internetUsable: internetStatus.canUseInternet === true,
       viewportNarrow,
     }),
@@ -10456,7 +10464,7 @@ function Home() {
       persistenceHealthLabel,
       council.councilState,
       councilFlowMode,
-      hideOldCouncilDiagnostics,
+      showOldCouncilDiagnostics,
       internetStatus.canUseInternet,
       viewportNarrow,
     ],
@@ -10944,7 +10952,12 @@ function Home() {
           </div>
           <div className="flex max-w-full flex-wrap items-center justify-start gap-1.5 sm:justify-end">
             <span className="mr-1 text-[9px] tracking-widest" style={{ color: '#555' }}>Session controls</span>
-            <CopyCouncilButton label="Copy Session" getText={getCopySessionText} successMessage="Session transcript copied" />
+            <CopyCouncilButton
+              label="Copy Session"
+              getText={getCopySessionText}
+              successMessage="Session transcript copied"
+              hint="Copies the full saved session, including archived messages."
+            />
             <CopyCouncilButton
               label="Copy Latest Exchange"
               getText={getCopyLatestExchangeText}
@@ -11008,6 +11021,7 @@ function Home() {
                 getText={getCopyVisibleLogText}
                 successMessage="Visible log copied"
                 variant="accent"
+                hint="Copies only messages currently visible in this thread."
               />
               <CopyCouncilButton
                 label="Copy as Cursor Brief"
@@ -11127,10 +11141,10 @@ function Home() {
             hiddenCount={hiddenCouncilMessageCount}
             collapsedNoiseCount={collapsedCouncilNoiseCount}
             councilPassthroughMode={councilPassthroughMode}
-            hideOldDiagnostics={hideOldCouncilDiagnostics}
-            onToggleHideOldDiagnostics={
+            showOldDiagnostics={showOldCouncilDiagnostics}
+            onToggleShowOldDiagnostics={
               isUnifiedLiveRoom && uiMode === 'operator'
-                ? () => setHideOldCouncilDiagnostics(prev => !prev)
+                ? () => setShowOldCouncilDiagnostics(prev => !prev)
                 : undefined
             }
             onViewArchive={handleViewArchive}

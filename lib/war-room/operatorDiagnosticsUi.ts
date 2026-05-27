@@ -7,6 +7,11 @@ const OLD_OPERATOR_DIAGNOSTIC_PATTERNS = [
   /fallback summary used/i,
   /degraded response quality/i,
   /excluded from synthesis and repair packets/i,
+  /\bfallback\b/i,
+  /\bretry\b/i,
+  /integrity snapshot|runtime integrity|protocol artifact/i,
+  /sequential diagnostic|diagnostic session complete|diagnostic queue/i,
+  /red team hold/i,
 ] as const
 
 export function isOldOperatorDiagnosticText(text: string): boolean {

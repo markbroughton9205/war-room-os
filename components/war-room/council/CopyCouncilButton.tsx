@@ -14,6 +14,7 @@ export type CopyCouncilButtonProps = {
   successMessage?: string
   className?: string
   variant?: 'default' | 'accent'
+  hint?: string
 }
 
 export const CopyCouncilButton = memo(function CopyCouncilButton({
@@ -22,6 +23,7 @@ export const CopyCouncilButton = memo(function CopyCouncilButton({
   successMessage = 'Copied to clipboard',
   className = '',
   variant = 'default',
+  hint,
 }: CopyCouncilButtonProps) {
   const { signalSuccess, signalError } = useMatrixStatus()
   const [copied, setCopied] = useState(false)
@@ -40,18 +42,25 @@ export const CopyCouncilButton = memo(function CopyCouncilButton({
   const accent = variant === 'accent'
 
   return (
-    <button
-      type="button"
-      className={`${BTN_CLASS} ${className}`}
-      style={{
-        border: accent ? '1px solid rgba(255,215,0,0.45)' : '1px solid rgba(148,163,184,0.35)',
-        color: copied ? '#86EFAC' : accent ? '#FDE68A' : '#CBD5E1',
-        background: 'rgba(0,0,0,0.22)',
-      }}
-      aria-label={label}
-      onClick={() => void onClick()}
-    >
-      {copied ? 'Copied' : label}
-    </button>
+    <div className={`inline-flex max-w-[14rem] flex-col gap-0.5 ${className}`}>
+      <button
+        type="button"
+        className={BTN_CLASS}
+        style={{
+          border: accent ? '1px solid rgba(255,215,0,0.45)' : '1px solid rgba(148,163,184,0.35)',
+          color: copied ? '#86EFAC' : accent ? '#FDE68A' : '#CBD5E1',
+          background: 'rgba(0,0,0,0.22)',
+        }}
+        aria-label={label}
+        onClick={() => void onClick()}
+      >
+        {copied ? 'Copied' : label}
+      </button>
+      {hint ? (
+        <span className="text-[8px] leading-snug tracking-wide text-slate-600" role="note">
+          {hint}
+        </span>
+      ) : null}
+    </div>
   )
 })

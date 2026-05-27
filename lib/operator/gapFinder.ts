@@ -4,6 +4,7 @@
  */
 
 import type { CouncilMessageLike } from './copyCouncilText'
+import { isOldOperatorDiagnosticMessage } from '@/lib/war-room/operatorDiagnosticsUi'
 
 export type GapCategory =
   | 'Not wired'
@@ -61,7 +62,7 @@ export type GapFinderContext = {
   persistenceHealthLabel?: string
   councilPaused?: boolean
   councilFlowMode?: string
-  hideOldDiagnostics?: boolean
+  showOldDiagnostics?: boolean
   canonicalStatus?: CanonicalGapSnapshot | null
   canonicalStatusUnavailable?: boolean
   internetUsable?: boolean
@@ -78,9 +79,21 @@ function gap(
   }
 }
 
+function visibleForGapScan(messages: CouncilMessageLike[], showOldDiagnostics?: boolean): CouncilMessageLike[] {
+  if (showOldDiagnostics) return messages
+  return messages.filter(
+    m =>
+      !isOldOperatorDiagnosticMessage({
+        content: m.content,
+        messageType: m.messageType,
+        degraded: m.degraded,
+      }),
+  )
+}
+
 export function findOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
   const gaps: OperatorGap[] = []
-  const visible = ctx.visibleMessages ?? []
+  const visible = visibleForGapScan(ctx.visibleMessages ?? [], ctx.showOldDiagnostics)
 
   if (!visible.some(m => m.messageType === 'decree' || /rael/i.test(m.familyName))) {
     gaps.push(
@@ -142,7 +155,7 @@ export function findOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
     )
   }
 
-  if (ctx.hideOldDiagnostics === false && visible.some(m => /fallback|degraded|unavailable/i.test(m.content))) {
+  if (ctx.showOldDiagnostics && visible.some(m => /fallback|degraded|unavailable/i.test(m.content))) {
     gaps.push(
       gap({
         title: 'Old diagnostic notices visible',
@@ -150,7 +163,7 @@ export function findOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
         area: 'Live Council',
         category: 'Old diagnostics',
         severity: 'low',
-        recommendedFix: 'Enable "Hide old diagnostics" in operator live view.',
+        recommendedFix: 'Turn off "Show old diagnostics" in operator live view (default hides legacy noise).',
         cursorCommand:
           'Review isOldOperatorDiagnosticMessage filtering in app/page.tsx MessageBubble; keep history without live noise.',
       }),
@@ -271,13 +284,15 @@ export function findOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
   if (ctx.internetUsable === false) {
     gaps.push(
       gap({
-        title: 'Internet tools not usable',
-        meaning: 'Live research / internet layer reports unavailable.',
+        title: 'Optional live research source — not required for Stable Group Chat',
+        meaning: 'Live research tools are not active. Stable Group Chat still works without them.',
         area: 'Command Intel',
         category: 'Not wired',
-        severity: 'medium',
-        recommendedFix: 'Configure internet tools (Tavily/Firecrawl) per tools status panel.',
-        cursorCommand: 'Verify /api/tools/internet/status and operator env for research tools.',
+        severity: 'low',
+        recommendedFix:
+          'No action required for Stable Group Chat. Enable live research only when you need web-backed intel.',
+        cursorCommand:
+          'UI-only: gapFinder internet tools entry is informational; do not block council or configure Tavily/Firecrawl from this gap.',
       }),
     )
   }
