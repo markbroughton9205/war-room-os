@@ -9,6 +9,13 @@ export type MatrixStatusSnapshot = {
   tick: number
 }
 
+/** Stable idle snapshot for SSR / getServerSnapshot (must not allocate per call). */
+export const MATRIX_IDLE_SNAPSHOT: MatrixStatusSnapshot = Object.freeze({
+  kind: 'idle',
+  message: '',
+  tick: 0,
+})
+
 const THROTTLE_MS = 380
 const AUTO_IDLE_MS: Record<Exclude<MatrixStatusKind, 'idle'>, number> = {
   working: 0,
@@ -25,7 +32,7 @@ const PRIORITY: Record<MatrixStatusKind, number> = {
   error: 4,
 }
 
-let snapshot: MatrixStatusSnapshot = { kind: 'idle', message: '', tick: 0 }
+let snapshot: MatrixStatusSnapshot = MATRIX_IDLE_SNAPSHOT
 const listeners = new Set<() => void>()
 let lastEmitAt = 0
 let idleTimer: ReturnType<typeof setTimeout> | null = null
@@ -54,6 +61,10 @@ function scheduleIdle(kind: Exclude<MatrixStatusKind, 'idle'>) {
 
 export function getMatrixStatusSnapshot(): MatrixStatusSnapshot {
   return snapshot
+}
+
+export function getMatrixStatusServerSnapshot(): MatrixStatusSnapshot {
+  return MATRIX_IDLE_SNAPSHOT
 }
 
 export function subscribeMatrixStatus(listener: () => void): () => void {

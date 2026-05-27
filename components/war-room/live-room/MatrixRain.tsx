@@ -3,6 +3,7 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 import {
+  getMatrixStatusServerSnapshot,
   getMatrixStatusSnapshot,
   subscribeMatrixStatus,
   type MatrixStatusKind,
@@ -110,11 +111,11 @@ export const MatrixRain = memo(function MatrixRain() {
   const [reducedMotion, setReducedMotion] = useState(false)
   const [mobile, setMobile] = useState(false)
 
-  const statusSnap = useSyncExternalStore(subscribeMatrixStatus, getMatrixStatusSnapshot, () => ({
-    kind: 'idle' as const,
-    message: '',
-    tick: 0,
-  }))
+  const statusSnap = useSyncExternalStore(
+    subscribeMatrixStatus,
+    getMatrixStatusSnapshot,
+    getMatrixStatusServerSnapshot,
+  )
 
   useEffect(() => {
     statusRef.current = statusSnap.kind
