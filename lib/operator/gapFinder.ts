@@ -11,8 +11,17 @@ import {
   type KnownGapId,
 } from './gapVerification'
 import { isOldOperatorDiagnosticMessage } from '@/lib/war-room/operatorDiagnosticsUi'
+import { gapFinderToSelfAuditContext } from './selfAudit/context'
+import {
+  applyCommanderDismissals,
+  countActionableOpenGaps,
+  mergeSelfAuditWithLegacyGaps,
+} from './selfAudit/merge'
+import { runSelfAudit } from './selfAudit/run'
+import type { SelfAuditCategory, SelfAuditFindingKind } from './selfAudit/types'
 
-export type GapCategory =
+/** Legacy gap categories (pre–Phase 43); retained for older findings. */
+export type LegacyGapCategory =
   | 'Not wired'
   | 'Confusing UI'
   | 'Broken action'
@@ -24,6 +33,8 @@ export type GapCategory =
   | 'Mobile layout'
   | 'Old diagnostics'
 
+export type GapCategory = LegacyGapCategory | SelfAuditCategory
+
 export type GapSeverity = 'low' | 'medium' | 'high'
 
 export type GapStatus = 'open' | 'fixed' | 'needs_review'
@@ -34,9 +45,12 @@ export const COMMANDER_MANUAL_FIX_EVIDENCE =
 export type OperatorGap = {
   id: string
   title: string
+  /** Plain-language summary for Commander (no jargon). */
+  plainLanguage: string
   meaning: string
   area: string
   category: GapCategory
+  kind?: SelfAuditFindingKind
   severity: GapSeverity
   recommendedFix: string
   cursorCommand: string
@@ -83,17 +97,48 @@ export type GapFinderContext = {
   internetUsable?: boolean
   evolutionReadinessScore?: number | null
   viewportNarrow?: boolean
+  viewportWidthPx?: number
+  activeDockPanelId?: string | null
   gapVerification?: GapVerificationContext
   /** Gap id → ISO timestamp when Commander marked fixed manually. */
   commanderManualFixedAt?: Partial<Record<string, string>>
+  /** Gap id → ISO timestamp when Commander marked not important. */
+  commanderDismissedIds?: Partial<Record<string, string>>
+  silentUi?: {
+    archiveRecallNotConnected?: boolean
+    smsControlsNotConnected?: boolean
+    repoScanPlaceholders?: boolean
+  }
+  operatorLabels?: string[]
+  revenue?: {
+    opportunityCount?: number
+    paidOpportunityCount?: number
+    scoutStatus?: string
+    scoutError?: boolean
+  }
+  memory?: {
+    memoryCount?: number
+    persistenceAvailable?: boolean
+    runtimeLabel?: string
+    sessionOnly?: boolean
+  }
+  orchestration?: {
+    recentCouncilTriggers?: number
+    councilStabilityMode?: boolean
+  }
 }
 
 function gap(
-  partial: Omit<OperatorGap, 'id' | 'status'> & { id?: string; status?: GapStatus },
+  partial: Omit<OperatorGap, 'id' | 'status' | 'plainLanguage'> & {
+    id?: string
+    status?: GapStatus
+    plainLanguage?: string
+  },
 ): OperatorGap {
   return {
     id: partial.id ?? `${partial.category}-${partial.title}`.replace(/\s+/g, '-').toLowerCase(),
     status: partial.status ?? 'open',
+    plainLanguage: partial.plainLanguage ?? partial.meaning,
     ...partial,
   }
 }
@@ -151,6 +196,7 @@ const KNOWN_GAP_DISPLAY: Record<
 > = {
   [KNOWN_GAP_IDS.OLD_DIAGNOSTICS_UX]: {
     title: 'Old diagnostic notices visible',
+    plainLanguage: 'Old fallback and diagnostic lines are visible in the live council thread.',
     meaning: 'Legacy fallback/diagnostic lines may clutter the live council thread.',
     area: 'Live Council',
     category: 'Old diagnostics',
@@ -161,6 +207,7 @@ const KNOWN_GAP_DISPLAY: Record<
   },
   [KNOWN_GAP_IDS.ARCHIVE_COPY_CLARITY]: {
     title: 'Older messages hidden from live view',
+    plainLanguage: 'Some messages are hidden from the live view — use Copy Session for the full transcript.',
     meaning: 'Messages are archived from the visible log — copy/archive UX must be clear.',
     area: 'Live Council',
     category: 'Confusing UI',
@@ -195,12 +242,16 @@ function injectVerifiedFixedKnownGaps(gaps: OperatorGap[], ctx: GapFinderContext
 }
 
 export function resolveOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
-  const withStatus = applyGapVerification(findOperatorGaps(ctx), ctx)
-  return injectVerifiedFixedKnownGaps(withStatus, ctx)
+  const legacy = findOperatorGaps(ctx)
+  const selfAudit = runSelfAudit(gapFinderToSelfAuditContext(ctx))
+  const merged = mergeSelfAuditWithLegacyGaps(legacy, selfAudit)
+  const withStatus = applyGapVerification(merged, ctx)
+  const withDismissals = applyCommanderDismissals(withStatus, ctx.commanderDismissedIds)
+  return injectVerifiedFixedKnownGaps(withDismissals, ctx)
 }
 
 export function countOpenOperatorGaps(gaps: OperatorGap[]): number {
-  return gaps.filter(g => g.status === 'open').length
+  return countActionableOpenGaps(gaps)
 }
 
 function visibleForGapScan(messages: CouncilMessageLike[], showOldDiagnostics?: boolean): CouncilMessageLike[] {
@@ -250,52 +301,6 @@ export function findOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
     )
   }
 
-  const degradedVisible = visible.filter(m => m.degraded && m.messageType === 'response')
-  if (degradedVisible.length > 0) {
-    gaps.push(
-      gap({
-        title: 'Degraded family responses visible',
-        meaning: `${degradedVisible.length} response(s) marked degraded — excluded from synthesis/repair.`,
-        area: 'Council quality',
-        category: 'Placeholder confidence',
-        severity: 'high',
-        recommendedFix: 'Retry providers, reduce load, or switch council flow mode; hide old diagnostics if noise.',
-        cursorCommand:
-          'Inspect lib/council/councilRenderGate.ts and provider health; fix truncation/integrity before operator relies on answers.',
-      }),
-    )
-  }
-
-  if (ctx.councilPaused) {
-    gaps.push(
-      gap({
-        title: 'Council session paused',
-        meaning: 'Orchestration is paused; families will not advance until resumed.',
-        area: 'Session controls',
-        category: 'Confusing UI',
-        severity: 'medium',
-        recommendedFix: 'Click Resume in session controls when ready to continue.',
-        cursorCommand: 'Verify pauseCouncil/resumeCouncil UX copy near session controls in app/page.tsx.',
-      }),
-    )
-  }
-
-  if (ctx.showOldDiagnostics && visible.some(m => /fallback|degraded|unavailable/i.test(m.content))) {
-    gaps.push(
-      gap({
-        id: KNOWN_GAP_IDS.OLD_DIAGNOSTICS_UX,
-        title: 'Old diagnostic notices visible',
-        meaning: 'Legacy fallback/diagnostic lines may clutter the live council thread.',
-        area: 'Live Council',
-        category: 'Old diagnostics',
-        severity: 'low',
-        recommendedFix: 'Turn off "Show old diagnostics" in operator live view (default hides legacy noise).',
-        cursorCommand:
-          'Review isOldOperatorDiagnosticMessage filtering in app/page.tsx MessageBubble; keep history without live noise.',
-      }),
-    )
-  }
-
   if ((ctx.collapsedNoiseCount ?? 0) > 3) {
     gaps.push(
       gap({
@@ -308,59 +313,6 @@ export function findOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
         cursorCommand: 'Trace applyCouncilThreadHygiene collapsed keys in app/page.tsx for repeating system messages.',
       }),
     )
-  }
-
-  for (const row of ctx.canonicalStatus?.providers ?? []) {
-    const avail = (row.availability ?? '').toUpperCase()
-    if (avail === 'NOT_CONFIGURED' || row.configured === false) {
-      gaps.push(
-        gap({
-          title: `${row.label ?? row.family} not configured`,
-          meaning: 'Provider family lacks API configuration for live council calls.',
-          area: 'Providers',
-          category: 'Missing API key',
-          severity: 'high',
-          recommendedFix: `Configure ${row.family} keys in environment/settings; refresh canonical status.`,
-          cursorCommand: `Verify env keys for ${row.family} and /api/runtime/canonical-status reflects CONFIGURED.`,
-        }),
-      )
-    } else if (avail === 'RATE_LIMITED') {
-      gaps.push(
-        gap({
-          title: `${row.label ?? row.family} rate limited`,
-          meaning: 'Provider returned quota/rate limit signals.',
-          area: 'Providers',
-          category: 'Quota',
-          severity: 'high',
-          recommendedFix: 'Wait for quota reset or reduce parallel council load.',
-          cursorCommand: `Check provider quota handling for ${row.family}; surface operator-friendly retry in Live Council.`,
-        }),
-      )
-    } else if (avail === 'INVALID_KEY') {
-      gaps.push(
-        gap({
-          title: `${row.label ?? row.family} invalid API key`,
-          meaning: 'Canonical status reports invalid key for this family.',
-          area: 'Providers',
-          category: 'Missing API key',
-          severity: 'high',
-          recommendedFix: 'Rotate or fix API key in environment; reload provider health.',
-          cursorCommand: `Fix ${row.family} credentials; confirm lib/runtime/canonicalStatus maps INVALID_KEY.`,
-        }),
-      )
-    } else if (row.health === 'unavailable' || row.connectionStatus === 'error') {
-      gaps.push(
-        gap({
-          title: `${row.label ?? row.family} unavailable`,
-          meaning: 'Family cannot be reached with current runtime configuration.',
-          area: 'Providers',
-          category: 'Broken action',
-          severity: 'high',
-          recommendedFix: 'Open System Health → AI Team Status and follow recovery steps.',
-          cursorCommand: `Diagnose ${row.family} in ProviderRuntimePanel without changing council routing.`,
-        }),
-      )
-    }
   }
 
   if (!ctx.canonicalStatus && ctx.canonicalStatusUnavailable) {
@@ -437,20 +389,6 @@ export function findOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
     )
   }
 
-  if (ctx.viewportNarrow) {
-    gaps.push(
-      gap({
-        title: 'Narrow viewport — dock panels overlap council',
-        meaning: 'On small screens, feature dock and console reduce council readable area.',
-        area: 'Layout',
-        category: 'Mobile layout',
-        severity: 'low',
-        recommendedFix: 'Close dock panels; use landscape or desktop for long transcripts.',
-        cursorCommand: 'Audit live-room-shell CSS padding and touch targets under 640px.',
-      }),
-    )
-  }
-
   const severityRank: Record<GapSeverity, number> = { high: 0, medium: 1, low: 2 }
   return gaps.sort((a, b) => severityRank[a.severity] - severityRank[b.severity])
 }
@@ -472,6 +410,7 @@ export function formatGapReport(gaps: OperatorGap[]): string {
       lines.push(`## ${index + 1}. ${g.title} [${g.severity}] · ${g.status}`)
       lines.push(`Category: ${g.category}`)
       lines.push(`Area: ${g.area}`)
+      lines.push(`Plain language: ${g.plainLanguage}`)
       lines.push(`Meaning: ${g.meaning}`)
       lines.push(`Recommended fix: ${g.recommendedFix}`)
       lines.push(`Cursor command: ${g.cursorCommand}`)

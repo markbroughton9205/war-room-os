@@ -7,19 +7,33 @@ import { useMatrixStatus } from '@/hooks/useMatrixStatus'
 import {
   COMMANDER_MANUAL_FIX_EVIDENCE,
   countOpenOperatorGaps,
-  formatGapReport,
   resolveOperatorGaps,
-  topGapCursorCommand,
   type CanonicalGapSnapshot,
   type GapFinderContext,
   type GapStatus,
   type OperatorGap,
 } from '@/lib/operator/gapFinder'
+import {
+  formatSelfAuditReport,
+  gapsBySelfAuditSection,
+  topSelfAuditCursorCommand,
+} from '@/lib/operator/selfAudit'
 
 export type GapFinderPanelProps = {
   context: GapFinderContext
   onGapCountChange?: (count: number) => void
 }
+
+const SECTION_ORDER = [
+  'Open Issues',
+  'Suggestions',
+  'Duplicates',
+  'Placeholders',
+  'Mobile Risks',
+  'Revenue Gaps',
+  'Fixed Recently',
+  'Other',
+] as const
 
 export const GapFinderPanel = memo(function GapFinderPanel({
   context,
@@ -34,6 +48,9 @@ export const GapFinderPanel = memo(function GapFinderPanel({
   const [commanderManualFixedAt, setCommanderManualFixedAt] = useState<
     Partial<Record<string, string>>
   >(context.commanderManualFixedAt ?? {})
+  const [commanderDismissedIds, setCommanderDismissedIds] = useState<
+    Partial<Record<string, string>>
+  >(context.commanderDismissedIds ?? {})
 
   const mergedContext = useMemo<GapFinderContext>(
     () => ({
@@ -41,8 +58,9 @@ export const GapFinderPanel = memo(function GapFinderPanel({
       canonicalStatus: canonical ?? context.canonicalStatus,
       canonicalStatusUnavailable: canonicalFailed,
       commanderManualFixedAt,
+      commanderDismissedIds,
     }),
-    [canonical, canonicalFailed, commanderManualFixedAt, context],
+    [canonical, canonicalFailed, commanderDismissedIds, commanderManualFixedAt, context],
   )
 
   const gaps = useMemo(() => {
@@ -50,54 +68,77 @@ export const GapFinderPanel = memo(function GapFinderPanel({
     return resolveOperatorGaps(mergedContext)
   }, [mergedContext, recheckToken])
 
-  const openGaps = useMemo(() => gaps.filter(g => g.status === 'open'), [gaps])
-  const fixedGaps = useMemo(() => gaps.filter(g => g.status === 'fixed'), [gaps])
-  const needsReviewGaps = useMemo(() => gaps.filter(g => g.status === 'needs_review'), [gaps])
+  const sections = useMemo(() => gapsBySelfAuditSection(gaps), [gaps])
+  const openCount = useMemo(() => countOpenOperatorGaps(gaps), [gaps])
+  const fixedCount = useMemo(() => gaps.filter(g => g.status === 'fixed').length, [gaps])
+  const reviewCount = useMemo(
+    () => gaps.filter(g => g.status === 'needs_review').length,
+    [gaps],
+  )
 
   useEffect(() => {
-    onGapCountChange?.(countOpenOperatorGaps(gaps))
-  }, [gaps, onGapCountChange])
+    onGapCountChange?.(openCount)
+  }, [openCount, onGapCountChange])
 
-  const recheckGaps = useCallback(() => {
+  const recheckAfterFix = useCallback(() => {
     setRecheckToken(token => token + 1)
-    signalSuccess('Gap verification rechecked')
+    signalSuccess('Self-audit rechecked after fix')
   }, [signalSuccess])
 
   const markFixedManually = useCallback(
     (gapId: string) => {
       const markedAt = new Date().toISOString()
       setCommanderManualFixedAt(prev => ({ ...prev, [gapId]: markedAt }))
-      signalSuccess('Gap marked for Commander review')
+      signalSuccess('Marked for Commander review')
     },
     [signalSuccess],
   )
 
-  const refreshCanonical = useCallback(async () => {
+  const markNotImportant = useCallback(
+    (gapId: string) => {
+      const markedAt = new Date().toISOString()
+      setCommanderDismissedIds(prev => ({ ...prev, [gapId]: markedAt }))
+      signalSuccess('Marked not important')
+    },
+    [signalSuccess],
+  )
+
+  const runSelfAuditScan = useCallback(async () => {
     setScanning(true)
-    signalWorking('Scanning for gaps…')
+    signalWorking('Running self-audit…')
     try {
+      let snapshot: CanonicalGapSnapshot | null = mergedContext.canonicalStatus ?? null
       const res = await fetch('/api/runtime/canonical-status', { cache: 'no-store' })
       if (!res.ok) {
         setCanonicalFailed(true)
         setCanonical(null)
-        signalError('Canonical status unavailable')
-        return
+        snapshot = null
+        signalError('Canonical status unavailable — local heuristics only')
+      } else {
+        snapshot = (await res.json()) as CanonicalGapSnapshot
+        setCanonical(snapshot)
+        setCanonicalFailed(false)
       }
-      const data = (await res.json()) as CanonicalGapSnapshot
-      setCanonical(data)
-      setCanonicalFailed(false)
-      const resolved = resolveOperatorGaps({ ...mergedContext, canonicalStatus: data })
-      signalSuccess(
-        `Gap scan complete · ${countOpenOperatorGaps(resolved)} open · ${resolved.filter(g => g.status === 'fixed').length} fixed`,
-      )
       setRecheckToken(token => token + 1)
+      const resolved = resolveOperatorGaps({
+        ...mergedContext,
+        canonicalStatus: snapshot,
+        canonicalStatusUnavailable: !res.ok,
+      })
+      signalSuccess(
+        `Self-audit complete · ${countOpenOperatorGaps(resolved)} open · ${resolved.filter(g => g.status === 'fixed').length} fixed`,
+      )
     } catch {
       setCanonicalFailed(true)
-      signalError('Gap scan failed')
+      signalError('Self-audit scan failed')
     } finally {
       setScanning(false)
     }
   }, [mergedContext, signalError, signalSuccess, signalWorking])
+
+  const refreshCanonical = useCallback(async () => {
+    await runSelfAuditScan()
+  }, [runSelfAuditScan])
 
   return (
     <section
@@ -106,19 +147,22 @@ export const GapFinderPanel = memo(function GapFinderPanel({
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-200">Operator Gap Finder</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-200">
+            War Room Self-Audit
+          </p>
           <p className="mt-1 text-[9px] tracking-wide text-slate-500">
-            Local heuristics + repair verification. Fixed status requires evidence — no auto-claim without proof.
+            UI, runtime, and state heuristics only — no provider completions. Fixed status requires
+            evidence.
           </p>
         </div>
         <span
           className="rounded-full px-2 py-0.5 text-[9px] font-bold tracking-widest"
           style={{
-            border: openGaps.length ? '1px solid rgba(248,113,113,0.5)' : '1px solid rgba(52,211,153,0.4)',
-            color: openGaps.length ? '#FCA5A5' : '#86EFAC',
+            border: openCount ? '1px solid rgba(248,113,113,0.5)' : '1px solid rgba(52,211,153,0.4)',
+            color: openCount ? '#FCA5A5' : '#86EFAC',
           }}
         >
-          {openGaps.length} open · {fixedGaps.length} fixed · {needsReviewGaps.length} review
+          {openCount} open · {fixedCount} fixed · {reviewCount} review
         </span>
       </div>
 
@@ -129,26 +173,27 @@ export const GapFinderPanel = memo(function GapFinderPanel({
           className="min-h-[32px] rounded px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest"
           style={{ border: '1px solid rgba(217,70,239,0.45)', color: '#E879F9', background: 'rgba(0,0,0,0.35)' }}
           onClick={() => void refreshCanonical()}
+          data-testid="self-audit-run"
         >
-          {scanning ? 'Scanning…' : 'Find Gaps'}
+          {scanning ? 'Auditing…' : 'Run Self-Audit'}
         </button>
         <button
           type="button"
           className="min-h-[32px] rounded px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest"
           style={{ border: '1px solid rgba(52,211,153,0.45)', color: '#86EFAC', background: 'rgba(0,0,0,0.35)' }}
-          onClick={recheckGaps}
-          data-testid="gap-finder-recheck"
+          onClick={recheckAfterFix}
+          data-testid="self-audit-recheck"
         >
-          Recheck Gaps
+          Recheck After Fix
         </button>
         <CopyCouncilButton
-          label="Copy Gap Report"
-          getText={() => formatGapReport(gaps)}
-          successMessage="Gap report copied"
+          label="Copy Self-Audit Report"
+          getText={() => formatSelfAuditReport(gaps)}
+          successMessage="Self-audit report copied"
         />
         <CopyCouncilButton
-          label="Copy Next Cursor Command"
-          getText={() => topGapCursorCommand(gaps) ?? ''}
+          label="Copy Top Cursor Command"
+          getText={() => topSelfAuditCursorCommand(gaps) ?? ''}
           successMessage="Cursor command copied"
           variant="accent"
         />
@@ -157,59 +202,60 @@ export const GapFinderPanel = memo(function GapFinderPanel({
           className="min-h-[32px] rounded px-2 py-1.5 text-[9px] tracking-widest text-slate-500"
           onClick={() => setExpanded(prev => !prev)}
         >
-          {expanded ? 'Hide list' : 'Show list'}
+          {expanded ? 'Hide sections' : 'Show sections'}
         </button>
       </div>
 
       {expanded ? (
-        <div className="mt-3 max-h-80 space-y-4 overflow-y-auto text-[10px]">
-          <GapSection
-            title="Open gaps"
-            emptyLabel="No open gaps with current heuristics."
-            gaps={openGaps}
-            onMarkFixedManually={markFixedManually}
-          />
-          <GapSection
-            title="Fixed gaps"
-            emptyLabel="No automatically verified fixes yet."
-            gaps={fixedGaps}
-            onMarkFixedManually={markFixedManually}
-          />
-          <GapSection
-            title="Needs review"
-            emptyLabel="No Commander manual closures pending review."
-            gaps={needsReviewGaps}
-            onMarkFixedManually={markFixedManually}
-          />
+        <div className="mt-3 max-h-96 space-y-4 overflow-y-auto text-[10px]">
+          {SECTION_ORDER.map(sectionTitle => {
+            const items = sections[sectionTitle]
+            if (!items?.length) return null
+            return (
+              <SelfAuditSection
+                key={sectionTitle}
+                title={sectionTitle}
+                gaps={items}
+                onMarkFixedManually={markFixedManually}
+                onMarkNotImportant={markNotImportant}
+              />
+            )
+          })}
+          {!gaps.length ? (
+            <p className="text-slate-500">No findings with current heuristics.</p>
+          ) : null}
         </div>
       ) : null}
     </section>
   )
 })
 
-function GapSection({
+function SelfAuditSection({
   title,
-  emptyLabel,
   gaps,
   onMarkFixedManually,
+  onMarkNotImportant,
 }: {
   title: string
-  emptyLabel: string
   gaps: OperatorGap[]
   onMarkFixedManually: (gapId: string) => void
+  onMarkNotImportant: (gapId: string) => void
 }) {
   return (
-    <div>
-      <p className="mb-2 text-[9px] font-bold uppercase tracking-widest text-fuchsia-200/90">{title}</p>
-      {gaps.length === 0 ? (
-        <p className="text-slate-500">{emptyLabel}</p>
-      ) : (
-        <ul className="space-y-2">
-          {gaps.map(g => (
-            <GapRow key={g.id} gap={g} onMarkFixedManually={onMarkFixedManually} />
-          ))}
-        </ul>
-      )}
+    <div data-testid={`self-audit-section-${title.toLowerCase().replace(/\s+/g, '-')}`}>
+      <p className="mb-2 text-[9px] font-bold uppercase tracking-widest text-fuchsia-200/90">
+        {title} ({gaps.length})
+      </p>
+      <ul className="space-y-2">
+        {gaps.map(g => (
+          <GapRow
+            key={g.id}
+            gap={g}
+            onMarkFixedManually={onMarkFixedManually}
+            onMarkNotImportant={onMarkNotImportant}
+          />
+        ))}
+      </ul>
     </div>
   )
 }
@@ -217,9 +263,11 @@ function GapSection({
 function GapRow({
   gap,
   onMarkFixedManually,
+  onMarkNotImportant,
 }: {
   gap: OperatorGap
   onMarkFixedManually: (gapId: string) => void
+  onMarkNotImportant: (gapId: string) => void
 }) {
   const severityColor =
     gap.severity === 'high' ? '#F87171' : gap.severity === 'medium' ? '#FBBF24' : '#94A3B8'
@@ -237,7 +285,8 @@ function GapRow({
         </span>
         <span className="text-[8px] uppercase tracking-widest text-slate-600">{gap.category}</span>
       </div>
-      <p className="mt-1 text-slate-400">{gap.meaning}</p>
+      <p className="mt-1 text-emerald-100/90">{gap.plainLanguage}</p>
+      <p className="mt-1 text-slate-500">{gap.meaning}</p>
       <p className="mt-1 text-[9px] text-emerald-200/80">{gap.recommendedFix}</p>
       {gap.verificationEvidence?.length ? (
         <ul className="mt-2 list-inside list-disc text-[9px] text-sky-200/80">
@@ -250,15 +299,25 @@ function GapRow({
         <p className="mt-1 text-[8px] text-slate-600">Last checked: {gap.lastCheckedAt}</p>
       ) : null}
       {gap.status === 'open' ? (
-        <button
-          type="button"
-          className="mt-2 min-h-[28px] rounded px-2 py-1 text-[8px] font-bold uppercase tracking-widest"
-          style={{ border: '1px solid rgba(251,191,36,0.45)', color: '#FCD34D' }}
-          onClick={() => onMarkFixedManually(gap.id)}
-          title={COMMANDER_MANUAL_FIX_EVIDENCE}
-        >
-          Mark Fixed Manually
-        </button>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="min-h-[28px] rounded px-2 py-1 text-[8px] font-bold uppercase tracking-widest"
+            style={{ border: '1px solid rgba(251,191,36,0.45)', color: '#FCD34D' }}
+            onClick={() => onMarkFixedManually(gap.id)}
+            title={COMMANDER_MANUAL_FIX_EVIDENCE}
+          >
+            Mark Fixed Manually
+          </button>
+          <button
+            type="button"
+            className="min-h-[28px] rounded px-2 py-1 text-[8px] font-bold uppercase tracking-widest"
+            style={{ border: '1px solid rgba(148,163,184,0.45)', color: '#94A3B8' }}
+            onClick={() => onMarkNotImportant(gap.id)}
+          >
+            Mark as Not Important
+          </button>
+        </div>
       ) : null}
     </li>
   )

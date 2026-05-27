@@ -5495,13 +5495,21 @@ function Home() {
   const [showOldCouncilDiagnostics, setShowOldCouncilDiagnostics] = useState(false)
   const [operatorGapCount, setOperatorGapCount] = useState(0)
   const [viewportNarrow, setViewportNarrow] = useState(false)
+  const [viewportWidthPx, setViewportWidthPx] = useState<number | undefined>(undefined)
   useEffect(() => {
     if (typeof window === 'undefined') return
     const mq = window.matchMedia('(max-width: 640px)')
-    const update = () => setViewportNarrow(mq.matches)
+    const update = () => {
+      setViewportNarrow(mq.matches)
+      setViewportWidthPx(window.innerWidth)
+    }
     update()
     mq.addEventListener('change', update)
-    return () => mq.removeEventListener('change', update)
+    window.addEventListener('resize', update)
+    return () => {
+      mq.removeEventListener('change', update)
+      window.removeEventListener('resize', update)
+    }
   }, [])
   const deferredVisibleCouncilMessages = useDeferredValue(visibleCouncilMessages)
   const compressedCouncilSummary = useMemo(
@@ -10449,6 +10457,10 @@ function Home() {
     }),
     [hiddenCouncilMessageCount],
   )
+  const paidOpportunityCount = useMemo(
+    () => incomeOpportunities.filter(opportunity => opportunity.status === 'paid').length,
+    [incomeOpportunities],
+  )
   const operatorGapFinderContext = useMemo<GapFinderContext>(
     () => ({
       visibleMessages: visibleCouncilMessages.map(m => ({
@@ -10470,7 +10482,38 @@ function Home() {
       showOldDiagnostics: showOldCouncilDiagnostics,
       internetUsable: internetStatus.canUseInternet === true,
       viewportNarrow,
+      viewportWidthPx,
+      activeDockPanelId: dockPanelId,
       gapVerification: operatorGapVerificationContext,
+      silentUi: {
+        archiveRecallNotConnected: true,
+        smsControlsNotConnected: true,
+        repoScanPlaceholders: true,
+      },
+      operatorLabels: [
+        chatHealthLabel,
+        persistenceHealthLabel,
+        councilContinueStatusLine,
+        providerHealthLabel,
+        memoryRuntime.label,
+        COUNCIL_FLOW_MODE_LABELS[councilFlowMode],
+      ].filter(Boolean) as string[],
+      revenue: {
+        opportunityCount: incomeOpportunities.length,
+        paidOpportunityCount,
+        scoutStatus: opportunityScout.status,
+        scoutError: opportunityScout.status === 'error',
+      },
+      memory: {
+        memoryCount: memories.length,
+        persistenceAvailable,
+        runtimeLabel: memoryRuntime.label,
+        sessionOnly: memoryRuntime.sessionOnly,
+      },
+      orchestration: {
+        recentCouncilTriggers: visibleCouncilMessages.filter(m => m.messageType === 'response').length,
+        councilStabilityMode,
+      },
     }),
     [
       visibleCouncilMessages,
@@ -10484,7 +10527,19 @@ function Home() {
       showOldCouncilDiagnostics,
       internetStatus.canUseInternet,
       viewportNarrow,
+      viewportWidthPx,
+      dockPanelId,
       operatorGapVerificationContext,
+      councilContinueStatusLine,
+      providerHealthLabel,
+      memoryRuntime.label,
+      memoryRuntime.sessionOnly,
+      incomeOpportunities.length,
+      paidOpportunityCount,
+      opportunityScout.status,
+      memories.length,
+      persistenceAvailable,
+      councilStabilityMode,
     ],
   )
   useEffect(() => {
