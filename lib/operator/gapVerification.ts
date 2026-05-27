@@ -6,6 +6,7 @@
 export const KNOWN_GAP_IDS = {
   OLD_DIAGNOSTICS_UX: 'old-diagnostics-old-diagnostic-notices-visible',
   ARCHIVE_COPY_CLARITY: 'confusing-ui-older-messages-hidden-from-live-view',
+  ARCHIVE_RECALL_NOT_WIRED: 'archive-recall-not-wired',
 } as const
 
 export type KnownGapId = (typeof KNOWN_GAP_IDS)[keyof typeof KNOWN_GAP_IDS]
@@ -19,6 +20,10 @@ export type GapVerificationContext = {
   hiddenMessageCount: number
   /** Archive banner copy when messages are hidden from live view. */
   hasArchivedCountBanner: boolean
+  /** View Archive opens client-side Archive Viewer with full session transcript. */
+  archiveRecallWired?: boolean
+  /** View Archive disabled with explicit operator copy (no broken control). */
+  archiveRecallProperlyDisabled?: boolean
 }
 
 export type GapVerificationResult = {
@@ -58,6 +63,16 @@ export function verifyKnownGaps(ctx: GapVerificationContext): GapVerificationRes
     ctx.hasCopySessionHint &&
     (!archiveNeedsBanner || ctx.hasArchivedCountBanner)
 
+  const recallEvidence: string[] = []
+  if (ctx.archiveRecallWired) {
+    recallEvidence.push('View Archive opens Archive Viewer with full client-side transcript')
+  }
+  if (ctx.archiveRecallProperlyDisabled) {
+    recallEvidence.push('View Archive disabled with Copy Session fallback copy')
+  }
+  const recallVerified =
+    recallEvidence.length > 0 && (ctx.archiveRecallWired === true || ctx.archiveRecallProperlyDisabled === true)
+
   return [
     {
       gapId: KNOWN_GAP_IDS.OLD_DIAGNOSTICS_UX,
@@ -68,6 +83,11 @@ export function verifyKnownGaps(ctx: GapVerificationContext): GapVerificationRes
       gapId: KNOWN_GAP_IDS.ARCHIVE_COPY_CLARITY,
       verified: archiveVerified,
       evidence: archiveVerified ? archiveEvidence : [],
+    },
+    {
+      gapId: KNOWN_GAP_IDS.ARCHIVE_RECALL_NOT_WIRED,
+      verified: recallVerified,
+      evidence: recallVerified ? recallEvidence : [],
     },
   ]
 }

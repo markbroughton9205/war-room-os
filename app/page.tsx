@@ -44,6 +44,7 @@ import type { StandingPermissionMode } from '@/lib/permissions/standingPermissio
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
+import { ArchiveViewer } from '@/components/war-room/council/ArchiveViewer'
 import { CopyCouncilButton } from '@/components/war-room/council/CopyCouncilButton'
 import { MessageCopyButton } from '@/components/war-room/council/MessageCopyButton'
 import {
@@ -334,6 +335,9 @@ type CouncilMessage = {
 }
 
 type CouncilSessionLifecycle = 'active' | 'archived'
+
+/** Full council transcript is always available client-side from session state. */
+const ARCHIVE_RECALL_CLIENT_AVAILABLE = true
 
 type CouncilThreadHygieneResult = {
   visibleMessages: CouncilMessage[]
@@ -1734,6 +1738,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   showOldDiagnostics = false,
   onToggleShowOldDiagnostics,
   onViewArchive,
+  archiveRecallConnected,
   onSummarizeSession,
   onRecallEconomicOps,
   onOpenFullMemory,
@@ -1746,6 +1751,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   councilPassthroughMode?: boolean
   showOldDiagnostics?: boolean
   onToggleShowOldDiagnostics?: () => void
+  archiveRecallConnected: boolean
   onViewArchive: () => void
   onSummarizeSession: () => void
   onRecallEconomicOps: () => void
@@ -1761,14 +1767,34 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           style={{ background: 'rgba(96,165,250,0.07)', border: '1px solid rgba(96,165,250,0.24)', color: '#93C5FD' }}
         >
           <span className="tracking-widest">
-            {hiddenCount} older message{hiddenCount === 1 ? '' : 's'} are archived. Use Copy Session or View Archive for full history.
+            {hiddenCount} older message{hiddenCount === 1 ? '' : 's'} are archived from the visible log. Copy Session or View Archive for the full transcript; Copy Visible Log is on-screen only.
           </span>
-          <button type="button" onClick={onViewArchive} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #60A5FA', color: '#BFDBFE' }}>
-            View Archive
-          </button>
-          <span className="text-[8px] tracking-wide text-amber-200/85" title="Archive recall loads from memory when persistence is available">
-            Recall not fully wired — use Copy Session for full history
-          </span>
+          {archiveRecallConnected ? (
+            <button
+              type="button"
+              onClick={onViewArchive}
+              className="rounded px-2 py-1 tracking-widest"
+              style={{ border: '1px solid #60A5FA', color: '#BFDBFE' }}
+              title="Open Archive Viewer with full session transcript"
+            >
+              View Archive
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="cursor-not-allowed rounded px-2 py-1 tracking-widest opacity-60"
+              style={{ border: '1px solid #64748B', color: '#94A3B8' }}
+              title="Archive recall not connected yet — use Copy Session for full transcript"
+            >
+              Archive Recall Coming Later
+            </button>
+          )}
+          {!archiveRecallConnected ? (
+            <span className="text-[8px] tracking-wide text-amber-200/85">
+              Archive recall not connected yet — use Copy Session for full transcript.
+            </span>
+          ) : null}
           <button type="button" onClick={onSummarizeSession} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #FFD700', color: '#FFD700' }}>
             Summarize Session
           </button>
@@ -5496,6 +5522,7 @@ function Home() {
   const visibleCouncilMessages = liveCouncilHygiene.visibleMessages
   const collapsedCouncilNoiseCount = liveCouncilHygiene.collapsedCount
   const [showOldCouncilDiagnostics, setShowOldCouncilDiagnostics] = useState(false)
+  const [archiveViewerOpen, setArchiveViewerOpen] = useState(false)
   const [operatorGapCount, setOperatorGapCount] = useState(0)
   const [viewportNarrow, setViewportNarrow] = useState(false)
   const [viewportWidthPx, setViewportWidthPx] = useState<number | undefined>(undefined)
@@ -9969,18 +9996,10 @@ function Home() {
     window.setTimeout(() => void submitDecree('summarize council discussion', 'summarize'), 0)
   }
 
-  const handleViewArchive = () => {
-    if (!persistenceAvailable) {
-      addSystemMessageRef.current?.(
-        'Archive recall is not connected yet. Use Copy Session for the full transcript.',
-      )
-      return
-    }
-    const parsed = parseRecallCommand('show archive')
-    if (parsed) {
-      void executeRecallCommand(parsed).then(() => setOperatorTab('memory'))
-    }
-  }
+  const handleViewArchive = useCallback(() => {
+    if (!ARCHIVE_RECALL_CLIENT_AVAILABLE) return
+    setArchiveViewerOpen(true)
+  }, [])
 
   const handleSummarizeSessionArchive = () => {
     const parsed = parseRecallCommand('summarize last session')
@@ -10457,6 +10476,8 @@ function Home() {
       hasCopySessionHint: true,
       hiddenMessageCount: hiddenCouncilMessageCount,
       hasArchivedCountBanner: hiddenCouncilMessageCount > 0,
+      archiveRecallWired: ARCHIVE_RECALL_CLIENT_AVAILABLE,
+      archiveRecallProperlyDisabled: !ARCHIVE_RECALL_CLIENT_AVAILABLE,
     }),
     [hiddenCouncilMessageCount],
   )
@@ -10489,7 +10510,7 @@ function Home() {
       activeDockPanelId: dockPanelId,
       gapVerification: operatorGapVerificationContext,
       silentUi: {
-        archiveRecallNotConnected: true,
+        archiveRecallNotConnected: !ARCHIVE_RECALL_CLIENT_AVAILABLE,
         smsControlsNotConnected: true,
         repoScanPlaceholders: true,
       },
@@ -11227,6 +11248,7 @@ function Home() {
                 ? () => setShowOldCouncilDiagnostics(prev => !prev)
                 : undefined
             }
+            archiveRecallConnected={ARCHIVE_RECALL_CLIENT_AVAILABLE}
             onViewArchive={handleViewArchive}
             onSummarizeSession={handleSummarizeSessionArchive}
             onRecallEconomicOps={handleRecallEconomicOps}
@@ -11661,6 +11683,36 @@ function Home() {
         </div>
         ) : null}
       </div>
+
+      {archiveViewerOpen ? (
+        <ArchiveViewer
+          visibleMessages={visibleCouncilMessages.map(m => ({
+            id: m.id,
+            familyName: m.familyName,
+            content: m.content,
+            timestamp: m.timestamp,
+            messageType: m.messageType,
+            provider: m.provider,
+            degraded: m.degraded,
+          }))}
+          archivedMessages={archivedCouncilMessages.map(m => ({
+            id: m.id,
+            familyName: m.familyName,
+            content: m.content,
+            timestamp: m.timestamp,
+            messageType: m.messageType,
+            provider: m.provider,
+            degraded: 'degraded' in m ? Boolean((m as CouncilMessage).degraded) : undefined,
+          }))}
+          hiddenCount={hiddenCouncilMessageCount}
+          meta={{
+            sessionId: councilSnapRef.current.sessionId,
+            conversationId: liveCouncilConvId,
+            councilFlowMode,
+          }}
+          onClose={() => setArchiveViewerOpen(false)}
+        />
+      ) : null}
 
     </main>
   )
