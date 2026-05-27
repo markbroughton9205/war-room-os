@@ -70,12 +70,12 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   {
     id: 'kimi',
     label: 'Kimi Family',
-    role: 'Decomposition, task sequencing',
-    provider: 'Local / Moonshot path',
-    optional: true,
-    engineId: null,
+    role: 'Decomposition, task sequencing, execution planning',
+    provider: 'Moonshot',
+    optional: false,
+    engineId: 'kimi',
     localAgentId: 'kimi-family-baby',
-    defaultDuty: 'off_duty',
+    defaultDuty: 'standing_by',
   },
   {
     id: 'red_team',

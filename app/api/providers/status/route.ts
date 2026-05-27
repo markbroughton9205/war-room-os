@@ -5,7 +5,7 @@ import { collectCanonicalRuntimeStatus } from '@/lib/runtime/canonicalStatus'
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'redteam'
+type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'kimi' | 'redteam'
 
 function legacyConnectionStatus(availability: string): 'online' | 'standby' | 'error' | 'not_connected' {
   if (availability === 'CONNECTED') return 'online'

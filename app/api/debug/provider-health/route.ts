@@ -22,13 +22,17 @@ const CLOUD_ENV: Record<EngineId, string> = {
   claude: 'ANTHROPIC_API_KEY',
   grok: 'XAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
+  kimi: 'KIMI_API_KEY',
   cursor: '',
   codex: 'OPENAI_API_KEY',
 }
 
-const CLOUD_PROVIDERS: EngineId[] = ['chatgpt', 'claude', 'grok', 'gemini']
+const CLOUD_PROVIDERS: EngineId[] = ['chatgpt', 'claude', 'grok', 'gemini', 'kimi']
 
 function keyPresent(id: EngineId): boolean {
+  if (id === 'kimi') {
+    return Boolean(process.env.KIMI_API_KEY?.trim() || process.env.MOONSHOT_API_KEY?.trim())
+  }
   const env = CLOUD_ENV[id]
   if (!env) return false
   return Boolean(process.env[env]?.trim())

@@ -5,7 +5,7 @@ import { collectCanonicalRuntimeStatus } from '@/lib/runtime/canonicalStatus'
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'redteam'
+type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'kimi' | 'redteam'
 
 /** Presence/config classification — does not assert live API connectivity without canonical CONNECTED. */
 export type ProviderAvailability = 'configured' | 'not_configured' | 'probe_required' | 'live_connected' | 'degraded' | 'rate_limited' | 'invalid_key'
@@ -37,6 +37,7 @@ export async function GET(req: Request) {
     chatgpt: availabilityFromCanonical(byFamily.chatgpt?.availability),
     grok: availabilityFromCanonical(byFamily.grok?.availability),
     gemini: availabilityFromCanonical(byFamily.gemini?.availability),
+    kimi: availabilityFromCanonical(byFamily.kimi?.availability),
     redteam: availabilityFromCanonical(byFamily.redteam?.availability),
   }
 
@@ -45,6 +46,7 @@ export async function GET(req: Request) {
     chatgpt: byFamily.chatgpt?.connectionStatus ?? legacyConnectionStatus(availability.chatgpt),
     grok: byFamily.grok?.connectionStatus ?? legacyConnectionStatus(availability.grok),
     gemini: byFamily.gemini?.connectionStatus ?? legacyConnectionStatus(availability.gemini),
+    kimi: byFamily.kimi?.connectionStatus ?? legacyConnectionStatus(availability.kimi),
     redteam: byFamily.redteam?.connectionStatus ?? 'standby' as const,
   }
 
@@ -53,6 +55,7 @@ export async function GET(req: Request) {
     chatgpt: byFamily.chatgpt?.label ?? 'OpenAI · ChatGPT · unknown',
     grok: byFamily.grok?.label ?? 'xAI · Grok · unknown',
     gemini: byFamily.gemini?.label ?? 'Google · Gemini · unknown',
+    kimi: byFamily.kimi?.label ?? 'Moonshot · Kimi · unknown',
     redteam: byFamily.redteam?.label ?? 'War Room · Red Team · unknown',
   }
 

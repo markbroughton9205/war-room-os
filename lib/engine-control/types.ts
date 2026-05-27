@@ -9,6 +9,7 @@ export type EngineId =
   | 'claude'
   | 'chatgpt'
   | 'gemini'
+  | 'kimi'
 
 /** Where the engine typically runs. */
 export type EngineCategory = 'manual_workspace' | 'ide' | 'cloud' | 'cloud_model'
@@ -19,6 +20,7 @@ export type ProviderType =
   | 'anthropic'
   | 'xai'
   | 'google'
+  | 'moonshot'
   | 'ide_external'
 
 /** Capability tags for routing and permission hints. */

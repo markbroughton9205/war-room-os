@@ -12,6 +12,7 @@ const DIRECT_PROVIDERS = new Set<DirectProviderFamily>([
   'claude',
   'grok',
   'gemini',
+  'kimi',
   'red_team',
   'baby',
 ])
@@ -72,7 +73,7 @@ export async function GET(req: Request) {
   const provider = parseProvider(url.searchParams.get('provider'))
   if (!provider) {
     return NextResponse.json(
-      { error: 'provider query required (chatgpt|claude|grok|gemini|red_team|baby)' },
+      { error: 'provider query required (chatgpt|claude|grok|gemini|kimi|red_team|baby)' },
       { status: 400 },
     )
   }
@@ -93,7 +94,7 @@ export async function POST(req: Request) {
   const provider = parseProvider(body.provider)
   if (!provider) {
     return NextResponse.json(
-      { error: 'provider required (chatgpt|claude|grok|gemini|red_team|baby)' },
+      { error: 'provider required (chatgpt|claude|grok|gemini|kimi|red_team|baby)' },
       { status: 400 },
     )
   }

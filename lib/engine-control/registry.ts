@@ -2,7 +2,7 @@ import type { EngineCategory, EngineCapabilityId, EngineId, ProviderType } from 
 
 /**
  * Optional env vars consulted by `collectEngineStatuses` (see `lib/engine-control/status.ts`):
- * - Cloud: OPENAI_API_KEY (chatgpt, codex), ANTHROPIC_API_KEY (claude), XAI_API_KEY (grok), GEMINI_API_KEY (gemini).
+ * - Cloud: OPENAI_API_KEY (chatgpt, codex), ANTHROPIC_API_KEY (claude), XAI_API_KEY (grok), GEMINI_API_KEY (gemini), KIMI_API_KEY or MOONSHOT_API_KEY (kimi).
  * - Cursor remains a manual workspace lane and is not probed from War Room.
  */
 
@@ -65,6 +65,14 @@ export const ENGINE_REGISTRY: readonly EngineRegistryEntry[] = [
     providerType: 'google',
     defaultCapabilities: ['chat_completion', 'code_assist', 'repo_read'],
     defaultPermissionHints: 'Google AI — optional GEMINI_API_KEY (see module comment above).',
+  },
+  {
+    id: 'kimi',
+    displayName: 'Kimi',
+    category: 'cloud',
+    providerType: 'moonshot',
+    defaultCapabilities: ['chat_completion', 'code_assist', 'reasoning'],
+    defaultPermissionHints: 'Moonshot AI — KIMI_API_KEY (or MOONSHOT_API_KEY fallback).',
   },
 ] as const
 

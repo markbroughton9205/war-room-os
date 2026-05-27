@@ -1,5 +1,6 @@
 import { completeGeminiCouncilMessage } from '@/lib/ai/providers/geminiCouncil'
 import { callXAIChat } from '@/lib/ai/providers/xai'
+import { completeKimiChat, isKimiConfigured } from '@/lib/providers/kimi'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
@@ -16,6 +17,7 @@ export type DirectProviderFamily =
   | 'claude'
   | 'grok'
   | 'gemini'
+  | 'kimi'
   | 'red_team'
   | 'baby'
 
@@ -133,6 +135,32 @@ async function callGrokDirect(prompt: string, system: string, timeoutMs: number)
   return { ok: true, text: compactDisplayWhitespace(result.text), transportStatus: 200 }
 }
 
+async function callKimiDirect(prompt: string, system: string, timeoutMs: number): Promise<DirectProviderCallResult> {
+  if (!isKimiConfigured()) {
+    return { ok: false, text: '', transportStatus: 'unavailable', error: 'Kimi not configured' }
+  }
+  const result = await completeKimiChat({
+    system,
+    messages: [{ role: 'user', content: prompt }],
+    maxTokens: DEFAULT_MAX_TOKENS,
+    timeoutMs,
+  })
+  if (!result.ok) {
+    const err = result.error || 'Kimi unavailable'
+    const timedOut = /\b(timeout|timed out|abort)\b/i.test(err)
+    return {
+      ok: false,
+      text: '',
+      transportStatus: timedOut ? 'timeout' : 'unavailable',
+      error: sanitizeProviderError(err),
+    }
+  }
+  if (!result.data.text?.trim()) {
+    return { ok: false, text: '', transportStatus: 'unavailable', error: 'empty response body' }
+  }
+  return { ok: true, text: compactDisplayWhitespace(result.data.text), transportStatus: 200 }
+}
+
 async function callGeminiDirect(prompt: string, system: string): Promise<DirectProviderCallResult> {
   if (!process.env.GEMINI_API_KEY) {
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'GEMINI_API_KEY not configured' }
@@ -189,6 +217,9 @@ export async function invokeDirectCouncilProvider(
     }
     if (family === 'gemini') {
       return await callGeminiDirect(userPrompt, system)
+    }
+    if (family === 'kimi') {
+      return await callKimiDirect(userPrompt, system, timeoutMs)
     }
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'unknown provider' }
   } catch (error) {

@@ -49,7 +49,7 @@ const FAMILY_TO_PROVIDER: Record<CouncilOrchestrationFamily, ProviderRuntimeId> 
   gemini: 'google',
   red_team: 'anthropic',
   baby: 'openai',
-  kimi: 'openai',
+  kimi: 'moonshot',
   bridge_architect: 'openai',
 }
 
@@ -72,6 +72,8 @@ function providerConfigured(id: ProviderRuntimeId): boolean {
       return Boolean(process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim())
     case 'xai':
       return Boolean(process.env.XAI_API_KEY?.trim())
+    case 'moonshot':
+      return Boolean(process.env.KIMI_API_KEY?.trim() || process.env.MOONSHOT_API_KEY?.trim())
     default:
       return false
   }

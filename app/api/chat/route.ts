@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { completeGeminiCouncilMessage } from '@/lib/ai/providers/geminiCouncil'
 import { callXAIChat } from '@/lib/ai/providers/xai'
+import { completeKimiChat, isKimiConfigured } from '@/lib/providers/kimi'
 import { councilSingleFamilyToMemoryPartition, tryPersistMemoryProposalFromModelOutput } from '@/lib/memory/ingestFromModel'
 import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
@@ -596,6 +597,13 @@ export async function POST(req: Request) {
     ),
     'gemini',
   )
+  const kimiSystem = withCouncilIdentityLayer(
+    withOpportunityMandate(
+      `You are Kimi Family in Ra'el's War Room. Role: task decomposition, execution planning, long-context reasoning, and step breakdown with dependencies. Personality: practical, ordered, calm. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not invent completed work or hidden tools. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+      'kimi',
+    ),
+    'kimi',
+  )
   const redTeamSystem = withCouncilIdentityLayer(
     withOpportunityMandate(
       `You are Red Team in Ra'el's War Room — internal adversary and risk assumption challenger. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
@@ -850,8 +858,11 @@ export async function POST(req: Request) {
     opts?: { grokTimeoutMs?: number },
   ): Promise<ProviderResult> => {
     const familyName = displayFamilyName(family)
-    if (family === 'kimi' || family === 'bridge_architect') {
+    if (family === 'bridge_architect') {
       return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE' }
+    }
+    if (family === 'kimi' && !isKimiConfigured()) {
+      return { family: familyName, content: 'Kimi not configured', status: 'UNAVAILABLE' }
     }
     if (family === 'chatgpt' && !process.env.OPENAI_API_KEY) {
       return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE' }
@@ -909,6 +920,23 @@ export async function POST(req: Request) {
           }
         }
         return { family: familyName, content: geminiResult.text.trim(), status: 'OK' }
+      }
+      if (family === 'kimi') {
+        const kimiResult = await completeKimiChat({
+          system: kimiSystem,
+          messages: [{ role: 'user', content: userPrompt }],
+          maxTokens,
+          timeoutMs: PROVIDER_TIMEOUT_MS,
+        })
+        if (!kimiResult.ok) {
+          return {
+            family: familyName,
+            content: kimiResult.error === 'Kimi not configured' ? 'Kimi not configured' : '',
+            status: kimiResult.error === 'Kimi not configured' ? 'UNAVAILABLE' : 'FAILED',
+            error: kimiResult.error,
+          }
+        }
+        return { family: familyName, content: kimiResult.data.text.trim(), status: 'OK' }
       }
       if (family === 'red_team') {
         const ac = new AbortController()
@@ -1125,7 +1153,7 @@ export async function POST(req: Request) {
         }
       }
 
-      if (councilSingleFamily === 'kimi' || councilSingleFamily === 'bridge_architect') {
+      if (councilSingleFamily === 'bridge_architect') {
         await safeAudit({
           success: false,
           flow: 'continue_single',
@@ -1139,6 +1167,21 @@ export async function POST(req: Request) {
           },
           { status: 400 },
         )
+      }
+      if (councilSingleFamily === 'kimi' && !isKimiConfigured()) {
+        await safeAudit({
+          success: false,
+          flow: 'continue_single',
+          councilSingleFamily: 'kimi',
+          reason: 'kimi_not_configured',
+        })
+        return NextResponse.json({
+          councilSingleResponse: 'Kimi not configured',
+          councilSingleFamily: 'kimi',
+          results: [{ family: 'Kimi', content: 'Kimi not configured', status: 'UNAVAILABLE' }],
+          showContinue: true,
+          ...stabilityMeta,
+        })
       }
 
       const providerBudgetMs =
@@ -1490,6 +1533,45 @@ export async function POST(req: Request) {
               })
               markLiveResearchProviderFailed('failed')
               return degradedProviderResponse('gemini', 'failed', 'Gemini returned empty content')
+            }
+            break
+          }
+          case 'kimi': {
+            const kimiResult = await completeKimiChat({
+              system: stableGroupSystemForFamily ?? kimiSystem,
+              messages: [{ role: 'user', content: userPrompt }],
+              maxTokens: tokensForCall,
+              timeoutMs: providerBudgetMs,
+            })
+            if (!kimiResult.ok) {
+              await safeAudit({
+                success: false,
+                flow: 'continue_single',
+                councilSingleFamily: 'kimi',
+                reason: kimiResult.error === 'Kimi not configured' ? 'kimi_not_configured' : 'kimi_provider_error',
+              })
+              if (kimiResult.error === 'Kimi not configured') {
+                return NextResponse.json({
+                  councilSingleResponse: 'Kimi not configured',
+                  councilSingleFamily: 'kimi',
+                  results: [{ family: 'Kimi', content: 'Kimi not configured', status: 'UNAVAILABLE' }],
+                  showContinue: true,
+                  ...stabilityMeta,
+                })
+              }
+              markLiveResearchProviderFailed('failed')
+              return degradedProviderResponse('kimi', 'failed', kimiResult.error)
+            }
+            responseText = kimiResult.data.text.trim()
+            if (!responseText) {
+              await safeAudit({
+                success: false,
+                flow: 'continue_single',
+                councilSingleFamily: 'kimi',
+                reason: 'kimi_empty',
+              })
+              markLiveResearchProviderFailed('failed')
+              return degradedProviderResponse('kimi', 'failed', 'Kimi returned empty content')
             }
             break
           }
@@ -1969,9 +2051,11 @@ export async function POST(req: Request) {
             ? grokSystem
             : councilSingleFamily === 'gemini'
               ? geminiSystem
-              : councilSingleFamily === 'red_team'
-                ? redTeamSystem
-                : gptSystem)
+              : councilSingleFamily === 'kimi'
+                ? kimiSystem
+                : councilSingleFamily === 'red_team'
+                  ? redTeamSystem
+                  : gptSystem)
 
       if (stableGroupTurn || councilFlowMode === 'direct') {
         logProviderTokenDiagnostics(

@@ -24,6 +24,7 @@ export const STABLE_GROUP_FAMILY_ORDER = [
   'claude',
   'grok',
   'gemini',
+  'kimi',
   'red_team',
 ] as const
 

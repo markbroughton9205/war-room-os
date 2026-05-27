@@ -68,7 +68,7 @@ export function getProviderIntegritySnapshot(providerId: ProviderRuntimeId): Pro
 }
 
 export function getAllProviderIntegritySnapshots(): Record<ProviderRuntimeId, ProviderIntegrityRuntimeSnapshot> {
-  const ids: ProviderRuntimeId[] = ['openai', 'anthropic', 'google', 'xai', 'tavily', 'firecrawl']
+  const ids: ProviderRuntimeId[] = ['openai', 'anthropic', 'google', 'xai', 'moonshot', 'tavily', 'firecrawl']
   return Object.fromEntries(ids.map(id => [id, getProviderIntegritySnapshot(id)])) as Record<
     ProviderRuntimeId,
     ProviderIntegrityRuntimeSnapshot

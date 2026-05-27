@@ -22,6 +22,7 @@ function cloudEngineIdForFamily(family: CouncilOrchestrationFamily): EngineId | 
   if (family === 'claude' || family === 'red_team') return 'claude'
   if (family === 'grok') return 'grok'
   if (family === 'gemini') return 'gemini'
+  if (family === 'kimi') return 'kimi'
   return null
 }
 
@@ -32,7 +33,7 @@ function classifyFamilyFromEngineMap(
 ): AttendancePreflightStatus {
   if (family === 'gemini' && opts.skipGeminiForSession) return 'unavailable'
 
-  if (family === 'kimi' || family === 'bridge_architect') {
+  if (family === 'bridge_architect') {
     return 'unavailable'
   }
 

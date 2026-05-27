@@ -33,6 +33,7 @@ const CLOUD_PROVIDER_FAMILY: Partial<Record<EngineId, string>> = {
   claude: 'claude',
   grok: 'grok',
   gemini: 'gemini',
+  kimi: 'kimi',
 }
 
 const ENGINE_PROVIDER_RUNTIME_ID: Partial<Record<EngineId, ProviderRuntimeId>> = {
@@ -40,6 +41,7 @@ const ENGINE_PROVIDER_RUNTIME_ID: Partial<Record<EngineId, ProviderRuntimeId>> =
   claude: 'anthropic',
   grok: 'xai',
   gemini: 'google',
+  kimi: 'moonshot',
 }
 
 function providerDiagnostic(args: {
@@ -68,7 +70,7 @@ function finalize(status: Omit<EngineStatus, 'permissions' | 'approvalRequired' 
 }
 
 function cloudEngine(
-  id: 'grok' | 'claude' | 'chatgpt',
+  id: 'grok' | 'claude' | 'chatgpt' | 'kimi',
   lastChecked: string,
   provider: ProviderRuntimeStatus | undefined,
   configuredNotes: string,
@@ -307,6 +309,7 @@ export async function collectEngineStatuses(
     cloudEngine('claude', lastChecked, providerById.get(ENGINE_PROVIDER_RUNTIME_ID.claude!), 'Anthropic Claude.', 'Set ANTHROPIC_API_KEY for Claude API access.'),
     cloudEngine('chatgpt', lastChecked, providerById.get(ENGINE_PROVIDER_RUNTIME_ID.chatgpt!), 'OpenAI Chat Completions.', 'Set OPENAI_API_KEY for OpenAI API access.'),
     gemini,
+    cloudEngine('kimi', lastChecked, providerById.get(ENGINE_PROVIDER_RUNTIME_ID.kimi!), 'Moonshot Kimi.', 'Set KIMI_API_KEY (or MOONSHOT_API_KEY) for Kimi API access.'),
   ]
 
   return ordered

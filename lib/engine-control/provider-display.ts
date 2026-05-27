@@ -8,6 +8,7 @@ export function engineProviderDisplayLabel(id: EngineId, providerType: ProviderT
   if (providerType === 'anthropic') return 'Anthropic'
   if (providerType === 'xai') return 'xAI'
   if (providerType === 'google') return 'Google'
+  if (providerType === 'moonshot') return 'Moonshot'
   const reg = ENGINE_REGISTRY_BY_ID.get(id)
   return reg?.displayName ?? providerType
 }

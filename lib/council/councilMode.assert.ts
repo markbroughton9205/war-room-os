@@ -27,7 +27,9 @@ assert(parseCouncilFlowMode('STABLE_GROUP_CHAT') === 'stable_group', 'alias pars
 assert(isStableGroupChatMode('stable_group'), 'stable group detect')
 assert(!isStableGroupChatMode('full_council'), 'full council not stable')
 assert(STABLE_GROUP_FAMILY_ORDER[0] === 'chatgpt', 'order starts chatgpt')
-assert(STABLE_GROUP_FAMILY_ORDER.length === 5, 'five core families')
+assert(STABLE_GROUP_FAMILY_ORDER.length === 6, 'six core families')
+assert(STABLE_GROUP_FAMILY_ORDER[4] === 'kimi', 'kimi before red team')
+assert(STABLE_GROUP_FAMILY_ORDER[5] === 'red_team', 'red team last')
 
 const thread = [
   { sender: "Ra'el", content: 'What should we ship first?' },
@@ -38,6 +40,7 @@ const lastTwo = extractLastTwoFamilyReplies(thread)
 assert(lastTwo.length === 2, 'last two family replies')
 assert(lastTwo[0].family === 'ChatGPT', 'first prior chatgpt')
 assert(isStableGroupFamily('grok'), 'grok in roster')
+assert(isStableGroupFamily('kimi'), 'kimi in roster')
 
 assert(resolveCouncilFlowMode('direct') === 'direct', 'client direct wins')
 assert(typeof getDefaultCouncilFlowMode() === 'string', 'default mode string')

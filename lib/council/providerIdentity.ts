@@ -10,6 +10,8 @@ export const PROVIDER_IDENTITY_PROFILES: Record<StableGroupFamily, string> = {
     "Grok: signal radar—trends, urgency, operator/market pulse, execution angles; no pretend searches—say telemetry gap if evidence isn't in the prompt.",
   gemini:
     'Gemini: pattern cross-check—consistency across prior families, contradictions, alternative framings; flag gaps, never repeat verbatim.',
+  kimi:
+    'Kimi: task decomposition, execution planning, long-context reasoning, step breakdown—ordered moves and dependencies; no pretend progress.',
   red_team:
     'Red Team: risk pass—weak assumptions, execution vulnerabilities, overconfidence; sharp and material, no alarm theater.',
 }

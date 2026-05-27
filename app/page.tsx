@@ -426,6 +426,7 @@ function cloudEngineIdForCouncilFamily(f: CouncilOrchestrationFamily): EngineId 
   if (f === 'claude' || f === 'red_team') return 'claude'
   if (f === 'grok') return 'grok'
   if (f === 'gemini') return 'gemini'
+  if (f === 'kimi') return 'kimi'
   return null
 }
 
@@ -684,7 +685,7 @@ type RaelActionUrgency = 'low' | 'medium' | 'high'
 type SmsBridgeStatus = 'not configured' | 'standby' | 'online' | 'error'
 type RepoScanStatus = 'idle' | 'scanning' | 'indexed' | 'error'
 type ProviderConnectionStatus = 'online' | 'standby' | 'error' | 'not_connected'
-type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'redteam'
+type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'kimi' | 'redteam'
 
 type RaelActionItem = {
   action_id: string
@@ -938,6 +939,7 @@ const INITIAL_PROVIDER_HEALTH: ProviderHealthState = {
     chatgpt: 'not_connected',
     grok: 'not_connected',
     gemini: 'not_connected',
+    kimi: 'not_connected',
     redteam: 'standby',
   },
   labels: {
@@ -945,6 +947,7 @@ const INITIAL_PROVIDER_HEALTH: ProviderHealthState = {
     chatgpt: 'OpenAI · ChatGPT · checking',
     grok: 'xAI · Grok · checking',
     gemini: 'Google · Gemini · not connected',
+    kimi: 'Moonshot · Kimi · checking',
     redteam: 'War Room · Red Team · standby',
   },
 }
@@ -1097,8 +1100,9 @@ const FAMILY_NODE_GROUPS: FamilyNodeGroup[] = [
   },
   {
     familyName: 'Kimi Family',
+    presenceKey: 'KIMI FAMILY',
     color: '#60A5FA',
-    nodes: ['Task Tree', 'Dependency', 'Parallelization', 'Operations', 'Sequencing'].map(name => ({ name, status: 'idle', task: 'future worker node' })),
+    nodes: ['Task Tree', 'Dependency', 'Parallelization', 'Operations', 'Sequencing'].map(name => ({ name, status: 'idle', task: 'standing by' })),
   },
   {
     familyName: 'Grok Family',
@@ -10211,7 +10215,7 @@ function Home() {
       setOperatorTab('command')
     }
   }, [operatorTab, uiMode])
-  const providerStripKeys: ProviderFamilyKey[] = ['claude', 'chatgpt', 'grok', 'gemini', 'redteam']
+  const providerStripKeys: ProviderFamilyKey[] = ['claude', 'chatgpt', 'grok', 'gemini', 'kimi', 'redteam']
   const providerStatusStyles: Record<ProviderConnectionStatus, { color: string; dot: string; shadow: string }> = {
     online: { color: '#9AE6B4', dot: '#00ff41', shadow: '0 0 8px #00ff41' },
     standby: { color: '#FFD700', dot: '#FFD700', shadow: '0 0 8px rgba(255,215,0,0.7)' },

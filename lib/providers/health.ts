@@ -4,6 +4,7 @@ import {
   getProviderIntegritySnapshot,
   type ProviderIntegrityRuntimeSnapshot,
 } from '@/lib/providers/integrityRuntime'
+import { probeKimiApi } from '@/lib/providers/kimi'
 
 export type ProviderRuntimeHealth =
   | 'CONNECTED'
@@ -12,7 +13,7 @@ export type ProviderRuntimeHealth =
   | 'RATE_LIMITED'
   | 'INVALID_KEY'
 
-export type ProviderRuntimeId = 'openai' | 'anthropic' | 'google' | 'xai' | 'tavily' | 'firecrawl'
+export type ProviderRuntimeId = 'openai' | 'anthropic' | 'google' | 'xai' | 'moonshot' | 'tavily' | 'firecrawl'
 
 export type ProviderResponseIntegrityFields = Pick<
   ProviderIntegrityRuntimeSnapshot,
@@ -247,6 +248,16 @@ async function probeGoogle(apiKey: string): Promise<ProbeResult> {
   }
 }
 
+async function probeMoonshot(apiKey: string): Promise<ProbeResult> {
+  const result = await probeKimiApi(apiKey)
+  return {
+    activeModels: compactModels(
+      result.activeModels.filter(model => /kimi|moonshot/i.test(model)),
+    ),
+    note: result.note,
+  }
+}
+
 async function probeXai(apiKey: string): Promise<ProbeResult> {
   type XaiModels = { data?: Array<{ id?: string }> }
   const { data } = await jsonFetch<XaiModels>('https://api.x.ai/v1/models', {
@@ -333,6 +344,13 @@ const PROVIDERS: ProviderDefinition[] = [
     family: 'Grok family',
     envNames: ['XAI_API_KEY'],
     probe: probeXai,
+  },
+  {
+    id: 'moonshot',
+    provider: 'Moonshot',
+    family: 'Kimi family',
+    envNames: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
+    probe: probeMoonshot,
   },
   {
     id: 'tavily',

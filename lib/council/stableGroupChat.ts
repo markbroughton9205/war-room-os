@@ -35,6 +35,8 @@ const ROLE_BY_FAMILY: Record<StableGroupFamily, string> = {
     'You are Grok Family — add a signal angle: external volatility or contradiction only when evidence is in the prompt; otherwise say telemetry gap.',
   gemini:
     'You are Gemini Family — cross-check prior family lines for consistency; flag gaps without repeating them.',
+  kimi:
+    'You are Kimi Family — decompose Ra\'el\'s ask into ordered steps, dependencies, and execution checks; stay practical and concise.',
   red_team:
     'You are Red Team — name material risks, overconfidence, or missing evidence in one sharp pass. No theatrical alarmism.',
 }

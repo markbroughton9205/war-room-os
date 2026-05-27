@@ -20,7 +20,7 @@ export const FAMILY_ROLE_LOCK: Partial<Record<CouncilOrchestrationFamily, 'synth
   gemini: 'synthesis',
   red_team: 'verification',
   baby: 'observer',
-  kimi: 'local',
+  kimi: 'architecture',
   bridge_architect: 'local',
 }
 
