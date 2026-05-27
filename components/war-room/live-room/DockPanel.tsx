@@ -1,6 +1,8 @@
 'use client'
 
-import { memo, type ReactNode } from 'react'
+import { memo, useEffect, type ReactNode } from 'react'
+
+import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 
 import type { DockPanelId } from './FeatureDock'
 import { DOCK_ICONS } from './FeatureDock'
@@ -15,6 +17,15 @@ export type DockPanelProps = {
 export const DockPanel = memo(function DockPanel({ panelId, onClose, onMinimize, children }: DockPanelProps) {
   const meta = DOCK_ICONS.find(icon => icon.id === panelId)
   const title = meta?.label ?? panelId
+
+  useEffect(() => {
+    matrixStatus('success', `${title} ready`)
+  }, [panelId, title])
+
+  const handleClose = () => {
+    matrixStatus('warning', `${title} closed`)
+    onClose()
+  }
 
   return (
     <div
@@ -42,7 +53,7 @@ export const DockPanel = memo(function DockPanel({ panelId, onClose, onMinimize,
             <button
               type="button"
               className="rounded border border-white/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-slate-300"
-              onClick={onClose}
+              onClick={handleClose}
             >
               Close
             </button>

@@ -43,6 +43,7 @@ import type { RouteCommandResult } from '@/lib/engine-control/router'
 import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
+import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { ContinuationRequest } from '@/lib/council/continuationRequest'
 import { classifyCommand } from '@/lib/engine-control/permissions'
@@ -6503,6 +6504,14 @@ function Home() {
 
   const respondToRaelAction = (actionId: string, response: string) => {
     const answeredAt = new Date().toISOString()
+    const lower = response.toLowerCase()
+    if (/reject|decline|dismiss|not now/i.test(lower)) {
+      matrixStatus('warning', 'Response recorded — council noted')
+    } else if (/approve|save|review now/i.test(lower)) {
+      matrixStatus('success', 'Approval recorded')
+    } else {
+      matrixStatus('success', 'Response sent to council')
+    }
 
     setRaelActions(prev => prev.map(action => (
       action.action_id === actionId
@@ -8054,6 +8063,8 @@ function Home() {
   }
 
   const submitDecree = async (decree: string, mode?: CouncilMode) => {
+    let decreeCompletedOk = false
+    let decreeMatrixFailed = false
     const myRound = ++decreeRoundGenRef.current
     latestDecreeAttemptRoundRef.current = myRound
     orchRedTeamEarlyLatchRef.current = false
@@ -8068,6 +8079,7 @@ function Home() {
     const controller = new AbortController()
     abortControllerRef.current = controller
     setLoading(true)
+    matrixStatus('working', 'Council responding…')
     if (mode !== 'continue') {
       setLiveResearchHud(null)
     }
@@ -9357,8 +9369,11 @@ function Home() {
           scheduleNextOrchestration()
         }, 0)
       }
+      decreeCompletedOk = true
     } catch (error) {
       if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return
+      decreeMatrixFailed = true
+      matrixStatus('error', 'Council response failed')
       const msg = sanitizeMemoryRuntimeText(error instanceof Error ? error.message : 'Council unreachable.')
       addSystemMessage(`[Error] ${msg}`)
       lastCouncilFamilyErrorRef.current = decreeSubmitFaultAnchor ?? 'chatgpt'
@@ -9406,6 +9421,9 @@ function Home() {
       sequentialDiagnostics.stop()
       setTypingFamily(null)
       if (toolIntent) endToolRequest()
+      if (decreeCompletedOk && !decreeMatrixFailed && !controller.signal.aborted) {
+        matrixStatus('success', 'Council response ready')
+      }
       setLoading(false)
     }
   }
@@ -9426,6 +9444,7 @@ function Home() {
         return { decree: d, ...expansionNeed }
       },
       onExpansionQueued: (decree, expansion) => {
+        matrixStatus('warning', 'Expanded analysis needs your approval')
         addRaelAction({
           action_id: `expanded-analysis-${decree.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80)}`,
           related_opportunity_id: null,
@@ -9867,6 +9886,13 @@ function Home() {
     packet: ProjectOrchestrationPacket,
   ) => {
     const [approve, pause, deeper, redirect] = packet.approvalPacket.nextDecreeSuggestions
+    if (action === 'approve') {
+      matrixStatus('working', 'Council responding…')
+    } else if (action === 'pause') {
+      matrixStatus('warning', 'Project paused')
+    } else {
+      matrixStatus('success', 'Project command prepared')
+    }
     if (action === 'pause') {
       appendVisibleRaelDecree(pause ?? `Pause project packet ${packet.id}.`)
       activateCouncilHold(`Project packet ${packet.id} paused by Commander control.`)
@@ -10237,16 +10263,19 @@ function Home() {
 
   const handleExpansionApprove = async () => {
     if (!expansionPrompt || loading) return
+    matrixStatus('working', 'Council responding…')
     await sendRaelDecree(expansionPrompt.decree, 'expanded')
   }
 
   const handleExpansionDecline = async () => {
     if (!expansionPrompt || loading) return
+    matrixStatus('working', 'Council responding…')
     await sendRaelDecree(expansionPrompt.decree)
   }
 
   const handleExpansionSummarize = async () => {
     if (!expansionPrompt || loading) return
+    matrixStatus('working', 'Council responding…')
     await sendRaelDecree(expansionPrompt.decree, 'summarize')
   }
 

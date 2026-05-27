@@ -2,6 +2,7 @@
 
 import { memo, type FormEvent } from 'react'
 import { COUNCIL_FLOW_MODE_LABELS, type CouncilFlowMode } from '@/lib/council/councilMode'
+import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 
 export type CommandConsoleProps = {
   command: string
@@ -35,6 +36,9 @@ export const CommandConsole = memo(function CommandConsole({
         className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2"
         onSubmit={event => {
           event.preventDefault()
+          if (!loading && command.trim()) {
+            matrixStatus('working', 'Council responding…')
+          }
           void onSubmit(event)
         }}
       >

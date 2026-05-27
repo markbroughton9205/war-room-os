@@ -2,6 +2,8 @@
 
 import { memo, useState } from 'react'
 
+import { matrixStatus } from '@/lib/ui/matrixStatusBus'
+
 export type DockPanelId =
   | 'live-council'
   | 'command-intel'
@@ -59,10 +61,17 @@ export const FeatureDock = memo(function FeatureDock({ activePanelId, onSelect }
             onMouseLeave={() => setHovered(null)}
             onClick={() => {
               if (icon.id === 'live-council') {
+                matrixStatus('success', 'Live Council focused')
                 onSelect(null)
                 return
               }
-              onSelect(active ? null : icon.id)
+              if (active) {
+                matrixStatus('warning', `${icon.label} closed`)
+                onSelect(null)
+              } else {
+                matrixStatus('working', `Opening ${icon.label}…`)
+                onSelect(icon.id)
+              }
             }}
           >
             {showLabel ? (

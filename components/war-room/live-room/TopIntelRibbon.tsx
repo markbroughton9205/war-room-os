@@ -8,6 +8,7 @@ import type { LiveEnvironmentDashboardPayload } from '@/lib/intelligence/environ
 import { DEFAULT_COMMANDER_LOCATION } from '@/lib/intelligence/environment/locationPolicy'
 import { buildNewsIntelWall, fetchNewsIntelWallData } from '@/lib/intelligence/newsIntelWall'
 import type { CouncilResearchHandoff } from '@/lib/council-research/types'
+import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 import { fetchJsonSafe, sanitizeConnectionError } from '@/lib/war-room/sanitizeConnectionError'
 
 const NewsIntelCommandWall = dynamic(
@@ -241,7 +242,11 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
           <button
             type="button"
             className="whitespace-nowrap rounded border border-cyan-400/35 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-200 transition hover:bg-cyan-400/10"
-            onClick={() => setIntelWallOpen(true)}
+            onClick={() => {
+              matrixStatus('working', 'Expanding intel wall…')
+              setIntelWallOpen(true)
+              matrixStatus('success', 'Intel wall expanded')
+            }}
           >
             Expand Intel
           </button>
