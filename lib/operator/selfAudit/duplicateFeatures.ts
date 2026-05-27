@@ -1,6 +1,5 @@
 import type { OperatorGap } from '../gapFinder'
 import { selfAuditGap } from './gapFactory'
-import type { SelfAuditContext } from './types'
 
 const DUPLICATE_PAIRS: {
   id: string
@@ -39,7 +38,7 @@ const DUPLICATE_PAIRS: {
   },
 ]
 
-export function auditDuplicateFeatures(_ctx: SelfAuditContext): OperatorGap[] {
+export function auditDuplicateFeatures(): OperatorGap[] {
   return DUPLICATE_PAIRS.map(pair =>
     selfAuditGap({
       id: pair.id,

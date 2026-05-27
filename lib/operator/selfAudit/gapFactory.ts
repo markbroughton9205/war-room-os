@@ -1,4 +1,4 @@
-import type { GapSeverity, GapStatus, OperatorGap } from '../gapFinder'
+import type { GapStatus, OperatorGap } from '../gapFinder'
 import type { SelfAuditCategory, SelfAuditFindingKind } from './types'
 
 export function selfAuditGap(
@@ -14,11 +14,11 @@ export function selfAuditGap(
     partial.id ??
     `self-audit-${partial.category}-${partial.title}`.replace(/\s+/g, '-').toLowerCase()
   return {
+    ...partial,
     id,
     status: partial.status ?? 'open',
     kind: partial.kind ?? 'issue',
     plainLanguage: partial.plainLanguage,
-    ...partial,
   }
 }
 
