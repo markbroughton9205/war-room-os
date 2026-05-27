@@ -53,7 +53,12 @@ import {
   formatSessionTranscript,
   formatVisibleLog,
 } from '@/lib/operator/copyCouncilText'
-import { findOperatorGaps, type GapFinderContext } from '@/lib/operator/gapFinder'
+import {
+  countOpenOperatorGaps,
+  resolveOperatorGaps,
+  type GapFinderContext,
+} from '@/lib/operator/gapFinder'
+import type { GapVerificationContext } from '@/lib/operator/gapVerification'
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { ContinuationRequest } from '@/lib/council/continuationRequest'
 import { classifyCommand } from '@/lib/engine-control/permissions'
@@ -10433,6 +10438,17 @@ function Home() {
     internetStatus.label,
     internetStatus.overallStatus,
   ])
+  const operatorGapVerificationContext = useMemo<GapVerificationContext>(
+    () => ({
+      showOldDiagnosticsDefault: false,
+      hasShowOldDiagnosticsToggle: true,
+      hasCopyVisibleLogHint: true,
+      hasCopySessionHint: true,
+      hiddenMessageCount: hiddenCouncilMessageCount,
+      hasArchivedCountBanner: hiddenCouncilMessageCount > 0,
+    }),
+    [hiddenCouncilMessageCount],
+  )
   const operatorGapFinderContext = useMemo<GapFinderContext>(
     () => ({
       visibleMessages: visibleCouncilMessages.map(m => ({
@@ -10454,6 +10470,7 @@ function Home() {
       showOldDiagnostics: showOldCouncilDiagnostics,
       internetUsable: internetStatus.canUseInternet === true,
       viewportNarrow,
+      gapVerification: operatorGapVerificationContext,
     }),
     [
       visibleCouncilMessages,
@@ -10467,10 +10484,11 @@ function Home() {
       showOldCouncilDiagnostics,
       internetStatus.canUseInternet,
       viewportNarrow,
+      operatorGapVerificationContext,
     ],
   )
   useEffect(() => {
-    setOperatorGapCount(findOperatorGaps(operatorGapFinderContext).length)
+    setOperatorGapCount(countOpenOperatorGaps(resolveOperatorGaps(operatorGapFinderContext)))
   }, [operatorGapFinderContext])
   const getCopyVisibleLogText = useCallback(
     () => formatVisibleLog(operatorGapFinderContext.visibleMessages),

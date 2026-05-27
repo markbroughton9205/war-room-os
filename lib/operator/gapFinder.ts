@@ -4,6 +4,12 @@
  */
 
 import type { CouncilMessageLike } from './copyCouncilText'
+import {
+  KNOWN_GAP_IDS,
+  verifyKnownGaps,
+  type GapVerificationContext,
+  type KnownGapId,
+} from './gapVerification'
 import { isOldOperatorDiagnosticMessage } from '@/lib/war-room/operatorDiagnosticsUi'
 
 export type GapCategory =
@@ -20,6 +26,11 @@ export type GapCategory =
 
 export type GapSeverity = 'low' | 'medium' | 'high'
 
+export type GapStatus = 'open' | 'fixed' | 'needs_review'
+
+export const COMMANDER_MANUAL_FIX_EVIDENCE =
+  'Commander marked fixed manually — not automatically verified.'
+
 export type OperatorGap = {
   id: string
   title: string
@@ -29,6 +40,10 @@ export type OperatorGap = {
   severity: GapSeverity
   recommendedFix: string
   cursorCommand: string
+  status: GapStatus
+  fixedAt?: string | null
+  verificationEvidence?: string[]
+  lastCheckedAt?: string
 }
 
 export type CanonicalGapSnapshot = {
@@ -68,15 +83,124 @@ export type GapFinderContext = {
   internetUsable?: boolean
   evolutionReadinessScore?: number | null
   viewportNarrow?: boolean
+  gapVerification?: GapVerificationContext
+  /** Gap id → ISO timestamp when Commander marked fixed manually. */
+  commanderManualFixedAt?: Partial<Record<string, string>>
 }
 
 function gap(
-  partial: Omit<OperatorGap, 'id'> & { id?: string },
+  partial: Omit<OperatorGap, 'id' | 'status'> & { id?: string; status?: GapStatus },
 ): OperatorGap {
   return {
     id: partial.id ?? `${partial.category}-${partial.title}`.replace(/\s+/g, '-').toLowerCase(),
+    status: partial.status ?? 'open',
     ...partial,
   }
+}
+
+function isKnownGapId(id: string): id is KnownGapId {
+  return id === KNOWN_GAP_IDS.OLD_DIAGNOSTICS_UX || id === KNOWN_GAP_IDS.ARCHIVE_COPY_CLARITY
+}
+
+function verificationMap(ctx: GapFinderContext): Map<string, { verified: boolean; evidence: string[] }> {
+  if (!ctx.gapVerification) return new Map()
+  return new Map(verifyKnownGaps(ctx.gapVerification).map(row => [row.gapId, row]))
+}
+
+/** Apply verification + Commander overrides; never auto-fix without evidence. */
+export function applyGapVerification(gaps: OperatorGap[], ctx: GapFinderContext): OperatorGap[] {
+  const checkedAt = new Date().toISOString()
+  const verifiedById = verificationMap(ctx)
+  const manual = ctx.commanderManualFixedAt ?? {}
+
+  return gaps.map(item => {
+    const lastCheckedAt = checkedAt
+    const manualAt = manual[item.id]
+    if (manualAt) {
+      return {
+        ...item,
+        status: 'needs_review' as const,
+        fixedAt: manualAt,
+        verificationEvidence: [COMMANDER_MANUAL_FIX_EVIDENCE],
+        lastCheckedAt,
+      }
+    }
+
+    if (!isKnownGapId(item.id)) {
+      return { ...item, status: item.status ?? 'open', lastCheckedAt }
+    }
+
+    const verification = verifiedById.get(item.id)
+    if (verification?.verified && verification.evidence.length > 0) {
+      return {
+        ...item,
+        status: 'fixed' as const,
+        fixedAt: checkedAt,
+        verificationEvidence: verification.evidence,
+        lastCheckedAt,
+      }
+    }
+
+    return { ...item, status: 'open' as const, lastCheckedAt }
+  })
+}
+
+const KNOWN_GAP_DISPLAY: Record<
+  KnownGapId,
+  Omit<OperatorGap, 'id' | 'status' | 'fixedAt' | 'verificationEvidence' | 'lastCheckedAt'>
+> = {
+  [KNOWN_GAP_IDS.OLD_DIAGNOSTICS_UX]: {
+    title: 'Old diagnostic notices visible',
+    meaning: 'Legacy fallback/diagnostic lines may clutter the live council thread.',
+    area: 'Live Council',
+    category: 'Old diagnostics',
+    severity: 'low',
+    recommendedFix: 'Turn off "Show old diagnostics" in operator live view (default hides legacy noise).',
+    cursorCommand:
+      'Review isOldOperatorDiagnosticMessage filtering in app/page.tsx MessageBubble; keep history without live noise.',
+  },
+  [KNOWN_GAP_IDS.ARCHIVE_COPY_CLARITY]: {
+    title: 'Older messages hidden from live view',
+    meaning: 'Messages are archived from the visible log — copy/archive UX must be clear.',
+    area: 'Live Council',
+    category: 'Confusing UI',
+    severity: 'low',
+    recommendedFix: 'Use View Archive or Copy Session for full transcript; Copy Visible Log only covers on-screen rows.',
+    cursorCommand:
+      'Document in operator UI that Copy Visible Log uses visibleCouncilMessages only; link to archive recall if needed.',
+  },
+}
+
+function injectVerifiedFixedKnownGaps(gaps: OperatorGap[], ctx: GapFinderContext): OperatorGap[] {
+  const verifiedById = verificationMap(ctx)
+  const present = new Set(gaps.map(g => g.id))
+  const injected: OperatorGap[] = []
+  for (const gapId of Object.values(KNOWN_GAP_IDS)) {
+    if (present.has(gapId)) continue
+    const verification = verifiedById.get(gapId)
+    if (!verification?.verified || verification.evidence.length === 0) continue
+    if (gapId === KNOWN_GAP_IDS.ARCHIVE_COPY_CLARITY && (ctx.hiddenMessageCount ?? 0) === 0) continue
+    injected.push(
+      gap({
+        id: gapId,
+        ...KNOWN_GAP_DISPLAY[gapId],
+        status: 'fixed',
+        fixedAt: new Date().toISOString(),
+        verificationEvidence: verification.evidence,
+        lastCheckedAt: new Date().toISOString(),
+      }),
+    )
+  }
+  return [...gaps, ...injected]
+}
+
+export function resolveOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
+  const withStatus = applyGapVerification(findOperatorGaps(ctx), ctx)
+  return injectVerifiedFixedKnownGaps(withStatus, ctx)
+}
+
+export function countOpenOperatorGaps(gaps: OperatorGap[]): number {
+  return gaps.filter(g => g.status === 'open').length
 }
 
 function visibleForGapScan(messages: CouncilMessageLike[], showOldDiagnostics?: boolean): CouncilMessageLike[] {
@@ -113,6 +237,7 @@ export function findOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
   if ((ctx.hiddenMessageCount ?? 0) > 0) {
     gaps.push(
       gap({
+        id: KNOWN_GAP_IDS.ARCHIVE_COPY_CLARITY,
         title: 'Older messages hidden from live view',
         meaning: `${ctx.hiddenMessageCount} messages are archived from the visible log.`,
         area: 'Live Council',
@@ -158,6 +283,7 @@ export function findOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
   if (ctx.showOldDiagnostics && visible.some(m => /fallback|degraded|unavailable/i.test(m.content))) {
     gaps.push(
       gap({
+        id: KNOWN_GAP_IDS.OLD_DIAGNOSTICS_UX,
         title: 'Old diagnostic notices visible',
         meaning: 'Legacy fallback/diagnostic lines may clutter the live council thread.',
         area: 'Live Council',
@@ -330,24 +456,39 @@ export function findOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
 }
 
 export function formatGapReport(gaps: OperatorGap[]): string {
+  const open = gaps.filter(g => g.status === 'open')
+  const fixed = gaps.filter(g => g.status === 'fixed')
+  const needsReview = gaps.filter(g => g.status === 'needs_review')
   const lines = [
     '# War Room Operator Gap Report',
     `Generated: ${new Date().toISOString()}`,
-    `Gaps found: ${gaps.length}`,
+    `Open: ${open.length} · Fixed: ${fixed.length} · Needs review: ${needsReview.length}`,
     '',
   ]
-  gaps.forEach((g, index) => {
-    lines.push(`## ${index + 1}. ${g.title} [${g.severity}]`)
-    lines.push(`Category: ${g.category}`)
-    lines.push(`Area: ${g.area}`)
-    lines.push(`Meaning: ${g.meaning}`)
-    lines.push(`Recommended fix: ${g.recommendedFix}`)
-    lines.push(`Cursor command: ${g.cursorCommand}`)
-    lines.push('')
-  })
+  const appendSection = (title: string, items: OperatorGap[]) => {
+    if (!items.length) return
+    lines.push(`### ${title}`)
+    items.forEach((g, index) => {
+      lines.push(`## ${index + 1}. ${g.title} [${g.severity}] · ${g.status}`)
+      lines.push(`Category: ${g.category}`)
+      lines.push(`Area: ${g.area}`)
+      lines.push(`Meaning: ${g.meaning}`)
+      lines.push(`Recommended fix: ${g.recommendedFix}`)
+      lines.push(`Cursor command: ${g.cursorCommand}`)
+      if (g.verificationEvidence?.length) {
+        lines.push(`Verification: ${g.verificationEvidence.join('; ')}`)
+      }
+      if (g.fixedAt) lines.push(`Fixed at: ${g.fixedAt}`)
+      lines.push('')
+    })
+  }
+  appendSection('Open gaps', open)
+  appendSection('Fixed gaps', fixed)
+  appendSection('Needs review', needsReview)
+  if (!gaps.length) lines.push('No gaps detected with current heuristics.')
   return lines.join('\n').trim()
 }
 
 export function topGapCursorCommand(gaps: OperatorGap[]): string | null {
-  return gaps[0]?.cursorCommand ?? null
+  return gaps.find(g => g.status === 'open')?.cursorCommand ?? null
 }
