@@ -7,6 +7,7 @@ import { useMatrixStatus } from '@/hooks/useMatrixStatus'
 import {
   COMMANDER_MANUAL_FIX_EVIDENCE,
   countOpenOperatorGaps,
+  formatGapReport,
   resolveOperatorGaps,
   type CanonicalGapSnapshot,
   type GapFinderContext,
@@ -208,14 +209,22 @@ export const GapFinderPanel = memo(function GapFinderPanel({
           Recheck After Fix
         </button>
         <CopyCouncilButton
+          label="Copy Gap Report"
+          getText={() => formatGapReport(gaps)}
+          successMessage="Copied"
+          manualTitle="Gap report"
+        />
+        <CopyCouncilButton
           label="Copy Self-Audit Report"
           getText={() => formatSelfAuditReport(gaps)}
-          successMessage="Self-audit report copied"
+          successMessage="Copied"
+          manualTitle="Self-audit report"
         />
         <CopyCouncilButton
           label="Copy Top Cursor Command"
           getText={() => topSelfAuditCursorCommand(gaps) ?? ''}
-          successMessage="Cursor command copied"
+          successMessage="Copied"
+          manualTitle="Top Cursor command"
           variant="accent"
         />
         <button

@@ -1,6 +1,8 @@
 /**
- * Council transcript formatting and clipboard helpers (client-safe).
+ * Council transcript formatting helpers (client-safe).
  */
+
+export { copyTextToClipboard, type CopyToClipboardResult } from './copyToClipboard'
 
 export type CouncilMessageLike = {
   id: string
@@ -19,37 +21,6 @@ export type CouncilExchange = {
 
 export type CopyMessageOptions = {
   includeMeta?: boolean
-}
-
-export async function copyTextToClipboard(text: string): Promise<boolean> {
-  const trimmed = text.trim()
-  if (!trimmed) return false
-
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(trimmed)
-      return true
-    } catch {
-      /* fall through */
-    }
-  }
-
-  if (typeof document === 'undefined') return false
-
-  const textarea = document.createElement('textarea')
-  textarea.value = trimmed
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  document.body.appendChild(textarea)
-  textarea.select()
-  try {
-    return document.execCommand('copy')
-  } catch {
-    return false
-  } finally {
-    document.body.removeChild(textarea)
-  }
 }
 
 export function formatMessageForCopy(

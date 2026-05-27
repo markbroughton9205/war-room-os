@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CouncilRepairPacket, CouncilRepairSnapshot } from '@/lib/council-repair'
 
 import { OperatorNextStepsBlock } from '@/components/war-room/evolution/OperatorNextStepsBlock'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 
 function Badge({ label }: { label: string }) {
   const color = /risk|security|rejected|broken/i.test(label)
@@ -37,6 +38,7 @@ function FieldList({ title, items }: { title: string; items: string[] }) {
 }
 
 export function RepairPacketPanel({ latest }: { latest?: CouncilRepairPacket | null }) {
+  const { copy } = useCopyToClipboard()
   const [snapshot, setSnapshot] = useState<CouncilRepairSnapshot | null>(null)
   const [selectedPacketId, setSelectedPacketId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -78,11 +80,14 @@ export function RepairPacketPanel({ latest }: { latest?: CouncilRepairPacket | n
 
   const copyPrompt = async () => {
     if (!activePacket) return
-    try {
-      await navigator.clipboard.writeText(activePacket.cursorReadyPrompt)
+    const result = await copy(activePacket.cursorReadyPrompt, {
+      successMessage: 'Copied',
+      manualTitle: 'Repair packet',
+    })
+    if (result === 'copied') {
       setNotice('Repair packet copied for manual Cursor handoff. War Room did not invoke Cursor or mutate files.')
-    } catch {
-      setNotice('Clipboard unavailable; select the visible prompt manually. War Room did not invoke Cursor.')
+    } else if (result === 'manual') {
+      setNotice('Manual copy needed — use the dialog or the prompt below. War Room did not invoke Cursor.')
     }
   }
 

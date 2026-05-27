@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { ClientProviders } from '@/components/ClientProviders'
 import { WandTrail } from '@/components/WandTrail'
 import './globals.css'
 
@@ -15,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-black">
-        {children}
+        <ClientProviders>{children}</ClientProviders>
         <WandTrail />
       </body>
     </html>

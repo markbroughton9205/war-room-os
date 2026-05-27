@@ -2,8 +2,7 @@
 
 import { memo, useCallback, useState } from 'react'
 
-import { useMatrixStatus } from '@/hooks/useMatrixStatus'
-import { copyTextToClipboard } from '@/lib/operator/copyCouncilText'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 
 const BTN_CLASS =
   'min-h-[32px] rounded px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-widest transition hover:bg-white/5 active:scale-[0.98]'
@@ -12,6 +11,7 @@ export type CopyCouncilButtonProps = {
   label: string
   getText: () => string
   successMessage?: string
+  manualTitle?: string
   className?: string
   variant?: 'default' | 'accent'
   hint?: string
@@ -20,24 +20,22 @@ export type CopyCouncilButtonProps = {
 export const CopyCouncilButton = memo(function CopyCouncilButton({
   label,
   getText,
-  successMessage = 'Copied to clipboard',
+  successMessage = 'Copied',
+  manualTitle,
   className = '',
   variant = 'default',
   hint,
 }: CopyCouncilButtonProps) {
-  const { signalSuccess, signalError } = useMatrixStatus()
+  const { copy } = useCopyToClipboard()
   const [copied, setCopied] = useState(false)
 
   const onClick = useCallback(async () => {
-    const ok = await copyTextToClipboard(getText())
-    if (!ok) {
-      signalError('Copy failed')
-      return
+    const result = await copy(getText(), { successMessage, manualTitle: manualTitle ?? label })
+    if (result === 'copied') {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1_600)
     }
-    setCopied(true)
-    signalSuccess(successMessage)
-    window.setTimeout(() => setCopied(false), 1_600)
-  }, [getText, signalError, signalSuccess, successMessage])
+  }, [copy, getText, label, manualTitle, successMessage])
 
   const accent = variant === 'accent'
 

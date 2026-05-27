@@ -193,7 +193,8 @@ function RevenueStarterCard({ playbook }: { playbook: typeof FIRST_INCOME_MOVE_P
       <CopyCouncilButton
         label="Copy playbook"
         getText={() => formatRevenueStarterCard(playbook)}
-        successMessage="Income playbook copied"
+        successMessage="Copied"
+        manualTitle="Income playbook"
         variant="accent"
       />
     </article>
@@ -278,7 +279,8 @@ function InboxRow({
         <CopyCouncilButton
           label="Copy cursor command"
           getText={() => item.copyCursorCommand}
-          successMessage="Cursor command copied"
+          successMessage="Copied"
+          manualTitle="Cursor command"
         />
         {onRecheck ? (
           <ActionChip label="Recheck" onClick={onRecheck} />

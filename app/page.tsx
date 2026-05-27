@@ -11031,13 +11031,15 @@ function Home() {
             <CopyCouncilButton
               label="Copy Session"
               getText={getCopySessionText}
-              successMessage="Session transcript copied"
+              successMessage="Copied"
+              manualTitle="Session transcript"
               hint="Copies the full saved session, including archived messages."
             />
             <CopyCouncilButton
               label="Copy Latest Exchange"
               getText={getCopyLatestExchangeText}
-              successMessage="Latest exchange copied"
+              successMessage="Copied"
+              manualTitle="Latest exchange"
             />
             {councilSessionControls}
             <label className="flex items-center gap-1 rounded px-2 py-0.5 text-[9px] tracking-widest" style={{ border: '1px solid #333', color: '#888' }}>
@@ -11095,14 +11097,16 @@ function Home() {
               <CopyCouncilButton
                 label="Copy Visible Log"
                 getText={getCopyVisibleLogText}
-                successMessage="Visible log copied"
+                successMessage="Copied"
+                manualTitle="Visible log"
                 variant="accent"
                 hint="Copies only messages currently visible in this thread."
               />
               <CopyCouncilButton
                 label="Copy as Cursor Brief"
                 getText={getCopyCursorBriefText}
-                successMessage="Cursor brief copied"
+                successMessage="Copied"
+                manualTitle="Cursor brief"
               />
             </div>
             <div

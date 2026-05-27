@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { useWarRoomUiMode } from '@/components/war-room/WarRoomUiModeContext'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { buildEvolutionOperatorSummary } from '@/lib/operator/evolutionSummary'
 import type { RepairIntelligenceSnapshot } from '@/lib/evolution/types'
 import type { SweepReport } from '@/lib/war-room-sweep/types'
@@ -26,7 +27,9 @@ export function WarRoomEvolutionPanel({
   onCouncilHandoff?: (decree: string) => void
 }) {
   const { uiMode } = useWarRoomUiMode()
+  const { copy } = useCopyToClipboard()
   const [snapshot, setSnapshot] = useState<RepairIntelligenceSnapshot | null>(null)
+  const [nextPacketPreview, setNextPacketPreview] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -92,8 +95,17 @@ export function WarRoomEvolutionPanel({
       if (!res.ok || !body.repairPacket?.cursorReadyPrompt) {
         throw new Error(body.error || 'Sweep repair packet unavailable')
       }
-      await navigator.clipboard.writeText(body.repairPacket.cursorReadyPrompt)
-      setNotice('Next repair packet from OS sweep copied for Cursor handoff.')
+      const prompt = body.repairPacket.cursorReadyPrompt
+      setNextPacketPreview(prompt)
+      const result = await copy(prompt, {
+        successMessage: 'Copied',
+        manualTitle: 'Next repair packet',
+      })
+      if (result === 'copied') {
+        setNotice('Next repair packet from OS sweep copied for Cursor handoff.')
+      } else if (result === 'manual') {
+        setNotice('Manual copy needed — packet shown below for Cursor handoff.')
+      }
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Repair packet generation failed.')
     }
@@ -140,8 +152,16 @@ export function WarRoomEvolutionPanel({
       const body = await res.json() as SchemaRepairPacketResponse
       const prompt = body.repairPacket?.combinedCursorPrompt ?? body.repairPacket?.cursorReadyPrompt
       if (prompt) {
-        await navigator.clipboard.writeText(prompt)
-        setNotice('Schema repair packet generated and copied for manual Cursor handoff.')
+        setNextPacketPreview(prompt)
+        const result = await copy(prompt, {
+          successMessage: 'Copied',
+          manualTitle: 'Repair packet',
+        })
+        setNotice(
+          result === 'copied'
+            ? 'Schema repair packet generated and copied for manual Cursor handoff.'
+            : 'Manual copy needed — packet shown below.',
+        )
       } else {
         setNotice('Repair packet generated. Open Engineering View for SQL details.')
       }
@@ -159,11 +179,17 @@ export function WarRoomEvolutionPanel({
       setNotice('No cursor command in current snapshot. Generate a repair packet first.')
       return
     }
-    try {
-      await navigator.clipboard.writeText(command)
+    const result = await copy(command, {
+      successMessage: 'Copied',
+      manualTitle: 'Cursor command',
+    })
+    if (result === 'copied') {
       setNotice('Cursor command copied. War Room did not execute or mutate anything.')
-    } catch {
-      setNotice('Clipboard unavailable; copy from Engineering detail view.')
+    } else if (result === 'manual') {
+      setNextPacketPreview(command)
+      setNotice('Manual copy needed — command shown below.')
+    } else {
+      setNotice('No cursor command to copy.')
     }
   }
 
@@ -218,6 +244,19 @@ export function WarRoomEvolutionPanel({
 
       {notice ? <p className="mt-1 text-[8px] text-sky-200">{notice}</p> : null}
 
+      {nextPacketPreview ? (
+        <section className="mt-2 rounded border border-sky-500/25 bg-black/30 p-2">
+          <p className="text-[8px] font-bold uppercase tracking-widest text-sky-300">Next packet</p>
+          <textarea
+            readOnly
+            value={nextPacketPreview}
+            rows={8}
+            className="mt-1 w-full resize-y rounded border border-white/10 bg-black/40 p-2 font-mono text-[9px] leading-relaxed text-slate-300"
+            aria-label="Next repair packet text"
+          />
+        </section>
+      ) : null}
+
       <div className="mt-2 flex flex-wrap gap-1">
         {engineering ? (
           <ActionButton
@@ -226,7 +265,7 @@ export function WarRoomEvolutionPanel({
           />
         ) : null}
         <ActionButton label="OS sweep" onClick={() => void runOsSweep()} disabled={loading} />
-        <ActionButton label="Next packet" onClick={() => void generateNextRepairPacket()} disabled={loading} />
+        <ActionButton label="NEXT PACKET" onClick={() => void generateNextRepairPacket()} disabled={loading} />
         {engineering ? (
           <ActionButton label="Schema sweep" onClick={() => void runSchemaSweep()} disabled={loading} />
         ) : null}
