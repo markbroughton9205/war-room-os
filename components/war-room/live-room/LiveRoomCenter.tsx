@@ -9,7 +9,7 @@ export type LiveRoomCenterProps = {
   toolbar: ReactNode
   preamble: ReactNode
   thread: ReactNode
-  composer: ReactNode
+  composer?: ReactNode
   inlineBelowThread?: ReactNode
 }
 
@@ -42,8 +42,8 @@ export function LiveRoomCenter({
   return (
     <section
       data-testid="live-council-chat-card"
-      className="flex min-h-[28rem] flex-col overflow-hidden rounded border border-yellow-900/50"
-      style={{ background: 'rgba(10,8,4,0.58)' }}
+      className="flex min-h-[20rem] flex-col overflow-hidden rounded border border-emerald-900/50 lg:min-h-[28rem]"
+      style={{ background: 'rgba(0,8,4,0.62)', backdropFilter: 'blur(8px)', boxShadow: '0 0 32px rgba(0,255,102,0.06)' }}
     >
       <div
         className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-yellow-900/60 px-4 py-2 sm:px-6"
@@ -63,12 +63,14 @@ export function LiveRoomCenter({
       {inlineBelowThread ? (
         <div className="flex-shrink-0 border-t border-yellow-900/40 px-4 py-2 sm:px-6">{inlineBelowThread}</div>
       ) : null}
-      <div
-        className="flex-shrink-0 border-t border-yellow-900 px-4 py-4 sm:px-6"
-        style={{ background: 'rgba(255,215,0,0.09)' }}
-      >
-        {composer}
-      </div>
+      {composer ? (
+        <div
+          className="flex-shrink-0 border-t border-yellow-900 px-4 py-4 sm:px-6"
+          style={{ background: 'rgba(255,215,0,0.09)' }}
+        >
+          {composer}
+        </div>
+      ) : null}
     </section>
   )
 }

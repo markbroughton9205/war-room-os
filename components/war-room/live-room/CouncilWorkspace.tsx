@@ -9,7 +9,7 @@ export type CouncilWorkspaceProps = {
   toolbar: ReactNode
   preamble?: ReactNode
   thread: ReactNode
-  composer: ReactNode
+  composer?: ReactNode
   inlineBelowThread?: ReactNode
 }
 

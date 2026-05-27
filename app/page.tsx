@@ -216,11 +216,16 @@ import {
   type CouncilOutputMode,
 } from '@/lib/council/compression'
 import {
+  AmbientActivityFeed,
+  CommandConsole,
+  CouncilMembersPanel,
   CouncilWorkspace,
   DockPanelContent,
+  LiveRoomNavPanel,
   LiveRoomShell,
   LiveRoomModeProvider,
-  LivingIntelligenceRibbon,
+  MatrixTopIntelRow,
+  WarRoomOsHeader,
   useLiveRoomMode,
   type DockPanelId,
 } from '@/components/war-room/live-room'
@@ -10373,9 +10378,22 @@ function Home() {
     </>
   )
 
+  const activityFeedLabel = useMemo(() => {
+    if (typingFamily) {
+      const p = familyPresence[typingFamily]
+      return p ? `${typingFamily} — ${p.label}` : `${typingFamily} responding`
+    }
+    return councilContinueStatusLine
+  }, [typingFamily, familyPresence, councilContinueStatusLine])
+
+  const sessionStartedAt = useMemo(() => {
+    const first = visibleCouncilMessages[0]?.timestamp
+    return first ?? null
+  }, [visibleCouncilMessages])
+
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-black font-mono text-white">
-      <MatrixCodeRain />
+      {!isUnifiedLiveRoom ? <MatrixCodeRain /> : null}
       <style>{`
         .message-fade-in {
           animation: message-fade-in 220ms ease-out;
@@ -10529,47 +10547,64 @@ function Home() {
         {!isUnifiedLiveRoom ? operatorNav : null}
         {isUnifiedLiveRoom && (
         <LiveRoomShell
-          topBar={(
-            <>
-              <LivingIntelligenceRibbon
-                location={commanderLocation}
-                threadId={liveCouncilConvId ?? undefined}
-                onCouncilHandoff={injectLiveEnvironmentDecree}
-                onCouncilResearchHandoff={handleCouncilResearchHandoff}
-                opportunityCount={incomeOpportunities.length}
-                headlineOverride={
-                  liveResearchHud && liveResearchHud.mode !== 'inactive'
-                    ? liveResearchHud.label
-                    : null
-                }
-                urgentWarning={
-                  chatHealthLabel && chatHealthLabel !== 'Ready'
-                    ? chatHealthLabel
-                    : null
-                }
-              />
-              <div className="flex flex-wrap gap-1 border-t border-yellow-900/40 px-4 py-1.5">
-                {visibleOperatorTabs.map(({ id: tab, label }) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    className="rounded px-2 py-0.5 text-[9px] font-bold tracking-widest"
-                    style={{
-                      border: operatorTab === tab ? '1px solid #FFD700' : '1px solid #333',
-                      color: operatorTab === tab ? '#FFD700' : '#888',
-                    }}
-                    onClick={() => startTransition(() => setOperatorTab(tab))}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </>
+          header={(
+            <WarRoomOsHeader
+              systemStatusLine={chatHealthLabel}
+              missionHint={councilContinueStatusLine}
+            />
+          )}
+          intelRow={(
+            <MatrixTopIntelRow
+              location={commanderLocation}
+              threadId={liveCouncilConvId ?? undefined}
+              onCouncilHandoff={injectLiveEnvironmentDecree}
+              onCouncilResearchHandoff={handleCouncilResearchHandoff}
+              opportunityCount={incomeOpportunities.length}
+              headlineOverride={
+                liveResearchHud && liveResearchHud.mode !== 'inactive'
+                  ? liveResearchHud.label
+                  : null
+              }
+              urgentWarning={
+                chatHealthLabel && chatHealthLabel !== 'Ready'
+                  ? chatHealthLabel
+                  : null
+              }
+              missionStatus={councilContinueStatusLine}
+              councilHealthLabel={chatHealthLabel}
+              activityFeedLabel={activityFeedLabel}
+            />
+          )}
+          leftNav={(
+            <LiveRoomNavPanel
+              activePanelId={dockPanelId}
+              councilFlowMode={councilFlowMode}
+              sessionId={liveCouncilConvId}
+              sessionStartedAt={sessionStartedAt}
+              onSelectPanel={setDockPanelId}
+              onEndSession={() => startTransition(archiveCurrentCouncilSession)}
+            />
+          )}
+          rightPanel={(
+            <CouncilMembersPanel
+              providerStatuses={providerHealth.providers}
+              onOpenPanel={id => setDockPanelId(id)}
+            />
+          )}
+          commandConsole={(
+            <CommandConsole
+              command={command}
+              onCommandChange={setCommand}
+              onSubmit={handleDecree}
+              loading={loading}
+              councilFlowMode={councilFlowMode}
+              onCouncilFlowModeChange={persistCouncilFlowMode}
+            />
           )}
           activePanelId={dockPanelId}
           onPanelChange={id => {
             setDockPanelId(id)
-            if (id === 'builder-tools') {
+            if (id === 'settings') {
               setUiMode('advanced')
               setEngineeringDrawerOpen(true)
             }
@@ -10636,6 +10671,9 @@ function Home() {
                     <CouncilDeliberationStream threadId={liveCouncilConvId} enabled />
                     <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />
                   </div>
+                )}
+                redTeamPanel={(
+                  <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
                 )}
               />
             ) : null
@@ -10927,50 +10965,12 @@ function Home() {
           <div ref={bottomRef} />
         </>
           )}
-          composer={(
-        <>
-          <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <p className="text-[10px] font-bold tracking-widest" style={{ color: '#FFD700' }}>Speak to the AI families</p>
-              <p className="text-[9px] tracking-widest" style={{ color: '#666' }}>Claude builds, ChatGPT orchestrates, Grok scouts, Gemini cross-references, Red Team checks risk.</p>
-            </div>
-            <span className="rounded px-2 py-0.5 text-[9px] tracking-widest" style={{ border: '1px solid rgba(255,215,0,0.35)', color: '#FDE68A' }}>
-              Main command input
-            </span>
-          </div>
-          <form
-            className="flex items-start gap-3 rounded p-4"
-            style={{ background: 'rgba(255,215,0,0.06)', border: '1px solid rgba(255,215,0,0.55)', boxShadow: '0 0 24px rgba(255,215,0,0.08)' }}
-            onSubmit={handleDecree}
-          >
-            <span className="mt-1 shrink-0" style={{ color: '#FFD700' }}>⚔</span>
-            <textarea
-              data-command-surface-id="live-council-primary-decree"
-              data-command-surface-role="primary_decree"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  if (!loading) void handleDecree()
-                }
-              }}
-              rows={3}
-              placeholder="Speak your decree to the families..."
-              className="min-h-[3rem] flex-1 resize-y bg-transparent text-sm tracking-widest outline-none"
-              style={{ color: '#FFD700', caretColor: '#FFD700' }}
-              disabled={loading}
+          inlineBelowThread={(
+            <AmbientActivityFeed
+              familyPresence={familyPresence}
+              typingFamily={typingFamily}
+              runtime={conversationRuntimeSnapshot}
             />
-            <button type="submit" disabled={loading}
-              className="mt-0.5 shrink-0 rounded px-5 py-2 text-xs font-bold tracking-widest disabled:opacity-30"
-              style={{ border: '1px solid #FFD700', color: '#000', background: '#FFD700' }}>
-              {loading ? '…' : 'Send'}
-            </button>
-          </form>
-          <p className="mt-2 text-[9px] tracking-widest" style={{ color: '#555' }}>
-            Messages persist to Supabase when configured; otherwise this tab uses sessionStorage. Cloud order: ChatGPT → Claude → Grok → Gemini (Income Operations: Grok → Gemini → ChatGPT → Claude).
-          </p>
-        </>
           )}
         />
           )}

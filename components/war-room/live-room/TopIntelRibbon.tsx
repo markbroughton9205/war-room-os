@@ -92,6 +92,9 @@ export type TopIntelRibbonProps = {
   urgentWarning?: string | null
   headlineOverride?: string | null
   weatherOverride?: string | null
+  missionStatus?: string
+  councilHealthLabel?: string
+  activityFeedLabel?: string
 }
 
 export const TopIntelRibbon = memo(function TopIntelRibbon({
@@ -103,6 +106,9 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
   urgentWarning: urgentWarningProp,
   headlineOverride,
   weatherOverride,
+  missionStatus: missionStatusProp,
+  councilHealthLabel: councilHealthLabelProp,
+  activityFeedLabel: activityFeedLabelProp,
 }: TopIntelRibbonProps) {
   const [headline, setHeadline] = useState('Gathering live briefing…')
   const [weather, setWeather] = useState('Weather unavailable')
@@ -189,6 +195,9 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
     urgentWarningProp ?? internalUrgent ?? (fetchNote ? sanitizeConnectionError(fetchNote) : null)
   const opportunityLabel =
     opportunityCount === 0 ? 'No opportunities queued' : `${opportunityCount} opportunit${opportunityCount === 1 ? 'y' : 'ies'} open`
+  const missionStatus = missionStatusProp ?? opportunityLabel
+  const councilHealth = councilHealthLabelProp ?? provider.label
+  const activityFeed = activityFeedLabelProp ?? (opportunityCount === 0 ? 'No opportunities queued' : opportunityLabel)
 
   return (
     <div className="w-full" data-testid="top-intel-ribbon">
@@ -211,15 +220,16 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
           </div>
         ) : null}
 
-        <RibbonSegment label="Headline" value={displayHeadline} className="min-w-[12rem] flex-[1.4] sm:min-w-[14rem]" />
-        <RibbonSegment label="Weather" value={displayWeather} />
-        <RibbonSegment label="Markets" value={market} />
-        <RibbonSegment label="AI team" value={provider.label} tone={provider.tone} />
+        <RibbonSegment label="Live News" value={displayHeadline} className="min-w-[12rem] flex-[1.4] sm:min-w-[14rem]" />
+        <RibbonSegment label="Weather" value={displayWeather === 'Weather unavailable' ? 'Weather unavailable' : displayWeather} />
+        <RibbonSegment label="Markets" value={/unavailable|limited|checking/i.test(market) ? 'Markets unavailable' : market} />
+        <RibbonSegment label="Mission Status" value={missionStatus} tone="warn" />
         <RibbonSegment
-          label="Opportunities"
-          value={opportunityLabel}
-          tone={opportunityCount > 0 ? 'ok' : 'neutral'}
+          label="Council Health"
+          value={councilHealth}
+          tone={councilHealthLabelProp ? (councilHealth === 'Ready' ? 'ok' : 'warn') : provider.tone}
         />
+        <RibbonSegment label="Activity Feed" value={activityFeed} tone={opportunityCount > 0 ? 'ok' : 'neutral'} />
 
         <div className="sticky right-0 z-[1] flex shrink-0 items-center border-l border-yellow-900/50 bg-[rgba(4,6,10,0.96)] px-3 py-2 sm:px-4">
           <button

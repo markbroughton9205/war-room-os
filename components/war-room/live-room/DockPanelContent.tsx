@@ -23,7 +23,7 @@ function PanelSkeleton({ label }: { label: string }) {
 
 const SignalRadarPanel = dynamic(
   () => import('@/components/war-room/signals/SignalRadarPanel').then(m => m.SignalRadarPanel),
-  { ssr: false, loading: () => <PanelSkeleton label="News & Signals" /> },
+  { ssr: false, loading: () => <PanelSkeleton label="Analytics" /> },
 )
 const ProviderRuntimePanel = dynamic(
   () => import('@/components/war-room/providers/ProviderRuntimePanel').then(m => m.ProviderRuntimePanel),
@@ -31,7 +31,7 @@ const ProviderRuntimePanel = dynamic(
 )
 const OpportunityScoutPanel = dynamic(
   () => import('@/components/war-room/opportunities/OpportunityScoutPanel').then(m => m.OpportunityScoutPanel),
-  { ssr: false, loading: () => <PanelSkeleton label="Opportunities" /> },
+  { ssr: false, loading: () => <PanelSkeleton label="Operations" /> },
 )
 const SchemaSweepPanel = dynamic(
   () => import('@/components/war-room/schema/SchemaSweepPanel').then(m => m.SchemaSweepPanel),
@@ -51,7 +51,7 @@ const ProductionDiagnosticsPanel = dynamic(
 )
 const Phase6MemoryPanels = dynamic(
   () => import('@/components/war-room/memory/Phase6MemoryPanels').then(m => m.Phase6MemoryPanels),
-  { ssr: false, loading: () => <PanelSkeleton label="Memory" /> },
+  { ssr: false, loading: () => <PanelSkeleton label="Memory Core" /> },
 )
 const RuntimeIntegrityPanel = dynamic(
   () => import('@/components/war-room/runtime/RuntimeIntegrityPanel').then(m => m.RuntimeIntegrityPanel),
@@ -63,9 +63,8 @@ const OperatorCommandEnvironment = dynamic(
 )
 const OperatorCommandDeck = dynamic(
   () => import('@/components/war-room/operator').then(m => m.OperatorCommandDeck),
-  { ssr: false, loading: () => <PanelSkeleton label="My Command Center" /> },
+  { ssr: false, loading: () => <PanelSkeleton label="Command Center" /> },
 )
-
 export type DockPanelContentProps = {
   panelId: DockPanelId
   latestRepairPacket?: CouncilRepairPacket | null
@@ -88,6 +87,7 @@ export type DockPanelContentProps = {
   babyObserver?: ReactNode
   commandCenterExtras?: ReactNode
   builderExtras?: ReactNode
+  redTeamPanel?: ReactNode
 }
 
 export const DockPanelContent = memo(function DockPanelContent({
@@ -100,6 +100,7 @@ export const DockPanelContent = memo(function DockPanelContent({
   babyObserver,
   commandCenterExtras,
   builderExtras,
+  redTeamPanel,
 }: DockPanelContentProps) {
   const { setLiveMode, setEngineeringDrawerOpen } = useLiveRoomMode()
 
@@ -111,13 +112,24 @@ export const DockPanelContent = memo(function DockPanelContent({
 
   return (
     <PanelErrorBoundary label={panelId}>
-      {panelId === 'news-intel' && liveEnvironment ? (
-        <LiveEnvironmentPanel
-          {...liveEnvironment}
-          hideEvolutionPanel
-        />
+      {panelId === 'live-council' ? (
+        <section className="space-y-2 text-[10px] tracking-wide text-slate-400">
+          <p className="font-bold uppercase tracking-widest text-emerald-300">Live Council</p>
+          <p>Close this panel to return focus to the council thread. Use the command console below to speak with the families.</p>
+          {sessionIndicators}
+        </section>
       ) : null}
-      {panelId === 'opportunities' ? <OpportunityScoutPanel /> : null}
+
+      {panelId === 'command-intel' && liveEnvironment ? (
+        <LiveEnvironmentPanel {...liveEnvironment} hideEvolutionPanel />
+      ) : null}
+
+      {panelId === 'operations' ? (
+        <div className="space-y-3">
+          <OpportunityScoutPanel />
+        </div>
+      ) : null}
+
       {panelId === 'system-health' ? (
         <div className="space-y-3">
           <WarRoomEvolutionPanel onCouncilHandoff={onCouncilHandoff} />
@@ -125,40 +137,48 @@ export const DockPanelContent = memo(function DockPanelContent({
             <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-fuchsia-200">AI Team Status</p>
             <ProviderRuntimePanel />
           </section>
+          <RuntimeIntegrityPanel />
         </div>
       ) : null}
-      {panelId === 'repairs' ? <RepairPacketPanel latest={latestRepairPacket ?? null} /> : null}
-      {panelId === 'memory' ? <Phase6MemoryPanels /> : null}
-      {panelId === 'news-signals' ? <SignalRadarPanel /> : null}
-      {panelId === 'income-workers' ? <OpportunityScoutPanel /> : null}
-      {panelId === 'operator-tasks' ? (
+
+      {panelId === 'memory-core' ? <Phase6MemoryPanels /> : null}
+
+      {panelId === 'analytics' ? <SignalRadarPanel /> : null}
+
+      {panelId === 'red-team' ? (
         <div className="space-y-3">
-          <section>
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-sky-300">Live AI Updates</p>
-            <p className="mb-2 text-[9px] text-slate-500">Mission queue and packet feed from command graph.</p>
-          </section>
+          {redTeamPanel ?? (
+            <p className="text-[10px] tracking-wide text-slate-500">Red Team review loads from the engineering lane when configured.</p>
+          )}
+          <RepairPacketPanel latest={latestRepairPacket ?? null} />
+        </div>
+      ) : null}
+
+      {panelId === 'approvals' ? (
+        <div className="space-y-3">
           <OperatorCommandEnvironment
-            version="36"
+            version="41"
             sessionIndicators={sessionIndicators ?? null}
             onOpenEngineering={openBuilder}
           />
           <section>
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-yellow-200">My Command Center</p>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-yellow-200">Approvals &amp; Command Deck</p>
             <OperatorCommandDeck />
           </section>
           {commandCenterExtras}
         </div>
       ) : null}
-      {panelId === 'baby-observer' ? babyObserver : null}
-      {panelId === 'builder-tools' ? (
+
+      {panelId === 'settings' ? (
         <div className="grid gap-3 lg:grid-cols-2">
           <WarRoomSweepPanel />
           <SchemaSweepPanel />
           <ProductionDiagnosticsPanel />
-          <RuntimeIntegrityPanel />
           {builderExtras}
         </div>
       ) : null}
+
+      {babyObserver && panelId === 'live-council' ? babyObserver : null}
     </PanelErrorBoundary>
   )
 })
