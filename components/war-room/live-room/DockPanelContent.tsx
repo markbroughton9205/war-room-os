@@ -1,7 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { memo, type ReactNode } from 'react'
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react'
 import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoundary'
 import { LiveEnvironmentPanel } from '@/components/intelligence/LiveEnvironmentPanel'
 import { WarRoomEvolutionPanel } from '@/components/war-room/evolution'
@@ -10,7 +10,17 @@ import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/en
 import type { AstrologyInterpretationMode } from '@/lib/intelligence/environment/horoscopeEnvironment'
 import type { CouncilResearchHandoff } from '@/lib/council-research/types'
 import type { CouncilRepairPacket } from '@/lib/council-repair'
-import type { GapFinderContext } from '@/lib/operator/gapFinder'
+import {
+  resolveOperatorGaps,
+  type GapFinderContext,
+} from '@/lib/operator/gapFinder'
+import {
+  inboxExtrasFromGapContext,
+  loadOperatorInboxSnapshot,
+  shouldShowCouncilBurstNote,
+  syncOperatorInboxFromGaps,
+  type OperatorInboxSnapshot,
+} from '@/lib/operator/inbox'
 import type { DockPanelId } from './FeatureDock'
 import { useLiveRoomMode } from './LiveRoomModeContext'
 
@@ -70,6 +80,121 @@ const GapFinderPanel = dynamic(
   () => import('@/components/war-room/operator/GapFinderPanel').then(m => m.GapFinderPanel),
   { ssr: false, loading: () => <PanelSkeleton label="Gap Finder" /> },
 )
+const OperatorInboxPanel = dynamic(
+  () => import('@/components/war-room/operator/OperatorInboxPanel').then(m => m.OperatorInboxPanel),
+  { ssr: false, loading: () => <PanelSkeleton label="Operator Inbox" /> },
+)
+
+const SystemHealthOperatorPanels = memo(function SystemHealthOperatorPanels({
+  gapFinderContext,
+  onGapCountChange,
+}: {
+  gapFinderContext: GapFinderContext
+  onGapCountChange?: (count: number) => void
+}) {
+  const [inboxSnapshot, setInboxSnapshot] = useState<OperatorInboxSnapshot>(() =>
+    loadOperatorInboxSnapshot(),
+  )
+
+  const inboxExtras = useMemo(() => inboxExtrasFromGapContext(gapFinderContext), [gapFinderContext])
+
+  const showCouncilBurstNote = useMemo(
+    () => shouldShowCouncilBurstNote(inboxSnapshot, inboxExtras),
+    [inboxExtras, inboxSnapshot],
+  )
+
+  const recheckInbox = useCallback(() => {
+    const existing = loadOperatorInboxSnapshot()
+    const mergedContext: GapFinderContext = {
+      ...gapFinderContext,
+      commanderManualFixedAt: existing.commanderManualFixedAt,
+      commanderDismissedIds: existing.commanderDismissedIds,
+    }
+    const gaps = resolveOperatorGaps(mergedContext)
+    setInboxSnapshot(
+      syncOperatorInboxFromGaps(gaps, {
+        extras: inboxExtras,
+        commanderManualFixedAt: existing.commanderManualFixedAt,
+        commanderDismissedIds: existing.commanderDismissedIds,
+        existing,
+      }),
+    )
+  }, [gapFinderContext, inboxExtras])
+
+  const mergedGapContext = useMemo<GapFinderContext>(
+    () => ({
+      ...gapFinderContext,
+      commanderManualFixedAt: inboxSnapshot.commanderManualFixedAt,
+      commanderDismissedIds: inboxSnapshot.commanderDismissedIds,
+    }),
+    [gapFinderContext, inboxSnapshot.commanderDismissedIds, inboxSnapshot.commanderManualFixedAt],
+  )
+
+  const applyCommanderPatch = useCallback(
+    (patch: {
+      commanderManualFixedAt?: Record<string, string>
+      commanderDismissedIds?: Record<string, string>
+    }) => {
+      const commanderManualFixedAt =
+        patch.commanderManualFixedAt ?? inboxSnapshot.commanderManualFixedAt
+      const commanderDismissedIds =
+        patch.commanderDismissedIds ?? inboxSnapshot.commanderDismissedIds
+      const ctx: GapFinderContext = {
+        ...gapFinderContext,
+        commanderManualFixedAt,
+        commanderDismissedIds,
+      }
+      const gaps = resolveOperatorGaps(ctx)
+      setInboxSnapshot(
+        syncOperatorInboxFromGaps(gaps, {
+          extras: inboxExtras,
+          commanderManualFixedAt,
+          commanderDismissedIds,
+          existing: inboxSnapshot,
+        }),
+      )
+    },
+    [gapFinderContext, inboxExtras, inboxSnapshot],
+  )
+
+  const onCommanderManualFix = useCallback(
+    (gapId: string) => {
+      const markedAt = new Date().toISOString()
+      applyCommanderPatch({
+        commanderManualFixedAt: { ...inboxSnapshot.commanderManualFixedAt, [gapId]: markedAt },
+      })
+    },
+    [applyCommanderPatch, inboxSnapshot.commanderManualFixedAt],
+  )
+
+  const onCommanderDismiss = useCallback(
+    (gapId: string) => {
+      const markedAt = new Date().toISOString()
+      applyCommanderPatch({
+        commanderDismissedIds: { ...inboxSnapshot.commanderDismissedIds, [gapId]: markedAt },
+      })
+    },
+    [applyCommanderPatch, inboxSnapshot.commanderDismissedIds],
+  )
+
+  return (
+    <>
+      <OperatorInboxPanel
+        snapshot={inboxSnapshot}
+        onSnapshotChange={setInboxSnapshot}
+        showCouncilBurstNote={showCouncilBurstNote}
+        onRecheck={recheckInbox}
+      />
+      <GapFinderPanel
+        context={mergedGapContext}
+        onGapCountChange={onGapCountChange}
+        onInboxSnapshotChange={setInboxSnapshot}
+        onCommanderManualFix={onCommanderManualFix}
+        onCommanderDismiss={onCommanderDismiss}
+      />
+    </>
+  )
+})
 export type DockPanelContentProps = {
   panelId: DockPanelId
   latestRepairPacket?: CouncilRepairPacket | null
@@ -142,7 +267,10 @@ export const DockPanelContent = memo(function DockPanelContent({
       {panelId === 'system-health' ? (
         <div className="space-y-3">
           {gapFinderContext ? (
-            <GapFinderPanel context={gapFinderContext} onGapCountChange={onGapCountChange} />
+            <SystemHealthOperatorPanels
+              gapFinderContext={gapFinderContext}
+              onGapCountChange={onGapCountChange}
+            />
           ) : null}
           <WarRoomEvolutionPanel onCouncilHandoff={onCouncilHandoff} />
           <section>

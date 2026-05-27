@@ -14,6 +14,11 @@ import {
   type OperatorGap,
 } from '@/lib/operator/gapFinder'
 import {
+  inboxExtrasFromGapContext,
+  syncOperatorInboxFromGaps,
+  type OperatorInboxSnapshot,
+} from '@/lib/operator/inbox'
+import {
   formatSelfAuditReport,
   gapsBySelfAuditSection,
   topSelfAuditCursorCommand,
@@ -22,6 +27,9 @@ import {
 export type GapFinderPanelProps = {
   context: GapFinderContext
   onGapCountChange?: (count: number) => void
+  onInboxSnapshotChange?: (snapshot: OperatorInboxSnapshot) => void
+  onCommanderManualFix?: (gapId: string) => void
+  onCommanderDismiss?: (gapId: string) => void
 }
 
 const SECTION_ORDER = [
@@ -38,6 +46,9 @@ const SECTION_ORDER = [
 export const GapFinderPanel = memo(function GapFinderPanel({
   context,
   onGapCountChange,
+  onInboxSnapshotChange,
+  onCommanderManualFix,
+  onCommanderDismiss,
 }: GapFinderPanelProps) {
   const { signalSuccess, signalError, signalWorking } = useMatrixStatus()
   const [canonical, setCanonical] = useState<CanonicalGapSnapshot | null>(context.canonicalStatus ?? null)
@@ -45,28 +56,37 @@ export const GapFinderPanel = memo(function GapFinderPanel({
   const [scanning, setScanning] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [recheckToken, setRecheckToken] = useState(0)
-  const [commanderManualFixedAt, setCommanderManualFixedAt] = useState<
-    Partial<Record<string, string>>
-  >(context.commanderManualFixedAt ?? {})
-  const [commanderDismissedIds, setCommanderDismissedIds] = useState<
-    Partial<Record<string, string>>
-  >(context.commanderDismissedIds ?? {})
 
   const mergedContext = useMemo<GapFinderContext>(
     () => ({
       ...context,
       canonicalStatus: canonical ?? context.canonicalStatus,
       canonicalStatusUnavailable: canonicalFailed,
-      commanderManualFixedAt,
-      commanderDismissedIds,
     }),
-    [canonical, canonicalFailed, commanderDismissedIds, commanderManualFixedAt, context],
+    [canonical, canonicalFailed, context],
   )
 
   const gaps = useMemo(() => {
     void recheckToken
     return resolveOperatorGaps(mergedContext)
   }, [mergedContext, recheckToken])
+
+  const syncInbox = useCallback(
+    (resolved: ReturnType<typeof resolveOperatorGaps>) => {
+      const snapshot = syncOperatorInboxFromGaps(resolved, {
+        extras: inboxExtrasFromGapContext(mergedContext),
+        commanderManualFixedAt: mergedContext.commanderManualFixedAt as Record<string, string>,
+        commanderDismissedIds: mergedContext.commanderDismissedIds as Record<string, string>,
+      })
+      onInboxSnapshotChange?.(snapshot)
+      return snapshot
+    },
+    [mergedContext, onInboxSnapshotChange],
+  )
+
+  useEffect(() => {
+    syncInbox(gaps)
+  }, [gaps, syncInbox])
 
   const sections = useMemo(() => gapsBySelfAuditSection(gaps), [gaps])
   const openCount = useMemo(() => countOpenOperatorGaps(gaps), [gaps])
@@ -87,20 +107,20 @@ export const GapFinderPanel = memo(function GapFinderPanel({
 
   const markFixedManually = useCallback(
     (gapId: string) => {
-      const markedAt = new Date().toISOString()
-      setCommanderManualFixedAt(prev => ({ ...prev, [gapId]: markedAt }))
+      onCommanderManualFix?.(gapId)
+      setRecheckToken(token => token + 1)
       signalSuccess('Marked for Commander review')
     },
-    [signalSuccess],
+    [onCommanderManualFix, signalSuccess],
   )
 
   const markNotImportant = useCallback(
     (gapId: string) => {
-      const markedAt = new Date().toISOString()
-      setCommanderDismissedIds(prev => ({ ...prev, [gapId]: markedAt }))
+      onCommanderDismiss?.(gapId)
+      setRecheckToken(token => token + 1)
       signalSuccess('Marked not important')
     },
-    [signalSuccess],
+    [onCommanderDismiss, signalSuccess],
   )
 
   const runSelfAuditScan = useCallback(async () => {
@@ -125,6 +145,7 @@ export const GapFinderPanel = memo(function GapFinderPanel({
         canonicalStatus: snapshot,
         canonicalStatusUnavailable: !res.ok,
       })
+      syncInbox(resolved)
       signalSuccess(
         `Self-audit complete · ${countOpenOperatorGaps(resolved)} open · ${resolved.filter(g => g.status === 'fixed').length} fixed`,
       )
@@ -134,7 +155,7 @@ export const GapFinderPanel = memo(function GapFinderPanel({
     } finally {
       setScanning(false)
     }
-  }, [mergedContext, signalError, signalSuccess, signalWorking])
+  }, [mergedContext, signalError, signalSuccess, signalWorking, syncInbox])
 
   const refreshCanonical = useCallback(async () => {
     await runSelfAuditScan()

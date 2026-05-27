@@ -1766,6 +1766,9 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           <button type="button" onClick={onViewArchive} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #60A5FA', color: '#BFDBFE' }}>
             View Archive
           </button>
+          <span className="text-[8px] tracking-wide text-amber-200/85" title="Archive recall loads from memory when persistence is available">
+            Recall not fully wired — use Copy Session for full history
+          </span>
           <button type="button" onClick={onSummarizeSession} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #FFD700', color: '#FFD700' }}>
             Summarize Session
           </button>
