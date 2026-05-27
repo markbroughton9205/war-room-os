@@ -17,6 +17,7 @@ export type LiveRoomShellProps = {
   activePanelId: DockPanelId | null
   onPanelChange: (id: DockPanelId | null) => void
   dockPanel?: ReactNode
+  systemHealthGapCount?: number
 }
 
 export function LiveRoomShell({
@@ -29,6 +30,7 @@ export function LiveRoomShell({
   activePanelId,
   onPanelChange,
   dockPanel,
+  systemHealthGapCount,
 }: LiveRoomShellProps) {
   return (
     <section
@@ -66,7 +68,11 @@ export function LiveRoomShell({
             className="border-t border-emerald-900/70 px-2 py-0.5 sm:py-1"
             style={{ background: 'rgba(0,0,0,0.88)', boxShadow: '0 -4px 20px rgba(0,0,0,0.45)' }}
           >
-            <FeatureDock activePanelId={activePanelId} onSelect={onPanelChange} />
+            <FeatureDock
+              activePanelId={activePanelId}
+              onSelect={onPanelChange}
+              systemHealthGapCount={systemHealthGapCount}
+            />
           </div>
         </footer>
         <div className="live-room-console flex-shrink-0">{commandConsole}</div>

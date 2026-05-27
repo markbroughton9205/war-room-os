@@ -10,6 +10,7 @@ import type { CommanderLocationState, LocationMode } from '@/lib/intelligence/en
 import type { AstrologyInterpretationMode } from '@/lib/intelligence/environment/horoscopeEnvironment'
 import type { CouncilResearchHandoff } from '@/lib/council-research/types'
 import type { CouncilRepairPacket } from '@/lib/council-repair'
+import type { GapFinderContext } from '@/lib/operator/gapFinder'
 import type { DockPanelId } from './FeatureDock'
 import { useLiveRoomMode } from './LiveRoomModeContext'
 
@@ -65,6 +66,10 @@ const OperatorCommandDeck = dynamic(
   () => import('@/components/war-room/operator').then(m => m.OperatorCommandDeck),
   { ssr: false, loading: () => <PanelSkeleton label="Command Center" /> },
 )
+const GapFinderPanel = dynamic(
+  () => import('@/components/war-room/operator/GapFinderPanel').then(m => m.GapFinderPanel),
+  { ssr: false, loading: () => <PanelSkeleton label="Gap Finder" /> },
+)
 export type DockPanelContentProps = {
   panelId: DockPanelId
   latestRepairPacket?: CouncilRepairPacket | null
@@ -88,6 +93,8 @@ export type DockPanelContentProps = {
   commandCenterExtras?: ReactNode
   builderExtras?: ReactNode
   redTeamPanel?: ReactNode
+  gapFinderContext?: GapFinderContext
+  onGapCountChange?: (count: number) => void
 }
 
 export const DockPanelContent = memo(function DockPanelContent({
@@ -101,6 +108,8 @@ export const DockPanelContent = memo(function DockPanelContent({
   commandCenterExtras,
   builderExtras,
   redTeamPanel,
+  gapFinderContext,
+  onGapCountChange,
 }: DockPanelContentProps) {
   const { setLiveMode, setEngineeringDrawerOpen } = useLiveRoomMode()
 
@@ -132,6 +141,9 @@ export const DockPanelContent = memo(function DockPanelContent({
 
       {panelId === 'system-health' ? (
         <div className="space-y-3">
+          {gapFinderContext ? (
+            <GapFinderPanel context={gapFinderContext} onGapCountChange={onGapCountChange} />
+          ) : null}
           <WarRoomEvolutionPanel onCouncilHandoff={onCouncilHandoff} />
           <section>
             <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-fuchsia-200">AI Team Status</p>

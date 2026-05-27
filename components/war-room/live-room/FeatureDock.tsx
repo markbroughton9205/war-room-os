@@ -36,9 +36,15 @@ export const DOCK_ICONS: DockIconDef[] = [
 export type FeatureDockProps = {
   activePanelId: DockPanelId | null
   onSelect: (id: DockPanelId | null) => void
+  /** Operator gap count badge on System Health dock icon. */
+  systemHealthGapCount?: number
 }
 
-export const FeatureDock = memo(function FeatureDock({ activePanelId, onSelect }: FeatureDockProps) {
+export const FeatureDock = memo(function FeatureDock({
+  activePanelId,
+  onSelect,
+  systemHealthGapCount = 0,
+}: FeatureDockProps) {
   const [hovered, setHovered] = useState<DockPanelId | null>(null)
 
   return (
@@ -80,7 +86,7 @@ export const FeatureDock = memo(function FeatureDock({ activePanelId, onSelect }
               </span>
             ) : null}
             <span
-              className="flex h-9 w-9 items-center justify-center rounded-xl text-sm transition-transform sm:h-10 sm:w-10 sm:text-base"
+              className="relative flex h-9 w-9 items-center justify-center rounded-xl text-sm transition-transform sm:h-10 sm:w-10 sm:text-base"
               style={{
                 border: active ? '1px solid rgba(52,211,153,0.7)' : '1px solid rgba(255,255,255,0.12)',
                 background: active ? 'rgba(0,255,102,0.12)' : 'rgba(0,0,0,0.6)',
@@ -89,6 +95,15 @@ export const FeatureDock = memo(function FeatureDock({ activePanelId, onSelect }
               }}
             >
               {icon.glyph}
+              {icon.id === 'system-health' && systemHealthGapCount > 0 ? (
+                <span
+                  className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[8px] font-bold leading-none"
+                  style={{ background: '#DC2626', color: '#FFF', border: '1px solid rgba(0,0,0,0.6)' }}
+                  aria-label={`${systemHealthGapCount} operator gaps`}
+                >
+                  {systemHealthGapCount > 9 ? '9+' : systemHealthGapCount}
+                </span>
+              ) : null}
             </span>
           </button>
         )

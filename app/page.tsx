@@ -44,6 +44,16 @@ import type { StandingPermissionMode } from '@/lib/permissions/standingPermissio
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
+import { CopyCouncilButton } from '@/components/war-room/council/CopyCouncilButton'
+import { MessageCopyButton } from '@/components/war-room/council/MessageCopyButton'
+import {
+  extractLatestExchange,
+  formatCursorBrief,
+  formatLatestExchange,
+  formatSessionTranscript,
+  formatVisibleLog,
+} from '@/lib/operator/copyCouncilText'
+import { findOperatorGaps, type GapFinderContext } from '@/lib/operator/gapFinder'
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { ContinuationRequest } from '@/lib/council/continuationRequest'
 import { classifyCommand } from '@/lib/engine-control/permissions'
@@ -1658,17 +1668,30 @@ const MessageBubble = memo(function MessageBubble({
   }
 
   return (
-    <div className={`message-fade-in flex items-start gap-3 mb-4 ${isRael ? 'flex-row-reverse' : ''}`}>
+    <div className={`message-fade-in group flex items-start gap-3 mb-4 ${isRael ? 'flex-row-reverse' : ''}`}>
       <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm"
         style={{ background: msg.color + '22', border: `1px solid ${msg.color}40` }}>
         {msg.icon}
       </div>
       <div className={`flex-1 max-w-2xl ${isRael ? 'items-end' : 'items-start'} flex flex-col`}>
-        <div className={`flex items-center gap-2 mb-1 ${isRael ? 'flex-row-reverse' : ''}`}>
+        <div className={`flex flex-wrap items-center gap-2 mb-1 ${isRael ? 'flex-row-reverse' : ''}`}>
           <span className="text-xs font-bold tracking-widest" style={{ color: msg.color }}>{msg.familyName}</span>
           {msg.provider && <span className="text-xs" style={{ color: '#444' }}>{msg.provider}</span>}
           <span className="text-xs" style={{ color: '#333' }}>{msg.timestamp}</span>
           <span className="text-xs px-1 rounded" style={{ color: '#555', background: '#111' }}>{msg.messageType}</span>
+          {(msg.messageType === 'response' || msg.messageType === 'decree') && msg.content.trim() ? (
+            <MessageCopyButton
+              message={{
+                id: msg.id,
+                familyName: msg.familyName,
+                content: msg.content,
+                timestamp: msg.timestamp,
+                messageType: msg.messageType,
+                provider: msg.provider,
+                degraded: msg.degraded,
+              }}
+            />
+          ) : null}
         </div>
         <div className="rounded-lg p-3 text-sm text-gray-300 whitespace-pre-wrap"
           style={{
@@ -5465,6 +5488,16 @@ function Home() {
   const visibleCouncilMessages = liveCouncilHygiene.visibleMessages
   const collapsedCouncilNoiseCount = liveCouncilHygiene.collapsedCount
   const [hideOldCouncilDiagnostics, setHideOldCouncilDiagnostics] = useState(false)
+  const [operatorGapCount, setOperatorGapCount] = useState(0)
+  const [viewportNarrow, setViewportNarrow] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 640px)')
+    const update = () => setViewportNarrow(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
   const deferredVisibleCouncilMessages = useDeferredValue(visibleCouncilMessages)
   const compressedCouncilSummary = useMemo(
     () => compressCouncilOutput(deferredVisibleCouncilMessages, councilOutputMode),
@@ -10392,6 +10425,96 @@ function Home() {
     internetStatus.label,
     internetStatus.overallStatus,
   ])
+  const operatorGapFinderContext = useMemo<GapFinderContext>(
+    () => ({
+      visibleMessages: visibleCouncilMessages.map(m => ({
+        id: m.id,
+        familyName: m.familyName,
+        content: m.content,
+        timestamp: m.timestamp,
+        messageType: m.messageType,
+        provider: m.provider,
+        degraded: m.degraded,
+      })),
+      hiddenMessageCount: hiddenCouncilMessageCount,
+      collapsedNoiseCount: collapsedCouncilNoiseCount,
+      providerConnection: providerHealth.providers,
+      chatHealthLabel,
+      persistenceHealthLabel,
+      councilPaused: council.councilState === 'paused',
+      councilFlowMode,
+      hideOldDiagnostics: hideOldCouncilDiagnostics,
+      internetUsable: internetStatus.canUseInternet === true,
+      viewportNarrow,
+    }),
+    [
+      visibleCouncilMessages,
+      hiddenCouncilMessageCount,
+      collapsedCouncilNoiseCount,
+      providerHealth.providers,
+      chatHealthLabel,
+      persistenceHealthLabel,
+      council.councilState,
+      councilFlowMode,
+      hideOldCouncilDiagnostics,
+      internetStatus.canUseInternet,
+      viewportNarrow,
+    ],
+  )
+  useEffect(() => {
+    setOperatorGapCount(findOperatorGaps(operatorGapFinderContext).length)
+  }, [operatorGapFinderContext])
+  const getCopyVisibleLogText = useCallback(
+    () => formatVisibleLog(operatorGapFinderContext.visibleMessages),
+    [operatorGapFinderContext.visibleMessages],
+  )
+  const getCopySessionText = useCallback(
+    () =>
+      formatSessionTranscript(
+        messagesRef.current.map(m => ({
+          id: m.id,
+          familyName: m.familyName,
+          content: m.content,
+          timestamp: m.timestamp,
+          messageType: m.messageType,
+          provider: m.provider,
+          degraded: 'degraded' in m ? Boolean((m as CouncilMessage).degraded) : undefined,
+        })),
+        {
+          sessionId: councilSnapRef.current.sessionId,
+          conversationId: liveCouncilConvId,
+          councilFlowMode,
+          exportedAt: new Date().toISOString(),
+        },
+      ),
+    [councilFlowMode, liveCouncilConvId],
+  )
+  const getCopyLatestExchangeText = useCallback(
+    () => formatLatestExchange(messagesRef.current.map(m => ({
+      id: m.id,
+      familyName: m.familyName,
+      content: m.content,
+      timestamp: m.timestamp,
+      messageType: m.messageType,
+      degraded: 'degraded' in m ? Boolean((m as CouncilMessage).degraded) : undefined,
+    }))),
+    [],
+  )
+  const getCopyCursorBriefText = useCallback(
+    () =>
+      formatCursorBrief({
+        exchange: extractLatestExchange(messagesRef.current.map(m => ({
+          id: m.id,
+          familyName: m.familyName,
+          content: m.content,
+          timestamp: m.timestamp,
+          messageType: m.messageType,
+          degraded: 'degraded' in m ? Boolean((m as CouncilMessage).degraded) : undefined,
+        }))),
+        sessionId: councilSnapRef.current.sessionId,
+      }),
+    [],
+  )
   const councilSessionControls = (
     <CouncilSessionControls
       onNewSession={() => startTransition(() => { void startFreshCouncilSession('new') })}
@@ -10650,6 +10773,7 @@ function Home() {
         {!isUnifiedLiveRoom ? operatorNav : null}
         {isUnifiedLiveRoom && (
         <LiveRoomShell
+          systemHealthGapCount={operatorGapCount}
           header={(
             <WarRoomOsHeader
               systemStatusLine={chatHealthLabel}
@@ -10720,6 +10844,8 @@ function Home() {
                 panelId={dockPanelId}
                 latestRepairPacket={latestRepairPacket}
                 sessionIndicators={councilSessionIndicators}
+                gapFinderContext={operatorGapFinderContext}
+                onGapCountChange={setOperatorGapCount}
                 onCouncilHandoff={injectLiveEnvironmentDecree}
                 onOpenEngineering={() => {
                   setUiMode('advanced')
@@ -10818,6 +10944,12 @@ function Home() {
           </div>
           <div className="flex max-w-full flex-wrap items-center justify-start gap-1.5 sm:justify-end">
             <span className="mr-1 text-[9px] tracking-widest" style={{ color: '#555' }}>Session controls</span>
+            <CopyCouncilButton label="Copy Session" getText={getCopySessionText} successMessage="Session transcript copied" />
+            <CopyCouncilButton
+              label="Copy Latest Exchange"
+              getText={getCopyLatestExchangeText}
+              successMessage="Latest exchange copied"
+            />
             {councilSessionControls}
             <label className="flex items-center gap-1 rounded px-2 py-0.5 text-[9px] tracking-widest" style={{ border: '1px solid #333', color: '#888' }}>
               Mode
@@ -10869,7 +11001,20 @@ function Home() {
           preamble={(
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FFD700' }}>LIVE COUNCIL</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FFD700' }}>LIVE COUNCIL</h2>
+              <CopyCouncilButton
+                label="Copy Visible Log"
+                getText={getCopyVisibleLogText}
+                successMessage="Visible log copied"
+                variant="accent"
+              />
+              <CopyCouncilButton
+                label="Copy as Cursor Brief"
+                getText={getCopyCursorBriefText}
+                successMessage="Cursor brief copied"
+              />
+            </div>
             <div
               className="flex flex-wrap items-center gap-1"
               role="radiogroup"
