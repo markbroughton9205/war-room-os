@@ -11,6 +11,7 @@ import type { AstrologyInterpretationMode } from '@/lib/intelligence/environment
 import type { CouncilResearchHandoff } from '@/lib/council-research/types'
 import type { CouncilRepairPacket } from '@/lib/council-repair'
 import {
+  countOpenOperatorGaps,
   resolveOperatorGaps,
   type GapFinderContext,
 } from '@/lib/operator/gapFinder'
@@ -21,6 +22,8 @@ import {
   syncOperatorInboxFromGaps,
   type OperatorInboxSnapshot,
 } from '@/lib/operator/inbox'
+import { loadSelfRepairSnapshot } from '@/lib/operator/selfRepair'
+import { loadUpgradeQueue } from '@/lib/operator/upgradeQueue'
 import type { DockPanelId } from './FeatureDock'
 import { useLiveRoomMode } from './LiveRoomModeContext'
 
@@ -84,6 +87,18 @@ const OperatorInboxPanel = dynamic(
   () => import('@/components/war-room/operator/OperatorInboxPanel').then(m => m.OperatorInboxPanel),
   { ssr: false, loading: () => <PanelSkeleton label="Operator Inbox" /> },
 )
+const SelfRepairPanel = dynamic(
+  () => import('@/components/war-room/operator/SelfRepairPanel').then(m => m.SelfRepairPanel),
+  { ssr: false, loading: () => <PanelSkeleton label="Self-repair" /> },
+)
+const UpgradeQueuePanel = dynamic(
+  () => import('@/components/war-room/operator/UpgradeQueuePanel').then(m => m.UpgradeQueuePanel),
+  { ssr: false, loading: () => <PanelSkeleton label="Upgrade queue" /> },
+)
+const SelfRepairRulesPanel = dynamic(
+  () => import('@/components/war-room/operator/SelfRepairRulesPanel').then(m => m.SelfRepairRulesPanel),
+  { ssr: false, loading: () => <PanelSkeleton label="Self-repair rules" /> },
+)
 
 const SystemHealthOperatorPanels = memo(function SystemHealthOperatorPanels({
   gapFinderContext,
@@ -95,6 +110,8 @@ const SystemHealthOperatorPanels = memo(function SystemHealthOperatorPanels({
   const [inboxSnapshot, setInboxSnapshot] = useState<OperatorInboxSnapshot>(() =>
     loadOperatorInboxSnapshot(),
   )
+  const [repairSnapshot, setRepairSnapshot] = useState(() => loadSelfRepairSnapshot())
+  const [upgradeQueue, setUpgradeQueue] = useState(() => loadUpgradeQueue())
 
   const inboxExtras = useMemo(() => inboxExtrasFromGapContext(gapFinderContext), [gapFinderContext])
 
@@ -177,13 +194,25 @@ const SystemHealthOperatorPanels = memo(function SystemHealthOperatorPanels({
     [applyCommanderPatch, inboxSnapshot.commanderDismissedIds],
   )
 
+  const openGapCount = useMemo(
+    () => countOpenOperatorGaps(resolveOperatorGaps(mergedGapContext)),
+    [mergedGapContext],
+  )
+
   return (
     <>
+      <SelfRepairPanel repairSnapshot={repairSnapshot} openGapCount={openGapCount} />
+      <UpgradeQueuePanel queue={upgradeQueue} onQueueChange={setUpgradeQueue} />
+      <SelfRepairRulesPanel />
       <OperatorInboxPanel
         snapshot={inboxSnapshot}
         onSnapshotChange={setInboxSnapshot}
         showCouncilBurstNote={showCouncilBurstNote}
         onRecheck={recheckInbox}
+        gapFinderContext={mergedGapContext}
+        repairSnapshot={repairSnapshot}
+        onRepairSnapshotChange={setRepairSnapshot}
+        onUpgradeQueueChange={setUpgradeQueue}
       />
       <GapFinderPanel
         context={mergedGapContext}
@@ -191,6 +220,9 @@ const SystemHealthOperatorPanels = memo(function SystemHealthOperatorPanels({
         onInboxSnapshotChange={setInboxSnapshot}
         onCommanderManualFix={onCommanderManualFix}
         onCommanderDismiss={onCommanderDismiss}
+        repairSnapshot={repairSnapshot}
+        onRepairSnapshotChange={setRepairSnapshot}
+        onUpgradeQueueChange={setUpgradeQueue}
       />
     </>
   )

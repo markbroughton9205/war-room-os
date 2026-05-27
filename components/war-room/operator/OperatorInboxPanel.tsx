@@ -18,12 +18,20 @@ import {
   FIRST_INCOME_MOVE_PLAYBOOK,
   formatRevenueStarterCard,
 } from '@/lib/operator/revenueStarter'
+import type { GapFinderContext } from '@/lib/operator/gapFinder'
+import type { SelfRepairSnapshot } from '@/lib/operator/selfRepair'
+import type { UpgradeQueueSnapshot } from '@/lib/operator/upgradeQueue'
+import { SelfRepairActions } from './SelfRepairActions'
 
 export type OperatorInboxPanelProps = {
   snapshot: OperatorInboxSnapshot
   onSnapshotChange: (snapshot: OperatorInboxSnapshot) => void
   onRecheck?: () => void
   showCouncilBurstNote?: boolean
+  gapFinderContext?: GapFinderContext
+  repairSnapshot?: SelfRepairSnapshot
+  onRepairSnapshotChange?: (snapshot: SelfRepairSnapshot) => void
+  onUpgradeQueueChange?: (snapshot: UpgradeQueueSnapshot) => void
 }
 
 export const OperatorInboxPanel = memo(function OperatorInboxPanel({
@@ -31,6 +39,10 @@ export const OperatorInboxPanel = memo(function OperatorInboxPanel({
   onSnapshotChange,
   onRecheck,
   showCouncilBurstNote = false,
+  gapFinderContext,
+  repairSnapshot,
+  onRepairSnapshotChange,
+  onUpgradeQueueChange,
 }: OperatorInboxPanelProps) {
   const { signalSuccess } = useMatrixStatus()
   const [showDismissed, setShowDismissed] = useState(false)
@@ -145,10 +157,37 @@ export const OperatorInboxPanel = memo(function OperatorInboxPanel({
       ) : null}
 
       <div className="mt-3 max-h-80 space-y-3 overflow-y-auto text-[10px]">
-        <InboxGroup title="Open" items={[...grouped.open, ...grouped.inProgress]} onStatus={applyStatus} onRecheck={onRecheck} />
-        <InboxGroup title="Fixed recently" items={grouped.fixedRecently} onStatus={applyStatus} onRecheck={onRecheck} />
+        <InboxGroup
+          title="Open"
+          items={[...grouped.open, ...grouped.inProgress]}
+          onStatus={applyStatus}
+          onRecheck={onRecheck}
+          gapFinderContext={gapFinderContext}
+          repairSnapshot={repairSnapshot}
+          onRepairSnapshotChange={onRepairSnapshotChange}
+          onUpgradeQueueChange={onUpgradeQueueChange}
+        />
+        <InboxGroup
+          title="Fixed recently"
+          items={grouped.fixedRecently}
+          onStatus={applyStatus}
+          onRecheck={onRecheck}
+          gapFinderContext={gapFinderContext}
+          repairSnapshot={repairSnapshot}
+          onRepairSnapshotChange={onRepairSnapshotChange}
+          onUpgradeQueueChange={onUpgradeQueueChange}
+        />
         {showDismissed ? (
-          <InboxGroup title="Dismissed" items={grouped.dismissed} onStatus={applyStatus} onRecheck={onRecheck} />
+          <InboxGroup
+            title="Dismissed"
+            items={grouped.dismissed}
+            onStatus={applyStatus}
+            onRecheck={onRecheck}
+            gapFinderContext={gapFinderContext}
+            repairSnapshot={repairSnapshot}
+            onRepairSnapshotChange={onRepairSnapshotChange}
+            onUpgradeQueueChange={onUpgradeQueueChange}
+          />
         ) : null}
         {!grouped.open.length &&
         !grouped.inProgress.length &&
@@ -206,11 +245,19 @@ function InboxGroup({
   items,
   onStatus,
   onRecheck,
+  gapFinderContext,
+  repairSnapshot,
+  onRepairSnapshotChange,
+  onUpgradeQueueChange,
 }: {
   title: string
   items: OperatorInboxItem[]
   onStatus: (id: string, status: OperatorInboxStatus) => void
   onRecheck?: () => void
+  gapFinderContext?: GapFinderContext
+  repairSnapshot?: SelfRepairSnapshot
+  onRepairSnapshotChange?: (snapshot: SelfRepairSnapshot) => void
+  onUpgradeQueueChange?: (snapshot: UpgradeQueueSnapshot) => void
 }) {
   if (!items.length) return null
   return (
@@ -220,7 +267,16 @@ function InboxGroup({
       </p>
       <ul className="space-y-2">
         {items.map(item => (
-          <InboxRow key={item.id} item={item} onStatus={onStatus} onRecheck={onRecheck} />
+          <InboxRow
+            key={item.id}
+            item={item}
+            onStatus={onStatus}
+            onRecheck={onRecheck}
+            gapFinderContext={gapFinderContext}
+            repairSnapshot={repairSnapshot}
+            onRepairSnapshotChange={onRepairSnapshotChange}
+            onUpgradeQueueChange={onUpgradeQueueChange}
+          />
         ))}
       </ul>
     </div>
@@ -231,10 +287,18 @@ function InboxRow({
   item,
   onStatus,
   onRecheck,
+  gapFinderContext,
+  repairSnapshot,
+  onRepairSnapshotChange,
+  onUpgradeQueueChange,
 }: {
   item: OperatorInboxItem
   onStatus: (id: string, status: OperatorInboxStatus) => void
   onRecheck?: () => void
+  gapFinderContext?: GapFinderContext
+  repairSnapshot?: SelfRepairSnapshot
+  onRepairSnapshotChange?: (snapshot: SelfRepairSnapshot) => void
+  onUpgradeQueueChange?: (snapshot: UpgradeQueueSnapshot) => void
 }) {
   const severityColor =
     item.severity === 'high' ? '#F87171' : item.severity === 'medium' ? '#FBBF24' : '#94A3B8'
@@ -286,6 +350,16 @@ function InboxRow({
           <ActionChip label="Recheck" onClick={onRecheck} />
         ) : null}
       </div>
+      {gapFinderContext && repairSnapshot && onRepairSnapshotChange ? (
+        <SelfRepairActions
+          source={{ type: 'inbox', item }}
+          gapFinderContext={gapFinderContext}
+          repairSnapshot={repairSnapshot}
+          onRepairSnapshotChange={onRepairSnapshotChange}
+          onUpgradeQueueChange={onUpgradeQueueChange}
+          compact
+        />
+      ) : null}
     </li>
   )
 }

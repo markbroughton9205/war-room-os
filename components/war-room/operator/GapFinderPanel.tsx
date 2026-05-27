@@ -24,6 +24,9 @@ import {
   gapsBySelfAuditSection,
   topSelfAuditCursorCommand,
 } from '@/lib/operator/selfAudit'
+import type { SelfRepairSnapshot } from '@/lib/operator/selfRepair'
+import type { UpgradeQueueSnapshot } from '@/lib/operator/upgradeQueue'
+import { SelfRepairActions } from './SelfRepairActions'
 
 export type GapFinderPanelProps = {
   context: GapFinderContext
@@ -31,6 +34,9 @@ export type GapFinderPanelProps = {
   onInboxSnapshotChange?: (snapshot: OperatorInboxSnapshot) => void
   onCommanderManualFix?: (gapId: string) => void
   onCommanderDismiss?: (gapId: string) => void
+  repairSnapshot?: SelfRepairSnapshot
+  onRepairSnapshotChange?: (snapshot: SelfRepairSnapshot) => void
+  onUpgradeQueueChange?: (snapshot: UpgradeQueueSnapshot) => void
 }
 
 const SECTION_ORDER = [
@@ -50,6 +56,9 @@ export const GapFinderPanel = memo(function GapFinderPanel({
   onInboxSnapshotChange,
   onCommanderManualFix,
   onCommanderDismiss,
+  repairSnapshot,
+  onRepairSnapshotChange,
+  onUpgradeQueueChange,
 }: GapFinderPanelProps) {
   const { signalSuccess, signalError, signalWorking } = useMatrixStatus()
   const [canonical, setCanonical] = useState<CanonicalGapSnapshot | null>(context.canonicalStatus ?? null)
@@ -248,6 +257,10 @@ export const GapFinderPanel = memo(function GapFinderPanel({
                 gaps={items}
                 onMarkFixedManually={markFixedManually}
                 onMarkNotImportant={markNotImportant}
+                gapFinderContext={mergedContext}
+                repairSnapshot={repairSnapshot}
+                onRepairSnapshotChange={onRepairSnapshotChange}
+                onUpgradeQueueChange={onUpgradeQueueChange}
               />
             )
           })}
@@ -265,11 +278,19 @@ function SelfAuditSection({
   gaps,
   onMarkFixedManually,
   onMarkNotImportant,
+  gapFinderContext,
+  repairSnapshot,
+  onRepairSnapshotChange,
+  onUpgradeQueueChange,
 }: {
   title: string
   gaps: OperatorGap[]
   onMarkFixedManually: (gapId: string) => void
   onMarkNotImportant: (gapId: string) => void
+  gapFinderContext: GapFinderContext
+  repairSnapshot?: SelfRepairSnapshot
+  onRepairSnapshotChange?: (snapshot: SelfRepairSnapshot) => void
+  onUpgradeQueueChange?: (snapshot: UpgradeQueueSnapshot) => void
 }) {
   return (
     <div data-testid={`self-audit-section-${title.toLowerCase().replace(/\s+/g, '-')}`}>
@@ -283,6 +304,10 @@ function SelfAuditSection({
             gap={g}
             onMarkFixedManually={onMarkFixedManually}
             onMarkNotImportant={onMarkNotImportant}
+            gapFinderContext={gapFinderContext}
+            repairSnapshot={repairSnapshot}
+            onRepairSnapshotChange={onRepairSnapshotChange}
+            onUpgradeQueueChange={onUpgradeQueueChange}
           />
         ))}
       </ul>
@@ -294,10 +319,18 @@ function GapRow({
   gap,
   onMarkFixedManually,
   onMarkNotImportant,
+  gapFinderContext,
+  repairSnapshot,
+  onRepairSnapshotChange,
+  onUpgradeQueueChange,
 }: {
   gap: OperatorGap
   onMarkFixedManually: (gapId: string) => void
   onMarkNotImportant: (gapId: string) => void
+  gapFinderContext: GapFinderContext
+  repairSnapshot?: SelfRepairSnapshot
+  onRepairSnapshotChange?: (snapshot: SelfRepairSnapshot) => void
+  onUpgradeQueueChange?: (snapshot: UpgradeQueueSnapshot) => void
 }) {
   const severityColor =
     gap.severity === 'high' ? '#F87171' : gap.severity === 'medium' ? '#FBBF24' : '#94A3B8'
@@ -348,6 +381,16 @@ function GapRow({
             Mark as Not Important
           </button>
         </div>
+      ) : null}
+      {repairSnapshot && onRepairSnapshotChange ? (
+        <SelfRepairActions
+          source={{ type: 'gap', gap }}
+          gapFinderContext={gapFinderContext}
+          repairSnapshot={repairSnapshot}
+          onRepairSnapshotChange={onRepairSnapshotChange}
+          onUpgradeQueueChange={onUpgradeQueueChange}
+          compact
+        />
       ) : null}
     </li>
   )
