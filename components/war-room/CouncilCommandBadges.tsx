@@ -50,10 +50,31 @@ function providerStatusLabel(st: ProviderFamilyOutcomeStatus): string {
 function CouncilCommandBadgesInner({
   cmd,
   packet,
+  operatorMode = false,
 }: {
   cmd: CouncilCommand
   packet?: CouncilRenderPacket | null
+  /** Operator matrix view: council-active badge only; protocol/integrity in builder/advanced. */
+  operatorMode?: boolean
 }) {
+  if (operatorMode) {
+    const active = BADGES.find(b => b.mode === cmd.mode) ?? BADGES.find(b => b.mode === 'council')
+    return (
+      <div className="mt-1">
+        <span
+          className="rounded px-2 py-0.5 text-[9px] font-bold tracking-widest"
+          style={{
+            border: '1px solid rgba(255,215,0,0.55)',
+            color: '#FFD700',
+            background: 'rgba(255,215,0,0.08)',
+          }}
+        >
+          {active?.label ?? 'COUNCIL ACTIVE'}
+        </span>
+      </div>
+    )
+  }
+
   const sessionLine = packet
     ? `Session · ${packet.sessionState} · ${PACKET_STATUS_LABEL[packet.packetStatus]}`
     : 'Session · —'

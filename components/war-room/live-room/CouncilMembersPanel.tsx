@@ -8,13 +8,17 @@ type ProviderConnectionStatus = 'online' | 'standby' | 'not_connected' | 'error'
 
 export type CouncilMembersPanelProps = {
   providerStatuses: Record<string, ProviderConnectionStatus | string>
+  providerLabels?: Record<string, string>
   onOpenPanel?: (panel: 'command-intel' | 'operations' | 'memory-core' | 'approvals' | 'analytics' | 'red-team' | 'system-health' | 'settings') => void
 }
 
 const STATUS_DOT: Record<string, { color: string; glow?: string }> = {
+  ready: { color: '#34d399', glow: '0 0 8px #34d399' },
   online: { color: '#34d399', glow: '0 0 8px #34d399' },
   standby: { color: '#fbbf24', glow: '0 0 6px #fbbf24' },
+  needs_key: { color: '#64748b' },
   not_connected: { color: '#64748b' },
+  quota: { color: '#f87171', glow: '0 0 8px #f87171' },
   error: { color: '#f87171', glow: '0 0 8px #f87171' },
   degraded: { color: '#fbbf24' },
   unavailable: { color: '#f87171' },
@@ -50,8 +54,37 @@ function statusForMember(
   return raw
 }
 
+export type MemberStatusPresentation = {
+  tone: keyof typeof STATUS_DOT
+  label: string
+}
+
+export function memberStatusPresentation(
+  status: string,
+  detailLabel?: string,
+): MemberStatusPresentation {
+  const haystack = `${status} ${detailLabel ?? ''}`.toLowerCase()
+  if (/quota|rate.?limit|429|insufficient.?quota|billing|credit/.test(haystack)) {
+    return { tone: 'quota', label: 'Quota issue' }
+  }
+  if (/needs.?key|not.?connected|api.?key|unconfigured|config.?needed|missing.?key/.test(haystack)) {
+    return { tone: 'needs_key', label: 'Needs key' }
+  }
+  if (status === 'online' || status === 'standby') {
+    return { tone: 'ready', label: 'Ready' }
+  }
+  if (/degraded|partial|fallback|mixed/.test(haystack) || status === 'degraded') {
+    return { tone: 'degraded', label: 'Degraded' }
+  }
+  if (status === 'error' || status === 'unavailable' || status === 'offline') {
+    return { tone: 'offline', label: 'Offline' }
+  }
+  return { tone: 'offline', label: 'Offline' }
+}
+
 export const CouncilMembersPanel = memo(function CouncilMembersPanel({
   providerStatuses,
+  providerLabels,
   onOpenPanel,
 }: CouncilMembersPanelProps) {
   return (
@@ -65,18 +98,25 @@ export const CouncilMembersPanel = memo(function CouncilMembersPanel({
         <ul className="mt-2 space-y-2">
           {MEMBER_ORDER.map(member => {
             const status = statusForMember(member.id, member.rosterId, providerStatuses)
-            const dot = STATUS_DOT[status] ?? STATUS_DOT.not_connected
+            const detailKey = member.rosterId ?? member.id
+            const presentation = memberStatusPresentation(status, providerLabels?.[detailKey])
+            const dot = STATUS_DOT[presentation.tone] ?? STATUS_DOT.offline
             const roster = member.rosterId ? COUNCIL_ROSTER.find(r => r.id === member.rosterId) : null
             return (
               <li key={member.id} className="flex items-start gap-2">
                 <span
                   className="mt-1 h-2 w-2 shrink-0 rounded-full"
                   style={{ background: dot.color, boxShadow: dot.glow }}
-                  title={status}
+                  title={presentation.label}
                   aria-hidden
                 />
                 <div className="min-w-0">
-                  <p className="text-[10px] font-bold tracking-widest text-emerald-100">{member.label}</p>
+                  <div className="flex flex-wrap items-baseline gap-1.5">
+                    <p className="text-[10px] font-bold tracking-widest text-emerald-100">{member.label}</p>
+                    <span className="text-[8px] font-semibold uppercase tracking-widest text-slate-500">
+                      {presentation.label}
+                    </span>
+                  </div>
                   {roster ? (
                     <p className="truncate text-[8px] tracking-wide text-slate-500">{roster.role}</p>
                   ) : (

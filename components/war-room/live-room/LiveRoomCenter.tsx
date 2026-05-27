@@ -42,7 +42,7 @@ export function LiveRoomCenter({
   return (
     <section
       data-testid="live-council-chat-card"
-      className="flex min-h-[20rem] flex-col overflow-hidden rounded border border-emerald-900/50 lg:min-h-[28rem]"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-emerald-900/50"
       style={{ background: 'rgba(0,8,4,0.62)', backdropFilter: 'blur(8px)', boxShadow: '0 0 32px rgba(0,255,102,0.06)' }}
     >
       <div
@@ -56,7 +56,7 @@ export function LiveRoomCenter({
         data-testid="live-council-messages"
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="min-h-[18rem] flex-1 overflow-y-auto px-4 py-2 sm:max-h-[min(58vh,calc(100vh-22rem))] sm:px-6"
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-2 sm:px-6 [scroll-padding-bottom:var(--live-room-bottom-reserved,7rem)]"
       >
         {thread}
       </div>

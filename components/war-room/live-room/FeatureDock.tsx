@@ -41,7 +41,7 @@ export const FeatureDock = memo(function FeatureDock({ activePanelId, onSelect }
 
   return (
     <nav
-      className="flex items-end justify-center gap-0.5 overflow-x-auto px-2 py-1 sm:gap-1.5 sm:px-4"
+      className="mx-auto flex max-w-3xl items-end justify-center gap-0.5 overflow-x-auto px-2 py-0.5 sm:gap-1.5 sm:px-3"
       aria-label="War Room feature dock"
       data-testid="feature-dock"
     >
@@ -71,7 +71,7 @@ export const FeatureDock = memo(function FeatureDock({ activePanelId, onSelect }
               </span>
             ) : null}
             <span
-              className="flex h-10 w-10 items-center justify-center rounded-xl text-base transition-transform sm:h-11 sm:w-11"
+              className="flex h-9 w-9 items-center justify-center rounded-xl text-sm transition-transform sm:h-10 sm:w-10 sm:text-base"
               style={{
                 border: active ? '1px solid rgba(52,211,153,0.7)' : '1px solid rgba(255,255,255,0.12)',
                 background: active ? 'rgba(0,255,102,0.12)' : 'rgba(0,0,0,0.6)',

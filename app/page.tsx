@@ -134,6 +134,7 @@ import {
 } from '@/lib/council/providerTimeouts'
 import { shapeAttendanceForModeGovernor } from '@/lib/council/responseCompression'
 import { shouldSuppressProviderFailureFromChatStream } from '@/lib/council/chatStreamFilters'
+import { isOldOperatorDiagnosticMessage } from '@/lib/war-room/operatorDiagnosticsUi'
 import {
   attendancePreflightSkipsChat,
   attendancePreflightToProviderRuntime,
@@ -1299,6 +1300,7 @@ const MessageBubble = memo(function MessageBubble({
   msg,
   diagnosticsOpen,
   councilPassthroughMode,
+  operatorDiagnosticsMuted = false,
   onOpenFullMemory,
   onProjectAction,
   onPrepareRepairPacket,
@@ -1306,11 +1308,19 @@ const MessageBubble = memo(function MessageBubble({
   msg: CouncilMessage
   diagnosticsOpen?: boolean
   councilPassthroughMode?: boolean
+  operatorDiagnosticsMuted?: boolean
   onOpenFullMemory?: (preview: CouncilMemoryRecallPreview) => void
   onProjectAction?: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
   onPrepareRepairPacket?: (message: CouncilMessage) => void
 }) {
   const isRael = msg.familyName === "RA'EL"
+  const oldOperatorDiagnostic =
+    !diagnosticsOpen
+    && !councilPassthroughMode
+    && isOldOperatorDiagnosticMessage(msg)
+  if (oldOperatorDiagnostic && operatorDiagnosticsMuted) {
+    return null
+  }
   if (
     msg.messageType === 'system'
     && shouldSuppressProviderFailureFromChatStream(msg.content, { diagnosticsOpen })
@@ -1632,6 +1642,20 @@ const MessageBubble = memo(function MessageBubble({
       </div>
     )
   }
+  if (oldOperatorDiagnostic) {
+    return (
+      <details
+        className="message-fade-in mb-3 ml-11 rounded border border-slate-700/40 bg-black/30 px-3 py-2 text-[10px] text-slate-500"
+        data-testid="operator-diagnostic-notice"
+      >
+        <summary className="cursor-pointer list-none font-bold tracking-widest text-slate-500 [&::-webkit-details-marker]:hidden">
+          System notice · {msg.familyName} · degraded / fallback (history preserved)
+        </summary>
+        <p className="mt-2 whitespace-pre-wrap leading-relaxed text-slate-600">{msg.content}</p>
+      </details>
+    )
+  }
+
   return (
     <div className={`message-fade-in flex items-start gap-3 mb-4 ${isRael ? 'flex-row-reverse' : ''}`}>
       <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm"
@@ -1664,7 +1688,7 @@ const MessageBubble = memo(function MessageBubble({
           </button>
         ) : null}
         {msg.degraded && !councilPassthroughMode && msg.messageType === 'response' ? (
-          <p className="mt-2 text-[10px] tracking-widest" style={{ color: '#FBBF24' }}>
+          <p className="mt-2 text-[10px] tracking-widest text-amber-700/80">
             Degraded response quality — excluded from synthesis and repair packets.
           </p>
         ) : null}
@@ -1678,6 +1702,8 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   hiddenCount,
   collapsedNoiseCount,
   councilPassthroughMode,
+  hideOldDiagnostics = false,
+  onToggleHideOldDiagnostics,
   onViewArchive,
   onSummarizeSession,
   onRecallEconomicOps,
@@ -1689,6 +1715,8 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   hiddenCount: number
   collapsedNoiseCount: number
   councilPassthroughMode?: boolean
+  hideOldDiagnostics?: boolean
+  onToggleHideOldDiagnostics?: () => void
   onViewArchive: () => void
   onSummarizeSession: () => void
   onRecallEconomicOps: () => void
@@ -1725,12 +1753,27 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           Clear Noise active: {collapsedNoiseCount} repeated notice{collapsedNoiseCount === 1 ? '' : 's'} collapsed from the live view.
         </div>
       ) : null}
+      {onToggleHideOldDiagnostics ? (
+        <div className="mb-3 ml-11 flex flex-wrap items-center gap-2 text-[9px] tracking-widest text-slate-500">
+          <label className="flex cursor-pointer items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={hideOldDiagnostics}
+              onChange={onToggleHideOldDiagnostics}
+              className="accent-emerald-500"
+            />
+            Hide old diagnostics
+          </label>
+          <span className="text-slate-600">Fallback / degraded notices stay in history; toggle only affects the live view.</span>
+        </div>
+      ) : null}
       {messages.map(msg => (
         <MessageBubble
           key={msg.id}
           msg={msg}
           diagnosticsOpen={false}
           councilPassthroughMode={councilPassthroughMode}
+          operatorDiagnosticsMuted={hideOldDiagnostics}
           onOpenFullMemory={onOpenFullMemory}
           onProjectAction={onProjectAction}
           onPrepareRepairPacket={onPrepareRepairPacket}
@@ -5420,6 +5463,7 @@ function Home() {
   )
   const visibleCouncilMessages = liveCouncilHygiene.visibleMessages
   const collapsedCouncilNoiseCount = liveCouncilHygiene.collapsedCount
+  const [hideOldCouncilDiagnostics, setHideOldCouncilDiagnostics] = useState(false)
   const deferredVisibleCouncilMessages = useDeferredValue(visibleCouncilMessages)
   const compressedCouncilSummary = useMemo(
     () => compressCouncilOutput(deferredVisibleCouncilMessages, councilOutputMode),
@@ -10378,13 +10422,37 @@ function Home() {
     </>
   )
 
+  const matrixMissionStatusLabel = useMemo(() => {
+    const mode = COUNCIL_FLOW_MODE_LABELS[councilFlowMode]
+    const stability = councilStabilityMode ? ' · Stability' : ''
+    return `${mode}${stability}`
+  }, [councilFlowMode, councilStabilityMode])
+
+  const matrixCouncilHealthLabel = useMemo(() => {
+    const rosterFamilies = COUNCIL_ROSTER.filter(entry => entry.engineId)
+    const active = rosterFamilies.filter(entry => {
+      const key = entry.engineId as ProviderFamilyKey
+      const status = providerHealth.providers[key]
+      return status === 'online' || status === 'standby'
+    }).length
+    return `${active} of ${rosterFamilies.length} families active`
+  }, [providerHealth.providers])
+
   const activityFeedLabel = useMemo(() => {
     if (typingFamily) {
       const p = familyPresence[typingFamily]
       return p ? `${typingFamily} — ${p.label}` : `${typingFamily} responding`
     }
-    return councilContinueStatusLine
-  }, [typingFamily, familyPresence, councilContinueStatusLine])
+    const recentActions = queueActions.length
+    if (recentActions > 0) {
+      return `${recentActions} recent action${recentActions === 1 ? '' : 's'}`
+    }
+    const pendingApprovals = raelActions.filter(action => action.status === 'pending').length
+    if (pendingApprovals > 0) {
+      return `${pendingApprovals} pending approval${pendingApprovals === 1 ? '' : 's'}`
+    }
+    return 'No recent actions'
+  }, [typingFamily, familyPresence, queueActions.length, raelActions])
 
   const sessionStartedAt = useMemo(() => {
     const first = visibleCouncilMessages[0]?.timestamp
@@ -10542,7 +10610,13 @@ function Home() {
         </div>
       )}
 
-      <div className="relative z-10 flex flex-col">
+      <div
+        className={
+          isUnifiedLiveRoom
+            ? 'relative z-10 flex h-[100dvh] min-h-0 flex-col overflow-hidden'
+            : 'relative z-10 flex flex-col'
+        }
+      >
         <WriteApprovalBanner />
         {!isUnifiedLiveRoom ? operatorNav : null}
         {isUnifiedLiveRoom && (
@@ -10570,8 +10644,8 @@ function Home() {
                   ? chatHealthLabel
                   : null
               }
-              missionStatus={councilContinueStatusLine}
-              councilHealthLabel={chatHealthLabel}
+              missionStatus={matrixMissionStatusLabel}
+              councilHealthLabel={matrixCouncilHealthLabel}
               activityFeedLabel={activityFeedLabel}
             />
           )}
@@ -10588,6 +10662,7 @@ function Home() {
           rightPanel={(
             <CouncilMembersPanel
               providerStatuses={providerHealth.providers}
+              providerLabels={providerHealth.labels}
               onOpenPanel={id => setDockPanelId(id)}
             />
           )}
@@ -10599,6 +10674,7 @@ function Home() {
               loading={loading}
               councilFlowMode={councilFlowMode}
               onCouncilFlowModeChange={persistCouncilFlowMode}
+              showFlowModeSelect={false}
             />
           )}
           activePanelId={dockPanelId}
@@ -10684,6 +10760,23 @@ function Home() {
           onScroll={handleScroll}
           toolbar={(
         <>
+          {isUnifiedLiveRoom && uiMode === 'operator' ? (
+          <div className="flex w-full flex-wrap items-center justify-between gap-2">
+            <span className="text-[10px] font-bold tracking-widest text-emerald-300">
+              {councilContinueStatusLine}
+            </span>
+            {!autoScrollEnabled ? (
+              <button
+                type="button"
+                onClick={jumpToLatest}
+                className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+                style={{ background: '#FFD700', color: '#000' }}
+              >
+                Go to latest
+              </button>
+            ) : null}
+          </div>
+          ) : (
           <div className="flex w-full flex-wrap items-center justify-between gap-2">
           <div>
             <span className="text-[10px] font-bold tracking-widest" style={{ color: '#93C5FD' }}>
@@ -10741,6 +10834,7 @@ function Home() {
             )}
           </div>
           </div>
+          )}
         </>
           )}
           preamble={(
@@ -10782,10 +10876,16 @@ function Home() {
               </button>
             )}
           </div>
-          <p className="text-[9px] tracking-widest" style={{ color: '#666' }}>
-            Council thread below — type at the bottom to speak with the families (Enter sends, Shift+Enter newline).
-          </p>
-          <CouncilCommandBadges cmd={councilUiCommand} packet={councilPacketRender} />
+          {!(isUnifiedLiveRoom && uiMode === 'operator') ? (
+            <p className="text-[9px] tracking-widest" style={{ color: '#666' }}>
+              Council thread below — type at the bottom to speak with the families (Enter sends, Shift+Enter newline).
+            </p>
+          ) : null}
+          <CouncilCommandBadges
+            cmd={councilUiCommand}
+            packet={councilPacketRender}
+            operatorMode={isUnifiedLiveRoom && uiMode === 'operator'}
+          />
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"
@@ -10853,6 +10953,12 @@ function Home() {
             hiddenCount={hiddenCouncilMessageCount}
             collapsedNoiseCount={collapsedCouncilNoiseCount}
             councilPassthroughMode={councilPassthroughMode}
+            hideOldDiagnostics={hideOldCouncilDiagnostics}
+            onToggleHideOldDiagnostics={
+              isUnifiedLiveRoom && uiMode === 'operator'
+                ? () => setHideOldCouncilDiagnostics(prev => !prev)
+                : undefined
+            }
             onViewArchive={handleViewArchive}
             onSummarizeSession={handleSummarizeSessionArchive}
             onRecallEconomicOps={handleRecallEconomicOps}

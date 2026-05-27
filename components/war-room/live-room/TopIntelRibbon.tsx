@@ -46,14 +46,14 @@ function providerSummary(providers: CanonicalStatusPayload['providers']): { labe
 
 function marketLabel(subsystems: CanonicalStatusPayload['subsystems']): string {
   const radar = subsystems?.find(s => s.id === 'signal_radar')
-  if (!radar) return 'Checking markets'
+  if (!radar) return 'Market data unavailable'
   if (/healthy|verified/i.test(radar.health)) return 'Markets steady'
   if (/degraded|advisory/i.test(radar.health)) return 'Market signals mixed'
-  return 'Market data limited'
+  return 'Market data unavailable'
 }
 
 function weatherRibbonLabel(weather: LiveEnvironmentDashboardPayload['weather'] | null): string {
-  if (!weather || weather.status !== 'available') return 'Weather unavailable'
+  if (!weather || weather.status !== 'available') return 'Weather reconnecting'
   const parts: string[] = []
   if (weather.currentTempF != null) parts.push(`${Math.round(weather.currentTempF)}°`)
   const condition = weather.condition?.trim()
@@ -77,8 +77,8 @@ function RibbonSegment({
       className={`flex min-w-[9.5rem] shrink-0 flex-1 flex-col justify-center border-r border-white/10 px-4 py-2.5 sm:min-w-[11rem] ${className}`}
       title={value}
     >
-      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{label}</p>
-      <p className={`mt-0.5 truncate text-sm font-semibold leading-snug ${TONE_TEXT[tone]}`}>{value}</p>
+      <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{label}</p>
+      <p className={`mt-1 truncate text-base font-semibold leading-snug ${TONE_TEXT[tone]}`}>{value}</p>
     </div>
   )
 }
@@ -110,9 +110,9 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
   councilHealthLabel: councilHealthLabelProp,
   activityFeedLabel: activityFeedLabelProp,
 }: TopIntelRibbonProps) {
-  const [headline, setHeadline] = useState('Gathering live briefing…')
-  const [weather, setWeather] = useState('Weather unavailable')
-  const [market, setMarket] = useState('Checking markets')
+  const [headline, setHeadline] = useState('Open Intel for latest stories')
+  const [weather, setWeather] = useState('Weather reconnecting')
+  const [market, setMarket] = useState('Market data unavailable')
   const [provider, setProvider] = useState<{ label: string; tone: SegmentTone }>({
     label: 'Checking AI team…',
     tone: 'warn',
@@ -146,13 +146,13 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
           cache: 'no-store',
         })
         if (!res.ok) {
-          setWeather('Weather unavailable')
+          setWeather('Weather reconnecting')
         } else {
           const payload = (await res.json()) as LiveEnvironmentDashboardPayload
           setWeather(weatherRibbonLabel(payload.weather))
         }
-      } catch (error) {
-        setWeather(sanitizeConnectionError(error, 'Weather unavailable'))
+      } catch {
+        setWeather('Weather reconnecting')
       }
     }
 
@@ -171,9 +171,9 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
           ?? wall.sections.usa_watch[0]
         if (topStory?.headline) setHeadline(topStory.headline)
         else if (signals[0]?.title) setHeadline(signals[0].title)
-        else setHeadline('No headline yet — expand intel')
-      } catch (error) {
-        setHeadline(sanitizeConnectionError(error, 'Briefing unavailable in fallback mode'))
+        else setHeadline('Open Intel for latest stories')
+      } catch {
+        setHeadline('Open Intel for latest stories')
       }
     }
   }, [headlineOverride, location, opportunityCountProp, weatherOverride])
@@ -221,8 +221,14 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
         ) : null}
 
         <RibbonSegment label="Live News" value={displayHeadline} className="min-w-[12rem] flex-[1.4] sm:min-w-[14rem]" />
-        <RibbonSegment label="Weather" value={displayWeather === 'Weather unavailable' ? 'Weather unavailable' : displayWeather} />
-        <RibbonSegment label="Markets" value={/unavailable|limited|checking/i.test(market) ? 'Markets unavailable' : market} />
+        <RibbonSegment
+          label="Weather"
+          value={/unavailable|reconnecting/i.test(displayWeather) ? 'Weather reconnecting' : displayWeather}
+        />
+        <RibbonSegment
+          label="Markets"
+          value={/unavailable|limited|checking/i.test(market) ? 'Market data unavailable' : market}
+        />
         <RibbonSegment label="Mission Status" value={missionStatus} tone="warn" />
         <RibbonSegment
           label="Council Health"
