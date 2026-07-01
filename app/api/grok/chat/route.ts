@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { callXAIChat } from '@/lib/ai/providers/xai'
+import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,6 +11,9 @@ type GrokChatRequest = {
 }
 
 export async function POST(request: Request) {
+  const unauthorized = assertActionRouteAuthorized(request)
+  if (unauthorized) return unauthorized
+
   let body: GrokChatRequest
 
   try {

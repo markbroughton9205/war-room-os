@@ -4,6 +4,7 @@ import { submitDepositProofRecord } from '@/lib/payments/depositStore'
 import { recordPaymentAudit } from '@/lib/payments/paymentAudit'
 import { normalizeProofMetadata, proofMetadataHasSensitiveKeys } from '@/lib/payments/payoutProof'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +13,9 @@ function persistenceLabel(value: 'supabase' | 'session-only') {
 }
 
 export async function POST(req: Request) {
+  const unauthorized = assertActionRouteAuthorized(req)
+  if (unauthorized) return unauthorized
+
   const sup = tryWarRoomSupabase()
   let body: Record<string, unknown>
   try {

@@ -4,6 +4,7 @@ import { createExpectedDepositRecord, getDepositRecord, listDepositRecords, upda
 import { recordPaymentAudit, recordPaymentGuardFindings } from '@/lib/payments/paymentAudit'
 import { runPaymentGuard } from '@/lib/payments/redSentinelPaymentGuard'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +38,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const unauthorized = assertActionRouteAuthorized(req)
+  if (unauthorized) return unauthorized
+
   const sup = tryWarRoomSupabase()
   let body: Record<string, unknown>
   try {
@@ -78,6 +82,9 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  const unauthorized = assertActionRouteAuthorized(req)
+  if (unauthorized) return unauthorized
+
   const sup = tryWarRoomSupabase()
   let body: Record<string, unknown>
   try {

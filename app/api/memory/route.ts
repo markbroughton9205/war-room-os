@@ -1,13 +1,16 @@
-import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { mapRawMemoryRuntimeState } from '@/lib/memory/runtimeState'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
-
 export async function POST(req: Request) {
+  let supabase
+  try {
+    supabase = createSupabaseAdminClient()
+  } catch (error) {
+    const runtime = mapRawMemoryRuntimeState(error, { configured: false })
+    return NextResponse.json({ error: runtime.commanderPhrase, runtime }, { status: 202 })
+  }
+
   const { category, content } = await req.json()
 
   const { data, error } = await supabase
@@ -23,6 +26,14 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
+  let supabase
+  try {
+    supabase = createSupabaseAdminClient()
+  } catch (error) {
+    const runtime = mapRawMemoryRuntimeState(error, { configured: false })
+    return NextResponse.json({ error: runtime.commanderPhrase, runtime, data: [] })
+  }
+
   const { data, error } = await supabase
     .from('memories')
     .select('*')

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
 
 function getTwilioConfig() {
   const accountSid = process.env.TWILIO_ACCOUNT_SID
@@ -14,6 +15,9 @@ function getTwilioConfig() {
 }
 
 export async function POST(req: Request) {
+  const unauthorized = assertActionRouteAuthorized(req)
+  if (unauthorized) return unauthorized
+
   const config = getTwilioConfig()
   const body = await req.json().catch(() => ({}))
   const message = String(body.message ?? '').trim()

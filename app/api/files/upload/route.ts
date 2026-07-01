@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { beginFileUpload, endFileUpload } from '@/lib/filesUploadActivity'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
 
 const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
@@ -122,6 +123,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const unauthorized = assertActionRouteAuthorized(req)
+  if (unauthorized) return unauthorized
+
   const bucket = configuredBucketName()
   const { supabase, response } = await getSupabaseOrResponse()
   if (response) return response
