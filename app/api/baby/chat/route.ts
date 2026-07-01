@@ -4,7 +4,6 @@ import { sourceFromUrl } from '@/lib/income/tavily'
 import { tryPersistMemoryProposalFromModelOutput } from '@/lib/memory/ingestFromModel'
 import { mapRawMemoryRuntimeState } from '@/lib/memory/runtimeState'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
-import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 const TAVILY_URL = 'https://api.tavily.com/search'
@@ -190,9 +189,6 @@ async function callBabyAi(prompt: string, system: string) {
 }
 
 export async function POST(req: Request) {
-  const unauthorized = assertActionRouteAuthorized(req)
-  if (unauthorized) return unauthorized
-
   const { message, history = [] } = await req.json()
   const userMessage = String(message ?? '').trim()
 

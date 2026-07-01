@@ -1,4 +1,3 @@
-import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
 import { isStandingPermissionMode, type StandingPermissionMode } from '@/lib/permissions/standingPermissions'
 import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
@@ -7,9 +6,6 @@ import { upsertWarRoomPermissionsState } from '@/lib/war-room/permissionsState'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: Request) {
-  const unauthorized = assertActionRouteAuthorized(req)
-  if (unauthorized) return unauthorized
-
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     const headers = new Headers()

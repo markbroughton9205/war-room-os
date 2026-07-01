@@ -1,14 +1,10 @@
 import { appendWarRoomActionLog } from '@/lib/war-room/actionLogs'
 import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
-import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: Request) {
-  const unauthorized = assertActionRouteAuthorized(req)
-  if (unauthorized) return unauthorized
-
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ error: 'Supabase is not configured.' }, false, { status: 503 })

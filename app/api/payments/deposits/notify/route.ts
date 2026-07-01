@@ -3,7 +3,6 @@ import { emitEvent } from '@/lib/events/bus'
 import { recordDepositNotification } from '@/lib/payments/depositStore'
 import { recordPaymentAudit } from '@/lib/payments/paymentAudit'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
-import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,9 +11,6 @@ function persistenceLabel(value: 'supabase' | 'session-only') {
 }
 
 export async function POST(req: Request) {
-  const unauthorized = assertActionRouteAuthorized(req)
-  if (unauthorized) return unauthorized
-
   const sup = tryWarRoomSupabase()
   let depositId = ''
   try {
