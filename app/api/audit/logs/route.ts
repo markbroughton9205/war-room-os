@@ -1,7 +1,20 @@
+import { timingSafeEqual } from 'node:crypto'
+
 import { isWarRoomAuditCategory } from '@/lib/war-room/auditLog'
 import { jsonWithPersistence, jsonWithPersistenceSafe, tryWarRoomSupabase } from '@/lib/war-room/persistence'
 
 export const dynamic = 'force-dynamic'
+
+function timingSafeEqualUtf8(a: string, b: string): boolean {
+  try {
+    const ba = Buffer.from(a, 'utf8')
+    const bb = Buffer.from(b, 'utf8')
+    if (ba.length !== bb.length) return false
+    return timingSafeEqual(ba, bb)
+  } catch {
+    return false
+  }
+}
 
 function parseLimit(raw: string | null): number {
   const n = raw ? Number.parseInt(raw, 10) : 50
@@ -59,7 +72,8 @@ export async function POST(req: Request) {
     }
 
     const auth = req.headers.get('authorization')?.trim()
-    if (auth !== `Bearer ${secret}`) {
+    const provided = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length) : null
+    if (!provided || !timingSafeEqualUtf8(secret, provided)) {
       return jsonWithPersistence({ error: 'Unauthorized.' }, false, { status: 401 })
     }
 

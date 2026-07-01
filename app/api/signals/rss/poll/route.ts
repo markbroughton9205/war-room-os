@@ -1,3 +1,5 @@
+import { timingSafeEqual } from 'node:crypto'
+
 import { NextResponse } from 'next/server'
 
 import { runRssIngestionPoll } from '@/lib/signals/rss/runtime'
@@ -5,11 +7,23 @@ import { runRssIngestionPoll } from '@/lib/signals/rss/runtime'
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
+function timingSafeEqualUtf8(a: string, b: string): boolean {
+  try {
+    const ba = Buffer.from(a, 'utf8')
+    const bb = Buffer.from(b, 'utf8')
+    if (ba.length !== bb.length) return false
+    return timingSafeEqual(ba, bb)
+  } catch {
+    return false
+  }
+}
+
 function authorizePoll(req: Request): { ok: true } | { ok: false; status: number; error: string } {
   const secret = process.env.WAR_ROOM_RSS_POLL_SECRET?.trim()
-  if (!secret) return { ok: true }
+  if (!secret) return { ok: false, status: 503, error: 'RSS poll ingest is not enabled.' }
   const auth = req.headers.get('authorization')?.trim()
-  if (auth === `Bearer ${secret}`) return { ok: true }
+  const provided = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length) : null
+  if (provided && timingSafeEqualUtf8(secret, provided)) return { ok: true }
   return { ok: false, status: 401, error: 'Unauthorized RSS poll request.' }
 }
 
