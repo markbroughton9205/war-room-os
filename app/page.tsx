@@ -5544,8 +5544,8 @@ function Home() {
   }, [])
   const deferredVisibleCouncilMessages = useDeferredValue(visibleCouncilMessages)
   const compressedCouncilSummary = useMemo(
-    () => compressCouncilOutput(deferredVisibleCouncilMessages, councilOutputMode),
-    [deferredVisibleCouncilMessages, councilOutputMode],
+    () => compressCouncilOutput(deferredVisibleCouncilMessages, councilOutputMode, { stabilityMode: councilPassthroughMode }),
+    [deferredVisibleCouncilMessages, councilOutputMode, councilPassthroughMode],
   )
   const activeCouncilCommandRef = useRef<CouncilCommand>({ ...DEFAULT_COUNCIL_COMMAND })
   const lastRaelDirectiveContentRef = useRef('')

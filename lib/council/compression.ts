@@ -305,7 +305,7 @@ function latestDecreeText(messages: CouncilCompressionMessage[]): string {
   return toDisplayText(messages[idx]?.content).trim()
 }
 
-function responseMessages(messages: CouncilCompressionMessage[]) {
+function responseMessages(messages: CouncilCompressionMessage[], stabilityMode: boolean) {
   const start = latestDecreeIndex(messages)
   const decreeText = latestDecreeText(messages)
   const promptIntent = decreeText ? detectPromptIntent(decreeText) : undefined
@@ -317,7 +317,7 @@ function responseMessages(messages: CouncilCompressionMessage[]) {
       const content = toDisplayText(message.content)
       const family = normalizeOrchestrationFamily(message.familyName)
       if (!family) return { ...message, content }
-      const sanitized = sanitizeCouncilFamilyResponse(family, content, { decreeText, promptIntent })
+      const sanitized = sanitizeCouncilFamilyResponse(family, content, { decreeText, promptIntent, stabilityMode })
       if (!sanitized.incomplete) return message
       const label = councilFamilyIntegrityLabel(family, true)
       return {
@@ -328,14 +328,14 @@ function responseMessages(messages: CouncilCompressionMessage[]) {
     })
 }
 
-function synthesisEligibleMessages(messages: CouncilCompressionMessage[]) {
-  return responseMessages(messages).filter(message => !message.integrityIncomplete)
+function synthesisEligibleMessages(messages: CouncilCompressionMessage[], stabilityMode: boolean) {
+  return responseMessages(messages, stabilityMode).filter(message => !message.integrityIncomplete)
 }
 
-function buildFindings(messages: CouncilCompressionMessage[]): CouncilCompressedFinding[] {
+function buildFindings(messages: CouncilCompressionMessage[], stabilityMode: boolean): CouncilCompressedFinding[] {
   const groups = new Map<string, CouncilCompressedFinding>()
   let rawIndex = 0
-  for (const message of synthesisEligibleMessages(messages)) {
+  for (const message of synthesisEligibleMessages(messages, stabilityMode)) {
     const family = normalizeFamilyName(message.familyName)
     for (const candidate of sentenceCandidates(message.content)) {
       rawIndex += 1
@@ -418,11 +418,11 @@ function buildRevenuePacket(messages: CouncilCompressionMessage[], findings: Cou
   }
 }
 
-function fallbackDecision(messages: CouncilCompressionMessage[]) {
-  const eligible = synthesisEligibleMessages(messages)
+function fallbackDecision(messages: CouncilCompressionMessage[], stabilityMode: boolean) {
+  const eligible = synthesisEligibleMessages(messages, stabilityMode)
   const last = eligible.at(-1)
   if (!last) {
-    const incompleteFamilies = responseMessages(messages)
+    const incompleteFamilies = responseMessages(messages, stabilityMode)
       .filter(message => message.integrityIncomplete)
       .map(message => normalizeFamilyName(message.familyName))
     if (incompleteFamilies.length) {
@@ -436,9 +436,20 @@ function fallbackDecision(messages: CouncilCompressionMessage[]) {
 export function compressCouncilOutput(
   messages: CouncilCompressionMessage[],
   mode: CouncilOutputMode = 'standard',
+  opts?: {
+    /**
+     * Server-reported stability mode, e.g. from the `councilStabilityMode` field
+     * on the /api/chat response. Takes precedence over the env-based check —
+     * COUNCIL_STABILITY_MODE is server-only and always reads as unset when this
+     * runs client-side (compressCouncilOutput is called directly from
+     * app/page.tsx), so callers running in the browser must pass this explicitly.
+     */
+    stabilityMode?: boolean
+  },
 ): CouncilCompressedSummary {
-  if (shouldPassthroughCouncilProviderText()) {
-    const relevant = responseMessages(messages)
+  const stabilityMode = opts?.stabilityMode ?? shouldPassthroughCouncilProviderText()
+  if (stabilityMode) {
+    const relevant = responseMessages(messages, stabilityMode)
     const last = relevant.at(-1)
     const summary = last
       ? compactDisplayWhitespace(toDisplayText(last.content)).slice(0, 220)
@@ -469,8 +480,8 @@ export function compressCouncilOutput(
     }
   }
 
-  const relevant = responseMessages(messages)
-  const findings = buildFindings(messages)
+  const relevant = responseMessages(messages, stabilityMode)
+  const findings = buildFindings(messages, stabilityMode)
   const repairPacket = buildRepairPacket(relevant, findings)
   const revenuePacket = buildRevenuePacket(relevant, findings)
   const calibration = redTeamCalibrationFor(relevant)
@@ -479,7 +490,7 @@ export function compressCouncilOutput(
 
   const decisionSummary = topFindings.length
     ? topFindings.map(finding => finding.text)
-    : [fallbackDecision(messages)]
+    : [fallbackDecision(messages, stabilityMode)]
   const nextAction =
     mode === 'repair' && repairPacket
       ? repairPacket.fixPlan.find(plan => plan.trim().length >= 24 && !/^(prepare|generate|create)\s+(a\s+)?repair/i.test(plan.trim()))
@@ -514,7 +525,7 @@ export function compressCouncilOutput(
     revenuePacket,
     duplicateReduction: {
       collapsedFindingCount: findings.length,
-      rawFindingCount: responseMessages(messages).reduce((total, message) => total + sentenceCandidates(message.content).length, 0),
+      rawFindingCount: responseMessages(messages, stabilityMode).reduce((total, message) => total + sentenceCandidates(message.content).length, 0),
     },
     guardrails: {
       providerTruthPreserved: true,

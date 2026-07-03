@@ -16,11 +16,23 @@ export type SanitizedFamilyResponse = {
 export function sanitizeCouncilFamilyResponse(
   family: CouncilOrchestrationFamily,
   raw: unknown,
-  opts?: { decreeText?: string; promptIntent?: PromptIntent; councilFlowMode?: CouncilFlowMode | null },
+  opts?: {
+    decreeText?: string
+    promptIntent?: PromptIntent
+    councilFlowMode?: CouncilFlowMode | null
+    /**
+     * Server-reported stability mode, e.g. from the `councilStabilityMode` field
+     * on the /api/chat response. Takes precedence over the env-based check —
+     * COUNCIL_STABILITY_MODE is server-only and always reads as unset in client
+     * bundles, so callers running client-side must pass this explicitly.
+     */
+    stabilityMode?: boolean
+  },
 ): SanitizedFamilyResponse {
   const text = toDisplayText(raw).trim()
   const promptIntent = opts?.promptIntent ?? (opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined)
-  if (shouldPassthroughCouncilProviderText(opts?.councilFlowMode)) {
+  const passthroughMode = opts?.stabilityMode ?? shouldPassthroughCouncilProviderText(opts?.councilFlowMode)
+  if (passthroughMode) {
     return {
       displayText: text,
       integrityStatus: text ? 'COMPLETE' : 'EMPTY',
@@ -28,7 +40,12 @@ export function sanitizeCouncilFamilyResponse(
       operatorSafe: Boolean(text),
     }
   }
-  const gate = applyCouncilRenderGate(family, text, { councilMode: true, promptIntent, decreeText: opts?.decreeText })
+  const gate = applyCouncilRenderGate(family, text, {
+    councilMode: true,
+    promptIntent,
+    decreeText: opts?.decreeText,
+    stabilityMode: opts?.stabilityMode,
+  })
   const incomplete = !gate.renderable || gate.degraded
 
   if (!incomplete) {
