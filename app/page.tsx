@@ -45,6 +45,7 @@ import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permiss
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 import { ArchiveViewer } from '@/components/war-room/council/ArchiveViewer'
+import { LogoutButton } from '@/components/auth/LogoutButton'
 import { CopyCouncilButton } from '@/components/war-room/council/CopyCouncilButton'
 import { MessageCopyButton } from '@/components/war-room/council/MessageCopyButton'
 import {
@@ -10802,13 +10803,16 @@ function Home() {
           <h1 className="text-xl font-bold tracking-widest" style={{ color: '#FFD700' }}>⚔ WAR ROOM</h1>
           <p className="text-xs tracking-widest" style={{ color: '#444' }}>RA&apos;EL — HIGHER VISION INC</p>
         </div>
-        <Link
-          href="/baby"
-          className="rounded px-3 py-2 text-xs font-bold tracking-widest"
-          style={{ border: '1px solid rgba(56,189,248,0.35)', color: '#38BDF8', background: 'rgba(0,0,0,0.28)' }}
-        >
-          Baby AI Private
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/baby"
+            className="rounded px-3 py-2 text-xs font-bold tracking-widest"
+            style={{ border: '1px solid rgba(56,189,248,0.35)', color: '#38BDF8', background: 'rgba(0,0,0,0.28)' }}
+          >
+            Baby AI Private
+          </Link>
+          <LogoutButton />
+        </div>
       </header>
 
       {councilStabilityMode ? (

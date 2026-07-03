@@ -13,7 +13,7 @@ function persistenceLabel(value: 'supabase' | 'session-only') {
 }
 
 export async function POST(req: Request) {
-  const unauthorized = assertActionRouteAuthorized(req)
+  const unauthorized = await assertActionRouteAuthorized(req)
   if (unauthorized) return unauthorized
 
   const sup = tryWarRoomSupabase()

@@ -11,7 +11,7 @@ type GrokChatRequest = {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = assertActionRouteAuthorized(request)
+  const unauthorized = await assertActionRouteAuthorized(request)
   if (unauthorized) return unauthorized
 
   let body: GrokChatRequest

@@ -38,7 +38,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const unauthorized = assertActionRouteAuthorized(req)
+  const unauthorized = await assertActionRouteAuthorized(req)
   if (unauthorized) return unauthorized
 
   const sup = tryWarRoomSupabase()
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  const unauthorized = assertActionRouteAuthorized(req)
+  const unauthorized = await assertActionRouteAuthorized(req)
   if (unauthorized) return unauthorized
 
   const sup = tryWarRoomSupabase()
