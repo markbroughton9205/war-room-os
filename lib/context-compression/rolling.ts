@@ -58,9 +58,20 @@ export function shouldApplyRollingCompression(messages: CouncilCompressionMessag
 export function applyRollingContextCompression(
   messages: CouncilCompressionMessage[],
   mode: import('@/lib/council/compression').CouncilOutputMode = 'standard',
+  opts?: {
+    /**
+     * Server-reported stability mode, threaded through to compressCouncilOutput.
+     * COUNCIL_STABILITY_MODE is server-only and always reads as unset when this
+     * runs client-side (this whole chain is invoked from app/page.tsx via
+     * useConversationRuntime), so callers running in the browser must pass this
+     * explicitly. Server-side callers (app/api/council/continue/route.ts) can
+     * omit it and fall back to compressCouncilOutput's own env read.
+     */
+    stabilityMode?: boolean
+  },
 ): RollingCompressionResult {
   const tokenEstimateBefore = estimateTokens(messages)
-  const compressed = compressCouncilOutput(messages, mode)
+  const compressed = compressCouncilOutput(messages, mode, { stabilityMode: opts?.stabilityMode })
   const applied = shouldApplyRollingCompression(messages)
 
   const preserved = {

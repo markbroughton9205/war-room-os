@@ -13,6 +13,7 @@ export function rebuildConversationRuntime(
   threadId: string | null,
   existing: CouncilConversationRuntime | null,
   outputMode: CouncilOutputMode = 'standard',
+  stabilityMode?: boolean,
 ): CouncilConversationRuntime {
   const base = existing?.sessionId === council.sessionId
     ? existing
@@ -27,7 +28,7 @@ export function rebuildConversationRuntime(
     repairPacket: m.repairPacket,
   }))
 
-  const rolling = applyRollingContextCompression(compressionMessages, outputMode)
+  const rolling = applyRollingContextCompression(compressionMessages, outputMode, { stabilityMode })
   const providerStates = mergeProviderStatesFromMessages(base.providerStates, council.messages)
 
   const contradictionMap: Record<string, string[]> = {}

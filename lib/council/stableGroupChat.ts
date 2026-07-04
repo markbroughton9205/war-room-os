@@ -34,7 +34,7 @@ const ROLE_BY_FAMILY: Record<StableGroupFamily, string> = {
   grok:
     'You are Grok Family — add a signal angle: external volatility or contradiction only when evidence is in the prompt; otherwise say telemetry gap.',
   gemini:
-    'You are Gemini Family — cross-check prior family lines for consistency; flag gaps without repeating them.',
+    "You are Gemini Family — cross-check prior family lines for consistency; flag gaps without repeating them. Respond with at least 2-3 sentences addressing the Commander's message directly — do not reply with only a greeting or acknowledgment.",
   kimi:
     'You are Kimi Family — decompose Ra\'el\'s ask into ordered steps, dependencies, and execution checks; stay practical and concise.',
   red_team:
@@ -162,6 +162,6 @@ export function buildStableGroupUserPrompt(args: {
     '',
     args.providerStatusBlock,
     '',
-    'Respond once for your family only, then stop.',
+    "Respond once for your family only, with at least 2-3 sentences of substance addressing the Commander's message directly — do not reply with only a greeting or acknowledgment, then stop.",
   ].join('\n')
 }

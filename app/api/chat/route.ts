@@ -137,10 +137,10 @@ function buildResearchAntiLoopAugment(threadBlock: string): string {
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
-const CLAUDE_MODEL = 'claude-sonnet-4-20250514'
+const CLAUDE_MODEL = 'claude-sonnet-5'
 const DEFAULT_MAX_TOKENS = 220
 const EXPANDED_MAX_TOKENS = 520
-const STABLE_GROUP_MAX_TOKENS = 200
+const STABLE_GROUP_MAX_TOKENS = 1200
 
 const COUNCIL_THREAD_MESSAGES = 16
 
@@ -1458,6 +1458,11 @@ export async function POST(req: Request) {
       try {
         switch (councilSingleFamily) {
           case 'chatgpt': {
+            console.log('[TEMP-DEBUG-PROMPT-TRACE]', JSON.stringify({
+              family: 'chatgpt',
+              decreeText: raelDirectiveText,
+              userPrompt,
+            }))
             const { signal, dispose } = withBudgetSignal()
             try {
               responseText = await callChatGPT(
@@ -1502,6 +1507,11 @@ export async function POST(req: Request) {
             break
           }
           case 'gemini': {
+            console.log('[TEMP-DEBUG-PROMPT-TRACE]', JSON.stringify({
+              family: 'gemini',
+              decreeText: raelDirectiveText,
+              userPrompt,
+            }))
             const geminiResult = await completeGeminiCouncilMessage({
               userPrompt,
               systemPrompt: stableGroupSystemForFamily ?? geminiSystem,
@@ -1525,6 +1535,13 @@ export async function POST(req: Request) {
             }
             responseText = geminiResult.text.trim()
             providerFinishReason = geminiResult.finishReason
+            console.log('[TEMP-DEBUG-FINISH-REASON]', JSON.stringify({
+              family: 'gemini',
+              finishReason: providerFinishReason ?? null,
+              maxOutputTokens: tokensForCall,
+              responseTextLength: responseText.length,
+              responseText,
+            }))
             if (!responseText) {
               await safeAudit({
                 success: false,

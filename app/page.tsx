@@ -5469,12 +5469,6 @@ function Home() {
   const [engineList, setEngineList] = useState<EngineStatus[]>([])
   const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
   const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
-  const { snapshot: conversationRuntimeSnapshot } = useConversationRuntime(
-    council,
-    liveCouncilConvId,
-    councilOutputMode,
-    councilMounted,
-  )
   const [persistenceAvailable, setPersistenceAvailable] = useState(false)
   const [continuityMode, setContinuityMode] = useState<RuntimeContinuityIndicatorMode>('Unknown')
   const [continuityRecoverAt, setContinuityRecoverAt] = useState<string | null>(null)
@@ -5516,6 +5510,13 @@ function Home() {
     }
   }, [])
   const councilPassthroughMode = councilStabilityMode || councilFlowMode === 'stable_group'
+  const { snapshot: conversationRuntimeSnapshot } = useConversationRuntime(
+    council,
+    liveCouncilConvId,
+    councilOutputMode,
+    councilMounted,
+    councilPassthroughMode,
+  )
   const liveCouncilHygiene = useMemo(
     () => applyCouncilThreadHygiene(liveChatWindow.visibleMessages, councilPassthroughMode),
     [liveChatWindow.visibleMessages, councilPassthroughMode],

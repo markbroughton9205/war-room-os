@@ -18,6 +18,13 @@ export function useConversationRuntime(
   threadId: string | null,
   outputMode: CouncilOutputMode,
   mounted: boolean,
+  /**
+   * Server-reported stability mode (e.g. the caller's councilPassthroughMode),
+   * threaded down to compressCouncilOutput so it doesn't fall back to reading
+   * the server-only COUNCIL_STABILITY_MODE env var, which is always unset in
+   * the browser.
+   */
+  stabilityMode: boolean,
 ) {
   const runtimeRef = useRef<CouncilConversationRuntime | null>(null)
   const [runtime, setRuntime] = useState<CouncilConversationRuntime | null>(null)
@@ -30,11 +37,11 @@ export function useConversationRuntime(
   useEffect(() => {
     if (!mounted) return
     const stored = loadConversationRuntimeFromStorage(council.sessionId)
-    const rebuilt = rebuildConversationRuntime(council, threadId, stored ?? runtimeRef.current, outputMode)
+    const rebuilt = rebuildConversationRuntime(council, threadId, stored ?? runtimeRef.current, outputMode, stabilityMode)
     runtimeRef.current = rebuilt
     setRuntime(rebuilt)
     saveConversationRuntimeToStorage(rebuilt)
-  }, [mounted, council, threadId, outputMode, messageFingerprint])
+  }, [mounted, council, threadId, outputMode, messageFingerprint, stabilityMode])
 
   const snapshot: ConversationRuntimeSnapshot | null = useMemo(
     () => (runtime ? toRuntimeSnapshot(runtime) : null),
@@ -48,11 +55,12 @@ export function useConversationRuntime(
       threadId,
       null,
       outputMode,
+      stabilityMode,
     )
     runtimeRef.current = fresh
     setRuntime(fresh)
     saveConversationRuntimeToStorage(fresh)
-  }, [council, threadId, outputMode])
+  }, [council, threadId, outputMode, stabilityMode])
 
   return { runtime, snapshot, resetRuntime }
 }
