@@ -1458,11 +1458,6 @@ export async function POST(req: Request) {
       try {
         switch (councilSingleFamily) {
           case 'chatgpt': {
-            console.log('[TEMP-DEBUG-PROMPT-TRACE]', JSON.stringify({
-              family: 'chatgpt',
-              decreeText: raelDirectiveText,
-              userPrompt,
-            }))
             const { signal, dispose } = withBudgetSignal()
             try {
               responseText = await callChatGPT(
@@ -1507,11 +1502,6 @@ export async function POST(req: Request) {
             break
           }
           case 'gemini': {
-            console.log('[TEMP-DEBUG-PROMPT-TRACE]', JSON.stringify({
-              family: 'gemini',
-              decreeText: raelDirectiveText,
-              userPrompt,
-            }))
             const geminiResult = await completeGeminiCouncilMessage({
               userPrompt,
               systemPrompt: stableGroupSystemForFamily ?? geminiSystem,
@@ -1535,13 +1525,6 @@ export async function POST(req: Request) {
             }
             responseText = geminiResult.text.trim()
             providerFinishReason = geminiResult.finishReason
-            console.log('[TEMP-DEBUG-FINISH-REASON]', JSON.stringify({
-              family: 'gemini',
-              finishReason: providerFinishReason ?? null,
-              maxOutputTokens: tokensForCall,
-              responseTextLength: responseText.length,
-              responseText,
-            }))
             if (!responseText) {
               await safeAudit({
                 success: false,
