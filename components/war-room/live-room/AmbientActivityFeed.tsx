@@ -51,7 +51,7 @@ export const AmbientActivityFeed = memo(function AmbientActivityFeed({
   }, [])
 
   const lines = useMemo(() => {
-    const out: { key: string; text: string; tone: 'active' | 'idle' | 'warn' }[] = []
+    const out: { key: string; text: string; tone: 'active' | 'idle' | 'warn'; title?: string }[] = []
 
     if (typingFamily) {
       const p = familyPresence[typingFamily]
@@ -74,6 +74,7 @@ export const AmbientActivityFeed = memo(function AmbientActivityFeed({
         key: 'synthesis',
         text: `Synthesis: ${runtime.latestSynthesis.slice(0, 120)}${runtime.latestSynthesis.length > 120 ? '…' : ''}`,
         tone: 'active',
+        title: runtime.latestSynthesis,
       })
     } else if (runtime?.councilMomentum && runtime.councilMomentum !== 'idle') {
       out.push({
@@ -116,6 +117,7 @@ export const AmbientActivityFeed = memo(function AmbientActivityFeed({
       {lines.map(line => (
         <li
           key={line.key}
+          title={line.title}
           className={
             line.tone === 'active'
               ? 'text-emerald-300/90'
