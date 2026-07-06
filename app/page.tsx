@@ -8225,7 +8225,17 @@ function Home() {
       const merged = new AbortController()
       const onDecreeAbort = () => merged.abort()
       controller.signal.addEventListener('abort', onDecreeAbort, { once: true })
+      const startedAt = Date.now()
       const hangId = window.setTimeout(() => merged.abort(), DECREE_GATHER_HARD_HANG_MS)
+      // Browsers throttle setTimeout heavily in backgrounded/minimized tabs, so hangId
+      // can fire minutes late. visibilitychange is not throttled — on return to the tab,
+      // catch up immediately if the deadline already passed while it was hidden.
+      const onVisibilityChange = () => {
+        if (document.visibilityState === 'visible' && Date.now() - startedAt >= DECREE_GATHER_HARD_HANG_MS) {
+          merged.abort()
+        }
+      }
+      document.addEventListener('visibilitychange', onVisibilityChange)
       if (controller.signal.aborted) merged.abort()
       try {
         const out = await postCouncilChat({ ...body, councilGatherPhase: 'decree_soft' }, merged.signal)
@@ -8233,6 +8243,7 @@ function Home() {
         return out
       } finally {
         window.clearTimeout(hangId)
+        document.removeEventListener('visibilitychange', onVisibilityChange)
         controller.signal.removeEventListener('abort', onDecreeAbort)
       }
     }
