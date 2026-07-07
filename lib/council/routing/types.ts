@@ -17,6 +17,8 @@ export type CommanderIntentKind =
   | 'coordination'
   | 'unknown'
 
+export type IntentClarificationReason = 'none' | 'low_signal' | 'ambiguous_categories'
+
 export type IntentClassification = {
   intent: CommanderIntentKind
   normalizedMessage: string
@@ -25,6 +27,7 @@ export type IntentClassification = {
   candidateTools: string[]
   confidence: number
   clarificationRecommended: boolean
+  clarificationReason: IntentClarificationReason
 }
 
 export type RejectedSkill = {

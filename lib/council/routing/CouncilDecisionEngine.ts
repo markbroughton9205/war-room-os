@@ -3,7 +3,19 @@ import { EntityRouter } from './EntityRouter'
 import { IntentEngine } from './IntentEngine'
 import { SkillRouter } from './SkillRouter'
 import { createRoutingNote } from './RoutingNote'
-import type { CouncilDecisionInput, RoutingNote } from './types'
+import type { CouncilDecisionInput, IntentClarificationReason, RoutingNote } from './types'
+
+function describeClarification(reasonKind: IntentClarificationReason): string {
+  switch (reasonKind) {
+    case 'ambiguous_categories':
+      return 'Multiple candidate routes detected. Commander clarification recommended.'
+    case 'low_signal':
+      return 'Low-confidence intent match; insufficient signal to route with certainty. Commander clarification recommended.'
+    case 'none':
+    default:
+      return 'Routing decision created from intent, skill ownership, entity ownership, and skill approval metadata.'
+  }
+}
 
 export class CouncilDecisionEngine {
   constructor(
@@ -37,14 +49,12 @@ export class CouncilDecisionEngine {
     )
 
     if (intent.clarificationRecommended) {
-      decisionPath.push('Multiple candidate routes detected. Commander clarification recommended.')
+      decisionPath.push(describeClarification(intent.clarificationReason))
     }
 
     decisionPath.push('Provider selection deferred to Phase 46D.')
 
-    const reason = intent.clarificationRecommended
-      ? 'Multiple candidate routes detected. Commander clarification recommended.'
-      : 'Routing decision created from intent, skill ownership, entity ownership, and skill approval metadata.'
+    const reason = describeClarification(intent.clarificationReason)
 
     return createRoutingNote({
       intent,
