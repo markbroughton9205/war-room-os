@@ -33,7 +33,8 @@ const INTENT_RULES: IntentRule[] = [
     category: 'research',
     signals: [
       'research', 'search', 'look up', 'current', 'latest', 'source', 'verify online', 'internet',
-      'news', 'update', 'trend', 'market', 'prices', 'happening',
+      'news', 'update', 'trend', 'market', 'prices', 'happening', 'scout', 'opportunities',
+      'income opportunities',
     ],
     patterns: [
       { regex: /what'?s happening/, label: "what's happening" },
@@ -61,6 +62,10 @@ const INTENT_RULES: IntentRule[] = [
     intent: 'risk',
     category: 'risk',
     signals: ['risk', 'scam', 'flaw', 'contradiction', 'stress test', 'assumption'],
+    patterns: [
+      { regex: /is this .+scam/, label: 'is this ... scam' },
+      { regex: /does this look like .+scam/, label: 'does this look like ... scam' },
+    ],
   },
   {
     intent: 'memory',
@@ -75,7 +80,7 @@ const INTENT_RULES: IntentRule[] = [
   {
     intent: 'coordination',
     category: 'coordination',
-    signals: ['coordinate', 'assign', 'route', 'handoff', 'organize'],
+    signals: ['coordinate', 'assign', 'route', 'handoff', 'organize', 'full council', 'run full council'],
   },
 ]
 
