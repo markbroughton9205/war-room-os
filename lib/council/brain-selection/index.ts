@@ -1,5 +1,5 @@
 export { BRAIN_CANDIDATE_REGISTRY } from './BrainCandidateRegistry'
-export { BrainProfileResolver } from './BrainProfileResolver'
+export { BrainProfileResolver, detectPrivacySignals } from './BrainProfileResolver'
 export { BrainScorer, resolveBrainScoreWeights } from './BrainScorer'
 export { BrainSelectionEngine } from './BrainSelectionEngine'
 export type {

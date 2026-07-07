@@ -108,6 +108,7 @@ export type BrainScoreWeights = {
 
 export type BrainSelectionInput = {
   routingNote: RoutingNote
+  commanderMessage?: string
   createdAt?: string
   recommendationId?: string
 }
