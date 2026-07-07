@@ -12,12 +12,21 @@ function isPublicPath(pathname: string): boolean {
 // assertActionRouteAuthorized accepting WAR_ROOM_ACTION_SECRET OR a signed-in
 // session). Middleware must not blanket-401 these or it breaks the
 // server-to-server secret path these routes still support.
+//
+// internet/status + research are read-only diagnostic GETs (boolean config
+// flags only, no secret values) called both from the browser and, more
+// heavily, from internal server-to-server probes (lib/engine-control/
+// tool-snapshot.ts, canonicalStatus.ts, runtimeIntegrityCollect.ts) that have
+// no session cookie to present. Same low-sensitivity category as
+// PUBLIC_API_PREFIXES's /api/debug/* below, not the secret-or-session pattern.
 const PUBLIC_API_PATHS = new Set([
   '/api/sms/inbound',
   '/api/signals/rss/poll',
   '/api/grok/chat',
   '/api/payments/deposits',
   '/api/payments/proof',
+  '/api/tools/internet/status',
+  '/api/tools/research',
 ])
 
 const PUBLIC_API_PREFIXES = ['/api/debug/']
