@@ -1,7 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { memo } from 'react'
+import { memo, useCallback, useEffect } from 'react'
 
 import { useLiveRoomMode } from './LiveRoomModeContext'
 
@@ -37,7 +37,20 @@ export const LiveRoomEngineeringDrawer = memo(function LiveRoomEngineeringDrawer
   open,
   latestRepairPacket,
 }: LiveRoomEngineeringDrawerProps) {
-  const { liveMode } = useLiveRoomMode()
+  const { liveMode, setEngineeringDrawerOpen } = useLiveRoomMode()
+
+  const handleClose = useCallback(() => {
+    setEngineeringDrawerOpen(false)
+  }, [setEngineeringDrawerOpen])
+
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') handleClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, handleClose])
 
   if (!open) return null
 
@@ -46,9 +59,19 @@ export const LiveRoomEngineeringDrawer = memo(function LiveRoomEngineeringDrawer
       className="live-room-engineering-drawer border-t border-sky-900/50 bg-black/90 px-3 py-3"
       data-testid="live-room-engineering-drawer"
     >
-      <p className="mb-2 text-[9px] font-bold uppercase tracking-widest text-sky-300">
-        Engineering diagnostics · {liveMode} mode
-      </p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-[9px] font-bold uppercase tracking-widest text-sky-300">
+          Engineering diagnostics · {liveMode} mode
+        </p>
+        <button
+          type="button"
+          className="rounded border border-white/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-slate-300"
+          onClick={handleClose}
+          aria-label="Close engineering diagnostics"
+        >
+          Close
+        </button>
+      </div>
       <section className="grid max-h-[min(52vh,28rem)] gap-3 overflow-y-auto lg:grid-cols-2">
         <WarRoomSweepPanel />
         <SchemaSweepPanel />

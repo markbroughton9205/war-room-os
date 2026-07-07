@@ -10650,6 +10650,84 @@ function Home() {
       sessionOnly={memoryRuntime.sessionOnly}
     />
   )
+  const councilLiveControls = (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <CopyCouncilButton
+          label="Copy Session"
+          getText={getCopySessionText}
+          successMessage="Copied"
+          manualTitle="Session transcript"
+          hint="Copies the full saved session, including archived messages."
+        />
+        <CopyCouncilButton
+          label="Copy Latest Exchange"
+          getText={getCopyLatestExchangeText}
+          successMessage="Copied"
+          manualTitle="Latest exchange"
+        />
+        <CopyCouncilButton
+          label="Copy Visible Log"
+          getText={getCopyVisibleLogText}
+          successMessage="Copied"
+          manualTitle="Visible log"
+          variant="accent"
+          hint="Copies only messages currently visible in this thread."
+        />
+        <CopyCouncilButton
+          label="Copy as Cursor Brief"
+          getText={getCopyCursorBriefText}
+          successMessage="Copied"
+          manualTitle="Cursor brief"
+        />
+      </div>
+      {councilSessionControls}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <label className="flex items-center gap-1 rounded px-2 py-0.5 text-[9px] tracking-widest" style={{ border: '1px solid #333', color: '#888' }}>
+          Mode
+          <select
+            value={councilOutputMode}
+            onChange={event => setCouncilOutputMode(event.target.value as CouncilOutputMode)}
+            className="bg-black text-[9px] outline-none"
+            style={{ color: '#FDE68A' }}
+            aria-label="Council response mode"
+          >
+            {COUNCIL_OUTPUT_MODES.map(mode => (
+              <option key={mode} value={mode}>{councilOutputModeLabel(mode)}</option>
+            ))}
+          </select>
+        </label>
+        {!councilPaused ? (
+          <button type="button" onClick={() => startTransition(pauseCouncil)}
+            className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+            style={{ border: '1px solid #333', color: '#888' }}>
+            Pause
+          </button>
+        ) : (
+          <button type="button" onClick={() => startTransition(resumeCouncil)}
+            className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+            style={{ background: '#34D399', color: '#000', fontWeight: 'bold' }}>
+            Resume
+          </button>
+        )}
+        <button type="button" onClick={() => startTransition(toggleDeepDiscussion)}
+          className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+          style={{
+            border: council.deepDiscussionMode ? '1px solid #34D399' : '1px solid #333',
+            color: council.deepDiscussionMode ? '#34D399' : '#888',
+          }}>
+          Deep {council.deepDiscussionMode ? 'ON' : 'OFF'}
+        </button>
+        {footerShowsPacketOrCouncilProviderIssue && (
+          <button type="button" onClick={() => startTransition(retryProvider)}
+            className="rounded px-2 py-0.5 text-[9px] tracking-widest"
+            style={{ background: '#F97316', color: '#000', fontWeight: 'bold' }}>
+            Retry
+          </button>
+        )}
+      </div>
+    </div>
+  )
   const operatorNav = (
     <>
       {uiMode === 'operator' && (
@@ -10965,6 +11043,7 @@ function Home() {
                 panelId={dockPanelId}
                 latestRepairPacket={latestRepairPacket}
                 sessionIndicators={councilSessionIndicators}
+                liveCouncilControls={councilLiveControls}
                 gapFinderContext={operatorGapFinderContext}
                 onGapCountChange={setOperatorGapCount}
                 onCouncilHandoff={injectLiveEnvironmentDecree}
@@ -11035,122 +11114,12 @@ function Home() {
           scrollContainerRef={scrollContainerRef}
           onScroll={handleScroll}
           toolbar={(
-        <>
-          {isUnifiedLiveRoom && uiMode === 'operator' ? (
-          <div className="flex w-full flex-wrap items-center justify-between gap-2">
-            <span className="text-[10px] font-bold tracking-widest text-emerald-300">
-              {councilContinueStatusLine}
-            </span>
-            {!autoScrollEnabled ? (
-              <button
-                type="button"
-                onClick={jumpToLatest}
-                className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
-                style={{ background: '#FFD700', color: '#000' }}
-              >
-                Go to latest
-              </button>
-            ) : null}
-          </div>
-          ) : (
-          <div className="flex w-full flex-wrap items-center justify-between gap-2">
-          <div>
-            <span className="text-[10px] font-bold tracking-widest" style={{ color: '#93C5FD' }}>
-              FAMILY COMMAND FLOW
-            </span>
-            <p className="text-[9px] tracking-widest" style={{ color: '#555' }}>
-              Ra’el speaks to the AI families; infrastructure notices stay minimal.
-            </p>
-            {councilSessionIndicators}
-          </div>
-          <div className="flex max-w-full flex-wrap items-center justify-start gap-1.5 sm:justify-end">
-            <span className="mr-1 text-[9px] tracking-widest" style={{ color: '#555' }}>Session controls</span>
-            <CopyCouncilButton
-              label="Copy Session"
-              getText={getCopySessionText}
-              successMessage="Copied"
-              manualTitle="Session transcript"
-              hint="Copies the full saved session, including archived messages."
-            />
-            <CopyCouncilButton
-              label="Copy Latest Exchange"
-              getText={getCopyLatestExchangeText}
-              successMessage="Copied"
-              manualTitle="Latest exchange"
-            />
-            {councilSessionControls}
-            <label className="flex items-center gap-1 rounded px-2 py-0.5 text-[9px] tracking-widest" style={{ border: '1px solid #333', color: '#888' }}>
-              Mode
-              <select
-                value={councilOutputMode}
-                onChange={event => setCouncilOutputMode(event.target.value as CouncilOutputMode)}
-                className="bg-black text-[9px] outline-none"
-                style={{ color: '#FDE68A' }}
-                aria-label="Council response mode"
-              >
-                {COUNCIL_OUTPUT_MODES.map(mode => (
-                  <option key={mode} value={mode}>{councilOutputModeLabel(mode)}</option>
-                ))}
-              </select>
-            </label>
-            {!councilPaused ? (
-              <button type="button" onClick={() => startTransition(pauseCouncil)}
-                className="rounded px-2 py-0.5 text-[9px] tracking-widest"
-                style={{ border: '1px solid #333', color: '#888' }}>
-                Pause
-              </button>
-            ) : (
-              <button type="button" onClick={() => startTransition(resumeCouncil)}
-                className="rounded px-2 py-0.5 text-[9px] tracking-widest"
-                style={{ background: '#34D399', color: '#000', fontWeight: 'bold' }}>
-                Resume
-              </button>
-            )}
-            <button type="button" onClick={() => startTransition(toggleDeepDiscussion)}
-              className="rounded px-2 py-0.5 text-[9px] tracking-widest"
-              style={{
-                border: council.deepDiscussionMode ? '1px solid #34D399' : '1px solid #333',
-                color: council.deepDiscussionMode ? '#34D399' : '#888',
-              }}>
-              Deep {council.deepDiscussionMode ? 'ON' : 'OFF'}
-            </button>
-            {footerShowsPacketOrCouncilProviderIssue && (
-              <button type="button" onClick={() => startTransition(retryProvider)}
-                className="rounded px-2 py-0.5 text-[9px] tracking-widest"
-                style={{ background: '#F97316', color: '#000', fontWeight: 'bold' }}>
-                Retry
-              </button>
-            )}
-          </div>
-          </div>
-          )}
-        </>
-          )}
-          preamble={(
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FFD700' }}>LIVE COUNCIL</h2>
-              <CopyCouncilButton
-                label="Copy Visible Log"
-                getText={getCopyVisibleLogText}
-                successMessage="Copied"
-                manualTitle="Visible log"
-                variant="accent"
-                hint="Copies only messages currently visible in this thread."
-              />
-              <CopyCouncilButton
-                label="Copy as Cursor Brief"
-                getText={getCopyCursorBriefText}
-                successMessage="Copied"
-                manualTitle="Cursor brief"
-              />
-            </div>
-            <div
-              className="flex flex-wrap items-center gap-1"
-              role="radiogroup"
-              aria-label="Council conversation mode"
-            >
+        <div className="flex w-full flex-wrap items-center justify-between gap-2">
+          <span className="text-[10px] font-bold tracking-widest text-emerald-300">
+            {councilContinueStatusLine}
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1" role="radiogroup" aria-label="Council conversation mode">
               {(['direct', 'stable_group', 'full_council'] as const).map(mode => (
                 <button
                   key={mode}
@@ -11170,7 +11139,17 @@ function Home() {
                 </button>
               ))}
             </div>
-            {!autoScrollEnabled && (
+            <button
+              type="button"
+              onClick={() => setDockPanelId('live-council')}
+              className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+              style={{ border: '1px solid #93C5FD', color: '#93C5FD' }}
+              aria-label="Open council controls"
+              title="Controls"
+            >
+              ⚙ Controls
+            </button>
+            {!autoScrollEnabled ? (
               <button
                 type="button"
                 onClick={jumpToLatest}
@@ -11179,8 +11158,12 @@ function Home() {
               >
                 Go to latest
               </button>
-            )}
+            ) : null}
           </div>
+        </div>
+      )}
+          preamble={(
+        <>
           {!(isUnifiedLiveRoom && uiMode === 'operator') ? (
             <p className="text-[9px] tracking-widest" style={{ color: '#666' }}>
               Council thread below — type at the bottom to speak with the families (Enter sends, Shift+Enter newline).

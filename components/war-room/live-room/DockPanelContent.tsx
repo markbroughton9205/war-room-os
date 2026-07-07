@@ -231,6 +231,7 @@ export type DockPanelContentProps = {
   panelId: DockPanelId
   latestRepairPacket?: CouncilRepairPacket | null
   sessionIndicators?: ReactNode
+  liveCouncilControls?: ReactNode
   onCouncilHandoff?: (decree: string) => void
   onOpenEngineering?: () => void
   liveEnvironment?: {
@@ -258,6 +259,7 @@ export const DockPanelContent = memo(function DockPanelContent({
   panelId,
   latestRepairPacket,
   sessionIndicators,
+  liveCouncilControls,
   onCouncilHandoff,
   onOpenEngineering,
   liveEnvironment,
@@ -283,6 +285,7 @@ export const DockPanelContent = memo(function DockPanelContent({
           <p className="font-bold uppercase tracking-widest text-emerald-300">Live Council</p>
           <p>Close this panel to return focus to the council thread. Use the command console below to speak with the families.</p>
           {sessionIndicators}
+          {liveCouncilControls}
         </section>
       ) : null}
 

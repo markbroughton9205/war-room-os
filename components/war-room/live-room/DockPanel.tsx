@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useEffect, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, type ReactNode } from 'react'
 
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 
@@ -22,10 +22,18 @@ export const DockPanel = memo(function DockPanel({ panelId, onClose, onMinimize,
     matrixStatus('success', `${title} ready`)
   }, [panelId, title])
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     matrixStatus('warning', `${title} closed`)
     onClose()
-  }
+  }, [title, onClose])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') handleClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [handleClose])
 
   return (
     <div

@@ -1333,7 +1333,7 @@ export async function POST(req: Request) {
       let stableGroupSystemForFamily: string | null = null
       let stableGroupPriorTrimmed = false
       let stableGroupPriorForTurn = stableGroupPrior
-      let tokensForCall = maxTokens
+      let tokensForCall = isFullCouncilFlowMode(councilFlowMode) ? STABLE_GROUP_MAX_TOKENS : maxTokens
 
       if (stableGroupTurn) {
         tokensForCall = STABLE_GROUP_MAX_TOKENS
