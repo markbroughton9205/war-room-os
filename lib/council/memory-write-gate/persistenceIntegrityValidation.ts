@@ -30,6 +30,7 @@ export function runMemoryPersistenceIntegrityValidation(): MemoryWriteValidation
     validateBlockedAttemptsLeaveStoreUnchanged(),
     validateDuplicateRetryCreatesNoDuplicate(),
     validatePartialFailureDetected(),
+    validatePartialFailureWithNoWriteReportsStoreUnchanged(),
     validateRollbackPlanBeforeCommit(),
     validateRollbackRevokesWithoutDeleting(),
     validateAuditTrailAppendOnly(),
@@ -84,6 +85,20 @@ function validatePartialFailureDetected(): MemoryWriteValidationResult {
     memoryCount === 1
 
   return makeResult('gate8_partial_failure', 'Partial failure with a persisted fake record is detected by independent integrity report.', 'partial_failure', result.status, true, result.memoryStoreChanged, 1, memoryCount, true, result.approvalConsumed, report.consistent, passed)
+}
+
+function validatePartialFailureWithNoWriteReportsStoreUnchanged(): MemoryWriteValidationResult {
+  const store = new FakeMemoryStore('throw_before_any_write')
+  const fixture = buildFixture(store)
+  const result = new MemoryWriteCommitter().commit({ ...fixture, store, now: NOW }).result
+  const memoryCount = store.snapshot().records.length
+  const passed =
+    result.status === 'partial_failure' &&
+    result.memoryStoreChanged === false &&
+    result.memoryId === null &&
+    memoryCount === 0
+
+  return makeResult('gate8_partial_failure_no_write', 'Partial failure before any write correctly reports memoryStoreChanged false when no record was ever persisted.', 'partial_failure', result.status, false, result.memoryStoreChanged, 0, memoryCount, true, result.approvalConsumed, new MemoryIntegrityChecker().check(store).consistent, passed)
 }
 
 function validateRollbackPlanBeforeCommit(): MemoryWriteValidationResult {

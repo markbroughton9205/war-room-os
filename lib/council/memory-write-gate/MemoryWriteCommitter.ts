@@ -117,11 +117,13 @@ export class MemoryWriteCommitter {
       const partialMemoryRecord = snapshot.records.find(
         record => record.stagedWriteId === input.stagedWrite.stagedWriteId
       )
-      const memoryStoreChanged =
-        Boolean(partialMemoryRecord) ||
-        snapshot.auditEvents.some(
-          event => event.stagedWriteId === input.stagedWrite.stagedWriteId
-        )
+      // Must reflect whether a memory record actually exists, not whether any
+      // audit event happens to share this stagedWriteId -- staging itself
+      // always appends memory_staged/memory_rollback_planned events before
+      // commit() is ever called, so an audit-event-presence check is true
+      // unconditionally and would report "changed" even when commitMemory()
+      // never touched the store at all.
+      const memoryStoreChanged = Boolean(partialMemoryRecord)
 
       return {
         result: {

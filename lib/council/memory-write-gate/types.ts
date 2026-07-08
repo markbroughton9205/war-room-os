@@ -253,6 +253,7 @@ export type FakeMemoryStoreMode =
   | 'normal'
   | 'throw_after_audit_before_memory'
   | 'throw_after_memory_before_commit_audit'
+  | 'throw_before_any_write'
 
 export type MemoryIntegrityReport = {
   consistent: boolean

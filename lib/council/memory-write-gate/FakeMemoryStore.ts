@@ -41,6 +41,10 @@ export class FakeMemoryStore {
     stagedWrite: StagedMemoryWrite
     createdAt: string
   }): { memory: FakeMemoryRecord; auditEvent: MemoryAuditEvent } {
+    if (this.mode === 'throw_before_any_write') {
+      throw new Error('Fake store partial failure before any write or audit event.')
+    }
+
     const auditEvent = this.appendAuditEvent({
       eventType: 'memory_commit_attempted',
       proposalId: input.proposal.proposalId,
