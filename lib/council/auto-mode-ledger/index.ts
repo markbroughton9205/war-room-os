@@ -4,6 +4,7 @@ export {
   type InMemoryLedgerState,
 } from './InMemoryDurableSingleUseLedger'
 export { AppleReminderLedgerReceiptVerifier } from './AppleReminderLedgerReceiptVerifier'
+export { createLiveAppleReminderLedgerReceiptVerifier } from './LiveAppleReminderLedgerReceiptVerifier'
 export { FileBackedSingleUseLedger } from './FileBackedSingleUseLedger'
 export { LIVE_FEATURE_REGISTRY, validateLiveFeatureRegistry } from './LiveFeatureRegistry'
 export { AUTO_MODE_SINGLE_USE_LEDGER_TABLE } from './types'

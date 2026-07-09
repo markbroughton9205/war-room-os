@@ -71,7 +71,13 @@ Other consume errors map to `consume_failed`.
 
 `createSupabaseSingleUseLedger` uses the existing server-only Supabase admin client. It requires the service-role Supabase secret on the server and must not be imported from client components.
 
-46M adds the adapter only. It does not wire the adapter into live UI, live chat, Apple Shortcut execution, or API routes in this phase.
+## Live Wiring
+
+`createLiveAppleReminderLedgerReceiptVerifier` (`LiveAppleReminderLedgerReceiptVerifier.ts`) composes `AppleReminderLedgerReceiptVerifier` with `createSupabaseSingleUseLedger()`. This is the live path: `AppleReminderLedgerReceiptVerifier` itself takes its ledger by constructor injection and remains ledger-agnostic, so this factory is additive, not a change to the verifier's default behavior.
+
+This wiring is intentionally isolated in its own file rather than added to `AppleReminderLedgerReceiptVerifier.ts` directly, so that code using the verifier with `InMemoryDurableSingleUseLedger` or `FileBackedSingleUseLedger` (all existing tests and local/dev usage) does not transitively pull in the Supabase admin client or its server-only requirement.
+
+The adapter is wired into the receipt verifier's live path. It is still not wired into UI, live chat, Apple Shortcut execution triggering, or API routes -- nothing calls `createLiveAppleReminderLedgerReceiptVerifier` yet. That remains separate future work.
 
 ## Gate 12 Requirement
 
@@ -88,3 +94,8 @@ The independent Gate 12 stress test must:
 - avoid touching real production ledger entries
 
 Do not reuse this package's validation harness for the authoritative Gate 12 result.
+
+## Changelog
+
+- **2026-07-09** (`a401361`) -- Initial 46M implementation: `SupabaseSingleUseLedger`, atomic conditional consume, constraint error mapping. Independently verified: stale `approval_id` field found and removed from `types.ts`/`entryToRow()`/`rowToEntry()` (code bug, not a missing production column), then Gate 12 verified against the real production table -- 10 runs x 20 concurrent attempts, exactly 1 success per run, cleanup confirmed after every run.
+- **2026-07-09** -- Added `createLiveAppleReminderLedgerReceiptVerifier`, wiring the adapter into `AppleReminderLedgerReceiptVerifier` as the live path (see "Live Wiring" above). No route, UI, chat, or Shortcut-execution wiring added.
