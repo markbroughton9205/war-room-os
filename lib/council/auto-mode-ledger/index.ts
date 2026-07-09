@@ -6,6 +6,11 @@ export {
 export { AppleReminderLedgerReceiptVerifier } from './AppleReminderLedgerReceiptVerifier'
 export { FileBackedSingleUseLedger } from './FileBackedSingleUseLedger'
 export { LIVE_FEATURE_REGISTRY, validateLiveFeatureRegistry } from './LiveFeatureRegistry'
+export { AUTO_MODE_SINGLE_USE_LEDGER_TABLE } from './types'
+export {
+  SupabaseSingleUseLedger,
+  createSupabaseSingleUseLedger,
+} from './SupabaseSingleUseLedger'
 export {
   ledgerEntryFromApplePacket,
   ledgerEntryFromRollbackPacket,

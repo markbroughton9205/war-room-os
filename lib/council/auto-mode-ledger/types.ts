@@ -24,7 +24,6 @@ export type RegisteredFutureLiveActionType =
 export type AutoModeSingleUseLedgerEntry = {
   ledgerId: string
   packetId: string
-  approvalId: string
   explicitExecutionApprovalId: string
   receiptId: string | null
   rollbackPacketId: string | null
@@ -152,3 +151,5 @@ export type LedgerGateValidationResult = {
   result: 'PASS' | 'FAIL'
   notes: string[]
 }
+
+export const AUTO_MODE_SINGLE_USE_LEDGER_TABLE = 'auto_mode_single_use_ledger'

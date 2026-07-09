@@ -11,7 +11,6 @@ export function ledgerEntryFromApplePacket(
   return {
     ledgerId: overrides.ledgerId ?? `ledger_${packet.packetId}`,
     packetId: packet.packetId,
-    approvalId: packet.approvalId,
     explicitExecutionApprovalId: packet.explicitExecutionApprovalId,
     receiptId: null,
     rollbackPacketId: null,
@@ -51,7 +50,6 @@ export function ledgerEntryFromRollbackPacket(
   return {
     ledgerId: overrides.ledgerId ?? `ledger_${rollbackPacket.rollbackPacketId}`,
     packetId: rollbackPacket.rollbackPacketId,
-    approvalId: original.approvalId,
     explicitExecutionApprovalId: original.explicitExecutionApprovalId,
     receiptId: original.receiptId,
     rollbackPacketId: rollbackPacket.rollbackPacketId,
