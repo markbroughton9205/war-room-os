@@ -35,21 +35,17 @@ This limitation is intentional and compliant with 46K's no-endpoint, no-storage,
 
 ## Replay Protection Limitation
 
-Receipt replay protection is process-local only in 46K.
+46K has no replay protection at any level.
 
-Any in-memory consumed approval/receipt tracking is not durable.
+`AppleReminderReceiptVerifier` is fully stateless: it holds no fields and no in-memory consumed-nonce or consumed-approval tracking of any kind. Verification is a pure function of the packet and receipt it is given.
 
-Replay protection does not survive process restart.
+This means a captured valid receipt replays as `verified_clean` indefinitely -- not only across process restarts or redeploys, but even against the exact same verifier instance, called repeatedly, with no reset in between. There is no weaker "single-process" or "process-local" protection to fall back on; this was an earlier, incorrect claim about this limitation and has been corrected here.
 
-Replay protection does not survive redeploy.
-
-Replay protection should not be assumed across independent serverless executions.
-
-46K intentionally introduces no persistence layer.
+46K intentionally introduces no persistence layer, so this is expected, not a defect.
 
 Durable replay protection is deferred to a future phase.
 
-The validation case `negative_replay_after_stateless_verifier_reset` documents this limitation directly: the same otherwise valid receipt verifies clean when checked by a fresh stateless verifier. This is the expected 46K limitation, not replay protection and not a strong replay-security guarantee.
+The validation case `negative_replay_after_stateless_verifier_reset` documents this limitation: the same otherwise valid receipt verifies clean when checked again by a separate, fresh verifier instance. That case demonstrates the limitation across instances; it does not by itself prove the same-instance case, but the verifier's statelessness (no fields at all) makes the same-instance and cross-instance behavior identical by construction. This is the expected 46K limitation, not replay protection and not a strong replay-security guarantee.
 
 ## Why Apple Reminders First
 

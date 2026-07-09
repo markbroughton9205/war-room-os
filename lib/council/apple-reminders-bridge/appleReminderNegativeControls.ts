@@ -212,14 +212,14 @@ function replayAfterStatelessVerifierResetCase(): AppleReminderBridgeValidationR
 
   return {
     caseId: 'negative_replay_after_stateless_verifier_reset',
-    description: 'Same valid receipt verifies clean when verifier state is fresh; this demonstrates the documented process-local replay limitation in 46K.',
+    description: 'Same valid receipt verifies clean across a fresh verifier instance; the verifier holds no fields, so this demonstrates the documented zero-replay-protection limitation in 46K, not a weaker single-process/process-local guarantee.',
     expected: 'accepted_limitation',
     observed,
     result: observed === 'accepted_limitation' ? 'LIMITATION_ACCEPTED' : 'FAIL',
     notes: [
       `firstVerification=${firstResult.status}`,
       `freshVerifierReplay=${replayResult.status}`,
-      'This is the expected 46K limitation, not replay protection.',
+      'This is the expected 46K limitation, not replay protection at any level -- not even within a single instance.',
       'Durable replay protection requires a future persistence-backed single-use ledger.',
     ],
   }
