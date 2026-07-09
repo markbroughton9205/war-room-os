@@ -157,3 +157,8 @@ Acceptable future implementations include a persistent single-use ledger, durabl
 46N may add an approved action queue with manual release.
 
 46O may consider limited live Auto Mode only after repeated bridge proof.
+
+## Changelog
+
+- **2026-07-08** (`1645940`) -- Initial 46K implementation: packet/receipt/rollback bridge, 10 gates, 31 negative controls, independent validation.
+- **2026-07-09** (`89e2b1d`) -- Fix: corrected this doc's Replay Protection Limitation section and the `negative_replay_after_stateless_verifier_reset` description, which still read "process-local only... does not survive process restart." Re-validation (empirical same-instance repeat verification, plus full gate/negative-control re-run) confirmed `AppleReminderReceiptVerifier` is fully stateless with zero replay protection at any level, including repeated calls on the same instance in the same process. No behavior change; documentation accuracy only.
