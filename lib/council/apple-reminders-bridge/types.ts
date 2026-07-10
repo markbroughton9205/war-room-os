@@ -116,6 +116,30 @@ export type AppleReminderExplicitBridgeApproval = {
   status: 'active' | 'expired' | 'consumed' | 'rejected'
 }
 
+export type AppleReminderConsumedApprovalSnapshot = {
+  snapshotKind: 'ConsumedApprovalSnapshot'
+  approvalPattern: 'ExplicitExecutionApproval'
+  approvalId: string
+  exactApprovedText: string
+  commanderInput: string
+  actionType: AppleReminderLiveActionType
+  targetSystem: 'apple_reminders'
+  reminderId: string
+  singleUse: true
+  nonce: string
+  createdAt: string
+  expiresAt: string
+  consumedAt: string
+  consumedStatus: 'consumed'
+  validAt: string
+  reusableAuthority: false
+  source: 'supabase_approval_authority'
+}
+
+export type AppleReminderAuthorizationInput =
+  | AppleReminderExplicitBridgeApproval
+  | AppleReminderConsumedApprovalSnapshot
+
 export type AppleReminderRollbackPlan = {
   rollbackPlanId: string
   packetId: string
@@ -347,7 +371,7 @@ export type AppleReminderRollbackReceipt = {
 
 export type AppleReminderPacketCreationInput = {
   policy: AppleRemindersBridgePolicy
-  approval: AppleReminderExplicitBridgeApproval | null
+  approval: AppleReminderAuthorizationInput | null
   commanderInput: string
   exactApprovedText: string
   reminderId: string | null

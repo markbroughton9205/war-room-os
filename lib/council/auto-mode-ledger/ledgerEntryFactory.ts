@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import type {
   AppleReminderActionPacket,
   AppleReminderRollbackPacket,
@@ -9,7 +10,7 @@ export function ledgerEntryFromApplePacket(
   overrides: Partial<AutoModeSingleUseLedgerEntry> = {}
 ): AutoModeSingleUseLedgerEntry {
   return {
-    ledgerId: overrides.ledgerId ?? `ledger_${packet.packetId}`,
+    ledgerId: overrides.ledgerId ?? randomUUID(),
     packetId: packet.packetId,
     explicitExecutionApprovalId: packet.explicitExecutionApprovalId,
     receiptId: null,
@@ -48,7 +49,7 @@ export function ledgerEntryFromRollbackPacket(
   overrides: Partial<AutoModeSingleUseLedgerEntry> = {}
 ): AutoModeSingleUseLedgerEntry {
   return {
-    ledgerId: overrides.ledgerId ?? `ledger_${rollbackPacket.rollbackPacketId}`,
+    ledgerId: overrides.ledgerId ?? randomUUID(),
     packetId: rollbackPacket.rollbackPacketId,
     explicitExecutionApprovalId: original.explicitExecutionApprovalId,
     receiptId: original.receiptId,

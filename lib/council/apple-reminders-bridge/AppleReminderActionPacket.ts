@@ -2,6 +2,9 @@ import {
   APPLE_REMINDER_PACKET_VERSION,
   APPLE_REMINDERS_SHORTCUT_NAME,
   type AppleReminderActionPacket,
+  type AppleReminderAuthorizationInput,
+  type AppleReminderConsumedApprovalSnapshot,
+  type AppleReminderExplicitBridgeApproval,
   type AppleReminderPacketCreationInput,
   type AppleReminderPacketCreationResult,
   type AppleReminderPacketSignature,
@@ -78,8 +81,8 @@ export class AppleReminderActionPacketFactory {
       }
     }
 
-    const approval = input.approval
-    const packetId = input.packetId ?? `apple_packet_${approval?.nonce ?? 'nonce'}_${input.reminderId}`
+    const authorization = input.approval
+    const packetId = input.packetId ?? `apple_packet_${authorization?.nonce ?? 'nonce'}_${input.reminderId}`
     const rollbackPlan = {
       rollbackPlanId: `rollback_plan_${packetId}`,
       packetId,
@@ -103,16 +106,16 @@ export class AppleReminderActionPacketFactory {
     }
     const signature = this.createPlaceholderSignature({
       packetId,
-      approvalId: approval?.approvalId ?? '',
+      approvalId: authorization?.approvalId ?? '',
       reminderId: input.reminderId ?? '',
-      nonce: approval?.nonce ?? '',
+      nonce: authorization?.nonce ?? '',
       expiresAt,
     })
     const packet: AppleReminderActionPacket = {
       packetVersion: APPLE_REMINDER_PACKET_VERSION,
       packetId,
-      approvalId: approval?.approvalId ?? '',
-      explicitExecutionApprovalId: approval?.approvalId ?? '',
+      approvalId: authorization?.approvalId ?? '',
+      explicitExecutionApprovalId: authorization?.approvalId ?? '',
       source: 'auto_mode_gate',
       commanderId: 'mark',
       commanderInput: input.commanderInput,
@@ -134,7 +137,7 @@ export class AppleReminderActionPacketFactory {
         singleUse: true,
         expiresAt,
         createdAt,
-        nonce: approval?.nonce ?? '',
+        nonce: authorization?.nonce ?? '',
         requiresManualShortcutRun: true,
         requiresReadBeforeWrite: true,
         requiresReadAfterWrite: true,
@@ -164,9 +167,9 @@ export class AppleReminderActionPacketFactory {
         exactTextMatched: true,
         scopedToSingleAction: true,
         scopedToSingleTarget: true,
-        expiresAt: approval?.expiresAt ?? expiresAt,
-        singleUseNonce: approval?.nonce ?? '',
-        approvalCreatedAt: approval?.createdAt ?? createdAt,
+        expiresAt: authorization?.expiresAt ?? expiresAt,
+        singleUseNonce: authorization?.nonce ?? '',
+        approvalCreatedAt: authorization?.createdAt ?? createdAt,
       },
       expectedMutation: {
         expectedChangedSystem: 'apple_reminders',
@@ -248,35 +251,87 @@ export class AppleReminderActionPacketFactory {
       return 'Missing ExplicitExecutionApproval.'
     }
 
-    if (input.approval.approvalPattern !== 'ExplicitExecutionApproval') {
+    return this.findAuthorizationBlockedReason(input.approval, input, createdAt)
+  }
+
+  private findAuthorizationBlockedReason(
+    authorization: AppleReminderAuthorizationInput,
+    input: AppleReminderPacketCreationInput,
+    createdAt: string
+  ): string | null {
+    if (authorization.approvalPattern !== 'ExplicitExecutionApproval') {
       return 'Approval object is not ExplicitExecutionApproval.'
     }
 
-    if (input.approval.status !== 'active' || input.approval.consumedAt !== null) {
+    if (isConsumedApprovalSnapshot(authorization)) {
+      return this.findConsumedSnapshotBlockedReason(authorization, input, createdAt)
+    }
+
+    return this.findActiveApprovalBlockedReason(authorization, input, createdAt)
+  }
+
+  private findActiveApprovalBlockedReason(
+    approval: AppleReminderExplicitBridgeApproval,
+    input: AppleReminderPacketCreationInput,
+    createdAt: string
+  ): string | null {
+    if (approval.status !== 'active' || approval.consumedAt !== null) {
       return 'Approval is not active single-use approval.'
     }
 
-    if (new Date(input.approval.expiresAt).getTime() <= new Date(createdAt).getTime()) {
+    return this.findSharedAuthorizationBlockedReason(approval, input, createdAt)
+  }
+
+  private findConsumedSnapshotBlockedReason(
+    snapshot: AppleReminderConsumedApprovalSnapshot,
+    input: AppleReminderPacketCreationInput,
+    createdAt: string
+  ): string | null {
+    if (snapshot.consumedStatus !== 'consumed' || !snapshot.consumedAt) {
+      return 'Authorization snapshot is not consumed.'
+    }
+
+    if (snapshot.reusableAuthority !== false) {
+      return 'Authorization snapshot cannot be reusable authority.'
+    }
+
+    if (snapshot.source !== 'supabase_approval_authority') {
+      return 'Authorization snapshot source mismatch.'
+    }
+
+    return this.findSharedAuthorizationBlockedReason(snapshot, input, createdAt)
+  }
+
+  private findSharedAuthorizationBlockedReason(
+    authorization: AppleReminderAuthorizationInput,
+    input: AppleReminderPacketCreationInput,
+    createdAt: string
+  ): string | null {
+    if (authorization.singleUse !== true) {
+      return 'Approval is not marked single-use.'
+    }
+
+    if (new Date(authorization.expiresAt).getTime() <= new Date(createdAt).getTime()) {
       return 'Approval expired.'
     }
 
-    if (input.exactApprovedText !== input.approval.exactApprovedText) {
+    if (input.exactApprovedText !== authorization.exactApprovedText) {
       return 'Approval text mismatch.'
     }
 
-    if (input.commanderInput !== input.approval.commanderInput) {
+    if (input.commanderInput !== authorization.commanderInput) {
       return 'Commander input mismatch.'
     }
 
-    if (input.approval.actionType !== 'mark_apple_reminder_read') {
+    if (authorization.actionType !== 'mark_apple_reminder_read') {
       return 'Approval action mismatch.'
     }
 
-    if (input.approval.targetSystem !== 'apple_reminders') {
+    if (authorization.targetSystem !== 'apple_reminders') {
       return 'Approval target system mismatch.'
     }
 
-    if (input.approval.reminderId !== input.reminderId) {
+    if (authorization.reminderId !== input.reminderId) {
       return 'Approval reminder target mismatch.'
     }
 
@@ -307,4 +362,10 @@ export class AppleReminderActionPacketFactory {
       note: 'Deterministic validation material only. No cryptographic secret is introduced in 46K.',
     }
   }
+}
+
+function isConsumedApprovalSnapshot(
+  authorization: AppleReminderAuthorizationInput
+): authorization is AppleReminderConsumedApprovalSnapshot {
+  return 'snapshotKind' in authorization && authorization.snapshotKind === 'ConsumedApprovalSnapshot'
 }

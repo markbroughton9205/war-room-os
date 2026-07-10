@@ -21,6 +21,8 @@ export type {
   AppleReminderBridgeGateValidationResult,
   AppleReminderBridgeValidationResult,
   AppleReminderChangedPath,
+  AppleReminderAuthorizationInput,
+  AppleReminderConsumedApprovalSnapshot,
   AppleReminderExplicitBridgeApproval,
   AppleReminderLiveActionType,
   AppleReminderObservation,
