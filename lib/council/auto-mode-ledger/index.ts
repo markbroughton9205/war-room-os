@@ -20,6 +20,7 @@ export {
 export { runGate11DurableReplayValidation } from './gate11Validation'
 export { runAutoModeLedgerNegativeControls } from './negativeControls'
 export { runAutoModeLedgerValidation } from './validation'
+export { runLedgerUuidRegressionValidation } from './uuidRegression'
 export type {
   AutoModeLedgerActionType,
   AutoModeLedgerEntryKind,

@@ -7,6 +7,7 @@ import {
   type ExplicitExecutionApproval,
   type IssueApprovalInput,
   type IssueApprovalResult,
+  type ApprovalAuthoritySecurityTelemetrySink,
   type RevokeApprovalResult,
 } from './types'
 
@@ -23,7 +24,8 @@ const DEFAULT_APPROVAL_TTL_MS = 5 * 60 * 1000
 export class SupabaseApprovalAuthority {
   constructor(
     private readonly client: SupabaseApprovalClient,
-    private readonly nonceGenerator: () => string = () => `nonce_${randomUUID()}`
+    private readonly nonceGenerator: () => string = () => `nonce_${randomUUID()}`,
+    private readonly securityTelemetry?: ApprovalAuthoritySecurityTelemetrySink
   ) {}
 
   async issue(input: IssueApprovalInput): Promise<IssueApprovalResult> {
@@ -62,6 +64,11 @@ export class SupabaseApprovalAuthority {
     expectedExactText: string
   ): Promise<ConsumeApprovalResult> {
     const now = new Date().toISOString()
+    if (!isUuid(approvalId)) {
+      this.recordMalformedApprovalId('consumeIfValid', approvalId, now)
+      return consume(false, 'invalid_approval_id', null, 'Malformed approvalId rejected before database query.')
+    }
+
     const { data, error } = await this.client
       .from(EXPLICIT_EXECUTION_APPROVALS_TABLE)
       .update({
@@ -94,6 +101,11 @@ export class SupabaseApprovalAuthority {
 
   async revoke(approvalId: string, reason: string): Promise<RevokeApprovalResult> {
     const now = new Date().toISOString()
+    if (!isUuid(approvalId)) {
+      this.recordMalformedApprovalId('revoke', approvalId, now)
+      return { ok: false, status: 'not_found', approval: null, errorMessage: 'Malformed approvalId rejected before database query.' }
+    }
+
     const { data, error } = await this.client
       .from(EXPLICIT_EXECUTION_APPROVALS_TABLE)
       .update({
@@ -122,6 +134,11 @@ export class SupabaseApprovalAuthority {
   }
 
   async getById(approvalId: string): Promise<ExplicitExecutionApproval | null> {
+    if (!isUuid(approvalId)) {
+      this.recordMalformedApprovalId('getById', approvalId, new Date().toISOString())
+      return null
+    }
+
     const { data, error } = await this.client
       .from(EXPLICIT_EXECUTION_APPROVALS_TABLE)
       .select(selectColumns())
@@ -176,6 +193,19 @@ export class SupabaseApprovalAuthority {
       .update({ status: 'expired', updated_at: now })
       .eq('approval_id', approvalId)
       .eq('status', 'active')
+  }
+
+  private recordMalformedApprovalId(
+    operation: 'consumeIfValid' | 'revoke' | 'getById',
+    approvalId: string,
+    createdAt: string
+  ): void {
+    this.securityTelemetry?.record({
+      category: 'malformed_approval_id_probe',
+      approvalId,
+      operation,
+      createdAt,
+    })
   }
 }
 
@@ -241,4 +271,8 @@ function consume(
   errorMessage: string | null
 ): ConsumeApprovalResult {
   return { ok, status, approval, errorMessage }
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }

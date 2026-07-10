@@ -116,6 +116,9 @@ async function handleIssue(
   // Atomic check-and-consume against a PRE-EXISTING approval record, issued
   // by a separate, prior approved-execution-gate step. This route never
   // constructs its own approval -- doing so was the security gap being fixed.
+  // Authenticated-route rate limiting is intentionally deferred to a dedicated
+  // future protection phase; this phase only validates and logs malformed
+  // approval IDs before any approval lookup reaches Supabase.
   const consumeResult = await options.approvalConsumer.consumeForAppleReminderRead({
     approvalId,
     reminderId,
@@ -298,6 +301,7 @@ function mapApprovalConsumeStatusToBlockedReason(
   status: AppleApprovalConsumeStatus
 ): AppleReminderLiveRouteBlockedReason {
   switch (status) {
+    case 'invalid_approval_id': return 'approval_invalid_id'
     case 'not_found': return 'approval_not_found'
     case 'not_active': return 'approval_not_active'
     case 'revoked': return 'approval_revoked'

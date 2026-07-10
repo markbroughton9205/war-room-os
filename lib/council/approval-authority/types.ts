@@ -41,6 +41,7 @@ export type IssueApprovalResult = {
 
 export type ConsumeApprovalStatus =
   | 'consumed'
+  | 'invalid_approval_id'
   | 'not_found'
   | 'already_consumed'
   | 'expired'
@@ -73,4 +74,18 @@ export type ApprovalAuthorityValidationResult = {
   observed: string
   result: 'PASS' | 'FAIL'
   notes: string[]
+}
+
+export type ApprovalAuthoritySecurityTelemetryCategory =
+  | 'malformed_approval_id_probe'
+
+export type ApprovalAuthoritySecurityTelemetryEvent = {
+  category: ApprovalAuthoritySecurityTelemetryCategory
+  approvalId: string
+  operation: 'consumeIfValid' | 'revoke' | 'getById'
+  createdAt: string
+}
+
+export type ApprovalAuthoritySecurityTelemetrySink = {
+  record(event: ApprovalAuthoritySecurityTelemetryEvent): void
 }

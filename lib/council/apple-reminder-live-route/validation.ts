@@ -33,6 +33,7 @@ const FLAG_EXECUTION_ONLY: AppleReminderLiveRouteEnv = {
 type FakeApprovalState = {
   approvals: Map<string, AppleReminderExplicitBridgeApproval>
   snapshotOverrides: Map<string, (snapshot: AppleReminderConsumedApprovalSnapshot) => AppleReminderConsumedApprovalSnapshot>
+  forcedStatuses: Map<string, AppleApprovalConsumeStatus>
 }
 
 function freshDeps() {
@@ -73,6 +74,7 @@ export async function runAppleReminderLiveRouteValidation(): Promise<AppleRemind
     await invalidRequestBlocked(),
     await validIssueSucceeds(),
     await approvalNotFoundBlocked(),
+    await malformedApprovalIdBlocked(),
     await approvalReminderMismatchBlocked(),
     await approvalTextMismatchBlocked(),
     await approvalExpiredBlocked(),
@@ -183,6 +185,22 @@ async function approvalNotFoundBlocked(): Promise<AppleReminderLiveRouteValidati
     { env: FLAGS_ON, approvalConsumer, ledger, receiptVerifier, now: NOW }
   )
   return validation('gate15_10_approval_not_found', 'Referencing a non-existent approvalId is blocked.', 'blocked', result.status, [result.auditRecord.blockedReason ?? 'none'])
+}
+
+async function malformedApprovalIdBlocked(): Promise<AppleReminderLiveRouteValidationResult> {
+  const { ledger, receiptVerifier, approvalConsumer } = freshDeps()
+  approvalConsumer.forceStatus('not-a-valid-uuid', 'invalid_approval_id')
+  const result = await handleAppleReminderLiveCommand(
+    issueCommand('not-a-valid-uuid', 'reminder_gate15'),
+    { env: FLAGS_ON, approvalConsumer, ledger, receiptVerifier, now: NOW }
+  )
+  const observed = result.status === 'blocked' &&
+    result.auditRecord.blockedReason === 'approval_invalid_id' &&
+    !result.packet &&
+    !result.auditRecord.ledgerStatus
+    ? 'blocked_approval_invalid_id_no_packet_no_ledger'
+    : `${result.status}:${result.auditRecord.blockedReason ?? 'none'}:${result.auditRecord.ledgerStatus ?? 'no_ledger_status'}`
+  return validation('gate15_10b_malformed_approval_id', 'Malformed approvalId maps to approval_invalid_id without issuing a packet or ledger write.', 'blocked_approval_invalid_id_no_packet_no_ledger', observed, [])
 }
 
 async function approvalReminderMismatchBlocked(): Promise<AppleReminderLiveRouteValidationResult> {
@@ -409,6 +427,7 @@ class FakeAppleApprovalConsumer implements AppleApprovalConsumer {
   private readonly state: FakeApprovalState = {
     approvals: new Map(),
     snapshotOverrides: new Map(),
+    forcedStatuses: new Map(),
   }
 
   seed(approval: AppleReminderExplicitBridgeApproval): void {
@@ -422,7 +441,14 @@ class FakeAppleApprovalConsumer implements AppleApprovalConsumer {
     this.state.snapshotOverrides.set(approvalId, override)
   }
 
+  forceStatus(approvalId: string, status: AppleApprovalConsumeStatus): void {
+    this.state.forcedStatuses.set(approvalId, status)
+  }
+
   async consumeForAppleReminderRead(input: AppleApprovalConsumeInput): Promise<AppleApprovalConsumeResult> {
+    const forcedStatus = this.state.forcedStatuses.get(input.approvalId)
+    if (forcedStatus) return consumeResult(false, forcedStatus, null, `Forced ${forcedStatus} for validation.`)
+
     const approval = this.state.approvals.get(input.approvalId) ?? null
     if (!approval) return consumeResult(false, 'not_found', null, 'No approval found for this approvalId.')
     if (approval.actionType !== 'mark_apple_reminder_read') return consumeResult(false, 'action_type_mismatch', null, 'Approval actionType is not mark_apple_reminder_read.')

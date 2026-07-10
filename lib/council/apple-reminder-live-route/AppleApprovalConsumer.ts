@@ -133,6 +133,7 @@ export function snapshotFromConsumedApproval(
 function mapConsumeStatus(status: ConsumeApprovalStatus): AppleApprovalConsumeStatus {
   switch (status) {
     case 'consumed': return 'consumed'
+    case 'invalid_approval_id': return 'invalid_approval_id'
     case 'not_found': return 'not_found'
     case 'already_consumed': return 'already_consumed'
     case 'expired': return 'expired'

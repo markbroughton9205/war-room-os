@@ -52,6 +52,7 @@ export type AppleReminderLiveRouteBlockedReason =
   | 'missing_reminder_id'
   | 'missing_approval_id'
   | 'approval_not_found'
+  | 'approval_invalid_id'
   | 'approval_not_active'
   | 'approval_revoked'
   | 'approval_already_consumed'
@@ -87,6 +88,7 @@ export type AppleApprovalConsumeInput = {
 
 export type AppleApprovalConsumeStatus =
   | 'consumed'
+  | 'invalid_approval_id'
   | 'not_found'
   | 'not_active'
   | 'already_consumed'
