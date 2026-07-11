@@ -5,6 +5,7 @@ import { recordPaymentAudit, recordPaymentGuardFindings } from '@/lib/payments/p
 import { runPaymentGuard } from '@/lib/payments/redSentinelPaymentGuard'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
+import { assertLiveActionsAllowed } from '@/lib/security/actionRoutePolicy'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +39,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const environmentBlocked = assertLiveActionsAllowed()
+  if (environmentBlocked) return environmentBlocked
+
   const unauthorized = await assertActionRouteAuthorized(req)
   if (unauthorized) return unauthorized
 
@@ -82,6 +86,9 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  const environmentBlocked = assertLiveActionsAllowed()
+  if (environmentBlocked) return environmentBlocked
+
   const unauthorized = await assertActionRouteAuthorized(req)
   if (unauthorized) return unauthorized
 

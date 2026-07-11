@@ -5,6 +5,7 @@ import { recordPaymentAudit } from '@/lib/payments/paymentAudit'
 import { normalizeProofMetadata, proofMetadataHasSensitiveKeys } from '@/lib/payments/payoutProof'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { assertActionRouteAuthorized } from '@/lib/security/actionRouteGuard'
+import { assertLiveActionsAllowed } from '@/lib/security/actionRoutePolicy'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,6 +14,9 @@ function persistenceLabel(value: 'supabase' | 'session-only') {
 }
 
 export async function POST(req: Request) {
+  const environmentBlocked = assertLiveActionsAllowed()
+  if (environmentBlocked) return environmentBlocked
+
   const unauthorized = await assertActionRouteAuthorized(req)
   if (unauthorized) return unauthorized
 

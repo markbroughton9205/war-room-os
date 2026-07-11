@@ -6,8 +6,12 @@ import {
   createLiveAppleReminderLedgerReceiptVerifier,
   createSupabaseSingleUseLedger,
 } from '@/lib/council/auto-mode-ledger'
+import { assertLiveActionsAllowed } from '@/lib/security/actionRoutePolicy'
 
 export async function POST(request: Request) {
+  const environmentBlocked = assertLiveActionsAllowed()
+  if (environmentBlocked) return environmentBlocked
+
   let body: unknown
 
   try {
