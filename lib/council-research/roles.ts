@@ -3,14 +3,6 @@ import type { FamilyRoleOutput } from './types'
 
 export type CouncilResearchRole = FamilyRoleOutput['family']
 
-const SHARED_RULES = [
-  'You are part of Ra\'el\'s War Room Council Research Team.',
-  'Use ONLY the source bundle below for factual claims about current events.',
-  'Label inference clearly. Never invent URLs, quotes, or live headlines.',
-  'If sources are missing or historical, say so plainly.',
-  'Write for Commander Mark (Ra\'el) in plain language — no developer jargon.',
-].join(' ')
-
 export function buildRoleUserPrompt(args: {
   role: CouncilResearchRole
   decree: string
