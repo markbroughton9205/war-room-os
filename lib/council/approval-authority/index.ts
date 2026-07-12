@@ -14,6 +14,8 @@ export {
   type ConsumeApprovalStatus,
   type ExplicitExecutionApproval,
   type ExplicitExecutionApprovalStatus,
+  type ApprovalAuthorityBasis,
+  type ApprovalIssuanceRoute,
   type IssueApprovalInput,
   type IssueApprovalResult,
   type RevokeApprovalResult,

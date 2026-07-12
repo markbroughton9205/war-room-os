@@ -42,6 +42,9 @@ export class SupabaseApprovalAuthority {
         action_type: input.action_type,
         target_system: input.target_system,
         target_id: input.target_id,
+        ...(input.issued_by_user_id !== undefined ? { issued_by_user_id: input.issued_by_user_id } : {}),
+        ...(input.authority_basis !== undefined ? { authority_basis: input.authority_basis } : {}),
+        ...(input.issuance_route !== undefined ? { issuance_route: input.issuance_route } : {}),
         single_use: true,
         nonce: this.nonceGenerator(),
         created_at: now,
@@ -49,7 +52,7 @@ export class SupabaseApprovalAuthority {
         expires_at: expiresAt,
         status: 'active',
       })
-      .select(selectColumns())
+      .select(selectColumns(hasIssuanceMetadata(input)))
       .single()
 
     if (error) return issueError(error)
@@ -61,7 +64,8 @@ export class SupabaseApprovalAuthority {
     expectedActionType: string,
     expectedTargetSystem: string,
     expectedTargetId: string,
-    expectedExactText: string
+    expectedExactText: string,
+    includeIssuanceMetadata = false
   ): Promise<ConsumeApprovalResult> {
     const now = new Date().toISOString()
     if (!isUuid(approvalId)) {
@@ -83,7 +87,7 @@ export class SupabaseApprovalAuthority {
       .eq('target_system', expectedTargetSystem)
       .eq('target_id', expectedTargetId)
       .eq('exact_approved_text', expectedExactText)
-      .select(selectColumns())
+      .select(selectColumns(includeIssuanceMetadata))
       .maybeSingle()
 
     if (error) return consume(false, 'consume_failed', null, error.message ?? 'Approval consume failed.')
@@ -95,11 +99,12 @@ export class SupabaseApprovalAuthority {
       expectedTargetSystem,
       expectedTargetId,
       expectedExactText,
-      now
+      now,
+      includeIssuanceMetadata
     )
   }
 
-  async revoke(approvalId: string, reason: string): Promise<RevokeApprovalResult> {
+  async revoke(approvalId: string, reason: string, includeIssuanceMetadata = false): Promise<RevokeApprovalResult> {
     const now = new Date().toISOString()
     if (!isUuid(approvalId)) {
       this.recordMalformedApprovalId('revoke', approvalId, now)
@@ -116,13 +121,13 @@ export class SupabaseApprovalAuthority {
       })
       .eq('approval_id', approvalId)
       .eq('status', 'active')
-      .select(selectColumns())
+      .select(selectColumns(includeIssuanceMetadata))
       .maybeSingle()
 
     if (error) return { ok: false, status: 'revoke_failed', approval: null, errorMessage: error.message ?? 'Approval revoke failed.' }
     if (data) return { ok: true, status: 'revoked', approval: rowToApproval(data as unknown as ApprovalRow), errorMessage: null }
 
-    const existing = await this.getById(approvalId)
+    const existing = await this.getById(approvalId, includeIssuanceMetadata)
     if (!existing) return { ok: false, status: 'not_found', approval: null, errorMessage: 'No approval found for this approvalId.' }
     if (existing.status === 'consumed' || existing.consumed_at) {
       return { ok: false, status: 'already_consumed', approval: existing, errorMessage: 'Approval has already been consumed.' }
@@ -133,7 +138,7 @@ export class SupabaseApprovalAuthority {
     return { ok: false, status: 'not_active', approval: existing, errorMessage: `Approval status is ${existing.status}.` }
   }
 
-  async getById(approvalId: string): Promise<ExplicitExecutionApproval | null> {
+  async getById(approvalId: string, includeIssuanceMetadata = false): Promise<ExplicitExecutionApproval | null> {
     if (!isUuid(approvalId)) {
       this.recordMalformedApprovalId('getById', approvalId, new Date().toISOString())
       return null
@@ -141,7 +146,7 @@ export class SupabaseApprovalAuthority {
 
     const { data, error } = await this.client
       .from(EXPLICIT_EXECUTION_APPROVALS_TABLE)
-      .select(selectColumns())
+      .select(selectColumns(includeIssuanceMetadata))
       .eq('approval_id', approvalId)
       .maybeSingle()
 
@@ -155,9 +160,10 @@ export class SupabaseApprovalAuthority {
     expectedTargetSystem: string,
     expectedTargetId: string,
     expectedExactText: string,
-    now: string
+    now: string,
+    includeIssuanceMetadata = false
   ): Promise<ConsumeApprovalResult> {
-    const existing = await this.getById(approvalId)
+    const existing = await this.getById(approvalId, includeIssuanceMetadata)
     if (!existing) return consume(false, 'not_found', null, 'No approval found for this approvalId.')
     if (existing.status === 'consumed' || existing.consumed_at) {
       return consume(false, 'already_consumed', existing, 'Approval has already been consumed.')
@@ -215,8 +221,8 @@ export function createSupabaseApprovalAuthority(): SupabaseApprovalAuthority {
 
 type ApprovalRow = ExplicitExecutionApproval
 
-function selectColumns(): string {
-  return [
+function selectColumns(includeIssuanceMetadata = true): string {
+  const columns = [
     'approval_id',
     'exact_approved_text',
     'commander_input',
@@ -233,7 +239,13 @@ function selectColumns(): string {
     'revoked_at',
     'revoked_reason',
     'status',
-  ].join(',')
+  ]
+
+  if (includeIssuanceMetadata) {
+    columns.splice(7, 0, 'issued_by_user_id', 'authority_basis', 'issuance_route')
+  }
+
+  return columns.join(',')
 }
 
 function rowToApproval(row: ApprovalRow): ExplicitExecutionApproval {
@@ -245,6 +257,9 @@ function rowToApproval(row: ApprovalRow): ExplicitExecutionApproval {
     action_type: row.action_type,
     target_system: row.target_system,
     target_id: row.target_id,
+    issued_by_user_id: row.issued_by_user_id ?? null,
+    authority_basis: row.authority_basis ?? null,
+    issuance_route: row.issuance_route ?? null,
     single_use: row.single_use,
     nonce: row.nonce,
     created_at: row.created_at,
@@ -271,6 +286,12 @@ function consume(
   errorMessage: string | null
 ): ConsumeApprovalResult {
   return { ok, status, approval, errorMessage }
+}
+
+function hasIssuanceMetadata(input: IssueApprovalInput): boolean {
+  return input.issued_by_user_id !== undefined ||
+    input.authority_basis !== undefined ||
+    input.issuance_route !== undefined
 }
 
 function isUuid(value: string): boolean {

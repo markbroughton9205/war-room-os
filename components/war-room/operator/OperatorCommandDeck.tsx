@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import type { OperatorAction, OperatorDeckSnapshot } from '@/lib/operator/deckTypes'
 import { ActionQueueMini } from './ActionQueueMini'
+import { ApprovalIssuancePanel } from './ApprovalIssuancePanel'
 import { AppleReminderLiveBridgePanel } from './AppleReminderLiveBridgePanel'
 import { FinancialTelemetryMini } from './FinancialTelemetryMini'
 import { MissionStatusStrip } from './MissionStatusStrip'
@@ -193,6 +194,7 @@ export const OperatorCommandDeck = memo(function OperatorCommandDeck() {
           />
           <FinancialTelemetryMini metrics={snapshot.financialTelemetry} />
           <MissionStatusStrip missions={snapshot.missions} />
+          <ApprovalIssuancePanel />
           <AppleReminderLiveBridgePanel />
           <QuickActionBar
             loading={loading}

@@ -2,6 +2,10 @@ export const EXPLICIT_EXECUTION_APPROVALS_TABLE = 'explicit_execution_approvals'
 
 export type ExplicitExecutionApprovalStatus = 'active' | 'expired' | 'consumed' | 'revoked'
 
+export type ApprovalAuthorityBasis = 'configured_commander_user_id' | 'legacy_pre_46p'
+
+export type ApprovalIssuanceRoute = 'operator_approval_surface' | 'legacy_unknown'
+
 export type ExplicitExecutionApproval = {
   approval_id: string
   exact_approved_text: string
@@ -19,6 +23,9 @@ export type ExplicitExecutionApproval = {
   revoked_at: string | null
   revoked_reason: string | null
   status: ExplicitExecutionApprovalStatus
+  issued_by_user_id?: string | null
+  authority_basis?: ApprovalAuthorityBasis | null
+  issuance_route?: ApprovalIssuanceRoute | null
 }
 
 export type IssueApprovalInput = {
@@ -28,6 +35,9 @@ export type IssueApprovalInput = {
   action_type: string
   target_system: string
   target_id: string
+  issued_by_user_id?: string | null
+  authority_basis?: ApprovalAuthorityBasis | null
+  issuance_route?: ApprovalIssuanceRoute | null
   ttlMs?: number
   now?: string
 }
