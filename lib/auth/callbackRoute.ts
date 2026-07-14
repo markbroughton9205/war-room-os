@@ -6,6 +6,7 @@ import { clearAuthCleanupMarker, clearRecoveryMarker, setAuthCleanupMarker, setR
 type CallbackSupabaseClient = {
   auth: {
     exchangeCodeForSession(code: string): Promise<{ error: unknown | null }>
+    verifyOtp(input: { token_hash: string; type: 'recovery' }): Promise<{ error: unknown | null }>
     getUser(): Promise<{ data: { user: { id: string; email?: string | null } | null }; error: unknown | null }>
     signOut(): Promise<{ error: unknown | null }>
   }
@@ -19,8 +20,40 @@ export type AuthCallbackDeps = {
 export async function handleAuthCallback(req: NextRequest, deps: AuthCallbackDeps): Promise<NextResponse> {
   const url = new URL(req.url)
   const code = url.searchParams.get('code')
+  const tokenHash = url.searchParams.get('token_hash')
   const type = url.searchParams.get('type')
   const origin = url.origin
+
+  if (type === 'recovery') {
+    const supabase = await deps.createSupabaseClient()
+    if (!tokenHash?.trim() || code) {
+      return cleanupAndRedirect(supabase, `${origin}/login?auth=invalid_callback`)
+    }
+
+    try {
+      const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
+      if (error) return cleanupAndRedirect(supabase, `${origin}/login?auth=invalid_callback`)
+    } catch {
+      return cleanupAndRedirect(supabase, `${origin}/login?auth=invalid_callback`)
+    }
+
+    const { data, error: userError } = await supabase.auth.getUser()
+    const user = data.user
+    if (userError || !user?.id) {
+      return cleanupAndRedirect(supabase, `${origin}/login?auth=unverified`)
+    }
+
+    const response = ResponseFactory.redirect(`${origin}/update-password`)
+    if (!(await setRecoveryMarker(response, user.id))) {
+      return cleanupAndRedirect(supabase, `${origin}/login?auth=recovery_unavailable`)
+    }
+    return response
+  }
+
+  if (type === 'signup' && tokenHash) {
+    const supabase = await deps.createSupabaseClient()
+    return cleanupAndRedirect(supabase, `${origin}/login?auth=invalid_callback`)
+  }
 
   if (!code) return ResponseFactory.redirect(`${origin}/login?auth=missing_code`)
 
@@ -33,24 +66,6 @@ export async function handleAuthCallback(req: NextRequest, deps: AuthCallbackDep
   const email = user?.email
   if (userError || !user?.id || !email) {
     return cleanupAndRedirect(supabase, `${origin}/login?auth=unverified`)
-  }
-
-  if (type === 'recovery') {
-    const invitationAuthority = deps.createInvitationAuthority()
-    const latestInvitation = await invitationAuthority.findLatestByEmail(email)
-    if (latestInvitation?.status === 'account_created') {
-      const confirmation = await invitationAuthority.confirmAccountForVerifiedUser(email, user.id)
-      if (!confirmation.ok) {
-        return cleanupAndRedirect(supabase, `${origin}/login?auth=invitation_mismatch`)
-      }
-      return ResponseFactory.redirect(`${origin}/login?confirmed=1`)
-    }
-
-    const response = ResponseFactory.redirect(`${origin}/update-password`)
-    if (!(await setRecoveryMarker(response, user.id))) {
-      return cleanupAndRedirect(supabase, `${origin}/login?auth=recovery_unavailable`)
-    }
-    return response
   }
 
   if (type === 'signup') {

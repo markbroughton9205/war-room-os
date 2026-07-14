@@ -73,6 +73,21 @@ export async function runPasswordRecoveryValidation(): Promise<PasswordRecoveryV
       cleanupMarkerSetFailsAfterSignOutFailureFailsClosed,
       normalRecoverySuccessUnchangedAfterR3,
       normalSignupConfirmationUnchangedAfterR3,
+      recoveryTokenHashVerifyOtpSucceeds,
+      recoveryVerifyOtpErrorFailsClosed,
+      recoveryVerifyOtpThrowsFailsClosed,
+      expiredOrReusedTokenHashFailsClosed,
+      missingTokenHashRejected,
+      missingTypeRejected,
+      unsupportedTypeRejectedAfterR4,
+      recoveryTokenMislabeledSignupFails,
+      signupCallbackMislabeledRecoveryFails,
+      codeAndTokenHashTogetherFailClosed,
+      getUserFailureAfterVerifyOtpFailsClosed,
+      updatePasswordReachedOnlyAfterVerifyOtpSuccess,
+      implicitFragmentLinkCannotBeConsumed,
+      noTokenHashInErrorsOrPersistence,
+      recoveryRedirectTargetHasNoTokenFragment,
     ]
 
     const results: PasswordRecoveryValidationResult[] = []
@@ -102,7 +117,7 @@ async function nonexistentEmailResetGeneric(): Promise<PasswordRecoveryValidatio
 async function recoveryCallbackRedirects(): Promise<PasswordRecoveryValidationResult> {
   const fixture = makeCallbackFixture({ type: 'recovery' })
   const response = await fixture.run()
-  return validation('recovery_03_callback_redirects_update_password', response.headers.get('location') === `${ORIGIN}/update-password` && hasCookie(response, 'war_room_recovery'), 'recovery callback redirects to /update-password and sets marker', `location=${response.headers.get('location')}; marker=${hasCookie(response, 'war_room_recovery')}`, ['type=recovery is honored only after code exchange and getUser succeed.'])
+  return validation('recovery_03_callback_redirects_update_password', response.headers.get('location') === `${ORIGIN}/update-password` && hasCookie(response, 'war_room_recovery'), 'recovery callback redirects to /update-password and sets marker', `location=${response.headers.get('location')}; marker=${hasCookie(response, 'war_room_recovery')}`, ['type=recovery is honored only after verifyOtp and getUser succeed.'])
 }
 
 async function signupCallbackConfirmsInvitation(): Promise<PasswordRecoveryValidationResult> {
@@ -267,9 +282,9 @@ async function domainSeparatedHmacRejectsCrossProtocolValue(): Promise<PasswordR
 }
 
 async function mislabeledSignupRecoveryDoesNotStrandInvitation(): Promise<PasswordRecoveryValidationResult> {
-  const fixture = makeCallbackFixture({ type: 'recovery', latestInvitationStatus: 'account_created' })
+  const fixture = makeCallbackFixture({ type: 'recovery', includeCode: true, includeTokenHash: false, latestInvitationStatus: 'account_created' })
   const response = await fixture.run()
-  return validation('recovery_31_mislabeled_signup_recovery_not_stranded', response.headers.get('location') === `${ORIGIN}/login?confirmed=1` && fixture.authority.confirmAttempts === 1 && !hasCookie(response, 'war_room_recovery'), 'signup callback mislabeled as recovery confirms invitation instead of creating recovery marker', `location=${response.headers.get('location')}; confirms=${fixture.authority.confirmAttempts}; marker=${hasCookie(response, 'war_room_recovery')}`, ['The type query is only a hint; server-side invitation state wins for account_created rows.'])
+  return validation('recovery_31_mislabeled_signup_recovery_not_stranded', response.headers.get('location') === `${ORIGIN}/login?auth=invalid_callback` && fixture.authority.confirmAttempts === 0 && hasClearedCookie(response, 'war_room_recovery'), 'signup callback mislabeled as recovery is rejected without creating recovery marker', `location=${response.headers.get('location')}; confirms=${fixture.authority.confirmAttempts}; recoveryCleared=${hasClearedCookie(response, 'war_room_recovery')}`, ['Recovery now requires token_hash plus type=recovery; signup code callbacks stay separate.'])
 }
 
 async function forgotPasswordEnvironmentGate(): Promise<PasswordRecoveryValidationResult> {
@@ -396,13 +411,107 @@ async function normalSignupConfirmationUnchangedAfterR3(): Promise<PasswordRecov
   return validation('recovery_r3_50_normal_signup_confirmation_unchanged', response.headers.get('location') === `${ORIGIN}/login?confirmed=1` && fixture.authority.confirmAttempts === 1, 'normal signup confirmation remains unchanged', `location=${response.headers.get('location')}; confirms=${fixture.authority.confirmAttempts}`, ['Signup confirmation still uses invitation authority.'])
 }
 
+async function recoveryTokenHashVerifyOtpSucceeds(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'recovery' })
+  const response = await fixture.run()
+  return validation('recovery_r4_51_token_hash_verify_otp_succeeds', response.headers.get('location') === `${ORIGIN}/update-password` && fixture.supabase.verifyAttempts === 1 && fixture.supabase.verifiedType === 'recovery' && hasCookie(response, 'war_room_recovery'), 'valid recovery token_hash verifies via verifyOtp and reaches /update-password', `location=${response.headers.get('location')}; verifyAttempts=${fixture.supabase.verifyAttempts}; type=${fixture.supabase.verifiedType}; marker=${hasCookie(response, 'war_room_recovery')}`, ['Recovery uses verifyOtp({ token_hash, type: recovery }) instead of code exchange.'])
+}
+
+async function recoveryVerifyOtpErrorFailsClosed(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'recovery', verifyOk: false })
+  const response = await fixture.run()
+  return validation('recovery_r4_52_verify_otp_error_fails_closed', response.headers.get('location') === `${ORIGIN}/login?auth=invalid_callback` && fixture.supabase.signOutAttempts === 1 && hasClearedCookie(response, 'war_room_recovery'), 'verifyOtp returned error signs out and clears recovery marker', `location=${response.headers.get('location')}; signOut=${fixture.supabase.signOutAttempts}; recoveryCleared=${hasClearedCookie(response, 'war_room_recovery')}`, ['Supabase error details are not exposed.'])
+}
+
+async function recoveryVerifyOtpThrowsFailsClosed(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'recovery', verifyThrows: true })
+  const response = await fixture.run()
+  return validation('recovery_r4_53_verify_otp_throw_fails_closed', response.headers.get('location') === `${ORIGIN}/login?auth=invalid_callback` && fixture.supabase.signOutAttempts === 1, 'thrown verifyOtp failure signs out through cleanup path', `location=${response.headers.get('location')}; signOut=${fixture.supabase.signOutAttempts}`, ['Thrown provider/network errors do not fall through.'])
+}
+
+async function expiredOrReusedTokenHashFailsClosed(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'recovery', verifyOk: false })
+  const response = await fixture.run()
+  return validation('recovery_r4_54_expired_or_reused_token_fails_closed', response.headers.get('location') === `${ORIGIN}/login?auth=invalid_callback` && fixture.supabase.signOutAttempts === 1, 'expired or reused token_hash is treated as invalid callback', `location=${response.headers.get('location')}; signOut=${fixture.supabase.signOutAttempts}`, ['The callback does not distinguish expired, reused, or invalid token_hash values.'])
+}
+
+async function missingTokenHashRejected(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'recovery', includeTokenHash: false })
+  const response = await fixture.run()
+  return validation('recovery_r4_55_missing_token_hash_rejected', response.headers.get('location') === `${ORIGIN}/login?auth=invalid_callback` && fixture.supabase.verifyAttempts === 0, 'recovery callback requires a non-empty token_hash', `location=${response.headers.get('location')}; verifyAttempts=${fixture.supabase.verifyAttempts}`, ['No attempt is made to process a recovery request without token_hash.'])
+}
+
+async function missingTypeRejected(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: null, includeCode: true })
+  const response = await fixture.run()
+  return validation('recovery_r4_56_missing_type_rejected', response.headers.get('location') === `${ORIGIN}/login?auth=unsupported_callback` && fixture.supabase.signOutAttempts === 1, 'callback without type is rejected after safe code exchange cleanup path', `location=${response.headers.get('location')}; signOut=${fixture.supabase.signOutAttempts}`, ['The route does not infer recovery from token_hash alone.'])
+}
+
+async function unsupportedTypeRejectedAfterR4(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'magic' })
+  const response = await fixture.run()
+  return validation('recovery_r4_57_unsupported_type_rejected', response.headers.get('location') === `${ORIGIN}/login?auth=unsupported_callback` && fixture.supabase.signOutAttempts === 1, 'unsupported callback type remains rejected', `location=${response.headers.get('location')}; signOut=${fixture.supabase.signOutAttempts}`, ['Only recovery and signup are accepted.'])
+}
+
+async function recoveryTokenMislabeledSignupFails(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'signup', includeCode: false, includeTokenHash: true })
+  const response = await fixture.run()
+  return validation('recovery_r4_58_recovery_token_mislabeled_signup_fails', response.headers.get('location') === `${ORIGIN}/login?auth=invalid_callback` && fixture.supabase.verifyAttempts === 0 && fixture.authority.confirmAttempts === 0, 'token_hash with type=signup is rejected and never confirms an invitation', `location=${response.headers.get('location')}; verifyAttempts=${fixture.supabase.verifyAttempts}; confirms=${fixture.authority.confirmAttempts}`, ['Recovery and signup mechanisms stay separate.'])
+}
+
+async function signupCallbackMislabeledRecoveryFails(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'recovery', includeCode: true, includeTokenHash: false, latestInvitationStatus: 'account_created' })
+  const response = await fixture.run()
+  return validation('recovery_r4_59_signup_callback_mislabeled_recovery_fails', response.headers.get('location') === `${ORIGIN}/login?auth=invalid_callback` && fixture.authority.confirmAttempts === 0 && fixture.supabase.exchangeAttempts === 0, 'code callback mislabeled recovery is rejected before signup confirmation', `location=${response.headers.get('location')}; confirms=${fixture.authority.confirmAttempts}; exchanges=${fixture.supabase.exchangeAttempts}`, ['A signup code cannot be converted into recovery or invitation confirmation by changing type.'])
+}
+
+async function codeAndTokenHashTogetherFailClosed(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'recovery', includeCode: true, includeTokenHash: true })
+  const response = await fixture.run()
+  return validation('recovery_r4_60_code_and_token_hash_fail_closed', response.headers.get('location') === `${ORIGIN}/login?auth=invalid_callback` && fixture.supabase.verifyAttempts === 0 && fixture.supabase.exchangeAttempts === 0, 'ambiguous code plus token_hash callback is rejected without processing either credential', `location=${response.headers.get('location')}; verifyAttempts=${fixture.supabase.verifyAttempts}; exchanges=${fixture.supabase.exchangeAttempts}`, ['Mixed parameter sets fail closed.'])
+}
+
+async function getUserFailureAfterVerifyOtpFailsClosed(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'recovery', user: null })
+  const response = await fixture.run()
+  return validation('recovery_r4_61_get_user_failure_fails_closed', response.headers.get('location') === `${ORIGIN}/login?auth=unverified` && fixture.supabase.verifyAttempts === 1 && fixture.supabase.signOutAttempts === 1, 'getUser failure after verifyOtp signs out and does not create marker', `location=${response.headers.get('location')}; verifyAttempts=${fixture.supabase.verifyAttempts}; signOut=${fixture.supabase.signOutAttempts}`, ['No client-supplied user identity is accepted.'])
+}
+
+async function updatePasswordReachedOnlyAfterVerifyOtpSuccess(): Promise<PasswordRecoveryValidationResult> {
+  const valid = await makeCallbackFixture({ type: 'recovery' }).run()
+  const invalid = await makeCallbackFixture({ type: 'recovery', verifyOk: false }).run()
+  return validation('recovery_r4_62_update_password_only_after_verify_success', valid.headers.get('location') === `${ORIGIN}/update-password` && invalid.headers.get('location') !== `${ORIGIN}/update-password`, 'only successful verifyOtp reaches /update-password', `valid=${valid.headers.get('location')}; invalid=${invalid.headers.get('location')}`, ['The update-password route is not reachable from invalid recovery callbacks.'])
+}
+
+async function implicitFragmentLinkCannotBeConsumed(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: null, includeCode: false, includeTokenHash: false })
+  const response = await fixture.run()
+  return validation('recovery_r4_63_implicit_fragment_not_consumed', response.headers.get('location') === `${ORIGIN}/login?auth=missing_code` && fixture.supabase.verifyAttempts === 0 && fixture.supabase.exchangeAttempts === 0, 'server route cannot consume browser fragment tokens', `location=${response.headers.get('location')}; verifyAttempts=${fixture.supabase.verifyAttempts}; exchanges=${fixture.supabase.exchangeAttempts}`, ['No fragment parsing or access-token handling was added.'])
+}
+
+async function noTokenHashInErrorsOrPersistence(): Promise<PasswordRecoveryValidationResult> {
+  const fixture = makeCallbackFixture({ type: 'recovery', verifyOk: false, tokenHash: 'secret-token-hash-never-log' })
+  const response = await fixture.run()
+  const serialized = JSON.stringify({ status: response.status, location: response.headers.get('location'), cookies: response.headers.get('set-cookie') })
+  return validation('recovery_r4_64_token_hash_not_reflected', !serialized.includes('secret-token-hash-never-log'), 'token_hash is not reflected in responses, errors, or cookies', `containsTokenHash=${serialized.includes('secret-token-hash-never-log')}`, ['The token_hash is passed only to verifyOtp and is not persisted by War Room.'])
+}
+
+async function recoveryRedirectTargetHasNoTokenFragment(): Promise<PasswordRecoveryValidationResult> {
+  const auth = new FakeRecoveryRequestAuth(true)
+  await requestPasswordRecovery(EMAIL, auth, ORIGIN)
+  const redirectTo = auth.lastRedirectTo ?? ''
+  const hasTokenFragment = redirectTo.includes('#') || redirectTo.includes('access_token') || redirectTo.includes('refresh_token')
+  return validation('recovery_r4_65_redirect_target_no_token_fragment', !hasTokenFragment, 'recovery redirect target contains no token fragment or token params', `hasTokenFragment=${hasTokenFragment}; redirectTo=${redirectTo}`, ['The repo never asks Supabase to place tokens in the browser URL.'])
+}
+
 class FakeRecoveryRequestAuth {
   attempts = 0
+  lastRedirectTo: string | null = null
 
   constructor(private readonly ok: boolean) {}
 
   async resetPasswordForEmail(input: { email: string; redirectTo: string }): Promise<{ ok: true } | { ok: false }> {
-    void input
+    this.lastRedirectTo = input.redirectTo
     this.attempts += 1
     return this.ok ? { ok: true } : { ok: false }
   }
@@ -441,13 +550,26 @@ class FakePasswordUpdateAuth {
 
 class FakeCallbackSupabase {
   signOutAttempts = 0
+  exchangeAttempts = 0
+  verifyAttempts = 0
+  exchangedCode: string | null = null
+  verifiedTokenHash: string | null = null
+  verifiedType: string | null = null
 
-  constructor(private readonly options: { exchangeOk: boolean; user: { id: string; email: string } | null; signOutOk: boolean; signOutThrows: boolean }) {}
+  constructor(private readonly options: { exchangeOk: boolean; verifyOk: boolean; verifyThrows: boolean; user: { id: string; email: string } | null; signOutOk: boolean; signOutThrows: boolean }) {}
 
   auth = {
     exchangeCodeForSession: async (code: string) => {
-      void code
+      this.exchangeAttempts += 1
+      this.exchangedCode = code
       return { error: this.options.exchangeOk ? null : new Error('bad code') }
+    },
+    verifyOtp: async (input: { token_hash: string; type: 'recovery' }) => {
+      this.verifyAttempts += 1
+      this.verifiedTokenHash = input.token_hash
+      this.verifiedType = input.type
+      if (this.options.verifyThrows) throw new Error('verify failed')
+      return { error: this.options.verifyOk ? null : new Error('bad token') }
     },
     getUser: async () => ({ data: { user: this.options.user }, error: this.options.user ? null : new Error('no user') }),
     signOut: async () => {
@@ -522,28 +644,42 @@ class FakeInvitationAuthority {
 }
 
 function makeCallbackFixture(options: {
-  type: string
+  type: string | null
   exchangeOk?: boolean
+  verifyOk?: boolean
+  verifyThrows?: boolean
   user?: { id: string; email: string } | null
   confirmationOk?: boolean
   latestInvitationStatus?: FakeInvitationStatus
   signOutOk?: boolean
   signOutThrows?: boolean
   extraQuery?: string
+  includeCode?: boolean
+  includeTokenHash?: boolean
+  tokenHash?: string
 }) {
   const supabase = new FakeCallbackSupabase({
     exchangeOk: options.exchangeOk ?? true,
+    verifyOk: options.verifyOk ?? true,
+    verifyThrows: options.verifyThrows ?? false,
     user: options.user === undefined ? { id: USER_ID, email: EMAIL } : options.user,
     signOutOk: options.signOutOk ?? true,
     signOutThrows: options.signOutThrows ?? false,
   })
   const authority = new FakeInvitationAuthority(options.confirmationOk ?? true, options.latestInvitationStatus ?? null)
+  const includeCode = options.includeCode ?? options.type !== 'recovery'
+  const includeTokenHash = options.includeTokenHash ?? options.type === 'recovery'
+  const queryParts: string[] = []
+  if (includeCode) queryParts.push('code=abc')
+  if (includeTokenHash) queryParts.push(`token_hash=${encodeURIComponent(options.tokenHash ?? 'recovery-token-hash')}`)
+  if (options.type !== null) queryParts.push(`type=${encodeURIComponent(options.type)}`)
+  const query = queryParts.length > 0 ? `?${queryParts.join('&')}${options.extraQuery ?? ''}` : ''
   return {
     supabase,
     authority,
     run: () =>
       handleAuthCallback(
-        { url: `${ORIGIN}/auth/callback?code=abc&type=${encodeURIComponent(options.type)}${options.extraQuery ?? ''}` } as never,
+        { url: `${ORIGIN}/auth/callback${query}` } as never,
         {
           createSupabaseClient: async () => supabase as never,
           createInvitationAuthority: () => authority as never,
@@ -554,6 +690,10 @@ function makeCallbackFixture(options: {
 
 function hasCookie(response: Response, name: string): boolean {
   return response.headers.get('set-cookie')?.includes(name) ?? false
+}
+
+function hasClearedCookie(response: Response, name: string): boolean {
+  return response.headers.get('set-cookie')?.includes(`${name}=;`) ?? false
 }
 
 function makeRequest(url: string, cookieMap: Record<string, string>) {
