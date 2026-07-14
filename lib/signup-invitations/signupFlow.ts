@@ -78,7 +78,7 @@ export async function processInviteSignup(input: SignupFlowInput, deps: SignupFl
     return { status: 'error', message: GENERIC_INVITATION_REJECTION }
   }
 
-  const emailRedirectTo = `${(deps.baseUrl ?? readBaseUrl()).replace(/\/+$/, '')}/auth/callback`
+  const emailRedirectTo = `${(deps.baseUrl ?? readBaseUrl()).replace(/\/+$/, '')}/auth/callback?type=signup`
 
   if (existingUser.status === 'unconfirmed') {
     const resend = await callAuthOperation(() => deps.auth.resend({ email: signupEmail, emailRedirectTo }))

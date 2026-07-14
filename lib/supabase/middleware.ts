@@ -1,7 +1,15 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import {
+  AUTH_CLEANUP_MARKER_COOKIE,
+  clearAuthCleanupMarker,
+  clearRecoveryMarker,
+  setAuthCleanupMarker,
+  verifyAuthCleanupMarkerFromRequest,
+  verifyRecoveryMarkerFromRequest,
+} from '@/lib/auth/recovery'
 
-const PUBLIC_PATHS = ['/login', '/signup', '/auth/callback']
+const PUBLIC_PATHS = ['/login', '/signup', '/forgot-password', '/auth/callback', '/auth/cleanup']
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(`${path}/`))
@@ -74,10 +82,104 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   const {
     data: { user },
   } = await supabase.auth.getUser()
+  const { pathname } = request.nextUrl
+
+  if (user) {
+    const cleanupMarkerCookie = request.cookies.get(AUTH_CLEANUP_MARKER_COOKIE)?.value
+    if (cleanupMarkerCookie) {
+      const marker = await verifyAuthCleanupMarkerFromRequest(request, user.id)
+      if (!marker.ok) {
+        // A still-live session must not reach an ordinary redirect unless
+        // sign-out is confirmed — an invalid/expired marker on its own says
+        // nothing about whether the session was actually terminated.
+        let signOutOk = false
+        try {
+          const { error } = await supabase.auth.signOut()
+          signOutOk = !error
+        } catch {
+          signOutOk = false
+        }
+
+        if (signOutOk) {
+          const loginUrl = request.nextUrl.clone()
+          loginUrl.pathname = '/login'
+          loginUrl.search = '?auth=cleanup_required'
+          const response = NextResponse.redirect(loginUrl)
+          clearAuthCleanupMarker(response)
+          clearRecoveryMarker(response)
+          return response
+        }
+
+        const cleanupUrl = request.nextUrl.clone()
+        cleanupUrl.pathname = '/auth/cleanup'
+        cleanupUrl.search = ''
+        const response = NextResponse.redirect(cleanupUrl)
+        clearRecoveryMarker(response)
+        const cleanupMarkerSet = await setAuthCleanupMarker(response, { userId: user.id, destination: '/login?auth=cleanup_required' })
+        if (!cleanupMarkerSet) return failClosedCleanupResponse()
+        return response
+      }
+
+      if (!isCleanupAllowedPath(pathname)) {
+        const cleanupUrl = request.nextUrl.clone()
+        cleanupUrl.pathname = '/auth/cleanup'
+        cleanupUrl.search = ''
+        const response = NextResponse.redirect(cleanupUrl)
+        clearRecoveryMarker(response)
+        return response
+      }
+    }
+
+    const markerCookie = request.cookies.get('war_room_recovery')?.value
+    if (markerCookie) {
+      const marker = await verifyRecoveryMarkerFromRequest(request, user.id)
+      if (!marker.ok) {
+        // Same invariant as the cleanup-marker branch above: don't fall
+        // through to an ordinary redirect on an invalid recovery marker
+        // unless sign-out is confirmed. On failure, hand off to the
+        // auth-cleanup quarantine rather than inventing a second retry path.
+        let signOutOk = false
+        try {
+          const { error } = await supabase.auth.signOut()
+          signOutOk = !error
+        } catch {
+          signOutOk = false
+        }
+
+        if (signOutOk) {
+          const loginUrl = request.nextUrl.clone()
+          loginUrl.pathname = '/login'
+          loginUrl.search = '?auth=recovery_required'
+          const response = NextResponse.redirect(loginUrl)
+          clearRecoveryMarker(response)
+          return response
+        }
+
+        const cleanupUrl = request.nextUrl.clone()
+        cleanupUrl.pathname = '/auth/cleanup'
+        cleanupUrl.search = ''
+        const response = NextResponse.redirect(cleanupUrl)
+        clearRecoveryMarker(response)
+        const cleanupMarkerSet = await setAuthCleanupMarker(response, { userId: user.id, destination: '/login?auth=recovery_required' })
+        if (!cleanupMarkerSet) return failClosedCleanupResponse()
+        return response
+      }
+
+      if (!isRecoveryAllowedPath(pathname)) {
+        const updateUrl = request.nextUrl.clone()
+        updateUrl.pathname = '/update-password'
+        updateUrl.search = ''
+        return NextResponse.redirect(updateUrl)
+      }
+    } else if (pathname === '/update-password' || pathname.startsWith('/update-password/')) {
+      const loginUrl = request.nextUrl.clone()
+      loginUrl.pathname = '/login'
+      loginUrl.search = '?auth=recovery_required'
+      return NextResponse.redirect(loginUrl)
+    }
+  }
 
   if (!user) {
-    const { pathname } = request.nextUrl
-
     if (pathname.startsWith('/api/')) {
       if (!isExemptApiRequest(pathname, request.method)) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -91,4 +193,27 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   }
 
   return supabaseResponse
+}
+
+function failClosedCleanupResponse(): NextResponse {
+  return NextResponse.json(
+    { error: 'Authentication cleanup could not be completed safely. Refresh this page to retry.' },
+    { status: 503 }
+  )
+}
+
+export function isCleanupAllowedPath(pathname: string): boolean {
+  if (pathname === '/auth/cleanup' || pathname.startsWith('/auth/cleanup/')) return true
+  if (pathname === '/auth/callback' || pathname.startsWith('/auth/callback/')) return true
+  if (pathname.startsWith('/_next/')) return true
+  if (pathname === '/favicon.ico' || pathname === '/robots.txt') return true
+  return false
+}
+
+export function isRecoveryAllowedPath(pathname: string): boolean {
+  if (pathname === '/update-password' || pathname.startsWith('/update-password/')) return true
+  if (pathname === '/auth/callback' || pathname.startsWith('/auth/callback/')) return true
+  if (pathname.startsWith('/_next/')) return true
+  if (pathname === '/favicon.ico' || pathname === '/robots.txt') return true
+  return false
 }
