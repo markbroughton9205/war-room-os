@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
-import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { mapRawMemoryRuntimeState } from '@/lib/memory/runtimeState'
+import { requireCommanderSession } from '@/lib/security/commanderSession'
+import { assertLiveActionsAllowed } from '@/lib/security/actionRoutePolicy'
 
 type MemoryEntry = {
   id?: string
@@ -25,11 +27,16 @@ function normalizeMemory(row: Record<string, unknown>): MemoryEntry {
 }
 
 export async function GET(req: Request) {
+  const environmentBlocked = assertLiveActionsAllowed()
+  if (environmentBlocked) return environmentBlocked
+
   const healthOnly = new URL(req.url).searchParams.get('health') === '1'
+  const commander = await requireCommanderSession(healthOnly ? 'Memory health' : 'Memory read')
+  if (!commander.ok) return commander.response
 
   let supabase
   try {
-    supabase = createSupabaseServerClient()
+    supabase = createSupabaseAdminClient()
   } catch (error) {
     const runtime = mapRawMemoryRuntimeState(error, { configured: false })
     if (healthOnly) {
@@ -120,9 +127,15 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const environmentBlocked = assertLiveActionsAllowed()
+  if (environmentBlocked) return environmentBlocked
+
+  const commander = await requireCommanderSession('Memory save')
+  if (!commander.ok) return commander.response
+
   let supabase
   try {
-    supabase = createSupabaseServerClient()
+    supabase = createSupabaseAdminClient()
   } catch (error) {
     const runtime = mapRawMemoryRuntimeState(error, { configured: false })
     return NextResponse.json({
@@ -152,7 +165,11 @@ export async function POST(req: Request) {
 
   const { data, error } = await supabase
     .from('memories')
-    .insert([memory])
+    .insert([{
+      ...memory,
+      created_by_user_id: commander.userId,
+      ownership_authority_basis: 'authenticated_commander_session',
+    }])
     .select('id, content, source, family, tags, importance, created_at')
     .single()
 
@@ -168,7 +185,12 @@ export async function POST(req: Request) {
 
   const fallback = await supabase
     .from('memories')
-    .insert([{ category: memory.source, content: memory.content }])
+    .insert([{
+      category: memory.source,
+      content: memory.content,
+      created_by_user_id: commander.userId,
+      ownership_authority_basis: 'authenticated_commander_session',
+    }])
     .select('*')
     .single()
 

@@ -38,6 +38,8 @@ export async function insertMemoryProposal(
     content_redacted: string
     conversation_id: string | null
     metadata: Record<string, unknown>
+    created_by_user_id?: string | null
+    ownership_authority_basis?: 'authenticated_commander_session' | 'legacy_backfill_commander' | null
   },
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const { data, error } = await client
@@ -50,6 +52,8 @@ export async function insertMemoryProposal(
       status: 'pending',
       metadata: input.metadata,
       conversation_id: input.conversation_id,
+      ...(input.created_by_user_id ? { created_by_user_id: input.created_by_user_id } : {}),
+      ...(input.ownership_authority_basis ? { ownership_authority_basis: input.ownership_authority_basis } : {}),
     })
     .select('id')
     .single()

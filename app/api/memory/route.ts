@@ -1,8 +1,16 @@
 import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { mapRawMemoryRuntimeState } from '@/lib/memory/runtimeState'
+import { requireCommanderSession } from '@/lib/security/commanderSession'
+import { assertLiveActionsAllowed } from '@/lib/security/actionRoutePolicy'
 
 export async function POST(req: Request) {
+  const environmentBlocked = assertLiveActionsAllowed()
+  if (environmentBlocked) return environmentBlocked
+
+  const commander = await requireCommanderSession('Memory save')
+  if (!commander.ok) return commander.response
+
   let supabase
   try {
     supabase = createSupabaseAdminClient()
@@ -15,7 +23,12 @@ export async function POST(req: Request) {
 
   const { data, error } = await supabase
     .from('memories')
-    .insert([{ category, content }])
+    .insert([{
+      category,
+      content,
+      created_by_user_id: commander.userId,
+      ownership_authority_basis: 'authenticated_commander_session',
+    }])
     .select()
 
   if (error) {
@@ -26,6 +39,12 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
+  const environmentBlocked = assertLiveActionsAllowed()
+  if (environmentBlocked) return environmentBlocked
+
+  const commander = await requireCommanderSession('Memory read')
+  if (!commander.ok) return commander.response
+
   let supabase
   try {
     supabase = createSupabaseAdminClient()
