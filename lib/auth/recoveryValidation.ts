@@ -25,6 +25,9 @@ export async function runPasswordRecoveryValidation(): Promise<PasswordRecoveryV
     const cases: Array<() => Promise<PasswordRecoveryValidationResult>> = [
       existingEmailResetGeneric,
       nonexistentEmailResetGeneric,
+      resetPasswordReturnedErrorDoesNotCrash,
+      resetPasswordThrownExceptionDoesNotCrash,
+      resetPasswordRateLimitDoesNotCrash,
       recoveryCallbackRedirects,
       signupCallbackConfirmsInvitation,
       unknownTypeRejected,
@@ -112,6 +115,24 @@ async function nonexistentEmailResetGeneric(): Promise<PasswordRecoveryValidatio
   const auth = new FakeRecoveryRequestAuth(false)
   const result = await requestPasswordRecovery('missing@example.com', auth, ORIGIN)
   return validation('recovery_02_nonexistent_email_generic', result.message === GENERIC_RECOVERY_SENT_MESSAGE && auth.attempts === 1, 'nonexistent email receives identical generic response', `message=${result.message}; attempts=${auth.attempts}`, ['Returned Supabase errors are suppressed.'])
+}
+
+async function resetPasswordReturnedErrorDoesNotCrash(): Promise<PasswordRecoveryValidationResult> {
+  const auth = new FakeRecoveryRequestAuth(false)
+  const result = await requestPasswordRecovery(EMAIL, auth, ORIGIN)
+  return validation('recovery_02a_returned_error_generic', result.status === 'sent' && result.message === GENERIC_RECOVERY_SENT_MESSAGE && auth.attempts === 1, 'Supabase returned error still produces generic response', `status=${result.status}; message=${result.message}; attempts=${auth.attempts}`, ['Returned resetPasswordForEmail errors do not crash or enumerate accounts.'])
+}
+
+async function resetPasswordThrownExceptionDoesNotCrash(): Promise<PasswordRecoveryValidationResult> {
+  const auth = new FakeRecoveryRequestAuth(true, { throws: true })
+  const result = await requestPasswordRecovery(EMAIL, auth, ORIGIN)
+  return validation('recovery_02b_thrown_error_generic', result.status === 'sent' && result.message === GENERIC_RECOVERY_SENT_MESSAGE && auth.attempts === 1, 'Supabase thrown exception still produces generic response', `status=${result.status}; message=${result.message}; attempts=${auth.attempts}`, ['Thrown resetPasswordForEmail failures do not crash or enumerate accounts.'])
+}
+
+async function resetPasswordRateLimitDoesNotCrash(): Promise<PasswordRecoveryValidationResult> {
+  const auth = new FakeRecoveryRequestAuth(false, { reason: 'rate_limited' })
+  const result = await requestPasswordRecovery(EMAIL, auth, ORIGIN)
+  return validation('recovery_02c_rate_limit_generic', result.status === 'sent' && result.message === GENERIC_RECOVERY_SENT_MESSAGE && auth.attempts === 1, 'rate-limit-style failure still produces generic response', `status=${result.status}; message=${result.message}; attempts=${auth.attempts}; reason=${auth.reason}`, ['Rate limiting does not expose account state or crash the action flow.'])
 }
 
 async function recoveryCallbackRedirects(): Promise<PasswordRecoveryValidationResult> {
@@ -507,12 +528,16 @@ async function recoveryRedirectTargetHasNoTokenFragment(): Promise<PasswordRecov
 class FakeRecoveryRequestAuth {
   attempts = 0
   lastRedirectTo: string | null = null
+  readonly reason: string | null
 
-  constructor(private readonly ok: boolean) {}
+  constructor(private readonly ok: boolean, private readonly options: { throws?: boolean; reason?: string } = {}) {
+    this.reason = options.reason ?? null
+  }
 
   async resetPasswordForEmail(input: { email: string; redirectTo: string }): Promise<{ ok: true } | { ok: false }> {
     this.lastRedirectTo = input.redirectTo
     this.attempts += 1
+    if (this.options.throws) throw new Error(this.options.reason ?? 'reset failed')
     return this.ok ? { ok: true } : { ok: false }
   }
 }

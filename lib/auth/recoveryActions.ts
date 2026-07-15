@@ -7,11 +7,8 @@ import { clearRecoveryMarkerFromCookieStore, verifyRecoveryMarkerFromCookieStore
 import {
   requestPasswordRecovery,
   updateRecoveredPassword,
-  type PasswordRecoveryRequestState,
-  type PasswordUpdateState,
 } from './recoveryFlow'
-
-export type { PasswordRecoveryRequestState, PasswordUpdateState }
+import type { PasswordRecoveryRequestState, PasswordUpdateState } from './recoveryState'
 
 export async function sendPasswordRecoveryEmail(_prevState: PasswordRecoveryRequestState, formData: FormData): Promise<PasswordRecoveryRequestState> {
   const environmentBlocked = assertLiveActionsAllowed()

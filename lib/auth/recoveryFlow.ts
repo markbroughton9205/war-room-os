@@ -1,14 +1,5 @@
 import { isPlausibleEmail, normalizeEmail, readBaseUrl } from '@/lib/signup-invitations/token'
-
-export type PasswordRecoveryRequestState = {
-  status: 'idle' | 'sent'
-  message: string | null
-}
-
-export type PasswordUpdateState = {
-  status: 'idle' | 'error' | 'success'
-  message: string | null
-}
+import type { PasswordRecoveryRequestState, PasswordUpdateState } from './recoveryState'
 
 export type PasswordRecoveryAuthClient = {
   resetPasswordForEmail(input: { email: string; redirectTo: string }): Promise<{ ok: true } | { ok: false }>

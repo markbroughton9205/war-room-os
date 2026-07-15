@@ -2,9 +2,10 @@
 
 import Link from 'next/link'
 import { useActionState } from 'react'
-import { sendPasswordRecoveryEmail, type PasswordRecoveryRequestState } from '@/lib/auth/recoveryActions'
+import { sendPasswordRecoveryEmail } from '@/lib/auth/recoveryActions'
+import { PASSWORD_RECOVERY_REQUEST_INITIAL_STATE } from '@/lib/auth/recoveryState'
 
-const initialState: PasswordRecoveryRequestState = { status: 'idle', message: null }
+const initialState = PASSWORD_RECOVERY_REQUEST_INITIAL_STATE
 
 export function ForgotPasswordForm() {
   const [state, formAction, pending] = useActionState(sendPasswordRecoveryEmail, initialState)

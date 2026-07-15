@@ -1,9 +1,10 @@
 'use client'
 
 import { useActionState } from 'react'
-import { updatePasswordAfterRecovery, type PasswordUpdateState } from '@/lib/auth/recoveryActions'
+import { updatePasswordAfterRecovery } from '@/lib/auth/recoveryActions'
+import { PASSWORD_UPDATE_INITIAL_STATE } from '@/lib/auth/recoveryState'
 
-const initialState: PasswordUpdateState = { status: 'idle', message: null }
+const initialState = PASSWORD_UPDATE_INITIAL_STATE
 
 export function UpdatePasswordForm() {
   const [state, formAction, pending] = useActionState(updatePasswordAfterRecovery, initialState)
