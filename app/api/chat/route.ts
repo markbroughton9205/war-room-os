@@ -122,6 +122,13 @@ import {
 } from '@/lib/council/stabilityMode'
 import { logCouncilPacketMetrics } from '@/lib/council/packetSizeLog'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
+import { deriveTopicScopeLock } from '@/lib/council/topicScope'
+import {
+  attachCouncilTrace,
+  createCouncilRuntimeTrace,
+  isCouncilRuntimeTraceRequested,
+  summarizeTextForTrace,
+} from '@/lib/council/runtimeTrace'
 
 function buildResearchAntiLoopAugment(threadBlock: string): string {
   const hits = threadBlock.match(/\bprimary\s+finding\b/gi) ?? []
@@ -474,8 +481,48 @@ export async function POST(req: Request) {
     typeof body.conversationId === 'string' && /^[0-9a-f-]{36}$/i.test(body.conversationId.trim())
       ? body.conversationId.trim()
       : null
+  const councilTrace = createCouncilRuntimeTrace({
+    enabled: isCouncilRuntimeTraceRequested(req, body),
+    sessionId: conversationId,
+  })
+  const withTrace = <T extends Record<string, unknown>>(payload: T) => attachCouncilTrace(payload, councilTrace)
+  councilTrace.record('request_received', {
+    module: 'app/api/chat/route.ts:POST',
+    inputSummary: {
+      message: summarizeTextForTrace(message),
+      conversationalTurn,
+      mode,
+      toneMode,
+      councilSingleFamily,
+      councilFlowMode,
+      hasConversationId: Boolean(conversationId),
+      hasThreadHistory: Array.isArray(threadHistory),
+    },
+    outputSummary: {
+      councilTraceId: councilTrace.councilTraceId,
+      missionId: councilTrace.missionId,
+      missionVersion: councilTrace.missionVersion,
+    },
+    stateChange: 'Initialized debug-only runtime trace envelope for this /api/chat request.',
+  })
 
   const councilCommand = coerceCouncilCommand(body.councilCommand)
+  councilTrace.record('command_parsed', {
+    module: 'lib/council/councilCommandTypes.ts:coerceCouncilCommand',
+    inputSummary: {
+      provided: Boolean(body.councilCommand),
+      message: summarizeTextForTrace(message),
+    },
+    outputSummary: {
+      mode: councilCommand.mode,
+      targetFamilies: councilCommand.targetFamilies,
+      excludedFamilies: councilCommand.excludedFamilies,
+      directInvocation: councilCommand.directInvocation,
+      executionPermission: councilCommand.executionPermission,
+      responseLimits: councilCommand.responseLimits,
+    },
+    stateChange: 'Commander discipline command normalized for the current request.',
+  })
   const councilGatherPhase = body.councilGatherPhase === 'decree_soft' ? 'decree_soft' : null
   const councilSingleFamilyEarly = body.councilSingleFamily as CouncilSingleFamily | undefined
   const raelDirectiveText =
@@ -507,6 +554,17 @@ export async function POST(req: Request) {
 
   const thread = buildThread(threadHistory)
   const intentState = resolveCurrentIntent({ latestRaelDecreeText: raelDirectiveText })
+  councilTrace.record('current_intent_resolved', {
+    module: 'lib/council/currentIntent.ts:resolveCurrentIntent',
+    inputSummary: { latestRaelDecreeText: summarizeTextForTrace(raelDirectiveText) },
+    outputSummary: {
+      intent: intentState.intent,
+      scopeIntent: intentState.scope.intent,
+      decreeFingerprint: intentState.decreeFingerprint,
+      councilCommandMode: intentState.councilCommand.mode,
+    },
+    stateChange: 'Latest Commander decree converted into current intent state.',
+  })
   const mandatoryRetrieval = evaluateMandatoryLiveRetrieval(raelDirectiveText)
 
   const isAttendanceFlow =
@@ -533,6 +591,41 @@ export async function POST(req: Request) {
     councilCommand,
     intent: intentState.intent,
   })
+  councilTrace.record('active_scope_built', {
+    module: 'lib/council/intentScope.ts:buildActiveScope',
+    inputSummary: {
+      decreeText: summarizeTextForTrace(raelDirectiveText),
+      councilCommandMode: councilCommand.mode,
+      intent: intentState.intent,
+    },
+    outputSummary: {
+      intent: scopeForGovernor.intent,
+      businessTopicsAllowed: scopeForGovernor.businessTopicsAllowed,
+      allowedTopics: scopeForGovernor.allowedTopics,
+      forbiddenTopics: scopeForGovernor.forbiddenTopics,
+      responseLength: scopeForGovernor.responseLength,
+      responseStyle: scopeForGovernor.responseStyle,
+      crossTalkAllowed: scopeForGovernor.crossTalkAllowed,
+    },
+    stateChange: 'Active scope generated from Commander decree and council command.',
+  })
+  const topicScopeLock = deriveTopicScopeLock(raelDirectiveText, message, {
+    allowBusinessTopicsFromIntent: scopeForGovernor.businessTopicsAllowed,
+  })
+  councilTrace.record('topic_scope_built', {
+    module: 'lib/council/topicScope.ts:deriveTopicScopeLock',
+    inputSummary: {
+      decreeText: summarizeTextForTrace(raelDirectiveText),
+      userMessage: summarizeTextForTrace(message),
+      allowBusinessTopicsFromIntent: scopeForGovernor.businessTopicsAllowed,
+    },
+    outputSummary: {
+      locked: topicScopeLock.locked,
+      forbiddenLabels: topicScopeLock.forbiddenLabels,
+      forbiddenPatternCount: topicScopeLock.forbiddenPatterns.length,
+    },
+    stateChange: 'Topic scope lock derived for mission-drift observation.',
+  })
 
   const providerRuntimeStates = coerceProviderRuntimeStates(body.councilProviderRuntimeStates)
   const modeGovernor = resolveModeGovernor({
@@ -541,6 +634,27 @@ export async function POST(req: Request) {
     councilCommand,
     providerStates: providerRuntimeStates,
     directedFamilies: councilSingleFamily ? [councilSingleFamily] : undefined,
+  })
+  councilTrace.record('mode_governor_resolved', {
+    module: 'lib/council/modeGovernor.ts:resolveModeGovernor',
+    inputSummary: {
+      decreeText: summarizeTextForTrace(raelDirectiveText),
+      intentKind: intentState.intent,
+      councilCommandMode: councilCommand.mode,
+      directedFamilies: councilSingleFamily ? [councilSingleFamily] : [],
+      providerStateFamilies: providerRuntimeStates ? Object.keys(providerRuntimeStates) : [],
+    },
+    outputSummary: {
+      mode: modeGovernor.mode,
+      maxSentences: modeGovernor.maxSentences,
+      continuationAllowed: modeGovernor.continuationAllowed,
+      providerAwareness: modeGovernor.providerAwareness,
+      allowCrossFamilyReference: modeGovernor.allowCrossFamilyReference,
+      fullTeamRequired: modeGovernor.fullTeamRequired,
+      allowSpeculation: modeGovernor.allowSpeculation,
+      allowLongForm: modeGovernor.allowLongForm,
+    },
+    stateChange: 'Mode governor resolved output shape and continuation discipline.',
   })
   const roomStatuses = buildRoomStatusesFromProviderStates(providerRuntimeStates)
   const directInvocationTail =
@@ -641,6 +755,22 @@ export async function POST(req: Request) {
     if (councilResponseCompletion) o.councilResponseCompletion = councilResponseCompletion
     return o
   }
+  councilTrace.record('research_planned', {
+    module: 'app/api/chat/route.ts:evaluateMandatoryLiveRetrieval',
+    inputSummary: {
+      decreeText: summarizeTextForTrace(raelDirectiveText),
+      liveResearchRouterEnabled: stabilityFlags.liveResearchRouter,
+      councilSingleFamily,
+      stableGroupTurn,
+      sequentialDiagnostic,
+    },
+    outputSummary: {
+      mandatoryRetrievalRequired: mandatoryRetrieval.required,
+      mandatoryRetrievalReasons: mandatoryRetrieval.reasons,
+      initialLiveResearchAttempted: liveResearchAttempted,
+    },
+    stateChange: 'Initial research posture evaluated before provider execution.',
+  })
 
   const safeAudit = async (meta: Record<string, unknown>) => {
     try {
@@ -662,6 +792,12 @@ export async function POST(req: Request) {
 
   if (!stabilityFlags.osSweepAndResearchTeam && detectOsSweepIntent(raelDirectiveText)) {
     try {
+      councilTrace.record('providers_selected', {
+        module: 'app/api/chat/route.ts:os_sweep_bypass',
+        inputSummary: { decreeText: summarizeTextForTrace(raelDirectiveText) },
+        outputSummary: { selectedFamilies: [], bypass: 'os_sweep' },
+        stateChange: 'OS sweep bypass selected before normal provider family flow.',
+      })
       const report = await runWarRoomOsSweep(req)
       const markdown = formatCouncilOsSweepMarkdown(report)
       await safeAudit({
@@ -670,17 +806,23 @@ export async function POST(req: Request) {
         readiness: report.summary.readinessScore,
         findingCount: report.findings.length,
       })
-      return NextResponse.json({
+      councilTrace.record('council_report_built', {
+        module: 'app/api/chat/route.ts:os_sweep_bypass',
+        inputSummary: { findingCount: report.findings.length },
+        outputSummary: { finalReportId: councilTrace.finalReportId, bypass: 'os_sweep' },
+        stateChange: 'OS sweep result returned outside normal provider-family response flow.',
+      })
+      return NextResponse.json(withTrace({
         results: [{ family: 'SYSTEM', content: markdown, status: 'OK' }],
         hardStop: true,
         mode: 'os_sweep',
         osSweepReport: report,
         councilSingleResponse: markdown,
-      })
+      }))
     } catch (error) {
       const message = error instanceof Error ? error.message : 'War Room OS sweep failed.'
       await safeAudit({ success: false, flow: 'os_sweep', reason: message })
-      return NextResponse.json({
+      return NextResponse.json(withTrace({
         results: [{
           family: 'SYSTEM',
           content: `War Room OS sweep could not complete. ${message} Open War Room Evolution → Run OS Sweep for structured results.`,
@@ -688,7 +830,7 @@ export async function POST(req: Request) {
         }],
         hardStop: true,
         mode: 'os_sweep',
-      })
+      }))
     }
   }
 
@@ -704,6 +846,16 @@ export async function POST(req: Request) {
     )
   ) {
     try {
+      councilTrace.record('providers_selected', {
+        module: 'app/api/chat/route.ts:council_research_team_bypass',
+        inputSummary: {
+          decreeText: summarizeTextForTrace(raelDirectiveText),
+          councilResearchTeamRequested,
+          councilResearchIntentTriggered: councilResearchIntent.triggered,
+        },
+        outputSummary: { selectedFamilies: ['chatgpt'], bypass: 'council_research_team' },
+        stateChange: 'Council Research Team bypass selected before normal provider family flow.',
+      })
       const report = await runCouncilResearchTeam({
         decree: raelDirectiveText,
         threadId: conversationId,
@@ -715,7 +867,23 @@ export async function POST(req: Request) {
         sourceCount: report.sources.length,
         confidenceLevel: report.confidenceLevel,
       })
-      return NextResponse.json({
+      councilTrace.record('research_planned', {
+        module: 'lib/council-research/orchestrator.ts:runCouncilResearchTeam',
+        inputSummary: { decreeText: summarizeTextForTrace(raelDirectiveText) },
+        outputSummary: {
+          sourceCount: report.sources.length,
+          confidenceLevel: report.confidenceLevel,
+          sourcesUnavailable: report.sourcesUnavailable,
+        },
+        stateChange: 'Council Research Team produced source-backed research report.',
+      })
+      councilTrace.record('council_report_built', {
+        module: 'app/api/chat/route.ts:council_research_team_bypass',
+        inputSummary: { sourceCount: report.sources.length },
+        outputSummary: { finalReportId: councilTrace.finalReportId, bypass: 'council_research_team' },
+        stateChange: 'Council Research Team result returned outside normal provider-family response flow.',
+      })
+      return NextResponse.json(withTrace({
         results: [{ family: 'ChatGPT', content: report.markdown, status: 'OK' }],
         councilSingleResponse: report.markdown,
         councilSingleFamily: 'chatgpt',
@@ -732,11 +900,11 @@ export async function POST(req: Request) {
           councilPhase: 'model_running',
           responseCompletion: 'complete',
         },
-      })
+      }))
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Council research team failed.'
       await safeAudit({ success: false, flow: 'council_research_team', reason: message })
-      return NextResponse.json({
+      return NextResponse.json(withTrace({
         results: [{
           family: 'SYSTEM',
           content: `Council Research Team could not complete. ${message}`,
@@ -744,7 +912,7 @@ export async function POST(req: Request) {
         }],
         hardStop: true,
         mode: 'council_research_team',
-      })
+      }))
     }
   }
 
@@ -773,7 +941,26 @@ export async function POST(req: Request) {
       resolvedMode: 'economic_ops',
       bypassed: ['parallel_family_attendance', 'legacy_provider_availability_broadcast', 'live_research_router'],
     })
-    return NextResponse.json({
+    councilTrace.record('providers_selected', {
+      module: 'app/api/chat/route.ts:economic_ops_bypass',
+      inputSummary: {
+        decreeText: summarizeTextForTrace(raelDirectiveText),
+        economicRoutingReason: economicRouting.reason,
+      },
+      outputSummary: {
+        selectedFamilies: [],
+        bypass: 'economic_ops',
+        bypassed: ['parallel_family_attendance', 'legacy_provider_availability_broadcast', 'live_research_router'],
+      },
+      stateChange: 'Economic Ops command bypassed normal provider broadcast.',
+    })
+    councilTrace.record('council_report_built', {
+      module: 'app/api/chat/route.ts:economic_ops_bypass',
+      inputSummary: { economicRoutingReason: economicRouting.reason },
+      outputSummary: { finalReportId: councilTrace.finalReportId, bypass: 'economic_ops' },
+      stateChange: 'Economic Ops system response returned outside normal provider-family response flow.',
+    })
+    return NextResponse.json(withTrace({
       results: [{
         family: 'SYSTEM',
         content: 'Economic Ops command routed to Opportunity Scout. Provider analysis will be stored in operational records, not broadcast as council wall-of-text.',
@@ -782,7 +969,7 @@ export async function POST(req: Request) {
       hardStop: true,
       mode: 'economic_ops',
       economicOpsBypass: true,
-    })
+    }))
   }
 
   const diagnosticMetaFor = (fam: CouncilSingleFamily | undefined, meta?: { hold?: boolean }) => {
@@ -835,8 +1022,20 @@ export async function POST(req: Request) {
       councilStabilityMode,
     })
     const dm = diagnosticMetaFor(councilFam)
+    councilTrace.record('provider_responses_received', {
+      module: 'app/api/chat/route.ts:degradedProviderResponse',
+      inputSummary: { councilFam, status, detail: summarizeTextForTrace(detail) },
+      outputSummary: { resultCount: results.length },
+      stateChange: 'Provider returned degraded response path.',
+    })
+    councilTrace.record('integrity_checked', {
+      module: 'app/api/chat/route.ts:validateProviderResults',
+      inputSummary: { councilFam, status },
+      outputSummary: { resultCount: results.length },
+      stateChange: 'Provider degradation normalized through integrity result handling.',
+    })
     return NextResponse.json(
-      {
+      withTrace({
         councilSingleResponse: stabilityMessage,
         councilSingleFamily: councilFam,
         results,
@@ -847,7 +1046,7 @@ export async function POST(req: Request) {
         ...(dm ? { diagnosticMeta: dm } : {}),
         ...liveResearchJson(),
         ...stabilityMeta,
-      },
+      }),
       { status: 200 },
     )
   }
@@ -1033,6 +1232,22 @@ export async function POST(req: Request) {
           ? DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS
           : directTimeoutMs
       const directStarted = Date.now()
+      councilTrace.record('providers_selected', {
+        module: 'app/api/chat/route.ts:direct_invocation',
+        inputSummary: { directKey, councilSingleFamilyEarly, isAttendanceFlow },
+        outputSummary: { selectedFamilies: [directFamily], mode: 'direct_invocation' },
+        stateChange: 'Direct invocation selected one provider family.',
+      })
+      councilTrace.record('provider_calls_started', {
+        module: 'app/api/chat/route.ts:callCouncilProvider',
+        inputSummary: {
+          family: directFamily,
+          timeoutMs: outerDirectTimeoutMs,
+          prompt: summarizeTextForTrace(baseUserPrompt),
+        },
+        outputSummary: { started: true },
+        stateChange: 'Direct invocation provider call started.',
+      })
       const result = await withTimeout(
         displayFamilyName(directFamily),
         callCouncilProvider(directFamily, baseUserPrompt, {
@@ -1077,12 +1292,63 @@ export async function POST(req: Request) {
             }
           : {}),
       })
-      return NextResponse.json({
+      const responseId = councilTrace.registerProviderResponse(normalized.family)
+      councilTrace.record('provider_responses_received', {
+        module: 'app/api/chat/route.ts:withTimeout',
+        inputSummary: { family: normalized.family, elapsedMs },
+        outputSummary: {
+          responseId,
+          status: normalized.status,
+          content: summarizeTextForTrace(normalized.content),
+          hasError: Boolean(normalized.error),
+        },
+        stateChange: 'Direct invocation provider response received.',
+      })
+      const directResults = [normalized]
+      councilTrace.record('integrity_checked', {
+        module: 'app/api/chat/route.ts:direct_invocation',
+        inputSummary: { resultCount: directResults.length },
+        outputSummary: { integrityCheck: 'direct_invocation_terminal' },
+        stateChange: 'Direct invocation hard-stop result prepared without changing provider routing.',
+      })
+      councilTrace.record('red_team_checked', {
+        module: 'app/api/chat/route.ts:direct_invocation',
+        inputSummary: { mode: 'direct_invocation' },
+        outputSummary: { redTeamRuntimeCheck: 'not_applicable_single_family_direct_invocation' },
+        stateChange: 'No Red Team expansion was invoked for explicit direct invocation.',
+        observation: 'inferred',
+      })
+      councilTrace.record('scope_guardian_checked', {
+        module: 'app/api/chat/route.ts:direct_invocation',
+        inputSummary: { missionVersion: councilTrace.missionVersion },
+        outputSummary: { advisoryStatus: 'not_integrated_47a_1_trace_only' },
+        stateChange: 'Scope Guardian advisory check recorded as not yet integrated in 47A-1.',
+        observation: 'inferred',
+      })
+      councilTrace.record('final_moderated', {
+        module: 'app/api/chat/route.ts:direct_invocation',
+        inputSummary: { family: normalized.family },
+        outputSummary: { mode: 'direct_invocation', hardStop: true },
+        stateChange: 'Direct invocation response finalized for JSON return.',
+      })
+      councilTrace.record('council_report_built', {
+        module: 'app/api/chat/route.ts:direct_invocation',
+        inputSummary: { responseIds: [responseId] },
+        outputSummary: { finalReportId: councilTrace.finalReportId, minimalReport: true },
+        stateChange: 'Minimal trace report envelope built for direct invocation.',
+      })
+      councilTrace.record('memory_recommendation_recorded', {
+        module: 'app/api/chat/route.ts:direct_invocation',
+        inputSummary: { stabilityMemoryInjection: stabilityFlags.memoryInjection },
+        outputSummary: { memoryRecommendation: 'not_evaluated_direct_invocation' },
+        stateChange: 'No memory proposal ingestion ran in direct invocation hard-stop path.',
+      })
+      return NextResponse.json(withTrace({
         result: normalized,
-        results: [normalized],
+        results: directResults,
         hardStop: true,
         mode: 'direct_invocation',
-      })
+      }))
     }
 
     if (!councilSingleFamily) {
@@ -1092,6 +1358,19 @@ export async function POST(req: Request) {
         ...(process.env.XAI_API_KEY ? (['grok'] as const) : []),
         ...(process.env.GEMINI_API_KEY ? (['gemini'] as const) : []),
       ]
+      councilTrace.record('providers_selected', {
+        module: 'app/api/chat/route.ts:parallel_provider_selection',
+        inputSummary: {
+          configured: {
+            chatgpt: Boolean(process.env.OPENAI_API_KEY),
+            claude: Boolean(process.env.ANTHROPIC_API_KEY),
+            grok: Boolean(process.env.XAI_API_KEY),
+            gemini: Boolean(process.env.GEMINI_API_KEY),
+          },
+        },
+        outputSummary: { selectedFamilies: activeFamilies },
+        stateChange: 'Parallel provider family list selected from configured server-side providers.',
+      })
 
       if (activeFamilies.length === 0) {
         const result: ProviderResult = {
@@ -1104,13 +1383,41 @@ export async function POST(req: Request) {
           flow: 'parallel_providers',
           reason: 'no_active_providers',
         })
-        return NextResponse.json({
+        councilTrace.record('provider_calls_started', {
+          module: 'app/api/chat/route.ts:parallel_provider_selection',
+          inputSummary: { selectedFamilies: activeFamilies },
+          outputSummary: { started: false, reason: 'no_active_providers' },
+          stateChange: 'No provider calls started because no active providers were configured.',
+        })
+        councilTrace.record('provider_responses_received', {
+          module: 'app/api/chat/route.ts:parallel_provider_selection',
+          inputSummary: { selectedFamilies: activeFamilies },
+          outputSummary: { resultCount: 1, status: result.status },
+          stateChange: 'System unavailable result produced for empty provider roster.',
+        })
+        councilTrace.record('council_report_built', {
+          module: 'app/api/chat/route.ts:parallel_provider_selection',
+          inputSummary: { resultCount: 1 },
+          outputSummary: { finalReportId: councilTrace.finalReportId, minimalReport: true },
+          stateChange: 'Minimal trace report envelope built for no-provider path.',
+        })
+        return NextResponse.json(withTrace({
           results: [result],
           hardStop: false,
           mode: 'parallel_providers',
-        })
+        }))
       }
 
+      councilTrace.record('provider_calls_started', {
+        module: 'app/api/chat/route.ts:Promise.all(callCouncilProvider)',
+        inputSummary: {
+          selectedFamilies: activeFamilies,
+          timeoutMs: PROVIDER_TIMEOUT_MS,
+          prompt: summarizeTextForTrace(baseUserPrompt),
+        },
+        outputSummary: { started: true, callMode: 'parallel' },
+        stateChange: 'Parallel provider calls started simultaneously.',
+      })
       const providerResults = await Promise.all(
         activeFamilies.map(family =>
           withTimeout(
@@ -1120,10 +1427,63 @@ export async function POST(req: Request) {
           ),
         ),
       )
+      const providerResponseIds = providerResults.map(result => ({
+        family: result.family,
+        responseId: councilTrace.registerProviderResponse(result.family),
+        status: result.status,
+      }))
+      councilTrace.record('provider_responses_received', {
+        module: 'app/api/chat/route.ts:Promise.all(callCouncilProvider)',
+        inputSummary: { selectedFamilies: activeFamilies },
+        outputSummary: {
+          providerResponseIds,
+          statuses: providerResults.map(result => ({ family: result.family, status: result.status })),
+        },
+        stateChange: 'Parallel provider responses collected.',
+      })
       const results = validateProviderResults(providerResults, {
         integrityCheck: !skipProviderIntegrityCheck,
         minimalCouncilPath,
         decreeText: raelDirectiveText,
+      })
+      councilTrace.record('integrity_checked', {
+        module: 'app/api/chat/route.ts:validateProviderResults',
+        inputSummary: { resultCount: providerResults.length, integrityCheck: !skipProviderIntegrityCheck },
+        outputSummary: { resultCount: results.length },
+        stateChange: 'Parallel provider results passed through response integrity validation.',
+      })
+      councilTrace.record('red_team_checked', {
+        module: 'app/api/chat/route.ts:validateProviderResults',
+        inputSummary: { resultFamilies: results.map(result => result.family) },
+        outputSummary: {
+          integrityFlagCount: results.filter(result => result.messageType === 'integrity_flag').length,
+        },
+        stateChange: 'Red Team integrity flag presence observed in provider result set.',
+      })
+      councilTrace.record('scope_guardian_checked', {
+        module: 'app/api/chat/route.ts:parallel_provider_selection',
+        inputSummary: { missionVersion: councilTrace.missionVersion },
+        outputSummary: { advisoryStatus: 'not_integrated_47a_1_trace_only' },
+        stateChange: 'Scope Guardian advisory check recorded as not yet integrated in 47A-1.',
+        observation: 'inferred',
+      })
+      councilTrace.record('final_moderated', {
+        module: 'app/api/chat/route.ts:parallel_provider_selection',
+        inputSummary: { resultCount: results.length },
+        outputSummary: { mode: 'parallel_providers', showContinue: true },
+        stateChange: 'Parallel provider results finalized for JSON return.',
+      })
+      councilTrace.record('council_report_built', {
+        module: 'app/api/chat/route.ts:parallel_provider_selection',
+        inputSummary: { responseIds: providerResponseIds },
+        outputSummary: { finalReportId: councilTrace.finalReportId, minimalReport: true },
+        stateChange: 'Minimal trace report envelope built for parallel provider response.',
+      })
+      councilTrace.record('memory_recommendation_recorded', {
+        module: 'app/api/chat/route.ts:parallel_provider_selection',
+        inputSummary: { stabilityMemoryInjection: stabilityFlags.memoryInjection },
+        outputSummary: { memoryRecommendation: 'not_evaluated_parallel_provider_path' },
+        stateChange: 'No memory proposal ingestion ran in parallel provider path.',
       })
       await safeAudit({
         success: true,
@@ -1131,12 +1491,12 @@ export async function POST(req: Request) {
         families: activeFamilies,
         resultCount: results.length,
       })
-      return NextResponse.json({
+      return NextResponse.json(withTrace({
         results,
         hardStop: false,
         mode: 'parallel_providers',
         showContinue: true,
-      })
+      }))
     }
 
     if (mode === 'continue' && councilSingleFamily) {
@@ -1162,10 +1522,10 @@ export async function POST(req: Request) {
           reason: 'cloud_provider_unavailable',
         })
         return NextResponse.json(
-          {
+          withTrace({
             error: 'cloud_provider_unavailable',
             message: `${councilSingleFamily} has no cloud provider route configured in War Room.`,
-          },
+          }),
           { status: 400 },
         )
       }
@@ -1176,13 +1536,13 @@ export async function POST(req: Request) {
           councilSingleFamily: 'kimi',
           reason: 'kimi_not_configured',
         })
-        return NextResponse.json({
+        return NextResponse.json(withTrace({
           councilSingleResponse: 'Kimi not configured',
           councilSingleFamily: 'kimi',
           results: [{ family: 'Kimi', content: 'Kimi not configured', status: 'UNAVAILABLE' }],
           showContinue: true,
           ...stabilityMeta,
-        })
+        }))
       }
 
       const providerBudgetMs =
@@ -1197,6 +1557,22 @@ export async function POST(req: Request) {
               mode,
               councilCommand,
             })
+
+      councilTrace.record('providers_selected', {
+        module: 'app/api/chat/route.ts:continue_single',
+        inputSummary: {
+          councilSingleFamily,
+          mode,
+          councilFlowMode,
+          councilGatherPhase,
+        },
+        outputSummary: {
+          selectedFamilies: [councilSingleFamily],
+          providerBudgetMs,
+          stableGroupTurn,
+        },
+        stateChange: 'Single-family provider selected for continuation request.',
+      })
 
       const grokContinueEligible = isGrokDirectInvocationEligible({
         isAttendanceFlow,
@@ -1235,6 +1611,21 @@ export async function POST(req: Request) {
           sequentialDiagnostic,
           intentKind: intentState.intent,
           councilGatherPhase: mandatoryRetrieval.required ? null : councilGatherPhase,
+        })
+        councilTrace.record('research_planned', {
+          module: 'lib/research/researchIntent.ts:detectResearchIntent',
+          inputSummary: {
+            decreeText: summarizeTextForTrace(raelDirectiveText),
+            researchEligible,
+            mandatoryResearchEligible,
+            mandatoryRetrievalRequired: mandatoryRetrieval.required,
+          },
+          outputSummary: {
+            shouldResearch: researchIntentEval.shouldResearch,
+            confidence: researchIntentEval.confidence,
+            liveResearchWillRun: researchIntentEval.shouldResearch || mandatoryRetrieval.required,
+          },
+          stateChange: 'Single-family live research plan evaluated before provider prompt construction.',
         })
         if (researchIntentEval.shouldResearch || mandatoryRetrieval.required) {
           liveResearchAttempted = true
@@ -1278,6 +1669,20 @@ export async function POST(req: Request) {
               packet,
               routerMs: Date.now() - rs,
             })
+            councilTrace.record('research_planned', {
+              module: 'lib/research/researchRouter.ts:runLiveResearchRouter',
+              inputSummary: {
+                decreeText: summarizeTextForTrace(raelDirectiveText),
+                conversationIdPresent: Boolean(conversationId),
+              },
+              outputSummary: {
+                attempted: true,
+                usedLiveResearch: packet.usedLiveResearch,
+                sourceCount: packet.sources?.length ?? packet.intelligencePacket?.sources_used.length ?? 0,
+                routerMs: Date.now() - rs,
+              },
+              stateChange: 'Live research evidence packet prepared and prompt grounding appended.',
+            })
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err)
             const packet = mandatoryRetrieval.required
@@ -1307,6 +1712,20 @@ export async function POST(req: Request) {
               intentConfidence: researchIntentEval.confidence,
               packet,
               routerMs: Date.now() - rs,
+            })
+            councilTrace.record('research_planned', {
+              module: 'lib/research/researchRouter.ts:runLiveResearchRouter',
+              inputSummary: {
+                decreeText: summarizeTextForTrace(raelDirectiveText),
+                conversationIdPresent: Boolean(conversationId),
+              },
+              outputSummary: {
+                attempted: true,
+                failed: true,
+                error: summarizeTextForTrace(msg),
+                routerMs: Date.now() - rs,
+              },
+              stateChange: 'Live research failed; failure evidence packet prepared for grounded response.',
             })
           }
         }
@@ -1367,7 +1786,7 @@ export async function POST(req: Request) {
             flow: 'stable_group_skip',
             councilSingleFamily,
           })
-          return NextResponse.json({
+          return NextResponse.json(withTrace({
             councilSingleResponse: '',
             councilSingleFamily,
             results: [],
@@ -1375,7 +1794,7 @@ export async function POST(req: Request) {
             councilFlowMode,
             stableGroupSkipped: true,
             ...stabilityMeta,
-          })
+          }))
         }
       } else {
         userPrompt = buildCouncilUserPrompt({
@@ -1435,7 +1854,7 @@ export async function POST(req: Request) {
           retrievalFailed: retrievalForGate?.retrieval_failed ?? true,
           sourceCount: packetForGate?.sources_used.length ?? 0,
         })
-        return NextResponse.json({
+        return NextResponse.json(withTrace({
           councilSingleResponse: responseText,
           councilSingleFamily,
           results: [
@@ -1448,13 +1867,24 @@ export async function POST(req: Request) {
           ],
           showContinue: true,
           ...liveResearchJson(),
-        })
+        }))
       }
 
       let responseText = ''
       let geminiDegradedReason: string | null = null
       let grokContinueInvokeStartedAt: number | undefined
       let grokContinueAuditTiming: { elapsedMs: number; timeoutMs: number } | null = null
+      councilTrace.record('provider_calls_started', {
+        module: 'app/api/chat/route.ts:continue_single_provider_switch',
+        inputSummary: {
+          family: councilSingleFamily,
+          prompt: summarizeTextForTrace(userPrompt),
+          tokensForCall,
+          providerBudgetMs,
+        },
+        outputSummary: { started: true },
+        stateChange: 'Single-family provider call started.',
+      })
       try {
         switch (councilSingleFamily) {
           case 'chatgpt': {
@@ -1553,13 +1983,13 @@ export async function POST(req: Request) {
             reason: kimiUnavailable ? 'kimi_not_configured' : 'kimi_provider_error',
               })
           if (kimiUnavailable) {
-                return NextResponse.json({
+                return NextResponse.json(withTrace({
                   councilSingleResponse: 'Kimi not configured',
                   councilSingleFamily: 'kimi',
                   results: [{ family: 'Kimi', content: 'Kimi not configured', status: 'UNAVAILABLE' }],
                   showContinue: true,
                   ...stabilityMeta,
-                })
+                }))
               }
               markLiveResearchProviderFailed('failed')
               return degradedProviderResponse('kimi', 'failed', kimiResult.error)
@@ -1608,7 +2038,7 @@ export async function POST(req: Request) {
               reason: 'unknown_councilSingleFamily',
               councilSingleFamily: String(councilSingleFamily),
             })
-            return NextResponse.json({ error: 'Unknown councilSingleFamily', ...liveResearchJson() }, { status: 400 })
+            return NextResponse.json(withTrace({ error: 'Unknown councilSingleFamily', ...liveResearchJson() }), { status: 400 })
         }
       } catch (providerErr) {
         const msg = providerErr instanceof Error ? providerErr.message : String(providerErr)
@@ -1652,13 +2082,25 @@ export async function POST(req: Request) {
             return degradedProviderResponse(councilSingleFamily, 'failed', msg)
           }
           return NextResponse.json(
-            { error: 'council_configuration_error', message: msg, ...liveResearchJson() },
+            withTrace({ error: 'council_configuration_error', message: msg, ...liveResearchJson() }),
             { status: 503 },
           )
         }
         markLiveResearchProviderFailed('failed')
         return degradedProviderResponse(councilSingleFamily, 'failed', msg)
       }
+      const providerResponseId = councilTrace.registerProviderResponse(displayFamilyName(councilSingleFamily))
+      councilTrace.record('provider_responses_received', {
+        module: 'app/api/chat/route.ts:continue_single_provider_switch',
+        inputSummary: { family: councilSingleFamily },
+        outputSummary: {
+          responseId: providerResponseId,
+          content: summarizeTextForTrace(responseText),
+          geminiDegraded: geminiDegradedReason !== null,
+          providerFinishReason: providerFinishReason ?? null,
+        },
+        stateChange: 'Single-family provider response received before integrity and governor checks.',
+      })
 
       if (!responseText.trim()) {
         await safeAudit({
@@ -1720,6 +2162,18 @@ export async function POST(req: Request) {
                 : 'partial'
         }
       }
+      councilTrace.record('integrity_checked', {
+        module: 'lib/providers/retryOrchestration.ts:orchestrateProviderResponse',
+        inputSummary: {
+          family: councilSingleFamily,
+          integrityRetriesEnabled: stabilityFlags.integrityOrchestrationRetries,
+        },
+        outputSummary: {
+          diagnostics: providerIntegrityDiagnostics ?? null,
+          responseCompletion: councilResponseCompletion ?? null,
+        },
+        stateChange: 'Provider response integrity path completed.',
+      })
 
       if (minimalCouncilPath) {
         const rawLen = responseText.length
@@ -1806,6 +2260,20 @@ export async function POST(req: Request) {
               : { family: councilSingleFamily },
           })
         : { text: compactDisplayWhitespace(toDisplayText(responseText)), warnings: [] as string[] }
+      councilTrace.record('scope_guardian_checked', {
+        module: 'lib/council/responseGovernor.ts:applyGovernor',
+        inputSummary: {
+          family: councilSingleFamily,
+          councilCommandMode: councilCommand.mode,
+          activeScopeIntent: scopeForGovernor.intent,
+        },
+      outputSummary: {
+          warningCount: governed.warnings?.length ?? 0,
+          warnings: governed.warnings ?? [],
+          responseChars: governed.text.length,
+      },
+        stateChange: 'Existing response governor observed as the current scope-discipline layer for 47A-1.',
+      })
       if (governed.warnings?.includes(COUNCIL_GOVERNOR_SILENT_SKIP)) {
         await safeAudit({
           success: true,
@@ -1837,7 +2305,19 @@ export async function POST(req: Request) {
             : {}),
         })
         const dmGov = diagnosticMetaFor(councilSingleFamily)
-        return NextResponse.json({
+        councilTrace.record('final_moderated', {
+          module: 'app/api/chat/route.ts:governor_silent_skip',
+          inputSummary: { family: councilSingleFamily, warnings: governed.warnings },
+          outputSummary: { skipped: true },
+          stateChange: 'Governor skipped visible output for this family.',
+        })
+        councilTrace.record('council_report_built', {
+          module: 'app/api/chat/route.ts:governor_silent_skip',
+          inputSummary: { responseIds: [providerResponseId] },
+          outputSummary: { finalReportId: councilTrace.finalReportId, minimalReport: true },
+          stateChange: 'Minimal trace report envelope built for governor skip.',
+        })
+        return NextResponse.json(withTrace({
           councilSingleResponse: '',
           ...(economicOpsRawProviderAnalysis ? { economicOpsRawProviderAnalysis } : {}),
           councilSingleFamily,
@@ -1860,7 +2340,7 @@ export async function POST(req: Request) {
           councilGovernorSkipped: true,
           ...(dmGov ? { diagnosticMeta: dmGov } : {}),
           ...liveResearchJson(),
-        })
+        }))
       }
       responseText = governed.text
 
@@ -2025,6 +2505,20 @@ export async function POST(req: Request) {
           diagnostic_mode: diagnosticIntentMode,
         })
       }
+      councilTrace.record('red_team_checked', {
+        module: 'app/api/chat/route.ts:continue_single',
+        inputSummary: {
+          family: councilSingleFamily,
+          sequentialDiagnostic,
+          diagnosticIntentMode,
+        },
+        outputSummary: {
+          redTeamRuntimeHold:
+            councilSingleFamily === 'red_team' ? detectRedTeamRuntimeHold(responseText) : false,
+          redTeamProviderPresent: councilSingleFamily === 'red_team',
+        },
+        stateChange: 'Red Team runtime signal observed for this provider contribution.',
+      })
 
       const dmOk = diagnosticMetaFor(councilSingleFamily, {
         hold: councilSingleFamily === 'red_team' && detectRedTeamRuntimeHold(responseText),
@@ -2086,7 +2580,64 @@ export async function POST(req: Request) {
           })
         : null
 
-      return NextResponse.json({
+      const finalResults = validateProviderResults(
+        [
+          {
+            family: displayFamilyName(councilSingleFamily),
+            content: responseText,
+            status: 'OK',
+          },
+        ],
+        {
+          integrityCheck: !skipProviderIntegrityCheck,
+          minimalCouncilPath,
+          decreeText: raelDirectiveText,
+          suppressSyncWarnings: suppressIntegritySyncWarnings,
+        },
+      )
+      councilTrace.record('final_moderated', {
+        module: 'app/api/chat/route.ts:continue_single_final_response',
+        inputSummary: {
+          family: councilSingleFamily,
+          responseCompletion: councilResponseCompletion ?? null,
+          continuationRequested: Boolean(continuationRequest),
+        },
+        outputSummary: {
+          resultCount: finalResults.length,
+          responseChars: responseText.length,
+          confidence: councilFamilyConfidenceScore,
+        },
+        stateChange: 'Single-family response finalized after governor, render gate, completion check, and result validation.',
+      })
+      councilTrace.record('council_report_built', {
+        module: 'app/api/chat/route.ts:continue_single_final_response',
+        inputSummary: {
+          responseIds: [providerResponseId],
+          liveResearchAttempted,
+          hasLiveResearchSummary: Boolean(liveResearchSummary),
+        },
+        outputSummary: {
+          finalReportId: councilTrace.finalReportId,
+          minimalReport: true,
+          evidenceLineage: liveResearchAttempted ? 'live_research_summary_attached' : 'provider_response_only',
+        },
+        stateChange: 'Minimal trace report envelope built for single-family response.',
+      })
+      councilTrace.record('memory_recommendation_recorded', {
+        module: 'lib/memory/ingestFromModel.ts:tryPersistMemoryProposalFromModelOutput',
+        inputSummary: {
+          stabilityMemoryInjection: stabilityFlags.memoryInjection,
+          geminiDegraded: geminiDegradedReason !== null,
+          family: councilSingleFamily,
+        },
+        outputSummary: {
+          attempted: Boolean(stabilityFlags.memoryInjection && geminiDegradedReason === null),
+          persistenceClientAvailable: sup.ok,
+        },
+        stateChange: 'Memory recommendation/proposal ingestion status recorded for trace lineage.',
+      })
+
+      return NextResponse.json(withTrace({
         councilSingleResponse: responseText,
         ...(economicOpsRawProviderAnalysis ? { economicOpsRawProviderAnalysis } : {}),
         councilSingleFamily,
@@ -2096,21 +2647,7 @@ export async function POST(req: Request) {
               councilFamilyConfidencePercent: councilConfidenceToPercent(councilFamilyConfidenceScore),
             }
           : {}),
-        results: validateProviderResults(
-          [
-            {
-              family: displayFamilyName(councilSingleFamily),
-              content: responseText,
-              status: 'OK',
-            },
-          ],
-          {
-            integrityCheck: !skipProviderIntegrityCheck,
-            minimalCouncilPath,
-            decreeText: raelDirectiveText,
-            suppressSyncWarnings: suppressIntegritySyncWarnings,
-          },
-        ),
+        results: finalResults,
         showContinue: true,
         councilFlowMode,
         ...(continuationRequest ? { continuationRequest } : {}),
@@ -2122,7 +2659,7 @@ export async function POST(req: Request) {
         ...(opportunityDiagnostics ? { opportunityDiagnostics } : {}),
         ...liveResearchJson(),
         ...stabilityMeta,
-      })
+      }))
     }
 
     await safeAudit({
@@ -2132,10 +2669,10 @@ export async function POST(req: Request) {
       mode: mode ?? null,
     })
     return NextResponse.json(
-      {
+      withTrace({
         error: 'unsupported_flow',
         message: 'Live Council requires mode "continue" with councilSingleFamily (one provider per request).',
-      },
+      }),
       { status: 400 },
     )
   } catch (e) {
@@ -2145,10 +2682,10 @@ export async function POST(req: Request) {
       error: e instanceof Error ? e.message : String(e),
     })
     return NextResponse.json(
-      {
+      withTrace({
         error: 'council_internal_error',
         message: e instanceof Error ? e.message : String(e),
-      },
+      }),
       { status: 500 },
     )
   }

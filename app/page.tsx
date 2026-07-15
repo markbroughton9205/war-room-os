@@ -5291,6 +5291,56 @@ function ExpansionPermissionPrompt({
   )
 }
 
+type CouncilTraceTestProvider = {
+  family: string
+  status: string
+  reason: string
+}
+
+type CouncilTraceTestResponse = {
+  ok: boolean
+  summary: {
+    traceCaptured: boolean
+    traceId: string | null
+    missionId: string | null
+    missionVersion: number | null
+    eventOrder: string[]
+    activeProviders: CouncilTraceTestProvider[]
+    unavailableProviders: CouncilTraceTestProvider[]
+    runtimeObservedStages: string[]
+    skippedOrInferredStages: string[]
+    intentTransformationChain: string[]
+    driftFindings: string[]
+    bypassesObserved: string[]
+    secretRedactionVerdict: string
+    normalCouncilResponse: Array<{
+      family: string
+      status: string
+      content: string
+      messageType?: string
+    }>
+  }
+  councilTrace: unknown
+  rawCouncilTraceJson: string
+}
+
+function TraceDebugList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded px-2 py-1" style={{ border: '1px solid rgba(125,211,252,0.18)' }}>
+      <div className="mb-1 font-bold tracking-widest" style={{ color: '#7DD3FC' }}>{title}</div>
+      {items.length > 0 ? (
+        <ol className="list-decimal space-y-1 pl-4" style={{ color: '#DFFAFE' }}>
+          {items.map((item, index) => (
+            <li key={`${title}-${index}`} className="break-words">{item}</li>
+          ))}
+        </ol>
+      ) : (
+        <div style={{ color: '#7DD3FC' }}>—</div>
+      )}
+    </div>
+  )
+}
+
 function Home() {
   const { setEngineeringDrawerOpen } = useLiveRoomMode()
   const renderStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
@@ -5469,6 +5519,10 @@ function Home() {
   const [engineList, setEngineList] = useState<EngineStatus[]>([])
   const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
   const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
+  const [councilTraceTestAvailable, setCouncilTraceTestAvailable] = useState(false)
+  const [councilTraceTestStatus, setCouncilTraceTestStatus] = useState<'checking' | 'hidden' | 'ready' | 'running' | 'complete' | 'error'>('checking')
+  const [councilTraceTestResult, setCouncilTraceTestResult] = useState<CouncilTraceTestResponse | null>(null)
+  const [councilTraceTestError, setCouncilTraceTestError] = useState<string | null>(null)
   const [persistenceAvailable, setPersistenceAvailable] = useState(false)
   const [continuityMode, setContinuityMode] = useState<RuntimeContinuityIndicatorMode>('Unknown')
   const [continuityRecoverAt, setContinuityRecoverAt] = useState<string | null>(null)
@@ -5509,6 +5563,62 @@ function Home() {
       /* private mode */
     }
   }, [])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/council/trace-test', { cache: 'no-store' })
+        if (cancelled) return
+        if (!res.ok) {
+          setCouncilTraceTestAvailable(false)
+          setCouncilTraceTestStatus('hidden')
+          return
+        }
+        const body = await res.json() as { available?: unknown }
+        const available = body.available === true
+        setCouncilTraceTestAvailable(available)
+        setCouncilTraceTestStatus(available ? 'ready' : 'hidden')
+      } catch {
+        if (!cancelled) {
+          setCouncilTraceTestAvailable(false)
+          setCouncilTraceTestStatus('hidden')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  const runCouncilTraceTest = useCallback(async () => {
+    setCouncilTraceTestStatus('running')
+    setCouncilTraceTestError(null)
+    setCouncilTraceTestResult(null)
+    try {
+      const res = await fetch('/api/council/trace-test', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ run: true }),
+      })
+      const body = await res.json() as CouncilTraceTestResponse | { error?: string }
+      if (!res.ok) {
+        const error = 'error' in body && typeof body.error === 'string' ? body.error : 'Trace test failed.'
+        throw new Error(error)
+      }
+      setCouncilTraceTestResult(body as CouncilTraceTestResponse)
+      setCouncilTraceTestStatus('complete')
+    } catch (error) {
+      setCouncilTraceTestError(error instanceof Error ? error.message : 'Trace test failed.')
+      setCouncilTraceTestStatus('error')
+    }
+  }, [])
+  const copyCouncilTraceTestArtifact = useCallback(async () => {
+    if (!councilTraceTestResult?.councilTrace) return
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(councilTraceTestResult.councilTrace, null, 2))
+    } catch {
+      setCouncilTraceTestError('Clipboard copy failed.')
+    }
+  }, [councilTraceTestResult])
   const councilPassthroughMode = councilStabilityMode || councilFlowMode === 'stable_group'
   const { snapshot: conversationRuntimeSnapshot } = useConversationRuntime(
     council,
@@ -10726,6 +10836,97 @@ function Home() {
           </button>
         )}
       </div>
+      {councilTraceTestAvailable && (
+        <div
+          className="rounded p-2 text-[10px]"
+          style={{ border: '1px solid rgba(56,189,248,0.35)', background: 'rgba(8,47,73,0.18)', color: '#A5F3FC' }}
+        >
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="font-bold tracking-widest" style={{ color: '#67E8F9' }}>Temporary Trace Verification</div>
+              <div style={{ color: '#7DD3FC' }}>Commander-only debug control. Captures one sanitized Live Council trace.</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => startTransition(() => { void runCouncilTraceTest() })}
+              disabled={councilTraceTestStatus === 'running'}
+              className="rounded px-3 py-1 text-[9px] font-bold tracking-widest"
+              style={{
+                background: councilTraceTestStatus === 'running' ? '#164E63' : '#22D3EE',
+                color: councilTraceTestStatus === 'running' ? '#A5F3FC' : '#001014',
+              }}
+            >
+              {councilTraceTestStatus === 'running' ? 'Capturing...' : 'Run Council Trace Test'}
+            </button>
+          </div>
+          {councilTraceTestError && (
+            <div className="mb-2 rounded px-2 py-1" style={{ border: '1px solid rgba(248,113,113,0.35)', color: '#FCA5A5' }}>
+              {councilTraceTestError}
+            </div>
+          )}
+          {councilTraceTestResult && (
+            <div className="space-y-2">
+              <div className="grid gap-2 md:grid-cols-3">
+                <div className="rounded px-2 py-1" style={{ border: '1px solid rgba(125,211,252,0.18)' }}>
+                  <div style={{ color: '#7DD3FC' }}>Trace captured</div>
+                  <div className="font-bold">{councilTraceTestResult.summary.traceCaptured ? 'yes' : 'no'}</div>
+                </div>
+                <div className="rounded px-2 py-1" style={{ border: '1px solid rgba(125,211,252,0.18)' }}>
+                  <div style={{ color: '#7DD3FC' }}>Trace ID</div>
+                  <div className="font-mono break-all">{councilTraceTestResult.summary.traceId ?? '—'}</div>
+                </div>
+                <div className="rounded px-2 py-1" style={{ border: '1px solid rgba(125,211,252,0.18)' }}>
+                  <div style={{ color: '#7DD3FC' }}>Mission</div>
+                  <div className="font-mono break-all">
+                    {councilTraceTestResult.summary.missionId ?? '—'} / v{councilTraceTestResult.summary.missionVersion ?? '—'}
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <span>Secret redaction: <strong>{councilTraceTestResult.summary.secretRedactionVerdict}</strong></span>
+                <span>Active providers: <strong>{councilTraceTestResult.summary.activeProviders.map(provider => provider.family).join(', ') || '—'}</strong></span>
+                <span>Unavailable: <strong>{councilTraceTestResult.summary.unavailableProviders.map(provider => `${provider.family} (${provider.reason})`).join(', ') || '—'}</strong></span>
+              </div>
+              <details>
+                <summary className="cursor-pointer font-bold tracking-widest" style={{ color: '#67E8F9' }}>Trace Details</summary>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  <TraceDebugList title="Exact event order" items={councilTraceTestResult.summary.eventOrder} />
+                  <TraceDebugList title="Runtime-observed stages" items={councilTraceTestResult.summary.runtimeObservedStages} />
+                  <TraceDebugList title="Skipped / inferred stages" items={councilTraceTestResult.summary.skippedOrInferredStages} />
+                  <TraceDebugList title="Intent transformation chain" items={councilTraceTestResult.summary.intentTransformationChain} />
+                  <TraceDebugList title="Drift findings" items={councilTraceTestResult.summary.driftFindings} />
+                  <TraceDebugList title="Bypasses observed" items={councilTraceTestResult.summary.bypassesObserved} />
+                </div>
+              </details>
+              <details>
+                <summary className="cursor-pointer font-bold tracking-widest" style={{ color: '#67E8F9' }}>Normal Council Response</summary>
+                <div className="mt-2 space-y-2">
+                  {councilTraceTestResult.summary.normalCouncilResponse.map((response, index) => (
+                    <div key={`${response.family}-${index}`} className="rounded px-2 py-1" style={{ border: '1px solid rgba(125,211,252,0.18)' }}>
+                      <div className="font-bold">{response.family} · {response.status}</div>
+                      <div style={{ color: '#DFFAFE' }}>{response.content || '—'}</div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+              <details>
+                <summary className="cursor-pointer font-bold tracking-widest" style={{ color: '#67E8F9' }}>Raw Sanitized councilTrace JSON</summary>
+                <pre className="mt-2 max-h-56 overflow-auto rounded p-2 text-[9px]" style={{ background: 'rgba(0,0,0,0.35)', color: '#BAE6FD' }}>
+                  {councilTraceTestResult.rawCouncilTraceJson || '{}'}
+                </pre>
+              </details>
+              <button
+                type="button"
+                onClick={() => startTransition(() => { void copyCouncilTraceTestArtifact() })}
+                className="rounded px-3 py-1 text-[9px] font-bold tracking-widest"
+                style={{ border: '1px solid rgba(34,211,238,0.55)', color: '#67E8F9' }}
+              >
+                Copy Sanitized Trace
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
   const operatorNav = (

@@ -24,6 +24,7 @@ import type { LiveResearchClientSummary, LiveResearchClientUi } from '@/lib/runt
 import type { CouncilResponseCompletion } from '@/lib/council/responseCompletion'
 import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import type { StableGroupPriorReply } from '@/lib/council/stableGroupChat'
+import type { CouncilRuntimeTraceSnapshot } from '@/lib/council/runtimeTrace'
 
 export type CouncilChatRequestBody = {
   message: string
@@ -118,6 +119,8 @@ export type CouncilChatJson = {
       >
     >
   }
+  /** Debug-only Phase 47A runtime trace. Present only when explicitly requested. */
+  councilTrace?: CouncilRuntimeTraceSnapshot
 }
 
 export async function postCouncilChat(
