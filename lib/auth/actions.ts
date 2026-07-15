@@ -3,10 +3,7 @@
 import { redirect } from 'next/navigation'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { isSafeRedirectPath } from '@/lib/auth/redirect'
-
-export type SignInState = {
-  error: string | null
-}
+import type { SignInState } from '@/lib/auth/authState'
 
 export async function signIn(_prevState: SignInState, formData: FormData): Promise<SignInState> {
   const email = String(formData.get('email') ?? '').trim()

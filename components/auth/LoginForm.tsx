@@ -2,9 +2,10 @@
 
 import { useActionState } from 'react'
 import Link from 'next/link'
-import { signIn, type SignInState } from '@/lib/auth/actions'
+import { signIn } from '@/lib/auth/actions'
+import { SIGN_IN_INITIAL_STATE } from '@/lib/auth/authState'
 
-const initialState: SignInState = { error: null }
+const initialState = SIGN_IN_INITIAL_STATE
 
 export function LoginForm({ next }: { next: string }) {
   const [state, formAction, pending] = useActionState(signIn, initialState)

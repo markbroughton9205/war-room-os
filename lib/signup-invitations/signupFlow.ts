@@ -4,11 +4,9 @@ import type {
   ClaimSignupInvitationResult,
   ReleaseClaimResult,
 } from './types'
+import type { SignupFlowState } from './signupFlowState'
 
-export type SignupFlowState = {
-  status: 'idle' | 'error' | 'success'
-  message: string | null
-}
+export type { SignupFlowState } from './signupFlowState'
 
 export type ExistingSignupUser =
   | { status: 'none' }

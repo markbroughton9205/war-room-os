@@ -2,9 +2,10 @@
 
 import { useActionState } from 'react'
 import { useState } from 'react'
-import { signUpWithInvitation, type SignupState } from '@/lib/auth/signupActions'
+import { signUpWithInvitation } from '@/lib/auth/signupActions'
+import { SIGNUP_FLOW_INITIAL_STATE } from '@/lib/signup-invitations/signupFlowState'
 
-const initialState: SignupState = { status: 'idle', message: null }
+const initialState = SIGNUP_FLOW_INITIAL_STATE
 
 export function SignupForm({ token }: { token: string }) {
   const [state, formAction, pending] = useActionState(signUpWithInvitation, initialState)

@@ -11,14 +11,13 @@ import {
 } from '@/lib/signup-invitations/signupFlow'
 import type { User } from '@supabase/supabase-js'
 
-export type SignupState = SignupFlowState
 type ExistingAuthLookup =
   | { status: 'none' }
   | { status: 'unconfirmed'; user: User }
   | { status: 'confirmed'; user: User }
   | { status: 'lookup_unavailable' }
 
-export async function signUpWithInvitation(_prevState: SignupState, formData: FormData): Promise<SignupState> {
+export async function signUpWithInvitation(_prevState: SignupFlowState, formData: FormData): Promise<SignupFlowState> {
   const rawToken = String(formData.get('invite') ?? formData.get('token') ?? '').trim()
   const email = normalizeEmail(String(formData.get('email') ?? ''))
   const password = String(formData.get('password') ?? '')
