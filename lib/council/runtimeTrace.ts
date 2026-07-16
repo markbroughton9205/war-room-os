@@ -147,7 +147,19 @@ export function createCouncilRuntimeTrace(args: {
           finalReportId,
           sessionId: typeof args.sessionId === 'string' ? safeTraceString(args.sessionId) : null,
           providerResponseIds: sanitizeTraceValue(providerResponseIds) as Record<string, string[]>,
-          stages: stages.map(stage => sanitizeTraceValue(stage)) as CouncilTraceStage[],
+          // inputSummary/outputSummary are already-sanitized object trees stored
+          // by reference on the internal stage record. A plain `{...stage}`
+          // spread only copies that reference, not the tree itself, so a
+          // caller mutating the returned snapshot's inputSummary/outputSummary
+          // would mutate the internally stored object too and corrupt every
+          // later snapshot() call. Re-running the (pure, idempotent)
+          // sanitizer produces a fresh, unaliased copy without repaying the
+          // cost of re-sanitizing the whole stage record's primitive fields.
+          stages: stages.map(stage => ({
+            ...stage,
+            inputSummary: sanitizeTraceValue(stage.inputSummary),
+            outputSummary: sanitizeTraceValue(stage.outputSummary),
+          })),
           redaction: {
             applied: true,
             policy: 'Prompt bodies, credentials, cookies, auth tokens, invite/recovery tokens, Google/Gemini API keys, and long free-text fields are redacted or summarized.',

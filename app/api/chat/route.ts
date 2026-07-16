@@ -1427,17 +1427,24 @@ export async function POST(req: Request) {
           ),
         ),
       )
-      const providerResponseIds = providerResults.map(result => ({
+      const providerResponses = providerResults.map(result => ({
         family: result.family,
         responseId: councilTrace.registerProviderResponse(result.family),
         status: result.status,
+        responseLength: typeof result.content === 'string' ? result.content.length : null,
+        errorClass: result.error ? 'provider_error' : null,
       }))
       councilTrace.record('provider_responses_received', {
         module: 'app/api/chat/route.ts:Promise.all(callCouncilProvider)',
         inputSummary: { selectedFamilies: activeFamilies },
         outputSummary: {
-          providerResponseIds,
-          statuses: providerResults.map(result => ({ family: result.family, status: result.status })),
+          providerResponses: providerResponses.map(result => ({
+            responseId: result.responseId,
+            providerFamily: result.family,
+            status: result.status,
+            responseLength: result.responseLength,
+            errorClass: result.errorClass,
+          })),
         },
         stateChange: 'Parallel provider responses collected.',
       })
@@ -1449,22 +1456,35 @@ export async function POST(req: Request) {
       councilTrace.record('integrity_checked', {
         module: 'app/api/chat/route.ts:validateProviderResults',
         inputSummary: { resultCount: providerResults.length, integrityCheck: !skipProviderIntegrityCheck },
-        outputSummary: { resultCount: results.length },
+        outputSummary: {
+          externalProviderResultCount: providerResults.length,
+          integrityFlagCount: results.filter(result => result.messageType === 'integrity_flag').length,
+          totalResultRecords: results.length,
+        },
         stateChange: 'Parallel provider results passed through response integrity validation.',
       })
       councilTrace.record('red_team_checked', {
         module: 'app/api/chat/route.ts:validateProviderResults',
         inputSummary: { resultFamilies: results.map(result => result.family) },
         outputSummary: {
+          sourceType: 'integrity_layer',
+          externalProviderCallCompleted: false,
           integrityFlagCount: results.filter(result => result.messageType === 'integrity_flag').length,
+          syntheticIntegrityFamilies: results
+            .filter(result => result.messageType === 'integrity_flag')
+            .map(result => result.family),
         },
-        stateChange: 'Red Team integrity flag presence observed in provider result set.',
+        stateChange: 'Integrity-layer Red Team flag presence observed; no external Red Team provider call completed.',
       })
       councilTrace.record('scope_guardian_checked', {
         module: 'app/api/chat/route.ts:parallel_provider_selection',
         inputSummary: { missionVersion: councilTrace.missionVersion },
-        outputSummary: { advisoryStatus: 'not_integrated_47a_1_trace_only' },
-        stateChange: 'Scope Guardian advisory check recorded as not yet integrated in 47A-1.',
+        outputSummary: {
+          status: 'not_integrated',
+          enforcementApplied: false,
+          advisoryStatus: 'not_integrated_47a_1_trace_only',
+        },
+        stateChange: 'Scope Guardian is not integrated in 47A-1; no runtime enforcement was applied.',
         observation: 'inferred',
       })
       councilTrace.record('final_moderated', {
@@ -1475,15 +1495,27 @@ export async function POST(req: Request) {
       })
       councilTrace.record('council_report_built', {
         module: 'app/api/chat/route.ts:parallel_provider_selection',
-        inputSummary: { responseIds: providerResponseIds },
-        outputSummary: { finalReportId: councilTrace.finalReportId, minimalReport: true },
-        stateChange: 'Minimal trace report envelope built for parallel provider response.',
+        inputSummary: {
+          responseIds: providerResponses.map(result => result.responseId),
+          providerFamilies: providerResponses.map(result => result.family),
+        },
+        outputSummary: {
+          finalReportId: councilTrace.finalReportId,
+          reportType: 'minimal_trace_envelope',
+          canonicalCouncilReportGenerated: false,
+        },
+        stateChange: 'Minimal trace envelope built for parallel provider response; canonical Council Report was not generated.',
       })
       councilTrace.record('memory_recommendation_recorded', {
         module: 'app/api/chat/route.ts:parallel_provider_selection',
         inputSummary: { stabilityMemoryInjection: stabilityFlags.memoryInjection },
-        outputSummary: { memoryRecommendation: 'not_evaluated_parallel_provider_path' },
-        stateChange: 'No memory proposal ingestion ran in parallel provider path.',
+        outputSummary: {
+          recommendationStatus: 'not_evaluated',
+          memoryRecommendation: 'not_evaluated_parallel_provider_path',
+          memoryEvaluationExecuted: false,
+          memoryWritten: false,
+        },
+        stateChange: 'No memory proposal ingestion or memory write ran in parallel provider path.',
       })
       await safeAudit({
         success: true,
