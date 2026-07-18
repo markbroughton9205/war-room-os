@@ -69,7 +69,19 @@ export type CouncilTraceValidationResult = {
 }
 
 const SECRET_KEY_PATTERN = /(api[_-]?key|authorization|cookie|token|secret|service[_-]?role|password|refresh[_-]?token|access[_-]?token|recovery|invitation)/i
-const SECRET_VALUE_PATTERN = /(bearer\s+[a-z0-9._-]+|eyJ[a-z0-9._-]+|sk-[a-z0-9_-]+|sb_secret_[a-z0-9_-]+|fc-[a-z0-9_-]+|tvly-[a-z0-9_-]+|xai-[a-z0-9_-]+|AIza[A-Za-z0-9_-]{20,})/i
+// fc- has a negative lookbehind because 'f' and 'c' are both valid
+// hexadecimal digits: a random UUID naturally produces the literal
+// substring "fc-" at a hex-group boundary roughly 1 in 20 times (always
+// preceded by another hex digit, since UUID groups are 4+ chars), which
+// previously caused legitimate values (e.g. a responseId embedding a UUID)
+// to be falsely redacted. A length floor does not fix this -- the rest of
+// a UUID/identifier easily supplies 20+ further matching characters. The
+// lookbehind requires "fc-" to start a token (preceded by nothing, or by a
+// non-identifier separator), which a genuine standalone Firecrawl key
+// satisfies but a hex-boundary collision never does. sk-/sb_secret_/tvly-/
+// xai-/eyJ/bearer all require at least one non-hex letter, so a hex-only
+// UUID cannot produce them and they don't need the same treatment.
+const SECRET_VALUE_PATTERN = /(bearer\s+[a-z0-9._-]+|eyJ[a-z0-9._-]+|sk-[a-z0-9_-]+|sb_secret_[a-z0-9_-]+|(?<![a-z0-9_])fc-[a-z0-9_-]+|tvly-[a-z0-9_-]+|xai-[a-z0-9_-]+|AIza[A-Za-z0-9_-]{20,})/i
 const MAX_STRING_CHARS = 240
 const MAX_ARRAY_ITEMS = 12
 const MAX_OBJECT_KEYS = 24

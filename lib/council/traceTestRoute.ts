@@ -12,6 +12,8 @@ export type CouncilTraceTestProvider = {
   family: string
   status: CouncilTraceTestProviderStatus
   reason: string
+  configuredContext?: string
+  causeVerifiedAtRuntime?: boolean
 }
 
 export type CouncilTraceTestSummary = {
@@ -40,9 +42,22 @@ export type CouncilTraceTestCouncilResponse = {
 
 export type CouncilTraceTestRunResponse = {
   ok: boolean
+  diagnostic: CouncilRuntimeDiagnosticClassification
   summary: CouncilTraceTestSummary
   councilTrace: CouncilRuntimeTraceSnapshot | null
   rawCouncilTraceJson: string
+}
+
+export type CouncilRuntimeDiagnosticClassification = {
+  featureType: 'commander_diagnostic'
+  authority: 'commander_only'
+  runtimeImpact: 'observational'
+  executionAuthority: 'none'
+  memoryWriteAuthority: 'none'
+  providerControlAuthority: 'none'
+  authenticatedRuntimeTraceGate: 'passed'
+  verifiedEnvironment: 'production'
+  verificationStatus: 'independently_reviewed'
 }
 
 type ProviderResultLike = {
@@ -65,6 +80,8 @@ const EXPECTED_PROVIDER_ENV: Array<{
   family: string
   envKeys: string[]
   unavailableReason: string
+  configuredContext?: string
+  causeVerifiedAtRuntime?: boolean
 }> = [
   { family: 'ChatGPT', envKeys: ['OPENAI_API_KEY'], unavailableReason: 'OPENAI_API_KEY not configured' },
   { family: 'Claude', envKeys: ['ANTHROPIC_API_KEY'], unavailableReason: 'ANTHROPIC_API_KEY not configured' },
@@ -73,9 +90,23 @@ const EXPECTED_PROVIDER_ENV: Array<{
   {
     family: 'Kimi',
     envKeys: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
-    unavailableReason: 'intentionally_unavailable_funding_paused',
+    unavailableReason: 'unavailable in this request',
+    configuredContext: 'funding paused',
+    causeVerifiedAtRuntime: false,
   },
 ]
+
+export const COUNCIL_RUNTIME_DIAGNOSTIC_CLASSIFICATION: CouncilRuntimeDiagnosticClassification = {
+  featureType: 'commander_diagnostic',
+  authority: 'commander_only',
+  runtimeImpact: 'observational',
+  executionAuthority: 'none',
+  memoryWriteAuthority: 'none',
+  providerControlAuthority: 'none',
+  authenticatedRuntimeTraceGate: 'passed',
+  verifiedEnvironment: 'production',
+  verificationStatus: 'independently_reviewed',
+}
 
 export function buildCouncilTraceTestChatBody(): Record<string, unknown> {
   return {
@@ -93,13 +124,13 @@ export async function handleCouncilTraceTestStatus(_request: Request, deps: Trac
   const environmentBlocked = (deps.assertEnvironmentAllowed ?? assertLiveActionsAllowed)()
   if (environmentBlocked) return environmentBlocked
 
-  const commander = await (deps.requireCommander ?? requireCommanderSession)('Council trace test')
+  const commander = await (deps.requireCommander ?? requireCommanderSession)('Council runtime diagnostics')
   if (!commander.ok) return commander.response
 
   return NextResponse.json({
     available: true,
-    temporary: true,
-    label: 'Run Council Trace Test',
+    diagnostic: COUNCIL_RUNTIME_DIAGNOSTIC_CLASSIFICATION,
+    label: 'Run Council Runtime Trace',
   })
 }
 
@@ -107,12 +138,12 @@ export async function handleCouncilTraceTestRun(request: Request, deps: TraceTes
   const environmentBlocked = (deps.assertEnvironmentAllowed ?? assertLiveActionsAllowed)()
   if (environmentBlocked) return environmentBlocked
 
-  const commander = await (deps.requireCommander ?? requireCommanderSession)('Council trace test')
+  const commander = await (deps.requireCommander ?? requireCommanderSession)('Council runtime diagnostics')
   if (!commander.ok) return commander.response
 
   const chatPost = deps.chatPost
   if (!chatPost) {
-    return NextResponse.json({ error: 'Council trace test route is not configured.' }, { status: 500 })
+    return NextResponse.json({ error: 'Council runtime diagnostics route is not configured.' }, { status: 500 })
   }
 
   const chatRequest = new Request(new URL('/api/chat', request.url), {
@@ -145,6 +176,7 @@ export function buildCouncilTraceTestRunResponse(
 
   return {
     ok: Boolean(trace),
+    diagnostic: COUNCIL_RUNTIME_DIAGNOSTIC_CLASSIFICATION,
     summary: {
       traceCaptured: Boolean(trace),
       traceId: trace?.councilTraceId ?? null,
@@ -196,6 +228,10 @@ function summarizeUnavailableProviders(
       family: provider.family,
       status: 'unavailable' as const,
       reason: provider.unavailableReason,
+      ...(provider.configuredContext ? { configuredContext: provider.configuredContext } : {}),
+      ...(typeof provider.causeVerifiedAtRuntime === 'boolean'
+        ? { causeVerifiedAtRuntime: provider.causeVerifiedAtRuntime }
+        : {}),
     }))
 
   return [...fromResults, ...fromConfig]

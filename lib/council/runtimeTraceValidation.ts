@@ -55,6 +55,8 @@ export function runCouncilRuntimeTraceValidation(): ValidationCase[] {
     validateActivationAliasesMatchDocumentation(),
     validatePostRecordInputMutationIsolated(),
     validateSnapshotOutputMutationDoesNotLeakIntoLaterSnapshot(),
+    validateUuidEmbeddedFcSequenceNotFalselyRedacted(),
+    validateGenuineFirecrawlKeyStillRedacted(),
   ]
 }
 
@@ -396,6 +398,38 @@ function validateHarmlessGeminiGoogleProseRetained(): ValidationCase {
   return {
     caseId: 'harmless_gemini_google_prose_retained',
     ok: safeValues.every(value => raw.includes(value)) && !raw.includes('[REDACTED]'),
+    detail: raw,
+  }
+}
+
+function validateUuidEmbeddedFcSequenceNotFalselyRedacted(): ValidationCase {
+  // 'f' and 'c' are both valid hex digits, so a hex UUID can naturally spell
+  // "fc-" at a group boundary (roughly 1 in 20 random UUIDs). This is a
+  // regression test for a real, intermittently-reproducing false-positive
+  // redaction found by running the suite repeatedly: a legitimate
+  // responseId embedding a UUID like this one was being replaced with
+  // [REDACTED] purely by chance.
+  const responseIdWithFcBoundary = 'resp_grok_12345bfc-4edd-b63d-97885612850d'
+  const sanitized = sanitizeTraceValue({ responseId: responseIdWithFcBoundary })
+  const raw = JSON.stringify(sanitized)
+  return {
+    caseId: 'uuid_embedded_fc_sequence_not_falsely_redacted',
+    ok: raw.includes(responseIdWithFcBoundary) && !raw.includes('[REDACTED]'),
+    detail: raw,
+  }
+}
+
+function validateGenuineFirecrawlKeyStillRedacted(): ValidationCase {
+  // Field name is deliberately neutral (does not match SECRET_KEY_PATTERN's
+  // api[_-]?key/secret/token/etc. alternatives) so this proves the
+  // Firecrawl value-shape pattern itself redacts the key, not that the
+  // property name alone triggered key-name redaction.
+  const realisticKey = 'fc-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6'
+  const sanitized = sanitizeTraceValue({ providerCredential: realisticKey })
+  const raw = JSON.stringify(sanitized)
+  return {
+    caseId: 'genuine_firecrawl_key_still_redacted',
+    ok: !raw.includes(realisticKey) && raw.includes('[REDACTED]'),
     detail: raw,
   }
 }

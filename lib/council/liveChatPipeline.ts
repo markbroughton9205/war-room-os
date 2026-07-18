@@ -119,7 +119,7 @@ export type CouncilChatJson = {
       >
     >
   }
-  /** Debug-only Phase 47A runtime trace. Present only when explicitly requested. */
+  /** Commander diagnostic runtime trace. Present only when explicitly requested. */
   councilTrace?: CouncilRuntimeTraceSnapshot
 }
 

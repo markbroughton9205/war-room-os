@@ -503,7 +503,7 @@ export async function POST(req: Request) {
       missionId: councilTrace.missionId,
       missionVersion: councilTrace.missionVersion,
     },
-    stateChange: 'Initialized debug-only runtime trace envelope for this /api/chat request.',
+    stateChange: 'Initialized diagnostic-only runtime trace envelope for this /api/chat request.',
   })
 
   const councilCommand = coerceCouncilCommand(body.councilCommand)

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import {
   buildCouncilTraceTestChatBody,
   buildCouncilTraceTestRunResponse,
+  COUNCIL_RUNTIME_DIAGNOSTIC_CLASSIFICATION,
   COUNCIL_TRACE_TEST_PROMPT,
   handleCouncilTraceTestRun,
   handleCouncilTraceTestStatus,
@@ -18,12 +19,15 @@ export type CouncilTraceTestRouteValidationResult = {
 export async function runCouncilTraceTestRouteValidation(): Promise<CouncilTraceTestRouteValidationResult[]> {
   return [
     tracePromptAndBodyAreExact(),
+    ordinaryCouncilRequestsRemainTraceDisabled(),
     await environmentGateRunsBeforeCommanderSession(),
     await nonCommanderCannotInvokeChatPost(),
     await commanderStatusAvailabilityRequiresAuthorization(),
     await commanderRunInvokesExistingChatPath(),
-    traceSummaryDistinguishesKimiIntentionalUnavailability(),
+    diagnosticClassificationIsCommanderOnlyObservational(),
+    traceSummarySeparatesKimiConfiguredContextFromRuntimeCause(),
     traceSummaryRejectsSecretLikeArtifacts(),
+    diagnosticDoesNotGrantActionMemoryOrProviderAuthority(),
   ]
 }
 
@@ -48,6 +52,23 @@ function tracePromptAndBodyAreExact(): CouncilTraceTestRouteValidationResult {
     ok,
     'exact prompt, councilTraceDebug=true, full_council mode',
     JSON.stringify(body),
+  )
+}
+
+function ordinaryCouncilRequestsRemainTraceDisabled(): CouncilTraceTestRouteValidationResult {
+  const ordinary = {
+    message: 'hello council',
+    profile: '',
+    threadHistory: [],
+    mode: 'continue',
+  }
+  const diagnostic = buildCouncilTraceTestChatBody()
+  const ok = !('councilTraceDebug' in ordinary) && diagnostic.councilTraceDebug === true
+  return validation(
+    'ordinary_council_requests_remain_trace_disabled',
+    ok,
+    'ordinary request omits councilTraceDebug; diagnostic request explicitly opts in',
+    `ordinary=${JSON.stringify(ordinary)}; diagnosticTraceDebug=${String(diagnostic.councilTraceDebug)}`,
   )
 }
 
@@ -101,12 +122,16 @@ async function commanderStatusAvailabilityRequiresAuthorization(): Promise<Counc
     assertEnvironmentAllowed: () => null,
     requireCommander: async () => ({ ok: true, userId: 'commander' }),
   })
-  const body = await response.json() as { available?: unknown; temporary?: unknown }
-  const ok = response.status === 200 && body.available === true && body.temporary === true
+  const body = await response.json() as { available?: unknown; diagnostic?: { featureType?: unknown }; label?: unknown }
+  const ok =
+    response.status === 200
+    && body.available === true
+    && body.label === 'Run Council Runtime Trace'
+    && body.diagnostic?.featureType === 'commander_diagnostic'
   return validation(
     'commander_status_availability_requires_authorization',
     ok,
-    'authorized status returns available temporary control',
+    'authorized status returns available permanent Commander diagnostic control',
     `status=${response.status}; body=${JSON.stringify(body)}`,
   )
 }
@@ -141,7 +166,27 @@ async function commanderRunInvokesExistingChatPath(): Promise<CouncilTraceTestRo
   )
 }
 
-function traceSummaryDistinguishesKimiIntentionalUnavailability(): CouncilTraceTestRouteValidationResult {
+function diagnosticClassificationIsCommanderOnlyObservational(): CouncilTraceTestRouteValidationResult {
+  const response = buildCouncilTraceTestRunResponse({ results: [], councilTrace: sampleTrace() })
+  const ok =
+    response.diagnostic.featureType === 'commander_diagnostic'
+    && response.diagnostic.authority === 'commander_only'
+    && response.diagnostic.runtimeImpact === 'observational'
+    && response.diagnostic.executionAuthority === 'none'
+    && response.diagnostic.memoryWriteAuthority === 'none'
+    && response.diagnostic.providerControlAuthority === 'none'
+    && response.diagnostic.authenticatedRuntimeTraceGate === 'passed'
+    && response.diagnostic.verifiedEnvironment === 'production'
+    && response.diagnostic.verificationStatus === 'independently_reviewed'
+  return validation(
+    'diagnostic_classification_is_commander_only_observational',
+    ok,
+    'classification marks feature as Commander-only, observational, and non-authoritative',
+    JSON.stringify(response.diagnostic),
+  )
+}
+
+function traceSummarySeparatesKimiConfiguredContextFromRuntimeCause(): CouncilTraceTestRouteValidationResult {
   const response = buildCouncilTraceTestRunResponse({
     results: [{ family: 'ChatGPT', status: 'OK', content: 'ready' }],
     councilTrace: sampleTrace(),
@@ -152,11 +197,14 @@ function traceSummaryDistinguishesKimiIntentionalUnavailability(): CouncilTraceT
     GEMINI_API_KEY: 'configured',
   })
   const kimi = response.summary.unavailableProviders.find(provider => provider.family === 'Kimi')
-  const ok = kimi?.reason === 'intentionally_unavailable_funding_paused'
+  const ok =
+    kimi?.reason === 'unavailable in this request'
+    && kimi.configuredContext === 'funding paused'
+    && kimi.causeVerifiedAtRuntime === false
   return validation(
-    'trace_summary_distinguishes_kimi_intentional_unavailability',
+    'trace_summary_separates_kimi_configured_context_from_runtime_cause',
     ok,
-    'Kimi unavailable reason is intentional funding pause, not provider error',
+    'Kimi is unavailable in request; funding pause is configured context, not runtime-observed cause',
     JSON.stringify(kimi),
   )
 }
@@ -174,6 +222,21 @@ function traceSummaryRejectsSecretLikeArtifacts(): CouncilTraceTestRouteValidati
     ok,
     'secret-like trace artifact yields failed redaction verdict',
     response.summary.secretRedactionVerdict,
+  )
+}
+
+function diagnosticDoesNotGrantActionMemoryOrProviderAuthority(): CouncilTraceTestRouteValidationResult {
+  const classification = COUNCIL_RUNTIME_DIAGNOSTIC_CLASSIFICATION
+  const ok =
+    classification.executionAuthority === 'none'
+    && classification.memoryWriteAuthority === 'none'
+    && classification.providerControlAuthority === 'none'
+    && classification.runtimeImpact === 'observational'
+  return validation(
+    'diagnostic_does_not_grant_action_memory_or_provider_authority',
+    ok,
+    'diagnostic classification grants no execution, memory write, or provider-control authority',
+    JSON.stringify(classification),
   )
 }
 

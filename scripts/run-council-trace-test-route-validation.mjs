@@ -12,7 +12,7 @@ for (const result of results) {
   }
 }
 
-console.log(`Council trace test route validation: ${results.length - failures.length}/${results.length} PASS`)
+console.log(`Commander runtime diagnostics route validation: ${results.length - failures.length}/${results.length} PASS`)
 
 if (failures.length > 0) {
   process.exitCode = 1

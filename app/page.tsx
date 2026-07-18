@@ -5295,10 +5295,23 @@ type CouncilTraceTestProvider = {
   family: string
   status: string
   reason: string
+  configuredContext?: string
+  causeVerifiedAtRuntime?: boolean
 }
 
 type CouncilTraceTestResponse = {
   ok: boolean
+  diagnostic?: {
+    featureType?: string
+    authority?: string
+    runtimeImpact?: string
+    executionAuthority?: string
+    memoryWriteAuthority?: string
+    providerControlAuthority?: string
+    authenticatedRuntimeTraceGate?: string
+    verifiedEnvironment?: string
+    verificationStatus?: string
+  }
   summary: {
     traceCaptured: boolean
     traceId: string | null
@@ -10843,8 +10856,8 @@ function Home() {
         >
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="font-bold tracking-widest" style={{ color: '#67E8F9' }}>Temporary Trace Verification</div>
-              <div style={{ color: '#7DD3FC' }}>Commander-only debug control. Captures one sanitized Live Council trace.</div>
+              <div className="font-bold tracking-widest" style={{ color: '#67E8F9' }}>Commander Runtime Diagnostics</div>
+              <div style={{ color: '#7DD3FC' }}>Captures a sanitized trace of one Live Council request for system auditing. This tool does not execute actions, write memory, change provider state, or alter mission authority.</div>
             </div>
             <button
               type="button"
@@ -10856,7 +10869,7 @@ function Home() {
                 color: councilTraceTestStatus === 'running' ? '#A5F3FC' : '#001014',
               }}
             >
-              {councilTraceTestStatus === 'running' ? 'Capturing...' : 'Run Council Trace Test'}
+              {councilTraceTestStatus === 'running' ? 'Capturing...' : 'Run Council Runtime Trace'}
             </button>
           </div>
           {councilTraceTestError && (
@@ -10885,7 +10898,8 @@ function Home() {
               <div className="flex flex-wrap gap-2">
                 <span>Secret redaction: <strong>{councilTraceTestResult.summary.secretRedactionVerdict}</strong></span>
                 <span>Active providers: <strong>{councilTraceTestResult.summary.activeProviders.map(provider => provider.family).join(', ') || '—'}</strong></span>
-                <span>Unavailable: <strong>{councilTraceTestResult.summary.unavailableProviders.map(provider => `${provider.family} (${provider.reason})`).join(', ') || '—'}</strong></span>
+                <span>Unavailable: <strong>{councilTraceTestResult.summary.unavailableProviders.map(provider => `${provider.family} (${provider.reason}${provider.configuredContext ? `; configured context: ${provider.configuredContext}` : ''}${typeof provider.causeVerifiedAtRuntime === 'boolean' ? `; cause verified at runtime: ${provider.causeVerifiedAtRuntime ? 'yes' : 'no'}` : ''})`).join(', ') || '—'}</strong></span>
+                <span>Diagnostic: <strong>{councilTraceTestResult.diagnostic?.featureType ?? 'commander_diagnostic'} · {councilTraceTestResult.diagnostic?.runtimeImpact ?? 'observational'}</strong></span>
               </div>
               <details>
                 <summary className="cursor-pointer font-bold tracking-widest" style={{ color: '#67E8F9' }}>Trace Details</summary>
