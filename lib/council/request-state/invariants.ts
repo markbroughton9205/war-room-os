@@ -11,8 +11,62 @@ import {
 } from './types'
 import { isDispatchLifecycle, isTerminalLifecycle } from './transitions'
 
-const SECRET_PATTERN =
-  /\b(?:authorization|cookie|set-cookie|bearer|access[_-]?token|refresh[_-]?token|service[_-]?role|api[_-]?key|password|secret)\b/i
+const SECRET_PHRASES = [
+  'authorization',
+  'authorization header',
+  'bearer',
+  'bearer token',
+  'access token',
+  'refresh token',
+  'api key',
+  'service role',
+  'service role key',
+  'supabase service key',
+  'cookie',
+  'set cookie',
+  'password',
+  'secret',
+  'private key',
+  'raw prompt',
+  'chain of thought',
+  'hidden reasoning',
+  'provider request body',
+  'provider response body',
+] as const
+
+// Phrases that legitimately contain a dangerous component word but are not
+// themselves unsafe (e.g. "cookie policy" contains "cookie"). Stripped out
+// before pattern matching so they never trigger a false positive, while a
+// genuinely unsafe occurrence elsewhere in the same string is still caught.
+const SECRET_SAFE_PHRASES = ['cookie policy', 'key result', 'reasoning category', 'prompt version'] as const
+
+function normalizeForSecretScan(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+const SECRET_PHRASE_PATTERN = new RegExp(
+  `\\b(?:${[...SECRET_PHRASES]
+    .sort((a, b) => b.length - a.length)
+    .map(phrase => phrase.split(' ').join('\\s+'))
+    .join('|')})\\b`,
+)
+
+/**
+ * Case-insensitive, separator-insensitive secret/unsafe-vocabulary detector.
+ * Normalizes whitespace/underscores/hyphens/punctuation before matching so
+ * "access_token", "access-token", and "ACCESS TOKEN" are all caught the same
+ * as "access token" -- while a small safe-phrase allowlist keeps benign
+ * lookalikes like "cookie policy" from being falsely rejected. Shared by
+ * lib/council/progress-events so both modules apply identical rules.
+ */
+export function containsUnsafeSecretText(value: string): boolean {
+  const normalized = normalizeForSecretScan(value)
+  let scanned = normalized
+  for (const safePhrase of SECRET_SAFE_PHRASES) {
+    scanned = scanned.split(safePhrase).join(' ')
+  }
+  return SECRET_PHRASE_PATTERN.test(scanned)
+}
 
 const READINESS_WORDS = new Set(['configured', 'connected', 'unavailable', 'paused', 'disabled', 'unknown'])
 
@@ -102,7 +156,7 @@ function validateFamilyExecution(
     if (record.fallbackLineage.fallbackReplacedVisiblePrimary && record.visibility.rendered && !record.visibility.substituted) {
       issues.push(issue('substituted_output_unmarked', path('visibility.substituted'), 'Rendered substituted output must be explicitly marked substituted.'))
     }
-    if (SECRET_PATTERN.test(record.fallbackLineage.safeDiagnosticReason)) {
+    if (containsUnsafeSecretText(record.fallbackLineage.safeDiagnosticReason)) {
       issues.push(issue('unsafe_fallback_diagnostic', path('fallbackLineage.safeDiagnosticReason'), 'Fallback diagnostic reason contains secret-bearing vocabulary.'))
     }
   }
@@ -125,10 +179,10 @@ function validateFamilyExecution(
   ) {
     issues.push(issue('reviewing_without_delivered_lineage', path('priorResponseLineage'), 'reviewing_previous_family requires at least one delivered prior response.'))
   }
-  if (record.safeDiagnosticMessage && SECRET_PATTERN.test(record.safeDiagnosticMessage)) {
+  if (record.safeDiagnosticMessage && containsUnsafeSecretText(record.safeDiagnosticMessage)) {
     issues.push(issue('unsafe_diagnostic_message', path('safeDiagnosticMessage'), 'Safe diagnostic message contains secret-bearing vocabulary.'))
   }
-  if (record.safeDiagnosticCode && SECRET_PATTERN.test(record.safeDiagnosticCode)) {
+  if (record.safeDiagnosticCode && containsUnsafeSecretText(record.safeDiagnosticCode)) {
     issues.push(issue('unsafe_diagnostic_code', path('safeDiagnosticCode'), 'Safe diagnostic code contains secret-bearing vocabulary.'))
   }
 
@@ -223,9 +277,19 @@ export function validateCouncilRequestState(
     )
   const isClosed = request.cancellation.cancelled || allSelectedFamiliesTerminal
   if (isClosed) {
-    for (const record of request.familyExecutions) {
-      if (isDispatched(record) && record.lifecycle !== 'terminal') {
-        issues.push(issue('dispatched_without_terminal_outcome', 'familyExecutions', `${record.family} was dispatched but has no terminal outcome.`))
+    // Closure -- whether via full natural completion or via confirmed
+    // Commander cancellation -- requires EVERY selected family to be
+    // terminal, not just the ones that happened to be dispatched. A
+    // selected family still sitting in waiting/queued/retrieving/
+    // responding/reviewing is just as much an open, unresolved commitment
+    // as a dispatched one; checking only dispatched families silently let
+    // request_cancelled close a request while a merely-waiting selected
+    // family was still open. Expected-but-unselected families are
+    // intentionally excluded -- this loop only walks selectedFamilies.
+    for (const family of request.selectedFamilies) {
+      const record = request.familyExecutions.find(candidate => candidate.family === family)
+      if (!record || record.lifecycle !== 'terminal') {
+        issues.push(issue('selected_family_not_terminal_at_closure', 'familyExecutions', `${family} was selected but is not terminal at request closure.`))
       }
     }
   }

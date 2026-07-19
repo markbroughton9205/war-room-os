@@ -261,6 +261,29 @@ function validRequestCases(): CouncilRequestStateValidationCase[] {
     validateCase('red_02_partial_record_synthetic', 'Partial synthetic-integrity audit is representable.', 'valid', redPartial),
     validateCase('red_03_unknown_scope', 'Unknown-scope audit is representable without full-record claim.', 'valid', redUnknown),
     validateCase('valid_09_mixed_terminal_and_in_flight', 'One family terminal and another still legitimately in flight (sequential exchange) is valid -- the request is not closed until every selected family reaches terminal.', 'valid', mixedTerminalAndInFlight),
+    validateCase(
+      'valid_10_cancelled_after_all_selected_terminal',
+      'Confirmed cancellation after every selected family independently reaches terminal is valid.',
+      'valid',
+      makeRequest({
+        cancellation: { cancelled: true, reason: 'commander_stop', cancelledAt: '2026-07-18T00:00:04.000Z' },
+        familyExecutions: [terminalExecution('chatgpt', 'complete'), terminalExecution('claude', 'stopped')],
+      }),
+    ),
+    validateCase(
+      'valid_11_expected_unselected_waiting_does_not_block_cancellation',
+      'An expected-but-unselected family left waiting does not block confirmed cancellation closure.',
+      'valid',
+      makeRequest({
+        expectedFamilies: ['chatgpt', 'claude'],
+        selectedFamilies: ['chatgpt'],
+        familyExecutions: [
+          terminalExecution('chatgpt', 'complete'),
+          makeExecution({ family: 'claude', lifecycle: 'waiting', outcome: null, dispatchedAt: null, queuedAt: null, completedAt: null }),
+        ],
+        cancellation: { cancelled: true, reason: 'commander_stop', cancelledAt: '2026-07-18T00:00:04.000Z' },
+      }),
+    ),
     caseResult('adapter_01_online_maps_connected', 'Legacy online maps to readiness connected.', 'valid', mapLegacyConnectionStatusToReadiness('online') === 'connected'),
     caseResult('adapter_02_provider_timeout_maps_timed_out', 'Legacy provider timeout maps to request outcome timed_out.', 'valid', mapProviderRuntimeOutcomeToRequestOutcome('TIMED_OUT') === 'timed_out'),
     caseResult('adapter_03_in_flight_maps_to_null_not_terminal_outcome', 'Legacy IN_FLIGHT status must never map to a terminal outcome value.', 'valid', mapProviderRuntimeOutcomeToRequestOutcome('IN_FLIGHT') === null),
@@ -425,8 +448,34 @@ function invalidRequestCases(): CouncilRequestStateValidationCase[] {
     ],
   })
 
+  // Phase 47C-2R2 Correction 1: confirmed cancellation must be rejected
+  // unless every SELECTED family is terminal -- not just the ones that
+  // happened to be dispatched. A selected family sitting in waiting,
+  // queued, or responding is just as open as one that was dispatched.
+  const cancelledWithSelectedWaiting = makeRequest({
+    cancellation: { cancelled: true, reason: 'commander_stop', cancelledAt: '2026-07-18T00:00:02.000Z' },
+    familyExecutions: [
+      makeExecution({ family: 'chatgpt', lifecycle: 'waiting', outcome: null, dispatchedAt: null, queuedAt: null, completedAt: null }),
+    ],
+  })
+  const cancelledWithSelectedQueued = makeRequest({
+    cancellation: { cancelled: true, reason: 'commander_stop', cancelledAt: '2026-07-18T00:00:02.000Z' },
+    familyExecutions: [
+      makeExecution({ family: 'chatgpt', lifecycle: 'queued', outcome: null, dispatchedAt: null, completedAt: null }),
+    ],
+  })
+  const cancelledWithSelectedResponding = makeRequest({
+    cancellation: { cancelled: true, reason: 'commander_stop', cancelledAt: '2026-07-18T00:00:02.000Z' },
+    familyExecutions: [
+      makeExecution({ family: 'chatgpt', lifecycle: 'responding', outcome: null, dispatchedAt: '2026-07-18T00:00:01.000Z', completedAt: null }),
+    ],
+  })
+
   return [
     validateCase('invalid_01_dispatched_without_terminal_outcome', 'Dispatched family cannot remain nonterminal once the request has closed via Commander cancellation.', 'invalid', dispatchedOpen),
+    validateCase('invalid_17_cancelled_with_selected_waiting', 'request_cancelled cannot close a request while a selected family is still waiting (never dispatched).', 'invalid', cancelledWithSelectedWaiting),
+    validateCase('invalid_18_cancelled_with_selected_queued', 'request_cancelled cannot close a request while a selected family is only queued (not yet dispatched).', 'invalid', cancelledWithSelectedQueued),
+    validateCase('invalid_19_cancelled_with_selected_responding', 'request_cancelled cannot close a request while a selected family is still responding.', 'invalid', cancelledWithSelectedResponding),
     validateCase('invalid_02_terminal_without_outcome', 'Terminal lifecycle without outcome is invalid.', 'invalid', terminalNoOutcome),
     validateCase('invalid_03_nonterminal_with_outcome', 'Nonterminal lifecycle with terminal outcome is invalid.', 'invalid', nonterminalOutcome),
     validateCase('invalid_04_not_reached_dispatched', 'not_reached cannot also be dispatched.', 'invalid', notReachedDispatched),
