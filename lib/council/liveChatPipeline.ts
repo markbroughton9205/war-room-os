@@ -62,6 +62,14 @@ export type CouncilChatRequestBody = {
   councilProviderRuntimeStates?: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>>
   /** Live Council flow: direct | stable_group | full_council */
   councilFlowMode?: CouncilFlowMode
+  /** Stable per-Commander-decree correlation ID reused across per-family continuation calls. */
+  councilLogicalRequestId?: string
+  /** Full logical family roster for this decree when the client is driving sequential calls. */
+  councilLogicalExpectedFamilies?: CouncilOrchestrationFamily[]
+  /** Zero-based family turn index inside the logical decree. */
+  councilLogicalTurnIndex?: number
+  /** Total number of family turns expected for the logical decree. */
+  councilLogicalTurnTotal?: number
   /** Conversation-runtime active topic (stable group slim context). */
   activeTopic?: string
   /** Prior replies in the current stable-group turn (server builds prompts from these). */

@@ -7992,6 +7992,7 @@ function Home() {
     }
     const threadHistory = messagesRef.current.map(m => ({ sender: m.familyName, content: m.content }))
     const inputText = `${decree}\n${threadHistory.map(m => `${m.sender}: ${m.content}`).join('\n')}`
+    const councilLogicalRequestId = createMessageId('council-autonomous-request')
 
     let textOut: string | null = null
 
@@ -8029,6 +8030,10 @@ function Home() {
               mode: 'continue',
               toneMode: 'casual',
               councilSingleFamily: family,
+              councilLogicalRequestId,
+              councilLogicalExpectedFamilies: [family],
+              councilLogicalTurnIndex: 0,
+              councilLogicalTurnTotal: 1,
               orchestrationAugment: augment,
               councilCommand: activeCouncilCommandRef.current,
               raelDirectiveText: lastRaelDirectiveContentRef.current,
@@ -8647,6 +8652,7 @@ function Home() {
       const stableGroupSequential =
         councilFlowModeEffective === 'stable_group' && !attendanceWave && !cmd.directInvocation
       const orderForGather = diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder
+      const councilLogicalRequestId = createMessageId('council-logical-request')
       decreeSubmitFaultAnchor = orderForGather[0] ?? directedOrder[0]
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
         allowBusinessTopicsFromIntent: councilIntentState.intent === 'business_ops',
@@ -8879,6 +8885,10 @@ function Home() {
                   councilModeGovernor: modeGovernor,
                   councilProviderRuntimeStates: providerRuntimeStates,
                   councilFlowMode: councilFlowModeEffective,
+                  councilLogicalRequestId,
+                  councilLogicalExpectedFamilies: orderForGather,
+                  councilLogicalTurnIndex: orderForGather.indexOf(family),
+                  councilLogicalTurnTotal: orderForGather.length,
                   activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
                   ...(councilFlowModeEffective === 'stable_group'
                     ? { stableGroupPriorReplies: stableGroupPriorThisTurn }
@@ -9131,6 +9141,10 @@ function Home() {
               councilIntentKind: councilIntentState.intent,
               councilActiveScope: councilIntentState.scope,
               councilFlowMode: 'stable_group',
+              councilLogicalRequestId,
+              councilLogicalExpectedFamilies: orderForGather,
+              councilLogicalTurnIndex: orderForGather.indexOf('chatgpt'),
+              councilLogicalTurnTotal: orderForGather.length,
               activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
               stableGroupPriorReplies: stableGroupPriorThisTurn,
               stableGroupFinalSynthesis: true,

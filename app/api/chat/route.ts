@@ -129,6 +129,14 @@ import {
   isCouncilRuntimeTraceRequested,
   summarizeTextForTrace,
 } from '@/lib/council/runtimeTrace'
+import {
+  attachCouncilProgress,
+  buildSyntheticIntegrityAuditPayload,
+  createCouncilProgressRuntimeTracker,
+  providerStatusToProgressOutcome,
+  providerStatusToReadiness,
+  type CouncilProgressRuntimeTracker,
+} from '@/lib/council/progress-events/runtime'
 
 function buildResearchAntiLoopAugment(threadBlock: string): string {
   const hits = threadBlock.match(/\bprimary\s+finding\b/gi) ?? []
@@ -208,6 +216,26 @@ function familyFromDirectValue(value: string): CouncilSingleFamily | null {
   if (value === 'Kimi') return 'kimi'
   if (value === 'RedTeam') return 'red_team'
   return null
+}
+
+function isCouncilSingleFamily(value: unknown): value is CouncilSingleFamily {
+  return value === 'chatgpt'
+    || value === 'claude'
+    || value === 'grok'
+    || value === 'gemini'
+    || value === 'red_team'
+    || value === 'baby'
+    || value === 'kimi'
+    || value === 'bridge_architect'
+}
+
+function coerceCouncilFamilyList(value: unknown): CouncilSingleFamily[] {
+  if (!Array.isArray(value)) return []
+  const out: CouncilSingleFamily[] = []
+  for (const item of value) {
+    if (isCouncilSingleFamily(item) && !out.includes(item)) out.push(item)
+  }
+  return out
 }
 
 function withTimeout(
@@ -309,6 +337,82 @@ function validateProviderResults(
       messageType: 'integrity_flag',
     },
   ]
+}
+
+function recordCouncilProgressProviderStart(
+  tracker: CouncilProgressRuntimeTracker | null,
+  families: CouncilSingleFamily[],
+): void {
+  if (!tracker) return
+  for (const family of families) {
+    tracker.record({ eventType: 'family_queued', source: 'server_orchestrator', family })
+    tracker.record({
+      eventType: 'family_dispatched',
+      source: 'provider_adapter',
+      family,
+      payload: {
+        readiness: 'configured',
+        providerLabel: displayFamilyName(family),
+      },
+    })
+    tracker.record({ eventType: 'family_response_started', source: 'provider_adapter', family })
+  }
+}
+
+function recordCouncilProgressProviderResult(
+  tracker: CouncilProgressRuntimeTracker | null,
+  family: CouncilSingleFamily,
+  result: ProviderResult,
+): void {
+  if (!tracker) return
+  const outcome = providerStatusToProgressOutcome(result.status)
+  const readiness = providerStatusToReadiness(result.status)
+  const payload = {
+    outcome,
+    readiness,
+    providerLabel: result.family,
+    ...(result.timeoutMs ? { timeoutMs: result.timeoutMs } : {}),
+    ...(result.error
+      ? {
+          diagnostic: {
+            category: result.status === 'TIMED_OUT' ? 'timeout' as const : 'provider' as const,
+            code: result.status.toLowerCase(),
+            safeMessage: `${result.family} returned ${result.status}.`,
+            providerFamily: family,
+            timeoutClassification: result.status === 'TIMED_OUT' ? 'hard' as const : 'none' as const,
+          },
+        }
+      : {}),
+  }
+  if (result.status === 'OK') {
+    tracker.record({ eventType: 'family_response_completed', source: 'provider_adapter', family, payload })
+  } else if (result.status === 'TIMED_OUT') {
+    tracker.record({ eventType: 'family_timed_out', source: 'provider_adapter', family, payload })
+  } else if (result.status === 'UNAVAILABLE') {
+    tracker.record({
+      eventType: 'family_failed',
+      source: 'provider_adapter',
+      family,
+      payload: {
+        ...payload,
+        outcome: 'failed',
+        reason: 'Provider reported unavailable after dispatch began.',
+      },
+    })
+  } else {
+    tracker.record({ eventType: 'family_failed', source: 'provider_adapter', family, payload })
+  }
+}
+
+function recordCouncilProgressSyntheticAudit(
+  tracker: CouncilProgressRuntimeTracker | null,
+  expectedFamilies: CouncilSingleFamily[],
+  providerResults: ProviderResult[],
+): void {
+  if (!tracker) return
+  const audit = buildSyntheticIntegrityAuditPayload({ expectedFamilies, providerResults })
+  tracker.record({ eventType: 'audit_scope_declared', source: 'integrity_layer', payload: { audit } })
+  tracker.record({ eventType: 'audit_completed', source: 'integrity_layer', payload: { audit } })
 }
 
 async function callChatGPT(
@@ -481,11 +585,26 @@ export async function POST(req: Request) {
     typeof body.conversationId === 'string' && /^[0-9a-f-]{36}$/i.test(body.conversationId.trim())
       ? body.conversationId.trim()
       : null
+  const councilLogicalRequestId =
+    typeof body.councilLogicalRequestId === 'string' && body.councilLogicalRequestId.trim()
+      ? body.councilLogicalRequestId.trim()
+      : null
+  const councilLogicalExpectedFamilies = coerceCouncilFamilyList(body.councilLogicalExpectedFamilies)
+  const councilLogicalTurnIndex =
+    typeof body.councilLogicalTurnIndex === 'number' && Number.isInteger(body.councilLogicalTurnIndex)
+      ? body.councilLogicalTurnIndex
+      : null
+  const councilLogicalTurnTotal =
+    typeof body.councilLogicalTurnTotal === 'number' && Number.isInteger(body.councilLogicalTurnTotal)
+      ? body.councilLogicalTurnTotal
+      : null
   const councilTrace = createCouncilRuntimeTrace({
     enabled: isCouncilRuntimeTraceRequested(req, body),
     sessionId: conversationId,
   })
-  const withTrace = <T extends Record<string, unknown>>(payload: T) => attachCouncilTrace(payload, councilTrace)
+  let councilProgress: CouncilProgressRuntimeTracker | null = null
+  const withTrace = <T extends Record<string, unknown>>(payload: T) =>
+    attachCouncilTrace(attachCouncilProgress(payload, councilProgress), councilTrace)
   councilTrace.record('request_received', {
     module: 'app/api/chat/route.ts:POST',
     inputSummary: {
@@ -1022,6 +1141,18 @@ export async function POST(req: Request) {
       councilStabilityMode,
     })
     const dm = diagnosticMetaFor(councilFam)
+    recordCouncilProgressProviderResult(councilProgress, councilFam, {
+      family: displayFamilyName(councilFam),
+      content: stabilityMessage,
+      status: resultStatus,
+      error: detail,
+    })
+    recordCouncilProgressSyntheticAudit(councilProgress, [councilFam], [{
+      family: displayFamilyName(councilFam),
+      content: stabilityMessage,
+      status: resultStatus,
+      error: detail,
+    }])
     councilTrace.record('provider_responses_received', {
       module: 'app/api/chat/route.ts:degradedProviderResponse',
       inputSummary: { councilFam, status, detail: summarizeTextForTrace(detail) },
@@ -1238,6 +1369,22 @@ export async function POST(req: Request) {
         outputSummary: { selectedFamilies: [directFamily], mode: 'direct_invocation' },
         stateChange: 'Direct invocation selected one provider family.',
       })
+      councilProgress = createCouncilProgressRuntimeTracker({
+        requestIdSeed: councilTrace.councilTraceId,
+        commanderTurnRef: conversationId ?? 'api-chat-direct-invocation',
+        flowMode: 'direct',
+        executionStrategy: 'single_family_direct',
+        expectedFamilies: [directFamily],
+        selectedFamilies: [directFamily],
+        selectionAuthority: 'direct_invocation',
+      })
+      councilProgress.record({ eventType: 'request_created', source: 'server_orchestrator' })
+      councilProgress.record({
+        eventType: 'request_selection_resolved',
+        source: 'server_orchestrator',
+        payload: { selectedFamilies: [directFamily], expectedFamilies: [directFamily] },
+      })
+      councilProgress.record({ eventType: 'request_started', source: 'server_orchestrator' })
       councilTrace.record('provider_calls_started', {
         module: 'app/api/chat/route.ts:callCouncilProvider',
         inputSummary: {
@@ -1248,6 +1395,7 @@ export async function POST(req: Request) {
         outputSummary: { started: true },
         stateChange: 'Direct invocation provider call started.',
       })
+      recordCouncilProgressProviderStart(councilProgress, [directFamily])
       const result = await withTimeout(
         displayFamilyName(directFamily),
         callCouncilProvider(directFamily, baseUserPrompt, {
@@ -1305,6 +1453,9 @@ export async function POST(req: Request) {
         stateChange: 'Direct invocation provider response received.',
       })
       const directResults = [normalized]
+      recordCouncilProgressProviderResult(councilProgress, directFamily, normalized)
+      recordCouncilProgressSyntheticAudit(councilProgress, [directFamily], directResults)
+      councilProgress.closeIfTerminal()
       councilTrace.record('integrity_checked', {
         module: 'app/api/chat/route.ts:direct_invocation',
         inputSummary: { resultCount: directResults.length },
@@ -1371,6 +1522,22 @@ export async function POST(req: Request) {
         outputSummary: { selectedFamilies: activeFamilies },
         stateChange: 'Parallel provider family list selected from configured server-side providers.',
       })
+      councilProgress = createCouncilProgressRuntimeTracker({
+        requestIdSeed: councilTrace.councilTraceId,
+        commanderTurnRef: conversationId ?? 'api-chat-parallel-providers',
+        flowMode: 'full_council',
+        executionStrategy: 'server_parallel',
+        expectedFamilies: activeFamilies,
+        selectedFamilies: activeFamilies,
+        selectionAuthority: 'system_selected',
+      })
+      councilProgress.record({ eventType: 'request_created', source: 'server_orchestrator' })
+      councilProgress.record({
+        eventType: 'request_selection_resolved',
+        source: 'server_orchestrator',
+        payload: { selectedFamilies: activeFamilies, expectedFamilies: activeFamilies },
+      })
+      councilProgress.record({ eventType: 'request_started', source: 'server_orchestrator' })
 
       if (activeFamilies.length === 0) {
         const result: ProviderResult = {
@@ -1378,6 +1545,8 @@ export async function POST(req: Request) {
           content: 'No council providers are currently available.',
           status: 'UNAVAILABLE',
         }
+        councilProgress.recordDiagnostic('no_active_providers', 'No configured Council providers were selected.')
+        councilProgress.closeIfTerminal()
         await safeAudit({
           success: false,
           flow: 'parallel_providers',
@@ -1418,6 +1587,7 @@ export async function POST(req: Request) {
         outputSummary: { started: true, callMode: 'parallel' },
         stateChange: 'Parallel provider calls started simultaneously.',
       })
+      recordCouncilProgressProviderStart(councilProgress, activeFamilies)
       const providerResults = await Promise.all(
         activeFamilies.map(family =>
           withTimeout(
@@ -1427,6 +1597,9 @@ export async function POST(req: Request) {
           ),
         ),
       )
+      activeFamilies.forEach((family, index) => {
+        recordCouncilProgressProviderResult(councilProgress, family, providerResults[index])
+      })
       const providerResponses = providerResults.map(result => ({
         family: result.family,
         responseId: councilTrace.registerProviderResponse(result.family),
@@ -1463,6 +1636,8 @@ export async function POST(req: Request) {
         },
         stateChange: 'Parallel provider results passed through response integrity validation.',
       })
+      recordCouncilProgressSyntheticAudit(councilProgress, activeFamilies, providerResults)
+      councilProgress.closeIfTerminal()
       councilTrace.record('red_team_checked', {
         module: 'app/api/chat/route.ts:validateProviderResults',
         inputSummary: { resultFamilies: results.map(result => result.family) },
@@ -1533,6 +1708,29 @@ export async function POST(req: Request) {
 
     if (mode === 'continue' && councilSingleFamily) {
       let providerFinishReason: string | undefined
+      const sequentialProgressSeed = councilLogicalRequestId
+        ? `${councilLogicalRequestId}-${councilLogicalTurnIndex ?? councilSingleFamily}-${councilSingleFamily}`
+        : `${councilTrace.councilTraceId}-${councilSingleFamily}`
+      councilProgress = createCouncilProgressRuntimeTracker({
+        requestIdSeed: sequentialProgressSeed,
+        commanderTurnRef: conversationId ?? councilLogicalRequestId ?? 'api-chat-continue-single',
+        flowMode: councilFlowMode,
+        executionStrategy: stableGroupTurn ? 'frontend_sequential_single_family' : 'frontend_parallel_single_family',
+        expectedFamilies: [councilSingleFamily],
+        selectedFamilies: [councilSingleFamily],
+        selectionAuthority: 'continuation_selected',
+        logicalRequestId: councilLogicalRequestId,
+        logicalTurnIndex: councilLogicalTurnIndex,
+        logicalTurnTotal: councilLogicalTurnTotal,
+        logicalExpectedFamilies: councilLogicalExpectedFamilies.length ? councilLogicalExpectedFamilies : [councilSingleFamily],
+      })
+      councilProgress.record({ eventType: 'request_created', source: 'server_orchestrator' })
+      councilProgress.record({
+        eventType: 'request_selection_resolved',
+        source: 'server_orchestrator',
+        payload: { selectedFamilies: [councilSingleFamily], expectedFamilies: [councilSingleFamily] },
+      })
+      councilProgress.record({ eventType: 'request_started', source: 'server_orchestrator' })
 
       const markLiveResearchProviderFailed = (roster: 'failed' | 'timed_out') => {
         if (!liveResearchAttempted) return
@@ -1547,6 +1745,23 @@ export async function POST(req: Request) {
       }
 
       if (councilSingleFamily === 'bridge_architect') {
+        const result: ProviderResult = {
+          family: displayFamilyName(councilSingleFamily),
+          content: `${councilSingleFamily} has no cloud provider route configured in War Room.`,
+          status: 'UNAVAILABLE',
+        }
+        councilProgress.record({
+          eventType: 'family_not_reached',
+          source: 'server_orchestrator',
+          family: councilSingleFamily,
+          payload: {
+            outcome: 'not_reached',
+            readiness: 'unavailable',
+            providerLabel: displayFamilyName(councilSingleFamily),
+            reason: 'No cloud provider route is configured for Bridge Architect.',
+          },
+        })
+        recordCouncilProgressSyntheticAudit(councilProgress, [councilSingleFamily], [result])
         await safeAudit({
           success: false,
           flow: 'continue_single',
@@ -1562,6 +1777,23 @@ export async function POST(req: Request) {
         )
       }
       if (councilSingleFamily === 'kimi' && !isKimiConfigured()) {
+        const result: ProviderResult = {
+          family: 'Kimi',
+          content: 'Kimi not configured',
+          status: 'UNAVAILABLE',
+        }
+        councilProgress.record({
+          eventType: 'family_not_reached',
+          source: 'server_orchestrator',
+          family: 'kimi',
+          payload: {
+            outcome: 'not_reached',
+            readiness: 'unavailable',
+            providerLabel: 'Kimi',
+            reason: 'Kimi provider key is not configured.',
+          },
+        })
+        recordCouncilProgressSyntheticAudit(councilProgress, ['kimi'], [result])
         await safeAudit({
           success: false,
           flow: 'continue_single',
@@ -1605,7 +1837,6 @@ export async function POST(req: Request) {
         },
         stateChange: 'Single-family provider selected for continuation request.',
       })
-
       const grokContinueEligible = isGrokDirectInvocationEligible({
         isAttendanceFlow,
         councilCommand,
@@ -1813,6 +2044,20 @@ export async function POST(req: Request) {
             turnPriorFromClient: stableGroupPriorForTurn,
           })
         } else {
+          councilProgress.record({
+            eventType: 'family_skipped_by_policy',
+            source: 'server_orchestrator',
+            family: councilSingleFamily,
+            payload: {
+              outcome: 'skipped_by_policy',
+              reason: 'Family is outside stable group turn roster.',
+            },
+          })
+          recordCouncilProgressSyntheticAudit(councilProgress, [councilSingleFamily], [{
+            family: displayFamilyName(councilSingleFamily),
+            content: '',
+            status: 'UNAVAILABLE',
+          }])
           await safeAudit({
             success: true,
             flow: 'stable_group_skip',
@@ -1886,6 +2131,20 @@ export async function POST(req: Request) {
           retrievalFailed: retrievalForGate?.retrieval_failed ?? true,
           sourceCount: packetForGate?.sources_used.length ?? 0,
         })
+        councilProgress.record({
+          eventType: 'family_skipped_by_policy',
+          source: 'retrieval_layer',
+          family: councilSingleFamily,
+          payload: {
+            outcome: 'skipped_by_policy',
+            reason: 'Mandatory retrieval gate prevented provider synthesis.',
+          },
+        })
+        recordCouncilProgressSyntheticAudit(councilProgress, [councilSingleFamily], [{
+          family: displayFamilyName(councilSingleFamily),
+          content: responseText,
+          status: 'UNAVAILABLE',
+        }])
         return NextResponse.json(withTrace({
           councilSingleResponse: responseText,
           councilSingleFamily,
@@ -1917,6 +2176,7 @@ export async function POST(req: Request) {
         outputSummary: { started: true },
         stateChange: 'Single-family provider call started.',
       })
+      recordCouncilProgressProviderStart(councilProgress, [councilSingleFamily])
       try {
         switch (councilSingleFamily) {
           case 'chatgpt': {
@@ -2133,7 +2393,6 @@ export async function POST(req: Request) {
         },
         stateChange: 'Single-family provider response received before integrity and governor checks.',
       })
-
       if (!responseText.trim()) {
         await safeAudit({
           success: false,
@@ -2144,6 +2403,11 @@ export async function POST(req: Request) {
         markLiveResearchProviderFailed('failed')
         return degradedProviderResponse(councilSingleFamily, 'failed', `${councilSingleFamily} returned empty body`)
       }
+      recordCouncilProgressProviderResult(councilProgress, councilSingleFamily, {
+        family: displayFamilyName(councilSingleFamily),
+        content: responseText,
+        status: 'OK',
+      })
 
       let providerIntegrityDiagnostics: Record<string, unknown> | undefined
       if (
@@ -2349,6 +2613,11 @@ export async function POST(req: Request) {
           outputSummary: { finalReportId: councilTrace.finalReportId, minimalReport: true },
           stateChange: 'Minimal trace report envelope built for governor skip.',
         })
+        recordCouncilProgressSyntheticAudit(councilProgress, [councilSingleFamily], [{
+          family: displayFamilyName(councilSingleFamily),
+          content: '',
+          status: 'OK',
+        }])
         return NextResponse.json(withTrace({
           councilSingleResponse: '',
           ...(economicOpsRawProviderAnalysis ? { economicOpsRawProviderAnalysis } : {}),
@@ -2627,6 +2896,11 @@ export async function POST(req: Request) {
           suppressSyncWarnings: suppressIntegritySyncWarnings,
         },
       )
+      recordCouncilProgressSyntheticAudit(councilProgress, [councilSingleFamily], [{
+        family: displayFamilyName(councilSingleFamily),
+        content: responseText,
+        status: 'OK',
+      }])
       councilTrace.record('final_moderated', {
         module: 'app/api/chat/route.ts:continue_single_final_response',
         inputSummary: {
