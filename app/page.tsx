@@ -43,6 +43,13 @@ import type { RouteCommandResult } from '@/lib/engine-control/router'
 import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
+import {
+  canDisplayAsChallenge,
+  canDisplayAsResponse,
+  canDisplayAsRevision,
+  type DeliberationEvidenceReference,
+  type DeliberationTurn,
+} from '@/lib/council/family-deliberation'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 import { ArchiveViewer } from '@/components/war-room/council/ArchiveViewer'
 import { LogoutButton } from '@/components/auth/LogoutButton'
@@ -333,6 +340,8 @@ type CouncilMessage = {
   repairPacket?: CouncilRepairPacket
   projectOrchestrationPacket?: ProjectOrchestrationPacket
   analystOperationsPacket?: AnalystOperationsPacket
+  familyDeliberationTurn?: DeliberationTurn
+  familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
 }
 
 type CouncilSessionLifecycle = 'active' | 'archived'
@@ -1711,6 +1720,54 @@ const MessageBubble = memo(function MessageBubble({
           }}>
           {msg.content}
         </div>
+        {msg.familyDeliberationTurn ? (
+          <details
+            className="mt-2 w-full max-w-2xl rounded px-3 py-2 text-[10px] tracking-widest"
+            style={{
+              border: '1px solid rgba(52,211,153,0.22)',
+              background: 'rgba(0,0,0,0.28)',
+              color: '#94A3B8',
+            }}
+          >
+            <summary className="cursor-pointer list-none font-bold text-emerald-300 [&::-webkit-details-marker]:hidden">
+              Deliberation provenance
+            </summary>
+            <div className="mt-2 grid gap-1 normal-case tracking-normal text-slate-300">
+              <div>turn_id: {msg.familyDeliberationTurn.turn_id}</div>
+              <div>turn_role: {msg.familyDeliberationTurn.turn_role}</div>
+              <div>speaking_order: {msg.familyDeliberationTurn.speaking_order}</div>
+              <div>input_message_ids: {msg.familyDeliberationTurn.input_message_ids.join(', ') || 'none'}</div>
+              <div>challenge_target_ids: {msg.familyDeliberationTurn.challenge_target_ids.join(', ') || 'none'}</div>
+              <div>revision_of_message_id: {msg.familyDeliberationTurn.revision_of_message_id ?? 'none'}</div>
+              <div>completion_status: {msg.familyDeliberationTurn.completion_status}</div>
+              <div>confidence: {msg.familyDeliberationTurn.confidence == null ? 'unresolved' : `${Math.round(msg.familyDeliberationTurn.confidence * 100)}%`}</div>
+              {msg.familyDeliberationEvidenceReferences?.length ? (
+                <div className="mt-2">
+                  <div className="font-bold text-emerald-200">source references</div>
+                  <ul className="mt-1 space-y-1">
+                    {msg.familyDeliberationEvidenceReferences.map(ref => (
+                      <li key={ref.evidence_reference_id}>
+                        {ref.url ? (
+                          <a
+                            href={ref.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sky-300 underline decoration-sky-500/40 underline-offset-2"
+                          >
+                            {ref.label}
+                          </a>
+                        ) : (
+                          <span>{ref.label}</span>
+                        )}
+                        <span className="text-slate-500"> · {ref.evidence_reference_id} · {ref.source_kind}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
         {!isRael && !councilPassthroughMode && msg.messageType === 'response' && isCouncilMessageRepairPacketEligible(msg) ? (
           <button
             type="button"
@@ -9007,6 +9064,183 @@ function Home() {
           runtimeDetail,
           transientMessageIds: transientDirectStatusMessageIds,
         }
+      }
+
+      const formatFamilyDeliberationContent = (
+        turn: DeliberationTurn,
+        priorOutputMessageIds: string[],
+        evidenceReferences: DeliberationEvidenceReference[],
+      ) => {
+        const hasPriorResponseInput = priorOutputMessageIds.some(id => canDisplayAsResponse(turn, id))
+        const challengeValid = turn.turn_role === 'red_team_challenge'
+          ? canDisplayAsChallenge(turn, priorOutputMessageIds)
+          : true
+        const revisionValid = turn.turn_role === 'revision_or_stand_firm'
+          ? canDisplayAsRevision(turn, priorOutputMessageIds)
+          : true
+        const responseLine =
+          turn.turn_role === 'opening_position'
+            ? 'Relationship: opening position from Commander message'
+            : turn.turn_role === 'red_team_challenge'
+              ? challengeValid
+                ? `Challenge targets: ${turn.challenge_target_ids.join(', ')}`
+                : 'Challenge targets: unresolved; relationship label suppressed by display gate'
+              : turn.turn_role === 'revision_or_stand_firm'
+                ? revisionValid
+                  ? `Revision of: ${turn.revision_of_message_id} (${turn.revision_status})`
+                  : 'Revision status: unresolved; revision label suppressed by display gate'
+                : hasPriorResponseInput
+                  ? `Responding to: ${turn.input_message_ids.filter(id => priorOutputMessageIds.includes(id)).join(', ')}`
+                  : 'Relationship: independent contribution; no verified prior-message input'
+        const revisionLine =
+          turn.turn_role === 'revision_or_stand_firm'
+            ? responseLine
+            : `Revision status: ${turn.revision_status}`
+        const sourceLines = turn.evidence_reference_ids
+          .map(id => evidenceReferences.find(ref => ref.evidence_reference_id === id))
+          .filter((ref): ref is DeliberationEvidenceReference => Boolean(ref))
+          .map(ref => `${ref.label}: ${ref.url ?? ref.evidence_reference_id}`)
+        return [
+          `Provider: ${turn.provider_label}${turn.provider_model ? ` · ${turn.provider_model}` : ''}`,
+          `Role: ${turn.turn_role}`,
+          responseLine,
+          ...(turn.turn_role === 'revision_or_stand_firm' ? [] : [revisionLine]),
+          '',
+          `Executive position: ${turn.executive_position || '(unavailable)'}`,
+          '',
+          turn.full_response || `Provider contribution ${turn.completion_status}${turn.failure_reason ? `: ${turn.failure_reason}` : ''}.`,
+          '',
+          `Claims: ${turn.claims.length ? turn.claims.map(claim => `${claim.label}: ${claim.text}`).join(' | ') : 'none recorded'}`,
+          `Evidence references: ${sourceLines.length ? sourceLines.join(' | ') : 'none; model judgment/unresolved labels apply'}`,
+          `Confidence: ${turn.confidence == null ? 'unresolved' : `${Math.round(turn.confidence * 100)}%`}`,
+          `Recommended action: ${turn.recommended_action}`,
+        ].join('\n')
+      }
+
+      const runFamilyDeliberationGather = async () => {
+        try {
+          const { res: deliberationRes, data: deliberationData } = await postCouncilChatDecreeGather({
+            message: decree,
+            profile: RAEL_PROFILE,
+            threadHistory: threadHistory(),
+            mode: 'continue',
+            toneMode,
+            councilSingleFamily: 'chatgpt',
+            orchestrationAugment: outputModeInstruction,
+            councilCommand: activeCouncilCommandRef.current,
+            raelDirectiveText: decree,
+            councilIntentKind: councilIntentState.intent,
+            councilActiveScope: councilIntentState.scope,
+            councilModeGovernor: modeGovernor,
+            councilProviderRuntimeStates: providerRuntimeStates,
+            councilFlowMode: 'stable_group',
+            councilLogicalRequestId,
+            councilLogicalExpectedFamilies: ['chatgpt', 'claude', 'red_team'],
+            councilLogicalTurnIndex: 0,
+            councilLogicalTurnTotal: 5,
+            activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
+            councilDeliberationMode: 'family_to_family_v1',
+            ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
+          }, { ignoreContinuation: true })
+          if (!deliberationRes.ok || !deliberationData.familyDeliberation) return false
+
+          const deliberation = deliberationData.familyDeliberation
+          const turns = [...deliberation.turns].sort((a, b) => a.speaking_order - b.speaking_order)
+          const messagesToAdd: CouncilMessage[] = []
+          const runtimeByFamily: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
+          const detailsByFamily: CouncilProviderRuntimeDetails = {}
+          const priorOutputMessageIds: string[] = []
+
+          for (const turn of turns) {
+            const family = turn.provider_family
+            const complete = turn.completion_status === 'complete' && Boolean(turn.output_message_id)
+            runtimeByFamily[family] =
+              complete
+                ? 'RESPONDED'
+                : turn.completion_status === 'timed_out'
+                  ? 'TIMED_OUT'
+                  : turn.completion_status === 'failed'
+                    ? 'FAILED'
+                    : 'SKIPPED'
+            if (!complete && turn.failure_reason) detailsByFamily[family] = turn.failure_reason
+
+            const vis = orchestrationVisual(family)
+            const meta = FAMILY_META[vis.presenceKey]
+            const bubbleFamilyName = complete
+              ? (vis.bubbleFamilyName ?? rosterLabel(family))
+              : 'SYSTEM'
+            const displayContent = formatFamilyDeliberationContent(
+              turn,
+              priorOutputMessageIds,
+              deliberation.evidence_references,
+            )
+            messagesToAdd.push({
+              id: turn.output_message_id ?? turn.turn_id,
+              familyName: bubbleFamilyName,
+              content: displayContent,
+              timestamp: new Date(turn.completed_at ?? Date.now()).toLocaleTimeString(),
+              color: complete ? (vis.colorOverride ?? meta.color) : '#FFD700',
+              icon: complete ? (vis.iconOverride ?? meta.icon) : '⚙',
+              provider: turn.provider_model ?? turn.provider_label,
+              messageType: complete ? 'response' : 'system',
+              degraded: !complete,
+              familyDeliberationTurn: turn,
+              familyDeliberationEvidenceReferences: deliberation.evidence_references,
+            })
+
+            if (complete) {
+              anySuccess = true
+              const focusSnippet = compactDisplayWhitespace(turn.full_response, 120)
+              setFamilyCurrentFocus(prev => ({ ...prev, [family]: focusSnippet }))
+              void postLiveCouncilMessage(
+                {
+                  role: 'assistant',
+                  content: displayContent,
+                  family: bubbleFamilyName,
+                },
+                { responseSuccessful: true, providerRuntime: runtimeByFamily[family] },
+              )
+            }
+            if (turn.output_message_id) priorOutputMessageIds.push(turn.output_message_id)
+          }
+
+          if (messagesToAdd.length) addMessages(messagesToAdd)
+          providerRuntimeStates = runtimeByFamily
+          providerRuntimeDetails = detailsByFamily
+          councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+          decreePacketFlushCompleteRef.current = true
+          applyCouncilPacketRender(
+            buildCouncilRenderPacket({
+              command: activeCouncilCommandRef.current,
+              sessionState: 'CLOSED',
+              packetStatus: turns.some(turn => turn.completion_status === 'complete') ? 'released' : 'idle',
+              families: turns
+                .filter(turn => turn.completion_status === 'complete')
+                .map(turn => ({ family: turn.provider_family, content: turn.full_response })),
+              extraWarnings: [
+                ...modeWarnings,
+                'family_to_family_deliberation_v1',
+                ...(deliberation.diagnostics.length ? ['family_deliberation_partial'] : []),
+              ],
+              providerRuntimeStates,
+              providerRuntimeDetails,
+            }),
+          )
+          councilDispatch({ type: 'SET_COUNCIL_CHANNEL_OPEN', payload: true })
+          if (councilSnapRef.current.councilState === 'idle') {
+            councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
+          }
+          setTypingFamily(null)
+          setFamilyDuty(Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])))
+          return true
+        } catch {
+          return false
+        }
+      }
+
+      if (stableGroupSequential) {
+        const deliberationHandled = await runFamilyDeliberationGather()
+        if (deliberationHandled) return
       }
 
       const outcomeByFamily = new Map<CouncilOrchestrationFamily, GatherCell>()

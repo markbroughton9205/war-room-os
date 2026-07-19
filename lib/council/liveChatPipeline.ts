@@ -25,6 +25,7 @@ import type { CouncilResponseCompletion } from '@/lib/council/responseCompletion
 import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import type { StableGroupPriorReply } from '@/lib/council/stableGroupChat'
 import type { CouncilRuntimeTraceSnapshot } from '@/lib/council/runtimeTrace'
+import type { DeliberationSession } from '@/lib/council/family-deliberation'
 
 export type CouncilChatRequestBody = {
   message: string
@@ -76,6 +77,8 @@ export type CouncilChatRequestBody = {
   stableGroupPriorReplies?: StableGroupPriorReply[]
   /** Optional closing ChatGPT synthesis after Red Team in stable group mode. */
   stableGroupFinalSynthesis?: boolean
+  /** Phase 48-C3A: real family-to-family deliberation runtime slice. */
+  councilDeliberationMode?: 'family_to_family_v1'
 }
 
 export type CouncilChatJson = {
@@ -129,6 +132,8 @@ export type CouncilChatJson = {
   }
   /** Commander diagnostic runtime trace. Present only when explicitly requested. */
   councilTrace?: CouncilRuntimeTraceSnapshot
+  /** Phase 48-C3A: real family-to-family deliberation artifact. */
+  familyDeliberation?: DeliberationSession
 }
 
 export async function postCouncilChat(

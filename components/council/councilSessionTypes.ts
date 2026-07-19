@@ -2,6 +2,7 @@ import type { EngineeringTaskPacket } from '@/lib/engineering/engineeringTaskPac
 import type { AnalystOperationsPacket } from '@/lib/analysts/analystOutcomeEvaluator'
 import type { ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
 import type { CouncilRepairPacket } from '@/lib/council-repair'
+import type { DeliberationEvidenceReference, DeliberationTurn } from '@/lib/council/family-deliberation'
 
 export type CouncilLifecycleState =
   | 'active'
@@ -44,6 +45,8 @@ export type PersistedCouncilMessage = {
   repairPacket?: CouncilRepairPacket
   projectOrchestrationPacket?: ProjectOrchestrationPacket
   analystOperationsPacket?: AnalystOperationsPacket
+  familyDeliberationTurn?: DeliberationTurn
+  familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
 }
 
 export type CouncilCooldownMap = Partial<Record<CouncilOrchestrationFamily, number>>

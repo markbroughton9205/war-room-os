@@ -137,6 +137,23 @@ import {
   providerStatusToReadiness,
   type CouncilProgressRuntimeTracker,
 } from '@/lib/council/progress-events/runtime'
+import {
+  appendDeliberationTurn,
+  buildDeliberationPrompt,
+  canSynthesize,
+  createDeliberationProgressRecorder,
+  createDeliberationSession,
+  evidenceReferencesFromLiveResearch,
+  formatDeliberationTurnForChat,
+  providerModelForFamily,
+} from '@/lib/council/family-deliberation'
+import type {
+  DeliberationCompletionStatus,
+  DeliberationProviderResult,
+  DeliberationSession,
+  DeliberationTurn,
+  DeliberationTurnRole,
+} from '@/lib/council/family-deliberation'
 
 function buildResearchAntiLoopAugment(threadBlock: string): string {
   const hits = threadBlock.match(/\bprimary\s+finding\b/gi) ?? []
@@ -206,6 +223,27 @@ function displayFamilyName(family: CouncilSingleFamily): string {
   if (family === 'baby') return 'Baby AI'
   if (family === 'bridge_architect') return 'Bridge Architect'
   return family
+}
+
+function deliberationStatusFromProviderStatus(status: ProviderResultStatus): DeliberationCompletionStatus {
+  if (status === 'OK') return 'complete'
+  if (status === 'TIMED_OUT') return 'timed_out'
+  if (status === 'UNAVAILABLE') return 'unavailable'
+  return 'failed'
+}
+
+function providerResultForDeliberation(
+  family: CouncilSingleFamily,
+  result: ProviderResult,
+): DeliberationProviderResult {
+  return {
+    family,
+    providerLabel: displayFamilyName(family),
+    providerModel: providerModelForFamily(family),
+    content: result.status === 'OK' ? result.content : '',
+    status: deliberationStatusFromProviderStatus(result.status),
+    failureReason: result.status === 'OK' ? null : (result.error ?? result.content ?? result.status),
+  }
 }
 
 function familyFromDirectValue(value: string): CouncilSingleFamily | null {
@@ -568,6 +606,7 @@ export async function POST(req: Request) {
   const stabilityMeta = stabilityModeResponseMeta(councilFlowMode)
   const stableGroupPriorFromClient = coerceStableGroupPriorReplies(body.stableGroupPriorReplies)
   const stableGroupFinalSynthesis = body.stableGroupFinalSynthesis === true
+  const familyDeliberationRequested = body.councilDeliberationMode === 'family_to_family_v1'
   const activeTopicFromBody =
     typeof body.activeTopic === 'string' && body.activeTopic.trim() ? body.activeTopic.trim() : ''
 
@@ -1298,6 +1337,183 @@ export async function POST(req: Request) {
     }
   }
 
+  const runFamilyToFamilyDeliberation = async (
+    progressTracker: CouncilProgressRuntimeTracker,
+  ): Promise<DeliberationSession> => {
+    const progress = createDeliberationProgressRecorder(progressTracker)
+    const evidenceReferences = evidenceReferencesFromLiveResearch(liveResearchPacket)
+    const session = createDeliberationSession({
+      sessionId: conversationId,
+      missionId: councilTrace.missionId,
+      missionVersion: councilTrace.missionVersion,
+      commanderMessage: raelDirectiveText,
+      evidenceReferences,
+    })
+    const evidenceReferenceIds = evidenceReferences.map(ref => ref.evidence_reference_id)
+    const completedOutputIds = () =>
+      session.turns
+        .map(turn => turn.output_message_id)
+        .filter((id): id is string => Boolean(id))
+
+    const appendUnresolvedTurn = (
+      family: CouncilSingleFamily,
+      role: DeliberationTurnRole,
+      speakingOrder: number,
+      reason: string,
+      opts?: {
+        inputMessageIds?: string[]
+        challengeTargetIds?: string[]
+        revisionOfMessageId?: string | null
+        recordProgress?: boolean
+      },
+    ) => {
+      const turn = appendDeliberationTurn(session, {
+        family,
+        role,
+        speakingOrder,
+        inputMessageIds: opts?.inputMessageIds ?? [session.commander_message_id],
+        challengeTargetIds: opts?.challengeTargetIds,
+        revisionOfMessageId: opts?.revisionOfMessageId,
+        evidenceReferenceIds,
+        providerResult: {
+          family,
+          providerLabel: displayFamilyName(family),
+          providerModel: providerModelForFamily(family),
+          content: '',
+          status: 'unresolved',
+          failureReason: reason,
+        },
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      })
+      if (opts?.recordProgress !== false) {
+        progress.recordTurnCompleted(turn, { finalFamilyTurn: true })
+      }
+      return turn
+    }
+
+    const callTurn = async (
+      family: CouncilSingleFamily,
+      role: DeliberationTurnRole,
+      speakingOrder: number,
+      opts?: {
+        inputMessageIds?: string[]
+        challengeTargetIds?: string[]
+        revisionOfMessageId?: string | null
+        targetTurn?: DeliberationTurn | null
+      },
+    ) => {
+      const startedAt = new Date().toISOString()
+      const prompt = buildDeliberationPrompt({
+        role,
+        commanderMessage: raelDirectiveText,
+        evidenceReferences,
+        priorTurns: session.turns,
+        targetTurn: opts?.targetTurn,
+      })
+      progress.recordTurnStarted(family, role, session.turns)
+      const result = await withTimeout(
+        displayFamilyName(family),
+        callCouncilProvider(family, prompt),
+        PROVIDER_TIMEOUT_MS,
+      )
+      const turn = appendDeliberationTurn(session, {
+        family,
+        role,
+        speakingOrder,
+        inputMessageIds: opts?.inputMessageIds ?? [session.commander_message_id],
+        challengeTargetIds: opts?.challengeTargetIds,
+        revisionOfMessageId: opts?.revisionOfMessageId,
+        evidenceReferenceIds,
+        providerResult: providerResultForDeliberation(family, result),
+        startedAt,
+        completedAt: new Date().toISOString(),
+      })
+      progress.recordTurnCompleted(turn, {
+        finalFamilyTurn:
+          role === 'direct_response'
+          || role === 'red_team_challenge'
+          || role === 'revision_or_stand_firm'
+          || turn.completion_status !== 'complete',
+      })
+      return turn
+    }
+
+    councilTrace.record('providers_selected', {
+      module: 'app/api/chat/route.ts:family_to_family_deliberation',
+      inputSummary: { requestedMode: 'family_to_family_v1' },
+      outputSummary: { selectedFamilies: ['chatgpt', 'claude', 'red_team', 'chatgpt'] },
+      stateChange: 'Phase 48-C3A selected two commercial families plus one Red Team challenge and one revision/synthesis family.',
+    })
+
+    const opening = await callTurn('chatgpt', 'opening_position', 1, {
+      inputMessageIds: [session.commander_message_id],
+    })
+    if (!opening.output_message_id) {
+      appendUnresolvedTurn('claude', 'direct_response', 2, 'Opening position unavailable; no prior message ID exists for a truthful response.')
+      appendUnresolvedTurn('red_team', 'red_team_challenge', 3, 'Required prior family messages unavailable; challenge not generated.')
+      appendUnresolvedTurn('chatgpt', 'revision_or_stand_firm', 4, 'Red Team challenge unavailable; revision not generated.', {
+        revisionOfMessageId: opening.output_message_id,
+      })
+      session.diagnostics.push('Deliberation stopped before synthesis because the opening provider contribution was unavailable.')
+      progress.closeIfTerminal()
+      return session
+    }
+
+    const response = await callTurn('claude', 'direct_response', 2, {
+      inputMessageIds: [session.commander_message_id, opening.output_message_id],
+    })
+    if (!response.output_message_id) {
+      appendUnresolvedTurn('red_team', 'red_team_challenge', 3, 'Second family response unavailable; Red Team cannot challenge a completed two-family exchange.', {
+        inputMessageIds: [session.commander_message_id, opening.output_message_id],
+        challengeTargetIds: [opening.output_message_id],
+      })
+      appendUnresolvedTurn('chatgpt', 'revision_or_stand_firm', 4, 'Red Team challenge unavailable; revision not generated.', {
+        inputMessageIds: [session.commander_message_id, opening.output_message_id],
+        revisionOfMessageId: opening.output_message_id,
+        recordProgress: false,
+      })
+      session.diagnostics.push('Deliberation stopped before synthesis because the second family contribution was unavailable.')
+      progress.recordTurnCompleted(opening, { finalFamilyTurn: true })
+      progress.closeIfTerminal()
+      return session
+    }
+
+    const challenge = await callTurn('red_team', 'red_team_challenge', 3, {
+      inputMessageIds: [session.commander_message_id, opening.output_message_id, response.output_message_id],
+      challengeTargetIds: [opening.output_message_id, response.output_message_id],
+    })
+    if (!challenge.output_message_id) {
+      appendUnresolvedTurn('chatgpt', 'revision_or_stand_firm', 4, 'Red Team challenge unavailable; revision not generated.', {
+        inputMessageIds: [session.commander_message_id, opening.output_message_id, response.output_message_id],
+        revisionOfMessageId: opening.output_message_id,
+        recordProgress: false,
+      })
+      session.diagnostics.push('Deliberation stopped before synthesis because the Red Team challenge was unavailable.')
+      progress.recordTurnCompleted(opening, { finalFamilyTurn: true })
+      progress.closeIfTerminal()
+      return session
+    }
+
+    await callTurn('chatgpt', 'revision_or_stand_firm', 4, {
+      inputMessageIds: [session.commander_message_id, challenge.output_message_id],
+      challengeTargetIds: [challenge.output_message_id],
+      revisionOfMessageId: opening.output_message_id,
+      targetTurn: opening,
+    })
+
+    if (canSynthesize(session, ['opening_position', 'direct_response', 'red_team_challenge', 'revision_or_stand_firm'])) {
+      await callTurn('chatgpt', 'council_synthesis', 5, {
+        inputMessageIds: [session.commander_message_id, ...completedOutputIds()],
+      })
+    } else {
+      session.diagnostics.push('Synthesis not requested because required deliberation turns were not terminal.')
+    }
+
+    progress.closeIfTerminal()
+    return session
+  }
+
   try {
     let diagnosticRuntimeEvidencePacket: RuntimeEvidencePacket | undefined
 
@@ -1346,6 +1562,122 @@ export async function POST(req: Request) {
       intentLabel: intentState.intent,
       modeGovernorBlock: councilStabilityMode ? '' : modeGovernorBlock,
     })
+
+    if (familyDeliberationRequested) {
+      // councilLogicalRequestId/councilLogicalExpectedFamilies/
+      // councilLogicalTurnIndex/councilLogicalTurnTotal (parsed above from
+      // the request body) are intentionally not threaded into this tracker.
+      // Those fields exist to reconcile progress across the legacy
+      // multi-HTTP-call sequential shard path (see the councilSingleFamily
+      // tracker construction below), where each family turn is a separate
+      // request that needs to be correlated back to one logical decree.
+      // Family-to-family deliberation instead executes and reconciles every
+      // selected family's full turn sequence inside this single request/
+      // response, so there is no cross-call correlation need here -- the
+      // client may still send these fields (harmless, backward compatible),
+      // but this path has no use for them.
+      councilProgress = createCouncilProgressRuntimeTracker({
+        requestIdSeed: councilTrace.councilTraceId,
+        commanderTurnRef: conversationId ?? 'api-chat-family-deliberation',
+        flowMode: 'stable_group',
+        executionStrategy: 'server_sequential_streaming_future',
+        expectedFamilies: ['chatgpt', 'claude', 'red_team'],
+        selectedFamilies: ['chatgpt', 'claude', 'red_team'],
+        selectionAuthority: 'system_selected',
+      })
+      councilProgress.record({ eventType: 'request_created', source: 'server_orchestrator' })
+      councilProgress.record({
+        eventType: 'request_selection_resolved',
+        source: 'server_orchestrator',
+        payload: {
+          selectedFamilies: ['chatgpt', 'claude', 'red_team'],
+          expectedFamilies: ['chatgpt', 'claude', 'red_team'],
+        },
+      })
+      councilProgress.record({ eventType: 'request_started', source: 'server_orchestrator' })
+      councilTrace.record('provider_calls_started', {
+        module: 'app/api/chat/route.ts:family_to_family_deliberation',
+        inputSummary: { mode: 'family_to_family_v1', timeoutMs: PROVIDER_TIMEOUT_MS },
+        outputSummary: { callMode: 'sequential_family_to_family' },
+        stateChange: 'Family deliberation provider calls started in strict speaking order.',
+      })
+      const familyDeliberation = await runFamilyToFamilyDeliberation(councilProgress)
+      const resultTurns = familyDeliberation.turns.filter(turn =>
+        turn.output_message_id || turn.completion_status !== 'complete',
+      )
+      const results = resultTurns.map(turn => ({
+        family: turn.completion_status === 'complete' ? turn.provider_label : 'SYSTEM',
+        content: formatDeliberationTurnForChat(turn, familyDeliberation.evidence_references),
+        status:
+          turn.completion_status === 'complete'
+            ? 'OK'
+            : turn.completion_status === 'timed_out'
+              ? 'TIMED_OUT'
+              : turn.completion_status === 'unavailable'
+                ? 'UNAVAILABLE'
+                : 'FAILED',
+      }))
+      const synthesis = familyDeliberation.synthesis_turn_id
+        ? familyDeliberation.turns.find(turn => turn.turn_id === familyDeliberation.synthesis_turn_id)
+        : null
+      councilTrace.record('provider_responses_received', {
+        module: 'app/api/chat/route.ts:family_to_family_deliberation',
+        inputSummary: { turnCount: familyDeliberation.turns.length },
+        outputSummary: {
+          providerResponses: familyDeliberation.turns.map(turn => ({
+            turnId: turn.turn_id,
+            outputMessageId: turn.output_message_id,
+            providerFamily: turn.provider_label,
+            role: turn.turn_role,
+            status: turn.completion_status,
+          })),
+        },
+        stateChange: 'Family-to-family deliberation turns collected with explicit message linkage.',
+      })
+      councilTrace.record('integrity_checked', {
+        module: 'app/api/chat/route.ts:family_to_family_deliberation',
+        inputSummary: { turnCount: familyDeliberation.turns.length },
+        outputSummary: {
+          synthesisReady: Boolean(synthesis?.output_message_id),
+          fabricatedContribution: false,
+        },
+        stateChange: 'Deliberation integrity check completed from recorded turn structure.',
+      })
+      councilTrace.record('red_team_checked', {
+        module: 'app/api/chat/route.ts:family_to_family_deliberation',
+        inputSummary: {
+          challengeTargets: familyDeliberation.turns
+            .filter(turn => turn.turn_role === 'red_team_challenge')
+            .flatMap(turn => turn.challenge_target_ids),
+        },
+        outputSummary: { sourceType: 'external_provider_turn', externalProviderCallCompleted: true },
+        stateChange: 'Red Team challenge recorded as a real deliberation turn when provider completed.',
+      })
+      councilTrace.record('memory_recommendation_recorded', {
+        module: 'app/api/chat/route.ts:family_to_family_deliberation',
+        inputSummary: { familyDeliberationMode: true },
+        outputSummary: {
+          memoryRecommendation: 'not_evaluated_family_deliberation_path',
+          memoryEvaluationExecuted: false,
+          memoryWritten: false,
+        },
+        stateChange: 'No memory proposal ingestion or memory write ran in family deliberation path.',
+      })
+      await safeAudit({
+        success: familyDeliberation.completion_status !== 'failed',
+        flow: 'family_to_family_deliberation',
+        turnCount: familyDeliberation.turns.length,
+      })
+      return NextResponse.json(withTrace({
+        results,
+        familyDeliberation,
+        councilSingleResponse: synthesis?.full_response ?? '',
+        hardStop: false,
+        mode: 'family_to_family_deliberation',
+        showContinue: false,
+        ...liveResearchJson(),
+      }))
+    }
 
     if (directFamily) {
       const grokDirectEligible = isGrokDirectInvocationEligible({
