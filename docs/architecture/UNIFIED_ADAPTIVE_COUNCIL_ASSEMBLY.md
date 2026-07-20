@@ -228,7 +228,136 @@ No file in this module is imported by `/api/chat`, provider routes, Live Council
 
 ## Future Phase 48-C3B2
 
-Phase 48-C3B2 can add a shadow-selection path that computes an assembly plan alongside existing execution and records comparison diagnostics. That future phase should still avoid controlling dispatch until independently validated.
+Phase 48-C3B2 adds a shadow-selection path that computes an assembly plan alongside existing execution and records comparison diagnostics. It still does not control dispatch.
+
+## Phase 48-C3B2 Shadow Selection
+
+Shadow selection exists to compare two separate truths:
+
+- Actual execution truth: families selected and executed by the existing runtime.
+- Shadow recommendation truth: families the adaptive planner would have recommended.
+
+The shadow report is metadata only. Required label:
+
+> Recommended assembly — shadow only, not used for execution.
+
+Required execution flag:
+
+```ts
+executionUnaffected: true
+```
+
+### Eligibility
+
+Shadow eligibility is deterministic. Supported Commander Council requests may produce a shadow plan. Direct provider invocations, empty mission input, disabled feature mode, validation-only requests, and internal/provider subcalls do not produce an executable recommendation.
+
+### Feature Control
+
+The supported modes are:
+
+- `disabled`
+- `diagnostics_only`
+- `response_metadata`
+
+The flag never controls provider execution. Planner failure always fails open.
+
+### Normalized Mission Adapter
+
+The adapter uses request-scoped non-secret data only:
+
+- Commander message
+- Council flow mode
+- trace request ID
+- mission ID/version from the existing runtime trace
+- logical request ID when present
+- direct-invocation and family-deliberation flags
+
+It does not create a new canonical mission object and does not mutate the live request.
+
+### Actual Selection Snapshot
+
+The actual-selection snapshot records what the existing runtime already selected:
+
+- execution mode
+- actual selected families
+- actual synthesis family when known
+- Red Team inclusion
+- actual selection source
+- finalized/unresolved state
+- capture timestamp
+
+The snapshot is diagnostic. It does not become a lifecycle source.
+
+### Shadow Comparison Schema
+
+`CouncilShadowSelectionReport` records:
+
+- recommended families
+- actual families
+- recommended-only families
+- actual-only families
+- overlap
+- match status
+- recommended synthesizer
+- actual synthesizer
+- Red Team policy comparison
+- unresolved capabilities
+- uncertainty flags
+- provenance
+
+The comparison does not grade the current runtime as wrong. A mismatch is an observation.
+
+### Fail-Open Behavior
+
+Classifier, registry, planner, or comparison failures produce a truthful failed/unresolved shadow report where possible. The existing Council request continues unchanged.
+
+### No Execution Authority
+
+The shadow report states:
+
+- plan authority: advisory
+- execution authority: none
+- actual selection authority: existing runtime
+- execution influenced: false
+
+Shadow data cannot dispatch providers, select providers, alter provider order, trigger synthesis, retrieve evidence, write memory, close requests, or emit progress events.
+
+### No Provider-Prompt Contamination
+
+Shadow planning runs after the current request prompt is built and only at response metadata boundaries. The report is not inserted into:
+
+- ChatGPT prompts
+- Claude prompts
+- Grok prompts
+- Gemini prompts
+- Kimi prompts
+- Red Team prompts
+- synthesis prompts
+- revision prompts
+
+### No Progress Accounting
+
+The shadow module does not import progress runtime modules, create progress trackers, emit family lifecycle events, alter missing terminal families, or call `closeIfTerminal()`.
+
+### Diagnostics Labeling
+
+If surfaced, the output must be labeled `Shadow recommendation` and `Not used for execution`. It must not use queued, thinking, reviewing, complete, failed, or timed-out visual states; those belong only to actual execution.
+
+### Future Promotion Requirements
+
+Shadow recommendations cannot control execution until a later phase independently proves:
+
+- stable recommendation quality
+- deterministic selection
+- reliable actual-selection comparison
+- no execution contamination
+- cost/latency measurement integrity
+- provider availability truth
+- Commander override semantics
+- rollback behavior
+- safe fallback behavior
+- independent Claude Code approval
+- explicit Commander authorization
 
 ## Known Limitations
 
@@ -239,4 +368,4 @@ Phase 48-C3B2 can add a shadow-selection path that computes an assembly plan alo
 - No persistence exists.
 - The planner does not yet consume a fully canonical mission object because current mission structures are not the same shape as Live Council directives.
 - Advisory recommendations are not visible in production UI unless a future phase safely surfaces them.
-
+- Phase 48-C3B2 shadow metadata is not promoted to execution authority.

@@ -154,6 +154,15 @@ import type {
   DeliberationTurn,
   DeliberationTurnRole,
 } from '@/lib/council/family-deliberation'
+import {
+  createActualSelectionSnapshot,
+  normalizeShadowMissionInput,
+  resolveShadowFeatureMode,
+  runAdaptiveCouncilShadowSelection,
+  shouldAttachShadowReport,
+  type ActualCouncilSelectionSnapshot,
+  type CouncilShadowSelectionReport,
+} from '@/lib/council/adaptive-assembly'
 
 function buildResearchAntiLoopAugment(threadBlock: string): string {
   const hits = threadBlock.match(/\bprimary\s+finding\b/gi) ?? []
@@ -738,6 +747,45 @@ export async function POST(req: Request) {
     && Object.prototype.hasOwnProperty.call(DIRECT_KEYS, directKey)
       ? familyFromDirectValue(DIRECT_KEYS[directKey])
       : null
+  const shadowFeatureMode = resolveShadowFeatureMode(body.adaptiveCouncilShadowMode)
+  const attachShadowMetadata = <T extends Record<string, unknown>>(
+    payload: T,
+    actualSnapshot: ActualCouncilSelectionSnapshot,
+  ): T & { shadowCouncilAssembly?: CouncilShadowSelectionReport } => {
+    const report = runAdaptiveCouncilShadowSelection({
+      featureMode: shadowFeatureMode,
+      missionInput: normalizeShadowMissionInput({
+        requestId: councilTrace.councilTraceId,
+        logicalRequestId: councilLogicalRequestId,
+        missionId: councilTrace.missionId,
+        missionVersion: councilTrace.missionVersion,
+        commanderMessage: raelDirectiveText,
+        councilFlowMode,
+        directInvocation: Boolean(directFamily),
+        familyDeliberationRequested,
+      }),
+      actualSnapshot,
+    })
+    councilTrace.record('council_report_built', {
+      module: 'lib/council/adaptive-assembly/shadowRuntime.ts:runAdaptiveCouncilShadowSelection',
+      inputSummary: {
+        executionMode: actualSnapshot.executionMode,
+        actualSelectedFamilies: actualSnapshot.actualSelectedFamilies,
+        featureMode: shadowFeatureMode,
+      },
+      outputSummary: {
+        eligibilityStatus: report.eligibilityStatus,
+        plannerStatus: report.plannerStatus,
+        matchStatus: report.recommendationMatchStatus,
+        recommendedCount: report.recommendedFamilies.length,
+        actualCount: report.actualFamilies.length,
+        executionUnaffected: report.executionUnaffected,
+      },
+      stateChange: 'Adaptive Council shadow recommendation metadata generated as non-authoritative diagnostics only.',
+    })
+    if (!shouldAttachShadowReport(shadowFeatureMode)) return payload
+    return { ...payload, shadowCouncilAssembly: report }
+  }
 
   const skipProviderIntegrityCheck = Boolean(
     minimalCouncilPath
@@ -1668,7 +1716,7 @@ export async function POST(req: Request) {
         flow: 'family_to_family_deliberation',
         turnCount: familyDeliberation.turns.length,
       })
-      return NextResponse.json(withTrace({
+      return NextResponse.json(withTrace(attachShadowMetadata({
         results,
         familyDeliberation,
         councilSingleResponse: synthesis?.full_response ?? '',
@@ -1676,7 +1724,12 @@ export async function POST(req: Request) {
         mode: 'family_to_family_deliberation',
         showContinue: false,
         ...liveResearchJson(),
-      }))
+      }, createActualSelectionSnapshot({
+        executionMode: 'family_to_family_deliberation',
+        actualSelectedFamilies: ['chatgpt', 'claude', 'red_team'],
+        actualSynthesisFamily: synthesis?.provider_family ?? null,
+        actualSelectionSource: 'system_selected',
+      }))))
     }
 
     if (directFamily) {
@@ -1826,12 +1879,17 @@ export async function POST(req: Request) {
         outputSummary: { memoryRecommendation: 'not_evaluated_direct_invocation' },
         stateChange: 'No memory proposal ingestion ran in direct invocation hard-stop path.',
       })
-      return NextResponse.json(withTrace({
+      return NextResponse.json(withTrace(attachShadowMetadata({
         result: normalized,
         results: directResults,
         hardStop: true,
         mode: 'direct_invocation',
-      }))
+      }, createActualSelectionSnapshot({
+        executionMode: 'direct_invocation',
+        actualSelectedFamilies: [directFamily],
+        actualSynthesisFamily: null,
+        actualSelectionSource: 'direct_invocation',
+      }))))
     }
 
     if (!councilSingleFamily) {
@@ -1902,11 +1960,17 @@ export async function POST(req: Request) {
           outputSummary: { finalReportId: councilTrace.finalReportId, minimalReport: true },
           stateChange: 'Minimal trace report envelope built for no-provider path.',
         })
-        return NextResponse.json(withTrace({
+        return NextResponse.json(withTrace(attachShadowMetadata({
           results: [result],
           hardStop: false,
           mode: 'parallel_providers',
-        }))
+        }, createActualSelectionSnapshot({
+          executionMode: 'parallel_providers',
+          actualSelectedFamilies: activeFamilies,
+          actualSynthesisFamily: null,
+          actualSelectionSource: 'system_selected',
+          actualSelectionFinalized: true,
+        }))))
       }
 
       councilTrace.record('provider_calls_started', {
@@ -2030,12 +2094,17 @@ export async function POST(req: Request) {
         families: activeFamilies,
         resultCount: results.length,
       })
-      return NextResponse.json(withTrace({
+      return NextResponse.json(withTrace(attachShadowMetadata({
         results,
         hardStop: false,
         mode: 'parallel_providers',
         showContinue: true,
-      }))
+      }, createActualSelectionSnapshot({
+        executionMode: 'parallel_providers',
+        actualSelectedFamilies: activeFamilies,
+        actualSynthesisFamily: null,
+        actualSelectionSource: 'system_selected',
+      }))))
     }
 
     if (mode === 'continue' && councilSingleFamily) {
@@ -3275,7 +3344,7 @@ export async function POST(req: Request) {
         stateChange: 'Memory recommendation/proposal ingestion status recorded for trace lineage.',
       })
 
-      return NextResponse.json(withTrace({
+      return NextResponse.json(withTrace(attachShadowMetadata({
         councilSingleResponse: responseText,
         ...(economicOpsRawProviderAnalysis ? { economicOpsRawProviderAnalysis } : {}),
         councilSingleFamily,
@@ -3297,7 +3366,13 @@ export async function POST(req: Request) {
         ...(opportunityDiagnostics ? { opportunityDiagnostics } : {}),
         ...liveResearchJson(),
         ...stabilityMeta,
-      }))
+      }, createActualSelectionSnapshot({
+        executionMode: councilFlowMode,
+        actualSelectedFamilies: [councilSingleFamily],
+        actualSynthesisFamily: stableGroupFinalSynthesis ? councilSingleFamily : null,
+        actualSelectionSource: 'continuation_selected',
+        actualSelectionFinalized: true,
+      }))))
     }
 
     await safeAudit({

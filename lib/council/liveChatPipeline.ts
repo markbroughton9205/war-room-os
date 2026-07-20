@@ -26,6 +26,7 @@ import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import type { StableGroupPriorReply } from '@/lib/council/stableGroupChat'
 import type { CouncilRuntimeTraceSnapshot } from '@/lib/council/runtimeTrace'
 import type { DeliberationSession } from '@/lib/council/family-deliberation'
+import type { CouncilShadowSelectionReport, ShadowFeatureMode } from '@/lib/council/adaptive-assembly'
 
 export type CouncilChatRequestBody = {
   message: string
@@ -79,6 +80,8 @@ export type CouncilChatRequestBody = {
   stableGroupFinalSynthesis?: boolean
   /** Phase 48-C3A: real family-to-family deliberation runtime slice. */
   councilDeliberationMode?: 'family_to_family_v1'
+  /** Phase 48-C3B2: advisory-only adaptive Council shadow diagnostics. */
+  adaptiveCouncilShadowMode?: ShadowFeatureMode
 }
 
 export type CouncilChatJson = {
@@ -134,6 +137,8 @@ export type CouncilChatJson = {
   councilTrace?: CouncilRuntimeTraceSnapshot
   /** Phase 48-C3A: real family-to-family deliberation artifact. */
   familyDeliberation?: DeliberationSession
+  /** Phase 48-C3B2: advisory-only shadow recommendation metadata, never used for execution. */
+  shadowCouncilAssembly?: CouncilShadowSelectionReport
 }
 
 export async function postCouncilChat(
