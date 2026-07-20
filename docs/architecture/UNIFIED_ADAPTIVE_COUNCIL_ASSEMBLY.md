@@ -359,6 +359,92 @@ Shadow recommendations cannot control execution until a later phase independentl
 - independent Claude Code approval
 - explicit Commander authorization
 
+## Phase 48-C3B3 Commander Readout
+
+Phase 48-C3B3 surfaces the Phase 48-C3B2 shadow-selection report to the Commander as a collapsed, read-only diagnostic readout on completed Council responses. It exists to make the difference between adaptive recommendation and actual Council execution visible without changing either one.
+
+Required label:
+
+> Advisory only — did not control execution.
+
+Required execution-honesty language when the report explicitly confirms execution was unaffected:
+
+> This recommendation did not control provider selection or execution.
+
+If that confirmation is absent or false, the UI must not claim execution was unaffected. It must instead report that execution-isolation confirmation is unavailable.
+
+### Sole Source Of Truth
+
+The readout may read only the server-generated C3B2 response metadata:
+
+```ts
+response.shadowCouncilAssembly
+```
+
+The client readout and adapter must not call the adaptive planner, reconstruct recommendations, classify missions, inspect provider configuration, infer provider health, emit progress events, write memory, persist diagnostics, or call an API to recreate shadow metadata.
+
+### Recommended Versus Actual Truth
+
+The readout must keep these groups distinct:
+
+- Recommended Council
+- Actual Council Used
+- Recommended and used
+- Recommended, not used
+- Used, not recommended
+
+Recommended-only families must never be shown as actual participants. Actual-only families must never be hidden or reframed as recommendation failures. A difference is diagnostic information, not automatically an error.
+
+### No Execution Controls
+
+Phase 48-C3B3 includes no controls that can promote advisory metadata into execution input. It must not include apply, run, replace, auto-select, retry, promote, save-default, write-back, provider-selection, prompt, synthesis, progress-runtime, request-closure, memory, or persistence actions.
+
+### Response-Completion Eligibility
+
+The readout renders only for completed assistant response messages that carry displayable `shadowCouncilAssembly` metadata. It does not render for user messages, system notes, streaming partials, historic responses without metadata, direct-invocation ineligible reports, or local placeholders.
+
+Truthful shadow failure reports may render an unavailable state while leaving the Council response itself usable.
+
+### Red Team, Evidence, And Live Data
+
+The readout must display recommendation and execution truth separately:
+
+- Red Team recommended
+- Red Team participated
+- Evidence recommended
+- Live information recommended
+
+It must not imply Red Team participated merely because policy recommended it. It must not imply live research or evidence gathering occurred merely because the adaptive planner recommended it.
+
+### Accessibility And Layout
+
+The Commander readout uses a semantic collapsed disclosure, keyboard-accessible focus behavior, text labels for status, section headings, non-color-only meaning, wrapping family chips, and responsive grids that avoid fixed-width overflow. The default collapsed state prevents the Chamber from becoming a diagnostic wall.
+
+### Known Limitations
+
+- Recommendation reasons are shown only when present in C3B2 metadata; C3B3 does not invent explanations.
+- Requested and covered capability lists remain unavailable until C3B2 metadata includes those explicit fields.
+- Evidence and live-data requirements remain unknown unless explicit server metadata is added.
+- Availability remains configured or unknown truth; no provider-health check is performed.
+- The readout is diagnostic UI only and does not activate adaptive provider selection.
+
+### Future Active-Selection Promotion Gate
+
+Adaptive selection may not control execution until a later separately authorized phase proves:
+
+- stable shadow accuracy over real missions
+- acceptable disagreement explanations
+- provider-health truth source
+- deterministic Commander override behavior
+- explicit execution approval policy
+- rollback path
+- auditability
+- progress-runtime compatibility
+- request-closure compatibility
+- provider-prompt isolation
+- independent Claude Code validation
+- controlled commit and deployment authorization
+
 ## Known Limitations
 
 - Availability is configured truth only; no health checks are performed.

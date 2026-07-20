@@ -3,6 +3,7 @@ import type { AnalystOperationsPacket } from '@/lib/analysts/analystOutcomeEvalu
 import type { ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
 import type { CouncilRepairPacket } from '@/lib/council-repair'
 import type { DeliberationEvidenceReference, DeliberationTurn } from '@/lib/council/family-deliberation'
+import type { CouncilShadowSelectionReport } from '@/lib/council/adaptive-assembly/shadowTypes'
 
 export type CouncilLifecycleState =
   | 'active'
@@ -47,6 +48,7 @@ export type PersistedCouncilMessage = {
   analystOperationsPacket?: AnalystOperationsPacket
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
+  shadowCouncilAssembly?: CouncilShadowSelectionReport
 }
 
 export type CouncilCooldownMap = Partial<Record<CouncilOrchestrationFamily, number>>

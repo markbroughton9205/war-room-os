@@ -99,6 +99,7 @@ import { detectResearchIntent } from '@/lib/research/researchIntent'
 import { detectCouncilResearchIntent } from '@/lib/council-research/intent'
 import type { CouncilResearchHandoff, CouncilStoryContext, ResearchReport, ResearchStatus } from '@/lib/council-research/types'
 import { CouncilResearchStatus } from '@/components/war-room/council/CouncilResearchStatus'
+import { AdaptiveCouncilReadout } from '@/components/council/AdaptiveCouncilReadout'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
@@ -212,6 +213,7 @@ import {
 } from '@/lib/council/councilMode'
 import type { StableGroupPriorReply } from '@/lib/council/stableGroupChat'
 import type { ResponseIntegrityStatus } from '@/lib/providers/responseIntegrity'
+import type { CouncilShadowSelectionReport } from '@/lib/council/adaptive-assembly/shadowTypes'
 import { createMessageId } from '@/lib/council/messageIds'
 import { cloudEngineReadinessLabel, cloudEngineStripStatus, internetToolReadinessParts } from '@/lib/warRoom/providerReadiness'
 import { windowLiveChatMessages } from '@/lib/conversation/liveWindow'
@@ -342,6 +344,7 @@ type CouncilMessage = {
   analystOperationsPacket?: AnalystOperationsPacket
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
+  shadowCouncilAssembly?: CouncilShadowSelectionReport
 }
 
 type CouncilSessionLifecycle = 'active' | 'archived'
@@ -1768,6 +1771,12 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           </details>
         ) : null}
+        <AdaptiveCouncilReadout
+          report={msg.shadowCouncilAssembly}
+          messageType={msg.messageType}
+          responseComplete={Boolean(msg.content.trim()) && msg.messageType === 'response'}
+          isUserMessage={isRael}
+        />
         {!isRael && !councilPassthroughMode && msg.messageType === 'response' && isCouncilMessageRepairPacketEligible(msg) ? (
           <button
             type="button"
@@ -7617,6 +7626,7 @@ function Home() {
     iconOverride,
     instant,
     removeMessageIds,
+    shadowCouncilAssembly,
   }: {
     familyName: TypingFamily
     bubbleFamilyName?: string
@@ -7631,6 +7641,8 @@ function Home() {
     instant?: boolean
     /** Remove stale placeholders atomically when the final visible response appears. */
     removeMessageIds?: string[]
+    /** Server-generated adaptive Council shadow metadata; advisory display only. */
+    shadowCouncilAssembly?: CouncilShadowSelectionReport
   }) => {
     const family = colorOverride
       ? { color: colorOverride, icon: iconOverride ?? '•' }
@@ -7663,6 +7675,7 @@ function Home() {
         degraded: renderGate?.degraded,
         integrityStatus: renderGate?.integrityStatus,
         renderDiagnostics: renderGate?.diagnostics,
+        shadowCouncilAssembly,
       }], removeMessageIds?.length ? { removeIds: removeMessageIds } : undefined)
       setPresence(familyName, 'idle', 'standby')
       return
@@ -7689,7 +7702,8 @@ function Home() {
       color: family.color,
       icon: family.icon,
       provider,
-      messageType: 'response'
+      messageType: 'response',
+      shadowCouncilAssembly,
     }])
 
     setTypingFamily(null)
@@ -7801,6 +7815,7 @@ function Home() {
       councilRevealSource?: 'autonomous' | 'decree'
       autonomousDecreeRoundAtFetch?: number
       transientMessageIds?: string[]
+      shadowCouncilAssembly?: CouncilShadowSelectionReport
     },
   ) => {
     const directTarget = activeCouncilCommandRef.current.directInvocation
@@ -7880,6 +7895,7 @@ function Home() {
       streamingLabel: vis.streamingLabel,
       instant: true,
       removeMessageIds: directInvocationRemoveIds,
+      shadowCouncilAssembly: opts?.shadowCouncilAssembly,
     })
     if (directInvocationFinal) {
       const providerError = councilSnapRef.current.providerErrorMessage
@@ -8055,6 +8071,7 @@ function Home() {
 
     councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: true })
     let shouldScheduleNext = false
+    let shadowCouncilAssembly: CouncilShadowSelectionReport | undefined
     try {
       if (!textOut) {
         const baseAutoBudget = resolveProviderTimeoutMs({
@@ -8102,6 +8119,7 @@ function Home() {
           )
           r = out.res
           data = out.data
+          shadowCouncilAssembly = data.shadowCouncilAssembly
           mergeContinuationFromChatJson(data)
           if (data.liveResearchAttempted) {
             lastAutonomousHadLiveResearchRef.current = true
@@ -8180,6 +8198,7 @@ function Home() {
       await revealOrchestrationTurn(family, textOut, inputText, {
         councilRevealSource: 'autonomous',
         autonomousDecreeRoundAtFetch,
+        shadowCouncilAssembly,
       })
       if (orchRedEarly && family === 'red_team') orchRedTeamEarlyLatchRef.current = true
       if (councilSnapRef.current.sessionId !== expectedSessionId) return
@@ -8771,6 +8790,7 @@ function Home() {
         family: CouncilOrchestrationFamily
         textOut: string
         transientMessageIds?: string[]
+        shadowCouncilAssembly?: CouncilShadowSelectionReport
       }
       const staged: StagedCouncilLine[] = []
 
@@ -8860,6 +8880,7 @@ function Home() {
         runtime: ProviderFamilyOutcomeStatus
         runtimeDetail?: string
         transientMessageIds?: string[]
+        shadowCouncilAssembly?: CouncilShadowSelectionReport
       }
 
       const gatherFamily = async (family: CouncilOrchestrationFamily): Promise<GatherCell> => {
@@ -8903,6 +8924,7 @@ function Home() {
         let textOut: string | null = null
         let runtime: ProviderFamilyOutcomeStatus = 'SKIPPED'
         let runtimeDetail: string | undefined
+        let shadowCouncilAssembly: CouncilShadowSelectionReport | undefined
 
         try {
           if (family === 'kimi' || family === 'bridge_architect') {
@@ -9011,6 +9033,7 @@ function Home() {
                   runtime = 'SKIPPED'
                   runtimeDetail = 'governor_silent_skip'
                 } else {
+                  shadowCouncilAssembly = chatData.shadowCouncilAssembly
                   textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
                   if (textOut && councilFlowModeEffective === 'stable_group' && !chatData.stableGroupSkipped) {
                     stableGroupPriorThisTurn.push({
@@ -9063,6 +9086,7 @@ function Home() {
           runtime,
           runtimeDetail,
           transientMessageIds: transientDirectStatusMessageIds,
+          shadowCouncilAssembly,
         }
       }
 
@@ -9150,6 +9174,10 @@ function Home() {
           const runtimeByFamily: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
           const detailsByFamily: CouncilProviderRuntimeDetails = {}
           const priorOutputMessageIds: string[] = []
+          const shadowReadoutTurnId =
+            deliberation.synthesis_turn_id
+            ?? [...turns].reverse().find(turn => turn.completion_status === 'complete' && Boolean(turn.output_message_id))?.turn_id
+            ?? null
 
           for (const turn of turns) {
             const family = turn.provider_family
@@ -9186,6 +9214,7 @@ function Home() {
               degraded: !complete,
               familyDeliberationTurn: turn,
               familyDeliberationEvidenceReferences: deliberation.evidence_references,
+              shadowCouncilAssembly: turn.turn_id === shadowReadoutTurnId ? deliberationData.shadowCouncilAssembly : undefined,
             })
 
             if (complete) {
@@ -9391,6 +9420,7 @@ function Home() {
                 textOut: synthText,
                 runtime: 'RESPONDED',
                 runtimeDetail: 'stable_group_final_synthesis',
+                shadowCouncilAssembly: finalData.shadowCouncilAssembly,
               })
             }
           } catch {
@@ -9442,6 +9472,7 @@ function Home() {
           family: c.family,
           textOut: councilProviderTextAfterRenderGate(c.family, c.textOut!.trim(), decree, councilPassthroughMode),
           transientMessageIds: c.transientMessageIds,
+          shadowCouncilAssembly: c.shadowCouncilAssembly,
         }))
 
       for (const row of stagedCandidates) staged.push(row)
@@ -9584,6 +9615,7 @@ function Home() {
           const visible = await revealOrchestrationTurn(line.family, line.content, inputText(), {
             councilRevealSource: 'decree',
             transientMessageIds: sourceLine?.transientMessageIds,
+            shadowCouncilAssembly: sourceLine?.shadowCouncilAssembly,
           })
           if (!visible) continue
           attendanceRevealedFamilies.add(line.family)
@@ -9696,6 +9728,7 @@ function Home() {
                 family: c.family,
                 textOut: c.textOut.trim(),
                 transientMessageIds: c.transientMessageIds,
+                shadowCouncilAssembly: c.shadowCouncilAssembly,
               })
               continue
             }
