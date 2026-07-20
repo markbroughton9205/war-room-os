@@ -21,23 +21,30 @@ export type CommanderOperationMode =
   | 'unknown'
 
 export type CommanderOperationStatus =
+  | 'idle'
   | 'received'
   | 'interpreting'
   | 'assembling'
   | 'running'
+  | 'waiting_for_provider'
   | 'synthesizing'
   | 'waiting_approval'
   | 'completed'
   | 'completed_with_failures'
   | 'failed'
+  | 'cancelled'
+  | 'unknown'
 
 export type CommanderOperationEventType =
   | 'request_received'
   | 'request_interpreted'
+  | 'council_mode_selected'
+  | 'families_assigned'
   | 'family_queued'
   | 'family_started'
   | 'family_responded'
   | 'family_failed'
+  | 'family_timed_out'
   | 'family_unavailable'
   | 'family_skipped'
   | 'family_waiting_approval'
@@ -47,6 +54,7 @@ export type CommanderOperationEventType =
   | 'approval_required'
   | 'operation_completed'
   | 'operation_failed'
+  | 'operation_cancelled'
   | 'system_state_inspected'
   | 'lane_assigned'
 
@@ -55,6 +63,13 @@ export type CommanderOperationEventProvenance =
   | 'provider_response'
   | 'system_state'
   | 'approval_state'
+
+export type CommanderOperationTimelineSource =
+  | 'authoritative_runtime_snapshot'
+  | 'completed_transcript'
+  | 'reconciled_runtime_snapshot_and_transcript'
+  | 'project_packet'
+  | 'unknown'
 
 export type CommanderOperationEvent = {
   readonly id: string
@@ -110,4 +125,7 @@ export type CommanderOperation = {
   readonly briefing: CommanderBriefing
   readonly summary: CommanderOperationSummary
   readonly technicalData: unknown | null
+  readonly timelineSource?: CommanderOperationTimelineSource
+  readonly runtimeSnapshotAvailable?: boolean
+  readonly incrementalTransportAvailable?: boolean
 }

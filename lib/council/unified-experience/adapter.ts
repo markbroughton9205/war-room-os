@@ -395,6 +395,9 @@ export function buildCommanderOperationFromMessages(rawInputs: readonly CouncilO
     briefing: briefingFromText(briefingText, requestKind, hasFinalBriefing),
     summary: summaryFor(mode, events),
     technicalData: null,
+    timelineSource: 'completed_transcript',
+    runtimeSnapshotAvailable: false,
+    incrementalTransportAvailable: false,
   })
 }
 
@@ -500,6 +503,9 @@ function buildCommanderOperationFromProjectPacket(input: CouncilOperationMessage
     }),
     summary: summaryFor('system', events),
     technicalData: packet,
+    timelineSource: 'project_packet',
+    runtimeSnapshotAvailable: false,
+    incrementalTransportAvailable: false,
   })
 }
 

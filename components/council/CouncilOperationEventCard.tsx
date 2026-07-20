@@ -7,10 +7,15 @@ type CouncilOperationEventCardProps = {
 }
 
 const EVENT_TONE: Record<string, string> = {
+  council_mode_selected: '#93C5FD',
+  families_assigned: '#93C5FD',
   family_responded: '#86EFAC',
   synthesis_completed: '#86EFAC',
   family_failed: '#FCA5A5',
+  family_timed_out: '#FCA5A5',
   operation_failed: '#FCA5A5',
+  operation_cancelled: '#FCA5A5',
+  operation_completed: '#86EFAC',
   family_unavailable: '#FDE68A',
   family_skipped: '#CBD5E1',
   family_waiting_approval: '#FDE68A',

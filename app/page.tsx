@@ -101,6 +101,8 @@ import type { CouncilResearchHandoff, CouncilStoryContext, ResearchReport, Resea
 import { CouncilResearchStatus } from '@/components/war-room/council/CouncilResearchStatus'
 import { AdaptiveCouncilReadout } from '@/components/council/AdaptiveCouncilReadout'
 import { CouncilOperationTimeline } from '@/components/council/CouncilOperationTimeline'
+import { buildCouncilOperationTimeline } from '@/lib/council/unified-experience'
+import type { CouncilProgressRuntimeSnapshot } from '@/lib/council/progress-events/runtime'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
@@ -346,6 +348,7 @@ type CouncilMessage = {
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
   shadowCouncilAssembly?: CouncilShadowSelectionReport
+  councilProgress?: CouncilProgressRuntimeSnapshot
 }
 
 type CouncilSessionLifecycle = 'active' | 'archived'
@@ -1385,6 +1388,32 @@ const MessageBubble = memo(function MessageBubble({
     !diagnosticsOpen
     && !councilPassthroughMode
     && isOldOperatorDiagnosticMessage(msg)
+  const operationMessageInputs = useMemo(() => operationTimelineInputs.map(item => ({
+    id: item.id,
+    familyName: item.familyName,
+    content: item.content,
+    timestamp: item.timestamp,
+    provider: item.provider,
+    messageType: item.messageType,
+    providerStatus: councilOperationProviderStatus(item),
+    familyDeliberationTurn: item.familyDeliberationTurn,
+    requestId: item.councilProgress?.requestId ?? item.familyDeliberationTurn?.mission_id ?? null,
+    sessionId: item.councilProgress?.logicalRequestId ?? item.familyDeliberationTurn?.session_id ?? null,
+  })), [operationTimelineInputs])
+  const operationProgress = useMemo(
+    () => [...operationTimelineInputs].reverse().find(item => item.councilProgress)?.councilProgress ?? msg.councilProgress ?? null,
+    [msg.councilProgress, operationTimelineInputs],
+  )
+  const reconciledOperation = useMemo(
+    () => showOperationTimeline && operationMessageInputs.length
+      ? buildCouncilOperationTimeline({
+          progress: operationProgress,
+          completedInputs: operationMessageInputs,
+          requestText: null,
+        })
+      : null,
+    [operationMessageInputs, operationProgress, showOperationTimeline],
+  )
   if (oldOperatorDiagnostic && operatorDiagnosticsMuted) {
     return null
   }
@@ -1781,16 +1810,8 @@ const MessageBubble = memo(function MessageBubble({
               providerStatus: councilOperationProviderStatus(msg),
               familyDeliberationTurn: msg.familyDeliberationTurn,
             }}
-            inputs={operationTimelineInputs.map(item => ({
-              id: item.id,
-              familyName: item.familyName,
-              content: item.content,
-              timestamp: item.timestamp,
-              provider: item.provider,
-              messageType: item.messageType,
-              providerStatus: councilOperationProviderStatus(item),
-              familyDeliberationTurn: item.familyDeliberationTurn,
-            }))}
+            inputs={operationMessageInputs}
+            operation={reconciledOperation}
           />
         ) : null}
         {msg.familyDeliberationTurn ? (
@@ -7699,6 +7720,7 @@ function Home() {
     instant,
     removeMessageIds,
     shadowCouncilAssembly,
+    councilProgress,
   }: {
     familyName: TypingFamily
     bubbleFamilyName?: string
@@ -7715,6 +7737,8 @@ function Home() {
     removeMessageIds?: string[]
     /** Server-generated adaptive Council shadow metadata; advisory display only. */
     shadowCouncilAssembly?: CouncilShadowSelectionReport
+    /** Server-generated authoritative progress snapshot for timeline projection only. */
+    councilProgress?: CouncilProgressRuntimeSnapshot
   }) => {
     const family = colorOverride
       ? { color: colorOverride, icon: iconOverride ?? '•' }
@@ -7746,8 +7770,9 @@ function Home() {
         messageType: 'response',
         degraded: renderGate?.degraded,
         integrityStatus: renderGate?.integrityStatus,
-        renderDiagnostics: renderGate?.diagnostics,
-        shadowCouncilAssembly,
+      renderDiagnostics: renderGate?.diagnostics,
+      shadowCouncilAssembly,
+      councilProgress,
       }], removeMessageIds?.length ? { removeIds: removeMessageIds } : undefined)
       setPresence(familyName, 'idle', 'standby')
       return
@@ -7776,6 +7801,7 @@ function Home() {
       provider,
       messageType: 'response',
       shadowCouncilAssembly,
+      councilProgress,
     }])
 
     setTypingFamily(null)
@@ -7888,6 +7914,7 @@ function Home() {
       autonomousDecreeRoundAtFetch?: number
       transientMessageIds?: string[]
       shadowCouncilAssembly?: CouncilShadowSelectionReport
+      councilProgress?: CouncilProgressRuntimeSnapshot
     },
   ) => {
     const directTarget = activeCouncilCommandRef.current.directInvocation
@@ -7968,6 +7995,7 @@ function Home() {
       instant: true,
       removeMessageIds: directInvocationRemoveIds,
       shadowCouncilAssembly: opts?.shadowCouncilAssembly,
+      councilProgress: opts?.councilProgress,
     })
     if (directInvocationFinal) {
       const providerError = councilSnapRef.current.providerErrorMessage
@@ -8144,6 +8172,7 @@ function Home() {
     councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: true })
     let shouldScheduleNext = false
     let shadowCouncilAssembly: CouncilShadowSelectionReport | undefined
+    let councilProgressForMessage: CouncilProgressRuntimeSnapshot | undefined
     try {
       if (!textOut) {
         const baseAutoBudget = resolveProviderTimeoutMs({
@@ -8192,6 +8221,7 @@ function Home() {
           r = out.res
           data = out.data
           shadowCouncilAssembly = data.shadowCouncilAssembly
+          councilProgressForMessage = data.councilProgress
           mergeContinuationFromChatJson(data)
           if (data.liveResearchAttempted) {
             lastAutonomousHadLiveResearchRef.current = true
@@ -8271,6 +8301,7 @@ function Home() {
         councilRevealSource: 'autonomous',
         autonomousDecreeRoundAtFetch,
         shadowCouncilAssembly,
+        councilProgress: councilProgressForMessage,
       })
       if (orchRedEarly && family === 'red_team') orchRedTeamEarlyLatchRef.current = true
       if (councilSnapRef.current.sessionId !== expectedSessionId) return
@@ -8863,6 +8894,7 @@ function Home() {
         textOut: string
         transientMessageIds?: string[]
         shadowCouncilAssembly?: CouncilShadowSelectionReport
+        councilProgress?: CouncilProgressRuntimeSnapshot
       }
       const staged: StagedCouncilLine[] = []
 
@@ -8953,6 +8985,7 @@ function Home() {
         runtimeDetail?: string
         transientMessageIds?: string[]
         shadowCouncilAssembly?: CouncilShadowSelectionReport
+        councilProgress?: CouncilProgressRuntimeSnapshot
       }
 
       const gatherFamily = async (family: CouncilOrchestrationFamily): Promise<GatherCell> => {
@@ -8997,6 +9030,7 @@ function Home() {
         let runtime: ProviderFamilyOutcomeStatus = 'SKIPPED'
         let runtimeDetail: string | undefined
         let shadowCouncilAssembly: CouncilShadowSelectionReport | undefined
+        let councilProgressForMessage: CouncilProgressRuntimeSnapshot | undefined
 
         try {
           if (family === 'kimi' || family === 'bridge_architect') {
@@ -9106,6 +9140,7 @@ function Home() {
                   runtimeDetail = 'governor_silent_skip'
                 } else {
                   shadowCouncilAssembly = chatData.shadowCouncilAssembly
+                  councilProgressForMessage = chatData.councilProgress
                   textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
                   if (textOut && councilFlowModeEffective === 'stable_group' && !chatData.stableGroupSkipped) {
                     stableGroupPriorThisTurn.push({
@@ -9159,6 +9194,7 @@ function Home() {
           runtimeDetail,
           transientMessageIds: transientDirectStatusMessageIds,
           shadowCouncilAssembly,
+          councilProgress: councilProgressForMessage,
         }
       }
 
@@ -9545,6 +9581,7 @@ function Home() {
           textOut: councilProviderTextAfterRenderGate(c.family, c.textOut!.trim(), decree, councilPassthroughMode),
           transientMessageIds: c.transientMessageIds,
           shadowCouncilAssembly: c.shadowCouncilAssembly,
+          councilProgress: c.councilProgress,
         }))
 
       for (const row of stagedCandidates) staged.push(row)
@@ -9688,6 +9725,7 @@ function Home() {
             councilRevealSource: 'decree',
             transientMessageIds: sourceLine?.transientMessageIds,
             shadowCouncilAssembly: sourceLine?.shadowCouncilAssembly,
+            councilProgress: sourceLine?.councilProgress,
           })
           if (!visible) continue
           attendanceRevealedFamilies.add(line.family)
@@ -9801,6 +9839,7 @@ function Home() {
                 textOut: c.textOut.trim(),
                 transientMessageIds: c.transientMessageIds,
                 shadowCouncilAssembly: c.shadowCouncilAssembly,
+                councilProgress: c.councilProgress,
               })
               continue
             }

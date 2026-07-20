@@ -7,6 +7,7 @@ import {
   buildCommanderOperationFromMessage,
   buildCommanderOperationFromMessages,
   buildReadableCommanderOperationCopy,
+  type CommanderOperation,
   type CouncilOperationMessageInput,
 } from '@/lib/council/unified-experience'
 
@@ -15,6 +16,7 @@ type CopyState = 'idle' | 'copied' | 'failed'
 type CouncilOperationTimelineProps = {
   input: CouncilOperationMessageInput
   inputs?: readonly CouncilOperationMessageInput[]
+  operation?: CommanderOperation | null
 }
 
 function readableStatus(value: string): string {
@@ -53,12 +55,13 @@ function useCopyState() {
   return { copyState, copy }
 }
 
-export function CouncilOperationTimeline({ input, inputs }: CouncilOperationTimelineProps) {
+export function CouncilOperationTimeline({ input, inputs, operation: providedOperation }: CouncilOperationTimelineProps) {
   const operationInputs = useMemo(() => inputs?.length ? inputs : [input], [input, inputs])
-  const operation = useMemo(
+  const fallbackOperation = useMemo(
     () => operationInputs.length > 1 ? buildCommanderOperationFromMessages(operationInputs) : buildCommanderOperationFromMessage(input),
     [input, operationInputs],
   )
+  const operation = providedOperation ?? fallbackOperation
   const readableCopy = useMemo(() => buildReadableCommanderOperationCopy(operation, operationInputs[0]?.requestText), [operationInputs, operation])
   const rawCopy = useMemo(() => JSON.stringify(operation.technicalData ?? operation, null, 2), [operation])
   const primaryCopy = useCopyState()
@@ -81,6 +84,7 @@ export function CouncilOperationTimeline({ input, inputs }: CouncilOperationTime
       className="mt-3 w-full max-w-2xl rounded px-3 py-3 text-xs"
       style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(2,6,23,0.42)' }}
       aria-label="Council operation timeline"
+      aria-live={operation.status === 'running' || operation.status === 'waiting_for_provider' || operation.status === 'synthesizing' ? 'polite' : undefined}
     >
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
@@ -89,6 +93,15 @@ export function CouncilOperationTimeline({ input, inputs }: CouncilOperationTime
           </h3>
           <p className="mt-1 text-[10px] uppercase tracking-widest" style={{ color: '#94A3B8' }}>
             {operation.summary.title} · {operation.summary.label}
+          </p>
+          <p className="mt-1 text-[9px] uppercase tracking-widest" style={{ color: '#64748B' }}>
+            {operation.timelineSource === 'authoritative_runtime_snapshot'
+              ? 'Runtime event record'
+              : operation.timelineSource === 'reconciled_runtime_snapshot_and_transcript'
+                ? 'Runtime record reconciled with completed response'
+                : operation.timelineSource === 'project_packet'
+                  ? 'Project operation record'
+                  : 'Completed operation record'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -111,6 +124,16 @@ export function CouncilOperationTimeline({ input, inputs }: CouncilOperationTime
           <CouncilOperationEventCard key={item.id} event={item} />
         ))}
       </ol>
+
+      {operation.status === 'running' || operation.status === 'waiting_for_provider' || operation.status === 'synthesizing' ? (
+        <p className="mt-3 rounded px-3 py-2 text-[10px] uppercase tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.18)', color: '#A7F3D0', background: 'rgba(0,0,0,0.18)' }}>
+          Operation running. Waiting for runtime update.
+        </p>
+      ) : operation.status === 'waiting_approval' ? (
+        <p className="mt-3 rounded px-3 py-2 text-[10px] uppercase tracking-widest" style={{ border: '1px solid rgba(253,230,138,0.22)', color: '#FDE68A', background: 'rgba(0,0,0,0.18)' }}>
+          Awaiting approval.
+        </p>
+      ) : null}
 
       <section className="mt-3 rounded px-3 py-2" style={{ border: '1px solid rgba(147,197,253,0.16)', background: 'rgba(0,0,0,0.22)' }}>
         <h3 className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#93C5FD' }}>
@@ -174,7 +197,9 @@ export function CouncilOperationTimeline({ input, inputs }: CouncilOperationTime
       </details>
 
       <p className="mt-2 text-[9px] uppercase tracking-widest" style={{ color: '#64748B' }}>
-        Completed ordered transcript fallback. No live provider activity is fabricated.
+        {operation.timelineSource === 'authoritative_runtime_snapshot' || operation.timelineSource === 'reconciled_runtime_snapshot_and_transcript'
+          ? 'Authoritative runtime-event projection. No provider activity is fabricated.'
+          : 'Completed ordered transcript fallback. No provider activity is fabricated.'}
       </p>
       <span className="sr-only">Operation status: {readableStatus(operation.status)}.</span>
     </section>

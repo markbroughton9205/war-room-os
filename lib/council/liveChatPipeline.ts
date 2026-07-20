@@ -25,6 +25,7 @@ import type { CouncilResponseCompletion } from '@/lib/council/responseCompletion
 import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import type { StableGroupPriorReply } from '@/lib/council/stableGroupChat'
 import type { CouncilRuntimeTraceSnapshot } from '@/lib/council/runtimeTrace'
+import type { CouncilProgressRuntimeSnapshot } from '@/lib/council/progress-events/runtime'
 import type { DeliberationSession } from '@/lib/council/family-deliberation'
 import type { CouncilShadowSelectionReport, ShadowFeatureMode } from '@/lib/council/adaptive-assembly'
 
@@ -135,6 +136,8 @@ export type CouncilChatJson = {
   }
   /** Commander diagnostic runtime trace. Present only when explicitly requested. */
   councilTrace?: CouncilRuntimeTraceSnapshot
+  /** Authoritative server-side Council progress snapshot when the route emitted progress events. */
+  councilProgress?: CouncilProgressRuntimeSnapshot
   /** Phase 48-C3A: real family-to-family deliberation artifact. */
   familyDeliberation?: DeliberationSession
   /** Phase 48-C3B2: advisory-only shadow recommendation metadata, never used for execution. */
