@@ -100,6 +100,7 @@ import { detectCouncilResearchIntent } from '@/lib/council-research/intent'
 import type { CouncilResearchHandoff, CouncilStoryContext, ResearchReport, ResearchStatus } from '@/lib/council-research/types'
 import { CouncilResearchStatus } from '@/components/war-room/council/CouncilResearchStatus'
 import { AdaptiveCouncilReadout } from '@/components/council/AdaptiveCouncilReadout'
+import { CouncilOperationTimeline } from '@/components/council/CouncilOperationTimeline'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
@@ -1329,8 +1330,39 @@ function gatherCellsToProviderRuntimeDetails(
   return Object.keys(out).length ? out : undefined
 }
 
+function councilOperationProviderStatus(message: CouncilMessage): string | null {
+  if (message.messageType === 'system') return null
+  if (!message.content.trim()) return 'SKIPPED'
+  return 'OK'
+}
+
+function councilOperationGroupKey(message: CouncilMessage, messages: readonly CouncilMessage[]): string | null {
+  if (message.projectOrchestrationPacket) return `project:${message.projectOrchestrationPacket.id}`
+  if (message.familyDeliberationTurn?.session_id) return `deliberation:${message.familyDeliberationTurn.session_id}`
+  if (message.messageType !== 'response' && message.messageType !== 'system') return null
+  const messageIndex = messages.findIndex(item => item.id === message.id)
+  const priorMessages = messageIndex >= 0 ? messages.slice(0, messageIndex + 1) : messages
+  const nearestDecree = [...priorMessages].reverse().find(item => item.messageType === 'decree')
+  return nearestDecree ? `turn:${nearestDecree.id}` : `message:${message.id}`
+}
+
+function councilOperationTimelineInputs(message: CouncilMessage, messages: readonly CouncilMessage[]) {
+  const groupKey = councilOperationGroupKey(message, messages)
+  if (!groupKey) return []
+  return messages
+    .filter(item => councilOperationGroupKey(item, messages) === groupKey)
+    .filter(item => (item.messageType === 'response' || item.messageType === 'system') && item.content.trim())
+}
+
+function isLastCouncilOperationMessage(message: CouncilMessage, messages: readonly CouncilMessage[]): boolean {
+  const group = councilOperationTimelineInputs(message, messages)
+  return group.length > 0 && group[group.length - 1]?.id === message.id
+}
+
 const MessageBubble = memo(function MessageBubble({
   msg,
+  operationTimelineInputs = [],
+  showOperationTimeline = false,
   diagnosticsOpen,
   councilPassthroughMode,
   operatorDiagnosticsMuted = false,
@@ -1339,6 +1371,8 @@ const MessageBubble = memo(function MessageBubble({
   onPrepareRepairPacket,
 }: {
   msg: CouncilMessage
+  operationTimelineInputs?: CouncilMessage[]
+  showOperationTimeline?: boolean
   diagnosticsOpen?: boolean
   councilPassthroughMode?: boolean
   operatorDiagnosticsMuted?: boolean
@@ -1487,6 +1521,18 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           </div>
         </div>
+
+        <CouncilOperationTimeline
+          input={{
+            id: msg.id,
+            familyName: msg.familyName,
+            content: msg.content,
+            timestamp: msg.timestamp,
+            provider: msg.provider,
+            messageType: msg.messageType,
+            projectOrchestrationPacket: packet,
+          }}
+        />
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {([
@@ -1723,6 +1769,30 @@ const MessageBubble = memo(function MessageBubble({
           }}>
           {msg.content}
         </div>
+        {!isRael && showOperationTimeline && operationTimelineInputs.length ? (
+          <CouncilOperationTimeline
+            input={{
+              id: msg.id,
+              familyName: msg.familyName,
+              content: msg.content,
+              timestamp: msg.timestamp,
+              provider: msg.provider,
+              messageType: msg.messageType,
+              providerStatus: councilOperationProviderStatus(msg),
+              familyDeliberationTurn: msg.familyDeliberationTurn,
+            }}
+            inputs={operationTimelineInputs.map(item => ({
+              id: item.id,
+              familyName: item.familyName,
+              content: item.content,
+              timestamp: item.timestamp,
+              provider: item.provider,
+              messageType: item.messageType,
+              providerStatus: councilOperationProviderStatus(item),
+              familyDeliberationTurn: item.familyDeliberationTurn,
+            }))}
+          />
+        ) : null}
         {msg.familyDeliberationTurn ? (
           <details
             className="mt-2 w-full max-w-2xl rounded px-3 py-2 text-[10px] tracking-widest"
@@ -1896,6 +1966,8 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
         <MessageBubble
           key={msg.id}
           msg={msg}
+          operationTimelineInputs={councilOperationTimelineInputs(msg, messages)}
+          showOperationTimeline={isLastCouncilOperationMessage(msg, messages)}
           diagnosticsOpen={false}
           councilPassthroughMode={councilPassthroughMode}
           operatorDiagnosticsMuted={!showOldDiagnostics}
