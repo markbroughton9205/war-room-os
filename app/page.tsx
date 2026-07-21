@@ -300,6 +300,18 @@ const RepairPacketPanel = dynamic(
   },
 )
 
+const NotificationsCenterPanel = dynamic(
+  () => import('@/components/war-room/notifications/NotificationsCenterPanel').then(mod => mod.NotificationsCenterPanel),
+  {
+    ssr: false,
+    loading: () => (
+      <section className="rounded border border-white/10 bg-black/20 p-3 text-[10px] tracking-widest text-slate-300">
+        Notifications loading on demand.
+      </section>
+    ),
+  },
+)
+
 const SchemaSweepPanel = dynamic(
   () => import('@/components/war-room/schema/SchemaSweepPanel').then(mod => mod.SchemaSweepPanel),
   {
@@ -12110,6 +12122,7 @@ function Home() {
                 />
                 <SchemaSweepPanel />
                 <EngineeringLaneManualPanel latest={latestEngineeringTaskPacket} />
+                <NotificationsCenterPanel />
                 <RepairPacketPanel latest={latestRepairPacket} />
                 <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
                 <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
@@ -12353,6 +12366,7 @@ function Home() {
                 <Phase3WarRoomPanels uiMode={uiMode} homeBundle="diagnostics" />
                 <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
                 <EngineeringLaneManualPanel latest={latestEngineeringTaskPacket} />
+                <NotificationsCenterPanel />
                 <RepairPacketPanel latest={latestRepairPacket} />
                 <CloudAgentFamiliesPanel engines={engineList} />
                 <BabyAiObserverPanel memories={memories} actions={raelActions} opportunities={incomeOpportunities} />

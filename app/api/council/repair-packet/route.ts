@@ -100,6 +100,8 @@ export async function POST(req: Request) {
       concreteIssue: packet.concreteIssue,
       affectedPanelRoute: packet.affectedPanelRoute,
       approvalStatus: packet.approvalStatus,
+      status: packet.status,
+      severity: packet.severity,
       sourceFamily: packet.source.sourceFamily,
       connectedSurfaces: packet.connectedSurfaces,
       guardrails: packet.guardrails,

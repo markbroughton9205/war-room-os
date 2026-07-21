@@ -11,6 +11,29 @@ export type RepairClassification =
 
 export type RepairApprovalStatus = 'awaiting_commander_approval' | 'approved_for_manual_cursor' | 'rejected'
 
+export type RepairPacketStatus =
+  | 'detected'
+  | 'analysis_required'
+  | 'awaiting_council'
+  | 'awaiting_red_team'
+  | 'proposal_ready'
+  | 'awaiting_commander'
+  | 'approved'
+  | 'rejected'
+  | 'deferred'
+  | 'repair_unavailable'
+  | 'report_generated'
+  | 'archived'
+
+export type RepairSeverity = 'critical' | 'high' | 'medium' | 'low'
+
+/** Projects the full lifecycle status onto the older, narrower approval badge status. */
+export function deriveApprovalStatusFromStatus(status: RepairPacketStatus): RepairApprovalStatus {
+  if (status === 'approved') return 'approved_for_manual_cursor'
+  if (status === 'rejected') return 'rejected'
+  return 'awaiting_commander_approval'
+}
+
 import type { OperatorNextStepsPayload } from '@/lib/operator/nextStepsReport'
 
 export type RepairFamilyKey = 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'red_team' | 'baby_observer'
@@ -71,7 +94,25 @@ export type CouncilRepairPacket = {
   ]
   riskNotes: string[]
   rollbackNotes: string[]
+  /** Spec-aligned alias of rollbackNotes (same content); rollbackNotes remains the rendered field. */
+  rollbackPlan: string[]
   approvalStatus: RepairApprovalStatus
+  /** Full repair lifecycle status — source of truth; approvalStatus is derived from this. */
+  status: RepairPacketStatus
+  sourcePanel: string
+  sourceEventId: string | null
+  summary: string
+  severity: RepairSeverity
+  detectedAt: string
+  lastObservedAt: string
+  affectedSubsystem: string
+  securityImpact: string
+  userImpact: string
+  reliabilityImpact: string
+  councilRecommendation: string
+  redTeamRecommendation: string
+  proposedRepair: string
+  verificationRequirements: string[]
   familyContributions: RepairFamilyContribution[]
   riskReview: RepairFamilyContribution
   babyLessonCandidate: BabyRepairLessonCandidate
@@ -115,6 +156,10 @@ export type CreateRepairRequestInput = {
 
 export type CreateRepairPacketInput = CreateRepairRequestInput & {
   request?: CouncilRepairRequest | null
+  /** Originating dashboard panel, when the packet is triggered from somewhere other than a decree. */
+  sourcePanel?: string | null
+  /** Originating WarRoomEvent id, when the packet is triggered from an event rather than a decree. */
+  sourceEventId?: string | null
 }
 
 export const REPAIR_VALIDATION_COMMANDS: CouncilRepairPacket['validationCommands'] = [

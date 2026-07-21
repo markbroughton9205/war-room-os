@@ -6,12 +6,15 @@ import { buildCouncilRepairOperatorNextSteps } from '@/lib/operator/repairPacket
 import {
   COUNCIL_REPAIR_GUARDRAILS,
   REPAIR_VALIDATION_COMMANDS,
+  deriveApprovalStatusFromStatus,
   type BabyRepairLessonCandidate,
   type CouncilRepairPacket,
   type CouncilRepairRequest,
   type CreateRepairPacketInput,
   type CreateRepairRequestInput,
+  type RepairClassification,
   type RepairFamilyContribution,
+  type RepairSeverity,
 } from './model'
 import { classifyRepairRequest, compactRepairText, matchedRepairTriggers } from './classifier'
 import type { RepairPacketCreateResult } from './model'
@@ -126,6 +129,48 @@ function connectedSurfaces(classification: CouncilRepairRequest['classification'
   return base
 }
 
+function severityForClassification(classification: RepairClassification): RepairSeverity {
+  if (classification === 'security_truth_boundary_issue') return 'critical'
+  if (classification === 'supabase_schema_issue' || classification === 'routing_orchestration_issue') return 'high'
+  if (classification === 'provider_runtime_issue' || classification === 'performance_issue' || classification === 'council_prompt_issue') return 'medium'
+  return 'low'
+}
+
+function subsystemForClassification(classification: RepairClassification): string {
+  if (classification === 'security_truth_boundary_issue') return 'security_truth_boundary'
+  if (classification === 'supabase_schema_issue') return 'persistence_schema'
+  if (classification === 'provider_runtime_issue' || classification === 'performance_issue') return 'runtime_provider'
+  if (classification === 'routing_orchestration_issue' || classification === 'council_prompt_issue') return 'council_orchestration'
+  if (classification === 'ui_issue') return 'ui_panel'
+  return 'unclassified'
+}
+
+function securityImpactForClassification(classification: RepairClassification, riskNotes: string[]): string {
+  if (classification === 'security_truth_boundary_issue') {
+    return riskNotes[0] ?? 'Potential truth-boundary or execution-boundary exposure; treat as security-relevant until reviewed.'
+  }
+  return 'Not yet assessed — no security-specific signal in this decree.'
+}
+
+function reliabilityImpactForClassification(classification: RepairClassification): string {
+  if (classification === 'provider_runtime_issue' || classification === 'performance_issue') {
+    return 'Repeated degradation, timeouts, or slow rendering may affect Commander confidence in live status; verify before treating as resolved.'
+  }
+  return 'Not yet assessed beyond the reported symptom.'
+}
+
+function userImpactFor(affectedPanelRoute: string, concreteIssue: string): string {
+  return compactRepairText(`Operators/Commander using ${affectedPanelRoute} may see: ${concreteIssue}`, 240)
+}
+
+function summaryFor(classification: RepairClassification, concreteIssue: string): string {
+  return compactRepairText(`${classification.replace(/_/g, ' ')}: ${concreteIssue}`, 140)
+}
+
+function proposedRepairFor(recommendedFix: string[]): string {
+  return compactRepairText(recommendedFix.join(' '), 400)
+}
+
 function cursorPrompt(
   packet: Omit<CouncilRepairPacket, 'cursorReadyPrompt' | 'operatorNextSteps' | 'operatorNextStepsMarkdown'>,
 ): string {
@@ -137,6 +182,9 @@ function cursorPrompt(
     `Affected panel/route: ${packet.affectedPanelRoute}`,
     `Classification: ${packet.classification}`,
     `Approval status: ${packet.approvalStatus}`,
+    `Status: ${packet.status}`,
+    `Severity: ${packet.severity}`,
+    `Summary: ${packet.summary}`,
     `Packet source: ${packet.source.packetSource}`,
     '',
     'Evidence:',
@@ -219,6 +267,11 @@ export function createCouncilRepairPacket(
     ...symptoms.slice(0, 2).map(item => compactRepairText(item, 220)),
     `Classification: ${request.classification.replace(/_/g, ' ')}.`,
   ]
+  const rollbackNotes = [
+    'Keep implementation changes small and reviewable; rollback by reverting the approved manual Cursor diff.',
+    'Do not auto-rollback from War Room or mark repair complete without validation evidence.',
+    'If persistence/schema is involved, use additive migrations and preserve audit rows.',
+  ]
   const babyLessonCandidate: BabyRepairLessonCandidate = {
     id: `${request.id}:baby-lesson`,
     summary: `When ${request.classification.replace(/_/g, ' ')} repair work is requested, preserve evidence, approval gates, and validation output before treating it as a lesson.`,
@@ -254,18 +307,35 @@ export function createCouncilRepairPacket(
       'Repair packet creation is logged for visibility but does not execute the repair.',
       'Manual Cursor copy is a handoff prompt only; approval and implementation happen outside War Room.',
     ],
-    rollbackNotes: [
-      'Keep implementation changes small and reviewable; rollback by reverting the approved manual Cursor diff.',
-      'Do not auto-rollback from War Room or mark repair complete without validation evidence.',
-      'If persistence/schema is involved, use additive migrations and preserve audit rows.',
-    ],
-    approvalStatus: 'awaiting_commander_approval' as const,
+    rollbackNotes,
+    rollbackPlan: rollbackNotes,
+    approvalStatus: deriveApprovalStatusFromStatus('awaiting_commander'),
+    status: 'awaiting_commander',
     familyContributions: family,
     riskReview: family.find(item => item.family === 'red_team') ?? family[4]!,
     babyLessonCandidate,
     connectedSurfaces: connectedSurfaces(request.classification),
     guardrails: COUNCIL_REPAIR_GUARDRAILS,
     createdAt: now.toISOString(),
+    sourcePanel: input.sourcePanel?.trim()
+      || (request.sourceFamily ? `Live Council response (${request.sourceFamily})` : 'Live Council decree'),
+    sourceEventId: input.sourceEventId?.trim() || null,
+    summary: summaryFor(request.classification, concreteIssue),
+    severity: severityForClassification(request.classification),
+    detectedAt: request.createdAt,
+    lastObservedAt: now.toISOString(),
+    affectedSubsystem: subsystemForClassification(request.classification),
+    securityImpact: securityImpactForClassification(request.classification, rule.riskNotes),
+    userImpact: userImpactFor(affectedPanelRoute, concreteIssue),
+    reliabilityImpact: reliabilityImpactForClassification(request.classification),
+    councilRecommendation: family.find(item => item.family === 'chatgpt')?.contribution
+      ?? 'No converged Council recommendation yet — awaiting multi-family review.',
+    redTeamRecommendation: (family.find(item => item.family === 'red_team') ?? family[4]!).contribution,
+    proposedRepair: proposedRepairFor(rule.recommendedFix),
+    verificationRequirements: [
+      ...REPAIR_VALIDATION_COMMANDS,
+      'Manual check in dev server against the affected panel/route before marking the repair validated.',
+    ],
   } satisfies Omit<CouncilRepairPacket, 'cursorReadyPrompt' | 'operatorNextSteps' | 'operatorNextStepsMarkdown'>
 
   const operatorPayload = toOperatorNextStepsPayload(

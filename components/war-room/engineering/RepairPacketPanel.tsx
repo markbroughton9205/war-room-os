@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CouncilRepairPacket, CouncilRepairSnapshot } from '@/lib/council-repair'
 
 import { OperatorNextStepsBlock } from '@/components/war-room/evolution/OperatorNextStepsBlock'
+import { ExportButton } from '@/components/war-room/operator/ExportButton'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 
 function Badge({ label }: { label: string }) {
-  const color = /risk|security|rejected|broken/i.test(label)
+  const color = /risk|security|rejected|broken|critical|high/i.test(label)
     ? '#F87171'
     : /approval|awaiting|schema|runtime/i.test(label)
       ? '#FBBF24'
@@ -20,6 +21,11 @@ function Badge({ label }: { label: string }) {
       {label.replace(/_/g, ' ')}
     </span>
   )
+}
+
+/** rollbackPlan is the spec-aligned field; rollbackNotes is the legacy backing field with the same content today. */
+function sameStringArray(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((item, index) => item === b[index])
 }
 
 function FieldList({ title, items }: { title: string; items: string[] }) {
@@ -131,7 +137,8 @@ export function RepairPacketPanel({ latest }: { latest?: CouncilRepairPacket | n
                   <span className="block font-semibold text-white">{packet.title}</span>
                   <span className="mt-2 flex flex-wrap gap-1">
                     <Badge label={packet.classification} />
-                    <Badge label={packet.approvalStatus} />
+                    <Badge label={packet.severity} />
+                    <Badge label={packet.status} />
                   </span>
                   <span className="mt-1 block text-[10px] text-slate-500">{packet.source.packetSource}</span>
                 </button>
@@ -154,29 +161,54 @@ export function RepairPacketPanel({ latest }: { latest?: CouncilRepairPacket | n
                   </p>
                   <div className="mt-2 flex flex-wrap gap-1">
                     <Badge label={activePacket.classification} />
+                    <Badge label={activePacket.severity} />
+                    <Badge label={activePacket.status} />
                     <Badge label={activePacket.approvalStatus} />
                     <Badge label="manual_copy_only" />
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void copyPrompt()}
-                  className="rounded border border-sky-400/40 px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-sky-200"
-                >
-                  Copy Cursor Packet
-                </button>
+                <div className="flex flex-wrap items-start gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void copyPrompt()}
+                    className="rounded border border-sky-400/40 px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-sky-200"
+                  >
+                    Copy Cursor Packet
+                  </button>
+                  <ExportButton
+                    label="Export Packet"
+                    getContent={() => activePacket.cursorReadyPrompt}
+                    filename={() => `repair-packet-${activePacket.id}.txt`}
+                  />
+                </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
+                <FieldList title="Summary" items={[activePacket.summary]} />
                 <FieldList title="Concrete Issue" items={[activePacket.concreteIssue]} />
                 <FieldList title="Affected Panel / Route" items={[activePacket.affectedPanelRoute]} />
+                <FieldList title="Affected Subsystem" items={[activePacket.affectedSubsystem]} />
                 <FieldList title="Evidence" items={activePacket.evidence} />
                 <FieldList title="Observed Symptoms" items={activePacket.observedSymptoms} />
+                <FieldList title="Security Impact" items={[activePacket.securityImpact]} />
+                <FieldList title="User Impact" items={[activePacket.userImpact]} />
+                <FieldList title="Reliability Impact" items={[activePacket.reliabilityImpact]} />
                 <FieldList title="Files / Routes To Inspect" items={activePacket.filesRoutesToInspect} />
                 <FieldList title="Recommended Fix" items={activePacket.recommendedFix} />
+                <FieldList title="Proposed Repair" items={[activePacket.proposedRepair]} />
+                <FieldList title="Council Recommendation" items={[activePacket.councilRecommendation]} />
+                <FieldList title="Red Team Recommendation" items={[activePacket.redTeamRecommendation]} />
                 <FieldList title="Validation Commands" items={activePacket.validationCommands} />
+                <FieldList title="Verification Requirements" items={activePacket.verificationRequirements} />
                 <FieldList title="Risk Notes" items={activePacket.riskNotes} />
-                <FieldList title="Rollback Notes" items={activePacket.rollbackNotes} />
+                {sameStringArray(activePacket.rollbackPlan, activePacket.rollbackNotes) ? (
+                  <FieldList title="Rollback Plan" items={activePacket.rollbackPlan} />
+                ) : (
+                  <>
+                    <FieldList title="Rollback Plan" items={activePacket.rollbackPlan} />
+                    <FieldList title="Rollback Notes" items={activePacket.rollbackNotes} />
+                  </>
+                )}
               </div>
 
               <OperatorNextStepsBlock
