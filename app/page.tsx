@@ -43,6 +43,7 @@ import type { RouteCommandResult } from '@/lib/engine-control/router'
 import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
+import { postIncrementalCouncilChat } from '@/lib/council/incremental-transport/client'
 import {
   canDisplayAsChallenge,
   canDisplayAsResponse,
@@ -5712,6 +5713,19 @@ function Home() {
     includeBridgeArchitect: false,
   })
   const [councilFlowMode, setCouncilFlowMode] = useState<CouncilFlowMode>(() => getDefaultCouncilFlowMode())
+  const [incrementalCouncilProgress, setIncrementalCouncilProgress] = useState<CouncilProgressRuntimeSnapshot | null>(null)
+  const [incrementalCouncilRequestText, setIncrementalCouncilRequestText] = useState<string | null>(null)
+  const [incrementalCouncilTransportStatus, setIncrementalCouncilTransportStatus] = useState<
+    'idle' | 'establishing' | 'opened' | 'receiving' | 'final_received' | 'closed' | 'interrupted'
+  >('idle')
+  const incrementalCouncilOperation = useMemo(() => {
+    if (!incrementalCouncilProgress) return null
+    return buildCouncilOperationTimeline({
+      progress: incrementalCouncilProgress,
+      completedInputs: [],
+      requestText: incrementalCouncilRequestText,
+    })
+  }, [incrementalCouncilProgress, incrementalCouncilRequestText])
   useEffect(() => {
     if (typeof sessionStorage === 'undefined') return
     const stored = parseCouncilFlowMode(sessionStorage.getItem(COUNCIL_FLOW_MODE_STORAGE_KEY))
@@ -8545,7 +8559,34 @@ function Home() {
       document.addEventListener('visibilitychange', onVisibilityChange)
       if (controller.signal.aborted) merged.abort()
       try {
-        const out = await postCouncilChat({ ...body, councilGatherPhase: 'decree_soft' }, merged.signal)
+        setIncrementalCouncilTransportStatus('establishing')
+        setIncrementalCouncilRequestText(body.message)
+        setIncrementalCouncilProgress(null)
+        const streamed = await postIncrementalCouncilChat({
+          body: { ...body, councilGatherPhase: 'decree_soft' },
+          signal: merged.signal,
+          fallback: 'final_snapshot_before_execution_only',
+          callbacks: {
+            onOpened: () => setIncrementalCouncilTransportStatus('opened'),
+            onProgress: envelope => {
+              setIncrementalCouncilTransportStatus('receiving')
+              setIncrementalCouncilProgress(envelope.snapshot)
+            },
+            onFinal: envelope => {
+              setIncrementalCouncilTransportStatus('final_received')
+              if (envelope.finalProgress) setIncrementalCouncilProgress(envelope.finalProgress)
+            },
+            onError: () => setIncrementalCouncilTransportStatus('interrupted'),
+            onClosed: () => setIncrementalCouncilTransportStatus('closed'),
+          },
+        })
+        const data = streamed.finalResponse ?? {}
+        const out = {
+          res: new Response(null, {
+            status: streamed.responseStatus ?? (streamed.error ? 502 : 200),
+          }),
+          data,
+        }
         mergeContinuationFromChatJson(out.data, continuationMergeOpts)
         return out
       } finally {
@@ -11781,6 +11822,52 @@ function Home() {
             packet={councilPacketRender}
             operatorMode={isUnifiedLiveRoom && uiMode === 'operator'}
           />
+          {incrementalCouncilProgress && incrementalCouncilOperation ? (
+            <div
+              className="mt-3 rounded border border-emerald-900/30 px-3 py-3"
+              style={{ background: 'rgba(0,0,0,0.28)' }}
+              aria-live="polite"
+            >
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>
+                  Incremental Council Transport
+                </div>
+                <div className="text-[9px] uppercase tracking-widest" style={{ color: '#94A3B8' }}>
+                  {incrementalCouncilTransportStatus.replaceAll('_', ' ')}
+                </div>
+              </div>
+              <CouncilOperationTimeline
+                input={{
+                  id: incrementalCouncilProgress.requestId,
+                  familyName: 'CONTROL',
+                  content: incrementalCouncilRequestText ?? 'Council operation in progress.',
+                  timestamp: new Date().toLocaleTimeString(),
+                  provider: 'SSE',
+                  messageType: 'system',
+                  requestText: incrementalCouncilRequestText,
+                  requestId: incrementalCouncilProgress.requestId,
+                  operationId: incrementalCouncilProgress.requestId,
+                }}
+                operation={incrementalCouncilOperation}
+              />
+            </div>
+          ) : incrementalCouncilTransportStatus === 'establishing' ? (
+            <div
+              className="mt-3 rounded border border-emerald-900/30 px-3 py-2 text-[10px] uppercase tracking-widest"
+              style={{ background: 'rgba(0,0,0,0.24)', color: '#A7F3D0' }}
+              aria-live="polite"
+            >
+              Establishing Council connection.
+            </div>
+          ) : incrementalCouncilTransportStatus === 'interrupted' ? (
+            <div
+              className="mt-3 rounded border border-amber-900/40 px-3 py-2 text-[10px] uppercase tracking-widest"
+              style={{ background: 'rgba(0,0,0,0.24)', color: '#FDE68A' }}
+              aria-live="polite"
+            >
+              Incremental transport interrupted. Operation state may be uncertain.
+            </div>
+          ) : null}
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"

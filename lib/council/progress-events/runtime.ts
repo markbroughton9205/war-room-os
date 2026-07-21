@@ -73,6 +73,11 @@ export type CouncilProgressRuntimeTracker = {
   snapshot(): CouncilProgressRuntimeSnapshot
 }
 
+export type CouncilProgressEventObserver = (input: {
+  event: CouncilProgressEventEnvelope
+  snapshot: CouncilProgressRuntimeSnapshot
+}) => void
+
 export type CouncilProgressRuntimeTrackerInput = {
   requestIdSeed: string
   commanderTurnRef: string
@@ -86,6 +91,7 @@ export type CouncilProgressRuntimeTrackerInput = {
   logicalTurnIndex?: number | null
   logicalTurnTotal?: number | null
   logicalExpectedFamilies?: CouncilOrchestrationFamily[]
+  eventObserver?: CouncilProgressEventObserver | null
 }
 
 function cloneState(state: CouncilRequestStateRecord): CouncilRequestStateRecord {
@@ -214,6 +220,37 @@ export function createCouncilProgressRuntimeTracker(input: CouncilProgressRuntim
   const diagnostics: CouncilProgressRuntimeDiagnostic[] = []
   let ignoredDuplicateCount = 0
 
+  function snapshot(): CouncilProgressRuntimeSnapshot {
+    return {
+      schemaVersion: '47c3.council-progress-runtime.v1',
+      requestId: startingState.requestId,
+      logicalRequestId,
+      logicalTurnIndex,
+      logicalTurnTotal,
+      logicalExpectedFamilies,
+      status,
+      eventCount: events.length,
+      appliedEventCount: events.length,
+      ignoredDuplicateCount,
+      rejectedEventCount: diagnostics.length,
+      events: cloneEvents(events),
+      state: cloneState(currentState),
+      diagnostics: JSON.parse(JSON.stringify(diagnostics)) as CouncilProgressRuntimeDiagnostic[],
+    }
+  }
+
+  function notifyObserver(event: CouncilProgressEventEnvelope): void {
+    if (!input.eventObserver) return
+    try {
+      input.eventObserver({
+        event: JSON.parse(JSON.stringify(event)) as CouncilProgressEventEnvelope,
+        snapshot: snapshot(),
+      })
+    } catch {
+      // Transport observers are isolated from authoritative progress recording.
+    }
+  }
+
   function rejected(
     code: string,
     eventType: CouncilProgressEventType,
@@ -276,6 +313,7 @@ export function createCouncilProgressRuntimeTracker(input: CouncilProgressRuntim
       eventIdentities.set(event.eventId, eventIdentity(event))
       currentState = replay.finalState
       nextSequence += 1
+      notifyObserver(event)
       return { ok: true, event, ignoredDuplicate: false }
     } catch (error) {
       return rejected(
@@ -318,6 +356,7 @@ export function createCouncilProgressRuntimeTracker(input: CouncilProgressRuntim
       eventIdentities.set(event.eventId, eventIdentity(event))
       currentState = replay.finalState
       nextSequence = Math.max(nextSequence, event.sequence + 1)
+      notifyObserver(event)
       return { ok: true, event, ignoredDuplicate: false }
     } catch (error) {
       return rejected(
@@ -362,24 +401,7 @@ export function createCouncilProgressRuntimeTracker(input: CouncilProgressRuntim
       if (result.ok) status = 'closed'
       return result
     },
-    snapshot() {
-      return {
-        schemaVersion: '47c3.council-progress-runtime.v1',
-        requestId: startingState.requestId,
-        logicalRequestId,
-        logicalTurnIndex,
-        logicalTurnTotal,
-        logicalExpectedFamilies,
-        status,
-        eventCount: events.length,
-        appliedEventCount: events.length,
-        ignoredDuplicateCount,
-        rejectedEventCount: diagnostics.length,
-        events: cloneEvents(events),
-        state: cloneState(currentState),
-        diagnostics: JSON.parse(JSON.stringify(diagnostics)) as CouncilProgressRuntimeDiagnostic[],
-      }
-    },
+    snapshot,
   }
 }
 
