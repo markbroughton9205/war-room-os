@@ -33,6 +33,42 @@ export function classifyWarRoomEvent(event: WarRoomEvent): ClassifiedNotificatio
         title: 'Action failed',
         detail: str(payload.error, 'An action failed to complete.'),
       }
+    case 'action.approved': {
+      const actionId = str(payload.actionId)
+      return {
+        severity: 'info',
+        title: 'Action Approved',
+        detail: actionId ? `Action ${actionId} was approved.` : 'An action was approved.',
+      }
+    }
+    case 'action.rejected': {
+      const actionId = str(payload.actionId)
+      const reason = str(payload.reason)
+      const base = actionId ? `Action ${actionId} was rejected.` : 'An action was rejected.'
+      return {
+        severity: 'info',
+        title: 'Action Rejected',
+        detail: reason ? `${base} Reason: ${reason}` : base,
+      }
+    }
+    case 'action.deferred': {
+      const actionId = str(payload.actionId)
+      const reason = str(payload.reason)
+      const base = actionId ? `Action ${actionId} was deferred.` : 'An action was deferred.'
+      return {
+        severity: 'info',
+        title: 'Action Deferred',
+        detail: reason ? `${base} Reason: ${reason}` : base,
+      }
+    }
+    case 'action.archived': {
+      const actionId = str(payload.actionId)
+      return {
+        severity: 'info',
+        title: 'Action Archived',
+        detail: actionId ? `Action ${actionId} was archived.` : 'An action was archived.',
+      }
+    }
     case 'red_sentinel.scan.completed': {
       const findings = num(payload.findings)
       return {

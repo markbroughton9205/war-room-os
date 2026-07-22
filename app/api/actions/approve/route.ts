@@ -1,6 +1,7 @@
 import { appendWarRoomActionLog } from '@/lib/war-room/actionLogs'
 import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { emitEvent } from '@/lib/events/bus'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,6 +78,18 @@ export async function POST(req: Request) {
     action_id: actionId,
     message: 'Action approved',
     metadata: { type: current.type, previous_status: current.status },
+  })
+
+  await emitEvent({
+    supabase: sup.client,
+    type: 'action.approved',
+    source: 'user',
+    correlationId: actionId,
+    payload: {
+      actionId,
+      type: current.type,
+      previous_status: current.status,
+    },
   })
 
   return jsonWithPersistence({ action: data }, true)
