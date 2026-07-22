@@ -48,6 +48,7 @@ export const NewsIntelCommandWall = memo(function NewsIntelCommandWall({
   onCouncilHandoff,
   onCouncilResearchHandoff,
   threadId,
+  presentation = 'overlay',
 }: {
   open: boolean
   onClose: () => void
@@ -55,6 +56,7 @@ export const NewsIntelCommandWall = memo(function NewsIntelCommandWall({
   onCouncilHandoff?: (decree: string) => void
   onCouncilResearchHandoff?: (payload: CouncilResearchHandoff) => void
   threadId?: string
+  presentation?: 'overlay' | 'workspace'
 }) {
   const [payload, setPayload] = useState<NewsIntelWallPayload | null>(null)
   const [loading, setLoading] = useState(false)
@@ -140,7 +142,72 @@ export const NewsIntelCommandWall = memo(function NewsIntelCommandWall({
 
   if (!open) return null
 
-  return (
+  const shell = presentation === 'workspace' ? (
+    <IntelWallWorkspace>
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-500/20 px-4 py-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-sky-300">News Intelligence Command Wall</p>
+          <p className="text-[9px] uppercase tracking-widest text-slate-500">Source-backed only · manual refresh · no fabricated stories</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded border border-sky-400/30 px-3 py-1 text-[9px] font-bold uppercase tracking-widest text-sky-200 hover:bg-sky-400/10"
+            onClick={() => void load()}
+            disabled={loading}
+          >
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <button
+            type="button"
+            className="rounded border border-white/20 px-3 py-1 text-[9px] font-bold uppercase tracking-widest text-slate-300 hover:bg-white/5"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        <div className="mx-auto max-w-6xl space-y-4">
+          <OperatorGuidance open={guidanceOpen} onToggle={() => setGuidanceOpen(prev => !prev)} />
+          <FilterBar filters={filters} onChange={setFilters} />
+          {payload ? <SourceMixBar mix={payload.sourceMix} loadedAt={payload.loadedAt} /> : null}
+          {error ? (
+            <p className="rounded border border-rose-400/30 bg-rose-950/30 px-3 py-2 text-[10px] text-rose-200">{error}</p>
+          ) : null}
+          {notice ? (
+            <p className="rounded border border-emerald-400/20 bg-emerald-950/20 px-3 py-2 text-[10px] text-emerald-200">{notice}</p>
+          ) : null}
+          {loading && !payload ? (
+            <p className="text-[10px] uppercase tracking-widest text-slate-500">Loading source-backed intel…</p>
+          ) : null}
+          {payload && !payload.hasLiveSourceBackedIntel && !loading ? (
+            <p className="rounded border border-amber-400/25 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-100">
+              No live source-backed intel available. Configure RSS, Guardian, NewsAPI, or run a Signal scan — War Room will not fabricate headlines.
+            </p>
+          ) : null}
+          {filteredSections && payload ? (
+            <div className="space-y-6">
+              {NEWS_INTEL_WATCH_SECTIONS.map(section => (
+                <WallSection
+                  key={section}
+                  section={section}
+                  stories={filteredSections[section]}
+                  contradictionGroups={section === 'contradictions' ? payload.contradictionGroups : undefined}
+                  allStories={payload.stories}
+                  onAskCouncil={handleAskCouncil}
+                  onInvestigate={handleInvestigate}
+                  onSendToGrok={handleSendToGrok}
+                  onCreateOpportunity={story => void handleCreateOpportunity(story)}
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </IntelWallWorkspace>
+  ) : (
     <IntelWallOverlay>
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-500/20 px-4 py-3">
         <div>
@@ -206,6 +273,8 @@ export const NewsIntelCommandWall = memo(function NewsIntelCommandWall({
       </div>
     </IntelWallOverlay>
   )
+
+  return shell
 })
 
 function IntelWallOverlay({ children }: { children: React.ReactNode }) {
@@ -218,6 +287,18 @@ function IntelWallOverlay({ children }: { children: React.ReactNode }) {
     >
       {children}
     </div>
+  )
+}
+
+function IntelWallWorkspace({ children }: { children: React.ReactNode }) {
+  return (
+    <section
+      className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded border border-sky-500/25 bg-slate-950/95 font-mono"
+      aria-label="News Intelligence Command Wall"
+      data-testid="expanded-intel-workspace"
+    >
+      {children}
+    </section>
   )
 }
 

@@ -354,6 +354,18 @@ const ConversationStatePanel = dynamic(
   },
 )
 
+const NewsIntelCommandWall = dynamic(
+  () => import('@/components/intelligence/NewsIntelCommandWall').then(mod => mod.NewsIntelCommandWall),
+  {
+    ssr: false,
+    loading: () => (
+      <section className="flex h-full min-h-[18rem] items-center justify-center rounded border border-sky-500/20 bg-slate-950/80 p-4 text-[10px] uppercase tracking-widest text-sky-200">
+        Expanded Intel loading…
+      </section>
+    ),
+  },
+)
+
 type CouncilMessage = {
   id: string
   familyName: string
@@ -1918,6 +1930,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   messages,
   hiddenCount,
   collapsedNoiseCount,
+  emptyState,
   councilPassthroughMode,
   showOldDiagnostics = false,
   onToggleShowOldDiagnostics,
@@ -1932,6 +1945,11 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   messages: CouncilMessage[]
   hiddenCount: number
   collapsedNoiseCount: number
+  emptyState?: {
+    title: string
+    detail: string
+    tone?: 'ready' | 'loading' | 'warning'
+  }
   councilPassthroughMode?: boolean
   showOldDiagnostics?: boolean
   onToggleShowOldDiagnostics?: () => void
@@ -2007,6 +2025,39 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
             Show old diagnostics
           </label>
           <span className="text-slate-600">Off by default. Fallback / degraded notices stay in history; toggle only affects the live view.</span>
+        </div>
+      ) : null}
+      {messages.length === 0 ? (
+        <div
+          className="mx-auto my-8 max-w-xl rounded border px-4 py-5 text-center"
+          style={{
+            background: 'rgba(0,0,0,0.28)',
+            borderColor:
+              emptyState?.tone === 'warning'
+                ? 'rgba(251,191,36,0.35)'
+                : emptyState?.tone === 'loading'
+                  ? 'rgba(56,189,248,0.3)'
+                  : 'rgba(52,211,153,0.26)',
+            color: '#CBD5E1',
+          }}
+          data-testid="live-council-empty-state"
+        >
+          <div
+            className="text-[10px] font-bold uppercase tracking-[0.24em]"
+            style={{
+              color:
+                emptyState?.tone === 'warning'
+                  ? '#FDE68A'
+                  : emptyState?.tone === 'loading'
+                    ? '#7DD3FC'
+                    : '#86EFAC',
+            }}
+          >
+            {emptyState?.title ?? 'Live Council is ready.'}
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-slate-400">
+            {emptyState?.detail ?? 'Enter a command to begin this session.'}
+          </p>
         </div>
       ) : null}
       {messages.map(msg => (
@@ -5717,6 +5768,8 @@ function Home() {
   const [engineList, setEngineList] = useState<EngineStatus[]>([])
   const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
   const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
+  const [liveCouncilLoadState, setLiveCouncilLoadState] = useState<'restoring' | 'ready' | 'session_only' | 'error'>('restoring')
+  const [liveRoomWorkspace, setLiveRoomWorkspace] = useState<'council' | 'expanded_intel'>('council')
   const [councilTraceTestAvailable, setCouncilTraceTestAvailable] = useState(false)
   const [councilTraceTestStatus, setCouncilTraceTestStatus] = useState<'checking' | 'hidden' | 'ready' | 'running' | 'complete' | 'error'>('checking')
   const [councilTraceTestResult, setCouncilTraceTestResult] = useState<CouncilTraceTestResponse | null>(null)
@@ -6249,10 +6302,14 @@ function Home() {
     if (!councilMounted) return
     void (async () => {
       try {
+        setLiveCouncilLoadState('restoring')
         const res = await fetch('/api/conversations', { cache: 'no-store' })
         const persist = res.headers.get('x-war-room-persistence') === 'available'
         setPersistenceAvailable(persist)
-        if (!res.ok || !persist) return
+        if (!res.ok || !persist) {
+          setLiveCouncilLoadState('session_only')
+          return
+        }
 
         const j = await res.json() as { conversations?: { id: string; metadata?: Record<string, unknown> }[] }
         const convs = Array.isArray(j.conversations) ? j.conversations : []
@@ -6276,16 +6333,25 @@ function Home() {
               metadata: { council: { source: 'live_council', incomeOperationsMode: false } },
             }),
           })
-          if (!cre.ok) return
+          if (!cre.ok) {
+            setLiveCouncilLoadState('error')
+            return
+          }
           const cj = await cre.json() as { conversation?: { id: string } }
           id = cj.conversation?.id ?? null
         }
-        if (!id) return
+        if (!id) {
+          setLiveCouncilLoadState('error')
+          return
+        }
         sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
         setLiveCouncilConvId(id)
 
         const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
-        if (!tr.ok) return
+        if (!tr.ok) {
+          setLiveCouncilLoadState('error')
+          return
+        }
         const tj = await tr.json() as {
           messages?: {
             id: string
@@ -6344,7 +6410,9 @@ function Home() {
             councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
           }
         }
+        setLiveCouncilLoadState('ready')
       } catch {
+        setLiveCouncilLoadState('session_only')
         /* session-only council */
       }
     })()
@@ -6363,6 +6431,19 @@ function Home() {
     })
     return () => window.cancelAnimationFrame(frame)
   }, [messages, autoScrollEnabled])
+
+  // Returning from Expanded Intel remounts the transcript scroll container
+  // (fresh node, scrollTop resets to 0) — jump it back to latest so the
+  // view doesn't appear stuck at the top of history.
+  useEffect(() => {
+    if (liveRoomWorkspace !== 'council' || !autoScrollEnabled) return
+    const frame = window.requestAnimationFrame(() => {
+      const el = scrollContainerRef.current
+      if (!el) return
+      el.scrollTop = el.scrollHeight
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [liveRoomWorkspace, autoScrollEnabled])
 
   const addMessages = (newMsgs: CouncilMessage[], opts?: { removeIds?: string[] }) => {
     const existing = new Set(messagesRef.current.map(message => message.id))
@@ -11480,6 +11561,42 @@ function Home() {
     return first ?? null
   }, [visibleCouncilMessages])
 
+  const liveCouncilTranscriptEmptyState = useMemo(() => {
+    if (!councilMounted || liveCouncilLoadState === 'restoring') {
+      return {
+        title: 'Restoring Live Council session.',
+        detail: 'War Room is loading the active council transcript.',
+        tone: 'loading' as const,
+      }
+    }
+    if (liveCouncilLoadState === 'error') {
+      return {
+        title: 'Live Council transcript could not load.',
+        detail: 'The command console remains available, but persisted message loading failed. Try refreshing or continue in this session.',
+        tone: 'warning' as const,
+      }
+    }
+    if (liveCouncilLoadState === 'session_only') {
+      return {
+        title: 'Live Council is ready in session-only mode.',
+        detail: 'Persistence is unavailable or not connected here. Enter a command to begin this local session.',
+        tone: 'ready' as const,
+      }
+    }
+    if (!liveCouncilConvId) {
+      return {
+        title: 'Live Council is ready.',
+        detail: 'No persisted conversation is attached yet. Enter a command to begin this session.',
+        tone: 'ready' as const,
+      }
+    }
+    return {
+      title: 'Live Council is ready.',
+      detail: 'Enter a command to begin this session.',
+      tone: 'ready' as const,
+    }
+  }, [councilMounted, liveCouncilConvId, liveCouncilLoadState])
+
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-black font-mono text-white">
       {!isUnifiedLiveRoom ? <MatrixCodeRain /> : null}
@@ -11672,6 +11789,7 @@ function Home() {
               missionStatus={matrixMissionStatusLabel}
               councilHealthLabel={matrixCouncilHealthLabel}
               activityFeedLabel={activityFeedLabel}
+              onExpandIntel={() => setLiveRoomWorkspace('expanded_intel')}
             />
           )}
           leftNav={(
@@ -11782,7 +11900,19 @@ function Home() {
               />
             ) : null
           }
-          council={(
+          council={liveRoomWorkspace === 'expanded_intel' ? (
+            <div className="flex h-full min-h-0 flex-1 flex-col px-2 py-1 sm:px-3 sm:py-2">
+              <NewsIntelCommandWall
+                open
+                presentation="workspace"
+                onClose={() => setLiveRoomWorkspace('council')}
+                location={commanderLocation}
+                threadId={liveCouncilConvId ?? undefined}
+                onCouncilHandoff={injectLiveEnvironmentDecree}
+                onCouncilResearchHandoff={handleCouncilResearchHandoff}
+              />
+            </div>
+          ) : (
         <CouncilWorkspace
           scrollContainerRef={scrollContainerRef}
           onScroll={handleScroll}
@@ -11959,6 +12089,7 @@ function Home() {
             messages={visibleCouncilMessages}
             hiddenCount={hiddenCouncilMessageCount}
             collapsedNoiseCount={collapsedCouncilNoiseCount}
+            emptyState={liveCouncilTranscriptEmptyState}
             councilPassthroughMode={councilPassthroughMode}
             showOldDiagnostics={showOldCouncilDiagnostics}
             onToggleShowOldDiagnostics={

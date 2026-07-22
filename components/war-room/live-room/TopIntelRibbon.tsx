@@ -96,6 +96,7 @@ export type TopIntelRibbonProps = {
   missionStatus?: string
   councilHealthLabel?: string
   activityFeedLabel?: string
+  onExpandIntel?: () => void
 }
 
 export const TopIntelRibbon = memo(function TopIntelRibbon({
@@ -110,6 +111,7 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
   missionStatus: missionStatusProp,
   councilHealthLabel: councilHealthLabelProp,
   activityFeedLabel: activityFeedLabelProp,
+  onExpandIntel,
 }: TopIntelRibbonProps) {
   const [headline, setHeadline] = useState('Open Intel for latest stories')
   const [weather, setWeather] = useState('Weather reconnecting')
@@ -244,7 +246,11 @@ export const TopIntelRibbon = memo(function TopIntelRibbon({
             className="whitespace-nowrap rounded border border-cyan-400/35 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-200 transition hover:bg-cyan-400/10"
             onClick={() => {
               matrixStatus('working', 'Expanding intel wall…')
-              setIntelWallOpen(true)
+              if (onExpandIntel) {
+                onExpandIntel()
+              } else {
+                setIntelWallOpen(true)
+              }
               matrixStatus('success', 'Intel wall expanded')
             }}
           >
