@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WarRoomUiMode } from '@/components/war-room/WarRoomUiModeContext'
+import { ApprovalsWorkspace } from '@/components/war-room/approvals/ApprovalsWorkspace'
 import { StandingPermissionsPanel } from '@/components/war-room/permissions/StandingPermissionsPanel'
+import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoundary'
 import { Phase5DeployPanels } from '@/components/war-room/phase5/DeployPanels'
 import { Phase6MemoryPanels } from '@/components/war-room/memory/Phase6MemoryPanels'
 import { Phase4WarRoomPanels } from '@/components/war-room/phase3/Phase4WarRoomPanels'
@@ -31,7 +33,7 @@ type MsgRow = {
   created_at: string
 }
 
-type ActionRow = {
+export type ActionRow = {
   id: string
   conversation_id: string | null
   status: string
@@ -98,6 +100,7 @@ export function Phase3WarRoomPanels({
   const [actionPayload, setActionPayload] = useState('{}')
   const [actionsLoading, setActionsLoading] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [approvalActionError, setApprovalActionError] = useState<string | null>(null)
 
   const [netStatus, setNetStatus] = useState<InternetStatus | null>(null)
   const [searchQ, setSearchQ] = useState('')
@@ -456,16 +459,43 @@ export function Phase3WarRoomPanels({
     }
   }
 
-  const approvalQueue = actions.filter(a => a.status === 'waiting_approval')
+  /** Shared POST + failure-surfacing path for the Approvals row actions. Clears any prior row-action error up front so a new action never inherits a stale message, and never claims success unless the response is actually ok. */
+  const runApprovalRowAction = async (
+    url: string,
+    body: Record<string, unknown>,
+    fallbackError: string,
+  ): Promise<boolean> => {
+    setApprovalActionError(null)
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      setPersistence(readPersistence(res))
+      if (res.ok) return true
+      let message = fallbackError
+      try {
+        const j = await res.json() as { error?: string }
+        if (typeof j.error === 'string' && j.error.trim()) message = j.error
+      } catch {
+        /* response body wasn't JSON — keep fallback */
+      }
+      setApprovalActionError(message)
+      return false
+    } catch (e) {
+      setApprovalActionError(e instanceof Error ? e.message : fallbackError)
+      return false
+    }
+  }
 
   const approveAction = async (id: string) => {
-    const res = await fetch('/api/actions/approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ actionId: id, approval_granted: true }),
-    })
-    setPersistence(readPersistence(res))
-    if (res.ok) {
+    const ok = await runApprovalRowAction(
+      '/api/actions/approve',
+      { actionId: id, approval_granted: true },
+      'Approval action failed.',
+    )
+    if (ok) {
       void loadActions()
       void loadAuditLogs()
     }
@@ -473,13 +503,37 @@ export function Phase3WarRoomPanels({
 
   const rejectAction = async (id: string) => {
     const reason = window.prompt('Rejection reason (optional)') ?? ''
-    const res = await fetch('/api/actions/reject', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ actionId: id, reason: reason.trim() || undefined }),
-    })
-    setPersistence(readPersistence(res))
-    if (res.ok) {
+    const ok = await runApprovalRowAction(
+      '/api/actions/reject',
+      { actionId: id, reason: reason.trim() || undefined },
+      'Rejection action failed.',
+    )
+    if (ok) {
+      void loadActions()
+      void loadAuditLogs()
+    }
+  }
+
+  const deferAction = async (id: string) => {
+    const reason = window.prompt('Defer reason (optional)') ?? ''
+    const ok = await runApprovalRowAction(
+      '/api/actions/defer',
+      { actionId: id, reason: reason.trim() || undefined },
+      'Defer action failed.',
+    )
+    if (ok) {
+      void loadActions()
+      void loadAuditLogs()
+    }
+  }
+
+  const archiveAction = async (id: string) => {
+    const ok = await runApprovalRowAction(
+      '/api/actions/archive',
+      { actionId: id },
+      'Archive action failed.',
+    )
+    if (ok) {
       void loadActions()
       void loadAuditLogs()
     }
@@ -677,26 +731,17 @@ export function Phase3WarRoomPanels({
           </section>
         </div>
 
-        <section className="rounded p-3 text-xs" style={{ border: '1px solid #7f1d1d', background: 'rgba(127,29,29,0.12)' }}>
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <span className="font-bold tracking-widest" style={{ color: '#FCA5A5' }}>PENDING APPROVALS</span>
-            <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid #444', color: '#ccc' }} onClick={() => void loadActions()} disabled={actionsLoading}>REFRESH</button>
+        <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
+          <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid #444', color: '#ccc' }} onClick={() => void loadActions()} disabled={actionsLoading}>REFRESH APPROVALS</button>
+        </div>
+        {approvalActionError && (
+          <div className="mb-2 rounded border border-red-500/30 bg-red-500/10 p-2 text-[11px]" style={{ color: '#fca5a5' }}>
+            {approvalActionError}
           </div>
-          <p className="mb-2 text-[10px]" style={{ color: '#888' }}>Lists <code className="text-[9px]">waiting_approval</code> only.</p>
-          <ul className="max-h-56 space-y-2 overflow-y-auto">
-            {approvalQueue.map(a => (
-              <li key={a.id} className="rounded border border-white/10 p-2" style={{ color: '#ddd' }}>
-                <div className="font-mono text-[10px]" style={{ color: '#F87171' }}>{a.type}</div>
-                <div className="text-[9px] opacity-70">{a.id}</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ background: '#16A34A', color: '#fff' }} onClick={() => void approveAction(a.id)}>APPROVE</button>
-                  <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ background: '#991B1B', color: '#fff' }} onClick={() => void rejectAction(a.id)}>REJECT</button>
-                </div>
-              </li>
-            ))}
-            {!approvalQueue.length && <li style={{ color: '#666' }}>No actions awaiting approval.</li>}
-          </ul>
-        </section>
+        )}
+        <PanelErrorBoundary label="Approvals" note="No approval or repair action was executed by this failure.">
+          <ApprovalsWorkspace actions={actions} onApprove={approveAction} onReject={rejectAction} onDefer={deferAction} onArchive={archiveAction} />
+        </PanelErrorBoundary>
       </div>
     )
   }
@@ -1060,26 +1105,19 @@ export function Phase3WarRoomPanels({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <section className="rounded p-3 text-xs" style={{ border: '1px solid #7f1d1d', background: 'rgba(127,29,29,0.12)' }}>
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <span className="font-bold tracking-widest" style={{ color: '#FCA5A5' }}>PENDING APPROVALS</span>
-            <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid #444', color: '#ccc' }} onClick={() => void loadActions()} disabled={actionsLoading}>REFRESH</button>
+        <div>
+          <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
+            <button type="button" className="rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid #444', color: '#ccc' }} onClick={() => void loadActions()} disabled={actionsLoading}>REFRESH APPROVALS</button>
           </div>
-          <p className="mb-2 text-[10px]" style={{ color: '#888' }}>Lists <code className="text-[9px]">waiting_approval</code> only.</p>
-          <ul className="max-h-56 space-y-2 overflow-y-auto">
-            {approvalQueue.map(a => (
-              <li key={a.id} className="rounded border border-white/10 p-2" style={{ color: '#ddd' }}>
-                <div className="font-mono text-[10px]" style={{ color: '#F87171' }}>{a.type}</div>
-                <div className="text-[9px] opacity-70">{a.id}</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ background: '#16A34A', color: '#fff' }} onClick={() => void approveAction(a.id)}>APPROVE</button>
-                  <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ background: '#991B1B', color: '#fff' }} onClick={() => void rejectAction(a.id)}>REJECT</button>
-                </div>
-              </li>
-            ))}
-            {!approvalQueue.length && <li style={{ color: '#666' }}>No actions awaiting approval.</li>}
-          </ul>
-        </section>
+          {approvalActionError && (
+            <div className="mb-2 rounded border border-red-500/30 bg-red-500/10 p-2 text-[11px]" style={{ color: '#fca5a5' }}>
+              {approvalActionError}
+            </div>
+          )}
+          <PanelErrorBoundary label="Approvals" note="No approval or repair action was executed by this failure.">
+            <ApprovalsWorkspace actions={actions} onApprove={approveAction} onReject={rejectAction} onDefer={deferAction} onArchive={archiveAction} />
+          </PanelErrorBoundary>
+        </div>
 
         <section className="rounded p-3 text-xs" style={{ border: '1px solid #333', background: 'rgba(0,0,0,0.25)' }}>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

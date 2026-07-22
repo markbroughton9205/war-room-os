@@ -10,6 +10,8 @@ export const WAR_ROOM_ACTION_STATUSES = [
   'failed',
   'rollback_available',
   'rolled_back',
+  'deferred',
+  'archived',
 ] as const
 
 export type WarRoomActionStatus = (typeof WAR_ROOM_ACTION_STATUSES)[number]

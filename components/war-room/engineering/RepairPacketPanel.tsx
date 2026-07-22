@@ -5,43 +5,13 @@ import type { CouncilRepairPacket, CouncilRepairSnapshot } from '@/lib/council-r
 
 import { OperatorNextStepsBlock } from '@/components/war-room/evolution/OperatorNextStepsBlock'
 import { ExportButton } from '@/components/war-room/operator/ExportButton'
+import { Badge } from '@/components/war-room/repair-shared/Badge'
+import { FieldList } from '@/components/war-room/repair-shared/FieldList'
+import { RepairImpactGrid } from '@/components/war-room/repair-shared/RepairImpactGrid'
+import { RepairRecommendations } from '@/components/war-room/repair-shared/RepairRecommendations'
+import { RepairStatusBadges } from '@/components/war-room/repair-shared/RepairStatusBadges'
+import { RepairVerificationBlock } from '@/components/war-room/repair-shared/RepairVerificationBlock'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
-
-function Badge({ label }: { label: string }) {
-  const color = /risk|security|rejected|broken|critical|high/i.test(label)
-    ? '#F87171'
-    : /approval|awaiting|schema|runtime/i.test(label)
-      ? '#FBBF24'
-      : '#38BDF8'
-  return (
-    <span
-      className="rounded px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest"
-      style={{ border: `1px solid ${color}66`, color, background: 'rgba(0,0,0,0.25)' }}
-    >
-      {label.replace(/_/g, ' ')}
-    </span>
-  )
-}
-
-/** rollbackPlan is the spec-aligned field; rollbackNotes is the legacy backing field with the same content today. */
-function sameStringArray(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((item, index) => item === b[index])
-}
-
-function FieldList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <section className="rounded border border-white/10 bg-black/20 p-3">
-      <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-300">{title}</h4>
-      <ul className="mt-2 space-y-1 text-[10px] leading-relaxed text-slate-400">
-        {(items.length ? items : ['None identified yet.']).slice(0, 8).map(item => (
-          <li key={`${title}-${item}`} className="rounded border border-white/10 px-2 py-1">
-            {item}
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
 
 export function RepairPacketPanel({ latest }: { latest?: CouncilRepairPacket | null }) {
   const { copy } = useCopyToClipboard()
@@ -159,11 +129,8 @@ export function RepairPacketPanel({ latest }: { latest?: CouncilRepairPacket | n
                   <p className="mt-1 text-xs leading-relaxed text-slate-400">
                     Source: {activePacket.source.packetSource} · created {new Date(activePacket.createdAt).toLocaleString()}
                   </p>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    <Badge label={activePacket.classification} />
-                    <Badge label={activePacket.severity} />
-                    <Badge label={activePacket.status} />
-                    <Badge label={activePacket.approvalStatus} />
+                  <div className="mt-2 flex flex-wrap items-center gap-1">
+                    <RepairStatusBadges packet={activePacket} />
                     <Badge label="manual_copy_only" />
                   </div>
                 </div>
@@ -190,26 +157,15 @@ export function RepairPacketPanel({ latest }: { latest?: CouncilRepairPacket | n
                 <FieldList title="Affected Subsystem" items={[activePacket.affectedSubsystem]} />
                 <FieldList title="Evidence" items={activePacket.evidence} />
                 <FieldList title="Observed Symptoms" items={activePacket.observedSymptoms} />
-                <FieldList title="Security Impact" items={[activePacket.securityImpact]} />
-                <FieldList title="User Impact" items={[activePacket.userImpact]} />
-                <FieldList title="Reliability Impact" items={[activePacket.reliabilityImpact]} />
                 <FieldList title="Files / Routes To Inspect" items={activePacket.filesRoutesToInspect} />
                 <FieldList title="Recommended Fix" items={activePacket.recommendedFix} />
-                <FieldList title="Proposed Repair" items={[activePacket.proposedRepair]} />
-                <FieldList title="Council Recommendation" items={[activePacket.councilRecommendation]} />
-                <FieldList title="Red Team Recommendation" items={[activePacket.redTeamRecommendation]} />
                 <FieldList title="Validation Commands" items={activePacket.validationCommands} />
-                <FieldList title="Verification Requirements" items={activePacket.verificationRequirements} />
                 <FieldList title="Risk Notes" items={activePacket.riskNotes} />
-                {sameStringArray(activePacket.rollbackPlan, activePacket.rollbackNotes) ? (
-                  <FieldList title="Rollback Plan" items={activePacket.rollbackPlan} />
-                ) : (
-                  <>
-                    <FieldList title="Rollback Plan" items={activePacket.rollbackPlan} />
-                    <FieldList title="Rollback Notes" items={activePacket.rollbackNotes} />
-                  </>
-                )}
               </div>
+
+              <RepairImpactGrid packet={activePacket} />
+              <RepairRecommendations packet={activePacket} />
+              <RepairVerificationBlock packet={activePacket} />
 
               <OperatorNextStepsBlock
                 report={activePacket.operatorNextSteps}

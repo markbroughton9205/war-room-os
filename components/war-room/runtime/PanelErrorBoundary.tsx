@@ -5,6 +5,8 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 type Props = {
   label: string
   children: ReactNode
+  /** Optional extra reassurance line shown under the failure message (e.g. "no approval action was executed"). */
+  note?: string
 }
 
 type State = {
@@ -41,6 +43,9 @@ export class PanelErrorBoundary extends Component<Props, State> {
         <p className="mt-2 rounded border border-white/10 bg-black/30 p-2 font-mono text-[11px] text-white/65">
           {this.state.error}
         </p>
+        {this.props.note ? (
+          <p className="mt-2 text-xs leading-relaxed text-amber-100/80">{this.props.note}</p>
+        ) : null}
       </section>
     )
   }

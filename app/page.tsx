@@ -53,6 +53,7 @@ import {
 } from '@/lib/council/family-deliberation'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 import { ArchiveViewer } from '@/components/war-room/council/ArchiveViewer'
+import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoundary'
 import { LogoutButton } from '@/components/auth/LogoutButton'
 import { CopyCouncilButton } from '@/components/war-room/council/CopyCouncilButton'
 import { MessageCopyButton } from '@/components/war-room/council/MessageCopyButton'
@@ -307,6 +308,18 @@ const NotificationsCenterPanel = dynamic(
     loading: () => (
       <section className="rounded border border-white/10 bg-black/20 p-3 text-[10px] tracking-widest text-slate-300">
         Notifications loading on demand.
+      </section>
+    ),
+  },
+)
+
+const RedTeamWorkspacePanel = dynamic(
+  () => import('@/components/war-room/red-team/RedTeamWorkspacePanel').then(mod => mod.RedTeamWorkspacePanel),
+  {
+    ssr: false,
+    loading: () => (
+      <section className="rounded border border-red-500/20 bg-black/20 p-3 text-[10px] tracking-widest text-red-200">
+        Red Team workspace loading on demand.
       </section>
     ),
   },
@@ -12124,6 +12137,9 @@ function Home() {
                 <EngineeringLaneManualPanel latest={latestEngineeringTaskPacket} />
                 <NotificationsCenterPanel />
                 <RepairPacketPanel latest={latestRepairPacket} />
+                <PanelErrorBoundary label="Red Team Workspace" note="No repair or approval action was executed by this failure.">
+                  <RedTeamWorkspacePanel />
+                </PanelErrorBoundary>
                 <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
                 <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
                 {uiMode === 'advanced' && (
@@ -12368,6 +12384,9 @@ function Home() {
                 <EngineeringLaneManualPanel latest={latestEngineeringTaskPacket} />
                 <NotificationsCenterPanel />
                 <RepairPacketPanel latest={latestRepairPacket} />
+                <PanelErrorBoundary label="Red Team Workspace" note="No repair or approval action was executed by this failure.">
+                  <RedTeamWorkspacePanel />
+                </PanelErrorBoundary>
                 <CloudAgentFamiliesPanel engines={engineList} />
                 <BabyAiObserverPanel memories={memories} actions={raelActions} opportunities={incomeOpportunities} />
                 <FamilyPresencePanel presence={familyPresence} geminiEngine={geminiEngineRow} />
