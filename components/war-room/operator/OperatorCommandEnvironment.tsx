@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import type { Mission } from '@/lib/missions/types'
 import type { PriorityActionCandidate, PriorityEngineSnapshot } from '@/lib/priority-engine/types'
 import type { RuntimeGraphNode, SourceBackedMetric } from '@/lib/runtime-graph/types'
+import { RuntimeStateNotice } from '@/components/war-room/runtime/RuntimeStateNotice'
+import { approvalsRuntimePresentation, emptySectionPresentation, type RuntimeStatePresentation } from '@/lib/runtime/runtimeStatePresentation'
 
 type OperatorCommandEnvironmentProps = {
   version: string
@@ -130,9 +132,15 @@ function ActionCard({ action, onIntent }: { action: PriorityActionCandidate; onI
   )
 }
 
-function PacketFeed({ nodes, onIntent }: { nodes: RuntimeGraphNode[]; onIntent: (message: string) => void }) {
+function packetHealthExplanation(packet: RuntimeGraphNode): string | null {
+  if (packet.health === 'unknown') return 'No verified health result has been recorded for this runtime item yet.'
+  if (packet.health === 'unavailable') return 'The runtime source required to verify this item is currently unavailable.'
+  return null
+}
+
+function PacketFeed({ nodes, onIntent, runtimePresentation }: { nodes: RuntimeGraphNode[]; onIntent: (message: string) => void; runtimePresentation: RuntimeStatePresentation }) {
   const packets = nodes.filter(node => ['revenue', 'mission', 'subsystem', 'approval'].includes(node.kind)).slice(0, 8)
-  if (!packets.length) return <EmptyState>No active packet feed is available from the runtime graph.</EmptyState>
+  if (!packets.length) return <RuntimeStateNotice presentation={emptySectionPresentation(runtimePresentation, 'active approval packets')} compact />
   return (
     <div className="space-y-2">
       {packets.map(packet => (
@@ -144,6 +152,7 @@ function PacketFeed({ nodes, onIntent }: { nodes: RuntimeGraphNode[]; onIntent: 
             </div>
             <Badge value={packet.health} />
           </div>
+          {packetHealthExplanation(packet) ? <p className="mt-2 text-[9px] leading-relaxed text-slate-500">{packetHealthExplanation(packet)}</p> : null}
           <div className="mt-2 flex flex-wrap gap-2">
             {['approve', 'reject', 'modify', 'archive'].map(action => (
               <button key={action} type="button" onClick={() => onIntent(`${action} intent captured for ${packet.label}; no packet mutation performed.`)} className="rounded border border-white/15 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">
@@ -175,8 +184,8 @@ export function OperatorCommandEnvironment({ version, sessionIndicators, onOpenE
       if (!res.ok) throw new Error(body.error || 'Priority engine unavailable')
       setSnapshot(body)
       setFocusedMissionId(current => current ?? body.graph.missions[0]?.id ?? null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Priority engine unavailable')
+    } catch {
+      setError('The priority and approval status request did not complete.')
     } finally {
       setLoading(false)
     }
@@ -203,6 +212,15 @@ export function OperatorCommandEnvironment({ version, sessionIndicators, onOpenE
   const runtimeStatus = snapshot?.graph.derived.blockedSystems.length ? 'degraded' : snapshot ? 'active' : 'loading'
   const actions = snapshot?.actionQueue ?? []
   const graph = snapshot?.graph
+  const runtimePresentation = approvalsRuntimePresentation({
+    loading,
+    requestFailed: Boolean(error),
+    hasSnapshot: Boolean(snapshot),
+    configurationPresent: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+    persistenceAvailable: snapshot ? true : undefined,
+    actionCount: actions.length,
+    generatedAt: snapshot?.generatedAt,
+  })
 
   return (
     <section className="mx-4 mt-4 rounded border border-emerald-500/25 bg-slate-950/70 p-4 shadow-2xl shadow-emerald-950/20">
@@ -233,6 +251,7 @@ export function OperatorCommandEnvironment({ version, sessionIndicators, onOpenE
 
       {error ? <div className="mb-3 rounded border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">{error}</div> : null}
       {intentMessage ? <div className="mb-3 rounded border border-sky-400/30 bg-sky-400/10 p-3 text-xs text-sky-100">{intentMessage}</div> : null}
+      <div className="mb-3"><RuntimeStateNotice presentation={runtimePresentation} /></div>
 
       <div className="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)_18rem]">
         <MissionControl missions={graph?.missions ?? []} focusedMissionId={focusedMissionId} onFocus={setFocusedMissionId} onIntent={setIntentMessage} />
@@ -253,7 +272,7 @@ export function OperatorCommandEnvironment({ version, sessionIndicators, onOpenE
                 {actions.map(action => <ActionCard key={action.id} action={action} onIntent={setIntentMessage} />)}
               </div>
             ) : (
-              <EmptyState>No highest leverage action is currently available from source-backed graph inputs.</EmptyState>
+              <RuntimeStateNotice presentation={emptySectionPresentation(runtimePresentation, 'source-backed approval actions')} compact />
             )}
           </section>
 
@@ -266,7 +285,7 @@ export function OperatorCommandEnvironment({ version, sessionIndicators, onOpenE
 
           <section className="rounded border border-sky-500/20 bg-black/30 p-3">
             <div className="mb-3 text-[10px] font-bold uppercase tracking-widest text-sky-300">Active Packet Feed</div>
-            <PacketFeed nodes={graph?.nodes ?? []} onIntent={setIntentMessage} />
+            <PacketFeed nodes={graph?.nodes ?? []} onIntent={setIntentMessage} runtimePresentation={runtimePresentation} />
           </section>
         </div>
 
@@ -290,7 +309,7 @@ export function OperatorCommandEnvironment({ version, sessionIndicators, onOpenE
                     <Badge value={provider.health} />
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-1 text-[9px] text-slate-500">
-                    <span>Latency: unavailable</span>
+                    <span>Latency: {provider.connected ? 'not measured' : 'not measured — provider unavailable'}</span>
                     <span>Last: {formatDateTime(provider.lastChecked)}</span>
                     <span>Model: {provider.providerId}</span>
                     <span>Class: {provider.availability}</span>
@@ -305,7 +324,7 @@ export function OperatorCommandEnvironment({ version, sessionIndicators, onOpenE
                   </div>
                 </article>
               ))}
-              {!graph?.providers.length ? <EmptyState>Provider runtime unavailable.</EmptyState> : null}
+              {!graph?.providers.length ? <RuntimeStateNotice presentation={emptySectionPresentation(runtimePresentation, 'provider runtime records')} compact /> : null}
             </div>
           </section>
 

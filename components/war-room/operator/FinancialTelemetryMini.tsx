@@ -39,7 +39,7 @@ export const FinancialTelemetryMini = memo(function FinancialTelemetryMini({ met
               </div>
             )}
             <div className="mt-2 text-[9px] leading-relaxed text-slate-500">
-              {metric.source ?? 'Not logged yet'}
+              {metric.source ?? 'No verified entry has been recorded for this metric yet.'}
             </div>
           </article>
         ))}

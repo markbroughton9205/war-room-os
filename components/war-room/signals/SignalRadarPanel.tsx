@@ -5,6 +5,8 @@ import { CanonicalStatusBadge } from '@/components/war-room/runtime/CanonicalSta
 import type { SignalClassificationBuckets, SignalResult, SignalSnapshot, SignalSourceDefinition } from '@/lib/signals/model'
 import { newsCardTimestampLabel, signalCardDisplayLabel, signalIngestedAtFromResult } from '@/lib/signals/freshness'
 import { SignalFederationPanel } from '@/components/war-room/signals/SignalFederationPanel'
+import { RuntimeStateNotice } from '@/components/war-room/runtime/RuntimeStateNotice'
+import { analyticsRuntimePresentation, emptySectionPresentation } from '@/lib/runtime/runtimeStatePresentation'
 
 function label(value: string) {
   return value.replace(/_/g, ' ')
@@ -215,6 +217,19 @@ export function SignalRadarPanel() {
   const freshness = snapshot?.latestScan?.freshnessSummary
   const cacheDiagnostics = snapshot?.cacheDiagnostics
   const classificationDiagnostics = snapshot?.classificationDiagnostics
+  const runtimePresentation = analyticsRuntimePresentation({
+    loading,
+    requestFailed: Boolean(error),
+    hasSnapshot: Boolean(snapshot),
+    configurationPresent: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+    persistenceAvailable: snapshot?.persistenceAvailable,
+    migrationStatus: snapshot?.migrationStatus,
+    latestScanStatus: snapshot?.latestScan?.status,
+    latestScanCompletedAt: freshness?.latestScanTime ?? snapshot?.latestScan?.completedAt,
+    resultCount: snapshot?.results.length,
+    staleResultCount: classificationBuckets.stale.length,
+    maxAgeDays: freshness?.maxAgeDays,
+  })
 
   return (
     <section className="mx-auto mt-14 max-w-6xl border-t border-cyan-900/50 pt-10">
@@ -240,6 +255,7 @@ export function SignalRadarPanel() {
 
       {error ? <div className="mb-4 rounded border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">{error}</div> : null}
       {notice ? <div className="mb-4 rounded border border-cyan-500/30 bg-cyan-500/10 p-3 text-xs text-cyan-100">{notice}</div> : null}
+      <div className="mb-4"><RuntimeStateNotice presentation={runtimePresentation} /></div>
 
       <SignalFederationPanel embedded />
 
@@ -289,11 +305,11 @@ export function SignalRadarPanel() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-300">Highest Leverage Signal</p>
-            <h3 className="mt-1 text-lg font-semibold text-white">{snapshot?.strongestSignal?.title ?? 'No source-backed signal loaded yet'}</h3>
+            <h3 className="mt-1 text-lg font-semibold text-white">{snapshot?.strongestSignal?.title ?? runtimePresentation.label}</h3>
             <p className="mt-2 max-w-3xl text-xs leading-relaxed text-cyan-100">
               {snapshot?.strongestSignal
                 ? `${snapshot.strongestSignal.summary} Assigned to ${snapshot.strongestSignal.assignedBabyFamily}.`
-                : 'Run a bounded scan or configure cloud providers to surface a source-backed opportunity.'}
+                : runtimePresentation.explanation}
             </p>
           </div>
           <MiniMetric label="Signal Score" value={String(Math.round(snapshot?.strongestSignal?.scores.highestLeverage ?? 0))} />
@@ -337,7 +353,7 @@ export function SignalRadarPanel() {
             </div>
             <div className="max-h-[44rem] space-y-3 overflow-y-auto">
               {classificationBuckets.actionable.length ? classificationBuckets.actionable.slice(0, 6).map(signal => <SignalCard key={signal.id} signal={signal} />) : (
-                <div className="rounded border border-white/10 p-3 text-xs text-slate-500">No actionable classified signals. RSS remains watchlist until corroborated.</div>
+                <RuntimeStateNotice presentation={emptySectionPresentation(runtimePresentation, 'actionable signals')} compact />
               )}
             </div>
           </div>
@@ -347,7 +363,7 @@ export function SignalRadarPanel() {
             <div className="mt-2 max-h-[16rem] space-y-2 overflow-y-auto">
               {classificationBuckets.watchlist.slice(0, 5).map(signal => <SignalCard key={signal.id} signal={signal} compact />)}
               {!classificationBuckets.watchlist.length ? (
-                <div className="rounded border border-white/10 p-2 text-[10px] text-slate-500">No watchlist signals.</div>
+                <RuntimeStateNotice presentation={emptySectionPresentation(runtimePresentation, 'watchlist signals')} compact />
               ) : null}
             </div>
           </section>
@@ -358,7 +374,7 @@ export function SignalRadarPanel() {
               <div className="mt-2 space-y-2">
                 {classificationBuckets.conflicted.slice(0, 4).map(signal => <SignalCard key={signal.id} signal={signal} compact />)}
                 {!classificationBuckets.conflicted.length ? (
-                  <div className="rounded border border-white/10 p-2 text-[10px] text-slate-500">No contradictory narratives detected.</div>
+                  <RuntimeStateNotice presentation={emptySectionPresentation(runtimePresentation, 'contradictory narratives')} compact />
                 ) : null}
               </div>
             </section>
@@ -367,7 +383,7 @@ export function SignalRadarPanel() {
               <div className="mt-2 space-y-2">
                 {classificationBuckets.stale.slice(0, 4).map(signal => <SignalCard key={signal.id} signal={signal} compact />)}
                 {!classificationBuckets.stale.length ? (
-                  <div className="rounded border border-white/10 p-2 text-[10px] text-slate-500">No stale or archival signals.</div>
+                  <RuntimeStateNotice presentation={emptySectionPresentation(runtimePresentation, 'stale or archival signals')} compact />
                 ) : null}
               </div>
             </section>
@@ -378,7 +394,7 @@ export function SignalRadarPanel() {
               <h3 className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Rejected / Low Confidence</h3>
               <div className="mt-2 space-y-2">
                 {(snapshot?.rejectedOrLowConfidence ?? []).slice(0, 4).map(signal => <SignalCard key={signal.id} signal={signal} compact />)}
-                {snapshot && snapshot.rejectedOrLowConfidence.length === 0 ? <div className="rounded border border-white/10 p-2 text-[10px] text-slate-500">No low-confidence signals loaded.</div> : null}
+                {snapshot && snapshot.rejectedOrLowConfidence.length === 0 ? <RuntimeStateNotice presentation={emptySectionPresentation(runtimePresentation, 'rejected or low-confidence signals')} compact /> : null}
               </div>
             </section>
 
@@ -388,7 +404,7 @@ export function SignalRadarPanel() {
                 {Object.entries(snapshot?.integrations ?? {}).slice(0, 7).map(([key, lines]) => (
                   <div key={key} className="rounded border border-white/10 p-2">
                     <div className="font-semibold text-slate-200">{label(key)}</div>
-                    <p className="mt-1">{lines[0] ?? 'No current source-backed signal for this surface.'}</p>
+                    {lines[0] ? <p className="mt-1">{lines[0]}</p> : <div className="mt-1"><RuntimeStateNotice presentation={emptySectionPresentation(runtimePresentation, `${label(key)} signals`)} compact /></div>}
                   </div>
                 ))}
               </div>

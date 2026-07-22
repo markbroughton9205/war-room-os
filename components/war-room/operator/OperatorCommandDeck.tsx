@@ -7,40 +7,10 @@ import { ActionQueueMini } from './ActionQueueMini'
 import { FinancialTelemetryMini } from './FinancialTelemetryMini'
 import { MissionStatusStrip } from './MissionStatusStrip'
 import { QuickActionBar } from './QuickActionBar'
+import { RuntimeStateNotice } from '@/components/war-room/runtime/RuntimeStateNotice'
+import { approvalsRuntimePresentation } from '@/lib/runtime/runtimeStatePresentation'
 
 const LogEarningsModal = dynamic(() => import('./LogEarningsModal'), { ssr: false })
-
-function emptySnapshot(): OperatorDeckSnapshot {
-  return {
-    generatedAt: new Date().toISOString(),
-    persistenceAvailable: false,
-    realtimeAvailable: false,
-    stateLabel: 'UNAVAILABLE',
-    actionQueue: [],
-    financialTelemetry: [],
-    missions: [],
-    lastPacket: null,
-    recentActivity: [],
-    integrations: {
-      liveCouncil: 'UNAVAILABLE',
-      babyAiObserver: 'UNAVAILABLE',
-      revenueEngine: 'UNAVAILABLE',
-      signalRadar: 'UNAVAILABLE',
-      growthCalendar: 'UNAVAILABLE',
-      outcomeLedger: 'UNAVAILABLE',
-      commanderOs: 'UNAVAILABLE',
-      approvalQueue: 'UNAVAILABLE',
-    },
-    guardrails: {
-      noFakeEarnings: true,
-      noFakeBalances: true,
-      noHiddenActions: true,
-      noAutonomousSpending: true,
-      noAutomaticEmailSending: true,
-      commanderApprovalRequired: true,
-    },
-  }
-}
 
 function Pill({ label, value }: { label: string; value: string }) {
   const unavailable = value === 'UNAVAILABLE'
@@ -52,14 +22,16 @@ function Pill({ label, value }: { label: string; value: string }) {
 }
 
 export const OperatorCommandDeck = memo(function OperatorCommandDeck() {
-  const [snapshot, setSnapshot] = useState<OperatorDeckSnapshot>(() => emptySnapshot())
+  const [snapshot, setSnapshot] = useState<OperatorDeckSnapshot | null>(null)
   const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches)
   const [loading, setLoading] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [modalAction, setModalAction] = useState<OperatorAction | null | undefined>(undefined)
 
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadFailed(false)
     try {
       const [deckRes, queueRes] = await Promise.all([
         fetch('/api/operator/deck', { cache: 'no-store' }),
@@ -67,10 +39,10 @@ export const OperatorCommandDeck = memo(function OperatorCommandDeck() {
       ])
       const body = await deckRes.json() as OperatorDeckSnapshot
       const queueBody = await queueRes.json() as { actions?: OperatorAction[] }
-      if (deckRes.ok) setSnapshot({ ...body, actionQueue: queueRes.ok ? queueBody.actions ?? [] : [] })
-      else setSnapshot(emptySnapshot())
+      if (!deckRes.ok || !queueRes.ok) throw new Error('Approval status request failed')
+      setSnapshot({ ...body, actionQueue: queueBody.actions ?? [] })
     } catch {
-      setSnapshot(emptySnapshot())
+      setLoadFailed(true)
     } finally {
       setLoading(false)
     }
@@ -104,9 +76,19 @@ export const OperatorCommandDeck = memo(function OperatorCommandDeck() {
     }
   }, [load])
 
-  const integrationPills = useMemo(() => Object.entries(snapshot.integrations).map(([key, value]) => (
+  const integrationPills = useMemo(() => Object.entries(snapshot?.integrations ?? {}).map(([key, value]) => (
     <Pill key={key} label={key.replace(/([A-Z])/g, ' $1').toLowerCase()} value={value} />
-  )), [snapshot.integrations])
+  )), [snapshot?.integrations])
+
+  const runtimePresentation = approvalsRuntimePresentation({
+    loading,
+    requestFailed: loadFailed,
+    hasSnapshot: Boolean(snapshot),
+    configurationPresent: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+    persistenceAvailable: snapshot?.persistenceAvailable,
+    actionCount: snapshot?.actionQueue.length,
+    generatedAt: snapshot?.generatedAt,
+  })
 
   const postCommand = useCallback(async (payload: Record<string, unknown>) => {
     setLoading(true)
@@ -161,7 +143,7 @@ export const OperatorCommandDeck = memo(function OperatorCommandDeck() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded border border-yellow-300/30 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-yellow-200">
-            {snapshot.stateLabel.replace(/_/g, ' ')}
+            {runtimePresentation.label}
           </span>
           <button type="button" onClick={() => void load()} disabled={loading} className="rounded border border-white/15 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-300 disabled:opacity-50">
             {loading ? 'Refreshing' : 'Refresh'}
@@ -173,8 +155,9 @@ export const OperatorCommandDeck = memo(function OperatorCommandDeck() {
       </header>
 
       {notice ? <div className="mt-3 rounded border border-sky-300/25 bg-sky-500/10 p-2 text-xs text-sky-100">{notice}</div> : null}
+      <div className="mt-3"><RuntimeStateNotice presentation={runtimePresentation} /></div>
 
-      {collapsed ? (
+      {!snapshot ? null : collapsed ? (
         <div className="mt-3 grid gap-2 text-[10px] text-slate-400 sm:grid-cols-4">
           <span className="rounded border border-white/10 bg-black/25 p-2">Actions: {snapshot.actionQueue.length}</span>
           <span className="rounded border border-white/10 bg-black/25 p-2">Missions: {snapshot.missions.length}</span>
@@ -200,12 +183,16 @@ export const OperatorCommandDeck = memo(function OperatorCommandDeck() {
             onManualEmailAlert={manualEmailAlert}
           />
           <div className="rounded border border-white/10 bg-black/25 p-3 text-[10px] text-slate-500">
-            Recent activity: {snapshot.recentActivity.length ? snapshot.recentActivity.map(item => `${item.summary} (${item.truthLabel})`).join(' | ') : 'Not logged yet'}
+            Recent activity: {snapshot.recentActivity.length
+              ? snapshot.recentActivity.map(item => `${item.summary} (${item.truthLabel})`).join(' | ')
+              : snapshot.persistenceAvailable
+                ? 'No operator activity has been recorded yet.'
+                : 'Activity history is unavailable because persistence could not be loaded.'}
           </div>
         </div>
       )}
 
-      {modalAction !== undefined ? (
+      {modalAction !== undefined && snapshot ? (
         <LogEarningsModal
           action={modalAction}
           missions={snapshot.missions}
