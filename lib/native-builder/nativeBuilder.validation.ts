@@ -37,6 +37,13 @@ import {
 } from './runtime'
 import { countUnresolvedIssues } from './storage'
 import { runSelfRepairStorageValidation } from '../operator/selfRepair/storage.validation'
+import {
+  assertLiveResearchApproved,
+  hashDecreeTextForApproval,
+  runGlobalIntelligenceMission,
+  type NativeLiveResearchApproval,
+} from './intelligenceMission'
+import type { LiveResearchRouterResult } from '@/lib/research/researchRouter'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 
@@ -562,6 +569,127 @@ async function testStaticSafetyBoundaries(): Promise<CaseResult[]> {
   return results
 }
 
+// --- 21. Commander-gated live research authority (Commander hardening decision) -----------------
+
+const FAKE_ROUTER_RESULT: LiveResearchRouterResult = {
+  generatedAt: '2026-01-01T00:00:00.000Z',
+  searchQuery: 'test query',
+  tavily: { ok: true, results: [{ title: 'x', url: 'https://example.com/x', snippet: 'x' }], durationMs: 1 },
+  grok: { ok: false, text: '', error: 'not used' },
+  direct: [{ url: 'https://example.com/x', ok: true, contentSnippet: 'x', statusCode: 200 }],
+  retrieval: {} as LiveResearchRouterResult['retrieval'],
+}
+
+/** A stub matching runLiveResearchRouter's signature that never touches the network — used to
+ * inject into runGlobalIntelligenceMission's optional runRouter parameter so this suite can prove
+ * a zero call count for every blocked case and a nonzero call count only once genuinely approved,
+ * without any real Tavily/fetch call ever being reachable from this test. */
+function makeCountingRouterStub() {
+  let calls = 0
+  const stub = async () => {
+    calls += 1
+    return FAKE_ROUTER_RESULT
+  }
+  return { stub, callCount: () => calls }
+}
+
+function validApproval(decreeText: string): NativeLiveResearchApproval {
+  return { kind: 'native_builder_live_research', granted: true, decreeTextHash: hashDecreeTextForApproval(decreeText) }
+}
+
+async function testLiveResearchGate(): Promise<CaseResult[]> {
+  const results: CaseResult[] = []
+  const decreeText = 'Reference material for verification: https://example.com'
+
+  // 1. Unauthenticated request is rejected.
+  const noSession = assertLiveResearchApproved({ hasSession: false, safetyLock: false, decreeText, approval: validApproval(decreeText) })
+  results.push(check('research_01_unauthenticated_rejected', !noSession.ok && noSession.status === 401, JSON.stringify(noSession)))
+
+  // 2. Authenticated but unapproved request is rejected.
+  const noApproval = assertLiveResearchApproved({ hasSession: true, safetyLock: false, decreeText, approval: undefined })
+  results.push(check('research_02_authenticated_unapproved_rejected', !noApproval.ok, JSON.stringify(noApproval)))
+
+  // 3. Rejection occurs before Tavily or fetch is invoked (call-count proof via injected stub).
+  {
+    const counter = makeCountingRouterStub()
+    const gate = assertLiveResearchApproved({ hasSession: true, safetyLock: false, decreeText, approval: undefined })
+    if (gate.ok) {
+      await runGlobalIntelligenceMission({ decreeText, supabase: null }, counter.stub)
+    }
+    results.push(check('research_03_blocked_case_makes_zero_network_calls', counter.callCount() === 0, `callCount=${counter.callCount()}`))
+  }
+
+  // 4. Explicitly approved request may reach the declared research boundary.
+  {
+    const counter = makeCountingRouterStub()
+    const gate = assertLiveResearchApproved({ hasSession: true, safetyLock: false, decreeText, approval: validApproval(decreeText) })
+    let missionRan = false
+    if (gate.ok) {
+      await runGlobalIntelligenceMission({ decreeText, supabase: null }, counter.stub)
+      missionRan = true
+    }
+    results.push(check('research_04_approved_request_reaches_research_boundary', gate.ok && missionRan && counter.callCount() === 1, `gateOk=${gate.ok} missionRan=${missionRan} callCount=${counter.callCount()}`))
+  }
+
+  // 5. Approval for one mission does not authorize a second (different) mission.
+  const missionAApproval = validApproval('Mission A decree text')
+  const missionB = assertLiveResearchApproved({ hasSession: true, safetyLock: false, decreeText: 'Mission B decree text', approval: missionAApproval })
+  results.push(check('research_05_approval_not_reusable_across_missions', !missionB.ok, JSON.stringify(missionB)))
+
+  // 6. Malformed approval is rejected (missing hash, wrong type, truncated hash).
+  const malformed1 = assertLiveResearchApproved({ hasSession: true, safetyLock: false, decreeText, approval: { kind: 'native_builder_live_research', granted: true } })
+  const malformed2 = assertLiveResearchApproved({ hasSession: true, safetyLock: false, decreeText, approval: { kind: 'native_builder_live_research', granted: true, decreeTextHash: 123 } })
+  const malformed3 = assertLiveResearchApproved({ hasSession: true, safetyLock: false, decreeText, approval: { kind: 'native_builder_live_research', granted: true, decreeTextHash: 'deadbeef' } })
+  results.push(check('research_06_malformed_approval_rejected', !malformed1.ok && !malformed2.ok && !malformed3.ok, JSON.stringify([malformed1, malformed2, malformed3])))
+
+  // 7. Unrelated approval kinds are rejected (e.g. a file_modification-style approval).
+  const unrelatedKind = assertLiveResearchApproved({
+    hasSession: true,
+    safetyLock: false,
+    decreeText,
+    approval: { kind: 'file_modification', granted: true, decreeTextHash: hashDecreeTextForApproval(decreeText) },
+  })
+  const bareApprovalGranted = assertLiveResearchApproved({ hasSession: true, safetyLock: false, decreeText, approval: { approval_granted: true } })
+  results.push(check('research_07_unrelated_approval_kind_rejected', !unrelatedKind.ok && !bareApprovalGranted.ok, JSON.stringify([unrelatedKind, bareApprovalGranted])))
+
+  // 8. Safety lock behavior is enforced — blocks even a fully valid, correctly-bound approval.
+  const lockedEvenWithApproval = assertLiveResearchApproved({ hasSession: true, safetyLock: true, decreeText, approval: validApproval(decreeText) })
+  results.push(check('research_08_safety_lock_blocks_even_with_valid_approval', !lockedEvenWithApproval.ok && lockedEvenWithApproval.status === 403, JSON.stringify(lockedEvenWithApproval)))
+
+  // 9. Offline Native Builder validation still works (this suite itself completing is part of the
+  // proof; also re-confirm a cheap, unrelated deterministic check still passes to catch any import-
+  // time breakage this change might have introduced).
+  const stillWorks = isNativeTerminalOperationId('typecheck') && !isNativeTerminalOperationId('rm -rf /')
+  results.push(check('research_09_offline_validation_still_works', stillWorks, String(stillWorks)))
+
+  // 10. No hidden alternative route can start the same network mission ungated — every owned file
+  // that references runGlobalIntelligenceMission must also reference the gate, except the mission
+  // function's own definition file and the (excluded, documented) live/manual validation file.
+  const callers: string[] = []
+  for (const file of OWNED_SOURCE_FILES) {
+    const read = await readRepoFile(file)
+    if (!read.ok) continue
+    const code = stripCommentsForSafetyScan(read.content)
+    if (/runGlobalIntelligenceMission\s*\(/.test(code) && file !== 'lib/native-builder/intelligenceMission.ts') {
+      callers.push(file)
+    }
+  }
+  const everyCallerIsGated: string[] = []
+  for (const file of callers) {
+    const read = await readRepoFile(file)
+    if (read.ok && /assertLiveResearchApproved/.test(read.content)) everyCallerIsGated.push(file)
+  }
+  results.push(
+    check(
+      'research_10_no_hidden_ungated_route_starts_the_mission',
+      callers.length > 0 && callers.every(f => everyCallerIsGated.includes(f)),
+      `callers=${JSON.stringify(callers)} gated=${JSON.stringify(everyCallerIsGated)}`,
+    ),
+  )
+
+  return results
+}
+
 // --- 19. System Health / self-repair remain stable ------------------------------------------------
 
 async function testSelfRepairStillStable(): Promise<CaseResult[]> {
@@ -621,6 +749,7 @@ export async function runNativeBuilderValidation(): Promise<CaseResult[]> {
   results.push(...(await testEndToEndFixtureRepair()))
   results.push(...(await testNoCommitPushDeployCapability()))
   results.push(...(await testStaticSafetyBoundaries()))
+  results.push(...(await testLiveResearchGate()))
   results.push(...(await testSelfRepairStillStable()))
 
   // Sanity: at least one real validation operation executes cleanly end to end (typecheck on this

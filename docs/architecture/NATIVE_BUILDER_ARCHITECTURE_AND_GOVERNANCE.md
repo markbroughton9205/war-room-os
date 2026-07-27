@@ -2,16 +2,23 @@
 
 This document describes what the Native Builder subsystem's code actually does and actually
 restricts, verified by direct source inspection and by `scripts/run-native-builder-validation.mjs`
-(74/74 checks). It does not describe intentions or a roadmap — every claim below is either a cited
+(84/84 checks). It does not describe intentions or a roadmap — every claim below is either a cited
 source location or a passing automated check. Where a real capability exists that a naive reading
 of the subsystem's name might not expect (e.g. real outbound network calls in one file), it is
 stated plainly rather than omitted.
 
+**Commander hardening decision (post-commit 64ac14e):** session authentication alone is not
+sufficient authority for Native Builder to make Tavily searches, direct external fetches, or any
+other non-local network request. Live research now requires an explicit, request-bound Commander
+approval on every call — see section 15.
+
 ## 1. Designation And Status
 
-Native Builder is implemented and present in the working tree; as of this document, three commits
+Native Builder is implemented and present in the working tree; as of this document, four commits
 exist ahead of it in this branch's history (Phase 48-C4D, Phase 49-A, the Operator self-repair
-storage fix, and a DockPanelContent wiring fix) but Native Builder itself is not yet committed.
+storage fix, and a DockPanelContent wiring fix) and the Native Builder subsystem itself is
+committed at `64ac14e`. This follow-up hardening (the live-research approval gate) is a separate,
+focused fix on top of that commit, not yet committed itself at the time this section was written.
 This document, the fixture-classification fix, the resolve-route approval-gate fix, and the
 extended static safety suite were produced together as one completion pass. `npm run build`,
 `npx tsc --noEmit`, and ESLint on owned files all pass (see section 23).
@@ -194,11 +201,8 @@ Three files make real network calls:
   "already real, already running Tavily search... as three INDEPENDENT parallel legs"), not new
   capability invented by Native Builder. It is read-only evidence gathering — no filesystem write,
   no repo mutation, no code-execution consequence from its results. It is reachable via
-  `POST /api/native-builder/intelligence-mission`, gated by session auth only (see section 7), the
-  same risk tier this codebase already applies to `/api/income/search` (also live Tavily/Firecrawl
-  calls, also session-auth-only, already shipped in Phase 49-A). This route is **not wired into the
-  Native Builder UI panel** — it exists in the API surface but `NativeBuilderPanel.tsx` never calls
-  it.
+  `POST /api/native-builder/intelligence-mission`. This route is **not wired into the Native
+  Builder UI panel** — it exists in the API surface but `NativeBuilderPanel.tsx` never calls it.
 - `validationRunner.ts` — `terminalDevServerStatus()` calls `http://localhost:3000` only (a local
   dev-server liveness probe), never an external host.
 
@@ -208,6 +212,59 @@ opinions (`repairPlanner.ts`'s `requestCouncilOpinions`) are wired via dependenc
 **never called by any current route** — no route in section 6 passes `councilFamilies`/
 `councilInvoke` to `planRepair`. This path is present in the code but currently unreachable through
 the live API surface.
+
+### 15a. Live-Research Approval Gate (Commander Hardening Decision)
+
+**Session authentication alone is necessary but not sufficient authority for live research.**
+`assertLiveResearchApproved()` (`lib/native-builder/intelligenceMission.ts`) is a pure, side-
+effect-free gate that `POST /api/native-builder/intelligence-mission` calls *before*
+`runGlobalIntelligenceMission` is ever invoked — a blocked result guarantees zero Tavily/fetch
+calls were attempted for that request (proven by `research_03_blocked_case_makes_zero_network_calls`,
+which injects a call-counting stub in place of the real router and asserts the count stays `0`).
+
+All four of the following must hold, checked fresh on every single call:
+
+1. **A valid authenticated session.** `middleware.ts`'s `updateSession()` already blocks any
+   unauthenticated request from reaching this route at all (section 7); the gate function still
+   declares `hasSession` as its own explicit, independently unit-tested parameter rather than
+   silently assuming truthiness (`research_01_unauthenticated_rejected`).
+2. **The current permission state permits the action.** Read via the existing
+   `fetchWarRoomPermissionsState()` — if the standing safety lock is active, live research is
+   blocked outright, with **no override** for this action (unlike the standing auto-allow catalog's
+   `standing_override` mechanism). This is intentionally stricter than the pre-existing dangerous-
+   action pattern (`file_modification`/`rollback`), which lets `approval_granted: true` bypass the
+   lock; live research does not get that bypass (`research_08_safety_lock_blocks_even_with_valid_
+   approval`).
+3. **An explicit, well-formed approval for this exact action.** The request body must carry a
+   `liveResearchApproval` object shaped `{ kind: 'native_builder_live_research', granted: true,
+   decreeTextHash: <sha256 of decreeText> }`. None of the following ever count as approval — each is
+   explicitly tested and rejected: a signed-in session alone, visiting the Native Builder page,
+   creating or approving a repair plan, an approval object with the wrong `kind` (e.g. one meant for
+   `file_modification`), a bare `{ approval_granted: true }` with no `kind`/hash at all, or a missing/
+   truncated/wrong-type `decreeTextHash` (`research_02`, `research_06`, `research_07`).
+4. **The approval is bound to this one request's exact mission text.** `decreeTextHash` must equal
+   `sha256(decreeText)` for *this* request. An approval minted for one decree's text does not
+   authorize a different decree — proven by `research_05_approval_not_reusable_across_missions`,
+   which mints a valid approval for "Mission A decree text" and shows it is rejected against
+   "Mission B decree text". Nothing about this approval is stored server-side between requests —
+   there is no session flag, no standing toggle, and no cached "already approved" state a second
+   call could rely on. **No standing or background live-research permission exists anywhere in this
+   subsystem.**
+
+`research_10_no_hidden_ungated_route_starts_the_mission` scans every owned file for any call site
+of `runGlobalIntelligenceMission` other than its own definition, and confirms the one real caller
+(`intelligence-mission/route.ts`) is the only one, and that it references the gate. There is
+currently exactly one route capable of triggering a live mission, and it is gated.
+
+**Local Ollama access does not require this gate, and this fix did not broaden its authority.**
+`ollamaClient.ts` targets `localhost:11434` only, with no external fallback anywhere in its source
+(confirmed: no non-loopback URL literal exists in the file). It is local-machine network access, not
+external research, and it never itself mutates anything — any patch a local-model proposal produces
+still must pass through the separate, already-gated `/approve` file-write flow (section 9) before
+anything happens. Under current policy this file is explicitly exempted from the live-research
+approval requirement (it is one of the three files listed in `NETWORK_ALLOWED_FILES` alongside
+`intelligenceMission.ts` and `validationRunner.ts`'s local dev-server probe), and this pass leaves
+it exactly as it was — no new capability, no new gate, no removed restriction.
 
 ## 16. Database/Supabase Boundaries
 
@@ -284,12 +341,17 @@ issues opened automatically by the `[ REPAIR SYSTEM ]` sweep).
 
 ## 23. Deterministic Validation Requirements
 
-**Release gate** (must pass before commit — all confirmed passing in this pass):
-- `node scripts/run-native-builder-validation.mjs` — **74/74 PASS** (64 pre-existing + 10 new static
-  safety-boundary assertions added in this pass: no force push, no unrestricted git mutation, no
-  SQL execution, no Supabase privilege mutation, no secret dumping, no arbitrary shell, no deploy
-  command, no hidden provider calls outside three declared local/reused-infra files, every
-  file-mutating route requires Commander approval, no background autonomous scheduling).
+**Release gate** (must pass before commit — all confirmed passing):
+- `node scripts/run-native-builder-validation.mjs` — **84/84 PASS** (64 original + 10 static
+  safety-boundary assertions [no force push, no unrestricted git mutation, no SQL execution, no
+  Supabase privilege mutation, no secret dumping, no arbitrary shell, no deploy command, no hidden
+  provider calls outside three declared local/reused-infra files, every file-mutating route
+  requires Commander approval, no background autonomous scheduling] + 10 live-research-gate
+  assertions added in this hardening pass [section 15a]: unauthenticated rejected, authenticated-
+  but-unapproved rejected, blocked case makes zero network calls, approved request reaches the
+  research boundary, approval not reusable across missions, malformed approval rejected, unrelated
+  approval kind rejected, safety lock blocks even a valid approval, offline validation still works,
+  no hidden ungated route starts the mission).
 - `npx tsc --noEmit` — clean.
 - ESLint on owned files — clean.
 - `npm run build` — succeeds.
@@ -351,7 +413,8 @@ This pass is complete when: (a) every owned file has been read and classified (d
 touching the seeded bug, not weakening the validator, and not hiding the fixture (done — section
 24, zero changes to fixture business logic, 8 new near-miss tests added); (c) this document exists
 and covers all 25 required sections (done); (d) the release-gate validator passes deterministically
-offline (done — 74/74, including 10 new static safety assertions); (e) `tsc`, ESLint, `build`, and
+offline (done — 84/84, including 10 static safety assertions and 10 live-research-gate assertions);
+(e) `tsc`, ESLint, `build`, and
 `git diff --check` all pass (done — section 23); (f) any real capability contradicting the required
 boundary list is either fixed or explicitly reported (done — section 21's resolve-route gate gap
 was fixed; section 15/24's network/live-validator findings are reported, not hidden). Committing

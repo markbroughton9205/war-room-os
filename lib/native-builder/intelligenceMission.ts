@@ -116,15 +116,105 @@ export type GlobalIntelligenceMissionResult = {
   firecrawlUsed: false // this router never calls Firecrawl — confirmed by the Phase-1 audit
 }
 
-/** Real call — no paid-provider requirement to succeed: direct-fetch works even if Tavily is
- * unconfigured/unreachable, since the two legs run independently via Promise.all upstream. */
-export async function runGlobalIntelligenceMission(args: {
+// ---------------------------------------------------------------------------
+// Commander-gated live research approval.
+//
+// Commander decision: session authentication alone is not sufficient authority for this module's
+// real external network calls (Tavily search, direct fetch). A live mission may run only when all
+// four of the following hold, checked fresh on every call with no server-side memory of a prior
+// approval — there is no standing or background live-research permission:
+//   1. the caller has a valid authenticated session
+//   2. the current permission state permits the action (safety lock is not active — no override
+//      exists for this action, unlike the standing auto-allow catalog's `standing_override`)
+//   3. the request carries an explicit, well-formed `native_builder_live_research` approval
+//   4. that approval's `decreeTextHash` matches this exact request's decreeText — an approval
+//      minted for one mission's text can never authorize a different or later mission
+// See docs/architecture/NATIVE_BUILDER_ARCHITECTURE_AND_GOVERNANCE.md for the full policy.
+// ---------------------------------------------------------------------------
+
+export type NativeLiveResearchApproval = {
+  kind: 'native_builder_live_research'
+  granted: true
+  /** sha256 of the exact decreeText this approval covers — see hashDecreeTextForApproval(). */
+  decreeTextHash: string
+}
+
+export type LiveResearchGateResult = { ok: true } | { ok: false; status: number; reason: string }
+
+export function hashDecreeTextForApproval(decreeText: string): string {
+  return createHash('sha256').update(decreeText, 'utf8').digest('hex')
+}
+
+/**
+ * Pure, deterministic gate — makes no network call itself and has no side effects, so it is fully
+ * unit-testable without a live server or live providers. The caller (the API route) must call this
+ * and receive `{ ok: true }` BEFORE invoking runGlobalIntelligenceMission; a blocked result here
+ * guarantees zero Tavily/fetch calls were ever attempted for this request.
+ */
+export function assertLiveResearchApproved(input: {
+  hasSession: boolean
+  safetyLock: boolean
   decreeText: string
-  supabase: WarRoomSupabase | null
-  conversationId?: string | null
-}): Promise<GlobalIntelligenceMissionResult> {
+  approval: unknown
+}): LiveResearchGateResult {
+  if (!input.hasSession) {
+    return { ok: false, status: 401, reason: 'Authentication required for live research.' }
+  }
+  if (input.safetyLock) {
+    return {
+      ok: false,
+      status: 403,
+      reason: 'Safety lock is active — live research is blocked while the lock is on; there is no override for this action.',
+    }
+  }
+  if (!input.approval || typeof input.approval !== 'object') {
+    return {
+      ok: false,
+      status: 403,
+      reason: 'Live research requires an explicit liveResearchApproval object in the request body; none was provided. A session, a page visit, a repair plan, or a prior approval for a different action are never sufficient.',
+    }
+  }
+  const approval = input.approval as Record<string, unknown>
+  if (approval.kind !== 'native_builder_live_research') {
+    return {
+      ok: false,
+      status: 403,
+      reason: `Approval kind ${JSON.stringify(approval.kind ?? null)} is not valid for live research (expected "native_builder_live_research"). An approval for a different action kind never authorizes this one.`,
+    }
+  }
+  if (approval.granted !== true) {
+    return { ok: false, status: 403, reason: 'Approval object present but granted is not exactly true (malformed approval).' }
+  }
+  if (typeof approval.decreeTextHash !== 'string' || approval.decreeTextHash.length !== 64) {
+    return { ok: false, status: 403, reason: 'Approval is missing a valid decreeTextHash (malformed approval).' }
+  }
+  const expectedHash = hashDecreeTextForApproval(input.decreeText)
+  if (approval.decreeTextHash !== expectedHash) {
+    return {
+      ok: false,
+      status: 403,
+      reason: "Approval does not match this request's decreeText — approvals are bound to one mission's exact text and cannot be reused for a different or later mission.",
+    }
+  }
+  return { ok: true }
+}
+
+/** Real call — no paid-provider requirement to succeed: direct-fetch works even if Tavily is
+ * unconfigured/unreachable, since the two legs run independently via Promise.all upstream.
+ * `runRouter` defaults to the real runLiveResearchRouter and is only ever overridden by a test —
+ * this is the same dependency-injection shape already used by lib/providers/retryOrchestration.ts's
+ * `invoke` and lib/native-builder/repairPlanner.ts's `councilInvoke`, chosen so a test can assert a
+ * zero call count for blocked cases without any real network call ever being reachable. */
+export async function runGlobalIntelligenceMission(
+  args: {
+    decreeText: string
+    supabase: WarRoomSupabase | null
+    conversationId?: string | null
+  },
+  runRouter: typeof runLiveResearchRouter = runLiveResearchRouter,
+): Promise<GlobalIntelligenceMissionResult> {
   const missionId = randomUUID()
-  const routerResult = await runLiveResearchRouter({
+  const routerResult = await runRouter({
     decreeText: args.decreeText,
     supabase: args.supabase,
     conversationId: args.conversationId,
