@@ -62,6 +62,21 @@ const FALLBACK_CHAIN: Partial<Record<CouncilOrchestrationFamily, CouncilOrchestr
   baby: ['chatgpt'],
 }
 
+const FAMILY_DISPLAY_LABEL: Record<CouncilOrchestrationFamily, string> = {
+  chatgpt: 'ChatGPT',
+  claude: 'Claude',
+  grok: 'Grok',
+  gemini: 'Gemini',
+  red_team: 'Red Team',
+  baby: 'Baby',
+  kimi: 'Kimi',
+  bridge_architect: 'Bridge Architect',
+}
+
+function familyDisplayLabel(family: CouncilOrchestrationFamily): string {
+  return FAMILY_DISPLAY_LABEL[family] ?? family
+}
+
 function providerConfigured(id: ProviderRuntimeId): boolean {
   switch (id) {
     case 'openai':
@@ -165,6 +180,7 @@ export async function orchestrateProviderResponse(args: {
   let retryCount = 0
   let fallbackUsed = false
   let fallbackProvider: ProviderRuntimeId | null = null
+  let fallbackFamilyUsed: CouncilOrchestrationFamily | null = null
   let diagnosticFragment: string | undefined
   const retryStrategies: string[] = []
 
@@ -288,6 +304,7 @@ export async function orchestrateProviderResponse(args: {
         if (fbIntegrity.integrity_status === 'COMPLETE') {
           fallbackUsed = true
           fallbackProvider = fallbackId
+          fallbackFamilyUsed = fallbackFamily
           text = fallbackText
           integrity = fbIntegrity
           recordOutcome('INCOMPLETE', `primary incomplete; fallback ${fallbackFamily} succeeded`, {
@@ -364,7 +381,12 @@ export async function orchestrateProviderResponse(args: {
 
   return {
     text,
-    displayText: text,
+    // Real content, but it did not come from this family's own model — say so. Otherwise a
+    // fallback-family's summary renders under the original family's name as if it spoke it.
+    displayText:
+      fallbackUsed && fallbackFamilyUsed
+        ? `[${familyDisplayLabel(fallbackFamilyUsed)} summarized ${familyDisplayLabel(args.family)}'s incomplete response]\n\n${text}`
+        : text,
     integrity,
     providerId,
     family: args.family,

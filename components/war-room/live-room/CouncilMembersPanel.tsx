@@ -3,12 +3,20 @@
 import { memo } from 'react'
 
 import { COUNCIL_ROSTER } from '@/lib/council/familyRoster'
+import {
+  FAMILY_OPERATION_STATUS_PRESENTATION,
+  type FamilyOperationStatus,
+  type FamilyOperationTone,
+} from '@/lib/council/familyOperationStatus'
 
 type ProviderConnectionStatus = 'online' | 'standby' | 'not_connected' | 'error'
 
 export type CouncilMembersPanelProps = {
   providerStatuses: Record<string, ProviderConnectionStatus | string>
   providerLabels?: Record<string, string>
+  /** Current-operation outcome per family (keyed by roster id) — distinct from `providerStatuses`
+   * connectivity. Absent entries render connectivity only, matching prior behavior. */
+  operationStatuses?: Partial<Record<string, FamilyOperationStatus>>
   onOpenPanel?: (panel: 'command-intel' | 'operations' | 'memory-core' | 'approvals' | 'analytics' | 'red-team' | 'system-health' | 'settings') => void
 }
 
@@ -23,6 +31,13 @@ const STATUS_DOT: Record<string, { color: string; glow?: string }> = {
   degraded: { color: '#fbbf24' },
   unavailable: { color: '#f87171' },
   offline: { color: '#64748b' },
+}
+
+const OPERATION_TONE_DOT: Record<FamilyOperationTone, { color: string; glow?: string }> = {
+  green: { color: '#34d399', glow: '0 0 8px #34d399' },
+  neutral: { color: '#64748b' },
+  amber: { color: '#fbbf24', glow: '0 0 6px #fbbf24' },
+  red: { color: '#f87171', glow: '0 0 8px #f87171' },
 }
 
 const MEMBER_ORDER: { id: string; label: string; rosterId?: string }[] = [
@@ -71,7 +86,7 @@ export function memberStatusPresentation(
     return { tone: 'needs_key', label: 'Needs key' }
   }
   if (status === 'online' || status === 'standby') {
-    return { tone: 'ready', label: 'Ready' }
+    return { tone: 'ready', label: 'Connected' }
   }
   if (/degraded|partial|fallback|mixed/.test(haystack) || status === 'degraded') {
     return { tone: 'degraded', label: 'Degraded' }
@@ -85,6 +100,7 @@ export function memberStatusPresentation(
 export const CouncilMembersPanel = memo(function CouncilMembersPanel({
   providerStatuses,
   providerLabels,
+  operationStatuses,
   onOpenPanel,
 }: CouncilMembersPanelProps) {
   return (
@@ -100,14 +116,21 @@ export const CouncilMembersPanel = memo(function CouncilMembersPanel({
             const status = statusForMember(member.id, member.rosterId, providerStatuses)
             const detailKey = member.rosterId ?? member.id
             const presentation = memberStatusPresentation(status, providerLabels?.[detailKey])
-            const dot = STATUS_DOT[presentation.tone] ?? STATUS_DOT.offline
+            const operationStatus = member.rosterId ? operationStatuses?.[member.rosterId] : undefined
+            const operationPresentation = operationStatus ? FAMILY_OPERATION_STATUS_PRESENTATION[operationStatus] : null
+            const dot = operationPresentation
+              ? OPERATION_TONE_DOT[operationPresentation.tone]
+              : (STATUS_DOT[presentation.tone] ?? STATUS_DOT.offline)
+            const dotTitle = operationPresentation
+              ? `${presentation.label} · ${operationPresentation.label}`
+              : presentation.label
             const roster = member.rosterId ? COUNCIL_ROSTER.find(r => r.id === member.rosterId) : null
             return (
-              <li key={member.id} className="flex items-start gap-2">
+              <li key={member.id} className="flex items-start gap-2" data-testid={`council-member-${member.id}`}>
                 <span
                   className="mt-1 h-2 w-2 shrink-0 rounded-full"
                   style={{ background: dot.color, boxShadow: dot.glow }}
-                  title={presentation.label}
+                  title={dotTitle}
                   aria-hidden
                 />
                 <div className="min-w-0">
@@ -115,6 +138,7 @@ export const CouncilMembersPanel = memo(function CouncilMembersPanel({
                     <p className="text-[10px] font-bold tracking-widest text-emerald-100">{member.label}</p>
                     <span className="text-[8px] font-semibold uppercase tracking-widest text-slate-500">
                       {presentation.label}
+                      {operationPresentation ? ` · ${operationPresentation.label}` : ''}
                     </span>
                   </div>
                   {roster ? (
