@@ -163,8 +163,8 @@ async function scanRepo() {
     currentBranch: branch,
     lastScanTime: new Date().toISOString(),
     scanStatus: 'indexed',
-    buildStatus: 'placeholder: not connected',
-    deploymentStatus: 'placeholder: not connected',
+    buildStatus: 'config_needed: build verification is not connected to repo scan; use the validated build command outside this read-only route.',
+    deploymentStatus: 'config_needed: deployment provider status is not connected to repo scan; no deployment state is inferred.',
     architectureMap: SCAN_ROOTS.map(scanRoot => ({
       module: scanRoot,
       fileCount: files.filter(file => file.relativePath.startsWith(`${scanRoot}/`)).length,

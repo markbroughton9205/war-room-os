@@ -51,7 +51,7 @@ function Metric({ metric }: { metric: SourceBackedMetric }) {
       <div className="text-[9px] font-bold uppercase tracking-widest text-slate-500">{metric.label}</div>
       <div className="mt-1 font-mono text-sm" style={{ color: available ? '#D1FAE5' : '#64748B' }}>{available ? metric.value : 'Unavailable'}</div>
       <div className="mt-2 text-[9px] leading-relaxed" style={{ color: available ? '#86EFAC' : '#64748B' }}>
-        {available ? metric.source : 'Requires SOURCE_BACKED financial evidence.'}
+        {available ? metric.source : 'Missing dependency: source-backed Outcome Ledger revenue or confirmed operator earnings. No financial value is inferred.'}
       </div>
     </div>
   )
@@ -132,7 +132,13 @@ function ActionCard({ action, onIntent }: { action: PriorityActionCandidate; onI
 
 function PacketFeed({ nodes, onIntent }: { nodes: RuntimeGraphNode[]; onIntent: (message: string) => void }) {
   const packets = nodes.filter(node => ['revenue', 'mission', 'subsystem', 'approval'].includes(node.kind)).slice(0, 8)
-  if (!packets.length) return <EmptyState>No active packet feed is available from the runtime graph.</EmptyState>
+  if (!packets.length) {
+    return (
+      <EmptyState>
+        No runtime nodes are available for this feed. Missing dependency: runtime graph inputs from missions, approvals, revenue, or source-backed signals. Implementation remaining: connect this surface to real `war_room_operator_packets` before presenting executable packet actions.
+      </EmptyState>
+    )
+  }
   return (
     <div className="space-y-2">
       {packets.map(packet => (
@@ -147,7 +153,7 @@ function PacketFeed({ nodes, onIntent }: { nodes: RuntimeGraphNode[]; onIntent: 
           <div className="mt-2 flex flex-wrap gap-2">
             {['approve', 'reject', 'modify', 'archive'].map(action => (
               <button key={action} type="button" onClick={() => onIntent(`${action} intent captured for ${packet.label}; no packet mutation performed.`)} className="rounded border border-white/15 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">
-                {action}
+                {action} intent
               </button>
             ))}
           </div>
@@ -265,7 +271,10 @@ export function OperatorCommandEnvironment({ version, sessionIndicators, onOpenE
           </section>
 
           <section className="rounded border border-sky-500/20 bg-black/30 p-3">
-            <div className="mb-3 text-[10px] font-bold uppercase tracking-widest text-sky-300">Active Packet Feed</div>
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-sky-300">Runtime Node Feed</div>
+            <p className="mb-3 text-[10px] text-slate-500">
+              Advisory graph records only. This is not a live packet approval queue until backed by `war_room_operator_packets`.
+            </p>
             <PacketFeed nodes={graph?.nodes ?? []} onIntent={setIntentMessage} />
           </section>
         </div>

@@ -16,9 +16,10 @@ export function CommandBar() {
         <input
           type="search"
           readOnly
-          placeholder="Command palette — type to filter (mock)"
+          placeholder="Command palette not connected on this legacy route"
           className="min-w-0 flex-1 bg-transparent text-sm text-slate-200 placeholder:text-slate-600 outline-none"
-          aria-label="Command palette (placeholder)"
+          aria-label="Command palette not connected on this legacy route"
+          title="Missing dependency: connect this legacy shell to the main War Room command dispatcher before accepting commands."
         />
         <kbd className="hidden shrink-0 rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-slate-400 shadow-[inset_0_-1px_0_rgba(0,0,0,0.4)] sm:inline-block">
           ⌘K

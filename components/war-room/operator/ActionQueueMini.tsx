@@ -92,7 +92,9 @@ export const ActionQueueMini = memo(function ActionQueueMini({
           ))}
         </div>
       ) : (
-        <div className="rounded border border-white/10 bg-black/25 p-3 text-xs text-slate-500">No source-backed actions yet.</div>
+        <div className="rounded border border-white/10 bg-black/25 p-3 text-xs leading-relaxed text-slate-500">
+          No source-backed actions are queued. Missing dependency: a persisted `war_room_operator_actions` row, a classified Signal Radar candidate, or a source-backed priority queue item. Implementation remaining: run a bounded signal scan, request a better queue, or connect a real operator action source; no fake action is shown.
+        </div>
       )}
     </section>
   )

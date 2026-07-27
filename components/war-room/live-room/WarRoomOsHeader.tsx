@@ -45,12 +45,12 @@ export const WarRoomOsHeader = memo(function WarRoomOsHeader({
 
       <div className="hidden flex-1 flex-col items-center gap-1 sm:flex">
         <p className="text-[9px] font-bold uppercase tracking-[0.35em] text-slate-500">System Status</p>
-        <div className="flex flex-wrap items-center justify-center gap-3 text-[10px] tracking-widest text-emerald-300/90">
-          <span title="CPU load placeholder">CPU · Nominal</span>
+        <div className="flex flex-wrap items-center justify-center gap-3 text-[10px] tracking-widest text-slate-400">
+          <span title="Missing dependency: a connected resource monitor feed.">CPU · Not connected</span>
           <span className="text-emerald-900/80">|</span>
-          <span title="Memory placeholder">Memory · Nominal</span>
+          <span title="Missing dependency: a connected resource monitor feed.">Memory · Not connected</span>
           <span className="text-emerald-900/80">|</span>
-          <span title="Network placeholder">Network · Nominal</span>
+          <span title="Missing dependency: a connected network health feed.">Network · Not connected</span>
         </div>
         <p className="max-w-md truncate text-center text-[9px] tracking-wide text-cyan-300/80" title={systemStatusLine}>
           {systemStatusLine}

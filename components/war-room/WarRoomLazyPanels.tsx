@@ -152,7 +152,7 @@ function CouncilSection() {
         <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-[#d4af37]">Council</p>
         <h2 className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-2xl">Seating &amp; oversight</h2>
         <p className="mt-1 max-w-2xl text-sm text-slate-500">
-          Mock council layout — six family seats, Sentinel metrics, Baby observer node.
+          Static council overview for the legacy route. Use the primary Live Council shell for runtime provider participation, trace, and transcript state.
         </p>
       </header>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_17.5rem] lg:items-start lg:gap-x-8 lg:gap-y-6 xl:grid-cols-[minmax(0,1fr)_20rem]">

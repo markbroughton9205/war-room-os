@@ -28,7 +28,7 @@ export function SentinelStatusPanel({
   sentinel?: SentinelStatus
   className?: string
 }) {
-  const [feedHint, setFeedHint] = useState('Mock / Not live')
+  const [feedHint, setFeedHint] = useState('Static seed / not live')
 
   useEffect(() => {
     let cancelled = false
@@ -37,9 +37,9 @@ export function SentinelStatusPanel({
         const res = await fetch('/api/red-sentinel/status', { cache: 'no-store' })
         if (!res.ok) throw new Error('status failed')
         await res.json()
-        if (!cancelled) setFeedHint('Red Sentinel API reachable · metrics mock')
+        if (!cancelled) setFeedHint('Red Sentinel API reachable · static seed metrics')
       } catch {
-        if (!cancelled) setFeedHint('Mock / Not live')
+        if (!cancelled) setFeedHint('Static seed / not live')
       }
     })()
     return () => {

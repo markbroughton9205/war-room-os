@@ -133,7 +133,7 @@ async function listOperatorRows(client: WarRoomSupabase) {
   const [actions, earnings, packets, activity] = await Promise.all([
     client.from('war_room_operator_actions').select('*').neq('status', 'completed').neq('status', 'skipped').order('confidence', { ascending: false }).order('created_at', { ascending: false }).limit(4),
     client.from('war_room_operator_earnings').select('*').order('created_at', { ascending: false }).limit(80),
-    client.from('war_room_operator_packets').select('*').order('created_at', { ascending: false }).limit(1),
+    client.from('war_room_operator_packets').select('*').order('created_at', { ascending: false }).limit(8),
     client.from('war_room_operator_activity').select('*').order('created_at', { ascending: false }).limit(8),
   ])
   const firstError = [actions.error, earnings.error, packets.error, activity.error].find(Boolean)
@@ -159,10 +159,23 @@ function activityFromRows(rows: Row[]): OperatorActivity[] {
 function packetFromRow(row: Row | undefined): OperatorPacketSummary | null {
   if (!row) return null
   const status = text(row.status, 'pending')
+  const packetType = text(row.packet_type, 'unknown')
+  const body = text(row.body)
+  const externalActionPerformed = row.external_action_performed === true
+  const autonomousExecutionPerformed = row.autonomous_execution_performed === true
+  const emailSent = row.email_sent === true
   return {
     id: text(row.id),
     title: text(row.title, 'Operator approval packet'),
+    packetType: packetType === 'approval_packet' || packetType === 'email_draft' || packetType === 'queue_refresh' || packetType === 'council_proposal' ? packetType : 'unknown',
     status: status === 'approved' || status === 'drafted' || status === 'completed' ? status : 'pending',
+    body,
+    recipient: nullableText(row.recipient),
+    proposedEffect: body ? body.slice(0, 240) : 'No packet body recorded. Missing dependency: packet creator must write body text into `war_room_operator_packets`.',
+    approvalRequirement: status === 'approved' ? 'Commander approval recorded; no external execution was performed.' : 'Commander approval required before this packet can be treated as accepted.',
+    executionRelationship: externalActionPerformed || autonomousExecutionPerformed || emailSent
+      ? 'Safety violation recorded on packet row; do not execute from this deck.'
+      : 'Database guardrails record no external action, no autonomous execution, and no email sent.',
     createdAt: text(row.created_at, new Date().toISOString()),
     truthLabel: text(row.truth_label) as OperatorTruthLabel || 'APPROVAL_REQUIRED',
   }
@@ -239,6 +252,7 @@ export async function collectOperatorDeck(req: Request): Promise<OperatorDeckSna
     actionQueue,
     financialTelemetry: financialTelemetry(operatorRows?.earnings ?? [], weeklyOutcomeActual, lastOutcome ? money(lastOutcome.actualRevenue) : null),
     missions: missions.map(missionStatus),
+    packets: (operatorRows?.packets ?? []).map(packetFromRow).filter(Boolean) as OperatorPacketSummary[],
     lastPacket: packetFromRow(operatorRows?.packets[0]),
     recentActivity: activityFromRows(operatorRows?.activity ?? []),
     integrations: {
@@ -320,14 +334,17 @@ export async function handleOperatorAction(req: Request, command: OperatorAction
     return { ok: true, persistenceAvailable: true, message: 'Action skipped. It was retained for learning.', snapshot: await collectOperatorDeck(req) }
   }
 
-  if (command.command === 'approve_last_packet') {
+  if (command.command === 'approve_last_packet' || command.command === 'approve_packet') {
     if (!command.confirmed) return { ok: false, persistenceAvailable: true, message: 'Explicit Commander confirmation required.' }
-    const { data } = await supabase.client.from('war_room_operator_packets').select('id').order('created_at', { ascending: false }).limit(1).maybeSingle()
+    const explicitId = command.command === 'approve_packet' ? text(command.packetId) : ''
+    const { data } = explicitId
+      ? { data: { id: explicitId } }
+      : await supabase.client.from('war_room_operator_packets').select('id').order('created_at', { ascending: false }).limit(1).maybeSingle()
     const id = text((data as Row | null)?.id)
     if (!id) return { ok: false, persistenceAvailable: true, message: 'No packet is waiting for approval.' }
     await supabase.client.from('war_room_operator_packets').update({ status: 'approved', approved_at: new Date().toISOString() }).eq('id', id)
-    await insertActivity(supabase.client, 'packet_approved', 'Last operator packet approved by Commander confirmation.', 'APPROVAL_REQUIRED')
-    return { ok: true, persistenceAvailable: true, message: 'Last packet approved by Commander confirmation.', snapshot: await collectOperatorDeck(req) }
+    await insertActivity(supabase.client, 'packet_approved', `Operator packet ${id} approved by Commander confirmation.`, 'APPROVAL_REQUIRED')
+    return { ok: true, persistenceAvailable: true, message: 'Packet approved by Commander confirmation. No external action was performed.', snapshot: await collectOperatorDeck(req) }
   }
 
   if (command.command === 'manual_email_alert') {
@@ -415,6 +432,7 @@ export function sanitizeOperatorCommand(body: unknown): OperatorActionCommand | 
   if (command === 'skip') return { command, actionId: text(input.actionId), reason: nullableText(input.reason) }
   if (command === 'request_better_queue') return { command }
   if (command === 'approve_last_packet') return { command, confirmed: input.confirmed === true }
+  if (command === 'approve_packet') return { command, packetId: text(input.packetId), confirmed: input.confirmed === true }
   if (command === 'manual_email_alert') {
     return {
       command,
