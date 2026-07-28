@@ -13,6 +13,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { resolveRepoRoot } from '@/lib/repo/paths'
+import { resolveSovereignModelLabStorageRoot } from './storage'
 import { REQUIRED_TOKENIZER_SPECIAL_TOKENS } from './types'
 import type { TokenizerArtifactFile, TokenizerVerificationCheck, TokenizerVerificationResult } from './types'
 
@@ -29,7 +30,7 @@ function check(id: string, label: string, passed: boolean, detail: string): Toke
 }
 
 function tokenizerVaultRoot(): string {
-  return path.join(resolveRepoRoot(), '.war-room', 'sovereign-model-lab', 'tokenizers', 'WRM-001')
+  return path.join(resolveSovereignModelLabStorageRoot(), 'tokenizers', 'WRM-001')
 }
 
 function isContainedUnderVault(candidate: string): boolean {

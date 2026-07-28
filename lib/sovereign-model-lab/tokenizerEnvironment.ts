@@ -12,6 +12,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { resolveRepoRoot } from '@/lib/repo/paths'
 import { probeFreeDiskBytes, resolvePythonExecutable } from './hardwareProbe'
+import { resolveSovereignModelLabStorageRoot } from './storage'
 import type { TokenizerEnvironmentReport, TokenizerLibraryName, TokenizerLibraryProbeResult } from './types'
 
 const execFileAsync = promisify(execFile)
@@ -150,7 +151,7 @@ export async function probeTokenizerEnvironment(): Promise<TokenizerEnvironmentR
 
   const libraries = await Promise.all(APPROVED_LIBRARIES.map(lib => probeLibrary(absPathOut, lib, versionOut)))
 
-  const outputDir = path.join(resolveRepoRoot(), '.war-room', 'sovereign-model-lab', 'tokenizers', 'WRM-001')
+  const outputDir = path.join(resolveSovereignModelLabStorageRoot(), 'tokenizers', 'WRM-001')
   const writableOutputDir = await checkWritableDir(outputDir)
 
   const scriptPath = path.join(resolveRepoRoot(), 'scripts', 'sovereign-model-lab', 'train_wrm001_tokenizer.py')

@@ -6,10 +6,8 @@
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { resolveRepoRoot } from '@/lib/repo/paths'
+import { resolveSovereignModelLabStorageRoot } from './storage'
 import type { DatasetAccessStatus, DatasetLicenseRecord } from './types'
-
-const LEDGER_REL = path.join('.war-room', 'sovereign-model-lab', 'provenance')
 
 export type ProvenanceLedgerEntry = {
   entryId: string
@@ -28,7 +26,7 @@ export type ProvenanceLedgerEntry = {
 }
 
 function ledgerDirFor(documentId: string): string {
-  return path.join(resolveRepoRoot(), LEDGER_REL, documentId)
+  return path.join(resolveSovereignModelLabStorageRoot(), 'provenance', documentId)
 }
 
 async function atomicWriteJson(dir: string, fileName: string, value: unknown): Promise<void> {
@@ -93,7 +91,7 @@ export async function appendProvenanceEntry(
 }
 
 export async function listAllProvenanceDocumentIds(): Promise<string[]> {
-  const root = path.join(resolveRepoRoot(), LEDGER_REL)
+  const root = path.join(resolveSovereignModelLabStorageRoot(), 'provenance')
   try {
     const entries = await readdir(root, { withFileTypes: true })
     return entries.filter(e => e.isDirectory()).map(e => e.name)

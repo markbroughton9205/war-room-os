@@ -64,6 +64,7 @@ import {
   getTokenizerJobStatus,
   listCorpusVersions,
   listDocuments,
+  resolveSovereignModelLabStorageRoot,
   saveDatasetManifest,
   saveDocument,
   saveHardwareReport,
@@ -385,7 +386,7 @@ export async function createTokenizerPlan(programId: string, opts: {
     ? `Requested vocab_size=${opts.vocabSize} exceeds what this corpus (${totalChars} characters) can usefully support. Recommending ${recommendedVocabSize} instead.`
     : null
 
-  const outputDir = path.join(resolveRepoRoot(), '.war-room', 'sovereign-model-lab', 'tokenizers', CORPUS_ID, corpusVersion)
+  const outputDir = path.join(resolveSovereignModelLabStorageRoot(), 'tokenizers', CORPUS_ID, corpusVersion)
   const manifestOutputPath = path.join(outputDir, 'training-manifest.json')
   const corpusJsonlPath = path.join(corpusVersionDir(CORPUS_ID, corpusVersion), 'corpus.jsonl')
   const scriptPath = path.join(resolveRepoRoot(), 'scripts', 'sovereign-model-lab', 'train_wrm001_tokenizer.py')

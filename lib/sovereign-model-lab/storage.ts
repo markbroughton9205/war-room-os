@@ -22,10 +22,72 @@ import type {
   TrainingExperiment,
 } from './types'
 
-const ROOT_REL = path.join('.war-room', 'sovereign-model-lab')
+const PRODUCTION_ROOT_REL = path.join('.war-room', 'sovereign-model-lab')
+const VALIDATION_ROOT_REL = path.join('.war-room', 'validation', 'sovereign-model-lab')
+
+export class InvalidValidationStorageRootError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'InvalidValidationStorageRootError'
+  }
+}
+
+let validationRootOverride: string | null = null
+
+/**
+ * The single resolution point for the Sovereign Model Lab on-disk storage root. Every function in
+ * this module — and every other Sovereign Model Lab module that needs a path under this
+ * subsystem's own persisted state (provenanceLedger.ts, tokenizerEnvironment.ts,
+ * tokenizerVerifier.ts, runtime.ts's tokenizer plan output dir) — calls this function rather than
+ * constructing '.war-room/sovereign-model-lab' independently. Production/default behavior is
+ * unchanged unless a validation override is explicitly set (see
+ * setSovereignModelLabValidationStorageRoot below), and even then only for the lifetime of the
+ * current process — nothing here is persisted across processes.
+ */
+export function resolveSovereignModelLabStorageRoot(): string {
+  if (validationRootOverride !== null) return validationRootOverride
+  return path.join(resolveRepoRoot(), PRODUCTION_ROOT_REL)
+}
+
+/** Always resolves to the production/default root regardless of any active validation override —
+ * exists so validation code can prove properties about the production root (e.g. that a fixture
+ * planted there survives an isolated run) without itself constructing the path independently. */
+export function sovereignModelLabProductionStorageRootForTesting(): string {
+  return path.join(resolveRepoRoot(), PRODUCTION_ROOT_REL)
+}
+
+/**
+ * Validation-only override. Constrains the requested root to the repository-owned
+ * `.war-room/validation/sovereign-model-lab/` area — rejects path traversal and any path (relative
+ * or absolute) that resolves outside that area, before ever assigning the override. Never capable
+ * of pointing at the production default root or anywhere else on the filesystem. Intended caller: a
+ * validation suite's entry point, before any Model Lab storage access happens.
+ */
+export function setSovereignModelLabValidationStorageRoot(requestedRoot: string): string {
+  const validationBase = path.resolve(resolveRepoRoot(), VALIDATION_ROOT_REL)
+  const trimmed = requestedRoot.trim()
+  if (!trimmed) {
+    throw new InvalidValidationStorageRootError('Empty validation storage root requested.')
+  }
+  const candidate = path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(validationBase, trimmed)
+  const rel = path.relative(validationBase, candidate)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new InvalidValidationStorageRootError(
+      `Requested validation storage root ${JSON.stringify(requestedRoot)} resolves outside the permitted validation area (${validationBase}).`,
+    )
+  }
+  validationRootOverride = candidate
+  return candidate
+}
+
+/** Restores production/default storage-root resolution. Always call this when a validation run
+ * finishes, success or failure (e.g. in a finally block). */
+export function clearSovereignModelLabValidationStorageRoot(): void {
+  validationRootOverride = null
+}
 
 function dirFor(collection: string): string {
-  return path.join(resolveRepoRoot(), ROOT_REL, collection)
+  return path.join(resolveSovereignModelLabStorageRoot(), collection)
 }
 
 /** Root directory for a corpus's immutable versioned artifact bundles — the actual multi-file

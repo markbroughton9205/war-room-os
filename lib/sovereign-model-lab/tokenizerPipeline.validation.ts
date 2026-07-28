@@ -6,7 +6,8 @@
  * convention as the Phase 1 suite.
  */
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { resolveRepoRoot } from '@/lib/repo/paths'
@@ -15,6 +16,7 @@ import {
   buildCorpusForProgram,
   buildDatasetCandidateForProgram,
   checkTokenizerEnvironment,
+  checkTokenizerTrainingProgress,
   createTokenizerPlan,
   decideDatasetApproval,
   ingestDocumentForProgram,
@@ -23,12 +25,18 @@ import {
   verifyProvenanceForProgram,
 } from './runtime'
 import {
+  clearSovereignModelLabValidationStorageRoot,
   getProgram,
   getTokenizerExperiment,
   getTokenizerJobStatus,
+  InvalidValidationStorageRootError,
+  listPrograms,
   listTokenizerJobStatuses,
+  resolveSovereignModelLabStorageRoot,
   saveProgram,
   saveTokenizerExperiment,
+  setSovereignModelLabValidationStorageRoot,
+  sovereignModelLabProductionStorageRootForTesting,
   tokenizerJobLockPath,
 } from './storage'
 import { buildProgramProjection, migrateProgramState } from './programProjection'
@@ -56,8 +64,11 @@ const CORPUS_ID = 'WRM-001'
 const FIXTURE_REL = 'lib/sovereign-model-lab/__fixtures__/sample-commander-document.txt'
 const SCRATCH_DIR = path.join(resolveRepoRoot(), '.war-room', 'sovereign-model-lab-test-scratch')
 
+/** Deletes whatever the CURRENT storage root resolves to — production by default, or the isolated
+ * validation root once set via setSovereignModelLabValidationStorageRoot(). Never independently
+ * constructs '.war-room/sovereign-model-lab' — see storage.ts's single resolution point. */
 async function resetLabState(): Promise<void> {
-  await rm(path.join(resolveRepoRoot(), '.war-room', 'sovereign-model-lab'), { recursive: true, force: true })
+  await rm(resolveSovereignModelLabStorageRoot(), { recursive: true, force: true })
 }
 
 function licenseRecord(overrides: Partial<DatasetLicenseRecord> = {}): DatasetLicenseRecord {
@@ -599,9 +610,12 @@ function testCancellationAndFailureNeverReady(): CaseResult[] {
 // --- 21/23/24. Artifact hashing, special-token verification, reload-before-ready gate ---------------
 
 async function testArtifactVerificationChecks(): Promise<CaseResult[]> {
-  const vaultDir = path.join(resolveRepoRoot(), '.war-room', 'sovereign-model-lab', 'tokenizers', CORPUS_ID, 'test-version')
+  // Must use the resolver (not an independently-constructed path) so this stays consistent with
+  // verifyTokenizerArtifact()'s own internal tokenizerVaultRoot() containment check, and so this
+  // test operates against whichever root (production or isolated) is currently active.
+  const vaultDir = path.join(resolveSovereignModelLabStorageRoot(), 'tokenizers', CORPUS_ID, 'test-version')
   await mkdir(vaultDir, { recursive: true })
-  const corpusDir = path.join(resolveRepoRoot(), '.war-room', 'sovereign-model-lab', 'corpora', CORPUS_ID, 'test-version')
+  const corpusDir = path.join(resolveSovereignModelLabStorageRoot(), 'corpora', CORPUS_ID, 'test-version')
   await mkdir(corpusDir, { recursive: true })
   const corpusJsonlPath = path.join(corpusDir, 'corpus.jsonl')
   await writeFile(corpusJsonlPath, '{"documentId":"d1","text":"hello"}\n', 'utf8')
@@ -640,8 +654,8 @@ async function testArtifactVerificationChecks(): Promise<CaseResult[]> {
   })
   const missingSpecialTokenDetected = incompleteResult.checks.find(c => c.id === 'special_tokens_exist')?.passed === false
 
-  await rm(path.join(resolveRepoRoot(), '.war-room', 'sovereign-model-lab', 'tokenizers'), { recursive: true, force: true })
-  await rm(path.join(resolveRepoRoot(), '.war-room', 'sovereign-model-lab', 'corpora'), { recursive: true, force: true })
+  await rm(path.join(resolveSovereignModelLabStorageRoot(), 'tokenizers'), { recursive: true, force: true })
+  await rm(path.join(resolveSovereignModelLabStorageRoot(), 'corpora'), { recursive: true, force: true })
 
   return [
     check('phase2a_21_every_artifact_hashed', artifactsHashed, JSON.stringify(result.checks.find(c => c.id === 'artifacts_hashed'))),
@@ -891,6 +905,239 @@ async function testTokenizerExecutionGateIntegration(): Promise<CaseResult[]> {
   return results
 }
 
+/**
+ * Route-level integration test (verification pass, commit 90d07ef follow-up). The 21 gate tests
+ * above call assertTokenizerExecutionApproved() and startTokenizerTrainingForProgram() as two
+ * separate, independently-tested functions — neither proves route.ts itself wires them together in
+ * the correct order. This test closes that gap by importing and invoking the REAL exported POST
+ * handler from app/api/sovereign-model-lab/programs/[id]/tokenizer-train/route.ts directly, with a
+ * real Request object, against real (but Node-executable-only, never-Python) fixtures.
+ *
+ * Methodological note: this repository has no mocking/spy framework (no Jest/Vitest — see
+ * CLAUDE.md — and no other validator in this repo uses one). A literal "assert the mock was called
+ * zero times" is therefore not achievable without introducing new test infrastructure, which this
+ * verification pass is explicitly scoped not to do. Instead, call order is proven behaviorally: the
+ * blocked case and the approved case use the identical program/experiment/plan fixture and differ
+ * in exactly one input (the approval object in the request body), then the REAL, observable,
+ * on-disk side effect of startTokenizerTrainingForProgram (a job record + exclusive lock) is
+ * checked directly. Since nothing else in this test varies, "blocked case never creates a job
+ * record" and "approved case always creates one" together prove the gate runs first and actually
+ * governs reachability of the execution call in the real, unmodified route file — not a stand-in.
+ */
+async function importRealTokenizerTrainRouteHandler(): Promise<{ POST: (req: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response> }> {
+  const routeUrl = pathToFileURL(
+    path.join(resolveRepoRoot(), 'app', 'api', 'sovereign-model-lab', 'programs', '[id]', 'tokenizer-train', 'route.ts'),
+  ).href
+  return import(routeUrl) as Promise<{ POST: (req: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response> }>
+}
+
+function fakeTrainRequest(bodyObject: unknown): Request {
+  return new Request('http://localhost/api/sovereign-model-lab/programs/test/tokenizer-train', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(bodyObject),
+  })
+}
+
+async function testRouteLevelWiringOrder(): Promise<CaseResult[]> {
+  await resetLabState()
+  const results: CaseResult[] = []
+
+  const { POST } = await importRealTokenizerTrainRouteHandler()
+
+  const { program: builtProgram, experimentId } = await setUpApprovedTokenizerExperiment('WRM-ROUTE-WIRING-TEST', 300)
+  const experiment = await getTokenizerExperiment(experimentId)
+  if (!experiment?.plan) {
+    await resetLabState()
+    return [check('route_setup_failed', false, 'Could not construct a real approved tokenizer experiment for route-level wiring tests.')]
+  }
+  const readyProgram: SovereignModelLabProgram = {
+    ...builtProgram,
+    state: 'awaiting_commander_tokenizer_approval',
+    tokenizerExperimentId: experimentId,
+    history: [...builtProgram.history, { state: 'awaiting_commander_tokenizer_approval', at: new Date().toISOString(), note: 'route wiring test fixture' }],
+  }
+  await saveProgram(readyProgram)
+
+  // --- Blocked case: real POST call, no approval in the body ---------------------------------
+  const blockedReq = fakeTrainRequest({})
+  const blockedRes = await POST(blockedReq, { params: Promise.resolve({ id: readyProgram.programId }) })
+  const blockedBody = (await blockedRes.json()) as { error?: string; blocked?: boolean }
+  results.push(check('route_01_blocked_request_returns_blocked_response', blockedRes.status === 403 && blockedBody.blocked === true, `status=${blockedRes.status} body=${JSON.stringify(blockedBody)}`))
+
+  const jobsAfterBlocked = await listTokenizerJobStatuses()
+  const lockExistsAfterBlocked = await readFile(tokenizerJobLockPath(), 'utf8').then(() => true).catch(() => false)
+  results.push(check('route_02_blocked_request_never_reaches_execution_zero_jobs', jobsAfterBlocked.length === 0, `${jobsAfterBlocked.length} job record(s) found after a blocked POST`))
+  results.push(check('route_03_blocked_request_never_reaches_execution_no_lock_file', !lockExistsAfterBlocked, `lock file exists=${lockExistsAfterBlocked}`))
+
+  // Also exercise the "wrong approval" (not merely absent) shape through the real route, since a
+  // present-but-invalid approval is a distinct code path through JSON parsing than a missing key.
+  const wrongApprovalReq = fakeTrainRequest({ tokenizerExecutionApproval: { kind: 'sovereign_model_lab_tokenizer_execution', granted: true, programId: readyProgram.programId, planHash: 'not-a-real-hash', action: 'start_tokenizer_training' } })
+  const wrongApprovalRes = await POST(wrongApprovalReq, { params: Promise.resolve({ id: readyProgram.programId }) })
+  const wrongApprovalBody = (await wrongApprovalRes.json()) as { error?: string; blocked?: boolean }
+  results.push(check('route_04_wrong_approval_hash_also_blocked_via_real_route', wrongApprovalRes.status === 403 && wrongApprovalBody.blocked === true, `status=${wrongApprovalRes.status} body=${JSON.stringify(wrongApprovalBody)}`))
+  const jobsAfterWrongApproval = await listTokenizerJobStatuses()
+  results.push(check('route_05_wrong_approval_hash_also_zero_jobs', jobsAfterWrongApproval.length === 0, `${jobsAfterWrongApproval.length} job record(s) found`))
+
+  // --- Approved case: real POST call, correctly-bound approval in the body -------------------
+  const approvedReq = fakeTrainRequest({
+    tokenizerExecutionApproval: {
+      kind: 'sovereign_model_lab_tokenizer_execution',
+      granted: true,
+      programId: readyProgram.programId,
+      planHash: experiment.plan.planHash,
+      action: 'start_tokenizer_training',
+    },
+  })
+  const approvedRes = await POST(approvedReq, { params: Promise.resolve({ id: readyProgram.programId }) })
+  const approvedBody = (await approvedRes.json()) as { program?: SovereignModelLabProgram; error?: string }
+  results.push(check('route_06_approved_request_returns_200_and_training_state', approvedRes.status === 200 && approvedBody.program?.state === 'tokenizer_training', `status=${approvedRes.status} state=${approvedBody.program?.state}`))
+
+  const experimentAfterApproved = approvedBody.program?.tokenizerExperimentId ? await getTokenizerExperiment(approvedBody.program.tokenizerExperimentId) : null
+  const jobId = experimentAfterApproved?.jobId ?? null
+  results.push(check('route_07_approved_request_actually_reaches_execution', jobId !== null, `jobId=${jobId}`))
+
+  if (jobId) {
+    const finalStatus = await waitForJobToTerminate(jobId, 5000)
+    results.push(check('route_08_approved_request_job_actually_ran_via_real_route_call', finalStatus?.status === 'completed' && finalStatus.exitCode === 0, JSON.stringify(finalStatus)))
+  } else {
+    results.push(check('route_08_approved_request_job_actually_ran_via_real_route_call', false, 'no job id — cannot verify'))
+  }
+
+  // Order proof: identical fixture, only the approval differed between route_02 (0 jobs) and
+  // route_07 (1 job) — the gate is what governed reachability of the real execution call in the
+  // real, unmodified route.ts file, not a stand-in.
+  const finalJobs = await listTokenizerJobStatuses()
+  results.push(check('route_09_call_order_proof_blocked_vs_approved_job_count', jobsAfterBlocked.length === 0 && finalJobs.length === 1, `blocked_jobs=${jobsAfterBlocked.length} approved_jobs=${finalJobs.length}`))
+
+  await resetLabState()
+  return results
+}
+
+/**
+ * CASE 6 (90d07ef-VERIFY continuation): real failure injection through the real POST route. The
+ * gate passes with a genuinely valid, correctly-bound approval; the underlying plan's
+ * executablePath is a real, non-existent path — the exact technique testSpawnErrorHandledGracefully
+ * above already uses to exercise tokenizerRuntime.ts's own error handler in isolation — now driven
+ * through the real, unmodified POST handler instead of calling startTokenizerTraining directly. No
+ * function is patched, replaced, or mocked; spawn() is the real Node spawn, and it genuinely fails
+ * with ENOENT because the executable genuinely does not exist on this machine.
+ */
+async function testRouteLevelRealFailureInjection(): Promise<CaseResult[]> {
+  await resetLabState()
+  const results: CaseResult[] = []
+
+  // Before-state: confirm the sandbox is genuinely empty before this test adds anything to it —
+  // not merely assumed clean because resetLabState() was called.
+  const programsBefore = await listPrograms()
+  const jobsBefore = await listTokenizerJobStatuses()
+  results.push(check('failure_00_sandbox_empty_before_test', programsBefore.length === 0 && jobsBefore.length === 0, `programs=${programsBefore.length} jobs=${jobsBefore.length}`))
+
+  const { POST } = await importRealTokenizerTrainRouteHandler()
+
+  const nonexistentExecutable = 'C:\\this\\definitely\\does\\not\\exist\\nonexistent-executable-for-case6.exe'
+  const { program: builtProgram, experimentId } = await setUpApprovedTokenizerExperimentWithExecutable(
+    'WRM-ROUTE-REAL-FAILURE-TEST',
+    nonexistentExecutable,
+    ['--version'],
+  )
+  const experiment = await getTokenizerExperiment(experimentId)
+  if (!experiment?.plan) {
+    await resetLabState()
+    return [...results, check('failure_setup_failed', false, 'Could not construct a real tokenizer experiment with an invalid executable path.')]
+  }
+  const readyProgram: SovereignModelLabProgram = {
+    ...builtProgram,
+    state: 'awaiting_commander_tokenizer_approval',
+    tokenizerExperimentId: experimentId,
+    history: [...builtProgram.history, { state: 'awaiting_commander_tokenizer_approval', at: new Date().toISOString(), note: 'real failure injection test fixture' }],
+  }
+  await saveProgram(readyProgram)
+
+  const outputDirAbs = path.isAbsolute(experiment.plan.outputDir) ? experiment.plan.outputDir : path.resolve(resolveRepoRoot(), experiment.plan.outputDir)
+
+  // Real POST call with a genuinely valid, correctly-bound approval — the gate must pass; the
+  // failure that follows is entirely inside the real spawn/runtime layer, never the gate itself.
+  const req = fakeTrainRequest({
+    tokenizerExecutionApproval: {
+      kind: 'sovereign_model_lab_tokenizer_execution',
+      granted: true,
+      programId: readyProgram.programId,
+      planHash: experiment.plan.planHash,
+      action: 'start_tokenizer_training',
+    },
+  })
+  const res = await POST(req, { params: Promise.resolve({ id: readyProgram.programId }) })
+  const body = (await res.json()) as { program?: SovereignModelLabProgram; error?: string }
+  results.push(check('failure_01_gate_passed_real_valid_approval', res.status === 200 && body.program?.state === 'tokenizer_training', `status=${res.status} state=${body.program?.state}`))
+
+  const experimentAfterStart = body.program?.tokenizerExperimentId ? await getTokenizerExperiment(body.program.tokenizerExperimentId) : null
+  const jobId = experimentAfterStart?.jobId ?? null
+  results.push(check('failure_02_real_job_was_actually_started', jobId !== null, `jobId=${jobId}`))
+
+  const finalJobStatus = jobId ? await waitForJobToTerminate(jobId, 5000) : null
+  results.push(check('failure_03_real_spawn_failure_produces_failed_job_status', finalJobStatus?.status === 'failed', JSON.stringify(finalJobStatus)))
+  results.push(check('failure_04_failure_reason_is_the_real_enoent_not_fabricated', Boolean(finalJobStatus?.stderrTail?.includes('ENOENT') || finalJobStatus?.stderrTail?.includes('Spawn failed')), finalJobStatus?.stderrTail ?? 'missing'))
+
+  // Reconcile program state the same way the real /tokenizer-progress route does — this calls the
+  // real, unmodified checkTokenizerTrainingProgress() function, not a stand-in.
+  const reconciled = jobId ? await checkTokenizerTrainingProgress(readyProgram.programId) : null
+  results.push(check('failure_05_real_resulting_program_state_is_tokenizer_failed', reconciled?.program.state === 'tokenizer_failed', reconciled?.program.state ?? 'no job to reconcile'))
+
+  // On-disk state checks: job record, lock file, output directory / partial artifact.
+  const jobRecordExists = jobId ? Boolean(await getTokenizerJobStatus(jobId)) : false
+  results.push(check('failure_06_job_record_exists_on_disk', jobRecordExists, `jobId=${jobId} exists=${jobRecordExists}`))
+
+  const lockFileExistsAfterFailure = await readFile(tokenizerJobLockPath(), 'utf8').then(() => true).catch(() => false)
+  results.push(check('failure_07_lock_file_released_after_real_failure', !lockFileExistsAfterFailure, `lock file exists=${lockFileExistsAfterFailure}`))
+
+  const outputDirExists = await access(outputDirAbs, fsConstants.F_OK).then(() => true).catch(() => false)
+  results.push(check('failure_08_no_output_directory_or_partial_artifact_created', !outputDirExists, `outputDir=${outputDirAbs} exists=${outputDirExists}`))
+
+  // Approval must still be consumed exactly once even on a real failure path — no replay window.
+  const finalExperiment = await getTokenizerExperiment(experimentId)
+  results.push(check('failure_09_approval_consumed_exactly_once_on_real_failure', Boolean(finalExperiment?.approval?.consumedAt), JSON.stringify(finalExperiment?.approval)))
+
+  // Cleanup, then verify cleanup actually worked — before-and-after, not just a final rm call.
+  if (outputDirExists) await rm(outputDirAbs, { recursive: true, force: true })
+  await resetLabState()
+  const programsAfter = await listPrograms()
+  const jobsAfter = await listTokenizerJobStatuses()
+  const lockAfterCleanup = await readFile(tokenizerJobLockPath(), 'utf8').then(() => true).catch(() => false)
+  results.push(check('failure_10_sandbox_fully_clean_after_test_verified_not_assumed', programsAfter.length === 0 && jobsAfter.length === 0 && !lockAfterCleanup, `programs=${programsAfter.length} jobs=${jobsAfter.length} lock=${lockAfterCleanup}`))
+
+  return results
+}
+
+/**
+ * STEP 4 (90d07ef-VERIFY continuation): narrow static backstop reporting explicit numbers, separate
+ * from the behavioral proof above. Secondary evidence only — the behavioral tests above are the
+ * primary proof — but required to be present and numeric.
+ */
+async function testRouteWiringStaticBackstopNumeric(): Promise<CaseResult[]> {
+  const routePath = path.join(resolveRepoRoot(), 'app', 'api', 'sovereign-model-lab', 'programs', '[id]', 'tokenizer-train', 'route.ts')
+  const content = await readFile(routePath, 'utf8')
+
+  const postExportCount = (content.match(/export\s+async\s+function\s+POST\s*\(/g) ?? []).length
+  const gateCallSiteCount = (content.match(/assertTokenizerExecutionApproved\s*\(/g) ?? []).length
+  const runtimeCallSiteCount = (content.match(/startTokenizerTrainingForProgram\s*\(/g) ?? []).length
+
+  const gateCallIndex = content.indexOf('assertTokenizerExecutionApproved(')
+  const runtimeCallIndex = content.indexOf('startTokenizerTrainingForProgram(')
+  const gatePositionPrecedesRuntimePosition = gateCallIndex !== -1 && runtimeCallIndex !== -1 && gateCallIndex < runtimeCallIndex
+
+  return [
+    check('static_backstop_01_post_export_count', postExportCount === 1, `postExportCount=${postExportCount}`),
+    check('static_backstop_02_gate_call_site_count', gateCallSiteCount === 1, `gateCallSiteCount=${gateCallSiteCount}`),
+    check('static_backstop_03_runtime_call_site_count', runtimeCallSiteCount === 1, `runtimeCallSiteCount=${runtimeCallSiteCount}`),
+    check(
+      'static_backstop_04_gate_position_precedes_runtime_position',
+      gatePositionPrecedesRuntimePosition,
+      `gateCallIndex=${gateCallIndex} runtimeCallIndex=${runtimeCallIndex} precedes=${gatePositionPrecedesRuntimePosition}`,
+    ),
+  ]
+}
+
 // --- 14. Read-only Model Lab operations remain unaffected by the gate -----------------------------
 
 async function testReadOnlyOperationsUnaffectedByGate(): Promise<CaseResult[]> {
@@ -914,7 +1161,130 @@ async function testConcurrencyAndTimeoutProtectionsUnchanged(): Promise<CaseResu
   ]
 }
 
+// --- Validation storage-root isolation (Commander requirement: this suite — including case 6's ---
+// --- real ENOENT failure injection and every resetLabState() call it makes — must never touch ---
+// --- the production/default Model Lab state directory). ---------------------------------------------
+
+type ProductionFixtureProof = { programId: string; filePath: string; contentBefore: string }
+
+/** Plants a REAL program record directly in the production/default root, via the real saveProgram()
+ * storage function, BEFORE any validation-root override is set. */
+async function plantProductionRootFixture(): Promise<ProductionFixtureProof> {
+  const programId = `production-survives-fixture-${randomUUID()}`
+  const now = new Date().toISOString()
+  const fixtureProgram: SovereignModelLabProgram = {
+    programId,
+    name: 'PRODUCTION-SURVIVAL-FIXTURE-PHASE2A',
+    state: 'hardware_audit',
+    history: [{ state: 'hardware_audit', at: now, note: 'Planted before validation isolation to prove production state survives the full Phase 2A run, including case 6.' }],
+    hardwareReportId: null,
+    registeredSourceIds: [],
+    ingestedDocumentIds: [],
+    datasetManifestId: null,
+    tokenizerExperimentId: null,
+    trainingExperimentId: null,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await saveProgram(fixtureProgram)
+  const filePath = path.join(sovereignModelLabProductionStorageRootForTesting(), 'programs', `${programId}.json`)
+  const contentBefore = await readFile(filePath, 'utf8')
+  return { programId, filePath, contentBefore }
+}
+
+/** Re-reads the exact fixture file from the production root after the ENTIRE isolated Phase 2A run
+ * has finished — every gate test, every route-level test, case 6's real ENOENT failure injection,
+ * and every resetLabState() call any of them made — and compares it byte-for-byte against what was
+ * written before isolation began. */
+async function verifyProductionRootFixtureUnmodified(proof: ProductionFixtureProof): Promise<CaseResult[]> {
+  let contentAfter: string | null = null
+  let readError: string | null = null
+  try {
+    contentAfter = await readFile(proof.filePath, 'utf8')
+  } catch (error) {
+    readError = error instanceof Error ? error.message : String(error)
+  }
+  const stillExists = contentAfter !== null
+  const unmodified = stillExists && contentAfter === proof.contentBefore
+  const results = [
+    check('isolation_10_production_fixture_still_exists_after_full_isolated_run', stillExists, readError ?? 'exists'),
+    check(
+      'isolation_11_production_fixture_byte_for_byte_unmodified',
+      unmodified,
+      unmodified ? 'unchanged' : `before=${proof.contentBefore.length} chars, after=${contentAfter?.length ?? 'missing'} chars`,
+    ),
+  ]
+  await rm(proof.filePath, { force: true })
+  return results
+}
+
+function testValidationRootPathTraversalRejected(): CaseResult[] {
+  let threw = false
+  let message = ''
+  try {
+    setSovereignModelLabValidationStorageRoot('../../../../etc/passwd-traversal-attempt')
+  } catch (error) {
+    threw = error instanceof InvalidValidationStorageRootError
+    message = error instanceof Error ? error.message : String(error)
+  }
+  return [check('isolation_05_path_traversal_requested_root_rejected', threw, message || 'did not throw')]
+}
+
+function testValidationRootAbsoluteEscapeRejected(): CaseResult[] {
+  let threw = false
+  let message = ''
+  const outsideAbsolutePath = process.platform === 'win32' ? 'C:\\Windows\\Temp\\model-lab-escape-attempt' : '/tmp/model-lab-escape-attempt'
+  try {
+    setSovereignModelLabValidationStorageRoot(outsideAbsolutePath)
+  } catch (error) {
+    threw = error instanceof InvalidValidationStorageRootError
+    message = error instanceof Error ? error.message : String(error)
+  }
+  return [check('isolation_06_absolute_path_outside_validation_area_rejected', threw, message || 'did not throw')]
+}
+
+async function testIsolationCleanupVerified(): Promise<CaseResult[]> {
+  const isolatedRoot = resolveSovereignModelLabStorageRoot()
+  await resetLabState()
+  const stillExists = await access(isolatedRoot, fsConstants.F_OK).then(() => true).catch(() => false)
+  return [check('isolation_09_isolated_validation_root_removed_after_run', !stillExists, `isolatedRoot=${isolatedRoot} exists=${stillExists}`)]
+}
+
 export async function runTokenizerPipelineValidation(): Promise<CaseResult[]> {
+  const results: CaseResult[] = []
+
+  const productionFixtureProof = await plantProductionRootFixture()
+  const productionRootBefore = sovereignModelLabProductionStorageRootForTesting()
+
+  const isolatedRoot = setSovereignModelLabValidationStorageRoot(`run-${randomUUID()}`)
+  results.push(check('isolation_01_validation_root_differs_from_production_root', isolatedRoot !== productionRootBefore, `isolated=${isolatedRoot} production=${productionRootBefore}`))
+  results.push(check('isolation_02_validation_root_is_inside_permitted_validation_area', isolatedRoot.split(path.sep).includes('validation'), isolatedRoot))
+
+  try {
+    results.push(...testValidationRootPathTraversalRejected())
+    results.push(...testValidationRootAbsoluteEscapeRejected())
+    const rootAfterAdversarialAttempts = resolveSovereignModelLabStorageRoot()
+    results.push(check('isolation_07_adversarial_attempts_never_corrupted_active_root', rootAfterAdversarialAttempts === isolatedRoot, `expected=${isolatedRoot} actual=${rootAfterAdversarialAttempts}`))
+
+    results.push(...(await runTokenizerPipelineValidationCasesAgainstCurrentRoot()))
+    results.push(...(await testIsolationCleanupVerified()))
+  } finally {
+    clearSovereignModelLabValidationStorageRoot()
+  }
+
+  const productionRootAfterClear = resolveSovereignModelLabStorageRoot()
+  results.push(check('isolation_08_production_root_resolution_unchanged_after_clearing_override', productionRootBefore === productionRootAfterClear, `before=${productionRootBefore} afterClear=${productionRootAfterClear}`))
+
+  results.push(...(await verifyProductionRootFixtureUnmodified(productionFixtureProof)))
+
+  return results
+}
+
+/** The full Phase 2A regression suite, unchanged in logic — only ever invoked while an isolated
+ * validation root is active (see runTokenizerPipelineValidation above), so every call it makes
+ * through resetLabState()/storage.ts, including case 6's real ENOENT failure injection, operates on
+ * the isolated root, never production. */
+async function runTokenizerPipelineValidationCasesAgainstCurrentRoot(): Promise<CaseResult[]> {
   const results: CaseResult[] = []
   results.push(...(await testTokenizerReadyUnreachableFromPlanAloneOrProbeAlone()))
   results.push(...testMigrationIsHonestAndNeverAutomatic())
@@ -936,6 +1306,9 @@ export async function runTokenizerPipelineValidation(): Promise<CaseResult[]> {
   results.push(...(await testNoSecretsOrContentInGeneralLogs()))
   results.push(...testTokenizerExecutionGatePureCases())
   results.push(...(await testTokenizerExecutionGateIntegration()))
+  results.push(...(await testRouteLevelWiringOrder()))
+  results.push(...(await testRouteLevelRealFailureInjection()))
+  results.push(...(await testRouteWiringStaticBackstopNumeric()))
   results.push(...(await testReadOnlyOperationsUnaffectedByGate()))
   results.push(...(await testConcurrencyAndTimeoutProtectionsUnchanged()))
   await rm(SCRATCH_DIR, { recursive: true, force: true })

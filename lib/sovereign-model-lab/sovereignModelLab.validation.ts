@@ -1,7 +1,9 @@
 /**
  * Sovereign Model Lab Phase 1 regression suite.
  */
-import { readFile, rm } from 'node:fs/promises'
+import { access, readFile, rm } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { resolveRepoRoot } from '@/lib/repo/paths'
@@ -16,6 +18,7 @@ import {
   SOVEREIGN_MODEL_LAB_TRANSITIONS,
   type DatasetLicenseRecord,
   type SovereignDocumentRecord,
+  type SovereignModelLabProgram,
 } from './types'
 import {
   beginModelProgram,
@@ -24,7 +27,16 @@ import {
   registerSourceForProgram,
   requestTrainingApproval,
 } from './runtime'
-import { getProgram, listPrograms } from './storage'
+import {
+  clearSovereignModelLabValidationStorageRoot,
+  getProgram,
+  InvalidValidationStorageRootError,
+  listPrograms,
+  resolveSovereignModelLabStorageRoot,
+  saveProgram,
+  setSovereignModelLabValidationStorageRoot,
+  sovereignModelLabProductionStorageRootForTesting,
+} from './storage'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 function check(name: string, pass: boolean, detail: string): CaseResult {
@@ -33,9 +45,11 @@ function check(name: string, pass: boolean, detail: string): CaseResult {
 
 const FIXTURE_REL = 'lib/sovereign-model-lab/__fixtures__/sample-commander-document.txt'
 
+/** Deletes whatever the CURRENT storage root resolves to — production by default, or the isolated
+ * validation root once set via setSovereignModelLabValidationStorageRoot(). Never independently
+ * constructs '.war-room/sovereign-model-lab' — see storage.ts's single resolution point. */
 async function resetLabState(): Promise<void> {
-  const root = path.join(resolveRepoRoot(), '.war-room', 'sovereign-model-lab')
-  await rm(root, { recursive: true, force: true })
+  await rm(resolveSovereignModelLabStorageRoot(), { recursive: true, force: true })
 }
 
 function licenseRecord(overrides: Partial<DatasetLicenseRecord> = {}): DatasetLicenseRecord {
@@ -340,7 +354,133 @@ async function testNoSecretsLogged(): Promise<CaseResult[]> {
   ]
 }
 
+// --- Validation storage-root isolation (Commander requirement: validator must never touch the ---
+// --- production/default Model Lab state directory). ------------------------------------------------
+
+type ProductionFixtureProof = { programId: string; filePath: string; contentBefore: string }
+
+/** Plants a REAL program record directly in the production/default root, via the real saveProgram()
+ * storage function, BEFORE any validation-root override is set — confirmed by construction, since
+ * resolveSovereignModelLabStorageRoot() only ever returns the production root when no override is
+ * active. This is the fixture whose survival proves the isolated run below never touched
+ * production. */
+async function plantProductionRootFixture(): Promise<ProductionFixtureProof> {
+  const programId = `production-survives-fixture-${randomUUID()}`
+  const now = new Date().toISOString()
+  const fixtureProgram: SovereignModelLabProgram = {
+    programId,
+    name: 'PRODUCTION-SURVIVAL-FIXTURE',
+    state: 'hardware_audit',
+    history: [{ state: 'hardware_audit', at: now, note: 'Planted before validation isolation to prove production state survives an isolated run.' }],
+    hardwareReportId: null,
+    registeredSourceIds: [],
+    ingestedDocumentIds: [],
+    datasetManifestId: null,
+    tokenizerExperimentId: null,
+    trainingExperimentId: null,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await saveProgram(fixtureProgram)
+  const filePath = path.join(sovereignModelLabProductionStorageRootForTesting(), 'programs', `${programId}.json`)
+  const contentBefore = await readFile(filePath, 'utf8')
+  return { programId, filePath, contentBefore }
+}
+
+/** Re-reads the exact fixture file from the production root after the entire isolated run has
+ * finished (including every resetLabState() call the isolated tests made) and compares it
+ * byte-for-byte against what was written before isolation began. */
+async function verifyProductionRootFixtureUnmodified(proof: ProductionFixtureProof): Promise<CaseResult[]> {
+  let contentAfter: string | null = null
+  let readError: string | null = null
+  try {
+    contentAfter = await readFile(proof.filePath, 'utf8')
+  } catch (error) {
+    readError = error instanceof Error ? error.message : String(error)
+  }
+  const stillExists = contentAfter !== null
+  const unmodified = stillExists && contentAfter === proof.contentBefore
+  const results = [
+    check('isolation_10_production_fixture_still_exists_after_full_isolated_run', stillExists, readError ?? 'exists'),
+    check(
+      'isolation_11_production_fixture_byte_for_byte_unmodified',
+      unmodified,
+      unmodified ? 'unchanged' : `before=${proof.contentBefore.length} chars, after=${contentAfter?.length ?? 'missing'} chars`,
+    ),
+  ]
+  // This is our own planted test fixture, not real Commander data — remove it now that its
+  // survival has been proven, so repeated validator runs don't accumulate fixtures in production.
+  await rm(proof.filePath, { force: true })
+  return results
+}
+
+function testValidationRootPathTraversalRejected(): CaseResult[] {
+  let threw = false
+  let message = ''
+  try {
+    setSovereignModelLabValidationStorageRoot('../../../../etc/passwd-traversal-attempt')
+  } catch (error) {
+    threw = error instanceof InvalidValidationStorageRootError
+    message = error instanceof Error ? error.message : String(error)
+  }
+  return [check('isolation_05_path_traversal_requested_root_rejected', threw, message || 'did not throw')]
+}
+
+function testValidationRootAbsoluteEscapeRejected(): CaseResult[] {
+  let threw = false
+  let message = ''
+  const outsideAbsolutePath = process.platform === 'win32' ? 'C:\\Windows\\Temp\\model-lab-escape-attempt' : '/tmp/model-lab-escape-attempt'
+  try {
+    setSovereignModelLabValidationStorageRoot(outsideAbsolutePath)
+  } catch (error) {
+    threw = error instanceof InvalidValidationStorageRootError
+    message = error instanceof Error ? error.message : String(error)
+  }
+  return [check('isolation_06_absolute_path_outside_validation_area_rejected', threw, message || 'did not throw')]
+}
+
+async function testIsolationCleanupVerified(): Promise<CaseResult[]> {
+  const isolatedRoot = resolveSovereignModelLabStorageRoot()
+  await resetLabState()
+  const stillExists = await access(isolatedRoot, fsConstants.F_OK).then(() => true).catch(() => false)
+  return [check('isolation_09_isolated_validation_root_removed_after_run', !stillExists, `isolatedRoot=${isolatedRoot} exists=${stillExists}`)]
+}
+
 export async function runSovereignModelLabValidation(): Promise<CaseResult[]> {
+  const results: CaseResult[] = []
+
+  // Plant the production-survival fixture BEFORE any isolation override is set.
+  const productionFixtureProof = await plantProductionRootFixture()
+  const productionRootBefore = sovereignModelLabProductionStorageRootForTesting()
+
+  const isolatedRoot = setSovereignModelLabValidationStorageRoot(`run-${randomUUID()}`)
+  results.push(check('isolation_01_validation_root_differs_from_production_root', isolatedRoot !== productionRootBefore, `isolated=${isolatedRoot} production=${productionRootBefore}`))
+  results.push(check('isolation_02_validation_root_is_inside_permitted_validation_area', isolatedRoot.split(path.sep).includes('validation'), isolatedRoot))
+
+  try {
+    results.push(...testValidationRootPathTraversalRejected())
+    results.push(...testValidationRootAbsoluteEscapeRejected())
+    const rootAfterAdversarialAttempts = resolveSovereignModelLabStorageRoot()
+    results.push(check('isolation_07_adversarial_attempts_never_corrupted_active_root', rootAfterAdversarialAttempts === isolatedRoot, `expected=${isolatedRoot} actual=${rootAfterAdversarialAttempts}`))
+
+    results.push(...(await runSovereignModelLabValidationCasesAgainstCurrentRoot()))
+    results.push(...(await testIsolationCleanupVerified()))
+  } finally {
+    clearSovereignModelLabValidationStorageRoot()
+  }
+
+  const productionRootAfterClear = resolveSovereignModelLabStorageRoot()
+  results.push(check('isolation_08_production_root_resolution_unchanged_after_clearing_override', productionRootBefore === productionRootAfterClear, `before=${productionRootBefore} afterClear=${productionRootAfterClear}`))
+
+  results.push(...(await verifyProductionRootFixtureUnmodified(productionFixtureProof)))
+
+  return results
+}
+
+/** The original Phase 1 regression suite, unchanged in logic — only ever invoked while an isolated
+ * validation root is active (see runSovereignModelLabValidation above), so every call it makes
+ * through resetLabState()/storage.ts operates on the isolated root, never production. */
+async function runSovereignModelLabValidationCasesAgainstCurrentRoot(): Promise<CaseResult[]> {
   const results: CaseResult[] = []
   results.push(...(await testHardwareHonesty()))
   results.push(...testSourcePolicy())
@@ -404,7 +544,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
     const failed = results.filter(result => !result.pass)
     console.log(`Sovereign Model Lab validation: ${results.length - failed.length}/${results.length} PASS`)
-    await resetLabState().catch(() => {})
+    // No trailing resetLabState() here: runSovereignModelLabValidation() already cleans up the
+    // isolated validation root (and clears the override back to production) before returning.
+    // Calling resetLabState() again at this point, after the override is cleared, would delete the
+    // PRODUCTION root instead — exactly the destructive behavior this isolation mechanism exists to
+    // prevent.
     if (failed.length) process.exit(1)
   })
 }
