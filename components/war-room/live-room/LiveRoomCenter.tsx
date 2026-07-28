@@ -56,7 +56,7 @@ export function LiveRoomCenter({
         data-testid="live-council-messages"
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-2 sm:px-6 [scroll-padding-bottom:var(--live-room-bottom-reserved,7rem)]"
+        className="min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-[calc(var(--live-room-bottom-reserved,7rem)+1rem)] sm:px-6 [scroll-padding-bottom:var(--live-room-bottom-reserved,7rem)]"
       >
         {thread}
       </div>

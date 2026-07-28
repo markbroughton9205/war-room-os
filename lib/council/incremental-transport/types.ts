@@ -21,6 +21,36 @@ export type CouncilStreamSanitizedError = {
   classification: 'validation' | 'auth' | 'provider' | 'transport' | 'runtime' | 'unknown'
 }
 
+export type CouncilStreamChunkDiagnostic = {
+  chunkIndex: number
+  byteLength: number
+  decodedLength: number
+  finalDecoderFlush: boolean
+  abortSignalState: 'aborted' | 'active' | 'none'
+}
+
+export type CouncilStreamResponseDiagnostic = {
+  requestUrl: '/api/chat/stream'
+  requestMethod: 'POST'
+  status: number
+  ok: boolean
+  contentType: string | null
+  cacheControl: string | null
+  connection: string | null
+  transportAvailable: boolean
+}
+
+export type CouncilStreamFrameDiagnostic = {
+  frameIndex: number
+  eventName: string | null
+  id: string | null
+  retry: number | null
+  dataLineCount: number
+  dataCharLength: number
+  envelopeType: CouncilStreamEnvelopeType | null
+  parseStatus: 'ignored_comment' | 'parsed' | 'malformed_json' | 'malformed_envelope' | 'event_name_mismatch'
+}
+
 export type CouncilStreamEnvelopeBase = {
   version: typeof COUNCIL_STREAM_VERSION
   envelopeType: CouncilStreamEnvelopeType
@@ -46,8 +76,12 @@ export type CouncilStreamFinal = CouncilStreamEnvelopeBase & {
   envelopeType: 'final'
   httpStatus: number
   ok: boolean
+  status: 'completed' | 'partial' | 'failed'
   finalResponse: CouncilChatJson
   finalProgress: CouncilProgressRuntimeSnapshot | null
+  readableContributionCount: number
+  runtimeEventCount: number
+  completedAt: string
 }
 
 export type CouncilStreamError = CouncilStreamEnvelopeBase & {
@@ -68,8 +102,8 @@ export type CouncilStreamEnvelope =
   | CouncilStreamClosed
 
 export type CouncilStreamParserEvent =
-  | { ok: true; envelope: CouncilStreamEnvelope }
-  | { ok: false; error: CouncilStreamSanitizedError; rawFrame: string }
+  | { ok: true; envelope: CouncilStreamEnvelope; eventName: string | null; id: string | null; retry: number | null }
+  | { ok: false; error: CouncilStreamSanitizedError; rawFrame: string; eventName: string | null; id: string | null; retry: number | null }
 
 export type CouncilStreamCallbacks = {
   onOpened?: (envelope: CouncilStreamOpened) => void
@@ -78,6 +112,9 @@ export type CouncilStreamCallbacks = {
   onError?: (envelope: CouncilStreamError) => void
   onClosed?: (envelope: CouncilStreamClosed) => void
   onMalformedEnvelope?: (event: Extract<CouncilStreamParserEvent, { ok: false }>) => void
+  onResponse?: (diagnostic: CouncilStreamResponseDiagnostic) => void
+  onChunk?: (diagnostic: CouncilStreamChunkDiagnostic) => void
+  onFrame?: (diagnostic: CouncilStreamFrameDiagnostic) => void
 }
 
 export type CouncilStreamResult = {

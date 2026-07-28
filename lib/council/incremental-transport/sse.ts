@@ -1,6 +1,8 @@
 import {
   COUNCIL_STREAM_VERSION,
   type CouncilStreamEnvelope,
+  type CouncilStreamEnvelopeType,
+  type CouncilStreamFrameDiagnostic,
   type CouncilStreamParserEvent,
   type CouncilStreamSanitizedError,
 } from './types'
@@ -43,7 +45,13 @@ export function validateCouncilStreamEnvelopeShape(value: unknown): value is Cou
     return Boolean(progress.progressEvent && progress.snapshot)
   }
   if (envelope.envelopeType === 'final') {
+    const final = envelope as Partial<Extract<CouncilStreamEnvelope, { envelopeType: 'final' }>>
     return 'finalResponse' in envelope
+      && ['completed', 'partial', 'failed'].includes(String(final.status))
+      && typeof final.readableContributionCount === 'number'
+      && typeof final.runtimeEventCount === 'number'
+      && typeof final.completedAt === 'string'
+      && Boolean(final.completedAt)
   }
   if (envelope.envelopeType === 'error') {
     const err = (envelope as Partial<Extract<CouncilStreamEnvelope, { envelopeType: 'error' }>>).error
@@ -55,14 +63,48 @@ export function validateCouncilStreamEnvelopeShape(value: unknown): value is Cou
   return envelope.envelopeType === 'opened'
 }
 
+const KNOWN_STREAM_EVENT_NAMES: ReadonlySet<CouncilStreamEnvelopeType> = new Set(['opened', 'progress', 'final', 'error', 'closed'])
+
+function malformedEvent(
+  code: string,
+  message: string,
+  frame: string,
+  eventName: string | null,
+  id: string | null,
+  retry: number | null,
+): CouncilStreamParserEvent {
+  return {
+    ok: false,
+    error: {
+      code,
+      message,
+      terminal: true,
+      classification: 'transport',
+    },
+    rawFrame: frame,
+    eventName,
+    id,
+    retry,
+  }
+}
+
 function parseSseFrame(frame: string): CouncilStreamParserEvent | null {
   const lines = frame.split(/\r?\n/)
   const dataLines: string[] = []
+  let eventName: string | null = null
+  let id: string | null = null
+  let retry: number | null = null
   for (const line of lines) {
     if (!line || line.startsWith(':')) continue
     const colonIndex = line.indexOf(':')
     const field = colonIndex >= 0 ? line.slice(0, colonIndex) : line
     const value = colonIndex >= 0 ? line.slice(colonIndex + 1).replace(/^ /, '') : ''
+    if (field === 'event') eventName = value || null
+    if (field === 'id') id = value || null
+    if (field === 'retry') {
+      const parsedRetry = Number(value)
+      retry = Number.isFinite(parsedRetry) ? parsedRetry : null
+    }
     if (field === 'data') dataLines.push(value)
   }
   if (!dataLines.length) return null
@@ -70,38 +112,56 @@ function parseSseFrame(frame: string): CouncilStreamParserEvent | null {
   try {
     const parsed = JSON.parse(rawData) as unknown
     if (!validateCouncilStreamEnvelopeShape(parsed)) {
-      return {
-        ok: false,
-        error: {
-          code: 'malformed_stream_envelope',
-          message: 'Council stream envelope shape was invalid.',
-          terminal: true,
-          classification: 'transport',
-        },
-        rawFrame: frame,
-      }
+      return malformedEvent('malformed_stream_envelope', 'Council stream envelope shape was invalid.', frame, eventName, id, retry)
     }
-    return { ok: true, envelope: parsed }
+    if (eventName && KNOWN_STREAM_EVENT_NAMES.has(eventName as CouncilStreamEnvelopeType) && eventName !== parsed.envelopeType) {
+      return malformedEvent('stream_event_name_mismatch', 'Council stream event name did not match envelope type.', frame, eventName, id, retry)
+    }
+    return { ok: true, envelope: parsed, eventName, id, retry }
   } catch {
-    return {
-      ok: false,
-      error: {
-        code: 'malformed_stream_json',
-        message: 'Council stream frame contained invalid JSON.',
-        terminal: true,
-        classification: 'transport',
-      },
-      rawFrame: frame,
-    }
+    return malformedEvent('malformed_stream_json', 'Council stream frame contained invalid JSON.', frame, eventName, id, retry)
   }
 }
 
-export function createCouncilSseParser(onEvent: (event: CouncilStreamParserEvent) => void): {
+function frameDiagnostic(frame: string, parsed: CouncilStreamParserEvent | null, frameIndex: number): CouncilStreamFrameDiagnostic {
+  const lines = frame.split(/\r?\n/)
+  const dataLineCount = lines.filter(line => line.startsWith('data:') || line === 'data').length
+  const dataCharLength = lines
+    .filter(line => line.startsWith('data:') || line === 'data')
+    .map(line => line.includes(':') ? line.slice(line.indexOf(':') + 1).replace(/^ /, '') : '')
+    .join('\n')
+    .length
+  const commentOnly = lines.every(line => !line || line.startsWith(':'))
+  return {
+    frameIndex,
+    eventName: parsed?.eventName ?? null,
+    id: parsed?.id ?? null,
+    retry: parsed?.retry ?? null,
+    dataLineCount,
+    dataCharLength,
+    envelopeType: parsed?.ok ? parsed.envelope.envelopeType : null,
+    parseStatus: commentOnly
+      ? 'ignored_comment'
+      : parsed?.ok
+        ? 'parsed'
+        : parsed?.error.code === 'malformed_stream_json'
+          ? 'malformed_json'
+          : parsed?.error.code === 'stream_event_name_mismatch'
+            ? 'event_name_mismatch'
+            : 'malformed_envelope',
+  }
+}
+
+export function createCouncilSseParser(
+  onEvent: (event: CouncilStreamParserEvent) => void,
+  options?: { onFrame?: (diagnostic: CouncilStreamFrameDiagnostic) => void },
+): {
   push(chunk: string): void
   flush(): void
   reset(): void
 } {
   let buffer = ''
+  let frameIndex = 0
   function drain(): void {
     let boundary = buffer.search(/\r?\n\r?\n/)
     while (boundary >= 0) {
@@ -109,6 +169,8 @@ export function createCouncilSseParser(onEvent: (event: CouncilStreamParserEvent
       const frame = buffer.slice(0, boundary)
       buffer = buffer.slice(boundary + separatorLength)
       const parsed = parseSseFrame(frame)
+      frameIndex += 1
+      options?.onFrame?.(frameDiagnostic(frame, parsed, frameIndex))
       if (parsed) onEvent(parsed)
       boundary = buffer.search(/\r?\n\r?\n/)
     }
@@ -124,11 +186,14 @@ export function createCouncilSseParser(onEvent: (event: CouncilStreamParserEvent
         return
       }
       const parsed = parseSseFrame(buffer)
+      frameIndex += 1
+      options?.onFrame?.(frameDiagnostic(buffer, parsed, frameIndex))
       buffer = ''
       if (parsed) onEvent(parsed)
     },
     reset() {
       buffer = ''
+      frameIndex = 0
     },
   }
 }

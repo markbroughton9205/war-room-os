@@ -418,15 +418,23 @@ function buildRevenuePacket(messages: CouncilCompressionMessage[], findings: Cou
   }
 }
 
+/** Honest insufficiency message — used only when real responses were attempted this round but
+ * none were valid enough to synthesize (all empty/degraded/greeting-only). Never fabricate a
+ * decision summary from responses that didn't actually complete. */
+export const NO_RELIABLE_SYNTHESIS_MESSAGE = 'Council could not produce a reliable synthesis from this round.'
+
 function fallbackDecision(messages: CouncilCompressionMessage[], stabilityMode: boolean) {
   const eligible = synthesisEligibleMessages(messages, stabilityMode)
   const last = eligible.at(-1)
   if (!last) {
-    const incompleteFamilies = responseMessages(messages, stabilityMode)
-      .filter(message => message.integrityIncomplete)
-      .map(message => normalizeFamilyName(message.familyName))
-    if (incompleteFamilies.length) {
-      return `Council received incomplete provider response(s) from ${incompleteFamilies.join(', ')}; awaiting fallback or retry.`
+    const allResponses = responseMessages(messages, stabilityMode)
+    if (allResponses.length > 0) {
+      const incompleteFamilies = allResponses
+        .filter(message => message.integrityIncomplete)
+        .map(message => normalizeFamilyName(message.familyName))
+      return incompleteFamilies.length
+        ? `${NO_RELIABLE_SYNTHESIS_MESSAGE} (${incompleteFamilies.join(', ')} did not return a usable response.)`
+        : NO_RELIABLE_SYNTHESIS_MESSAGE
     }
     return 'Council is waiting for a new decree or provider response.'
   }

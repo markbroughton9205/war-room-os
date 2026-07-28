@@ -37,7 +37,7 @@ export const CommandConsole = memo(function CommandConsole({
         onSubmit={event => {
           event.preventDefault()
           if (!loading && command.trim()) {
-            matrixStatus('working', 'Council responding…')
+            matrixStatus('working', 'Council thinking…')
           }
           void onSubmit(event)
         }}
@@ -92,7 +92,7 @@ export const CommandConsole = memo(function CommandConsole({
           className="shrink-0 rounded border border-emerald-400/60 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-black disabled:opacity-40 sm:px-5 sm:py-2"
           style={{ background: loading ? '#166534' : '#34d399', boxShadow: loading ? undefined : '0 0 16px rgba(52,211,153,0.35)' }}
         >
-          {loading ? 'Working…' : 'Execute'}
+          {loading ? 'Council thinking…' : 'Execute'}
         </button>
       </form>
     </footer>

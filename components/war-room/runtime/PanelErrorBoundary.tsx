@@ -26,6 +26,20 @@ export class PanelErrorBoundary extends Component<Props, State> {
       error: error.message,
       componentStack: info.componentStack,
     })
+    // Fire-and-forget: feed the native builder's issue pipeline for real (fingerprinted,
+    // deduplicated) instead of leaving this as a console-only event with no persistence.
+    void fetch('/api/native-builder/issues', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'panel_error_boundary',
+        panelLabel: this.props.label,
+        errorMessage: error.message || 'Panel render failed',
+        componentStack: info.componentStack ?? undefined,
+      }),
+    }).catch(() => {
+      /* best-effort only — a failed issue report must never surface as a second panel error */
+    })
   }
 
   render() {
