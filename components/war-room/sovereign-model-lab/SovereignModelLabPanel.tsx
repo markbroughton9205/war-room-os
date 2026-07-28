@@ -212,8 +212,18 @@ export function SovereignModelLabPanel() {
 
   const trainTokenizer = () => {
     if (!program) return
+    const planHash = detail?.tokenizer?.plan?.planHash
+    if (!planHash) return
     void runAction('train-tokenizer', async () => {
-      const result = await postJson(`/api/sovereign-model-lab/programs/${program.programId}/tokenizer-train`, {})
+      const result = await postJson(`/api/sovereign-model-lab/programs/${program.programId}/tokenizer-train`, {
+        tokenizerExecutionApproval: {
+          kind: 'sovereign_model_lab_tokenizer_execution',
+          granted: true,
+          programId: program.programId,
+          planHash,
+          action: 'start_tokenizer_training',
+        },
+      })
       if (!result.ok) throw new Error(result.error)
     })
   }

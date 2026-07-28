@@ -10,7 +10,7 @@
  * lib/council/approved-call/ApprovalVerifier.ts's any-field-mismatch-rejects shape.
  */
 import { createHash, randomUUID } from 'node:crypto'
-import type { CorpusManifest, PreflightCheckResult, TokenizerExecutionPlan, TokenizerTrainingApproval } from './types'
+import type { CorpusManifest, PreflightCheckResult, SovereignModelLabState, TokenizerExecutionPlan, TokenizerTrainingApproval } from './types'
 
 function sha256(data: string): string {
   return createHash('sha256').update(data, 'utf8').digest('hex')
@@ -131,4 +131,121 @@ export function assertFreshBeforeSpawn(args: {
 
 export function consumeApproval(approval: TokenizerTrainingApproval): TokenizerTrainingApproval {
   return { ...approval, consumedAt: new Date().toISOString() }
+}
+
+// ---------------------------------------------------------------------------
+// Commander-gated tokenizer execution authority (Commander hardening decision — see
+// docs/architecture/SOVEREIGN_MODEL_LAB_ARCHITECTURE_AND_GOVERNANCE.md).
+//
+// Session authentication and correct program-state eligibility alone are not sufficient authority
+// to launch the tokenizer subprocess, create output artifacts, or begin a build job. The API route
+// (tokenizer-train) must call this gate and receive { ok: true } BEFORE calling
+// startTokenizerTrainingForProgram — a blocked result here guarantees no output directory is
+// created, no artifact is written, no Python process is spawned, and no job state is ever set to
+// running, because the caller simply never reaches the function that does any of that.
+// ---------------------------------------------------------------------------
+
+export type SovereignTokenizerExecutionApproval = {
+  kind: 'sovereign_model_lab_tokenizer_execution'
+  granted: true
+  programId: string
+  /** The exact TokenizerExecutionPlan.planHash this approval covers — already a SHA-256 over the
+   * plan's full immutable field set (corpus version, algorithm, vocab size, minimum frequency,
+   * seed, executable path, argv, output dir, expected artifacts, network policy, runtime cap —
+   * see immutablePlanFields above). Binding to this one hash satisfies binding to corpus/dataset
+   * version, tokenizer configuration, and output/candidate target simultaneously, without
+   * duplicating a second hashing scheme. */
+  planHash: string
+  action: 'start_tokenizer_training'
+}
+
+export type TokenizerExecutionGateResult = { ok: true } | { ok: false; status: number; reason: string }
+
+/**
+ * Pure, deterministic gate — makes no I/O call itself (no filesystem read/write, no subprocess),
+ * so it is fully unit-testable without touching disk. All of the following must hold, checked
+ * fresh on every call, with no server-side memory of a prior approval:
+ *   1. a valid authenticated session
+ *   2. the program's current state permits execution (must be exactly
+ *      'awaiting_commander_tokenizer_approval' — the state reached only via a prior, separate
+ *      approveTokenizerTraining() call; nothing here trusts that call's own approval object)
+ *   3. the safety lock is not active (no override exists for this action — stricter than the
+ *      standing auto-allow catalog's `standing_override` mechanism)
+ *   4. an explicit, well-formed `sovereign_model_lab_tokenizer_execution` approval object is
+ *      present in the request
+ *   5. that approval's programId matches this exact program
+ *   6. that approval's planHash matches this program's current tokenizer plan hash exactly — an
+ *      approval minted for a different program, a different corpus version, a different tokenizer
+ *      configuration, or a different output target will have a different hash and is rejected
+ */
+export function assertTokenizerExecutionApproved(input: {
+  hasSession: boolean
+  safetyLock: boolean
+  programState: SovereignModelLabState
+  programId: string
+  currentPlanHash: string | null
+  approval: unknown
+}): TokenizerExecutionGateResult {
+  if (!input.hasSession) {
+    return { ok: false, status: 401, reason: 'Authentication required for tokenizer execution.' }
+  }
+  if (input.programState !== 'awaiting_commander_tokenizer_approval') {
+    return {
+      ok: false,
+      status: 409,
+      reason: `Program state "${input.programState}" does not permit tokenizer execution — a tokenizer plan must be approved (state awaiting_commander_tokenizer_approval) first.`,
+    }
+  }
+  if (input.safetyLock) {
+    return {
+      ok: false,
+      status: 403,
+      reason: 'Safety lock is active — tokenizer execution is blocked while the lock is on; there is no override for this action.',
+    }
+  }
+  if (!input.currentPlanHash) {
+    return { ok: false, status: 409, reason: 'No tokenizer plan exists for this program — cannot execute.' }
+  }
+  if (!input.approval || typeof input.approval !== 'object') {
+    return {
+      ok: false,
+      status: 403,
+      reason: 'Tokenizer execution requires an explicit tokenizerExecutionApproval object in the request body; none was provided. A session, opening the Model Lab page, creating a program, admitting a corpus, reviewing a preview, an approval for a different tokenizer job, a bare approval_granted boolean, or an approval for Native Builder or another subsystem are never sufficient.',
+    }
+  }
+  const approval = input.approval as Record<string, unknown>
+  if (approval.kind !== 'sovereign_model_lab_tokenizer_execution') {
+    return {
+      ok: false,
+      status: 403,
+      reason: `Approval kind ${JSON.stringify(approval.kind ?? null)} is not valid for tokenizer execution (expected "sovereign_model_lab_tokenizer_execution"). An approval for a different subsystem or action never authorizes this one.`,
+    }
+  }
+  if (approval.granted !== true) {
+    return { ok: false, status: 403, reason: 'Approval object present but granted is not exactly true (malformed approval).' }
+  }
+  if (typeof approval.programId !== 'string' || approval.programId.length === 0) {
+    return { ok: false, status: 403, reason: 'Approval is missing a valid programId (malformed approval).' }
+  }
+  if (approval.programId !== input.programId) {
+    return { ok: false, status: 403, reason: 'Approval is scoped to a different program — approvals cannot be reused across programs.' }
+  }
+  if (typeof approval.planHash !== 'string' || approval.planHash.length !== 64) {
+    return { ok: false, status: 403, reason: 'Approval is missing a valid planHash (malformed approval).' }
+  }
+  if (approval.planHash !== input.currentPlanHash) {
+    return {
+      ok: false,
+      status: 403,
+      reason: "Approval's planHash does not match this program's current tokenizer plan — the corpus version, tokenizer configuration, or output target changed since approval, invalidating it. Approval for one job never authorizes a materially different job.",
+    }
+  }
+  if (approval.action !== 'start_tokenizer_training') {
+    return {
+      ok: false,
+      status: 403,
+      reason: `Approval action ${JSON.stringify(approval.action ?? null)} does not match the requested action ("start_tokenizer_training").`,
+    }
+  }
+  return { ok: true }
 }

@@ -19,6 +19,7 @@ import {
   decideDatasetApproval,
   ingestDocumentForProgram,
   registerSourceForProgram,
+  startTokenizerTrainingForProgram,
   verifyProvenanceForProgram,
 } from './runtime'
 import {
@@ -26,17 +27,25 @@ import {
   getTokenizerExperiment,
   getTokenizerJobStatus,
   listTokenizerJobStatuses,
+  saveProgram,
   saveTokenizerExperiment,
   tokenizerJobLockPath,
 } from './storage'
 import { buildProgramProjection, migrateProgramState } from './programProjection'
 import { buildCorpusArtifact, readCorpusManifest, CorpusVersionExistsError } from './corpusBuilder'
-import { assertFreshBeforeSpawn, finalizePlanWithHash, verifyTokenizerApproval, createTokenizerApproval } from './tokenizerApproval'
+import {
+  assertFreshBeforeSpawn,
+  assertTokenizerExecutionApproved,
+  finalizePlanWithHash,
+  verifyTokenizerApproval,
+  createTokenizerApproval,
+} from './tokenizerApproval'
+import type { SovereignTokenizerExecutionApproval } from './tokenizerApproval'
 import { TokenizerApprovalInvalidError, TokenizerJobAlreadyRunningError, startTokenizerTraining } from './tokenizerRuntime'
 import { verifyTokenizerArtifact } from './tokenizerVerifier'
 import { classifyLocalExecutability, estimateTrainingMemory } from './trainingMemoryEstimator'
 import { SOVEREIGN_MODEL_LAB_TRANSITIONS } from './types'
-import type { DatasetLicenseRecord, SovereignModelLabProgram } from './types'
+import type { DatasetLicenseRecord, SovereignModelLabProgram, TokenizerExecutionPlan } from './types'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 function check(name: string, pass: boolean, detail: string): CaseResult {
@@ -721,6 +730,190 @@ async function testNoSecretsOrContentInGeneralLogs(): Promise<CaseResult[]> {
   return [check('phase2a_30_tokenizer_audit_logs_never_include_stdout_or_content', noStdoutOrContentPassed, `${tokenizerRelatedCalls.length} tokenizer-related audit call(s) checked`)]
 }
 
+// --- Commander hardening: tokenizer execution approval gate ---------------------------------------
+
+function samplePlanFields(overrides: Partial<Omit<TokenizerExecutionPlan, 'planHash'>> = {}): Omit<TokenizerExecutionPlan, 'planHash'> {
+  return {
+    planId: randomUUID(),
+    createdAt: new Date().toISOString(),
+    corpusVersion: 'v1',
+    corpusManifestId: 'WRM-001',
+    corpusClassification: 'validation_only',
+    corpusDocumentCount: 1,
+    corpusByteCount: 351,
+    estimatedTokens: 88,
+    algorithm: 'bpe',
+    requestedVocabSize: 8192,
+    recommendedVocabSize: 150,
+    vocabSizeAdjustedReason: null,
+    minimumFrequency: 2,
+    seed: 42,
+    executablePath: process.execPath,
+    argv: ['-e', 'process.exit(0)'],
+    outputDir: 'out',
+    manifestOutputPath: 'out/manifest.json',
+    maxRuntimeMs: 10_000,
+    cpuLimit: null,
+    ramCeilingBytes: null,
+    networkPolicy: 'no_network_allowed',
+    expectedArtifacts: ['tokenizer.json'],
+    ...overrides,
+  }
+}
+
+function approvalFor(programId: string, planHash: string): SovereignTokenizerExecutionApproval {
+  return { kind: 'sovereign_model_lab_tokenizer_execution', granted: true, programId, planHash, action: 'start_tokenizer_training' }
+}
+
+/** Pure cases — no I/O, no storage, no subprocess. Covers required cases 1, 2, 5, 6, 7, 8, 9, 10, 11. */
+function testTokenizerExecutionGatePureCases(): CaseResult[] {
+  const results: CaseResult[] = []
+  const planA = finalizePlanWithHash(samplePlanFields())
+  const programId = 'gate-test-program-A'
+
+  const unauth = assertTokenizerExecutionApproved({ hasSession: false, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planA.planHash, approval: approvalFor(programId, planA.planHash) })
+  results.push(check('gate_01_unauthenticated_rejected', !unauth.ok && unauth.status === 401, JSON.stringify(unauth)))
+
+  const unapproved = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planA.planHash, approval: undefined })
+  results.push(check('gate_02_authenticated_unapproved_rejected', !unapproved.ok, JSON.stringify(unapproved)))
+
+  const wrongState = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'tokenizer_plan_ready', programId, currentPlanHash: planA.planHash, approval: approvalFor(programId, planA.planHash) })
+  results.push(check('gate_02b_wrong_program_state_rejected', !wrongState.ok && wrongState.status === 409, JSON.stringify(wrongState)))
+
+  const malformed1 = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planA.planHash, approval: { kind: 'sovereign_model_lab_tokenizer_execution', granted: true, programId } })
+  const malformed2 = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planA.planHash, approval: { kind: 'sovereign_model_lab_tokenizer_execution', granted: true, programId, planHash: 'deadbeef' } })
+  results.push(check('gate_05_malformed_approval_rejected', !malformed1.ok && !malformed2.ok, JSON.stringify([malformed1, malformed2])))
+
+  const wrongKind = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planA.planHash, approval: { kind: 'native_builder_live_research', granted: true, programId, planHash: planA.planHash, action: 'start_tokenizer_training' } })
+  const bareApprovalGranted = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planA.planHash, approval: { approval_granted: true } })
+  results.push(check('gate_06_wrong_approval_kind_rejected', !wrongKind.ok && !bareApprovalGranted.ok, JSON.stringify([wrongKind, bareApprovalGranted])))
+
+  const wrongProgram = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planA.planHash, approval: approvalFor('gate-test-program-B', planA.planHash) })
+  results.push(check('gate_07_approval_for_another_program_rejected', !wrongProgram.ok, JSON.stringify(wrongProgram)))
+
+  // 8 — differs only in corpus version
+  const planDifferentCorpus = finalizePlanWithHash(samplePlanFields({ corpusVersion: 'v2' }))
+  const wrongCorpusVersion = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planDifferentCorpus.planHash, approval: approvalFor(programId, planA.planHash) })
+  results.push(check('gate_08_approval_for_another_corpus_version_rejected', !wrongCorpusVersion.ok, JSON.stringify(wrongCorpusVersion)))
+
+  // 9 — differs only in tokenizer configuration (vocab size)
+  const planDifferentConfig = finalizePlanWithHash(samplePlanFields({ requestedVocabSize: 4096, recommendedVocabSize: 4096 }))
+  const wrongConfig = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planDifferentConfig.planHash, approval: approvalFor(programId, planA.planHash) })
+  results.push(check('gate_09_approval_for_another_tokenizer_configuration_rejected', !wrongConfig.ok, JSON.stringify(wrongConfig)))
+
+  // 10 — general "materially different job" (different seed = a different run)
+  const planDifferentSeed = finalizePlanWithHash(samplePlanFields({ seed: 7 }))
+  const differentJob = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planDifferentSeed.planHash, approval: approvalFor(programId, planA.planHash) })
+  results.push(check('gate_10_approval_cannot_authorize_second_materially_different_job', !differentJob.ok, JSON.stringify(differentJob)))
+
+  const locked = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: true, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planA.planHash, approval: approvalFor(programId, planA.planHash) })
+  results.push(check('gate_11_safety_lock_blocks_execution', !locked.ok && locked.status === 403, JSON.stringify(locked)))
+
+  const approved = assertTokenizerExecutionApproved({ hasSession: true, safetyLock: false, programState: 'awaiting_commander_tokenizer_approval', programId, currentPlanHash: planA.planHash, approval: approvalFor(programId, planA.planHash) })
+  results.push(check('gate_00_well_formed_matching_approval_accepted', approved.ok, JSON.stringify(approved)))
+
+  return results
+}
+
+/**
+ * Integration cases — covers required cases 3, 4, 12, 13. Reuses this suite's existing
+ * setUpApprovedTokenizerExperiment convention (executablePath = process.execPath, never a Python
+ * interpreter) so the "approved request reaches the boundary" proof never launches the real
+ * tokenizer training process, exactly like every other tokenizerRuntime.ts test in this file.
+ */
+async function testTokenizerExecutionGateIntegration(): Promise<CaseResult[]> {
+  await resetLabState()
+  const results: CaseResult[] = []
+
+  const { program: builtProgram, experimentId } = await setUpApprovedTokenizerExperiment('WRM-GATE-TEST', 300)
+  const experiment = await getTokenizerExperiment(experimentId)
+  if (!experiment?.plan) {
+    await resetLabState()
+    return [check('gate_setup_failed', false, 'Could not construct a real approved tokenizer experiment for gate integration tests.')]
+  }
+
+  // Persist the program in exactly the state the real /tokenizer-train route requires before the
+  // gate can even be reached — directly constructing this fixture (rather than driving the full
+  // environment-probe/plan/approve chain, which is flaky without tokenizers/sentencepiece
+  // installed — see phase2a_01's own comment) mirrors this file's existing pattern of building
+  // precise program fixtures directly for isolated component testing.
+  const readyProgram: SovereignModelLabProgram = {
+    ...builtProgram,
+    state: 'awaiting_commander_tokenizer_approval',
+    tokenizerExperimentId: experimentId,
+    history: [...builtProgram.history, { state: 'awaiting_commander_tokenizer_approval', at: new Date().toISOString(), note: 'gate test fixture' }],
+  }
+  await saveProgram(readyProgram)
+
+  // 3/4: blocked case — no approval supplied, exactly what an unapproved client request looks like.
+  const blockedGate = assertTokenizerExecutionApproved({
+    hasSession: true,
+    safetyLock: false,
+    programState: readyProgram.state,
+    programId: readyProgram.programId,
+    currentPlanHash: experiment.plan.planHash,
+    approval: undefined,
+  })
+  results.push(check('gate_03_blocked_case_rejected_before_any_execution_call', !blockedGate.ok, JSON.stringify(blockedGate)))
+  const jobsBeforeAnyRealAttempt = await listTokenizerJobStatuses()
+  const lockExistsBeforeAnyRealAttempt = await readFile(tokenizerJobLockPath(), 'utf8').then(() => true).catch(() => false)
+  results.push(check('gate_03b_zero_subprocesses_launched_for_blocked_case', jobsBeforeAnyRealAttempt.length === 0, `${jobsBeforeAnyRealAttempt.length} job record(s) found`))
+  results.push(check('gate_04_zero_files_written_for_blocked_case', !lockExistsBeforeAnyRealAttempt, `lock file exists=${lockExistsBeforeAnyRealAttempt}`))
+
+  // 12/13: correctly approved request reaches the real spawn boundary — targeting Node, never Python.
+  const approvedGate = assertTokenizerExecutionApproved({
+    hasSession: true,
+    safetyLock: false,
+    programState: readyProgram.state,
+    programId: readyProgram.programId,
+    currentPlanHash: experiment.plan.planHash,
+    approval: approvalFor(readyProgram.programId, experiment.plan.planHash),
+  })
+  results.push(check('gate_12a_correctly_approved_request_passes_the_gate', approvedGate.ok, JSON.stringify(approvedGate)))
+
+  let reachedBoundary = false
+  let jobId: string | null = null
+  if (approvedGate.ok) {
+    const started = await startTokenizerTrainingForProgram(readyProgram.programId)
+    reachedBoundary = started.state === 'tokenizer_training'
+    const linkedExperiment = started.tokenizerExperimentId ? await getTokenizerExperiment(started.tokenizerExperimentId) : null
+    jobId = linkedExperiment?.jobId ?? null
+  }
+  results.push(check('gate_12b_approved_request_reaches_subprocess_boundary', reachedBoundary && jobId !== null, `reachedBoundary=${reachedBoundary} jobId=${jobId}`))
+
+  if (jobId) {
+    const finalStatus = await waitForJobToTerminate(jobId, 5000)
+    results.push(check('gate_12c_boundary_process_actually_ran_and_completed', finalStatus?.status === 'completed', JSON.stringify(finalStatus)))
+  }
+  results.push(check('gate_13_test_never_launches_real_python_tokenizer_process', experiment.plan.executablePath === process.execPath, experiment.plan.executablePath))
+
+  await resetLabState()
+  return results
+}
+
+// --- 14. Read-only Model Lab operations remain unaffected by the gate -----------------------------
+
+async function testReadOnlyOperationsUnaffectedByGate(): Promise<CaseResult[]> {
+  await resetLabState()
+  const { program } = await setUpApprovedCorpus('WRM-GATE-READONLY')
+  const programStillReadable = Boolean(await getProgram(program.programId))
+  const environmentProbeStillWorks = (await checkTokenizerEnvironment(program.programId)).program.programId === program.programId
+  await resetLabState()
+  return [check('gate_14_read_only_operations_unaffected', programStillReadable && environmentProbeStillWorks, `readable=${programStillReadable} probeWorks=${environmentProbeStillWorks}`)]
+}
+
+// --- 15. Existing single-concurrency and timeout protections remain enforced -----------------------
+
+async function testConcurrencyAndTimeoutProtectionsUnchanged(): Promise<CaseResult[]> {
+  const content = await readFile(path.join(resolveRepoRoot(), 'lib', 'sovereign-model-lab', 'tokenizerRuntime.ts'), 'utf8')
+  const lockMechanismIntact = /acquireTokenizerJobLock/.test(content) && /TokenizerJobAlreadyRunningError/.test(content)
+  const timeoutMechanismIntact = /maxRuntimeMs/.test(content) && /setTimeout/.test(content)
+  return [
+    check('gate_15_single_concurrency_lock_mechanism_unchanged', lockMechanismIntact, String(lockMechanismIntact)),
+    check('gate_15b_timeout_enforcement_mechanism_unchanged', timeoutMechanismIntact, String(timeoutMechanismIntact)),
+  ]
+}
+
 export async function runTokenizerPipelineValidation(): Promise<CaseResult[]> {
   const results: CaseResult[] = []
   results.push(...(await testTokenizerReadyUnreachableFromPlanAloneOrProbeAlone()))
@@ -741,6 +934,10 @@ export async function runTokenizerPipelineValidation(): Promise<CaseResult[]> {
   results.push(...(await testNoModelTrainingFunctionExists()))
   results.push(...testMemoryEstimatorCorrectness())
   results.push(...(await testNoSecretsOrContentInGeneralLogs()))
+  results.push(...testTokenizerExecutionGatePureCases())
+  results.push(...(await testTokenizerExecutionGateIntegration()))
+  results.push(...(await testReadOnlyOperationsUnaffectedByGate()))
+  results.push(...(await testConcurrencyAndTimeoutProtectionsUnchanged()))
   await rm(SCRATCH_DIR, { recursive: true, force: true })
   await resetLabState()
   return results

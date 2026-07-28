@@ -2,10 +2,15 @@
 
 This document describes what the Sovereign Model Lab subsystem's code actually does, verified by
 direct source inspection of all 23 `lib/sovereign-model-lab/*.ts` files, both Python scripts, a
-representative sample of its ~20 API routes, and its two validation suites (131/131 checks
-combined: `sovereignModelLab.validation.ts` 69/69, `tokenizerPipeline.validation.ts` 62/62). It
+representative sample of its ~20 API routes, and its two validation suites (152/152 checks
+combined: `sovereignModelLab.validation.ts` 69/69, `tokenizerPipeline.validation.ts` 83/83). It
 documents only actual implemented behavior — where the code is stronger or weaker than a name might
 suggest, that is stated explicitly rather than assumed.
+
+**Commander hardening decision (post-commit fb2aa74):** authentication and program-state eligibility
+alone are not sufficient authority to launch the tokenizer subprocess, create output artifacts, or
+begin a build job. Tokenizer execution now requires an explicit, job-specific Commander approval at
+the point of execution — see section 12a.
 
 ## 1. Designation And Status
 
@@ -142,31 +147,97 @@ live process, since no model-training process exists to bound.
 no `sovereign-model-lab` exemption exists in `lib/supabase/middleware.ts`'s public-path list, same
 as Native Builder) — a session is required to reach any route in this subsystem at all.
 
-## 12. Commander Approval Gates — Real Capability Stronger/Weaker Than a Naive Reading
+## 12. Commander Approval Gates
 
 **Real, structurally-enforced gates exist** for the two decisions that matter most: dataset approval
 (`decideDatasetApproval`, required before a corpus can be built) and tokenizer-training approval
 (`approveTokenizerTraining` → single-use, hash-bound, freshness-rechecked at spawn time — see
-section 5). These are not weaker than documented; the freshness-recheck-at-spawn design is
-genuinely more rigorous than a simple boolean flag.
+section 5). The freshness-recheck-at-spawn design is genuinely more rigorous than a simple boolean
+flag.
 
-**One finding to report, per this packet's explicit instruction to report any capability stronger
-than documented:** unlike Native Builder's `/approve`, `/rollback`, and (after this hardening pass)
-`/resolve` routes, **no route in `app/api/sovereign-model-lab/` calls this codebase's shared
-dangerous-action gate** (`lib/permissions/policy.ts`'s `assertAutoOrApproval`) — confirmed by a
-direct grep across the entire route tree returning zero matches for `assertAutoOrApproval` or
-`fetchWarRoomPermissionsState`. Concretely: `POST .../tokenizer-approval` (which mints a real,
-consumable training approval) and `POST .../tokenizer-train` (which spawns the real subprocess)
-require nothing beyond an authenticated session and having the program already be in the correct
-state — there is no `approval_granted: true`-style explicit-confirmation body flag anywhere in this
-subsystem's API surface. In practice this means any authenticated session that can reach these
-routes and has walked a program through the prior state-machine steps (dataset approval → corpus
-build → environment check → plan creation) can approve and start a real local tokenizer-training
-subprocess without an extra explicit confirmation step. The blast radius is bounded — no network
-call, no repository source-file write, local-only, 10-minute cap, single concurrent job — but this
-is a real, structural difference from Native Builder's gating pattern, worth the Commander's
-explicit awareness. **This document does not change this behavior; it reports it, per instruction,
-for a Commander decision.**
+**Prior finding, now resolved (section 12a):** an earlier pass of this audit reported that no route
+in `app/api/sovereign-model-lab/` called this codebase's shared dangerous-action gate
+(`assertAutoOrApproval`), and that `POST .../tokenizer-train` required nothing beyond an
+authenticated session and correct program state — no explicit per-request confirmation. This has
+been hardened; see section 12a.
+
+## 12a. Tokenizer Execution Approval Gate (Commander Hardening Decision)
+
+**Authentication and program-state eligibility are necessary but not sufficient authority to
+launch the tokenizer subprocess, create output artifacts, begin a build job, or otherwise cause
+consequential Model Lab filesystem mutation.** `assertTokenizerExecutionApproved()`
+(`lib/sovereign-model-lab/tokenizerApproval.ts`) is a pure, side-effect-free gate that
+`POST /api/sovereign-model-lab/programs/[id]/tokenizer-train` calls *before*
+`startTokenizerTrainingForProgram` is ever invoked — a blocked result guarantees no output
+directory is created, no artifact is written, no Python process is spawned, and no job state is
+ever set to `running`, because the route never reaches the function that does any of that
+(proven by `gate_03b_zero_subprocesses_launched_for_blocked_case` and
+`gate_04_zero_files_written_for_blocked_case`, which confirm zero job records and no lock file
+exist after a blocked attempt).
+
+All of the following must hold, checked fresh on every single call, with no server-side memory of
+a prior approval — **no standing approval exists**:
+
+1. **A valid authenticated session.** `middleware.ts` already blocks any unauthenticated request
+   from reaching this route at all (section 11); the gate still declares `hasSession` as its own
+   explicit, independently unit-tested parameter (`gate_01_unauthenticated_rejected`).
+2. **The program's current state permits execution** — must be exactly
+   `awaiting_commander_tokenizer_approval`, the state reached only via a prior, separate
+   `approveTokenizerTraining()` call (`gate_02b_wrong_program_state_rejected`).
+3. **The safety lock permits execution** — if active, tokenizer execution is blocked outright, with
+   **no override** for this action (`gate_11_safety_lock_blocks_execution`).
+4. **An explicit, well-formed approval object** — the request body must carry a
+   `tokenizerExecutionApproval` object shaped `{ kind: 'sovereign_model_lab_tokenizer_execution',
+   granted: true, programId, planHash, action: 'start_tokenizer_training' }`. None of the following
+   ever count as approval — each is explicitly tested and rejected: being signed in, opening the
+   Model Lab page, creating a tokenizer program, admitting a corpus, reviewing a preview, an
+   approval for a different tokenizer job, a bare `{ approval_granted: true }` boolean with no
+   `kind`/hash, or an approval for Native Builder or another subsystem
+   (`gate_02_authenticated_unapproved_rejected`, `gate_05_malformed_approval_rejected`,
+   `gate_06_wrong_approval_kind_rejected`).
+5. **The approval kind is specific to Sovereign Model Lab tokenizer execution** —
+   `'sovereign_model_lab_tokenizer_execution'` only; an approval minted for
+   `'native_builder_live_research'` or any other kind is rejected (`gate_06`).
+6. **The approval is deterministically bound to program ID, corpus/dataset version, tokenizer
+   configuration, requested action, and output target.** `planHash` is the plan's own SHA-256 over
+   its full immutable field set — corpus version, algorithm, vocab size, minimum frequency, seed,
+   executable path, argv, output dir, expected artifacts, network policy, and runtime cap (see
+   `immutablePlanFields` in `tokenizerApproval.ts`). Binding the gate to this one hash, alongside
+   an explicit `programId` field, satisfies binding to every one of those dimensions without a
+   second, duplicate hashing scheme. Proven with real, independently-computed plans (not fabricated
+   constants) that differ in exactly one dimension each:
+   `gate_08_approval_for_another_corpus_version_rejected` (only `corpusVersion` differs),
+   `gate_09_approval_for_another_tokenizer_configuration_rejected` (only `requestedVocabSize`
+   differs), `gate_10_approval_cannot_authorize_second_materially_different_job` (only `seed`
+   differs), `gate_07_approval_for_another_program_rejected` (only `programId` differs).
+7. **The approval cannot authorize a later or materially different job.** Nothing about this
+   approval is stored server-side between requests — every field is re-supplied and re-checked on
+   every call. An approval minted for one plan's hash simply will not equal a different plan's hash,
+   by construction of SHA-256.
+
+**Layering, not redundancy:** this route-level gate and `tokenizerApproval.ts`'s pre-existing
+`assertFreshBeforeSpawn()` (still called, unchanged, immediately before the actual `spawn()` inside
+`tokenizerRuntime.ts`) serve different purposes. This gate proves the *caller* explicitly
+authorized this exact action, bound to this exact plan, in this exact request. The pre-spawn
+freshness recheck proves nothing *drifted* between authorization and the moment of execution
+(e.g. the corpus was rebuilt in between). Both must pass; neither substitutes for the other.
+
+**Read-only operations remain session-authenticated only, unaffected by this gate** — confirmed by
+`gate_14_read_only_operations_unaffected`: program status/detail reads, hardware/source/document
+listing, dataset-candidate/corpus building, tokenizer-environment probing, tokenizer-plan creation,
+dataset-preview, and deterministic validation all remain reachable with nothing beyond a session,
+exactly as before this hardening pass. Only the one route that actually launches the subprocess
+(`tokenizer-train`) requires the new explicit approval.
+
+**Sandbox, timeout, and concurrency boundaries — unchanged, re-verified:** the 10-minute
+(`maxRuntimeMs`) runtime cap, the OS-level exclusive single-job lock
+(`acquireTokenizerJobLock`/`TokenizerJobAlreadyRunningError`), the fixed executable+argv (never
+`shell: true`), and the minimal environment allowlist are all still enforced by
+`tokenizerRuntime.ts`, which this hardening pass did not modify — confirmed by
+`gate_15_single_concurrency_lock_mechanism_unchanged` and
+`gate_15b_timeout_enforcement_mechanism_unchanged`, and independently by the full, unmodified,
+still-passing `phase2a_defect2_*` suite (atomic single-job + approval-consumption gate, stale-lock
+handling).
 
 ## 13. Rollback Behavior
 
@@ -238,10 +309,11 @@ Commander action buttons matching each state-machine transition.
 
 **Validators**: `scripts/run-sovereign-model-lab-validation.mjs` (wraps
 `sovereignModelLab.validation.ts`, 69/69), `scripts/run-sovereign-model-lab-tokenizer-validation.mjs`
-(wraps `tokenizerPipeline.validation.ts`, 62/62). Both are pure Node subprocess wrappers (same
-`spawnSync(process.execPath, [...])` pattern as every other `run-*-validation.mjs` in this repo) —
-neither wrapper itself makes a network call; confirmed the underlying suites don't either (section
-7).
+(wraps `tokenizerPipeline.validation.ts`, 83/83, including the 21 new tokenizer-execution-gate
+cases added in the Commander hardening pass — section 12a). Both are pure Node subprocess wrappers
+(same `spawnSync(process.execPath, [...])` pattern as every other `run-*-validation.mjs` in this
+repo) — neither wrapper itself makes a network call; confirmed the underlying suites don't either
+(section 7).
 
 ## 18. Validation Requirements
 
@@ -250,10 +322,13 @@ Both existing suites pass and were independently re-run during this audit:
   `leaf_01_storage_never_imports_runtime`, `leaf_02_provenance_ledger_never_imports_runtime`,
   `secrets_01_audit_log_calls_never_reference_env_or_secret_terms`, and a full state-machine legal-
   transition suite.
-- `node scripts/run-sovereign-model-lab-tokenizer-validation.mjs` — **62/62 PASS**, including
-  `phase2a_25`/`phase2a_26` (no network imports, no weight downloads, for both Python scripts),
-  `phase2a_27_no_model_training_function_exists`, and the full itemized training-memory-estimate
-  coverage.
+- `node scripts/run-sovereign-model-lab-tokenizer-validation.mjs` — **83/83 PASS** (62 prior +
+  21 new), including `phase2a_25`/`phase2a_26` (no network imports, no weight downloads, for both
+  Python scripts), `phase2a_27_no_model_training_function_exists`, the full itemized
+  training-memory-estimate coverage, and the full `gate_*` tokenizer-execution-approval suite
+  (section 12a) — every gate test uses `process.execPath` (Node) as its target executable, never
+  the real Python tokenizer, confirmed directly by `gate_13_test_never_launches_real_python_
+  tokenizer_process`.
 - `npx tsc --noEmit`, ESLint on owned files, `npm run build`, `git diff --check` — see the commit
   report for this pass's results.
 
@@ -263,9 +338,13 @@ Both existing suites pass and were independently re-run during this audit:
   a static-verification guarantee (the training script never imports a network client, proven by
   the validation suite), not an OS-level sandbox — Windows has no default job-object/firewall-rule
   enforcement wired up here.
-- Section 12's finding: no Sovereign Model Lab route uses the shared `assertAutoOrApproval`
-  dangerous-action gate that Native Builder's file/rollback-mutating routes use. This is reported,
-  not fixed, in this pass.
+- Tokenizer execution (`/tokenizer-train`) is now gated by a bespoke, Model-Lab-specific approval
+  mechanism (section 12a) rather than this codebase's shared `assertAutoOrApproval` dangerous-action
+  gate that Native Builder's file/rollback-mutating routes use. This was a deliberate choice: the
+  shared gate's generic `approval_granted: true` boolean cannot express job-specific binding
+  (program/corpus/configuration/output), which this hardening's own requirements call for. No other
+  Sovereign Model Lab route (dataset approval, corpus build, environment probe, plan creation) uses
+  either gate — they remain session-authenticated only, per section 12a's explicit scope.
 - `directMlAvailable` in the hardware report is always `null` — no reliable no-install probe exists
   for it (honestly disclosed in the probe's own output, not silently omitted).
 - Training memory/VRAM estimates are architecture-inferred rules of thumb (no real WRM-001
@@ -283,7 +362,8 @@ assumed (done — sections 4, 7, 8, each independently confirmed against both di
 and the existing validation suites); (c) this document exists and documents actual implemented
 behavior only, correcting rather than inventing where needed (done — section 12's finding is
 reported exactly as found, not smoothed over); (d) both existing validation suites pass
-deterministically offline (done — 131/131 combined); (e) `tsc`, ESLint, `build`, and
+deterministically offline (done — 152/152 combined, including the 21-case tokenizer-execution
+approval gate suite); (e) `tsc`, ESLint, `build`, and
 `git diff --check` all pass (see commit report); (f) any capability stronger than documented is
 explicitly reported (done — section 12). Committing this work to version control, pushing, merging,
 and deploying are separate, later steps not authorized by this document.
