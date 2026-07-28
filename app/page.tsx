@@ -153,9 +153,17 @@ import {
   buildAttendanceDirectedOrder,
   isAttendanceIntent,
   packetHasActionableProviderIssues,
+  rosterLabelForAttendance,
   runtimeAfterAttendanceHardClose,
   runtimeAfterAttendanceSoftCap,
 } from '@/lib/council/attendanceReadiness'
+import { buildAttendanceLateLines } from '@/lib/council/attendanceRelease'
+import {
+  buildProviderIssueBanner,
+  countFamilyResponses,
+  projectFamilyOperationStatuses,
+  type FamilyOperationStatusMap,
+} from '@/lib/council/familyOperationStatus'
 import {
   DECREE_GATHER_HARD_HANG_MS,
   DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS,
@@ -207,6 +215,10 @@ import {
 } from '@/lib/council/councilRenderGate'
 import { detectPromptIntent, type PromptIntent } from '@/lib/council/promptIntent'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
+import {
+  extractReadableCouncilContributions,
+  extractReadableCouncilResponse,
+} from '@/lib/council/liveResponseExtraction'
 import { COUNCIL_STABILITY_FAILURE_MESSAGE } from '@/lib/council/stabilityMode'
 import {
   COUNCIL_FLOW_MODE_LABELS,
@@ -9026,6 +9038,7 @@ function Home() {
                 packetStatus: 'idle',
                 families: [],
                 extraWarnings: [...modeWarnings, 'full_team_gate_unsatisfied'],
+                directedFamilies: directedOrder,
               }),
             )
             return
@@ -9092,6 +9105,7 @@ function Home() {
           extraWarnings: modeWarnings,
           providerRuntimeStates,
           providerRuntimeDetails,
+          directedFamilies: orderForGather,
         }),
       )
 
@@ -9288,7 +9302,17 @@ function Home() {
                 } else {
                   shadowCouncilAssembly = chatData.shadowCouncilAssembly
                   councilProgressForMessage = chatData.councilProgress
-                  textOut = typeof chatData.councilSingleResponse === 'string' ? chatData.councilSingleResponse.trim() : ''
+                  const extractedResponse = extractReadableCouncilResponse(chatData, family)
+                  textOut = extractedResponse?.content ?? ''
+                  if (
+                    process.env.NODE_ENV === 'development'
+                    && extractedResponse?.source === 'results.content'
+                  ) {
+                    console.debug('[Live Council] normalized provider response from results.content', {
+                      family,
+                      sourceFamily: extractedResponse.family,
+                    })
+                  }
                   if (textOut && councilFlowModeEffective === 'stable_group' && !chatData.stableGroupSkipped) {
                     stableGroupPriorThisTurn.push({
                       family: rosterLabel(family),
@@ -9426,6 +9450,8 @@ function Home() {
           const deliberation = deliberationData.familyDeliberation
           const turns = [...deliberation.turns].sort((a, b) => a.speaking_order - b.speaking_order)
           const messagesToAdd: CouncilMessage[] = []
+          const readableMessageCountBeforeFallback = () =>
+            messagesToAdd.filter(message => message.messageType === 'response' && message.content.trim()).length
           const runtimeByFamily: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
           const detailsByFamily: CouncilProviderRuntimeDetails = {}
           const priorOutputMessageIds: string[] = []
@@ -9470,6 +9496,7 @@ function Home() {
               familyDeliberationTurn: turn,
               familyDeliberationEvidenceReferences: deliberation.evidence_references,
               shadowCouncilAssembly: turn.turn_id === shadowReadoutTurnId ? deliberationData.shadowCouncilAssembly : undefined,
+              councilProgress: deliberationData.councilProgress,
             })
 
             if (complete) {
@@ -9486,6 +9513,31 @@ function Home() {
               )
             }
             if (turn.output_message_id) priorOutputMessageIds.push(turn.output_message_id)
+          }
+
+          if (readableMessageCountBeforeFallback() === 0) {
+            for (const contribution of extractReadableCouncilContributions(deliberationData)) {
+              const family =
+                parseCouncilMessageFamily(contribution.family)
+                ?? parseCouncilMessageFamily(contribution.displayFamily)
+              if (!family) continue
+              const vis = orchestrationVisual(family)
+              const meta = FAMILY_META[vis.presenceKey]
+              messagesToAdd.push({
+                id: `incremental-${(deliberationData.councilProgress?.requestId ?? deliberation.session_id)}-${family}-${contribution.contributionId}`.replace(/[^a-zA-Z0-9:_-]+/g, '-'),
+                familyName: vis.bubbleFamilyName ?? rosterLabel(family),
+                content: contribution.content,
+                timestamp: new Date().toLocaleTimeString(),
+                color: vis.colorOverride ?? meta.color,
+                icon: vis.iconOverride ?? meta.icon,
+                provider: vis.provider,
+                messageType: 'response',
+                councilProgress: deliberationData.councilProgress,
+                shadowCouncilAssembly: deliberationData.shadowCouncilAssembly,
+              })
+              runtimeByFamily[family] = 'RESPONDED'
+              anySuccess = true
+            }
           }
 
           if (messagesToAdd.length) addMessages(messagesToAdd)
@@ -9508,6 +9560,7 @@ function Home() {
               ],
               providerRuntimeStates,
               providerRuntimeDetails,
+              directedFamilies: orderForGather,
             }),
           )
           councilDispatch({ type: 'SET_COUNCIL_CHANNEL_OPEN', payload: true })
@@ -9668,8 +9721,11 @@ function Home() {
               stableGroupFinalSynthesis: true,
               councilProviderRuntimeStates: providerRuntimeStates,
             })
-            if (finalRes.ok && finalData.councilSingleResponse?.trim()) {
-              const synthText = finalData.councilSingleResponse.trim()
+            const finalExtractedResponse = finalRes.ok
+              ? extractReadableCouncilResponse(finalData, 'chatgpt')
+              : null
+            if (finalExtractedResponse?.content) {
+              const synthText = finalExtractedResponse.content
               outcomeByFamily.set('chatgpt', {
                 family: 'chatgpt',
                 textOut: synthText,
@@ -9830,6 +9886,7 @@ function Home() {
             extraWarnings: [...modeWarnings, 'packet_cancelled_mid_gather'],
             providerRuntimeStates,
             providerRuntimeDetails,
+            directedFamilies: orderForGather,
           }),
         )
         return
@@ -9902,6 +9959,7 @@ function Home() {
             extraWarnings: [...modeWarnings, 'packet_finalizing'],
             providerRuntimeStates,
             providerRuntimeDetails,
+            directedFamilies: orderForGather,
           }),
         )
         const syncMs = resolveCouncilPacketSyncMs({
@@ -9924,6 +9982,7 @@ function Home() {
               extraWarnings: [...modeWarnings, 'packet_cancelled_before_release'],
               providerRuntimeStates,
               providerRuntimeDetails,
+              directedFamilies: orderForGather,
             }),
           )
           return
@@ -9977,30 +10036,11 @@ function Home() {
             directedFamilies: directedOrder,
           })
 
-          const lateLines: StagedCouncilLine[] = []
-          for (const c of cells) {
-            if (attendanceRevealedFamilies.has(c.family)) continue
-            if (c.textOut?.trim()) {
-              lateLines.push({
-                family: c.family,
-                textOut: c.textOut.trim(),
-                transientMessageIds: c.transientMessageIds,
-                shadowCouncilAssembly: c.shadowCouncilAssembly,
-                councilProgress: c.councilProgress,
-              })
-              continue
-            }
-            const slotStatus =
-              c.runtime === 'DEGRADED'
-                ? 'DEGRADED'
-                : c.runtime === 'FAILED'
-                  ? 'FAILED'
-                  : 'UNAVAILABLE'
-            lateLines.push({
-              family: c.family,
-              textOut: shapeAttendanceForModeGovernor('', c.family, slotStatus),
-            })
-          }
+          const lateLines: StagedCouncilLine[] = buildAttendanceLateLines(
+            cells,
+            attendanceRevealedFamilies,
+            (family, slotStatus) => shapeAttendanceForModeGovernor('', family, slotStatus),
+          )
           if (lateLines.length) {
             const lateModerated = await releaseAttendancePacket(lateLines, providerRuntimeStates)
             allModerated = [...allModerated, ...lateModerated]
@@ -10041,6 +10081,7 @@ function Home() {
             ],
             providerRuntimeStates,
             providerRuntimeDetails,
+            directedFamilies: orderForGather,
           }),
         )
       } else {
@@ -10054,6 +10095,7 @@ function Home() {
             extraWarnings: modeWarnings,
             providerRuntimeStates,
             providerRuntimeDetails,
+            directedFamilies: orderForGather,
           }),
         )
       }
@@ -11076,6 +11118,27 @@ function Home() {
     )
   const footerShowsPacketOrCouncilProviderIssue =
     Boolean(currentPacketProviderIssue) || councilProviderErrorFooterActive
+  /** Canonical per-family outcome for the *current* operation only — connectivity (whether a
+   * provider is configured/reachable) is a separate concept tracked by `providerHealth`. */
+  const familyOperationStatuses: FamilyOperationStatusMap = useMemo(() => {
+    const packet = councilPacketRender
+    const operationConcluded = Boolean(packet) && packet!.sessionState === 'CLOSED' && !loading
+    return projectFamilyOperationStatuses({
+      directedFamilies: packet?.directedFamilies,
+      providerRuntimeStates: packet?.providerRuntimeStates,
+      providerRuntimeDetails: packet?.providerRuntimeDetails,
+      operationConcluded,
+      operationInProgress: loading,
+    })
+  }, [councilPacketRender, loading])
+  const providerIssueBanner = useMemo(
+    () => buildProviderIssueBanner(familyOperationStatuses, rosterLabelForAttendance),
+    [familyOperationStatuses],
+  )
+  const councilResponseProgressLabel = useMemo(
+    () => countFamilyResponses(familyOperationStatuses, councilPacketRender?.directedFamilies),
+    [familyOperationStatuses, councilPacketRender],
+  )
   const chatHealthLabel = useMemo(() => {
     if (loading) return 'Working'
     if (liveResearchHud?.mode === 'failed') return 'Error'
@@ -11090,7 +11153,9 @@ function Home() {
     if (councilStabilityMode && council.councilState === 'provider_error') {
       return COUNCIL_STABILITY_FAILURE_MESSAGE
     }
-    if (footerShowsPacketOrCouncilProviderIssue) return 'Provider issue — see family status badges.'
+    if (footerShowsPacketOrCouncilProviderIssue) {
+      return providerIssueBanner ?? 'Provider issue — the affected family did not complete this Council round.'
+    }
     if (liveResearchHud?.mode === 'completing' || liveResearchHud?.councilPhase === 'model_running') {
       return 'Research completing'
     }
@@ -11108,6 +11173,7 @@ function Home() {
   }, [
     councilStabilityMode,
     footerShowsPacketOrCouncilProviderIssue,
+    providerIssueBanner,
     council.councilState,
     council.isAwaitingResponses,
     liveResearchHud?.mode,
@@ -11530,15 +11596,24 @@ function Home() {
     return `${mode}${stability}`
   }, [councilFlowMode, councilStabilityMode])
 
-  const matrixCouncilHealthLabel = useMemo(() => {
+  /** Configured/reachable count — connectivity, not this operation's outcome. Renamed from the
+   * old "X of Y families active" wording, which read like a health claim about the last response. */
+  const matrixCouncilAvailabilityLabel = useMemo(() => {
     const rosterFamilies = COUNCIL_ROSTER.filter(entry => entry.engineId)
-    const active = rosterFamilies.filter(entry => {
+    const available = rosterFamilies.filter(entry => {
       const key = entry.engineId as ProviderFamilyKey
       const status = providerHealth.providers[key]
       return status === 'online' || status === 'standby'
     }).length
-    return `${active} of ${rosterFamilies.length} families active`
+    return `${available} of ${rosterFamilies.length} families available`
   }, [providerHealth.providers])
+  /** Truthful response-progress readout for the current/just-completed operation only — never
+   * substitutes for the availability count above, and never counts Ra'el as a provider response. */
+  const matrixCouncilResponseProgressLabel = useMemo(() => {
+    if (!councilResponseProgressLabel) return null
+    return `${councilResponseProgressLabel.responded} of ${councilResponseProgressLabel.total} responded`
+  }, [councilResponseProgressLabel])
+  const matrixCouncilHealthLabel = matrixCouncilResponseProgressLabel ?? matrixCouncilAvailabilityLabel
 
   const activityFeedLabel = useMemo(() => {
     if (typingFamily) {
@@ -11806,6 +11881,7 @@ function Home() {
             <CouncilMembersPanel
               providerStatuses={providerHealth.providers}
               providerLabels={providerHealth.labels}
+              operationStatuses={familyOperationStatuses}
               onOpenPanel={id => setDockPanelId(id)}
             />
           )}
