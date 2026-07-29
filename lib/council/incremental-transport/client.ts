@@ -7,8 +7,10 @@ import {
 } from './reconcile'
 import { createCouncilSseParser } from './sse'
 import type {
+  CouncilStreamChunkDiagnostic,
   CouncilStreamClosed,
   CouncilStreamError,
+  CouncilStreamFrameDiagnostic,
   CouncilStreamParserEvent,
   CouncilStreamResult,
   IncrementalCouncilChatOptions,
@@ -28,12 +30,23 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
   let error: CouncilStreamError | null = null
   let progressCount = 0
   let executionStarted = false
+  let chunkIndex = 0
 
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options.body),
     signal: options.signal,
+  })
+  callbacks.onResponse?.({
+    requestUrl: '/api/chat/stream',
+    requestMethod: 'POST',
+    status: response.status,
+    ok: response.ok,
+    contentType: response.headers.get('content-type'),
+    cacheControl: response.headers.get('cache-control'),
+    connection: response.headers.get('connection'),
+    transportAvailable: isTextEventStream(response),
   })
 
   if (!isTextEventStream(response)) {
@@ -79,6 +92,12 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
   }
 
   const decoder = new TextDecoder()
+  const recordChunk = (input: Omit<CouncilStreamChunkDiagnostic, 'abortSignalState'>) => {
+    callbacks.onChunk?.({
+      ...input,
+      abortSignalState: options.signal ? (options.signal.aborted ? 'aborted' : 'active') : 'none',
+    })
+  }
   const handleParserEvent = (event: CouncilStreamParserEvent) => {
     if (!event.ok) {
       callbacks.onMalformedEnvelope?.(event)
@@ -129,16 +148,36 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
       callbacks.onClosed?.(event.envelope)
     }
   }
-  const parser = createCouncilSseParser(handleParserEvent)
+  const parser = createCouncilSseParser(handleParserEvent, {
+    onFrame: (diagnostic: CouncilStreamFrameDiagnostic) => callbacks.onFrame?.(diagnostic),
+  })
 
   try {
     while (true) {
       const chunk = await reader.read()
       if (chunk.done) break
-      parser.push(decoder.decode(chunk.value, { stream: true }))
+      const decoded = decoder.decode(chunk.value, { stream: true })
+      chunkIndex += 1
+      recordChunk({
+        chunkIndex,
+        byteLength: chunk.value.byteLength,
+        decodedLength: decoded.length,
+        finalDecoderFlush: false,
+      })
+      parser.push(decoded)
       if (error) break
     }
-    parser.push(decoder.decode())
+    const finalDecoded = decoder.decode()
+    if (finalDecoded.length > 0) {
+      chunkIndex += 1
+      recordChunk({
+        chunkIndex,
+        byteLength: 0,
+        decodedLength: finalDecoded.length,
+        finalDecoderFlush: true,
+      })
+      parser.push(finalDecoded)
+    }
     parser.flush()
   } finally {
     parser.reset()

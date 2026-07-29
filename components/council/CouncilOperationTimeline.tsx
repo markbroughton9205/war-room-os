@@ -119,22 +119,6 @@ export function CouncilOperationTimeline({ input, inputs, operation: providedOpe
         </div>
       </header>
 
-      <ol className="mt-3 space-y-2 border-l border-emerald-400/20 pl-2">
-        {operation.events.map(item => (
-          <CouncilOperationEventCard key={item.id} event={item} />
-        ))}
-      </ol>
-
-      {operation.status === 'running' || operation.status === 'waiting_for_provider' || operation.status === 'synthesizing' ? (
-        <p className="mt-3 rounded px-3 py-2 text-[10px] uppercase tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.18)', color: '#A7F3D0', background: 'rgba(0,0,0,0.18)' }}>
-          Operation running. Waiting for runtime update.
-        </p>
-      ) : operation.status === 'waiting_approval' ? (
-        <p className="mt-3 rounded px-3 py-2 text-[10px] uppercase tracking-widest" style={{ border: '1px solid rgba(253,230,138,0.22)', color: '#FDE68A', background: 'rgba(0,0,0,0.18)' }}>
-          Awaiting approval.
-        </p>
-      ) : null}
-
       <section className="mt-3 rounded px-3 py-2" style={{ border: '1px solid rgba(147,197,253,0.16)', background: 'rgba(0,0,0,0.22)' }}>
         <h3 className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#93C5FD' }}>
           Commander Briefing
@@ -170,6 +154,27 @@ export function CouncilOperationTimeline({ input, inputs, operation: providedOpe
           </div>
         ) : null}
       </section>
+
+      {operation.status === 'running' || operation.status === 'waiting_for_provider' || operation.status === 'synthesizing' ? (
+        <p className="mt-3 rounded px-3 py-2 text-[10px] uppercase tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.18)', color: '#A7F3D0', background: 'rgba(0,0,0,0.18)' }}>
+          Operation running. Waiting for runtime update.
+        </p>
+      ) : operation.status === 'waiting_approval' ? (
+        <p className="mt-3 rounded px-3 py-2 text-[10px] uppercase tracking-widest" style={{ border: '1px solid rgba(253,230,138,0.22)', color: '#FDE68A', background: 'rgba(0,0,0,0.18)' }}>
+          Awaiting approval.
+        </p>
+      ) : null}
+
+      <details className="mt-3 rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.14)', background: 'rgba(0,0,0,0.18)' }}>
+        <summary className="min-h-8 cursor-pointer list-none text-[10px] font-bold uppercase tracking-widest outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 [&::-webkit-details-marker]:hidden" style={{ color: '#86EFAC' }}>
+          View runtime event timeline
+        </summary>
+        <ol className="mt-3 space-y-2 border-l border-emerald-400/20 pl-2">
+          {operation.events.map(item => (
+            <CouncilOperationEventCard key={item.id} event={item} />
+          ))}
+        </ol>
+      </details>
 
       <details className="mt-3 rounded px-3 py-2" style={{ border: '1px solid rgba(148,163,184,0.16)', background: 'rgba(0,0,0,0.18)' }}>
         <summary className="min-h-8 cursor-pointer list-none text-[10px] font-bold uppercase tracking-widest outline-none focus-visible:ring-2 focus-visible:ring-slate-300 [&::-webkit-details-marker]:hidden" style={{ color: '#94A3B8' }}>

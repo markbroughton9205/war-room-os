@@ -6,7 +6,8 @@ import type { OperatorGap, GapStatus } from './gapFinder'
 import { KNOWN_GAP_IDS } from './gapVerification'
 import type { OperatorInboxItem, OperatorInboxSnapshot, OperatorInboxStatus } from './inbox'
 import { OPERATOR_INBOX_STORAGE_KEY } from './inbox'
-import { loadSelfRepairSnapshot, saveSelfRepairSnapshot } from './selfRepair/storage'
+import { loadSelfRepairSnapshot } from './selfRepair/storage'
+import type { SelfRepairRecord, SelfRepairSnapshot } from './selfRepair/types'
 import { loadUpgradeQueue, type UpgradeQueueSnapshot } from './upgradeQueue'
 
 export const CANONICAL_ISSUE_IDS = {
@@ -233,17 +234,40 @@ export function applyInboxUpgradeQueueReconciliation(
   })
 }
 
-export function normalizeSelfRepairGapIds(): void {
-  const snapshot = loadSelfRepairSnapshot()
+export type SelfRepairNormalizationResult = {
+  snapshot: SelfRepairSnapshot
+  changed: boolean
+}
+
+/**
+ * Pure canonicalization: rewrites each record's gapId to its canonical form and collapses
+ * records that land on the same canonical gapId into one (keeping the more recently updated —
+ * same recency convention `upsertSelfRepairRecord` already sorts by). Never reads or writes
+ * storage — the caller decides whether/how to persist the result. This must stay pure: the only
+ * historical bug here was this function calling back into `loadSelfRepairSnapshot`, which created
+ * infinite recursion (every load re-triggered a normalize, which re-triggered a load...).
+ */
+export function normalizeSelfRepairGapIds(snapshot: SelfRepairSnapshot): SelfRepairNormalizationResult {
   let changed = false
-  const records = snapshot.records.map(record => {
+  const byGapId = new Map<string, SelfRepairRecord>()
+
+  for (const record of snapshot.records) {
     const gapId = canonicalizeIssueId(record.gapId)
-    if (gapId === record.gapId) return record
+    const canonicalRecord = gapId === record.gapId ? record : { ...record, gapId }
+    if (canonicalRecord !== record) changed = true
+
+    const existing = byGapId.get(gapId)
+    if (!existing) {
+      byGapId.set(gapId, canonicalRecord)
+      continue
+    }
     changed = true
-    return { ...record, gapId }
-  })
-  if (!changed) return
-  saveSelfRepairSnapshot({ ...snapshot, records })
+    const keepIncoming = canonicalRecord.plan.updatedAt.localeCompare(existing.plan.updatedAt) > 0
+    byGapId.set(gapId, keepIncoming ? canonicalRecord : existing)
+  }
+
+  if (!changed) return { snapshot, changed: false }
+  return { snapshot: { ...snapshot, records: [...byGapId.values()] }, changed: true }
 }
 
 export function normalizeOperatorSessionStorage(): void {
@@ -261,7 +285,9 @@ export function normalizeOperatorSessionStorage(): void {
     /* private mode */
   }
   try {
-    normalizeSelfRepairGapIds()
+    // loadSelfRepairSnapshot() already normalizes-and-persists-if-changed as part of loading;
+    // calling it here (return value unused) is what actually migrates legacy gapIds eagerly.
+    loadSelfRepairSnapshot()
   } catch {
     /* ignore */
   }

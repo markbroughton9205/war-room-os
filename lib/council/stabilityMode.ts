@@ -78,22 +78,33 @@ export function isCouncilStabilityMode(): boolean {
   return raw === 'true' || raw === '1'
 }
 
-/** Heavy systems off when env stability is on or flow is stable group chat. */
+/** Heavy systems (memory injection, RSS federation, opportunity scanning, baby observer,
+ * autonomous gather, packet classification, etc.) off when env stability is on or flow is
+ * stable group chat — this remains Stable Group's intentionally lighter-weight orchestration. */
 export function isMinimalCouncilSystemsPath(councilFlowMode?: CouncilFlowMode | null): boolean {
   return isCouncilStabilityMode() || isStableGroupChatMode(councilFlowMode)
 }
 
 /**
- * Pass provider text through without integrity substitution, fallback summaries, or degraded flags.
- * Active for `COUNCIL_STABILITY_MODE` and stable group chat flow.
+ * Pass provider text through without integrity substitution, fallback summaries, or degraded
+ * flags. Active ONLY for the explicit `COUNCIL_STABILITY_MODE` debug/circuit-breaker flag — not
+ * for ordinary Stable Group chat, whose responses must still get truthful greeting-only/degraded
+ * detection like every other flow (see Commander "REAL AGENT RESPONSES" directive: a family
+ * bubble may never show synthetic/degraded text as if it were a complete real response).
  */
-export function shouldPassthroughCouncilProviderText(councilFlowMode?: CouncilFlowMode | null): boolean {
-  return isMinimalCouncilSystemsPath(councilFlowMode)
+export function shouldPassthroughCouncilProviderText(): boolean {
+  return isCouncilStabilityMode()
 }
 
-/** Feature flags for the active mode (disabled layers are off when minimal path is active). */
+/**
+ * Feature flags for the active mode. Most layers stay off for Stable Group (see
+ * `isMinimalCouncilSystemsPath`), but `liveResearchRouter` is deliberately exempted: internet
+ * grounding is a truthfulness requirement, not a "heavy" optional enrichment, so only the
+ * explicit debug stability flag disables it — Stable Group decrees still get real research.
+ */
 export function getStabilityModeFlags(councilFlowMode?: CouncilFlowMode | null): StabilityModeFlags {
-  return isMinimalCouncilSystemsPath(councilFlowMode) ? DISABLED_WHEN_STABLE : ENABLED_WHEN_NORMAL
+  const base = isMinimalCouncilSystemsPath(councilFlowMode) ? DISABLED_WHEN_STABLE : ENABLED_WHEN_NORMAL
+  return { ...base, liveResearchRouter: !isCouncilStabilityMode() }
 }
 
 export function stabilityModeResponseMeta(councilFlowMode?: CouncilFlowMode | null): {

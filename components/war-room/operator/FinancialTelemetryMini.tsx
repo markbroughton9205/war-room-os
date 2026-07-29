@@ -11,12 +11,18 @@ function tone(label: string): string {
 }
 
 export const FinancialTelemetryMini = memo(function FinancialTelemetryMini({ metrics }: { metrics: OperatorFinancialMetric[] }) {
+  const empty = metrics.length === 0
   return (
     <section className="rounded border border-emerald-500/20 bg-emerald-500/[0.035] p-3">
       <div className="mb-3">
         <div className="text-[10px] font-black uppercase tracking-[0.28em] text-emerald-300">Live Financial Telemetry</div>
         <p className="mt-1 text-[10px] text-slate-500">Manual logged or source-backed money only. Missing data stays unavailable.</p>
       </div>
+      {empty ? (
+        <div className="rounded border border-white/10 bg-black/25 p-3 text-xs leading-relaxed text-slate-400">
+          No financial telemetry source returned metrics. Missing dependency: `war_room_operator_earnings` or Outcome Ledger rows with confirmed revenue. Implementation remaining: log confirmed earnings, connect a source-backed payout/deposit feed, or repair `/api/operator/deck`.
+        </div>
+      ) : null}
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {metrics.map(metric => (
           <article key={metric.key} className="rounded border border-white/10 bg-black/30 p-3">
@@ -39,7 +45,7 @@ export const FinancialTelemetryMini = memo(function FinancialTelemetryMini({ met
               </div>
             )}
             <div className="mt-2 text-[9px] leading-relaxed text-slate-500">
-              {metric.source ?? 'Not logged yet'}
+              {metric.source ?? 'Missing dependency: confirmed manual earning, source URI, or Outcome Ledger actual revenue. No value is inferred.'}
             </div>
           </article>
         ))}

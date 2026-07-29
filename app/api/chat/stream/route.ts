@@ -34,6 +34,32 @@ function isCouncilChatJson(value: unknown): value is CouncilChatJson {
   return Boolean(value && typeof value === 'object')
 }
 
+function readableContributionCount(data: CouncilChatJson): number {
+  const seen = new Set<string>()
+  const add = (family: unknown, content: unknown) => {
+    if (typeof content !== 'string' || content.trim().length < 5) return
+    const familyKey = typeof family === 'string' ? family.trim().toLowerCase() : 'provider'
+    const contentKey = content.trim()
+    seen.add(`${familyKey}|${contentKey}`)
+  }
+  if (typeof data.councilSingleResponse === 'string') add(data.councilSingleFamily ?? 'synthesis', data.councilSingleResponse)
+  for (const result of Array.isArray(data.results) ? data.results : []) {
+    if (result.status === 'OK') add(result.family, result.content)
+  }
+  const turns = data.familyDeliberation?.turns ?? []
+  for (const turn of turns) {
+    if (turn.completion_status === 'complete') add(turn.provider_family, turn.full_response)
+  }
+  return seen.size
+}
+
+function finalStatusFor(data: CouncilChatJson, responseOk: boolean): 'completed' | 'partial' | 'failed' {
+  if (!responseOk) return 'failed'
+  const count = readableContributionCount(data)
+  if (count > 0) return data.councilProviderHttpStatus === 'failed' || data.councilProviderHttpStatus === 'timed_out' ? 'partial' : 'completed'
+  return 'failed'
+}
+
 export function createCouncilStreamPostHandler(executeRequest: CouncilStreamExecutor = defaultCouncilStreamExecutor) {
   return async function councilStreamPost(req: Request) {
   const encoder = new TextEncoder()
@@ -150,8 +176,12 @@ export function createCouncilStreamPostHandler(executeRequest: CouncilStreamExec
               emittedAt: new Date().toISOString(),
               httpStatus: response.status,
               ok: response.ok,
+              status: finalStatusFor(data, response.ok),
               finalResponse: cloneJson(data),
               finalProgress: finalProgress ? cloneJson(finalProgress) : null,
+              readableContributionCount: readableContributionCount(data),
+              runtimeEventCount: finalProgress?.events.length ?? 0,
+              completedAt: new Date().toISOString(),
             })
           }
           emitClosed(requestId, 'execution_completed')

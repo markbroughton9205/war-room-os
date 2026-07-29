@@ -188,7 +188,14 @@ export function stripForbiddenScopeLines(text: string, scope: ActiveScope): { te
     }
     kept.push(line)
   }
-  return { text: kept.join('\n').trim(), stripped }
+  const result = kept.join('\n').trim()
+  // Most provider replies are a single line/paragraph, so one incidental forbidden-topic
+  // mention (e.g. a family disclaiming "no Panama analysis needed" in a plain greeting)
+  // strips the entire response to nothing — a genuine reply silently vanishing is worse
+  // than leaving an incidental mention in place, so keep the original text rather than
+  // erase it completely.
+  if (!result) return { text, stripped: 0 }
+  return { text: result, stripped }
 }
 
 /** Greeting: block mission steering / off-decree business drift — not general helpful substance. */

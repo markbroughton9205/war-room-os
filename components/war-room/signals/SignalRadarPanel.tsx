@@ -204,6 +204,62 @@ export function SignalRadarPanel() {
       providers: new Set(sources.filter(source => source.configured).map(source => source.provider)).size,
     }
   }, [snapshot?.sources])
+  const availabilityDiagnostic = useMemo(() => {
+    if (error) {
+      return {
+        state: 'error',
+        reason: error,
+        dependency: '/api/signals/results',
+        remaining: 'Inspect the Signal Radar API route, Supabase signal tables, and server logs. No signals are fabricated while the route fails.',
+      }
+    }
+    if (!snapshot) {
+      return {
+        state: loading ? 'loading' : 'not_loaded',
+        reason: loading ? 'Signal Radar is loading its source-backed snapshot.' : 'No signal snapshot has been loaded in this browser session.',
+        dependency: '/api/signals/results',
+        remaining: 'Use Refresh or Run bounded scan. If the API cannot return a snapshot, repair the route before showing signal cards.',
+      }
+    }
+    if (snapshot.migrationStatus === 'MIGRATION_REQUIRED') {
+      return {
+        state: 'migration_required',
+        reason: 'Signal persistence schema is missing or stale.',
+        dependency: 'supabase/war_room_phase14_signals.sql or supabase/war_room_phase17_signal_schema_cache_patch.sql',
+        remaining: 'Apply the reviewed migration and reload the Supabase/PostgREST schema cache.',
+      }
+    }
+    if (!snapshot.persistenceAvailable) {
+      return {
+        state: 'persistence_unavailable',
+        reason: 'Signal snapshot loaded without durable persistence.',
+        dependency: 'Supabase signal tables and service access for signal persistence',
+        remaining: 'Repair signal persistence before claiming durable radar history.',
+      }
+    }
+    if (sourceStats.configured === 0) {
+      return {
+        state: 'sources_missing',
+        reason: 'No signal sources are configured.',
+        dependency: 'At least one configured signal source such as RSS, Guardian, NewsAPI, or approved cloud source',
+        remaining: 'Configure a real source and run a bounded scan.',
+      }
+    }
+    if ((snapshot.results.length ?? 0) === 0) {
+      return {
+        state: 'no_results',
+        reason: 'Configured sources returned no accepted source-backed signals.',
+        dependency: 'Fresh source results passing Signal Radar classification and freshness filters',
+        remaining: 'Run a bounded scan, inspect rejected/low-confidence rows, or add approved sources.',
+      }
+    }
+    return {
+      state: 'source_backed',
+      reason: 'Signal Radar has source-backed results from configured sources.',
+      dependency: 'Configured signal source and persistence',
+      remaining: 'Review actionable/watchlist/conflicted sections before taking action.',
+    }
+  }, [error, loading, snapshot, sourceStats.configured])
 
   const classification = snapshot?.classification
   const classificationBuckets: SignalClassificationBuckets = classification ?? {
@@ -240,6 +296,16 @@ export function SignalRadarPanel() {
 
       {error ? <div className="mb-4 rounded border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">{error}</div> : null}
       {notice ? <div className="mb-4 rounded border border-cyan-500/30 bg-cyan-500/10 p-3 text-xs text-cyan-100">{notice}</div> : null}
+
+      <section className="mb-4 rounded border border-white/10 bg-black/30 p-3 text-xs leading-relaxed text-slate-400">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-200">Radar Availability</p>
+          <Badge value={availabilityDiagnostic.state} />
+        </div>
+        <p className="mt-2"><span className="text-slate-500">Reason:</span> {availabilityDiagnostic.reason}</p>
+        <p className="mt-1"><span className="text-slate-500">Missing dependency:</span> {availabilityDiagnostic.dependency}</p>
+        <p className="mt-1"><span className="text-slate-500">Implementation remaining:</span> {availabilityDiagnostic.remaining}</p>
+      </section>
 
       <SignalFederationPanel embedded />
 

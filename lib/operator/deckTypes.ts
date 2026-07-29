@@ -65,7 +65,13 @@ export type OperatorMissionStatus = {
 export type OperatorPacketSummary = {
   id: string
   title: string
+  packetType: 'approval_packet' | 'email_draft' | 'queue_refresh' | 'council_proposal' | 'unknown'
   status: 'pending' | 'approved' | 'drafted' | 'completed'
+  body: string
+  recipient: string | null
+  proposedEffect: string
+  approvalRequirement: string
+  executionRelationship: string
   createdAt: string
   truthLabel: OperatorTruthLabel
 }
@@ -86,6 +92,7 @@ export type OperatorDeckSnapshot = {
   actionQueue: OperatorAction[]
   financialTelemetry: OperatorFinancialMetric[]
   missions: OperatorMissionStatus[]
+  packets: OperatorPacketSummary[]
   lastPacket: OperatorPacketSummary | null
   recentActivity: OperatorActivity[]
   integrations: {
@@ -119,6 +126,11 @@ export type OperatorActionCommand =
     }
   | {
       command: 'approve_last_packet'
+      confirmed: boolean
+    }
+  | {
+      command: 'approve_packet'
+      packetId: string
       confirmed: boolean
     }
   | {

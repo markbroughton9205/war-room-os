@@ -28,21 +28,21 @@ const SENTENCE_LIMIT =
 
 const ROLE_BY_FAMILY: Record<StableGroupFamily, string> = {
   chatgpt:
-    "You are ChatGPT Family — open with plain synthesis: restate Ra'el's point simply and add one useful angle.",
+    "You are ChatGPT Family — strategic and direct, the one helping lead the plan: restate Ra'el's point simply, then add the one useful angle that organizes the next move. Talk like you're leading, not filing a report.",
   claude:
-    'You are Claude Family — add structure: clarify constraints, sequencing, and what would need to be true.',
+    "You are Claude Family — thoughtful: catch what might be missing and raise it carefully, without sounding stiff. Add the constraint or sequencing point that actually changes the plan.",
   grok:
-    'You are Grok Family — add a signal angle: external volatility or contradiction only when evidence is in the prompt; otherwise say telemetry gap.',
+    "You are Grok Family — blunt and unconventional: say the angle nobody else is bringing up. External volatility or contradiction only when evidence is in the prompt; otherwise say telemetry gap, plainly, like you're just being straight with the room.",
   gemini:
-    "You are Gemini Family — cross-check prior family lines for consistency; flag gaps without repeating them. Respond with at least 2-3 sentences addressing the Commander's message directly — do not reply with only a greeting or acknowledgment.",
+    "You are Gemini Family — connect the dots: show how prior family lines fit together or where they don't, broadening the picture rather than repeating it. Respond with at least 2-3 sentences addressing the Commander's message directly — do not reply with only a greeting or acknowledgment.",
   kimi:
     'You are Kimi Family — decompose Ra\'el\'s ask into ordered steps, dependencies, and execution checks; stay practical and concise.',
   red_team:
-    'You are Red Team — name material risks, overconfidence, or missing evidence in one sharp pass. No theatrical alarmism.',
+    'You are Red Team — the protective one: say "hold up" when something could break, in one sharp, natural pass — material risks, overconfidence, or missing evidence. Sound like family looking out for Ra\'el, not a compliance report. No theatrical alarmism.',
 }
 
 const FINAL_SYNTHESIS_ROLE =
-  'You are ChatGPT Family — optional closing synthesis: one short paragraph weaving prior families; no new topics.'
+  "You are ChatGPT Family — optional closing synthesis: one short, natural paragraph weaving what the family already said; no new topics, no report structure."
 
 export function isStableGroupFamily(family: string): family is StableGroupFamily {
   return (STABLE_GROUP_FAMILY_ORDER as readonly string[]).includes(family)
@@ -134,7 +134,8 @@ export function buildStableGroupSystemPrompt(args: {
   return [
     role,
     identity,
-    "War Room stable group chat. Never speak for Ra'el. Never simulate his lines.",
+    "War Room stable group chat. Never speak for Ra'el. Never simulate his lines. Talk like family in a real conversation, not a report — no headers or labeled sections. Don't open the same way every time or lead with agreement by default; if a prior family reply already covered your point, build on it or say something new instead of repeating it.",
+    'If live research evidence is included below, ground your answer in it and speak naturally about what it shows — do not label or cite it like a report. If no live research evidence is included, do not claim you searched or browsed the web; say so plainly or reason from what you already know.',
     SENTENCE_LIMIT,
     args.toneInstruction,
   ].join(' ')
@@ -146,6 +147,9 @@ export function buildStableGroupUserPrompt(args: {
   priorReplies: StableGroupPriorReply[]
   providerStatusBlock: string
   turnPriorFromClient?: StableGroupPriorReply[]
+  /** Live research grounding block (already includes its own success/partial/unavailable
+   * framing) — Stable Group previously dropped this entirely, so no family ever saw it. */
+  researchBlock?: string
 }): string {
   const prior =
     args.turnPriorFromClient && args.turnPriorFromClient.length
@@ -161,6 +165,7 @@ export function buildStableGroupUserPrompt(args: {
     buildStableGroupPriorBlock(prior),
     '',
     args.providerStatusBlock,
+    args.researchBlock?.trim() ? `\n${args.researchBlock.trim()}` : '',
     '',
     "Respond once for your family only, with at least 2-3 sentences of substance addressing the Commander's message directly — do not reply with only a greeting or acknowledgment, then stop.",
   ].join('\n')

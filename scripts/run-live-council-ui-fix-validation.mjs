@@ -10,6 +10,23 @@ const topRibbon = read('components/war-room/live-room/TopIntelRibbon.tsx')
 const intelWall = read('components/intelligence/NewsIntelCommandWall.tsx')
 const center = read('components/war-room/live-room/LiveRoomCenter.tsx')
 const shell = read('components/war-room/live-room/LiveRoomShell.tsx')
+const deck = read('components/war-room/operator/OperatorCommandDeck.tsx')
+const deckPersistence = read('lib/operator/deckPersistence.ts')
+const deckTypes = read('lib/operator/deckTypes.ts')
+const dockContent = read('components/war-room/live-room/DockPanelContent.tsx')
+const toolsFilesRoute = read('app/api/tools/files/route.ts')
+const toolsRepoRoute = read('app/api/tools/repo/route.ts')
+const incomeSearchRoute = read('app/api/income/search/route.ts')
+const incomeCurrencyRoute = read('app/api/income/currency/route.ts')
+const repoScanRoute = read('app/api/repo/scan/route.ts')
+const osHeader = read('components/war-room/live-room/WarRoomOsHeader.tsx')
+const commandBar = read('components/war-room/CommandBar.tsx')
+const kpiGrid = read('components/war-room/KpiGrid.tsx')
+const lazyPanels = read('components/war-room/WarRoomLazyPanels.tsx')
+const sentinelPanel = read('components/war-room/council/SentinelStatusPanel.tsx')
+const councilTable = read('components/war-room/council/CouncilTable.tsx')
+const paymentTypes = read('lib/payments/types.ts')
+const paymentProviders = read('lib/payments/providers.ts')
 
 function liveCouncilEmptyState({ loadState, conversationId, messageCount }) {
   if (messageCount > 0) return null
@@ -107,7 +124,7 @@ const structuralCases = [
   ],
   [
     'live_council_12_bottom_toolbar_does_not_cover_transcript',
-    center.includes('[scroll-padding-bottom:var(--live-room-bottom-reserved,7rem)]') && shell.includes('live-room-bottom-stack'),
+    center.includes('pb-[calc(var(--live-room-bottom-reserved,7rem)+1rem)]') && center.includes('[scroll-padding-bottom:var(--live-room-bottom-reserved,7rem)]') && shell.includes('live-room-bottom-stack'),
   ],
   [
     'live_council_13_close_keyboard_accessible',
@@ -186,9 +203,73 @@ const behavioralCases = [
   ],
 ]
 
+const operationalWiringCases = [
+  [
+    'operator_01_packet_feed_uses_real_packet_rows',
+    deck.includes('Approval Packet Feed') && deckTypes.includes('packets: OperatorPacketSummary[]') && deckPersistence.includes("client.from('war_room_operator_packets').select('*')") && deckPersistence.includes('.limit(8)'),
+  ],
+  [
+    'operator_02_specific_packet_approval_wired',
+    deck.includes("command: 'approve_packet'") && deckPersistence.includes("command.command === 'approve_last_packet' || command.command === 'approve_packet'") && deckPersistence.includes('No external action was performed'),
+  ],
+  [
+    'operator_03_unsupported_packet_actions_truthfully_disabled',
+    deck.includes('unsupportedPacketActionReason') && deck.includes('Modify') && deck.includes('Reject') && deck.includes('Archive'),
+  ],
+  [
+    'operator_04_approvals_workspace_removes_duplicate_command_environment',
+    !dockContent.includes('<OperatorCommandEnvironment') && dockContent.includes('signalRadarSlot={<SignalRadarPanel />}'),
+  ],
+  [
+    'operator_05_signal_radar_visible_in_approvals_order',
+    deck.includes('{signalRadarSlot}') && dockContent.includes('signalRadarSlot={<SignalRadarPanel />}'),
+  ],
+  [
+    'routes_01_files_tool_route_is_connected',
+    toolsFilesRoute.includes("from('war_room_files')") && !toolsFilesRoute.includes("status: 'placeholder'"),
+  ],
+  [
+    'routes_02_repo_tool_route_is_connected',
+    toolsRepoRoute.includes('getRepoStatus') && !toolsRepoRoute.includes("status: 'placeholder'"),
+  ],
+  [
+    'routes_03_income_search_no_generated_fallbacks',
+    incomeSearchRoute.includes('searchTavilyIncomeOpportunities') && incomeSearchRoute.includes('searchIncomeOpportunities') && incomeSearchRoute.includes('No fallback or generated opportunities') && !incomeSearchRoute.includes("status: 'placeholder'"),
+  ],
+  [
+    'routes_04_currency_route_reports_missing_dependency',
+    incomeCurrencyRoute.includes("status: 'config_needed'") && incomeCurrencyRoute.includes('Exchange-rate provider') && !incomeCurrencyRoute.includes("status: 'placeholder'"),
+  ],
+  [
+    'routes_05_repo_scan_build_deploy_status_truthful',
+    repoScanRoute.includes('config_needed: build verification is not connected') && repoScanRoute.includes('config_needed: deployment provider status is not connected') && !repoScanRoute.includes('placeholder: not connected'),
+  ],
+  [
+    'legacy_01_header_resource_status_is_truthful',
+    osHeader.includes('CPU · Not connected') && osHeader.includes('Missing dependency: a connected resource monitor feed.') && !osHeader.includes('placeholder'),
+  ],
+  [
+    'legacy_02_command_bar_not_labeled_mock',
+    commandBar.includes('not connected on this legacy route') && !commandBar.toLowerCase().includes('mock'),
+  ],
+  [
+    'legacy_03_kpi_grid_no_mock_kpi_import',
+    !kpiGrid.includes('MOCK_KPIS') && kpiGrid.includes('does not display fabricated counts'),
+  ],
+  [
+    'legacy_04_council_overview_static_seed_labeled',
+    lazyPanels.includes('Static council overview') && !lazyPanels.includes('Mock council layout') && sentinelPanel.includes('Static seed / not live') && councilTable.includes('Static seed overview'),
+  ],
+  [
+    'payments_01_provider_readiness_has_no_placeholder_status',
+    !paymentTypes.includes("'placeholder'") && paymentProviders.includes("status: 'not_configured'") && !paymentProviders.includes("status: 'placeholder'"),
+  ],
+]
+
 const cases = [
   ...structuralCases.map(([name, pass]) => [`structural_${name}`, pass]),
   ...behavioralCases,
+  ...operationalWiringCases,
 ]
 
 const failed = cases.filter(([, pass]) => !pass)
@@ -198,6 +279,7 @@ for (const [name, pass] of cases) {
 console.log(`Live Council UI fix validation: ${cases.length - failed.length}/${cases.length} PASS`)
 console.log(`Structural source checks: ${structuralCases.length - structuralCases.filter(([, pass]) => !pass).length}/${structuralCases.length} PASS`)
 console.log(`Behavioral model checks: ${behavioralCases.length - behavioralCases.filter(([, pass]) => !pass).length}/${behavioralCases.length} PASS`)
+console.log(`Operational wiring checks: ${operationalWiringCases.length - operationalWiringCases.filter(([, pass]) => !pass).length}/${operationalWiringCases.length} PASS`)
 console.log('DOM component rendering coverage: NOT AVAILABLE (no React/JSDOM/Vitest test stack is configured in this repository)')
 
 if (failed.length) process.exit(1)

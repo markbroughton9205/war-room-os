@@ -22,8 +22,8 @@ export function getPaymentProviderReadiness(): PaymentProviderReadiness[] {
     },
     {
       id: 'ach_placeholder',
-      name: 'ACH deposit placeholder',
-      status: 'placeholder',
+      name: 'ACH deposit provider',
+      status: 'not_configured',
       notes: 'No account/routing storage. Secure provider integration required later.',
     },
     {

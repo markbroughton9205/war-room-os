@@ -106,6 +106,8 @@ export const GapFinderPanel = memo(function GapFinderPanel({
     () => gaps.filter(g => g.status === 'needs_review').length,
     [gaps],
   )
+  const activeIssues = useMemo(() => gaps.filter(g => g.status === 'open'), [gaps])
+  const warnings = useMemo(() => activeIssues.filter(g => g.severity !== 'high'), [activeIssues])
 
   useEffect(() => {
     onGapCountChange?.(openCount)
@@ -198,6 +200,21 @@ export const GapFinderPanel = memo(function GapFinderPanel({
         </span>
       </div>
 
+      <div className="mt-3 grid gap-2 text-[10px] sm:grid-cols-3">
+        <div className="rounded border border-red-300/20 bg-red-500/5 p-2">
+          <div className="font-bold uppercase tracking-widest text-red-200">Active Issues</div>
+          <div className="mt-1 font-mono text-lg text-red-100">{activeIssues.length}</div>
+        </div>
+        <div className="rounded border border-yellow-300/20 bg-yellow-500/5 p-2">
+          <div className="font-bold uppercase tracking-widest text-yellow-200">Warnings</div>
+          <div className="mt-1 font-mono text-lg text-yellow-100">{warnings.length}</div>
+        </div>
+        <div className="rounded border border-emerald-300/20 bg-emerald-500/5 p-2">
+          <div className="font-bold uppercase tracking-widest text-emerald-200">Resolved / Review</div>
+          <div className="mt-1 font-mono text-lg text-emerald-100">{fixedCount + reviewCount}</div>
+        </div>
+      </div>
+
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
@@ -244,6 +261,39 @@ export const GapFinderPanel = memo(function GapFinderPanel({
         >
           {expanded ? 'Hide sections' : 'Show sections'}
         </button>
+      </div>
+
+      <div className="mt-3 rounded border border-white/10 bg-black/25 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-fuchsia-200/90">
+            Active Issue List
+          </p>
+          <span className="text-[9px] uppercase tracking-widest text-slate-500">
+            Mirrors System Health badge count
+          </span>
+        </div>
+        {activeIssues.length ? (
+          <ul className="max-h-72 space-y-2 overflow-y-auto text-[10px]">
+            {activeIssues.slice(0, 12).map(gap => (
+              <li key={gap.id} className="rounded border border-white/10 bg-black/35 p-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold tracking-widest text-slate-200">{gap.title}</span>
+                  <span className="text-[8px] uppercase tracking-widest text-slate-500">{gap.area}</span>
+                  <span className="text-[8px] uppercase tracking-widest" style={{ color: gap.severity === 'high' ? '#F87171' : gap.severity === 'medium' ? '#FBBF24' : '#94A3B8' }}>
+                    {gap.severity}
+                  </span>
+                </div>
+                <p className="mt-1 text-slate-400">{gap.plainLanguage}</p>
+                <p className="mt-1 text-[9px] text-emerald-200/80">{gap.recommendedFix}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-slate-500">No active issues from current heuristics.</p>
+        )}
+        {activeIssues.length > 12 ? (
+          <p className="mt-2 text-[9px] text-slate-500">Showing first 12 active issues. Use Show sections for the full grouped report.</p>
+        ) : null}
       </div>
 
       {expanded ? (

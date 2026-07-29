@@ -13,6 +13,7 @@ import {
   sanitizeCouncilStreamError,
   validateCouncilStreamEnvelopeShape,
   type CouncilStreamEnvelope,
+  type CouncilStreamFrameDiagnostic,
   type CouncilStreamParserEvent,
   type CouncilStreamProgress,
   type IncrementalCouncilChatOptions,
@@ -202,7 +203,20 @@ function baseEnvelope(type: CouncilStreamEnvelope['envelopeType'], sequence = 1,
   if (type === 'progress') {
     return { ...base, envelopeType: 'progress', progressEvent: progressEvent(sequence, requestId), snapshot: snapshot(requestId, sequence) }
   }
-  if (type === 'final') return { ...base, envelopeType: 'final', httpStatus: 200, ok: true, finalResponse: { results: [] }, finalProgress: snapshot(requestId, sequence) }
+  if (type === 'final') {
+    return {
+      ...base,
+      envelopeType: 'final',
+      httpStatus: 200,
+      ok: true,
+      status: 'completed',
+      finalResponse: { results: [] },
+      finalProgress: snapshot(requestId, sequence),
+      readableContributionCount: 0,
+      runtimeEventCount: 1,
+      completedAt: '2026-07-23T00:00:00.000Z',
+    }
+  }
   if (type === 'error') {
     return {
       ...base,
@@ -232,6 +246,20 @@ function parseFrames(input: string | string[]): CouncilStreamParserEvent[] {
   for (const chunk of Array.isArray(input) ? input : [input]) parser.push(chunk)
   parser.flush()
   return events
+}
+
+function parseFramesWithDiagnostics(input: string | string[]): {
+  events: CouncilStreamParserEvent[]
+  frames: CouncilStreamFrameDiagnostic[]
+} {
+  const events: CouncilStreamParserEvent[] = []
+  const frames: CouncilStreamFrameDiagnostic[] = []
+  const parser = createCouncilSseParser(event => events.push(event), {
+    onFrame: diagnostic => frames.push(diagnostic),
+  })
+  for (const chunk of Array.isArray(input) ? input : [input]) parser.push(chunk)
+  parser.flush()
+  return { events, frames }
 }
 
 function validParsed(events: CouncilStreamParserEvent[], count: number): boolean {
@@ -487,6 +515,11 @@ function runSseCases(): ValidationCase[] {
   cases.push(makeCase('c4c_sse_007_unknown_version_rejected', 'B. SSE parser', 'invalid', parseFrames(encodeCouncilStreamEnvelope({ ...baseEnvelope('opened'), version: 'bad' as typeof COUNCIL_STREAM_VERSION })).some(event => !event.ok)))
   cases.push(makeCase('c4c_sse_008_unknown_type_rejected', 'B. SSE parser', 'invalid', parseFrames(`event: typing\ndata: ${JSON.stringify({ ...baseEnvelope('opened'), envelopeType: 'typing' })}\n\n`).some(event => !event.ok)))
   cases.push(makeCase('c4c_sse_009_missing_request_id_rejected', 'B. SSE parser', 'invalid', parseFrames(encodeCouncilStreamEnvelope({ ...baseEnvelope('opened'), requestId: '' })).some(event => !event.ok)))
+  const namedFinal = parseFrames(`id: final-1\nevent: final\nretry: 1500\ndata: ${JSON.stringify(baseEnvelope('final', 2))}\n\n`)
+  cases.push(makeCase('c4c_sse_010_named_final_event_accepted', 'B. SSE parser', 'valid', namedFinal.length === 1 && namedFinal[0]?.ok === true && namedFinal[0].eventName === 'final' && namedFinal[0].id === 'final-1' && namedFinal[0].retry === 1500))
+  cases.push(makeCase('c4c_sse_011_event_name_mismatch_rejected', 'B. SSE parser', 'invalid', parseFrames(`event: progress\ndata: ${JSON.stringify(baseEnvelope('final', 2))}\n\n`).some(event => !event.ok && event.error.code === 'stream_event_name_mismatch')))
+  const diagnostic = parseFramesWithDiagnostics(opened + encodeCouncilStreamComment('keepalive') + final)
+  cases.push(makeCase('c4c_sse_012_frame_diagnostics_record_shape_only', 'B. SSE parser', 'valid', diagnostic.frames.length === 3 && diagnostic.frames[0]?.parseStatus === 'parsed' && diagnostic.frames[1]?.parseStatus === 'ignored_comment' && diagnostic.frames[2]?.envelopeType === 'final' && diagnostic.frames.every(frame => frame.dataCharLength >= 0)))
   return cases
 }
 

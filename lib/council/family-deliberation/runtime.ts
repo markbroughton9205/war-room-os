@@ -266,18 +266,18 @@ function formatPriorTurnsBlock(turns: DeliberationTurn[]): string {
 
 function roleInstruction(role: DeliberationTurnRole): string {
   if (role === 'opening_position') {
-    return 'Turn role: opening position. Give your executive position, reasoning, risks, confidence, and recommended action.'
+    return "Turn role: opening position. Give your read — your position, the reasoning behind it, real risks, and what you'd actually do next. Talk like you're in the room, not writing a memo. Do not cite message IDs or label sections (no \"confidence:\", no \"recommended action:\")."
   }
   if (role === 'direct_response') {
-    return 'Turn role: direct response. Respond directly to the prior family message by message_id. State agreements, disagreements, risks, confidence, and recommended action.'
+    return "Turn role: direct response. Respond to what the prior family actually said, in your own words — agree, push back, or add to it. Do not cite it by message ID or label your reply with sections; just talk about the substance."
   }
   if (role === 'red_team_challenge') {
-    return 'Turn role: Red Team challenge. Challenge the prior family positions. Target specific message IDs. Focus on assumptions, missing evidence, and failure modes.'
+    return "Turn role: Red Team challenge. Push back on the prior family's position by name, not by message ID. Focus on assumptions, missing evidence, and failure modes — say it like you're the one in the room saying \"hold up,\" not filing a finding."
   }
   if (role === 'revision_or_stand_firm') {
-    return 'Turn role: revision or stand firm. Respond directly to the Red Team challenge. Either revise your original position or explicitly stand firm, and explain why.'
+    return "Turn role: revision or stand firm. Respond to the Red Team challenge directly, in your own words — either revise your position or stand firm, and say why. No message-ID citations or labeled sections."
   }
-  return 'Turn role: council synthesis. Synthesize only the completed exchange. Do not add new evidence. Produce final Council response for Ra’el.'
+  return 'Turn role: council synthesis. Synthesize only the completed exchange in plain language. Do not add new evidence. Give Ra’el the actual takeaway, like a person closing out the conversation, not a formal summary.'
 }
 
 export function formatDeliberationTurnForChat(turn: DeliberationTurn, references: DeliberationEvidenceReference[]): string {

@@ -27,6 +27,10 @@ export type CouncilRenderPacket = {
   providerRuntimeStates?: CouncilProviderRuntimeStates
   /** Disambiguates SKIPPED (e.g. preflight_unavailable) for provider-issue UI. */
   providerRuntimeDetails?: CouncilProviderRuntimeDetails
+  /** Full roster targeted for this operation round — lets the UI distinguish "not called this
+   * round" from "responded" without guessing, and gives an honest denominator for response-progress
+   * counts ("3 of 5 responded"). Absent means the roster for this packet isn't known. */
+  directedFamilies?: CouncilOrchestrationFamily[]
 }
 
 export function buildCouncilRenderPacket(args: {
@@ -37,6 +41,7 @@ export function buildCouncilRenderPacket(args: {
   extraWarnings?: string[]
   providerRuntimeStates?: CouncilProviderRuntimeStates
   providerRuntimeDetails?: CouncilProviderRuntimeDetails
+  directedFamilies?: CouncilOrchestrationFamily[]
 }): CouncilRenderPacket {
   const participatingFamilies = args.families.map(f => f.family)
   const warnings = [
@@ -52,5 +57,6 @@ export function buildCouncilRenderPacket(args: {
     participatingFamilies,
     ...(args.providerRuntimeStates ? { providerRuntimeStates: args.providerRuntimeStates } : {}),
     ...(args.providerRuntimeDetails ? { providerRuntimeDetails: args.providerRuntimeDetails } : {}),
+    ...(args.directedFamilies ? { directedFamilies: args.directedFamilies } : {}),
   }
 }

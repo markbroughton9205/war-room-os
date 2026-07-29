@@ -123,8 +123,7 @@ export function applyCouncilRenderGate(
   const councilMode = opts?.councilMode ?? true
   const promptIntent = opts?.promptIntent ?? (opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined)
   const relaxedCasual = promptIntent ? isRelaxedPromptIntent(promptIntent) : false
-  const passthroughMode =
-    opts?.stabilityMode ?? shouldPassthroughCouncilProviderText(opts?.councilFlowMode)
+  const passthroughMode = opts?.stabilityMode ?? shouldPassthroughCouncilProviderText()
 
   if (passthroughMode && family) {
     const displayText = rawText

@@ -25,7 +25,6 @@ import {
 import { loadSelfRepairSnapshot } from '@/lib/operator/selfRepair'
 import { loadUpgradeQueue } from '@/lib/operator/upgradeQueue'
 import type { DockPanelId } from './FeatureDock'
-import { useLiveRoomMode } from './LiveRoomModeContext'
 
 function PanelSkeleton({ label }: { label: string }) {
   return (
@@ -70,10 +69,6 @@ const Phase6MemoryPanels = dynamic(
 const RuntimeIntegrityPanel = dynamic(
   () => import('@/components/war-room/runtime/RuntimeIntegrityPanel').then(m => m.RuntimeIntegrityPanel),
   { ssr: false, loading: () => <PanelSkeleton label="Runtime pressure" /> },
-)
-const OperatorCommandEnvironment = dynamic(
-  () => import('@/components/war-room/operator').then(m => m.OperatorCommandEnvironment),
-  { ssr: false, loading: () => <PanelSkeleton label="Command environment" /> },
 )
 const OperatorCommandDeck = dynamic(
   () => import('@/components/war-room/operator').then(m => m.OperatorCommandDeck),
@@ -261,7 +256,6 @@ export const DockPanelContent = memo(function DockPanelContent({
   sessionIndicators,
   liveCouncilControls,
   onCouncilHandoff,
-  onOpenEngineering,
   liveEnvironment,
   babyObserver,
   commandCenterExtras,
@@ -270,14 +264,6 @@ export const DockPanelContent = memo(function DockPanelContent({
   gapFinderContext,
   onGapCountChange,
 }: DockPanelContentProps) {
-  const { setLiveMode, setEngineeringDrawerOpen } = useLiveRoomMode()
-
-  const openBuilder = () => {
-    setLiveMode('builder')
-    setEngineeringDrawerOpen(true)
-    onOpenEngineering?.()
-  }
-
   return (
     <PanelErrorBoundary label={panelId}>
       {panelId === 'live-council' ? (
@@ -331,14 +317,9 @@ export const DockPanelContent = memo(function DockPanelContent({
 
       {panelId === 'approvals' ? (
         <div className="space-y-3">
-          <OperatorCommandEnvironment
-            version="41"
-            sessionIndicators={sessionIndicators ?? null}
-            onOpenEngineering={openBuilder}
-          />
           <section>
             <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-yellow-200">Approvals &amp; Command Deck</p>
-            <OperatorCommandDeck />
+            <OperatorCommandDeck signalRadarSlot={<SignalRadarPanel />} />
           </section>
           {commandCenterExtras}
         </div>

@@ -20,9 +20,9 @@ function isValidRecord(value: unknown): value is SelfRepairRecord {
   )
 }
 
-export function loadSelfRepairSnapshot(): SelfRepairSnapshot {
-  if (!isBrowser()) return { ...EMPTY, records: [] }
-  normalizeSelfRepairGapIds()
+/** Raw storage → parsed-and-validated snapshot. No normalization here — that happens once, in
+ * `loadSelfRepairSnapshot`, after this returns. Never calls back into `loadSelfRepairSnapshot`. */
+function parseStoredSnapshot(): SelfRepairSnapshot {
   try {
     const raw = sessionStorage.getItem(SELF_REPAIR_STORAGE_KEY)
     if (!raw) return { ...EMPTY, records: [] }
@@ -38,6 +38,14 @@ export function loadSelfRepairSnapshot(): SelfRepairSnapshot {
   } catch {
     return { ...EMPTY, records: [] }
   }
+}
+
+export function loadSelfRepairSnapshot(): SelfRepairSnapshot {
+  if (!isBrowser()) return { ...EMPTY, records: [] }
+  const parsed = parseStoredSnapshot()
+  const { snapshot, changed } = normalizeSelfRepairGapIds(parsed)
+  if (changed) saveSelfRepairSnapshot(snapshot)
+  return snapshot
 }
 
 export function saveSelfRepairSnapshot(snapshot: SelfRepairSnapshot): void {

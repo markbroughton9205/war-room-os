@@ -1,5 +1,43 @@
 import Link from 'next/link'
-import { MOCK_KPIS } from '@/lib/war-room/mock-kpis'
+
+const OPERATIONAL_STATUS_CARDS = [
+  {
+    id: 'live-council',
+    label: 'Live Council',
+    status: 'Use primary shell',
+    detail: 'The source-backed Live Council interface is available on the main War Room OS route.',
+  },
+  {
+    id: 'provider-health',
+    label: 'Provider Health',
+    status: 'Connected elsewhere',
+    detail: 'Provider status is reported by the AI Team Status panel and `/api/providers/health`.',
+  },
+  {
+    id: 'signal-radar',
+    label: 'Signal Radar',
+    status: 'Source-gated',
+    detail: 'Signal Radar shows only persisted scan results or exact missing source dependencies.',
+  },
+  {
+    id: 'operator-deck',
+    label: 'Operator Deck',
+    status: 'Persistent where configured',
+    detail: 'Actions, packets, earnings, and activity require the approved operator Supabase tables.',
+  },
+  {
+    id: 'files-vault',
+    label: 'Files Vault',
+    status: 'Bucket-gated',
+    detail: 'Files require `SUPABASE_FILES_BUCKET` plus the `war_room_files` metadata table.',
+  },
+  {
+    id: 'legacy-dashboard',
+    label: 'Legacy Dashboard',
+    status: 'Readout only',
+    detail: 'This route no longer displays fabricated KPI numbers. Use the main shell for live operations.',
+  },
+] as const
 
 export function KpiGrid() {
   return (
@@ -10,29 +48,19 @@ export function KpiGrid() {
           Operational overview
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-400">
-          The Council is aligned. Memory persists. Signal integrity stable.
-        </p>
-        <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.35em] text-amber-500/85">
-          Mock / Estimated
+          This legacy dashboard is a readout surface. It does not display fabricated counts, telemetry, or SLA values.
         </p>
       </header>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {MOCK_KPIS.map((kpi) => (
+        {OPERATIONAL_STATUS_CARDS.map((card) => (
           <article
-            key={kpi.id}
+            key={card.id}
             className="group rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-[0_0_0_1px_rgba(56,189,248,0.06),0_20px_50px_-28px_rgba(0,0,0,0.85)] backdrop-blur-md transition duration-300 hover:border-[#d4af37]/25 hover:shadow-[0_0_0_1px_rgba(212,175,55,0.12),0_24px_60px_-24px_rgba(56,189,248,0.25)]"
           >
-            <p className="text-[10px] font-medium uppercase tracking-[0.25em] text-slate-500">{kpi.label}</p>
-            <p className="mt-3 font-mono text-3xl font-semibold tracking-tight text-white">{kpi.value}</p>
-            {kpi.sublabel && (
-              <p className="mt-1 text-xs text-slate-500">{kpi.sublabel}</p>
-            )}
-            {kpi.trend && (
-              <p className="mt-4 text-xs font-medium text-[#38bdf8] opacity-90 transition group-hover:text-[#d4af37]">
-                {kpi.trend}
-              </p>
-            )}
+            <p className="text-[10px] font-medium uppercase tracking-[0.25em] text-slate-500">{card.label}</p>
+            <p className="mt-3 text-sm font-semibold tracking-tight text-white">{card.status}</p>
+            <p className="mt-3 text-xs leading-relaxed text-slate-500">{card.detail}</p>
           </article>
         ))}
       </div>

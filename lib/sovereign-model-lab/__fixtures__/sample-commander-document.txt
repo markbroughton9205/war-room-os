@@ -1,0 +1,4 @@
+This is a sample Commander-owned document used only for Sovereign Model Lab validation tests.
+The document contains ordinary English text so the language heuristic and the ingestion
+pipeline have real content to hash, classify, and admit into a dataset candidate. It is not
+sensitive, not private, and not subject to any external license restriction.

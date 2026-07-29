@@ -31,7 +31,7 @@ export function sanitizeCouncilFamilyResponse(
 ): SanitizedFamilyResponse {
   const text = toDisplayText(raw).trim()
   const promptIntent = opts?.promptIntent ?? (opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined)
-  const passthroughMode = opts?.stabilityMode ?? shouldPassthroughCouncilProviderText(opts?.councilFlowMode)
+  const passthroughMode = opts?.stabilityMode ?? shouldPassthroughCouncilProviderText()
   if (passthroughMode) {
     return {
       displayText: text,

@@ -197,11 +197,15 @@ function operationSeedFromInputs(inputs: readonly CouncilOperationMessageInput[]
 function briefingFromText(text: string, requestKind: CommanderOperationRequestKind, hasFinalBriefing: boolean): CommanderBriefing {
   return Object.freeze({
     heading: requestKind === 'project' ? 'Commander Briefing' : 'Commander Briefing',
-    body: hasFinalBriefing ? (text.trim() || 'No final provider output was available.') : 'Not yet available.',
+    body: hasFinalBriefing
+      ? (text.trim() || 'No final provider output was available.')
+      : 'No final Commander briefing was emitted by this Council path. The timeline below shows only real provider/runtime records; implementation remaining: emit a final_synthesis or commander_briefing message when the backend completes synthesis.',
     risks: [],
     approvalRequirements: requestKind === 'project' ? ['Commander approval required before execution.'] : [],
     nextActions: [],
-    evidenceStatus: 'Evidence not evaluated by this presentation layer.',
+    evidenceStatus: hasFinalBriefing
+      ? 'Evidence not evaluated by this presentation layer.'
+      : 'Not evaluated here. No source, provider, or synthesis evidence is fabricated.',
     recommendation: null,
   })
 }

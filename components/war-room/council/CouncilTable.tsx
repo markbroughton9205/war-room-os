@@ -55,7 +55,7 @@ export function CouncilTable({
   return (
     <div className={['relative', className].filter(Boolean).join(' ')}>
       <p className="mb-3 text-center text-[9px] font-semibold uppercase tracking-[0.35em] text-slate-500 lg:text-left">
-        Mock / Estimated
+        Static seed overview
       </p>
       {/* Narrow viewports: hub + two columns */}
       <div className="lg:hidden">

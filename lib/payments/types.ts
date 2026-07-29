@@ -42,7 +42,7 @@ export type DepositRecord = {
 export type PaymentProviderReadiness = {
   id: PaymentProviderId
   name: string
-  status: 'configured' | 'not_configured' | 'placeholder'
+  status: 'configured' | 'not_configured'
   notes: string
 }
 
