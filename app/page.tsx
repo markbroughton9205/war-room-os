@@ -45,9 +45,6 @@ import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permiss
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
 import { postIncrementalCouncilChat } from '@/lib/council/incremental-transport/client'
 import {
-  canDisplayAsChallenge,
-  canDisplayAsResponse,
-  canDisplayAsRevision,
   type DeliberationEvidenceReference,
   type DeliberationTurn,
 } from '@/lib/council/family-deliberation'
@@ -5805,6 +5802,7 @@ function Home() {
   const [councilFlowMode, setCouncilFlowMode] = useState<CouncilFlowMode>(() => getDefaultCouncilFlowMode())
   const [incrementalCouncilProgress, setIncrementalCouncilProgress] = useState<CouncilProgressRuntimeSnapshot | null>(null)
   const [incrementalCouncilRequestText, setIncrementalCouncilRequestText] = useState<string | null>(null)
+  const [incrementalCouncilCompletedInputs, setIncrementalCouncilCompletedInputs] = useState<CouncilMessage[]>([])
   const [incrementalCouncilTransportStatus, setIncrementalCouncilTransportStatus] = useState<
     'idle' | 'establishing' | 'opened' | 'receiving' | 'final_received' | 'closed' | 'interrupted'
   >('idle')
@@ -5812,10 +5810,10 @@ function Home() {
     if (!incrementalCouncilProgress) return null
     return buildCouncilOperationTimeline({
       progress: incrementalCouncilProgress,
-      completedInputs: [],
+      completedInputs: incrementalCouncilCompletedInputs,
       requestText: incrementalCouncilRequestText,
     })
-  }, [incrementalCouncilProgress, incrementalCouncilRequestText])
+  }, [incrementalCouncilCompletedInputs, incrementalCouncilProgress, incrementalCouncilRequestText])
   useEffect(() => {
     if (typeof sessionStorage === 'undefined') return
     const stored = parseCouncilFlowMode(sessionStorage.getItem(COUNCIL_FLOW_MODE_STORAGE_KEY))
@@ -5895,7 +5893,10 @@ function Home() {
       setCouncilTraceTestError('Clipboard copy failed.')
     }
   }, [councilTraceTestResult])
-  const councilPassthroughMode = councilStabilityMode || councilFlowMode === 'stable_group'
+  // Truthfulness gate: only the explicit COUNCIL_STABILITY_MODE debug/circuit-breaker flag skips
+  // greeting-only/degraded-response detection. Stable Group must not bypass it — a family bubble
+  // may never display synthetic/degraded text as if it were a complete real response.
+  const councilPassthroughMode = councilStabilityMode
   const { snapshot: conversationRuntimeSnapshot } = useConversationRuntime(
     council,
     liveCouncilConvId,
@@ -6469,6 +6470,14 @@ function Home() {
       existing.add(nextId)
       return { ...message, id: nextId }
     })
+    const readableResponses = normalized.filter(message => message.messageType === 'response' && message.content.trim())
+    if (readableResponses.length) {
+      setIncrementalCouncilCompletedInputs(prev => {
+        const byId = new Map(prev.map(message => [message.id, message]))
+        for (const message of readableResponses) byId.set(message.id, message)
+        return [...byId.values()]
+      })
+    }
     if (opts?.removeIds?.length) {
       councilDispatch({
         type: 'ADD_MESSAGES_REMOVING',
@@ -8596,7 +8605,7 @@ function Home() {
     const controller = new AbortController()
     abortControllerRef.current = controller
     setLoading(true)
-    matrixStatus('working', 'Council responding…')
+    matrixStatus('working', 'Council thinking…')
     if (mode !== 'continue') {
       setLiveResearchHud(null)
     }
@@ -8657,6 +8666,42 @@ function Home() {
     const rosterLabel = (fid: CouncilOrchestrationFamily) =>
       COUNCIL_ROSTER.find(r => r.id === fid)?.label ?? fid
 
+    const logCouncilStreamDiagnostic = (label: string, payload: Record<string, unknown>) => {
+      if (process.env.NODE_ENV !== 'development') return
+      console.info(`[Live Council SSE Diagnostic] ${label}`, payload)
+    }
+
+    const summarizeFinalResponseShape = (payload: CouncilChatJson) => {
+      const results = Array.isArray(payload.results) ? payload.results : []
+      const turns = Array.isArray(payload.familyDeliberation?.turns)
+        ? payload.familyDeliberation.turns
+        : []
+      return {
+        hasCouncilSingleResponse: typeof payload.councilSingleResponse === 'string',
+        councilSingleResponseLength: typeof payload.councilSingleResponse === 'string' ? payload.councilSingleResponse.length : 0,
+        resultsCount: results.length,
+        resultShapes: results.map((result, index) => ({
+          index,
+          family: typeof result.family === 'string' ? result.family : null,
+          status: typeof result.status === 'string' ? result.status : null,
+          contentType: typeof result.content,
+          contentLength: typeof result.content === 'string' ? result.content.length : 0,
+        })),
+        familyDeliberationPresent: Boolean(payload.familyDeliberation),
+        familyDeliberationTurnCount: turns.length,
+        turnShapes: turns.map((turn, index) => ({
+          index,
+          family: typeof turn.provider_family === 'string' ? turn.provider_family : null,
+          label: typeof turn.provider_label === 'string' ? turn.provider_label : null,
+          status: typeof turn.completion_status === 'string' ? turn.completion_status : null,
+          outputMessageIdPresent: typeof turn.output_message_id === 'string' && turn.output_message_id.length > 0,
+          fullResponseType: typeof turn.full_response,
+          fullResponseLength: typeof turn.full_response === 'string' ? turn.full_response.length : 0,
+        })),
+        councilProgressEventCount: payload.councilProgress?.events.length ?? 0,
+      }
+    }
+
     const postCouncilChatDecreeGather = async (
       body: Parameters<typeof postCouncilChat>[0],
       continuationMergeOpts?: { ignoreContinuation?: boolean },
@@ -8680,11 +8725,15 @@ function Home() {
         setIncrementalCouncilTransportStatus('establishing')
         setIncrementalCouncilRequestText(body.message)
         setIncrementalCouncilProgress(null)
+        setIncrementalCouncilCompletedInputs([])
         const streamed = await postIncrementalCouncilChat({
           body: { ...body, councilGatherPhase: 'decree_soft' },
           signal: merged.signal,
           fallback: 'final_snapshot_before_execution_only',
           callbacks: {
+            onResponse: diagnostic => logCouncilStreamDiagnostic('response', diagnostic),
+            onChunk: diagnostic => logCouncilStreamDiagnostic('chunk', diagnostic),
+            onFrame: diagnostic => logCouncilStreamDiagnostic('frame', diagnostic),
             onOpened: () => setIncrementalCouncilTransportStatus('opened'),
             onProgress: envelope => {
               setIncrementalCouncilTransportStatus('receiving')
@@ -8693,9 +8742,32 @@ function Home() {
             onFinal: envelope => {
               setIncrementalCouncilTransportStatus('final_received')
               if (envelope.finalProgress) setIncrementalCouncilProgress(envelope.finalProgress)
+              logCouncilStreamDiagnostic('final_response_shape', {
+                operationId: envelope.operationId,
+                requestId: envelope.requestId,
+                httpStatus: envelope.httpStatus,
+                ok: envelope.ok,
+                ...summarizeFinalResponseShape(envelope.finalResponse),
+              })
             },
-            onError: () => setIncrementalCouncilTransportStatus('interrupted'),
-            onClosed: () => setIncrementalCouncilTransportStatus('closed'),
+            onError: envelope => {
+              logCouncilStreamDiagnostic('error', {
+                operationId: envelope.operationId,
+                requestId: envelope.requestId,
+                code: envelope.error.code,
+                classification: envelope.error.classification,
+                terminal: envelope.error.terminal,
+              })
+              setIncrementalCouncilTransportStatus('interrupted')
+            },
+            onClosed: envelope => {
+              logCouncilStreamDiagnostic('closed', {
+                operationId: envelope.operationId,
+                requestId: envelope.requestId,
+                terminalState: envelope.terminalState,
+              })
+              setIncrementalCouncilTransportStatus('closed')
+            },
           },
         })
         const data = streamed.finalResponse ?? {}
@@ -9369,55 +9441,15 @@ function Home() {
         }
       }
 
-      const formatFamilyDeliberationContent = (
-        turn: DeliberationTurn,
-        priorOutputMessageIds: string[],
-        evidenceReferences: DeliberationEvidenceReference[],
-      ) => {
-        const hasPriorResponseInput = priorOutputMessageIds.some(id => canDisplayAsResponse(turn, id))
-        const challengeValid = turn.turn_role === 'red_team_challenge'
-          ? canDisplayAsChallenge(turn, priorOutputMessageIds)
-          : true
-        const revisionValid = turn.turn_role === 'revision_or_stand_firm'
-          ? canDisplayAsRevision(turn, priorOutputMessageIds)
-          : true
-        const responseLine =
-          turn.turn_role === 'opening_position'
-            ? 'Relationship: opening position from Commander message'
-            : turn.turn_role === 'red_team_challenge'
-              ? challengeValid
-                ? `Challenge targets: ${turn.challenge_target_ids.join(', ')}`
-                : 'Challenge targets: unresolved; relationship label suppressed by display gate'
-              : turn.turn_role === 'revision_or_stand_firm'
-                ? revisionValid
-                  ? `Revision of: ${turn.revision_of_message_id} (${turn.revision_status})`
-                  : 'Revision status: unresolved; revision label suppressed by display gate'
-                : hasPriorResponseInput
-                  ? `Responding to: ${turn.input_message_ids.filter(id => priorOutputMessageIds.includes(id)).join(', ')}`
-                  : 'Relationship: independent contribution; no verified prior-message input'
-        const revisionLine =
-          turn.turn_role === 'revision_or_stand_firm'
-            ? responseLine
-            : `Revision status: ${turn.revision_status}`
-        const sourceLines = turn.evidence_reference_ids
-          .map(id => evidenceReferences.find(ref => ref.evidence_reference_id === id))
-          .filter((ref): ref is DeliberationEvidenceReference => Boolean(ref))
-          .map(ref => `${ref.label}: ${ref.url ?? ref.evidence_reference_id}`)
-        return [
-          `Provider: ${turn.provider_label}${turn.provider_model ? ` · ${turn.provider_model}` : ''}`,
-          `Role: ${turn.turn_role}`,
-          responseLine,
-          ...(turn.turn_role === 'revision_or_stand_firm' ? [] : [revisionLine]),
-          '',
-          `Executive position: ${turn.executive_position || '(unavailable)'}`,
-          '',
-          turn.full_response || `Provider contribution ${turn.completion_status}${turn.failure_reason ? `: ${turn.failure_reason}` : ''}.`,
-          '',
-          `Claims: ${turn.claims.length ? turn.claims.map(claim => `${claim.label}: ${claim.text}`).join(' | ') : 'none recorded'}`,
-          `Evidence references: ${sourceLines.length ? sourceLines.join(' | ') : 'none; model judgment/unresolved labels apply'}`,
-          `Confidence: ${turn.confidence == null ? 'unresolved' : `${Math.round(turn.confidence * 100)}%`}`,
-          `Recommended action: ${turn.recommended_action}`,
-        ].join('\n')
+      /**
+       * The Commander-facing bubble shows only what the family actually said — turn
+       * relationships, claims, evidence, and confidence are structured data already carried
+       * on the message (`familyDeliberationTurn`) for the collapsed "Deliberation provenance"
+       * panel, so they don't need to be baked into the visible prose as a report header.
+       */
+      const formatFamilyDeliberationContent = (turn: DeliberationTurn): string => {
+        if (turn.full_response.trim()) return turn.full_response
+        return `${turn.provider_label} didn't get a response in this round${turn.failure_reason ? ` — ${turn.failure_reason}` : ''}.`
       }
 
       const runFamilyDeliberationGather = async () => {
@@ -9454,7 +9486,6 @@ function Home() {
             messagesToAdd.filter(message => message.messageType === 'response' && message.content.trim()).length
           const runtimeByFamily: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
           const detailsByFamily: CouncilProviderRuntimeDetails = {}
-          const priorOutputMessageIds: string[] = []
           const shadowReadoutTurnId =
             deliberation.synthesis_turn_id
             ?? [...turns].reverse().find(turn => turn.completion_status === 'complete' && Boolean(turn.output_message_id))?.turn_id
@@ -9478,11 +9509,7 @@ function Home() {
             const bubbleFamilyName = complete
               ? (vis.bubbleFamilyName ?? rosterLabel(family))
               : 'SYSTEM'
-            const displayContent = formatFamilyDeliberationContent(
-              turn,
-              priorOutputMessageIds,
-              deliberation.evidence_references,
-            )
+            const displayContent = formatFamilyDeliberationContent(turn)
             messagesToAdd.push({
               id: turn.output_message_id ?? turn.turn_id,
               familyName: bubbleFamilyName,
@@ -9512,7 +9539,6 @@ function Home() {
                 { responseSuccessful: true, providerRuntime: runtimeByFamily[family] },
               )
             }
-            if (turn.output_message_id) priorOutputMessageIds.push(turn.output_message_id)
           }
 
           if (readableMessageCountBeforeFallback() === 0) {
@@ -10680,7 +10706,7 @@ function Home() {
   ) => {
     const [approve, pause, deeper, redirect] = packet.approvalPacket.nextDecreeSuggestions
     if (action === 'approve') {
-      matrixStatus('working', 'Council responding…')
+      matrixStatus('working', 'Council thinking…')
     } else if (action === 'pause') {
       matrixStatus('warning', 'Project paused')
     } else {
@@ -11056,19 +11082,19 @@ function Home() {
 
   const handleExpansionApprove = async () => {
     if (!expansionPrompt || loading) return
-    matrixStatus('working', 'Council responding…')
+    matrixStatus('working', 'Council thinking…')
     await sendRaelDecree(expansionPrompt.decree, 'expanded')
   }
 
   const handleExpansionDecline = async () => {
     if (!expansionPrompt || loading) return
-    matrixStatus('working', 'Council responding…')
+    matrixStatus('working', 'Council thinking…')
     await sendRaelDecree(expansionPrompt.decree)
   }
 
   const handleExpansionSummarize = async () => {
     if (!expansionPrompt || loading) return
-    matrixStatus('working', 'Council responding…')
+    matrixStatus('working', 'Council thinking…')
     await sendRaelDecree(expansionPrompt.decree, 'summarize')
   }
 
@@ -11140,7 +11166,7 @@ function Home() {
     [familyOperationStatuses, councilPacketRender],
   )
   const chatHealthLabel = useMemo(() => {
-    if (loading) return 'Working'
+    if (loading) return 'Council thinking…'
     if (liveResearchHud?.mode === 'failed') return 'Error'
     if (footerShowsPacketOrCouncilProviderIssue) return 'Error'
     return 'Ready'
@@ -12053,52 +12079,6 @@ function Home() {
             packet={councilPacketRender}
             operatorMode={isUnifiedLiveRoom && uiMode === 'operator'}
           />
-          {incrementalCouncilProgress && incrementalCouncilOperation ? (
-            <div
-              className="mt-3 rounded border border-emerald-900/30 px-3 py-3"
-              style={{ background: 'rgba(0,0,0,0.28)' }}
-              aria-live="polite"
-            >
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>
-                  Incremental Council Transport
-                </div>
-                <div className="text-[9px] uppercase tracking-widest" style={{ color: '#94A3B8' }}>
-                  {incrementalCouncilTransportStatus.replaceAll('_', ' ')}
-                </div>
-              </div>
-              <CouncilOperationTimeline
-                input={{
-                  id: incrementalCouncilProgress.requestId,
-                  familyName: 'CONTROL',
-                  content: incrementalCouncilRequestText ?? 'Council operation in progress.',
-                  timestamp: new Date().toLocaleTimeString(),
-                  provider: 'SSE',
-                  messageType: 'system',
-                  requestText: incrementalCouncilRequestText,
-                  requestId: incrementalCouncilProgress.requestId,
-                  operationId: incrementalCouncilProgress.requestId,
-                }}
-                operation={incrementalCouncilOperation}
-              />
-            </div>
-          ) : incrementalCouncilTransportStatus === 'establishing' ? (
-            <div
-              className="mt-3 rounded border border-emerald-900/30 px-3 py-2 text-[10px] uppercase tracking-widest"
-              style={{ background: 'rgba(0,0,0,0.24)', color: '#A7F3D0' }}
-              aria-live="polite"
-            >
-              Establishing Council connection.
-            </div>
-          ) : incrementalCouncilTransportStatus === 'interrupted' ? (
-            <div
-              className="mt-3 rounded border border-amber-900/40 px-3 py-2 text-[10px] uppercase tracking-widest"
-              style={{ background: 'rgba(0,0,0,0.24)', color: '#FDE68A' }}
-              aria-live="polite"
-            >
-              Incremental transport interrupted. Operation state may be uncertain.
-            </div>
-          ) : null}
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"
@@ -12181,6 +12161,60 @@ function Home() {
             onProjectAction={handleProjectAction}
             onPrepareRepairPacket={prepareRepairPacketFromCouncilMessage}
           />
+
+          <details className="mt-3 rounded border border-emerald-900/30" style={{ background: 'rgba(0,0,0,0.24)' }}>
+            <summary className="cursor-pointer px-3 py-2 text-[9px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>
+              Runtime Details
+            </summary>
+            <div className="px-3 pb-3">
+              {incrementalCouncilProgress && incrementalCouncilOperation ? (
+                <div
+                  className="mt-3 rounded border border-emerald-900/30 px-3 py-3"
+                  style={{ background: 'rgba(0,0,0,0.28)' }}
+                  aria-live="polite"
+                >
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>
+                      Incremental Council Transport
+                    </div>
+                    <div className="text-[9px] uppercase tracking-widest" style={{ color: '#94A3B8' }}>
+                      {incrementalCouncilTransportStatus.replaceAll('_', ' ')}
+                    </div>
+                  </div>
+                  <CouncilOperationTimeline
+                    input={{
+                      id: incrementalCouncilProgress.requestId,
+                      familyName: 'CONTROL',
+                      content: incrementalCouncilRequestText ?? 'Council operation in progress.',
+                      timestamp: new Date().toLocaleTimeString(),
+                      provider: 'SSE',
+                      messageType: 'system',
+                      requestText: incrementalCouncilRequestText,
+                      requestId: incrementalCouncilProgress.requestId,
+                      operationId: incrementalCouncilProgress.requestId,
+                    }}
+                    operation={incrementalCouncilOperation}
+                  />
+                </div>
+              ) : incrementalCouncilTransportStatus === 'establishing' ? (
+                <div
+                  className="mt-3 rounded border border-emerald-900/30 px-3 py-2 text-[10px] uppercase tracking-widest"
+                  style={{ background: 'rgba(0,0,0,0.24)', color: '#A7F3D0' }}
+                  aria-live="polite"
+                >
+                  Establishing Council connection.
+                </div>
+              ) : incrementalCouncilTransportStatus === 'interrupted' ? (
+                <div
+                  className="mt-3 rounded border border-amber-900/40 px-3 py-2 text-[10px] uppercase tracking-widest"
+                  style={{ background: 'rgba(0,0,0,0.24)', color: '#FDE68A' }}
+                  aria-live="polite"
+                >
+                  Incremental transport interrupted. Operation state may be uncertain.
+                </div>
+              ) : null}
+            </div>
+          </details>
 
           {expansionPrompt && (
             <ExpansionPermissionPrompt
