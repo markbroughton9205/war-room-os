@@ -2478,7 +2478,7 @@ function TokenUsagePanel({
       <div className="flex items-start justify-between gap-4 mb-3">
         <div>
           <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FFD700' }}>TOKEN USAGE</h2>
-          <p className="text-xs" style={{ color: '#555' }}>Mock estimates. Concise mode is default.</p>
+          <p className="text-xs" style={{ color: '#555' }}>Local estimates only. Concise mode is default.</p>
         </div>
         <div className="flex gap-4 text-xs tracking-widest">
           <span style={{ color: '#888' }}>CURRENT {formatCost(currentCost)}</span>
