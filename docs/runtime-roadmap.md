@@ -1,5 +1,11 @@
 # War Room Runtime Roadmap
 
+> This document covers the platform Phase A–D runtime-shell track only. For
+> the separate architecture/operations Phase 46–49 track (Council runtime
+> truthfulness, Native Builder, Sovereign Model Lab, etc.) and how it
+> relates to this and the aspirational `docs/phases/` track, see
+> [`docs/architecture/CANONICAL_PHASE_ROADMAP.md`](architecture/CANONICAL_PHASE_ROADMAP.md).
+
 ## Phase A: Stable Web/PWA Shell
 
 The current priority is a stable web and PWA shell. The app should load fast, mount only the active page, avoid hidden polling, keep chat usable, preserve memory when configured, and route all risky work through approval gates.
