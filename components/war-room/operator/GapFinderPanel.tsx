@@ -25,6 +25,11 @@ import {
   gapsBySelfAuditSection,
   topSelfAuditCursorCommand,
 } from '@/lib/operator/selfAudit'
+import {
+  baseSnapshotChanged,
+  baseSnapshotFromContext,
+  selectCanonicalStatus,
+} from '@/lib/operator/canonicalOverrideSelection'
 import type { SelfRepairSnapshot } from '@/lib/operator/selfRepair'
 import type { UpgradeQueueSnapshot } from '@/lib/operator/upgradeQueue'
 import { SelfRepairActions } from './SelfRepairActions'
@@ -62,19 +67,47 @@ export const GapFinderPanel = memo(function GapFinderPanel({
   onUpgradeQueueChange,
 }: GapFinderPanelProps) {
   const { signalSuccess, signalError, signalWorking } = useMatrixStatus()
-  const [canonical, setCanonical] = useState<CanonicalGapSnapshot | null>(context.canonicalStatus ?? null)
-  const [canonicalFailed, setCanonicalFailed] = useState(context.canonicalStatusUnavailable ?? false)
+  // Manual "Run Self-Audit" override — used only when the operator explicitly wants a
+  // point-in-time recheck. `context.canonicalStatus` (the mount-time fetch, now always live —
+  // see app/page.tsx's operatorGapFinderContext) is the base source of truth; a stale override
+  // must never be allowed to keep winning once a fresher base snapshot has arrived.
+  const [canonicalOverride, setCanonicalOverride] = useState<CanonicalGapSnapshot | null>(null)
+  const [canonicalOverrideFailed, setCanonicalOverrideFailed] = useState(false)
+  // Tracks whether a manual override attempt is currently active, independent of whether that
+  // attempt produced data. A failed manual recheck sets canonicalOverride to null (there's no
+  // fresh snapshot to show) but must still win over the base — gating on canonicalOverride's
+  // truthiness alone would silently drop that failure and fall back to the (possibly stale)
+  // base context, which is exactly the kind of stale-presented-as-fresh bug this override
+  // mechanism exists to prevent.
+  const [hasManualOverride, setHasManualOverride] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [recheckToken, setRecheckToken] = useState(0)
+  const [lastSeenBaseCanonical, setLastSeenBaseCanonical] = useState(() =>
+    baseSnapshotFromContext(context.canonicalStatus, context.canonicalStatusUnavailable),
+  )
+
+  // A new base snapshot (or explicit unavailability) arrived — drop any manual override so the
+  // fresher base wins instead of silently disagreeing with it. Adjusted during render (React's
+  // recommended pattern for resetting derived state on a prop change) rather than in an effect,
+  // so this never lands an extra committed render with the stale override still showing.
+  const currentBaseCanonical = baseSnapshotFromContext(context.canonicalStatus, context.canonicalStatusUnavailable)
+  if (baseSnapshotChanged(currentBaseCanonical, lastSeenBaseCanonical)) {
+    setLastSeenBaseCanonical(currentBaseCanonical)
+    setCanonicalOverride(null)
+    setCanonicalOverrideFailed(false)
+    setHasManualOverride(false)
+  }
 
   const mergedContext = useMemo<GapFinderContext>(
     () => ({
       ...context,
-      canonicalStatus: canonical ?? context.canonicalStatus,
-      canonicalStatusUnavailable: canonicalFailed,
+      ...selectCanonicalStatus(
+        { override: canonicalOverride, overrideFailed: canonicalOverrideFailed, hasOverride: hasManualOverride },
+        baseSnapshotFromContext(context.canonicalStatus, context.canonicalStatusUnavailable),
+      ),
     }),
-    [canonical, canonicalFailed, context],
+    [hasManualOverride, canonicalOverride, canonicalOverrideFailed, context],
   )
 
   const gaps = useMemo(() => {
@@ -143,14 +176,16 @@ export const GapFinderPanel = memo(function GapFinderPanel({
       let snapshot: CanonicalGapSnapshot | null = mergedContext.canonicalStatus ?? null
       const res = await fetch('/api/runtime/canonical-status', { cache: 'no-store' })
       if (!res.ok) {
-        setCanonicalFailed(true)
-        setCanonical(null)
+        setCanonicalOverrideFailed(true)
+        setCanonicalOverride(null)
+        setHasManualOverride(true)
         snapshot = null
         signalError('Canonical status unavailable — local heuristics only')
       } else {
         snapshot = (await res.json()) as CanonicalGapSnapshot
-        setCanonical(snapshot)
-        setCanonicalFailed(false)
+        setCanonicalOverride(snapshot)
+        setCanonicalOverrideFailed(false)
+        setHasManualOverride(true)
       }
       setRecheckToken(token => token + 1)
       const resolved = resolveOperatorGaps({
@@ -163,7 +198,9 @@ export const GapFinderPanel = memo(function GapFinderPanel({
         `Self-audit complete · ${countOpenOperatorGaps(resolved)} open · ${resolved.filter(g => g.status === 'fixed').length} fixed`,
       )
     } catch {
-      setCanonicalFailed(true)
+      setCanonicalOverrideFailed(true)
+      setCanonicalOverride(null)
+      setHasManualOverride(true)
       signalError('Self-audit scan failed')
     } finally {
       setScanning(false)
