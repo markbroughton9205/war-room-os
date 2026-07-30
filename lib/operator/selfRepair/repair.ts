@@ -5,9 +5,9 @@ import type { OperatorInboxItem } from '../inbox'
 import { transitionRepairState } from './lifecycle'
 import { repairPlanFromGap, repairPlanFromInboxItem } from './templates'
 import { findRepairBySourceId, loadSelfRepairSnapshot, upsertSelfRepairRecord } from './storage'
-import type { RepairLifecycleState, RepairValidationResult, SelfRepairRecord, SelfRepairSnapshot } from './types'
+import type { RepairLifecycleState, SelfRepairRecord, SelfRepairSnapshot } from './types'
 import { validateRepairAgainstGaps } from './validation'
-import type { GapFinderContext, RuntimeRefreshResult } from '../gapFinder'
+import type { GapFinderContext } from '../gapFinder'
 
 function recordIdForSource(sourceId: string): string {
   return `self-repair-${sourceId}`
@@ -85,111 +85,20 @@ export function markRepairApplied(record: SelfRepairRecord): SelfRepairSnapshot 
   return persistTransition(record, 'APPLIED', 'Commander marked applied manually')
 }
 
-export type ValidateRepairOutcome = { snapshot: SelfRepairSnapshot; result: RepairValidationResult }
-
-/** Keyed by record id — a second Validate Repair click (or a second mounted copy of the same
- * repair item, e.g. GapFinderPanel and OperatorInboxPanel both rendering it at once) while a
- * refresh+check is already in flight joins that same in-flight promise instead of starting a
- * second, independently-racing refresh. */
-const inFlightValidations = new Map<string, Promise<ValidateRepairOutcome>>()
-
-function cannotVerifyResult(evidence: string[]): RepairValidationResult {
-  return {
-    outcome: 'cannot_verify',
-    checkedAt: new Date().toISOString(),
-    evidence,
-    gapStillOpen: null,
-    knownGapVerified: false,
-  }
-}
-
-/** Merges an on-demand refresh result into a context, field by field. A field counts as
- * "supplied by this refresh" only when the property both exists on the result AND its value is
- * not `undefined` — `undefined` always means "this refresh didn't touch this field," whether that
- * property is entirely absent or explicitly set to `undefined`. A present `canonicalStatus: null`
- * is different: `null` is not `undefined`, so it still counts as supplied — a legitimate
- * authoritative result (a checked-and-empty answer, not "not checked"). Only a field this
- * specific refresh actually supplied may be marked 'ready' or replace the cached value — anything
- * else keeps its prior value AND prior readiness untouched, so a partial refresh (e.g. one that
- * only re-checks providerConnection) can never silently relabel a stale cached canonicalStatus as
- * freshly verified. Exported for direct, precise regression testing independent of gap-evaluation
- * semantics. */
-export function mergeRefreshedContext(ctx: GapFinderContext, refreshed: RuntimeRefreshResult): GapFinderContext {
-  const providerConnectionSupplied =
-    Object.prototype.hasOwnProperty.call(refreshed, 'providerConnection') && refreshed.providerConnection !== undefined
-  const canonicalStatusSupplied =
-    Object.prototype.hasOwnProperty.call(refreshed, 'canonicalStatus') && refreshed.canonicalStatus !== undefined
-
-  return {
-    ...ctx,
-    providerConnection: providerConnectionSupplied ? refreshed.providerConnection : ctx.providerConnection,
-    canonicalStatus: canonicalStatusSupplied ? refreshed.canonicalStatus : ctx.canonicalStatus,
-    canonicalStatusUnavailable: canonicalStatusSupplied
-      ? (refreshed.canonicalStatusUnavailable ?? false)
-      : ctx.canonicalStatusUnavailable,
-    runtimeReadiness: {
-      ...ctx.runtimeReadiness,
-      ...(providerConnectionSupplied ? { providerConnection: 'ready' as const } : {}),
-      ...(canonicalStatusSupplied ? { canonicalStatus: 'ready' as const } : {}),
-    },
-  }
-}
-
-async function runValidation(record: SelfRepairRecord, ctx: GapFinderContext): Promise<ValidateRepairOutcome> {
-  const at = new Date().toISOString()
-
-  // No refresh function supplied (e.g. a test/embedding that doesn't support one) — fall back to
-  // evaluating the context as given, matching the previous (pre-fresh-validation) behavior.
-  if (!ctx.refreshRuntimeData) {
-    const result = validateRepairAgainstGaps(record, ctx)
-    const nextState: RepairLifecycleState = result.outcome === 'verified' ? 'VALIDATED' : 'FAILED'
-    const updated: SelfRepairRecord = {
-      ...transitionRepairState(record, nextState, result.outcome === 'verified' ? 'Validation passed' : 'Validation failed'),
-      validation: result,
-      plan: { ...record.plan, updatedAt: at },
-    }
-    return { snapshot: upsertSelfRepairRecord(updated), result }
-  }
-
-  let refreshed: Awaited<ReturnType<NonNullable<GapFinderContext['refreshRuntimeData']>>>
-  try {
-    refreshed = await ctx.refreshRuntimeData()
-  } catch {
-    refreshed = { ok: false }
-  }
-
-  if (!refreshed.ok) {
-    const result = cannotVerifyResult([
-      'Runtime status could not be refreshed before validation — result withheld rather than reported pass or fail.',
-    ])
-    const updated: SelfRepairRecord = { ...record, validation: result, plan: { ...record.plan, updatedAt: at } }
-    return { snapshot: upsertSelfRepairRecord(updated), result }
-  }
-
-  const freshCtx = mergeRefreshedContext(ctx, refreshed)
-
-  const result = validateRepairAgainstGaps(record, freshCtx)
-  const nextState: RepairLifecycleState = result.outcome === 'verified' ? 'VALIDATED' : 'FAILED'
-  const updated: SelfRepairRecord = {
-    ...transitionRepairState(record, nextState, result.outcome === 'verified' ? 'Validation passed (fresh check)' : 'Validation failed (fresh check)'),
-    validation: result,
-    plan: { ...record.plan, updatedAt: at },
-  }
-  return { snapshot: upsertSelfRepairRecord(updated), result }
-}
-
 export function validateRepair(
   record: SelfRepairRecord,
   ctx: GapFinderContext,
-): Promise<ValidateRepairOutcome> {
-  const existing = inFlightValidations.get(record.id)
-  if (existing) return existing
-
-  const promise = runValidation(record, ctx).finally(() => {
-    if (inFlightValidations.get(record.id) === promise) inFlightValidations.delete(record.id)
-  })
-  inFlightValidations.set(record.id, promise)
-  return promise
+): { snapshot: SelfRepairSnapshot; result: ReturnType<typeof validateRepairAgainstGaps> } {
+  const result = validateRepairAgainstGaps(record, ctx)
+  const at = new Date().toISOString()
+  const nextState: RepairLifecycleState = result.verified ? 'VALIDATED' : 'FAILED'
+  const updated: SelfRepairRecord = {
+    ...transitionRepairState(record, nextState, result.verified ? 'Validation passed' : 'Validation failed'),
+    validation: result,
+    plan: { ...record.plan, updatedAt: at },
+  }
+  const snapshot = upsertSelfRepairRecord(updated)
+  return { snapshot, result }
 }
 
 export function learnFromRepair(record: SelfRepairRecord): SelfRepairSnapshot {

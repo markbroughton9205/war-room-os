@@ -39,23 +39,7 @@ export type RepairHistoryEntry = {
   note?: string
 }
 
-/** 'cannot_verify' means authoritative runtime data could not be refreshed/read before
- * evaluation — distinct from both 'verified' and 'failed' so a refresh failure is never
- * silently reported as either a pass or a fail. */
-export type RepairValidationOutcome = 'verified' | 'failed' | 'cannot_verify'
-
 export type RepairValidationResult = {
-  outcome: RepairValidationOutcome
-  checkedAt: string
-  evidence: string[]
-  gapStillOpen: boolean | null
-  knownGapVerified: boolean
-}
-
-/** Shape persisted by sessionStorage before the `outcome` field existed — pre-existing browser
- * sessions may still hold records exactly like this. Never re-write stored data into this shape;
- * it exists only so display logic can recognize and truthfully render what's already there. */
-export type LegacyRepairValidationResult = {
   verified: boolean
   checkedAt: string
   evidence: string[]
