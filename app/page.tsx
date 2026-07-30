@@ -64,9 +64,14 @@ import {
 import {
   countOpenOperatorGaps,
   resolveOperatorGaps,
+  type CanonicalGapSnapshot,
   type GapFinderContext,
+  type GapFinderRuntimeReadiness,
+  type RuntimeFieldReadiness,
+  type RuntimeRefreshResult,
 } from '@/lib/operator/gapFinder'
 import type { GapVerificationContext } from '@/lib/operator/gapVerification'
+import { deriveProviderHealthFromCanonicalStatus } from '@/lib/runtime/providerHealthFromCanonicalStatus'
 import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePacket'
 import type { ContinuationRequest } from '@/lib/council/continuationRequest'
 import { classifyCommand } from '@/lib/engine-control/permissions'
@@ -5685,6 +5690,12 @@ function Home() {
   const [memories, setMemories] = useState<MemoryEntry[]>([])
   const [repoAwareness, setRepoAwareness] = useState<RepoAwarenessState>(INITIAL_REPO_AWARENESS_STATE)
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
+  // canonicalStatusSnapshot/canonicalStatusUnavailable and providerHealth above are both derived
+  // from the same /api/runtime/canonical-status fetch (loadProviderHealth) — one response feeds
+  // both representations, never two independent fetches of the same endpoint.
+  const [canonicalStatusSnapshot, setCanonicalStatusSnapshot] = useState<CanonicalGapSnapshot | null>(null)
+  const [canonicalStatusUnavailable, setCanonicalStatusUnavailable] = useState(false)
+  const [providerHealthReadiness, setProviderHealthReadiness] = useState<RuntimeFieldReadiness>('pending')
   const [redTeamCoder, setRedTeamCoder] = useState<RedTeamCoderUiState>(INITIAL_RED_TEAM_CODER_STATE)
   const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
   const [latestRepairPacket, setLatestRepairPacket] = useState<CouncilRepairPacket | null>(null)
@@ -5700,6 +5711,7 @@ function Home() {
   const archivedCouncilMessages = liveChatWindow.archivedMessages
   const hiddenCouncilMessageCount = liveChatWindow.hiddenCount
   const [internetStatus, setInternetStatus] = useState<InternetStatusResponse>(INITIAL_INTERNET_STATUS)
+  const [internetReadiness, setInternetReadiness] = useState<RuntimeFieldReadiness>('pending')
   const [repoStatus, setRepoStatus] = useState<RepoStatus>(INITIAL_REPO_STATUS)
   const [rollbackStatus, setRollbackStatus] = useState<RollbackStatus>(INITIAL_ROLLBACK_STATUS)
   const [diffPreview, setDiffPreview] = useState<DiffPreviewResponse | null>(null)
@@ -5784,6 +5796,7 @@ function Home() {
   const [councilTraceTestResult, setCouncilTraceTestResult] = useState<CouncilTraceTestResponse | null>(null)
   const [councilTraceTestError, setCouncilTraceTestError] = useState<string | null>(null)
   const [persistenceAvailable, setPersistenceAvailable] = useState(false)
+  const [persistenceReadiness, setPersistenceReadiness] = useState<RuntimeFieldReadiness>('pending')
   const [continuityMode, setContinuityMode] = useState<RuntimeContinuityIndicatorMode>('Unknown')
   const [continuityRecoverAt, setContinuityRecoverAt] = useState<string | null>(null)
   const [recoverRuntimeBanner, setRecoverRuntimeBanner] = useState(false)
@@ -6319,6 +6332,7 @@ function Home() {
         const res = await fetch('/api/conversations', { cache: 'no-store' })
         const persist = res.headers.get('x-war-room-persistence') === 'available'
         setPersistenceAvailable(persist)
+        setPersistenceReadiness('ready')
         if (!res.ok || !persist) {
           setLiveCouncilLoadState('session_only')
           return
@@ -6426,6 +6440,7 @@ function Home() {
         setLiveCouncilLoadState('ready')
       } catch {
         setLiveCouncilLoadState('session_only')
+        setPersistenceReadiness('error')
         /* session-only council */
       }
     })()
@@ -7332,27 +7347,25 @@ function Home() {
     }
   }
 
-  const loadProviderHealth = async () => {
+  // Single shared fetch for both providerHealth (the reduced, widely-consumed provider/label
+  // maps) and canonicalStatus (the full snapshot self-audit's deeper validators need) — never two
+  // independent fetches of the same endpoint. Returns the fresh result so repair validation can
+  // evaluate against it directly instead of waiting for a re-render.
+  const loadProviderHealth = useCallback(async (): Promise<RuntimeRefreshResult> => {
     try {
       const res = await fetch('/api/runtime/canonical-status', { cache: 'no-store' })
       const raw = await res.text()
       if (res.headers.get('content-type')?.includes('text/html') || raw.trimStart().startsWith('<')) {
         throw new Error('connection_timeout')
       }
-      const data = JSON.parse(raw) as {
-        providers?: { family: ProviderFamilyKey; connectionStatus: ProviderConnectionStatus; label: string }[]
-        error?: string
-      }
+      const data = JSON.parse(raw) as CanonicalGapSnapshot & { error?: string }
       if (!res.ok) throw new Error(data.error || 'Canonical provider status failed')
-      const prov = { ...INITIAL_PROVIDER_HEALTH.providers }
-      const lab = { ...INITIAL_PROVIDER_HEALTH.labels }
-      for (const row of data.providers ?? []) {
-        if (row.family in prov) {
-          prov[row.family] = row.connectionStatus
-          lab[row.family] = row.label
-        }
-      }
+      const { providers: prov, labels: lab } = deriveProviderHealthFromCanonicalStatus(data, INITIAL_PROVIDER_HEALTH)
       setProviderHealth({ providers: prov, labels: lab })
+      setCanonicalStatusSnapshot(data)
+      setCanonicalStatusUnavailable(false)
+      setProviderHealthReadiness('ready')
+      return { ok: true, providerConnection: prov, canonicalStatus: data, canonicalStatusUnavailable: false }
     } catch {
       setProviderHealth(prev => ({
         ...prev,
@@ -7363,8 +7376,11 @@ function Home() {
           grok: 'error',
         },
       }))
+      setCanonicalStatusUnavailable(true)
+      setProviderHealthReadiness('error')
+      return { ok: false }
     }
-  }
+  }, [])
 
 
   const loadInternetStatus = useCallback(async () => {
@@ -7373,6 +7389,7 @@ function Home() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Internet status failed')
       setInternetStatus(data)
+      setInternetReadiness('ready')
     } catch {
       setInternetStatus(prev => ({
         ...prev,
@@ -7381,6 +7398,7 @@ function Home() {
         label: 'Unknown',
         canUseInternet: false,
       }))
+      setInternetReadiness('error')
     }
   }, [])
   loadInternetStatusRef.current = loadInternetStatus
@@ -7481,7 +7499,7 @@ function Home() {
     }, 0)
 
     return () => window.clearTimeout(timer)
-  }, [loadInternetStatus])
+  }, [loadInternetStatus, loadProviderHealth])
 
   useEffect(() => {
     let cancelled = false
@@ -7558,7 +7576,7 @@ function Home() {
     return () => {
       cancelled = true
     }
-  }, [loadInternetStatus])
+  }, [loadInternetStatus, loadProviderHealth])
 
   useEffect(() => {
     const bump = () => {
@@ -11252,6 +11270,21 @@ function Home() {
     () => incomeOpportunities.filter(opportunity => opportunity.status === 'paid').length,
     [incomeOpportunities],
   )
+  // Repair validation calls this to force a fresh canonical-status check before evaluating a gap,
+  // rather than trusting whatever this render's providerConnection/canonicalStatus already holds.
+  const refreshRuntimeDataForValidation = useCallback(
+    (): Promise<RuntimeRefreshResult> => loadProviderHealth(),
+    [loadProviderHealth],
+  )
+  const operatorRuntimeReadiness = useMemo<GapFinderRuntimeReadiness>(
+    () => ({
+      providerConnection: providerHealthReadiness,
+      canonicalStatus: providerHealthReadiness,
+      persistence: persistenceReadiness,
+      internet: internetReadiness,
+    }),
+    [providerHealthReadiness, persistenceReadiness, internetReadiness],
+  )
   const operatorGapFinderContext = useMemo<GapFinderContext>(
     () => ({
       visibleMessages: visibleCouncilMessages.map(m => ({
@@ -11271,6 +11304,10 @@ function Home() {
       councilPaused: council.councilState === 'paused',
       councilFlowMode,
       showOldDiagnostics: showOldCouncilDiagnostics,
+      canonicalStatus: canonicalStatusSnapshot,
+      canonicalStatusUnavailable,
+      runtimeReadiness: operatorRuntimeReadiness,
+      refreshRuntimeData: refreshRuntimeDataForValidation,
       internetUsable: internetStatus.canUseInternet === true,
       viewportNarrow,
       viewportWidthPx,
@@ -11316,6 +11353,10 @@ function Home() {
       council.councilState,
       councilFlowMode,
       showOldCouncilDiagnostics,
+      canonicalStatusSnapshot,
+      canonicalStatusUnavailable,
+      operatorRuntimeReadiness,
+      refreshRuntimeDataForValidation,
       internetStatus.canUseInternet,
       viewportNarrow,
       viewportWidthPx,
