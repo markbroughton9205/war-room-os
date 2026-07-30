@@ -85,6 +85,27 @@ export type CanonicalGapSnapshot = {
   }
 }
 
+/** Per-field load state for async-sourced context values. `'pending'` = not yet checked,
+ * `'ready'` = a real check completed (value may still be healthy or unhealthy),
+ * `'error'` = the check itself failed (value is not trustworthy either way). */
+export type RuntimeFieldReadiness = 'pending' | 'ready' | 'error'
+
+export type GapFinderRuntimeReadiness = {
+  providerConnection?: RuntimeFieldReadiness
+  persistence?: RuntimeFieldReadiness
+  internet?: RuntimeFieldReadiness
+  canonicalStatus?: RuntimeFieldReadiness
+}
+
+/** Result of an on-demand refresh of authoritative runtime data, used by repair validation
+ * so it never evaluates against an arbitrarily old context snapshot. */
+export type RuntimeRefreshResult = {
+  ok: boolean
+  providerConnection?: Partial<Record<string, 'online' | 'standby' | 'error' | 'not_connected'>>
+  canonicalStatus?: CanonicalGapSnapshot | null
+  canonicalStatusUnavailable?: boolean
+}
+
 export type GapFinderContext = {
   visibleMessages: CouncilMessageLike[]
   hiddenMessageCount?: number
@@ -97,6 +118,12 @@ export type GapFinderContext = {
   showOldDiagnostics?: boolean
   canonicalStatus?: CanonicalGapSnapshot | null
   canonicalStatusUnavailable?: boolean
+  /** Readiness of the async-sourced fields above — see normalizeContextForReadiness(). */
+  runtimeReadiness?: GapFinderRuntimeReadiness
+  /** When present, repair validation calls this to fetch a fresh snapshot instead of trusting
+   * whatever this context object already holds. Absent in contexts that don't support refresh
+   * (e.g. tests) — those fall back to evaluating the given context as-is. */
+  refreshRuntimeData?: () => Promise<RuntimeRefreshResult>
   internetUsable?: boolean
   evolutionReadinessScore?: number | null
   viewportNarrow?: boolean
@@ -258,13 +285,37 @@ function injectVerifiedFixedKnownGaps(gaps: OperatorGap[], ctx: GapFinderContext
   return [...gaps, ...injected]
 }
 
+/** Neutralizes any async-sourced field that isn't `'ready'` yet (still `'pending'`, or the
+ * check itself `'error'`ed) so downstream validators never see a value that's indistinguishable
+ * from "confirmed broken" while it's really just "not checked yet." Applied once, here, rather
+ * than duplicating a loading guard inside every audit module that reads one of these fields. */
+export function normalizeContextForReadiness(ctx: GapFinderContext): GapFinderContext {
+  const readiness = ctx.runtimeReadiness
+  if (!readiness) return ctx
+  let next = ctx
+  if (readiness.providerConnection && readiness.providerConnection !== 'ready') {
+    next = { ...next, providerConnection: undefined }
+  }
+  if (readiness.persistence && readiness.persistence !== 'ready' && next.memory) {
+    next = { ...next, memory: { ...next.memory, persistenceAvailable: undefined } }
+  }
+  if (readiness.internet && readiness.internet !== 'ready') {
+    next = { ...next, internetUsable: undefined }
+  }
+  if (readiness.canonicalStatus && readiness.canonicalStatus !== 'ready') {
+    next = { ...next, canonicalStatus: undefined, canonicalStatusUnavailable: undefined }
+  }
+  return next
+}
+
 export function resolveOperatorGaps(ctx: GapFinderContext): OperatorGap[] {
-  const legacy = findOperatorGaps(ctx)
-  const selfAudit = runSelfAudit(gapFinderToSelfAuditContext(ctx))
+  const normalized = normalizeContextForReadiness(ctx)
+  const legacy = findOperatorGaps(normalized)
+  const selfAudit = runSelfAudit(gapFinderToSelfAuditContext(normalized))
   const merged = mergeSelfAuditWithLegacyGaps(legacy, selfAudit)
-  const withStatus = applyGapVerification(merged, ctx)
-  const withDismissals = applyCommanderDismissals(withStatus, ctx.commanderDismissedIds)
-  return mergeCanonicalGaps(injectVerifiedFixedKnownGaps(withDismissals, ctx))
+  const withStatus = applyGapVerification(merged, normalized)
+  const withDismissals = applyCommanderDismissals(withStatus, normalized.commanderDismissedIds)
+  return mergeCanonicalGaps(injectVerifiedFixedKnownGaps(withDismissals, normalized))
 }
 
 export function countOpenOperatorGaps(gaps: OperatorGap[]): number {
