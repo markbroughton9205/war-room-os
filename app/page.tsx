@@ -170,7 +170,7 @@ import {
 } from '@/lib/council/providerTimeouts'
 import { shapeAttendanceForModeGovernor } from '@/lib/council/responseCompression'
 import { shouldSuppressProviderFailureFromChatStream } from '@/lib/council/chatStreamFilters'
-import { isOldOperatorDiagnosticMessage } from '@/lib/war-room/operatorDiagnosticsUi'
+import { resolveOperatorDiagnosticVisibility } from '@/lib/war-room/operatorDiagnosticsUi'
 import {
   attendancePreflightSkipsChat,
   attendancePreflightToProviderRuntime,
@@ -1409,6 +1409,15 @@ function isLastCouncilOperationMessage(message: CouncilMessage, messages: readon
   return group.length > 0 && group[group.length - 1]?.id === message.id
 }
 
+/** True when `message` belongs to the same operation as the most recent Commander decree — i.e.
+ * this round, not an earlier one. Used so degraded/diagnostic messages from the current round are
+ * never muted by the "Show old diagnostics" setting, which is meant for historical noise only. */
+function isCurrentCouncilOperationMessage(message: CouncilMessage, messages: readonly CouncilMessage[]): boolean {
+  const latestDecree = [...messages].reverse().find(item => item.messageType === 'decree')
+  if (!latestDecree) return false
+  return councilOperationGroupKey(message, messages) === `turn:${latestDecree.id}`
+}
+
 const MessageBubble = memo(function MessageBubble({
   msg,
   operationTimelineInputs = [],
@@ -1416,6 +1425,7 @@ const MessageBubble = memo(function MessageBubble({
   diagnosticsOpen,
   councilPassthroughMode,
   operatorDiagnosticsMuted = false,
+  isCurrentOperation = false,
   onOpenFullMemory,
   onProjectAction,
   onPrepareRepairPacket,
@@ -1426,15 +1436,23 @@ const MessageBubble = memo(function MessageBubble({
   diagnosticsOpen?: boolean
   councilPassthroughMode?: boolean
   operatorDiagnosticsMuted?: boolean
+  /** Whether `msg` belongs to the most recent council operation — a current-round degraded or
+   * diagnostic message is always shown as a clear degraded/failure notice, never hidden. */
+  isCurrentOperation?: boolean
   onOpenFullMemory?: (preview: CouncilMemoryRecallPreview) => void
   onProjectAction?: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
   onPrepareRepairPacket?: (message: CouncilMessage) => void
 }) {
   const isRael = msg.familyName === "RA'EL"
-  const oldOperatorDiagnostic =
-    !diagnosticsOpen
-    && !councilPassthroughMode
-    && isOldOperatorDiagnosticMessage(msg)
+  const diagnosticVisibility = resolveOperatorDiagnosticVisibility({
+    content: msg.content,
+    messageType: msg.messageType,
+    degraded: msg.degraded,
+    diagnosticsOpen,
+    councilPassthroughMode,
+    operatorDiagnosticsMuted,
+    isCurrentOperation,
+  })
   const operationMessageInputs = useMemo(() => operationTimelineInputs.map(item => ({
     id: item.id,
     familyName: item.familyName,
@@ -1461,7 +1479,7 @@ const MessageBubble = memo(function MessageBubble({
       : null,
     [operationMessageInputs, operationProgress, showOperationTimeline],
   )
-  if (oldOperatorDiagnostic && operatorDiagnosticsMuted) {
+  if (diagnosticVisibility === 'hidden') {
     return null
   }
   if (
@@ -1797,14 +1815,14 @@ const MessageBubble = memo(function MessageBubble({
       </div>
     )
   }
-  if (oldOperatorDiagnostic) {
+  if (diagnosticVisibility === 'degraded_notice') {
     return (
       <details
         className="message-fade-in mb-3 ml-11 rounded border border-slate-700/40 bg-black/30 px-3 py-2 text-[10px] text-slate-500"
         data-testid="operator-diagnostic-notice"
       >
         <summary className="cursor-pointer list-none font-bold tracking-widest text-slate-500 [&::-webkit-details-marker]:hidden">
-          System notice · {msg.familyName} · degraded / fallback (history preserved)
+          System notice · {msg.familyName} · degraded / fallback {isCurrentOperation ? '(this round)' : '(history preserved)'}
         </summary>
         <p className="mt-2 whitespace-pre-wrap leading-relaxed text-slate-600">{msg.content}</p>
       </details>
@@ -2078,6 +2096,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           diagnosticsOpen={false}
           councilPassthroughMode={councilPassthroughMode}
           operatorDiagnosticsMuted={!showOldDiagnostics}
+          isCurrentOperation={isCurrentCouncilOperationMessage(msg, messages)}
           onOpenFullMemory={onOpenFullMemory}
           onProjectAction={onProjectAction}
           onPrepareRepairPacket={onPrepareRepairPacket}
