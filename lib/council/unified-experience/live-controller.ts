@@ -7,6 +7,7 @@ import {
   buildCommanderOperationFromMessages,
   type CouncilOperationMessageInput,
 } from './adapter'
+import { countOperationFamilyContributions } from './operationSummary'
 import type {
   CommanderBriefing,
   CommanderOperation,
@@ -357,10 +358,11 @@ function preserveMonotonicStatus(a: CommanderOperationStatus, b: CommanderOperat
 }
 
 function summaryFor(mode: CommanderOperationMode, events: readonly CommanderOperationEvent[]) {
-  const respondedCount = events.filter(item => item.type === 'family_responded' || item.type === 'synthesis_completed').length
-  const failedCount = events.filter(item => item.type === 'family_failed' || item.type === 'family_timed_out' || item.type === 'operation_failed').length
-  const unavailableCount = events.filter(item => item.type === 'family_unavailable').length
-  const skippedCount = events.filter(item => item.type === 'family_skipped').length
+  const familyCounts = countOperationFamilyContributions(events)
+  const respondedCount = familyCounts.respondedCount
+  const failedCount = familyCounts.failedCount + events.filter(item => item.type === 'operation_failed').length
+  const unavailableCount = familyCounts.unavailableCount
+  const skippedCount = familyCounts.skippedCount
   const waitingApprovalCount = events.filter(item => item.type === 'approval_required' || item.type === 'family_waiting_approval').length
   const synthesisCompleted = events.some(item => item.type === 'synthesis_completed')
   const approvalRequired = waitingApprovalCount > 0
@@ -460,7 +462,12 @@ export function mergeCommanderOperationWithCompletedTranscript(
   currentOperation: CommanderOperation,
   completedOperation: CommanderOperation,
 ): CommanderOperation {
-  if (currentOperation.operationId !== completedOperation.operationId && currentOperation.requestId && completedOperation.requestId && currentOperation.requestId !== completedOperation.requestId) {
+  // `requestId` is per-HTTP-request and deliberately differs across a Full Council round's N
+  // separate single-family requests — comparing it here silently discarded the completed
+  // transcript for every multi-family round. `sessionId` (the client-supplied logicalRequestId)
+  // is the identifier shared by every family's request within one round, so it's the correct
+  // "same operation" signal; only reject the merge when it's present on both sides and disagrees.
+  if (currentOperation.operationId !== completedOperation.operationId && currentOperation.sessionId && completedOperation.sessionId && currentOperation.sessionId !== completedOperation.sessionId) {
     return currentOperation
   }
   const events = dedupeEvents([...currentOperation.events, ...completedOperation.events])

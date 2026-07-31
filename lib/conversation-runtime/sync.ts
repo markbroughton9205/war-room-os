@@ -6,6 +6,7 @@ import {
   createConversationRuntime,
   syncRuntimeFromCouncilStore,
 } from '@/lib/conversation-runtime/sessionStore'
+import { buildLatestSynthesis } from '@/lib/conversation-runtime/synthesisSummary'
 import { mergeProviderStatesFromMessages } from '@/lib/provider-state/store'
 
 export function rebuildConversationRuntime(
@@ -51,7 +52,7 @@ export function rebuildConversationRuntime(
       compressedSnapshot: rolling.compressed,
       unresolvedInvestigations: investigations,
       contradictionMap,
-      latestSynthesis: rolling.compressed.decisionSummary[0] ?? base.latestSynthesis,
+      latestSynthesis: buildLatestSynthesis(rolling.compressed.decisionSummary, base.latestSynthesis),
     },
     council,
   )
