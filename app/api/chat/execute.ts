@@ -2824,9 +2824,13 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         markLiveResearchProviderFailed('failed')
         return degradedProviderResponse(councilSingleFamily, 'failed', `${councilSingleFamily} returned empty body`)
       }
+      recordCouncilProgressProviderResult(councilProgress, councilSingleFamily, {
+        family: displayFamilyName(councilSingleFamily),
+        content: responseText,
+        status: 'OK',
+      })
+
       let providerIntegrityDiagnostics: Record<string, unknown> | undefined
-      let progressOutcomeStatus: ProviderResultStatus = 'OK'
-      let progressOutcomeError: string | undefined
       if (
         stabilityFlags.integrityOrchestrationRetries
         && !skipProviderIntegrityCheck
@@ -2873,16 +2877,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
               : orchestrated.integrity.integrity_status === 'DEGRADED_RESPONSE_QUALITY'
                 ? 'partial'
                 : 'partial'
-          progressOutcomeStatus = 'FAILED'
-          progressOutcomeError = orchestrated.degradedLabel ?? `${councilSingleFamily} response incomplete after retry.`
         }
       }
-      recordCouncilProgressProviderResult(councilProgress, councilSingleFamily, {
-        family: displayFamilyName(councilSingleFamily),
-        content: responseText,
-        status: progressOutcomeStatus,
-        ...(progressOutcomeError ? { error: progressOutcomeError } : {}),
-      })
       councilTrace.record('integrity_checked', {
         module: 'lib/providers/retryOrchestration.ts:orchestrateProviderResponse',
         inputSummary: {

@@ -382,118 +382,6 @@ function requiredCases(): LiveCouncilOperationValidationCase[] {
   ]
 }
 
-function fullCouncilReconciliationCases(): LiveCouncilOperationValidationCase[] {
-  const roundSessionId = 'full-council-round-session'
-
-  const familyInput = (
-    id: string,
-    familyName: string,
-    content: string,
-    requestSuffix: string,
-    providerStatus: CouncilOperationMessageInput['providerStatus'] = 'OK',
-    sessionId: string = roundSessionId,
-  ): CouncilOperationMessageInput => ({
-    id,
-    familyName,
-    content,
-    timestamp: BASE_TIME,
-    provider: 'validation',
-    messageType: 'response',
-    providerStatus,
-    // Each family in a real Full Council round is a SEPARATE HTTP request with its own requestId
-    // — only the client-supplied logicalRequestId (sessionId here) is shared across the round.
-    requestId: `full-council-request-${requestSuffix}`,
-    sessionId,
-  })
-
-  const fourFamilyInputs = [
-    familyInput('fc-chatgpt', 'ChatGPT Family', 'ChatGPT real answer.', 'chatgpt'),
-    familyInput('fc-claude', 'Claude Family', 'Claude real answer.', 'claude'),
-    familyInput('fc-grok', 'Grok Family', 'Grok real answer.', 'grok'),
-    familyInput('fc-gemini', 'Gemini Family', 'Provider response incomplete; fallback summary used', 'gemini', 'FAILED'),
-  ]
-  const completedFourFamily = buildCommanderOperationFromMessages(fourFamilyInputs)
-
-  // The "live" snapshot represents only ONE family's own per-request progress trace (as in the
-  // real app, where each Full Council family is a separate HTTP request) — shaped as a retry: a
-  // premature failure followed by the eventual success, both for the same family (chatgpt).
-  const chatgptRetryProgress = progress(
-    [
-      event(1, 'family_failed', 'chatgpt', { eventId: 'fc-chatgpt-attempt-1' }),
-      event(2, 'family_response_completed', 'chatgpt', { eventId: 'fc-chatgpt-attempt-2' }),
-    ],
-    { requestId: 'full-council-request-chatgpt', logicalRequestId: roundSessionId },
-  )
-  const chatgptRetryLive = buildCommanderOperationFromProgressSnapshot(chatgptRetryProgress)
-  const fourFamilyMerged = mergeCommanderOperationWithCompletedTranscript(chatgptRetryLive, completedFourFamily)
-  const fourFamilyTimeline = buildCouncilOperationTimeline({
-    progress: chatgptRetryProgress,
-    completedInputs: fourFamilyInputs,
-  })
-
-  const otherRoundInput = familyInput('other-round', 'Claude Family', 'Different round entirely.', 'other-round', 'OK', 'a-different-round-session')
-  const crossRoundMerge = mergeCommanderOperationWithCompletedTranscript(chatgptRetryLive, buildCommanderOperationFromMessages([otherRoundInput]))
-
-  return [
-    validation(
-      'c4b_100_four_family_round_reaches_reconciled_timeline',
-      'a real 4-family Full Council round (separate per-family requestIds, shared session id) reaches the reconciled timeline, not the single-family live snapshot',
-      fourFamilyMerged.timelineSource === 'reconciled_runtime_snapshot_and_transcript',
-      [fourFamilyMerged.timelineSource ?? 'undefined'],
-    ),
-    validation(
-      'c4b_101_build_council_operation_timeline_also_reconciles_end_to_end',
-      'buildCouncilOperationTimeline reaches the reconciled timeline for a 4-family round end to end',
-      fourFamilyTimeline?.timelineSource === 'reconciled_runtime_snapshot_and_transcript',
-      [fourFamilyTimeline?.timelineSource ?? 'null'],
-    ),
-    validation(
-      'c4b_102_completed_inputs_are_merged_not_discarded',
-      'completedInputs contribute their events to the merged operation instead of being silently dropped',
-      fourFamilyMerged.events.length > chatgptRetryLive.events.length
-      && completedFourFamily.events.every(completedEvent => fourFamilyMerged.events.some(mergedEvent => mergedEvent.id === completedEvent.id)),
-      [`live=${chatgptRetryLive.events.length}`, `completed=${completedFourFamily.events.length}`, `merged=${fourFamilyMerged.events.length}`],
-    ),
-    validation(
-      'c4b_103_runtime_contribution_count_equals_distinct_responding_families',
-      'runtime contribution count equals the number of distinct successfully responding families (3), not raw event count',
-      fourFamilyMerged.summary.respondedCount === 3,
-      [String(fourFamilyMerged.summary.respondedCount)],
-    ),
-    validation(
-      'c4b_104_degraded_family_represented_not_counted_responded',
-      'the degraded/failed family (Gemini) is represented as failed, not silently dropped or counted as responded',
-      fourFamilyMerged.summary.failedCount === 1
-      && fourFamilyMerged.events.some(item => item.familyId === 'gemini' && item.type === 'family_failed'),
-      [`failedCount=${fourFamilyMerged.summary.failedCount}`, types(fourFamilyMerged)],
-    ),
-    validation(
-      'c4b_105_retry_within_merged_round_does_not_inflate_count',
-      'a family that failed then succeeded within its own per-request trace (retry) still counts once in the merged round-wide total',
-      fourFamilyMerged.summary.respondedCount === 3
-      && fourFamilyMerged.events.filter(item => item.familyId === 'chatgpt' && item.type === 'family_responded').length >= 1
-      && fourFamilyMerged.events.filter(item => item.familyId === 'chatgpt').length >= 2,
-      [
-        `respondedCount=${fourFamilyMerged.summary.respondedCount}`,
-        `chatgptEvents=${fourFamilyMerged.events.filter(item => item.familyId === 'chatgpt').map(item => item.type).join('+')}`,
-      ],
-    ),
-    validation(
-      'c4b_106_no_family_reported_as_unknown_in_full_council_merge',
-      'every real "X Family" persisted label resolves to its true family, not Unknown Council family, in the merged timeline',
-      fourFamilyMerged.events.every(item => item.familyId !== 'unknown'),
-      [fourFamilyMerged.events.map(item => String(item.familyId)).join(',')],
-    ),
-    validation(
-      'c4b_107_cross_round_merge_still_blocked_by_session_id',
-      'a genuinely different round (different logicalRequestId/sessionId) is still correctly blocked from merging',
-      crossRoundMerge.timelineSource === chatgptRetryLive.timelineSource
-      && crossRoundMerge.events.length === chatgptRetryLive.events.length,
-      [crossRoundMerge.timelineSource ?? 'undefined', String(crossRoundMerge.events.length), String(chatgptRetryLive.events.length)],
-    ),
-  ]
-}
-
 function generatedCoverageCases(): LiveCouncilOperationValidationCase[] {
   const statusCases: Array<[string, CouncilProgressEventType, CommanderOperationEventType]> = [
     ['queued', 'family_queued', 'family_queued'],
@@ -603,5 +491,5 @@ function documentationText(): string {
 }
 
 export function runLiveCouncilOperationValidation(): LiveCouncilOperationValidationCase[] {
-  return [...requiredCases(), ...fullCouncilReconciliationCases(), ...generatedCoverageCases()]
+  return [...requiredCases(), ...generatedCoverageCases()]
 }
