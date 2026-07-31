@@ -2,7 +2,6 @@
 
 import { memo, useEffect, useMemo, useState } from 'react'
 import type { ConversationRuntimeSnapshot } from '@/lib/conversation-runtime/types'
-import { truncateAtWordBoundary } from './textTruncation'
 
 type FamilyPresence = { status: string; label: string }
 
@@ -73,7 +72,7 @@ export const AmbientActivityFeed = memo(function AmbientActivityFeed({
     if (runtime?.latestSynthesis) {
       out.push({
         key: 'synthesis',
-        text: `Synthesis: ${truncateAtWordBoundary(runtime.latestSynthesis, 120)}`,
+        text: `Synthesis: ${runtime.latestSynthesis.slice(0, 120)}${runtime.latestSynthesis.length > 120 ? '…' : ''}`,
         tone: 'active',
         title: runtime.latestSynthesis,
       })

@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server'
 import { completeGeminiCouncilMessage } from '@/lib/ai/providers/geminiCouncil'
 import { callXAIChat } from '@/lib/ai/providers/xai'
 import { completeKimiChat, isKimiConfigured } from '@/lib/providers/kimi'
+import {
+  callClaudeFamilyWithEmptyContentRetry,
+  ClaudeEmptyContentError,
+  extractClaudeResponseText,
+} from '@/lib/providers/claudeResponseParsing'
 import { councilSingleFamilyToMemoryPartition, tryPersistMemoryProposalFromModelOutput } from '@/lib/memory/ingestFromModel'
 import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
@@ -518,13 +523,13 @@ async function callClaude(
       messages: [{ role: 'user', content: prompt }],
     }),
   })
-  const data = await res.json() as { content?: { text?: string }[]; error?: { message?: string } }
+  const data = await res.json() as { content?: unknown; error?: { message?: string } }
   if (!res.ok) {
     throw new Error(data?.error?.message || `Anthropic request failed (${res.status})`)
   }
-  const text = data.content?.[0]?.text
-  if (typeof text !== 'string' || !text.trim()) {
-    throw new Error('Claude returned empty content')
+  const text = extractClaudeResponseText(data.content)
+  if (!text.trim()) {
+    throw new ClaudeEmptyContentError('Claude returned empty content')
   }
   return text.trim()
 }
@@ -2267,6 +2272,20 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         }
       }
 
+      // Claude (and Red Team, which also calls callClaude) occasionally returns an HTTP-success
+      // response with no usable text block. That's transient and worth exactly one retry with a
+      // fresh timeout budget before it's treated as a real failure — anything other than
+      // ClaudeEmptyContentError propagates immediately with no retry.
+      const callClaudeWithEmptyContentRetry = (prompt: string, system: string, tokens: number): Promise<string> =>
+        callClaudeFamilyWithEmptyContentRetry(async () => {
+          const { signal, dispose } = withBudgetSignal()
+          try {
+            return await callClaude(prompt, system, tokens, signal)
+          } finally {
+            dispose()
+          }
+        })
+
       // Live research is a truthfulness requirement, not a mode-specific feature: Stable Group
       // and attendance/Full Council rounds are no longer hard-excluded here. `detectResearchIntent`
       // below already receives `attendanceFlow` as a soft signal and down-weights pure roll-call/
@@ -2615,17 +2634,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
             break
           }
           case 'claude': {
-            const { signal, dispose } = withBudgetSignal()
-            try {
-              responseText = await callClaude(
-                userPrompt,
-                stableGroupSystemForFamily ?? claudeSystem,
-                tokensForCall,
-                signal,
-              )
-            } finally {
-              dispose()
-            }
+            responseText = await callClaudeWithEmptyContentRetry(
+              userPrompt,
+              stableGroupSystemForFamily ?? claudeSystem,
+              tokensForCall,
+            )
             break
           }
           case 'grok': {
@@ -2726,12 +2739,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
                 `You are Red Team in Ra'el's War Room — the protective one, watching for where a plan could fail. Personality: protective, direct, like family saying "hold up" before Ra'el walks into something — not a compliance officer. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence, but say it the way someone who has his back would say it — never as a legal disclaimer or automated risk report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
                 'red_team',
               )
-            const { signal, dispose } = withBudgetSignal()
-            try {
-              responseText = await callClaude(userPrompt, redSystem, tokensForCall, signal)
-            } finally {
-              dispose()
-            }
+            responseText = await callClaudeWithEmptyContentRetry(userPrompt, redSystem, tokensForCall)
             break
           }
           case 'baby': {
@@ -2824,9 +2832,13 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         markLiveResearchProviderFailed('failed')
         return degradedProviderResponse(councilSingleFamily, 'failed', `${councilSingleFamily} returned empty body`)
       }
+      recordCouncilProgressProviderResult(councilProgress, councilSingleFamily, {
+        family: displayFamilyName(councilSingleFamily),
+        content: responseText,
+        status: 'OK',
+      })
+
       let providerIntegrityDiagnostics: Record<string, unknown> | undefined
-      let progressOutcomeStatus: ProviderResultStatus = 'OK'
-      let progressOutcomeError: string | undefined
       if (
         stabilityFlags.integrityOrchestrationRetries
         && !skipProviderIntegrityCheck
@@ -2873,16 +2885,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
               : orchestrated.integrity.integrity_status === 'DEGRADED_RESPONSE_QUALITY'
                 ? 'partial'
                 : 'partial'
-          progressOutcomeStatus = 'FAILED'
-          progressOutcomeError = orchestrated.degradedLabel ?? `${councilSingleFamily} response incomplete after retry.`
         }
       }
-      recordCouncilProgressProviderResult(councilProgress, councilSingleFamily, {
-        family: displayFamilyName(councilSingleFamily),
-        content: responseText,
-        status: progressOutcomeStatus,
-        ...(progressOutcomeError ? { error: progressOutcomeError } : {}),
-      })
       councilTrace.record('integrity_checked', {
         module: 'lib/providers/retryOrchestration.ts:orchestrateProviderResponse',
         inputSummary: {
