@@ -218,6 +218,10 @@ import {
   extractReadableCouncilContributions,
   extractReadableCouncilResponse,
 } from '@/lib/council/liveResponseExtraction'
+import {
+  classifyGatheredProviderText,
+  responseSuccessfulForRuntime,
+} from '@/lib/council/liveGatherClassification'
 import { COUNCIL_STABILITY_FAILURE_MESSAGE } from '@/lib/council/stabilityMode'
 import {
   COUNCIL_FLOW_MODE_LABELS,
@@ -464,14 +468,37 @@ function sanitizedCouncilMessage(
   return applyLiveCouncilRenderGate(message, opts)
 }
 
+type CouncilProviderRenderGateOutcome = {
+  displayText: string
+  degraded: boolean
+  integrityStatus: ResponseIntegrityStatus
+  renderable: boolean
+}
+
+/**
+ * Wraps `applyCouncilRenderGate` for the live gather paths. Must never discard `degraded`/
+ * `integrityStatus`/`renderable` — those are what let callers tell a genuine accepted response
+ * apart from fallback boilerplate the gate substituted in place of an incomplete/degraded one, so
+ * runtime classification and persisted `responseSuccessful` metadata can agree with what actually
+ * rendered instead of just checking whether some text came back.
+ */
 function councilProviderTextAfterRenderGate(
   family: CouncilOrchestrationFamily,
   text: string,
   decreeText?: string,
   stabilityMode?: boolean,
-): string {
-  if (stabilityMode) return sanitizeMemoryRuntimeText(toDisplayText(text))
-  return applyCouncilRenderGate(family, text, { decreeText, stabilityMode }).displayText
+): CouncilProviderRenderGateOutcome {
+  if (stabilityMode) {
+    const displayText = sanitizeMemoryRuntimeText(toDisplayText(text))
+    return { displayText, degraded: false, integrityStatus: displayText ? 'COMPLETE' : 'EMPTY', renderable: Boolean(displayText) }
+  }
+  const gate = applyCouncilRenderGate(family, text, { decreeText, stabilityMode })
+  return {
+    displayText: gate.displayText,
+    degraded: gate.degraded,
+    integrityStatus: gate.integrityStatus,
+    renderable: gate.renderable,
+  }
 }
 
 function councilNoiseKey(message: CouncilMessage): string | null {
@@ -8526,15 +8553,25 @@ function Home() {
           shouldScheduleNext = true
           return
         }
-        textOut = typeof data.councilSingleResponse === 'string' ? data.councilSingleResponse.trim() : ''
-        if (textOut) {
-          textOut = councilProviderTextAfterRenderGate(family, textOut, decree, councilPassthroughMode)
-        }
+        const autonomousExtracted = typeof data.councilSingleResponse === 'string' ? data.councilSingleResponse.trim() : ''
+        const autonomousGated: CouncilProviderRenderGateOutcome | null = autonomousExtracted
+          ? councilProviderTextAfterRenderGate(family, autonomousExtracted, decree, councilPassthroughMode)
+          : null
+        const autonomousClassified = classifyGatheredProviderText(autonomousExtracted, autonomousGated)
+        textOut = autonomousClassified.textOut
         if (!textOut) {
           const famLabel = COUNCIL_ROSTER.find(ro => ro.id === family)?.label ?? family
-          const errLine = `[Error] ${famLabel}: empty response`
+          const errLine = autonomousClassified.runtime === 'DEGRADED'
+            ? `[Notice] ${famLabel}: degraded response quality`
+            : `[Error] ${famLabel}: empty response`
           addSystemMessage(errLine)
-          void postLiveCouncilMessage({ role: 'system', content: errLine })
+          void postLiveCouncilMessage(
+            { role: 'system', content: errLine },
+            {
+              providerRuntime: autonomousClassified.runtime,
+              responseSuccessful: responseSuccessfulForRuntime(autonomousClassified.runtime),
+            },
+          )
           shouldScheduleNext = true
           return
         }
@@ -9531,18 +9568,18 @@ function Home() {
                       content: textOut,
                     })
                   }
-                  if (textOut) {
-                    textOut = councilProviderTextAfterRenderGate(family, textOut, decree, councilPassthroughMode)
+                  const gated: CouncilProviderRenderGateOutcome | null = textOut
+                    ? councilProviderTextAfterRenderGate(family, textOut, decree, councilPassthroughMode)
+                    : null
+                  const classified = classifyGatheredProviderText(textOut, gated)
+                  textOut = classified.textOut
+                  runtime = classified.runtime
+                  runtimeDetail = classified.runtimeDetail
+                  if (runtime !== 'RESPONDED' && !isDirectInvoke) {
+                    lastCouncilFamilyErrorRef.current = family
                   }
-                  if (!textOut) {
-                    if (!isDirectInvoke) {
-                      lastCouncilFamilyErrorRef.current = family
-                    }
-                    if (isDirectInvoke) await postDirectUnavailable('FAILED', 'empty_response')
-                    runtime = 'FAILED'
-                    runtimeDetail = 'empty_response'
-                  } else {
-                    runtime = 'RESPONDED'
+                  if (runtime !== 'RESPONDED' && isDirectInvoke) {
+                    await postDirectUnavailable(runtime, runtimeDetail)
                   }
                 }
               } catch (familyError) {
@@ -9947,7 +9984,7 @@ function Home() {
         .filter(c => Boolean(c.textOut?.trim()))
         .map(c => ({
           family: c.family,
-          textOut: councilProviderTextAfterRenderGate(c.family, c.textOut!.trim(), decree, councilPassthroughMode),
+          textOut: councilProviderTextAfterRenderGate(c.family, c.textOut!.trim(), decree, councilPassthroughMode).displayText,
           transientMessageIds: c.transientMessageIds,
           shadowCouncilAssembly: c.shadowCouncilAssembly,
           councilProgress: c.councilProgress,
@@ -10104,7 +10141,7 @@ function Home() {
           void postLiveCouncilMessage(
             { role: 'assistant', content: line.content, family: bubble },
             {
-              responseSuccessful: true,
+              responseSuccessful: responseSuccessfulForRuntime(runtimeStates[line.family]),
               providerRuntime: runtimeStates[line.family],
             },
           )

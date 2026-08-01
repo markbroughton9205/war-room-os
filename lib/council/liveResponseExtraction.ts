@@ -62,6 +62,7 @@ function resultHasUsableProviderText(result: ProviderResultLike, targetFamily?: 
   if (normalized(result.status).toUpperCase() !== 'OK') return false
   if (normalized(result.error)) return false
   if (normalized(result.messageType) === 'integrity_flag') return false
+  if (normalized(result.messageType) === 'integrity_incomplete') return false
   const family = normalized(result.family)
   if (!family || family.toUpperCase() === 'SYSTEM') return false
   return familyMatches(family, targetFamily)

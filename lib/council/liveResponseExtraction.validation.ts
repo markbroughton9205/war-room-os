@@ -126,6 +126,47 @@ const duplicateContributionRows = extractReadableCouncilContributions({
   ],
 })
 
+const integrityIncompleteFallback = extractReadableCouncilResponse({
+  councilSingleResponse: '',
+  results: [
+    {
+      family: 'ChatGPT',
+      content: 'Provider response incomplete; fallback summary used',
+      status: 'OK',
+      messageType: 'integrity_incomplete',
+    },
+  ],
+}, 'chatgpt')
+
+const integrityIncompleteAlongsideUsableSibling = extractReadableCouncilResponse({
+  councilSingleResponse: '',
+  results: [
+    {
+      family: 'ChatGPT',
+      content: 'Provider response incomplete; fallback summary used',
+      status: 'OK',
+      messageType: 'integrity_incomplete',
+    },
+    {
+      family: 'Claude',
+      content: 'Claude produced a complete, integrity-validated council response.',
+      status: 'OK',
+    },
+  ],
+})
+
+const integrityIncompleteContributionExcluded = extractReadableCouncilContributions({
+  results: [
+    {
+      family: 'ChatGPT',
+      content: 'Provider response incomplete; fallback summary used',
+      status: 'OK',
+      messageType: 'integrity_incomplete',
+    },
+    { family: 'Claude', content: 'Claude usable contribution for synthesis.', status: 'OK' },
+  ],
+})
+
 export function runLiveResponseExtractionValidation(): CaseResult[] {
   return [
     check(
@@ -179,6 +220,23 @@ export function runLiveResponseExtractionValidation(): CaseResult[] {
       'live_response_08_duplicate_contributions_insert_once',
       duplicateContributionRows.length === 1,
       JSON.stringify(duplicateContributionRows),
+    ),
+    check(
+      'live_response_09_integrity_incomplete_fallback_not_usable',
+      integrityIncompleteFallback === null,
+      JSON.stringify(integrityIncompleteFallback),
+    ),
+    check(
+      'live_response_10_integrity_incomplete_skipped_for_usable_sibling',
+      integrityIncompleteAlongsideUsableSibling?.content === 'Claude produced a complete, integrity-validated council response.'
+        && integrityIncompleteAlongsideUsableSibling.family === 'Claude',
+      JSON.stringify(integrityIncompleteAlongsideUsableSibling),
+    ),
+    check(
+      'live_response_11_integrity_incomplete_excluded_from_contributions',
+      integrityIncompleteContributionExcluded.length === 1
+        && integrityIncompleteContributionExcluded[0]?.family === 'Claude',
+      JSON.stringify(integrityIncompleteContributionExcluded),
     ),
   ]
 }
