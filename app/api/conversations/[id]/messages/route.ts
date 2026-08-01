@@ -75,6 +75,24 @@ export async function POST(
     return jsonWithPersistence({ skipped: true, reason: 'message_not_persistable' }, true, { status: 202 })
   }
 
+  // A client-supplied idempotency key (reused across a client-side retry of the same logical
+  // write) lets a retry recover from "request never reached the server" or "server errored"
+  // safely — but without this check, it could also duplicate a write that actually succeeded and
+  // only lost its response in transit. If a message with this key already exists, return it
+  // instead of inserting again.
+  const idempotencyKey = typeof metadata.idempotencyKey === 'string' ? metadata.idempotencyKey : null
+  if (idempotencyKey) {
+    const { data: existing, error: existingErr } = await sup.client
+      .from(TABLE_MESSAGES)
+      .select('id,conversation_id,role,content,family,metadata,created_at')
+      .eq('conversation_id', conversationId)
+      .contains('metadata', { idempotencyKey })
+      .maybeSingle()
+    if (!existingErr && existing) {
+      return jsonWithPersistence({ message: existing }, true, { status: 200 })
+    }
+  }
+
   const { data, error } = await sup.client
     .from(TABLE_MESSAGES)
     .insert({

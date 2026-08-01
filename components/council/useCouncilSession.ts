@@ -18,14 +18,14 @@ import {
   type CouncilMessagePersistenceContext,
 } from '@/lib/council/messagePersistenceFilter'
 
-const MAX_PERSISTED_MESSAGES = 100
+export const MAX_PERSISTED_MESSAGES = 100
 
 function newSessionId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
   return `council-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-function clipMessages(
+export function clipMessages(
   store: CouncilPersistedV1,
   persistenceCtx?: CouncilMessagePersistenceContext,
 ): CouncilPersistedV1 {

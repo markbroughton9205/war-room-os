@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { callClaudeFamilyWithEmptyContentRetry, ClaudeEmptyContentError, extractClaudeResponseText } from './claudeResponseParsing'
+import {
+  callClaudeFamilyWithEmptyContentRetry,
+  ClaudeEmptyContentError,
+  extractClaudeResponseText,
+  type ClaudeRetryAttemptInfo,
+} from './claudeResponseParsing'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 
@@ -133,12 +138,69 @@ async function retryNotUsedForFirstAttemptSuccessCase() {
   return { calls, result }
 }
 
+async function retryTelemetryEmptyThenSuccessCase() {
+  const attempts: ClaudeRetryAttemptInfo[] = []
+  let calls = 0
+  await callClaudeFamilyWithEmptyContentRetry(
+    async () => {
+      calls += 1
+      if (calls === 1) throw new ClaudeEmptyContentError('Claude returned empty content')
+      return 'Second attempt succeeded.'
+    },
+    info => attempts.push(info),
+  )
+  return attempts
+}
+
+async function retryTelemetryBothEmptyCase() {
+  const attempts: ClaudeRetryAttemptInfo[] = []
+  try {
+    await callClaudeFamilyWithEmptyContentRetry(
+      async () => {
+        throw new ClaudeEmptyContentError('Claude returned empty content')
+      },
+      info => attempts.push(info),
+    )
+  } catch {
+    // expected — both attempts empty
+  }
+  return attempts
+}
+
+async function retryTelemetryFirstAttemptSuccessCase() {
+  const attempts: ClaudeRetryAttemptInfo[] = []
+  await callClaudeFamilyWithEmptyContentRetry(
+    async () => 'First attempt already succeeded.',
+    info => attempts.push(info),
+  )
+  return attempts
+}
+
+async function retryTelemetryOtherErrorCase() {
+  const attempts: ClaudeRetryAttemptInfo[] = []
+  try {
+    await callClaudeFamilyWithEmptyContentRetry(
+      async () => {
+        throw new Error('Anthropic request failed (500)')
+      },
+      info => attempts.push(info),
+    )
+  } catch {
+    // expected — non-empty-content error propagates
+  }
+  return attempts
+}
+
 async function retryCases(): Promise<CaseResult[]> {
   const emptyThenSuccess = await retryEmptyThenSuccessCase()
   const bothEmpty = await retryBothEmptyCase()
   const timeoutCase = await retryNotUsedForTimeoutCase()
   const httpErrorCase = await retryNotUsedForHttpErrorCase()
   const firstAttemptSuccess = await retryNotUsedForFirstAttemptSuccessCase()
+  const telemetryEmptyThenSuccess = await retryTelemetryEmptyThenSuccessCase()
+  const telemetryBothEmpty = await retryTelemetryBothEmptyCase()
+  const telemetryFirstAttemptSuccess = await retryTelemetryFirstAttemptSuccessCase()
+  const telemetryOtherError = await retryTelemetryOtherErrorCase()
 
   return [
     check(
@@ -170,6 +232,40 @@ async function retryCases(): Promise<CaseResult[]> {
       'claude_retry_06_no_accidental_third_attempt_when_both_fail',
       bothEmpty.calls <= 2,
       `calls=${bothEmpty.calls}`,
+    ),
+    check(
+      'claude_retry_telemetry_01_empty_first_attempt_emits_retry_evidence',
+      telemetryEmptyThenSuccess.length === 2
+        && telemetryEmptyThenSuccess[0]?.attempt === 1
+        && telemetryEmptyThenSuccess[0]?.outcome === 'empty_content'
+        && telemetryEmptyThenSuccess[1]?.attempt === 2
+        && telemetryEmptyThenSuccess[1]?.outcome === 'success',
+      JSON.stringify(telemetryEmptyThenSuccess),
+    ),
+    check(
+      'claude_retry_telemetry_02_second_empty_response_emits_final_empty_content_failure_evidence',
+      telemetryBothEmpty.length === 2
+        && telemetryBothEmpty[0]?.outcome === 'empty_content'
+        && telemetryBothEmpty[1]?.attempt === 2
+        && telemetryBothEmpty[1]?.outcome === 'empty_content',
+      JSON.stringify(telemetryBothEmpty),
+    ),
+    check(
+      'claude_retry_telemetry_03_normal_first_attempt_success_emits_no_retry_event',
+      telemetryFirstAttemptSuccess.length === 1 && telemetryFirstAttemptSuccess[0]?.outcome === 'success',
+      JSON.stringify(telemetryFirstAttemptSuccess),
+    ),
+    check(
+      'claude_retry_telemetry_04_unrelated_error_not_mislabeled_as_empty_content_retry',
+      telemetryOtherError.length === 1 && telemetryOtherError[0]?.outcome === 'other_error',
+      JSON.stringify(telemetryOtherError),
+    ),
+    check(
+      'claude_retry_telemetry_05_telemetry_carries_no_content_fields',
+      [...telemetryEmptyThenSuccess, ...telemetryBothEmpty, ...telemetryFirstAttemptSuccess, ...telemetryOtherError].every(
+        info => Object.keys(info).sort().join(',') === 'attempt,outcome',
+      ),
+      'every telemetry event exposes only {attempt, outcome}',
     ),
   ]
 }
@@ -226,6 +322,26 @@ function structuralCases(): CaseResult[] {
       'claude_retry_structural_04_retry_wrapper_has_no_loop_construct',
       !/const callClaudeWithEmptyContentRetry[\s\S]{0,400}?(for\s*\(|while\s*\()/.test(source),
       'no for/while near the wrapper definition',
+    ),
+    check(
+      'claude_retry_structural_05_telemetry_uses_diagnostic_event_not_canonical_contribution_event',
+      (() => {
+        const telemetryFnSource = source.match(/function recordClaudeRetryTelemetry\([\s\S]*?\n\}/)?.[0] ?? ''
+        return (
+          telemetryFnSource.includes("eventType: 'diagnostic_recorded'")
+          && !telemetryFnSource.includes("eventType: 'family_responded'")
+          && !telemetryFnSource.includes("eventType: 'family_failed'")
+        )
+      })(),
+      'recordClaudeRetryTelemetry emits diagnostic_recorded, never a canonical family-contribution event type',
+    ),
+    check(
+      'claude_retry_structural_06_telemetry_carries_no_raw_content_field',
+      (() => {
+        const telemetryFnSource = source.match(/function recordClaudeRetryTelemetry\([\s\S]*?\n\}/)?.[0] ?? ''
+        return telemetryFnSource.length > 0 && !/\bcontent:\s*result\b|\bcontent:\s*responseText\b|\bcontent:\s*text\b/.test(telemetryFnSource)
+      })(),
+      'recordClaudeRetryTelemetry body never assigns raw response text into the recorded payload',
     ),
   ]
 }

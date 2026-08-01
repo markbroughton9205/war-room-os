@@ -69,14 +69,9 @@ export const AmbientActivityFeed = memo(function AmbientActivityFeed({
       }
     }
 
-    if (runtime?.latestSynthesis) {
-      out.push({
-        key: 'synthesis',
-        text: `Synthesis: ${runtime.latestSynthesis.slice(0, 120)}${runtime.latestSynthesis.length > 120 ? '…' : ''}`,
-        tone: 'active',
-        title: runtime.latestSynthesis,
-      })
-    } else if (runtime?.councilMomentum && runtime.councilMomentum !== 'idle') {
+    // Full synthesis text renders in the dedicated <SynthesisCard> above the thread, not here —
+    // this ticker only shows momentum so the synthesis is never duplicated in a truncated form.
+    if (runtime?.councilMomentum && runtime.councilMomentum !== 'idle') {
       out.push({
         key: 'momentum',
         text: `Council momentum: ${runtime.councilMomentum}${runtime.activeTopic ? ` · ${runtime.activeTopic.slice(0, 80)}` : ''}`,

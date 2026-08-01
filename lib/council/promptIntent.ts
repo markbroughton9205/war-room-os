@@ -58,6 +58,21 @@ export function isRelaxedPromptIntent(intent: PromptIntent): boolean {
   return intent === 'GREETING' || intent === 'CASUAL'
 }
 
+/**
+ * Decree explicitly asked for a short reply (e.g. "one sentence", "yes or no", "under 20 words").
+ * Orthogonal to `PromptIntent` — an analytical decree can still ask for a one-line answer. Lowers
+ * only the numeric length/meaningful-token floor in `buildIntegrityExpectationForPrompt`; it does
+ * not disable emptiness, fragment, greeting-stub, or repeated-fallback checks, and does not imply
+ * `relaxedCasual`.
+ */
+const BREVITY_MARKERS =
+  /\b(?:one[- ]sentence|a\s+single\s+sentence|one[- ]liner?s?|one[- ]word|brief(?:ly)?\s+repl(?:y|ies)?|brief\s+answer|short\s+answer|concise\s+(?:response|answer|confirmation|reply)|answer\s+brief(?:ly)?|reply\s+brief(?:ly)?|keep\s+it\s+(?:brief|short|concise)|yes\s+or\s+no|yes\/no|under\s+\d+\s+words?|no\s+more\s+than\s+\d+\s+words?|in\s+(?:no\s+more\s+than\s+)?\d+\s+words?|in\s+one\s+line)\b/i
+
+export function detectsExplicitBrevityRequest(message: string): boolean {
+  const raw = typeof message === 'string' ? message : ''
+  return BREVITY_MARKERS.test(norm(raw))
+}
+
 export function isStrictAnalyticalIntent(intent: PromptIntent): boolean {
   return (
     intent === 'ANALYSIS'
@@ -126,10 +141,19 @@ export function intentRequiresResearchDiscipline(intent: PromptIntent): boolean 
   return intent === 'RESEARCH'
 }
 
-/** Map decree intent to provider integrity expectation overrides. */
+/**
+ * Map decree intent to provider integrity expectation overrides.
+ *
+ * `brevityRequested` (from `detectsExplicitBrevityRequest`) only lowers the numeric length/
+ * meaningful-token floor to the same relaxed values already trusted for GREETING/CASUAL decrees
+ * — it never sets `relaxedCasual` and never touches `councilMode`, so emptiness, fragment,
+ * greeting-stub, and repeated-fallback checks still apply in full. Not applied to OPPORTUNITY,
+ * which requires enough substance to be independently actionable regardless of brevity phrasing.
+ */
 export function buildIntegrityExpectationForPrompt(
   intent: PromptIntent,
   base: ResponseIntegrityExpectation = {},
+  opts?: { brevityRequested?: boolean },
 ): ResponseIntegrityExpectation {
   if (isRelaxedPromptIntent(intent)) {
     return {
@@ -142,13 +166,18 @@ export function buildIntegrityExpectationForPrompt(
     }
   }
 
+  const brevityFloor = opts?.brevityRequested && intent !== 'OPPORTUNITY'
+    ? { minLength: RELAXED_MIN_LENGTH, minMeaningfulTokens: RELAXED_MIN_MEANINGFUL_TOKENS, brevityRequested: true as const }
+    : null
+
   if (intent === 'SIMPLE_HELP') {
     return {
       ...base,
       promptIntent: intent,
       councilMode: base.councilMode ?? true,
-      minLength: base.minLength ?? 40,
-      minMeaningfulTokens: base.minMeaningfulTokens ?? 12,
+      minLength: brevityFloor?.minLength ?? base.minLength ?? 40,
+      minMeaningfulTokens: brevityFloor?.minMeaningfulTokens ?? base.minMeaningfulTokens ?? 12,
+      ...(brevityFloor ? { brevityRequested: true } : {}),
     }
   }
 
@@ -168,10 +197,15 @@ export function buildIntegrityExpectationForPrompt(
       ...base,
       promptIntent: intent,
       councilMode: base.councilMode ?? true,
-      minLength: base.minLength ?? 80,
-      minMeaningfulTokens: base.minMeaningfulTokens ?? 24,
+      minLength: brevityFloor?.minLength ?? base.minLength ?? 80,
+      minMeaningfulTokens: brevityFloor?.minMeaningfulTokens ?? base.minMeaningfulTokens ?? 24,
+      ...(brevityFloor ? { brevityRequested: true } : {}),
     }
   }
 
-  return { ...base, promptIntent: intent }
+  return {
+    ...base,
+    promptIntent: intent,
+    ...(brevityFloor ?? {}),
+  }
 }

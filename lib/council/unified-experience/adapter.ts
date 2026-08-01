@@ -1,6 +1,7 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { DeliberationTurn } from '@/lib/council/family-deliberation'
 import type { ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
+import { countOperationFamilyContributions } from './operationSummary'
 import type {
   CommanderBriefing,
   CommanderOperation,
@@ -80,8 +81,18 @@ function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'operation'
 }
 
+/**
+ * Persisted transcript messages carry the family's roster display label (e.g. "Claude Family",
+ * "ChatGPT Family" — see `COUNCIL_ROSTER` in `lib/council/familyRoster.ts`), not the bare family
+ * name. Strip a trailing " FAMILY" before matching so those real persisted values resolve, while
+ * "Red Team" (no such suffix) and unrelated text are unaffected.
+ */
+function normalizedFamilyLabelKey(label: string): string {
+  return label.trim().toUpperCase().replace(/\s+FAMILY$/, '')
+}
+
 export function familyIdFromLabel(label: string): CouncilOrchestrationFamily | 'system' | 'unknown' {
-  return FAMILY_BY_LABEL[label.trim().toUpperCase()] ?? 'unknown'
+  return FAMILY_BY_LABEL[normalizedFamilyLabelKey(label)] ?? 'unknown'
 }
 
 export function familyLabel(family: CouncilOrchestrationFamily | 'system' | 'unknown' | null): string | null {
@@ -211,10 +222,11 @@ function briefingFromText(text: string, requestKind: CommanderOperationRequestKi
 }
 
 function summaryFor(mode: CommanderOperationMode, events: readonly CommanderOperationEvent[]) {
-  const respondedCount = events.filter(item => item.type === 'family_responded' || item.type === 'synthesis_completed').length
-  const failedCount = events.filter(item => item.type === 'family_failed' || item.type === 'operation_failed').length
-  const unavailableCount = events.filter(item => item.type === 'family_unavailable').length
-  const skippedCount = events.filter(item => item.type === 'family_skipped').length
+  const familyCounts = countOperationFamilyContributions(events)
+  const respondedCount = familyCounts.respondedCount
+  const failedCount = familyCounts.failedCount + events.filter(item => item.type === 'operation_failed').length
+  const unavailableCount = familyCounts.unavailableCount
+  const skippedCount = familyCounts.skippedCount
   const waitingApprovalCount = events.filter(item => item.type === 'approval_required' || item.type === 'family_waiting_approval').length
   const synthesisCompleted = events.some(item => item.type === 'synthesis_completed')
   const approvalRequired = waitingApprovalCount > 0

@@ -45,11 +45,14 @@ export async function GET(
     return jsonWithPersistence({ error: 'Not found' }, true, { status: 404 })
   }
 
+  // Fetch the most recent MESSAGE_LIMIT rows (descending), then reverse to ascending for the
+  // response — an ascending-order query with a limit would instead freeze on the oldest rows
+  // forever once a conversation passes MESSAGE_LIMIT messages, permanently hiding new activity.
   const { data: messages, error: mErr } = await sup.client
     .from(TABLE_MESSAGES)
     .select('id,conversation_id,role,content,family,metadata,created_at')
     .eq('conversation_id', id)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(MESSAGE_LIMIT)
 
   if (mErr) {
@@ -64,8 +67,8 @@ export async function GET(
   return jsonWithPersistence(
     {
       conversation: conv,
-      messages: messages ?? [],
-      messagesNote: `Up to ${MESSAGE_LIMIT} messages ascending by created_at (see GET /api/conversations/[id]).`,
+      messages: (messages ?? []).slice().reverse(),
+      messagesNote: `Most recent ${MESSAGE_LIMIT} messages, ascending by created_at (see GET /api/conversations/[id]).`,
     },
     true,
   )

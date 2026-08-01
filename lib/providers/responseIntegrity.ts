@@ -49,6 +49,13 @@ export type ResponseIntegrityExpectation = {
   promptIntent?: PromptIntent
   /** Skip council substance / greeting-only degradation (greeting & casual decrees). */
   relaxedCasual?: boolean
+  /**
+   * Decree explicitly asked for a short reply (e.g. "one sentence", "yes or no"). Unlike
+   * `relaxedCasual`, this only exempts the response from the reasoning/evidence/synthesis-marker
+   * substance check below — emptiness, fragment, greeting-stub, and repeated-fallback checks, and
+   * the (already-lowered) length/meaningful-token floor, still apply in full.
+   */
+  brevityRequested?: boolean
 }
 
 export { hasActionableOpportunity } from '@/lib/opportunities/validate'
@@ -63,7 +70,12 @@ export type ResponseIntegrityResult = {
   degraded_quality?: boolean
 }
 
-const SENTENCE_END = /[.!?…]["')\]]*\s*$/u
+// Terminal punctuation, optional closing quote/bracket, then any mix of whitespace and trailing
+// emoji (pictographic characters, U+200D zero-width joiners, U+FE0F variation selectors) to the
+// end of the string. Council providers routinely end otherwise-complete sentences with an emoji
+// flourish ("...resolved. [thinking-face emoji]"), which — without the trailing-emoji allowance —
+// falsely reads as unterminated/truncated text.
+const SENTENCE_END = new RegExp('[.!?…]["\')\\]]*[\\s\\p{Extended_Pictographic}\\u200D\\uFE0F]*$', 'u')
 const OPEN_TAIL = /(?:\b(?:and|or|but|because|that|which|when|where|while|the|a|an)\s+)$/i
 const TRUNCATED_WORD = /\b\w{2,}\s*$/m
 const BROKEN_BULLET = /(?:^|\n)\s*[-*•]\s*$/m
@@ -273,7 +285,7 @@ function assessDegradedResponseQuality(
     }
   }
 
-  if (expectation.councilMode && !hasCouncilContributionSubstance(text)) {
+  if (expectation.councilMode && !expectation.brevityRequested && !hasCouncilContributionSubstance(text)) {
     return {
       integrity_status: 'DEGRADED_RESPONSE_QUALITY',
       confidence: 84,

@@ -92,7 +92,7 @@ function isPersistableFamilySender(sender: string): boolean {
   return CORE_PERSISTABLE_FAMILY_IDS.has(id)
 }
 
-function providerRuntimeFailed(message: CouncilPersistableMessage): boolean {
+export function providerRuntimeFailed(message: CouncilPersistableMessage): boolean {
   const rt = (message.providerRuntime ?? message.providerState) as ProviderFamilyOutcomeStatus | string | undefined
   if (!rt || typeof rt !== 'string') return false
   if (NON_SUCCESS_PROVIDER_RUNTIME.has(rt as ProviderFamilyOutcomeStatus)) return true
@@ -113,7 +113,7 @@ function isAttendanceNonPersistablePlaceholder(message: CouncilPersistableMessag
   return detail === 'attendance_soft_cap'
 }
 
-function isSuccessfulVisibleMessage(message: CouncilPersistableMessage): boolean {
+export function isSuccessfulVisibleMessage(message: CouncilPersistableMessage): boolean {
   if (message.responseSuccessful === false) return false
   if (isAttendanceNonPersistablePlaceholder(message)) return false
   if (message.responseSuccessful === true) return Boolean(message.content?.trim())

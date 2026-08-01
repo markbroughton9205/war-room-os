@@ -6,7 +6,10 @@ import {
 import {
   buildIntegrityExpectationForPrompt,
   detectPromptIntent,
+  detectsExplicitBrevityRequest,
   isRelaxedPromptIntent,
+  RELAXED_MIN_LENGTH,
+  RELAXED_MIN_MEANINGFUL_TOKENS,
   type PromptIntent,
 } from '@/lib/council/promptIntent'
 import {
@@ -27,6 +30,25 @@ import {
 
 export const GEMINI_DEGRADED_COUNCIL_DISPLAY =
   'Gemini response incomplete — retry/fallback required.'
+
+export const PROVIDER_RESPONSE_INCOMPLETE_FALLBACK_DISPLAY =
+  'Provider response incomplete; fallback summary used'
+
+export const PROVIDER_RESPONSE_UNAVAILABLE_DISPLAY =
+  'Provider response unavailable'
+
+/**
+ * This gate's own generated fallback/degraded display strings — if raw text ever exactly matches
+ * one of these (e.g. a persisted message whose content already IS a prior degraded placeholder,
+ * fed back through the gate a second time), it must never be re-judged as ordinary COMPLETE
+ * content. Without this, synthetic boilerplate can pass integrity checks on its own merits (it
+ * reads as a short, grammatically complete sentence) and leak into synthesis findings.
+ */
+const KNOWN_FALLBACK_DISPLAY_TEXTS: ReadonlySet<string> = new Set([
+  GEMINI_DEGRADED_COUNCIL_DISPLAY,
+  PROVIDER_RESPONSE_INCOMPLETE_FALLBACK_DISPLAY,
+  PROVIDER_RESPONSE_UNAVAILABLE_DISPLAY,
+])
 
 export type GeminiRenderDiagnostics = {
   rawLength: number
@@ -123,6 +145,7 @@ export function applyCouncilRenderGate(
   const councilMode = opts?.councilMode ?? true
   const promptIntent = opts?.promptIntent ?? (opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined)
   const relaxedCasual = promptIntent ? isRelaxedPromptIntent(promptIntent) : false
+  const brevityRequested = opts?.decreeText ? detectsExplicitBrevityRequest(opts.decreeText) : false
   const passthroughMode = opts?.stabilityMode ?? shouldPassthroughCouncilProviderText()
 
   if (passthroughMode && family) {
@@ -171,15 +194,37 @@ export function applyCouncilRenderGate(
     }
   }
 
+  if (KNOWN_FALLBACK_DISPLAY_TEXTS.has(rawText)) {
+    return {
+      displayText: rawText,
+      rawText,
+      renderable: false,
+      integrityStatus: 'DEGRADED_RESPONSE_QUALITY',
+      degraded: true,
+      promptIntent,
+    }
+  }
+
   const integrityExpectation = promptIntent
-    ? buildIntegrityExpectationForPrompt(promptIntent, {
-        minLength: family === 'red_team' ? 60 : 80,
-        councilMode,
-      })
-    : {
-        minLength: family === 'red_team' ? 60 : 80,
-        councilMode,
-      }
+    ? buildIntegrityExpectationForPrompt(
+        promptIntent,
+        {
+          minLength: family === 'red_team' ? 60 : 80,
+          councilMode,
+        },
+        { brevityRequested },
+      )
+    : brevityRequested
+      ? {
+          minLength: RELAXED_MIN_LENGTH,
+          minMeaningfulTokens: RELAXED_MIN_MEANINGFUL_TOKENS,
+          councilMode,
+          brevityRequested: true,
+        }
+      : {
+          minLength: family === 'red_team' ? 60 : 80,
+          councilMode,
+        }
 
   const integrity = validateProviderResponseIntegrity(rawText, integrityExpectation)
   const matchedGreetingOnly = !relaxedCasual && detectGreetingOnlyResponse(rawText)
@@ -294,8 +339,8 @@ export function applyCouncilRenderGate(
     const blocked: CouncilRenderGateResult = {
       displayText:
         integrity.fallback_recommended
-          ? 'Provider response incomplete; fallback summary used'
-          : 'Provider response unavailable',
+          ? PROVIDER_RESPONSE_INCOMPLETE_FALLBACK_DISPLAY
+          : PROVIDER_RESPONSE_UNAVAILABLE_DISPLAY,
       rawText,
       renderable: false,
       integrityStatus: matchedGreetingOnly ? 'DEGRADED_RESPONSE_QUALITY' : integrity.integrity_status,

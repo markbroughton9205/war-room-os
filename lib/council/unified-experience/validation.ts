@@ -402,7 +402,7 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
     ['Control rendered as system state when used as source label', operation({ familyName: 'Control', messageType: 'system', content: 'Control state.' }).events.some(event => event.familyId === 'system')],
   ])
 
-  pushCases(results, next, [
+  next = pushCases(results, next, [
     ['project packet distinct builder remains unaffected', project.status === 'waiting_approval' && project.events.some(event => event.type === 'approval_required')],
     ['system status path remains unaffected', system.status === 'running' && system.events.some(event => event.type === 'system_state_inspected')],
     ['direct invocation remains truthful', direct.mode === 'direct' && countType(direct, 'synthesis_completed') === 0],
@@ -413,6 +413,39 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
     ['author identity does not prove synthesis', !/familyName.*ChatGPT[\s\S]{0,80}synthesis_completed/.test(source)],
     ['message position does not prove finality', !/last.*synthesis|slice\(-1\).*synthesis|index.*length.*synthesis/i.test(source)],
     ['content prose is not status input', !/input\.content[\s\S]{0,120}(FAILED|UNAVAILABLE|TIMED_OUT)/.test(source)],
+  ])
+
+  // Real persisted family labels — the exact strings COUNCIL_ROSTER (lib/council/familyRoster.ts)
+  // and app/page.tsx's direct-invocation bubbleFamilyName fallback actually attach to saved
+  // messages (e.g. "Claude Family", not bare "Claude"). Confirmed by reading those call sites;
+  // before this fix these all fell through to 'unknown' because FAMILY_BY_LABEL only had the bare
+  // uppercase keys.
+  pushCases(results, next, [
+    ['persisted "ChatGPT Family" resolves to chatgpt', familyIdFromLabel('ChatGPT Family') === 'chatgpt'],
+    ['persisted "Claude Family" resolves to claude', familyIdFromLabel('Claude Family') === 'claude'],
+    ['persisted "Grok Family" resolves to grok', familyIdFromLabel('Grok Family') === 'grok'],
+    ['persisted "Gemini Family" resolves to gemini', familyIdFromLabel('Gemini Family') === 'gemini'],
+    ['persisted "Kimi Family" resolves to kimi', familyIdFromLabel('Kimi Family') === 'kimi'],
+    ['persisted "Red Team" (no suffix) still resolves to red_team', familyIdFromLabel('Red Team') === 'red_team'],
+    ['uppercase "CHATGPT FAMILY" variant resolves to chatgpt', familyIdFromLabel('CHATGPT FAMILY') === 'chatgpt'],
+    [
+      'a real "X Family" message renders its true family label, not Unknown Council family',
+      operation({ familyName: 'Claude Family', content: 'Real Claude answer.' }).events.some(event => event.familyId === 'claude' && event.familyLabel === 'Claude'),
+    ],
+    [
+      'multi-family "X Family" transcript resolves every family, not just Red Team',
+      buildCommanderOperationFromMessages([
+        input({ id: 'fam-1', familyName: 'ChatGPT Family', content: 'ChatGPT answer.', requestId: 'req-fam', sessionId: 'sess-fam' }),
+        input({ id: 'fam-2', familyName: 'Claude Family', content: 'Claude answer.', requestId: 'req-fam', sessionId: 'sess-fam' }),
+        input({ id: 'fam-3', familyName: 'Grok Family', content: 'Grok answer.', requestId: 'req-fam', sessionId: 'sess-fam' }),
+        input({ id: 'fam-4', familyName: 'Gemini Family', content: 'Gemini answer.', requestId: 'req-fam', sessionId: 'sess-fam' }),
+      ]).events.filter(event => event.familyId === 'unknown').length === 0,
+    ],
+    // Regression guard: the "Family" suffix strip must not become broad/fuzzy matching.
+    ['unrelated text ending in "Family" is still unknown', familyIdFromLabel('Royal Family') === 'unknown'],
+    ['unrelated single-word text is still unknown', familyIdFromLabel('Oracle') === 'unknown'],
+    ['unmapped roster label "Bridge Architect" remains unknown (unproven, out of scope)', familyIdFromLabel('Bridge Architect') === 'unknown'],
+    ['unmapped roster label "Baby AI" remains unknown (unproven, out of scope)', familyIdFromLabel('Baby AI') === 'unknown'],
   ])
 
   return results

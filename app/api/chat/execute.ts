@@ -6,6 +6,7 @@ import {
   callClaudeFamilyWithEmptyContentRetry,
   ClaudeEmptyContentError,
   extractClaudeResponseText,
+  type ClaudeRetryAttemptInfo,
 } from '@/lib/providers/claudeResponseParsing'
 import { councilSingleFamilyToMemoryPartition, tryPersistMemoryProposalFromModelOutput } from '@/lib/memory/ingestFromModel'
 import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
@@ -76,7 +77,14 @@ import { buildFamilyIntelligenceFrame } from '@/lib/intelligence/familyFeedRoute
 import { buildGrokRssIntelligenceAugment } from '@/lib/intelligence/grokRssFallback'
 import { evaluateMandatoryLiveRetrieval } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
-import { buildIntegrityExpectationForPrompt, detectPromptIntent, isRelaxedPromptIntent } from '@/lib/council/promptIntent'
+import {
+  buildIntegrityExpectationForPrompt,
+  detectPromptIntent,
+  detectsExplicitBrevityRequest,
+  isRelaxedPromptIntent,
+  RELAXED_MIN_LENGTH,
+  RELAXED_MIN_MEANINGFUL_TOKENS,
+} from '@/lib/council/promptIntent'
 import { orchestrateProviderResponse } from '@/lib/providers/retryOrchestration'
 import { registerCouncilProviderPacketOnBus } from '@/lib/orchestration/deliberation'
 import {
@@ -343,6 +351,7 @@ function validateProviderResults(
   if (opts?.integrityCheck === false || opts?.minimalCouncilPath) return results
   const promptIntent = opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined
   const relaxedCasual = promptIntent ? isRelaxedPromptIntent(promptIntent) : false
+  const brevityRequested = opts?.decreeText ? detectsExplicitBrevityRequest(opts.decreeText) : false
   const violations: string[] = []
   const sanitized: ProviderResult[] = []
   for (const result of results) {
@@ -361,8 +370,14 @@ function validateProviderResults(
       const integrity = validateProviderResponseIntegrity(
         content,
         promptIntent
-          ? buildIntegrityExpectationForPrompt(promptIntent, { minLength: 60, councilMode: !relaxedCasual })
-          : { minLength: 60, councilMode: true },
+          ? buildIntegrityExpectationForPrompt(
+              promptIntent,
+              { minLength: 60, councilMode: !relaxedCasual },
+              { brevityRequested },
+            )
+          : brevityRequested
+            ? { minLength: RELAXED_MIN_LENGTH, minMeaningfulTokens: RELAXED_MIN_MEANINGFUL_TOKENS, councilMode: true, brevityRequested: true }
+            : { minLength: 60, councilMode: true },
       )
       if (!relaxedCasual && integrity.integrity_status !== 'COMPLETE') {
         violations.push(
@@ -467,6 +482,46 @@ function recordCouncilProgressSyntheticAudit(
   const audit = buildSyntheticIntegrityAuditPayload({ expectedFamilies, providerResults })
   tracker.record({ eventType: 'audit_scope_declared', source: 'integrity_layer', payload: { audit } })
   tracker.record({ eventType: 'audit_completed', source: 'integrity_layer', payload: { audit } })
+}
+
+/**
+ * Content-free telemetry for the Claude empty-content retry path (`claude` and `red_team`, both
+ * routed through callClaude()). Recorded as a `diagnostic_recorded` event, never a
+ * `family_responded`/`family_failed`-family event, so it never affects
+ * `countOperationFamilyContributions` — retries do not inflate the canonical contribution count.
+ * Never carries provider text or prompts, only attempt number and a coarse outcome category.
+ */
+function recordClaudeRetryTelemetry(
+  tracker: CouncilProgressRuntimeTracker | null,
+  family: 'claude' | 'red_team',
+  info: ClaudeRetryAttemptInfo,
+): void {
+  if (!tracker) return
+  tracker.record({
+    eventType: 'diagnostic_recorded',
+    source: 'provider_adapter',
+    family,
+    payload: {
+      diagnostic: {
+        category: 'provider',
+        code: `claude_retry_attempt_${info.attempt}_${info.outcome}`,
+        safeMessage:
+          info.attempt === 1 && info.outcome === 'success'
+            ? `${displayFamilyName(family)}: first attempt succeeded, no retry needed.`
+            : info.outcome === 'empty_content'
+              ? `${displayFamilyName(family)}: attempt ${info.attempt} returned empty content.`
+              : info.outcome === 'other_error'
+                ? `${displayFamilyName(family)}: attempt ${info.attempt} failed with a non-empty-content error (no retry triggered by this failure).`
+                : `${displayFamilyName(family)}: retry attempt ${info.attempt} succeeded.`,
+        providerFamily: family,
+        retryCount: info.attempt - 1,
+        sanitizedMetadata: {
+          attempt: info.attempt,
+          outcome: info.outcome,
+        },
+      },
+    },
+  })
 }
 
 async function callChatGPT(
@@ -2276,15 +2331,23 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       // response with no usable text block. That's transient and worth exactly one retry with a
       // fresh timeout budget before it's treated as a real failure — anything other than
       // ClaudeEmptyContentError propagates immediately with no retry.
-      const callClaudeWithEmptyContentRetry = (prompt: string, system: string, tokens: number): Promise<string> =>
-        callClaudeFamilyWithEmptyContentRetry(async () => {
-          const { signal, dispose } = withBudgetSignal()
-          try {
-            return await callClaude(prompt, system, tokens, signal)
-          } finally {
-            dispose()
-          }
-        })
+      const callClaudeWithEmptyContentRetry = (
+        prompt: string,
+        system: string,
+        tokens: number,
+        retryTelemetryFamily: 'claude' | 'red_team',
+      ): Promise<string> =>
+        callClaudeFamilyWithEmptyContentRetry(
+          async () => {
+            const { signal, dispose } = withBudgetSignal()
+            try {
+              return await callClaude(prompt, system, tokens, signal)
+            } finally {
+              dispose()
+            }
+          },
+          (info: ClaudeRetryAttemptInfo) => recordClaudeRetryTelemetry(councilProgress, retryTelemetryFamily, info),
+        )
 
       // Live research is a truthfulness requirement, not a mode-specific feature: Stable Group
       // and attendance/Full Council rounds are no longer hard-excluded here. `detectResearchIntent`
@@ -2638,6 +2701,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
               userPrompt,
               stableGroupSystemForFamily ?? claudeSystem,
               tokensForCall,
+              'claude',
             )
             break
           }
@@ -2739,7 +2803,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
                 `You are Red Team in Ra'el's War Room — the protective one, watching for where a plan could fail. Personality: protective, direct, like family saying "hold up" before Ra'el walks into something — not a compliance officer. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence, but say it the way someone who has his back would say it — never as a legal disclaimer or automated risk report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
                 'red_team',
               )
-            responseText = await callClaudeWithEmptyContentRetry(userPrompt, redSystem, tokensForCall)
+            responseText = await callClaudeWithEmptyContentRetry(userPrompt, redSystem, tokensForCall, 'red_team')
             break
           }
           case 'baby': {
@@ -2832,13 +2896,9 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         markLiveResearchProviderFailed('failed')
         return degradedProviderResponse(councilSingleFamily, 'failed', `${councilSingleFamily} returned empty body`)
       }
-      recordCouncilProgressProviderResult(councilProgress, councilSingleFamily, {
-        family: displayFamilyName(councilSingleFamily),
-        content: responseText,
-        status: 'OK',
-      })
-
       let providerIntegrityDiagnostics: Record<string, unknown> | undefined
+      let progressOutcomeStatus: ProviderResultStatus = 'OK'
+      let progressOutcomeError: string | undefined
       if (
         stabilityFlags.integrityOrchestrationRetries
         && !skipProviderIntegrityCheck
@@ -2885,8 +2945,16 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
               : orchestrated.integrity.integrity_status === 'DEGRADED_RESPONSE_QUALITY'
                 ? 'partial'
                 : 'partial'
+          progressOutcomeStatus = 'FAILED'
+          progressOutcomeError = orchestrated.degradedLabel ?? `${councilSingleFamily} response incomplete after retry.`
         }
       }
+      recordCouncilProgressProviderResult(councilProgress, councilSingleFamily, {
+        family: displayFamilyName(councilSingleFamily),
+        content: responseText,
+        status: progressOutcomeStatus,
+        ...(progressOutcomeError ? { error: progressOutcomeError } : {}),
+      })
       councilTrace.record('integrity_checked', {
         module: 'lib/providers/retryOrchestration.ts:orchestrateProviderResponse',
         inputSummary: {

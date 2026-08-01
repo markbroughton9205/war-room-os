@@ -170,7 +170,7 @@ import {
 } from '@/lib/council/providerTimeouts'
 import { shapeAttendanceForModeGovernor } from '@/lib/council/responseCompression'
 import { shouldSuppressProviderFailureFromChatStream } from '@/lib/council/chatStreamFilters'
-import { isOldOperatorDiagnosticMessage } from '@/lib/war-room/operatorDiagnosticsUi'
+import { resolveOperatorDiagnosticVisibility } from '@/lib/war-room/operatorDiagnosticsUi'
 import {
   attendancePreflightSkipsChat,
   attendancePreflightToProviderRuntime,
@@ -183,6 +183,8 @@ import {
   councilMessageFromWarRoomRow,
   shouldPersistCouncilMessage,
 } from '@/lib/council/messagePersistenceFilter'
+import { shouldAcceptCouncilAsyncResult } from '@/lib/conversation-runtime/asyncGuards'
+import { shouldReplacePersistedTranscript } from '@/lib/conversation-runtime/transcriptReconciliation'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 import { resolveModeGovernor } from '@/lib/council/modeGovernor'
 import {
@@ -267,6 +269,7 @@ import {
   LiveRoomShell,
   LiveRoomModeProvider,
   MatrixTopIntelRow,
+  SynthesisCard,
   WarRoomOsHeader,
   useLiveRoomMode,
   type DockPanelId,
@@ -375,7 +378,7 @@ const NewsIntelCommandWall = dynamic(
   },
 )
 
-type CouncilMessage = {
+export type CouncilMessage = {
   id: string
   familyName: string
   content: string
@@ -572,13 +575,16 @@ function councilMessagesForRedTeam(msgs: CouncilMessage[]): CouncilMessageLike[]
   }))
 }
 
-function mapWarRoomRowToCouncilMessage(row: {
-  id: string
-  role: string
-  content: string
-  family?: string | null
-  created_at: string
-}): CouncilMessage {
+function mapWarRoomRowToCouncilMessage(
+  row: {
+    id: string
+    role: string
+    content: string
+    family?: string | null
+    created_at: string
+  },
+  opts?: { decreeText?: string; promptIntent?: PromptIntent; stabilityMode?: boolean },
+): CouncilMessage {
   const ts = row.created_at ? new Date(row.created_at).toLocaleTimeString() : '--:--'
   if (row.role === 'user') {
     return {
@@ -615,7 +621,7 @@ function mapWarRoomRowToCouncilMessage(row: {
     provider: '',
     messageType: 'response',
   }
-  return applyLiveCouncilRenderGate(base)
+  return applyLiveCouncilRenderGate(base, opts)
 }
 
 function normalizeCouncilMessageIds(input: CouncilMessage[], scope = 'hydrated'): CouncilMessage[] {
@@ -1386,14 +1392,21 @@ function councilOperationProviderStatus(message: CouncilMessage): string | null 
   return 'OK'
 }
 
-function councilOperationGroupKey(message: CouncilMessage, messages: readonly CouncilMessage[]): string | null {
+export function councilOperationGroupKey(message: CouncilMessage, messages: readonly CouncilMessage[]): string | null {
   if (message.projectOrchestrationPacket) return `project:${message.projectOrchestrationPacket.id}`
-  if (message.familyDeliberationTurn?.session_id) return `deliberation:${message.familyDeliberationTurn.session_id}`
-  if (message.messageType !== 'response' && message.messageType !== 'system') return null
   const messageIndex = messages.findIndex(item => item.id === message.id)
   const priorMessages = messageIndex >= 0 ? messages.slice(0, messageIndex + 1) : messages
   const nearestDecree = [...priorMessages].reverse().find(item => item.messageType === 'decree')
-  return nearestDecree ? `turn:${nearestDecree.id}` : `message:${message.id}`
+  const turnKey = nearestDecree ? `turn:${nearestDecree.id}` : `message:${message.id}`
+  // family_deliberation_turn.session_id is assigned once per conversation (see execute.ts:
+  // `sessionId: conversationId`), not once per round — grouping by it alone would merge every
+  // deliberation-tagged message from every round ever run in this conversation into one "operation,"
+  // inflating its contribution count with stale data from unrelated, already-completed rounds.
+  // Combining it with the turn key keeps deliberation exchanges scoped to their own round while
+  // still distinguishing them from ordinary single-response turns within that same round.
+  if (message.familyDeliberationTurn?.session_id) return `deliberation:${message.familyDeliberationTurn.session_id}:${turnKey}`
+  if (message.messageType !== 'response' && message.messageType !== 'system') return null
+  return turnKey
 }
 
 function councilOperationTimelineInputs(message: CouncilMessage, messages: readonly CouncilMessage[]) {
@@ -1409,6 +1422,15 @@ function isLastCouncilOperationMessage(message: CouncilMessage, messages: readon
   return group.length > 0 && group[group.length - 1]?.id === message.id
 }
 
+/** True when `message` belongs to the same operation as the most recent Commander decree — i.e.
+ * this round, not an earlier one. Used so degraded/diagnostic messages from the current round are
+ * never muted by the "Show old diagnostics" setting, which is meant for historical noise only. */
+function isCurrentCouncilOperationMessage(message: CouncilMessage, messages: readonly CouncilMessage[]): boolean {
+  const latestDecree = [...messages].reverse().find(item => item.messageType === 'decree')
+  if (!latestDecree) return false
+  return councilOperationGroupKey(message, messages) === `turn:${latestDecree.id}`
+}
+
 const MessageBubble = memo(function MessageBubble({
   msg,
   operationTimelineInputs = [],
@@ -1416,6 +1438,7 @@ const MessageBubble = memo(function MessageBubble({
   diagnosticsOpen,
   councilPassthroughMode,
   operatorDiagnosticsMuted = false,
+  isCurrentOperation = false,
   onOpenFullMemory,
   onProjectAction,
   onPrepareRepairPacket,
@@ -1426,15 +1449,23 @@ const MessageBubble = memo(function MessageBubble({
   diagnosticsOpen?: boolean
   councilPassthroughMode?: boolean
   operatorDiagnosticsMuted?: boolean
+  /** Whether `msg` belongs to the most recent council operation — a current-round degraded or
+   * diagnostic message is always shown as a clear degraded/failure notice, never hidden. */
+  isCurrentOperation?: boolean
   onOpenFullMemory?: (preview: CouncilMemoryRecallPreview) => void
   onProjectAction?: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
   onPrepareRepairPacket?: (message: CouncilMessage) => void
 }) {
   const isRael = msg.familyName === "RA'EL"
-  const oldOperatorDiagnostic =
-    !diagnosticsOpen
-    && !councilPassthroughMode
-    && isOldOperatorDiagnosticMessage(msg)
+  const diagnosticVisibility = resolveOperatorDiagnosticVisibility({
+    content: msg.content,
+    messageType: msg.messageType,
+    degraded: msg.degraded,
+    diagnosticsOpen,
+    councilPassthroughMode,
+    operatorDiagnosticsMuted,
+    isCurrentOperation,
+  })
   const operationMessageInputs = useMemo(() => operationTimelineInputs.map(item => ({
     id: item.id,
     familyName: item.familyName,
@@ -1461,7 +1492,7 @@ const MessageBubble = memo(function MessageBubble({
       : null,
     [operationMessageInputs, operationProgress, showOperationTimeline],
   )
-  if (oldOperatorDiagnostic && operatorDiagnosticsMuted) {
+  if (diagnosticVisibility === 'hidden') {
     return null
   }
   if (
@@ -1797,14 +1828,14 @@ const MessageBubble = memo(function MessageBubble({
       </div>
     )
   }
-  if (oldOperatorDiagnostic) {
+  if (diagnosticVisibility === 'degraded_notice') {
     return (
       <details
         className="message-fade-in mb-3 ml-11 rounded border border-slate-700/40 bg-black/30 px-3 py-2 text-[10px] text-slate-500"
         data-testid="operator-diagnostic-notice"
       >
         <summary className="cursor-pointer list-none font-bold tracking-widest text-slate-500 [&::-webkit-details-marker]:hidden">
-          System notice · {msg.familyName} · degraded / fallback (history preserved)
+          System notice · {msg.familyName} · degraded / fallback {isCurrentOperation ? '(this round)' : '(history preserved)'}
         </summary>
         <p className="mt-2 whitespace-pre-wrap leading-relaxed text-slate-600">{msg.content}</p>
       </details>
@@ -2078,6 +2109,7 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           diagnosticsOpen={false}
           councilPassthroughMode={councilPassthroughMode}
           operatorDiagnosticsMuted={!showOldDiagnostics}
+          isCurrentOperation={isCurrentCouncilOperationMessage(msg, messages)}
           onOpenFullMemory={onOpenFullMemory}
           onProjectAction={onProjectAction}
           onPrepareRepairPacket={onPrepareRepairPacket}
@@ -4911,18 +4943,21 @@ const LiveCouncilHealthBadgesRow = memo(function LiveCouncilHealthBadgesRow({
   providerHealthLabel,
   persistenceHealthLabel,
   internetHealthLabel,
+  networkHealthLabel,
 }: {
   chatHealthLabel: string
   providerHealthLabel: string
   persistenceHealthLabel: string
   internetHealthLabel: string
+  networkHealthLabel: string
 }) {
   return (
-    <div className="mt-2 grid gap-2 text-[9px] tracking-widest sm:grid-cols-4" style={{ color: '#94a3b8' }}>
+    <div className="mt-2 grid gap-2 text-[9px] tracking-widest sm:grid-cols-5" style={{ color: '#94a3b8' }}>
       <span className="rounded border border-white/10 px-2 py-1">Chat: {chatHealthLabel}</span>
       <span className="rounded border border-white/10 px-2 py-1">Providers: {providerHealthLabel}</span>
       <span className="rounded border border-white/10 px-2 py-1">Persistence: {persistenceHealthLabel}</span>
       <span className="rounded border border-white/10 px-2 py-1">Internet: {internetHealthLabel}</span>
+      <span className="rounded border border-white/10 px-2 py-1">Network: {networkHealthLabel}</span>
     </div>
   )
 })
@@ -5753,6 +5788,8 @@ function Home() {
   const councilChannelOpenRef = useRef(false)
   const councilSnapRef = useRef(council)
   const messagesRef = useRef(messages)
+  const liveCouncilMountedRef = useRef(true)
+  const liveCouncilConvIdRef = useRef<string | null>(null)
   const archivedMessageIdsRef = useRef<Set<string>>(new Set())
   const redTeamCoderDiagnosisInFlightRef = useRef(false)
   const redTeamCoderLastDiagnosedMessageRef = useRef<string | null>(null)
@@ -5779,6 +5816,7 @@ function Home() {
   const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
   const [liveCouncilLoadState, setLiveCouncilLoadState] = useState<'restoring' | 'ready' | 'session_only' | 'error'>('restoring')
   const [liveRoomWorkspace, setLiveRoomWorkspace] = useState<'council' | 'expanded_intel'>('council')
+  const [browserOnline, setBrowserOnline] = useState(true)
   const [councilTraceTestAvailable, setCouncilTraceTestAvailable] = useState(false)
   const [councilTraceTestStatus, setCouncilTraceTestStatus] = useState<'checking' | 'hidden' | 'ready' | 'running' | 'complete' | 'error'>('checking')
   const [councilTraceTestResult, setCouncilTraceTestResult] = useState<CouncilTraceTestResponse | null>(null)
@@ -5814,6 +5852,29 @@ function Home() {
       requestText: incrementalCouncilRequestText,
     })
   }, [incrementalCouncilCompletedInputs, incrementalCouncilProgress, incrementalCouncilRequestText])
+  useEffect(() => {
+    liveCouncilMountedRef.current = true
+    return () => {
+      liveCouncilMountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    liveCouncilConvIdRef.current = liveCouncilConvId
+  }, [liveCouncilConvId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return
+    const update = () => setBrowserOnline(navigator.onLine)
+    update()
+    window.addEventListener('online', update)
+    window.addEventListener('offline', update)
+    return () => {
+      window.removeEventListener('online', update)
+      window.removeEventListener('offline', update)
+    }
+  }, [])
+
   useEffect(() => {
     if (typeof sessionStorage === 'undefined') return
     const stored = parseCouncilFlowMode(sessionStorage.getItem(COUNCIL_FLOW_MODE_STORAGE_KEY))
@@ -6313,10 +6374,21 @@ function Home() {
 
   useEffect(() => {
     if (!councilMounted) return
+    let cancelled = false
+    const expectedSessionId = councilSnapRef.current.sessionId
+    const isCurrentRestore = (expectedConversationId?: string | null) =>
+      shouldAcceptCouncilAsyncResult({
+        mounted: !cancelled && liveCouncilMountedRef.current,
+        expectedSessionId,
+        activeSessionId: councilSnapRef.current.sessionId,
+        expectedConversationId,
+        activeConversationId: liveCouncilConvIdRef.current,
+      })
     void (async () => {
       try {
         setLiveCouncilLoadState('restoring')
         const res = await fetch('/api/conversations', { cache: 'no-store' })
+        if (!isCurrentRestore()) return
         const persist = res.headers.get('x-war-room-persistence') === 'available'
         setPersistenceAvailable(persist)
         if (!res.ok || !persist) {
@@ -6357,10 +6429,13 @@ function Home() {
           setLiveCouncilLoadState('error')
           return
         }
+        if (!isCurrentRestore()) return
         sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
         setLiveCouncilConvId(id)
+        liveCouncilConvIdRef.current = id
 
         const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
+        if (!isCurrentRestore(id)) return
         if (!tr.ok) {
           setLiveCouncilLoadState('error')
           return
@@ -6376,6 +6451,7 @@ function Home() {
           }[]
           conversation?: { metadata?: Record<string, unknown> }
         }
+        if (!isCurrentRestore(id)) return
         const meta = tj.conversation?.metadata as { council?: Record<string, unknown> } | undefined
         const cmeta = meta?.council as {
           incomeOperationsMode?: boolean
@@ -6400,6 +6476,13 @@ function Home() {
         }
         const rows = Array.isArray(tj.messages) ? tj.messages : []
         if (rows.length > 0) {
+          // Same decree/promptIntent context applyCouncilThreadHygiene derives for live
+          // rendering — without it, applyLiveCouncilRenderGate has no basis to relax integrity
+          // for greetings/casual/brief replies and degrades otherwise-valid historical responses
+          // to a generic "Provider response incomplete" placeholder, discarding the real content.
+          const latestRow = [...rows].reverse().find(row => row.role === 'user')
+          const rowsDecreeText = latestRow ? latestRow.content.trim() : ''
+          const rowsPromptIntent = rowsDecreeText ? detectPromptIntent(rowsDecreeText) : undefined
           const mapped = normalizeCouncilMessageIds(
             rows
               .filter(row =>
@@ -6416,20 +6499,28 @@ function Home() {
                   councilPersistenceCtx,
                 ),
               )
-              .map(row => mapWarRoomRowToCouncilMessage(row)),
+              .map(row => mapWarRoomRowToCouncilMessage(row, {
+                decreeText: rowsDecreeText,
+                promptIntent: rowsPromptIntent,
+                stabilityMode: councilPassthroughMode,
+              })),
             'persisted',
           )
-          if (mapped.length > 0) {
+          if (shouldReplacePersistedTranscript(councilSnapRef.current.messages, mapped)) {
             councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
           }
         }
         setLiveCouncilLoadState('ready')
       } catch {
+        if (cancelled) return
         setLiveCouncilLoadState('session_only')
         /* session-only council */
       }
     })()
-  }, [councilMounted, councilDispatch, councilPersistenceCtx])
+    return () => {
+      cancelled = true
+    }
+  }, [councilMounted, councilDispatch, councilPersistenceCtx]) // eslint-disable-line react-hooks/exhaustive-deps -- mount-only reconciliation fetch; councilPassthroughMode is always its mount-time default (false) here since no decree has run yet, and refetching on later toggles isn't intended
 
   useEffect(() => {
     if (!autoScrollEnabled) return
@@ -6770,29 +6861,50 @@ function Home() {
     })
     if (!shouldPersistCouncilMessage(persistable, councilPersistenceCtx)) return null
     if (!liveCouncilConvId || !persistenceAvailable) return null
-    try {
-      const res = await fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          role: input.role,
-          content: input.content,
-          family: input.family ?? null,
-          metadata: {
-            responseSuccessful: opts?.responseSuccessful === true,
-            ...(opts?.providerRuntime ? { providerRuntime: opts.providerRuntime } : {}),
-            ...(opts?.transientProviderStatus ? { transientProviderStatus: true } : {}),
-            ...(opts?.directInvocationMetadata ? { directInvocation: opts.directInvocationMetadata } : {}),
-          },
-        }),
-      })
-      if (!res.ok) return null
-      const data = await res.json() as { message?: { id?: unknown } }
-      return typeof data.message?.id === 'string' ? data.message.id : null
-    } catch {
-      /* session fallback */
-      return null
+
+    // Reused across both attempts of the same logical write — lets the server recognize a retry
+    // of a write that actually already succeeded (response merely lost in transit) and return the
+    // existing row instead of inserting a duplicate.
+    const idempotencyKey = createMessageId('persist')
+
+    const attemptPersist = async (): Promise<{ ok: true; id: string | null } | { ok: false }> => {
+      try {
+        const res = await fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role: input.role,
+            content: input.content,
+            family: input.family ?? null,
+            metadata: {
+              responseSuccessful: opts?.responseSuccessful === true,
+              idempotencyKey,
+              ...(opts?.providerRuntime ? { providerRuntime: opts.providerRuntime } : {}),
+              ...(opts?.transientProviderStatus ? { transientProviderStatus: true } : {}),
+              ...(opts?.directInvocationMetadata ? { directInvocation: opts.directInvocationMetadata } : {}),
+            },
+          }),
+        })
+        if (!res.ok) return { ok: false }
+        const data = await res.json() as { message?: { id?: unknown } }
+        return { ok: true, id: typeof data.message?.id === 'string' ? data.message.id : null }
+      } catch {
+        return { ok: false }
+      }
     }
+
+    const first = await attemptPersist()
+    if (first.ok) return first.id
+    // This call is always fire-and-forget from the caller's side (`void postLiveCouncilMessage(...)`,
+    // never awaited), so a transient failure here has no other chance to be retried or surfaced —
+    // the message would otherwise be silently lost from durable storage forever, even though it
+    // stays visible in the local session for this tab. One short-delay retry recovers the common
+    // transient case (momentary network blip, brief 5xx) without building a full retry queue.
+    await new Promise(resolve => setTimeout(resolve, 400))
+    const second = await attemptPersist()
+    if (second.ok) return second.id
+    console.warn('[war-room] council message persistence failed after retry — message remains in this tab\'s local session only', { role: input.role, family: input.family ?? null })
+    return null
   }
 
   useEffect(() => {
@@ -8604,6 +8716,18 @@ function Home() {
 
     const controller = new AbortController()
     abortControllerRef.current = controller
+    const expectedCouncilSessionId = councilSnapRef.current.sessionId
+    const expectedConversationId = liveCouncilConvIdRef.current
+    const isCurrentDecreeAsync = () =>
+      shouldAcceptCouncilAsyncResult({
+        mounted: liveCouncilMountedRef.current,
+        expectedSessionId: expectedCouncilSessionId,
+        activeSessionId: councilSnapRef.current.sessionId,
+        expectedDecreeRound: myRound,
+        activeDecreeRound: decreeRoundGenRef.current,
+        expectedConversationId,
+        activeConversationId: liveCouncilConvIdRef.current,
+      })
     setLoading(true)
     matrixStatus('working', 'Council thinking…')
     if (mode !== 'continue') {
@@ -8722,10 +8846,12 @@ function Home() {
       document.addEventListener('visibilitychange', onVisibilityChange)
       if (controller.signal.aborted) merged.abort()
       try {
-        setIncrementalCouncilTransportStatus('establishing')
-        setIncrementalCouncilRequestText(body.message)
-        setIncrementalCouncilProgress(null)
-        setIncrementalCouncilCompletedInputs([])
+        if (isCurrentDecreeAsync()) {
+          setIncrementalCouncilTransportStatus('establishing')
+          setIncrementalCouncilRequestText(body.message)
+          setIncrementalCouncilProgress(null)
+          setIncrementalCouncilCompletedInputs([])
+        }
         const streamed = await postIncrementalCouncilChat({
           body: { ...body, councilGatherPhase: 'decree_soft' },
           signal: merged.signal,
@@ -8734,14 +8860,19 @@ function Home() {
             onResponse: diagnostic => logCouncilStreamDiagnostic('response', diagnostic),
             onChunk: diagnostic => logCouncilStreamDiagnostic('chunk', diagnostic),
             onFrame: diagnostic => logCouncilStreamDiagnostic('frame', diagnostic),
-            onOpened: () => setIncrementalCouncilTransportStatus('opened'),
+            onOpened: () => {
+              if (isCurrentDecreeAsync()) setIncrementalCouncilTransportStatus('opened')
+            },
             onProgress: envelope => {
+              if (!isCurrentDecreeAsync()) return
               setIncrementalCouncilTransportStatus('receiving')
               setIncrementalCouncilProgress(envelope.snapshot)
             },
             onFinal: envelope => {
-              setIncrementalCouncilTransportStatus('final_received')
-              if (envelope.finalProgress) setIncrementalCouncilProgress(envelope.finalProgress)
+              if (isCurrentDecreeAsync()) {
+                setIncrementalCouncilTransportStatus('final_received')
+                if (envelope.finalProgress) setIncrementalCouncilProgress(envelope.finalProgress)
+              }
               logCouncilStreamDiagnostic('final_response_shape', {
                 operationId: envelope.operationId,
                 requestId: envelope.requestId,
@@ -8758,7 +8889,7 @@ function Home() {
                 classification: envelope.error.classification,
                 terminal: envelope.error.terminal,
               })
-              setIncrementalCouncilTransportStatus('interrupted')
+              if (isCurrentDecreeAsync()) setIncrementalCouncilTransportStatus('interrupted')
             },
             onClosed: envelope => {
               logCouncilStreamDiagnostic('closed', {
@@ -8766,10 +8897,19 @@ function Home() {
                 requestId: envelope.requestId,
                 terminalState: envelope.terminalState,
               })
-              setIncrementalCouncilTransportStatus('closed')
+              if (isCurrentDecreeAsync()) setIncrementalCouncilTransportStatus('closed')
             },
           },
         })
+        if (!isCurrentDecreeAsync()) {
+          return {
+            res: new Response(null, { status: 499 }),
+            data: {
+              councilProviderHttpStatus: 'failed',
+              councilProviderHttpDetail: 'stale_decree_result',
+            } as CouncilChatJson,
+          }
+        }
         const data = streamed.finalResponse ?? {}
         const out = {
           res: new Response(null, {
@@ -10203,47 +10343,53 @@ function Home() {
       if (toolIntent) endToolRequest()
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null
-      sequentialDiagnosticApiRef.current = null
-      const snap = sequentialDiagnosticsSessionRef.current
-      if (snap?.active && snap.order.length) {
-        const outs = (snap.outcomes ?? []).filter(o => o && o.runtime !== 'IN_FLIGHT')
-        if (outs.length === snap.order.length) {
-          const mode = snap.intentMode && snap.intentMode !== 'none' ? snap.intentMode : 'sequential_diagnostics'
-          const modeLabel =
-            mode === 'runtime_audit'
-              ? 'Runtime audit'
-              : mode === 'repair_review'
-                ? 'Repair review'
-                : mode === 'sequential_diagnostics'
-                  ? 'Sequential diagnostics'
-                  : 'Sequential diagnostic'
-          void postRuntimeStatePatch({
-            appendDiagnosticEvents: [
-              {
-                kind: 'diagnostic_session_complete',
-                at: new Date().toISOString(),
-                intentMode: mode,
-                order: snap.order,
-                outcomes: outs,
+      const canMutateDecreeUi =
+        liveCouncilMountedRef.current
+        && myRound === decreeRoundGenRef.current
+        && councilSnapRef.current.sessionId === expectedCouncilSessionId
+      if (canMutateDecreeUi) {
+        sequentialDiagnosticApiRef.current = null
+        const snap = sequentialDiagnosticsSessionRef.current
+        if (snap?.active && snap.order.length) {
+          const outs = (snap.outcomes ?? []).filter(o => o && o.runtime !== 'IN_FLIGHT')
+          if (outs.length === snap.order.length) {
+            const mode = snap.intentMode && snap.intentMode !== 'none' ? snap.intentMode : 'sequential_diagnostics'
+            const modeLabel =
+              mode === 'runtime_audit'
+                ? 'Runtime audit'
+                : mode === 'repair_review'
+                  ? 'Repair review'
+                  : mode === 'sequential_diagnostics'
+                    ? 'Sequential diagnostics'
+                    : 'Sequential diagnostic'
+            void postRuntimeStatePatch({
+              appendDiagnosticEvents: [
+                {
+                  kind: 'diagnostic_session_complete',
+                  at: new Date().toISOString(),
+                  intentMode: mode,
+                  order: snap.order,
+                  outcomes: outs,
+                },
+              ],
+              set: {
+                [RUNTIME_STATE_KEYS.diagnosticModeSummary]: {
+                  at: new Date().toISOString(),
+                  intentMode: mode,
+                  label: modeLabel,
+                },
               },
-            ],
-            set: {
-              [RUNTIME_STATE_KEYS.diagnosticModeSummary]: {
-                at: new Date().toISOString(),
-                intentMode: mode,
-                label: modeLabel,
-              },
-            },
-          })
+            })
+          }
         }
+        sequentialDiagnostics.stop()
+        setTypingFamily(null)
+        if (toolIntent) endToolRequest()
+        if (decreeCompletedOk && !decreeMatrixFailed && !controller.signal.aborted) {
+          matrixStatus('success', 'Council response ready')
+        }
+        setLoading(false)
       }
-      sequentialDiagnostics.stop()
-      setTypingFamily(null)
-      if (toolIntent) endToolRequest()
-      if (decreeCompletedOk && !decreeMatrixFailed && !controller.signal.aborted) {
-        matrixStatus('success', 'Council response ready')
-      }
-      setLoading(false)
     }
   }
 
@@ -11210,6 +11356,7 @@ function Home() {
     ? 'Ready'
     : 'Degraded'
   const persistenceHealthLabel = persistenceAvailable ? 'Ready' : 'Session only'
+  const networkHealthLabel = browserOnline ? 'Online' : 'Offline'
   const memoryRuntime = useMemo(
     () => mapRawMemoryRuntimeState(
       persistenceAvailable
@@ -11990,6 +12137,7 @@ function Home() {
                       providerHealthLabel={providerHealthLabel}
                       persistenceHealthLabel={persistenceHealthLabel}
                       internetHealthLabel={internetHealthLabel}
+                      networkHealthLabel={networkHealthLabel}
                     />
                     <ConversationStatePanel runtime={conversationRuntimeSnapshot} />
                     <CouncilDeliberationStream threadId={liveCouncilConvId} enabled />
@@ -12321,11 +12469,14 @@ function Home() {
         </>
           )}
           inlineBelowThread={(
-            <AmbientActivityFeed
-              familyPresence={familyPresence}
-              typingFamily={typingFamily}
-              runtime={conversationRuntimeSnapshot}
-            />
+            <>
+              <SynthesisCard synthesis={conversationRuntimeSnapshot?.latestSynthesis} />
+              <AmbientActivityFeed
+                familyPresence={familyPresence}
+                typingFamily={typingFamily}
+                runtime={conversationRuntimeSnapshot}
+              />
+            </>
           )}
         />
           )}
