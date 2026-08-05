@@ -65,11 +65,9 @@ const activeRail =
 function NavButtons({
   active,
   compact,
-  onSelect,
 }: {
   active: string
   compact?: boolean
-  onSelect: (id: string) => void
 }) {
   return (
     <nav className="flex flex-col gap-1 p-3" aria-label="War room">
@@ -79,9 +77,9 @@ function NavButtons({
           <button
             key={item.id}
             type="button"
-            title={item.label}
-            onClick={() => onSelect(item.id)}
-            className={`${railBtn} ${isActive ? activeRail : ''} ${compact ? 'justify-center px-2' : ''}`}
+            title={`${item.label} — section navigation is not connected on this legacy route`}
+            disabled
+            className={`${railBtn} ${isActive ? activeRail : ''} ${compact ? 'justify-center px-2' : ''} cursor-not-allowed opacity-50`}
           >
             <span className={isActive ? 'text-[#d4af37]' : 'text-slate-400'}>
               <Icon name={item.icon} />
@@ -90,18 +88,20 @@ function NavButtons({
           </button>
         )
       })}
+      {!compact && (
+        <p className="mt-2 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-[10px] leading-relaxed text-slate-500">
+          Section navigation is not connected on this legacy route — these buttons are disabled.
+        </p>
+      )}
     </nav>
   )
 }
 
 export function Sidebar() {
-  const [active, setActive] = useState('overview')
+  // Section navigation is not connected on this legacy route; buttons are
+  // disabled, so there is no selection state to update.
+  const active = 'overview'
   const [drawerOpen, setDrawerOpen] = useState(false)
-
-  const handleSelect = (id: string) => {
-    setActive(id)
-    setDrawerOpen(false)
-  }
 
   return (
     <div className="flex flex-col md:contents">
@@ -133,9 +133,9 @@ export function Sidebar() {
             <div className="border-b border-white/10 px-4 py-3 text-xs uppercase tracking-[0.3em] text-slate-400">
               Navigation
             </div>
-            <NavButtons active={active} onSelect={handleSelect} />
+            <NavButtons active={active} />
             <div className="mt-auto border-t border-white/10 p-4 text-[10px] text-slate-500">
-              Mock UI — no backend
+              Legacy demo route — simulated placeholder data
             </div>
           </aside>
         </div>
@@ -147,12 +147,12 @@ export function Sidebar() {
           <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-[#d4af37]">War Room</p>
           <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">Command surface</p>
         </div>
-        <NavButtons active={active} onSelect={handleSelect} />
-        <div className="mt-auto border-t border-white/10 p-4 text-[10px] text-slate-500">v0.1 · local</div>
+        <NavButtons active={active} />
+        <div className="mt-auto border-t border-white/10 p-4 text-[10px] text-slate-500">Legacy demo route</div>
       </aside>
 
       <aside className="relative hidden h-full w-16 shrink-0 flex-col border-r border-white/10 bg-slate-950/55 backdrop-blur-xl md:flex md:flex-col lg:hidden">
-        <NavButtons active={active} compact onSelect={handleSelect} />
+        <NavButtons active={active} compact />
       </aside>
     </div>
   )

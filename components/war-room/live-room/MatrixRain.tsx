@@ -239,8 +239,8 @@ export const MatrixRain = memo(function MatrixRain() {
     <div className="pointer-events-none absolute inset-0 z-0 h-full w-full" aria-hidden>
       <canvas
         ref={canvasRef}
-        className="h-full w-full opacity-40"
-        style={{ mixBlendMode: 'screen' }}
+        className="h-full w-full"
+        style={{ mixBlendMode: 'screen', opacity: 'var(--war-room-matrix-opacity)' }}
       />
       <MatrixStatusCaption message={statusSnap.message} kind={statusSnap.kind} />
     </div>
