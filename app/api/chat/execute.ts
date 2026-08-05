@@ -17,7 +17,13 @@ import { resolveDiagnosticIntentMode } from '@/lib/council/diagnosticMode'
 import { detectRedTeamRuntimeHold } from '@/lib/council/redTeamHold'
 import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
-import { buildActiveScope } from '@/lib/council/intentScope'
+import {
+  buildActiveScope,
+  stripCrossTalkLines,
+  stripForbiddenScopeLines,
+  stripGreetingStrategicBoilerplate,
+  textViolatesForbiddenScope,
+} from '@/lib/council/intentScope'
 import {
   DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS,
   DIRECT_INVOCATION_GROK_TIMEOUT_MS,
@@ -33,7 +39,7 @@ import {
   buildModeGovernorPromptBlock,
 } from '@/lib/council/modeGovernorPrompt'
 import { buildRoomStatusesFromProviderStates } from '@/lib/council/roomStatus'
-import { providerOutcomeToVerifiedContext } from '@/lib/council/runtimeTruth'
+import { applyRuntimeTruthFilter, providerOutcomeToVerifiedContext } from '@/lib/council/runtimeTruth'
 import { ALL_ORCHESTRATION_FAMILIES } from '@/lib/council/commandParser'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
@@ -116,7 +122,7 @@ import {
   trimStableGroupPriorForCeiling,
   type StableGroupPriorReply,
 } from '@/lib/council/stableGroupChat'
-import { filterDecreeRelevantPriorReplies } from '@/lib/council/contextRelevance'
+import { filterDecreeRelevantPriorReplies, isLightweightPingDecree } from '@/lib/council/contextRelevance'
 import { appendProviderIdentityToCouncilSystem } from '@/lib/council/providerIdentity'
 import {
   buildProviderTokenDiagnostics,
@@ -785,7 +791,14 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
 
   const diagnosticIntentMode = resolveDiagnosticIntentMode(raelDirectiveText)
 
-  const thread = buildThread(threadHistory)
+  // Phase 49-A-1: a bare greeting/test-ping ("hello", "hi council", "quick check in", "status
+  // check") carries no topic of its own — it must not pull an unrelated prior thread (e.g. a
+  // stale Panama/business discussion) into the prompt just because raw thread history is always
+  // otherwise injected verbatim here (see buildCouncilUserPrompt's threadBlock, used by the
+  // direct-invocation and non-stable-group prompt paths — confirmed by a full-file grep of every
+  // `threadHistory` consumer: the only other consumer, `extractLastTwoFamilyReplies`, is always
+  // passed through `filterDecreeRelevantPriorReplies` at both of its call sites).
+  const thread = isLightweightPingDecree(raelDirectiveText) ? 'Session just started.' : buildThread(threadHistory)
   const intentState = resolveCurrentIntent({ latestRaelDecreeText: raelDirectiveText })
   councilTrace.record('current_intent_resolved', {
     module: 'lib/council/currentIntent.ts:resolveCurrentIntent',
@@ -1110,6 +1123,31 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   const councilResearchIntent = detectCouncilResearchIntent(raelDirectiveText, {
     forceTeamResearch: councilResearchTeamRequested || Boolean(body.storyContext),
   })
+  // Phase 49-A-1 — Section 22 item 3: EXPLICIT_ARCHITECTURAL_DEFERRAL.
+  //
+  // A per-request exemption for `stabilityFlags.osSweepAndResearchTeam` was built and then
+  // independently reviewed. The review proved it dead code for all real Commander traffic: this
+  // gate's second clause requires `councilResearchTeamRequested` (`body.councilResearchTeam ===
+  // true`, which the live UI in app/page.tsx never sends — confirmed by a repo-wide grep with
+  // zero "ResearchTeam" hits) OR `councilResearchIntent.triggered && !councilSingleFamilyEarly`
+  // — and Stable Group's per-family HTTP-call shape (`app/page.tsx` sets `councilSingleFamily`
+  // on every call) makes `!councilSingleFamilyEarly` permanently false for Stable Group. No
+  // exemption on the first clause can change that outcome, so the added flag never altered
+  // observable behavior. It has been removed rather than left as inert code.
+  //
+  // Council Research Team (the multi-family, source-threaded-into-every-prompt pathway) is
+  // therefore deliberately deferred for Stable Group, not fixed here — re-enabling it would
+  // require either restructuring Stable Group's per-family call pattern or loosening
+  // `detectCouncilResearchIntent`'s own trigger requirement, both larger architectural changes
+  // outside this package's authorized scope.
+  //
+  // This does not leave planning/current-information requests ungrounded: the single-family live
+  // research router below (`researchEligible`/`mandatoryResearchEligible`, gated only by
+  // `stabilityFlags.liveResearchRouter`, which is unconditionally on outside the debug circuit
+  // breaker) already runs for Stable Group's per-family calls regardless of this flag, and now
+  // recognizes planning/relocation/travel language via `detectResearchIntent`'s broadened
+  // triggers (see `lib/research/researchIntent.ts`). A Stable Group reply to "how can we get to
+  // Panama" is genuinely evidence-grounded through that pathway today.
   if (
     stabilityFlags.osSweepAndResearchTeam
     && (
@@ -3038,6 +3076,12 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           ? responseText.trim()
           : undefined
       const preCallRuntime = providerRuntimeStates?.[councilSingleFamily]
+      const verifiedRuntimeContextForFamily = preCallRuntime
+        ? providerOutcomeToVerifiedContext({
+            family: councilSingleFamily,
+            runtime: preCallRuntime,
+          })
+        : { family: councilSingleFamily }
       const governed = stabilityFlags.responseGovernor
         ? applyGovernor(responseText, councilSingleFamily, councilCommand, {
             raelDirectiveText,
@@ -3045,14 +3089,54 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
             councilActiveScope: scopeForGovernor,
             modeGovernor,
             roomStatuses,
-            verifiedRuntimeContext: preCallRuntime
-              ? providerOutcomeToVerifiedContext({
-                  family: councilSingleFamily,
-                  runtime: preCallRuntime,
-                })
-              : { family: councilSingleFamily },
+            verifiedRuntimeContext: verifiedRuntimeContextForFamily,
           })
-        : { text: compactDisplayWhitespace(toDisplayText(responseText)), warnings: [] as string[] }
+        : (() => {
+            // Phase 49-A-1: Stable Group deliberately does NOT get the rest of `applyGovernor`
+            // (family soft-trim/length caps, mode-governor compression, telemetry-cliché
+            // stripping, collapse-repeated-blocks, integrity repair) — none of that is part of
+            // the audited defect, and turning all of it on for every Stable Group turn would be
+            // an unreviewed change to Stable Group response quality/formatting. What Stable
+            // Group previously never got at all is the truthfulness + topic-scope layer
+            // (Panama/business-drift stripping, cross-talk stripping, greeting boilerplate
+            // stripping, runtime-truth filtering) — that layer only ran when
+            // `stabilityFlags.responseGovernor` was true, which Stable Group's default flow mode
+            // never was. This reuses the exact exported helpers `applyGovernor` itself calls for
+            // that layer (`stripForbiddenScopeLines`, `stripCrossTalkLines`,
+            // `stripGreetingStrategicBoilerplate`, `textViolatesForbiddenScope`,
+            // `applyRuntimeTruthFilter`), in the same order `applyActiveScopeTail` applies them,
+            // rather than duplicating their logic. (Not replicated: the red_team-specific length
+            // cap / warm-intent-noise / strategic-pivot-language stripping block, which is a
+            // family-specific formatting behavior outside the truthfulness/topic-scope layer.)
+            let t = compactDisplayWhitespace(toDisplayText(responseText))
+            const warnings: string[] = []
+            const scopeStrip = stripForbiddenScopeLines(t, scopeForGovernor)
+            t = scopeStrip.text
+            if (scopeStrip.stripped > 0) warnings.push('council_governor_stripped_active_scope_topic')
+            if (textViolatesForbiddenScope(scopeForGovernor, t)) {
+              warnings.push('protocol_drift_active_scope_residual')
+            }
+            if (!scopeForGovernor.crossTalkAllowed) {
+              const crossTalkStrip = stripCrossTalkLines(t)
+              t = crossTalkStrip.text
+              if (crossTalkStrip.stripped > 0) warnings.push('council_governor_stripped_cross_talk')
+            }
+            if (intentState.intent === 'greeting') {
+              const greetingStrip = stripGreetingStrategicBoilerplate(t)
+              t = greetingStrip.text
+              if (greetingStrip.stripped > 0) warnings.push('council_governor_greeting_stripped_boilerplate')
+            }
+            const truthFiltered = applyRuntimeTruthFilter(t, {
+              family: councilSingleFamily,
+              mode: modeGovernor?.mode ?? 'council',
+              verifiedContext: verifiedRuntimeContextForFamily,
+              roomStatuses,
+            })
+            if (truthFiltered.warnings.length) warnings.push(...truthFiltered.warnings)
+            const finalText = truthFiltered.text.trim()
+            if (!finalText) warnings.push('council_governor_empty_after_trim')
+            return { text: finalText, warnings }
+          })()
       councilTrace.record('scope_guardian_checked', {
         module: 'lib/council/responseGovernor.ts:applyGovernor',
         inputSummary: {

@@ -62,6 +62,38 @@ const RESEARCH_VERB_TRIGGERS: RegExp[] = [
   /\b(?:what\s+do\s+experts|peer[-\s]?reviewed)\b/i,
 ]
 
+/**
+ * Real-world planning / relocation / logistics language — a narrow news/current-event vocabulary
+ * previously missed requests like "how can we get to Panama" or "how can we relocate somewhere"
+ * entirely (zero trigger matches), so they fell through to pure model judgment with no live
+ * grounding and no signal that no research was attempted.
+ */
+const PLANNING_LOGISTICS_TRIGGERS: RegExp[] = [
+  /\bhow\s+(?:can|do|would|could)\s+we\s+(?:get\s+to|relocate|move|travel|accomplish|achieve|reach)\b/i,
+  /\brelocat(?:e|ion|ing)\b/i,
+  /\bimmigrat(?:e|ion|ing)\b/i,
+  /\bemigrat(?:e|ion|ing)\b/i,
+  /\b(?:move|moving)\s+to\b/i,
+  /\bplan(?:ning)?\s+(?:our|my|the|a)\s+(?:move|relocation|trip)\b/i,
+  /\btravel\s*(?:plan(?:ning)?|logistics|requirements?)\b/i,
+  /\bvisa\s+requirements?\b/i,
+  /\b(?:housing|transportation)\s*logistics\b/i,
+  /\bcurrent\s+(?:requirements?|costs?|prices?|availability)\b/i,
+  /\breal[-\s]?world\s+objective\b/i,
+]
+
+/**
+ * Code/meta-discussion nouns that indicate a relocation/travel/logistics-shaped word is being
+ * used about code, a variable, or the word itself — not a real-world planning request. An
+ * independent review confirmed these exact false-positive shapes against the planning triggers
+ * above before this exclusion existed: "relocate this function into another file", "update the
+ * relocation variable name", "immigration is a word in this document", "test the travel planning
+ * regex". Scoped to `PLANNING_LOGISTICS_TRIGGERS` only — it must not suppress unrelated trigger
+ * families (news/weather/research-verbs/etc).
+ */
+const PLANNING_CODE_OR_META_CONTEXT =
+  /\b(?:function|file|variable|method|class|module|component|regex|code|script|directory|folder|word|document|constant|property|parameter|argument)\b/i
+
 /** User pasted a public URL — safe direct fetch may apply (still routed + validated server-side). */
 const URL_PASTE_TRIGGER = /https?:\/\/[^\s\])>'"]{8,}/i
 
@@ -136,6 +168,7 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
   const socialHits = countMatches(t, SOCIAL_REALTIME_TRIGGERS)
   const domainHits = countMatches(t, DOMAIN_TRIGGERS)
   const researchVerbHits = countMatches(t, RESEARCH_VERB_TRIGGERS)
+  const planningHits = PLANNING_CODE_OR_META_CONTEXT.test(t) ? 0 : countMatches(t, PLANNING_LOGISTICS_TRIGGERS)
 
   const pushReason = (label: string, patterns: RegExp[]) => {
     const r = firstMatchingReason(t, patterns, label)
@@ -147,6 +180,7 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
   if (socialHits) pushReason('social_realtime', SOCIAL_REALTIME_TRIGGERS)
   if (domainHits) pushReason('domain_topic', DOMAIN_TRIGGERS)
   if (researchVerbHits) pushReason('research_verbs', RESEARCH_VERB_TRIGGERS)
+  if (planningHits) pushReason('planning_logistics', PLANNING_LOGISTICS_TRIGGERS)
   if (URL_PASTE_TRIGGER.test(t)) reasons.push('url_paste:https')
   if (mandatoryRetrieval.required) {
     reasons.push(...mandatoryRetrieval.reasons.map(reason => `mandatory_retrieval:${reason}`))
