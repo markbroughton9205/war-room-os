@@ -16,7 +16,11 @@ import type {
   IncomeWorkerScoutResult,
 } from '@/lib/income-workers/types'
 import type { IncomeCouncilReview } from '@/lib/income-workers/councilReview'
+import type { OpportunityRecord, OpportunityWorkflowRun } from '@/lib/opportunity-agents/types'
+import type { SourceConnectionHealth, SourceRefreshResult } from '@/lib/opportunity-agents/sources/types'
 import type { DeployStatusResponse } from '@/lib/deploy/types'
+import type { CanonicalRuntimeStatus } from '@/lib/runtime/canonicalStatus'
+import { resolveWarRoomStatusSigil, buildStatusSigilDiagnostics } from '@/lib/runtime/statusSigil'
 import type { DiffPreviewResponse, RepoStatus, RollbackStatus } from '@/lib/repo/types'
 import { TOOL_REGISTRY, type ToolId } from '@/lib/tools/toolRegistry'
 import type { InternetStatusResponse } from '@/lib/tools/internet/types'
@@ -501,6 +505,18 @@ function councilProviderTextAfterRenderGate(
   }
 }
 
+function isPrimaryTranscriptNoise(message: CouncilMessage): boolean {
+  const content = compactDisplayWhitespace(sanitizeMemoryRuntimeText(toDisplayText(message.content))).toLowerCase()
+  if (!content) return false
+  if (/completed ordered transcript fallback/i.test(content)) return true
+  if (/response[-\s]?governor|mode governor|provider routing|model routing|runtime trace|developer diagnostic|protocol warning/i.test(content)) return true
+  if (/^```json/.test(content) || /^\{\s*"/.test(content) || /"opportunities"\s*:/.test(content)) return true
+  if (/raw opportunity packet|copy raw json|technical packet/i.test(content)) return true
+  if (message.messageType === 'system' && /fallback|diagnostic|transport|sse|canonical runtime|integrity/i.test(content)) return true
+  if (message.degraded && /sorry|apolog/i.test(content)) return true
+  return false
+}
+
 function councilNoiseKey(message: CouncilMessage): string | null {
   if (message.messageType === 'decree') return null
   const content = compactDisplayWhitespace(sanitizeMemoryRuntimeText(toDisplayText(message.content))).toLowerCase()
@@ -525,14 +541,31 @@ function applyCouncilThreadHygiene(
   const decreeText = latestDecree ? toDisplayText(latestDecree.content).trim() : ''
   const promptIntent = decreeText ? detectPromptIntent(decreeText) : undefined
 
+  const latestRoundFamilyResponses = new Map<string, CouncilMessage>()
   for (const raw of messages) {
     const message = sanitizedCouncilMessage(raw, { decreeText, promptIntent, stabilityMode })
+    if (isPrimaryTranscriptNoise(message)) {
+      collapsedCount += 1
+      continue
+    }
     const key = councilNoiseKey(message)
     if (key && seenNoise.has(key)) {
       collapsedCount += 1
       continue
     }
     if (key) seenNoise.add(key)
+    const family = parseCouncilMessageFamily(message.familyName)
+    if (latestDecree && family && message.messageType === 'response' && councilOperationGroupKey(message, messages) === `turn:${latestDecree.id}`) {
+      const existing = latestRoundFamilyResponses.get(family)
+      if (existing) {
+        const index = visibleMessages.findIndex(item => item.id === existing.id)
+        if (index >= 0) visibleMessages[index] = message
+        latestRoundFamilyResponses.set(family, message)
+        collapsedCount += 1
+        continue
+      }
+      latestRoundFamilyResponses.set(family, message)
+    }
     visibleMessages.push(message)
   }
 
@@ -3147,6 +3180,38 @@ const INCOME_SCOUT_STATE_COLORS: Record<IncomeWorkerScoutExecutionState, string>
   failed: '#EF4444',
 }
 
+
+type OpportunityAgentWorkforceUiState = {
+  status: 'idle' | 'preparing' | 'ready' | 'error'
+  message: string
+  records: OpportunityRecord[]
+  runs: OpportunityWorkflowRun[]
+  persistence: 'session_only'
+}
+
+const INITIAL_OPPORTUNITY_AGENT_WORKFORCE: OpportunityAgentWorkforceUiState = {
+  status: 'idle',
+  message: 'Opportunity Agent Workforce has not prepared a work packet this session.',
+  records: [],
+  runs: [],
+  persistence: 'session_only',
+}
+
+
+type SourceConnectionsUiState = {
+  status: 'idle' | 'testing' | 'ready' | 'refreshing' | 'error'
+  message: string
+  connections: SourceConnectionHealth[]
+  latestRefresh: SourceRefreshResult | null
+}
+
+const INITIAL_SOURCE_CONNECTIONS_STATE: SourceConnectionsUiState = {
+  status: 'idle',
+  message: 'Source connections have not been tested this session. Existing environment variables do not imply connected status.',
+  connections: [],
+  latestRefresh: null,
+}
+
 function IncomeWorkersPanel({
   opportunities,
   actions,
@@ -3154,8 +3219,15 @@ function IncomeWorkersPanel({
   councilReviews,
   loading,
   assignLoading,
+  workforce,
+  workforceLoading,
+  sourceConnections,
+  sourceConnectionsLoading,
+  onTestSources,
+  onRefreshSource,
   onScout,
   onAssign,
+  onPreparePacket,
 }: {
   opportunities: IncomeOpportunity[]
   actions: RaelActionItem[]
@@ -3163,8 +3235,15 @@ function IncomeWorkersPanel({
   councilReviews: IncomeCouncilReview[]
   loading: boolean
   assignLoading: boolean
+  workforce: OpportunityAgentWorkforceUiState
+  workforceLoading: boolean
+  sourceConnections: SourceConnectionsUiState
+  sourceConnectionsLoading: boolean
+  onTestSources: () => void
+  onRefreshSource: (sourceId: string) => void
   onScout: () => void
   onAssign: (candidate: IncomeWorkerCandidate) => void
+  onPreparePacket: (candidate?: IncomeWorkerCandidate) => void
 }) {
   const activeMissions = opportunities.filter(opportunity => opportunity.status === 'applied' || opportunity.status === 'active')
   const expectedPayout = opportunities
@@ -3177,6 +3256,8 @@ function IncomeWorkersPanel({
   const stateColor = INCOME_SCOUT_STATE_COLORS[executionState] ?? '#94A3B8'
   const activityLog = scout.activityLog ?? []
   const diagnostics = scout.diagnostics
+  const latestWorkforceRun = workforce.runs[0] ?? null
+  const latestWorkPacket = latestWorkforceRun?.workPacket ?? null
 
   return (
     <section className="rounded border border-emerald-500/20 p-3 text-xs" style={{ background: 'rgba(6,78,59,0.10)' }}>
@@ -3205,6 +3286,15 @@ function IncomeWorkersPanel({
             onClick={onScout}
           >
             {loading ? 'Scouting...' : 'Scout with Income Workers'}
+          </button>
+          <button
+            type="button"
+            disabled={workforceLoading}
+            className="rounded px-3 py-1 text-[10px] font-bold tracking-widest disabled:opacity-40"
+            style={{ border: '1px solid rgba(147,197,253,0.35)', color: '#93C5FD' }}
+            onClick={() => onPreparePacket()}
+          >
+            {workforceLoading ? 'Preparing...' : 'Prepare Work Packets'}
           </button>
         </div>
       </div>
@@ -3310,6 +3400,137 @@ function IncomeWorkersPanel({
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="mt-3 rounded px-3 py-2" style={{ border: '1px solid rgba(52,211,153,0.16)', background: 'rgba(0,0,0,0.22)' }}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="font-bold tracking-widest" style={{ color: '#86EFAC' }}>SOURCE CONNECTIONS</div>
+            <div className="mt-1" style={{ color: '#777' }}>Server-side connection registry. CONNECTED requires a successful authorized probe.</div>
+          </div>
+          <button
+            type="button"
+            disabled={sourceConnectionsLoading}
+            className="rounded px-3 py-1 text-[10px] font-bold tracking-widest disabled:opacity-40"
+            style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#86EFAC' }}
+            onClick={onTestSources}
+          >
+            {sourceConnectionsLoading ? 'Checking...' : 'Test Sources'}
+          </button>
+        </div>
+        <div className="mb-2 text-[10px]" style={{ color: '#888' }}>{sourceConnections.message}</div>
+        {sourceConnections.connections.length ? (
+          <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3 war-room-scrollbar-green">
+            {sourceConnections.connections.map(source => {
+              const tone = source.connectionState === 'CONNECTED' ? '#34D399' : source.connectionState === 'KEY_MISSING' || source.connectionState === 'ACCOUNT_REQUIRED' ? '#FBBF24' : source.connectionState.includes('FAILED') || source.connectionState === 'DEGRADED' ? '#F87171' : '#94A3B8'
+              return (
+                <div key={source.id} className="rounded border border-white/10 px-2 py-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-bold" style={{ color: '#E5E7EB' }}>{source.displayName}</div>
+                      <div className="mt-0.5 text-[9px] uppercase tracking-widest" style={{ color: '#777' }}>{source.category.replace(/_/g, ' ')} · {source.costClass}</div>
+                    </div>
+                    <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: tone }}>{source.connectionState.replace(/_/g, ' ')}</span>
+                  </div>
+                  <div className="mt-1" style={{ color: '#888' }}>{source.accessMethod}</div>
+                  {source.currentFailure ? <div className="mt-1" style={{ color: '#FCA5A5' }}>{source.currentFailure}</div> : null}
+                  {source.requiredCommanderAction ? <div className="mt-1" style={{ color: '#FBBF24' }}>{source.requiredCommanderAction}</div> : null}
+                  {source.category === 'opportunity' || source.category === 'public_intelligence' ? (
+                    <button
+                      type="button"
+                      disabled={sourceConnectionsLoading}
+                      className="mt-2 rounded px-2 py-1 text-[9px] font-bold uppercase tracking-widest disabled:opacity-40"
+                      style={{ border: '1px solid rgba(147,197,253,0.35)', color: '#93C5FD' }}
+                      onClick={() => onRefreshSource(source.id)}
+                    >
+                      Refresh
+                    </button>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div style={{ color: '#FBBF24' }}>Click Test Sources to load browser-safe connection states.</div>
+        )}
+        {sourceConnections.latestRefresh ? (
+          <div className="mt-3 rounded border border-blue-900/30 px-3 py-2" style={{ background: 'rgba(0,0,0,0.24)' }}>
+            <div className="font-bold tracking-widest" style={{ color: '#93C5FD' }}>LIVE REFRESH PIPELINE</div>
+            <div className="mt-1" style={{ color: '#DDD' }}>
+              {sourceConnections.latestRefresh.sourceId}: retrieved {sourceConnections.latestRefresh.retrieved}, accepted {sourceConnections.latestRefresh.accepted}, duplicates {sourceConnections.latestRefresh.duplicates}, expired {sourceConnections.latestRefresh.expired}
+            </div>
+            <div className="mt-1" style={{ color: '#888' }}>
+              Pages: {sourceConnections.latestRefresh.pagination.pagesSucceeded}/{sourceConnections.latestRefresh.pagination.pagesRequested} · received {sourceConnections.latestRefresh.pagination.recordsReceived} · partial failure {String(sourceConnections.latestRefresh.pagination.partialFailure)}
+            </div>
+            {sourceConnections.latestRefresh.records[0] ? (
+              <div className="mt-1" style={{ color: '#BAE6FD' }}>
+                Latest source fields: notice {sourceConnections.latestRefresh.records[0].noticeId ?? 'none'} · solicitation {sourceConnections.latestRefresh.records[0].solicitationNumber ?? 'none'} · NAICS {sourceConnections.latestRefresh.records[0].naicsCodes.join(', ') || 'none'} · PSC {sourceConnections.latestRefresh.records[0].pscCodes.join(', ') || 'none'}
+              </div>
+            ) : null}
+            <div className="mt-1" style={{ color: '#888' }}>Requested refresh is not success. Status: {sourceConnections.latestRefresh.status}</div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-3 rounded px-3 py-2" style={{ border: '1px solid rgba(96,165,250,0.18)', background: 'rgba(0,0,0,0.22)' }}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="font-bold tracking-widest" style={{ color: '#93C5FD' }}>OPPORTUNITY AGENT WORKFORCE</div>
+            <div className="mt-1" style={{ color: '#777' }}>Scout → qualify → revenue estimate → work packet → draft materials → Commander approval. No external actions.</div>
+          </div>
+          <span className="rounded px-2 py-1 text-[9px] font-bold uppercase tracking-widest" style={{ border: '1px solid rgba(251,191,36,0.35)', color: '#FBBF24' }}>
+            {workforce.persistence.replace(/_/g, ' ')}
+          </span>
+        </div>
+        <div className="grid gap-2 md:grid-cols-4">
+          <div className="rounded border border-white/10 px-2 py-2">
+            <div className="tracking-widest" style={{ color: '#555' }}>STATUS</div>
+            <div className="mt-1 font-bold" style={{ color: workforce.status === 'error' ? '#F87171' : '#A7F3D0' }}>{workforce.status}</div>
+          </div>
+          <div className="rounded border border-white/10 px-2 py-2">
+            <div className="tracking-widest" style={{ color: '#555' }}>RECORDS</div>
+            <div className="mt-1 font-bold" style={{ color: '#93C5FD' }}>{workforce.records.length}</div>
+          </div>
+          <div className="rounded border border-white/10 px-2 py-2">
+            <div className="tracking-widest" style={{ color: '#555' }}>PACKETS</div>
+            <div className="mt-1 font-bold" style={{ color: '#C4B5FD' }}>{workforce.runs.length}</div>
+          </div>
+          <div className="rounded border border-white/10 px-2 py-2">
+            <div className="tracking-widest" style={{ color: '#555' }}>EXTERNAL ACTIONS</div>
+            <div className="mt-1 font-bold" style={{ color: '#FCA5A5' }}>0 executed</div>
+          </div>
+        </div>
+        <div className="mt-2 text-[10px]" style={{ color: '#888' }}>{workforce.message}</div>
+        {latestWorkPacket ? (
+          <div className="mt-3 grid gap-2 lg:grid-cols-2">
+            <div className="rounded border border-white/10 px-3 py-2">
+              <div className="font-bold" style={{ color: '#E5E7EB' }}>{latestWorkforceRun?.record.title}</div>
+              <div className="mt-1" style={{ color: '#9CA3AF' }}>Evidence: {latestWorkPacket.evidenceAndSources.evidenceStatus} · Freshness: {latestWorkPacket.evidenceAndSources.freshnessStatus}</div>
+              {latestWorkPacket.evidenceAndSources.noticeId || latestWorkPacket.evidenceAndSources.solicitationNumber ? (
+                <div className="mt-1" style={{ color: '#BAE6FD' }}>
+                  Notice: {latestWorkPacket.evidenceAndSources.noticeId ?? 'none'} · Solicitation: {latestWorkPacket.evidenceAndSources.solicitationNumber ?? 'none'}
+                </div>
+              ) : null}
+              {latestWorkPacket.evidenceAndSources.placeOfPerformance ? <div className="mt-1" style={{ color: '#CBD5E1' }}>Place: {latestWorkPacket.evidenceAndSources.placeOfPerformance}</div> : null}
+              {latestWorkPacket.evidenceAndSources.naicsCodes.length || latestWorkPacket.evidenceAndSources.pscCodes.length ? (
+                <div className="mt-1" style={{ color: '#94A3B8' }}>NAICS: {latestWorkPacket.evidenceAndSources.naicsCodes.join(', ') || 'none'} · PSC: {latestWorkPacket.evidenceAndSources.pscCodes.join(', ') || 'none'}</div>
+              ) : null}
+              {latestWorkPacket.evidenceAndSources.setAsideCode || latestWorkPacket.evidenceAndSources.setAsideDescription ? (
+                <div className="mt-1" style={{ color: '#FDE68A' }}>Set-aside: {latestWorkPacket.evidenceAndSources.setAsideCode ?? 'none'} {latestWorkPacket.evidenceAndSources.setAsideDescription ? `· ${latestWorkPacket.evidenceAndSources.setAsideDescription}` : ''}</div>
+              ) : null}
+              <div className="mt-1" style={{ color: '#FBBF24' }}>Recommended: {latestWorkPacket.recommendedDecision.replace(/_/g, ' ')}</div>
+              <div className="mt-1" style={{ color: '#A7F3D0' }}>Estimate: {latestWorkPacket.estimatedProfit?.amount === null || latestWorkPacket.estimatedProfit?.amount === undefined ? 'unconfirmed' : formatCost(latestWorkPacket.estimatedProfit.amount)}</div>
+              <div className="mt-1" style={{ color: '#FCA5A5' }}>Actual revenue: proof required</div>
+            </div>
+            <div className="rounded border border-white/10 px-3 py-2">
+              <div className="font-bold tracking-widest" style={{ color: '#C4B5FD' }}>APPROVAL GATES</div>
+              <div className="mt-1 grid gap-1">
+                {latestWorkPacket.commanderApprovalsRequired.map(item => <div key={item} style={{ color: '#DDD' }}>• {item}</div>)}
+              </div>
+              <div className="mt-2" style={{ color: '#888' }}>Draft materials: {latestWorkPacket.draftMaterials.length} · all draft-only</div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-3 rounded px-3 py-2" style={{ border: '1px solid rgba(147,197,253,0.16)', background: 'rgba(0,0,0,0.22)' }}>
@@ -5309,21 +5530,7 @@ function formatApprovalPendingLabel(action: QueueActionRow): string {
 function WriteApprovalBanner() {
   const [phase, setPhase] = useState<'initial' | 'ready' | 'error'>('initial')
   const [pendingLabel, setPendingLabel] = useState<string | null>(null)
-  const [hostingIsVercel, setHostingIsVercel] = useState(false)
   const queueInFlight = useRef(false)
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch('/api/deploy/status', { cache: 'no-store' })
-        if (!res.ok) return
-        const data = (await res.json()) as { provider?: string }
-        setHostingIsVercel(data.provider === 'vercel')
-      } catch {
-        /* keep false - do not claim Vercel */
-      }
-    })()
-  }, [])
 
   const refreshApprovalBanner = useCallback(async () => {
     if (queueInFlight.current) return
@@ -5379,7 +5586,6 @@ function WriteApprovalBanner() {
 
   const pending = Boolean(pendingLabel)
   const unknown = phase === 'error'
-  const calmIdle = phase === 'ready' && !pending && !unknown
 
   const borderColor = pending
     ? 'rgba(234,179,8,0.55)'
@@ -5397,18 +5603,13 @@ function WriteApprovalBanner() {
     ? 'Approval gate status unknown.'
     : pending
       ? `Approval required: ${pendingLabel}.`
-      : 'Approval gate active. No pending write actions.'
+      : 'Approval gate ready.'
 
   return (
     <div className="border-b px-6 py-2 flex-shrink-0" style={{ borderColor, background: bg }}>
       <p className="text-[10px] font-bold tracking-widest" style={{ color: textColor }}>
         {phase === 'initial' ? 'Checking approval queue...' : primaryLine}
       </p>
-      {calmIdle && hostingIsVercel ? (
-        <p className="mt-1 text-[9px] font-bold tracking-widest" style={{ color: '#64748B' }}>
-          Repo mutation controls unavailable in production dashboard.
-        </p>
-      ) : null}
     </div>
   )
 }
@@ -5443,6 +5644,53 @@ function statusColor(status: string) {
   if (['config_needed', 'missing', 'required', 'dirty', 'standby', 'unknown', 'false', 'not_probed', 'disabled'].includes(status)) return '#FFD700'
   if (['error', 'unreachable'].includes(status)) return '#EF4444'
   return '#777'
+}
+
+
+function WarRoomStatusSigilButton({ status }: { status: CanonicalRuntimeStatus | null }) {
+  const [open, setOpen] = useState(false)
+  const sigil = resolveWarRoomStatusSigil(status)
+  const color = sigil.state === 'green' ? '#00FF66' : sigil.state === 'red' ? '#EF4444' : '#FBBF24'
+  const diagnostics = buildStatusSigilDiagnostics(status)
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-label={sigil.ariaLabel}
+        title={sigil.ariaLabel}
+        aria-expanded={open}
+        onClick={() => setOpen(prev => !prev)}
+        className="group grid h-12 w-12 place-items-center rounded-full focus:outline-none focus:ring-2 focus:ring-emerald-300/70"
+        style={{
+          border: `1px solid ${color}88`,
+          background: 'radial-gradient(circle, rgba(0,0,0,0.85), rgba(0,0,0,0.35))',
+          boxShadow: `0 0 18px ${color}44`,
+        }}
+      >
+        <svg viewBox="0 0 64 64" role="img" aria-hidden="true" className="h-10 w-10">
+          <circle cx="32" cy="32" r="27" fill="none" stroke={color} strokeWidth="2" opacity="0.72" />
+          <circle cx="32" cy="32" r="22" fill="none" stroke={color} strokeWidth="1" opacity="0.28" className="animate-pulse" />
+          <path d="M18 16 L46 48" stroke={color} strokeWidth="3" strokeLinecap="round" />
+          <path d="M46 16 L18 48" stroke={color} strokeWidth="3" strokeLinecap="round" />
+          <path d="M15 13 L20 18 M49 13 L44 18 M15 51 L20 46 M49 51 L44 46" stroke={color} strokeWidth="2" strokeLinecap="round" />
+          <text x="32" y="36" textAnchor="middle" fontSize="13" fontWeight="800" fill="#FFD700" fontFamily="ui-monospace, monospace">WR</text>
+        </svg>
+      </button>
+      {open ? (
+        <div
+          className="absolute right-0 z-50 mt-2 w-80 rounded border border-emerald-900/40 px-3 py-3 text-[10px] shadow-2xl"
+          style={{ background: 'rgba(0,0,0,0.94)' }}
+          role="dialog"
+          aria-label="War Room runtime diagnostics"
+        >
+          <div className="mb-2 font-bold uppercase tracking-widest" style={{ color }}>Runtime Diagnostics</div>
+          <div className="space-y-1" style={{ color: '#CBD5E1' }}>
+            {diagnostics.map(line => <div key={line}>{line}</div>)}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function CommandRouterPanel() {
@@ -5747,6 +5995,7 @@ function Home() {
   const [memories, setMemories] = useState<MemoryEntry[]>([])
   const [repoAwareness, setRepoAwareness] = useState<RepoAwarenessState>(INITIAL_REPO_AWARENESS_STATE)
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
+  const [canonicalRuntimeStatus, setCanonicalRuntimeStatus] = useState<CanonicalRuntimeStatus | null>(null)
   const [redTeamCoder, setRedTeamCoder] = useState<RedTeamCoderUiState>(INITIAL_RED_TEAM_CODER_STATE)
   const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
   const [latestRepairPacket, setLatestRepairPacket] = useState<CouncilRepairPacket | null>(null)
@@ -5782,6 +6031,10 @@ function Home() {
   const [incomeCouncilReviews, setIncomeCouncilReviews] = useState<IncomeCouncilReview[]>([])
   const [incomeWorkerLoading, setIncomeWorkerLoading] = useState(false)
   const [incomeWorkerAssignLoading, setIncomeWorkerAssignLoading] = useState(false)
+  const [opportunityAgentWorkforce, setOpportunityAgentWorkforce] = useState<OpportunityAgentWorkforceUiState>(INITIAL_OPPORTUNITY_AGENT_WORKFORCE)
+  const [opportunityAgentLoading, setOpportunityAgentLoading] = useState(false)
+  const [sourceConnections, setSourceConnections] = useState<SourceConnectionsUiState>(INITIAL_SOURCE_CONNECTIONS_STATE)
+  const [sourceConnectionsLoading, setSourceConnectionsLoading] = useState(false)
   const [paymentLedger, setPaymentLedger] = useState<PaymentLedgerState>(INITIAL_PAYMENT_LEDGER_STATE)
   const [raelActions, setRaelActions] = useState<RaelActionItem[]>([])
   const [smsBridge, setSmsBridge] = useState<SmsBridgeState>(INITIAL_SMS_BRIDGE_STATE)
@@ -7478,11 +7731,9 @@ function Home() {
       if (res.headers.get('content-type')?.includes('text/html') || raw.trimStart().startsWith('<')) {
         throw new Error('connection_timeout')
       }
-      const data = JSON.parse(raw) as {
-        providers?: { family: ProviderFamilyKey; connectionStatus: ProviderConnectionStatus; label: string }[]
-        error?: string
-      }
+      const data = JSON.parse(raw) as CanonicalRuntimeStatus & { error?: string }
       if (!res.ok) throw new Error(data.error || 'Canonical provider status failed')
+      setCanonicalRuntimeStatus(data)
       const prov = { ...INITIAL_PROVIDER_HEALTH.providers }
       const lab = { ...INITIAL_PROVIDER_HEALTH.labels }
       for (const row of data.providers ?? []) {
@@ -7493,6 +7744,7 @@ function Home() {
       }
       setProviderHealth({ providers: prov, labels: lab })
     } catch {
+      setCanonicalRuntimeStatus(null)
       setProviderHealth(prev => ({
         ...prev,
         providers: {
@@ -7880,6 +8132,83 @@ function Home() {
       }))
     } finally {
       setIncomeWorkerLoading(false)
+    }
+  }
+
+  const testOpportunitySourceConnections = async () => {
+    if (sourceConnectionsLoading) return
+    setSourceConnectionsLoading(true)
+    setSourceConnections(prev => ({ ...prev, status: 'testing', message: 'Testing source connections server-side...' }))
+    try {
+      const res = await fetch('/api/opportunity-agents/sources?test=1', { cache: 'no-store' })
+      const data = await res.json() as { message?: string; connections?: SourceConnectionHealth[] }
+      if (!res.ok) throw new Error(data.message || 'Source connection test failed')
+      setSourceConnections(prev => ({
+        ...prev,
+        status: 'ready',
+        message: data.message ?? 'Source connection tests complete.',
+        connections: Array.isArray(data.connections) ? data.connections : [],
+      }))
+    } catch {
+      setSourceConnections(prev => ({ ...prev, status: 'error', message: 'Source connection tests failed or require Commander authentication.' }))
+    } finally {
+      setSourceConnectionsLoading(false)
+    }
+  }
+
+  const refreshOpportunitySource = async (sourceId: string) => {
+    if (sourceConnectionsLoading) return
+    setSourceConnectionsLoading(true)
+    setSourceConnections(prev => ({ ...prev, status: 'refreshing', message: `Refresh requested for ${sourceId}.` }))
+    try {
+      const res = await fetch('/api/opportunity-agents/sources/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceId, limit: 8 }),
+      })
+      const data = await res.json() as { message?: string; result?: SourceRefreshResult }
+      if (!res.ok) throw new Error(data.message || 'Source refresh failed')
+      setSourceConnections(prev => ({
+        ...prev,
+        status: 'ready',
+        message: data.message ?? 'Source refresh completed.',
+        latestRefresh: data.result ?? null,
+      }))
+    } catch {
+      setSourceConnections(prev => ({ ...prev, status: 'error', message: `Source refresh failed for ${sourceId}. No opportunity was fabricated.` }))
+    } finally {
+      setSourceConnectionsLoading(false)
+    }
+  }
+
+  const prepareOpportunityAgentWorkPacket = async (candidate?: IncomeWorkerCandidate) => {
+    if (opportunityAgentLoading) return
+    setOpportunityAgentLoading(true)
+    setOpportunityAgentWorkforce(prev => ({ ...prev, status: 'preparing', message: 'Opportunity Agent Workforce preparing approval-gated work packet...' }))
+    try {
+      const res = await fetch('/api/opportunity-agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(candidate ? { candidate, sourceType: incomeWorkerScout.diagnostics?.sourceType ?? 'local_manual' } : { limit: 3 }),
+      })
+      const data = await res.json() as {
+        message?: string
+        records?: OpportunityRecord[]
+        runs?: OpportunityWorkflowRun[]
+        persistence?: 'session_only'
+      }
+      if (!res.ok) throw new Error(data.message || 'Opportunity Agent Workforce failed')
+      setOpportunityAgentWorkforce({
+        status: 'ready',
+        message: data.message ?? 'Opportunity work packet prepared. Commander approval required before external action.',
+        records: Array.isArray(data.records) ? data.records : [],
+        runs: Array.isArray(data.runs) ? data.runs : [],
+        persistence: data.persistence ?? 'session_only',
+      })
+    } catch {
+      setOpportunityAgentWorkforce(prev => ({ ...prev, status: 'error', message: 'Opportunity Agent Workforce could not prepare a packet. No external action was taken.' }))
+    } finally {
+      setOpportunityAgentLoading(false)
     }
   }
 
@@ -11969,6 +12298,7 @@ function Home() {
           <p className="text-xs tracking-widest" style={{ color: '#444' }}>RA&apos;EL — HIGHER VISION INC</p>
         </div>
         <div className="flex items-center gap-2">
+          <WarRoomStatusSigilButton status={canonicalRuntimeStatus} />
           <Link
             href="/baby"
             className="rounded px-3 py-2 text-xs font-bold tracking-widest"
@@ -12616,8 +12946,15 @@ function Home() {
                   councilReviews={incomeCouncilReviews}
                   loading={incomeWorkerLoading}
                   assignLoading={incomeWorkerAssignLoading}
+                  workforce={opportunityAgentWorkforce}
+                  workforceLoading={opportunityAgentLoading}
+                  sourceConnections={sourceConnections}
+                  sourceConnectionsLoading={sourceConnectionsLoading}
+                  onTestSources={testOpportunitySourceConnections}
+                  onRefreshSource={refreshOpportunitySource}
                   onScout={runIncomeWorkerScout}
                   onAssign={assignIncomeWorkerCandidate}
+                  onPreparePacket={prepareOpportunityAgentWorkPacket}
                 />
                 <IncomeRadarPanel
                   opportunities={incomeOpportunities}
