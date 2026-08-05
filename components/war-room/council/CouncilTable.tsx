@@ -35,9 +35,9 @@ function CouncilHub({ className = '' }: { className?: string }) {
             'conic-gradient(from 180deg at 50% 50%, rgba(0,255,65,0.15), transparent, rgba(56,189,248,0.12), transparent, rgba(255,215,0,0.12), transparent)',
         }}
       />
-      <span className="relative text-[9px] font-semibold uppercase tracking-[0.35em] text-[#00ff41]/90">Core</span>
-      <span className="relative mt-1 text-center text-[8px] uppercase tracking-[0.2em] text-[#FFD700]/80">Council</span>
-      <span className="relative mt-0.5 text-[8px] text-sky-300/70">sync</span>
+      <span className="relative text-[9px] font-semibold uppercase tracking-[0.35em] text-slate-300">Core</span>
+      <span className="relative mt-1 text-center text-[8px] uppercase tracking-[0.2em] text-slate-400">Council</span>
+      <span className="relative mt-0.5 text-[8px] text-slate-500">simulated</span>
     </div>
   )
 }
@@ -54,8 +54,8 @@ export function CouncilTable({
 
   return (
     <div className={['relative', className].filter(Boolean).join(' ')}>
-      <p className="mb-3 text-center text-[9px] font-semibold uppercase tracking-[0.35em] text-slate-500 lg:text-left">
-        Static seed overview
+      <p className="mb-3 text-center text-[9px] font-semibold uppercase tracking-[0.35em] text-amber-300/90 lg:text-left">
+        Simulated placeholder seating — not live provider output
       </p>
       {/* Narrow viewports: hub + two columns */}
       <div className="lg:hidden">

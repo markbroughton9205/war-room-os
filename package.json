@@ -11,7 +11,8 @@
     "validate:approval-issuance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-approval-issuance-gate16.mjs",
     "validate:phase46-regressions": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase46-regressions.mjs",
     "validate:phase48-c4d": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase48-c4d-validation.mjs",
-    "validate:phase49-a": "node scripts/run-phase49-a-validation.mjs"
+    "validate:phase49-a": "node scripts/run-phase49-a-validation.mjs",
+    "validate:phase49-b": "node scripts/run-phase49-b-legacy-war-room-truth-tests.mjs"
   },
   "dependencies": {
     "@supabase/auth-js": "^2.105.4",

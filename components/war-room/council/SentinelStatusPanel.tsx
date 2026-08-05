@@ -5,10 +5,14 @@ import { useEffect, useState } from 'react'
 import type { SentinelMetricState, SentinelStatus } from '@/lib/mockCouncilData'
 import { MOCK_SENTINEL_STATUS } from '@/lib/mockCouncilData'
 
+// All metrics rendered here come from `MOCK_SENTINEL_STATUS` (lib/mockCouncilData.ts)
+// — simulated placeholder values, not live readings. Badges are styled neutral
+// slate and suffixed "sim": no green/healthy/critical signal coloring without
+// runtime evidence.
 const STATE_BADGE: Record<SentinelMetricState, string> = {
-  nominal: 'border-[#00ff41]/40 bg-emerald-950/30 text-[#00ff41]',
-  elevated: 'border-[#FFD700]/45 bg-amber-950/35 text-[#FFD700]',
-  critical: 'border-red-500/50 bg-red-950/40 text-red-300',
+  nominal: 'border-dashed border-slate-500/50 bg-slate-950/60 text-slate-400',
+  elevated: 'border-dashed border-slate-500/50 bg-slate-950/60 text-slate-400',
+  critical: 'border-dashed border-slate-500/50 bg-slate-950/60 text-slate-400',
 }
 
 const ROWS: { key: keyof SentinelStatus; label: string }[] = [
@@ -76,7 +80,7 @@ export function SentinelStatusPanel({
                   STATE_BADGE[value],
                 ].join(' ')}
               >
-                {value}
+                {value} · sim
               </span>
             </div>
           )

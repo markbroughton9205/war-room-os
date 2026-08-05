@@ -150,9 +150,13 @@ function CouncilSection() {
     <section className="mx-auto mt-14 max-w-6xl border-t border-white/10 pt-10">
       <header className="mb-6">
         <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-[#d4af37]">Council</p>
-        <h2 className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-2xl">Seating &amp; oversight</h2>
+        <h2 className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-2xl">
+          Simulated seating &amp; oversight
+        </h2>
         <p className="mt-1 max-w-2xl text-sm text-slate-500">
-          Static council overview for the legacy route. Use the primary Live Council shell for runtime provider participation, trace, and transcript state.
+          Everything in this section is simulated placeholder data from <code>lib/mockCouncilData.ts</code>. No
+          provider produced it, no task shown here is running, and no metric is a live reading. Use the primary
+          Live Council shell for runtime provider participation, trace, and transcript state.
         </p>
       </header>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_17.5rem] lg:items-start lg:gap-x-8 lg:gap-y-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
