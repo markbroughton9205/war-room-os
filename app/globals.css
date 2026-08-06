@@ -89,9 +89,24 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .war-room-scanlines,
-  .war-room-matrix-particles {
+  .war-room-matrix-particles,
+  .war-room-loading-pulse {
     animation: none !important;
   }
+}
+
+@keyframes war-room-loading-pulse-fade {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.war-room-loading-pulse {
+  animation: war-room-loading-pulse-fade 1.4s ease-in-out infinite;
 }
 
 * {

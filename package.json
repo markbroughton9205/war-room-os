@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "validate:approval-issuance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-approval-issuance-gate16.mjs",
+    "validate:earth-intelligence": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-earth-intelligence-validation.mjs",
     "validate:phase46-regressions": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase46-regressions.mjs",
     "validate:phase48-c4d": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase48-c4d-validation.mjs",
     "validate:phase49-a": "node scripts/run-phase49-a-validation.mjs",
@@ -20,12 +21,14 @@
     "@supabase/supabase-js": "^2.105.4",
     "ai": "^6.0.177",
     "globe.gl": "^2.45.3",
+    "leaflet": "^1.9.4",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
