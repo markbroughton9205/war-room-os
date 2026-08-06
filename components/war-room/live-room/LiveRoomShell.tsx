@@ -18,6 +18,12 @@ export type LiveRoomShellProps = {
   onPanelChange: (id: DockPanelId | null) => void
   dockPanel?: ReactNode
   systemHealthGapCount?: number
+  /**
+   * Commander correction (2026-08-05) — Expand Chat: a pure layout toggle. `leftNav`/`rightPanel`
+   * stay mounted in the tree (just not rendered) so no state they hold is lost, and `council`
+   * itself is never remounted, so transcript/scroll state persists across toggling either way.
+   */
+  chatExpanded?: boolean
 }
 
 export function LiveRoomShell({
@@ -31,6 +37,7 @@ export function LiveRoomShell({
   onPanelChange,
   dockPanel,
   systemHealthGapCount,
+  chatExpanded = false,
 }: LiveRoomShellProps) {
   return (
     <section
@@ -45,12 +52,16 @@ export function LiveRoomShell({
       <div className="relative z-10 flex-shrink-0">{intelRow}</div>
 
       <main
-        className="live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-2 overflow-hidden px-2 pt-2 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_minmax(0,14rem)] lg:gap-3 lg:px-3"
+        className={
+          chatExpanded
+            ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-2 overflow-hidden px-2 pt-2 lg:gap-3 lg:px-3'
+            : 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-2 overflow-hidden px-2 pt-2 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_minmax(0,14rem)] lg:gap-3 lg:px-3'
+        }
         data-testid="live-room-center"
       >
-        <div className="hidden min-h-0 lg:block">{leftNav}</div>
+        <div className={chatExpanded ? 'hidden' : 'hidden min-h-0 lg:block'}>{leftNav}</div>
         <div className="flex min-h-0 min-w-0 flex-col">{council}</div>
-        <div className="hidden min-h-0 lg:block">{rightPanel}</div>
+        <div className={chatExpanded ? 'hidden' : 'hidden min-h-0 lg:block'}>{rightPanel}</div>
       </main>
 
       {activePanelId && dockPanel ? (
