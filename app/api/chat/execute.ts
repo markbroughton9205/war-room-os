@@ -17,7 +17,13 @@ import { resolveDiagnosticIntentMode } from '@/lib/council/diagnosticMode'
 import { detectRedTeamRuntimeHold } from '@/lib/council/redTeamHold'
 import { applyGovernor, COUNCIL_GOVERNOR_SILENT_SKIP } from '@/lib/council/responseGovernor'
 import { resolveCurrentIntent } from '@/lib/council/currentIntent'
-import { buildActiveScope } from '@/lib/council/intentScope'
+import {
+  buildActiveScope,
+  stripCrossTalkLines,
+  stripForbiddenScopeLines,
+  stripGreetingStrategicBoilerplate,
+  textViolatesForbiddenScope,
+} from '@/lib/council/intentScope'
 import {
   DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS,
   DIRECT_INVOCATION_GROK_TIMEOUT_MS,
@@ -33,7 +39,7 @@ import {
   buildModeGovernorPromptBlock,
 } from '@/lib/council/modeGovernorPrompt'
 import { buildRoomStatusesFromProviderStates } from '@/lib/council/roomStatus'
-import { providerOutcomeToVerifiedContext } from '@/lib/council/runtimeTruth'
+import { applyRuntimeTruthFilter, providerOutcomeToVerifiedContext } from '@/lib/council/runtimeTruth'
 import { ALL_ORCHESTRATION_FAMILIES } from '@/lib/council/commandParser'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
@@ -116,7 +122,12 @@ import {
   trimStableGroupPriorForCeiling,
   type StableGroupPriorReply,
 } from '@/lib/council/stableGroupChat'
-import { filterDecreeRelevantPriorReplies } from '@/lib/council/contextRelevance'
+import { filterDecreeRelevantPriorReplies, isLightweightPingDecree } from '@/lib/council/contextRelevance'
+import {
+  buildGreetingSystemPrompt,
+  buildStableGroupGreetingUserPrompt,
+  STABLE_GROUP_GREETING_META,
+} from '@/lib/council/greetingPrompt'
 import { appendProviderIdentityToCouncilSystem } from '@/lib/council/providerIdentity'
 import {
   buildProviderTokenDiagnostics,
@@ -689,7 +700,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   const message = typeof body.message === 'string' ? body.message : ''
   if (!message && !conversationalTurn) return NextResponse.json({ error: 'No message' }, { status: 400 })
 
-  const profile = typeof body.profile === 'string' ? body.profile : ''
+  const rawProfileFromClient = typeof body.profile === 'string' ? body.profile : ''
   const threadHistory = body.threadHistory
   const mode = body.mode as string | undefined
   const toneMode = typeof body.toneMode === 'string' ? body.toneMode : 'casual'
@@ -767,6 +778,19 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           ? 'Continue council dialogue on the active topic without a new decree. Respond once; challenge only if material.'
           : message
 
+  /**
+   * Phase 49 preview correction (2026-08-05): a bare greeting/status ping was surfacing
+   * RAEL_PROFILE (including "Goal: Panama relocation") because the profile text was always
+   * interpolated into every family's system prompt with only a soft "use only when relevant"
+   * instruction — models don't reliably honor that when the text is handed to them regardless.
+   * `isLightweightPingDecree` is the same signal already used above to neutralize stale
+   * `threadHistory` for pings; reused here so the server, not the client, is the trust boundary
+   * for suppressing the profile — a client that still sends `profile` on a lightweight ping is
+   * ignored.
+   */
+  const isLightweightGreeting = isLightweightPingDecree(raelDirectiveText)
+  const profile = isLightweightGreeting ? '' : rawProfileFromClient
+
   const sequentialDiagnostic = body.sequentialDiagnostic === true
   const diagnosticTurnIndex = typeof body.diagnosticTurnIndex === 'number' ? body.diagnosticTurnIndex : undefined
   const diagnosticTurnTotal = typeof body.diagnosticTurnTotal === 'number' ? body.diagnosticTurnTotal : undefined
@@ -785,7 +809,14 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
 
   const diagnosticIntentMode = resolveDiagnosticIntentMode(raelDirectiveText)
 
-  const thread = buildThread(threadHistory)
+  // Phase 49-A-1: a bare greeting/test-ping ("hello", "hi council", "quick check in", "status
+  // check") carries no topic of its own — it must not pull an unrelated prior thread (e.g. a
+  // stale Panama/business discussion) into the prompt just because raw thread history is always
+  // otherwise injected verbatim here (see buildCouncilUserPrompt's threadBlock, used by the
+  // direct-invocation and non-stable-group prompt paths — confirmed by a full-file grep of every
+  // `threadHistory` consumer: the only other consumer, `extractLastTwoFamilyReplies`, is always
+  // passed through `filterDecreeRelevantPriorReplies` at both of its call sites).
+  const thread = isLightweightPingDecree(raelDirectiveText) ? 'Session just started.' : buildThread(threadHistory)
   const intentState = resolveCurrentIntent({ latestRaelDecreeText: raelDirectiveText })
   councilTrace.record('current_intent_resolved', {
     module: 'lib/council/currentIntent.ts:resolveCurrentIntent',
@@ -955,49 +986,89 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       ? appendProviderIdentityToCouncilSystem(system, family)
       : system
 
-  const gptSystem = withCouncilIdentityLayer(
-    withOpportunityMandate(
-      `You are ChatGPT Family in Ra'el's War Room. Role: synthesize, prioritize, and convert distinct family inputs into a coherent plan without repeating labels unless adding new value. Personality: strategic and direct — you're the one helping lead the plan, organizing the move rather than filing a report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  /**
+   * Dedicated lightweight-greeting system prompt (Phase 49 preview correction, 2026-08-05):
+   * a bare "hello council" must get a brief greeting + truthful status/availability, not the
+   * full persona/role prompt (which was how it ended up rambling into strategy/mission content
+   * even with `profile` blanked out — the role/personality text alone still invites it). Status
+   * is read from `providerRuntimeStates` (the same real per-turn connection data the rest of
+   * this handler already uses) rather than left to the model to self-report, so an unavailable
+   * provider can't claim to be connected. Logic lives in lib/council/greetingPrompt.ts (unit
+   * tested there) — this is a thin wrapper resolving the live per-turn status.
+   *
+   * Follow-up (same date): Stable Group mode — the app's default mode, and the mode that
+   * actually reproduced the Preview greeting defect — never reads `profile`/`RAEL_PROFILE` at
+   * all (`buildStableGroupSystemPrompt`/`buildStableGroupUserPrompt` in
+   * lib/council/stableGroupChat.ts take no such argument), so the gating above the
+   * `gptSystem`/`claudeSystem`/etc. block alone never touched it. The actual cause of the
+   * mission-speech-on-greeting behavior in Stable Group mode is (a) an unconditional
+   * `OPERATOR_CONTEXT_FACTS` operator-identity block (lib/council/providerIdentity.ts) baked into
+   * every stable-group system prompt via `buildProviderIdentityPromptLayer`, combined with (b)
+   * `buildStableGroupUserPrompt`'s closing instruction: "do not reply with only a greeting or
+   * acknowledgment, then stop" — which actively forces the model to invent substantive content
+   * when the decree has none. Both are bypassed below (`STABLE_GROUP_GREETING_META`,
+   * `buildStableGroupGreetingUserPrompt`, imported above) for lightweight greetings.
+   */
+  const greetingSystemPrompt = (label: string, roleShort: string, familyKey: CouncilOrchestrationFamily): string =>
+    buildGreetingSystemPrompt(label, roleShort, providerRuntimeStates?.[familyKey])
+
+  const gptSystem = isLightweightGreeting
+    ? greetingSystemPrompt('ChatGPT Family', 'synthesis and prioritization', 'chatgpt')
+    : withCouncilIdentityLayer(
+      withOpportunityMandate(
+        `You are ChatGPT Family in Ra'el's War Room. Role: synthesize, prioritize, and convert distinct family inputs into a coherent plan without repeating labels unless adding new value. Personality: strategic and direct — you're the one helping lead the plan, organizing the move rather than filing a report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+        'chatgpt',
+      ),
       'chatgpt',
-    ),
-    'chatgpt',
-  )
-  const claudeSystem = withCouncilIdentityLayer(
-    withOpportunityMandate(
-      `You are Claude Family in Ra'el's War Room. Role: architecture, invariants, truth boundaries, persistence, rollback, and evidence restraint. Personality: thoughtful, honest, dry humor — you catch what others might be missing and challenge it carefully, without sounding stiff or like a formal review. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    )
+  const claudeSystem = isLightweightGreeting
+    ? greetingSystemPrompt('Claude Family', 'architecture and truth boundaries', 'claude')
+    : withCouncilIdentityLayer(
+      withOpportunityMandate(
+        `You are Claude Family in Ra'el's War Room. Role: architecture, invariants, truth boundaries, persistence, rollback, and evidence restraint. Personality: thoughtful, honest, dry humor — you catch what others might be missing and challenge it carefully, without sounding stiff or like a formal review. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+        'claude',
+      ),
       'claude',
-    ),
-    'claude',
-  )
-  const grokSystem = withCouncilIdentityLayer(
-    withOpportunityMandate(
-      `You are Grok Family in Ra'el's War Room. Role: external signal volatility only when sources or live intelligence evidence are present, plus sharp contradiction spotting. Personality: blunt and unconventional — surface the angle nobody else is bringing up. A little personality is welcome, just don't lose the thread into unserious territory. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Important: if live tools or intelligence evidence are not provided in the prompt, do not pretend you searched X or the web; call it a telemetry gap or hypothesis. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    )
+  const grokSystem = isLightweightGreeting
+    ? greetingSystemPrompt('Grok Family', 'signals and contradiction analysis', 'grok')
+    : withCouncilIdentityLayer(
+      withOpportunityMandate(
+        `You are Grok Family in Ra'el's War Room. Role: external signal volatility only when sources or live intelligence evidence are present, plus sharp contradiction spotting. Personality: blunt and unconventional — surface the angle nobody else is bringing up. A little personality is welcome, just don't lose the thread into unserious territory. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Important: if live tools or intelligence evidence are not provided in the prompt, do not pretend you searched X or the web; call it a telemetry gap or hypothesis. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+        'grok',
+      ),
       'grok',
-    ),
-    'grok',
-  )
-  const geminiSystem = withCouncilIdentityLayer(
-    withOpportunityMandate(
-      `You are Gemini Family in Ra'el's War Room. Role: large-context reasoning, long evidence comparison, cross-source correlation, and multimodal interpretation only when the thread actually includes images/PDFs or pasted excerpts. Personality: connective and curious — you help the family see how the pieces fit together and broaden the picture, in plain conversational language, not a structured writeup. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not claim live web, image/PDF ingestion, or tools you were not given in the prompt. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    )
+  const geminiSystem = isLightweightGreeting
+    ? greetingSystemPrompt('Gemini Family', 'research and long-context analysis', 'gemini')
+    : withCouncilIdentityLayer(
+      withOpportunityMandate(
+        `You are Gemini Family in Ra'el's War Room. Role: large-context reasoning, long evidence comparison, cross-source correlation, and multimodal interpretation only when the thread actually includes images/PDFs or pasted excerpts. Personality: connective and curious — you help the family see how the pieces fit together and broaden the picture, in plain conversational language, not a structured writeup. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not claim live web, image/PDF ingestion, or tools you were not given in the prompt. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+        'gemini',
+      ),
       'gemini',
-    ),
-    'gemini',
-  )
-  const kimiSystem = withCouncilIdentityLayer(
-    withOpportunityMandate(
-      `You are Kimi Family in Ra'el's War Room. Role: task decomposition, execution planning, long-context reasoning, and step breakdown with dependencies. Personality: practical, ordered, calm. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not invent completed work or hidden tools. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    )
+  const kimiSystem = isLightweightGreeting
+    ? greetingSystemPrompt('Kimi Family', 'task decomposition and execution planning', 'kimi')
+    : withCouncilIdentityLayer(
+      withOpportunityMandate(
+        `You are Kimi Family in Ra'el's War Room. Role: task decomposition, execution planning, long-context reasoning, and step breakdown with dependencies. Personality: practical, ordered, calm. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not invent completed work or hidden tools. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+        'kimi',
+      ),
       'kimi',
-    ),
-    'kimi',
-  )
-  const redTeamSystem = withCouncilIdentityLayer(
-    withOpportunityMandate(
-      `You are Red Team in Ra'el's War Room — the protective one, watching for where a plan could fail. Personality: protective, direct, like family saying "hold up" before Ra'el walks into something — not a compliance officer. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence, but say it the way someone who has his back would say it — never as a legal disclaimer or automated risk report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    )
+  const redTeamSystem = isLightweightGreeting
+    ? greetingSystemPrompt('Red Team', 'adversarial review', 'red_team')
+    : withCouncilIdentityLayer(
+      withOpportunityMandate(
+        `You are Red Team in Ra'el's War Room — the protective one, watching for where a plan could fail. Personality: protective, direct, like family saying "hold up" before Ra'el walks into something — not a compliance officer. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence, but say it the way someone who has his back would say it — never as a legal disclaimer or automated risk report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+        'red_team',
+      ),
       'red_team',
-    ),
-    'red_team',
-  )
-  const babySystem = `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
+    )
+  const babySystem = isLightweightGreeting
+    ? greetingSystemPrompt('Baby AI', 'observational council witness', 'baby')
+    : `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
 
   const runtimeSnapRaw =
     typeof body.runtimeIntegritySnapshot === 'string' ? body.runtimeIntegritySnapshot.trim() : ''
@@ -1110,6 +1181,31 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   const councilResearchIntent = detectCouncilResearchIntent(raelDirectiveText, {
     forceTeamResearch: councilResearchTeamRequested || Boolean(body.storyContext),
   })
+  // Phase 49-A-1 — Section 22 item 3: EXPLICIT_ARCHITECTURAL_DEFERRAL.
+  //
+  // A per-request exemption for `stabilityFlags.osSweepAndResearchTeam` was built and then
+  // independently reviewed. The review proved it dead code for all real Commander traffic: this
+  // gate's second clause requires `councilResearchTeamRequested` (`body.councilResearchTeam ===
+  // true`, which the live UI in app/page.tsx never sends — confirmed by a repo-wide grep with
+  // zero "ResearchTeam" hits) OR `councilResearchIntent.triggered && !councilSingleFamilyEarly`
+  // — and Stable Group's per-family HTTP-call shape (`app/page.tsx` sets `councilSingleFamily`
+  // on every call) makes `!councilSingleFamilyEarly` permanently false for Stable Group. No
+  // exemption on the first clause can change that outcome, so the added flag never altered
+  // observable behavior. It has been removed rather than left as inert code.
+  //
+  // Council Research Team (the multi-family, source-threaded-into-every-prompt pathway) is
+  // therefore deliberately deferred for Stable Group, not fixed here — re-enabling it would
+  // require either restructuring Stable Group's per-family call pattern or loosening
+  // `detectCouncilResearchIntent`'s own trigger requirement, both larger architectural changes
+  // outside this package's authorized scope.
+  //
+  // This does not leave planning/current-information requests ungrounded: the single-family live
+  // research router below (`researchEligible`/`mandatoryResearchEligible`, gated only by
+  // `stabilityFlags.liveResearchRouter`, which is unconditionally on outside the debug circuit
+  // breaker) already runs for Stable Group's per-family calls regardless of this flag, and now
+  // recognizes planning/relocation/travel language via `detectResearchIntent`'s broadened
+  // triggers (see `lib/research/researchIntent.ts`). A Stable Group reply to "how can we get to
+  // Panama" is genuinely evidence-grounded through that pathway today.
   if (
     stabilityFlags.osSweepAndResearchTeam
     && (
@@ -2522,30 +2618,38 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         const finalSynth = stableGroupFinalSynthesis && councilSingleFamily === 'chatgpt'
         if (finalSynth || isStableGroupFamily(councilSingleFamily)) {
           const sgFamily = (finalSynth ? 'chatgpt' : councilSingleFamily) as (typeof STABLE_GROUP_FAMILY_ORDER)[number]
-          stableGroupSystemForFamily = buildStableGroupSystemPrompt({
-            family: sgFamily,
-            toneInstruction,
-            finalSynthesis: finalSynth,
-          })
-          const trimResult = trimStableGroupPriorForCeiling({
-            prior: stableGroupPrior,
-            commanderMessage: raelDirectiveText,
-            activeTopic,
-            providerStatusBlock: stableGroupStatusBlock,
-            systemPrompt: stableGroupSystemForFamily,
-          })
-          stableGroupPriorForTurn = trimResult.prior
-          stableGroupPriorTrimmed = trimResult.trimmed
-          userPrompt = buildStableGroupUserPrompt({
-            commanderMessage: raelDirectiveText,
-            activeTopic,
-            priorReplies: filterDecreeRelevantPriorReplies(raelDirectiveText, extractLastTwoFamilyReplies(threadHistory)),
-            providerStatusBlock: stableGroupStatusBlock,
-            turnPriorFromClient: stableGroupPriorForTurn,
-            // `augmentBlock` carries only the live-research grounding at this point in the
-            // stable-group branch (orchestration/diagnostic augments are skipped for minimalCouncilPath)
-            researchBlock: augmentBlock || undefined,
-          })
+          if (isLightweightGreeting) {
+            const meta = STABLE_GROUP_GREETING_META[sgFamily]
+            stableGroupSystemForFamily = greetingSystemPrompt(meta.label, meta.roleShort, sgFamily)
+            stableGroupPriorForTurn = []
+            stableGroupPriorTrimmed = false
+            userPrompt = buildStableGroupGreetingUserPrompt(raelDirectiveText)
+          } else {
+            stableGroupSystemForFamily = buildStableGroupSystemPrompt({
+              family: sgFamily,
+              toneInstruction,
+              finalSynthesis: finalSynth,
+            })
+            const trimResult = trimStableGroupPriorForCeiling({
+              prior: stableGroupPrior,
+              commanderMessage: raelDirectiveText,
+              activeTopic,
+              providerStatusBlock: stableGroupStatusBlock,
+              systemPrompt: stableGroupSystemForFamily,
+            })
+            stableGroupPriorForTurn = trimResult.prior
+            stableGroupPriorTrimmed = trimResult.trimmed
+            userPrompt = buildStableGroupUserPrompt({
+              commanderMessage: raelDirectiveText,
+              activeTopic,
+              priorReplies: filterDecreeRelevantPriorReplies(raelDirectiveText, extractLastTwoFamilyReplies(threadHistory)),
+              providerStatusBlock: stableGroupStatusBlock,
+              turnPriorFromClient: stableGroupPriorForTurn,
+              // `augmentBlock` carries only the live-research grounding at this point in the
+              // stable-group branch (orchestration/diagnostic augments are skipped for minimalCouncilPath)
+              researchBlock: augmentBlock || undefined,
+            })
+          }
         } else {
           councilProgress.record({
             eventType: 'family_skipped_by_policy',
@@ -2799,15 +2903,19 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           }
           case 'red_team': {
             const redSystem = stableGroupSystemForFamily
-              ?? appendOpportunityMandateToSystem(
-                `You are Red Team in Ra'el's War Room — the protective one, watching for where a plan could fail. Personality: protective, direct, like family saying "hold up" before Ra'el walks into something — not a compliance officer. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence, but say it the way someone who has his back would say it — never as a legal disclaimer or automated risk report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
-                'red_team',
-              )
+              ?? (isLightweightGreeting
+                ? greetingSystemPrompt('Red Team', 'adversarial review', 'red_team')
+                : appendOpportunityMandateToSystem(
+                  `You are Red Team in Ra'el's War Room — the protective one, watching for where a plan could fail. Personality: protective, direct, like family saying "hold up" before Ra'el walks into something — not a compliance officer. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence, but say it the way someone who has his back would say it — never as a legal disclaimer or automated risk report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+                  'red_team',
+                ))
             responseText = await callClaudeWithEmptyContentRetry(userPrompt, redSystem, tokensForCall, 'red_team')
             break
           }
           case 'baby': {
-            const babySystem = `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
+            const babySystem = isLightweightGreeting
+              ? greetingSystemPrompt('Baby AI', 'observational council witness', 'baby')
+              : `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
             const { signal, dispose } = withBudgetSignal()
             try {
               responseText = await callChatGPT(userPrompt, babySystem, maxTokens, signal)
@@ -3038,6 +3146,12 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           ? responseText.trim()
           : undefined
       const preCallRuntime = providerRuntimeStates?.[councilSingleFamily]
+      const verifiedRuntimeContextForFamily = preCallRuntime
+        ? providerOutcomeToVerifiedContext({
+            family: councilSingleFamily,
+            runtime: preCallRuntime,
+          })
+        : { family: councilSingleFamily }
       const governed = stabilityFlags.responseGovernor
         ? applyGovernor(responseText, councilSingleFamily, councilCommand, {
             raelDirectiveText,
@@ -3045,14 +3159,54 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
             councilActiveScope: scopeForGovernor,
             modeGovernor,
             roomStatuses,
-            verifiedRuntimeContext: preCallRuntime
-              ? providerOutcomeToVerifiedContext({
-                  family: councilSingleFamily,
-                  runtime: preCallRuntime,
-                })
-              : { family: councilSingleFamily },
+            verifiedRuntimeContext: verifiedRuntimeContextForFamily,
           })
-        : { text: compactDisplayWhitespace(toDisplayText(responseText)), warnings: [] as string[] }
+        : (() => {
+            // Phase 49-A-1: Stable Group deliberately does NOT get the rest of `applyGovernor`
+            // (family soft-trim/length caps, mode-governor compression, telemetry-cliché
+            // stripping, collapse-repeated-blocks, integrity repair) — none of that is part of
+            // the audited defect, and turning all of it on for every Stable Group turn would be
+            // an unreviewed change to Stable Group response quality/formatting. What Stable
+            // Group previously never got at all is the truthfulness + topic-scope layer
+            // (Panama/business-drift stripping, cross-talk stripping, greeting boilerplate
+            // stripping, runtime-truth filtering) — that layer only ran when
+            // `stabilityFlags.responseGovernor` was true, which Stable Group's default flow mode
+            // never was. This reuses the exact exported helpers `applyGovernor` itself calls for
+            // that layer (`stripForbiddenScopeLines`, `stripCrossTalkLines`,
+            // `stripGreetingStrategicBoilerplate`, `textViolatesForbiddenScope`,
+            // `applyRuntimeTruthFilter`), in the same order `applyActiveScopeTail` applies them,
+            // rather than duplicating their logic. (Not replicated: the red_team-specific length
+            // cap / warm-intent-noise / strategic-pivot-language stripping block, which is a
+            // family-specific formatting behavior outside the truthfulness/topic-scope layer.)
+            let t = compactDisplayWhitespace(toDisplayText(responseText))
+            const warnings: string[] = []
+            const scopeStrip = stripForbiddenScopeLines(t, scopeForGovernor)
+            t = scopeStrip.text
+            if (scopeStrip.stripped > 0) warnings.push('council_governor_stripped_active_scope_topic')
+            if (textViolatesForbiddenScope(scopeForGovernor, t)) {
+              warnings.push('protocol_drift_active_scope_residual')
+            }
+            if (!scopeForGovernor.crossTalkAllowed) {
+              const crossTalkStrip = stripCrossTalkLines(t)
+              t = crossTalkStrip.text
+              if (crossTalkStrip.stripped > 0) warnings.push('council_governor_stripped_cross_talk')
+            }
+            if (intentState.intent === 'greeting') {
+              const greetingStrip = stripGreetingStrategicBoilerplate(t)
+              t = greetingStrip.text
+              if (greetingStrip.stripped > 0) warnings.push('council_governor_greeting_stripped_boilerplate')
+            }
+            const truthFiltered = applyRuntimeTruthFilter(t, {
+              family: councilSingleFamily,
+              mode: modeGovernor?.mode ?? 'council',
+              verifiedContext: verifiedRuntimeContextForFamily,
+              roomStatuses,
+            })
+            if (truthFiltered.warnings.length) warnings.push(...truthFiltered.warnings)
+            const finalText = truthFiltered.text.trim()
+            if (!finalText) warnings.push('council_governor_empty_after_trim')
+            return { text: finalText, warnings }
+          })()
       councilTrace.record('scope_guardian_checked', {
         module: 'lib/council/responseGovernor.ts:applyGovernor',
         inputSummary: {

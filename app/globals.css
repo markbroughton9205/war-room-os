@@ -3,6 +3,10 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --war-room-scrollbar-thumb: #00ff66;
+  --war-room-scrollbar-thumb-hover: #86efac;
+  --war-room-scrollbar-track: #020403;
+  --war-room-matrix-opacity: 0.68;
 }
 
 @theme inline {
@@ -87,5 +91,40 @@ body {
   .war-room-scanlines,
   .war-room-matrix-particles {
     animation: none !important;
+  }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--war-room-scrollbar-thumb) var(--war-room-scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--war-room-scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(0,255,102,0.95), rgba(22,163,74,0.75));
+  border: 2px solid var(--war-room-scrollbar-track);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--war-room-scrollbar-thumb-hover);
+}
+
+.war-room-scrollbar-green {
+  scrollbar-width: thin;
+  scrollbar-color: var(--war-room-scrollbar-thumb) var(--war-room-scrollbar-track);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --war-room-matrix-opacity: 0.34;
   }
 }

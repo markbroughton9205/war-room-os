@@ -160,10 +160,11 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
     <canvas
       ref={canvasRef}
       aria-hidden
-      className="pointer-events-none fixed inset-0 z-0 h-screen w-screen opacity-55"
+      className="pointer-events-none fixed inset-0 z-0 h-screen w-screen"
       style={{
-        background: 'rgba(0, 0, 0, 0.18)',
+        background: 'rgba(0, 0, 0, 0.14)',
         mixBlendMode: 'screen',
+        opacity: 'var(--war-room-matrix-opacity)',
       }}
     />
   )

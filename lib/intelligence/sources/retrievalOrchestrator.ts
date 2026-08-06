@@ -13,6 +13,7 @@ export type MandatoryRetrievalReason =
   | 'public_sentiment'
   | 'breaking_developments'
   | 'explicit_live_retrieval'
+  | 'relocation_planning'
 
 export type RetrievalRequirement = {
   required: boolean
@@ -51,11 +52,29 @@ const MANDATORY_PATTERNS: { reason: MandatoryRetrievalReason; pattern: RegExp }[
   { reason: 'local_conditions', pattern: /\b(local|nearby|around\s+me|in\s+akron|cleveland|summit\s+county|neighborhood|traffic|road\s+closure)\b/i },
   { reason: 'public_sentiment', pattern: /\b(people\s+talking|sentiment|chatter|reddit|twitter|x\.com|community\s+discussion|rumor)\b/i },
   { reason: 'breaking_developments', pattern: /\b(breaking|developing|ongoing|live\s+updates?|just\s+happened)\b/i },
+  // Suffixes are deliberately restricted to (?:e|ion|ing) rather than \w* — aligned with
+  // lib/research/researchIntent.ts's PLANNING_LOGISTICS_TRIGGERS so the two files behave
+  // consistently. A looser \w* previously matched "emigrated" (past tense) here while the
+  // narrower researchIntent.ts pattern correctly did not, an inconsistency an independent review
+  // surfaced as a confirmed false positive ("our fictional character emigrated").
+  { reason: 'relocation_planning', pattern: /\b(relocat(?:e|ion|ing)|immigrat(?:e|ion|ing)|emigrat(?:e|ion|ing)|move\s+to|moving\s+to|plan(?:ning)?\s+(?:our|my|the|a)\s+(?:move|relocation|trip)|visa\s+requirements?|travel\s+(?:plan(?:ning)?|logistics|requirements?)|housing\s+logistics|transportation\s+logistics|how\s+(?:can|do|would|could)\s+we\s+(?:get\s+to|relocate|move|accomplish|achieve))\b/i },
 ]
+
+/**
+ * Code/meta-discussion nouns that indicate a relocation-shaped word is being used about code or
+ * the word itself, not a real-world planning request — mirrors
+ * lib/research/researchIntent.ts's PLANNING_CODE_OR_META_CONTEXT (kept as a separate local
+ * constant rather than a shared import to avoid a circular dependency: researchIntent.ts already
+ * imports `evaluateMandatoryLiveRetrieval` from this file). Scoped to the `relocation_planning`
+ * reason only — it must not suppress the other, unrelated mandatory-retrieval reasons.
+ */
+const RELOCATION_CODE_OR_META_CONTEXT =
+  /\b(?:function|file|variable|method|class|module|component|regex|code|script|directory|folder|word|document|constant|property|parameter|argument)\b/i
 
 export function evaluateMandatoryLiveRetrieval(decree: string): RetrievalRequirement {
   const reasons = MANDATORY_PATTERNS
     .filter(item => item.pattern.test(decree))
+    .filter(item => item.reason !== 'relocation_planning' || !RELOCATION_CODE_OR_META_CONTEXT.test(decree))
     .map(item => item.reason)
   const unique = [...new Set(reasons)]
   return {

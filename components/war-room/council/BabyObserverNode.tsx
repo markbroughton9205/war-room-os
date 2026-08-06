@@ -19,6 +19,9 @@ export function BabyObserverNode({
       aria-label="Baby observer"
     >
       <p className="text-[9px] font-semibold uppercase tracking-[0.3em] text-sky-300/90">Baby observer</p>
+      <p className="mt-1 text-[9px] uppercase tracking-wider text-amber-300/80">
+        Simulated placeholder metrics — not live observation
+      </p>
       <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
         <div className="flex justify-between gap-2 border-b border-white/5 pb-1">
           <dt className="text-slate-500">Patterns</dt>
@@ -38,7 +41,7 @@ export function BabyObserverNode({
         </div>
         <div className="col-span-2 flex justify-between gap-2 border-b border-white/5 pb-1">
           <dt className="text-slate-500">Memory</dt>
-          <dd className="truncate text-right text-[#00ff41]/85">{observer.memoryGrowth}</dd>
+          <dd className="truncate text-right text-slate-300">{observer.memoryGrowth}</dd>
         </div>
         <div className="flex justify-between gap-2">
           <dt className="text-slate-500">Loops</dt>
