@@ -17,10 +17,18 @@ function formatClock(now: Date) {
   })
 }
 
-export const WarRoomOsHeader = memo(function WarRoomOsHeader({
-  systemStatusLine = 'All systems nominal',
-  missionHint,
-}: WarRoomOsHeaderProps) {
+/**
+ * `systemStatusLine`/`missionHint` are intentionally accepted but unused: the verbose
+ * CPU/Memory/Network System Status block was removed from the header per Commander
+ * correction (2026-08-05) — that detail belongs in System Health / Runtime Details / the
+ * compact WarRoomStatusSigilButton indicator, not a permanent header banner. Kept as
+ * optional props so call sites don't need to change.
+ */
+export const WarRoomOsHeader = memo(function WarRoomOsHeader(props: WarRoomOsHeaderProps) {
+  // Accepted for call-site compatibility only — see comment above. Referenced (no-op) so the
+  // linter doesn't flag them as unused; the props themselves are intentionally not rendered.
+  void props.systemStatusLine
+  void props.missionHint
   const [clock, setClock] = useState('')
 
   useEffect(() => {
@@ -40,21 +48,6 @@ export const WarRoomOsHeader = memo(function WarRoomOsHeader({
         <p className="text-[10px] font-bold uppercase tracking-[0.42em] text-emerald-400">War Room OS</p>
         <p className="truncate text-[11px] font-semibold tracking-widest text-yellow-200/95">
           Ra&apos;el — Higher Vision Inc
-        </p>
-      </div>
-
-      <div className="hidden flex-1 flex-col items-center gap-1 sm:flex">
-        <p className="text-[9px] font-bold uppercase tracking-[0.35em] text-slate-500">System Status</p>
-        <div className="flex flex-wrap items-center justify-center gap-3 text-[10px] tracking-widest text-slate-400">
-          <span title="Missing dependency: a connected resource monitor feed.">CPU · Not connected</span>
-          <span className="text-emerald-900/80">|</span>
-          <span title="Missing dependency: a connected resource monitor feed.">Memory · Not connected</span>
-          <span className="text-emerald-900/80">|</span>
-          <span title="Missing dependency: a connected network health feed.">Network · Not connected</span>
-        </div>
-        <p className="max-w-md truncate text-center text-[9px] tracking-wide text-cyan-300/80" title={systemStatusLine}>
-          {systemStatusLine}
-          {missionHint ? ` · ${missionHint}` : ''}
         </p>
       </div>
 

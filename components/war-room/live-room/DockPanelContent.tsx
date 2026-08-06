@@ -246,6 +246,14 @@ export type DockPanelContentProps = {
   commandCenterExtras?: ReactNode
   builderExtras?: ReactNode
   redTeamPanel?: ReactNode
+  /**
+   * Phase 49-C Opportunity Command Center content (agent workforce, source
+   * status, work packets, live vs historical evidence, SAM fields). Supplied
+   * by the caller — this is a slot, not owned rendering, because the state
+   * it depends on (opportunityAgentWorkforce, sourceConnections, etc.) lives
+   * with the caller. Falls back to a not-yet-connected message if omitted.
+   */
+  opportunityCommandCenter?: ReactNode
   gapFinderContext?: GapFinderContext
   onGapCountChange?: (count: number) => void
 }
@@ -261,6 +269,7 @@ export const DockPanelContent = memo(function DockPanelContent({
   commandCenterExtras,
   builderExtras,
   redTeamPanel,
+  opportunityCommandCenter,
   gapFinderContext,
   onGapCountChange,
 }: DockPanelContentProps) {
@@ -282,6 +291,16 @@ export const DockPanelContent = memo(function DockPanelContent({
       {panelId === 'operations' ? (
         <div className="space-y-3">
           <OpportunityScoutPanel />
+        </div>
+      ) : null}
+
+      {panelId === 'opportunity-command-center' ? (
+        <div className="space-y-3">
+          {opportunityCommandCenter ?? (
+            <p className="text-[10px] tracking-wide text-slate-500">
+              Opportunity Command Center is not connected in this view yet.
+            </p>
+          )}
         </div>
       ) : null}
 

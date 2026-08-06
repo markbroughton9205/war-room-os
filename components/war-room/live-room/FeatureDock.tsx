@@ -8,6 +8,7 @@ export type DockPanelId =
   | 'live-council'
   | 'command-intel'
   | 'operations'
+  | 'opportunity-command-center'
   | 'memory-core'
   | 'approvals'
   | 'analytics'
@@ -25,6 +26,7 @@ export const DOCK_ICONS: DockIconDef[] = [
   { id: 'live-council', label: 'Live Council', glyph: '⚡' },
   { id: 'command-intel', label: 'Command Intel', glyph: '📡' },
   { id: 'operations', label: 'Operations', glyph: '⚙' },
+  { id: 'opportunity-command-center', label: 'Opportunity Command Center', glyph: '💼' },
   { id: 'memory-core', label: 'Memory Core', glyph: '🧠' },
   { id: 'approvals', label: 'Approvals', glyph: '✓' },
   { id: 'analytics', label: 'Analytics', glyph: '📊' },

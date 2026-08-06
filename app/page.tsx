@@ -280,6 +280,7 @@ import {
   SynthesisCard,
   WarRoomOsHeader,
   useLiveRoomMode,
+  type AttachmentStatus,
   type DockPanelId,
 } from '@/components/war-room/live-room'
 import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
@@ -1937,20 +1938,25 @@ const MessageBubble = memo(function MessageBubble({
           {msg.content}
         </div>
         {!isRael && showOperationTimeline && operationTimelineInputs.length ? (
-          <CouncilOperationTimeline
-            input={{
-              id: msg.id,
-              familyName: msg.familyName,
-              content: msg.content,
-              timestamp: msg.timestamp,
-              provider: msg.provider,
-              messageType: msg.messageType,
-              providerStatus: councilOperationProviderStatus(msg),
-              familyDeliberationTurn: msg.familyDeliberationTurn,
-            }}
-            inputs={operationMessageInputs}
-            operation={reconciledOperation}
-          />
+          <details className="mt-2 w-full max-w-2xl rounded border border-emerald-900/30" style={{ background: 'rgba(0,0,0,0.18)' }}>
+            <summary className="cursor-pointer px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest" style={{ color: '#64748B' }}>
+              Runtime Details
+            </summary>
+            <CouncilOperationTimeline
+              input={{
+                id: msg.id,
+                familyName: msg.familyName,
+                content: msg.content,
+                timestamp: msg.timestamp,
+                provider: msg.provider,
+                messageType: msg.messageType,
+                providerStatus: councilOperationProviderStatus(msg),
+                familyDeliberationTurn: msg.familyDeliberationTurn,
+              }}
+              inputs={operationMessageInputs}
+              operation={reconciledOperation}
+            />
+          </details>
         ) : null}
         {msg.familyDeliberationTurn ? (
           <details
@@ -5527,9 +5533,22 @@ function formatApprovalPendingLabel(action: QueueActionRow): string {
   return action.type
 }
 
-function WriteApprovalBanner() {
-  const [phase, setPhase] = useState<'initial' | 'ready' | 'error'>('initial')
-  const [pendingLabel, setPendingLabel] = useState<string | null>(null)
+type PendingApprovalAction = QueueActionRow & { id: string }
+
+/**
+ * Commander correction (2026-08-05): this used to render a permanent "Approval gate ready."
+ * strip at the top of the app for every routine turn — greetings, synthesis, internal Council
+ * activity included. It now renders nothing until there is an actual action genuinely
+ * waiting_approval, and then shows a focused decision card (not a persistent banner). Approve /
+ * Decline call the existing /api/actions/approve and /api/actions/reject endpoints already used
+ * by the Approvals dock panel — no new backend approval logic. Silent failure/loading states are
+ * intentional: a broken approval gate is already surfaced by WarRoomStatusSigilButton's
+ * `approval_gate` probe, so this component doesn't need a second always-on indicator for that.
+ */
+function WriteApprovalBanner({ onOpenApprovals }: { onOpenApprovals: () => void }) {
+  const [pendingAction, setPendingAction] = useState<PendingApprovalAction | null>(null)
+  const [actionState, setActionState] = useState<'idle' | 'submitting' | 'error'>('idle')
+  const [actionError, setActionError] = useState<string | null>(null)
   const queueInFlight = useRef(false)
 
   const refreshApprovalBanner = useCallback(async () => {
@@ -5537,28 +5556,19 @@ function WriteApprovalBanner() {
     queueInFlight.current = true
     try {
       const res = await fetch('/api/actions/queue', { cache: 'no-store' })
-      if (!res.ok) {
-        setPhase('error')
-        setPendingLabel(null)
-        return
-      }
+      if (!res.ok) return
       const j = await res.json() as { actions?: unknown }
-      if (!Array.isArray(j.actions)) {
-        setPhase('error')
-        setPendingLabel(null)
-        return
-      }
-      const rows = j.actions as QueueActionRow[]
+      if (!Array.isArray(j.actions)) return
+      const rows = (j.actions as PendingApprovalAction[]).filter(
+        row => typeof row.id === 'string' && row.id.length > 0,
+      )
       const waiting = rows.filter(row => row.status === 'waiting_approval')
       waiting.sort(
         (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       )
-      const next = waiting[0] ?? null
-      setPendingLabel(next ? formatApprovalPendingLabel(next) : null)
-      setPhase('ready')
+      setPendingAction(waiting[0] ?? null)
     } catch {
-      setPhase('error')
-      setPendingLabel(null)
+      /* silent: approval_gate probe already surfaces persistent failures */
     } finally {
       queueInFlight.current = false
     }
@@ -5584,32 +5594,95 @@ function WriteApprovalBanner() {
     }
   }, [refreshApprovalBanner])
 
-  const pending = Boolean(pendingLabel)
-  const unknown = phase === 'error'
+  if (!pendingAction) return null
 
-  const borderColor = pending
-    ? 'rgba(234,179,8,0.55)'
-    : unknown
-      ? 'rgba(248,113,113,0.45)'
-      : 'rgba(71,85,105,0.45)'
-  const bg = pending
-    ? 'rgba(234,179,8,0.08)'
-    : unknown
-      ? 'rgba(248,113,113,0.06)'
-      : 'rgba(15,23,42,0.35)'
-  const textColor = pending ? '#EAB308' : unknown ? '#F87171' : '#94A3B8'
+  const decide = async (endpoint: '/api/actions/approve' | '/api/actions/reject') => {
+    setActionState('submitting')
+    setActionError(null)
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          endpoint === '/api/actions/approve'
+            ? { actionId: pendingAction.id, approval_granted: true }
+            : { actionId: pendingAction.id },
+        ),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({} as { error?: string }))
+        setActionError(j.error || 'The decision could not be recorded.')
+        setActionState('error')
+        return
+      }
+      setPendingAction(null)
+      setActionState('idle')
+      void refreshApprovalBanner()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'The decision could not be recorded.')
+      setActionState('error')
+    }
+  }
 
-  const primaryLine = unknown
-    ? 'Approval gate status unknown.'
-    : pending
-      ? `Approval required: ${pendingLabel}.`
-      : 'Approval gate ready.'
+  const label = formatApprovalPendingLabel(pendingAction)
 
   return (
-    <div className="border-b px-6 py-2 flex-shrink-0" style={{ borderColor, background: bg }}>
-      <p className="text-[10px] font-bold tracking-widest" style={{ color: textColor }}>
-        {phase === 'initial' ? 'Checking approval queue...' : primaryLine}
+    <div
+      className="fixed inset-x-0 top-0 z-40 mx-auto mt-3 w-full max-w-xl rounded border px-4 py-3 shadow-lg"
+      style={{ borderColor: 'rgba(234,179,8,0.55)', background: 'rgba(15,23,42,0.96)' }}
+      role="alertdialog"
+      aria-label="Commander decision requested"
+    >
+      <p className="text-[10px] font-bold tracking-widest" style={{ color: '#EAB308' }}>
+        COMMANDER DECISION REQUESTED
       </p>
+      <p className="mt-1 text-xs" style={{ color: '#E5E7EB' }}>
+        <span className="font-bold">What:</span> {label}
+      </p>
+      <p className="mt-1 text-xs" style={{ color: '#9CA3AF' }}>
+        <span className="font-bold" style={{ color: '#E5E7EB' }}>Why it matters:</span> This action is queued as{' '}
+        <span className="font-mono">{pendingAction.status}</span> and will not proceed without your explicit
+        approval.
+      </p>
+      <p className="mt-1 text-xs" style={{ color: '#9CA3AF' }}>
+        <span className="font-bold" style={{ color: '#E5E7EB' }}>What would change:</span> Approving moves this action
+        to <span className="font-mono">approved</span> so it becomes eligible to run; declining stops it here.
+      </p>
+      <p className="mt-1 text-xs" style={{ color: '#9CA3AF' }}>
+        <span className="font-bold" style={{ color: '#E5E7EB' }}>External action:</span> No external action has
+        occurred yet. None will occur unless you approve.
+      </p>
+      {actionError && (
+        <p className="mt-2 text-xs font-bold" style={{ color: '#F87171' }}>{actionError}</p>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={actionState === 'submitting'}
+          onClick={() => void decide('/api/actions/approve')}
+          className="rounded px-3 py-1.5 text-[10px] font-bold tracking-widest"
+          style={{ border: '1px solid rgba(52,211,153,0.5)', color: '#34D399', background: 'rgba(52,211,153,0.08)' }}
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          disabled={actionState === 'submitting'}
+          onClick={() => void decide('/api/actions/reject')}
+          className="rounded px-3 py-1.5 text-[10px] font-bold tracking-widest"
+          style={{ border: '1px solid rgba(248,113,113,0.5)', color: '#F87171', background: 'rgba(248,113,113,0.08)' }}
+        >
+          Decline
+        </button>
+        <button
+          type="button"
+          onClick={onOpenApprovals}
+          className="rounded px-3 py-1.5 text-[10px] font-bold tracking-widest"
+          style={{ border: '1px solid rgba(148,163,184,0.4)', color: '#94A3B8' }}
+        >
+          Review Details
+        </button>
+      </div>
     </div>
   )
 }
@@ -5915,6 +5988,84 @@ function Home() {
   const { uiMode, setUiMode } = useWarRoomUiMode()
   const [command, setCommand] = useState('')
 
+  /**
+   * Commander correction (2026-08-05) — attachment beside Execute, for books/documents the
+   * Council should examine. Upload reuses the existing authenticated /api/files/upload route;
+   * scanning reuses the new /api/council/documents/scan route (Phase 49 preview correction).
+   * Relevant excerpts are announced via the existing `addSystemMessage` mechanism so they become
+   * part of the same visible/stored thread history normal decrees already fold in as grounding —
+   * no new prompt-injection plumbing, no raw extraction/backend detail shown, and no durable
+   * memory write (this is per-session transcript content, not a Memory Core entry).
+   */
+  const [attachedFile, setAttachedFile] = useState<{ id: string; fileName: string } | null>(null)
+  const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus>('idle')
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
+
+  const handleAttachmentSelect = async (file: File) => {
+    setAttachedFile({ id: '', fileName: file.name })
+    setAttachmentStatus('uploading')
+    setAttachmentError(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('source_context', 'live-council-attachment')
+      const uploadRes = await fetch('/api/files/upload', { method: 'POST', body: form })
+      const uploadJson = await uploadRes.json() as { status?: string; message?: string; file?: { id?: string; file_name?: string } }
+      if (!uploadRes.ok || uploadJson.status !== 'complete' || !uploadJson.file?.id) {
+        setAttachmentStatus('error')
+        setAttachmentError(uploadJson.message || 'Upload failed.')
+        addSystemMessage(`Attachment "${file.name}" failed to upload: ${uploadJson.message || 'unknown error'}.`, { force: true })
+        return
+      }
+      const fileId = uploadJson.file.id
+      const fileName = uploadJson.file.file_name || file.name
+      setAttachedFile({ id: fileId, fileName })
+      setAttachmentStatus('processing')
+
+      const scanRes = await fetch('/api/council/documents/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId, objective: command.trim() || 'General relevance to the current War Room objective' }),
+      })
+      const scanJson = await scanRes.json() as {
+        status?: string
+        message?: string
+        excerpts?: { sectionLabel: string; text: string }[]
+      }
+      if (!scanRes.ok || scanJson.status === 'error') {
+        setAttachmentStatus('error')
+        setAttachmentError(scanJson.message || 'Document scan failed.')
+        addSystemMessage(`"${fileName}" uploaded, but the Council scan failed: ${scanJson.message || 'unknown error'}.`, { force: true })
+        return
+      }
+      if (scanJson.status === 'unsupported_format') {
+        setAttachmentStatus('ready')
+        addSystemMessage(`"${fileName}" is attached and available, but this file type isn't scannable yet: ${scanJson.message || 'unsupported format'}. The Council cannot read its contents automatically.`, { force: true })
+        return
+      }
+      const excerpts = Array.isArray(scanJson.excerpts) ? scanJson.excerpts : []
+      setAttachmentStatus('ready')
+      if (excerpts.length) {
+        const excerptText = excerpts.map(e => `[${e.sectionLabel}]\n${e.text}`).join('\n\n')
+        addSystemMessage(
+          `Document attached: "${fileName}" — ${excerpts.length} relevant excerpt${excerpts.length === 1 ? '' : 's'} identified for Council reference.\n\n${excerptText}`,
+          { force: true },
+        )
+      } else {
+        addSystemMessage(`"${fileName}" is attached and available, but no clearly relevant sections were found for the current objective.`, { force: true })
+      }
+    } catch (e) {
+      setAttachmentStatus('error')
+      setAttachmentError(e instanceof Error ? e.message : 'Attachment failed.')
+    }
+  }
+
+  const handleAttachmentRemove = () => {
+    setAttachedFile(null)
+    setAttachmentStatus('idle')
+    setAttachmentError(null)
+  }
+
   const [loading, setLoading] = useState(false)
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
   const [toolBarHealth, setToolBarHealth] = useState(initialToolBarHealth)
@@ -6096,6 +6247,14 @@ function Home() {
   const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
   const [liveCouncilLoadState, setLiveCouncilLoadState] = useState<'restoring' | 'ready' | 'session_only' | 'error'>('restoring')
   const [liveRoomWorkspace, setLiveRoomWorkspace] = useState<'council' | 'expanded_intel'>('council')
+  /**
+   * Commander correction (2026-08-05): Expand Chat — a pure layout toggle, never unmounts the
+   * council transcript, so no conversation state is lost switching either direction. Left/right
+   * rails are hidden only while expanded (still present on collapse), command console/Execute/
+   * attachment stay outside this grid entirely (LiveRoomShell's bottom stack), so they're
+   * unaffected either way.
+   */
+  const [isChatExpanded, setIsChatExpanded] = useState(false)
   const [browserOnline, setBrowserOnline] = useState(true)
   const [councilTraceTestAvailable, setCouncilTraceTestAvailable] = useState(false)
   const [councilTraceTestStatus, setCouncilTraceTestStatus] = useState<'checking' | 'hidden' | 'ready' | 'running' | 'complete' | 'error'>('checking')
@@ -12373,11 +12532,12 @@ function Home() {
             : 'relative z-10 flex flex-col'
         }
       >
-        <WriteApprovalBanner />
+        <WriteApprovalBanner onOpenApprovals={() => setDockPanelId('approvals')} />
         {!isUnifiedLiveRoom ? operatorNav : null}
         {isUnifiedLiveRoom && (
         <LiveRoomShell
           systemHealthGapCount={operatorGapCount}
+          chatExpanded={isChatExpanded}
           header={(
             <WarRoomOsHeader
               systemStatusLine={chatHealthLabel}
@@ -12434,6 +12594,11 @@ function Home() {
               councilFlowMode={councilFlowMode}
               onCouncilFlowModeChange={persistCouncilFlowMode}
               showFlowModeSelect={false}
+              attachmentFileName={attachedFile?.fileName ?? null}
+              attachmentStatus={attachmentStatus}
+              attachmentError={attachmentError}
+              onAttachmentSelect={file => void handleAttachmentSelect(file)}
+              onAttachmentRemove={handleAttachmentRemove}
             />
           )}
           activePanelId={dockPanelId}
@@ -12514,6 +12679,25 @@ function Home() {
                 redTeamPanel={(
                   <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
                 )}
+                opportunityCommandCenter={(
+                  <IncomeWorkersPanel
+                    opportunities={incomeOpportunities}
+                    actions={raelActions}
+                    scout={incomeWorkerScout}
+                    councilReviews={incomeCouncilReviews}
+                    loading={incomeWorkerLoading}
+                    assignLoading={incomeWorkerAssignLoading}
+                    workforce={opportunityAgentWorkforce}
+                    workforceLoading={opportunityAgentLoading}
+                    sourceConnections={sourceConnections}
+                    sourceConnectionsLoading={sourceConnectionsLoading}
+                    onTestSources={testOpportunitySourceConnections}
+                    onRefreshSource={refreshOpportunitySource}
+                    onScout={runIncomeWorkerScout}
+                    onAssign={assignIncomeWorkerCandidate}
+                    onPreparePacket={prepareOpportunityAgentWorkPacket}
+                  />
+                )}
               />
             ) : null
           }
@@ -12568,6 +12752,20 @@ function Home() {
               title="Controls"
             >
               ⚙ Controls
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsChatExpanded(prev => !prev)}
+              className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+              style={{
+                border: isChatExpanded ? '1px solid #FFD700' : '1px solid #93C5FD',
+                color: isChatExpanded ? '#FFD700' : '#93C5FD',
+              }}
+              aria-label={isChatExpanded ? 'Collapse chat to normal dashboard' : 'Expand chat to full view'}
+              aria-pressed={isChatExpanded}
+              title={isChatExpanded ? 'Collapse Chat' : 'Expand Chat'}
+            >
+              {isChatExpanded ? '⤡ Collapse Chat' : '⤢ Expand Chat'}
             </button>
             {!autoScrollEnabled ? (
               <button
