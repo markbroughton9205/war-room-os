@@ -1,9 +1,14 @@
 # Research Engine — Architecture
 
-Status: **Phase 0 (foundation) complete, Phase 1 (primary providers) partially complete.**
-This is a staged build — see `RESEARCH_PROVIDER_MATRIX.md` for exactly which
-of the 29 providers in the assignment spec are implemented today, and
-`RESEARCH_ENGINE_RUNBOOK.md` for how to add the rest.
+Status: **Phase 0 (foundation) complete. 21 of 29 providers implemented as of
+the "Remaining 15" build phase; 8 remain honestly `implemented: false` with a
+documented blocker each.** This is a staged build — see
+`RESEARCH_PROVIDER_MATRIX.md` for exactly which providers are implemented
+today, `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md` for the full contract
+proof and blocker text behind the most recent build phase,
+`docs/RESEARCH_CONTROLLED_PROBE_LOG.md` for the auditable list of every live
+provider request made during that phase, and `RESEARCH_ENGINE_RUNBOOK.md`
+for how to add the rest.
 
 ## Terminology
 
@@ -16,7 +21,7 @@ interchangeably:
   calls no adapter.
 - **Implemented adapter** — a registered provider with a real
   `ResearchProviderAdapter` in `providers/registry.ts::IMPLEMENTED_PROVIDER_ADAPTERS`
-  (14 of 29 today).
+  (21 of 29 today).
 - **Adapter-specific mocked test** — a test in `diagnostics/validation.ts`
   that invokes a specific implemented adapter's real `run()` against a
   mocked `fetch` and asserts on its normalized output (checks `re_42`–`re_99`).
@@ -57,10 +62,13 @@ A server-only, read-only, Commander-gated intelligence-gathering layer under
 `lib/research-engine/` and `app/api/research/*`. It queries public/government
 data providers (GitHub, arXiv, Crossref, FRED, USGS Earthquake Catalog/Water
 Data/Real-Time Earthquake Feeds/ScienceBase, World Bank Indicators, Wikidata,
-NCBI/PubMed, Exa, Library of Congress, NASA GIBS today; 15 more registered
-but not yet implemented), normalizes their responses into one schema, and
-returns evidence with citations. It never writes to any provider, never
-executes actions, and is never reachable by an unauthenticated caller.
+NCBI/PubMed, Exa, Library of Congress, NASA GIBS, Semantic Scholar,
+CourtListener, Internet Archive, Wayback Machine, Common Crawl, SAM.gov, and
+NASA Open APIs (NeoWs) today; 8 more registered but not yet implemented, each
+with a documented blocker — see `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md`),
+normalizes their responses into one schema, and returns evidence with
+citations. It never writes to any provider, never executes actions, and is
+never reachable by an unauthenticated caller.
 
 ## Directory layout
 
@@ -279,20 +287,100 @@ unrenumbered and unchanged. No live provider verification occurred for this
 repair; validation is 132 pre-existing + 17 new = 149 total checks, all
 mocked.
 
+## Remaining 15 build phase: 7 implemented, 8 blocked
+
+A subsequent controls-compliant build phase (no live provider data/search
+calls, except two bounded, logged, controlled probes made under an explicit
+Commander amendment — see below) worked through the 15 providers left
+unimplemented after Batch 1A:
+
+- **Implemented**: Semantic Scholar, CourtListener, Internet Archive,
+  Wayback Machine, Common Crawl (Group A — research/legal/archives);
+  SAM.gov, NASA Open APIs/NeoWs (Group B — federal/science).
+- **Blocked, each with a specific documented reason** (never a guess): FMCSA
+  (response envelope undocumented by any official source this session could
+  read), USPTO (per-product ODP API family, current path unclear), USGS
+  National Map (official docs page unreadable — client-rendered Swagger
+  shell; official PDF returned 403; two controlled live probes both timed
+  out), World Bank Data Catalog, World Bank Projects (pre-existing v2/v3
+  conflict, re-confirmed this phase — not newly live-derived), World Bank
+  Finances, World Bank Climate, IMF SDMX.
+
+Full per-provider contract records (all 26 required fields), the exact
+official source for every claim, and the exact blocker text for every
+blocked provider are in `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md`.
+
+**Controlled live schema verification.** This phase began under the same
+"no live provider call" rule as Batch 1A, but a genuine research gap on
+`usgs_national_map` led to a disclosed process violation (a live query URL
+was fetched before any live-verification policy existed) and a subsequent
+Commander amendment authorizing a small number of narrowly bounded,
+logged, GET-only, credential-free structural probes. Two such probes were
+made against `usgs_national_map` (both HTTP 504 timeout, no data obtained);
+the provider was reclassified `BLOCKED — MISSING AUTHORITATIVE CONTRACT`
+per the amendment's own rule ("leave the provider blocked when the official
+documentation plus controlled schema check still cannot prove the adapter
+contract"). No other provider in this phase received a live request. The
+complete, auditable list — including the quarantined pre-amendment incident
+— is in `docs/RESEARCH_CONTROLLED_PROBE_LOG.md`.
+
+New shared infrastructure added this phase: `security/targetUrlValidator.ts`
+(SSRF-hardened bounded target-URL validation shared by `wayback.ts` and
+`commonCrawl.ts` — rejects localhost, loopback/RFC1918/link-local/
+metadata-service addresses in decimal/hex/octal/IPv6-mapped forms,
+embedded credentials, non-http(s) schemes, and over-length URLs before the
+value is ever sent to the archive service as a bounded lookup parameter;
+the target itself is never fetched by this server).
+
+Common Crawl required one new environment variable,
+`COMMON_CRAWL_COLLECTION_ID` (required) — this build does not auto-select
+"the current" Common Crawl collection because doing so would require a live
+fetch of the operational `collinfo.json` catalog, which this build's
+controls do not permit; the Commander must set a specific, currently-valid
+collection id.
+
+### Remaining-15 narrow repair pass
+
+A subsequent independent read-only audit of this build found one
+High-severity hardening defect (`targetUrlValidator.ts` matched IPv4-mapped
+IPv6 literals only in their dotted-decimal spelling, missing the compressed
+hexadecimal form the WHATWG `URL` parser actually normalizes bracketed IPv6
+literals into) and four Medium-severity caller-input-handling gaps (SAM.gov
+date-range validation, Internet Archive's unescaped Solr/Lucene `q`
+passthrough, CourtListener's naive canonical-URL string concatenation, and
+Semantic Scholar's title-as-ID fallback plus an unguarded `authors.map()`).
+A narrowly scoped repair pass fixed all five, expanded SSRF regression
+coverage (IPv6, alternative IPv4 encodings, authority-confusion, non-web
+schemes) for `wayback`/`common_crawl`, and added HTTP 401/403/429/503
+coverage for all seven Remaining-15 adapters. A follow-up micro-repair then
+corrected an explicit Commander requirement that pass had missed: an
+ordinary public HTTPS target using an explicit nonstandard port (e.g.
+`https://example.com:8443/`) had incorrectly been documented and tested as
+*accepted*. `validateBoundedTargetUrl` now rejects any target URL whose
+parsed `port` is non-empty (an explicit default port normalizes to empty and
+remains allowed), for both `wayback` and `common_crawl`, before the target
+ever reaches a provider request. Full detail, including the exact fix in
+each provider file and the current `re_232`–`re_402` validation IDs
+(`re_322`–`re_339` cover the nonstandard-port rejection/acceptance matrix),
+is in `docs/RESEARCH_ENGINE_SECURITY.md`'s "Remaining-15 repair pass"
+sections and `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md`. Neither repair
+changed any provider count, registry status, or enabled a previously
+blocked provider — the 29 registered / 21 implemented / 8 blocked totals
+are unchanged, and no live provider request occurred during either repair.
+
 ## What is intentionally NOT built yet
 
-- 15 of 29 providers are registered (env-detection works, so their
-  configuration status is visible today) but have no adapter — see the
-  provider matrix. Calling one via `/api/research/search` returns a clean
-  `not_configured`/`adapter not implemented` rejection, never a fake
-  success. This includes all six providers considered but not authorized
-  for the Batch 1A build phase: IMF SDMX, World Bank Data Catalog, World
-  Bank Projects (blocked on a v2/v3 API documentation conflict), World Bank
-  Finances, World Bank Climate, and USGS National Map.
+- 8 of 29 providers are registered (env-detection works, so their
+  configuration status is visible today) but have no adapter, each with a
+  specific documented blocker — see the provider matrix and
+  `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md`. Calling one via
+  `/api/research/search` returns a clean `not_configured`/`adapter not
+  implemented` rejection, never a fake success.
 - No Research Console UI page. `/api/research/providers` and
   `/api/research/search` are usable directly today; a UI panel is Phase 5.
-- No SDMX/NDJSON/WARC-consuming adapters yet (IMF, Common Crawl) — the parse
-  helpers they'll need (`safeNdjsonParse`, response-size caps) already exist
-  in `security/safeFetch.ts`.
+- No SDMX-consuming adapter (IMF SDMX remains blocked) — the NDJSON/
+  response-size-cap parse helpers it would need (`safeNdjsonParse`,
+  response-size caps) already exist in `security/safeFetch.ts` and are now
+  exercised by `commonCrawl.ts`.
 - Council integration is not wired in this build phase — the Research Engine
   is reachable only via its own API routes today.

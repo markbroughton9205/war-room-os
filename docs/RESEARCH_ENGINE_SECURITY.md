@@ -93,6 +93,166 @@ exposed in the response.** See `re_130`–`re_146` in
 `diagnostics/validation.ts` for the regression coverage. No live provider
 verification occurred for either repair.
 
+## Target-URL SSRF hardening (Wayback, Common Crawl)
+
+`security/targetUrlValidator.ts::validateBoundedTargetUrl` validates every
+caller-supplied "target URL" before it is ever sent — as a bounded lookup
+query parameter only — to the Wayback CDX Server API or the Common Crawl
+Index Server API. Neither adapter ever fetches the target URL itself; the
+validator exists to stop the archive/index service from being used as an
+SSRF proxy against internal network state via a crafted target URL. It
+rejects, after relying on the WHATWG `URL` parser to canonicalize decimal/
+hex/octal IPv4 host forms and IDNA-encode internationalized hostnames first
+(so obfuscated numeric-IP forms cannot bypass a naive string check):
+non-`http`/`https` schemes, embedded credentials (`user:pass@`), `localhost`/
+`localhost.`, loopback IPv4 (`127.0.0.0/8`) and IPv6 (`::1`), RFC1918
+(`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local and the cloud
+metadata address (`169.254.0.0/16`, incl. `169.254.169.254`), IPv6 link-local
+(`fe80::/10`), unique-local (`fc00::/7`), and multicast (`ff00::/8`), IPv4-mapped
+IPv6 literals, other reserved/test ranges (`0.0.0.0/8`, CGNAT `100.64.0.0/10`,
+the `192.0.2.0/24`/`198.18.0.0/15`/`198.51.100.0/24`/`203.0.113.0/24` test/
+benchmark nets, multicast/reserved `224.0.0.0/4`+), and over-length URLs
+(>2,048 chars).
+
+**IPv4-mapped IPv6 literals — repair pass note.** An earlier version of this
+validator matched IPv4-mapped IPv6 literals (`::ffff:a.b.c.d`) only in their
+dotted-decimal spelling. The WHATWG `URL` parser normalizes a bracketed
+literal like `[::ffff:127.0.0.1]` into the compressed hexadecimal form
+`[::ffff:7f00:1]` before the validator ever sees `parsed.hostname`, so that
+normalized form bypassed the old check entirely (confirmed for the loopback
+and cloud-metadata addresses specifically). The validator now fully expands
+any IPv6 hostname into its 8 constituent 16-bit groups (handling `::`
+compression and an embedded trailing IPv4 literal) and detects an IPv4-mapped
+address structurally — by group value, not by string pattern — so both the
+dotted-decimal and compressed-hex spellings are caught identically. Policy:
+**every** IPv4-mapped IPv6 literal is rejected outright, regardless of
+whether the embedded IPv4 address would itself be public or private. This
+fix does **not** add DNS resolution or DNS-rebinding protection of any kind —
+validation remains deterministic, local string/structure parsing only; a
+hostname that resolves to a private address at request time is not detected
+here.
+
+`re_232`–`re_276` (`wayback`) and `re_277`–`re_321` (`common_crawl`) in the
+validation harness are the current SSRF regression matrix — each case is
+exercised through the real adapter's `run()`, asserting `ok:false`, the exact
+error category, and that the injected `fetch` is never invoked. The matrix
+covers IPv6 (loopback/unspecified/link-local/unique-local/multicast),
+IPv4-mapped IPv6 in both dotted-decimal and compressed-hex spellings,
+alternative IPv4 encodings (decimal/hex/octal/short-form/CGNAT/RFC1918/
+documentation ranges), hostname/authority edge cases (localhost variants,
+embedded credentials, trailing-dot forms, encoded-`@` and backslash authority
+confusion, malformed percent-encoding), and non-web schemes
+(`file`/`ftp`/`data`/`javascript`/`blob`/`gopher`).
+
+**Explicit nonstandard target ports are rejected — micro-repair note.** An
+earlier version of this validator, and the tests documenting it, treated an
+ordinary public HTTPS target using an explicit nonstandard port (e.g.
+`https://example.com:8443/`) as acceptable. That was incorrect: `target_url`
+is a caller-controlled bounded lookup parameter, and an explicit nonstandard
+port widens the surface an archive/index service could be induced to probe on
+a caller's behalf. `validateBoundedTargetUrl` now rejects any parsed URL
+whose `URL.port` is non-empty, immediately after protocol validation and
+before the target is ever placed in a provider request — so a rejected
+target never reaches the injected `fetch`. The WHATWG `URL` parser normalizes
+an explicit default port (`http://example.com:80/`, `https://example.com:443/`)
+to an empty `port` value, so ordinary no-port URLs and explicit-default-port
+URLs remain indistinguishable and stay allowed; only an explicit *nonstandard*
+port is rejected. This adds no DNS resolution or DNS-rebinding protection —
+the check is deterministic, local URL-structure parsing only, applied
+identically to both `wayback` and `common_crawl`, the only two adapters that
+accept a caller-supplied target URL.
+
+`re_322` (`wayback`) and `re_323` (`common_crawl`) now prove that an ordinary
+public HTTPS target using an explicit nonstandard port (`:8443`) is
+**rejected** — `ok:false`, error category `unknown`, the injected `fetch`
+never invoked, `documents` empty, and provider-gate/cache/environment state
+restored. `re_324`–`re_327` (`wayback`) and `re_328`–`re_331` (`common_crawl`)
+extend the rejected-port matrix to `:8080`, `:22`, and `:3000` on both
+schemes. `re_332`–`re_335` (`wayback`) and `re_336`–`re_339` (`common_crawl`)
+prove the opposite for the allowed cases — no-port `https`/`http` and
+explicit-default-port `:443`/`:80` — each asserting `ok:true` and that the
+mocked outbound provider request was made exactly once. All of these tests
+run against the real adapter's `run()` with a mocked, network-free `fetch`;
+none makes a live network request.
+
+## Remaining-15 repair pass — caller-input hardening (SAM.gov, Internet Archive, CourtListener, Semantic Scholar)
+
+An independent read-only audit of the Remaining-15 build identified one
+High-severity finding (the IPv4-mapped IPv6 bypass above) plus four
+Medium-severity caller-input-handling gaps. All four are fixed:
+
+- **SAM.gov date-range validation.** `providers/samGov.ts` previously
+  silently defaulted an unparseable caller `dateFrom`/`dateTo` to "not
+  supplied" and never checked for a reversed range (`dateTo` before
+  `dateFrom`) or a range spanning more than 365 calendar days. It now
+  rejects all three outright — an invalid date, a reversed range, and a
+  range over 365 days each become `ok:false` before any upstream request is
+  built, with the final `postedFrom`/`postedTo` request range therefore
+  never able to exceed the cap. Rejections use error category `unknown`
+  (matching the convention the target-URL validator already uses for
+  caller-input rejection elsewhere in this codebase — the shared
+  `ResearchProviderError` type has no dedicated `invalid_request` category).
+  `re_340`–`re_347` in the validation harness cover: a valid range, an
+  invalid `dateFrom`, an invalid `dateTo`, a reversed range, an exactly-365-day
+  range (accepted), a 366-day range (rejected), the default bounded window
+  when no caller dates are supplied, and that the API key never leaks into a
+  serialized date-range error. This is mocked validation of the adapter's own
+  logic, not a live-verified claim about SAM.gov's own server-side behavior.
+- **Internet Archive literal-only query.** `providers/internetArchive.ts`
+  previously forwarded caller text directly into the Solr/Lucene `q`
+  parameter unescaped, so a caller could use field selectors (`title:`),
+  boolean operators, grouping, wildcards, and range syntax as if the engine
+  exposed the full Internet Archive advanced-search grammar. Caller text is
+  now encoded as a single escaped, double-quoted literal phrase before it is
+  ever placed in `q` — Solr treats a quoted phrase's contents as literal
+  terms to match, not as query syntax, so the caller's text can no longer be
+  interpreted as anything but a search string. `fl[]` (fixed field list),
+  `rows`, and `page` remain entirely code-controlled, never caller-influenced.
+  `re_348`–`re_356` capture the real outbound request and prove `q` for
+  inputs like `title:secret`, `foo OR mediatype:movies`, `*`, `(test)`,
+  `"quoted"`, `backslash\value`, and `date:[1900 TO 2100]` round-trips back
+  to exactly the caller's original text, that `fl[]` stays fixed regardless
+  of caller input, and that raw control characters are stripped.
+- **CourtListener canonical-URL resolution.** `providers/courtlistener.ts`
+  previously built `canonicalUrl` by naively string-concatenating the fixed
+  origin with the upstream `absolute_url` field, with no check that the
+  result actually stayed on `www.courtlistener.com`. It now accepts only a
+  relative path rooted at `/` (rejecting protocol-relative `//...` values,
+  full off-host URLs, and backslash-authority-confusion forms outright),
+  resolves it with `new URL(relativePath, trustedOrigin)`, and post-validates
+  the resolved URL's protocol (`https:`), hostname (exactly
+  `www.courtlistener.com`), port (default), and absence of embedded
+  credentials before ever using it as `canonicalUrl`. A result whose
+  `absolute_url` is present but fails this check is skipped entirely rather
+  than surfaced with an unsafe or garbled URL; if every result in a
+  non-empty upstream response is unsafe, the whole response becomes
+  `parse_error` rather than a fabricated honest-empty success. `re_357`–`re_364`
+  cover a normal relative opinion path, a protocol-relative override, a full
+  off-host URL, a lookalike-suffix host (`www.courtlistener.com.evil.example`),
+  backslash authority confusion, a newline-stripped protocol-relative bypass
+  (proving the *post-resolution* hostname check — not just a pre-resolution
+  string-prefix check — is what actually stops this class of attack, since
+  the WHATWG URL parser strips embedded newlines before parsing), a mixed
+  valid/invalid result set, and an all-invalid result set.
+- **Semantic Scholar stable-ID and item hardening.** `providers/semanticScholar.ts`
+  previously fell back to the paper's title when `paperId` was missing —
+  titles are neither stable nor unique, so this produced a non-stable
+  document identifier — and called `.map()` on `authors` without an
+  `Array.isArray` guard, which would throw if an upstream record ever shaped
+  `authors` unexpectedly. `paperId` is now mandatory (a record missing it is
+  skipped, never using title as a fallback ID), `authors` is only iterated
+  after an `Array.isArray` check with malformed entries dropped rather than
+  crashing normalization, a non-object `externalIds` no longer risks a
+  runtime error, and `url` is only trusted as `canonicalUrl` when it is a
+  valid HTTPS URL on `www.semanticscholar.org`. As with CourtListener, a
+  malformed record is skipped individually; an all-malformed non-empty
+  response becomes `parse_error`. A bare `year` is preserved as-is (e.g.
+  `"2024"`) and never expanded into a fabricated `YYYY-MM-DD` date.
+  `re_365`–`re_374` cover missing/title-only `paperId`, non-array/`null`/
+  malformed `authors`, a non-object `externalIds`, an off-origin `url`, a
+  mixed valid/invalid result set, an all-invalid result set, and the bare-year
+  behavior.
+
 ## Redirects never leak credentials cross-host
 
 `safeProviderFetch` follows redirects manually (`redirect: 'manual'`), caps
@@ -116,6 +276,16 @@ the number of lines parsed (default 5,000) for future NDJSON-based providers
 - `security/providerGate.ts` caps concurrent in-flight requests per provider
   (default 2) and opens a 30-second cooldown after 3 consecutive failures —
   a misbehaving upstream cannot be hammered by a burst of research requests.
+- **HTTP status coverage (repair pass).** Every failed HTTP status an
+  adapter's own `search()` handles maps to the same safe `upstream_error`
+  category rather than a fake success, for any status — this was previously
+  exercised only via a generic HTTP 500 case per adapter. The validation
+  harness now also covers 401, 403, 429, and 503 explicitly for all seven
+  Remaining-15 adapters (`semantic_scholar`, `courtlistener`,
+  `internet_archive`, `wayback`, `common_crawl`, `sam_gov`, `nasa`) —
+  `re_375`–`re_402` — each asserting `ok:false`, `documents.length === 0`,
+  category `upstream_error`, and that the raw upstream response body never
+  leaks into the normalized error.
 
 ## Prompt-injection / untrusted-content treatment
 
@@ -162,6 +332,31 @@ in-process memory only (resets on redeploy) and `diagnostics/audit.ts` logs
 structured, redacted metadata to the server log — it does not write to any
 database. Nothing beyond the existing War Room approval/memory gates is
 touched.
+
+## Controlled live schema verification (Remaining 15 build phase)
+
+For most of this build's history, "no live provider call" was an absolute
+rule. During the "Remaining 15" phase, a genuine research gap on
+`usgs_national_map` (its official docs page renders as a client-side
+Swagger UI shell with no extractable static content) led to a disclosed
+process violation — a live query URL with real parameters was fetched
+before any live-verification policy existed — which was immediately
+disclosed to the Commander rather than used as evidence. The Commander then
+issued a narrow, explicit amendment authorizing a small number of bounded,
+GET/HEAD-only, credential-free, logged structural probes against official
+provider-owned hosts (max 2 per provider, max 30 total for the build),
+strictly for confirming response *structure* (top-level type, collection
+field, pagination fields) — never for inferring business/legal/scientific/
+financial/status/eligibility/unit semantics, and never as a substitute for
+documentation proof of ownership, auth mechanism, capability, or request
+semantics. Every such probe — including the quarantined pre-amendment one —
+is recorded in `docs/RESEARCH_CONTROLLED_PROBE_LOG.md` with its sanitized
+URL, purpose, result, and an explicit confirmation that no credential was
+used, no secret was printed, and no returned link or resource was fetched.
+Two probes were made this phase (both against `usgs_national_map`, both
+HTTP 504 timeouts yielding no data); per the amendment's own rule, a
+provider whose contract a controlled probe cannot resolve remains
+`implemented: false`.
 
 ## Known gaps (tracked, not hidden)
 

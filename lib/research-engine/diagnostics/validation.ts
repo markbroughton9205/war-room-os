@@ -25,6 +25,14 @@ import { nasaGibsAdapter } from '@/lib/research-engine/providers/nasaGibs'
 import { usgsWaterAdapter } from '@/lib/research-engine/providers/usgsWater'
 import { usgsEarthquakeFeedAdapter } from '@/lib/research-engine/providers/usgsEarthquakeFeed'
 import { usgsScienceBaseAdapter } from '@/lib/research-engine/providers/usgsScienceBase'
+import { semanticScholarAdapter } from '@/lib/research-engine/providers/semanticScholar'
+import { courtListenerAdapter } from '@/lib/research-engine/providers/courtlistener'
+import { internetArchiveAdapter } from '@/lib/research-engine/providers/internetArchive'
+import { waybackAdapter } from '@/lib/research-engine/providers/wayback'
+import { commonCrawlAdapter } from '@/lib/research-engine/providers/commonCrawl'
+import { samGovAdapter } from '@/lib/research-engine/providers/samGov'
+import { nasaAdapter } from '@/lib/research-engine/providers/nasa'
+import { validateBoundedTargetUrl } from '@/lib/research-engine/security/targetUrlValidator'
 import { IMPLEMENTED_PROVIDER_ADAPTERS } from '@/lib/research-engine/providers/registry'
 import type { ResearchDocument, ResearchProviderId } from '@/lib/research-engine/core/types'
 
@@ -256,10 +264,12 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_17_router_rejects_unimplemented_provider_with_reason', () => {
-    // wayback has no required env var, so this isolates the "adapter not implemented" rejection path from "env missing".
-    const decision = routeResearchQuery({ text: 'test', intent: 'historical_web' })
-    const wayback = decision.rejectedProviders.find(entry => entry.provider === 'wayback')
-    return Boolean(wayback && /not implemented/i.test(wayback.reason)) || `wayback rejection: ${JSON.stringify(wayback)}`
+    // usgs_national_map has no required env var and remains unimplemented
+    // (BLOCKED — MISSING AUTHORITATIVE CONTRACT), so this isolates the
+    // "adapter not implemented" rejection path from "env missing".
+    const decision = routeResearchQuery({ text: 'test', intent: 'maps_geospatial' })
+    const usgsNationalMap = decision.rejectedProviders.find(entry => entry.provider === 'usgs_national_map')
+    return Boolean(usgsNationalMap && /not implemented/i.test(usgsNationalMap.reason)) || `usgs_national_map rejection: ${JSON.stringify(usgsNationalMap)}`
   })
 
   await add('re_18_router_selects_only_configured_implemented_providers', () => {
@@ -506,6 +516,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       usgs_water: ['timeSeries', 'geoSearch'],
       usgs_earthquake_feed: ['list'],
       usgs_sciencebase: ['search', 'getById'],
+      semantic_scholar: ['search'],
+      courtlistener: ['search'],
+      internet_archive: ['search'],
+      wayback: ['historicalCaptures'],
+      common_crawl: ['historicalCaptures'],
+      sam_gov: ['search'],
+      nasa: ['search'],
     }
     const implemented = RESEARCH_PROVIDER_ENV.filter(descriptor => descriptor.implemented)
     const offenders = implemented.filter(descriptor => {
@@ -1204,11 +1221,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   await add('re_100_registered_provider_count_remains_29', () =>
     RESEARCH_PROVIDER_ENV.length === 29 || `expected 29 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
-  await add('re_101_implemented_count_derives_to_14_from_descriptors_and_registry', () => {
+  await add('re_101_implemented_count_derives_to_21_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 14 && implementedAdapters === 14)
-      || `expected 14 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 21 && implementedAdapters === 21)
+      || `expected 21 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -1276,8 +1293,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     return !/NEXT_PUBLIC_.*(KEY|TOKEN|SECRET)/i.test(configSource) || 'a provider secret env var appears to be exposed via NEXT_PUBLIC_'
   })
 
+  const REMAINING_15_IMPLEMENTED_FILES = [
+    'semanticScholar.ts', 'courtlistener.ts', 'internetArchive.ts', 'wayback.ts', 'commonCrawl.ts',
+    'samGov.ts', 'nasa.ts',
+  ]
+
   await add('re_111_no_new_adapter_uses_write_capable_http_method', () => {
-    const files = ['usgsWater.ts', 'usgsEarthquakeFeed.ts', 'usgsScienceBase.ts']
+    const files = ['usgsWater.ts', 'usgsEarthquakeFeed.ts', 'usgsScienceBase.ts', ...REMAINING_15_IMPLEMENTED_FILES]
     const offenders = files.filter(file => {
       const source = readFileSync(join(process.cwd(), 'lib/research-engine/providers', file), 'utf8')
       return /method:\s*['"](POST|PUT|PATCH|DELETE)['"]/.test(source)
@@ -1286,7 +1308,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_112_new_adapters_never_call_raw_fetch', () => {
-    const files = ['usgsWater.ts', 'usgsEarthquakeFeed.ts', 'usgsScienceBase.ts']
+    const files = ['usgsWater.ts', 'usgsEarthquakeFeed.ts', 'usgsScienceBase.ts', ...REMAINING_15_IMPLEMENTED_FILES]
     const offenders = files.filter(file => {
       const source = readFileSync(join(process.cwd(), 'lib/research-engine/providers', file), 'utf8')
       return /[^.\w]fetch\(/.test(source)
@@ -1664,6 +1686,1485 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const response = await usgsScienceBaseAdapter.run({ text: 'a search with no matches' })
     return (response.ok === true && response.documents.length === 0) || `expected an explicit empty items array to remain an honest empty success, got ${JSON.stringify(response)}`
   }))
+
+  // --- Remaining 15: semantic_scholar (Group A) ---
+
+  const sampleSsPaper = {
+    paperId: 'abc123def456',
+    title: 'A Study of Sample Things',
+    abstract: 'This is a sample abstract.',
+    year: 2025,
+    authors: [{ authorId: '1', name: 'A. Researcher' }],
+    externalIds: { DOI: '10.9999/sample-ss' },
+    url: 'https://www.semanticscholar.org/paper/abc123def456',
+    venue: 'Journal of Samples',
+    citationCount: 12,
+  }
+
+  await add('re_147_semantic_scholar_success_normalizes_paper_search', () => withAdapterFetch([
+    jsonResponse({ total: 1, offset: 0, data: [sampleSsPaper] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected 1 document, got ${response.documents.length}`
+    const doc = response.documents[0]
+    if (doc.identifiers.semantic_scholar_paper_id !== 'abc123def456') return 'semantic_scholar_paper_id identifier missing'
+    if (doc.identifiers.doi !== '10.9999/sample-ss') return 'doi identifier missing'
+    if (doc.summary !== 'This is a sample abstract.') return `expected abstract preserved as summary, got ${doc.summary}`
+    return documentShapeIssue(doc, 'semantic_scholar') ?? true
+  }))
+
+  await add('re_148_semantic_scholar_upstream_error_is_safe_not_a_fake_success', () => withAdapterFetch([
+    new Response('Internal Server Error', { status: 500 }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error') || `expected a safe error response, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_149_semantic_scholar_malformed_json_is_safe_parse_error', () => withAdapterFetch([
+    new Response('not valid json', { status: 200 }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (response.ok !== false || !response.error) return `expected malformed JSON to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  }))
+
+  await add('re_150_semantic_scholar_missing_data_field_is_safe_parse_error', () => withAdapterFetch([
+    jsonResponse({ total: 0 }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (response.ok !== false || !response.error) return `expected a missing "data" field to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  }))
+
+  await add('re_151_semantic_scholar_non_array_data_field_is_safe_parse_error', () => withAdapterFetch([
+    jsonResponse({ data: 'not-an-array' }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (response.ok !== false || !response.error) return `expected a non-array "data" field to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  }))
+
+  await add('re_152_semantic_scholar_explicit_empty_data_remains_honest_success', () => withAdapterFetch([
+    jsonResponse({ total: 0, data: [] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'a search with no matches' })
+    return (response.ok === true && response.documents.length === 0) || `expected an explicit empty data array to remain an honest empty success, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_153_semantic_scholar_result_count_is_bounded', () => withAdapterFetch([
+    jsonResponse({ total: 200, data: Array.from({ length: 200 }, (_, i) => ({ ...sampleSsPaper, paperId: `paper-${i}` })) }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things', maxResults: 9999 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return response.documents.length <= 25 || `expected result count bounded to 25, got ${response.documents.length}`
+  }))
+
+  await add('re_154_semantic_scholar_missing_abstract_stays_null_not_fabricated', () => withAdapterFetch([
+    jsonResponse({ data: [{ ...sampleSsPaper, abstract: null }] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return response.documents[0].summary === null || `expected a missing abstract to stay null, got ${JSON.stringify(response.documents[0].summary)}`
+  }))
+
+  await add('re_155_semantic_scholar_api_key_sent_only_via_header_never_url', async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let capturedHeaders: Record<string, string> | undefined
+    let capturedUrl: string | undefined
+    __setResearchFetchForTests((async (input: RequestInfo | URL, init?: RequestInit) => {
+      capturedUrl = String(input)
+      capturedHeaders = init?.headers as Record<string, string> | undefined
+      return jsonResponse({ data: [] })
+    }) as typeof fetch)
+    try {
+      await withEnv({ SEMANTIC_SCHOLAR_API_KEY: 'test-key-not-real' }, () => semanticScholarAdapter.run({ text: 'sample things' }))
+      if (capturedUrl?.includes('test-key-not-real')) return 'API key leaked into the request URL'
+      return capturedHeaders?.['x-api-key'] === 'test-key-not-real' || `expected the x-api-key header to carry the key, got headers=${JSON.stringify(capturedHeaders)}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  })
+
+  await add('re_156_semantic_scholar_get_only_at_runtime', async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let capturedMethod: string | undefined
+    __setResearchFetchForTests((async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedMethod = init?.method
+      return jsonResponse({ data: [] })
+    }) as typeof fetch)
+    try {
+      await semanticScholarAdapter.run({ text: 'sample things' })
+      return (capturedMethod === undefined || capturedMethod === 'GET') || `expected a GET-only request, got method=${capturedMethod}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  })
+
+  // --- Remaining 15: courtlistener (Group A) ---
+
+  const sampleClResult = {
+    cluster_id: 987654,
+    absolute_url: '/opinion/987654/sample-v-example/',
+    caseName: 'Sample v. Example',
+    dateFiled: '2025-06-01',
+    court: 'Supreme Court of the United States',
+    court_id: 'scotus',
+    status: 'Published',
+    docketNumber: '25-1234',
+    citation: ['600 U.S. 1'],
+  }
+
+  await add('re_157_courtlistener_success_normalizes_case_law_search', () => withEnv({ COURTLISTENER_API_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    jsonResponse({ count: 1, results: [sampleClResult], next: null, previous: null }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample v example' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected 1 document, got ${response.documents.length}`
+    const doc = response.documents[0]
+    if (doc.identifiers.courtlistener_cluster_id !== '987654') return 'courtlistener_cluster_id identifier missing'
+    if (doc.canonicalUrl !== 'https://www.courtlistener.com/opinion/987654/sample-v-example/') return `expected absolute_url resolved against courtlistener.com, got ${doc.canonicalUrl}`
+    return documentShapeIssue(doc, 'courtlistener') ?? true
+  })))
+
+  await add('re_158_courtlistener_not_configured_is_safe_not_a_fake_success', () => withoutEnv(['COURTLISTENER_API_TOKEN'], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample v example' })
+    return (response.ok === false && response.error?.category === 'not_configured') || `expected a not_configured error, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_159_courtlistener_upstream_error_is_safe_not_a_fake_success', () => withEnv({ COURTLISTENER_API_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    new Response('Internal Server Error', { status: 500 }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample v example' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error') || `expected a safe error response, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_160_courtlistener_malformed_json_is_safe_parse_error', () => withEnv({ COURTLISTENER_API_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    new Response('not valid json', { status: 200 }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample v example' })
+    if (response.ok !== false || !response.error) return `expected malformed JSON to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_161_courtlistener_missing_results_field_is_safe_parse_error', () => withEnv({ COURTLISTENER_API_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    jsonResponse({ count: 0 }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample v example' })
+    if (response.ok !== false || !response.error) return `expected a missing "results" field to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_162_courtlistener_non_array_results_field_is_safe_parse_error', () => withEnv({ COURTLISTENER_API_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    jsonResponse({ results: 'not-an-array' }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample v example' })
+    if (response.ok !== false || !response.error) return `expected a non-array "results" field to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_163_courtlistener_explicit_empty_results_remains_honest_success', () => withEnv({ COURTLISTENER_API_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    jsonResponse({ count: 0, results: [] }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'a search with no matches' })
+    return (response.ok === true && response.documents.length === 0) || `expected an explicit empty results array to remain an honest empty success, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_164_courtlistener_result_count_is_bounded', () => withEnv({ COURTLISTENER_API_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    jsonResponse({ count: 100, results: Array.from({ length: 100 }, (_, i) => ({ ...sampleClResult, cluster_id: i })) }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample', maxResults: 9999 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return response.documents.length <= 20 || `expected result count bounded to 20, got ${response.documents.length}`
+  })))
+
+  await add('re_165_courtlistener_never_fabricates_missing_precedential_status', () => withEnv({ COURTLISTENER_API_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    jsonResponse({ results: [{ ...sampleClResult, status: undefined }] }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample v example' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return response.documents[0].identifiers.courtlistener_status === undefined || `expected a missing status to never be fabricated, got ${JSON.stringify(response.documents[0].identifiers)}`
+  })))
+
+  await add('re_166_courtlistener_token_sent_only_via_header_never_url', async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let capturedHeaders: Record<string, string> | undefined
+    let capturedUrl: string | undefined
+    __setResearchFetchForTests((async (input: RequestInfo | URL, init?: RequestInit) => {
+      capturedUrl = String(input)
+      capturedHeaders = init?.headers as Record<string, string> | undefined
+      return jsonResponse({ results: [] })
+    }) as typeof fetch)
+    try {
+      await withEnv({ COURTLISTENER_API_TOKEN: 'test-token-not-real' }, () => courtListenerAdapter.run({ text: 'sample v example' }))
+      if (capturedUrl?.includes('test-token-not-real')) return 'API token leaked into the request URL'
+      return capturedHeaders?.Authorization === 'Token test-token-not-real' || `expected the Authorization header to carry the token, got headers=${JSON.stringify(capturedHeaders)}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  })
+
+  // --- Remaining 15: internet_archive (Group A) ---
+
+  const sampleIaDoc = {
+    identifier: 'sample-item-2026',
+    title: 'A Sample Archive Item',
+    description: 'A description of the sample item.',
+    mediatype: 'texts',
+    date: '2020-01-01',
+    creator: 'A. Archivist',
+  }
+
+  await add('re_167_internet_archive_success_normalizes_search_results', () => withEnv({ INTERNET_ARCHIVE_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }, () => withAdapterFetch([
+    jsonResponse({ responseHeader: {}, response: { numFound: 1, start: 0, docs: [sampleIaDoc] } }),
+  ], async () => {
+    const response = await internetArchiveAdapter.run({ text: 'sample item' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected 1 document, got ${response.documents.length}`
+    const doc = response.documents[0]
+    if (doc.identifiers.internet_archive_identifier !== 'sample-item-2026') return 'internet_archive_identifier missing'
+    if (doc.canonicalUrl !== 'https://archive.org/details/sample-item-2026') return `expected canonical details URL, got ${doc.canonicalUrl}`
+    return documentShapeIssue(doc, 'internet_archive') ?? true
+  })))
+
+  await add('re_168_internet_archive_handles_array_valued_metadata_fields', () => withEnv({ INTERNET_ARCHIVE_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }, () => withAdapterFetch([
+    jsonResponse({ response: { docs: [{ ...sampleIaDoc, title: ['First Title', 'Alt Title'], creator: ['A. One', 'B. Two'] }] } }),
+  ], async () => {
+    const response = await internetArchiveAdapter.run({ text: 'sample item' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    const doc = response.documents[0]
+    if (doc.authors.length !== 2) return `expected both array-valued creators preserved, got ${JSON.stringify(doc.authors)}`
+    return true
+  })))
+
+  await add('re_169_internet_archive_not_configured_is_safe_not_a_fake_success', () => withoutEnv(['INTERNET_ARCHIVE_USER_AGENT_BASE'], async () => {
+    const response = await internetArchiveAdapter.run({ text: 'sample item' })
+    return (response.ok === false && response.error?.category === 'not_configured') || `expected a not_configured error, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_170_internet_archive_upstream_error_is_safe_not_a_fake_success', () => withEnv({ INTERNET_ARCHIVE_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }, () => withAdapterFetch([
+    new Response('Internal Server Error', { status: 500 }),
+  ], async () => {
+    const response = await internetArchiveAdapter.run({ text: 'sample item' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error') || `expected a safe error response, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_171_internet_archive_malformed_json_is_safe_parse_error', () => withEnv({ INTERNET_ARCHIVE_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }, () => withAdapterFetch([
+    new Response('not valid json', { status: 200 }),
+  ], async () => {
+    const response = await internetArchiveAdapter.run({ text: 'sample item' })
+    if (response.ok !== false || !response.error) return `expected malformed JSON to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_172_internet_archive_missing_response_docs_is_safe_parse_error', () => withEnv({ INTERNET_ARCHIVE_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }, () => withAdapterFetch([
+    jsonResponse({ responseHeader: {} }),
+  ], async () => {
+    const response = await internetArchiveAdapter.run({ text: 'sample item' })
+    if (response.ok !== false || !response.error) return `expected a missing "response.docs" field to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_173_internet_archive_non_array_docs_field_is_safe_parse_error', () => withEnv({ INTERNET_ARCHIVE_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }, () => withAdapterFetch([
+    jsonResponse({ response: { docs: 'not-an-array' } }),
+  ], async () => {
+    const response = await internetArchiveAdapter.run({ text: 'sample item' })
+    if (response.ok !== false || !response.error) return `expected a non-array "docs" field to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_174_internet_archive_explicit_empty_docs_remains_honest_success', () => withEnv({ INTERNET_ARCHIVE_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }, () => withAdapterFetch([
+    jsonResponse({ response: { numFound: 0, docs: [] } }),
+  ], async () => {
+    const response = await internetArchiveAdapter.run({ text: 'a search with no matches' })
+    return (response.ok === true && response.documents.length === 0) || `expected an explicit empty docs array to remain an honest empty success, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_175_internet_archive_result_count_is_bounded', () => withEnv({ INTERNET_ARCHIVE_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }, () => withAdapterFetch([
+    jsonResponse({ response: { docs: Array.from({ length: 100 }, (_, i) => ({ ...sampleIaDoc, identifier: `item-${i}` })) } }),
+  ], async () => {
+    const response = await internetArchiveAdapter.run({ text: 'sample', maxResults: 9999 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return response.documents.length <= 20 || `expected result count bounded to 20, got ${response.documents.length}`
+  })))
+
+  await add('re_176_internet_archive_arbitrary_base_url_override_rejected_by_allowlist', () => withEnv({ INTERNET_ARCHIVE_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0', INTERNET_ARCHIVE_BASE_URL: 'https://evil.example.com' }, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let called = false
+    __setResearchFetchForTests((async () => {
+      called = true
+      return jsonResponse({ response: { docs: [] } })
+    }) as typeof fetch)
+    try {
+      const response = await internetArchiveAdapter.run({ text: 'sample item' })
+      if (called) return 'the mocked fetch was invoked despite a disallowed host override — the central allowlist did not block it'
+      return (response.ok === false) || 'expected a safe error response when the base URL override is not on the host allowlist'
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+
+  // --- Remaining 15: wayback (Group A) ---
+
+  const sampleCdxRows = [
+    ['urlkey', 'timestamp', 'original', 'mimetype', 'statuscode', 'digest', 'length'],
+    ['com,example)/', '20250601120000', 'https://example.com/', 'text/html', '200', 'ABCDEF123456', '1024'],
+  ]
+
+  await add('re_177_wayback_success_normalizes_cdx_captures', () => withAdapterFetch([
+    jsonResponse(sampleCdxRows),
+  ], async () => {
+    const response = await waybackAdapter.run({ text: 'https://example.com/' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected 1 document, got ${response.documents.length}`
+    const doc = response.documents[0]
+    if (doc.identifiers.wayback_timestamp !== '20250601120000') return 'wayback_timestamp identifier missing'
+    if (doc.canonicalUrl !== 'https://web.archive.org/web/20250601120000/https://example.com/') return `expected the documented capture URL pattern, got ${doc.canonicalUrl}`
+    return documentShapeIssue(doc, 'wayback') ?? true
+  }))
+
+  await add('re_178_wayback_rejects_localhost_target', async () => {
+    const response = await waybackAdapter.run({ text: 'http://localhost/admin' })
+    return (response.ok === false && response.error?.category === 'unknown') || `expected localhost target to be rejected before any request, got ${JSON.stringify(response)}`
+  })
+
+  await add('re_179_wayback_rejects_loopback_ipv4_target', async () => {
+    const response = await waybackAdapter.run({ text: 'http://127.0.0.1/secret' })
+    return response.ok === false || 'expected a loopback IPv4 target to be rejected'
+  })
+
+  await add('re_180_wayback_rejects_rfc1918_target', async () => {
+    const response = await waybackAdapter.run({ text: 'http://10.0.0.5/internal' })
+    return response.ok === false || 'expected an RFC1918 target to be rejected'
+  })
+
+  await add('re_181_wayback_rejects_link_local_metadata_target', async () => {
+    const response = await waybackAdapter.run({ text: 'http://169.254.169.254/latest/meta-data/' })
+    return response.ok === false || 'expected the cloud metadata address to be rejected'
+  })
+
+  await add('re_182_wayback_rejects_decimal_encoded_loopback_target', async () => {
+    // 2130706433 is the decimal encoding of 127.0.0.1 — the WHATWG URL
+    // parser canonicalizes this to "127.0.0.1" before the range check runs.
+    const response = await waybackAdapter.run({ text: 'http://2130706433/' })
+    return response.ok === false || 'expected a decimal-encoded loopback target to be rejected'
+  })
+
+  await add('re_183_wayback_rejects_embedded_credentials_target', async () => {
+    const response = await waybackAdapter.run({ text: 'http://user:pass@example.com/' })
+    return response.ok === false || 'expected a target URL with embedded credentials to be rejected'
+  })
+
+  await add('re_184_wayback_rejects_non_web_scheme_target', async () => {
+    const response = await waybackAdapter.run({ text: 'file:///etc/passwd' })
+    return response.ok === false || 'expected a non-http(s) scheme target to be rejected'
+  })
+
+  await add('re_185_wayback_accepts_ordinary_public_https_target', () => {
+    const result = validateBoundedTargetUrl('https://example.com/some/page')
+    return result.ok || `expected an ordinary public HTTPS URL to validate, got ${JSON.stringify(result)}`
+  })
+
+  await add('re_186_wayback_upstream_error_is_safe_not_a_fake_success', () => withAdapterFetch([
+    new Response('Internal Server Error', { status: 500 }),
+  ], async () => {
+    const response = await waybackAdapter.run({ text: 'https://example.com/' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error') || `expected a safe error response, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_187_wayback_malformed_json_is_safe_parse_error', () => withAdapterFetch([
+    new Response('not valid json', { status: 200 }),
+  ], async () => {
+    const response = await waybackAdapter.run({ text: 'https://example.com/' })
+    if (response.ok !== false || !response.error) return `expected malformed JSON to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  }))
+
+  await add('re_188_wayback_non_array_top_level_is_safe_parse_error', () => withAdapterFetch([
+    jsonResponse({ not: 'an array' }),
+  ], async () => {
+    const response = await waybackAdapter.run({ text: 'https://example.com/' })
+    if (response.ok !== false || !response.error) return `expected a non-array top level to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  }))
+
+  await add('re_189_wayback_unexpected_header_shape_is_safe_parse_error', () => withAdapterFetch([
+    jsonResponse([['not', 'the', 'expected', 'header'], ['a', 'b']]),
+  ], async () => {
+    const response = await waybackAdapter.run({ text: 'https://example.com/' })
+    if (response.ok !== false || !response.error) return `expected an unrecognized header row to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  }))
+
+  await add('re_190_wayback_explicit_empty_array_remains_honest_success', () => withAdapterFetch([
+    jsonResponse([]),
+  ], async () => {
+    const response = await waybackAdapter.run({ text: 'https://example.com/never-captured' })
+    return (response.ok === true && response.documents.length === 0) || `expected an explicit empty CDX array to remain an honest empty success, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_191_wayback_result_count_is_bounded', () => withAdapterFetch([
+    jsonResponse([
+      sampleCdxRows[0],
+      ...Array.from({ length: 100 }, (_, i) => ['com,example)/', `2025060${i % 9}120000`, 'https://example.com/', 'text/html', '200', `DIGEST${i}`, '1024']),
+    ]),
+  ], async () => {
+    const response = await waybackAdapter.run({ text: 'https://example.com/', maxResults: 9999 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return response.documents.length <= 20 || `expected result count bounded to 20, got ${response.documents.length}`
+  }))
+
+  await add('re_192_wayback_arbitrary_base_url_override_rejected_by_allowlist', () => withEnv({ WAYBACK_BASE_URL: 'https://evil.example.com' }, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let called = false
+    __setResearchFetchForTests((async () => {
+      called = true
+      return jsonResponse([])
+    }) as typeof fetch)
+    try {
+      const response = await waybackAdapter.run({ text: 'https://example.com/' })
+      if (called) return 'the mocked fetch was invoked despite a disallowed host override — the central allowlist did not block it'
+      return (response.ok === false) || 'expected a safe error response when the base URL override is not on the host allowlist'
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+
+  await add('re_193_wayback_get_only_at_runtime', async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let capturedMethod: string | undefined
+    __setResearchFetchForTests((async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedMethod = init?.method
+      return jsonResponse([])
+    }) as typeof fetch)
+    try {
+      await waybackAdapter.run({ text: 'https://example.com/' })
+      return (capturedMethod === undefined || capturedMethod === 'GET') || `expected a GET-only request, got method=${capturedMethod}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  })
+
+  // --- Remaining 15: common_crawl (Group A) ---
+
+  const ccEnv = { COMMON_CRAWL_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0', COMMON_CRAWL_COLLECTION_ID: 'CC-MAIN-2025-33' }
+  const sampleCcLine = JSON.stringify({ urlkey: 'com,example)/', timestamp: '20250601120000', url: 'https://example.com/', mime: 'text/html', status: '200', digest: 'ABCDEF123456', filename: 'crawl-data/CC-MAIN-2025-33/segments/x.warc.gz', offset: '123', length: '456' })
+
+  await add('re_194_common_crawl_success_normalizes_index_records', () => withEnv(ccEnv, () => withAdapterFetch([
+    textResponse(sampleCcLine, 200, 'application/x-ndjson'),
+  ], async () => {
+    const response = await commonCrawlAdapter.run({ text: 'https://example.com/' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected 1 document, got ${response.documents.length}`
+    const doc = response.documents[0]
+    if (doc.identifiers.common_crawl_timestamp !== '20250601120000') return 'common_crawl_timestamp identifier missing'
+    if (doc.canonicalUrl !== 'https://example.com/') return `expected the record's own url as canonicalUrl, got ${doc.canonicalUrl}`
+    if ('common_crawl_filename' in doc.identifiers || 'common_crawl_offset' in doc.identifiers) return 'WARC pointer fields must never appear in normalized output'
+    return documentShapeIssue(doc, 'common_crawl') ?? true
+  })))
+
+  await add('re_195_common_crawl_not_configured_without_collection_id', () => withEnv({ COMMON_CRAWL_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }, () => withoutEnv(['COMMON_CRAWL_COLLECTION_ID'], async () => {
+    const response = await commonCrawlAdapter.run({ text: 'https://example.com/' })
+    return (response.ok === false && response.error?.category === 'not_configured') || `expected a not_configured error when the collection id is missing, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_196_common_crawl_not_configured_without_user_agent', () => withoutEnv(['COMMON_CRAWL_USER_AGENT_BASE'], async () => {
+    const response = await commonCrawlAdapter.run({ text: 'https://example.com/' })
+    return (response.ok === false && response.error?.category === 'not_configured') || `expected a not_configured error, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_197_common_crawl_upstream_error_is_safe_not_a_fake_success', () => withEnv(ccEnv, () => withAdapterFetch([
+    new Response('Internal Server Error', { status: 500 }),
+  ], async () => {
+    const response = await commonCrawlAdapter.run({ text: 'https://example.com/' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error') || `expected a safe error response, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_198_common_crawl_nonempty_unparseable_body_is_safe_parse_error', () => withEnv(ccEnv, () => withAdapterFetch([
+    textResponse('this is not ndjson at all {{{', 200, 'text/plain'),
+  ], async () => {
+    const response = await commonCrawlAdapter.run({ text: 'https://example.com/' })
+    if (response.ok !== false || !response.error) return `expected a non-empty unparseable body to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_199_common_crawl_empty_body_remains_honest_success', () => withEnv(ccEnv, () => withAdapterFetch([
+    textResponse('', 200, 'application/x-ndjson'),
+  ], async () => {
+    const response = await commonCrawlAdapter.run({ text: 'https://example.com/never-crawled' })
+    return (response.ok === true && response.documents.length === 0) || `expected an empty body to remain an honest empty success, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_200_common_crawl_result_count_is_bounded', () => withEnv(ccEnv, () => withAdapterFetch([
+    textResponse(Array.from({ length: 100 }, (_, i) => JSON.stringify({ urlkey: 'com,example)/', timestamp: `2025060${i % 9}120000`, url: 'https://example.com/', digest: `D${i}` })).join('\n'), 200, 'application/x-ndjson'),
+  ], async () => {
+    const response = await commonCrawlAdapter.run({ text: 'https://example.com/', maxResults: 9999 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return response.documents.length <= 20 || `expected result count bounded to 20, got ${response.documents.length}`
+  })))
+
+  await add('re_201_common_crawl_rejects_localhost_target', () => withEnv(ccEnv, async () => {
+    const response = await commonCrawlAdapter.run({ text: 'http://localhost/admin' })
+    return response.ok === false || 'expected a localhost target to be rejected before any request'
+  }))
+
+  await add('re_202_common_crawl_rejects_invalid_collection_id_format', () => withEnv({ ...ccEnv, COMMON_CRAWL_COLLECTION_ID: '../../etc/passwd' }, async () => {
+    const response = await commonCrawlAdapter.run({ text: 'https://example.com/' })
+    return (response.ok === false && response.error?.category === 'not_configured') || `expected an invalid collection id to be rejected as not_configured, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_203_common_crawl_arbitrary_base_url_override_rejected_by_allowlist', () => withEnv({ ...ccEnv, COMMON_CRAWL_INDEX_BASE_URL: 'https://evil.example.com' }, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let called = false
+    __setResearchFetchForTests((async () => {
+      called = true
+      return textResponse('', 200)
+    }) as typeof fetch)
+    try {
+      const response = await commonCrawlAdapter.run({ text: 'https://example.com/' })
+      if (called) return 'the mocked fetch was invoked despite a disallowed host override — the central allowlist did not block it'
+      return (response.ok === false) || 'expected a safe error response when the base URL override is not on the host allowlist'
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+
+  await add('re_204_common_crawl_get_only_at_runtime', () => withEnv(ccEnv, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let capturedMethod: string | undefined
+    __setResearchFetchForTests((async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedMethod = init?.method
+      return textResponse('', 200)
+    }) as typeof fetch)
+    try {
+      await commonCrawlAdapter.run({ text: 'https://example.com/' })
+      return (capturedMethod === undefined || capturedMethod === 'GET') || `expected a GET-only request, got method=${capturedMethod}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+
+  // --- Remaining 15: sam_gov (Group B) ---
+
+  const sampleSamOpp = {
+    noticeId: 'abc123',
+    title: 'Sample IT Services Opportunity',
+    solicitationNumber: 'SOL-2026-001',
+    postedDate: '2026-07-01',
+    type: 'Solicitation',
+    active: 'Yes',
+    typeOfSetAsideDescription: 'Total Small Business Set-Aside',
+    responseDeadLine: '2026-08-01T17:00:00-04:00',
+    uiLink: 'https://sam.gov/opp/abc123/view',
+    naicsCode: '541511',
+  }
+
+  await add('re_205_sam_gov_success_normalizes_opportunity_search', () => withEnv({ SAM_GOV_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ totalRecords: 1, opportunitiesData: [sampleSamOpp] }),
+  ], async () => {
+    const response = await samGovAdapter.run({ text: 'IT services' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected 1 document, got ${response.documents.length}`
+    const doc = response.documents[0]
+    if (doc.identifiers.sam_gov_notice_id !== 'abc123') return 'sam_gov_notice_id identifier missing'
+    if (doc.identifiers.sam_gov_active !== 'Yes') return 'sam_gov_active identifier missing'
+    return documentShapeIssue(doc, 'sam_gov') ?? true
+  })))
+
+  await add('re_206_sam_gov_not_configured_is_safe_not_a_fake_success', () => withoutEnv(['SAM_GOV_API_KEY'], async () => {
+    const response = await samGovAdapter.run({ text: 'IT services' })
+    return (response.ok === false && response.error?.category === 'not_configured') || `expected a not_configured error, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_207_sam_gov_upstream_error_is_safe_not_a_fake_success', () => withEnv({ SAM_GOV_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    new Response('Internal Server Error', { status: 500 }),
+  ], async () => {
+    const response = await samGovAdapter.run({ text: 'IT services' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error') || `expected a safe error response, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_208_sam_gov_malformed_json_is_safe_parse_error', () => withEnv({ SAM_GOV_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    new Response('not valid json', { status: 200 }),
+  ], async () => {
+    const response = await samGovAdapter.run({ text: 'IT services' })
+    if (response.ok !== false || !response.error) return `expected malformed JSON to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_209_sam_gov_missing_opportunities_data_is_safe_parse_error', () => withEnv({ SAM_GOV_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ totalRecords: 0 }),
+  ], async () => {
+    const response = await samGovAdapter.run({ text: 'IT services' })
+    if (response.ok !== false || !response.error) return `expected a missing "opportunitiesData" field to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_210_sam_gov_non_array_opportunities_data_is_safe_parse_error', () => withEnv({ SAM_GOV_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ opportunitiesData: 'not-an-array' }),
+  ], async () => {
+    const response = await samGovAdapter.run({ text: 'IT services' })
+    if (response.ok !== false || !response.error) return `expected a non-array "opportunitiesData" field to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_211_sam_gov_explicit_empty_opportunities_remains_honest_success', () => withEnv({ SAM_GOV_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ totalRecords: 0, opportunitiesData: [] }),
+  ], async () => {
+    const response = await samGovAdapter.run({ text: 'a search with no matches' })
+    return (response.ok === true && response.documents.length === 0) || `expected an explicit empty opportunitiesData array to remain an honest empty success, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_212_sam_gov_result_count_is_bounded', () => withEnv({ SAM_GOV_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ opportunitiesData: Array.from({ length: 100 }, (_, i) => ({ ...sampleSamOpp, noticeId: `notice-${i}` })) }),
+  ], async () => {
+    const response = await samGovAdapter.run({ text: 'IT services', maxResults: 9999 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return response.documents.length <= 20 || `expected result count bounded to 20, got ${response.documents.length}`
+  })))
+
+  await add('re_213_sam_gov_never_fabricates_missing_active_status', () => withEnv({ SAM_GOV_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ opportunitiesData: [{ ...sampleSamOpp, active: undefined, typeOfSetAsideDescription: undefined }] }),
+  ], async () => {
+    const response = await samGovAdapter.run({ text: 'IT services' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return (response.documents[0].identifiers.sam_gov_active === undefined && response.documents[0].identifiers.sam_gov_set_aside === undefined) || `expected missing active/set-aside to never be fabricated, got ${JSON.stringify(response.documents[0].identifiers)}`
+  })))
+
+  await add('re_214_sam_gov_api_key_never_leaks_into_cache_key_or_normalized_output', () => withEnv({ SAM_GOV_API_KEY: 'sk-live-sam-secret-not-real' }, () => withAdapterFetch([
+    jsonResponse({ opportunitiesData: [sampleSamOpp] }),
+  ], async () => {
+    const response = await samGovAdapter.run({ text: 'IT services' })
+    const serialized = JSON.stringify(response)
+    return !serialized.includes('sk-live-sam-secret-not-real') || 'the SAM.gov API key leaked into the normalized response'
+  })))
+
+  // --- Remaining 15: nasa (Group B, NeoWs feed only) ---
+
+  const sampleNeo = {
+    id: '3542519',
+    neo_reference_id: '3542519',
+    name: '(2010 XC15)',
+    nasa_jpl_url: 'https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=3542519',
+    close_approach_data: [{ close_approach_date: '2026-07-15' }],
+  }
+
+  await add('re_215_nasa_success_normalizes_neo_feed', () => withEnv({ NASA_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ element_count: 1, near_earth_objects: { '2026-07-15': [sampleNeo] } }),
+  ], async () => {
+    const response = await nasaAdapter.run({ text: '' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected 1 document, got ${response.documents.length}`
+    const doc = response.documents[0]
+    if (doc.identifiers.nasa_neo_reference_id !== '3542519') return 'nasa_neo_reference_id identifier missing'
+    if (doc.publishedAt !== '2026-07-15') return `expected the nearest close-approach date surfaced, got ${doc.publishedAt}`
+    return documentShapeIssue(doc, 'nasa') ?? true
+  })))
+
+  await add('re_216_nasa_not_configured_is_safe_not_a_fake_success', () => withoutEnv(['NASA_API_KEY'], async () => {
+    const response = await nasaAdapter.run({ text: '' })
+    return (response.ok === false && response.error?.category === 'not_configured') || `expected a not_configured error, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_217_nasa_upstream_error_is_safe_not_a_fake_success', () => withEnv({ NASA_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    new Response('Internal Server Error', { status: 500 }),
+  ], async () => {
+    const response = await nasaAdapter.run({ text: '' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error') || `expected a safe error response, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_218_nasa_malformed_json_is_safe_parse_error', () => withEnv({ NASA_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    new Response('not valid json', { status: 200 }),
+  ], async () => {
+    const response = await nasaAdapter.run({ text: '' })
+    if (response.ok !== false || !response.error) return `expected malformed JSON to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_219_nasa_missing_near_earth_objects_is_safe_parse_error', () => withEnv({ NASA_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ element_count: 0 }),
+  ], async () => {
+    const response = await nasaAdapter.run({ text: '' })
+    if (response.ok !== false || !response.error) return `expected a missing "near_earth_objects" field to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_220_nasa_non_object_near_earth_objects_is_safe_parse_error', () => withEnv({ NASA_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ near_earth_objects: 'not-an-object' }),
+  ], async () => {
+    const response = await nasaAdapter.run({ text: '' })
+    if (response.ok !== false || !response.error) return `expected a non-object "near_earth_objects" field to become ok:false, got ${JSON.stringify(response)}`
+    return response.error.category === 'parse_error' || `expected category parse_error, got ${response.error.category}`
+  })))
+
+  await add('re_221_nasa_explicit_empty_feed_remains_honest_success', () => withEnv({ NASA_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ element_count: 0, near_earth_objects: {} }),
+  ], async () => {
+    const response = await nasaAdapter.run({ text: '' })
+    return (response.ok === true && response.documents.length === 0) || `expected an explicit empty feed to remain an honest empty success, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_222_nasa_result_count_is_bounded', () => withEnv({ NASA_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ near_earth_objects: { '2026-07-15': Array.from({ length: 50 }, (_, i) => ({ ...sampleNeo, id: `neo-${i}`, neo_reference_id: `neo-${i}` })) } }),
+  ], async () => {
+    const response = await nasaAdapter.run({ text: '', maxResults: 9999 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return response.documents.length <= 20 || `expected result count bounded to 20, got ${response.documents.length}`
+  })))
+
+  await add('re_223_nasa_date_range_is_clamped_to_seven_days', async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let capturedUrl: string | undefined
+    __setResearchFetchForTests((async (input: RequestInfo | URL) => {
+      capturedUrl = String(input)
+      return jsonResponse({ near_earth_objects: {} })
+    }) as typeof fetch)
+    try {
+      await withEnv({ NASA_API_KEY: 'test-key-not-real' }, () => nasaAdapter.run({ text: '', dateFrom: '2026-01-01', dateTo: '2026-06-01' }))
+      if (!capturedUrl) return 'expected a request to be made'
+      const url = new URL(capturedUrl)
+      const start = new Date(`${url.searchParams.get('start_date')}T00:00:00Z`)
+      const end = new Date(`${url.searchParams.get('end_date')}T00:00:00Z`)
+      const days = (end.getTime() - start.getTime()) / 86_400_000
+      return days <= 7 || `expected the date range clamped to 7 days, got ${days} days (${capturedUrl})`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  })
+
+  await add('re_224_nasa_api_key_never_leaks_into_normalized_output', () => withEnv({ NASA_API_KEY: 'sk-live-nasa-secret-not-real' }, () => withAdapterFetch([
+    jsonResponse({ near_earth_objects: { '2026-07-15': [sampleNeo] } }),
+  ], async () => {
+    const response = await nasaAdapter.run({ text: '' })
+    const serialized = JSON.stringify(response)
+    return !serialized.includes('sk-live-nasa-secret-not-real') || 'the NASA API key leaked into the normalized response'
+  })))
+
+  // --- Remaining 15: global regression coverage for the whole build phase ---
+
+  // re_225 is a structural sanity check only (a source-text occurrence count
+  // of `<adapter>.run(` call sites) — it proves each adapter has *some*
+  // amount of direct runtime test coverage beyond just its success path, but
+  // it is not a measure of behavioral coverage completeness and must never
+  // be cited as proof that an adapter's security or correctness behavior is
+  // adequately tested. The actual behavioral coverage (SSRF matrices, date
+  // validation, literal-query encoding, canonical-URL hardening, item
+  // normalization, HTTP status handling, etc.) lives in the individual named
+  // checks throughout this file — re_225 is retained for compatibility only.
+  await add('re_225_remaining_15_implemented_adapters_each_have_runtime_tests', () => {
+    const selfSource = readFileSync(join(process.cwd(), 'lib/research-engine/diagnostics/validation.ts'), 'utf8')
+    const adapterVarNames: Record<string, string> = {
+      semantic_scholar: 'semanticScholarAdapter',
+      courtlistener: 'courtListenerAdapter',
+      internet_archive: 'internetArchiveAdapter',
+      wayback: 'waybackAdapter',
+      common_crawl: 'commonCrawlAdapter',
+      sam_gov: 'samGovAdapter',
+      nasa: 'nasaAdapter',
+    }
+    const missing = Object.entries(adapterVarNames).filter(([, varName]) => {
+      const runCallCount = selfSource.split(`${varName}.run(`).length - 1
+      // 1 call is the adapter's own success test; require at least 2 (success + at least one failure/edge case).
+      return runCallCount < 2
+    })
+    return missing.length === 0 || `adapter(s) missing sufficient runtime .run() test coverage: ${missing.map(([id]) => id).join(', ')}`
+  })
+
+  await add('re_226_all_unimplemented_providers_reject_honestly_via_getImplementedAdapter', () => {
+    const unimplemented = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).map(d => d.id)
+    const wronglyResolved = unimplemented.filter(id => IMPLEMENTED_PROVIDER_ADAPTERS[id] != null)
+    return wronglyResolved.length === 0 || `unimplemented provider(s) unexpectedly resolved a real adapter: ${JSON.stringify(wronglyResolved)}`
+  })
+
+  await add('re_227_remaining_15_implemented_files_never_use_timers_or_polling', () => {
+    const offenders = REMAINING_15_IMPLEMENTED_FILES.filter(file => {
+      const source = readFileSync(join(process.cwd(), 'lib/research-engine/providers', file), 'utf8')
+      return /setInterval\(|setTimeout\(/.test(source)
+    })
+    return offenders.length === 0 || `background timer/polling reference found in: ${offenders.join(', ')}`
+  })
+
+  await add('re_228_remaining_15_no_arbitrary_provider_host_accepted', () => {
+    const newlyImplementedIds: ResearchProviderId[] = ['semantic_scholar', 'courtlistener', 'internet_archive', 'wayback', 'common_crawl', 'sam_gov', 'nasa']
+    const offenders = newlyImplementedIds.filter(id => isAllowedHost(id, 'attacker.example.com'))
+    return offenders.length === 0 || `provider(s) accepted an arbitrary host: ${JSON.stringify(offenders)}`
+  })
+
+  await add('re_229_final_provider_descriptor_count_is_29', () =>
+    RESEARCH_PROVIDER_ENV.length === 29 || `expected 29 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
+
+  await add('re_230_final_implemented_count_is_21', () => {
+    const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
+    return count === 21 || `expected 21 implemented adapters, found ${count}`
+  })
+
+  await add('re_231_final_unimplemented_count_is_8', () => {
+    const count = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
+    return count === 8 || `expected 8 unimplemented providers, found ${count}`
+  })
+
+  // --- Repair pass: H1 (IPv4-mapped IPv6 SSRF bypass) fix regression + M5 SSRF matrix expansion ---
+  //
+  // Exercised through each real adapter's .run() (not just the shared validator in
+  // isolation) so a future regression in how an adapter wires up the validator would
+  // also be caught here, per the repair pass's Phase 3 requirement. Every case below
+  // asserts: (1) ok:false, (2) the exact error category, (3) the injected fetch was
+  // never invoked, and (4) provider-gate/cache state is restored in a finally block.
+
+  const BACKSLASH = String.fromCharCode(92)
+
+  const ssrfRejectedTargetCases: Array<{ id: string; url: string }> = [
+    // IPv6
+    { id: 'ipv6_loopback_target', url: 'http://[::1]/' },
+    { id: 'ipv6_unspecified_target', url: 'http://[::]/' },
+    { id: 'ipv6_link_local_target', url: 'http://[fe80::1]/' },
+    { id: 'ipv6_unique_local_fc_target', url: 'http://[fc00::1]/' },
+    { id: 'ipv6_unique_local_fd_target', url: 'http://[fd00::1]/' },
+    { id: 'ipv6_multicast_target', url: 'http://[ff00::1]/' },
+    // IPv4-mapped IPv6 (H1 — the confirmed bypass, in its dotted-decimal spelling)
+    { id: 'ipv4_mapped_ipv6_loopback_target', url: 'http://[::ffff:127.0.0.1]/' },
+    { id: 'ipv4_mapped_ipv6_metadata_target', url: 'http://[::ffff:169.254.169.254]/' },
+    { id: 'ipv4_mapped_ipv6_rfc1918_10_target', url: 'http://[::ffff:10.0.0.1]/' },
+    { id: 'ipv4_mapped_ipv6_rfc1918_172_target', url: 'http://[::ffff:172.16.0.1]/' },
+    { id: 'ipv4_mapped_ipv6_rfc1918_192_target', url: 'http://[::ffff:192.168.1.1]/' },
+    // IPv4-mapped IPv6, pre-normalized into the compressed hex form the WHATWG URL
+    // parser actually produces — this is the literal shape the bypass exploited,
+    // since the old validator's regex only matched the dotted-decimal spelling above.
+    { id: 'ipv4_mapped_ipv6_hex_loopback_target', url: 'http://[::ffff:7f00:1]/' },
+    { id: 'ipv4_mapped_ipv6_hex_metadata_target', url: 'http://[::ffff:a9fe:a9fe]/' },
+    { id: 'ipv4_mapped_ipv6_hex_rfc1918_10_target', url: 'http://[::ffff:a00:1]/' },
+    { id: 'ipv4_mapped_ipv6_hex_rfc1918_172_target', url: 'http://[::ffff:ac10:1]/' },
+    { id: 'ipv4_mapped_ipv6_hex_rfc1918_192_target', url: 'http://[::ffff:c0a8:101]/' },
+    // Alternative IPv4 encodings (the WHATWG URL parser canonicalizes each into
+    // dotted-decimal before the range check runs)
+    { id: 'ipv4_decimal_loopback_target', url: 'http://2130706433/' },
+    { id: 'ipv4_hex_loopback_target', url: 'http://0x7f000001/' },
+    { id: 'ipv4_octal_loopback_target', url: 'http://0177.0.0.1/' },
+    { id: 'ipv4_shortform_loopback_target', url: 'http://127.1/' },
+    { id: 'ipv4_cgnat_target', url: 'http://100.64.0.1/' },
+    { id: 'ipv4_link_local_target', url: 'http://169.254.1.1/' },
+    { id: 'ipv4_rfc1918_10_target', url: 'http://10.0.0.1/' },
+    { id: 'ipv4_rfc1918_172_target', url: 'http://172.16.0.1/' },
+    { id: 'ipv4_rfc1918_192_target', url: 'http://192.168.1.1/' },
+    { id: 'ipv4_documentation_range_target', url: 'http://192.0.2.1/' },
+    { id: 'ipv4_test_net_3_target', url: 'http://203.0.113.1/' },
+    // Hostname / authority edge cases
+    { id: 'hostname_localhost_target', url: 'http://localhost/' },
+    { id: 'hostname_localhost_trailing_dot_target', url: 'http://localhost./' },
+    { id: 'hostname_localhost_mixed_case_target', url: 'http://LocalHost/' },
+    { id: 'authority_embedded_credentials_target', url: 'http://user:pass@example.com/' },
+    { id: 'authority_username_only_target', url: 'http://user@example.com/' },
+    { id: 'hostname_trailing_dot_private_ip_target', url: 'http://10.0.0.1./' },
+    { id: 'authority_encoded_at_confusion_target', url: 'http://example.com%40evil.com/' },
+    { id: 'authority_backslash_disguised_metadata_target', url: `http://169.254.169.254${BACKSLASH}@example.com/` },
+    { id: 'authority_backslash_disguised_loopback_target', url: `http://127.0.0.1${BACKSLASH}@example.com/` },
+    { id: 'percent_encoded_loopback_octets_target', url: 'http://127%2e0%2e0%2e1/' },
+    { id: 'percent_encoded_loopback_digits_target', url: 'http://%31%32%37.0.0.1/' },
+    { id: 'malformed_percent_encoding_host_target', url: 'http://exa%zzmple.com/' },
+    // Non-web schemes
+    { id: 'scheme_file_target', url: 'file:///etc/passwd' },
+    { id: 'scheme_ftp_target', url: 'ftp://example.com/' },
+    { id: 'scheme_data_target', url: 'data:text/plain;base64,SGVsbG8=' },
+    { id: 'scheme_javascript_target', url: 'javascript:alert(1)' },
+    { id: 'scheme_blob_target', url: 'blob:https://example.com/uuid' },
+    { id: 'scheme_gopher_target', url: 'gopher://example.com/' },
+  ]
+
+  /** Runs one SSRF rejection case through a real adapter, proving no request is ever attempted. */
+  async function assertRejectedTarget(provider: 'wayback' | 'common_crawl', url: string): Promise<boolean | string> {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let called = false
+    __setResearchFetchForTests((async () => {
+      called = true
+      throw new Error('fetch must not be invoked for a target that should have been rejected before any request')
+    }) as typeof fetch)
+    try {
+      const response = provider === 'wayback'
+        ? await waybackAdapter.run({ text: url })
+        : await withEnv(ccEnv, () => commonCrawlAdapter.run({ text: url }))
+      if (called) return `mocked fetch was invoked for rejected target ${JSON.stringify(url)} — the SSRF gate did not block it before the request`
+      if (response.ok !== false) return `expected ok:false for rejected target ${JSON.stringify(url)}, got ${JSON.stringify(response)}`
+      if (response.documents.length !== 0) return `expected no documents for rejected target ${JSON.stringify(url)}, got ${response.documents.length}`
+      return response.error?.category === 'unknown' || `expected error category 'unknown' for rejected target ${JSON.stringify(url)}, got ${response.error?.category}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }
+
+  let ssrfCaseId = 232
+  for (const { id, url } of ssrfRejectedTargetCases) {
+    const currentId = ssrfCaseId
+    ssrfCaseId += 1
+    await add(`re_${currentId}_wayback_rejects_${id}`, () => assertRejectedTarget('wayback', url))
+  }
+  for (const { id, url } of ssrfRejectedTargetCases) {
+    const currentId = ssrfCaseId
+    ssrfCaseId += 1
+    await add(`re_${currentId}_common_crawl_rejects_${id}`, () => assertRejectedTarget('common_crawl', url))
+  }
+
+  // Corrected per the target-port micro-repair: an explicit nonstandard port must be
+  // rejected outright (not accepted) for both target-URL providers. re_322/re_323 keep
+  // their original numeric IDs — only the asserted behavior and descriptive name change.
+  await add(`re_${ssrfCaseId}_wayback_rejects_explicit_nonstandard_https_port_8443`, () => assertRejectedTarget('wayback', 'https://example.com:8443/'))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_common_crawl_rejects_explicit_nonstandard_https_port_8443`, () => assertRejectedTarget('common_crawl', 'https://example.com:8443/'))
+  ssrfCaseId += 1
+
+  // --- Repair pass: explicit nonstandard target-port rejection matrix (M-port) ---
+  //
+  // The WHATWG URL parser normalizes an explicit default port (http:80, https:443) to
+  // an empty `port` string, so those remain indistinguishable from no-port URLs and stay
+  // allowed. Any other explicit port must be rejected before the target reaches the
+  // provider's outbound request. Rejected cases reuse assertRejectedTarget (ok:false,
+  // error category 'unknown', fetch never invoked, no documents, gate/cache/env restored).
+  // Accepted cases prove the opposite: ok:true and exactly one outbound mocked request.
+
+  const rejectedPortCases: Array<{ id: string; url: string }> = [
+    { id: 'explicit_nonstandard_https_port_8443', url: 'https://example.com:8443/' },
+    { id: 'explicit_nonstandard_http_port_8080', url: 'http://example.com:8080/' },
+    { id: 'explicit_nonstandard_https_port_22', url: 'https://example.com:22/' },
+    { id: 'explicit_nonstandard_http_port_3000', url: 'http://example.com:3000/' },
+  ]
+
+  const acceptedPortCases: Array<{ id: string; url: string }> = [
+    { id: 'no_port_https', url: 'https://example.com/' },
+    { id: 'no_port_http', url: 'http://example.com/' },
+    { id: 'explicit_default_https_port_443', url: 'https://example.com:443/' },
+    { id: 'explicit_default_http_port_80', url: 'http://example.com:80/' },
+  ]
+
+  /** Runs one target-port acceptance case through a real adapter, proving exactly one outbound request is made. */
+  async function assertAcceptedTarget(provider: 'wayback' | 'common_crawl', url: string): Promise<boolean | string> {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let calls = 0
+    __setResearchFetchForTests((async () => {
+      calls += 1
+      return provider === 'wayback' ? jsonResponse([]) : textResponse('', 200, 'application/x-ndjson')
+    }) as typeof fetch)
+    try {
+      const response = provider === 'wayback'
+        ? await waybackAdapter.run({ text: url })
+        : await withEnv(ccEnv, () => commonCrawlAdapter.run({ text: url }))
+      if (calls !== 1) return `expected exactly one outbound request for accepted target ${JSON.stringify(url)}, got ${calls}`
+      if (response.ok !== true) return `expected ok:true for accepted target ${JSON.stringify(url)}, got ${JSON.stringify(response)}`
+      return response.documents.length === 0 || `expected the mocked empty response to yield no documents for ${JSON.stringify(url)}, got ${response.documents.length}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }
+
+  for (const { id, url } of rejectedPortCases) {
+    const currentId = ssrfCaseId
+    ssrfCaseId += 1
+    await add(`re_${currentId}_wayback_rejects_${id}`, () => assertRejectedTarget('wayback', url))
+  }
+  for (const { id, url } of rejectedPortCases) {
+    const currentId = ssrfCaseId
+    ssrfCaseId += 1
+    await add(`re_${currentId}_common_crawl_rejects_${id}`, () => assertRejectedTarget('common_crawl', url))
+  }
+  for (const { id, url } of acceptedPortCases) {
+    const currentId = ssrfCaseId
+    ssrfCaseId += 1
+    await add(`re_${currentId}_wayback_accepts_${id}`, () => assertAcceptedTarget('wayback', url))
+  }
+  for (const { id, url } of acceptedPortCases) {
+    const currentId = ssrfCaseId
+    ssrfCaseId += 1
+    await add(`re_${currentId}_common_crawl_accepts_${id}`, () => assertAcceptedTarget('common_crawl', url))
+  }
+
+  // --- Repair pass: M1 (SAM.gov reversed/oversized date-range validation) ---
+  //
+  // Preferred policy: invalid dates, a reversed range, and a range spanning more
+  // than 365 calendar days are all rejected outright (never silently corrected,
+  // swapped, or clamped) via error category 'unknown' — the same category the
+  // wayback/common_crawl target-URL validator uses for caller-input rejection,
+  // since the shared ResearchProviderError type has no 'invalid_request' category.
+
+  const samGovKey = { SAM_GOV_API_KEY: 'test-key-not-real' }
+
+  /** Runs one SAM.gov date-range rejection case, proving no upstream request is ever attempted. */
+  async function assertSamGovDateRejected(query: { text: string; dateFrom?: string; dateTo?: string }): Promise<boolean | string> {
+    return withEnv(samGovKey, async () => {
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+      let called = false
+      __setResearchFetchForTests((async () => {
+        called = true
+        throw new Error('fetch must not be invoked for a rejected caller date range')
+      }) as typeof fetch)
+      try {
+        const response = await samGovAdapter.run(query)
+        if (called) return `mocked fetch was invoked for a date range that should have been rejected: ${JSON.stringify(query)}`
+        if (response.ok !== false) return `expected ok:false for rejected date range ${JSON.stringify(query)}, got ${JSON.stringify(response)}`
+        return response.error?.category === 'unknown' || `expected error category 'unknown', got ${response.error?.category}`
+      } finally {
+        __setResearchFetchForTests(null)
+        __resetProviderGateForTests()
+        __resetCacheForTests()
+      }
+    })
+  }
+
+  await add(`re_${ssrfCaseId}_sam_gov_accepts_valid_caller_date_range`, () => withEnv(samGovKey, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let capturedUrl: string | undefined
+    __setResearchFetchForTests((async (input: RequestInfo | URL) => {
+      capturedUrl = typeof input === 'string' ? input : input.toString()
+      return jsonResponse({ opportunitiesData: [sampleSamOpp] })
+    }) as typeof fetch)
+    try {
+      const response = await samGovAdapter.run({ text: 'IT services', dateFrom: '2026-01-01', dateTo: '2026-01-31' })
+      if (!response.ok) return `expected ok response for a valid caller date range, got error: ${JSON.stringify(response.error)}`
+      const requestUrl = new URL(capturedUrl ?? '')
+      if (requestUrl.searchParams.get('postedFrom') !== '01/01/2026') return `expected postedFrom=01/01/2026, got ${requestUrl.searchParams.get('postedFrom')}`
+      if (requestUrl.searchParams.get('postedTo') !== '01/31/2026') return `expected postedTo=01/31/2026, got ${requestUrl.searchParams.get('postedTo')}`
+      return true
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_sam_gov_rejects_invalid_date_from`, () =>
+    assertSamGovDateRejected({ text: 'IT services', dateFrom: 'not-a-date', dateTo: '2026-01-31' }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_sam_gov_rejects_invalid_date_to`, () =>
+    assertSamGovDateRejected({ text: 'IT services', dateFrom: '2026-01-01', dateTo: 'not-a-date' }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_sam_gov_rejects_reversed_date_range`, () =>
+    assertSamGovDateRejected({ text: 'IT services', dateFrom: '2026-02-01', dateTo: '2026-01-01' }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_sam_gov_accepts_exactly_365_day_range`, () => withEnv(samGovKey, () => withAdapterFetch([
+    jsonResponse({ opportunitiesData: [sampleSamOpp] }),
+  ], async () => {
+    const response = await samGovAdapter.run({ text: 'IT services', dateFrom: '2025-01-01', dateTo: '2026-01-01' })
+    return response.ok === true || `expected a 365-day range to be accepted, got error: ${JSON.stringify(response.error)}`
+  })))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_sam_gov_rejects_range_greater_than_365_days`, () =>
+    assertSamGovDateRejected({ text: 'IT services', dateFrom: '2025-01-01', dateTo: '2026-01-02' }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_sam_gov_default_bounded_range_used_without_caller_dates`, () => withEnv(samGovKey, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let capturedUrl: string | undefined
+    __setResearchFetchForTests((async (input: RequestInfo | URL) => {
+      capturedUrl = typeof input === 'string' ? input : input.toString()
+      return jsonResponse({ opportunitiesData: [] })
+    }) as typeof fetch)
+    try {
+      const response = await samGovAdapter.run({ text: 'IT services' })
+      if (!response.ok) return `expected ok response when no caller dates are supplied, got error: ${JSON.stringify(response.error)}`
+      const requestUrl = new URL(capturedUrl ?? '')
+      const postedFrom = requestUrl.searchParams.get('postedFrom')
+      const postedTo = requestUrl.searchParams.get('postedTo')
+      if (!postedFrom || !postedTo) return `expected a default bounded postedFrom/postedTo pair, got ${postedFrom}..${postedTo}`
+      const parse = (mmddyyyy: string) => {
+        const [mm, dd, yyyy] = mmddyyyy.split('/')
+        return new Date(`${yyyy}-${mm}-${dd}T00:00:00Z`).getTime()
+      }
+      const rangeDays = Math.round((parse(postedTo) - parse(postedFrom)) / 86_400_000)
+      return (rangeDays > 0 && rangeDays <= 365) || `expected the default window to be bounded within 365 days, got ${rangeDays}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_sam_gov_api_key_absent_from_serialized_date_range_error`, () => withEnv({ SAM_GOV_API_KEY: 'sk-live-samgov-secret-not-real' }, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    __setResearchFetchForTests((async () => {
+      throw new Error('fetch must not be invoked for a rejected caller date range')
+    }) as typeof fetch)
+    try {
+      const response = await samGovAdapter.run({ text: 'IT services', dateFrom: '2026-02-01', dateTo: '2026-01-01' })
+      const serialized = JSON.stringify(response)
+      return !serialized.includes('sk-live-samgov-secret-not-real') || 'the SAM.gov API key leaked into a serialized date-range validation error'
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+  ssrfCaseId += 1
+
+  // --- Repair pass: M2 (Internet Archive literal-only query hardening) ---
+  //
+  // Caller text must never be interpreted as raw Solr/Lucene syntax (field
+  // selectors, boolean operators, grouping, wildcards, range/proximity
+  // syntax). Each case below captures the actual outbound request and proves
+  // the `q` param sent upstream is a single escaped, quoted literal phrase
+  // that round-trips back to exactly the caller's original text — not a
+  // naive passthrough of caller-controlled Solr syntax.
+
+  const iaEnv = { INTERNET_ARCHIVE_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }
+
+  /** Reverses the literal-phrase escaping independently of the adapter's own implementation, as an external oracle. */
+  function unescapeLiteralSolrPhrase(q: string): string | null {
+    if (q.length < 2 || q[0] !== '"' || q[q.length - 1] !== '"') return null
+    const inner = q.slice(1, -1)
+    let result = ''
+    for (let i = 0; i < inner.length; i++) {
+      if (inner[i] === '\\' && i + 1 < inner.length && (inner[i + 1] === '\\' || inner[i + 1] === '"')) {
+        result += inner[i + 1]
+        i += 1
+      } else {
+        result += inner[i]
+      }
+    }
+    return result
+  }
+
+  /** Runs one literal-query hardening case through the real adapter, capturing the exact outbound `q` param. */
+  async function assertInternetArchiveLiteralQuery(callerText: string): Promise<boolean | string> {
+    return withEnv(iaEnv, async () => {
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+      let capturedUrl: string | undefined
+      __setResearchFetchForTests((async (input: RequestInfo | URL) => {
+        capturedUrl = typeof input === 'string' ? input : input.toString()
+        return jsonResponse({ response: { numFound: 0, docs: [] } })
+      }) as typeof fetch)
+      try {
+        const response = await internetArchiveAdapter.run({ text: callerText })
+        if (!response.ok) return `expected ok response for caller text ${JSON.stringify(callerText)}, got error: ${JSON.stringify(response.error)}`
+        const requestUrl = new URL(capturedUrl ?? '')
+        const q = requestUrl.searchParams.get('q')
+        if (q === null) return `expected a "q" search param on the outbound request for ${JSON.stringify(callerText)}`
+        if (q === callerText) return `caller text ${JSON.stringify(callerText)} was passed through unescaped as raw Solr syntax`
+        const roundTripped = unescapeLiteralSolrPhrase(q)
+        if (roundTripped === null) return `expected "q" to be a single quoted literal phrase, got ${JSON.stringify(q)}`
+        return roundTripped === callerText || `expected the literal phrase to round-trip to ${JSON.stringify(callerText)}, got ${JSON.stringify(roundTripped)} (raw q=${JSON.stringify(q)})`
+      } finally {
+        __setResearchFetchForTests(null)
+        __resetProviderGateForTests()
+        __resetCacheForTests()
+      }
+    })
+  }
+
+  const iaLiteralQueryCases: Array<{ id: string; text: string }> = [
+    { id: 'field_selector_syntax', text: 'title:secret' },
+    { id: 'boolean_operator_syntax', text: 'foo OR mediatype:movies' },
+    { id: 'bare_wildcard_syntax', text: '*' },
+    { id: 'grouping_parentheses_syntax', text: '(test)' },
+    { id: 'embedded_double_quotes', text: '"quoted"' },
+    { id: 'embedded_backslash', text: 'backslash\\value' },
+    { id: 'range_syntax', text: 'date:[1900 TO 2100]' },
+  ]
+
+  for (const { id, text } of iaLiteralQueryCases) {
+    const currentId = ssrfCaseId
+    ssrfCaseId += 1
+    await add(`re_${currentId}_internet_archive_encodes_${id}_as_literal_text`, () => assertInternetArchiveLiteralQuery(text))
+  }
+
+  await add(`re_${ssrfCaseId}_internet_archive_fl_fields_remain_fixed_regardless_of_caller_input`, () => withEnv(iaEnv, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let capturedUrl: string | undefined
+    __setResearchFetchForTests((async (input: RequestInfo | URL) => {
+      capturedUrl = typeof input === 'string' ? input : input.toString()
+      return jsonResponse({ response: { numFound: 0, docs: [] } })
+    }) as typeof fetch)
+    try {
+      const response = await internetArchiveAdapter.run({ text: 'fl[]=identifier,secret_field&sort=random' })
+      if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+      const requestUrl = new URL(capturedUrl ?? '')
+      const fields = requestUrl.searchParams.getAll('fl[]')
+      const expected = ['identifier', 'title', 'description', 'mediatype', 'date', 'creator']
+      return (fields.length === expected.length && fields.every((f, i) => f === expected[i])) || `expected fl[] to remain fixed at ${JSON.stringify(expected)}, got ${JSON.stringify(fields)}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_internet_archive_strips_control_characters_from_query`, () => withEnv(iaEnv, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let capturedUrl: string | undefined
+    __setResearchFetchForTests((async (input: RequestInfo | URL) => {
+      capturedUrl = typeof input === 'string' ? input : input.toString()
+      return jsonResponse({ response: { numFound: 0, docs: [] } })
+    }) as typeof fetch)
+    try {
+      const response = await internetArchiveAdapter.run({ text: 'line1\x00line2\x1fline3' })
+      if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+      const requestUrl = new URL(capturedUrl ?? '')
+      const q = requestUrl.searchParams.get('q') ?? ''
+      return !/[\x00-\x1f\x7f]/.test(q) || `expected raw control characters to be stripped from the outbound query, got ${JSON.stringify(q)}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+  ssrfCaseId += 1
+
+  // --- Repair pass: M3 (CourtListener canonical-URL hardening) ---
+  //
+  // `absolute_url` is resolved via `new URL(relativePath, trustedOrigin)` and
+  // post-validated (https, exact hostname, default port, no credentials) —
+  // never naively string-concatenated. Preferred policy: a record whose
+  // `absolute_url` is present but unsafe/unusable is skipped; if every result
+  // in a non-empty upstream response is unsafe, the whole response becomes a
+  // parse_error rather than a fabricated honest-empty success.
+
+  const clEnv = { COURTLISTENER_API_TOKEN: 'test-token-not-real' }
+
+  const clUnsafeAbsoluteUrlCases: Array<{ id: string; absoluteUrl: string }> = [
+    { id: 'protocol_relative_authority_override', absoluteUrl: '//evil.example/path' },
+    { id: 'full_off_host_url', absoluteUrl: 'https://evil.example/path' },
+    { id: 'lookalike_host_suffix', absoluteUrl: 'https://www.courtlistener.com.evil.example/path' },
+    { id: 'backslash_authority_confusion', absoluteUrl: `/${String.fromCharCode(92)}evil.example/path` },
+    // WHATWG URL parsing strips embedded newlines before parsing, so a raw
+    // path containing a newline before "evil.example" (which does not literally
+    // start with "//") normalizes into the protocol-relative "//evil.example/..."
+    // once resolved -- proving the post-resolution hostname check catches what a
+    // pre-resolution string-prefix check alone would miss.
+    { id: 'newline_stripped_protocol_relative_bypass', absoluteUrl: `/${String.fromCharCode(10)}/evil.example/path` },
+  ]
+  for (const { id, absoluteUrl } of clUnsafeAbsoluteUrlCases) {
+    const currentId = ssrfCaseId
+    ssrfCaseId += 1
+    await add(`re_${currentId}_courtlistener_skips_result_with_${id}`, () => withEnv(clEnv, () => withAdapterFetch([
+      jsonResponse({ count: 1, results: [{ ...sampleClResult, absolute_url: absoluteUrl }] }),
+    ], async () => {
+      const response = await courtListenerAdapter.run({ text: 'sample case' })
+      if (response.ok !== false) return `expected an all-unsafe result set to become ok:false (parse_error), got ${JSON.stringify(response)}`
+      return response.error?.category === 'parse_error' || `expected category parse_error, got ${response.error?.category}`
+    })))
+  }
+
+  await add(`re_${ssrfCaseId}_courtlistener_accepts_normal_relative_opinion_path`, () => withEnv(clEnv, () => withAdapterFetch([
+    jsonResponse({ count: 1, results: [sampleClResult] }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample case' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected 1 document, got ${response.documents.length}`
+    const expected = `https://www.courtlistener.com${sampleClResult.absolute_url}`
+    return response.documents[0].canonicalUrl === expected || `expected canonicalUrl ${expected}, got ${response.documents[0].canonicalUrl}`
+  })))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_courtlistener_mixed_valid_and_invalid_results_keeps_only_valid`, () => withEnv(clEnv, () => withAdapterFetch([
+    jsonResponse({ count: 2, results: [sampleClResult, { ...sampleClResult, cluster_id: 111, absolute_url: '//evil.example/path' }] }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample case' })
+    if (!response.ok) return `expected ok response when at least one result is safe, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected only the 1 safe result to survive, got ${response.documents.length}`
+    return response.documents[0].canonicalUrl === `https://www.courtlistener.com${sampleClResult.absolute_url}` || `unexpected canonicalUrl on the surviving document: ${response.documents[0].canonicalUrl}`
+  })))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_courtlistener_all_results_invalid_is_parse_error_not_fabricated_empty_success`, () => withEnv(clEnv, () => withAdapterFetch([
+    jsonResponse({ count: 2, results: [{ ...sampleClResult, absolute_url: '//evil.example/path' }, { ...sampleClResult, cluster_id: 222, absolute_url: 'https://evil.example/other' }] }),
+  ], async () => {
+    const response = await courtListenerAdapter.run({ text: 'sample case' })
+    if (response.ok !== false) return `expected an all-invalid non-empty result set to become ok:false, got ${JSON.stringify(response)}`
+    return response.error?.category === 'parse_error' || `expected category parse_error, got ${response.error?.category}`
+  })))
+  ssrfCaseId += 1
+
+  // --- Repair pass: M4/L1 (Semantic Scholar stable-ID and item hardening) ---
+  //
+  // `paperId` is mandatory (title is never used as an ID fallback), `authors`
+  // is only ever iterated after an Array.isArray guard, and `url` is only
+  // trusted as canonicalUrl when it is a valid HTTPS URL on the accepted
+  // Semantic Scholar public origin. Preferred policy matches CourtListener's:
+  // skip individual malformed records, keep valid ones in a mixed response,
+  // and return parse_error (not a fabricated honest-empty success) if every
+  // record in a non-empty upstream response is malformed.
+
+  await add(`re_${ssrfCaseId}_semantic_scholar_skips_record_missing_paper_id`, () => withAdapterFetch([
+    jsonResponse({ data: [{ ...sampleSsPaper, paperId: undefined }] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (response.ok !== false) return `expected a lone record missing paperId to become ok:false (parse_error), got ${JSON.stringify(response)}`
+    return response.error?.category === 'parse_error' || `expected category parse_error, got ${response.error?.category}`
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_semantic_scholar_title_present_but_paper_id_missing_is_still_skipped`, () => withAdapterFetch([
+    jsonResponse({ data: [{ title: 'A Title With No Stable ID', abstract: null, year: 2024 }] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (response.ok !== false) return `expected a title-only record (no paperId) to be rejected rather than used as a fallback ID, got ${JSON.stringify(response)}`
+    return response.error?.category === 'parse_error' || `expected category parse_error, got ${response.error?.category}`
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_semantic_scholar_authors_as_string_does_not_crash_normalization`, () => withAdapterFetch([
+    jsonResponse({ data: [{ ...sampleSsPaper, authors: 'A. Researcher' }] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (!response.ok) return `expected ok response when authors is a string, got error: ${JSON.stringify(response.error)}`
+    return response.documents[0].authors.length === 0 || `expected authors to be normalized to [] when not an array, got ${JSON.stringify(response.documents[0].authors)}`
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_semantic_scholar_authors_null_does_not_crash_normalization`, () => withAdapterFetch([
+    jsonResponse({ data: [{ ...sampleSsPaper, authors: null }] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (!response.ok) return `expected ok response when authors is null, got error: ${JSON.stringify(response.error)}`
+    return response.documents[0].authors.length === 0 || `expected authors to be normalized to [], got ${JSON.stringify(response.documents[0].authors)}`
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_semantic_scholar_malformed_author_entries_are_dropped_not_crashed`, () => withAdapterFetch([
+    jsonResponse({ data: [{ ...sampleSsPaper, authors: ['not-an-object', { authorId: '2' }, { authorId: '3', name: 42 }, { authorId: '4', name: 'Valid Name' }, null] }] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (!response.ok) return `expected ok response with malformed author entries present, got error: ${JSON.stringify(response.error)}`
+    const authors = response.documents[0].authors
+    return (authors.length === 1 && authors[0] === 'Valid Name') || `expected only the one well-formed author name to survive, got ${JSON.stringify(authors)}`
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_semantic_scholar_external_ids_as_string_does_not_crash_normalization`, () => withAdapterFetch([
+    jsonResponse({ data: [{ ...sampleSsPaper, externalIds: 'DOI:10.9999/oops' }] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (!response.ok) return `expected ok response when externalIds is a string, got error: ${JSON.stringify(response.error)}`
+    return response.documents[0].identifiers.doi === undefined || `expected no doi identifier when externalIds is malformed, got ${response.documents[0].identifiers.doi}`
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_semantic_scholar_rejects_invalid_paper_url_as_canonical`, () => withAdapterFetch([
+    jsonResponse({ data: [{ ...sampleSsPaper, url: 'https://evil.example/paper/abc123def456' }] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (!response.ok) return `expected ok response (paperId is still present), got error: ${JSON.stringify(response.error)}`
+    return response.documents[0].canonicalUrl === null || `expected an off-origin paper url to be rejected as canonicalUrl, got ${response.documents[0].canonicalUrl}`
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_semantic_scholar_mixed_valid_and_invalid_records_keeps_only_valid`, () => withAdapterFetch([
+    jsonResponse({ data: [sampleSsPaper, { ...sampleSsPaper, paperId: undefined, title: 'Missing ID Paper' }] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (!response.ok) return `expected ok response when at least one record is valid, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected only the 1 valid record to survive, got ${response.documents.length}`
+    return response.documents[0].identifiers.semantic_scholar_paper_id === sampleSsPaper.paperId || `unexpected surviving record: ${JSON.stringify(response.documents[0].identifiers)}`
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_semantic_scholar_all_records_invalid_is_parse_error_not_fabricated_empty_success`, () => withAdapterFetch([
+    jsonResponse({ data: [{ ...sampleSsPaper, paperId: undefined }, { title: 'Also Missing ID' }] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (response.ok !== false) return `expected an all-invalid non-empty result set to become ok:false, got ${JSON.stringify(response)}`
+    return response.error?.category === 'parse_error' || `expected category parse_error, got ${response.error?.category}`
+  }))
+  ssrfCaseId += 1
+
+  await add(`re_${ssrfCaseId}_semantic_scholar_year_preserved_as_bare_year_not_fabricated_date`, () => withAdapterFetch([
+    jsonResponse({ data: [sampleSsPaper] }),
+  ], async () => {
+    const response = await semanticScholarAdapter.run({ text: 'sample things' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    return response.documents[0].publishedAt === String(sampleSsPaper.year) || `expected publishedAt to be the bare year "${sampleSsPaper.year}", got ${response.documents[0].publishedAt}`
+  }))
+  ssrfCaseId += 1
+
+  // --- Repair pass: M5 (HTTP 401/403/429/503 coverage matrix) ---
+  //
+  // Every Remaining-15 adapter maps any failed HTTP status to the same safe
+  // 'upstream_error' category (never a fake success), so each case below
+  // proves that holds for the auth-failure (401/403), rate-limit (429), and
+  // service-unavailable (503) statuses specifically, not just the existing
+  // 500 coverage. 429/503 responses carry `Retry-After: 0` so safeFetch's
+  // built-in retry/backoff resolves immediately rather than sleeping for
+  // real between attempts. Each case also proves the raw response body never
+  // leaks into the normalized error.
+
+  type HttpStatusAdapterConfig = {
+    id: string
+    env: Record<string, string>
+    query: { text: string }
+    run: (query: { text: string }) => ReturnType<typeof waybackAdapter.run>
+  }
+
+  const httpStatusAdapterConfigs: HttpStatusAdapterConfig[] = [
+    { id: 'semantic_scholar', env: {}, query: { text: 'sample things' }, run: semanticScholarAdapter.run },
+    { id: 'courtlistener', env: clEnv, query: { text: 'sample case' }, run: courtListenerAdapter.run },
+    { id: 'internet_archive', env: iaEnv, query: { text: 'sample item' }, run: internetArchiveAdapter.run },
+    { id: 'wayback', env: {}, query: { text: 'https://example.com/' }, run: waybackAdapter.run },
+    { id: 'common_crawl', env: ccEnv, query: { text: 'https://example.com/' }, run: commonCrawlAdapter.run },
+    { id: 'sam_gov', env: samGovKey, query: { text: 'IT services' }, run: samGovAdapter.run },
+    { id: 'nasa', env: { NASA_API_KEY: 'test-key-not-real' }, query: { text: '' }, run: nasaAdapter.run },
+  ]
+
+  const httpStatusCases = [401, 403, 429, 503]
+
+  for (const config of httpStatusAdapterConfigs) {
+    for (const status of httpStatusCases) {
+      const currentId = ssrfCaseId
+      ssrfCaseId += 1
+      const bodyMarker = `sensitive-raw-body-marker-${config.id}-${status}-must-never-leak`
+      await add(`re_${currentId}_${config.id}_http_${status}_is_safe_upstream_error`, () => withEnv(config.env, () => withAdapterFetch([
+        new Response(bodyMarker, { status, headers: status === 429 || status === 503 ? { 'Retry-After': '0' } : {} }),
+      ], async () => {
+        const response = await config.run(config.query)
+        if (response.ok !== false) return `expected HTTP ${status} to produce ok:false for ${config.id}, got ${JSON.stringify(response)}`
+        if (response.documents.length !== 0) return `expected 0 documents for an HTTP ${status} error on ${config.id}, got ${response.documents.length}`
+        if (response.error?.category !== 'upstream_error') return `expected category upstream_error for HTTP ${status} on ${config.id}, got ${response.error?.category}`
+        const serialized = JSON.stringify(response)
+        return !serialized.includes(bodyMarker) || `the raw upstream response body leaked into the normalized error for ${config.id} HTTP ${status}`
+      })))
+    }
+  }
 
   return results
 }

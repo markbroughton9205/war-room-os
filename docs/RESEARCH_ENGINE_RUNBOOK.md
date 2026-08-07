@@ -1,5 +1,13 @@
 # Research Engine — Runbook
 
+For the currently blocked providers (FMCSA, USPTO, USGS National Map, World
+Bank Data Catalog/Projects/Finances/Climate, IMF SDMX) and exactly why each
+remains `implemented: false`, see `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md`.
+Common Crawl requires one Commander-set env var not covered elsewhere in
+this runbook: `COMMON_CRAWL_COLLECTION_ID` (a specific, currently-existing
+collection id, e.g. `CC-MAIN-2025-33` — this build does not auto-discover
+the current collection).
+
 ## Checking what's configured
 
 `GET /api/research/providers` (Commander session required) returns every one

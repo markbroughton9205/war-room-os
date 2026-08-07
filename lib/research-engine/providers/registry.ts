@@ -16,6 +16,13 @@ import { nasaGibsAdapter } from '@/lib/research-engine/providers/nasaGibs'
 import { usgsWaterAdapter } from '@/lib/research-engine/providers/usgsWater'
 import { usgsEarthquakeFeedAdapter } from '@/lib/research-engine/providers/usgsEarthquakeFeed'
 import { usgsScienceBaseAdapter } from '@/lib/research-engine/providers/usgsScienceBase'
+import { semanticScholarAdapter } from '@/lib/research-engine/providers/semanticScholar'
+import { courtListenerAdapter } from '@/lib/research-engine/providers/courtlistener'
+import { internetArchiveAdapter } from '@/lib/research-engine/providers/internetArchive'
+import { waybackAdapter } from '@/lib/research-engine/providers/wayback'
+import { commonCrawlAdapter } from '@/lib/research-engine/providers/commonCrawl'
+import { samGovAdapter } from '@/lib/research-engine/providers/samGov'
+import { nasaAdapter } from '@/lib/research-engine/providers/nasa'
 
 /**
  * Only providers with a real, implemented adapter appear here. Every
@@ -39,6 +46,13 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   usgs_water: usgsWaterAdapter,
   usgs_earthquake_feed: usgsEarthquakeFeedAdapter,
   usgs_sciencebase: usgsScienceBaseAdapter,
+  semantic_scholar: semanticScholarAdapter,
+  courtlistener: courtListenerAdapter,
+  internet_archive: internetArchiveAdapter,
+  wayback: waybackAdapter,
+  common_crawl: commonCrawlAdapter,
+  sam_gov: samGovAdapter,
+  nasa: nasaAdapter,
 }
 
 export function getImplementedAdapter(id: ResearchProviderId): ResearchProviderAdapter | null {
