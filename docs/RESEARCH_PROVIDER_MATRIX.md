@@ -27,7 +27,7 @@ live check against the real upstream API.
 | Exa | general_web | `EXA_API_KEY` | Yes | Yes (`re_44`, `re_45`) | READY* | POST /search with content snippets. Capability: `search` only — no `getById`. |
 | GitHub | code | `GITHUB_TOKEN` | Yes | Yes (`re_42`, `re_43`) | READY* | Repo search only this phase (`GET /search/repositories`); no code/issue/PR/commit/release search. Capability: `search` only. |
 | SAM.gov | government_contracts | `SAM_GOV_API_KEY` | Yes | Yes (`re_205`–`re_214`, `re_340`–`re_347`, `re_395`–`re_398`, mocked) | READY* — MOCK-VALIDATED, NOT LIVE-VERIFIED | GET /opportunities/v2/search only. `postedFrom`/`postedTo` mandatory per docs, default bounded 90-day window. Repair pass: invalid dates, a reversed range, and a range over 365 days are all rejected outright (`re_340`–`re_347`) — never silently corrected/swapped/clamped. `api_key` is a required query param (no header alternative documented); redacted from logs. `active`/set-aside never fabricated when absent. A separate, revenue-focused SAM.gov adapter already exists at `lib/opportunity-agents/sources` — different purpose, not reused here. |
-| FMCSA | transportation | `FMCSA_WEB_KEY` | No | — | BLOCKED — MISSING AUTHORITATIVE CONTRACT | Official docs confirm host/auth/field names but never document the response envelope (bare vs. `content`-wrapped vs. array); no test credential available in this runtime to resolve via a controlled live probe. See `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md`. |
+| FMCSA | transportation | `FMCSA_WEB_KEY` | Yes | Yes (`re_600`–`re_678`, mocked) | READY* — MOCK-VALIDATED, TWO LIVE STRUCTURE-ONLY PROBES, INDEPENDENTLY AUDITED AND REPAIRED | GET /qc/services/carriers/{dotNumber} only, dispatched from an exact `usdot <digits>` query (1-8 digits, a War Room safety bound) canonicalized to a positive integer ≤99,999,999 before URL/cache-key construction (leading zeros collapse; zero is never valid). Response envelope (`content.carrier` with numeric `dotNumber`/string `legalName`) proven via two Commander-authorized, structure-only controlled probes against the official documentation-published sample USDOT 44110 — see `docs/RESEARCH_CONTROLLED_PROBE_LOG.md` (Probes 3–4) and `docs/RESEARCH_FMCSA_BUILD_REPORT.md`. The returned `dotNumber` must independently pass numeric validation (finite, safe integer, positive, ≤99,999,999) **and** exactly equal the canonicalized requested USDOT — a structurally valid response for a different carrier is rejected as `parse_error` with zero documents and is never cached under any key. `legalName` is bounded to 256 characters (rejected, not truncated, if exceeded); other optional carrier fields share the same bound. `safeProviderFetch` is called with `maxRetries: 0` (FMCSA-only override), so every execution costs at most one real upstream fetch regardless of outcome (success/4xx/5xx/timeout/redirect) — no retry amplification. No name search, no docket search, no pagination, no sub-resource calls. Empty-result and full error-response shapes were never live-observed (only a single matching carrier was probed) — non-2xx/malformed shapes fail closed to `upstream_error`/`parse_error`, never a fabricated empty success. Capability: `getById` only. |
 | NCBI / PubMed | scholarly | none required (`NCBI_API_KEY` optional) | Yes | Yes (`re_46`, `re_47`) | READY | ESearch+ESummary (JSON) + EFetch (XML) for top result's abstract, behind one search call. Capability: `search` only — `getById`/`related` are not independently callable. |
 | FRED | economics | `FRED_API_KEY` | Yes | Yes (`re_48`, `re_49`) | READY* | Series search + observations for the top match, both produced by one call. Capabilities `search`+`timeSeries` describe the two output shapes, not two dispatched operations. |
 | Semantic Scholar | scholarly | none (optional key) | Yes | Yes (`re_147`–`re_156`, `re_365`–`re_374`, `re_375`–`re_378`, mocked) | READY | GET /graph/v1/paper/search only (never `/paper/search/bulk`). Works unauthenticated at a shared, lower rate limit; optional key sent via `x-api-key` header. No citations/references/PDF fields requested. Repair pass: `paperId` is mandatory (never falls back to title), `authors` only iterated after an `Array.isArray` guard, `url` only trusted as `canonicalUrl` on the exact `www.semanticscholar.org` origin (`re_365`–`re_374`). Capability: `search` only. |
@@ -63,23 +63,24 @@ explicit, manual live check).
 
 ## Summary
 
-- **21 of 29 implemented**: the original 14 (Exa, GitHub, NCBI/PubMed, FRED,
+- **22 of 29 implemented**: the original 14 (Exa, GitHub, NCBI/PubMed, FRED,
   arXiv, Crossref, NASA GIBS (reused), World Bank Indicators, USGS
   Earthquake Catalog, Library of Congress, Wikidata, USGS Water Data, USGS
   Real-Time Earthquake Feeds, USGS ScienceBase) plus **7 added in the
   "Remaining 15" build phase**: Semantic Scholar, CourtListener, Internet
   Archive, Wayback Machine, Common Crawl, SAM.gov, NASA Open APIs (NeoWs
-  feed only). See `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md` for the full
-  per-provider contract proof, controlled-verification status, and
-  classification for each.
-- **8 of 29 registered but not implemented, each with a documented
-  blocker**: FMCSA (response envelope undocumented), USPTO (per-product API
-  family, current path unclear), USGS National Map (docs unreadable, PDF
-  403, two controlled live probes timed out), World Bank Data Catalog,
-  World Bank Projects (pre-existing v2/v3 conflict, re-confirmed not
-  newly live-derived), World Bank Finances, World Bank Climate, IMF SDMX.
+  feed only) — see `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md` — plus
+  **FMCSA**, added in the "Blocked Provider 1 of 8" build phase after two
+  Commander-authorized controlled probes resolved its response envelope; see
+  `docs/RESEARCH_FMCSA_BUILD_REPORT.md`.
+- **7 of 29 registered but not implemented, each with a documented
+  blocker**: USPTO (per-product API family, current path unclear), USGS
+  National Map (docs unreadable, PDF 403, two controlled live probes timed
+  out), World Bank Data Catalog, World Bank Projects (pre-existing v2/v3
+  conflict, re-confirmed not newly live-derived), World Bank Finances,
+  World Bank Climate, IMF SDMX.
   Full blocker text for each is in `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md`.
-- **All 21 implemented adapters have adapter-specific mocked tests**
+- **All 22 implemented adapters have adapter-specific mocked tests**
   (`re_42`–`re_99` for the original 14, `re_147`–`re_224` for the 7 added
   this phase, in `diagnostics/validation.ts`) that invoke the real exported
   adapter, not just shared utilities. A subsequent narrow repair pass

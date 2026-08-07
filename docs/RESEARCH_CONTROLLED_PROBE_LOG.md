@@ -93,14 +93,81 @@ No further live requests will be made against this provider in this build.
 
 ---
 
+### Probe 3 — fmcsa (top-level envelope)
+
+| Field | Value |
+|---|---|
+| Provider ID | `fmcsa` |
+| Date/time | 2026-08-07 (separate, Commander-authorized single-request session) |
+| Official documentation source authorizing the sample identifier | `https://mobile.fmcsa.dot.gov/QCDevsite/docs/qcApi` ("QCMobile API" page, endpoint table, "Example" column for `/carriers/:dotNumber`) — explicitly publishes USDOT `44110` as a documentation example, reused consistently across `/basics`, `/docket-numbers`, `/authority` example rows for the same endpoint family |
+| Sanitized URL | `https://mobile.fmcsa.dot.gov/qc/services/carriers/44110` |
+| Method | GET |
+| Request purpose | Confirm HTTP status, content type, top-level JSON type/keys — structural facts only |
+| Redirect mode | manual — none followed |
+| Timeout | 8s |
+| Max body accepted | 65,536 bytes |
+| HTTP status | 200 |
+| Content type | `application/hal+json;charset=UTF-8` |
+| Received bytes | 2096 |
+| Top-level type | object |
+| Top-level keys | `content` (object), `retrievalDate` (string) |
+| Credential used | `FMCSA_WEB_KEY` (value never printed, never saved) |
+| Confirmation no secret was printed | Yes |
+| Confirmation no returned link was followed | Yes |
+| Confirmation no file/resource was downloaded | Yes |
+| Confirmation no raw record value was printed or saved | Yes |
+| Conclusion supported | Outer envelope shape `{ content, retrievalDate }` |
+| Conclusion not supported | Structure inside `content` (carrier-record location, `dotNumber`/`legalName` paths) |
+
+### Probe 4 — fmcsa (recursive structure inside `content`)
+
+| Field | Value |
+|---|---|
+| Provider ID | `fmcsa` |
+| Date/time | 2026-08-07 (separate, Commander-authorized single-request session, immediately preceding the narrow adapter build) |
+| Official documentation source authorizing the sample identifier | Same as Probe 3 |
+| Sanitized URL | `https://mobile.fmcsa.dot.gov/qc/services/carriers/44110` |
+| Method | GET |
+| Request purpose | Recursive (max depth 4) structural key/type inspection to resolve the exact carrier-record path left open by Probe 3 |
+| Redirect mode | manual — none followed |
+| Timeout | 8s |
+| Max body accepted | 65,536 bytes |
+| HTTP status | 200 |
+| Content type | `application/hal+json;charset=UTF-8` |
+| Received bytes | 2096 |
+| Structural result | `$` → `{content: object, retrievalDate: string}`; `$.content` → `{_links: object, carrier: object}`; `$.content.carrier` → object containing (among ~40 sorted keys) `dotNumber` (number), `legalName` (string), `dbaName` (string), `allowedToOperate` (string), `statusCode` (string), `oosDate` (null observed), `phyCity`/`phyState`/`phyCountry` (strings), `safetyRating`/`safetyRatingDate` (strings), `commonAuthorityStatus`/`contractAuthorityStatus`/`brokerAuthorityStatus` (strings), plus nested `carrierOperation` and `censusTypeId` objects and numeric crash/inspection counters |
+| `dotNumber` structural path | `$.content.carrier.dotNumber` (type: number) |
+| `legalName` structural path | `$.content.carrier.legalName` (type: string) |
+| `_links` (HAL) present | Yes, at `$.content._links` — never followed |
+| Arrays present | No |
+| Credential used | `FMCSA_WEB_KEY` (value never printed, never saved) |
+| Confirmation no secret was printed | Yes |
+| Confirmation no returned link was followed | Yes |
+| Confirmation no file/resource was downloaded | Yes |
+| Confirmation no raw record value was printed or saved | Yes — key names and value *types* only |
+| Conclusion supported | Full success-envelope-to-carrier-record path proven without guessing; sufficient to implement a narrow, non-speculative parser |
+| Conclusion not supported | Empty-result shape, full error-response body shape, and the meaning of `retrievalDate` remain unproven (no 0-match or non-2xx response was ever observed) |
+
+**Per-provider probe budget for `fmcsa`: 2/2 used, both succeeded (200).** Per
+`docs/RESEARCH_FMCSA_BUILD_REPORT.md`, the proven envelope was sufficient to
+implement a USDOT-only adapter that fails closed (`upstream_error`/
+`parse_error`) on any non-2xx or unexpected shape rather than guessing at the
+unproven empty/error contract. No further live requests were made against
+this provider in this build.
+
+---
+
 ## Running totals
 
-- **Total live verification requests made this session: 2**
-- **Budget remaining: 28 of 30**
-- **Providers probed: 1 of 15** (`usgs_national_map`)
+- **Total live verification requests made this session: 4**
+- **Budget remaining: 26 of 30**
+- **Providers probed: 2 of 15** (`usgs_national_map`, `fmcsa`)
 - All requests: GET, bounded to documented minimum result count, official
-  host only, no credentials, no write capability, no returned-link
-  following, no resource download.
+  host only, no write capability, no returned-link following, no resource
+  download. `fmcsa`'s two requests additionally used a Commander-supplied
+  `FMCSA_WEB_KEY` (never printed, never saved, excluded from every log entry
+  above) and enforced a manual-redirect/65,536-byte/8-second bound beyond the
+  amendment's baseline rules.
 
 *(This log will be appended to, not rewritten, as additional controlled
 probes occur during the remainder of this build phase.)*

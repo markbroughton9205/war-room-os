@@ -10,13 +10,22 @@
   **variable names** required/optional — never a value, length, or prefix.
   Every route response includes `secretsExposed: false` as an explicit,
   checkable contract.
-- API keys that must travel in a URL (FRED, NCBI) are stripped by
-  `security/redact.ts::redactUrlForLogging` before that URL is ever logged or
-  surfaced in an error. Keys that support a header instead of a query param
+- API keys that must travel in a URL (FRED, NCBI, FMCSA's `webKey`) are
+  stripped by `security/redact.ts::redactUrlForLogging` before that URL is
+  ever logged or surfaced in an error — `webkey` was added to the shared
+  `SECRET_QUERY_PARAM_NAMES` allowlist (and the equivalent
+  `redactSecretsFromText` regex) specifically for FMCSA, so every existing
+  and future provider using that parameter name benefits automatically.
+  Keys that support a header instead of a query param
   (documented per-provider in `RESEARCH_PROVIDER_MATRIX.md`, e.g. IMF's
   `Ocp-Apim-Subscription-Key`, USGS Water's `X-Api-Key`) must use the header —
   this is enforced by convention today and should be a validation-harness
-  check as those adapters are implemented.
+  check as those adapters are implemented. An independent-audit repair pass
+  added dedicated tests (`re_674`, `re_675` in `diagnostics/validation.ts`)
+  confirming mixed-case parameter names (`webKey`/`WebKey`/`WEBKEY`/`webkey`)
+  and URL-encoded secret values are both fully redacted, not just the exact
+  lowercase/unencoded form used by the adapter itself — see
+  `docs/RESEARCH_FMCSA_BUILD_REPORT.md`.
 - No provider secret is ever prefixed `NEXT_PUBLIC_*` (`re_27` in the
   validation harness asserts this against the provider config source).
 - `security/redact.ts::redactSecretsFromText` also strips generic

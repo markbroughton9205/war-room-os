@@ -1,14 +1,14 @@
 # Research Engine — Architecture
 
-Status: **Phase 0 (foundation) complete. 21 of 29 providers implemented as of
-the "Remaining 15" build phase; 8 remain honestly `implemented: false` with a
-documented blocker each.** This is a staged build — see
-`RESEARCH_PROVIDER_MATRIX.md` for exactly which providers are implemented
-today, `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md` for the full contract
-proof and blocker text behind the most recent build phase,
-`docs/RESEARCH_CONTROLLED_PROBE_LOG.md` for the auditable list of every live
-provider request made during that phase, and `RESEARCH_ENGINE_RUNBOOK.md`
-for how to add the rest.
+Status: **Phase 0 (foundation) complete. 22 of 29 providers implemented as of
+the "Blocked Provider 1 of 8" (FMCSA) build phase; 7 remain honestly
+`implemented: false` with a documented blocker each.** This is a staged
+build — see `RESEARCH_PROVIDER_MATRIX.md` for exactly which providers are
+implemented today, `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md` and
+`docs/RESEARCH_FMCSA_BUILD_REPORT.md` for the full contract proof and
+blocker text behind the most recent build phases, `docs/RESEARCH_CONTROLLED_PROBE_LOG.md`
+for the auditable list of every live provider request made during those
+phases, and `RESEARCH_ENGINE_RUNBOOK.md` for how to add the rest.
 
 ## Terminology
 
@@ -21,7 +21,7 @@ interchangeably:
   calls no adapter.
 - **Implemented adapter** — a registered provider with a real
   `ResearchProviderAdapter` in `providers/registry.ts::IMPLEMENTED_PROVIDER_ADAPTERS`
-  (21 of 29 today).
+  (22 of 29 today).
 - **Adapter-specific mocked test** — a test in `diagnostics/validation.ts`
   that invokes a specific implemented adapter's real `run()` against a
   mocked `fetch` and asserts on its normalized output (checks `re_42`–`re_99`).
@@ -368,12 +368,58 @@ changed any provider count, registry status, or enabled a previously
 blocked provider — the 29 registered / 21 implemented / 8 blocked totals
 are unchanged, and no live provider request occurred during either repair.
 
+## Blocked Provider 1 of 8 build phase: FMCSA unblocked
+
+A later, narrowly scoped build phase resolved the one blocker preventing
+`fmcsa` from being implemented: the response envelope. Two separate,
+Commander-authorized, structure-only controlled probes (GET only, manual
+redirect, 8s timeout, 65,536-byte cap, no returned-link following) were made
+against the official documentation-published sample USDOT `44110`
+(`https://mobile.fmcsa.dot.gov/qc/services/carriers/44110`). The first
+confirmed the outer envelope (`{ content, retrievalDate }`); the second, a
+recursive depth-4 key/type inspection, resolved the exact carrier-record
+path (`content.carrier`) and confirmed `dotNumber` (number) and `legalName`
+(string) at that path — closing the gap without guessing at an unproven
+shape. `fmcsa` is now implemented as a narrow, read-only, USDOT-only
+`getById` adapter: exact input syntax `usdot <digits>` (1-8 digits, a War
+Room safety bound), one official endpoint, one carrier result per call, no
+name search, no docket-number search, no pagination, no sub-resource calls,
+no write capability of any kind. The empty-result and full error-response
+shapes were never live-observed (only a single matching carrier was ever
+probed), so the adapter fails closed — `upstream_error` for any non-2xx,
+`parse_error` for any unexpected shape — rather than fabricating an empty
+success or guessing an error envelope. Full detail, including the exact
+proven structural paths and the complete carrier-field mapping, is in
+`docs/RESEARCH_FMCSA_BUILD_REPORT.md`; the two probes themselves are logged
+in `docs/RESEARCH_CONTROLLED_PROBE_LOG.md` (Probes 3–4). This phase also
+added `webkey` to the shared secret-query-parameter redaction allowlist in
+`security/redact.ts`, used by every provider, not just FMCSA. Provider
+totals after this phase: 29 registered / 22 implemented / 7 blocked.
+
+**Independent-audit repair pass (same phase, prior to any commit):** an
+independent audit found the original adapter never verified that a returned
+`content.carrier.dotNumber` matched the requested USDOT (a wrong-carrier
+normalization/cache-poisoning gap), accepted out-of-range numeric
+`dotNumber` values (negative/decimal/unsafe-integer), left `legalName`
+unbounded, and — because `safeProviderFetch`'s shared 2-retry default was
+never overridden — could cost up to 3 real upstream fetches on a
+429/503/timeout/redirect despite documenting a one-call maximum. All were
+repaired with no additional live FMCSA request: a canonicalized-identifier
+identity check, strict numeric-range validation, a 256-character bound on
+`legalName` and other optional string fields, and an FMCSA-only
+`maxRetries: 0` override (the shared default is unchanged for every other
+provider). See "Independent-audit repair pass" in
+`docs/RESEARCH_FMCSA_BUILD_REPORT.md` for the full list and the 25 new
+mocked tests (`re_654`–`re_678`) that cover it.
+
 ## What is intentionally NOT built yet
 
-- 8 of 29 providers are registered (env-detection works, so their
+- 7 of 29 providers are registered (env-detection works, so their
   configuration status is visible today) but have no adapter, each with a
-  specific documented blocker — see the provider matrix and
-  `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md`. Calling one via
+  specific documented blocker — see the provider matrix,
+  `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md`, and
+  `docs/RESEARCH_FMCSA_BUILD_REPORT.md` (FMCSA moved from this list to
+  implemented in that phase). Calling one via
   `/api/research/search` returns a clean `not_configured`/`adapter not
   implemented` rejection, never a fake success.
 - No Research Console UI page. `/api/research/providers` and

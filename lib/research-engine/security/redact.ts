@@ -2,7 +2,7 @@ import 'server-only'
 
 const SECRET_QUERY_PARAM_NAMES = new Set([
   'api_key', 'apikey', 'key', 'token', 'access_token', 'subscription-key',
-  'subscription_key', 'x-api-key', 'auth', 'authorization', 'secret',
+  'subscription_key', 'x-api-key', 'auth', 'authorization', 'secret', 'webkey',
 ])
 
 /** Strips known secret-bearing query parameters from a URL before it is ever logged or included in an error. */
@@ -28,7 +28,7 @@ export function redactUrlForLogging(url: string): string {
  */
 export function redactSecretsFromText(text: string): string {
   return text
-    .replace(/([?&](?:api_key|apikey|key|token|access_token|secret)=)[^&\s]+/gi, '$1REDACTED')
+    .replace(/([?&](?:api_key|apikey|key|token|access_token|secret|webkey)=)[^&\s]+/gi, '$1REDACTED')
     .replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/gi, '$1REDACTED')
     .replace(/(Authorization["']?\s*[:=]\s*["']?)[A-Za-z0-9._~+/=-]{8,}/gi, '$1REDACTED')
     .replace(/(?:[A-Za-z]:\\|\.{0,2}\/)[^\s()<>"']*\.(?:ts|tsx|js|jsx|mjs|cjs)(?::\d+(?::\d+)?)?/g, '[internal-path-redacted]')

@@ -8,7 +8,7 @@ import { extractXmlBlocks, extractXmlText, decodeXmlEntities } from '@/lib/resea
 import { deduplicateDocuments } from '@/lib/research-engine/normalization/dedupe'
 import { buildCitation } from '@/lib/research-engine/citations/citations'
 import { routeResearchQuery } from '@/lib/research-engine/routing/router'
-import { __resetProviderGateForTests } from '@/lib/research-engine/security/providerGate'
+import { __resetProviderGateForTests, providerCooldownRemainingMs } from '@/lib/research-engine/security/providerGate'
 import { __resetCacheForTests } from '@/lib/research-engine/cache/ttlCache'
 import { makeDocument } from '@/lib/research-engine/providers/shared'
 import { githubAdapter } from '@/lib/research-engine/providers/github'
@@ -32,6 +32,7 @@ import { waybackAdapter } from '@/lib/research-engine/providers/wayback'
 import { commonCrawlAdapter } from '@/lib/research-engine/providers/commonCrawl'
 import { samGovAdapter } from '@/lib/research-engine/providers/samGov'
 import { nasaAdapter } from '@/lib/research-engine/providers/nasa'
+import { fmcsaAdapter } from '@/lib/research-engine/providers/fmcsa'
 import { validateBoundedTargetUrl } from '@/lib/research-engine/security/targetUrlValidator'
 import { IMPLEMENTED_PROVIDER_ADAPTERS } from '@/lib/research-engine/providers/registry'
 import type { ResearchDocument, ResearchProviderId } from '@/lib/research-engine/core/types'
@@ -139,6 +140,44 @@ async function withAdapterFetch<T>(responses: Response[], fn: () => Promise<T>):
   __setResearchFetchForTests(sequenceFetch(responses))
   try {
     return await fn()
+  } finally {
+    __setResearchFetchForTests(null)
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+  }
+}
+
+type CountingFetchCalls = { count: number; urls: string[]; inits: (RequestInit | undefined)[] }
+
+/**
+ * Like withAdapterFetch, but also records every request URL/init so a test
+ * can assert on call count, host, path, method, or query parameters.
+ * Deliberately does NOT fall back to replaying the last mocked response once
+ * `responses` is exhausted (Repair: independent-audit finding — a naive
+ * Math.min-clamped index would let an unexpected extra retry/redirect fetch
+ * hide behind a silently-replayed success response, so a call-count
+ * assertion could pass even when the adapter secretly made more upstream
+ * requests than the test authorized). Instead, any fetch beyond the
+ * authorized `responses.length` throws immediately with a distinctive
+ * message, so an unauthorized extra request surfaces as a visible failure
+ * rather than a concealed retry.
+ */
+async function withCountingFetch<T>(responses: Response[], fn: (calls: CountingFetchCalls) => Promise<T>): Promise<T> {
+  __resetProviderGateForTests()
+  __resetCacheForTests()
+  const calls: CountingFetchCalls = { count: 0, urls: [], inits: [] }
+  __setResearchFetchForTests((async (input: RequestInfo | URL, init?: RequestInit) => {
+    const index = calls.count
+    calls.count += 1
+    calls.urls.push(String(input))
+    calls.inits.push(init)
+    if (index >= responses.length) {
+      throw new Error(`withCountingFetch: unauthorized fetch #${calls.count} — only ${responses.length} mocked response(s) were authorized for this test, but the adapter attempted another upstream request`)
+    }
+    return responses[index]
+  }) as typeof fetch)
+  try {
+    return await fn(calls)
   } finally {
     __setResearchFetchForTests(null)
     __resetProviderGateForTests()
@@ -523,6 +562,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       common_crawl: ['historicalCaptures'],
       sam_gov: ['search'],
       nasa: ['search'],
+      fmcsa: ['getById'],
     }
     const implemented = RESEARCH_PROVIDER_ENV.filter(descriptor => descriptor.implemented)
     const offenders = implemented.filter(descriptor => {
@@ -1221,11 +1261,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   await add('re_100_registered_provider_count_remains_29', () =>
     RESEARCH_PROVIDER_ENV.length === 29 || `expected 29 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
-  await add('re_101_implemented_count_derives_to_21_from_descriptors_and_registry', () => {
+  await add('re_101_implemented_count_derives_to_22_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 21 && implementedAdapters === 21)
-      || `expected 21 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 22 && implementedAdapters === 22)
+      || `expected 22 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -2519,14 +2559,14 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   await add('re_229_final_provider_descriptor_count_is_29', () =>
     RESEARCH_PROVIDER_ENV.length === 29 || `expected 29 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
 
-  await add('re_230_final_implemented_count_is_21', () => {
+  await add('re_230_final_implemented_count_is_22', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 21 || `expected 21 implemented adapters, found ${count}`
+    return count === 22 || `expected 22 implemented adapters, found ${count}`
   })
 
-  await add('re_231_final_unimplemented_count_is_8', () => {
+  await add('re_231_final_unimplemented_count_is_7', () => {
     const count = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return count === 8 || `expected 8 unimplemented providers, found ${count}`
+    return count === 7 || `expected 7 unimplemented providers, found ${count}`
   })
 
   // --- Repair pass: H1 (IPv4-mapped IPv6 SSRF bypass) fix regression + M5 SSRF matrix expansion ---
@@ -3165,6 +3205,710 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       })))
     }
   }
+
+  // --- FMCSA QCMobile USDOT-only adapter (BLOCKED PROVIDER 1 OF 8 build) ---
+  //
+  // Envelope proven by two Commander-authorized, structure-only controlled
+  // probes against the official documentation-published sample USDOT 44110
+  // (see docs/RESEARCH_CONTROLLED_PROBE_LOG.md): a 200 response is
+  // `{ content: { _links, carrier: { dotNumber: number, legalName: string, ... } }, retrievalDate }`.
+  // All fixture values below are synthetic test data, never a real carrier record.
+
+  const fmcsaEnv = { FMCSA_WEB_KEY: 'test-key-not-real' }
+
+  const sampleFmcsaCarrier = {
+    content: {
+      _links: { self: { href: 'https://mobile.fmcsa.dot.gov/qc/services/carriers/44110' } },
+      carrier: {
+        dotNumber: 44110,
+        legalName: 'SAMPLE CARRIER LLC',
+        dbaName: 'SAMPLE DBA',
+        allowedToOperate: 'Y',
+        statusCode: 'A',
+        oosDate: null,
+        phyCity: 'SAMPLE CITY',
+        phyState: 'KS',
+        phyCountry: 'US',
+        safetyRating: 'S',
+        safetyRatingDate: '2020-01-01',
+        commonAuthorityStatus: 'A',
+        contractAuthorityStatus: 'N',
+        brokerAuthorityStatus: 'N',
+      },
+    },
+    retrievalDate: '2026-08-07T00:00:00.000Z',
+  }
+
+  await add('re_600_fmcsa_success_normalizes_proven_content_carrier_envelope', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    if (response.documents.length !== 1) return `expected 1 document, got ${response.documents.length}`
+    return documentShapeIssue(response.documents[0], 'fmcsa') ?? true
+  })))
+
+  await add('re_601_fmcsa_uses_exact_content_carrier_record_path', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    const doc = response.documents[0]
+    return doc?.canonicalUrl === 'https://mobile.fmcsa.dot.gov/qc/services/carriers/44110' || `expected the sanitized carrier endpoint as canonicalUrl, got ${doc?.canonicalUrl}`
+  })))
+
+  await add('re_602_fmcsa_dot_number_mapped_as_stable_identifier', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    const doc = response.documents[0]
+    return (doc?.providerRecordId === '44110' && doc.identifiers.fmcsa_dot_number === '44110') || `expected dotNumber mapped as a stable identifier, got ${JSON.stringify(doc?.identifiers)}`
+  })))
+
+  await add('re_603_fmcsa_legal_name_mapped_to_title', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return response.documents[0]?.title === 'SAMPLE CARRIER LLC' || `expected legalName mapped to title, got ${response.documents[0]?.title}`
+  })))
+
+  await add('re_604_fmcsa_optional_dba_name_mapped', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return response.documents[0]?.identifiers.fmcsa_dba_name === 'SAMPLE DBA' || `expected dbaName mapped, got ${JSON.stringify(response.documents[0]?.identifiers)}`
+  })))
+
+  await add('re_605_fmcsa_operating_status_mapped', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return response.documents[0]?.identifiers.fmcsa_allowed_to_operate === 'Y' || `expected allowedToOperate mapped, got ${JSON.stringify(response.documents[0]?.identifiers)}`
+  })))
+
+  await add('re_606_fmcsa_null_optional_field_preserved_not_fabricated', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, safetyRating: null, safetyRatingDate: null } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    if (!response.ok) return `expected ok response despite null optional fields, got ${JSON.stringify(response.error)}`
+    const ids = response.documents[0]?.identifiers ?? {}
+    return (!('fmcsa_safety_rating' in ids) && !('fmcsa_safety_rating_date' in ids)) || `expected null optional fields to be omitted, never fabricated, got ${JSON.stringify(ids)}`
+  })))
+
+  // Repair (independent-audit HIGH finding): this test formerly requested
+  // usdot 44110 and asserted that a response with dotNumber: 0 was accepted
+  // as valid ("falsy but valid"), proving the adapter never checked the
+  // returned carrier identity against the requested one. It now proves the
+  // opposite and required behavior: a returned dotNumber that does not match
+  // the requested USDOT is rejected as parse_error with zero documents, and
+  // is never cached under the requested key (a repeated identical request
+  // still performs a fresh fetch rather than serving a poisoned cache entry).
+  await add('re_607_fmcsa_returned_dot_number_mismatch_rejected_and_never_cached', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, dotNumber: 99999 } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, dotNumber: 99999 } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async calls => {
+    const first = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    if (first.ok !== false) return `expected a returned dotNumber (99999) that does not match the requested USDOT (44110) to be rejected, got ${JSON.stringify(first)}`
+    if (first.documents.length !== 0) return `expected zero documents for a mismatched carrier identity, got ${first.documents.length}`
+    if (first.error?.category !== 'parse_error') return `expected parse_error for a mismatched carrier identity, got ${first.error?.category}`
+    const second = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (second.ok === false && calls.count === 2) || `expected the mismatched response to never be cached under the requested key — a repeated identical request should still re-fetch, not hit a poisoned cache entry; got calls=${calls.count} second=${JSON.stringify(second)}`
+  })))
+
+  await add('re_608_fmcsa_retrieval_date_never_fabricates_publish_or_update_date', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    const doc = response.documents[0]
+    return (doc?.publishedAt === null && doc?.updatedAt === null) || `expected retrievalDate to never populate publishedAt/updatedAt (its meaning is undocumented), got publishedAt=${doc?.publishedAt} updatedAt=${doc?.updatedAt}`
+  })))
+
+  await add('re_609_fmcsa_invalid_input_rejected_before_fetch', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'hello world' })
+    return (response.ok === false && calls.count === 0) || `expected invalid input rejected without any fetch call, calls=${calls.count} response=${JSON.stringify(response)}`
+  })))
+
+  await add('re_610_fmcsa_free_text_query_rejected', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'acme trucking company' })
+    return (response.ok === false && calls.count === 0) || `expected free-text query rejected without a fetch call, calls=${calls.count}`
+  })))
+
+  await add('re_611_fmcsa_multiple_identifiers_rejected', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 123 456' })
+    return (response.ok === false && calls.count === 0) || `expected multiple identifiers rejected without a fetch call, calls=${calls.count}`
+  })))
+
+  await add('re_612_fmcsa_overlong_identifier_rejected', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 123456789' })
+    return (response.ok === false && calls.count === 0) || `expected a 9-digit identifier beyond the conservative bound rejected without a fetch call, calls=${calls.count}`
+  })))
+
+  await add('re_613_fmcsa_missing_webkey_reports_not_configured', () => withoutEnv(['FMCSA_WEB_KEY'], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'not_configured') || `expected a not_configured error, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_614_fmcsa_exact_host_construction', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    await fmcsaAdapter.run({ text: 'usdot 44110' })
+    if (calls.urls.length !== 1) return `expected exactly 1 request, got ${calls.urls.length}`
+    return new URL(calls.urls[0]).hostname === 'mobile.fmcsa.dot.gov' || `expected host mobile.fmcsa.dot.gov, got ${new URL(calls.urls[0]).hostname}`
+  })))
+
+  await add('re_615_fmcsa_exact_path_construction', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return new URL(calls.urls[0]).pathname === '/qc/services/carriers/44110' || `expected path /qc/services/carriers/44110, got ${new URL(calls.urls[0]).pathname}`
+  })))
+
+  await add('re_616_fmcsa_get_method_only', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    await fmcsaAdapter.run({ text: 'usdot 44110' })
+    const method = calls.inits[0]?.method ?? 'GET'
+    return method === 'GET' || `expected GET method only, got ${method}`
+  })))
+
+  await add('re_617_fmcsa_one_provider_call_maximum_per_run', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok && calls.count === 1) || `expected exactly 1 provider call per run, got ${calls.count}`
+  })))
+
+  await add('re_618_fmcsa_name_search_not_supported', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'name acme trucking' })
+    return (response.ok === false && calls.count === 0) || `expected name-search-style input rejected without a fetch call, calls=${calls.count}`
+  })))
+
+  await add('re_619_fmcsa_docket_search_not_supported', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'docket MC-123456' })
+    return (response.ok === false && calls.count === 0) || `expected docket-search-style input rejected without a fetch call, calls=${calls.count}`
+  })))
+
+  await add('re_620_fmcsa_never_constructs_a_sub_resource_url', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return new URL(calls.urls[0]).pathname === '/qc/services/carriers/44110' || `expected only the bare carrier endpoint, never a sub-resource path, got ${new URL(calls.urls[0]).pathname}`
+  })))
+
+  await add('re_621_fmcsa_never_sends_pagination_parameters', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    await fmcsaAdapter.run({ text: 'usdot 44110' })
+    const keys = Array.from(new URL(calls.urls[0]).searchParams.keys())
+    return (keys.length === 1 && keys[0] === 'webKey') || `expected only a webKey query parameter, no pagination params, got ${JSON.stringify(keys)}`
+  })))
+
+  await add('re_622_fmcsa_never_follows_hal_links_in_the_response', () => withEnv(fmcsaEnv, () => withCountingFetch([jsonResponse({
+    content: {
+      _links: { self: { href: 'https://mobile.fmcsa.dot.gov/qc/services/carriers/44110' }, basics: { href: 'https://mobile.fmcsa.dot.gov/qc/services/carriers/44110/basics' } },
+      carrier: sampleFmcsaCarrier.content.carrier,
+    },
+    retrievalDate: sampleFmcsaCarrier.retrievalDate,
+  })], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok && calls.count === 1) || `expected the HAL _links in the response body to never be followed (exactly 1 call), got ${calls.count}`
+  })))
+
+  await add('re_623_fmcsa_missing_content_wrapper_is_parse_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error' && response.documents.length === 0) || `expected parse_error for a missing content wrapper, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_624_fmcsa_content_wrong_type_is_parse_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: 'not-an-object', retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected parse_error for a non-object content field, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_625_fmcsa_carrier_record_wrong_type_is_parse_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: ['not', 'an', 'object'] }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected parse_error for a non-object carrier record, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_626_fmcsa_missing_dot_number_is_parse_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { legalName: 'SAMPLE CARRIER LLC' } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected parse_error for a missing dotNumber, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_627_fmcsa_malformed_dot_number_type_is_parse_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { dotNumber: '44110', legalName: 'SAMPLE CARRIER LLC' } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected parse_error for a string-typed dotNumber (the proven type is number), got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_628_fmcsa_missing_legal_name_is_parse_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { dotNumber: 44110 } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected parse_error for a missing legalName, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_629_fmcsa_legal_name_wrong_type_is_parse_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { dotNumber: 44110, legalName: 12345 } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected parse_error for a numeric-typed legalName, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_630_fmcsa_malformed_json_is_parse_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('{not valid json', { status: 200 }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected parse_error for malformed JSON, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_631_fmcsa_html_response_is_parse_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('<html><body>Not JSON</body></html>', { status: 200, headers: { 'Content-Type': 'text/html' } }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected parse_error for an HTML response, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_632_fmcsa_404_is_safe_not_a_fake_success', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('Not Found', { status: 404 }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error' && response.error?.httpStatus === 404) || `expected a safe upstream_error for 404 (no dedicated not_found category exists in this build's types), got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_633_fmcsa_400_is_safe_upstream_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('Bad Request', { status: 400 }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'upstream_error') || `expected upstream_error for 400, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_634_fmcsa_401_is_safe_upstream_error_without_key_leak', () => withEnv({ FMCSA_WEB_KEY: 'sk-live-fmcsa-secret-not-real' }, () => withAdapterFetch([
+    new Response('Unauthorized', { status: 401 }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    const serialized = JSON.stringify(response)
+    return (response.ok === false && response.error?.category === 'upstream_error' && !serialized.includes('sk-live-fmcsa-secret-not-real')) || `expected a safe 401 upstream_error without a key leak, got ${serialized}`
+  })))
+
+  await add('re_635_fmcsa_403_is_safe_upstream_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('Forbidden', { status: 403 }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'upstream_error') || `expected upstream_error for 403, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_636_fmcsa_429_is_rate_limited', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('Too Many Requests', { status: 429, headers: { 'retry-after': '0' } }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'rate_limited') || `expected rate_limited for 429, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_637_fmcsa_500_is_safe_upstream_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('Internal Server Error', { status: 500 }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'upstream_error') || `expected upstream_error for 500, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_638_fmcsa_503_is_safe_upstream_error', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('Service Unavailable', { status: 503, headers: { 'retry-after': '0' } }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'upstream_error') || `expected upstream_error after exhausted 503 retries, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_639_fmcsa_timeout_is_safe_upstream_error', () => withEnv(fmcsaEnv, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    __setResearchFetchForTests((async () => {
+      const abortError = new Error('The operation was aborted')
+      abortError.name = 'AbortError'
+      throw abortError
+    }) as typeof fetch)
+    try {
+      const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+      return (response.ok === false && response.documents.length === 0) || `expected a safe error response on timeout, got ${JSON.stringify(response)}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+
+  await add('re_640_fmcsa_oversized_response_is_rejected_not_parsed', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('x'.repeat(200_000), { status: 200 }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.documents.length === 0) || `expected an oversized response to be rejected, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_641_fmcsa_redirect_is_never_followed_and_costs_exactly_one_fetch', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    new Response(null, { status: 302, headers: { location: 'https://mobile.fmcsa.dot.gov/qc/services/carriers/44110/redirected' } }),
+  ], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    if (response.ok !== false || response.documents.length !== 0) return `expected a redirect to be rejected rather than followed, got ${JSON.stringify(response)}`
+    if (calls.count !== 1) return `expected exactly 1 upstream fetch for a redirect response (maxRetries: 0 + maxRedirects: 0 — no amplification), got ${calls.count}`
+    return calls.urls.every(u => !u.includes('/redirected')) || `expected the Location redirect target to never be requested, got ${JSON.stringify(calls.urls)}`
+  })))
+
+  await add('re_642_fmcsa_webkey_stripped_from_network_error_text', () => withEnv(fmcsaEnv, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    __setResearchFetchForTests((async () => {
+      throw new Error('fetch failed for https://mobile.fmcsa.dot.gov/qc/services/carriers/44110?webKey=FAKEWEBKEY123 : network unreachable')
+    }) as typeof fetch)
+    try {
+      const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+      const serialized = JSON.stringify(response)
+      return !serialized.includes('FAKEWEBKEY123') || `a fake webKey value leaked through a network-error message: ${serialized}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+
+  await add('re_643_fmcsa_webkey_absent_from_cache_key', () => withCountingFetch([jsonResponse(sampleFmcsaCarrier)], async calls => {
+    const prevKey = process.env.FMCSA_WEB_KEY
+    process.env.FMCSA_WEB_KEY = 'first-fake-key-not-real'
+    try {
+      const first = await fmcsaAdapter.run({ text: 'usdot 44110' })
+      if (!first.ok) return `expected first call to succeed, got ${JSON.stringify(first.error)}`
+      process.env.FMCSA_WEB_KEY = 'second-fake-key-not-real'
+      const second = await fmcsaAdapter.run({ text: 'usdot 44110' })
+      if (!second.ok) return `expected second call to succeed, got ${JSON.stringify(second.error)}`
+      return (second.fromCache === true && calls.count === 1) || `expected the cache key to be independent of webKey; calls=${calls.count} fromCache=${second.fromCache}`
+    } finally {
+      if (prevKey === undefined) delete process.env.FMCSA_WEB_KEY
+      else process.env.FMCSA_WEB_KEY = prevKey
+    }
+  }))
+
+  await add('re_644_fmcsa_webkey_absent_from_serialized_errors', () => withEnv({ FMCSA_WEB_KEY: 'sk-live-fmcsa-secret-not-real' }, () => withAdapterFetch([
+    new Response('not valid json', { status: 200 }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    const serialized = JSON.stringify(response)
+    return !serialized.includes('sk-live-fmcsa-secret-not-real') || 'the FMCSA WebKey leaked into a serialized error response'
+  })))
+
+  await add('re_645_fmcsa_webkey_absent_from_source_url', () => withEnv({ FMCSA_WEB_KEY: 'sk-live-fmcsa-secret-not-real' }, () => withAdapterFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    const doc = response.documents[0]
+    const noKeyLeak = !JSON.stringify(doc).includes('sk-live-fmcsa-secret-not-real')
+    const noParamLeak = !(doc?.sourceUrl ?? '').includes('webKey') && !(doc?.canonicalUrl ?? '').includes('webKey')
+    return (noKeyLeak && noParamLeak) || 'the WebKey or a webKey query parameter leaked into the normalized source/canonical URL'
+  })))
+
+  await add('re_646_fmcsa_fake_webkey_fully_redacted_by_shared_redactors', () => {
+    const redactedUrl = redactUrlForLogging('https://mobile.fmcsa.dot.gov/qc/services/carriers/44110?webKey=FAKEWEBKEY123')
+    const redactedText = redactSecretsFromText('request failed: https://mobile.fmcsa.dot.gov/qc/services/carriers/44110?webKey=FAKEWEBKEY123 timed out')
+    if (redactedUrl.includes('FAKEWEBKEY123') || !redactedUrl.includes('REDACTED')) return `webKey not redacted from URL: ${redactedUrl}`
+    if (redactedText.includes('FAKEWEBKEY123') || !redactedText.includes('REDACTED')) return `webKey not redacted from free text: ${redactedText}`
+    return true
+  })
+
+  await add('re_647_fmcsa_provider_gate_cooldown_engages_on_consecutive_failures', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('Internal Server Error', { status: 500 }),
+  ], async () => {
+    await fmcsaAdapter.run({ text: 'usdot 11111' })
+    await fmcsaAdapter.run({ text: 'usdot 22222' })
+    await fmcsaAdapter.run({ text: 'usdot 33333' })
+    const cooling = providerCooldownRemainingMs('fmcsa')
+    return cooling > 0 || `expected fmcsa to enter a failure cooldown after 3 consecutive failures, got ${cooling}ms remaining`
+  })))
+
+  await add('re_648_fmcsa_cache_does_not_leak_across_tests', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok && response.fromCache === false) || `expected a fresh (non-cached) lookup in an isolated test run despite an earlier test caching the same USDOT, got fromCache=${response.fromCache} ok=${response.ok}`
+  })))
+
+  await add('re_649_fmcsa_never_calls_global_fetch_directly', () => {
+    const source = readFileSync(join(process.cwd(), 'lib/research-engine/providers/fmcsa.ts'), 'utf8')
+    return !source.includes('fetch(') || 'fmcsa adapter appears to call fetch() directly instead of exclusively using safeProviderFetch'
+  })
+
+  await add('re_650_fmcsa_registered_exactly_once', () => {
+    const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).filter(id => id === 'fmcsa').length
+    return count === 1 || `expected fmcsa registered exactly once, found ${count}`
+  })
+
+  await add('re_651_fmcsa_descriptor_implemented_and_counts_are_29_22_7', () => {
+    const descriptor = RESEARCH_PROVIDER_ENV.find(d => d.id === 'fmcsa')
+    const totalCount = RESEARCH_PROVIDER_ENV.length
+    const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
+    const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
+    return (descriptor?.implemented === true && totalCount === 29 && implementedCount === 22 && blockedCount === 7)
+      || `expected fmcsa implemented plus a 29/22/7 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+  })
+
+  await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {
+    const descriptorImplementedIds = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).map(d => d.id).sort()
+    const registryIds = (Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS) as ResearchProviderId[]).sort()
+    const equal = descriptorImplementedIds.length === registryIds.length && descriptorImplementedIds.every((id, i) => id === registryIds[i])
+    return equal || `descriptor implemented set and registry key set diverge: descriptors=${JSON.stringify(descriptorImplementedIds)} registry=${JSON.stringify(registryIds)}`
+  })
+
+  await add('re_653_remaining_seven_blocked_providers_are_exactly_as_specified', () => {
+    const expected = ['imf_sdmx', 'usgs_national_map', 'uspto', 'world_bank_climate', 'world_bank_data_catalog', 'world_bank_finances', 'world_bank_projects'].sort()
+    const actual = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).map(d => d.id).sort()
+    const equal = expected.length === actual.length && expected.every((id, i) => id === actual[i])
+    return equal || `expected the remaining blocked set ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+  })
+
+  // --- FMCSA repair pass (independent-audit HIGH/MEDIUM findings) ---
+  //
+  // New tests re_654-re_678 close the gaps identified by the independent
+  // audit: requested-vs-returned USDOT identity, numeric range/type
+  // validation on the returned dotNumber, requested-identifier
+  // canonicalization, legalName bounds, the true one-upstream-fetch
+  // guarantee (maxRetries: 0) under every response condition, and
+  // mixed-case/URL-encoded WebKey redaction. re_607 (mismatch/cache
+  // poisoning) and re_641 (redirect fetch count) were repaired in place
+  // above rather than duplicated here. All fixture values are synthetic.
+
+  await add('re_654_fmcsa_returned_dot_number_exact_match_accepted_and_cached', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === true && response.documents[0]?.providerRecordId === '44110' && response.fromCache === false && calls.count === 1)
+      || `expected a returned dotNumber exactly matching the requested USDOT to be accepted on exactly 1 fetch, got calls=${calls.count} response=${JSON.stringify(response)}`
+  })))
+
+  await add('re_655_fmcsa_returned_dot_number_prefix_substring_not_treated_as_match', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, dotNumber: 44110 } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 4411' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'parse_error')
+      || `expected requested "4411" vs. returned dotNumber 44110 (a superstring, not equal) to be rejected as a mismatch, not accepted via prefix/substring confusion, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_656_fmcsa_returned_zero_dot_number_rejected', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, dotNumber: 0 } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'parse_error')
+      || `expected a returned dotNumber of 0 to be rejected (zero is never a valid USDOT), got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_657_fmcsa_returned_negative_dot_number_rejected', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, dotNumber: -44110 } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected a negative returned dotNumber to be rejected, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_658_fmcsa_returned_decimal_dot_number_rejected', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, dotNumber: 44110.5 } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected a decimal returned dotNumber to be rejected, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_659_fmcsa_returned_unsafe_integer_dot_number_rejected', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, dotNumber: 9_999_999_999_999_999 } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected an unsafe-integer returned dotNumber to be rejected, got ${JSON.stringify(response)}`
+  })))
+
+  // NaN is not representable in valid JSON — `JSON.parse` throws on the bare
+  // `NaN` token before any JavaScript NaN value could ever reach the FMCSA
+  // numeric validator. This test therefore proves malformed-JSON (parse
+  // failure) rejection, not a direct Number.isSafeInteger(NaN) rejection.
+  // Valid-JSON non-finite behavior (a number literal that parses successfully
+  // but overflows to a non-finite value) is separately exercised by re_661
+  // (1e400 parses as Infinity, then fails Number.isSafeInteger).
+  await add('re_660_fmcsa_invalid_json_nan_literal_is_parse_error', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    new Response('{"content":{"carrier":{"dotNumber":NaN,"legalName":"SAMPLE CARRIER LLC"}}}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  ], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error' && response.documents.length === 0 && calls.count === 1)
+      || `expected a body containing the illegal JSON token NaN to fail JSON.parse and be rejected as parse_error on exactly 1 fetch, got calls=${calls.count} response=${JSON.stringify(response)}`
+  })))
+
+  await add('re_661_fmcsa_returned_infinity_dot_number_rejected', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    new Response('{"content":{"carrier":{"dotNumber":1e400,"legalName":"SAMPLE CARRIER LLC"}}}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected a valid-JSON dotNumber that overflows to Infinity (1e400) to be rejected, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_662_fmcsa_requested_zero_rejected_before_fetch', () => withEnv(fmcsaEnv, () => withCountingFetch([], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 0' })
+    return (response.ok === false && calls.count === 0) || `expected a requested USDOT of 0 to be rejected before any fetch, calls=${calls.count} response=${JSON.stringify(response)}`
+  })))
+
+  await add('re_663_fmcsa_leading_zero_input_canonicalized_before_url_construction', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 044110' })
+    if (response.ok !== true || response.documents[0]?.providerRecordId !== '44110') return `expected leading-zero input "044110" to canonicalize to "44110", got ${JSON.stringify(response)}`
+    return new URL(calls.urls[0]).pathname === '/qc/services/carriers/44110' || `expected the canonical (non-leading-zero) form in the request path, got ${new URL(calls.urls[0]).pathname}`
+  })))
+
+  await add('re_664_fmcsa_leading_zero_and_canonical_input_share_cache_identity', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    jsonResponse(sampleFmcsaCarrier),
+  ], async calls => {
+    const first = await fmcsaAdapter.run({ text: 'usdot 044110' })
+    if (!first.ok) return `expected the leading-zero request to succeed, got ${JSON.stringify(first.error)}`
+    const second = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (second.ok === true && second.fromCache === true && calls.count === 1)
+      || `expected "usdot 044110" and "usdot 44110" to share one cache entry (only 1 real fetch total), got calls=${calls.count} second=${JSON.stringify(second)}`
+  })))
+
+  await add('re_665_fmcsa_empty_legal_name_rejected', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, legalName: '' } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected an empty legalName to be rejected, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_666_fmcsa_whitespace_only_legal_name_rejected', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, legalName: '   ' } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected a whitespace-only legalName to be rejected, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_667_fmcsa_oversized_legal_name_rejected', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, legalName: 'A'.repeat(257) } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'parse_error') || `expected a legalName over the 256-char bound to be rejected, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_668_fmcsa_maximum_length_legal_name_accepted', () => withEnv(fmcsaEnv, () => withAdapterFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, legalName: 'A'.repeat(256) } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+  ], async () => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === true && response.documents[0]?.title === 'A'.repeat(256)) || `expected a legalName exactly at the 256-char bound to be accepted, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_669_fmcsa_wrong_carrier_response_never_poisons_the_requested_cache_key', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    jsonResponse({ content: { carrier: { ...sampleFmcsaCarrier.content.carrier, dotNumber: 99999 } }, retrievalDate: sampleFmcsaCarrier.retrievalDate }),
+    jsonResponse(sampleFmcsaCarrier),
+  ], async calls => {
+    const mismatched = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    if (mismatched.ok !== false) return `expected the mismatched carrier response to be rejected, got ${JSON.stringify(mismatched)}`
+    const matched = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (matched.ok === true && matched.fromCache === false && calls.count === 2)
+      || `expected the requested-key cache to remain empty after a rejected mismatch, so the next matching request still performs a fresh fetch; got calls=${calls.count} matched=${JSON.stringify(matched)}`
+  })))
+
+  await add('re_670_fmcsa_success_never_consumes_more_than_one_fetch_even_when_more_are_available', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    jsonResponse(sampleFmcsaCarrier),
+    jsonResponse(sampleFmcsaCarrier),
+    jsonResponse(sampleFmcsaCarrier),
+  ], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === true && calls.count === 1) || `expected exactly 1 fetch even though 3 mocked responses were available (no speculative extra calls), got ${calls.count}`
+  })))
+
+  await add('re_671_fmcsa_429_uses_exactly_one_fetch_no_retry_amplification', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    new Response('Too Many Requests', { status: 429, headers: { 'retry-after': '0' } }),
+  ], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'rate_limited' && calls.count === 1)
+      || `expected exactly 1 fetch for a 429 response under maxRetries: 0, got calls=${calls.count} response=${JSON.stringify(response)}`
+  })))
+
+  await add('re_672_fmcsa_503_uses_exactly_one_fetch_no_retry_amplification', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    new Response('Service Unavailable', { status: 503, headers: { 'retry-after': '0' } }),
+  ], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.error?.category === 'upstream_error' && calls.count === 1)
+      || `expected exactly 1 fetch for a 503 response under maxRetries: 0, got calls=${calls.count} response=${JSON.stringify(response)}`
+  })))
+
+  await add('re_673_fmcsa_timeout_uses_exactly_one_fetch_no_retry_amplification', () => withEnv(fmcsaEnv, async () => {
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    let fetchCount = 0
+    __setResearchFetchForTests((async () => {
+      fetchCount += 1
+      const abortError = new Error('The operation was aborted')
+      abortError.name = 'AbortError'
+      throw abortError
+    }) as typeof fetch)
+    try {
+      const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+      return (response.ok === false && fetchCount === 1)
+        || `expected exactly 1 fetch attempt for a persistent timeout under maxRetries: 0, got fetchCount=${fetchCount} response=${JSON.stringify(response)}`
+    } finally {
+      __setResearchFetchForTests(null)
+      __resetProviderGateForTests()
+      __resetCacheForTests()
+    }
+  }))
+
+  await add('re_674_fmcsa_mixed_case_webkey_parameter_names_all_redacted', () => {
+    for (const paramName of ['webKey', 'WebKey', 'WEBKEY', 'webkey']) {
+      const url = `https://mobile.fmcsa.dot.gov/qc/services/carriers/44110?${paramName}=FAKEWEBKEY123`
+      const redactedUrl = redactUrlForLogging(url)
+      if (redactedUrl.includes('FAKEWEBKEY123') || !redactedUrl.includes('REDACTED')) return `expected "${paramName}" to be redacted from the URL, got ${redactedUrl}`
+      const redactedText = redactSecretsFromText(`request failed: ${url} timed out`)
+      if (redactedText.includes('FAKEWEBKEY123') || !redactedText.includes('REDACTED')) return `expected "${paramName}" to be redacted from free text, got ${redactedText}`
+    }
+    return true
+  })
+
+  await add('re_675_fmcsa_url_encoded_webkey_value_fully_redacted', () => {
+    const url = 'https://mobile.fmcsa.dot.gov/qc/services/carriers/44110?webKey=FAKE%20WEB%2FKEY%3D123'
+    const redacted = redactUrlForLogging(url)
+    return (!redacted.includes('FAKE') && redacted.includes('REDACTED')) || `expected a URL-encoded webKey value to be fully redacted, got ${redacted}`
+  })
+
+  await add('re_676_fmcsa_provider_gate_state_restored_after_test_helper_finally', () => withEnv(fmcsaEnv, async () => {
+    await withAdapterFetch([
+      new Response('Internal Server Error', { status: 500 }),
+    ], async () => {
+      await fmcsaAdapter.run({ text: 'usdot 11111' })
+    })
+    const cooling = providerCooldownRemainingMs('fmcsa')
+    return cooling === 0 || `expected the provider gate to be reset by withAdapterFetch's finally block, got ${cooling}ms remaining`
+  }))
+
+  await add('re_677_fmcsa_cache_state_restored_between_separate_test_helper_invocations', () => withEnv(fmcsaEnv, async () => {
+    await withAdapterFetch([jsonResponse(sampleFmcsaCarrier)], async () => {
+      await fmcsaAdapter.run({ text: 'usdot 44110' })
+    })
+    return withAdapterFetch([jsonResponse(sampleFmcsaCarrier)], async () => {
+      const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+      return (response.ok === true && response.fromCache === false) || `expected the cache to have been cleared between separate withAdapterFetch invocations, got fromCache=${response.fromCache}`
+    })
+  }))
+
+  await add('re_678_fmcsa_test_fetch_hook_restored_to_real_fetch_in_finally', () => {
+    const source = readFileSync(join(process.cwd(), 'lib/research-engine/diagnostics/validation.ts'), 'utf8')
+    const marker = 'async function withCountingFetch'
+    const start = source.indexOf(marker)
+    const body = source.slice(start, start + 1200)
+    return body.includes('__setResearchFetchForTests(null)') || 'expected withCountingFetch to restore the real fetch implementation (__setResearchFetchForTests(null)) in its finally block'
+  })
+
+  // Final LOW-finding cleanup: re_679/re_680 close out the retryable-status
+  // matrix (429/502/503/504) with the same exactly-one-fetch guarantee
+  // already proven for 429 (re_671) and 503 (re_672), so every status
+  // safeProviderFetch treats as retryable is now covered under FMCSA's
+  // maxRetries: 0 override.
+
+  await add('re_679_fmcsa_502_uses_exactly_one_fetch_no_retry_amplification', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    new Response('Bad Gateway', { status: 502, headers: { 'retry-after': '0' } }),
+  ], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error' && response.error?.httpStatus === 502 && calls.count === 1)
+      || `expected exactly 1 fetch for a 502 response under maxRetries: 0, got calls=${calls.count} response=${JSON.stringify(response)}`
+  })))
+
+  await add('re_680_fmcsa_504_uses_exactly_one_fetch_no_retry_amplification', () => withEnv(fmcsaEnv, () => withCountingFetch([
+    new Response('Gateway Timeout', { status: 504, headers: { 'retry-after': '0' } }),
+  ], async calls => {
+    const response = await fmcsaAdapter.run({ text: 'usdot 44110' })
+    return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error' && response.error?.httpStatus === 504 && calls.count === 1)
+      || `expected exactly 1 fetch for a 504 response under maxRetries: 0, got calls=${calls.count} response=${JSON.stringify(response)}`
+  })))
 
   return results
 }

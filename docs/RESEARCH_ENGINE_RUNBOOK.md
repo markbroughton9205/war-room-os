@@ -1,12 +1,20 @@
 # Research Engine — Runbook
 
-For the currently blocked providers (FMCSA, USPTO, USGS National Map, World
-Bank Data Catalog/Projects/Finances/Climate, IMF SDMX) and exactly why each
+For the currently blocked providers (USPTO, USGS National Map, World Bank
+Data Catalog/Projects/Finances/Climate, IMF SDMX) and exactly why each
 remains `implemented: false`, see `docs/RESEARCH_REMAINING_15_BUILD_REPORT.md`.
+FMCSA was unblocked in a later phase — see `docs/RESEARCH_FMCSA_BUILD_REPORT.md`.
 Common Crawl requires one Commander-set env var not covered elsewhere in
 this runbook: `COMMON_CRAWL_COLLECTION_ID` (a specific, currently-existing
 collection id, e.g. `CC-MAIN-2025-33` — this build does not auto-discover
-the current collection).
+the current collection). FMCSA requires `FMCSA_WEB_KEY` and only accepts an
+exact `usdot <digits>` query (1-8 digits, canonicalized — leading zeros
+collapse, zero is rejected) — free text, carrier names, and docket numbers
+are rejected before any request is made. FMCSA verifies the returned
+`dotNumber` matches the requested USDOT (a mismatch fails closed and is
+never cached) and is capped at exactly one upstream fetch per uncached
+execution (`maxRetries: 0`, an FMCSA-only override) — see the
+"Independent-audit repair pass" section of `docs/RESEARCH_FMCSA_BUILD_REPORT.md`.
 
 ## Checking what's configured
 

@@ -463,7 +463,7 @@ fabricated endpoint, field, or capability is recorded for this provider.**
 | 4 | wayback | IMPLEMENTABLE WITH EXPLICIT LIMITATION | Yes (CDX only, no Availability API, no compareCaptures) |
 | 5 | common_crawl | IMPLEMENTABLE WITH EXPLICIT LIMITATION | Yes (requires new `COMMON_CRAWL_COLLECTION_ID` env var) |
 | 6 | sam_gov | DOCUMENTED AND IMPLEMENTABLE | Yes |
-| 7 | fmcsa | BLOCKED — MISSING AUTHORITATIVE CONTRACT | No |
+| 7 | fmcsa | BLOCKED — MISSING AUTHORITATIVE CONTRACT (at the time of this phase) — later resolved, see note below | No (at the time of this phase) |
 | 8 | nasa | IMPLEMENTABLE WITH EXPLICIT LIMITATION | Yes (NeoWs feed only) |
 | 9 | uspto | BLOCKED — DOCUMENTATION CONFLICT | No |
 | 10 | usgs_national_map | BLOCKED — MISSING AUTHORITATIVE CONTRACT | No |
@@ -474,6 +474,18 @@ fabricated endpoint, field, or capability is recorded for this provider.**
 | 15 | imf_sdmx | BLOCKED — MISSING AUTHORITATIVE CONTRACT | No |
 
 **Result this phase: 9 of 15 implementable and implemented; 6 remain honestly `implemented: false` with documented blockers** (five documentation-only blockers plus `usgs_national_map`, blocked after its official documentation proved unreadable and both of its budgeted controlled live probes timed out — see `docs/RESEARCH_CONTROLLED_PROBE_LOG.md`).
+
+**Update (later "Blocked Provider 1 of 8" build phase):** `fmcsa` was
+subsequently unblocked once `FMCSA_WEB_KEY` became available in a
+Commander-controlled session. Two authorized, structure-only live probes
+against the official documentation-published sample USDOT `44110` resolved
+the response-envelope gap described in section 7 above (`content.carrier`
+with numeric `dotNumber` and string `legalName`). `fmcsa` is now
+`implemented: true` as a narrow, USDOT-only `getById` adapter. This does not
+change the historical record above — at the time of this phase the contract
+genuinely was unproven and no credential was available — see
+`docs/RESEARCH_CONTROLLED_PROBE_LOG.md` (Probes 3–4) and
+`docs/RESEARCH_FMCSA_BUILD_REPORT.md` for the full resolution.
 
 ## GROUP B / C corrections still pending live-schema review
 
