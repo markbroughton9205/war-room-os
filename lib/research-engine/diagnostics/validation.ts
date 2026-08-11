@@ -593,6 +593,82 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     return (response.ok === false && response.documents.length === 0 && response.error !== null) || `expected a safe error response, got ${JSON.stringify(response)}`
   })))
 
+  await add('re_403_github_issue_prefix_uses_official_issue_search_endpoint', () => withEnv({ GITHUB_TOKEN: 'test-token-not-real' }, () => withCountingFetch([
+    jsonResponse({ items: [{ id: 101, number: 7, title: 'Investigate parser drift', html_url: 'https://github.com/octocat/hello-world/issues/7', body: 'Parser drift in import path', user: { login: 'octocat' }, repository_url: 'https://api.github.com/repos/octocat/hello-world', state: 'open', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z', closed_at: null }] }),
+  ], async calls => {
+    const response = await githubAdapter.run({ text: 'github issues: parser drift repo:octocat/hello-world', maxResults: 3 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    if (calls.count !== 1) return `expected one upstream request, got ${calls.count}`
+    const url = new URL(calls.urls[0])
+    if (url.pathname !== '/search/issues') return `expected /search/issues, got ${url.pathname}`
+    if (url.searchParams.get('per_page') !== '3') return `expected bounded per_page=3, got ${url.searchParams.get('per_page')}`
+    if (!url.searchParams.get('q')?.includes('is:issue')) return `missing is:issue qualifier in ${url.searchParams.get('q')}`
+    const doc = response.documents[0]
+    if (doc.contentType !== 'code_issue') return `expected code_issue, got ${doc.contentType}`
+    if (doc.identifiers.github_repository !== 'octocat/hello-world') return 'github_repository identifier missing'
+    if (doc.identifiers.github_issue_number !== '7') return 'github_issue_number identifier missing'
+    return documentShapeIssue(doc, 'github') ?? true
+  })))
+
+  await add('re_404_github_pr_prefix_uses_issue_search_with_pr_qualifier', () => withEnv({ GITHUB_TOKEN: 'test-token-not-real' }, () => withCountingFetch([
+    jsonResponse({ items: [{ id: 202, number: 11, title: 'Repair trace output', html_url: 'https://github.com/octocat/hello-world/pull/11', body: 'Trace output repair', user: { login: 'hubot' }, repository_url: 'https://api.github.com/repos/octocat/hello-world', state: 'open', created_at: '2026-02-01T00:00:00Z', updated_at: '2026-02-02T00:00:00Z', closed_at: null, pull_request: { url: 'https://api.github.com/repos/octocat/hello-world/pulls/11' } }] }),
+  ], async calls => {
+    const response = await githubAdapter.run({ text: 'github prs: trace output repo:octocat/hello-world', maxResults: 2 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    const url = new URL(calls.urls[0])
+    if (url.pathname !== '/search/issues') return `expected /search/issues, got ${url.pathname}`
+    if (!url.searchParams.get('q')?.includes('is:pr')) return `missing is:pr qualifier in ${url.searchParams.get('q')}`
+    const doc = response.documents[0]
+    if (doc.contentType !== 'code_pull_request') return `expected code_pull_request, got ${doc.contentType}`
+    if (doc.identifiers.github_pull_request !== 'true') return 'github_pull_request marker missing'
+    return documentShapeIssue(doc, 'github') ?? true
+  })))
+
+  await add('re_405_github_default_search_remains_repository_search', () => withEnv({ GITHUB_TOKEN: 'test-token-not-real' }, () => withCountingFetch([
+    jsonResponse({ items: [{ full_name: 'octocat/default-search', html_url: 'https://github.com/octocat/default-search', description: 'default repo mode', owner: { login: 'octocat' }, language: 'TypeScript', license: { name: 'MIT' }, stargazers_count: 1, pushed_at: '2026-03-02T00:00:00Z', updated_at: '2026-03-02T00:00:00Z', created_at: '2026-03-01T00:00:00Z' }] }),
+  ], async calls => {
+    // Deliberately irregular whitespace and >256 chars so this proves the generic
+    // repository-search path sends query.text verbatim (pre-Wave-1 behavior), not
+    // the trim/collapse/256-char-truncate normalization added for issues/PR modes.
+    const rawQueryText = `  default   search  is:issue  ${'x'.repeat(300)}  `
+    const response = await githubAdapter.run({ text: rawQueryText, maxResults: 30 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    const url = new URL(calls.urls[0])
+    if (url.pathname !== '/search/repositories') return `expected /search/repositories, got ${url.pathname}`
+    if (url.searchParams.get('per_page') !== '25') return `expected per_page cap of 25, got ${url.searchParams.get('per_page')}`
+    if (url.searchParams.get('q') !== rawQueryText) return `expected raw query.text to reach the repository-search request unchanged, got ${JSON.stringify(url.searchParams.get('q'))}`
+    if (response.documents[0].contentType !== 'code_repository') return `expected code_repository, got ${response.documents[0].contentType}`
+    return true
+  })))
+
+  await add('re_406_github_issues_mode_strips_conflicting_pr_discriminator', () => withEnv({ GITHUB_TOKEN: 'test-token-not-real' }, () => withCountingFetch([
+    jsonResponse({ items: [{ id: 301, number: 21, title: 'Security bug', html_url: 'https://github.com/octocat/hello-world/issues/21', body: 'Security bug report', user: { login: 'octocat' }, repository_url: 'https://api.github.com/repos/octocat/hello-world', state: 'open', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z', closed_at: null }] }),
+  ], async calls => {
+    const response = await githubAdapter.run({ text: 'github issues: is:pr security bug', maxResults: 3 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    const url = new URL(calls.urls[0])
+    if (url.pathname !== '/search/issues') return `expected /search/issues, got ${url.pathname}`
+    const q = url.searchParams.get('q') ?? ''
+    if (!/\bis:issue\b/.test(q)) return `expected canonical is:issue qualifier to win, got ${q}`
+    if (/\bis:pr\b/i.test(q)) return `conflicting is:pr qualifier was not stripped in issues mode: ${q}`
+    if (/\btype:pr\b/i.test(q)) return `conflicting type:pr qualifier was not stripped in issues mode: ${q}`
+    return true
+  })))
+
+  await add('re_407_github_pr_mode_strips_conflicting_issue_discriminator', () => withEnv({ GITHUB_TOKEN: 'test-token-not-real' }, () => withCountingFetch([
+    jsonResponse({ items: [{ id: 302, number: 22, title: 'Security bug fix', html_url: 'https://github.com/octocat/hello-world/pull/22', body: 'Security bug fix', user: { login: 'hubot' }, repository_url: 'https://api.github.com/repos/octocat/hello-world', state: 'open', created_at: '2026-01-03T00:00:00Z', updated_at: '2026-01-04T00:00:00Z', closed_at: null, pull_request: { url: 'https://api.github.com/repos/octocat/hello-world/pulls/22' } }] }),
+  ], async calls => {
+    const response = await githubAdapter.run({ text: 'github prs: is:issue security bug', maxResults: 3 })
+    if (!response.ok) return `expected ok response, got error: ${JSON.stringify(response.error)}`
+    const url = new URL(calls.urls[0])
+    if (url.pathname !== '/search/issues') return `expected /search/issues, got ${url.pathname}`
+    const q = url.searchParams.get('q') ?? ''
+    if (!/\bis:pr\b/.test(q)) return `expected canonical is:pr qualifier to win, got ${q}`
+    if (/\bis:issue\b/i.test(q)) return `conflicting is:issue qualifier was not stripped in prs mode: ${q}`
+    if (/\btype:issue\b/i.test(q)) return `conflicting type:issue qualifier was not stripped in prs mode: ${q}`
+    return true
+  })))
+
   await add('re_44_exa_success_normalizes_web_search', () => withEnv({ EXA_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
     jsonResponse({ results: [{ title: 'Example Article', url: 'https://example.com/article', publishedDate: '2026-02-01', author: 'Jane Doe', score: 0.9, text: 'snippet text' }] }),
   ], async () => {
