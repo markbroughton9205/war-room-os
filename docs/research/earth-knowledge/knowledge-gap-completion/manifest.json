@@ -1,0 +1,46 @@
+{
+  "verification_date": "2026-08-13",
+  "reports": [
+    "17_global_black_history_diaspora.md",
+    "18_diagnostics_treatments.md",
+    "19_operator_learning.md",
+    "20_financial_enterprise_growth.md",
+    "knowledge_gap_completion_registry.md"
+  ],
+  "major_source_counts": {
+    "global_black_history_diaspora": 15,
+    "diagnostics_treatments": 17,
+    "technical_operator_learning": 29,
+    "financial_enterprise_growth": 21,
+    "total": 82
+  },
+  "integration_classification_totals": {
+    "LIVE PROVIDER CANDIDATE": 11,
+    "PERIODIC SYNC CANDIDATE": 22,
+    "BULK INGEST CANDIDATE": 3,
+    "DOCUMENT/ARCHIVE KNOWLEDGE SOURCE": 35,
+    "HUMAN-RESEARCH REFERENCE": 10,
+    "NOT APPROPRIATE FOR AUTOMATED INTEGRATION": 1
+  },
+  "verdicts": {
+    "Diagnostics / Treatments": "PRESENT",
+    "Global Black History / Diaspora": "PRESENT",
+    "Technical / Operator Learning": "PRESENT",
+    "Financial / Enterprise Growth": "PRESENT"
+  },
+  "final_audit": {
+    "previous_present": "40 / 44",
+    "newly_completed": 4,
+    "total_present": "44 / 44",
+    "remaining_partial": 0,
+    "remaining_not_found": 0
+  },
+  "hard_boundary": "Research/organization only; no code/provider/env/deploy/commit/push/merge performed.",
+  "sha256": {
+    "17_global_black_history_diaspora.md": "99d7b343dd9d1805ba02af3306e5a01ff6a71756f25159e4beff11a5bfa7acce",
+    "18_diagnostics_treatments.md": "641a0ce515bae84bfe5f9429d746ec2339617d5a80f2e839dfa3bdf67a931f2e",
+    "19_operator_learning.md": "fbe2ae10637dec49b37def20f9ab5a2cf28c7cbaa455e4d9b26520d00aa3cf39",
+    "20_financial_enterprise_growth.md": "babab6a28a4bdbee31d959b4fd9cf5db2158fb14974b0add321516fdd9afb6b7",
+    "knowledge_gap_completion_registry.md": "a2c807cc0367b1ccfa01d964dd9aa6edc73add709a3e43479f319e0ac5fceaec"
+  }
+}
