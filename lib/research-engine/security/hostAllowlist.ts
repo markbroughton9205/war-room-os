@@ -38,6 +38,8 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   library_of_congress: ['www.loc.gov'],
   wikidata: ['www.wikidata.org', 'query.wikidata.org'],
   common_crawl: ['index.commoncrawl.org', 'data.commoncrawl.org'],
+  mitre_attack: ['attack-taxii.mitre.org'],
+  gleif: ['api.gleif.org'],
 }
 
 export function isAllowedHost(provider: ResearchProviderId, hostname: string): boolean {

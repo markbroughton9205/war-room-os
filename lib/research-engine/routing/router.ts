@@ -28,6 +28,8 @@ const INTENT_PROVIDER_MAP: Record<ResearchQueryIntent, ResearchProviderId[]> = {
   cultural_history: ['library_of_congress', 'internet_archive', 'wikidata'],
   entity_knowledge_graph: ['wikidata', 'library_of_congress', 'github', 'sam_gov'],
   space_science: ['nasa', 'nasa_gibs'],
+  cyber_threat_intelligence: ['mitre_attack'],
+  legal_entity: ['gleif'],
 }
 
 function rejectionReason(provider: ResearchProviderId): string {
