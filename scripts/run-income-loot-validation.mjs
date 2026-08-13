@@ -1,0 +1,1 @@
+import { runIncomeLootValidation } from '../lib/income-loot/validation.ts'; const results=runIncomeLootValidation(); for(const r of results) console.log(`${r.pass?'PASS':'FAIL'} ${r.id}: ${r.detail}`); if(results.some(r=>!r.pass)) process.exitCode=1;
