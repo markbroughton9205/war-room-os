@@ -199,8 +199,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const results: ResearchValidationResult[] = []
   const add = async (id: string, fn: () => boolean | string | Promise<boolean | string>) => results.push(await test(id, fn))
 
-  await add('re_01_all_29_providers_registered', () =>
-    RESEARCH_PROVIDER_ENV.length === 29 || `expected 29 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+  await add('re_01_all_31_providers_registered', () =>
+    RESEARCH_PROVIDER_ENV.length === 31 || `expected 31 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_02_missing_required_env_not_configured', () => {
     const emptyEnv = { NODE_ENV: 'test' } as NodeJS.ProcessEnv
@@ -563,6 +563,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       sam_gov: ['search'],
       nasa: ['search'],
       fmcsa: ['getById'],
+      mitre_attack: ['search', 'getById'],
+      gleif: ['search', 'getById'],
     }
     const implemented = RESEARCH_PROVIDER_ENV.filter(descriptor => descriptor.implemented)
     const offenders = implemented.filter(descriptor => {
@@ -1334,14 +1336,14 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const BATCH_1A_TARGET_IDS = ['usgs_water', 'usgs_earthquake_feed', 'usgs_sciencebase'] as const
   const UNAUTHORIZED_BATCH_1_IDS = ['imf_sdmx', 'world_bank_data_catalog', 'world_bank_projects', 'world_bank_finances', 'world_bank_climate', 'usgs_national_map'] as const
 
-  await add('re_100_registered_provider_count_remains_29', () =>
-    RESEARCH_PROVIDER_ENV.length === 29 || `expected 29 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+  await add('re_100_registered_provider_count_is_31', () =>
+    RESEARCH_PROVIDER_ENV.length === 31 || `expected 31 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
-  await add('re_101_implemented_count_derives_to_22_from_descriptors_and_registry', () => {
+  await add('re_101_implemented_count_derives_to_24_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 22 && implementedAdapters === 22)
-      || `expected 22 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 24 && implementedAdapters === 24)
+      || `expected 24 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -2632,12 +2634,12 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     return offenders.length === 0 || `provider(s) accepted an arbitrary host: ${JSON.stringify(offenders)}`
   })
 
-  await add('re_229_final_provider_descriptor_count_is_29', () =>
-    RESEARCH_PROVIDER_ENV.length === 29 || `expected 29 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
+  await add('re_229_final_provider_descriptor_count_is_31', () =>
+    RESEARCH_PROVIDER_ENV.length === 31 || `expected 31 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
 
-  await add('re_230_final_implemented_count_is_22', () => {
+  await add('re_230_final_implemented_count_is_24', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 22 || `expected 22 implemented adapters, found ${count}`
+    return count === 24 || `expected 24 implemented adapters, found ${count}`
   })
 
   await add('re_231_final_unimplemented_count_is_7', () => {
@@ -3710,13 +3712,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     return count === 1 || `expected fmcsa registered exactly once, found ${count}`
   })
 
-  await add('re_651_fmcsa_descriptor_implemented_and_counts_are_29_22_7', () => {
+  await add('re_651_fmcsa_descriptor_implemented_and_counts_are_31_24_7', () => {
     const descriptor = RESEARCH_PROVIDER_ENV.find(d => d.id === 'fmcsa')
     const totalCount = RESEARCH_PROVIDER_ENV.length
     const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return (descriptor?.implemented === true && totalCount === 29 && implementedCount === 22 && blockedCount === 7)
-      || `expected fmcsa implemented plus a 29/22/7 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+    return (descriptor?.implemented === true && totalCount === 31 && implementedCount === 24 && blockedCount === 7)
+      || `expected fmcsa implemented plus a 31/24/7 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
   })
 
   await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {

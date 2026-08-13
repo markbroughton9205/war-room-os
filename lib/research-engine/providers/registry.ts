@@ -24,6 +24,8 @@ import { commonCrawlAdapter } from '@/lib/research-engine/providers/commonCrawl'
 import { samGovAdapter } from '@/lib/research-engine/providers/samGov'
 import { nasaAdapter } from '@/lib/research-engine/providers/nasa'
 import { fmcsaAdapter } from '@/lib/research-engine/providers/fmcsa'
+import { mitreAttackAdapter } from '@/lib/research-engine/providers/mitreAttack'
+import { gleifAdapter } from '@/lib/research-engine/providers/gleif'
 
 /**
  * Only providers with a real, implemented adapter appear here. Every
@@ -55,6 +57,8 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   sam_gov: samGovAdapter,
   nasa: nasaAdapter,
   fmcsa: fmcsaAdapter,
+  mitre_attack: mitreAttackAdapter,
+  gleif: gleifAdapter,
 }
 
 export function getImplementedAdapter(id: ResearchProviderId): ResearchProviderAdapter | null {

@@ -38,6 +38,8 @@ export type ResearchProviderId =
   | 'library_of_congress'
   | 'wikidata'
   | 'common_crawl'
+  | 'mitre_attack'
+  | 'gleif'
 
 export type ResearchProviderCategory =
   | 'general_web'
@@ -56,6 +58,8 @@ export type ResearchProviderCategory =
   | 'cultural_heritage'
   | 'knowledge_graph'
   | 'climate_environment'
+  | 'cyber_threat_intelligence'
+  | 'legal_entity_reference'
 
 export type ResearchProviderCapability =
   | 'search'
@@ -124,6 +128,8 @@ export type ResearchQueryIntent =
   | 'cultural_history'
   | 'entity_knowledge_graph'
   | 'space_science'
+  | 'cyber_threat_intelligence'
+  | 'legal_entity'
 
 export type ResearchQuery = {
   text: string
