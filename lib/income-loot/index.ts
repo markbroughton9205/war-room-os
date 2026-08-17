@@ -1,6 +1,7 @@
 export * from './types'
 export { INCOME_LOOT_PERSISTENCE, INCOME_LOOT_STORE_CAP, insertIncomeLootOpportunity, getIncomeLootOpportunityForOwner, listIncomeLootOpportunitiesForOwner, updateIncomeLootOpportunity } from './store'
 export { getIncomeLootPersistenceReadiness } from './durableStore'
+export { INCOME_LOOT_EVIDENCE_PERSISTENCE, INCOME_LOOT_EVIDENCE_STORE_CAP, insertIncomeLootEvidence, getIncomeLootEvidenceForOwner, listIncomeLootEvidenceForOwner, listIncomeLootEvidenceForOpportunity } from './evidenceStore'
 export { normalizeLootCandidate } from './normalize'
 export { rankLootOpportunity } from './ranking'
 export { incomeLootIdentity } from './identity'
