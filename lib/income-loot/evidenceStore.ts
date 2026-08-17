@@ -7,4 +7,5 @@ export function insertIncomeLootEvidence(input:NewEvidenceAttachment):EvidenceAt
 export function getIncomeLootEvidenceForOwner(ownerUserId:string,id:string):EvidenceAttachment|null{return evidence.find(x=>x.ownerUserId===ownerUserId&&x.id===id)??null}
 export function listIncomeLootEvidenceForOwner(ownerUserId:string):EvidenceAttachment[]{return evidence.filter(x=>x.ownerUserId===ownerUserId)}
 export function listIncomeLootEvidenceForOpportunity(ownerUserId:string,opportunityId:string):EvidenceAttachment[]{return evidence.filter(x=>x.ownerUserId===ownerUserId&&x.linkedRecordType==='opportunity'&&x.linkedOpportunityId===opportunityId)}
+export function findIncomeLootEvidenceDuplicateForOwner(ownerUserId:string,contentSha256:string):EvidenceAttachment|null{return evidence.find(x=>x.ownerUserId===ownerUserId&&x.contentSha256===contentSha256)??null}
 export function __resetIncomeLootEvidenceStore():void{evidence.splice(0);sequence=1}
