@@ -1,0 +1,1 @@
+import { runUserInterviewsValidation } from '../lib/income-loot/userInterviews.validation.ts'; const results=runUserInterviewsValidation(); for(const r of results) console.log(`${r.pass?'PASS':'FAIL'} ${r.id}: ${r.detail}`); if(results.some(r=>!r.pass)) process.exitCode=1;
