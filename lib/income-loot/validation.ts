@@ -10,6 +10,7 @@ import { EVIDENCE_TRUTH_STATES, type EvidenceAttachment } from './types'
 import { __resetIncomeLootEvidenceStore, INCOME_LOOT_EVIDENCE_STORE_CAP, insertIncomeLootEvidence, getIncomeLootEvidenceForOwner, listIncomeLootEvidenceForOwner, listIncomeLootEvidenceForOpportunity, findIncomeLootEvidenceDuplicateForOwner } from './evidenceStore'
 import { inspectIncomeLootEvidenceFile, MAX_INCOME_LOOT_EVIDENCE_BYTES } from './evidenceFileSafety'
 import { __resetIncomeLootEvidenceTransitionHistory, listIncomeLootEvidenceTransitionHistoryForOwner, transitionIncomeLootEvidenceTruthState } from './evidenceGovernance'
+import { __resetIncomeLootRewardLedger, INCOME_LOOT_REWARD_LEDGER_STORE_CAP, listRewardLedgerEntriesForOpportunity, listRewardLedgerEntriesForOwner, recordCashReceivedReward, recordConfirmedReward, recordEstimatedReward, summarizeRewardLedgerForOwner } from './rewardLedger'
 import { buildIncomeLootConsoleViewModel } from './consoleViewModel'
 export type IncomeLootValidationResult = { id: string; pass: boolean; detail: string }
 function item(n: number, ownerUserId = 'validation-user'): Omit<LootOpportunity, 'id'|'discoveredAt'|'updatedAt'|'commanderApprovalRequired'> { return { ownerUserId, provider:'validation-only', providerOpportunityId:null, title:`Validation ${n}`, description:null, category:'SURVEY', estimatedReward:{amount:1,currency:'USD',basis:'ESTIMATED',notes:'deterministic validation value'}, estimatedTimeMinutes:1, expiresAt:null, eligibility:[], locationRequirement:null, evidenceRequirement:[], externalUrl:`https://validation.invalid/${n}`, status:'DISCOVERED', evidenceLabel:'LIVE_SIGNAL_BACKED', confidence:50, provenance:[] } }
@@ -136,4 +137,38 @@ export function runIncomeLootValidation(): IncomeLootValidationResult[] { const 
   const uiSecretUrl={...uiLive,id:'ui-secret-url',provenance:[{...uiLive.provenance[0],sourceUrl:'https://example.com/opportunity?api_key=not-for-ui&safe=yes'}]}
   const uiSecretModel=buildIncomeLootConsoleViewModel({dataAvailable:true,opportunities:[uiSecretUrl],evidence:[]})
   add('loot_68_f3ui_provenance_and_durable_truth',uiModel.opportunities[0]?.provenance[0]?.sourceUrl==='https://example.com/opportunity'&&uiSecretModel.opportunities[0]?.provenance[0]?.sourceUrl==='https://example.com/opportunity?safe=yes'&&uiModel.durableAvailable===false&&uiModel.migrationRequired===true,'display model retains safe source URLs, removes credential-like parameters, and preserves session-only durability truth')
+  __resetIncomeLootRewardLedger()
+  const ledgerOpportunityA=insertIncomeLootOpportunity(item(700,'ledger-owner-a'))!, ledgerOpportunityB=insertIncomeLootOpportunity(item(701,'ledger-owner-b'))!
+  const provenance={sourceAdapterId:null,sourceType:'commander_manual' as const,providerRecordId:null,sourceUrl:null,retrievedAt:null,actorId:'commander-validation',notes:'Commander-recorded financial truth'}
+  const ledgerInput=(opportunityId:string, amount:number, currency='USD', extra:Record<string,unknown>={})=>({ownerUserId:'ledger-owner-a',opportunityId,amount,currency,provenance,...extra})
+  add('loot_69_f4_unknown_no_fake_zero',listRewardLedgerEntriesForOwner('ledger-owner-a').length===0,'unknown reward creates no ledger entry or fabricated zero')
+  const estimate=recordEstimatedReward(ledgerInput(ledgerOpportunityA.id,10),fixedNow)
+  add('loot_70_f4_estimated_real_amount',estimate.code==='RECORDED'&&estimate.entry?.valueBasis==='ESTIMATED'&&estimate.entry.amount===10,'explicit estimated amount records as ESTIMATED')
+  add('loot_71_f4_confirmation_required',recordConfirmedReward(ledgerInput(ledgerOpportunityA.id,8) as Parameters<typeof recordConfirmedReward>[0],fixedNow).code==='CONFIRMATION_REQUIRED','CONFIRMED requires an explicit confirmation event')
+  const confirmed=recordConfirmedReward({...ledgerInput(ledgerOpportunityA.id,8),confirmation:{type:'commander_manual',confirmedAt:fixedNow()}},fixedNow)
+  add('loot_72_f4_confirmed_explicit',confirmed.code==='RECORDED'&&confirmed.entry?.confirmation?.type==='commander_manual','explicit confirmation records without provider simulation')
+  add('loot_73_f4_receipt_required',recordCashReceivedReward(ledgerInput(ledgerOpportunityA.id,8) as Parameters<typeof recordCashReceivedReward>[0],fixedNow).code==='RECEIPT_REQUIRED','CASH_RECEIVED requires explicit receipt truth')
+  const received=recordCashReceivedReward({...ledgerInput(ledgerOpportunityA.id,8),receipt:{receivedAt:fixedNow(),method:'PayPal'}},fixedNow)
+  const ledgerEntries=listRewardLedgerEntriesForOpportunity('ledger-owner-a',ledgerOpportunityA.id)
+  add('loot_74_f4_append_only_chain',received.code==='RECORDED'&&ledgerEntries.length===3&&ledgerEntries.some(x=>x.valueBasis==='ESTIMATED'&&x.amount===10)&&ledgerEntries.some(x=>x.valueBasis==='CONFIRMED'&&x.amount===8)&&ledgerEntries.some(x=>x.valueBasis==='CASH_RECEIVED'&&x.amount===8),'estimated, confirmed, and received events remain separate append-only facts')
+  const summary=summarizeRewardLedgerForOwner('ledger-owner-a').byCurrency.USD
+  add('loot_75_f4_separate_nonduplicated_totals',summary?.estimated===10&&summary.confirmed===8&&summary.cashReceived===8&&summary.confirmedOutstanding===0,'summary separates truth buckets and does not add chain events together')
+  add('loot_76_f4_owner_isolation',listRewardLedgerEntriesForOwner('ledger-owner-b').length===0&&listRewardLedgerEntriesForOpportunity('ledger-owner-b',ledgerOpportunityA.id).length===0&&recordEstimatedReward({ownerUserId:'ledger-owner-b',opportunityId:ledgerOpportunityA.id,amount:1,currency:'USD',provenance}).code==='OPPORTUNITY_NOT_FOUND','ledger reads and writes are owner-scoped')
+  const euro=recordEstimatedReward({...ledgerInput(ledgerOpportunityA.id,5,'EUR'),externalEventId:'estimate-eur'},fixedNow)
+  const mixed=summarizeRewardLedgerForOwner('ledger-owner-a').byCurrency
+  add('loot_77_f4_multicurrency',euro.code==='RECORDED'&&mixed.USD.estimated===10&&mixed.EUR.estimated===5,'USD and EUR remain separate summary groups')
+  add('loot_78_f4_amount_and_currency_validation',recordEstimatedReward(ledgerInput(ledgerOpportunityA.id,-1) as Parameters<typeof recordEstimatedReward>[0]).code==='INVALID_AMOUNT'&&recordEstimatedReward(ledgerInput(ledgerOpportunityA.id,Number.NaN) as Parameters<typeof recordEstimatedReward>[0]).code==='INVALID_AMOUNT'&&recordEstimatedReward(ledgerInput(ledgerOpportunityA.id,1,'') as Parameters<typeof recordEstimatedReward>[0]).code==='INVALID_CURRENCY','negative, non-finite, and blank currency values reject')
+  const zero=recordEstimatedReward({...ledgerInput(ledgerOpportunityA.id,0),externalEventId:'real-zero'},fixedNow)
+  add('loot_79_f4_explicit_zero_preserved',zero.code==='RECORDED'&&zero.entry?.amount===0,'explicit real zero is preserved distinctly from unknown')
+  const duplicate=recordCashReceivedReward({...ledgerInput(ledgerOpportunityA.id,2),externalEventId:'provider-event-1',receipt:{receivedAt:fixedNow(),method:null}},fixedNow)
+  const duplicateAgain=recordCashReceivedReward({...ledgerInput(ledgerOpportunityA.id,2),externalEventId:'provider-event-1',receipt:{receivedAt:fixedNow(),method:null}},fixedNow)
+  const distinct=recordCashReceivedReward({...ledgerInput(ledgerOpportunityA.id,2),externalEventId:'provider-event-2',receipt:{receivedAt:fixedNow(),method:null}},fixedNow)
+  add('loot_80_f4_duplicate_event_protection',duplicate.code==='RECORDED'&&duplicateAgain.code==='DUPLICATE_EXTERNAL_EVENT'&&distinct.code==='RECORDED','same owner external event ID dedupes while distinct IDs allow repeated payments')
+  const manual=recordCashReceivedReward({...ledgerInput(ledgerOpportunityA.id,1),externalEventId:'manual-cash',receipt:{receivedAt:fixedNow(),method:'PayPal'}},fixedNow)
+  add('loot_81_f4_manual_classification',manual.entry?.provenance.sourceType==='commander_manual'&&manual.entry.provenance.actorId==='commander-validation'&&manual.entry.confirmation===null,'manual Commander receipt is explicit and not provider-confirmed')
+  for(let i=0;i<=INCOME_LOOT_REWARD_LEDGER_STORE_CAP;i++) recordEstimatedReward({...ledgerInput(ledgerOpportunityA.id,1),externalEventId:`cap-${i}`},fixedNow)
+  add('loot_82_f4_store_cap_and_durable_truth',listRewardLedgerEntriesForOwner('ledger-owner-a').length===INCOME_LOOT_REWARD_LEDGER_STORE_CAP&&getIncomeLootPersistenceReadiness().durableAvailable===false&&getIncomeLootPersistenceReadiness().migrationRequired===true,'ledger is bounded session-only and durable readiness remains unchanged')
+  const fakeProviderAttribution=recordConfirmedReward({...ledgerInput(ledgerOpportunityA.id,9),confirmation:{type:'provider_api',confirmedAt:fixedNow()}} as Parameters<typeof recordConfirmedReward>[0],fixedNow)
+  const fakeManualAttribution=recordConfirmedReward({ownerUserId:'ledger-owner-a',opportunityId:ledgerOpportunityA.id,amount:9,currency:'USD',provenance:{sourceAdapterId:'provider-adapter',sourceType:'provider_api',providerRecordId:'rec-1',sourceUrl:null,retrievedAt:fixedNow(),actorId:null,notes:null},confirmation:{type:'commander_manual',confirmedAt:fixedNow()}},fixedNow)
+  add('loot_83_f4_no_fake_provider_attribution',fakeProviderAttribution.code==='INVALID_CONFIRMATION'&&fakeManualAttribution.code==='INVALID_CONFIRMATION','manually-sourced events cannot claim provider confirmation and provider-sourced events cannot claim manual confirmation')
   return out }

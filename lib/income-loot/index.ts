@@ -1,6 +1,7 @@
 export * from './types'
 export { INCOME_LOOT_PERSISTENCE, INCOME_LOOT_STORE_CAP, insertIncomeLootOpportunity, getIncomeLootOpportunityForOwner, listIncomeLootOpportunitiesForOwner, updateIncomeLootOpportunity } from './store'
 export { getIncomeLootPersistenceReadiness } from './durableStore'
+export { INCOME_LOOT_REWARD_LEDGER_PERSISTENCE, INCOME_LOOT_REWARD_LEDGER_STORE_CAP, recordEstimatedReward, recordConfirmedReward, recordCashReceivedReward, listRewardLedgerEntriesForOwner, listRewardLedgerEntriesForOpportunity, summarizeRewardLedgerForOwner } from './rewardLedger'
 export { INCOME_LOOT_EVIDENCE_PERSISTENCE, INCOME_LOOT_EVIDENCE_STORE_CAP, insertIncomeLootEvidence, getIncomeLootEvidenceForOwner, listIncomeLootEvidenceForOwner, listIncomeLootEvidenceForOpportunity } from './evidenceStore'
 export { inspectIncomeLootEvidenceFile, MAX_INCOME_LOOT_EVIDENCE_BYTES } from './evidenceFileSafety'
 export { findIncomeLootEvidenceDuplicateForOwner } from './evidenceStore'
