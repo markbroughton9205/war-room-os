@@ -18,6 +18,7 @@
     "validate:phase21-tier1-live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase21-tier1-live-validation.mjs",
     "validate:income-loot": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-income-loot-validation.mjs",
     "validate:user-interviews-connector": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-user-interviews-connector-validation.mjs",
+    "validate:phase49-g": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase49-g-validation.mjs",
     "validate:income-loot:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-income-loot-live-validation.mjs"
   },
   "dependencies": {
