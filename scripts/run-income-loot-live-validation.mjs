@@ -1,1 +1,19 @@
-import { discoverIncomeLootFromGeneralWeb } from '../lib/income-loot/scouts/orchestrator.ts'; if(!process.env.TAVILY_API_KEY&&!process.env.BRAVE_API_KEY&&!process.env.FIRECRAWL_API_KEY){console.log('LIVE VALIDATION BLOCKED BY ENVIRONMENT: no configured general-web search provider');process.exit(0)} const result=await discoverIncomeLootFromGeneralWeb('live-validation'); console.log(JSON.stringify({provider:result.provider,queryCount:result.queryCount,rawResultCount:result.opportunities.length,normalizationCount:result.opportunities.length,dedupedCount:result.opportunities.length,rankingCount:result.rankings.length,representativeDomain:result.opportunities[0]?.externalUrl?new URL(result.opportunities[0].externalUrl).hostname:null,evidenceLabel:result.opportunities[0]?.evidenceLabel??null,provenanceComplete:result.opportunities.every(x=>x.provenance.length>0),failure:result.failure},null,2)); if(result.failure)process.exitCode=1;
+import { clinicalTrialsGovAdapter, discoverLiveIncomeSource } from '../lib/income-loot/liveSources.ts'
+
+const { result, opportunities } = await discoverLiveIncomeSource('live-validation', clinicalTrialsGovAdapter)
+console.log(JSON.stringify({
+  provider: clinicalTrialsGovAdapter.source.providerName,
+  sourceId: result.sourceId,
+  endpointClass: 'public documented REST API',
+  credentialRequired: clinicalTrialsGovAdapter.source.credentialRequirement,
+  credentialPresent: false,
+  status: result.status,
+  retrievedAt: result.retrievedAt,
+  realRecordsReturned: result.recordsReturned,
+  realRecordsNormalized: opportunities.length,
+  evidenceLabels: [...new Set(opportunities.map(item => item.evidenceLabel))],
+  provenanceComplete: opportunities.every(item => item.provenance.length === 1 && item.provenance[0].sourceType === 'provider_api'),
+  failure: result.failure,
+}, null, 2))
+
+if (result.status !== 'LIVE_VERIFIED') process.exitCode = 1
