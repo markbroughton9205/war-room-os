@@ -47,3 +47,6 @@ next-env.d.ts
 dev-bg.txt
 dev-bg-err.txt
 dev-out.txt
+
+# personal Claude Code instructions (not shared)
+CLAUDE.local.md
