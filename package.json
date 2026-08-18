@@ -20,7 +20,8 @@
     "validate:user-interviews-connector": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-user-interviews-connector-validation.mjs",
     "validate:phase49-g": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase49-g-validation.mjs",
     "validate:phase49-h": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase49-h-validation.mjs",
-    "validate:income-loot:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-income-loot-live-validation.mjs"
+    "validate:income-loot:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-income-loot-live-validation.mjs",
+    "validate:opportunity-readiness": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase49d-validation.mjs"
   },
   "dependencies": {
     "@supabase/auth-js": "^2.105.4",
