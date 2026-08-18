@@ -12466,7 +12466,7 @@ function Home() {
             Baby AI Private
           </Link>
           <Link href="/income-loot" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#6EE7B7', background: 'rgba(0,0,0,0.28)' }}>
-            Income Loot
+            Revenue Command
           </Link>
           <LogoutButton />
         </div>
