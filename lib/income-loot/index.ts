@@ -19,3 +19,6 @@ export { INCOME_LOOT_SOURCE_STATUSES, INCOME_LOOT_SOURCE_REGISTRY, clinicalTrial
 export type { IncomeLootSource, IncomeLootSourceStatus, LiveIncomeSourceAdapter, LiveSourceFailure, LiveSourceResult } from './liveSources'
 export * from './participantAutomation'
 export * from './userInterviews'
+export * from './paypalIncome'
+export * from './depositIntelligence'
+export * from './expenseReports'
