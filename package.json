@@ -23,6 +23,7 @@
     "validate:income-loot:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-income-loot-live-validation.mjs",
     "validate:opportunity-readiness": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase49d-validation.mjs",
     "validate:opportunity-mission-bridge": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase49i-validation.mjs"
+    ,"validate:opportunity-discovery": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-opportunity-discovery-validation.mjs"
   },
   "dependencies": {
     "@supabase/auth-js": "^2.105.4",
