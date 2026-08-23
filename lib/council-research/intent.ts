@@ -15,7 +15,8 @@ export type CouncilResearchIntentResult = {
 }
 
 const COUNCIL_TEAM_TRIGGERS: RegExp[] = [
-  /\bwhat(?:'s| is)\s+going\s+on\b/i,
+  /\bwhat(?:'s|s|\s+is)\s+(?:going\s+on|happening)\b/i,
+  /\bwhat(?:'s|s|\s+is)\s+(?:the\s+)?world\s+(?:up\s+to{1,2}|doing|like)\b/i,
   /\bresearch\s+this\b/i,
   /\binvestigate\b/i,
   /\bscout\s+(?:for\s+)?opportunit/i,

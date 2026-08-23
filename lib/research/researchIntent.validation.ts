@@ -65,6 +65,11 @@ const relocationVariableNoResearch = detectResearchIntent('update the relocation
   intentKind: 'natural',
 })
 
+// 10. Natural world-state questions must retrieve live evidence even without an explicit
+// "search", "latest", or "today" instruction. Includes the Commander's exact phrasing/typo.
+const worldUpToTriggers = detectResearchIntent('whats the world up too', { intentKind: 'natural' })
+const economyStateTriggers = detectResearchIntent('how is the economy doing', { intentKind: 'natural' })
+
 export function runResearchIntentValidation(): CaseResult[] {
   return [
     check(
@@ -142,6 +147,16 @@ export function runResearchIntentValidation(): CaseResult[] {
       'research_intent_09e_relocation_variable_name_no_research',
       !relocationVariableNoResearch.shouldResearch,
       JSON.stringify(relocationVariableNoResearch),
+    ),
+    check(
+      'research_intent_10a_world_up_to_triggers_live_research',
+      worldUpToTriggers.shouldResearch,
+      JSON.stringify(worldUpToTriggers),
+    ),
+    check(
+      'research_intent_10b_economy_state_triggers_live_research',
+      economyStateTriggers.shouldResearch,
+      JSON.stringify(economyStateTriggers),
     ),
   ]
 }
