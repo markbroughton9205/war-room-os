@@ -70,6 +70,15 @@ const relocationVariableNoResearch = detectResearchIntent('update the relocation
 const worldUpToTriggers = detectResearchIntent('whats the world up too', { intentKind: 'natural' })
 const economyStateTriggers = detectResearchIntent('how is the economy doing', { intentKind: 'natural' })
 
+// 11. RSS-fallback build phase (Phase 49-J): the intent gate must stay word-boundary-only, never
+// naive substring matching. "what's the world up to" (apostrophe form) is the exact acceptance
+// case from that build request; "can you explain what he said about the deal" is the regression
+// guard for the substring bug it called out (a naive .includes("ai") match inside "said" would
+// wrongly trigger research here — this codebase's WORLD_STATE_TRIGGERS/DOMAIN_TRIGGERS/etc. are
+// already \b-bounded regexes, never .includes(), so this must stay false).
+const worldUpToApostropheTriggers = detectResearchIntent("what's the world up to", { intentKind: 'natural' })
+const explainWhatHeSaidNoResearch = detectResearchIntent('can you explain what he said about the deal', { intentKind: 'natural' })
+
 export function runResearchIntentValidation(): CaseResult[] {
   return [
     check(
@@ -157,6 +166,16 @@ export function runResearchIntentValidation(): CaseResult[] {
       'research_intent_10b_economy_state_triggers_live_research',
       economyStateTriggers.shouldResearch,
       JSON.stringify(economyStateTriggers),
+    ),
+    check(
+      'research_intent_11a_world_up_to_apostrophe_form_triggers_research',
+      worldUpToApostropheTriggers.shouldResearch,
+      JSON.stringify(worldUpToApostropheTriggers),
+    ),
+    check(
+      'research_intent_11b_explain_what_he_said_no_research_substring_regression_guard',
+      !explainWhatHeSaidNoResearch.shouldResearch,
+      JSON.stringify(explainWhatHeSaidNoResearch),
     ),
   ]
 }

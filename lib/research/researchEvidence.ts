@@ -33,6 +33,10 @@ async function synthesizeWithGemini(args: {
     .slice(0, 6)
     .map(r => `TITLE: ${r.title}\nURL: ${r.url}\nPUBLISHED: ${r.publishedAt ?? 'unknown'}\nSOURCE: ${r.source}\nSNIPPET: ${r.snippet}`)
     .join('\n---\n')
+  const weatherLines = router.weatherAlerts.results
+    .slice(0, 6)
+    .map(r => `TITLE: ${r.title}\nPUBLISHED: ${r.publishedAt ?? 'unknown'}\nSOURCE: ${r.source}\nSNIPPET: ${r.snippet}`)
+    .join('\n---\n')
   const grokBlock = router.grok.ok ? `GROK_FRAMING:\n${router.grok.text.slice(0, 1800)}` : 'GROK_FRAMING: (unavailable)'
 
   const bundle = [
@@ -41,6 +45,9 @@ async function synthesizeWithGemini(args: {
     '',
     'PUBLIC_RSS_RESULTS:',
     rssLines || '(none)',
+    '',
+    'NWS_WEATHER_ALERTS:',
+    weatherLines || '(none)',
     '',
     'DIRECT_FETCH:',
     dLines || '(none)',
@@ -79,6 +86,9 @@ function fallbackFindings(router: LiveResearchRouterResult): string {
   }
   for (const r of router.publicRss.results.slice(0, 5)) {
     bits.push(`Current public news (${r.source}, ${r.publishedAt ?? 'date unavailable'}): ${r.title} — ${r.snippet.slice(0, 360)} (${r.url})`)
+  }
+  for (const r of router.weatherAlerts.results.slice(0, 5)) {
+    bits.push(`NWS weather alert (${r.source}, ${r.publishedAt ?? 'date unavailable'}): ${r.title} — ${r.snippet.slice(0, 360)}`)
   }
   if (router.grok.ok && router.grok.text) {
     bits.push(`Grok framing (non-web): ${router.grok.text.slice(0, 520)}`)
@@ -151,6 +161,21 @@ function rawIntelligenceFromRouter(router: LiveResearchRouterResult): RawIntelli
     })
   }
 
+  if (router.weatherAlerts.queried) {
+    records.push({
+      source_id: 'nws_weather_alerts',
+      ok: router.weatherAlerts.ok,
+      queried_at: router.generatedAt,
+      findings: router.weatherAlerts.results.map(result => ({
+        title: result.title,
+        content: result.snippet,
+        observed_at: result.publishedAt ?? router.generatedAt,
+      })),
+      error: router.weatherAlerts.error,
+      failure_behavior: 'skip',
+    })
+  }
+
   return records
 }
 
@@ -179,8 +204,19 @@ export async function buildLiveResearchEvidencePacket(args: {
     queriedAt: router.generatedAt,
     urls: router.publicRss.results.map(r => r.url).slice(0, 8),
     error: router.publicRss.error,
-    note: 'Public Google News and BBC World RSS fallback',
+    note: 'Credential-free RSS/RDF fallback: Google News plus the trusted static feed list (BBC, NASA, Bloomberg, TechCrunch, ABC, AllAfrica, Al Jazeera, Le Monde, The Hindu, SCMP, DW, SMH)',
   })
+
+  if (router.weatherAlerts.queried) {
+    sources.push({
+      kind: 'weather_alerts',
+      ok: router.weatherAlerts.ok,
+      queriedAt: router.generatedAt,
+      urls: router.weatherAlerts.results.map(r => r.url).slice(0, 8),
+      error: router.weatherAlerts.error,
+      note: 'NWS active-alerts API (application/geo+json), queried because this decree read as weather-related',
+    })
+  }
 
   sources.push({
     kind: 'grok_xai',
@@ -200,11 +236,13 @@ export async function buildLiveResearchEvidencePacket(args: {
     })
   }
 
+  const weatherAlertsOk = router.weatherAlerts.queried && router.weatherAlerts.ok
+
   let geminiText = ''
   let geminiOk = false
   const allowGemini =
     Boolean(process.env.GEMINI_API_KEY?.trim())
-    && (router.tavily.ok && router.tavily.results.length > 0 || router.publicRss.ok || router.direct.some(d => d.ok))
+    && (router.tavily.ok && router.tavily.results.length > 0 || router.publicRss.ok || weatherAlertsOk || router.direct.some(d => d.ok))
   if (allowGemini) {
     const syn = await synthesizeWithGemini({ decreeText, router })
     geminiOk = syn.ok && Boolean(syn.text)
@@ -230,6 +268,7 @@ export async function buildLiveResearchEvidencePacket(args: {
   const legScore =
     (router.tavily.ok ? 0.28 : 0)
     + (router.publicRss.ok ? 0.24 : 0)
+    + (weatherAlertsOk ? 0.1 : 0)
     + (router.grok.ok ? 0.12 : 0)
     + (router.direct.some(d => d.ok) ? 0.22 : 0)
     + (geminiOk ? 0.28 : 0)
@@ -241,12 +280,13 @@ export async function buildLiveResearchEvidencePacket(args: {
   const usedLiveResearch =
     (router.tavily.ok && router.tavily.results.length > 0)
     || router.publicRss.ok
+    || weatherAlertsOk
     || router.direct.some(d => d.ok)
     || router.grok.ok
     || geminiOk
 
   const freshness: LiveResearchEvidencePacket['freshness'] =
-    router.tavily.ok || router.publicRss.ok || router.direct.some(d => d.ok) ? 'recent' : router.grok.ok ? 'unknown' : 'stale'
+    router.tavily.ok || router.publicRss.ok || weatherAlertsOk || router.direct.some(d => d.ok) ? 'recent' : router.grok.ok ? 'unknown' : 'stale'
 
   const intelligencePacket = hydrateLiveIntelligencePacket({
     decree: decreeText,

@@ -120,6 +120,7 @@ function testIntelligenceResilienceWhenTavilyDown(): CaseResult[] {
     searchQuery: 'test query',
     tavily: { ok: false, results: [], error: 'TAVILY_API_KEY not configured', durationMs: 5 },
     publicRss: { ok: false, results: [], error: 'not used', durationMs: 1 },
+    weatherAlerts: { ok: true, queried: false, results: [], durationMs: 0 },
     grok: { ok: false, text: '', error: 'XAI_API_KEY missing' },
     direct: [
       { url: 'https://example.com/page', ok: true, contentSnippet: 'Real fetched content from a direct, non-commercial route.', statusCode: 200 },

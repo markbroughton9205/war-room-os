@@ -576,6 +576,7 @@ const FAKE_ROUTER_RESULT: LiveResearchRouterResult = {
   searchQuery: 'test query',
   tavily: { ok: true, results: [{ title: 'x', url: 'https://example.com/x', snippet: 'x' }], durationMs: 1 },
   publicRss: { ok: false, results: [], error: 'not used', durationMs: 1 },
+  weatherAlerts: { ok: true, queried: false, results: [], durationMs: 0 },
   grok: { ok: false, text: '', error: 'not used' },
   direct: [{ url: 'https://example.com/x', ok: true, contentSnippet: 'x', statusCode: 200 }],
   retrieval: {} as LiveResearchRouterResult['retrieval'],

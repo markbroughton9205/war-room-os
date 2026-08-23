@@ -1,7 +1,18 @@
 import { callXAIChat } from '@/lib/ai/providers/xai'
-import { buildRetrievalOrchestration, type RetrievalOrchestration } from '@/lib/intelligence/sources/retrievalOrchestrator'
+import { buildRetrievalOrchestration, evaluateMandatoryLiveRetrieval, type RetrievalOrchestration } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import { tavilyWarRoomSearch } from '@/lib/internet/warRoomSearchProviders'
 import type { WarRoomSupabase } from '@/lib/war-room/persistence'
+import {
+  fetchTrustedPublicNewsFeeds,
+  parsePublicNewsRss,
+  stripHtmlish,
+  type PublicNewsCategory,
+  type PublicNewsItem,
+} from '@/lib/research/publicRssFeeds'
+import { extractUsStateArea, fetchActiveWeatherAlerts, skippedWeatherAlertsLeg, type NwsAlertsLeg } from '@/lib/research/nwsAlerts'
+
+export type { PublicNewsItem } from '@/lib/research/publicRssFeeds'
+export type { NwsAlertsLeg } from '@/lib/research/nwsAlerts'
 
 export type LiveResearchRouterInput = {
   decreeText: string
@@ -32,14 +43,6 @@ export type GrokLeg = {
   error?: string
 }
 
-export type PublicNewsItem = {
-  title: string
-  url: string
-  snippet: string
-  publishedAt?: string
-  source: string
-}
-
 export type PublicRssLeg = {
   ok: boolean
   results: PublicNewsItem[]
@@ -52,6 +55,8 @@ export type LiveResearchRouterResult = {
   searchQuery: string
   tavily: TavilyLeg
   publicRss: PublicRssLeg
+  /** NWS active-alerts leg — only actually queried when the decree reads as weather-related. */
+  weatherAlerts: NwsAlertsLeg
   grok: GrokLeg
   direct: DirectFetchSnippet[]
   retrieval: RetrievalOrchestration
@@ -61,7 +66,7 @@ const MAX_DIRECT = 2
 const MAX_SNIPPET = 2400
 const FETCH_TIMEOUT_MS = 12_000
 const RSS_TIMEOUT_MS = 10_000
-const MAX_RSS_RESULTS = 8
+const MAX_RSS_RESULTS = 24
 
 function isPrivateOrBlockedHost(hostname: string): boolean {
   const h = hostname.toLowerCase()
@@ -105,83 +110,68 @@ export function extractPublicHttpUrls(text: string, max = MAX_DIRECT): string[] 
   return found
 }
 
-function stripHtmlish(raw: string): string {
-  return raw
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function decodeXmlText(raw: string): string {
-  return stripHtmlish(raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1'))
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-}
-
-function xmlField(block: string, tag: string): string {
-  const match = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'i').exec(block)
-  return match ? decodeXmlText(match[1] ?? '') : ''
-}
-
-/** Parse a conventional RSS 2.0 feed without trusting its markup as HTML. */
-export function parsePublicNewsRss(xml: string, fallbackSource: string): PublicNewsItem[] {
-  const items = xml.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi) ?? []
-  return items.flatMap(block => {
-    const title = xmlField(block, 'title')
-    const url = xmlField(block, 'link')
-    if (!title || !/^https:\/\//i.test(url)) return []
-    const rawDate = xmlField(block, 'pubDate') || xmlField(block, 'dc:date')
-    const timestamp = rawDate ? Date.parse(rawDate) : NaN
-    return [{
-      title,
-      url,
-      snippet: xmlField(block, 'description').slice(0, 900),
-      ...(Number.isFinite(timestamp) ? { publishedAt: new Date(timestamp).toISOString() } : {}),
-      source: xmlField(block, 'source') || fallbackSource,
-    }]
-  })
-}
-
-async function fetchPublicNewsRss(searchQuery: string): Promise<PublicRssLeg> {
+/**
+ * Google News (query-driven) plus the full trusted static feed list (`publicRssFeeds.ts`),
+ * filtered to `categories` when given. Also see `nwsAlerts.ts` for the separate weather-alerts
+ * leg, kept out of this RSS/RDF parser because its response is `application/geo+json`, not XML.
+ */
+async function fetchPublicNewsRss(searchQuery: string, categories: PublicNewsCategory[]): Promise<PublicRssLeg> {
   const started = Date.now()
-  const feeds = [
-    {
-      source: 'Google News',
-      url: `https://news.google.com/rss/search?q=${encodeURIComponent(searchQuery)}&hl=en-US&gl=US&ceid=US:en`,
-    },
-    { source: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml' },
-  ]
-  const settled = await Promise.all(feeds.map(async feed => {
-    try {
-      const res = await fetch(feed.url, {
-        signal: AbortSignal.timeout(RSS_TIMEOUT_MS),
-        headers: { 'user-agent': 'WarRoomLiveResearch/1.0', accept: 'application/rss+xml,application/xml,text/xml' },
-      })
+  const googleNewsUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(searchQuery)}&hl=en-US&gl=US&ceid=US:en`
+
+  const [googleNews, trusted] = await Promise.all([
+    fetch(googleNewsUrl, {
+      signal: AbortSignal.timeout(RSS_TIMEOUT_MS),
+      headers: { 'user-agent': 'WarRoomLiveResearch/1.0', accept: 'application/rss+xml,application/xml,text/xml' },
+    }).then(async res => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return { source: feed.source, items: parsePublicNewsRss(await res.text(), feed.source) }
-    } catch (error) {
-      return { source: feed.source, items: [] as PublicNewsItem[], error: error instanceof Error ? error.message : String(error) }
-    }
-  }))
+      return { ok: true as const, items: parsePublicNewsRss(await res.text(), 'Google News') }
+    }).catch(error => ({
+      ok: false as const,
+      items: [] as PublicNewsItem[],
+      error: error instanceof Error ? error.message : String(error),
+    })),
+    fetchTrustedPublicNewsFeeds({ categories }),
+  ])
+
+  const combined = [...googleNews.items, ...trusted.results]
   const seen = new Set<string>()
-  const results = settled.flatMap(feed => feed.items).filter(item => {
+  const results = combined.filter(item => {
     const key = `${item.title.toLowerCase()}|${item.url}`
     if (seen.has(key)) return false
     seen.add(key)
     return true
   }).sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')).slice(0, MAX_RSS_RESULTS)
-  const errors = settled.filter(feed => feed.error).map(feed => `${feed.source}: ${feed.error}`)
+
+  const errors = [
+    ...(googleNews.ok ? [] : [`Google News: ${googleNews.error}`]),
+    ...trusted.perFeed.filter(f => f.error).map(f => `${f.name}: ${f.error}`),
+  ]
   return {
     ok: results.length > 0,
     results,
     ...(results.length ? {} : { error: errors.join(' | ') || 'public_rss_empty' }),
     durationMs: Date.now() - started,
   }
+}
+
+/** Loose keyword mapping from decree text to trusted-feed categories — kept intentionally broad
+ * (world/news stay in every mix) so a generic query never comes back empty. */
+function categoriesForQuery(reasons: string[], decreeText: string): PublicNewsCategory[] {
+  const cats = new Set<PublicNewsCategory>(['world', 'news'])
+  if (reasons.includes('business_economics')) {
+    cats.add('markets')
+    cats.add('economy')
+  }
+  if (/\b(tech|technology|ai|software|startup|space|nasa|science)\b/i.test(decreeText)) {
+    cats.add('technology')
+    cats.add('science')
+    cats.add('startups')
+  }
+  if (/\bafrica\b/i.test(decreeText)) cats.add('africa')
+  if (/\beurope\b/i.test(decreeText)) cats.add('europe')
+  if (/\basia\b/i.test(decreeText)) cats.add('asia')
+  return [...cats]
 }
 
 async function fetchDirectSnippet(url: string): Promise<DirectFetchSnippet> {
@@ -291,10 +281,17 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     return { ok: Boolean(text), text, error: text ? undefined : 'empty_grok' }
   })()
 
-  const publicRssP = fetchPublicNewsRss(searchQuery)
+  const mandatoryRetrieval = evaluateMandatoryLiveRetrieval(input.decreeText)
+  const categories = categoriesForQuery(mandatoryRetrieval.reasons, input.decreeText)
+  const wantsWeather = mandatoryRetrieval.reasons.includes('weather')
+
+  const publicRssP = fetchPublicNewsRss(searchQuery, categories)
+  const weatherAlertsP = wantsWeather
+    ? fetchActiveWeatherAlerts({ areaState: extractUsStateArea(input.decreeText) })
+    : Promise.resolve(skippedWeatherAlertsLeg())
   const directP = Promise.all(urls.map(u => fetchDirectSnippet(u)))
 
-  const [tRaw, publicRss, grok, direct] = await Promise.all([tavilyP, publicRssP, grokP, directP])
+  const [tRaw, publicRss, weatherAlerts, grok, direct] = await Promise.all([tavilyP, publicRssP, weatherAlertsP, grokP, directP])
 
   const tavily: TavilyLeg = tRaw.ok
     ? { ok: true, results: tRaw.results, durationMs: tRaw.durationMs }
@@ -302,7 +299,7 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
   const retrieval = buildRetrievalOrchestration({
     decree: input.decreeText,
     generatedAt,
-    tavilyOk: (tavily.ok && tavily.results.length > 0) || publicRss.ok,
+    tavilyOk: (tavily.ok && tavily.results.length > 0) || publicRss.ok || (weatherAlerts.queried && weatherAlerts.ok),
     tavilyLatencyMs: Math.min(tavily.durationMs, publicRss.durationMs),
     tavilyError: tavily.ok || publicRss.ok ? undefined : [tavily.error, publicRss.error].filter(Boolean).join(' | '),
     grokOk: grok.ok,
@@ -319,6 +316,7 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     searchQuery,
     tavily,
     publicRss,
+    weatherAlerts,
     grok,
     direct,
     retrieval,
