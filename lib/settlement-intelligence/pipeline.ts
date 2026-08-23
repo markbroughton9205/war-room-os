@@ -17,7 +17,7 @@ export async function normalizeListing(listing:DiscoveryListing,fetcher:SafeFetc
 }
 export async function runSettlementIntelligence(options:{fetcher?:SafeFetch;now?:Date;listings?:DiscoveryListing[]}={}){
   const fetcher=options.fetcher??liveSafeFetch,now=options.now??new Date(),discovered=options.listings??await discoverClassActionListings(fetcher,now),records:SettlementRecord[]=[];const notifications=[]
-  for(const listing of discovered){const record=await normalizeListing(listing,fetcher,now);settlementStore.upsert(record);records.push(record);const notice=generateNotification(record,now);if(notice){settlementStore.saveNotification(notice);notifications.push(notice)}}
+  for(const listing of discovered){const record=await normalizeListing(listing,fetcher,now);if(record.deadlineState==='EXPIRED')continue;settlementStore.upsert(record);records.push(record);const notice=generateNotification(record,now);if(notice){settlementStore.saveNotification(notice);notifications.push(notice)}}
   return {discovered:records.length,officiallyVerified:records.filter(item=>item.officialSourceState==='OFFICIAL_SOURCE_VERIFIED').length,verifiedNoProof:records.filter(item=>item.officialSourceState==='OFFICIAL_SOURCE_VERIFIED'&&['NO_DOCUMENTATION_REQUIRED','PROOF_OF_PURCHASE_NOT_REQUIRED'].includes(item.terms.documentationRequirement)).length,records,notifications,persistence:'SESSION_ONLY' as const,applicationsOrSubmissionsPerformed:false,externalDeliveryOccurred:false}
 }
 export function prepareSettlementClaim(record:SettlementRecord,knownFacts:Record<string,boolean>){
