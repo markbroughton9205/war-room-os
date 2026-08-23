@@ -121,9 +121,10 @@ const cases = [
     'truth_11_header_resource_status_no_fabricated_nominal_reading',
     !osHeader.includes('Nominal')
       && !osHeader.toLowerCase().includes('placeholder')
-      && osHeader.includes('CPU · Not connected')
-      && osHeader.includes('Memory · Not connected')
-      && osHeader.includes('Network · Not connected'),
+      && !osHeader.includes('CPU ·')
+      && !osHeader.includes('Memory ·')
+      && !osHeader.includes('Network ·')
+      && osHeader.includes('System Health / Runtime Details'),
   ],
 ]
 

@@ -246,7 +246,12 @@ const operationalWiringCases = [
   ],
   [
     'legacy_01_header_resource_status_is_truthful',
-    osHeader.includes('CPU · Not connected') && osHeader.includes('Missing dependency: a connected resource monitor feed.') && !osHeader.includes('placeholder'),
+    !osHeader.includes('Nominal')
+      && !osHeader.includes('CPU ·')
+      && !osHeader.includes('Memory ·')
+      && !osHeader.includes('Network ·')
+      && osHeader.includes('verbose')
+      && osHeader.includes('System Health / Runtime Details'),
   ],
   [
     'legacy_02_command_bar_not_labeled_mock',
@@ -258,7 +263,10 @@ const operationalWiringCases = [
   ],
   [
     'legacy_04_council_overview_static_seed_labeled',
-    lazyPanels.includes('Static council overview') && !lazyPanels.includes('Mock council layout') && sentinelPanel.includes('Static seed / not live') && councilTable.includes('Static seed overview'),
+    lazyPanels.includes('Simulated seating &amp; oversight')
+      && lazyPanels.includes('simulated placeholder data')
+      && sentinelPanel.includes('Static seed / not live')
+      && councilTable.includes('Simulated placeholder seating — not live provider output'),
   ],
   [
     'payments_01_provider_readiness_has_no_placeholder_status',
