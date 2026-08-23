@@ -32,10 +32,26 @@ export type GrokLeg = {
   error?: string
 }
 
+export type PublicNewsItem = {
+  title: string
+  url: string
+  snippet: string
+  publishedAt?: string
+  source: string
+}
+
+export type PublicRssLeg = {
+  ok: boolean
+  results: PublicNewsItem[]
+  error?: string
+  durationMs: number
+}
+
 export type LiveResearchRouterResult = {
   generatedAt: string
   searchQuery: string
   tavily: TavilyLeg
+  publicRss: PublicRssLeg
   grok: GrokLeg
   direct: DirectFetchSnippet[]
   retrieval: RetrievalOrchestration
@@ -44,6 +60,8 @@ export type LiveResearchRouterResult = {
 const MAX_DIRECT = 2
 const MAX_SNIPPET = 2400
 const FETCH_TIMEOUT_MS = 12_000
+const RSS_TIMEOUT_MS = 10_000
+const MAX_RSS_RESULTS = 8
 
 function isPrivateOrBlockedHost(hostname: string): boolean {
   const h = hostname.toLowerCase()
@@ -94,6 +112,76 @@ function stripHtmlish(raw: string): string {
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function decodeXmlText(raw: string): string {
+  return stripHtmlish(raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1'))
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+}
+
+function xmlField(block: string, tag: string): string {
+  const match = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'i').exec(block)
+  return match ? decodeXmlText(match[1] ?? '') : ''
+}
+
+/** Parse a conventional RSS 2.0 feed without trusting its markup as HTML. */
+export function parsePublicNewsRss(xml: string, fallbackSource: string): PublicNewsItem[] {
+  const items = xml.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi) ?? []
+  return items.flatMap(block => {
+    const title = xmlField(block, 'title')
+    const url = xmlField(block, 'link')
+    if (!title || !/^https:\/\//i.test(url)) return []
+    const rawDate = xmlField(block, 'pubDate') || xmlField(block, 'dc:date')
+    const timestamp = rawDate ? Date.parse(rawDate) : NaN
+    return [{
+      title,
+      url,
+      snippet: xmlField(block, 'description').slice(0, 900),
+      ...(Number.isFinite(timestamp) ? { publishedAt: new Date(timestamp).toISOString() } : {}),
+      source: xmlField(block, 'source') || fallbackSource,
+    }]
+  })
+}
+
+async function fetchPublicNewsRss(searchQuery: string): Promise<PublicRssLeg> {
+  const started = Date.now()
+  const feeds = [
+    {
+      source: 'Google News',
+      url: `https://news.google.com/rss/search?q=${encodeURIComponent(searchQuery)}&hl=en-US&gl=US&ceid=US:en`,
+    },
+    { source: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml' },
+  ]
+  const settled = await Promise.all(feeds.map(async feed => {
+    try {
+      const res = await fetch(feed.url, {
+        signal: AbortSignal.timeout(RSS_TIMEOUT_MS),
+        headers: { 'user-agent': 'WarRoomLiveResearch/1.0', accept: 'application/rss+xml,application/xml,text/xml' },
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return { source: feed.source, items: parsePublicNewsRss(await res.text(), feed.source) }
+    } catch (error) {
+      return { source: feed.source, items: [] as PublicNewsItem[], error: error instanceof Error ? error.message : String(error) }
+    }
+  }))
+  const seen = new Set<string>()
+  const results = settled.flatMap(feed => feed.items).filter(item => {
+    const key = `${item.title.toLowerCase()}|${item.url}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')).slice(0, MAX_RSS_RESULTS)
+  const errors = settled.filter(feed => feed.error).map(feed => `${feed.source}: ${feed.error}`)
+  return {
+    ok: results.length > 0,
+    results,
+    ...(results.length ? {} : { error: errors.join(' | ') || 'public_rss_empty' }),
+    durationMs: Date.now() - started,
+  }
 }
 
 async function fetchDirectSnippet(url: string): Promise<DirectFetchSnippet> {
@@ -203,9 +291,10 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     return { ok: Boolean(text), text, error: text ? undefined : 'empty_grok' }
   })()
 
+  const publicRssP = fetchPublicNewsRss(searchQuery)
   const directP = Promise.all(urls.map(u => fetchDirectSnippet(u)))
 
-  const [tRaw, grok, direct] = await Promise.all([tavilyP, grokP, directP])
+  const [tRaw, publicRss, grok, direct] = await Promise.all([tavilyP, publicRssP, grokP, directP])
 
   const tavily: TavilyLeg = tRaw.ok
     ? { ok: true, results: tRaw.results, durationMs: tRaw.durationMs }
@@ -213,9 +302,9 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
   const retrieval = buildRetrievalOrchestration({
     decree: input.decreeText,
     generatedAt,
-    tavilyOk: tavily.ok && tavily.results.length > 0,
-    tavilyLatencyMs: tavily.durationMs,
-    tavilyError: tavily.error,
+    tavilyOk: (tavily.ok && tavily.results.length > 0) || publicRss.ok,
+    tavilyLatencyMs: Math.min(tavily.durationMs, publicRss.durationMs),
+    tavilyError: tavily.ok || publicRss.ok ? undefined : [tavily.error, publicRss.error].filter(Boolean).join(' | '),
     grokOk: grok.ok,
     grokError: grok.error,
     directOk: direct.some(item => item.ok),
@@ -229,6 +318,7 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     generatedAt,
     searchQuery,
     tavily,
+    publicRss,
     grok,
     direct,
     retrieval,

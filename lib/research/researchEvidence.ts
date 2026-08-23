@@ -29,11 +29,18 @@ async function synthesizeWithGemini(args: {
     .filter(d => d.ok && d.contentSnippet)
     .map(d => `URL: ${d.url}\nTEXT: ${d.contentSnippet.slice(0, 1200)}`)
     .join('\n---\n')
+  const rssLines = router.publicRss.results
+    .slice(0, 6)
+    .map(r => `TITLE: ${r.title}\nURL: ${r.url}\nPUBLISHED: ${r.publishedAt ?? 'unknown'}\nSOURCE: ${r.source}\nSNIPPET: ${r.snippet}`)
+    .join('\n---\n')
   const grokBlock = router.grok.ok ? `GROK_FRAMING:\n${router.grok.text.slice(0, 1800)}` : 'GROK_FRAMING: (unavailable)'
 
   const bundle = [
     'TAVILY_RESULTS:',
     tLines || '(none)',
+    '',
+    'PUBLIC_RSS_RESULTS:',
+    rssLines || '(none)',
     '',
     'DIRECT_FETCH:',
     dLines || '(none)',
@@ -43,7 +50,7 @@ async function synthesizeWithGemini(args: {
 
   const system = `You are Gemini Family in War Room **secondary verification / synthesis** for live research.
 Rules:
-- Use ONLY facts supported by the pasted bundle (TAVILY_RESULTS, DIRECT_FETCH, GROK_FRAMING). GROK_FRAMING is not web search output — treat it as hypothesis-level only.
+- Use ONLY facts supported by the pasted bundle (TAVILY_RESULTS, PUBLIC_RSS_RESULTS, DIRECT_FETCH, GROK_FRAMING). GROK_FRAMING is not web search output — treat it as hypothesis-level only.
 - Never invent URLs, publishers, dates, or quotes.
 - End your reply with exactly these three lines:
 CONTRADICTIONS: item1 || item2 || NONE
@@ -70,6 +77,9 @@ function fallbackFindings(router: LiveResearchRouterResult): string {
     const r = router.tavily.results[0]!
     bits.push(`Primary search hit: ${r.title} — ${r.snippet.slice(0, 420)}`)
   }
+  for (const r of router.publicRss.results.slice(0, 5)) {
+    bits.push(`Current public news (${r.source}, ${r.publishedAt ?? 'date unavailable'}): ${r.title} — ${r.snippet.slice(0, 360)} (${r.url})`)
+  }
   if (router.grok.ok && router.grok.text) {
     bits.push(`Grok framing (non-web): ${router.grok.text.slice(0, 520)}`)
   }
@@ -92,6 +102,19 @@ function rawIntelligenceFromRouter(router: LiveResearchRouterResult): RawIntelli
         observed_at: router.generatedAt,
       })),
       error: router.tavily.error,
+      failure_behavior: 'degrade',
+    },
+    {
+      source_id: 'public_news_rss',
+      ok: router.publicRss.ok,
+      queried_at: router.generatedAt,
+      findings: router.publicRss.results.map(result => ({
+        title: result.title,
+        url: result.url,
+        content: result.snippet,
+        observed_at: result.publishedAt ?? router.generatedAt,
+      })),
+      error: router.publicRss.error,
       failure_behavior: 'degrade',
     },
     {
@@ -151,6 +174,15 @@ export async function buildLiveResearchEvidencePacket(args: {
   })
 
   sources.push({
+    kind: 'public_rss',
+    ok: router.publicRss.ok,
+    queriedAt: router.generatedAt,
+    urls: router.publicRss.results.map(r => r.url).slice(0, 8),
+    error: router.publicRss.error,
+    note: 'Public Google News and BBC World RSS fallback',
+  })
+
+  sources.push({
     kind: 'grok_xai',
     ok: router.grok.ok,
     queriedAt: router.generatedAt,
@@ -172,7 +204,7 @@ export async function buildLiveResearchEvidencePacket(args: {
   let geminiOk = false
   const allowGemini =
     Boolean(process.env.GEMINI_API_KEY?.trim())
-    && (router.tavily.ok && router.tavily.results.length > 0 || router.direct.some(d => d.ok))
+    && (router.tavily.ok && router.tavily.results.length > 0 || router.publicRss.ok || router.direct.some(d => d.ok))
   if (allowGemini) {
     const syn = await synthesizeWithGemini({ decreeText, router })
     geminiOk = syn.ok && Boolean(syn.text)
@@ -197,6 +229,7 @@ export async function buildLiveResearchEvidencePacket(args: {
   const geminiConf = confMatch ? Number(confMatch[1]) : NaN
   const legScore =
     (router.tavily.ok ? 0.28 : 0)
+    + (router.publicRss.ok ? 0.24 : 0)
     + (router.grok.ok ? 0.12 : 0)
     + (router.direct.some(d => d.ok) ? 0.22 : 0)
     + (geminiOk ? 0.28 : 0)
@@ -207,12 +240,13 @@ export async function buildLiveResearchEvidencePacket(args: {
 
   const usedLiveResearch =
     (router.tavily.ok && router.tavily.results.length > 0)
+    || router.publicRss.ok
     || router.direct.some(d => d.ok)
     || router.grok.ok
     || geminiOk
 
   const freshness: LiveResearchEvidencePacket['freshness'] =
-    router.tavily.ok || router.direct.some(d => d.ok) ? 'recent' : router.grok.ok ? 'unknown' : 'stale'
+    router.tavily.ok || router.publicRss.ok || router.direct.some(d => d.ok) ? 'recent' : router.grok.ok ? 'unknown' : 'stale'
 
   const intelligencePacket = hydrateLiveIntelligencePacket({
     decree: decreeText,

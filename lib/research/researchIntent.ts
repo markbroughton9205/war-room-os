@@ -27,6 +27,17 @@ const LIVE_CURRENT_TRIGGERS: RegExp[] = [
   /\b(?:fact[-\s]?check|verify\s+online|confirm\s+on\s+the\s+web)\b/i,
 ]
 
+/** Natural world-state questions still require current evidence even when the user omits
+ * explicit words such as "latest", "today", or "search". */
+const WORLD_STATE_TRIGGERS: RegExp[] = [
+  /\bwhat(?:'s|s|\s+is)\s+(?:the\s+)?world\s+(?:up\s+to{1,2}|doing|like)\b/i,
+  /\bwhat(?:'s|s|\s+is)\s+(?:going\s+on|happening)\s+(?:in|around)\s+the\s+world\b/i,
+  /\b(?:catch|bring)\s+me\s+up\s+(?:on|to\s+speed)\b/i,
+  /\b(?:world|global|national|local)\s+(?:news|update|briefing|outlook)\b/i,
+  /\bhow(?:'s|s|\s+is|\s+are)\s+(?:the\s+)?(?:economy|markets?|politics|weather|technology|tech\s+sector|job\s+market|housing\s+market)\b/i,
+  /\bwhat\s+(?:are|is)\s+(?:the\s+)?(?:economy|markets?|politics|weather|technology|tech\s+sector|job\s+market|housing\s+market)\s+(?:doing|like)\b/i,
+]
+
 const INTERNET_EXPLICIT: RegExp[] = [
   /\b(?:search\s+the\s+web|web\s+search|live\s+web|use\s+the\s+internet|internet\s+research)\b/i,
   /\binternet\b/i,
@@ -165,6 +176,7 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
   const casualShape = CASUAL_ONLY.some(p => p.test(t)) && t.length < 220
   const explicitInternet = INTERNET_EXPLICIT.some(p => p.test(t))
   const liveHits = countMatches(t, LIVE_CURRENT_TRIGGERS)
+  const worldStateHits = countMatches(t, WORLD_STATE_TRIGGERS)
   const socialHits = countMatches(t, SOCIAL_REALTIME_TRIGGERS)
   const domainHits = countMatches(t, DOMAIN_TRIGGERS)
   const researchVerbHits = countMatches(t, RESEARCH_VERB_TRIGGERS)
@@ -177,6 +189,7 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
 
   if (explicitInternet) pushReason('internet_explicit', INTERNET_EXPLICIT)
   if (liveHits) pushReason('live_current', LIVE_CURRENT_TRIGGERS)
+  if (worldStateHits) pushReason('world_state', WORLD_STATE_TRIGGERS)
   if (socialHits) pushReason('social_realtime', SOCIAL_REALTIME_TRIGGERS)
   if (domainHits) pushReason('domain_topic', DOMAIN_TRIGGERS)
   if (researchVerbHits) pushReason('research_verbs', RESEARCH_VERB_TRIGGERS)
