@@ -1,57 +1,27 @@
-export const SETTLEMENT_DISCOVERY_ONLY = true as const
+export type OfficialSourceState = 'AGGREGATOR_ONLY'|'OFFICIAL_CANDIDATE'|'OFFICIAL_SOURCE_VERIFIED'|'OFFICIAL_SOURCE_CONFLICT'|'OFFICIAL_SOURCE_UNAVAILABLE'
+export type DocumentationRequirement = 'NO_DOCUMENTATION_REQUIRED'|'PROOF_OF_PURCHASE_NOT_REQUIRED'|'DOCUMENTATION_OPTIONAL'|'DOCUMENTATION_REQUIRED'|'DOCUMENTATION_REQUIREMENT_UNKNOWN'
+export type EligibilityState = 'UNKNOWN_FACTS_REQUIRED'|'POSSIBLY_ELIGIBLE_COMMANDER_REVIEW'|'ELIGIBLE_CONFIRMED'|'NOT_ELIGIBLE'
+export type DeadlineState = 'DUE_WITHIN_48_HOURS'|'DUE_WITHIN_7_DAYS'|'DUE_WITHIN_30_DAYS'|'OPEN'|'EXPIRED'
+export type SettlementPriority = 'CLAIM_NOW'|'HIGH_PRIORITY'|'REVIEW'|'LOW_PRIORITY'|'EXPIRED'
+export type WorkflowState = 'DISCOVERED'|'OFFICIAL_SOURCE_VERIFIED'|'ELIGIBILITY_REVIEW'|'CLAIM_READY'|'CLAIM_PREPARED'|'WAITING_FOR_COMMANDER'|'CLAIM_SUBMITTED'|'PAYMENT_PENDING'|'PAYMENT_VERIFIED'|'CASH_RECEIVED'
+export type ProvenanceKind = 'AGGREGATOR'|'OFFICIAL_PAGE'|'OFFICIAL_NOTICE'|'OFFICIAL_FAQ'|'OFFICIAL_CLAIM_FORM'|'SETTLEMENT_AGREEMENT'
 
-export type SettlementAggregator = 'settlesignal' | 'classaction_org'
-export type OfficialAuthority = 'OFFICIAL_ADMIN' | 'OFFICIAL_COURT' | 'OFFICIAL_GOVERNMENT'
-export type VerificationStatus = 'UNVERIFIED' | 'VERIFIED' | 'CONFLICT' | 'UNAVAILABLE'
-export type VerificationField = 'deadline' | 'proofRequirement' | 'benefit' | 'classDefinition' | 'claimFormUrl'
-export type BenefitType = 'FIXED' | 'UP_TO' | 'PRO_RATA' | 'TIERED' | 'REIMBURSEMENT' | 'UNKNOWN'
-
-export type Benefit = {
-  type: BenefitType
-  amount: number | null
-  currency: string | null
-  text: string
-  proRata: { numerator: number | null; denominator: number | null; netFundAmount: number | null } | null
-  tiers: Array<{ name: string; requirement: string; amount: number | null }> | null
+export interface Provenance { kind:ProvenanceKind; url:string; retrievedAt:string; httpStatus:number; evidence:string[] }
+export interface ClaimTier { name:string; benefit:string|null; documentationRequirement:DocumentationRequirement; evidence:string|null }
+export interface OfficialTerms {
+  settlementName:string|null; defendant:string|null; caseNumber:string|null; court:string|null; administrator:string|null; classDefinition:string|null
+  claimDeadline:string|null; exclusionDeadline:string|null; objectionDeadline:string|null; finalApprovalAt:string|null
+  claimFormUrl:string|null; officialNoticeUrl:string|null; faqUrl:string|null; settlementAgreementUrl:string|null
+  settlementFund:string|null; estimatedBenefit:string|null; claimTiers:ClaimTier[]; documentationRequirement:DocumentationRequirement
+  documentationEvidence:string|null; paymentMethod:string|null
 }
-
-export type Provenance = {
-  url: string
-  sourceClass: 'AGGREGATOR' | OfficialAuthority
-  retrievedAt: string
-  httpStatus: number | null
-  contentType: string | null
-  observedLatencyMs: number | null
+export interface EligibilityQuestion { id:string; fact:string; prompt:string }
+export interface SettlementRecord {
+  id:string; name:string; defendant:string|null; aggregatorUrl:string; officialUrl:string|null; officialSourceState:OfficialSourceState
+  terms:OfficialTerms; deadlineState:DeadlineState; priority:SettlementPriority; eligibilityState:EligibilityState; eligibilityQuestions:EligibilityQuestion[]
+  workflowState:WorkflowState; provenance:Provenance[]; discoveredAt:string; updatedAt:string; claimSubmitted:false; cashReceived:false
 }
-
-export type FieldVerification = {
-  field: VerificationField
-  status: VerificationStatus
-  value: string | null
-  source: Provenance | null
-  verifiedBy: OfficialAuthority | null
-  note: string | null
-}
-
-export type SettlementDiscovery = {
-  id: string
-  provider: SettlementAggregator
-  title: string
-  recordUrl: string
-  deadline: string | null
-  proofRequirement: string | null
-  benefit: Benefit
-  classDefinition: string | null
-  claimFormUrl: string | null
-  officialSourceCandidates: string[]
-  provenance: Provenance
-  rawText: string
-}
-
-export type CorroboratedSettlement = {
-  key: string
-  discoveries: SettlementDiscovery[]
-  corroboration: 'SINGLE_SOURCE' | 'DUAL_AGGREGATOR_CORROBORATED'
-  officialSourceVerified: boolean
-  fields: Record<VerificationField, FieldVerification>
-}
+export interface DiscoveryListing { title:string; defendant:string|null; listingUrl:string; aggregatorDeadline:string|null; aggregatorProofClaim:string|null; candidateUrls:string[]; retrievedAt:string; provenance:Provenance }
+export interface NotificationRecord { id:string; settlementId:string; fingerprint:string; createdAt:string; state:'NOTIFICATION_GENERATED'; delivery:'EXTERNAL_DELIVERY_NOT_ATTEMPTED'; message:string }
+export interface FetchResponse { url:string; status:number; text:string; contentType:string }
+export type SafeFetch = (url:string)=>Promise<FetchResponse>

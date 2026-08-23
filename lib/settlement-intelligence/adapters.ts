@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { parseBenefit } from './benefits'
-import { fetchReadOnly } from './fetch'
-import type { SettlementAggregator, SettlementDiscovery } from './types'
+import { fetchReadOnly } from './corroborationFetch'
+import type { SettlementAggregator, SettlementDiscovery } from './corroborationTypes'
 
 const linkedUrls = (html: string, baseUrl: string) => [...new Set([
   ...(html.match(/https:\/\/[^\s"'<>]+/g) ?? []),

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireCommanderSession } from '@/lib/security/commanderSession'
-import { runSettlementIntelligence, type SettlementSource } from '@/lib/settlement-intelligence'
+import { runSettlementCorroboration, type SettlementSource } from '@/lib/settlement-intelligence/corroborationPipeline'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
   const sources = requested.map(parseSource).filter((source): source is SettlementSource => source !== null)
   if (!sources.length || sources.length !== requested.length) return NextResponse.json({ status: 'error', error: 'Provide valid SettleSignal or ClassAction.org HTTPS record URLs.' }, { status: 400 })
   try {
-    const result = await runSettlementIntelligence(sources)
+    const result = await runSettlementCorroboration(sources)
     return NextResponse.json({ tool: 'REFRESH_SETTLEMENT_INTELLIGENCE', status: 'complete', ...result, secretsExposed: false, claimsSubmitted: false })
   } catch (error) {
     return NextResponse.json({ tool: 'REFRESH_SETTLEMENT_INTELLIGENCE', status: 'error', error: error instanceof Error ? error.message : 'Settlement refresh failed.', discoveryOnly: true, claimsSubmitted: false }, { status: 502 })

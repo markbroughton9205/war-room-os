@@ -1,12 +1,10 @@
-import { createHash } from 'node:crypto'
-import type { CorroboratedSettlement } from './types'
-
-const emitted = new Set<string>()
-export function generateSettlementNotification(record: CorroboratedSettlement) {
-  const verified = Object.values(record.fields).filter(field => field.status === 'VERIFIED').map(field => field.field).sort()
-  const fingerprint = createHash('sha256').update(JSON.stringify({ key: record.key, corroboration: record.corroboration, verified, deadlines: record.discoveries.map(x => x.deadline) })).digest('hex')
-  if (emitted.has(fingerprint)) return null
-  emitted.add(fingerprint)
-  return { id: fingerprint.slice(0, 20), persistence: 'SESSION_ONLY' as const, externalDelivery: 'NOT_ATTEMPTED' as const, body: `DISCOVERY ONLY — ${record.discoveries[0]?.title ?? record.key}. ${record.corroboration}. Officially verified fields: ${verified.join(', ') || 'none'}. Confirm every claim detail on the official source.` }
+import type { NotificationRecord,SettlementRecord } from './types'
+import { formatTimeRemaining } from './deadlines'
+const memory=new Map<string,NotificationRecord>()
+export const notificationFingerprint=(record:SettlementRecord)=>[record.id,record.officialSourceState,record.terms.documentationRequirement,record.terms.claimDeadline,record.workflowState].join('|')
+export function generateNotification(record:SettlementRecord,now=new Date()):NotificationRecord|null{
+  if(record.officialSourceState!=='OFFICIAL_SOURCE_VERIFIED')return null;const fingerprint=notificationFingerprint(record);if(memory.has(fingerprint))return null
+  const message=['URGENT SETTLEMENT OPPORTUNITY',`Case: ${record.name}`,`Deadline: ${record.terms.claimDeadline??'Unknown'}`,`Time remaining: ${formatTimeRemaining(record.terms.claimDeadline,now)}`,`Proof requirement: ${record.terms.documentationRequirement}`,'Eligibility: COMMANDER REVIEW REQUIRED',`Potential benefit: ${record.terms.estimatedBenefit??'Not officially stated'}`,`Official claim page: ${record.terms.claimFormUrl??record.officialUrl??'Unavailable'}`,'Official source: VERIFIED','','NO CLAIM HAS BEEN SUBMITTED.'].join('\n')
+  const item={id:`notice_${record.id}_${memory.size+1}`,settlementId:record.id,fingerprint,createdAt:now.toISOString(),state:'NOTIFICATION_GENERATED',delivery:'EXTERNAL_DELIVERY_NOT_ATTEMPTED',message} as const;memory.set(fingerprint,item);return item
 }
-export const __resetSettlementNotificationsForTests = () => emitted.clear()
+export function resetNotificationMemory(){memory.clear()}

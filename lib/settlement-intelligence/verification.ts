@@ -1,6 +1,6 @@
-import { classifyOfficialAuthority, fetchReadOnly } from './fetch'
+import { classifyOfficialAuthority, fetchReadOnly } from './corroborationFetch'
 import { parseBenefit } from './benefits'
-import type { CorroboratedSettlement, FieldVerification, SettlementDiscovery, VerificationField } from './types'
+import type { CorroboratedSettlement, FieldVerification, SettlementDiscovery, VerificationField } from './corroborationTypes'
 
 const fields: VerificationField[] = ['deadline', 'proofRequirement', 'benefit', 'classDefinition', 'claimFormUrl']
 const emptyFields = (): CorroboratedSettlement['fields'] => Object.fromEntries(fields.map(field => [field, { field, status: 'UNVERIFIED', value: null, source: null, verifiedBy: null, note: 'Aggregator evidence cannot verify an official field.' }])) as CorroboratedSettlement['fields']

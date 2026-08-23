@@ -1,4 +1,4 @@
-import type { Benefit, BenefitType } from './types'
+import type { Benefit, BenefitType } from './corroborationTypes'
 
 function amountFrom(text: string): number | null {
   const match = text.match(/\$\s*([\d,.]+)\s*(million|billion|m|b)?/i)

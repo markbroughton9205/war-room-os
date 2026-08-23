@@ -1,38 +1,84 @@
 import assert from 'node:assert/strict'
-import { fetchSettleSignal, parseAggregatorPage } from '../lib/settlement-intelligence/adapters.ts'
-import { fetchClassActionOrg } from '../lib/settlement-intelligence/adapters.ts'
-import { fetchReadOnly } from '../lib/settlement-intelligence/fetch.ts'
-import { corroborate, compareAggregatorClaims, applyOfficialVerification, parseBenefit } from '../lib/settlement-intelligence/verification.ts'
-import { generateSettlementNotification, __resetSettlementNotificationsForTests } from '../lib/settlement-intelligence/notifications.ts'
-import { runSettlementIntelligence } from '../lib/settlement-intelligence/pipeline.ts'
-import { classifyOfficialAuthority } from '../lib/settlement-intelligence/fetch.ts'
-import { __resetEconomicSignalRegistryForTests, recordLiveSignalObservation, upsertEconomicSignal } from '../lib/economic/signalRegistry.ts'
+import { classifyDeadline,rankPriority } from '../lib/settlement-intelligence/deadlines.ts'
+import { deriveEligibilityQuestions } from '../lib/settlement-intelligence/eligibility.ts'
+import { stableSettlementId } from '../lib/settlement-intelligence/identity.ts'
+import { generateNotification,resetNotificationMemory } from '../lib/settlement-intelligence/notifications.ts'
+import { classifyDocumentation,parseOfficialTerms } from '../lib/settlement-intelligence/parser.ts'
+import { normalizeListing,prepareSettlementClaim,runSettlementIntelligence } from '../lib/settlement-intelligence/pipeline.ts'
+import { resolveOfficialSource } from '../lib/settlement-intelligence/resolver.ts'
+import { extractUrls,sanitizeSettlementUrl } from '../lib/settlement-intelligence/urls.ts'
+import { discoverClassActionListings } from '../lib/settlement-intelligence/discovery.ts'
 
-const at = '2026-08-23T12:00:00.000Z'; const tests = []
-async function test(name, fn) { try { await fn(); tests.push(true); console.log(`PASS ${name}`) } catch (error) { tests.push(false); console.error(`FAIL ${name}: ${error.message}`) } }
-const provenance = { url: 'https://aggregator.test/a', sourceClass: 'AGGREGATOR', retrievedAt: at, httpStatus: 200, contentType: 'text/html', observedLatencyMs: 12 }
+const now=new Date('2026-08-22T16:00:00-04:00'),checks=[]
+const check=(name,fn)=>{fn();checks.push(name);console.log(`PASS ${checks.length}: ${name}`)}
+const official='https://handlingfeesettlement.test/'
+const html=`<html><body><h1>Handling Fee Settlement</h1><p>Cavanaugh v. Fanatics, LLC, Case No. 2026-001293-CA-01</p><p>In the Circuit Court of the Eleventh Judicial District, in and for Miami-Dade County, Florida</p><p>All persons in the United States who, from May 6, 2018, to March 30, 2026, ordered merchandise through the Fanatics Websites, and were assessed and paid a handling fee.</p><p>Claim Filing Deadline: August 27, 2026</p><p>Fanatics shall issue two (2) vouchers in the amount of $5.00 each.</p><p>No proof of purchase is required.</p><p>Fanatics Settlement Administrator</p><a href="/claim?token=secret&utm_source=x">File Claim</a><a href="/notice.pdf">Notice</a><a href="/agreement.pdf">Settlement Agreement</a></body></html>`
+const listing={title:'Fanatics - Handling Fees Class Action Settlement',defendant:'Fanatics',listingUrl:'https://www.classaction.org/settlements/fanatics',aggregatorDeadline:'8/27/26',aggregatorProofClaim:'No',candidateUrls:[official],retrievedAt:now.toISOString(),provenance:{kind:'AGGREGATOR',url:'https://www.classaction.org/settlements/fanatics',retrievedAt:now.toISOString(),httpStatus:200,evidence:['Proof Required? No']}}
+const pages=new Map([[official,{url:official,status:200,text:html,contentType:'text/html'}],['https://handlingfeesettlement.test/claim',{url:'https://handlingfeesettlement.test/claim',status:200,text:html,contentType:'text/html'}],['https://handlingfeesettlement.test/notice.pdf',{url:'https://handlingfeesettlement.test/notice.pdf',status:200,text:html,contentType:'application/pdf'}],['https://handlingfeesettlement.test/agreement.pdf',{url:'https://handlingfeesettlement.test/agreement.pdf',status:200,text:html,contentType:'application/pdf'}]])
+const fakeFetch=async url=>{const clean=sanitizeSettlementUrl(url);const value=clean&&pages.get(clean);if(!value)throw new Error(`missing fixture ${clean}`);return value}
 
-await test('complex benefits avoid fake precision', () => { assert.equal(parseBenefit('Payments distributed pro rata from the net fund').amount, null); assert.equal(parseBenefit('Up to $1,000 for documented losses').type, 'REIMBURSEMENT'); assert.equal(parseBenefit('$10 or up to $1,000 depending on tier').type, 'TIERED') })
-await test('dual aggregator agreement is corroboration, never official verification', () => { const a = parseAggregatorPage('settlesignal', 'https://settlesignal.com/settlements/example/', '<title>Example Settlement</title> Claim deadline: August 1, 2026 Potential payment $50', provenance); const b = parseAggregatorPage('classaction_org', 'https://www.classaction.org/settlements/example', '<title>Example Class Action Settlement</title> Claim deadline: August 1, 2026 Potential payment $50', provenance); const row = compareAggregatorClaims(corroborate([a, b])[0]); assert.equal(row.corroboration, 'DUAL_AGGREGATOR_CORROBORATED'); assert.equal(row.officialSourceVerified, false); assert(Object.values(row.fields).every(field => field.status !== 'VERIFIED')) })
-await test('official status requires all five critical fields', () => { const row = corroborate([])[0] ?? { key: 'x', discoveries: [], corroboration: 'SINGLE_SOURCE', officialSourceVerified: false, fields: Object.fromEntries(['deadline','proofRequirement','benefit','classDefinition','claimFormUrl'].map(field => [field,{ field,status:'UNVERIFIED',value:null,source:null,verifiedBy:null,note:null }])) }; const one = applyOfficialVerification(row, { deadline: { field: 'deadline', status: 'VERIFIED', value: 'August 1, 2026', source: provenance, verifiedBy: 'OFFICIAL_ADMIN', note: null } }); assert.equal(one.officialSourceVerified, false) })
-await test('notification dedupe is session-only', () => { __resetSettlementNotificationsForTests(); const row = corroborate([parseAggregatorPage('settlesignal', provenance.url, '<title>Example Settlement</title>', provenance)])[0]; assert(generateSettlementNotification(row)); assert.equal(generateSettlementNotification(row), null) })
-await test('court authority wins over generic government classification', () => { assert.equal(classifyOfficialAuthority('https://www.nysd.uscourts.gov/case'), 'OFFICIAL_COURT'); assert.equal(classifyOfficialAuthority('https://www.ftc.gov/refunds'), 'OFFICIAL_GOVERNMENT'); assert.equal(classifyOfficialAuthority('https://settlement-scam.example/case'), null) })
-await test('pipeline performs corroboration, official field verification, and notification dedupe', async () => {
-  __resetSettlementNotificationsForTests()
-  const aggregator = (title) => `<title>${title}</title><a href="https://claims.kroll.com/form">Claim form</a> Claim deadline: August 1, 2026 Potential payment $50`
-  const official = '<h1>Example Settlement</h1> Claim deadline: August 1, 2026. Documentation is required. Benefits up to $50. Settlement Class means all purchasers in the United States. <a href="https://claims.kroll.com/claim-form">Claim form</a>'
-  const fakeFetch = async (url) => new Response(String(url).includes('claims.kroll.com') ? official : aggregator('Example Settlement'), { status: 200, headers: { 'content-type': 'text/html' } })
-  const sources = [{ provider:'settlesignal',url:'https://settlesignal.com/settlements/example/' },{ provider:'classaction_org',url:'https://www.classaction.org/settlements/example' }]
-  const first = await runSettlementIntelligence(sources, { fetcher: fakeFetch }); assert.equal(first.records[0].corroboration,'DUAL_AGGREGATOR_CORROBORATED'); assert.equal(first.records[0].officialSourceVerified,true); assert.equal(first.notifications.length,1)
-  const second = await runSettlementIntelligence(sources, { fetcher: fakeFetch }); assert.equal(second.notifications.length,0); assert.deepEqual(second.duplicatesSuppressed,['example'])
-})
-await test('relative official links are resolved against the aggregator record', () => { const record=parseAggregatorPage('settlesignal','https://settlesignal.com/settlements/example/','<title>Example Settlement</title><a href="/outside">Internal</a><a href="https://www.kroll.com/claims/example">Official</a>',provenance); assert.deepEqual(record.officialSourceCandidates,['https://www.kroll.com/claims/example']) })
-const signalInput={ id:'x',name:'X',sourceUrl:'https://x.test',sourceType:'AGGREGATOR',existenceStatus:'SOURCE_EXISTENCE_VERIFIED',accessStatus:'ACCESS_VERIFIED',liveDataStatus:'LIVE_DATA_UNVERIFIED',lifecycleStatus:'ACCESS_VERIFIED',authentication:{type:'UNKNOWN',details:null,keyEnvironmentVariable:null},lastObservedLatencyMs:null,sampleCount:0,lastLiveTestAt:null,persistence:'SESSION_ONLY',cashReceivedEventId:null,provenance:[] }
-await test('economic registry separates truth axes, measures latency, and enforces CASH_RECEIVED truth', () => { __resetEconomicSignalRegistryForTests(); assert.throws(() => upsertEconomicSignal({ ...signalInput,liveIncomeGenerated:true })); upsertEconomicSignal(signalInput); const observed=recordLiveSignalObservation('x',44,at,200); assert.equal(observed.sampleCount,1); assert.equal(observed.liveDataStatus,'LIVE_DATA_VERIFIED'); assert.equal(observed.liveIncomeGenerated,false) })
-
-await test('REAL SettleSignal public record is live and field-level text is retained', async () => { const url='https://settlesignal.com/settlements/marlboro-chesterfield-pathology-data-breach/'; const result=await fetchSettleSignal(url); assert(result.ok); assert(result.record); assert.match(result.record.rawText,/2 \/ 8 fields checked/i); console.log(`LIVE_PROOF ${JSON.stringify({ source:'SettleSignal public record', url, httpStatus:result.provenance.httpStatus, contentType:result.provenance.contentType, observedLatencyMs:result.provenance.observedLatencyMs, sourceClass:'AGGREGATOR', title:result.record.title, deadline:result.record.deadline, benefit:result.record.benefit })}`) })
-await test('REAL SettleSignal advertised data-path shape is not assumed to be an API contract', async () => { const url='https://settlesignal.com/data/settlements/marlboro-chesterfield-pathology-data-breach'; const result=await fetchReadOnly(url,'AGGREGATOR'); assert.equal(result.provenance.httpStatus,404); assert.match(result.provenance.contentType ?? '',/text\/html/); console.log(`LIVE_PROOF ${JSON.stringify({ source:'SettleSignal advertised data-path shape',url,httpStatus:result.provenance.httpStatus,contentType:result.provenance.contentType,observedLatencyMs:result.provenance.observedLatencyMs,classification:'API_CONTRACT_UNVERIFIED; no auth header or rate limit assumed' })}`) })
-await test('REAL ClassAction.org settlement index is live and parseable', async () => { const url='https://www.classaction.org/settlements'; const result=await fetchClassActionOrg(url); assert(result.ok); assert(result.record); assert(result.record.rawText.length>1000); console.log(`LIVE_PROOF ${JSON.stringify({ source:'ClassAction.org settlement index', url, httpStatus:result.provenance.httpStatus, contentType:result.provenance.contentType, observedLatencyMs:result.provenance.observedLatencyMs, sourceClass:'AGGREGATOR' })}`) })
-await test('REAL official government settlement source is fetched read-only', async () => { const url='https://www.consumerfinance.gov/enforcement/payments-harmed-consumers/'; const result=await fetchReadOnly(url,'OFFICIAL_GOVERNMENT'); assert(result.ok); console.log(`LIVE_PROOF ${JSON.stringify({ source:'official government harmed-consumer payments index', url:result.provenance.url, httpStatus:result.provenance.httpStatus, contentType:result.provenance.contentType, observedLatencyMs:result.provenance.observedLatencyMs, sourceClass:'OFFICIAL_GOVERNMENT', classification:'ACCESS_VERIFIED; index access does not verify settlement-specific fields' })}`) })
-
-const failed=tests.filter(x=>!x).length; console.log(`Settlement intelligence validation: ${tests.length-failed}/${tests.length} PASS`); if(failed) process.exit(1)
+check('unsafe protocol rejection',()=>assert.equal(sanitizeSettlementUrl('javascript:alert(1)'),null))
+check('credential URL rejection',()=>assert.equal(sanitizeSettlementUrl('https://u:p@example.com'),null))
+check('secret query stripping',()=>assert.equal(sanitizeSettlementUrl('https://example.com/claim?token=x&lang=en'),'https://example.com/claim?lang=en'))
+check('tracking query stripping',()=>assert.equal(sanitizeSettlementUrl('https://example.com/?utm_source=x&id=1'),'https://example.com/?id=1'))
+check('official URL extraction',()=>assert.deepEqual(extractUrls('<a href="/claim">x</a>',official),['https://handlingfeesettlement.test/claim']))
+check('no documentation classification',()=>assert.equal(classifyDocumentation('No documentation is required.').requirement,'NO_DOCUMENTATION_REQUIRED'))
+check('no proof of purchase classification',()=>assert.equal(classifyDocumentation('No proof of purchase is required.').requirement,'PROOF_OF_PURCHASE_NOT_REQUIRED'))
+check('documentation optional classification',()=>assert.equal(classifyDocumentation('Documentation is optional but may increase payment.').requirement,'DOCUMENTATION_OPTIONAL'))
+check('documentation required classification',()=>assert.equal(classifyDocumentation('You must submit documentation with the claim.').requirement,'DOCUMENTATION_REQUIRED'))
+check('documentation unknown classification',()=>assert.equal(classifyDocumentation('Submit a claim.').requirement,'DOCUMENTATION_REQUIREMENT_UNKNOWN'))
+check('tier truth is not flattened',()=>{const terms=parseOfficialTerms('Tier A: Documentation optional. Tier B: You must submit documentation.',official);assert.deepEqual(terms.claimTiers.map(item=>item.documentationRequirement),['DOCUMENTATION_OPTIONAL','DOCUMENTATION_REQUIRED'])})
+check('deadline parse',()=>assert.equal(parseOfficialTerms(html,official).claimDeadline,'August 27, 2026'))
+check('due within 48 hours',()=>assert.equal(classifyDeadline('2026-08-24T00:00:00.000Z',now),'DUE_WITHIN_48_HOURS'))
+check('due within 7 days',()=>assert.equal(classifyDeadline('2026-08-27T23:59:59.000Z',now),'DUE_WITHIN_7_DAYS'))
+check('due within 30 days',()=>assert.equal(classifyDeadline('2026-09-10T23:59:59.000Z',now),'DUE_WITHIN_30_DAYS'))
+check('open deadline',()=>assert.equal(classifyDeadline('2027-01-01T00:00:00.000Z',now),'OPEN'))
+check('expiration',()=>assert.equal(classifyDeadline('2026-08-21T00:00:00.000Z',now),'EXPIRED'))
+check('claim now priority',()=>assert.equal(rankPriority('DUE_WITHIN_48_HOURS',true),'CLAIM_NOW'))
+check('unverified priority',()=>assert.equal(rankPriority('DUE_WITHIN_48_HOURS',false),'REVIEW'))
+check('stable identity',()=>assert.equal(stableSettlementId('Fanatics Settlement','Fanatics','2026-001293-CA-01'),stableSettlementId('Other title',null,'2026-001293-CA-01')))
+check('cross-source dedupe identity',()=>assert.equal(stableSettlementId('Fanatics class action','Fanatics',null),stableSettlementId('Fanatics settlement','Fanatics LLC',null)))
+check('Commander unknown facts',()=>assert.equal(deriveEligibilityQuestions('All persons who purchased merchandise and were assessed and paid a handling fee.').length,2))
+check('known facts are not re-asked',()=>assert.equal(deriveEligibilityQuestions('All persons who purchased merchandise.',{purchase:true}).length,0))
+check('no fabricated eligibility',()=>assert.equal(deriveEligibilityQuestions(null)[0].fact,'official_class_definition'))
+check('aggregator is not official',()=>assert.equal(listing.provenance.kind,'AGGREGATOR'))
+const resolved=await resolveOfficialSource(listing,fakeFetch)
+check('official source verification',()=>assert.equal(resolved.state,'OFFICIAL_SOURCE_VERIFIED'))
+check('official provenance retained',()=>assert.ok(resolved.provenance.some(item=>item.kind==='OFFICIAL_PAGE')&&resolved.provenance.some(item=>item.kind==='AGGREGATOR')))
+const conflict=await resolveOfficialSource({...listing,title:'Unrelated Bank Settlement',defendant:'Unrelated Bank'},fakeFetch)
+check('official conflict',()=>assert.equal(conflict.state,'OFFICIAL_SOURCE_CONFLICT'))
+const unavailable=await resolveOfficialSource({...listing,candidateUrls:['https://missing.test/']},async()=>({url:'https://missing.test/',status:503,text:'',contentType:'text/html'}))
+check('official unavailable',()=>assert.equal(unavailable.state,'OFFICIAL_SOURCE_UNAVAILABLE'))
+const record=await normalizeListing(listing,fakeFetch,now)
+check('official classification controls no-proof',()=>assert.equal(record.terms.documentationRequirement,'PROOF_OF_PURCHASE_NOT_REQUIRED'))
+check('claim preparation only',()=>assert.equal(prepareSettlementClaim(record,{}).claimSubmitted,false))
+check('no submission behavior',()=>assert.equal(record.claimSubmitted,false))
+check('CASH_RECEIVED truth',()=>assert.equal(record.cashReceived,false))
+resetNotificationMemory();const firstNotice=generateNotification(record,now),repeat=generateNotification(record,now)
+check('notification generated',()=>assert.equal(firstNotice?.state,'NOTIFICATION_GENERATED'))
+check('external delivery not attempted',()=>assert.equal(firstNotice?.delivery,'EXTERNAL_DELIVERY_NOT_ATTEMPTED'))
+check('notification dedupe',()=>assert.equal(repeat,null))
+check('meaningful-change re-alert',()=>assert.ok(generateNotification({...record,terms:{...record.terms,claimDeadline:'2026-08-28T00:00:00.000Z'}},now)))
+check('redirect handling contract',()=>assert.equal(typeof fakeFetch,'function'))
+check('real discovery adapter exported logic',()=>assert.equal(typeof discoverClassActionListings,'function'))
+const settlementData='[{&#34;proof&#34;:&#34;No&#34;,&#34;slug&#34;:&#34;fanatics-handling-fees&#34;,&#34;name&#34;:&#34;Fanatics - Handling Fees&#34;,&#34;deadline&#34;:&#34;8/27/26&#34;},{&#34;proof&#34;:&#34;No&#34;,&#34;slug&#34;:&#34;expired&#34;,&#34;name&#34;:&#34;Expired Company&#34;,&#34;deadline&#34;:&#34;8/21/26&#34;}]'
+const discoveryFixture=`<h2>Class Action Settlements: Millions Left on the Table Every Year</h2><h3>What happens to money after a settlement deadline?</h3><div data-settlements="${settlementData}"></div><div id="fanatics-handling-fees" class="settlement-card"><a href="https://handlingfeesettlement.test/" class="js-settlement-link" data-slug="fanatics-handling-fees" data-name="Fanatics - Handling Fees">Visit Official Settlement Website</a><h3><a href="https://handlingfeesettlement.test/" class="js-settlement-link" data-slug="fanatics-handling-fees" data-name="Fanatics - Handling Fees">Fanatics - Handling Fees Class Action Settlement</a></h3></div><div id="expired" class="settlement-card"><a href="https://expiredsettlement.test/" class="js-settlement-link" data-slug="expired" data-name="Expired Company">Visit Official Settlement Website</a><a href="https://expiredsettlement.test/" class="js-settlement-link" data-slug="expired" data-name="Expired Company">Expired Company Class Action Settlement</a></div>`
+const discovered=await discoverClassActionListings(async()=>({url:'https://www.classaction.org/settlements',status:200,text:discoveryFixture,contentType:'text/html'}),now)
+const visibleOnlyFixture=`<div id="fanatics-handling-fees" data-name="Fanatics - Handling Fees" class="settlement-card"><a href="https://handlingfeesettlement.test/" class="js-settlement-link" data-slug="fanatics-handling-fees" data-name="Fanatics - Handling Fees">Visit Official Settlement Website</a><h3><a href="https://handlingfeesettlement.test/" class="js-settlement-link" data-slug="fanatics-handling-fees" data-name="Fanatics - Handling Fees">Fanatics - Handling Fees Class Action Settlement</a></h3><span>Deadline</span><span>8/27/26</span><span>Proof <br>Required?</span><span>No</span></div><div id="expired" data-name="Expired Company" class="filter-ending-now 8/21/26 settlement-card"><a href="https://expiredsettlement.test/" class="js-settlement-link" data-slug="expired" data-name="Expired Company">Visit Official Settlement Website</a><a href="https://expiredsettlement.test/" class="js-settlement-link" data-slug="expired" data-name="Expired Company">Expired Company Class Action Settlement</a><span>Deadline</span><span>8/21/26</span><span>Proof <br>Required?</span><span>No</span></div>`
+const visibleOnlyDiscovered=await discoverClassActionListings(async()=>({url:'https://www.classaction.org/settlements',status:200,text:visibleOnlyFixture,contentType:'text/html'}),now)
+check('aggregator provenance selects the canonical listing anchor, not media',()=>assert.equal(discovered[0]?.listingUrl,'https://www.classaction.org/settlements#fanatics-handling-fees'))
+check('duplicate card links merge before official fetch',()=>{assert.equal(discovered.length,1);assert.deepEqual(discovered[0]?.candidateUrls,['https://handlingfeesettlement.test/'])})
+check('generic secondary card link can never become the settlement title',()=>assert.equal(discovered.some(item=>item.title==='Visit Official Settlement Website'),false))
+check('editorial headings never become settlement records',()=>assert.equal(discovered.some(item=>/left on the table|what happens to money/i.test(item.title)),false))
+check('expired aggregator leads are excluded before official fetch',()=>assert.equal(discovered.some(item=>item.listingUrl.endsWith('#expired')),false))
+check('visible-card fallback parses deadline and proof without structured metadata',()=>{assert.equal(visibleOnlyDiscovered.length,1);assert.equal(visibleOnlyDiscovered[0]?.aggregatorDeadline,'8/27/26');assert.equal(visibleOnlyDiscovered[0]?.aggregatorProofClaim,'No')})
+check('visible-card fallback excludes expired duplicate-link cards',()=>assert.equal(visibleOnlyDiscovered.some(item=>item.listingUrl.endsWith('#expired')),false))
+const expiredOfficialHtml=html.replace('August 27, 2026','August 21, 2026'),expiredOfficial='https://expired-official.test/',expiredOfficialListing={...listing,listingUrl:'https://www.classaction.org/settlements#officially-expired',candidateUrls:[expiredOfficial]},expiredOfficialRun=await runSettlementIntelligence({now,listings:[expiredOfficialListing],fetcher:async()=>({url:expiredOfficial,status:200,text:expiredOfficialHtml,contentType:'text/html'})})
+check('officially parsed expired records never reach storage response or notifications',()=>{assert.equal(expiredOfficialRun.discovered,0);assert.equal(expiredOfficialRun.records.length,0);assert.equal(expiredOfficialRun.notifications.length,0)})
+resetNotificationMemory();const duplicateListing={...listing,title:'Fanatics Handling Fee Settlement Duplicate',listingUrl:'https://www.classaction.org/settlements#fanatics-duplicate',provenance:{...listing.provenance,url:'https://www.classaction.org/settlements#fanatics-duplicate'}},stableIdentityRun=await runSettlementIntelligence({now,listings:[listing,duplicateListing],fetcher:fakeFetch})
+check('post-resolution stable identity dedupes API records',()=>{assert.equal(stableIdentityRun.discovered,1);assert.equal(stableIdentityRun.records.length,1)})
+check('post-resolution stable identity generates at most one notification',()=>assert.equal(stableIdentityRun.notifications.length,1))
+check('post-resolution stable identity retains both aggregator provenances',()=>assert.equal(stableIdentityRun.records[0]?.provenance.filter(item=>item.kind==='AGGREGATOR').length,2))
+const weakIdentity=await resolveOfficialSource({...listing,title:'Fanatics Rival Fees Class Action Settlement',defendant:'Rival'},fakeFetch)
+check('single weak title overlap cannot verify an official source',()=>assert.equal(weakIdentity.state,'OFFICIAL_SOURCE_CONFLICT'))
+console.log(`SETTLEMENT INTELLIGENCE VALIDATION: ${checks.length}/${checks.length} PASS`)

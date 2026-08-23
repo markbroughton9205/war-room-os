@@ -1,24 +1,20 @@
-import type { OfficialAuthority, Provenance } from './types'
+import type { FetchResponse,SafeFetch } from './types'
+import { sanitizeSettlementUrl } from './urls'
 
-export type ReadOnlyFetchResult = { ok: boolean; text: string; provenance: Provenance; error: string | null }
-
-export async function fetchReadOnly(url: string, sourceClass: Provenance['sourceClass'], fetcher: typeof fetch = fetch): Promise<ReadOnlyFetchResult> {
-  const parsed = new URL(url)
-  if (parsed.protocol !== 'https:') throw new Error('Settlement intelligence permits HTTPS GET requests only.')
-  const started = performance.now()
-  try {
-    const response = await fetcher(parsed, { method: 'GET', redirect: 'follow', headers: { Accept: 'text/html,application/json;q=0.9', 'User-Agent': 'WarRoomOS-SettlementIntelligence/1.0 (read-only discovery)' }, cache: 'no-store' })
-    const text = await response.text()
-    return { ok: response.ok, text, provenance: { url: response.url || parsed.toString(), sourceClass, retrievedAt: new Date().toISOString(), httpStatus: response.status, contentType: response.headers.get('content-type'), observedLatencyMs: Math.round(performance.now() - started) }, error: response.ok ? null : `HTTP ${response.status}` }
-  } catch (error) {
-    return { ok: false, text: '', provenance: { url: parsed.toString(), sourceClass, retrievedAt: new Date().toISOString(), httpStatus: null, contentType: null, observedLatencyMs: Math.round(performance.now() - started) }, error: error instanceof Error ? error.message : 'Fetch failed.' }
+const MAX_REDIRECTS=5
+export const liveSafeFetch:SafeFetch=async(raw)=>{
+  const initial=sanitizeSettlementUrl(raw)
+  if(!initial)throw new Error('Unsafe settlement URL rejected.')
+  let current:string=initial
+  for(let hop=0;hop<=MAX_REDIRECTS;hop++){
+    const response:Response=await fetch(current,{redirect:'manual',headers:{'user-agent':'WarRoomSettlementIntelligence/1.0 (+read-only discovery)','accept':'text/html,application/xhtml+xml,application/pdf;q=0.8'}})
+    if(response.status>=300&&response.status<400){
+      const next:string|null=response.headers.get('location');const safe:string|null=next?sanitizeSettlementUrl(next,current):null
+      if(!safe)throw new Error('Unsafe or missing redirect target.');current=safe;continue
+    }
+    const contentType=response.headers.get('content-type')??''
+    const text=await response.text()
+    return {url:current,status:response.status,text,contentType} satisfies FetchResponse
   }
-}
-
-export function classifyOfficialAuthority(url: string): OfficialAuthority | null {
-  const host = new URL(url).hostname.toLowerCase()
-  if (host.endsWith('.uscourts.gov') || host === 'uscourts.gov' || (host.endsWith('.gov') && /court/.test(host))) return 'OFFICIAL_COURT'
-  if (host.endsWith('.gov') || host === 'gov') return 'OFFICIAL_GOVERNMENT'
-  if (/(^|\.)(ksacms|veritaglobal|kroll|angeion|simpluris|epiq|jndla)\./.test(host)) return 'OFFICIAL_ADMIN'
-  return null
+  throw new Error('Settlement source exceeded redirect limit.')
 }
