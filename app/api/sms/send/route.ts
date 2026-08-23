@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 
 function getTwilioConfig() {
   const accountSid = process.env.TWILIO_ACCOUNT_SID
@@ -14,11 +15,12 @@ function getTwilioConfig() {
 }
 
 export async function POST(req: Request) {
+  const commander = await requireCommanderSession('Legacy SMS send'); if (!commander.ok) return commander.response
   const config = getTwilioConfig()
   const body = await req.json().catch(() => ({}))
   const message = String(body.message ?? '').trim()
 
-  if (!message) {
+  if (!message || message.length > 1500) {
     return NextResponse.json({
       tool: 'sms-bridge',
       status: 'error',
