@@ -75,6 +75,7 @@ import type { LiveResearchClientUi } from '@/lib/runtime/liveResearchEvidencePac
 import type { ContinuationRequest } from '@/lib/council/continuationRequest'
 import { classifyCommand } from '@/lib/engine-control/permissions'
 import { ProviderSetupChecklistPanel } from '@/components/war-room/ProviderSetupChecklistPanel'
+import { LiveCouncilPhoneBridgePanel } from '@/components/war-room/LiveCouncilPhoneBridgePanel'
 import { BabyAiAcademyPanel } from '@/components/war-room/baby-ai/BabyAiAcademyPanel'
 import { ConfigurationHealthSummaryPanel, ConfigurationSweepPanel } from '@/components/war-room/configuration/ConfigurationSweepPanel'
 import { Phase3WarRoomPanels } from '@/components/war-room/phase3/Phase3WarRoomPanels'
@@ -12676,6 +12677,7 @@ function Home() {
                     />
                     <ConversationStatePanel runtime={conversationRuntimeSnapshot} />
                     <CouncilDeliberationStream threadId={liveCouncilConvId} enabled />
+                    <LiveCouncilPhoneBridgePanel />
                     <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />
                   </div>
                 )}

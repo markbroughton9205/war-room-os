@@ -22,8 +22,9 @@
     "validate:phase49-h": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase49-h-validation.mjs",
     "validate:income-loot:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-income-loot-live-validation.mjs",
     "validate:opportunity-readiness": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase49d-validation.mjs",
-    "validate:opportunity-mission-bridge": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase49i-validation.mjs"
-    ,"validate:opportunity-discovery": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-opportunity-discovery-validation.mjs",
+    "validate:opportunity-mission-bridge": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase49i-validation.mjs",
+    "validate:live-council-phone-bridge": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-live-council-phone-bridge-validation.mjs",
+    "validate:opportunity-discovery": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-opportunity-discovery-validation.mjs",
     "validate:settlement-intelligence": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-settlement-intelligence-validation.mjs",
     "validate:settlement-intelligence:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-settlement-intelligence-live-validation.mjs",
     "validate:settlement-corroboration": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-settlement-corroboration-validation.mjs",
@@ -41,7 +42,8 @@
     "leaflet": "^1.9.4",
     "next": "16.2.6",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "twilio": "^5.10.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

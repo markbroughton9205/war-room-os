@@ -29,6 +29,7 @@ function isPublicPath(pathname: string): boolean {
 // PUBLIC_API_PREFIXES's /api/debug/* below, not the secret-or-session pattern.
 const PUBLIC_API_PATHS = new Set([
   '/api/sms/inbound',
+  '/api/live-council/sms/inbound',
   '/api/signals/rss/poll',
   '/api/grok/chat',
   '/api/payments/deposits',
@@ -39,7 +40,7 @@ const PUBLIC_API_PATHS = new Set([
 
 const PUBLIC_API_PREFIXES = ['/api/debug/']
 
-function isExemptApiRequest(pathname: string, method: string): boolean {
+export function isExemptApiRequest(pathname: string, method: string): boolean {
   // GET now requires a session (log reads are Commander-only); POST keeps its
   // existing WAR_ROOM_AUDIT_POST_SECRET gate.
   if (pathname === '/api/audit/logs') {

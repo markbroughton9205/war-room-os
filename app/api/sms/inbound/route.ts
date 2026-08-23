@@ -7,7 +7,8 @@ function cleanCommand(value: FormDataEntryValue | null) {
 }
 
 export async function POST(req: Request) {
-  const form = await req.formData()
+  return new Response(twiml('War Room legacy SMS endpoint is deprecated.'), { status: 410, headers: { 'Content-Type': 'text/xml' } })
+  /* const form = await req.formData()
   const command = cleanCommand(form.get('Body'))
   const from = String(form.get('From') ?? '').trim()
   const raelPhone = process.env.RAEL_PHONE_NUMBER
@@ -29,5 +30,5 @@ export async function POST(req: Request) {
 
   return new Response(twiml(responses[command] ?? 'War Room SMS Bridge commands: YES, NO, STATUS, PAUSE, RESUME, SCOUT.'), {
     headers: { 'Content-Type': 'text/xml' },
-  })
+  }) */
 }
