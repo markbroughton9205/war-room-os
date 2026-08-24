@@ -40,6 +40,8 @@ import type {
   NativeVerificationResult,
   NativeCouncilAssistComposition,
   NativeCouncilAssistSession,
+  NativeIterationAttempt,
+  NativeIterationPolicy,
 } from '@/lib/native-builder/types'
 
 // ---------------------------------------------------------------------------
@@ -116,6 +118,7 @@ export const RUNTIME_MISSION_CAPABILITIES = [
   'provider_single_agent',
   'provider_coder_proposal',
   'council_assist',
+  'bounded_auto_iteration',
   'patch_apply_gated',
   'validation_run',
   'rollback_gated',
@@ -132,6 +135,7 @@ export const ENGINEERING_MISSION_CAPABILITIES: readonly RuntimeMissionCapability
   'provider_single_agent',
   'provider_coder_proposal',
   'council_assist',
+  'bounded_auto_iteration',
   'patch_apply_gated',
   'validation_run',
   'rollback_gated',
@@ -170,6 +174,12 @@ export interface MissionExecutionStrategy<TRequest> {
   /** Optional — Phase E (Council Assist). Advisory-only; never mutates the repository, never
    * calls the apply path. See lib/native-builder/councilAssist.ts for the full reasoning. */
   councilAssist?(missionId: string, composition: NativeCouncilAssistComposition): Promise<RuntimeMission>
+  /** Optional — Phase G. A single bounded auto-replan-on-failure attempt (never applies anything;
+   * apply always still requires a separate, explicit, gated approval). Commander-invoked, once
+   * per call — "the loop" is the Commander (or a bounded client-side loop) calling this repeatedly
+   * up to the recorded budget, not an unattended background process. See
+   * lib/mission-runtime/engineeringStrategy.ts for the full reasoning. */
+  autoIterate?(missionId: string, opts?: { maxAttempts?: number; paused?: boolean }): Promise<RuntimeMission>
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +274,10 @@ export type RuntimeMission = {
   /** Phase E — advisory-only Council Assist sessions attached to this mission. Never a source for
    * an executable patch; see lib/native-builder/councilAssist.ts. */
   councilAssistSessions: NativeCouncilAssistSession[]
+  /** Phase G — bounded auto-replan-on-failure policy/history. See
+   * lib/mission-runtime/engineeringStrategy.ts:autoIterate(). Never applies anything itself. */
+  iterationPolicy: NativeIterationPolicy
+  iterationAttempts: NativeIterationAttempt[]
   validationResults: NativeValidationResult[]
   verification?: NativeVerificationResult
   diff?: NativeDiffEvidence

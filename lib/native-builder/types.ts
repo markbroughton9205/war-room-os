@@ -326,6 +326,29 @@ export type NativeCouncilAssistSession = {
   requestedAt: string
 }
 
+/**
+ * Phase G (Coder Agent Iteration). A single recorded attempt of the orchestration layer's bounded
+ * auto-replan-on-failure policy — see lib/mission-runtime/engineeringStrategy.ts:autoIterate().
+ * This is durable audit data only: it never itself applies anything. `attempt` regenerating a
+ * proposal (via the existing planRepair()/replan path) still requires a separate, explicit
+ * Commander approval before that proposal can touch the filesystem — the same gate every other
+ * apply already goes through, never bypassed by iteration.
+ */
+export type NativeIterationAttempt = {
+  attempt: number
+  triggeredBy: 'commander'
+  fromState: NativeRepairState
+  toState: NativeRepairState
+  evidenceSummary: string
+  at: string
+}
+
+export type NativeIterationPolicy = {
+  maxAttempts: number
+  attemptsUsed: number
+  paused: boolean
+}
+
 // ---------------------------------------------------------------------------
 // Repair record (persisted)
 // ---------------------------------------------------------------------------
@@ -355,6 +378,9 @@ export type NativeRepairRecord = {
    * on every repair record written before Phase E, isRepairRecord (storage.ts) does not require
    * it, written via the existing saveRepair() path only. */
   councilAssistSessions?: NativeCouncilAssistSession[]
+  /** Optional, backwards-compatible for the same reason as the two fields above — Phase G. */
+  iterationPolicy?: NativeIterationPolicy
+  iterationAttempts?: NativeIterationAttempt[]
   createdAt: string
   updatedAt: string
 }

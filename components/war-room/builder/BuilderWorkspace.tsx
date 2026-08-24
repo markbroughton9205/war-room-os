@@ -36,6 +36,8 @@ type RuntimeMissionLite = {
     results: { family: string; ok: boolean; text: string; error?: string }[]
     requestedAt: string
   }[]
+  iterationPolicy: { maxAttempts: number; attemptsUsed: number; paused: boolean }
+  iterationAttempts: { attempt: number; fromState: string; toState: string; evidenceSummary: string; at: string }[]
   validationResults: { operation: { id: string; targets?: string[] }; ok: boolean; exitCode: number | null; stdout: string; stderr: string; durationMs: number }[]
   verification?: { status: string; fingerprintRecurred: boolean; evidence: string[] }
   diff?: { diff: string; truncated: boolean; changedFiles: string[] }
@@ -351,6 +353,26 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
       if (result.data) setMission(result.data.mission)
     })
 
+  // Phase G: one bounded auto-replan-on-failure attempt. Never applies anything — a fresh
+  // approval is still required afterward, same as a manual replan.
+  const autoIterate = () =>
+    mission &&
+    void runAction('auto-iterate', async () => {
+      const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/auto-iterate`, {})
+      if (!result.ok) throw new Error(result.error)
+      if (result.data) setMission(result.data.mission)
+    })
+
+  const togglePauseIteration = () =>
+    mission &&
+    void runAction('auto-iterate', async () => {
+      const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/auto-iterate`, {
+        paused: !mission.iterationPolicy.paused,
+      })
+      if (!result.ok) throw new Error(result.error)
+      if (result.data) setMission(result.data.mission)
+    })
+
   const filteredFiles = fileFilter.trim()
     ? files.filter(f => f.toLowerCase().includes(fileFilter.toLowerCase()))
     : files
@@ -525,6 +547,23 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
               </button>
               <button
                 type="button"
+                disabled={busy !== null || mission.status !== 'blocked' || mission.iterationPolicy.paused || mission.iterationPolicy.attemptsUsed >= mission.iterationPolicy.maxAttempts}
+                className="rounded border border-fuchsia-500/40 px-2 py-1 text-fuchsia-300 disabled:opacity-40"
+                onClick={autoIterate}
+                title={`Bounded auto-replan-on-failure (${mission.iterationPolicy.attemptsUsed}/${mission.iterationPolicy.maxAttempts} attempts used). Never applies anything — approval still required after.`}
+              >
+                Auto-iterate ({mission.iterationPolicy.attemptsUsed}/{mission.iterationPolicy.maxAttempts})
+              </button>
+              <button
+                type="button"
+                disabled={busy !== null}
+                className="rounded border border-slate-600 px-2 py-1 text-slate-400 disabled:opacity-40"
+                onClick={togglePauseIteration}
+              >
+                {mission.iterationPolicy.paused ? 'Resume iteration' : 'Pause iteration'}
+              </button>
+              <button
+                type="button"
                 disabled={busy !== null || !['completed', 'awaiting_commander_decision', 'blocked'].includes(mission.status)}
                 className="rounded border border-amber-500/40 px-2 py-1 text-amber-300 disabled:opacity-40"
                 onClick={rollback}
@@ -608,13 +647,30 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
               ) : null}
 
               {tab === 'activity' ? (
-                <ul className="space-y-1">
-                  {mission.raw.repair.history.map((h, i) => (
-                    <li key={i} className="text-slate-400">
-                      <span className="text-white">{h.state}</span> — {new Date(h.at).toLocaleTimeString()} {h.note ? `— ${h.note}` : ''}
-                    </li>
-                  ))}
-                </ul>
+                <div>
+                  <ul className="space-y-1">
+                    {mission.raw.repair.history.map((h, i) => (
+                      <li key={i} className="text-slate-400">
+                        <span className="text-white">{h.state}</span> — {new Date(h.at).toLocaleTimeString()} {h.note ? `— ${h.note}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                  {mission.iterationAttempts.length > 0 ? (
+                    <div className="mt-3 border-t border-white/10 pt-2">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">
+                        Auto-iteration ({mission.iterationPolicy.attemptsUsed}/{mission.iterationPolicy.maxAttempts}{mission.iterationPolicy.paused ? ' · paused' : ''})
+                      </p>
+                      <ul className="space-y-1">
+                        {mission.iterationAttempts.map((a, i) => (
+                          <li key={i} className="text-slate-400">
+                            <span className="text-white">#{a.attempt}</span> {a.fromState} → {a.toState} — {new Date(a.at).toLocaleTimeString()}
+                            <p className="text-[9px] text-slate-500">{a.evidenceSummary.slice(0, 200)}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
 
               {tab === 'council' ? (

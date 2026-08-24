@@ -219,7 +219,7 @@ export type PlanRepairOptions = {
  * failures / verification evidence so a hosted coder proposal source can see exactly what its
  * previous attempt got wrong, instead of blindly retrying the same change. Reads only fields
  * already on the record — no new evidence collection mechanism. */
-function summarizeFailureEvidenceForReplan(record: NativeRepairRecord): string {
+export function summarizeFailureEvidenceForReplan(record: NativeRepairRecord): string {
   const parts: string[] = []
   if (record.verification) {
     parts.push(`Verification status: ${record.verification.status}.`)

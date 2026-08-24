@@ -20,10 +20,16 @@ import {
   approveAndApply,
   commanderResolve,
   rollbackNow,
+  summarizeFailureEvidenceForReplan,
 } from '@/lib/native-builder/runtime'
 import { getIssue, getRepair, listRepairs, saveRepair } from '@/lib/native-builder/storage'
 import { issueFromCommanderReport } from '@/lib/native-builder/issueIngest'
-import type { NativeIssueRecord, NativeRepairRecord, NativeCouncilAssistComposition } from '@/lib/native-builder/types'
+import type {
+  NativeIssueRecord,
+  NativeRepairRecord,
+  NativeCouncilAssistComposition,
+  NativeIterationPolicy,
+} from '@/lib/native-builder/types'
 import { requestCouncilAssist } from '@/lib/native-builder/councilAssist'
 import {
   invokeDirectCouncilProvider,
@@ -38,6 +44,19 @@ import {
   type RuntimeMission,
   type RuntimeMissionProviderOpinion,
 } from './types'
+
+/** Phase G default budget: small and bounded, never infinite. Overridable per-call via
+ * autoIterate(missionId, {maxAttempts}). */
+const DEFAULT_ITERATION_POLICY: NativeIterationPolicy = { maxAttempts: 3, attemptsUsed: 0, paused: false }
+
+/** RuntimeMissionStatus values eligible for an automatic replan attempt — mirrors exactly the
+ * native-builder states Foundation Hardening's replan fix made reachable from (verification_failed
+ * / blocked / escalation_recommended all project to 'blocked'; see missionStatusFromRepairState).
+ * partially_verified/rolled_back are deliberately excluded: those are not failures needing an
+ * automatic next attempt — the Commander's own review/decision governs what happens next there. */
+function isEligibleForAutoIteration(mission: RuntimeMission): boolean {
+  return mission.status === 'blocked'
+}
 
 /**
  * Runs exactly one provider call, outside of and prior to native-builder's own planning step.
@@ -92,6 +111,8 @@ function project(issue: NativeIssueRecord, repair: NativeRepairRecord): RuntimeM
       : { hasProposal: false },
     providerOpinions,
     councilAssistSessions: repair.councilAssistSessions ?? [],
+    iterationPolicy: repair.iterationPolicy ?? DEFAULT_ITERATION_POLICY,
+    iterationAttempts: repair.iterationAttempts ?? [],
     validationResults: repair.validationResults,
     verification: repair.verification,
     diff: repair.diffEvidence,
@@ -200,6 +221,86 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
     const updated: NativeRepairRecord = {
       ...repair,
       councilAssistSessions: [...(repair.councilAssistSessions ?? []), session],
+    }
+    await saveRepair(updated)
+    return project(issue, updated)
+  },
+
+  /**
+   * Phase G — bounded auto-replan-on-failure. A single Commander-invoked attempt: if the mission
+   * is currently in a failure state eligible for iteration, and the recorded budget has room, and
+   * iteration isn't paused, calls the EXISTING replan path (native-builder's own planRepair(),
+   * the identical function the manual /replan route already uses) to generate a fresh proposal
+   * fed the real prior failure evidence (summarizeFailureEvidenceForReplan, exported from
+   * runtime.ts specifically for this reuse). Records one NativeIterationAttempt either way (even
+   * a no-op — "not eligible" / "budget exhausted" / "paused" are all honest, visible outcomes, not
+   * silent no-ops). This method NEVER calls approveAndApply — the regenerated proposal still
+   * requires a separate, explicit, gated Commander approval before anything touches the
+   * filesystem, exactly like every other proposal. "The loop" is the Commander (or a client
+   * bounded to the same maxAttempts) calling this once per failed attempt, not an unattended
+   * background process — see the interface doc comment in ./types.ts for why.
+   */
+  async autoIterate(missionId: string, opts?: { maxAttempts?: number; paused?: boolean }) {
+    const repair = await getRepair(missionId)
+    if (!repair) throw new Error(`No repair found for mission ${missionId}.`)
+    const issue = await getIssue(repair.issueId)
+    if (!issue) throw new Error(`No issue found for repair ${missionId}.`)
+
+    const existingPolicy = repair.iterationPolicy ?? DEFAULT_ITERATION_POLICY
+    const policy: NativeIterationPolicy = {
+      maxAttempts: opts?.maxAttempts ?? existingPolicy.maxAttempts,
+      attemptsUsed: existingPolicy.attemptsUsed,
+      paused: opts?.paused ?? existingPolicy.paused,
+    }
+
+    const before = project(issue, repair)
+    const attemptNumber = policy.attemptsUsed + 1
+    const recordAttempt = async (toState: NativeRepairRecord['state'], evidenceSummary: string, nextPolicy: NativeIterationPolicy) => {
+      const attempt = {
+        attempt: attemptNumber,
+        triggeredBy: 'commander' as const,
+        fromState: repair.state,
+        toState,
+        evidenceSummary,
+        at: new Date().toISOString(),
+      }
+      const updated: NativeRepairRecord = {
+        ...repair,
+        iterationPolicy: nextPolicy,
+        iterationAttempts: [...(repair.iterationAttempts ?? []), attempt],
+      }
+      await saveRepair(updated)
+      return project(issue, updated)
+    }
+
+    if (policy.paused) {
+      return recordAttempt(repair.state, 'Iteration is paused — no replan attempted.', policy)
+    }
+    if (!isEligibleForAutoIteration(before)) {
+      return recordAttempt(repair.state, `Mission status "${before.status}" is not eligible for auto-iteration (only a "blocked" failure state is).`, policy)
+    }
+    if (policy.attemptsUsed >= policy.maxAttempts) {
+      return recordAttempt(repair.state, `Iteration budget exhausted (${policy.attemptsUsed}/${policy.maxAttempts} attempts used) — Commander review required.`, policy)
+    }
+
+    const evidenceSummary = summarizeFailureEvidenceForReplan(repair) || '(no structured failure evidence on record)'
+    const replanned = await planRepair(missionId, {
+      targetFiles: repair.selectedProposal?.relevantFiles,
+      commanderRequestText: `${issue.title}: ${issue.rawEvidenceText}`,
+    })
+    const nextPolicy = { ...policy, attemptsUsed: policy.attemptsUsed + 1 }
+    const attempt = {
+      attempt: attemptNumber,
+      triggeredBy: 'commander' as const,
+      fromState: repair.state,
+      toState: replanned.state,
+      evidenceSummary,
+      at: new Date().toISOString(),
+    }
+    const updated: NativeRepairRecord = {
+      ...replanned,
+      iterationPolicy: nextPolicy,
+      iterationAttempts: [...(repair.iterationAttempts ?? []), attempt],
     }
     await saveRepair(updated)
     return project(issue, updated)
