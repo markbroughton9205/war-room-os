@@ -146,17 +146,109 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
     missionIdRef.current = mission?.id ?? null
   }, [mission])
 
+  // Phase F (Engineering Streaming): while a mission is active, prefer a real live SSE
+  // subscription over manual polling. Every envelope carries the FULL authoritative mission
+  // state (see lib/mission-runtime/engineeringStream.ts) so applying it is just setMission —
+  // never a delta merge, so there is nothing that could apply out of order. Falls back to the
+  // original 2s poll if EventSource isn't available (e.g. non-browser test harness) or the
+  // stream errors.
+  const [liveStreaming, setLiveStreaming] = useState(false)
+  const activeMissionId = mission && ACTIVE_STATES.has(mission.status) ? mission.id : null
   useEffect(() => {
     if (pollRef.current) window.clearInterval(pollRef.current)
-    if (mission && ACTIVE_STATES.has(mission.status)) {
+    const resetTimer = window.setTimeout(() => setLiveStreaming(false), 0)
+    if (!activeMissionId) return () => window.clearTimeout(resetTimer)
+
+    if (typeof EventSource === 'undefined') {
+      pollRef.current = window.setInterval(() => {
+        if (missionIdRef.current) void loadMission(missionIdRef.current)
+      }, 2000)
+      return () => {
+        window.clearTimeout(resetTimer)
+        if (pollRef.current) window.clearInterval(pollRef.current)
+      }
+    }
+
+    const source = new EventSource(`/api/mission-runtime/engineering/${activeMissionId}/stream`)
+    let fellBack = false
+    const startFallbackPolling = () => {
+      if (fellBack) return
+      fellBack = true
+      setLiveStreaming(false)
+      source.close()
       pollRef.current = window.setInterval(() => {
         if (missionIdRef.current) void loadMission(missionIdRef.current)
       }, 2000)
     }
+    const onEnvelope = (evt: MessageEvent<string>) => {
+      try {
+        const parsed = JSON.parse(evt.data) as { envelopeType: string; mission?: RuntimeMissionLite }
+        if ((parsed.envelopeType === 'progress' || parsed.envelopeType === 'final') && parsed.mission) {
+          setLiveStreaming(true)
+          setMission(parsed.mission)
+        }
+      } catch {
+        /* ignore malformed frame */
+      }
+    }
+    source.addEventListener('progress', onEnvelope)
+    source.addEventListener('final', onEnvelope)
+    source.addEventListener('error', startFallbackPolling)
+
     return () => {
+      window.clearTimeout(resetTimer)
+      source.removeEventListener('progress', onEnvelope)
+      source.removeEventListener('final', onEnvelope)
+      source.removeEventListener('error', startFallbackPolling)
+      source.close()
       if (pollRef.current) window.clearInterval(pollRef.current)
     }
-  }, [mission, loadMission])
+  }, [activeMissionId, loadMission])
+
+  // Typewriter reveal for the diagnosis text — cosmetic only. `revealedDiagnosisChars` is a
+  // rendering-buffer counter, never the source of truth: mission.raw.repair.selectedProposal
+  // .diagnosis (set synchronously by setMission above, from streamed or polled authoritative
+  // state) always holds the full text. On first load — including a hard refresh reconnecting via
+  // the mission=<id> URL param — the full text is revealed immediately, no animation, so a
+  // reload can never re-play an already-seen reveal or show a truncated diagnosis as if it were
+  // still "typing." The animation only plays when a genuinely NEW diagnosis string arrives while
+  // already mounted (e.g. after a replan).
+  const diagnosisText = mission?.raw.repair.selectedProposal?.diagnosis ?? ''
+  const [revealedDiagnosisChars, setRevealedDiagnosisChars] = useState(0)
+  const lastDiagnosisRef = useRef<string | null>(null)
+  const diagnosisMountedRef = useRef(false)
+  useEffect(() => {
+    if (!diagnosisText) {
+      lastDiagnosisRef.current = null
+      diagnosisMountedRef.current = false
+      const timer = window.setTimeout(() => setRevealedDiagnosisChars(0), 0)
+      return () => window.clearTimeout(timer)
+    }
+    if (diagnosisText === lastDiagnosisRef.current) return
+    lastDiagnosisRef.current = diagnosisText
+    if (!diagnosisMountedRef.current) {
+      diagnosisMountedRef.current = true
+      const timer = window.setTimeout(() => setRevealedDiagnosisChars(diagnosisText.length), 0)
+      return () => window.clearTimeout(timer)
+    }
+    const startTimer = window.setTimeout(() => setRevealedDiagnosisChars(0), 0)
+    const stepMs = 12
+    const charsPerStep = Math.max(1, Math.ceil(diagnosisText.length / 120))
+    const tick = window.setInterval(() => {
+      setRevealedDiagnosisChars(n => {
+        const next = n + charsPerStep
+        if (next >= diagnosisText.length) {
+          window.clearInterval(tick)
+          return diagnosisText.length
+        }
+        return next
+      })
+    }, stepMs)
+    return () => {
+      window.clearTimeout(startTimer)
+      window.clearInterval(tick)
+    }
+  }, [diagnosisText])
 
   const openFile = useCallback(async (relPath: string) => {
     setSelectedFile(relPath)
@@ -395,6 +487,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
             <p className="text-white">{mission.title}</p>
             <p className="text-slate-500">
               Status: <span className="font-bold text-amber-300">{mission.status}</span> · repairId: {mission.nativeBuilder.repairId.slice(0, 8)}…
+              {liveStreaming ? <span className="ml-2 animate-pulse text-emerald-400">● LIVE</span> : null}
             </p>
 
             <div className="mt-2 flex flex-wrap gap-2 border-t border-white/10 pt-2">
@@ -459,7 +552,10 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
                 <div>
                   {mission.raw.repair.selectedProposal ? (
                     <>
-                      <p className="text-white">{mission.raw.repair.selectedProposal.diagnosis}</p>
+                      <p className="text-white">
+                        {diagnosisText.slice(0, revealedDiagnosisChars)}
+                        {revealedDiagnosisChars < diagnosisText.length ? <span className="animate-pulse text-emerald-400">▌</span> : null}
+                      </p>
                       <p className="text-slate-500">
                         Source: {mission.raw.repair.selectedProposal.sourceKind} ({mission.raw.repair.selectedProposal.proposerId}) · Confidence: {mission.raw.repair.selectedProposal.confidence}
                       </p>
