@@ -3,6 +3,7 @@ import { assertAutoOrApproval } from '@/lib/permissions/policy'
 import { fetchWarRoomPermissionsState } from '@/lib/war-room/permissionsState'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { getMissionExecutionStrategy, ENGINEERING_MISSION_POLICY } from '@/lib/mission-runtime'
+import { runInResolvedWorkspace } from '@/lib/mission-runtime/withWorkspace'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -15,7 +16,7 @@ export const runtime = 'nodejs'
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  let body: { accepted?: boolean } = {}
+  let body: { accepted?: boolean; workspaceId?: string } = {}
   try {
     const raw = await req.json()
     if (raw !== null && typeof raw === 'object') body = raw
@@ -25,6 +26,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (typeof body.accepted !== 'boolean') {
     return NextResponse.json({ error: 'accepted (boolean) is required.' }, { status: 400 })
   }
+  const accepted: boolean = body.accepted
 
   if (!body.accepted) {
     const sup = tryWarRoomSupabase()
@@ -40,11 +42,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
-  const strategy = getMissionExecutionStrategy('engineering')
-  try {
-    const mission = await strategy.decide(id, body.accepted)
-    return NextResponse.json({ mission })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })
-  }
+  const result = await runInResolvedWorkspace(body.workspaceId, async () => {
+    const strategy = getMissionExecutionStrategy('engineering')
+    try {
+      const mission = await strategy.decide(id, accepted)
+      return NextResponse.json({ mission })
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })
+    }
+  })
+  return result.ok ? result.value : result.response
 }

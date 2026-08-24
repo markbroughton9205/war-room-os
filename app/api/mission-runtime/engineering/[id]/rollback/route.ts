@@ -3,6 +3,7 @@ import { assertAutoOrApproval } from '@/lib/permissions/policy'
 import { fetchWarRoomPermissionsState } from '@/lib/war-room/permissionsState'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { getMissionExecutionStrategy, ENGINEERING_MISSION_POLICY } from '@/lib/mission-runtime'
+import { runInResolvedWorkspace } from '@/lib/mission-runtime/withWorkspace'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -32,11 +33,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: gate.error }, { status: gate.status })
   }
 
-  const strategy = getMissionExecutionStrategy('engineering')
-  try {
-    const mission = await strategy.rollback(id)
-    return NextResponse.json({ mission })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })
-  }
+  const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : undefined
+  const result = await runInResolvedWorkspace(workspaceId, async () => {
+    const strategy = getMissionExecutionStrategy('engineering')
+    try {
+      const mission = await strategy.rollback(id)
+      return NextResponse.json({ mission })
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })
+    }
+  })
+  return result.ok ? result.value : result.response
 }

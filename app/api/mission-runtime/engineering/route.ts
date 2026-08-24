@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getMissionExecutionStrategy } from '@/lib/mission-runtime'
 import type { EngineeringMissionRequest } from '@/lib/mission-runtime'
+import { runInResolvedWorkspace } from '@/lib/mission-runtime/withWorkspace'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -9,9 +10,10 @@ export const runtime = 'nodejs'
  * Creates an Engineering Mission: inspection + proposal generation only — no filesystem mutation.
  * Same no-gate reasoning as lib/native-builder's own /repairs/[id]/plan route (see that file's
  * header comment): the dangerous-action gate applies at /approve, where a real patch is written.
+ * Optional body.workspaceId scopes the mission to a Phase B registered workspace.
  */
 export async function POST(req: Request) {
-  let body: Partial<EngineeringMissionRequest> = {}
+  let body: Partial<EngineeringMissionRequest> & { workspaceId?: string } = {}
   try {
     const raw = await req.json()
     if (raw !== null && typeof raw === 'object') body = raw
@@ -23,11 +25,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'title, description, and subsystem are required.' }, { status: 400 })
   }
 
-  const strategy = getMissionExecutionStrategy('engineering')
-  try {
-    const mission = await strategy.create(body as EngineeringMissionRequest)
-    return NextResponse.json({ mission })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })
-  }
+  const result = await runInResolvedWorkspace(body.workspaceId, async () => {
+    const strategy = getMissionExecutionStrategy('engineering')
+    try {
+      const mission = await strategy.create(body as EngineeringMissionRequest)
+      return NextResponse.json({ mission })
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })
+    }
+  })
+  return result.ok ? result.value : result.response
 }

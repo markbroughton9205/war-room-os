@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { planRepair } from '@/lib/native-builder/runtime'
 import { invokeDirectCouncilProvider, type DirectProviderFamily } from '@/lib/council/providerDirectCall'
 import { getMissionExecutionStrategy } from '@/lib/mission-runtime'
+import { runInResolvedWorkspace } from '@/lib/mission-runtime/withWorkspace'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -17,7 +18,11 @@ export const runtime = 'nodejs'
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  let body: { targetFiles?: string[]; coderProvider?: { enabled: boolean; family?: DirectProviderFamily } } = {}
+  let body: {
+    targetFiles?: string[]
+    coderProvider?: { enabled: boolean; family?: DirectProviderFamily }
+    workspaceId?: string
+  } = {}
   try {
     const raw = await req.json()
     if (raw !== null && typeof raw === 'object') body = raw
@@ -29,13 +34,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     ? { family: body.coderProvider.family ?? 'claude', invoke: invokeDirectCouncilProvider }
     : undefined
 
-  try {
-    await planRepair(id, { targetFiles: body.targetFiles, hostedCoder })
-    const strategy = getMissionExecutionStrategy('engineering')
-    const mission = await strategy.get(id)
-    if (!mission) return NextResponse.json({ error: 'Mission not found after replan.' }, { status: 404 })
-    return NextResponse.json({ mission })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })
-  }
+  const result = await runInResolvedWorkspace(body.workspaceId, async () => {
+    try {
+      await planRepair(id, { targetFiles: body.targetFiles, hostedCoder })
+      const strategy = getMissionExecutionStrategy('engineering')
+      const mission = await strategy.get(id)
+      if (!mission) return NextResponse.json({ error: 'Mission not found after replan.' }, { status: 404 })
+      return NextResponse.json({ mission })
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })
+    }
+  })
+  return result.ok ? result.value : result.response
 }
