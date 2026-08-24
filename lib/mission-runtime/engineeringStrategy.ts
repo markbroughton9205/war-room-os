@@ -21,7 +21,7 @@ import {
   commanderResolve,
   rollbackNow,
 } from '@/lib/native-builder/runtime'
-import { getIssue, getRepair, saveRepair } from '@/lib/native-builder/storage'
+import { getIssue, getRepair, listRepairs, saveRepair } from '@/lib/native-builder/storage'
 import { issueFromCommanderReport } from '@/lib/native-builder/issueIngest'
 import type { NativeIssueRecord, NativeRepairRecord } from '@/lib/native-builder/types'
 import {
@@ -180,5 +180,24 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
     const issue = await getIssue(repair.issueId)
     if (!issue) throw new Error(`No issue found for repair ${missionId} after rollbackNow.`)
     return project(issue, repair)
+  },
+
+  /**
+   * Phase D: active-missions list for the War Room Engineering Mission UI's mission switcher.
+   * Pure read-side projection over the same storage.listRepairs() every other method already
+   * reads through — no new list, no separate index, nothing that could drift from the
+   * authoritative repair records. Bounded (most-recently-updated first, capped) rather than an
+   * unbounded dump, matching this module's "no full-repo/full-history dumps" discipline elsewhere.
+   */
+  async list() {
+    const repairs = await listRepairs()
+    const sorted = [...repairs].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).slice(0, 100)
+    const missions: RuntimeMission[] = []
+    for (const repair of sorted) {
+      const issue = await getIssue(repair.issueId)
+      if (!issue) continue
+      missions.push(project(issue, repair))
+    }
+    return missions
   },
 }

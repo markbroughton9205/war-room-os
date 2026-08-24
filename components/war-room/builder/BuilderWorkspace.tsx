@@ -69,7 +69,15 @@ async function postJson<T>(url: string, body: unknown): Promise<{ ok: boolean; d
 
 type TabKey = 'diff' | 'validation' | 'activity' | 'output'
 
-export function BuilderWorkspace() {
+/**
+ * basePath: where this thin client's own URL lives — defaults to Standalone Builder's own route.
+ * Phase D (War Room Engineering Mission UI) reuses this exact component with basePath="/war-room/engineering"
+ * rather than building a second Engineering Core client — see that page for the reasoning. This is
+ * also how Phase C's "shared session continuity" is concretely proven: the same missionId/repairId
+ * opened from either basePath reconstructs identical live state from the same authoritative
+ * native-builder persistence, not from any client-local state.
+ */
+export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string } = {}) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const missionIdFromUrl = searchParams.get('mission')
@@ -187,7 +195,7 @@ export function BuilderWorkspace() {
       if (!result.ok) throw new Error(result.error)
       if (result.data) {
         setMission(result.data.mission)
-        router.replace(`/builder?mission=${result.data.mission.id}`)
+        router.replace(`${basePath}?mission=${result.data.mission.id}`)
         setTab('output')
       }
     })

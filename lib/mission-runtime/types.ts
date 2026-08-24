@@ -157,6 +157,12 @@ export interface MissionExecutionStrategy<TRequest> {
   /** Explicit rollback outside the accept/reject flow. Callers MUST have already passed
    * assertAutoOrApproval with policy.rollbackActionKind. */
   rollback(missionId: string): Promise<RuntimeMission>
+  /** Optional — added in Phase D (War Room Engineering Mission UI) to back an "active missions"
+   * list, the one capability neither Foundation Hardening nor Phase A needed. Optional so any
+   * future strategy that genuinely cannot support listing (unlikely, but not this module's call to
+   * foreclose) remains a valid implementer without a breaking interface change. Read-only, same
+   * zero-new-persistence projection as get() — reuses storage.ts:listRepairs(), nothing new. */
+  list?(): Promise<RuntimeMission[]>
 }
 
 // ---------------------------------------------------------------------------

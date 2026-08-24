@@ -6,6 +6,18 @@ import { runInResolvedWorkspace } from '@/lib/mission-runtime/withWorkspace'
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
+/** Lists active/recent Engineering Missions (Phase D — War Room Engineering Mission UI mission
+ * switcher). Optional ?workspaceId= scopes to a Phase B registered workspace. Read-only. */
+export async function GET(req: Request) {
+  const workspaceId = new URL(req.url).searchParams.get('workspaceId')
+  const result = await runInResolvedWorkspace(workspaceId, async () => {
+    const strategy = getMissionExecutionStrategy('engineering')
+    const missions = (await strategy.list?.()) ?? []
+    return NextResponse.json({ missions })
+  })
+  return result.ok ? result.value : result.response
+}
+
 /**
  * Creates an Engineering Mission: inspection + proposal generation only — no filesystem mutation.
  * Same no-gate reasoning as lib/native-builder's own /repairs/[id]/plan route (see that file's
