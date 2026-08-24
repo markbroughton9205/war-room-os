@@ -58,7 +58,7 @@ export function runStructuralCompletionValidation(): CaseResult[] {
   for (const [name, text] of Object.entries(completionCases)) {
     const integrity = validateProviderResponseIntegrity(text, { councilMode: true })
     const gated = applyCouncilRenderGate('claude', text, { decreeText: decree })
-    const classified = classifyGatheredProviderText(gated.displayText || null, gated)
+    const classified = classifyGatheredProviderText(gated.displayText || '', gated)
     const synthesisEligible = isSuccessfulVisibleMessage({
       content: classified.textOut ?? undefined,
       responseSuccessful: classified.runtime === 'RESPONDED',
@@ -113,7 +113,7 @@ export function runStructuralCompletionValidation(): CaseResult[] {
   for (const [name, text] of Object.entries(failureCases)) {
     const integrity = validateProviderResponseIntegrity(text, { councilMode: true })
     const gated = applyCouncilRenderGate('claude', text, { decreeText: decree })
-    const classified = classifyGatheredProviderText(gated.displayText || null, gated)
+    const classified = classifyGatheredProviderText(gated.displayText || '', gated)
     const synthesisEligible = isSuccessfulVisibleMessage({
       content: classified.textOut ?? undefined,
       responseSuccessful: classified.runtime === 'RESPONDED',
