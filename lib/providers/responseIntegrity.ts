@@ -253,7 +253,12 @@ function abruptEnding(text: string, relaxedCasual = false): boolean {
   if (BROKEN_BULLET.test(t)) return true
   if (CLIPPED_ELLIPSIS_END.test(t)) return true
   if (BROKEN_SYNC_TAIL.test(t)) return true
-  if (t.length >= 200 && !SENTENCE_END.test(t)) return true
+  // Live-verification finding (2026-08-24): this catch-all ran before endsWithStructuralElement
+  // existed and shares the exact same false-positive class as the "no sentence terminator on
+  // substantial body" check below it in validateProviderResponseIntegrity -- a complete response
+  // ending in a bullet/numbered list, table row, or closing code fence has no terminal punctuation
+  // either, and was still being flagged TRUNCATED here before ever reaching the guarded check.
+  if (t.length >= 200 && !SENTENCE_END.test(t) && !endsWithStructuralElement(t)) return true
   return false
 }
 

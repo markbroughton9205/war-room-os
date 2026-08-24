@@ -54,6 +54,19 @@ export function runCouncilRenderGateValidation(): CaseResult[] {
     'Findings: because the mount-time reconciliation fetch races ahead of the persist write, the evidence shows the following synthesis of risk and recommended action for this deploy window:\n- Rollback plan verified against the prior release tag\n- Provider health checks all reported healthy at dispatch time\n- Recommended action: proceed with the 3pm deploy window'
   const bulletEnded = applyCouncilRenderGate('claude', bulletEndedResponse, { decreeText: decree6 })
 
+  // 7. Live-verification regression (2026-08-24): case 6 above happens to classify as a CASUAL
+  //    prompt intent, which takes the `relaxedCasual` branch of `abruptEnding()` and never
+  //    exercises its non-relaxed catch-all (`t.length >= 200 && !SENTENCE_END.test(t)`). Live
+  //    testing with an ANALYSIS-intent decree caught that this catch-all ran BEFORE
+  //    `endsWithStructuralElement` existed and independently flagged the exact same
+  //    bullet/table/code-fence endings as TRUNCATED, bypassing the fix in case 6 entirely for any
+  //    non-casual decree. A structured, non-casual, >=200-char analytical response ending in a
+  //    markdown table row must render as COMPLETE.
+  const decree7 = 'Give me the provider health summary for this round, verified against runtime telemetry.'
+  const tableEndedAnalyticalResponse =
+    'Provider health summary compiled from this round\'s dispatch, verified against runtime telemetry and cross-checked against the audit log for consistency because no discrepancies were found:\n| Provider | Status |\n| --- | --- |\n| Claude | Responded |\n| ChatGPT | Responded |\n| Grok | Timed out |'
+  const tableEndedAnalytical = applyCouncilRenderGate('claude', tableEndedAnalyticalResponse, { decreeText: decree7 })
+
   return [
     check(
       'render_gate_01_short_brevity_response_passes_with_decree_context',
@@ -90,6 +103,14 @@ export function runCouncilRenderGateValidation(): CaseResult[] {
       && bulletEnded.integrityStatus === 'COMPLETE'
       && bulletEnded.displayText === bulletEndedResponse,
       JSON.stringify(bulletEnded),
+    ),
+    check(
+      'render_gate_07_analytical_table_ending_bypasses_abruptEnding_catchall',
+      tableEndedAnalytical.renderable === true
+      && tableEndedAnalytical.degraded === false
+      && tableEndedAnalytical.integrityStatus === 'COMPLETE'
+      && tableEndedAnalytical.displayText === tableEndedAnalyticalResponse,
+      JSON.stringify(tableEndedAnalytical),
     ),
   ]
 }
