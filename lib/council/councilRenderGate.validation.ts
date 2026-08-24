@@ -42,6 +42,18 @@ export function runCouncilRenderGateValidation(): CaseResult[] {
     'Operational and responding normally on this turn, but noting for the record that several prior turns came back as fallback or incomplete rather than a real response and the active risk is exactly'
   const genuinelyTruncated = applyCouncilRenderGate('claude', genuinelyTruncatedResponse, { decreeText: decree5 })
 
+  // 6. Council Runtime Stability Overhaul regression: a long, complete, substantive response that
+  //    ends in a markdown bullet list (no trailing period on the last line — a normal and common
+  //    council output shape) must render as COMPLETE, not be misclassified INCOMPLETE and blocked
+  //    with the "response incomplete" placeholder. This is the concrete root cause traced for
+  //    successful providers being shown as DEGRADED despite the runtime reporting them connected
+  //    and completed: `validateProviderResponseIntegrity`'s "no sentence terminator on substantial
+  //    body" check did not previously recognize list/table/code-fence endings as complete.
+  const decree6 = 'Give me the deployment findings.'
+  const bulletEndedResponse =
+    'Findings: because the mount-time reconciliation fetch races ahead of the persist write, the evidence shows the following synthesis of risk and recommended action for this deploy window:\n- Rollback plan verified against the prior release tag\n- Provider health checks all reported healthy at dispatch time\n- Recommended action: proceed with the 3pm deploy window'
+  const bulletEnded = applyCouncilRenderGate('claude', bulletEndedResponse, { decreeText: decree6 })
+
   return [
     check(
       'render_gate_01_short_brevity_response_passes_with_decree_context',
@@ -70,6 +82,14 @@ export function runCouncilRenderGateValidation(): CaseResult[] {
       'render_gate_05_genuinely_truncated_response_still_flagged',
       genuinelyTruncated.renderable === false && genuinelyTruncated.degraded === true,
       JSON.stringify(genuinelyTruncated),
+    ),
+    check(
+      'render_gate_06_bullet_list_ending_is_complete_not_degraded',
+      bulletEnded.renderable === true
+      && bulletEnded.degraded === false
+      && bulletEnded.integrityStatus === 'COMPLETE'
+      && bulletEnded.displayText === bulletEndedResponse,
+      JSON.stringify(bulletEnded),
     ),
   ]
 }

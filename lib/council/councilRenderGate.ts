@@ -109,15 +109,12 @@ function resolveRenderDegraded(
   relaxedCasual: boolean,
 ): boolean {
   if (!rawText.trim()) return false
-  if (relaxedCasual) {
-    return isHardRenderIntegrityFailure(integrityStatus, { relaxedCasual: true })
-  }
-  const matchedGreetingOnly = detectGreetingOnlyResponse(rawText)
-  return (
-    matchedGreetingOnly
-    || isDegradedResponseQuality(integrityStatus)
-    || integrityStatus !== 'COMPLETE'
-  )
+  // Single source of truth for "is this degraded" — previously this non-relaxed branch used a
+  // separate `integrityStatus !== 'COMPLETE'` check instead of `isHardRenderIntegrityFailure`, a
+  // second definition of "failure" that could silently diverge from the canonical one as new
+  // integrity statuses are added. Both branches now defer to the one hard-failure predicate.
+  const matchedGreetingOnly = !relaxedCasual && detectGreetingOnlyResponse(rawText)
+  return matchedGreetingOnly || isHardRenderIntegrityFailure(integrityStatus, { relaxedCasual })
 }
 
 /**

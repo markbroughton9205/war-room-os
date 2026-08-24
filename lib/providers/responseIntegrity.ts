@@ -82,6 +82,31 @@ const BROKEN_BULLET = /(?:^|\n)\s*[-*•]\s*$/m
 const CLIPPED_ELLIPSIS_END = /…\s*$/
 const BROKEN_SYNC_TAIL = /\s*(?:sync|syncing|synchroni[sz]e?|synchroni[sz]ing)\w*$/i
 
+/**
+ * Root-cause fix (Council Runtime Stability Overhaul): the plain "no terminal punctuation"
+ * check below was flagging genuinely complete responses as INCOMPLETE purely because they
+ * ended in a markdown list item, table row, or closing code fence instead of a period —
+ * council/technical answers routinely end that way. This never widens what counts as
+ * truncated (abruptEnding still runs first and is unaffected); it only recognizes additional
+ * legitimate complete-response endings so they aren't misclassified as incomplete.
+ */
+function endsWithStructuralElement(text: string): boolean {
+  const lines = text.split('\n')
+  let lastLine = ''
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i].trim().length > 0) {
+      lastLine = lines[i].trim()
+      break
+    }
+  }
+  if (!lastLine) return false
+  if (lastLine === '```' || /^```\s*$/.test(lastLine)) return true // closing markdown code fence
+  if (/\|\s*$/.test(lastLine) && lastLine.includes('|')) return true // markdown table row
+  if (/^[-*•]\s+\S/.test(lastLine)) return true // unordered list item, no trailing period expected
+  if (/^\d+[.)]\s+\S/.test(lastLine)) return true // ordered list item
+  return false
+}
+
 /** Known Gemini / council truncation patterns observed in production. */
 const PARTIAL_HEADING_TAIL =
   /(?:^|\n)\s*(?:decision\s+summary|executive\s+summary|summary)\s*:\s*(?:the\s+)?(?:war\s+room|incomplete|partial|can\s+improve)\b/i
@@ -464,7 +489,7 @@ export function validateProviderResponseIntegrity(
     }
   }
 
-  if (!relaxedCasual && !SENTENCE_END.test(text) && text.length >= 120) {
+  if (!relaxedCasual && !SENTENCE_END.test(text) && !endsWithStructuralElement(text) && text.length >= 120) {
     return {
       integrity_status: 'INCOMPLETE',
       confidence: 68,
