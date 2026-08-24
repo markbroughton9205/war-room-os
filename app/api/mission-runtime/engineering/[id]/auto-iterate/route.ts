@@ -10,11 +10,22 @@ export const runtime = 'nodejs'
  * proposal (the same no-mutation operation the manual /replan route already performs without a
  * gate) — it never calls approveAndApply, so nothing here writes to the filesystem. A fresh
  * approval is still required at /approve before any regenerated proposal can be applied, exactly
- * as before Phase G existed. Body: { maxAttempts?: number, paused?: boolean, workspaceId?: string }.
+ * as before Phase G existed. Body: { maxAttempts?: number, paused?: boolean, workspaceId?: string,
+ * coderProvider?: { enabled: boolean, family?: DirectProviderFamily } }.
+ *
+ * coderProvider (Phase I — Provider Experience): optional override of which hosted-coder family
+ * this replan attempt uses. Omitted -> the strategy carries forward whatever family the mission's
+ * current proposal actually came from, honestly, rather than silently reverting to
+ * deterministic/local-model matching only.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  let body: { maxAttempts?: number; paused?: boolean; workspaceId?: string } = {}
+  let body: {
+    maxAttempts?: number
+    paused?: boolean
+    workspaceId?: string
+    coderProvider?: { enabled: boolean; family?: 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'kimi' }
+  } = {}
   try {
     const raw = await req.json()
     if (raw !== null && typeof raw === 'object') body = raw
@@ -28,7 +39,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       if (!strategy.autoIterate) {
         return NextResponse.json({ error: 'Auto-iteration is not supported by this mission strategy.' }, { status: 400 })
       }
-      const mission = await strategy.autoIterate(id, { maxAttempts: body.maxAttempts, paused: body.paused })
+      const mission = await strategy.autoIterate(id, { maxAttempts: body.maxAttempts, paused: body.paused, coderProvider: body.coderProvider })
       return NextResponse.json({ mission })
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })

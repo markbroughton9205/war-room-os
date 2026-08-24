@@ -109,6 +109,11 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
   const [subsystem, setSubsystem] = useState('')
   const [coderEnabled, setCoderEnabled] = useState(true)
   const [coderFamily, setCoderFamily] = useState<CoderFamily>('claude')
+  // Phase I (Provider Experience): honest configured/not-configured status per family, fetched
+  // once so the picker can label an unconfigured provider rather than let the Commander select
+  // one that will just fail. Never claims a family is live-reachable — only that its credential
+  // is present in this environment (see /api/mission-runtime/engineering/providers).
+  const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({})
 
   const [mission, setMission] = useState<RuntimeMissionLite | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -123,6 +128,10 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
       if (status.ok && status.data) setRepoStatus(status.data)
       const listing = await getJson<{ files: string[] }>('/api/mission-runtime/engineering/repo/files?pathPrefix=lib')
       if (listing.ok && listing.data) setFiles(listing.data.files)
+      const providers = await getJson<{ providers: { family: string; configured: boolean }[] }>('/api/mission-runtime/engineering/providers')
+      if (providers.ok && providers.data) {
+        setProviderStatus(Object.fromEntries(providers.data.providers.map(p => [p.family, p.configured])))
+      }
     })()
   }, [])
 
@@ -355,10 +364,16 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
 
   // Phase G: one bounded auto-replan-on-failure attempt. Never applies anything — a fresh
   // approval is still required afterward, same as a manual replan.
+  // Phase I: pass the same coderProvider selection replan() uses, so a bounded iteration attempt
+  // keeps using the Commander's chosen hosted-coder family instead of silently reverting to
+  // deterministic/local-model matching only (the engineeringStrategy also carries forward the
+  // mission's own previously-used family when this is omitted — see autoIterate() there).
   const autoIterate = () =>
     mission &&
     void runAction('auto-iterate', async () => {
-      const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/auto-iterate`, {})
+      const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/auto-iterate`, {
+        coderProvider: { enabled: coderEnabled, family: coderFamily },
+      })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
     })
@@ -368,6 +383,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
     void runAction('auto-iterate', async () => {
       const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/auto-iterate`, {
         paused: !mission.iterationPolicy.paused,
+        coderProvider: { enabled: coderEnabled, family: coderFamily },
       })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
@@ -486,11 +502,12 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
               onChange={e => setCoderFamily(e.target.value as CoderFamily)}
               disabled={!coderEnabled}
             >
-              <option value="claude">claude</option>
-              <option value="chatgpt">chatgpt</option>
-              <option value="grok">grok</option>
-              <option value="gemini">gemini</option>
-              <option value="kimi">kimi</option>
+              {(['claude', 'chatgpt', 'grok', 'gemini', 'kimi'] as CoderFamily[]).map(f => (
+                <option key={f} value={f}>
+                  {f}
+                  {providerStatus[f] === false ? ' (not configured)' : ''}
+                </option>
+              ))}
             </select>
           </div>
           <button

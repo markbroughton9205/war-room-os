@@ -265,3 +265,74 @@ export async function invokeDirectCouncilProvider(
     clearTimeout(timer)
   }
 }
+
+// ---------------------------------------------------------------------------
+// Phase I (Provider Experience). Additive only — nothing above this line changes. Gives callers
+// (native-builder's Coder Agent, the Engineering Mission UI) an honest, pre-call way to know which
+// provider families are actually configured, and a policy-based fallback that never fabricates a
+// hosted call: it only ever picks a family from the caller-supplied list that is genuinely
+// configured, decided BEFORE any network call, so a resulting proposal's proposerId (`hosted:
+// ${family}`) always honestly reflects the family that was actually invoked. If nothing offered is
+// configured, callers are expected to omit hostedCoder entirely rather than attempt a call that
+// invokeDirectCouncilProvider would just report as unavailable anyway — see
+// engineeringStrategy.ts's create()/autoIterate() for the concrete usage.
+// ---------------------------------------------------------------------------
+
+export const ALL_PROVIDER_FAMILIES: DirectProviderFamily[] = ['claude', 'chatgpt', 'grok', 'gemini', 'kimi', 'red_team', 'baby']
+
+/** The Coder Agent's own default priority order when a caller asks for fallback without
+ * specifying one. Deliberately excludes 'baby' and 'red_team' — those are Council-domain framing
+ * variants of chatgpt/claude, not independent hosted-coder-capable families. */
+export const DEFAULT_CODER_FALLBACK_ORDER: DirectProviderFamily[] = ['claude', 'chatgpt', 'grok', 'gemini', 'kimi']
+
+/** Honest, synchronous, no-network-call configuration check — mirrors exactly the same
+ * per-family key/config checks callOpenAi/callAnthropic/callGrokDirect/callGeminiDirect/
+ * callKimiDirect already perform at call time, exposed here so callers can decide BEFORE
+ * spending a network round trip (or fabricating an attempt) whether a family is usable. */
+export function isProviderFamilyConfigured(family: DirectProviderFamily): boolean {
+  switch (family) {
+    case 'claude':
+    case 'red_team':
+      return Boolean(process.env.ANTHROPIC_API_KEY)
+    case 'chatgpt':
+    case 'baby':
+      return Boolean(process.env.OPENAI_API_KEY)
+    case 'grok':
+      return Boolean(process.env.XAI_API_KEY)
+    case 'gemini':
+      return Boolean(process.env.GEMINI_API_KEY)
+    case 'kimi':
+      return isKimiConfigured()
+    default:
+      return false
+  }
+}
+
+export type ProviderFamilyStatus = { family: DirectProviderFamily; configured: boolean }
+
+/** Every sanctioned family's honest configured/not-configured status, for the Engineering Mission
+ * UI's provider picker and for /api/mission-runtime/engineering/providers. Never claims a family
+ * is reachable — 'configured' means "has the credential a call would need," not "verified live"
+ * (that determination belongs to Phase J, live provider verification, which is inherently
+ * per-environment and never asserted here). */
+export function listProviderFamilyStatus(): ProviderFamilyStatus[] {
+  return ALL_PROVIDER_FAMILIES.map(family => ({ family, configured: isProviderFamilyConfigured(family) }))
+}
+
+/**
+ * Policy-based fallback resolution. Returns the first CONFIGURED family starting with `preferred`
+ * and then walking `fallbackOrder` (skipping `preferred` itself on the second pass) — or `null` if
+ * none of the offered families are configured. This function makes no network call and never
+ * substitutes a family the caller didn't offer via `preferred`/`fallbackOrder`; it is pure policy
+ * over the same honest isProviderFamilyConfigured() check above.
+ */
+export function resolveConfiguredProviderFamily(
+  preferred: DirectProviderFamily,
+  fallbackOrder: DirectProviderFamily[] = DEFAULT_CODER_FALLBACK_ORDER,
+): DirectProviderFamily | null {
+  if (isProviderFamilyConfigured(preferred)) return preferred
+  for (const family of fallbackOrder) {
+    if (family !== preferred && isProviderFamilyConfigured(family)) return family
+  }
+  return null
+}

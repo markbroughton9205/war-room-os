@@ -179,7 +179,15 @@ export interface MissionExecutionStrategy<TRequest> {
    * per call — "the loop" is the Commander (or a bounded client-side loop) calling this repeatedly
    * up to the recorded budget, not an unattended background process. See
    * lib/mission-runtime/engineeringStrategy.ts for the full reasoning. */
-  autoIterate?(missionId: string, opts?: { maxAttempts?: number; paused?: boolean }): Promise<RuntimeMission>
+  /** coderProvider (Phase I — Provider Experience): optional override of which hosted-coder
+   * family a replan attempt uses. Omitted -> carries forward whatever family the mission's
+   * current selectedProposal was actually produced by, if any (honest continuity, not a silent
+   * provider switch). `enabled: false` explicitly turns hosted-coder replanning off for this
+   * attempt even if a prior hosted proposal exists. A requested family that isn't configured in
+   * this environment resolves via policy-based fallback (see
+   * lib/council/providerDirectCall.ts's resolveConfiguredProviderFamily) — never a fabricated
+   * call to an unconfigured provider. */
+  autoIterate?(missionId: string, opts?: { maxAttempts?: number; paused?: boolean; coderProvider?: { enabled: boolean; family?: 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'kimi' } }): Promise<RuntimeMission>
 }
 
 // ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ import type {
 import { requestCouncilAssist } from '@/lib/native-builder/councilAssist'
 import {
   invokeDirectCouncilProvider,
+  resolveConfiguredProviderFamily,
   type DirectProviderFamily,
 } from '@/lib/council/providerDirectCall'
 import {
@@ -81,6 +82,25 @@ async function requestSingleAgentOpinion(
   const prompt = `Engineering mission request.\nTitle: ${request.title}\nSubsystem: ${request.subsystem}\nDescription: ${request.description}\nGive a 1-2 sentence assessment of what likely needs to change. Do not propose exact code.`
   const result = await invokeDirectCouncilProvider(family, prompt, { timeoutMs: 15_000 })
   return { family, ok: result.ok, text: result.ok ? result.text : '', error: result.ok ? undefined : result.error }
+}
+
+/**
+ * Phase I — Provider Experience. Resolves a requested hosted-coder family against what's actually
+ * configured in this environment BEFORE any call is made (resolveConfiguredProviderFamily makes
+ * no network call — see providerDirectCall.ts), and returns the hostedCoder config planRepair()
+ * expects, or undefined if nothing offered is configured. Never fabricates a hosted attempt: if
+ * the requested family (and every fallback) is unconfigured, this returns undefined and the
+ * repair honestly falls through to the deterministic/local-model proposal path, exactly as if
+ * hosted-coder had never been requested — the same honesty discipline requestSingleAgentOpinion
+ * already applies for advisory opinions.
+ */
+function resolveHostedCoderConfig(
+  requested: { enabled: boolean; family?: DirectProviderFamily } | undefined,
+): { family: DirectProviderFamily; invoke: typeof invokeDirectCouncilProvider } | undefined {
+  if (!requested?.enabled) return undefined
+  const resolved = resolveConfiguredProviderFamily(requested.family ?? 'claude')
+  if (!resolved) return undefined
+  return { family: resolved, invoke: invokeDirectCouncilProvider }
 }
 
 /** Strips the durability-only `recordedAt` stamp back down to the projection shape. */
@@ -162,12 +182,9 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
         `native-builder merged this into an existing open issue (fingerprint ${issue.fingerprint}) without opening a new repair — call get() with the existing repair id instead of create() again for the same issue.`,
       )
     }
-    const hostedCoder = request.coderProvider?.enabled
-      ? { family: request.coderProvider.family ?? 'claude', invoke: invokeDirectCouncilProvider }
-      : undefined
     const planned = await planRepair(repair.id, {
       targetFiles: request.targetFiles,
-      hostedCoder,
+      hostedCoder: resolveHostedCoderConfig(request.coderProvider),
       commanderRequestText: `${request.title}: ${request.description}`,
     })
     const withOpinions = opinion ? await persistAdvisoryOpinions(planned, [opinion]) : planned
@@ -240,7 +257,7 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
    * bounded to the same maxAttempts) calling this once per failed attempt, not an unattended
    * background process — see the interface doc comment in ./types.ts for why.
    */
-  async autoIterate(missionId: string, opts?: { maxAttempts?: number; paused?: boolean }) {
+  async autoIterate(missionId: string, opts?: { maxAttempts?: number; paused?: boolean; coderProvider?: { enabled: boolean; family?: DirectProviderFamily } }) {
     const repair = await getRepair(missionId)
     if (!repair) throw new Error(`No repair found for mission ${missionId}.`)
     const issue = await getIssue(repair.issueId)
@@ -283,9 +300,27 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
       return recordAttempt(repair.state, `Iteration budget exhausted (${policy.attemptsUsed}/${policy.maxAttempts} attempts used) — Commander review required.`, policy)
     }
 
-    const evidenceSummary = summarizeFailureEvidenceForReplan(repair) || '(no structured failure evidence on record)'
+    // Phase I: carry the mission's previously-used hosted-coder family forward into this replan
+    // attempt, unless the caller explicitly overrides it (opts.coderProvider, including an
+    // explicit {enabled:false} opt-out). This is honest continuity — a mission that was already
+    // being drafted by a specific provider keeps using it across bounded iteration attempts,
+    // rather than silently reverting to deterministic/local-model matching only, which is what
+    // happened before this phase since no coder family was ever threaded through here.
+    const priorHostedFamily = repair.selectedProposal?.proposerId?.startsWith('hosted:')
+      ? (repair.selectedProposal.proposerId.slice('hosted:'.length) as DirectProviderFamily)
+      : undefined
+    const requestedCoderProvider =
+      opts?.coderProvider !== undefined ? opts.coderProvider : priorHostedFamily ? { enabled: true, family: priorHostedFamily } : undefined
+    const hostedCoder = resolveHostedCoderConfig(requestedCoderProvider)
+    const providerFallbackNote =
+      requestedCoderProvider?.enabled && !hostedCoder
+        ? ` Requested hosted-coder family "${requestedCoderProvider.family ?? 'claude'}" (and its configured fallbacks) is not available in this environment — falling back to deterministic/local-model matching only.`
+        : ''
+
+    const evidenceSummary = (summarizeFailureEvidenceForReplan(repair) || '(no structured failure evidence on record)') + providerFallbackNote
     const replanned = await planRepair(missionId, {
       targetFiles: repair.selectedProposal?.relevantFiles,
+      hostedCoder,
       commanderRequestText: `${issue.title}: ${issue.rawEvidenceText}`,
     })
     const nextPolicy = { ...policy, attemptsUsed: policy.attemptsUsed + 1 }
