@@ -304,6 +304,28 @@ export type NativeAdvisoryProviderOpinion = {
   recordedAt: string
 }
 
+/**
+ * Phase E (Council Assist). A Commander-requested, advisory-only Council consultation attached to
+ * a repair. Never turned into a patch — the Coder is the sole executor and must independently
+ * regenerate any change via the hosted-coder path (repairPlanner.ts:requestHostedModelProposal);
+ * this session's text can inform that request's commanderRequestText, but is never itself parsed
+ * as a StructuredPatch. Mirrors NativeAdvisoryProviderOpinion's shape/durability pattern exactly.
+ */
+export type NativeCouncilAssistComposition =
+  | 'stable_group'
+  | 'full_council'
+  | 'architecture_review'
+  | 'security_review'
+  | 'research_review'
+
+export type NativeCouncilAssistSession = {
+  id: string
+  composition: NativeCouncilAssistComposition
+  roster: string[]
+  results: NativeAdvisoryProviderOpinion[]
+  requestedAt: string
+}
+
 // ---------------------------------------------------------------------------
 // Repair record (persisted)
 // ---------------------------------------------------------------------------
@@ -329,6 +351,10 @@ export type NativeRepairRecord = {
    * normally with this simply undefined. Written by lib/mission-runtime/engineeringStrategy.ts
    * via the existing saveRepair() path; native-builder's own runtime.ts never reads or writes it. */
   advisoryProviderOpinions?: NativeAdvisoryProviderOpinion[]
+  /** Optional, backwards-compatible for the same reason as advisoryProviderOpinions above: absent
+   * on every repair record written before Phase E, isRepairRecord (storage.ts) does not require
+   * it, written via the existing saveRepair() path only. */
+  councilAssistSessions?: NativeCouncilAssistSession[]
   createdAt: string
   updatedAt: string
 }

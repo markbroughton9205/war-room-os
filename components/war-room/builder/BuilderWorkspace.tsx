@@ -29,6 +29,13 @@ type RuntimeMissionLite = {
   nativeBuilder: { issueId: string; repairId: string }
   proposalSummary: { hasProposal: boolean; sourceKind?: string; diagnosis?: string; relevantFiles?: string[] }
   providerOpinions: { family: string; ok: boolean; text: string; error?: string }[]
+  councilAssistSessions: {
+    id: string
+    composition: string
+    roster: string[]
+    results: { family: string; ok: boolean; text: string; error?: string }[]
+    requestedAt: string
+  }[]
   validationResults: { operation: { id: string; targets?: string[] }; ok: boolean; exitCode: number | null; stdout: string; stderr: string; durationMs: number }[]
   verification?: { status: string; fingerprintRecurred: boolean; evidence: string[] }
   diff?: { diff: string; truncated: boolean; changedFiles: string[] }
@@ -67,7 +74,10 @@ async function postJson<T>(url: string, body: unknown): Promise<{ ok: boolean; d
   }
 }
 
-type TabKey = 'diff' | 'validation' | 'activity' | 'output'
+type TabKey = 'diff' | 'validation' | 'activity' | 'output' | 'council'
+
+const COUNCIL_ASSIST_COMPOSITIONS = ['stable_group', 'full_council', 'architecture_review', 'security_review', 'research_review'] as const
+type CouncilAssistComposition = (typeof COUNCIL_ASSIST_COMPOSITIONS)[number]
 
 /**
  * basePath: where this thin client's own URL lives — defaults to Standalone Builder's own route.
@@ -224,6 +234,16 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
     mission &&
     void runAction('rollback', async () => {
       const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/rollback`, { approval_granted: true })
+      if (!result.ok) throw new Error(result.error)
+      if (result.data) setMission(result.data.mission)
+    })
+
+  const councilAssist = (composition: CouncilAssistComposition) =>
+    mission &&
+    void runAction('council-assist', async () => {
+      const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/council-assist`, {
+        composition,
+      })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
     })
@@ -422,7 +442,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
             {lastError ? <p className="mt-2 text-red-400">{lastError}</p> : null}
 
             <div className="mt-2 flex gap-2 border-b border-white/10 pb-1 text-[10px] uppercase tracking-widest">
-              {(['output', 'diff', 'validation', 'activity'] as TabKey[]).map(t => (
+              {(['output', 'diff', 'validation', 'activity', 'council'] as TabKey[]).map(t => (
                 <button
                   key={t}
                   type="button"
@@ -499,6 +519,47 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
                     </li>
                   ))}
                 </ul>
+              ) : null}
+
+              {tab === 'council' ? (
+                <div>
+                  <p className="mb-2 text-[10px] text-slate-500">
+                    Advisory only — Council never mutates this mission. A finding here can only
+                    become a change via an explicit Coder request (Coder Agent above), never
+                    automatically.
+                  </p>
+                  <div className="mb-3 flex flex-wrap gap-1">
+                    {COUNCIL_ASSIST_COMPOSITIONS.map(c => (
+                      <button
+                        key={c}
+                        type="button"
+                        disabled={busy !== null}
+                        className="rounded border border-purple-500/40 px-2 py-1 text-[10px] uppercase tracking-wider text-purple-300 hover:bg-purple-950/30 disabled:opacity-40"
+                        onClick={() => councilAssist(c)}
+                      >
+                        {c.replace(/_/g, ' ')}
+                      </button>
+                    ))}
+                  </div>
+                  {mission.councilAssistSessions.length === 0 ? (
+                    <p className="text-slate-500">No Council Assist sessions yet.</p>
+                  ) : (
+                    <ul className="space-y-3">
+                      {[...mission.councilAssistSessions].reverse().map(s => (
+                        <li key={s.id} className="rounded border border-white/10 bg-black/30 p-2">
+                          <p className="text-[10px] uppercase tracking-wider text-purple-300">
+                            {s.composition.replace(/_/g, ' ')} · {new Date(s.requestedAt).toLocaleTimeString()}
+                          </p>
+                          {s.results.map((r, i) => (
+                            <p key={i} className={r.ok ? 'mt-1 text-slate-300' : 'mt-1 text-amber-400'}>
+                              <span className="text-white">{r.family}:</span> {r.ok ? r.text : `unavailable — ${r.error}`}
+                            </p>
+                          ))}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               ) : null}
             </div>
           </div>

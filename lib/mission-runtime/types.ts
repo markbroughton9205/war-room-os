@@ -38,6 +38,8 @@ import type {
   NativeDiffEvidence,
   NativeValidationResult,
   NativeVerificationResult,
+  NativeCouncilAssistComposition,
+  NativeCouncilAssistSession,
 } from '@/lib/native-builder/types'
 
 // ---------------------------------------------------------------------------
@@ -113,6 +115,7 @@ export const RUNTIME_MISSION_CAPABILITIES = [
   'repo_diff_read',
   'provider_single_agent',
   'provider_coder_proposal',
+  'council_assist',
   'patch_apply_gated',
   'validation_run',
   'rollback_gated',
@@ -128,6 +131,7 @@ export const ENGINEERING_MISSION_CAPABILITIES: readonly RuntimeMissionCapability
   'repo_diff_read',
   'provider_single_agent',
   'provider_coder_proposal',
+  'council_assist',
   'patch_apply_gated',
   'validation_run',
   'rollback_gated',
@@ -163,6 +167,9 @@ export interface MissionExecutionStrategy<TRequest> {
    * foreclose) remains a valid implementer without a breaking interface change. Read-only, same
    * zero-new-persistence projection as get() — reuses storage.ts:listRepairs(), nothing new. */
   list?(): Promise<RuntimeMission[]>
+  /** Optional — Phase E (Council Assist). Advisory-only; never mutates the repository, never
+   * calls the apply path. See lib/native-builder/councilAssist.ts for the full reasoning. */
+  councilAssist?(missionId: string, composition: NativeCouncilAssistComposition): Promise<RuntimeMission>
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +261,9 @@ export type RuntimeMission = {
     relevantFiles?: string[]
   }
   providerOpinions: RuntimeMissionProviderOpinion[]
+  /** Phase E — advisory-only Council Assist sessions attached to this mission. Never a source for
+   * an executable patch; see lib/native-builder/councilAssist.ts. */
+  councilAssistSessions: NativeCouncilAssistSession[]
   validationResults: NativeValidationResult[]
   verification?: NativeVerificationResult
   diff?: NativeDiffEvidence

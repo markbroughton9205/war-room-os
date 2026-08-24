@@ -16,8 +16,8 @@
  * both surfaces read the same repairId against the same authoritative native-builder persistence
  * — there is no separate War-Room-side mission cache.
  *
- * Council Assist is Phase E, not yet implemented — the tab below is an honest, clearly-labeled
- * placeholder (no fabricated dashboard, no simulated data) rather than a working feature.
+ * Council Assist (Phase E) lives inside the reused BuilderWorkspace's own Council tab — shared by
+ * both clients for the same reason as everything else here: one Engineering Core, no duplicate.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -57,7 +57,6 @@ export function EngineeringMissionConsole() {
   const activeMissionId = searchParams.get('mission')
   const [missions, setMissions] = useState<MissionListItem[]>([])
   const [loadingList, setLoadingList] = useState(false)
-  const [showCouncilPlaceholder, setShowCouncilPlaceholder] = useState(false)
 
   const refreshList = useCallback(async () => {
     setLoadingList(true)
@@ -113,20 +112,10 @@ export function EngineeringMissionConsole() {
         </div>
 
         <div className="mt-4 border-t border-emerald-900/40 pt-3">
-          <button
-            type="button"
-            onClick={() => setShowCouncilPlaceholder(s => !s)}
-            className="w-full rounded border border-slate-800 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500"
-          >
-            Council Assist
-          </button>
-          {showCouncilPlaceholder && (
-            <p className="mt-2 px-1 text-[10px] leading-relaxed text-slate-600">
-              Not yet implemented. Council Assist is Phase E — a shared, advisory-only capability
-              from both War Room Engineering and Standalone Builder. Coder remains the sole
-              executor; Council will never directly become an executable patch.
-            </p>
-          )}
+          <p className="px-1 text-[10px] leading-relaxed text-slate-600">
+            Council Assist lives in the mission panel&apos;s Council tab, shared with Standalone
+            Builder — select a mission, then open Council there.
+          </p>
         </div>
       </aside>
 

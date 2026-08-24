@@ -23,7 +23,8 @@ import {
 } from '@/lib/native-builder/runtime'
 import { getIssue, getRepair, listRepairs, saveRepair } from '@/lib/native-builder/storage'
 import { issueFromCommanderReport } from '@/lib/native-builder/issueIngest'
-import type { NativeIssueRecord, NativeRepairRecord } from '@/lib/native-builder/types'
+import type { NativeIssueRecord, NativeRepairRecord, NativeCouncilAssistComposition } from '@/lib/native-builder/types'
+import { requestCouncilAssist } from '@/lib/native-builder/councilAssist'
 import {
   invokeDirectCouncilProvider,
   type DirectProviderFamily,
@@ -90,6 +91,7 @@ function project(issue: NativeIssueRecord, repair: NativeRepairRecord): RuntimeM
         }
       : { hasProposal: false },
     providerOpinions,
+    councilAssistSessions: repair.councilAssistSessions ?? [],
     validationResults: repair.validationResults,
     verification: repair.verification,
     diff: repair.diffEvidence,
@@ -180,6 +182,27 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
     const issue = await getIssue(repair.issueId)
     if (!issue) throw new Error(`No issue found for repair ${missionId} after rollbackNow.`)
     return project(issue, repair)
+  },
+
+  /**
+   * Phase E: advisory-only Council Assist. Runs the requested composition against the mission's
+   * title/description, persists the resulting session onto the authoritative repair record via
+   * the same saveRepair() durability mechanism advisoryProviderOpinions already uses (Foundation
+   * Hardening §2), and returns the re-projected mission. Never calls planRepair()/approveAndApply
+   * — advisory text only, exactly like requestSingleAgentOpinion above.
+   */
+  async councilAssist(missionId: string, composition: NativeCouncilAssistComposition) {
+    const repair = await getRepair(missionId)
+    if (!repair) throw new Error(`No repair found for mission ${missionId}.`)
+    const issue = await getIssue(repair.issueId)
+    if (!issue) throw new Error(`No issue found for repair ${missionId}.`)
+    const session = await requestCouncilAssist({ title: issue.title, description: issue.rawEvidenceText }, composition)
+    const updated: NativeRepairRecord = {
+      ...repair,
+      councilAssistSessions: [...(repair.councilAssistSessions ?? []), session],
+    }
+    await saveRepair(updated)
+    return project(issue, updated)
   },
 
   /**
