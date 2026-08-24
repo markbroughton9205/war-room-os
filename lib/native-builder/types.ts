@@ -183,6 +183,14 @@ export type NativeValidationOperation = {
 
 export type NativeProposalSourceKind = 'deterministic' | 'local_model' | 'hosted_model' | 'council_family'
 
+/** Phase H (Context Expansion). See lib/native-builder/contextExpansion.ts. */
+export type NativeContextSourceReason = 'target' | 'import_relationship' | 'search_match' | 'symbol_usage'
+export type NativeContextSource = {
+  relPath: string
+  reason: NativeContextSourceReason
+  chars: number
+}
+
 export type NativeRepairProposal = {
   issueId: string
   sourceKind: NativeProposalSourceKind
@@ -197,6 +205,12 @@ export type NativeRepairProposal = {
   risks: string[]
   rollbackPlan: string
   generatedAt: string
+  /** Phase H (Context Expansion). Optional, only set for sourceKind === 'hosted_model': which
+   * files/snippets were actually supplied to the hosted provider for this proposal, and why (see
+   * lib/native-builder/contextExpansion.ts). Auditability only — never consumed by the parser or
+   * patch policy. Absent on every proposal generated before Phase H and on every non-hosted
+   * source. */
+  contextSources?: NativeContextSource[]
 }
 
 // ---------------------------------------------------------------------------

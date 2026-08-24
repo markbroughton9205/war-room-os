@@ -20,6 +20,7 @@ import {
 import { fingerprintIssue, ingestIssue, mergeIssueOccurrence } from './issueIngest'
 import { findIssueByFingerprint, getIssue, getRepair, saveIssue, saveRepair } from './storage'
 import { readRepoFile, searchRepoText } from './repositoryInspector'
+import { gatherHostedCoderContext } from './contextExpansion'
 import {
   buildDeterministicProposal,
   councilOpinionsAsAdvisoryProposals,
@@ -291,11 +292,19 @@ export async function planRepair(repairId: string, opts: PlanRepairOptions = {})
     // validationResults/verification reflect whatever the last apply cycle produced), not
     // `withProposals`, which is correct: we want the evidence from before this planning pass.
     const priorFailureEvidence = isReplan ? summarizeFailureEvidenceForReplan(record) : undefined
-    hostedModelOutcome = await requestHostedModelProposal(issue, excerpts, opts.hostedCoder.family, opts.hostedCoder.invoke, {
+    // Phase H: the hosted-coder path specifically gets an expanded, bounded context (target files
+    // + one-hop import relationships + a few search matches + symbol-usage locations + scoped git
+    // context) built from the exact same read surface — deterministic/local-model proposals above
+    // are untouched and keep using the plain `excerpts`. See contextExpansion.ts.
+    const expandedContext = await gatherHostedCoderContext(issue, opts.targetFiles, excerpts)
+    hostedModelOutcome = await requestHostedModelProposal(issue, expandedContext.excerpts, opts.hostedCoder.family, opts.hostedCoder.invoke, {
       priorFailureEvidence,
       commanderRequestText: opts.commanderRequestText,
     })
-    if (hostedModelOutcome.status === 'proposal') proposals.push(hostedModelOutcome.proposal)
+    if (hostedModelOutcome.status === 'proposal') {
+      hostedModelOutcome.proposal.contextSources = expandedContext.sources
+      proposals.push(hostedModelOutcome.proposal)
+    }
   }
 
   if (opts.councilFamilies?.length && opts.councilInvoke) {
