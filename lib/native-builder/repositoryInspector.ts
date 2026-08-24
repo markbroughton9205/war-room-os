@@ -155,6 +155,18 @@ export async function readPackageScripts(): Promise<Record<string, string>> {
   }
 }
 
+/** Bounded, denylist-respecting flat file listing under the repo root (or a given path prefix).
+ * Reuses the exact same walkFiles primitive searchRepoText/listValidationFiles already use — this
+ * is the file-tree data source for a thin client (Standalone Builder / War Room Engineering UI),
+ * not a second directory-walking implementation. */
+export async function listRepoFiles(pathPrefix?: string): Promise<string[]> {
+  const root = path.resolve(resolveRepoRoot())
+  const startDir = pathPrefix ? resolveRepoRelativePath(pathPrefix) : root
+  const out: string[] = []
+  await walkFiles(startDir, root, out, { remaining: MAX_SEARCH_FILES })
+  return out.map(f => path.relative(root, f).split(path.sep).join('/')).sort()
+}
+
 export async function listValidationFiles(): Promise<string[]> {
   const root = path.resolve(resolveRepoRoot())
   const libDir = path.join(root, 'lib')

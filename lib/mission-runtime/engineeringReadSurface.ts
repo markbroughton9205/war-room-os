@@ -27,12 +27,21 @@ import {
   searchRepoText,
   inspectSymbolUsages,
   getRepoGitContext,
+  listRepoFiles,
   type RepoFileReadResult,
   type RepoSearchHit,
   type RepoGitContext,
 } from '@/lib/native-builder/repositoryInspector'
 
 export type { RepoFileReadResult, RepoSearchHit, RepoGitContext }
+
+/** Flat, denylist-respecting file listing — the data source for a thin client's file tree
+ * (Standalone Builder / War Room Engineering UI Phase A). Delegates entirely to
+ * repositoryInspector.listRepoFiles(), which reuses the same walk primitive search/validation-file
+ * listing already use. */
+export async function listEngineeringFiles(pathPrefix?: string): Promise<string[]> {
+  return listRepoFiles(pathPrefix)
+}
 
 /** Repository status plus a bounded recent diff — the same combined shape native-builder already
  * builds for itself internally, exposed here as one read-only Engineering Core call. Covers both
