@@ -205,13 +205,40 @@ export async function planRepair(repairId: string, opts: PlanRepairOptions = {})
   const record = await requireRepair(repairId)
   const issue = await requireIssue(record.issueId)
 
-  const inspecting = await persist(
-    transition(record, 'inspecting_repository', 'Reading relevant source files.'),
-    'inspecting repository',
-  )
+  // NATIVE_REPAIR_TRANSITIONS already declares two distinct legal entries into 'planning':
+  //   - collecting_evidence -> inspecting_repository -> planning   (first-time planning)
+  //   - {verification_failed, blocked, partially_verified, rolled_back,
+  //      escalation_recommended} -> planning directly                (replanning/iteration)
+  // Previously this function always forced the first path regardless of the record's actual
+  // state, which made the second, already-designed set of edges unreachable — replanning from
+  // any of those five states threw InvalidStateTransitionError because none of them may legally
+  // enter 'inspecting_repository'. The fix is to route through whichever edge the record's
+  // current state actually permits; transition() still enforces NATIVE_REPAIR_TRANSITIONS exactly
+  // as before; no state is granted a new edge and no check is weakened.
+  const allowedFromCurrent = NATIVE_REPAIR_TRANSITIONS[record.state]
+  const isReplan = !allowedFromCurrent.includes('inspecting_repository') && allowedFromCurrent.includes('planning')
 
+  let preInspection = record
+  if (!isReplan) {
+    preInspection = await persist(
+      transition(record, 'inspecting_repository', 'Reading relevant source files.'),
+      'inspecting repository',
+    )
+  }
+
+  // Re-running gatherExcerpts on a replan is deliberate: the repository may have changed since
+  // the prior attempt (a partially-applied patch, a rollback, files touched by validation), so a
+  // fresh read is more honest than reusing stale excerpts — this is real re-inspection work, it
+  // is simply not gated behind a second formal 'inspecting_repository' state hop, because that
+  // hop is not a legal transition from these five states.
   const excerpts = await gatherExcerpts(issue, opts.targetFiles)
-  const planning = await persist(transition(inspecting, 'planning', `Inspected ${excerpts.length} file(s).`), 'planning repair')
+  const planningNote = isReplan
+    ? `Re-inspected ${excerpts.length} file(s) ahead of replanning from ${record.state}.`
+    : `Inspected ${excerpts.length} file(s).`
+  const planning = await persist(
+    transition(preInspection, 'planning', planningNote),
+    isReplan ? 'replanning repair' : 'planning repair',
+  )
 
   const proposals: NativeRepairProposal[] = []
 

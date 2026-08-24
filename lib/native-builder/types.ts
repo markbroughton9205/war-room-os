@@ -285,6 +285,26 @@ export type ImmunityArtifactOutcome =
   | { created: false; reason: string }
 
 // ---------------------------------------------------------------------------
+// Advisory provider opinions (Engineering Core Foundation Hardening §2)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single-agent (non-Council) provider's advisory read on an issue, recorded on the repair
+ * itself so it survives a process restart. This is intentionally the same shallow shape as
+ * lib/mission-runtime/types.ts's RuntimeMissionProviderOpinion plus a recordedAt stamp — it is
+ * NOT turned into a patch and never affects selectPreferredProposal; it exists purely as durable
+ * advisory text attached to the authoritative repair record, mirroring how Council-family
+ * opinions are already folded into advisory (never-selected) proposals in repairPlanner.ts.
+ */
+export type NativeAdvisoryProviderOpinion = {
+  family: string
+  ok: boolean
+  text: string
+  error?: string
+  recordedAt: string
+}
+
+// ---------------------------------------------------------------------------
 // Repair record (persisted)
 // ---------------------------------------------------------------------------
 
@@ -304,6 +324,11 @@ export type NativeRepairRecord = {
   immunityOutcome?: ImmunityArtifactOutcome
   autoRepairEligible: boolean
   autoRepairMode: boolean
+  /** Optional, backwards-compatible: absent on every repair record written before this field
+   * existed, and isRepairRecord (storage.ts) does not require it — old records continue to load
+   * normally with this simply undefined. Written by lib/mission-runtime/engineeringStrategy.ts
+   * via the existing saveRepair() path; native-builder's own runtime.ts never reads or writes it. */
+  advisoryProviderOpinions?: NativeAdvisoryProviderOpinion[]
   createdAt: string
   updatedAt: string
 }

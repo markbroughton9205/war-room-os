@@ -8,13 +8,26 @@
  * nativeBuilder.validation.ts's e2e block ever disagree about what native-builder does, that is a
  * bug in this wrapper, not a second valid interpretation.
  */
+import { randomUUID } from 'node:crypto'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { resolveRepoRoot } from '@/lib/repo/paths'
-import { readRepoFile } from '@/lib/native-builder/repositoryInspector'
-import { countUnresolvedIssues } from '@/lib/native-builder/storage'
+import {
+  readRepoFile,
+  searchRepoText,
+  inspectSymbolUsages,
+} from '@/lib/native-builder/repositoryInspector'
+import { countUnresolvedIssues, getRepair, saveIssue, saveRepair } from '@/lib/native-builder/storage'
+import { planRepair } from '@/lib/native-builder/runtime'
+import type { NativeIssueRecord, NativeRepairRecord, NativeRepairState } from '@/lib/native-builder/types'
 import { assertAutoOrApproval } from '@/lib/permissions/policy'
+import {
+  getEngineeringRepositoryContext,
+  readEngineeringFile,
+  searchEngineeringRepository,
+  inspectEngineeringSymbolUsages,
+} from './engineeringReadSurface'
 import {
   SingleAgentEngineeringStrategy,
   getMissionExecutionStrategy,
@@ -117,7 +130,151 @@ function testStatusProjection(): CaseResult[] {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Full end-to-end acceptance test, driven entirely through the Mission Runtime wrapper.
+// 4. Engineering Core read/inspect surface — proves delegation (not reimplementation) and that
+//    every exposed operation is genuinely read-only (Foundation Hardening §1 / §8).
+// ---------------------------------------------------------------------------
+
+async function testEngineeringReadSurfaceDelegatesAndIsReadOnly(): Promise<CaseResult[]> {
+  const results: CaseResult[] = []
+
+  const statusBefore = await getEngineeringRepositoryContext()
+
+  // Delegation proof: the boundary function's result must be identical to calling the underlying
+  // repositoryInspector.ts function directly — if these ever diverge, the boundary has drifted
+  // into reimplementation, which §1 explicitly prohibits.
+  const viaSurface = await readEngineeringFile('package.json')
+  const viaInspector = await readRepoFile('package.json')
+  results.push(check(
+    'read_surface_01_read_file_delegates_to_repositoryInspector',
+    viaSurface.ok && viaInspector.ok && viaSurface.content === viaInspector.content,
+    viaSurface.ok ? `${viaSurface.content.length} bytes match` : viaSurface.error,
+  ))
+
+  const searchViaSurface = await searchEngineeringRepository('planRepair', { pathPrefix: 'lib/native-builder' })
+  const searchViaInspector = await searchRepoText('planRepair', { pathPrefix: 'lib/native-builder' })
+  results.push(check(
+    'read_surface_02_search_delegates_to_repositoryInspector',
+    searchViaSurface.length > 0 && JSON.stringify(searchViaSurface) === JSON.stringify(searchViaInspector),
+    `${searchViaSurface.length} hits`,
+  ))
+
+  const usagesViaSurface = await inspectEngineeringSymbolUsages('NATIVE_REPAIR_TRANSITIONS')
+  const usagesViaInspector = await inspectSymbolUsages('NATIVE_REPAIR_TRANSITIONS')
+  results.push(check(
+    'read_surface_03_symbol_usages_delegate_to_repositoryInspector',
+    usagesViaSurface.length > 0 && JSON.stringify(usagesViaSurface) === JSON.stringify(usagesViaInspector),
+    `${usagesViaSurface.length} hits`,
+  ))
+
+  results.push(check(
+    'read_surface_04_repository_context_carries_status_and_diff',
+    typeof statusBefore.status.repoPath === 'string' && typeof statusBefore.recentDiff.diff === 'string',
+    JSON.stringify({ repoPath: statusBefore.status.repoPath, diffLen: statusBefore.recentDiff.diff.length }),
+  ))
+
+  // Read-only proof: none of the four calls above may change the working tree. Compare the
+  // uncommitted-file count before and after — an unexpected mutation would move it.
+  const statusAfter = await getEngineeringRepositoryContext()
+  results.push(check(
+    'read_surface_05_no_mutation_from_any_read_operation',
+    statusAfter.status.uncommittedFilesCount === statusBefore.status.uncommittedFilesCount,
+    `${statusBefore.status.uncommittedFilesCount} -> ${statusAfter.status.uncommittedFilesCount}`,
+  ))
+
+  return results
+}
+
+// ---------------------------------------------------------------------------
+// 5. Replan transition-graph coverage — every state NATIVE_REPAIR_TRANSITIONS declares may
+//    re-enter 'planning' directly must actually do so through the real planRepair() function, with
+//    no 'inspecting_repository' hop in between (Foundation Hardening §3 / §8). The full e2e test
+//    below already proves this naturally for 'rolled_back' (a genuine rollback -> replan cycle);
+//    this section proves it for the remaining four declared states, using repair records saved
+//    through the exact same storage.ts saveIssue/saveRepair every other code path uses — not a
+//    mock — then handed to the real, unmodified-by-tests planRepair() and transition() functions.
+// ---------------------------------------------------------------------------
+
+const REPLAN_ENTRY_STATES: readonly NativeRepairState[] = [
+  'verification_failed',
+  'blocked',
+  'partially_verified',
+  'escalation_recommended',
+]
+
+async function seedReplanEligibleRepair(state: NativeRepairState): Promise<{ repairId: string }> {
+  const now = new Date().toISOString()
+  const issue: NativeIssueRecord = {
+    id: randomUUID(),
+    fingerprint: `replan-fixture-${state}-${randomUUID()}`,
+    title: 'Fixture sum drops last element',
+    severity: 'medium',
+    source: 'commander_report',
+    affectedSubsystem: FIXTURE_REL,
+    evidence: ['seeded for replan transition-graph coverage'],
+    rawEvidenceText: 'sumFixtureValues([1,2,3,4]) returns 6 instead of 10 — off-by-one loop bound.',
+    occurrenceCount: 1,
+    firstSeenAt: now,
+    lastSeenAt: now,
+    status: 'open',
+  }
+  await saveIssue(issue)
+
+  const repair: NativeRepairRecord = {
+    id: randomUUID(),
+    issueId: issue.id,
+    state,
+    history: [{ state, at: now, note: `Seeded directly in '${state}' for replan transition-graph coverage.` }],
+    proposals: [],
+    validationResults: [],
+    autoRepairEligible: false,
+    autoRepairMode: false,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await saveRepair(repair)
+  return { repairId: repair.id }
+}
+
+async function testReplanTransitionGraphCoverage(): Promise<CaseResult[]> {
+  const results: CaseResult[] = []
+  await resetNativeBuilderState()
+  await resetFixtureToBroken()
+
+  for (const state of REPLAN_ENTRY_STATES) {
+    const { repairId } = await seedReplanEligibleRepair(state)
+
+    let threw = false
+    let record: NativeRepairRecord | null = null
+    try {
+      record = await planRepair(repairId, { targetFiles: [FIXTURE_REL] })
+    } catch {
+      threw = true
+    }
+    results.push(check(`replan_${state}_01_does_not_throw_invalid_state_transition`, !threw, String(threw)))
+
+    const idx = record?.history.map(h => h.state).lastIndexOf(state) ?? -1
+    const nextState = record?.history[idx + 1]?.state
+    results.push(check(
+      `replan_${state}_02_transitions_directly_to_planning_no_inspecting_hop`,
+      nextState === 'planning',
+      JSON.stringify({ nextState, tail: record?.history.map(h => h.state) }),
+    ))
+    results.push(check(
+      `replan_${state}_03_reaches_a_legal_post_planning_state`,
+      record?.state === 'awaiting_local_execution_approval'
+        || record?.state === 'escalation_recommended'
+        || record?.state === 'blocked',
+      record?.state ?? 'missing',
+    ))
+  }
+
+  await resetNativeBuilderState()
+  await resetFixtureToBroken()
+  return results
+}
+
+// ---------------------------------------------------------------------------
+// 6. Full end-to-end acceptance test, driven entirely through the Mission Runtime wrapper.
 // ---------------------------------------------------------------------------
 
 async function testEndToEndEngineeringMission(): Promise<CaseResult[]> {
@@ -136,6 +293,19 @@ async function testEndToEndEngineeringMission(): Promise<CaseResult[]> {
   results.push(check('e2e_01_mission_created', Boolean(mission.id) && mission.kind === 'engineering', mission.id))
   results.push(check('e2e_02_single_agent_provider_invoked_exactly_once', mission.providerOpinions.length === 1 && mission.providerOpinions[0].family === 'claude', JSON.stringify(mission.providerOpinions)))
   results.push(check('e2e_03_provider_opinion_is_honest_not_faked_success', mission.providerOpinions[0].ok === false || mission.providerOpinions[0].text.length > 0, JSON.stringify(mission.providerOpinions[0])))
+
+  // Provider-opinion durability (Foundation Hardening §2): re-read the AUTHORITATIVE repair record
+  // straight off storage.ts (which has no in-process cache — every call re-reads from disk), not
+  // through the strategy's own get(). This is the "simulate a restart" proof: if the opinion only
+  // lived in an in-process Map, this independent disk re-read would come back empty.
+  const repairAfterCreate = await getRepair(mission.id)
+  results.push(check(
+    'e2e_03b_provider_opinion_durable_on_authoritative_repair_record',
+    Boolean(repairAfterCreate?.advisoryProviderOpinions?.length)
+      && repairAfterCreate!.advisoryProviderOpinions![0].family === 'claude'
+      && Boolean(repairAfterCreate!.advisoryProviderOpinions![0].recordedAt),
+    JSON.stringify(repairAfterCreate?.advisoryProviderOpinions),
+  ))
 
   // 2. Repository read/search + proposal generation already happened inside create() via
   // native-builder's planRepair (gatherExcerpts -> readRepoFile / searchRepoText).
@@ -184,18 +354,77 @@ async function testEndToEndEngineeringMission(): Promise<CaseResult[]> {
 
     const afterRollbackUnresolved = await countUnresolvedIssues()
     results.push(check('e2e_18_rollback_reopens_issue_badge', afterRollbackUnresolved === beforeUnresolved + 1, `${afterRollbackUnresolved} vs baseline+1=${beforeUnresolved + 1}`))
+
+    // 6. Replan / iteration proof (Foundation Hardening §3). The repair is now 'rolled_back' — one
+    // of the five states NATIVE_REPAIR_TRANSITIONS declares may re-enter 'planning' directly, and
+    // rollback just restored the fixture to its ORIGINAL broken content, so this is a genuine
+    // second cycle against a real, still-broken file — not a forced state or a test-only mutation.
+    // This exercises the exact runtime.ts planRepair() fix end to end through real production code:
+    // observe(rolled_back) -> replan -> apply revised proposal -> validate -> verify -> resolved.
+    const beforeReplan = await getRepair(mission.id)
+    results.push(check('e2e_19_repair_is_in_a_replan_eligible_state', beforeReplan?.state === 'rolled_back', beforeReplan?.state ?? 'missing'))
+
+    let replanThrew = false
+    let replanned: Awaited<ReturnType<typeof planRepair>> | null = null
+    try {
+      replanned = await planRepair(mission.id, { targetFiles: [FIXTURE_REL] })
+    } catch {
+      replanThrew = true
+    }
+    results.push(check('e2e_20_replan_does_not_throw_invalid_state_transition', !replanThrew, String(replanThrew)))
+
+    const rolledBackIdx = replanned?.history.map(h => h.state).lastIndexOf('rolled_back') ?? -1
+    const stateAfterRolledBack = replanned?.history[rolledBackIdx + 1]?.state
+    results.push(check(
+      'e2e_21_replan_transitions_directly_rolled_back_to_planning_no_inspecting_hop',
+      stateAfterRolledBack === 'planning',
+      JSON.stringify({ stateAfterRolledBack, tail: replanned?.history.slice(-4).map(h => h.state) }),
+    ))
+    results.push(check(
+      'e2e_22_replan_produces_a_fresh_executable_proposal',
+      replanned?.state === 'awaiting_local_execution_approval' && replanned.selectedProposal?.sourceKind === 'deterministic',
+      replanned?.state ?? 'missing',
+    ))
+
+    if (replanned?.state === 'awaiting_local_execution_approval') {
+      const reapplied = await strategy.approve(mission.id, true)
+      results.push(check('e2e_23_second_apply_after_replan_runs_for_real', reapplied.validationResults.length > 0, String(reapplied.validationResults.length)))
+
+      const patchedAgain = await readRepoFile(FIXTURE_REL)
+      results.push(check('e2e_24_second_patch_actually_written_to_disk', patchedAgain.ok && patchedAgain.content.includes('values.length;'), patchedAgain.ok ? 'contains fixed bound' : patchedAgain.error))
+
+      if (reapplied.status === 'awaiting_commander_decision') {
+        const resolvedAgain = await strategy.decide(mission.id, true)
+        results.push(check('e2e_25_replanned_mission_reaches_completed', resolvedAgain.status === 'completed', resolvedAgain.status))
+      } else {
+        results.push(check('e2e_25_replanned_mission_reaches_completed', false, `skipped — status was ${reapplied.status}, not awaiting_commander_decision`))
+      }
+    } else {
+      for (const name of ['e2e_23_second_apply_after_replan_runs_for_real', 'e2e_24_second_patch_actually_written_to_disk', 'e2e_25_replanned_mission_reaches_completed']) {
+        results.push(check(name, false, `skipped — replanned status was ${replanned?.state ?? 'missing'}, not awaiting_local_execution_approval`))
+      }
+    }
   } else {
-    for (const name of ['e2e_14_commander_accept_completes_mission', 'e2e_15_badge_decrements_on_completion', 'e2e_16_rollback_requires_approval_gate', 'e2e_17_rollback_restores_original_fixture', 'e2e_18_rollback_reopens_issue_badge']) {
+    for (const name of [
+      'e2e_14_commander_accept_completes_mission', 'e2e_15_badge_decrements_on_completion',
+      'e2e_16_rollback_requires_approval_gate', 'e2e_17_rollback_restores_original_fixture',
+      'e2e_18_rollback_reopens_issue_badge', 'e2e_19_repair_is_in_a_replan_eligible_state',
+      'e2e_20_replan_does_not_throw_invalid_state_transition',
+      'e2e_21_replan_transitions_directly_rolled_back_to_planning_no_inspecting_hop',
+      'e2e_22_replan_produces_a_fresh_executable_proposal',
+      'e2e_23_second_apply_after_replan_runs_for_real', 'e2e_24_second_patch_actually_written_to_disk',
+      'e2e_25_replanned_mission_reaches_completed',
+    ]) {
       results.push(check(name, false, `skipped — mission status was ${applied.status}, not awaiting_commander_decision`))
     }
   }
 
-  // 6. Mission is auditable: native-builder already writes every transition to
+  // 7. Mission is auditable: native-builder already writes every transition to
   // war_room_audit_logs (category 'repo') via lib/war-room/repoAudit.ts — this suite does not
   // re-verify that write (nativeBuilder.validation.ts's own safety_* checks already cover it end
   // to end); it verifies only that the mission's identifiers needed to trace that trail are
   // present in the projection.
-  results.push(check('e2e_19_mission_carries_traceable_native_builder_ids', mission.nativeBuilder.repairId === mission.id && Boolean(mission.nativeBuilder.issueId), JSON.stringify(mission.nativeBuilder)))
+  results.push(check('e2e_26_mission_carries_traceable_native_builder_ids', mission.nativeBuilder.repairId === mission.id && Boolean(mission.nativeBuilder.issueId), JSON.stringify(mission.nativeBuilder)))
 
   // Cleanup: leave state reset for the next run, matching nativeBuilder.validation.ts's own
   // idempotency discipline.
@@ -210,6 +439,8 @@ export async function runMissionRuntimeValidation(): Promise<CaseResult[]> {
     ...testRegistrySanity(),
     ...testApprovalGateReused(),
     ...testStatusProjection(),
+    ...(await testEngineeringReadSurfaceDelegatesAndIsReadOnly()),
+    ...(await testReplanTransitionGraphCoverage()),
     ...(await testEndToEndEngineeringMission()),
   ]
 }

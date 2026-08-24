@@ -21,7 +21,7 @@ import {
   commanderResolve,
   rollbackNow,
 } from '@/lib/native-builder/runtime'
-import { getIssue, getRepair } from '@/lib/native-builder/storage'
+import { getIssue, getRepair, saveRepair } from '@/lib/native-builder/storage'
 import { issueFromCommanderReport } from '@/lib/native-builder/issueIngest'
 import type { NativeIssueRecord, NativeRepairRecord } from '@/lib/native-builder/types'
 import {
@@ -63,11 +63,13 @@ async function requestSingleAgentOpinion(
   return { family, ok: result.ok, text: result.ok ? result.text : '', error: result.ok ? undefined : result.error }
 }
 
-function project(
-  issue: NativeIssueRecord,
-  repair: NativeRepairRecord,
-  providerOpinions: RuntimeMissionProviderOpinion[],
-): RuntimeMission {
+/** Strips the durability-only `recordedAt` stamp back down to the projection shape. */
+function toRuntimeOpinions(repair: NativeRepairRecord): RuntimeMissionProviderOpinion[] {
+  return (repair.advisoryProviderOpinions ?? []).map(({ family, ok, text, error }) => ({ family, ok, text, error }))
+}
+
+function project(issue: NativeIssueRecord, repair: NativeRepairRecord): RuntimeMission {
+  const providerOpinions = toRuntimeOpinions(repair)
   return {
     id: repair.id,
     kind: 'engineering',
@@ -96,14 +98,27 @@ function project(
   }
 }
 
-/** Provider opinions are not part of NativeRepairRecord (native-builder's own record has no field
- * for them — Council-family opinions there are folded into advisory proposals instead). This
- * module keeps them in a small in-process map keyed by repairId so a mission's projection can
- * include them across create()/get() calls without adding a persisted field to native-builder's
- * own record shape. This is deliberately NOT a mission state store: losing this map on process
- * restart loses only the advisory text, never the mission's actual status, proposal, validation,
- * or diff evidence, all of which remain fully owned by native-builder's file-based storage. */
-const providerOpinionsByRepairId = new Map<string, RuntimeMissionProviderOpinion[]>()
+/**
+ * Persists advisory provider opinions onto the authoritative NativeRepairRecord itself (Engineering
+ * Core Foundation Hardening §2), replacing the prior in-process `providerOpinionsByRepairId` Map.
+ * Reuses native-builder's own saveRepair() — the same persistence mechanism runtime.ts already
+ * uses for every other field — so this is not a second persistence system, and a process restart
+ * no longer loses the advisory text: the next get() reads it straight back off
+ * repair.advisoryProviderOpinions via requireRepair()/getRepair(), just like every other field.
+ */
+async function persistAdvisoryOpinions(
+  repair: NativeRepairRecord,
+  opinions: RuntimeMissionProviderOpinion[],
+): Promise<NativeRepairRecord> {
+  if (!opinions.length) return repair
+  const recordedAt = new Date().toISOString()
+  const updated: NativeRepairRecord = {
+    ...repair,
+    advisoryProviderOpinions: opinions.map(o => ({ ...o, recordedAt })),
+  }
+  await saveRepair(updated)
+  return updated
+}
 
 export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<EngineeringMissionRequest> = {
   kind: 'engineering',
@@ -125,9 +140,8 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
       )
     }
     const planned = await planRepair(repair.id, { targetFiles: request.targetFiles })
-    const opinions = opinion ? [opinion] : []
-    if (opinions.length) providerOpinionsByRepairId.set(repair.id, opinions)
-    return project(issue, planned, opinions)
+    const withOpinions = opinion ? await persistAdvisoryOpinions(planned, [opinion]) : planned
+    return project(issue, withOpinions)
   },
 
   async get(missionId) {
@@ -135,7 +149,7 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
     if (!repair) return null
     const issue = await getIssue(repair.issueId)
     if (!issue) return null
-    return project(issue, repair, providerOpinionsByRepairId.get(repair.id) ?? [])
+    return project(issue, repair)
   },
 
   async approve(missionId, approvalGranted) {
@@ -144,20 +158,20 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
     const repair = await approveAndApply(missionId, approvalGranted)
     const issue = await getIssue(repair.issueId)
     if (!issue) throw new Error(`No issue found for repair ${missionId} after approveAndApply.`)
-    return project(issue, repair, providerOpinionsByRepairId.get(repair.id) ?? [])
+    return project(issue, repair)
   },
 
   async decide(missionId, accepted) {
     const repair = await commanderResolve(missionId, accepted)
     const issue = await getIssue(repair.issueId)
     if (!issue) throw new Error(`No issue found for repair ${missionId} after commanderResolve.`)
-    return project(issue, repair, providerOpinionsByRepairId.get(repair.id) ?? [])
+    return project(issue, repair)
   },
 
   async rollback(missionId) {
     const repair = await rollbackNow(missionId)
     const issue = await getIssue(repair.issueId)
     if (!issue) throw new Error(`No issue found for repair ${missionId} after rollbackNow.`)
-    return project(issue, repair, providerOpinionsByRepairId.get(repair.id) ?? [])
+    return project(issue, repair)
   },
 }
