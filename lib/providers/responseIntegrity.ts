@@ -90,7 +90,64 @@ const BROKEN_SYNC_TAIL = /\s*(?:sync|syncing|synchroni[sz]e?|synchroni[sz]ing)\w
  * truncated (abruptEnding still runs first and is unaffected); it only recognizes additional
  * legitimate complete-response endings so they aren't misclassified as incomplete.
  */
+const CLOSING_TAG_TAIL = /<\/[a-zA-Z][\w:-]*\s*>\s*$/
+const YAML_KV_LINE = /^[\w.-]+:\s*\S.{0,60}$/
+
+/**
+ * Response Integrity Hardening (2026-08-24): three more structural forms carry the exact same
+ * property as the list/table/fence cases above — the format itself has no terminal-punctuation
+ * convention, so a genuinely complete response in that format routinely ends without one. A
+ * blockquote is deliberately excluded: unlike these, a blockquote quotes prose, and complete
+ * quoted prose normally keeps its own sentence punctuation, so an unpunctuated blockquote ending
+ * is still a meaningful truncation signal, not a format quirk — it is intentionally left as a
+ * genuine failure case (see the regression suite).
+ */
+function looksLikeCompleteJson(text: string): boolean {
+  const t = text.trim()
+  // Whole response is JSON (rare — usually JSON is appended after explanatory prose).
+  if (t.startsWith('{') || t.startsWith('[')) {
+    try {
+      JSON.parse(t)
+      return true
+    } catch {
+      // fall through — might still be a trailing JSON block below
+    }
+  }
+  // The common case: prose, then a trailing JSON blob on its own line(s). A single-line trailing
+  // blob parses on its own; pretty-printed JSON's last line is just its closing bracket, which is
+  // exactly as unambiguous a "this is deliberately finished" marker as a closing code fence.
+  const lines = t.split('\n')
+  let lastLine = ''
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i].trim().length > 0) {
+      lastLine = lines[i].trim()
+      break
+    }
+  }
+  if (lastLine === '}' || lastLine === ']') return true
+  if ((lastLine.startsWith('{') || lastLine.startsWith('[')) ) {
+    try {
+      JSON.parse(lastLine)
+      return true
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
+function endsInYamlBlock(text: string): boolean {
+  const nonEmptyLines = text.split('\n').map(l => l.trim()).filter(Boolean)
+  if (nonEmptyLines.length < 2) return false
+  const tail = nonEmptyLines.slice(-2)
+  return tail.every(line => YAML_KV_LINE.test(line))
+}
+
 function endsWithStructuralElement(text: string): boolean {
+  if (CLOSING_TAG_TAIL.test(text.trim())) return true // closing HTML/XML tag (</ul>, </result>, ...)
+  if (looksLikeCompleteJson(text)) return true // whole response is a valid JSON object/array
+  if (endsInYamlBlock(text)) return true // trailing lines are YAML-shaped key: value pairs
+
   const lines = text.split('\n')
   let lastLine = ''
   for (let i = lines.length - 1; i >= 0; i -= 1) {
@@ -102,7 +159,7 @@ function endsWithStructuralElement(text: string): boolean {
   if (!lastLine) return false
   if (lastLine === '```' || /^```\s*$/.test(lastLine)) return true // closing markdown code fence
   if (/\|\s*$/.test(lastLine) && lastLine.includes('|')) return true // markdown table row
-  if (/^[-*•]\s+\S/.test(lastLine)) return true // unordered list item, no trailing period expected
+  if (/^[-*•]\s+\S/.test(lastLine)) return true // unordered list item (covers markdown checklists too)
   if (/^\d+[.)]\s+\S/.test(lastLine)) return true // ordered list item
   return false
 }
