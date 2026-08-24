@@ -7,6 +7,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { logWarRoomRepoAudit } from '@/lib/war-room/repoAudit'
+import { getActiveWorkspaceId } from '@/lib/repo/workspaceContext'
 import { previewDiff, hashDiffSample } from '@/lib/repo/diff'
 import {
   NATIVE_REPAIR_TRANSITIONS,
@@ -69,7 +70,16 @@ function transition(record: NativeRepairRecord, next: NativeRepairState, note?: 
 
 async function persist(record: NativeRepairRecord, auditMessage: string): Promise<NativeRepairRecord> {
   await saveRepair(record)
-  await logWarRoomRepoAudit(`native-builder: ${auditMessage}`, { repairId: record.id, state: record.state, issueId: record.issueId })
+  // Phase K (Observability & Audit): workspaceId is included whenever this call happened inside a
+  // Phase B-resolved workspace (runInResolvedWorkspace); omitted (not fabricated) otherwise, e.g.
+  // in this same suite's direct runtime.ts calls that never go through a workspace-aware route.
+  const workspaceId = getActiveWorkspaceId()
+  await logWarRoomRepoAudit(`native-builder: ${auditMessage}`, {
+    repairId: record.id,
+    state: record.state,
+    issueId: record.issueId,
+    ...(workspaceId ? { workspaceId } : {}),
+  })
   return record
 }
 

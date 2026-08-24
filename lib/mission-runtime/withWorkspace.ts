@@ -28,5 +28,8 @@ export async function runInResolvedWorkspace<T>(
   const resolved = await resolveWorkspaceRoot(workspaceId)
   if (!resolved.ok) return resolved
   if (!resolved.root) return { ok: true, value: await fn() }
-  return { ok: true, value: await runWithWorkspaceRoot(resolved.root, fn) }
+  // Phase K: thread the workspaceId itself (not just the resolved root) into the async context so
+  // audit-log call sites deeper in the call chain (native-builder/runtime.ts's persist()) can tag
+  // which workspace a mutation happened in.
+  return { ok: true, value: await runWithWorkspaceRoot(resolved.root, fn, workspaceId ?? undefined) }
 }

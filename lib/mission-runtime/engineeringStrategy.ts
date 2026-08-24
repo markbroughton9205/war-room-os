@@ -36,6 +36,8 @@ import {
   resolveConfiguredProviderFamily,
   type DirectProviderFamily,
 } from '@/lib/council/providerDirectCall'
+import { logWarRoomRepoAudit } from '@/lib/war-room/repoAudit'
+import { buildCouncilAssistAuditMetadata, buildProviderResolutionAuditMetadata } from './engineeringAudit'
 import {
   ENGINEERING_MISSION_CAPABILITIES,
   ENGINEERING_MISSION_POLICY,
@@ -94,13 +96,19 @@ async function requestSingleAgentOpinion(
  * hosted-coder had never been requested — the same honesty discipline requestSingleAgentOpinion
  * already applies for advisory opinions.
  */
-function resolveHostedCoderConfig(
-  requested: { enabled: boolean; family?: DirectProviderFamily } | undefined,
-): { family: DirectProviderFamily; invoke: typeof invokeDirectCouncilProvider } | undefined {
-  if (!requested?.enabled) return undefined
+type HostedCoderResolution = {
+  hostedCoder: { family: DirectProviderFamily; invoke: typeof invokeDirectCouncilProvider } | undefined
+  /** Phase K: the raw resolveConfiguredProviderFamily() outcome (null covers both "not
+   * requested" and "requested but unconfigured" — callers that need to distinguish those two
+   * check `requested?.enabled` themselves, exactly as buildProviderResolutionAuditMetadata does). */
+  resolvedFamily: DirectProviderFamily | null
+}
+
+function resolveHostedCoderConfig(requested: { enabled: boolean; family?: DirectProviderFamily } | undefined): HostedCoderResolution {
+  if (!requested?.enabled) return { hostedCoder: undefined, resolvedFamily: null }
   const resolved = resolveConfiguredProviderFamily(requested.family ?? 'claude')
-  if (!resolved) return undefined
-  return { family: resolved, invoke: invokeDirectCouncilProvider }
+  if (!resolved) return { hostedCoder: undefined, resolvedFamily: null }
+  return { hostedCoder: { family: resolved, invoke: invokeDirectCouncilProvider }, resolvedFamily: resolved }
 }
 
 /** Strips the durability-only `recordedAt` stamp back down to the projection shape. */
@@ -182,11 +190,21 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
         `native-builder merged this into an existing open issue (fingerprint ${issue.fingerprint}) without opening a new repair — call get() with the existing repair id instead of create() again for the same issue.`,
       )
     }
+    const { hostedCoder, resolvedFamily } = resolveHostedCoderConfig(request.coderProvider)
     const planned = await planRepair(repair.id, {
       targetFiles: request.targetFiles,
-      hostedCoder: resolveHostedCoderConfig(request.coderProvider),
+      hostedCoder,
       commanderRequestText: `${request.title}: ${request.description}`,
     })
+    // Phase K: audit the resolution decision itself (requested vs. actually resolved family),
+    // not just the eventual proposal — this is what makes an honest "why did this mission use
+    // deterministic matching instead of the hosted coder I asked for" trace possible.
+    if (request.coderProvider?.enabled) {
+      await logWarRoomRepoAudit(
+        'native-builder: hosted-coder provider resolved (create)',
+        buildProviderResolutionAuditMetadata(repair.id, request.coderProvider, resolvedFamily),
+      )
+    }
     const withOpinions = opinion ? await persistAdvisoryOpinions(planned, [opinion]) : planned
     return project(issue, withOpinions)
   },
@@ -240,6 +258,9 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
       councilAssistSessions: [...(repair.councilAssistSessions ?? []), session],
     }
     await saveRepair(updated)
+    // Phase K: audit which families were actually asked and which of them answered ok vs failed
+    // — Council Assist sessions were durable (Phase E) but never traced until this phase.
+    await logWarRoomRepoAudit('native-builder: council assist session recorded', buildCouncilAssistAuditMetadata(missionId, session))
     return project(issue, updated)
   },
 
@@ -311,11 +332,18 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
       : undefined
     const requestedCoderProvider =
       opts?.coderProvider !== undefined ? opts.coderProvider : priorHostedFamily ? { enabled: true, family: priorHostedFamily } : undefined
-    const hostedCoder = resolveHostedCoderConfig(requestedCoderProvider)
+    const { hostedCoder, resolvedFamily } = resolveHostedCoderConfig(requestedCoderProvider)
     const providerFallbackNote =
       requestedCoderProvider?.enabled && !hostedCoder
         ? ` Requested hosted-coder family "${requestedCoderProvider.family ?? 'claude'}" (and its configured fallbacks) is not available in this environment — falling back to deterministic/local-model matching only.`
         : ''
+    // Phase K: audit this iteration attempt's provider resolution the same way create() does.
+    if (requestedCoderProvider?.enabled) {
+      await logWarRoomRepoAudit(
+        'native-builder: hosted-coder provider resolved (auto-iterate)',
+        { ...buildProviderResolutionAuditMetadata(missionId, requestedCoderProvider, resolvedFamily), attempt: attemptNumber },
+      )
+    }
 
     const evidenceSummary = (summarizeFailureEvidenceForReplan(repair) || '(no structured failure evidence on record)') + providerFallbackNote
     const replanned = await planRepair(missionId, {
