@@ -22,6 +22,7 @@ import type {
   LocalReasoningLabel,
   NativeIssueRecord,
   NativePlannedChange,
+  NativeProposalSourceKind,
   NativeRepairProposal,
 } from './types'
 
@@ -159,7 +160,13 @@ const STRUCTURED_PROPOSAL_INSTRUCTIONS = `You are War Room's local repair reason
 {"diagnosis":"...","confidence":"low"|"medium"|"high","relevantFiles":["..."],"plannedChanges":[{"file":"...","reason":"...","operation":"replace_range","matchText":"...","replacementText":"..."}],"risks":["..."],"rollbackPlan":"..."}
 Rules: matchText must be an exact substring of the given file content that appears exactly once. Only propose changes to files you were shown. Keep the patch minimal.`
 
-function tryParseModelProposal(raw: string, issue: NativeIssueRecord, excerpts: InspectionExcerpt[], proposerId: string): NativeRepairProposal | null {
+function tryParseModelProposal(
+  raw: string,
+  issue: NativeIssueRecord,
+  excerpts: InspectionExcerpt[],
+  proposerId: string,
+  sourceKind: NativeProposalSourceKind = 'local_model',
+): NativeRepairProposal | null {
   const jsonMatch = raw.match(/\{[\s\S]*\}/)
   if (!jsonMatch) return null
   let parsed: {
@@ -203,7 +210,7 @@ function tryParseModelProposal(raw: string, issue: NativeIssueRecord, excerpts: 
 
   return {
     issueId: issue.id,
-    sourceKind: 'local_model',
+    sourceKind,
     proposerId,
     diagnosis: parsed.diagnosis ?? 'Local model diagnosis (unlabeled).',
     confidence,
@@ -257,7 +264,11 @@ export type NativeCouncilFamily = 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'ki
 export type NativeCouncilInvokeFn = (
   family: NativeCouncilFamily,
   prompt: string,
-  opts?: { timeoutMs?: number },
+  /** maxTokens/system are narrowly additive (Engineering Coder Proposal Generation phase) —
+   * requestCouncilOpinions below never passes them, so every existing Council-opinion caller is
+   * unaffected. requestHostedModelProposal is the one caller that uses them, to request a
+   * structured-proposal-sized response instead of Council's short-form opinion. */
+  opts?: { timeoutMs?: number; maxTokens?: number; system?: string },
 ) => Promise<{ ok: boolean; text: string; error?: string }>
 
 export type CouncilOpinion = {
@@ -299,6 +310,68 @@ export async function requestCouncilOpinions(
   })
 
   return Promise.all(calls)
+}
+
+// ---------------------------------------------------------------------------
+// 3b. Hosted-model coder proposal source — for previously-unseen Commander requests that no
+// deterministic template matches. Reuses tryParseModelProposal's EXACT parsing/validation
+// contract (same STRUCTURED_PROPOSAL_INSTRUCTIONS schema already proven for the local Ollama
+// path) — this is deliberately not a second patch schema or a second parser. Reuses the same
+// NativeCouncilInvokeFn dependency-injection pattern as requestCouncilOpinions above (the caller
+// passes in the real lib/council/providerDirectCall.ts:invokeDirectCouncilProvider), so no second
+// provider adapter layer is introduced either.
+// ---------------------------------------------------------------------------
+
+/** Generous relative to Council's 120-token stability-test cap, but still a hard ceiling — a
+ * structured-patch JSON body for a bounded (patchPolicy-limited) change fits comfortably within
+ * this; a proposal that doesn't is exactly the kind of oversized/incomplete output
+ * tryParseModelProposal and patchPolicy.ts are there to reject, not something to raise the cap for. */
+const HOSTED_CODER_MAX_TOKENS = 2000
+const HOSTED_CODER_TIMEOUT_MS = 30_000
+
+export type HostedModelOutcome =
+  | { status: 'proposal'; proposal: NativeRepairProposal }
+  | { status: 'unavailable'; detail: string }
+  | { status: 'insufficient'; detail: string }
+
+/**
+ * Requests a novel structured-patch proposal from a real hosted provider for a Commander request
+ * that no deterministic template matched. `excerpts` is caller-supplied (real repository
+ * inspection already happened in runtime.ts's gatherExcerpts) — this function does no filesystem
+ * access of its own. When `priorFailureEvidence` is supplied (a replan after a failed validation),
+ * it is included verbatim so the provider can see exactly what its previous attempt got wrong.
+ */
+export async function requestHostedModelProposal(
+  issue: NativeIssueRecord,
+  excerpts: InspectionExcerpt[],
+  family: NativeCouncilFamily,
+  invoke: NativeCouncilInvokeFn,
+  opts?: { priorFailureEvidence?: string; commanderRequestText?: string; timeoutMs?: number },
+): Promise<HostedModelOutcome> {
+  const excerptBlock = excerpts.map(e => `--- ${e.relPath} ---\n${e.content.slice(0, 6000)}`).join('\n\n')
+  const requestLine = opts?.commanderRequestText ? `\nCommander request: ${opts.commanderRequestText}` : ''
+  const failureBlock = opts?.priorFailureEvidence
+    ? `\n\nA previous attempt at this repair was applied and FAILED validation. Evidence from that
+failed attempt:\n${opts.priorFailureEvidence}\n\nProduce a corrected proposal that addresses this
+evidence — do not repeat the same change.`
+    : ''
+
+  const userPrompt = `Issue: ${issue.title}\nSeverity: ${issue.severity}\nSubsystem: ${issue.affectedSubsystem}\nEvidence:\n${issue.evidence.join('\n')}${requestLine}\n\nSource excerpts:\n${excerptBlock}${failureBlock}`
+
+  const result = await invoke(family, userPrompt, {
+    system: STRUCTURED_PROPOSAL_INSTRUCTIONS,
+    maxTokens: HOSTED_CODER_MAX_TOKENS,
+    timeoutMs: opts?.timeoutMs ?? HOSTED_CODER_TIMEOUT_MS,
+  })
+  if (!result.ok) {
+    return { status: 'unavailable', detail: result.error || `Hosted provider (${family}) unavailable.` }
+  }
+
+  const proposal = tryParseModelProposal(result.text, issue, excerpts, `hosted:${family}`, 'hosted_model')
+  if (!proposal) {
+    return { status: 'insufficient', detail: 'Hosted provider responded but did not produce a usable structured proposal.' }
+  }
+  return { status: 'proposal', proposal }
 }
 
 export function councilOpinionsAsAdvisoryProposals(issue: NativeIssueRecord, opinions: CouncilOpinion[]): NativeRepairProposal[] {

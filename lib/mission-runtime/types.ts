@@ -68,6 +68,15 @@ export type EngineeringMissionRequest = {
     enabled: boolean
     family?: 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'kimi'
   }
+  /** Hosted-model coder proposal source (General-Purpose Coder Proposal Generation phase) — a
+   * distinct concept from singleAgentProvider above: that one produces a short advisory opinion
+   * BEFORE planning even starts and never becomes a patch; this one is the actual novel
+   * structured-patch proposal source planRepair() selects from when no deterministic template
+   * matches. Defaults to disabled; the deterministic/local-model proposal path works without it. */
+  coderProvider?: {
+    enabled: boolean
+    family?: 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'kimi'
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +112,7 @@ export const RUNTIME_MISSION_CAPABILITIES = [
   'repo_status_read',
   'repo_diff_read',
   'provider_single_agent',
+  'provider_coder_proposal',
   'patch_apply_gated',
   'validation_run',
   'rollback_gated',
@@ -117,6 +127,7 @@ export const ENGINEERING_MISSION_CAPABILITIES: readonly RuntimeMissionCapability
   'repo_status_read',
   'repo_diff_read',
   'provider_single_agent',
+  'provider_coder_proposal',
   'patch_apply_gated',
   'validation_run',
   'rollback_gated',

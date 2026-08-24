@@ -139,7 +139,14 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
         `native-builder merged this into an existing open issue (fingerprint ${issue.fingerprint}) without opening a new repair — call get() with the existing repair id instead of create() again for the same issue.`,
       )
     }
-    const planned = await planRepair(repair.id, { targetFiles: request.targetFiles })
+    const hostedCoder = request.coderProvider?.enabled
+      ? { family: request.coderProvider.family ?? 'claude', invoke: invokeDirectCouncilProvider }
+      : undefined
+    const planned = await planRepair(repair.id, {
+      targetFiles: request.targetFiles,
+      hostedCoder,
+      commanderRequestText: `${request.title}: ${request.description}`,
+    })
     const withOpinions = opinion ? await persistAdvisoryOpinions(planned, [opinion]) : planned
     return project(issue, withOpinions)
   },

@@ -25,8 +25,10 @@ import {
   councilOpinionsAsAdvisoryProposals,
   determineLocalReasoningLabel,
   requestCouncilOpinions,
+  requestHostedModelProposal,
   requestLocalModelProposal,
   selectPreferredProposal,
+  type HostedModelOutcome,
   type InspectionExcerpt,
   type LocalModelOutcome,
   type NativeCouncilFamily,
@@ -199,6 +201,37 @@ export type PlanRepairOptions = {
    * file header) — the API route layer passes lib/council/providerDirectCall.ts's
    * invokeDirectCouncilProvider here. Required only when councilFamilies is non-empty. */
   councilInvoke?: NativeCouncilInvokeFn
+  /** Hosted-model coder proposal source (General-Purpose Coder Proposal Generation phase): a real
+   * hosted provider generating a novel structured-patch proposal for a Commander request no
+   * deterministic template matches. `invoke` is the same injected-dependency pattern as
+   * councilInvoke — the caller passes the real invokeDirectCouncilProvider. Omitted entirely by
+   * default, so every existing planRepair() caller is unaffected. */
+  hostedCoder?: {
+    family: NativeCouncilFamily
+    invoke: NativeCouncilInvokeFn
+  }
+  /** Free-text Commander request included in the hosted-coder prompt when provided. Purely
+   * informational context — never affects which validations run or which policy applies. */
+  commanderRequestText?: string
+}
+
+/** Built only for a replan (isReplan === true): summarizes the PRIOR attempt's real validation
+ * failures / verification evidence so a hosted coder proposal source can see exactly what its
+ * previous attempt got wrong, instead of blindly retrying the same change. Reads only fields
+ * already on the record — no new evidence collection mechanism. */
+function summarizeFailureEvidenceForReplan(record: NativeRepairRecord): string {
+  const parts: string[] = []
+  if (record.verification) {
+    parts.push(`Verification status: ${record.verification.status}.`)
+    parts.push(...record.verification.evidence)
+  }
+  for (const result of record.validationResults) {
+    if (result.ok) continue
+    const label = result.operation.targets?.length ? `${result.operation.id} (${result.operation.targets.join(', ')})` : result.operation.id
+    const output = (result.stderr || result.stdout).slice(0, 2000)
+    parts.push(`${label} FAILED (exit ${result.exitCode}):\n${output}`)
+  }
+  return parts.join('\n')
 }
 
 export async function planRepair(repairId: string, opts: PlanRepairOptions = {}): Promise<NativeRepairRecord> {
@@ -249,6 +282,20 @@ export async function planRepair(repairId: string, opts: PlanRepairOptions = {})
   if (opts.useLocalModel !== false) {
     localModelOutcome = await requestLocalModelProposal(issue, excerpts)
     if (localModelOutcome.status === 'proposal') proposals.push(localModelOutcome.proposal)
+  }
+
+  let hostedModelOutcome: HostedModelOutcome | null = null
+  if (opts.hostedCoder) {
+    // Only a genuine replan carries prior failure evidence — a first-time hosted proposal has no
+    // prior attempt to summarize. `record` here is the ORIGINAL pre-transition record (its
+    // validationResults/verification reflect whatever the last apply cycle produced), not
+    // `withProposals`, which is correct: we want the evidence from before this planning pass.
+    const priorFailureEvidence = isReplan ? summarizeFailureEvidenceForReplan(record) : undefined
+    hostedModelOutcome = await requestHostedModelProposal(issue, excerpts, opts.hostedCoder.family, opts.hostedCoder.invoke, {
+      priorFailureEvidence,
+      commanderRequestText: opts.commanderRequestText,
+    })
+    if (hostedModelOutcome.status === 'proposal') proposals.push(hostedModelOutcome.proposal)
   }
 
   if (opts.councilFamilies?.length && opts.councilInvoke) {

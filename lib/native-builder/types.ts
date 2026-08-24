@@ -181,7 +181,7 @@ export type NativeValidationOperation = {
   targets?: string[]
 }
 
-export type NativeProposalSourceKind = 'deterministic' | 'local_model' | 'council_family'
+export type NativeProposalSourceKind = 'deterministic' | 'local_model' | 'hosted_model' | 'council_family'
 
 export type NativeRepairProposal = {
   issueId: string

@@ -43,7 +43,7 @@ function sanitizeProviderError(message: string): string {
     .slice(0, 280)
 }
 
-async function callOpenAi(prompt: string, system: string, signal?: AbortSignal): Promise<DirectProviderCallResult> {
+async function callOpenAi(prompt: string, system: string, maxTokens: number, signal?: AbortSignal): Promise<DirectProviderCallResult> {
   if (!process.env.OPENAI_API_KEY) {
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'OPENAI_API_KEY not configured' }
   }
@@ -60,7 +60,7 @@ async function callOpenAi(prompt: string, system: string, signal?: AbortSignal):
         { role: 'system', content: system },
         { role: 'user', content: prompt },
       ],
-      max_tokens: DEFAULT_MAX_TOKENS,
+      max_tokens: maxTokens,
     }),
   })
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
@@ -79,7 +79,7 @@ async function callOpenAi(prompt: string, system: string, signal?: AbortSignal):
   return { ok: true, text: compactDisplayWhitespace(text), transportStatus: res.status }
 }
 
-async function callAnthropic(prompt: string, system: string, signal?: AbortSignal): Promise<DirectProviderCallResult> {
+async function callAnthropic(prompt: string, system: string, maxTokens: number, signal?: AbortSignal): Promise<DirectProviderCallResult> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'ANTHROPIC_API_KEY not configured' }
   }
@@ -93,7 +93,7 @@ async function callAnthropic(prompt: string, system: string, signal?: AbortSigna
     signal,
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: DEFAULT_MAX_TOKENS,
+      max_tokens: maxTokens,
       system,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -114,7 +114,7 @@ async function callAnthropic(prompt: string, system: string, signal?: AbortSigna
   return { ok: true, text: compactDisplayWhitespace(text), transportStatus: res.status }
 }
 
-async function callGrokDirect(prompt: string, system: string, timeoutMs: number): Promise<DirectProviderCallResult> {
+async function callGrokDirect(prompt: string, system: string, timeoutMs: number, maxTokens: number): Promise<DirectProviderCallResult> {
   if (!process.env.XAI_API_KEY) {
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'XAI_API_KEY not configured' }
   }
@@ -123,7 +123,7 @@ async function callGrokDirect(prompt: string, system: string, timeoutMs: number)
       { role: 'system', content: system },
       { role: 'user', content: prompt },
     ],
-    maxTokens: DEFAULT_MAX_TOKENS,
+    maxTokens,
     timeoutMs,
   })
   if (result.status !== 'online') {
@@ -142,14 +142,14 @@ async function callGrokDirect(prompt: string, system: string, timeoutMs: number)
   return { ok: true, text: compactDisplayWhitespace(result.text), transportStatus: 200 }
 }
 
-async function callKimiDirect(prompt: string, system: string, timeoutMs: number): Promise<DirectProviderCallResult> {
+async function callKimiDirect(prompt: string, system: string, timeoutMs: number, maxTokens: number): Promise<DirectProviderCallResult> {
   if (!isKimiConfigured()) {
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'Kimi key missing', kimiErrorKind: 'key_missing' }
   }
   const result = await completeKimiChat({
     system,
     messages: [{ role: 'user', content: prompt }],
-    maxTokens: DEFAULT_MAX_TOKENS,
+    maxTokens,
     timeoutMs,
   })
   if (!result.ok) {
@@ -175,15 +175,15 @@ async function callKimiDirect(prompt: string, system: string, timeoutMs: number)
   }
 }
 
-async function callGeminiDirect(prompt: string, system: string): Promise<DirectProviderCallResult> {
+async function callGeminiDirect(prompt: string, system: string, maxTokens: number, timeoutMs: number): Promise<DirectProviderCallResult> {
   if (!process.env.GEMINI_API_KEY) {
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'GEMINI_API_KEY not configured' }
   }
   const result = await completeGeminiCouncilMessage({
     userPrompt: prompt,
     systemPrompt: system,
-    maxOutputTokens: DEFAULT_MAX_TOKENS,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
+    maxOutputTokens: maxTokens,
+    timeoutMs,
   })
   if (!result.ok) {
     const err = result.degraded ? result.note : result.error
@@ -204,36 +204,50 @@ async function callGeminiDirect(prompt: string, system: string): Promise<DirectP
 export async function invokeDirectCouncilProvider(
   family: DirectProviderFamily,
   prompt: string,
-  opts?: { timeoutMs?: number },
+  opts?: {
+    timeoutMs?: number
+    /** Narrowly additive (Engineering Coder Proposal Generation phase): overrides the fixed
+     * 120-token Council stability-test cap for callers that genuinely need more (e.g. a hosted
+     * coder proposal, which must return a structured-patch JSON body). Every existing Council
+     * caller omits this and gets DEFAULT_MAX_TOKENS exactly as before — this option changes
+     * nothing about current Council behavior. */
+    maxTokens?: number
+    /** Narrowly additive: overrides MINIMAL_SYSTEM for callers that need a different system
+     * framing (e.g. the hosted coder's structured-proposal instructions). Every existing Council
+     * caller omits this and gets MINIMAL_SYSTEM exactly as before. */
+    system?: string
+  },
 ): Promise<DirectProviderCallResult> {
   const userPrompt = toDisplayText(prompt) || 'Reply with OK only.'
-  const system = MINIMAL_SYSTEM
+  const system = opts?.system ?? MINIMAL_SYSTEM
+  const maxTokens = opts?.maxTokens ?? DEFAULT_MAX_TOKENS
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
 
   try {
     if (family === 'chatgpt' || family === 'baby') {
-      return await callOpenAi(userPrompt, system, ac.signal)
+      return await callOpenAi(userPrompt, system, maxTokens, ac.signal)
     }
     if (family === 'claude') {
-      return await callAnthropic(userPrompt, system, ac.signal)
+      return await callAnthropic(userPrompt, system, maxTokens, ac.signal)
     }
     if (family === 'red_team') {
       return await callAnthropic(
         userPrompt,
         `${system} Flag unsupported certainty only when visible in the prompt.`,
+        maxTokens,
         ac.signal,
       )
     }
     if (family === 'grok') {
-      return await callGrokDirect(userPrompt, system, timeoutMs)
+      return await callGrokDirect(userPrompt, system, timeoutMs, maxTokens)
     }
     if (family === 'gemini') {
-      return await callGeminiDirect(userPrompt, system)
+      return await callGeminiDirect(userPrompt, system, maxTokens, timeoutMs)
     }
     if (family === 'kimi') {
-      return await callKimiDirect(userPrompt, system, timeoutMs)
+      return await callKimiDirect(userPrompt, system, timeoutMs, maxTokens)
     }
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'unknown provider' }
   } catch (error) {
