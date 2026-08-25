@@ -1013,6 +1013,10 @@ const STUB_PROVIDERS = new Set([
 // docs/earth-knowledge/gap-matrix.md "Live probe results" for the full run
 // transcript this reflects (testedAt included there).
 const LIVE_VERIFIED_PROVIDERS = new Set([
+  // Confirmed live this mission via the Phase 4 controlled-batch live-validation
+  // sweep (scripts/run-research-engine-live-validation.mjs), 2026-08-25.
+  'econstor', 'github_advisory', 'imf_sdmx', 'ncbi', 'usgs_national_map', 'usgs_water',
+  'w3c_api', 'wayback', 'world_bank_projects', 'yago',
   'arxiv', 'crossref', 'wikidata', 'usgs_earthquake', 'usgs_earthquake_feed',
   'usgs_sciencebase', 'library_of_congress', 'world_bank_indicators', 'mitre_attack', 'gleif',
   'wikipedia', 'europe_pmc', 'clinicaltrials_gov', 'openfda', 'pubchem', 'gbif', 'uniprot',

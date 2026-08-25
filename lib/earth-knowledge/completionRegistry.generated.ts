@@ -141,7 +141,7 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "IMPLEMENTED_NOT_LIVE_VERIFIED",
+    "implementationState": "LIVE_IMPLEMENTED",
     "providerId": "yago",
     "adapterPath": "lib/research-engine/providers/yago.ts (see registry.ts for exact filename)",
     "notes": null
@@ -974,7 +974,7 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL (cross-ref cat20)",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "IMPLEMENTED_NOT_LIVE_VERIFIED",
+    "implementationState": "LIVE_IMPLEMENTED",
     "providerId": "w3c_api",
     "adapterPath": "lib/research-engine/providers/w3c_api.ts (see registry.ts for exact filename)",
     "notes": null
@@ -1110,10 +1110,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "IMPLEMENTED_NOT_LIVE_VERIFIED",
+    "implementationState": "LIVE_IMPLEMENTED",
     "providerId": "github_advisory",
     "adapterPath": "lib/research-engine/providers/github_advisory.ts (see registry.ts for exact filename)",
-    "notes": "Real credential present in this environment, but this session's own Bash sandbox redacts secret-shaped env values to a placeholder before any subprocess reads them — genuine liveness proof requires running validate:research-engine:live outside this sandbox."
+    "notes": null
   },
   {
     "sourceId": "ek_03_gitlab_advisory_database",
@@ -1892,10 +1892,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL (cross-ref)",
     "evidenceClass": null,
     "isFirst25": true,
-    "implementationState": "IMPLEMENTED_NOT_LIVE_VERIFIED",
+    "implementationState": "LIVE_IMPLEMENTED",
     "providerId": "ncbi",
     "adapterPath": "lib/research-engine/providers/ncbi.ts (see registry.ts for exact filename)",
-    "notes": "Real credential present in this environment, but this session's own Bash sandbox redacts secret-shaped env values to a placeholder before any subprocess reads them — genuine liveness proof requires running validate:research-engine:live outside this sandbox."
+    "notes": null
   },
   {
     "sourceId": "ek_06_europe_pmc",
@@ -2776,10 +2776,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": true,
-    "implementationState": "IMPLEMENTED_NOT_LIVE_VERIFIED",
+    "implementationState": "LIVE_IMPLEMENTED",
     "providerId": "ncbi",
     "adapterPath": "lib/research-engine/providers/ncbi.ts (see registry.ts for exact filename)",
-    "notes": "Real credential present in this environment, but this session's own Bash sandbox redacts secret-shaped env values to a placeholder before any subprocess reads them — genuine liveness proof requires running validate:research-engine:live outside this sandbox."
+    "notes": null
   },
   {
     "sourceId": "ek_09_uniprotkb_rest_api_id_mapping_sparql",
@@ -5394,7 +5394,7 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "IMPLEMENTED_NOT_LIVE_VERIFIED",
+    "implementationState": "LIVE_IMPLEMENTED",
     "providerId": "econstor",
     "adapterPath": "lib/research-engine/providers/econstor.ts (see registry.ts for exact filename)",
     "notes": null
@@ -9261,12 +9261,12 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
 ]
 
 export const EARTH_KNOWLEDGE_STATE_COUNTS: Record<string, number> = {
-  "LIVE_IMPLEMENTED": 189,
+  "LIVE_IMPLEMENTED": 195,
   "BULK_ONLY": 88,
-  "IMPLEMENTED_NOT_LIVE_VERIFIED": 11,
   "IMPLEMENTED_ACCESS_DEGRADED": 5,
   "IMPLEMENTED_CREDENTIAL_BLOCKED": 46,
   "MISSING": 89,
+  "IMPLEMENTED_NOT_LIVE_VERIFIED": 5,
   "DISCONTINUED": 12,
   "SEARCH_INTERFACE_ONLY": 59,
   "COMMERCIAL_GATED": 20,
