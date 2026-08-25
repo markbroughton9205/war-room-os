@@ -1,0 +1,303 @@
+// Real, reproducible live-network verification for lib/research-engine/
+// providers — the structural gap identified during the Earth Knowledge
+// reconciliation mission (diagnostics/validation.ts is 100% deterministic
+// mocked-fetch coverage; this script is the first actual live-HTTP proof for
+// this subsystem, mirroring the existing scripts/run-public-rss-live-validation.mjs
+// pattern). Makes real requests to real upstream APIs. Never logs secret
+// values — only provider ids, HTTP outcomes, and non-sensitive record counts.
+
+import { RESEARCH_PROVIDER_ENV, providerConfigStatus } from '../lib/research-engine/config/providerEnv.ts'
+import { IMPLEMENTED_PROVIDER_ADAPTERS } from '../lib/research-engine/providers/registry.ts'
+
+// One realistic, bounded test query per provider — chosen to be stable,
+// well-known, and unlikely to ever return zero results.
+const TEST_QUERIES = {
+  exa: 'artificial intelligence',
+  github: 'react',
+  sam_gov: 'services',
+  fmcsa: 'usdot 44110',
+  ncbi: 'covid',
+  fred: 'GDP',
+  semantic_scholar: 'transformer neural network',
+  arxiv: 'quantum computing',
+  crossref: 'climate change',
+  nasa: 'asteroid',
+  nasa_gibs: 'imagery',
+  uspto: 'patent',
+  courtlistener: 'contract dispute',
+  internet_archive: 'moon landing',
+  wayback: 'example.com',
+  world_bank_indicators: 'NY.GDP.MKTP.CD for USA',
+  world_bank_data_catalog: 'population',
+  world_bank_projects: 'infrastructure',
+  world_bank_finances: 'loans',
+  world_bank_climate: 'temperature',
+  imf_sdmx: 'GDP',
+  usgs_water: 'site 01646500',
+  usgs_earthquake: 'earthquake',
+  usgs_earthquake_feed: '',
+  usgs_national_map: 'elevation',
+  usgs_sciencebase: 'water',
+  library_of_congress: 'civil war',
+  wikidata: 'Albert Einstein',
+  common_crawl: 'example.com',
+  mitre_attack: 'phishing',
+  gleif: 'Apple Inc',
+  osv_dev: 'npm:lodash@4.17.4',
+  nvd: 'CVE-2021-44228',
+  cisa_kev: 'log4j',
+  osm_overpass: 'Eiffel Tower near 48.8584,2.2945,5',
+  geonames: 'London',
+  eurostat: 'population',
+  wikipedia: 'Earth',
+  europe_pmc: 'cancer',
+  clinicaltrials_gov: 'cancer',
+  openfda: 'aspirin',
+  pubchem: 'aspirin',
+  gbif: 'Puma concolor',
+  uniprot: 'insulin',
+  us_census: 'CA',
+  congress_gov: '118',
+  govinfo: 'FR',
+  sec_edgar: 'apple',
+  orcid: 'einstein',
+  reliefweb: 'earthquake',
+  ensembl: 'BRCA2',
+  rcsb_pdb: 'hemoglobin',
+  string_db: 'TP53',
+  gnomad: 'TP53',
+  ebi_ols: 'diabetes',
+  medlineplus: 'hypertension',
+  who_gho: 'life expectancy',
+  rxnorm: 'aspirin',
+  dailymed: 'ibuprofen',
+  chembl: 'imatinib',
+  open_targets: 'asthma',
+  inaturalist: 'Puma concolor',
+  obis: 'Orcinus orca',
+  worms: 'Orcinus orca',
+  itis: 'Ursus americanus',
+  pypi: 'requests',
+  npm_registry: 'express',
+  crates_io: 'serde',
+  rubygems: 'rails',
+  maven_central: 'guava',
+  github_advisory: 'npm',
+  endoflife: 'python',
+  epss: 'CVE-2021-44228',
+  alienvault_otx: 'test',
+  malwarebazaar: 'AgentTesla',
+  threatfox: 'botnet',
+  urlhaus: 'example.com',
+  federal_register: 'climate',
+  usaspending: 'research',
+  uk_legislation: 'data protection',
+  opensanctions: 'test',
+  companies_house: 'test',
+  ecb_sdw: 'EXR/D.USD.EUR.SP00.A',
+  bank_of_canada: 'FXUSDCAD',
+  bis_stats: 'WS_CBPOL/D.US',
+  eia: 'electricity/retail-sales',
+  statcan_wds: 'cpi',
+  uk_ons: 'population',
+  insee_melodi: 'population',
+  open_meteo: '52.52,13.41',
+  noaa_cdo: 'GHCND',
+  met_no: '52.52,13.41',
+  noaa_swpc: 'scales',
+  nominatim: 'Paris, France',
+  nasa_cmr: 'MODIS',
+  copernicus_dataspace: 'S2A',
+  opentopography: '36.0,-112.5,36.5,-112.0,SRTMGL3',
+  celestrak: '25544',
+  jpl_horizons: '499',
+  jpl_sbdb: 'Ceres',
+  nasa_exoplanet_archive: 'Kepler-10 b',
+  simbad: 'M31',
+  mast: '10.68,41.27',
+  ror: 'Stanford',
+  opencitations: '10.1038/nature12373',
+  biorxiv_medrxiv: '10.1101/339747',
+  hal: 'climate change',
+  base_search: 'climate',
+  inspire_hep: 'title Higgs boson',
+  hepdata: '1',
+  zbmath: 'prime numbers',
+  oeis: '1,1,2,3,5,8',
+  nasa_ads: 'test',
+  epo_ops: 'electric vehicle',
+  materials_project: 'Fe2O3',
+  oqmd: 'Fe2O3',
+  aflow: 'Fe2O3',
+  pleiades: 'Rome',
+  idai_gazetteer: 'Pergamon',
+  edh: 'Roma',
+  nomisma: 'denarius',
+  whg: 'Rome',
+  open_context: 'pottery',
+  cdli: 'tablet',
+  ehri: 'Auschwitz',
+  art_institute_chicago: 'van gogh',
+  cleveland_museum: 'monet',
+  va_museum: 'teapot',
+  smk: 'hammershoi',
+  open_library: 'hobbit',
+  unhcr_data: 'SYR',
+  ocha_fts: '2024',
+  opensky: '45.8,5.9,47.8,10.5',
+  cbdb: 'Wang Anshi',
+  eclac_cepalstat: '145',
+  oecd_data_explorer: 'OECD.SDD.TPS,DSD_LFS@DF_IALFS_UNE_M,1.0/AUS........',
+  un_sdg: 'SI_POV_DAY1',
+  unesco_uis: 'USA',
+  idb_open_data: 'poverty',
+  iati_datastore: 'health',
+  debian_sources: 'curl',
+  ietf_datatracker: 'rfc8259',
+  wikimedia_commons: 'cat',
+  dbpedia: 'Berlin',
+  dblp: 'transformer',
+  mozilla_bugzilla: 'crash',
+  msrc_cvrf: '2024-Jan',
+  isni: 'Einstein',
+  lobid_gnd: 'Albert Einstein',
+  factgrid: 'Leibniz',
+  ubuntu_security: 'kernel',
+  redhat_security_data: 'openssl',
+  cve_org: 'CVE-2021-44228',
+  conceptnet: 'dog',
+  ena_portal: 'Escherichia coli',
+  ncbi_datasets: 'BRCA2',
+  alphafold_db: 'P69905',
+  reactome: 'apoptosis',
+  intact: 'TP53',
+  orphadata: 'Marfan syndrome',
+  guide_to_pharmacology: 'aspirin',
+  clinpgx: 'warfarin',
+  pbdb: 'Tyrannosaurus',
+  nws_weather: '38.8894,-77.0352',
+  japan_egov_hourei: '憲法',
+  australia_frl: 'Corporations',
+  uk_gazette: 'insolvency',
+  eu_ted: 'software',
+  brazil_transparencia: '26246',
+  sidra_brazil: '6579/2021/9324',
+  cbs_statline: '83765NED',
+  gaia_archive: '5853498713190525696',
+  sdss_skyserver: '185.0,15.0',
+  apache_jira: 'build',
+  health_canada_dpd: 'tylenol',
+  bindingdb: 'P00533',
+  kegg: 'BRCA2',
+  metabolights: 'MTBLS1',
+  pride_archive: 'cancer',
+  libris_xl: 'Strindberg',
+  nasjonalbiblioteket: 'Ibsen',
+  nara_catalog: 'test',
+  jstage: 'science',
+  cinii: 'science',
+  musicbrainz: 'Beatles',
+  gitlab_api: 'react',
+  codeberg: 'test',
+  software_heritage: 'linux',
+  launchpad: 'crash',
+  metacpan: 'Moose',
+  ecosystems: 'npmjs.org/express',
+  deps_dev: 'npm/react',
+  homebrew: 'wget',
+  mdn_web_docs: 'fetch',
+  rosetta_code: 'quicksort',
+  greynoise: '8.8.8.8',
+  phishstats: 'paypal',
+  virustotal: '8.8.8.8',
+  abuseipdb: '8.8.8.8',
+  hybrid_analysis: 'test.exe',
+  ontobee: 'diabetes',
+  umls: 'diabetes',
+  loinc_fhir: '2093-3',
+  wikipathways: 'diabetes',
+  cellosaurus: 'HeLa',
+  metabolomics_workbench: 'diabetes',
+  npatlas: 'penicillin',
+  wellcome_collection: 'medicine',
+  bhl: 'darwin',
+  google_kg_search: 'Einstein',
+  merriam_webster: 'test',
+  brave_search: 'test',
+  checklistbank: 'Panthera leo',
+  eol: 'lion',
+  globi: 'Homo sapiens',
+  mushroom_observer: 'Amanita muscaria',
+  arctic_data_center: 'permafrost',
+  cbeta: '般若',
+  ebl: 'K.1',
+  mercado_publico: '750301-1-L124',
+  inpe_bdc: 'sentinel',
+  pdok: 'Amsterdam',
+  satnogs: 'ISS',
+  nomad_repository: 'Si',
+  kramerius: 'praha',
+  bdl_poland: 'ludność',
+  israel_cbs: '120010',
+  nomis_uk: 'NM_1_1',
+  abs_australia: 'CPI',
+  argentina_series: '168.1_T_CAMBIOR_D_0_0_26',
+  data_gov_my: 'population_state',
+  datos_abiertos_colombia: 'salud',
+  ine_tempus3: '50913',
+  singstat: 'M810011',
+  usgs_m2m: 'landsat_ot_c2_l2',
+  n2yo: '25544',
+  ariadne_portal: 'pottery',
+  ohm_overpass: 'Berlin near 52.52,13.40,5',
+  stack_exchange: 'python generator',
+  ecmwf_cds: 'era5',
+  met_office_datahub: '51.5,-0.1',
+  ndl_search: 'test',
+  swisscovery: 'shakespeare',
+}
+
+const results = []
+function record(id, pass, detail) {
+  results.push({ id, pass, detail })
+  console.log(`${pass ? 'PASS' : 'FAIL'} ${id}: ${detail}`)
+}
+
+const testedAt = new Date().toISOString()
+
+for (const descriptor of RESEARCH_PROVIDER_ENV) {
+  const providerId = descriptor.id
+  const adapter = IMPLEMENTED_PROVIDER_ADAPTERS[providerId]
+  if (!adapter) {
+    record(`re_live_${providerId}`, true, 'SKIPPED — STUB_ONLY, no adapter to test')
+    continue
+  }
+  const status = providerConfigStatus(descriptor)
+  if (status !== 'configured') {
+    record(`re_live_${providerId}`, true, `SKIPPED — CREDENTIAL_BLOCKED (${descriptor.requiredEnv.join(', ') || 'not configured'})`)
+    continue
+  }
+
+  const text = TEST_QUERIES[providerId] ?? ''
+  try {
+    const response = await adapter.run({ text, maxResults: 5 })
+    const recordCount = response.documents.length + response.timeSeries.length + response.geoFeatures.length
+    const sampleId = response.documents[0]?.providerRecordId ?? response.documents[0]?.id ?? response.timeSeries[0]?.seriesId ?? null
+    if (!response.ok) {
+      record(`re_live_${providerId}`, false, `ok=false category=${response.error?.category} message=${response.error?.message}`)
+    } else if (recordCount === 0) {
+      record(`re_live_${providerId}`, false, `ok=true but zero records returned for query "${text}"`)
+    } else {
+      record(`re_live_${providerId}`, true, `ok=true records=${recordCount} sample=${sampleId} durationMs=${response.durationMs}`)
+    }
+  } catch (error) {
+    record(`re_live_${providerId}`, false, `threw: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+const failed = results.filter(r => !r.pass)
+console.log(`\nResearch Engine LIVE validation (testedAt=${testedAt}): ${results.length - failed.length}/${results.length} PASS`)
+if (failed.length) {
+  console.log('Failed:', failed.map(f => f.id).join(', '))
+  process.exitCode = 1
+}

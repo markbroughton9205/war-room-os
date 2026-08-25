@@ -34,6 +34,220 @@ import { samGovAdapter } from '@/lib/research-engine/providers/samGov'
 import { nasaAdapter } from '@/lib/research-engine/providers/nasa'
 import { fmcsaAdapter } from '@/lib/research-engine/providers/fmcsa'
 import { validateBoundedTargetUrl } from '@/lib/research-engine/security/targetUrlValidator'
+import { mitreAttackAdapter } from '@/lib/research-engine/providers/mitreAttack'
+import { gleifAdapter } from '@/lib/research-engine/providers/gleif'
+import { osvDevAdapter } from '@/lib/research-engine/providers/osvDev'
+import { nvdAdapter } from '@/lib/research-engine/providers/nvd'
+import { cisaKevAdapter } from '@/lib/research-engine/providers/cisaKev'
+import { osmOverpassAdapter } from '@/lib/research-engine/providers/osmOverpass'
+import { geonamesAdapter } from '@/lib/research-engine/providers/geonames'
+import { eurostatAdapter } from '@/lib/research-engine/providers/eurostat'
+import { wikipediaAdapter } from '@/lib/research-engine/providers/wikipedia'
+import { europePmcAdapter } from '@/lib/research-engine/providers/europePmc'
+import { clinicalTrialsGovAdapter } from '@/lib/research-engine/providers/clinicalTrialsGov'
+import { openFdaAdapter } from '@/lib/research-engine/providers/openFda'
+import { pubchemAdapter } from '@/lib/research-engine/providers/pubchem'
+import { gbifAdapter } from '@/lib/research-engine/providers/gbif'
+import { uniprotAdapter } from '@/lib/research-engine/providers/uniprot'
+import { usCensusAdapter } from '@/lib/research-engine/providers/usCensus'
+import { congressGovAdapter } from '@/lib/research-engine/providers/congressGov'
+import { govinfoAdapter } from '@/lib/research-engine/providers/govinfo'
+import { secEdgarAdapter } from '@/lib/research-engine/providers/secEdgar'
+import { orcidAdapter } from '@/lib/research-engine/providers/orcid'
+import { reliefwebAdapter } from '@/lib/research-engine/providers/reliefweb'
+import { ensemblAdapter } from '@/lib/research-engine/providers/ensembl'
+import { rcsbPdbAdapter } from '@/lib/research-engine/providers/rcsbPdb'
+import { stringDbAdapter } from '@/lib/research-engine/providers/stringDb'
+import { gnomadAdapter } from '@/lib/research-engine/providers/gnomad'
+import { ebiOlsAdapter } from '@/lib/research-engine/providers/ebiOls'
+import { medlineplusAdapter } from '@/lib/research-engine/providers/medlineplus'
+import { whoGhoAdapter } from '@/lib/research-engine/providers/whoGho'
+import { rxnormAdapter } from '@/lib/research-engine/providers/rxnorm'
+import { dailymedAdapter } from '@/lib/research-engine/providers/dailymed'
+import { chemblAdapter } from '@/lib/research-engine/providers/chembl'
+import { openTargetsAdapter } from '@/lib/research-engine/providers/openTargets'
+import { inaturalistAdapter } from '@/lib/research-engine/providers/inaturalist'
+import { obisAdapter } from '@/lib/research-engine/providers/obis'
+import { wormsAdapter } from '@/lib/research-engine/providers/worms'
+import { itisAdapter } from '@/lib/research-engine/providers/itis'
+import { pypiAdapter } from '@/lib/research-engine/providers/pypi'
+import { npmRegistryAdapter } from '@/lib/research-engine/providers/npmRegistry'
+import { cratesIoAdapter } from '@/lib/research-engine/providers/cratesIo'
+import { rubygemsAdapter } from '@/lib/research-engine/providers/rubygems'
+import { mavenCentralAdapter } from '@/lib/research-engine/providers/mavenCentral'
+import { githubAdvisoryAdapter } from '@/lib/research-engine/providers/githubAdvisory'
+import { endoflifeAdapter } from '@/lib/research-engine/providers/endoflife'
+import { epssAdapter } from '@/lib/research-engine/providers/epss'
+import { alienvaultOtxAdapter } from '@/lib/research-engine/providers/alienvaultOtx'
+import { malwarebazaarAdapter } from '@/lib/research-engine/providers/malwarebazaar'
+import { threatfoxAdapter } from '@/lib/research-engine/providers/threatfox'
+import { urlhausAdapter } from '@/lib/research-engine/providers/urlhaus'
+import { federalRegisterAdapter } from '@/lib/research-engine/providers/federalRegister'
+import { usaspendingAdapter } from '@/lib/research-engine/providers/usaspending'
+import { ukLegislationAdapter } from '@/lib/research-engine/providers/ukLegislation'
+import { opensanctionsAdapter } from '@/lib/research-engine/providers/opensanctions'
+import { companiesHouseAdapter } from '@/lib/research-engine/providers/companiesHouse'
+import { ecbSdwAdapter } from '@/lib/research-engine/providers/ecbSdw'
+import { bankOfCanadaAdapter } from '@/lib/research-engine/providers/bankOfCanada'
+import { bisStatsAdapter } from '@/lib/research-engine/providers/bisStats'
+import { eiaAdapter } from '@/lib/research-engine/providers/eia'
+import { statcanWdsAdapter } from '@/lib/research-engine/providers/statcanWds'
+import { ukOnsAdapter } from '@/lib/research-engine/providers/ukOns'
+import { inseeMelodiAdapter } from '@/lib/research-engine/providers/inseeMelodi'
+import { openMeteoAdapter } from '@/lib/research-engine/providers/openMeteo'
+import { noaaCdoAdapter } from '@/lib/research-engine/providers/noaaCdo'
+import { metNoAdapter } from '@/lib/research-engine/providers/metNo'
+import { noaaSwpcAdapter } from '@/lib/research-engine/providers/noaaSwpc'
+import { nominatimAdapter } from '@/lib/research-engine/providers/nominatim'
+import { nasaCmrAdapter } from '@/lib/research-engine/providers/nasaCmr'
+import { copernicusDataspaceAdapter } from '@/lib/research-engine/providers/copernicusDataspace'
+import { opentopographyAdapter } from '@/lib/research-engine/providers/opentopography'
+import { celestrakAdapter } from '@/lib/research-engine/providers/celestrak'
+import { jplHorizonsAdapter } from '@/lib/research-engine/providers/jplHorizons'
+import { jplSbdbAdapter } from '@/lib/research-engine/providers/jplSbdb'
+import { nasaExoplanetArchiveAdapter } from '@/lib/research-engine/providers/nasaExoplanetArchive'
+import { simbadAdapter } from '@/lib/research-engine/providers/simbad'
+import { mastAdapter } from '@/lib/research-engine/providers/mast'
+import { rorAdapter } from '@/lib/research-engine/providers/ror'
+import { opencitationsAdapter } from '@/lib/research-engine/providers/opencitations'
+import { biorxivMedrxivAdapter } from '@/lib/research-engine/providers/biorxivMedrxiv'
+import { halAdapter } from '@/lib/research-engine/providers/hal'
+import { baseSearchAdapter } from '@/lib/research-engine/providers/baseSearch'
+import { inspireHepAdapter } from '@/lib/research-engine/providers/inspireHep'
+import { hepdataAdapter } from '@/lib/research-engine/providers/hepdata'
+import { zbmathAdapter } from '@/lib/research-engine/providers/zbmath'
+import { oeisAdapter } from '@/lib/research-engine/providers/oeis'
+import { nasaAdsAdapter } from '@/lib/research-engine/providers/nasaAds'
+import { epoOpsAdapter } from '@/lib/research-engine/providers/epoOps'
+import { materialsProjectAdapter } from '@/lib/research-engine/providers/materialsProject'
+import { oqmdAdapter } from '@/lib/research-engine/providers/oqmd'
+import { aflowAdapter } from '@/lib/research-engine/providers/aflow'
+import { pleiadesAdapter } from '@/lib/research-engine/providers/pleiades'
+import { idaiGazetteerAdapter } from '@/lib/research-engine/providers/idaiGazetteer'
+import { edhAdapter } from '@/lib/research-engine/providers/edh'
+import { nomismaAdapter } from '@/lib/research-engine/providers/nomisma'
+import { whgAdapter } from '@/lib/research-engine/providers/whg'
+import { openContextAdapter } from '@/lib/research-engine/providers/openContext'
+import { cdliAdapter } from '@/lib/research-engine/providers/cdli'
+import { ehriAdapter } from '@/lib/research-engine/providers/ehri'
+import { artInstituteChicagoAdapter } from '@/lib/research-engine/providers/artInstituteChicago'
+import { clevelandMuseumAdapter } from '@/lib/research-engine/providers/clevelandMuseum'
+import { vaMuseumAdapter } from '@/lib/research-engine/providers/vaMuseum'
+import { smkAdapter } from '@/lib/research-engine/providers/smk'
+import { openLibraryAdapter } from '@/lib/research-engine/providers/openLibrary'
+import { unhcrDataAdapter } from '@/lib/research-engine/providers/unhcrData'
+import { ochaFtsAdapter } from '@/lib/research-engine/providers/ochaFts'
+import { openskyAdapter } from '@/lib/research-engine/providers/opensky'
+import { cbdbAdapter } from '@/lib/research-engine/providers/cbdb'
+import { eclacCepalstatAdapter } from '@/lib/research-engine/providers/eclacCepalstat'
+import { oecdDataExplorerAdapter } from '@/lib/research-engine/providers/oecdDataExplorer'
+import { unSdgAdapter } from '@/lib/research-engine/providers/unSdg'
+import { unescoUisAdapter } from '@/lib/research-engine/providers/unescoUis'
+import { idbOpenDataAdapter } from '@/lib/research-engine/providers/idbOpenData'
+import { iatiDatastoreAdapter } from '@/lib/research-engine/providers/iatiDatastore'
+import { debianSourcesAdapter } from '@/lib/research-engine/providers/debianSources'
+import { ietfDatatrackerAdapter } from '@/lib/research-engine/providers/ietfDatatracker'
+import { wikimediaCommonsAdapter } from '@/lib/research-engine/providers/wikimediaCommons'
+import { dbpediaAdapter } from '@/lib/research-engine/providers/dbpedia'
+import { dblpAdapter } from '@/lib/research-engine/providers/dblp'
+import { mozillaBugzillaAdapter } from '@/lib/research-engine/providers/mozillaBugzilla'
+import { msrcCvrfAdapter } from '@/lib/research-engine/providers/msrcCvrf'
+import { isniAdapter } from '@/lib/research-engine/providers/isni'
+import { lobidGndAdapter } from '@/lib/research-engine/providers/lobidGnd'
+import { factgridAdapter } from '@/lib/research-engine/providers/factgrid'
+import { ubuntuSecurityAdapter } from '@/lib/research-engine/providers/ubuntuSecurity'
+import { redhatSecurityDataAdapter } from '@/lib/research-engine/providers/redhatSecurityData'
+import { cveOrgAdapter } from '@/lib/research-engine/providers/cveOrg'
+import { conceptnetAdapter } from '@/lib/research-engine/providers/conceptnet'
+import { enaPortalAdapter } from '@/lib/research-engine/providers/enaPortal'
+import { ncbiDatasetsAdapter } from '@/lib/research-engine/providers/ncbiDatasets'
+import { alphafoldDbAdapter } from '@/lib/research-engine/providers/alphafoldDb'
+import { reactomeAdapter } from '@/lib/research-engine/providers/reactome'
+import { intactAdapter } from '@/lib/research-engine/providers/intact'
+import { orphadataAdapter } from '@/lib/research-engine/providers/orphadata'
+import { guideToPharmacologyAdapter } from '@/lib/research-engine/providers/guideToPharmacology'
+import { clinpgxAdapter } from '@/lib/research-engine/providers/clinpgx'
+import { pbdbAdapter } from '@/lib/research-engine/providers/pbdb'
+import { nwsWeatherAdapter } from '@/lib/research-engine/providers/nwsWeather'
+import { japanEgovHoureiAdapter } from '@/lib/research-engine/providers/japanEgovHourei'
+import { australiaFrlAdapter } from '@/lib/research-engine/providers/australiaFrl'
+import { ukGazetteAdapter } from '@/lib/research-engine/providers/ukGazette'
+import { euTedAdapter } from '@/lib/research-engine/providers/euTed'
+import { brazilTransparenciaAdapter } from '@/lib/research-engine/providers/brazilTransparencia'
+import { sidraBrazilAdapter } from '@/lib/research-engine/providers/sidraBrazil'
+import { cbsStatlineAdapter } from '@/lib/research-engine/providers/cbsStatline'
+import { gaiaArchiveAdapter } from '@/lib/research-engine/providers/gaiaArchive'
+import { sdssSkyserverAdapter } from '@/lib/research-engine/providers/sdssSkyserver'
+import { apacheJiraAdapter } from '@/lib/research-engine/providers/apacheJira'
+import { healthCanadaDpdAdapter } from '@/lib/research-engine/providers/healthCanadaDpd'
+import { bindingdbAdapter } from '@/lib/research-engine/providers/bindingdb'
+import { keggAdapter } from '@/lib/research-engine/providers/kegg'
+import { metabolightsAdapter } from '@/lib/research-engine/providers/metabolights'
+import { prideArchiveAdapter } from '@/lib/research-engine/providers/prideArchive'
+import { librisXlAdapter } from '@/lib/research-engine/providers/librisXl'
+import { nasjonalbibliotekAdapter } from '@/lib/research-engine/providers/nasjonalbiblioteket'
+import { naraCatalogAdapter } from '@/lib/research-engine/providers/naraCatalog'
+import { jstageAdapter } from '@/lib/research-engine/providers/jstage'
+import { ciniiAdapter } from '@/lib/research-engine/providers/cinii'
+import { musicbrainzAdapter } from '@/lib/research-engine/providers/musicbrainz'
+import { gitlabApiAdapter } from '@/lib/research-engine/providers/gitlabApi'
+import { codebergAdapter } from '@/lib/research-engine/providers/codeberg'
+import { softwareHeritageAdapter } from '@/lib/research-engine/providers/softwareHeritage'
+import { launchpadAdapter } from '@/lib/research-engine/providers/launchpad'
+import { metacpanAdapter } from '@/lib/research-engine/providers/metacpan'
+import { ecosystemsAdapter } from '@/lib/research-engine/providers/ecosystems'
+import { depsDevAdapter } from '@/lib/research-engine/providers/depsDev'
+import { homebrewAdapter } from '@/lib/research-engine/providers/homebrew'
+import { mdnWebDocsAdapter } from '@/lib/research-engine/providers/mdnWebDocs'
+import { rosettaCodeAdapter } from '@/lib/research-engine/providers/rosettaCode'
+import { greynoiseAdapter } from '@/lib/research-engine/providers/greynoise'
+import { phishstatsAdapter } from '@/lib/research-engine/providers/phishstats'
+import { virustotalAdapter } from '@/lib/research-engine/providers/virustotal'
+import { abuseipdbAdapter } from '@/lib/research-engine/providers/abuseipdb'
+import { hybridAnalysisAdapter } from '@/lib/research-engine/providers/hybridAnalysis'
+import { ontobeeAdapter } from '@/lib/research-engine/providers/ontobee'
+import { umlsAdapter } from '@/lib/research-engine/providers/umls'
+import { loincFhirAdapter } from '@/lib/research-engine/providers/loincFhir'
+import { wikipathwaysAdapter } from '@/lib/research-engine/providers/wikipathways'
+import { cellosaurusAdapter } from '@/lib/research-engine/providers/cellosaurus'
+import { metabolomicsWorkbenchAdapter } from '@/lib/research-engine/providers/metabolomicsWorkbench'
+import { npatlasAdapter } from '@/lib/research-engine/providers/npatlas'
+import { wellcomeCollectionAdapter } from '@/lib/research-engine/providers/wellcomeCollection'
+import { bhlAdapter } from '@/lib/research-engine/providers/bhl'
+import { googleKgSearchAdapter } from '@/lib/research-engine/providers/googleKgSearch'
+import { merriamWebsterAdapter } from '@/lib/research-engine/providers/merriamWebster'
+import { braveSearchAdapter } from '@/lib/research-engine/providers/braveSearch'
+import { checklistbankAdapter } from '@/lib/research-engine/providers/checklistbank'
+import { eolAdapter } from '@/lib/research-engine/providers/eol'
+import { globiAdapter } from '@/lib/research-engine/providers/globi'
+import { mushroomObserverAdapter } from '@/lib/research-engine/providers/mushroomObserver'
+import { arcticDataCenterAdapter } from '@/lib/research-engine/providers/arcticDataCenter'
+import { cbetaAdapter } from '@/lib/research-engine/providers/cbeta'
+import { eblAdapter } from '@/lib/research-engine/providers/ebl'
+import { mercadoPublicoAdapter } from '@/lib/research-engine/providers/mercadoPublico'
+import { inpeBdcAdapter } from '@/lib/research-engine/providers/inpeBdc'
+import { pdokAdapter } from '@/lib/research-engine/providers/pdok'
+import { satnogsAdapter } from '@/lib/research-engine/providers/satnogs'
+import { nomadRepositoryAdapter } from '@/lib/research-engine/providers/nomadRepository'
+import { krameriusAdapter } from '@/lib/research-engine/providers/kramerius'
+import { bdlPolandAdapter } from '@/lib/research-engine/providers/bdlPoland'
+import { israelCbsAdapter } from '@/lib/research-engine/providers/israelCbs'
+import { nomisUkAdapter } from '@/lib/research-engine/providers/nomisUk'
+import { absAustraliaAdapter } from '@/lib/research-engine/providers/absAustralia'
+import { argentinaSeriesAdapter } from '@/lib/research-engine/providers/argentinaSeries'
+import { dataGovMyAdapter } from '@/lib/research-engine/providers/dataGovMy'
+import { datosAbiertosColombiaAdapter } from '@/lib/research-engine/providers/datosAbiertosColombia'
+import { ineTempus3Adapter } from '@/lib/research-engine/providers/ineTempus3'
+import { singstatAdapter } from '@/lib/research-engine/providers/singstat'
+import { usgsM2mAdapter } from '@/lib/research-engine/providers/usgsM2m'
+import { n2yoAdapter } from '@/lib/research-engine/providers/n2yo'
+import { ariadnePortalAdapter } from '@/lib/research-engine/providers/ariadnePortal'
+import { ohmOverpassAdapter } from '@/lib/research-engine/providers/ohmOverpass'
+import { stackExchangeAdapter } from '@/lib/research-engine/providers/stackExchange'
+import { ecmwfCdsAdapter } from '@/lib/research-engine/providers/ecmwfCds'
+import { metOfficeDataHubAdapter } from '@/lib/research-engine/providers/metOfficeDataHub'
+import { ndlSearchAdapter } from '@/lib/research-engine/providers/ndlSearch'
+import { swisscoveryAdapter } from '@/lib/research-engine/providers/swisscovery'
 import { IMPLEMENTED_PROVIDER_ADAPTERS } from '@/lib/research-engine/providers/registry'
 import type { ResearchDocument, ResearchProviderId } from '@/lib/research-engine/core/types'
 
@@ -200,7 +414,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const add = async (id: string, fn: () => boolean | string | Promise<boolean | string>) => results.push(await test(id, fn))
 
   await add('re_01_all_31_providers_registered', () =>
-    RESEARCH_PROVIDER_ENV.length === 31 || `expected 31 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 243 || `expected 243 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_02_missing_required_env_not_configured', () => {
     const emptyEnv = { NODE_ENV: 'test' } as NodeJS.ProcessEnv
@@ -565,6 +779,218 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       fmcsa: ['getById'],
       mitre_attack: ['search', 'getById'],
       gleif: ['search', 'getById'],
+      osv_dev: ['search'],
+      nvd: ['search', 'getById'],
+      cisa_kev: ['search'],
+      osm_overpass: ['geoSearch'],
+      geonames: ['search'],
+      eurostat: ['timeSeries'],
+      wikipedia: ['getById'],
+      europe_pmc: ['search'],
+      clinicaltrials_gov: ['search'],
+      openfda: ['search'],
+      pubchem: ['getById'],
+      gbif: ['search'],
+      uniprot: ['search'],
+      us_census: ['timeSeries'],
+      congress_gov: ['search'],
+      govinfo: ['search'],
+      sec_edgar: ['search'],
+      orcid: ['search'],
+      reliefweb: ['search'],
+      ensembl: ['getById'],
+      rcsb_pdb: ['search'],
+      string_db: ['search'],
+      gnomad: ['getById'],
+      ebi_ols: ['search'],
+      medlineplus: ['search'],
+      who_gho: ['timeSeries'],
+      rxnorm: ['search'],
+      dailymed: ['search'],
+      chembl: ['search'],
+      open_targets: ['search'],
+      inaturalist: ['search'],
+      obis: ['search', 'geoSearch'],
+      worms: ['search'],
+      itis: ['search'],
+      pypi: ['getById'],
+      npm_registry: ['getById'],
+      crates_io: ['search'],
+      rubygems: ['search'],
+      maven_central: ['search'],
+      github_advisory: ['search'],
+      endoflife: ['timeSeries'],
+      epss: ['getById'],
+      alienvault_otx: ['search'],
+      malwarebazaar: ['search'],
+      threatfox: ['search'],
+      urlhaus: ['search'],
+      federal_register: ['search'],
+      usaspending: ['search'],
+      uk_legislation: ['search'],
+      opensanctions: ['search'],
+      companies_house: ['search'],
+      ecb_sdw: ['timeSeries'],
+      bank_of_canada: ['timeSeries'],
+      bis_stats: ['timeSeries'],
+      eia: ['timeSeries'],
+      statcan_wds: ['timeSeries'],
+      uk_ons: ['search'],
+      insee_melodi: ['search'],
+      open_meteo: ['getById'],
+      noaa_cdo: ['search'],
+      met_no: ['getById'],
+      noaa_swpc: ['list'],
+      nominatim: ['search'],
+      nasa_cmr: ['search'],
+      copernicus_dataspace: ['search'],
+      opentopography: ['getById'],
+      celestrak: ['getById', 'list'],
+      jpl_horizons: ['getById'],
+      jpl_sbdb: ['getById'],
+      nasa_exoplanet_archive: ['search'],
+      simbad: ['search'],
+      mast: ['search'],
+      ror: ['search'],
+      opencitations: ['getById'],
+      biorxiv_medrxiv: ['getById'],
+      hal: ['search'],
+      base_search: ['search'],
+      inspire_hep: ['search'],
+      hepdata: ['getById'],
+      zbmath: ['search'],
+      oeis: ['search'],
+      nasa_ads: ['search'],
+      epo_ops: ['search'],
+      materials_project: ['search'],
+      oqmd: ['search'],
+      aflow: ['search'],
+      pleiades: ['search'],
+      idai_gazetteer: ['search'],
+      edh: ['search'],
+      nomisma: ['getById'],
+      whg: ['search'],
+      open_context: ['search'],
+      cdli: ['search'],
+      ehri: ['search'],
+      art_institute_chicago: ['search'],
+      cleveland_museum: ['search'],
+      va_museum: ['search'],
+      smk: ['search'],
+      open_library: ['search'],
+      unhcr_data: ['search'],
+      ocha_fts: ['search'],
+      opensky: ['search'],
+      cbdb: ['getById'],
+      eclac_cepalstat: ['getById'],
+      oecd_data_explorer: ['timeSeries'],
+      un_sdg: ['search'],
+      unesco_uis: ['search'],
+      idb_open_data: ['search'],
+      iati_datastore: ['search'],
+      debian_sources: ['getById'],
+      ietf_datatracker: ['search'],
+      wikimedia_commons: ['search'],
+      dbpedia: ['search'],
+      dblp: ['search'],
+      mozilla_bugzilla: ['search'],
+      msrc_cvrf: ['getById'],
+      isni: ['search'],
+      lobid_gnd: ['search'],
+      factgrid: ['search'],
+      ubuntu_security: ['search'],
+      redhat_security_data: ['search'],
+      cve_org: ['getById'],
+      conceptnet: ['getById'],
+      ena_portal: ['search'],
+      ncbi_datasets: ['getById'],
+      alphafold_db: ['getById'],
+      reactome: ['search'],
+      intact: ['search'],
+      orphadata: ['getById'],
+      guide_to_pharmacology: ['search'],
+      clinpgx: ['search'],
+      pbdb: ['search'],
+      nws_weather: ['search'],
+      japan_egov_hourei: ['search'],
+      australia_frl: ['search'],
+      uk_gazette: ['search'],
+      eu_ted: ['search'],
+      brazil_transparencia: ['search'],
+      sidra_brazil: ['getById'],
+      cbs_statline: ['getById'],
+      gaia_archive: ['getById'],
+      sdss_skyserver: ['search'],
+      apache_jira: ['search'],
+      health_canada_dpd: ['search'],
+      bindingdb: ['getById'],
+      kegg: ['search'],
+      metabolights: ['getById'],
+      pride_archive: ['search'],
+      libris_xl: ['search'],
+      nasjonalbiblioteket: ['search'],
+      nara_catalog: ['search'],
+      jstage: ['search'],
+      cinii: ['search'],
+      musicbrainz: ['search'],
+      gitlab_api: ['search'],
+      codeberg: ['search'],
+      software_heritage: ['search'],
+      launchpad: ['search'],
+      metacpan: ['search'],
+      ecosystems: ['getById'],
+      deps_dev: ['getById'],
+      homebrew: ['getById'],
+      mdn_web_docs: ['search'],
+      rosetta_code: ['search'],
+      greynoise: ['getById'],
+      phishstats: ['search'],
+      virustotal: ['search'],
+      abuseipdb: ['getById'],
+      hybrid_analysis: ['search'],
+      ontobee: ['search'],
+      umls: ['search'],
+      loinc_fhir: ['getById'],
+      wikipathways: ['search'],
+      cellosaurus: ['search'],
+      metabolomics_workbench: ['search'],
+      npatlas: ['search'],
+      wellcome_collection: ['search'],
+      bhl: ['search'],
+      google_kg_search: ['search'],
+      merriam_webster: ['getById'],
+      brave_search: ['search'],
+      checklistbank: ['search'],
+      eol: ['search'],
+      globi: ['search'],
+      mushroom_observer: ['search'],
+      arctic_data_center: ['search'],
+      cbeta: ['search'],
+      ebl: ['getById'],
+      mercado_publico: ['getById'],
+      inpe_bdc: ['search'],
+      pdok: ['search'],
+      satnogs: ['search'],
+      nomad_repository: ['search'],
+      kramerius: ['search'],
+      bdl_poland: ['search'],
+      israel_cbs: ['getById'],
+      nomis_uk: ['getById'],
+      abs_australia: ['getById', 'timeSeries'],
+      argentina_series: ['getById', 'timeSeries'],
+      data_gov_my: ['getById'],
+      datos_abiertos_colombia: ['search'],
+      ine_tempus3: ['getById', 'timeSeries'],
+      singstat: ['getById'],
+      usgs_m2m: ['search'],
+      n2yo: ['getById'],
+      ariadne_portal: ['search'],
+      ohm_overpass: ['geoSearch'],
+      stack_exchange: ['search'],
+      ecmwf_cds: ['search'],
+      met_office_datahub: ['getById'],
+      ndl_search: ['search'],
+      swisscovery: ['search'],
     }
     const implemented = RESEARCH_PROVIDER_ENV.filter(descriptor => descriptor.implemented)
     const offenders = implemented.filter(descriptor => {
@@ -1337,13 +1763,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const UNAUTHORIZED_BATCH_1_IDS = ['imf_sdmx', 'world_bank_data_catalog', 'world_bank_projects', 'world_bank_finances', 'world_bank_climate', 'usgs_national_map'] as const
 
   await add('re_100_registered_provider_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 31 || `expected 31 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 243 || `expected 243 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_101_implemented_count_derives_to_24_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 24 && implementedAdapters === 24)
-      || `expected 24 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 236 && implementedAdapters === 236)
+      || `expected 110 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -2635,11 +3061,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_229_final_provider_descriptor_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 31 || `expected 31 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 243 || `expected 243 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_230_final_implemented_count_is_24', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 24 || `expected 24 implemented adapters, found ${count}`
+    return count === 236 || `expected 236 implemented adapters, found ${count}`
   })
 
   await add('re_231_final_unimplemented_count_is_7', () => {
@@ -3717,8 +4143,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const totalCount = RESEARCH_PROVIDER_ENV.length
     const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return (descriptor?.implemented === true && totalCount === 31 && implementedCount === 24 && blockedCount === 7)
-      || `expected fmcsa implemented plus a 31/24/7 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+    return (descriptor?.implemented === true && totalCount === 243 && implementedCount === 236 && blockedCount === 7)
+      || `expected fmcsa implemented plus a 236/7 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
   })
 
   await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {
@@ -3987,6 +4413,1829 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     return (response.ok === false && response.documents.length === 0 && response.error?.category === 'upstream_error' && response.error?.httpStatus === 504 && calls.count === 1)
       || `expected exactly 1 fetch for a 504 response under maxRetries: 0, got calls=${calls.count} response=${JSON.stringify(response)}`
   })))
+
+  // --- Earth Knowledge Registry mission: mitre_attack and gleif had zero
+  // deterministic coverage prior to this build (present in registry.ts/
+  // providerEnv.ts but never imported into this file) — re_700/re_701 close
+  // that pre-existing gap, live-verified separately via
+  // scripts/run-research-engine-live-validation.mjs.
+
+  await add('re_700_mitre_attack_success_normalizes_stix_object', () => withAdapterFetch([
+    jsonResponse({ objects: [{ id: 'attack-pattern--test-1', type: 'attack-pattern', name: 'Phishing', description: 'desc', external_references: [{ source_name: 'mitre-attack', external_id: 'T1566', url: 'https://attack.mitre.org/techniques/T1566' }], modified: '2024-01-01T00:00:00.000Z' }] }),
+  ], async () => {
+    const response = await mitreAttackAdapter.run({ text: 'phishing' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success with documents, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'mitre_attack') ?? true
+  }))
+
+  await add('re_701_gleif_success_normalizes_lei_record', () => withAdapterFetch([
+    jsonResponse({ data: [{ id: 'HWUPKR0MPOU8FGXBT394', attributes: { lei: 'HWUPKR0MPOU8FGXBT394', entity: { legalName: { name: 'Apple Inc' }, legalAddress: { country: 'US' } } } }] }),
+  ], async () => {
+    const response = await gleifAdapter.run({ text: 'Apple Inc' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success with documents, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'gleif') ?? true
+  }))
+
+  // --- First-25 completion adapters built this mission (re_702-re_722):
+  // one mocked success-path normalization test per new provider. Real
+  // upstream proof for all of these lives in
+  // scripts/run-research-engine-live-validation.mjs (see
+  // docs/earth-knowledge/gap-matrix.md for the actual run transcript), not
+  // here — this file is deterministic-only by design.
+
+  await add('re_702_wikipedia_success_normalizes_page_summary', () => withEnv({ WIKIMEDIA_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0' }, () => withAdapterFetch([
+    jsonResponse({ title: 'Earth', pageid: 9228, extract: 'Earth is the third planet.', description: 'Third planet from the Sun', timestamp: '2024-01-01T00:00:00Z', content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Earth' } } }),
+  ], async () => {
+    const response = await wikipediaAdapter.run({ text: 'Earth' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'wikipedia') ?? true
+  })))
+
+  await add('re_703_europe_pmc_success_normalizes_result', () => withAdapterFetch([
+    jsonResponse({ hitCount: 1, resultList: { result: [{ id: '42617733', title: 'Cancer study', authorString: 'Doe J, Smith A', journalTitle: 'Nature', pubYear: '2024', doi: '10.1234/x', source: 'MED', pmid: '42617733', isOpenAccess: 'Y', firstPublicationDate: '2024-01-01' }] } }),
+  ], async () => {
+    const response = await europePmcAdapter.run({ text: 'cancer' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'europe_pmc') ?? true
+  }))
+
+  await add('re_704_clinicaltrials_gov_success_normalizes_study', () => withAdapterFetch([
+    jsonResponse({ studies: [{ protocolSection: { identificationModule: { nctId: 'NCT03768492', briefTitle: 'Test trial' }, statusModule: { overallStatus: 'ACTIVE_NOT_RECRUITING', lastUpdatePostDateStruct: { date: '2024-01-01' } }, conditionsModule: { conditions: ['Cancer'] }, sponsorCollaboratorsModule: { leadSponsor: { name: 'NIH' } } } }] }),
+  ], async () => {
+    const response = await clinicalTrialsGovAdapter.run({ text: 'cancer' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'clinicaltrials_gov') ?? true
+  }))
+
+  await add('re_705_openfda_success_normalizes_drug_label', () => withAdapterFetch([
+    jsonResponse({ results: [{ id: '8c45ef1f-f708-485b-bc20-60aa87ce6289', effective_time: '20240101', indications_and_usage: ['For pain relief'], openfda: { brand_name: ['Aspirin'], manufacturer_name: ['Acme'], spl_id: ['abc-123'], substance_name: ['ASPIRIN'] } }] }),
+  ], async () => {
+    const response = await openFdaAdapter.run({ text: 'aspirin' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'openfda') ?? true
+  }))
+
+  await add('re_706_pubchem_success_normalizes_compound_property', () => withAdapterFetch([
+    jsonResponse({ PropertyTable: { Properties: [{ CID: 2244, MolecularFormula: 'C9H8O4', MolecularWeight: '180.16', IUPACName: '2-acetyloxybenzoic acid', ConnectivitySMILES: 'CC(=O)OC1=CC=CC=C1C(=O)O' }] } }),
+  ], async () => {
+    const response = await pubchemAdapter.run({ text: 'aspirin' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'pubchem') ?? true
+  }))
+
+  await add('re_707_gbif_success_normalizes_occurrence', () => withAdapterFetch([
+    jsonResponse({ count: 1, results: [{ key: 5938145577, scientificName: 'Puma concolor', decimalLatitude: 40.1, decimalLongitude: -105.2, eventDate: '2024-01-01', country: 'United States', basisOfRecord: 'HUMAN_OBSERVATION', kingdom: 'Animalia', recordedBy: 'J. Doe', license: 'CC0' }] }),
+  ], async () => {
+    const response = await gbifAdapter.run({ text: 'Puma concolor' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'gbif') ?? true
+  }))
+
+  await add('re_708_uniprot_success_normalizes_entry', () => withAdapterFetch([
+    jsonResponse({ results: [{ primaryAccession: 'P01308', uniProtkbId: 'INS_HUMAN', entryType: 'UniProtKB reviewed (Swiss-Prot)', organism: { scientificName: 'Homo sapiens' }, proteinDescription: { recommendedName: { fullName: { value: 'Insulin' } } } }] }),
+  ], async () => {
+    const response = await uniprotAdapter.run({ text: 'insulin' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'uniprot') ?? true
+  }))
+
+  await add('re_709_osv_dev_success_normalizes_vuln_record', () => withAdapterFetch([
+    jsonResponse({ vulns: [{ id: 'GHSA-29mw-wpgm-hmr9', summary: 'ReDoS in lodash', details: 'details', modified: '2024-01-01T00:00:00Z', published: '2020-01-01T00:00:00Z', aliases: ['CVE-2020-8203'], affected: [{ package: { name: 'lodash', ecosystem: 'npm' } }] }] }),
+  ], async () => {
+    const response = await osvDevAdapter.run({ text: 'npm:lodash@4.17.4' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].identifiers.evidence_class !== 'VULNERABILITY_EXISTS') return 'expected osv_dev evidence_class to be VULNERABILITY_EXISTS'
+    return documentShapeIssue(response.documents[0], 'osv_dev') ?? true
+  }))
+
+  await add('re_710_nvd_success_normalizes_cve_and_evidence_class', () => withAdapterFetch([
+    jsonResponse({ totalResults: 1, vulnerabilities: [{ cve: { id: 'CVE-2021-44228', published: '2021-12-10T00:00:00.000', lastModified: '2021-12-11T00:00:00.000', descriptions: [{ lang: 'en', value: 'Log4Shell' }], metrics: { cvssMetricV31: [{ cvssData: { baseScore: 10.0, baseSeverity: 'CRITICAL' } }] }, cisaExploitAdd: '2021-12-10' } }] }),
+  ], async () => {
+    const response = await nvdAdapter.run({ text: 'CVE-2021-44228' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].identifiers.evidence_class !== 'CONFIRMED_EXPLOITED') return 'expected nvd evidence_class to be CONFIRMED_EXPLOITED when cisaExploitAdd is present'
+    return documentShapeIssue(response.documents[0], 'nvd') ?? true
+  }))
+
+  await add('re_711_cisa_kev_success_normalizes_catalog_entry_as_confirmed_exploited', () => withAdapterFetch([
+    jsonResponse({ catalogVersion: '2024.01.01', dateReleased: '2024-01-01T00:00:00Z', count: 1, vulnerabilities: [{ cveID: 'CVE-2021-45046', vendorProject: 'Apache', product: 'Log4j2', vulnerabilityName: 'Log4Shell follow-up', dateAdded: '2021-12-14', shortDescription: 'desc', requiredAction: 'Patch', dueDate: '2021-12-28' }] }),
+  ], async () => {
+    const response = await cisaKevAdapter.run({ text: 'log4j' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].identifiers.evidence_class !== 'CONFIRMED_EXPLOITED') return 'expected cisa_kev evidence_class to always be CONFIRMED_EXPLOITED'
+    return documentShapeIssue(response.documents[0], 'cisa_kev') ?? true
+  }))
+
+  await add('re_712_osm_overpass_rejects_query_without_near_clause', async () => {
+    const response = await osmOverpassAdapter.run({ text: 'Eiffel Tower' })
+    return (response.ok === false && response.documents.length === 0) || 'expected an unbounded query without "near" to be rejected, not silently guessed'
+  })
+
+  await add('re_713_osm_overpass_success_normalizes_way_via_center', () => withAdapterFetch([
+    jsonResponse({ elements: [{ type: 'way', id: 231157316, center: { lat: 48.8646, lon: 2.2852 }, tags: { name: 'Eiffel Tower' } }] }),
+  ], async () => {
+    const response = await osmOverpassAdapter.run({ text: 'Eiffel Tower near 48.8584,2.2945,5' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'osm_overpass') ?? true
+  }))
+
+  await add('re_714_geonames_success_normalizes_place', () => withEnv({ GEONAMES_USERNAME: 'warroom_validation_test' }, () => withAdapterFetch([
+    jsonResponse({ totalResultsCount: 1, geonames: [{ geonameId: 2643743, name: 'London', toponymName: 'London', countryName: 'United Kingdom', fcodeName: 'capital of a political entity' }] }),
+  ], async () => {
+    const response = await geonamesAdapter.run({ text: 'London' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'geonames') ?? true
+  })))
+
+  await add('re_715_geonames_detects_status_error_not_fabricated_empty_success', () => withEnv({ GEONAMES_USERNAME: 'warroom_validation_test' }, () => withAdapterFetch([
+    jsonResponse({ status: { message: 'invalid username', value: 10 } }),
+  ], async () => {
+    const response = await geonamesAdapter.run({ text: 'London' })
+    return (response.ok === false && response.error?.category === 'upstream_error') || `expected a GeoNames status.message error to surface as a failure, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_716_eurostat_success_decodes_json_stat_sample', () => withAdapterFetch([
+    jsonResponse({ label: 'Population density', id: ['geo'], size: [2], dimension: { geo: { category: { index: { BE: 0, FR: 1 }, label: { BE: 'Belgium', FR: 'France' } } } }, value: { '0': 100, '1': 200 } }),
+  ], async () => {
+    const response = await eurostatAdapter.run({ text: 'population' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'eurostat') ?? true
+  }))
+
+  await add('re_717_eurostat_rejects_unknown_keyword_and_code', async () => {
+    const response = await eurostatAdapter.run({ text: 'not a real keyword or code' })
+    return (response.ok === false) || 'expected an unresolvable Eurostat query to fail rather than guess a dataset code'
+  })
+
+  await add('re_718_us_census_success_normalizes_array_of_arrays', () => withAdapterFetch([
+    jsonResponse([['NAME', 'B01001_001E', 'state'], ['California', '39000000', '06'], ['Texas', '30000000', '48']]),
+  ], async () => {
+    const response = await usCensusAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length !== 2) return `expected 2 normalized state rows, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'us_census') ?? true
+  }))
+
+  await add('re_719_us_census_client_side_filter_narrows_by_name', () => withAdapterFetch([
+    jsonResponse([['NAME', 'B01001_001E', 'state'], ['California', '39000000', '06'], ['Texas', '30000000', '48']]),
+  ], async () => {
+    const response = await usCensusAdapter.run({ text: 'california' })
+    return (response.ok === true && response.documents.length === 1 && response.documents[0].geography === 'California')
+      || `expected exactly 1 filtered document for "california", got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_720_congress_gov_success_normalizes_bill', () => withEnv({ CONGRESS_GOV_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ bills: [{ congress: 118, number: '3076', type: 'HR', title: 'Test Act', updateDate: '2024-01-01', originChamber: 'House', latestAction: { actionDate: '2024-01-02', text: 'Passed House' } }] }),
+  ], async () => {
+    const response = await congressGovAdapter.run({ text: '118' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'congress_gov') ?? true
+  })))
+
+  await add('re_721_govinfo_success_normalizes_package', () => withEnv({ GOVINFO_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ packages: [{ packageId: 'FR-2024-01-01', title: 'Federal Register', dateIssued: '2024-01-01', lastModified: '2024-01-02', packageLink: 'https://api.govinfo.gov/packages/FR-2024-01-01/summary', docClass: 'FR' }] }),
+  ], async () => {
+    const response = await govinfoAdapter.run({ text: 'FR' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'govinfo') ?? true
+  })))
+
+  await add('re_722_sec_edgar_success_normalizes_filing_hit', () => withEnv({ SEC_EDGAR_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0 (validation@example.com)' }, () => withAdapterFetch([
+    jsonResponse({ hits: { total: { value: 1 }, hits: [{ _id: 'x', _source: { cik: '320193', display_names: ['Apple Inc.'], file_type: '10-K', file_date: '2024-01-01', root_form: '10-K', adsh: '0000320193-24-000123' } }] } }),
+  ], async () => {
+    const response = await secEdgarAdapter.run({ text: 'apple' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'sec_edgar') ?? true
+  })))
+
+  await add('re_723_orcid_success_fetches_token_then_normalizes_search', () => withEnv({ ORCID_CLIENT_ID: 'test-client', ORCID_CLIENT_SECRET: 'test-secret-not-real' }, () => withAdapterFetch([
+    jsonResponse({ access_token: 'test-token-not-real', token_type: 'bearer', expires_in: 3600 }),
+    jsonResponse({ 'expanded-result': [{ 'orcid-id': '0000-0002-1825-0097', 'given-names': 'Jane', 'family-names': 'Doe', 'institution-name': ['MIT'] }], 'num-found': 1 }),
+  ], async () => {
+    const response = await orcidAdapter.run({ text: 'jane doe' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'orcid') ?? true
+  })))
+
+  await add('re_724_reliefweb_success_normalizes_report', () => withEnv({ RELIEFWEB_APPNAME: 'warroom-validation-test' }, () => withAdapterFetch([
+    jsonResponse({ data: [{ id: '123', fields: { title: 'Earthquake situation report', url: 'https://reliefweb.int/report/123', date: { original: '2024-01-01' }, source: [{ name: 'OCHA' }], primary_country: { name: 'Haiti' }, body: 'Report body text.' } }] }),
+  ], async () => {
+    const response = await reliefwebAdapter.run({ text: 'earthquake' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'reliefweb') ?? true
+  })))
+
+  // --- Checkpoint 2 completion adapters (biomedical/genetics, re_725-re_739):
+  // one mocked success-path normalization test per new provider. Real
+  // upstream proof lives in scripts/run-research-engine-live-validation.mjs.
+
+  await add('re_725_ensembl_success_normalizes_gene_lookup', () => withAdapterFetch([
+    jsonResponse({ id: 'ENSG00000139618', display_name: 'BRCA2', description: 'BRCA2 DNA repair associated', biotype: 'protein_coding', species: 'homo_sapiens', seq_region_name: '13', start: 32315086, end: 32400268 }),
+  ], async () => {
+    const response = await ensemblAdapter.run({ text: 'BRCA2' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ensembl') ?? true
+  }))
+
+  await add('re_726_rcsb_pdb_success_normalizes_search_then_detail', () => withAdapterFetch([
+    jsonResponse({ result_set: [{ identifier: '4HHB', score: 1 }] }),
+    jsonResponse({ rcsb_id: '4HHB', struct: { title: 'THE CRYSTAL STRUCTURE OF HUMAN DEOXYHAEMOGLOBIN' }, rcsb_accession_info: { initial_release_date: '1984-07-17' }, audit_author: [{ name: 'Fermi, G.' }] }),
+  ], async () => {
+    const response = await rcsbPdbAdapter.run({ text: 'hemoglobin' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'rcsb_pdb') ?? true
+  }))
+
+  await add('re_727_string_db_success_normalizes_resolve_then_partners', () => withAdapterFetch([
+    jsonResponse([{ stringId: '9606.ENSP00000269305', preferredName: 'TP53', annotation: 'Cellular tumor antigen p53', taxonName: 'Homo sapiens' }]),
+    jsonResponse([{ stringId_A: '9606.ENSP00000269305', stringId_B: '9606.ENSP00000228872', preferredName_A: 'TP53', preferredName_B: 'MDM2', score: 0.999 }]),
+  ], async () => {
+    const response = await stringDbAdapter.run({ text: 'TP53' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'string_db') ?? true
+  }))
+
+  await add('re_728_gnomad_success_normalizes_graphql_gene', () => withAdapterFetch([
+    jsonResponse({ data: { gene: { gene_id: 'ENSG00000141510', symbol: 'TP53', chrom: '17', start: 7661779, stop: 7687538 } } }),
+  ], async () => {
+    const response = await gnomadAdapter.run({ text: 'TP53' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'gnomad') ?? true
+  }))
+
+  await add('re_729_ebi_ols_success_normalizes_ontology_term', () => withAdapterFetch([
+    jsonResponse({ response: { numFound: 1, docs: [{ iri: 'http://purl.obolibrary.org/obo/HP_0005978', short_form: 'HP_0005978', obo_id: 'HP:0005978', ontology_name: 'hp', label: 'Type II diabetes mellitus', description: [] }] } }),
+  ], async () => {
+    const response = await ebiOlsAdapter.run({ text: 'diabetes' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ebi_ols') ?? true
+  }))
+
+  await add('re_730_medlineplus_success_parses_attribute_addressed_xml', () => withAdapterFetch([
+    textResponse('<nlmSearchResult><list><document rank="1" url="https://medlineplus.gov/highbloodpressure.html"><content name="title">High <span class="qt0"><span class="qt1">Blood</span></span> Pressure</content><content name="organizationName">NIH</content><content name="snippet">A short summary.</content></document></list></nlmSearchResult>', 200, 'text/xml'),
+  ], async () => {
+    const response = await medlineplusAdapter.run({ text: 'hypertension' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].title.includes('<span')) return 'expected highlight-wrapper spans to be stripped from the title'
+    return documentShapeIssue(response.documents[0], 'medlineplus') ?? true
+  }))
+
+  await add('re_731_who_gho_success_normalizes_indicator_row', () => withAdapterFetch([
+    jsonResponse({ value: [{ Id: 1, IndicatorCode: 'WHOSIS_000001', SpatialDim: 'SOM', ParentLocation: 'Africa', TimeDim: 2020, Value: '55.0', NumericValue: 55.0 }] }),
+  ], async () => {
+    const response = await whoGhoAdapter.run({ text: 'life expectancy' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'who_gho') ?? true
+  }))
+
+  await add('re_732_who_gho_rejects_unknown_keyword_and_code', async () => {
+    const response = await whoGhoAdapter.run({ text: 'not a real keyword or code' })
+    return (response.ok === false) || 'expected an unresolvable WHO GHO query to fail rather than guess an indicator code'
+  })
+
+  await add('re_733_rxnorm_success_flattens_nested_concept_groups', () => withAdapterFetch([
+    jsonResponse({ drugGroup: { conceptGroup: [{ tty: 'IN', conceptProperties: [{ rxcui: '1191', name: 'aspirin', tty: 'IN' }] }, { tty: 'BN', conceptProperties: [{ rxcui: '212033', name: 'Bayer Aspirin', tty: 'BN' }] }] } }),
+  ], async () => {
+    const response = await rxnormAdapter.run({ text: 'aspirin' })
+    if (!response.ok || response.documents.length !== 2) return `expected 2 flattened, deduplicated concepts, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'rxnorm') ?? true
+  }))
+
+  await add('re_734_dailymed_success_normalizes_spl_entry', () => withAdapterFetch([
+    jsonResponse({ data: [{ spl_version: 2, published_date: 'Aug 21, 2026', title: 'IBUPROFEN TABLET', setid: '5ba08c30-7eb9-433b-b763-9288f4dd1012' }], metadata: { total_elements: 1 } }),
+  ], async () => {
+    const response = await dailymedAdapter.run({ text: 'ibuprofen' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'dailymed') ?? true
+  }))
+
+  await add('re_735_chembl_success_normalizes_molecule', () => withAdapterFetch([
+    jsonResponse({ molecules: [{ molecule_chembl_id: 'CHEMBL941', pref_name: 'IMATINIB', max_phase: '4.0', first_approval: 2001, molecule_properties: { full_mwt: '493.62', full_molformula: 'C29H31N7O' }, molecule_type: 'Small molecule', withdrawn_flag: false }] }),
+  ], async () => {
+    const response = await chemblAdapter.run({ text: 'imatinib' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'chembl') ?? true
+  }))
+
+  await add('re_736_open_targets_success_normalizes_graphql_hits', () => withAdapterFetch([
+    jsonResponse({ data: { search: { hits: [{ id: 'MONDO_0004979', name: 'asthma', entity: 'disease' }] } } }),
+  ], async () => {
+    const response = await openTargetsAdapter.run({ text: 'asthma' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'open_targets') ?? true
+  }))
+
+  await add('re_737_inaturalist_success_normalizes_observation', () => withAdapterFetch([
+    jsonResponse({ total_results: 1, results: [{ id: 393957654, taxon: { name: 'Puma concolor', id: 42 }, observed_on: '2024-01-01', uri: 'https://www.inaturalist.org/observations/393957654', quality_grade: 'research', license_code: 'cc-by' }] }),
+  ], async () => {
+    const response = await inaturalistAdapter.run({ text: 'Puma concolor' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'inaturalist') ?? true
+  }))
+
+  await add('re_738_obis_success_normalizes_occurrence', () => withAdapterFetch([
+    jsonResponse({ total: 1, results: [{ id: '00042a5b-d420-450d-ba01-8a59bcfc6d4f', scientificName: 'Orcinus orca', decimalLatitude: 60.1, decimalLongitude: -2.3, eventDate: '2025-06-30T11:01:16', basisOfRecord: 'HumanObservation' }] }),
+  ], async () => {
+    const response = await obisAdapter.run({ text: 'Orcinus orca' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'obis') ?? true
+  }))
+
+  await add('re_739_worms_success_normalizes_aphia_record', () => withAdapterFetch([
+    jsonResponse([{ AphiaID: 137102, scientificname: 'Orcinus orca', authority: '(Linnaeus, 1758)', status: 'accepted', rank: 'Species', kingdom: 'Animalia', url: 'https://www.marinespecies.org/aphia.php?p=taxdetails&id=137102', modified: '2008-08-20T11:25:36.853Z' }]),
+  ], async () => {
+    const response = await wormsAdapter.run({ text: 'Orcinus orca' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'worms') ?? true
+  }))
+
+  await add('re_740_worms_rejects_non_array_sentinel_response', () => withAdapterFetch([
+    jsonResponse(-999),
+  ], async () => {
+    const response = await wormsAdapter.run({ text: 'ambiguousname' })
+    return (response.ok === false && response.documents.length === 0) || `expected a non-array WoRMS sentinel response to fail closed, not a fabricated empty success, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_741_itis_success_normalizes_scientific_name_record', () => withAdapterFetch([
+    jsonResponse({ scientificNames: [{ tsn: '180544', combinedName: 'Ursus americanus', author: 'Pallas, 1780', kingdom: 'Animalia' }] }),
+  ], async () => {
+    const response = await itisAdapter.run({ text: 'Ursus americanus' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'itis') ?? true
+  }))
+
+  // --- Checkpoint 3 completion adapters (cybersecurity/software, re_742-re_753):
+  // one mocked success-path normalization test per new provider. Real
+  // upstream proof lives in scripts/run-research-engine-live-validation.mjs.
+
+  await add('re_742_pypi_success_normalizes_package_json', () => withAdapterFetch([
+    jsonResponse({ info: { name: 'requests', version: '2.34.2', summary: 'Python HTTP for Humans.', author: 'Kenneth Reitz', license: 'Apache-2.0', project_url: 'https://pypi.org/project/requests/' } }),
+  ], async () => {
+    const response = await pypiAdapter.run({ text: 'requests' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'pypi') ?? true
+  }))
+
+  await add('re_743_npm_registry_success_normalizes_package', () => withAdapterFetch([
+    jsonResponse({ name: 'express', description: 'Fast web framework', 'dist-tags': { latest: '5.2.1' }, license: 'MIT', time: { '5.2.1': '2026-01-01T00:00:00.000Z' } }),
+  ], async () => {
+    const response = await npmRegistryAdapter.run({ text: 'express' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'npm_registry') ?? true
+  }))
+
+  await add('re_744_crates_io_success_normalizes_crate', () => withAdapterFetch([
+    jsonResponse({ crates: [{ name: 'serde', description: 'Serialization framework', max_version: '1.0.229', downloads: 1301752025, updated_at: '2026-01-01T00:00:00Z' }] }),
+  ], async () => {
+    const response = await cratesIoAdapter.run({ text: 'serde' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'crates_io') ?? true
+  }))
+
+  await add('re_745_rubygems_success_normalizes_bare_array_response', () => withAdapterFetch([
+    jsonResponse([{ name: 'rails', info: 'Full-stack framework', version: '8.1.3.1', authors: 'David Heinemeier Hansson', licenses: ['MIT'], project_uri: 'https://rubygems.org/gems/rails' }]),
+  ], async () => {
+    const response = await rubygemsAdapter.run({ text: 'rails' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'rubygems') ?? true
+  }))
+
+  await add('re_746_maven_central_success_normalizes_artifact', () => withAdapterFetch([
+    jsonResponse({ response: { numFound: 1, docs: [{ id: 'com.google.guava:guava', g: 'com.google.guava', a: 'guava', latestVersion: '33.4.8-jre', timestamp: 1700000000000, p: 'jar' }] } }),
+  ], async () => {
+    const response = await mavenCentralAdapter.run({ text: 'guava' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'maven_central') ?? true
+  }))
+
+  await add('re_747_github_advisory_success_tags_distinct_evidence_classes', () => withAdapterFetch([
+    jsonResponse([{ ghsa_id: 'GHSA-66mm-25pp-rfff', cve_id: 'CVE-2024-0001', summary: 'Test advisory', severity: 'critical', epss: { percentage: 0.00508, percentile: 0.41336 }, published_at: '2024-01-01T00:00:00Z', html_url: 'https://github.com/advisories/GHSA-66mm-25pp-rfff' }]),
+  ], async () => {
+    const response = await githubAdvisoryAdapter.run({ text: 'npm' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const doc = response.documents[0]
+    if (doc.identifiers.evidence_class !== 'VULNERABILITY_EXISTS') return 'expected github_advisory evidence_class to be VULNERABILITY_EXISTS'
+    if (doc.identifiers.epss_evidence_class !== 'PREDICTED_EXPLOITABILITY') return 'expected github_advisory epss_evidence_class to be PREDICTED_EXPLOITABILITY, kept distinct from evidence_class'
+    return documentShapeIssue(doc, 'github_advisory') ?? true
+  }))
+
+  await add('re_748_endoflife_success_resolves_slug_and_normalizes_cycle', () => withAdapterFetch([
+    jsonResponse(['python', 'nodejs', 'ubuntu']),
+    jsonResponse([{ cycle: '3.14', releaseDate: '2025-10-01', eol: '2030-10-31', latest: '3.14.7' }]),
+  ], async () => {
+    const response = await endoflifeAdapter.run({ text: 'python' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'endoflife') ?? true
+  }))
+
+  await add('re_749_epss_success_parses_decimal_string_score_as_predicted_exploitability', () => withAdapterFetch([
+    jsonResponse({ status: 'OK', data: [{ cve: 'CVE-2021-44228', epss: '0.999990000', percentile: '1.000000000', date: '2026-08-23' }] }),
+  ], async () => {
+    const response = await epssAdapter.run({ text: 'CVE-2021-44228' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].identifiers.evidence_class !== 'PREDICTED_EXPLOITABILITY') return 'expected epss evidence_class to be PREDICTED_EXPLOITABILITY'
+    return documentShapeIssue(response.documents[0], 'epss') ?? true
+  }))
+
+  await add('re_750_epss_rejects_non_cve_query', async () => {
+    const response = await epssAdapter.run({ text: 'not a cve id' })
+    return (response.ok === false) || 'expected a non-CVE-ID query to fail rather than call the API with a garbage id'
+  })
+
+  await add('re_751_alienvault_otx_success_tags_community_reported', () => withEnv({ OTX_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ results: [{ id: 'abc123', name: 'Test pulse', description: 'desc', author: { username: 'researcher' }, created: '2024-01-01T00:00:00Z', tags: ['apt'] }] }),
+  ], async () => {
+    const response = await alienvaultOtxAdapter.run({ text: 'test' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].identifiers.evidence_class !== 'COMMUNITY_REPORTED') return 'expected alienvault_otx evidence_class to be COMMUNITY_REPORTED'
+    return documentShapeIssue(response.documents[0], 'alienvault_otx') ?? true
+  })))
+
+  await add('re_752_malwarebazaar_success_tags_community_reported', () => withEnv({ MALWAREBAZAAR_AUTH_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ query_status: 'ok', data: [{ sha256_hash: 'a'.repeat(64), file_name: 'sample.exe', file_type: 'exe', signature: 'TestMalware', first_seen: '2024-01-01' }] }),
+  ], async () => {
+    const response = await malwarebazaarAdapter.run({ text: 'testtag' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].identifiers.evidence_class !== 'COMMUNITY_REPORTED') return 'expected malwarebazaar evidence_class to be COMMUNITY_REPORTED'
+    return documentShapeIssue(response.documents[0], 'malwarebazaar') ?? true
+  })))
+
+  await add('re_753_threatfox_and_urlhaus_success_tag_community_reported', () => withEnv({ THREATFOX_AUTH_KEY: 'test-key-not-real', URLHAUS_AUTH_KEY: 'test-key-not-real' }, async () => {
+    const tfResponse = await withAdapterFetch([
+      jsonResponse({ query_status: 'ok', data: [{ id: '1', ioc: '1.2.3.4', ioc_type: 'ip:port', threat_type: 'botnet_cc', malware_printable: 'TestBot', confidence_level: 80, first_seen: '2024-01-01' }] }),
+    ], () => threatfoxAdapter.run({ text: '1.2.3.4' }))
+    if (!tfResponse.ok || tfResponse.documents.length === 0) return `threatfox: expected ok success, got ${JSON.stringify(tfResponse)}`
+    if (tfResponse.documents[0].identifiers.evidence_class !== 'COMMUNITY_REPORTED') return 'expected threatfox evidence_class to be COMMUNITY_REPORTED'
+    const tfShapeIssue = documentShapeIssue(tfResponse.documents[0], 'threatfox')
+    if (tfShapeIssue) return tfShapeIssue
+
+    const uhResponse = await withAdapterFetch([
+      jsonResponse({ query_status: 'ok', url_count: 1, urls: [{ id: '1', url: 'http://evil.example/payload', url_status: 'online', date_added: '2024-01-01', threat: 'malware_download' }] }),
+    ], () => urlhausAdapter.run({ text: 'evil.example' }))
+    if (!uhResponse.ok || uhResponse.documents.length === 0) return `urlhaus: expected ok success, got ${JSON.stringify(uhResponse)}`
+    if (uhResponse.documents[0].identifiers.evidence_class !== 'COMMUNITY_REPORTED') return 'expected urlhaus evidence_class to be COMMUNITY_REPORTED'
+    return documentShapeIssue(uhResponse.documents[0], 'urlhaus') ?? true
+  }))
+
+  // --- Checkpoint 4 completion adapters (government/law/economics/statistics,
+  // re_754-re_765): one mocked success-path normalization test per new
+  // provider. Real upstream proof lives in
+  // scripts/run-research-engine-live-validation.mjs.
+
+  await add('re_754_federal_register_success_normalizes_document', () => withAdapterFetch([
+    jsonResponse({ count: 1, results: [{ document_number: '2026-11091', title: 'Test Rule', type: 'Rule', abstract: 'desc', html_url: 'https://www.federalregister.gov/documents/2026-11091', publication_date: '2026-01-01', agencies: [{ name: 'EPA' }] }] }),
+  ], async () => {
+    const response = await federalRegisterAdapter.run({ text: 'climate' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'federal_register') ?? true
+  }))
+
+  await add('re_755_usaspending_success_normalizes_award', () => withAdapterFetch([
+    jsonResponse({ results: [{ 'Award ID': 'W123', 'Recipient Name': 'Acme Corp', 'Award Amount': 5000000, 'Start Date': '2026-01-01', 'Awarding Agency': 'DoD', generated_internal_id: 'CONT_AWD_W123' }] }),
+  ], async () => {
+    const response = await usaspendingAdapter.run({ text: 'research' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'usaspending') ?? true
+  }))
+
+  await add('re_756_uk_legislation_success_parses_atom_entry', () => withAdapterFetch([
+    textResponse('<feed><entry><id>http://www.legislation.gov.uk/id/eudn/2020/1745</id><title>Test Act 2020</title><updated>2020-01-01T00:00:00Z</updated><published>2020-01-01T00:00:00Z</published><summary>desc</summary><link rel="alternate" type="text/html" href="http://www.legislation.gov.uk/eudn/2020/1745"/></entry></feed>', 200, 'application/atom+xml'),
+  ], async () => {
+    const response = await ukLegislationAdapter.run({ text: 'data protection' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'uk_legislation') ?? true
+  }))
+
+  await add('re_757_opensanctions_success_normalizes_entity', () => withEnv({ OPENSANCTIONS_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ results: [{ id: 'Q123', caption: 'Test Entity', schema: 'Person', datasets: ['sanctions'], first_seen: '2024-01-01', target: true }] }),
+  ], async () => {
+    const response = await opensanctionsAdapter.run({ text: 'test' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'opensanctions') ?? true
+  })))
+
+  await add('re_758_companies_house_success_normalizes_company', () => withEnv({ COMPANIES_HOUSE_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ items: [{ company_number: '00000006', title: 'TEST COMPANY LTD', company_status: 'active', company_type: 'ltd', date_of_creation: '2000-01-01', address_snippet: 'London' }] }),
+  ], async () => {
+    const response = await companiesHouseAdapter.run({ text: 'test company' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'companies_house') ?? true
+  })))
+
+  await add('re_759_ecb_sdw_success_decodes_sdmx_json', () => withAdapterFetch([
+    jsonResponse({ dataSets: [{ series: { '0:0:0:0:0': { observations: { '0': [1.16], '1': [1.17] } } } }], structure: { dimensions: { observation: [{ values: [{ id: '2026-08-19' }, { id: '2026-08-20' }] }] } } }),
+  ], async () => {
+    const response = await ecbSdwAdapter.run({ text: 'EXR/D.USD.EUR.SP00.A' })
+    if (!response.ok || response.documents.length !== 2) return `expected 2 decoded observations, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ecb_sdw') ?? true
+  }))
+
+  await add('re_760_bank_of_canada_success_normalizes_observation', () => withAdapterFetch([
+    jsonResponse({ seriesDetail: { FXUSDCAD: { label: 'USD/CAD' } }, observations: [{ d: '2026-08-21', FXUSDCAD: { v: '1.3760' } }] }),
+  ], async () => {
+    const response = await bankOfCanadaAdapter.run({ text: 'FXUSDCAD' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'bank_of_canada') ?? true
+  }))
+
+  await add('re_761_bis_stats_success_decodes_sdmx_json', () => withAdapterFetch([
+    jsonResponse({ data: { dataSets: [{ series: { '0:0': { observations: { '0': [3.625] } } } }], structure: { dimensions: { observation: [{ values: [{ id: '2026-08-21' }] }] } } } }),
+  ], async () => {
+    const response = await bisStatsAdapter.run({ text: 'WS_CBPOL/D.US' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'bis_stats') ?? true
+  }))
+
+  await add('re_762_eia_success_handles_response_data_wrapper', () => withEnv({ EIA_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ response: { data: [{ period: '2026-01', price: 12.5 }] } }),
+  ], async () => {
+    const response = await eiaAdapter.run({ text: 'electricity/retail-sales' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'eia') ?? true
+  })))
+
+  await add('re_763_statcan_wds_success_normalizes_vector_point', () => withAdapterFetch([
+    jsonResponse([{ status: 'SUCCESS', object: { vectorId: 41690973, vectorDataPoint: [{ refPer: '2026-01-01', value: 161.9, releaseTime: '2026-02-01' }] } }]),
+  ], async () => {
+    const response = await statcanWdsAdapter.run({ text: 'cpi' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'statcan_wds') ?? true
+  }))
+
+  await add('re_764_uk_ons_success_normalizes_search_item', () => withAdapterFetch([
+    jsonResponse({ count: 1, items: [{ title: 'Population estimates', summary: 'desc', uri: '/peoplepopulationandcommunity/pop', release_date: '2026-01-01', type: 'bulletin' }] }),
+  ], async () => {
+    const response = await ukOnsAdapter.run({ text: 'population' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'uk_ons') ?? true
+  }))
+
+  await add('re_765_insee_melodi_success_two_call_catalog_then_data', () => withAdapterFetch([
+    jsonResponse([{ identifier: 'DD_ESTIMATION_POPULATION', title: [{ content: 'Population estimates', lang: 'en' }] }]),
+    jsonResponse({ observations: [{ dimensions: { GEO: 'FR', TIME_PERIOD: '2026' }, measures: { OBS_VALUE_NIVEAU: { value: 68000000 } } }] }),
+  ], async () => {
+    const response = await inseeMelodiAdapter.run({ text: 'population' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'insee_melodi') ?? true
+  }))
+
+  // --- Checkpoint 5 completion adapters (earth/GIS/space, re_766-re_779):
+  // one mocked success-path normalization test per new provider. Real
+  // upstream proof lives in scripts/run-research-engine-live-validation.mjs.
+
+  await add('re_766_open_meteo_success_normalizes_current_forecast', () => withAdapterFetch([
+    jsonResponse({ latitude: 52.52, longitude: 13.41, timezone: 'Europe/Berlin', current: { time: '2026-01-01T00:00', temperature_2m: 12.7, wind_speed_10m: 10.2 }, current_units: { temperature_2m: '°C', wind_speed_10m: 'km/h' } }),
+  ], async () => {
+    const response = await openMeteoAdapter.run({ text: '52.52,13.41' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'open_meteo') ?? true
+  }))
+
+  await add('re_767_noaa_cdo_success_normalizes_dataset', () => withEnv({ NOAA_CDO_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    jsonResponse({ results: [{ id: 'GHCND', name: 'Daily Summaries', mindate: '1750-01-01', maxdate: '2026-01-01', datacoverage: 1 }] }),
+  ], async () => {
+    const response = await noaaCdoAdapter.run({ text: 'GHCND' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'noaa_cdo') ?? true
+  })))
+
+  await add('re_768_met_no_success_normalizes_timeseries_point', () => withAdapterFetch([
+    jsonResponse({ geometry: { coordinates: [13.41, 52.52, 34] }, properties: { meta: { updated_at: '2026-01-01T00:00:00Z' }, timeseries: [{ time: '2026-01-01T00:00:00Z', data: { instant: { details: { air_temperature: 12.6, air_pressure_at_sea_level: 1021.6 } } } }] } }),
+  ], async () => {
+    const response = await metNoAdapter.run({ text: '52.52,13.41' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'met_no') ?? true
+  }))
+
+  await add('re_769_noaa_swpc_success_normalizes_scales', () => withAdapterFetch([
+    jsonResponse({ '0': { DateStamp: '2026-01-01', TimeStamp: '00:00:00', R: { Scale: '0' }, S: { Scale: '0' }, G: { Scale: '0' } } }),
+  ], async () => {
+    const response = await noaaSwpcAdapter.run({ text: 'scales' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'noaa_swpc') ?? true
+  }))
+
+  await add('re_770_nominatim_success_normalizes_place', () => withAdapterFetch([
+    jsonResponse([{ place_id: 97683695, osm_type: 'relation', osm_id: 71525, lat: '48.8534951', lon: '2.3483915', display_name: 'Paris, Île-de-France, France', class: 'boundary', type: 'administrative' }]),
+  ], async () => {
+    const response = await nominatimAdapter.run({ text: 'Paris, France' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'nominatim') ?? true
+  }))
+
+  await add('re_771_nasa_cmr_success_normalizes_collection', () => withAdapterFetch([
+    jsonResponse({ feed: { entry: [{ entry_id: 'C123-LPDAAC', short_name: 'MYD00F', dataset_id: 'MODIS Test', version_id: '1', data_center: 'LPDAAC', summary: 'desc', time_start: '2000-01-01T00:00:00Z' }] } }),
+  ], async () => {
+    const response = await nasaCmrAdapter.run({ text: 'MODIS' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'nasa_cmr') ?? true
+  }))
+
+  await add('re_772_copernicus_dataspace_success_normalizes_product', () => withAdapterFetch([
+    jsonResponse({ value: [{ Id: 'abc-123', Name: 'S2A_MSIL1C_TEST.SAFE', OriginDate: '2026-01-01T00:00:00Z', Online: true, ContentLength: 500000000 }] }),
+  ], async () => {
+    const response = await copernicusDataspaceAdapter.run({ text: 'S2A' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'copernicus_dataspace') ?? true
+  }))
+
+  await add('re_773_opentopography_rejects_oversized_bbox', () => withEnv({ OPENTOPOGRAPHY_API_KEY: 'test-key-not-real' }, async () => {
+    const response = await opentopographyAdapter.run({ text: '30,-115,40,-105' })
+    return (response.ok === false) || 'expected a bbox spanning more than 1 degree per side to be rejected, not silently accepted'
+  }))
+
+  await add('re_774_celestrak_success_normalizes_gp_element', () => withAdapterFetch([
+    jsonResponse([{ OBJECT_NAME: 'ISS (ZARYA)', OBJECT_ID: '1998-067A', NORAD_CAT_ID: 25544, EPOCH: '2026-01-01T00:00:00', INCLINATION: 51.6 }]),
+  ], async () => {
+    const response = await celestrakAdapter.run({ text: '25544' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'celestrak') ?? true
+  }))
+
+  await add('re_775_jpl_horizons_success_treats_result_as_content', () => withAdapterFetch([
+    jsonResponse({ result: 'Target body name: Mars (499)                     {source: mar097}\nVol. mean radius (km) = 3389.5' }),
+  ], async () => {
+    const response = await jplHorizonsAdapter.run({ text: '499' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'jpl_horizons') ?? true
+  }))
+
+  await add('re_776_jpl_sbdb_success_normalizes_small_body', () => withAdapterFetch([
+    jsonResponse({ object: { fullname: '1 Ceres (A801 AA)', des: '1', spkid: '20000001', kind: 'an', neo: false, pha: false, orbit_class: { name: 'Main-belt Asteroid' } }, orbit: { epoch: '2026-01-01', last_obs: '2025-12-01' } }),
+  ], async () => {
+    const response = await jplSbdbAdapter.run({ text: 'Ceres' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'jpl_sbdb') ?? true
+  }))
+
+  await add('re_777_nasa_exoplanet_archive_success_normalizes_planet_row', () => withAdapterFetch([
+    jsonResponse([{ pl_name: 'Kepler-10 b', hostname: 'Kepler-10', discoverymethod: 'Transit', disc_year: 2011, pl_orbper: 0.8374907 }]),
+  ], async () => {
+    const response = await nasaExoplanetArchiveAdapter.run({ text: 'Kepler-10 b' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'nasa_exoplanet_archive') ?? true
+  }))
+
+  await add('re_778_simbad_success_decodes_tap_json_column_array', () => withAdapterFetch([
+    jsonResponse({ metadata: [{ name: 'main_id' }, { name: 'ra' }, { name: 'dec' }, { name: 'otype' }], data: [['M  31', 10.68, 41.27, 'AGN']] }),
+  ], async () => {
+    const response = await simbadAdapter.run({ text: 'M31' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].providerRecordId !== 'M 31') return `expected main_id padding ("M  31") to be trimmed to "M 31", got ${JSON.stringify(response.documents[0].providerRecordId)}`
+    return documentShapeIssue(response.documents[0], 'simbad') ?? true
+  }))
+
+  await add('re_779_mast_success_two_call_name_resolve_then_cone_search', () => withAdapterFetch([
+    jsonResponse({ resolvedCoordinate: [{ ra: 10.68, decl: 41.27 }] }),
+    jsonResponse({ status: 'COMPLETE', data: [{ obs_id: 'tess-s0017-2-4', obs_collection: 'TESS', instrument_name: 'Photometer', target_name: 'M31', s_ra: 10.68, s_dec: 41.27, t_min: 58700 }] }),
+  ], async () => {
+    const response = await mastAdapter.run({ text: 'M31' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'mast') ?? true
+  }))
+
+  // --- Checkpoint 6 completion adapters (academic/patents/materials,
+  // re_780-re_793): one mocked success-path normalization test per new
+  // provider. Real upstream proof lives in
+  // scripts/run-research-engine-live-validation.mjs.
+
+  await add('re_780_ror_success_normalizes_organization', () => withAdapterFetch([
+    jsonResponse({ number_of_results: 1, items: [{ id: 'https://ror.org/00f54p054', names: [{ value: 'Stanford University', types: ['ror_display'] }], links: [{ type: 'website', value: 'https://www.stanford.edu' }], established: 1891 }] }),
+  ], async () => {
+    const response = await rorAdapter.run({ text: 'Stanford' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ror') ?? true
+  }))
+
+  await add('re_781_opencitations_success_normalizes_citation_count', () => withAdapterFetch([
+    jsonResponse([{ count: '1806' }]),
+  ], async () => {
+    const response = await opencitationsAdapter.run({ text: '10.1038/nature12373' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'opencitations') ?? true
+  }))
+
+  await add('re_782_biorxiv_medrxiv_success_normalizes_preprint', () => withAdapterFetch([
+    jsonResponse({ messages: [{ status: 'ok' }], collection: [{ title: 'Test preprint', authors: 'Doe J; Smith A', doi: '10.1101/339747', date: '2018-06-05', version: '1', category: 'genomics' }] }),
+  ], async () => {
+    const response = await biorxivMedrxivAdapter.run({ text: '10.1101/339747' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'biorxiv_medrxiv') ?? true
+  }))
+
+  await add('re_783_hal_success_normalizes_doc', () => withAdapterFetch([
+    jsonResponse({ response: { numFound: 1, docs: [{ docid: '05309397', title_s: ['Climate change study'], authFullName_s: ['Jane Doe'], producedDate_s: '2024-01-01', uri_s: 'https://hal.science/hal-05309397v1' }] } }),
+  ], async () => {
+    const response = await halAdapter.run({ text: 'climate change' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'hal') ?? true
+  }))
+
+  await add('re_784_base_search_detects_access_denied_error_field', () => withEnv({ BASE_SEARCH_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ error: 'Access denied for IP address and user agent' }),
+  ], async () => {
+    const response = await baseSearchAdapter.run({ text: 'test' })
+    return (response.ok === false) || `expected a BASE Search API error field to surface as a failure, not a fabricated empty success, got ${JSON.stringify(response)}`
+  })))
+
+  await add('re_785_inspire_hep_success_normalizes_literature_hit', () => withAdapterFetch([
+    jsonResponse({ hits: { hits: [{ id: '819311', metadata: { titles: [{ title: 'Higgs boson otherwise' }], arxiv_eprints: [{ value: '0905.0206' }], earliest_date: '2009-05-01' } }] } }),
+  ], async () => {
+    const response = await inspireHepAdapter.run({ text: 'Higgs boson' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'inspire_hep') ?? true
+  }))
+
+  await add('re_786_hepdata_rejects_non_numeric_query', async () => {
+    const response = await hepdataAdapter.run({ text: 'higgs boson' })
+    return (response.ok === false) || 'expected a non-numeric query to be rejected — HEPData search is not programmatically accessible, getById only'
+  })
+
+  await add('re_787_hepdata_success_normalizes_record', () => withAdapterFetch([
+    jsonResponse({ data_tables: [{ id: 1, name: 'Table 1', description: 'desc', doi: '10.17182/hepdata.1' }], breadcrumb_text: 'Test Collaboration' }),
+  ], async () => {
+    const response = await hepdataAdapter.run({ text: '1283842' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'hepdata') ?? true
+  }))
+
+  await add('re_788_zbmath_success_normalizes_document', () => withAdapterFetch([
+    jsonResponse({ result: [{ identifier: '0688.10043', title: { title: 'On prime-additive numbers' }, contributors: { authors: [{ name: 'Erdős' }] }, year: 1988, zbmath_url: 'https://zbmath.org/0688.10043' }] }),
+  ], async () => {
+    const response = await zbmathAdapter.run({ text: 'prime numbers' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'zbmath') ?? true
+  }))
+
+  await add('re_789_oeis_success_normalizes_sequence_and_handles_null_empty', () => withAdapterFetch([
+    jsonResponse([{ number: 45, data: '1,1,2,3,5,8', name: 'Fibonacci numbers', author: 'N. J. A. Sloane' }]),
+  ], async () => {
+    const response = await oeisAdapter.run({ text: '1,1,2,3,5,8' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].providerRecordId !== 'A000045') return `expected A-number zero-padded to A000045, got ${response.documents[0].providerRecordId}`
+    return documentShapeIssue(response.documents[0], 'oeis') ?? true
+  }))
+
+  await add('re_790_nasa_ads_success_normalizes_bibcode_record', () => withEnv({ NASA_ADS_API_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    jsonResponse({ response: { docs: [{ bibcode: '2011ApJ...737..103S', title: ['Test paper'], author: ['Smith, J.'], year: '2011', pub: 'ApJ' }] } }),
+  ], async () => {
+    const response = await nasaAdsAdapter.run({ text: 'test' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'nasa_ads') ?? true
+  })))
+
+  await add('re_791_epo_ops_success_two_call_token_then_biblio_search', () => withEnv({ EPO_OPS_CONSUMER_KEY: 'test-key', EPO_OPS_CONSUMER_SECRET: 'test-secret-not-real' }, () => withAdapterFetch([
+    jsonResponse({ access_token: 'test-token-not-real', expires_in: 1200 }),
+    textResponse('<exchange-documents><exchange-document><document-id><country>EP</country><doc-number>1000000</doc-number><kind>A1</kind></document-id><invention-title>Test Invention</invention-title><date>20240101</date></exchange-document></exchange-documents>', 200, 'application/xml'),
+  ], async () => {
+    const response = await epoOpsAdapter.run({ text: 'electric vehicle' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'epo_ops') ?? true
+  })))
+
+  await add('re_792_materials_project_success_normalizes_material', () => withEnv({ MATERIALS_PROJECT_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ data: [{ material_id: 'mp-19770', formula_pretty: 'Fe2O3', symmetry: { crystal_system: 'Trigonal', space_group_symbol: 'R-3c' }, band_gap: 2.1, is_stable: true }] }),
+  ], async () => {
+    const response = await materialsProjectAdapter.run({ text: 'Fe2O3' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'materials_project') ?? true
+  })))
+
+  await add('re_793_oqmd_success_normalizes_entry', () => withAdapterFetch([
+    jsonResponse({ data: [{ entry_id: 353416, name: 'Fe2O3', spacegroup: 'Pm-3m', delta_e: -0.935846740892949 }], meta: { data_available: 1 } }),
+  ], async () => {
+    const response = await oqmdAdapter.run({ text: 'Fe2O3' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'oqmd') ?? true
+  }))
+
+  await add('re_794_aflow_success_normalizes_optimade_structure', () => withAdapterFetch([
+    jsonResponse({ data: [{ id: 'aflow:abc123', attributes: { chemical_formula_reduced: 'Fe2O3', elements: ['Fe', 'O'], nsites: 10 } }] }),
+  ], async () => {
+    const response = await aflowAdapter.run({ text: 'Fe2O3' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'aflow') ?? true
+  }))
+
+  await add('re_795_pleiades_success_two_step_resolve_then_place_json', () => withAdapterFetch([
+    textResponse('<rdf:RDF><item><rdf:li rdf:resource="https://pleiades.stoa.org/places/579885"/></item></rdf:RDF>', 200, 'application/rdf+xml'),
+    jsonResponse({ id: '579885', title: 'Rome', reprPoint: [12.5, 41.9], placeTypes: ['settlement'], description: 'Ancient city of Rome.' }),
+  ], async () => {
+    const response = await pleiadesAdapter.run({ text: 'Rome' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'pleiades') ?? true
+  }))
+
+  await add('re_796_idai_gazetteer_success_normalizes_place', () => withAdapterFetch([
+    jsonResponse({ total: 1, result: [{ '@id': 'https://gazetteer.dainst.org/place/2078044', gazId: 2078044, types: ['settlement'], prefName: { title: 'Pergamon', language: 'en' }, prefLocation: { coordinates: [27.1836, 39.1325] } }] }),
+  ], async () => {
+    const response = await idaiGazetteerAdapter.run({ text: 'Pergamon' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'idai_gazetteer') ?? true
+  }))
+
+  await add('re_797_edh_success_normalizes_inscription', () => withAdapterFetch([
+    jsonResponse({ items: [{ id: 'HD000001', country: 'Italy', findspot_ancient: 'Roma', transcription: 'IMP CAESAR DIVI F', type_of_inscription: 'honorific', language: 'Latin', not_before: 1, not_after: 100, modern_region: 'Lazio' }] }),
+  ], async () => {
+    const response = await edhAdapter.run({ text: 'Roma' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'edh') ?? true
+  }))
+
+  await add('re_798_nomisma_success_normalizes_concept', () => withAdapterFetch([
+    jsonResponse({ '@id': 'https://nomisma.org/id/denarius', label: 'Denarius' }),
+  ], async () => {
+    const response = await nomismaAdapter.run({ text: 'denarius' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'nomisma') ?? true
+  }))
+
+  await add('re_799_whg_success_normalizes_place_feature', () => withAdapterFetch([
+    jsonResponse({ features: [{ properties: { title: 'Rome', index_id: 12345, place_id: 6789, variants: ['Roma'], placetypes: ['city'], timespans: [{ gte: -753, lte: 2024 }], ccodes: ['IT'] }, geometry: { type: 'Point', coordinates: [12.4964, 41.9028] } }] }),
+  ], async () => {
+    const response = await whgAdapter.run({ text: 'Rome' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'whg') ?? true
+  }))
+
+  await add('re_800_open_context_success_normalizes_uri_meta_item', () => withAdapterFetch([
+    jsonResponse([{ label: 'Pottery sherd', uri: 'https://opencontext.org/subjects/abc123', href: 'https://opencontext.org/subjects/abc123', 'project label': 'Test Excavation', 'item category': 'Pottery', snippet: 'A <mark>pottery</mark> sherd found in situ.', published: '2020-01-01' }]),
+  ], async () => {
+    const response = await openContextAdapter.run({ text: 'pottery' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'open_context') ?? true
+  }))
+
+  await add('re_801_cdli_success_normalizes_artifact', () => withAdapterFetch([
+    jsonResponse({ data: [{ id: 123456, designation: 'P123456', museum_no: 'BM 12345', findspot_comments: 'Ur', artifact_type: { artifact_type: 'tablet' }, period: { period: 'Ur III' }, provenience: { provenience: 'Ur' } }] }),
+  ], async () => {
+    const response = await cdliAdapter.run({ text: 'tablet' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'cdli') ?? true
+  }))
+
+  await add('re_802_ehri_success_normalizes_documentary_unit', () => withAdapterFetch([
+    jsonResponse({ data: [{ id: 'us-005578', type: 'DocumentaryUnit', attributes: { descriptions: [{ languageCode: 'eng', name: 'Auschwitz Collection', scopeAndContent: 'Records relating to Auschwitz.' }] } }], meta: { total: 1 } }),
+  ], async () => {
+    const response = await ehriAdapter.run({ text: 'Auschwitz' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ehri') ?? true
+  }))
+
+  await add('re_803_art_institute_chicago_success_normalizes_artwork', () => withAdapterFetch([
+    jsonResponse({ data: [{ id: 129884, title: 'A Sunday on La Grande Jatte', artist_display: 'Georges Seurat', date_display: '1884-1886', image_id: '9c6e9c3d-2d5e-4e2e-8f2e-abc' }], config: { iiif_url: 'https://www.artic.edu/iiif/2' } }),
+  ], async () => {
+    const response = await artInstituteChicagoAdapter.run({ text: 'Seurat' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'art_institute_chicago') ?? true
+  }))
+
+  await add('re_804_cleveland_museum_success_normalizes_artwork', () => withAdapterFetch([
+    jsonResponse({ data: [{ id: 129930, accession_number: '1916.1029', title: 'Twilight in the Wilderness', creators: [{ description: 'Frederic Edwin Church (American, 1826-1900)' }], creation_date: '1860', url: 'https://www.clevelandart.org/art/1916.1029', share_license_status: 'CC0' }] }),
+  ], async () => {
+    const response = await clevelandMuseumAdapter.run({ text: 'Church' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'cleveland_museum') ?? true
+  }))
+
+  await add('re_805_va_museum_success_normalizes_object', () => withAdapterFetch([
+    jsonResponse({ records: [{ systemNumber: 'O13200', objectType: 'Teapot', _primaryTitle: 'Teapot', _primaryMaker: { name: 'Josiah Wedgwood' }, _primaryDate: '1770', _primaryPlace: 'Staffordshire' }] }),
+  ], async () => {
+    const response = await vaMuseumAdapter.run({ text: 'teapot' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'va_museum') ?? true
+  }))
+
+  await add('re_806_smk_success_normalizes_artwork', () => withAdapterFetch([
+    jsonResponse({ items: [{ id: 'KMS1', object_number: 'KMS1', titles: [{ title: 'Portrait of a Man', language: 'en' }], frontend_url: 'https://open.smk.dk/en/artwork/image/KMS1', production: [{ creator: 'Vilhelm Hammershøi' }], public_domain: true }] }),
+  ], async () => {
+    const response = await smkAdapter.run({ text: 'Hammershoi' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'smk') ?? true
+  }))
+
+  await add('re_807_open_library_success_normalizes_work', () => withAdapterFetch([
+    jsonResponse({ docs: [{ key: '/works/OL262758W', title: 'The Hobbit', author_name: ['J. R. R. Tolkien'], first_publish_year: 1937, isbn: ['9780618968633'], cover_i: 6498519, language: ['eng'], subject: ['Fiction'] }] }),
+  ], async () => {
+    const response = await openLibraryAdapter.run({ text: 'hobbit' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'open_library') ?? true
+  }))
+
+  await add('re_808_unhcr_data_success_normalizes_population_item', () => withAdapterFetch([
+    jsonResponse({ items: [{ year: 2023, coo_name: 'Syrian Arab Rep.', coo_iso: 'SYR', coa_name: 'Germany', coa_iso: 'DEU', refugees: 100, asylum_seekers: 10, idps: 0, stateless: 0 }] }),
+  ], async () => {
+    const response = await unhcrDataAdapter.run({ text: 'SYR' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'unhcr_data') ?? true
+  }))
+
+  await add('re_809_ocha_fts_success_normalizes_plan', () => withAdapterFetch([
+    jsonResponse({ data: [{ id: 1129, planVersion: { name: 'Syria HRP 2024', shortName: 'Syria 2024', code: 'HSYR24', startDate: '2024-01-01', endDate: '2024-12-31' } }] }),
+  ], async () => {
+    const response = await ochaFtsAdapter.run({ text: '2024' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ocha_fts') ?? true
+  }))
+
+  await add('re_810_opensky_success_normalizes_state_vector', () => withAdapterFetch([
+    jsonResponse({ time: 1700000000, states: [['3c6444', 'DLH9LF  ', 'Germany', 1700000000, 1700000000, 8.5, 47.0, 10000, false, 250, 90, 0, null, 10200, '1000', false, 0]] }),
+  ], async () => {
+    const response = await openskyAdapter.run({ text: '45.8,5.9,47.8,10.5' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'opensky') ?? true
+  }))
+
+  await add('re_811_cbdb_success_normalizes_person', () => withAdapterFetch([
+    jsonResponse({ Package: { PersonAuthority: { PersonInfo: { Person: { BasicInfo: { PersonId: 1762, EngName: 'Wang Anshi', ChName: '王安石', YearBirth: 1021, YearDeath: 1086, Dynasty: 'Song', Notes: 'Song dynasty statesman.' } } } } } }),
+  ], async () => {
+    const response = await cbdbAdapter.run({ text: 'Wang Anshi' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'cbdb') ?? true
+  }))
+
+  await add('re_812_eclac_cepalstat_success_normalizes_indicator_row', () => withAdapterFetch([
+    jsonResponse({ body: { metadata: { indicator_id: 145, indicator_name: 'GDP growth', theme: 'Economic', area: 'LAC', unit: '%', definition: 'Annual GDP growth rate.' }, data: [{ value: 3.2, iso3: 'BRA' }] } }),
+  ], async () => {
+    const response = await eclacCepalstatAdapter.run({ text: '145' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'eclac_cepalstat') ?? true
+  }))
+
+  await add('re_813_oecd_data_explorer_success_decodes_sdmx_json_series', () => withAdapterFetch([
+    jsonResponse({
+      data: {
+        dataSets: [{ series: { '0:0:0:0:0:0:0:0:0': { observations: { '0': [5.1], '1': ['5.2'] } } } }],
+        structures: [{ dimensions: { observation: [{ id: 'TIME_PERIOD', values: [{ id: '2023-01' }, { id: '2023-02' }] }] } }],
+      },
+    }),
+  ], async () => {
+    const response = await oecdDataExplorerAdapter.run({ text: 'not-a-valid-series-so-uses-default' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'oecd_data_explorer') ?? true
+  }))
+
+  await add('re_814_un_sdg_success_normalizes_series_row', () => withAdapterFetch([
+    jsonResponse({ data: [{ series: 'SI_POV_DAY1', seriesDescription: 'Poverty headcount ratio', geoAreaCode: '840', geoAreaName: 'United States', timePeriodStart: 2020, value: '1.2', source: 'World Bank' }] }),
+  ], async () => {
+    const response = await unSdgAdapter.run({ text: 'SI_POV_DAY1' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'un_sdg') ?? true
+  }))
+
+  await add('re_815_unesco_uis_success_normalizes_record', () => withAdapterFetch([
+    jsonResponse({ records: [{ indicatorId: '10403', geoUnit: 'USA', year: 2020, value: 98.5, qualifier: 'estimate' }] }),
+  ], async () => {
+    const response = await unescoUisAdapter.run({ text: 'USA' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'unesco_uis') ?? true
+  }))
+
+  await add('re_816_idb_open_data_success_normalizes_ckan_dataset', () => withAdapterFetch([
+    jsonResponse({ success: true, result: { count: 1, results: [{ id: 'abc123', name: 'poverty-dataset', title: 'Poverty in LAC', notes: 'Dataset on poverty.', organization: { title: 'IDB' }, metadata_created: '2020-01-01', metadata_modified: '2021-01-01' }] } }),
+  ], async () => {
+    const response = await idbOpenDataAdapter.run({ text: 'poverty' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'idb_open_data') ?? true
+  }))
+
+  await add('re_817_iati_datastore_success_normalizes_solr_doc', () => withEnv({ IATI_DATASTORE_SUBSCRIPTION_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ response: { numFound: 1, docs: [{ iati_identifier: 'XM-DAC-1-1', title_narrative: ['Health Project'], description_narrative: ['A health project.'], reporting_org_narrative: ['WHO'], activity_status_code: '2', start_date_actual_iso_date: '2020-01-01' }] } }),
+  ], async () => {
+    const response = await iatiDatastoreAdapter.run({ text: 'health' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'iati_datastore') ?? true
+  })))
+
+  await add('re_818_debian_sources_success_normalizes_package_version', () => withAdapterFetch([
+    jsonResponse({ package: 'curl', versions: [{ area: 'main', suites: ['bookworm'], version: '7.88.1-10' }] }),
+  ], async () => {
+    const response = await debianSourcesAdapter.run({ text: 'curl' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'debian_sources') ?? true
+  }))
+
+  await add('re_819_ietf_datatracker_success_normalizes_rfc', () => withAdapterFetch([
+    jsonResponse({ objects: [{ name: 'rfc8259', title: 'The JSON Data Interchange Format', abstract: 'JSON is a text format for structured data.', rev: '', rfc: 8259, time: '2017-12-01' }] }),
+  ], async () => {
+    const response = await ietfDatatrackerAdapter.run({ text: 'rfc8259' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ietf_datatracker') ?? true
+  }))
+
+  await add('re_820_wikimedia_commons_success_normalizes_file', () => withAdapterFetch([
+    jsonResponse({ query: { pages: { '123': { pageid: 123, title: 'File:Cat.jpg', imageinfo: [{ url: 'https://upload.wikimedia.org/cat.jpg', descriptionurl: 'https://commons.wikimedia.org/wiki/File:Cat.jpg', extmetadata: { ImageDescription: { value: 'A cat' }, Artist: { value: 'John' }, LicenseShortName: { value: 'CC BY-SA 4.0' } } }] } } } }),
+  ], async () => {
+    const response = await wikimediaCommonsAdapter.run({ text: 'cat' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'wikimedia_commons') ?? true
+  }))
+
+  await add('re_821_dbpedia_success_normalizes_entity_and_strips_highlight_tags', () => withAdapterFetch([
+    jsonResponse({ docs: [{ resource: ['http://dbpedia.org/resource/Berlin'], label: ['<B>Berlin</B>'], comment: ['Capital of Germany'], typeName: ['City'] }] }),
+  ], async () => {
+    const response = await dbpediaAdapter.run({ text: 'Berlin' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].title.includes('<B>')) return `expected highlight tags stripped, got title "${response.documents[0].title}"`
+    return documentShapeIssue(response.documents[0], 'dbpedia') ?? true
+  }))
+
+  await add('re_822_dblp_success_normalizes_publication_and_multi_author', () => withAdapterFetch([
+    jsonResponse({ result: { hits: { hit: [{ '@id': '1', info: { title: 'Attention Is All You Need', venue: 'NeurIPS', year: '2017', type: 'Conference and Workshop Papers', key: 'conf/nips/x', authors: { author: [{ text: 'A' }, { text: 'B' }] } } }] } } }),
+  ], async () => {
+    const response = await dblpAdapter.run({ text: 'transformer' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'dblp') ?? true
+  }))
+
+  await add('re_823_mozilla_bugzilla_success_normalizes_bug', () => withAdapterFetch([
+    jsonResponse({ bugs: [{ id: 12345, summary: 'App crashes on load', status: 'NEW', product: 'Firefox', component: 'General' }] }),
+  ], async () => {
+    const response = await mozillaBugzillaAdapter.run({ text: 'crash' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'mozilla_bugzilla') ?? true
+  }))
+
+  await add('re_824_msrc_cvrf_success_normalizes_vulnerability', () => withAdapterFetch([
+    jsonResponse({ DocumentTitle: { Value: 'January 2024 Security Updates' }, Vulnerability: [{ Title: { Value: 'Windows Kernel EoP' }, CVE: 'CVE-2024-0001', CWE: [{ ID: 'CWE-123' }] }] }),
+  ], async () => {
+    const response = await msrcCvrfAdapter.run({ text: '2024-Jan' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'msrc_cvrf') ?? true
+  }))
+
+  await add('re_825_isni_success_decodes_sru_xml_record', () => withAdapterFetch([
+    textResponse('<srw:records><srw:record><srw:recordData><responseRecord><ISNIAssigned><isniUnformatted>000000053038150X</isniUnformatted><ISNIMetadata><identity><personOrFiction><personalName><surname>Einstein</surname></personalName></personOrFiction></identity></ISNIMetadata></ISNIAssigned></responseRecord></srw:recordData></srw:record></srw:records>', 200, 'application/xml'),
+  ], async () => {
+    const response = await isniAdapter.run({ text: 'Einstein' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'isni') ?? true
+  }))
+
+  await add('re_826_lobid_gnd_success_normalizes_authority_record', () => withAdapterFetch([
+    jsonResponse({ totalItems: 1, member: [{ id: 'https://d-nb.info/gnd/118529579', preferredName: 'Einstein, Albert', dateOfBirth: ['1879'], dateOfDeath: ['1955'], type: ['Person'] }] }),
+  ], async () => {
+    const response = await lobidGndAdapter.run({ text: 'Albert Einstein' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'lobid_gnd') ?? true
+  }))
+
+  await add('re_827_factgrid_success_normalizes_entity', () => withAdapterFetch([
+    jsonResponse({ search: [{ id: 'Q1', concepturi: 'https://database.factgrid.de/entity/Q1', label: 'Gottfried Wilhelm Leibniz', description: 'German polymath' }] }),
+  ], async () => {
+    const response = await factgridAdapter.run({ text: 'Leibniz' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'factgrid') ?? true
+  }))
+
+  await add('re_828_ubuntu_security_success_normalizes_notice', () => withAdapterFetch([
+    jsonResponse({ notices: [{ id: 'USN-8671-1', title: 'Linux kernel vulnerabilities', summary: 'Several security issues were fixed.', published: '2024-01-01' }] }),
+  ], async () => {
+    const response = await ubuntuSecurityAdapter.run({ text: 'kernel' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ubuntu_security') ?? true
+  }))
+
+  await add('re_829_redhat_security_data_success_normalizes_cve_array', () => withAdapterFetch([
+    jsonResponse([{ CVE: 'CVE-2024-0001', severity: 'important', public_date: '2024-01-01', bugzilla_description: 'OpenSSL vulnerability', cvss3_score: 7.5 }]),
+  ], async () => {
+    const response = await redhatSecurityDataAdapter.run({ text: 'openssl' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'redhat_security_data') ?? true
+  }))
+
+  await add('re_830_cve_org_success_normalizes_cve_record', () => withAdapterFetch([
+    jsonResponse({ cveMetadata: { cveId: 'CVE-2021-44228', state: 'PUBLISHED', datePublished: '2021-12-10', assignerShortName: 'apache' }, containers: { cna: { title: 'Log4Shell', descriptions: [{ lang: 'en', value: 'Apache Log4j2 RCE' }] } } }),
+  ], async () => {
+    const response = await cveOrgAdapter.run({ text: 'CVE-2021-44228' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'cve_org') ?? true
+  }))
+
+  await add('re_831_conceptnet_success_normalizes_edge', () => withAdapterFetch([
+    jsonResponse({ edges: [{ rel: { label: 'IsA' }, start: { label: 'dog' }, end: { label: 'animal' }, weight: 2.0 }] }),
+  ], async () => {
+    const response = await conceptnetAdapter.run({ text: 'dog' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'conceptnet') ?? true
+  }))
+
+  await add('re_832_ena_portal_success_normalizes_sequence_entry', () => withAdapterFetch([
+    jsonResponse([{ accession: 'AB123456', description: 'E. coli genome sequence', scientific_name: 'Escherichia coli' }]),
+  ], async () => {
+    const response = await enaPortalAdapter.run({ text: 'Escherichia coli' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ena_portal') ?? true
+  }))
+
+  await add('re_833_ncbi_datasets_success_normalizes_gene_report', () => withAdapterFetch([
+    jsonResponse({ reports: [{ gene: { gene_id: '675', symbol: 'BRCA2', description: 'BRCA2 DNA repair associated', tax_id: '9606', taxname: 'Homo sapiens', synonyms: ['FANCD1'] } }] }),
+  ], async () => {
+    const response = await ncbiDatasetsAdapter.run({ text: 'BRCA2' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ncbi_datasets') ?? true
+  }))
+
+  await add('re_834_alphafold_db_success_normalizes_prediction', () => withAdapterFetch([
+    jsonResponse([{ uniprotAccession: 'P69905', uniprotId: 'HBA_HUMAN', uniprotDescription: 'Hemoglobin subunit alpha', gene: 'HBA1', organismScientificName: 'Homo sapiens', globalMetricValue: 92.3, cifUrl: 'https://alphafold.ebi.ac.uk/files/AF-P69905-F1-model_v4.cif' }]),
+  ], async () => {
+    const response = await alphafoldDbAdapter.run({ text: 'P69905' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'alphafold_db') ?? true
+  }))
+
+  await add('re_835_reactome_success_strips_highlight_tags', () => withAdapterFetch([
+    jsonResponse({ results: [{ entries: [{ dbId: 109581, stId: 'R-HSA-109581', name: '<span class="highlighting">Apoptosis</span>', type: 'Pathway', summation: 'Programmed cell death.' }] }] }),
+  ], async () => {
+    const response = await reactomeAdapter.run({ text: 'apoptosis' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].title.includes('<span')) return `expected highlight tags stripped, got title "${response.documents[0].title}"`
+    return documentShapeIssue(response.documents[0], 'reactome') ?? true
+  }))
+
+  await add('re_836_intact_success_normalizes_interactor', () => withAdapterFetch([
+    jsonResponse({ content: [{ interactorAc: 'EBI-366083', interactorName: 'TP53_HUMAN', interactorPreferredIdentifier: 'P04637', interactorDescription: 'Cellular tumor antigen p53', interactorType: 'protein', interactorSpecies: 'Homo sapiens', interactionCount: 100 }] }),
+  ], async () => {
+    const response = await intactAdapter.run({ text: 'TP53' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'intact') ?? true
+  }))
+
+  await add('re_837_orphadata_success_normalizes_disorder', () => withAdapterFetch([
+    jsonResponse({ data: { results: { ORPHAcode: 558, 'Preferred term': 'Marfan syndrome', OrphanetURL: 'https://www.orpha.net/en/disease/detail/558', DisorderGroup: 'Disease', SummaryInformation: [{ Definition: 'A rare genetic disorder of connective tissue.' }], Synonym: ['MFS'] } } }),
+  ], async () => {
+    const response = await orphadataAdapter.run({ text: 'Marfan syndrome' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'orphadata') ?? true
+  }))
+
+  await add('re_838_guide_to_pharmacology_success_normalizes_ligand', () => withAdapterFetch([
+    jsonResponse([{ ligandId: 2249, name: 'aspirin', type: 'Synthetic organic', approved: true, withdrawn: false, radioactive: false }]),
+  ], async () => {
+    const response = await guideToPharmacologyAdapter.run({ text: 'aspirin' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'guide_to_pharmacology') ?? true
+  }))
+
+  await add('re_839_clinpgx_success_normalizes_drug', () => withAdapterFetch([
+    jsonResponse({ data: [{ id: 'PA451906', name: 'warfarin', pediatric: true, types: ['Drug'] }] }),
+  ], async () => {
+    const response = await clinpgxAdapter.run({ text: 'warfarin' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'clinpgx') ?? true
+  }))
+
+  await add('re_840_pbdb_success_normalizes_occurrence', () => withAdapterFetch([
+    jsonResponse({ records: [{ oid: 'occ:1001', tna: 'Tyrannosaurus rex', oei: 'Maastrichtian', eag: 72.1, lag: 66.0 }] }),
+  ], async () => {
+    const response = await pbdbAdapter.run({ text: 'Tyrannosaurus' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'pbdb') ?? true
+  }))
+
+  await add('re_841_nws_weather_success_two_hop_points_then_forecast', () => withAdapterFetch([
+    jsonResponse({ properties: { forecast: 'https://api.weather.gov/gridpoints/LWX/97,71/forecast', relativeLocation: { properties: { city: 'Washington', state: 'DC' } } } }),
+    jsonResponse({ properties: { periods: [{ name: 'Tonight', startTime: '2024-01-01T18:00:00-05:00', temperature: 45, temperatureUnit: 'F', windSpeed: '5 mph', windDirection: 'NW', shortForecast: 'Clear', detailedForecast: 'Clear skies overnight.' }] } }),
+  ], async () => {
+    const response = await nwsWeatherAdapter.run({ text: '38.8894,-77.0352' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'nws_weather') ?? true
+  }))
+
+  await add('re_842_japan_egov_hourei_success_normalizes_law', () => withAdapterFetch([
+    jsonResponse({ total_count: 1, laws: [{ law_info: { law_id: '325CO0000000001', law_num: 'Showa 25 Cabinet Order No. 1', promulgation_date: '1950-01-01' }, revision_info: { law_title: 'Test Law', category: 'Administrative', updated: '2020-01-01' } }] }),
+  ], async () => {
+    const response = await japanEgovHoureiAdapter.run({ text: 'test law' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'japan_egov_hourei') ?? true
+  }))
+
+  await add('re_843_australia_frl_success_normalizes_title', () => withAdapterFetch([
+    jsonResponse({ value: [{ id: 'C2004A00819', name: 'Corporations Act 2001', makingDate: '2001-06-28', collection: 'Act', isInForce: true, status: 'In force', year: 2001, number: '50' }] }),
+  ], async () => {
+    const response = await australiaFrlAdapter.run({ text: 'Corporations' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'australia_frl') ?? true
+  }))
+
+  await add('re_844_uk_gazette_success_normalizes_notice', () => withAdapterFetch([
+    jsonResponse({ entry: [{ id: 'https://www.thegazette.co.uk/id/notice/1234', title: 'Notice of insolvency', 'f:notice-code': '2301', 'f:status': 'published', published: '2024-01-01', updated: '2024-01-01', link: [{ '@href': 'https://www.thegazette.co.uk/notice/1234', '@rel': 'alternate' }] }] }),
+  ], async () => {
+    const response = await ukGazetteAdapter.run({ text: 'insolvency' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'uk_gazette') ?? true
+  }))
+
+  await add('re_845_eu_ted_success_normalizes_notice', () => withAdapterFetch([
+    jsonResponse({ notices: [{ ND: '123456-2024', PD: '20240101', TI: { eng: 'Software procurement notice' }, 'publication-number': '123456-2024' }] }),
+  ], async () => {
+    const response = await euTedAdapter.run({ text: 'software' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'eu_ted') ?? true
+  }))
+
+  await add('re_846_brazil_transparencia_success_normalizes_documento', () => withEnv({ BRAZIL_TRANSPARENCIA_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse([{ documento: 'DOC123', valor: 1000.5, dataDocumento: '2024-01-01', favorecido: { nome: 'Empresa X' }, orgao: { nome: 'Ministerio Y' } }]),
+  ], async () => {
+    const response = await brazilTransparenciaAdapter.run({ text: '26246' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'brazil_transparencia') ?? true
+  })))
+
+  await add('re_847_sidra_brazil_success_normalizes_series_value', () => withAdapterFetch([
+    jsonResponse([{ id: '9324', variavel: 'População residente estimada', unidade: 'Pessoas', resultados: [{ series: [{ localidade: { id: '1', nome: 'Brasil' }, serie: { '2021': '213317639' } }] }] }]),
+  ], async () => {
+    const response = await sidraBrazilAdapter.run({ text: '6579/2021/9324' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'sidra_brazil') ?? true
+  }))
+
+  await add('re_848_cbs_statline_success_normalizes_row', () => withAdapterFetch([
+    jsonResponse({ value: [{ ID: 0, WijkenEnBuurten: 'NL00', AantalInwoners_5: 17000000 }] }),
+  ], async () => {
+    const response = await cbsStatlineAdapter.run({ text: '83765NED' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'cbs_statline') ?? true
+  }))
+
+  await add('re_849_gaia_archive_success_decodes_tap_json_column_array', () => withAdapterFetch([
+    jsonResponse({
+      metadata: [{ name: 'source_id' }, { name: 'ra' }, { name: 'dec' }, { name: 'parallax' }, { name: 'pmra' }, { name: 'pmdec' }, { name: 'phot_g_mean_mag' }],
+      data: [['5853498713190525696', 217.39, -62.67, 742.0, -3781.7, 769.2, 6.7]],
+    }),
+  ], async () => {
+    const response = await gaiaArchiveAdapter.run({ text: '5853498713190525696' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'gaia_archive') ?? true
+  }))
+
+  await add('re_850_sdss_skyserver_success_normalizes_object', () => withAdapterFetch([
+    jsonResponse([{ TableName: 'Table1', Rows: [{ objID: '1237648720693739577', ra: 185.0, dec: 15.0, type: 3, r: 18.2, g: 19.1 }] }]),
+  ], async () => {
+    const response = await sdssSkyserverAdapter.run({ text: '185.0,15.0' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'sdss_skyserver') ?? true
+  }))
+
+  await add('re_851_apache_jira_success_normalizes_issue', () => withAdapterFetch([
+    jsonResponse({ issues: [{ key: 'SPARK-1234', fields: { summary: 'Build fails on JDK 17', status: { name: 'Open' }, project: { key: 'SPARK', name: 'Spark' }, priority: { name: 'Major' }, created: '2024-01-01', updated: '2024-01-02' } }] }),
+  ], async () => {
+    const response = await apacheJiraAdapter.run({ text: 'build' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'apache_jira') ?? true
+  }))
+
+  await add('re_852_health_canada_dpd_success_normalizes_drug', () => withAdapterFetch([
+    jsonResponse([{ drug_code: 12345, class_name: 'Human', drug_identification_number: '00000123', brand_name: 'Tylenol', descriptor: 'Acetaminophen tablet', company_name: 'Johnson & Johnson', last_update_date: '2024-01-01' }]),
+  ], async () => {
+    const response = await healthCanadaDpdAdapter.run({ text: 'tylenol' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'health_canada_dpd') ?? true
+  }))
+
+  await add('re_853_bindingdb_success_normalizes_affinity', () => withAdapterFetch([
+    jsonResponse({ getLindsByUniprotResponse: { 'bdb.affinities': [{ 'bdb.monomerid': 50000001, 'bdb.smile': 'CC(=O)Oc1ccccc1C(=O)O', 'bdb.affinity_type': 'IC50', 'bdb.affinity': '10' }] } }),
+  ], async () => {
+    const response = await bindingdbAdapter.run({ text: 'P00533' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'bindingdb') ?? true
+  }))
+
+  await add('re_854_kegg_success_parses_flat_text', () => withAdapterFetch([
+    textResponse('hsa:675\tBRCA2, BRCC2; breast cancer type 2 susceptibility protein\n', 200, 'text/plain'),
+  ], async () => {
+    const response = await keggAdapter.run({ text: 'BRCA2' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'kegg') ?? true
+  }))
+
+  await add('re_855_metabolights_success_normalizes_study_title', () => withAdapterFetch([
+    jsonResponse({ title: 'A metabolomic study of urinary changes in type 2 diabetes' }),
+  ], async () => {
+    const response = await metabolightsAdapter.run({ text: 'MTBLS1' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'metabolights') ?? true
+  }))
+
+  await add('re_856_pride_archive_success_normalizes_project', () => withAdapterFetch([
+    jsonResponse([{ accession: 'PXD000001', title: 'Test proteomics project', projectDescription: 'A study of protein expression.', publicationDate: '2024-01-01', updatedDate: '2024-01-02', organisms: ['Homo sapiens'], diseases: ['cancer'], instruments: ['Orbitrap'] }]),
+  ], async () => {
+    const response = await prideArchiveAdapter.run({ text: 'cancer' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'pride_archive') ?? true
+  }))
+
+  await add('re_857_libris_xl_success_normalizes_json_ld_item', () => withAdapterFetch([
+    jsonResponse({ totalItems: 1, items: [{ '@id': 'https://libris.kb.se/abc123', '@type': 'Instance', hasTitle: [{ mainTitle: 'Fröken Julie' }] }] }),
+  ], async () => {
+    const response = await librisXlAdapter.run({ text: 'Strindberg' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'libris_xl') ?? true
+  }))
+
+  await add('re_858_nasjonalbiblioteket_success_normalizes_item', () => withAdapterFetch([
+    jsonResponse({ _embedded: { items: [{ id: 'URN:NBN:no-nb_digibok_123', _links: { self: { href: 'https://api.nb.no/catalog/v1/items/123' } }, accessInfo: { isPublicDomain: true, license: 'CC0' }, metadata: { title: 'Et dukkehjem', creators: ['Henrik Ibsen'], contentClasses: ['bøker'] } }] } }),
+  ], async () => {
+    const response = await nasjonalbibliotekAdapter.run({ text: 'Ibsen' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'nasjonalbiblioteket') ?? true
+  }))
+
+  await add('re_859_nara_catalog_success_normalizes_hit', () => withAdapterFetch([
+    jsonResponse({ body: { hits: { hits: [{ _id: '123456', _source: { metadata: { controlGroup: { naId: 123456 } }, record: { title: 'Test Record', levelOfDescription: 'item', recordType: 'textual' } } }] } } }),
+  ], async () => {
+    const response = await naraCatalogAdapter.run({ text: 'test' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'nara_catalog') ?? true
+  }))
+
+  await add('re_860_jstage_success_decodes_nested_en_ja_atom_xml', () => withAdapterFetch([
+    textResponse('<feed><entry><article_title><en><![CDATA[Test Article]]></en><ja/></article_title><article_link><en>https://www.jstage.jst.go.jp/article/test/1/1/1_1/_article</en><ja/></article_link><cdjournal>testj</cdjournal><material_title><en><![CDATA[Test Journal]]></en><ja/></material_title></entry></feed>', 200, 'application/xml'),
+  ], async () => {
+    const response = await jstageAdapter.run({ text: 'test' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'jstage') ?? true
+  }))
+
+  await add('re_861_cinii_success_normalizes_article', () => withAdapterFetch([
+    jsonResponse({ items: [{ '@id': 'https://cir.nii.ac.jp/crid/123', title: 'Test paper', 'dc:creator': ['Taro Yamada'], 'prism:publicationName': 'Journal of Test', 'prism:publicationDate': '2020' }] }),
+  ], async () => {
+    const response = await ciniiAdapter.run({ text: 'science' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'cinii') ?? true
+  }))
+
+  await add('re_862_musicbrainz_success_normalizes_artist', () => withAdapterFetch([
+    jsonResponse({ count: 1, artists: [{ id: 'b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d', type: 'Group', name: 'The Beatles', country: 'GB', area: { name: 'United Kingdom' }, 'life-span': { begin: '1957' } }] }),
+  ], async () => {
+    const response = await musicbrainzAdapter.run({ text: 'Beatles' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'musicbrainz') ?? true
+  }))
+
+  await add('re_863_gitlab_api_success_normalizes_project', () => withAdapterFetch([
+    jsonResponse([{ id: 278964, description: 'A JS library', name: 'react', path_with_namespace: 'test/react', created_at: '2020-01-01', web_url: 'https://gitlab.com/test/react', star_count: 100 }]),
+  ], async () => {
+    const response = await gitlabApiAdapter.run({ text: 'react' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'gitlab_api') ?? true
+  }))
+
+  await add('re_864_codeberg_success_normalizes_repo', () => withAdapterFetch([
+    jsonResponse({ ok: true, data: [{ id: 1, owner: { login: 'testuser' }, name: 'test-repo', full_name: 'testuser/test-repo', description: 'A test repo', language: 'Go', html_url: 'https://codeberg.org/testuser/test-repo' }] }),
+  ], async () => {
+    const response = await codebergAdapter.run({ text: 'test' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'codeberg') ?? true
+  }))
+
+  await add('re_865_software_heritage_success_normalizes_origin', () => withAdapterFetch([
+    jsonResponse([{ url: 'https://github.com/torvalds/linux', nb_visits: 500, last_visit_date: '2024-01-01' }]),
+  ], async () => {
+    const response = await softwareHeritageAdapter.run({ text: 'linux' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'software_heritage') ?? true
+  }))
+
+  await add('re_866_launchpad_success_normalizes_bug_task', () => withAdapterFetch([
+    jsonResponse({ entries: [{ self_link: 'https://api.launchpad.net/devel/bugs/12345', web_link: 'https://bugs.launchpad.net/ubuntu/+bug/12345', status: 'New', importance: 'High', bug_target_display_name: 'ubuntu', date_created: '2024-01-01' }] }),
+  ], async () => {
+    const response = await launchpadAdapter.run({ text: 'crash' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'launchpad') ?? true
+  }))
+
+  await add('re_867_metacpan_success_normalizes_release', () => withAdapterFetch([
+    jsonResponse({ hits: { hits: [{ _id: 'abc123', _source: { abstract: 'A postmodern object system', author: 'STEVAN', date: '2020-01-01', distribution: 'Moose' } }] } }),
+  ], async () => {
+    const response = await metacpanAdapter.run({ text: 'Moose' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'metacpan') ?? true
+  }))
+
+  await add('re_868_ecosystems_success_normalizes_package', () => withAdapterFetch([
+    jsonResponse({ name: 'express', ecosystem: 'npm', description: 'Fast web framework', homepage: 'https://expressjs.com', repository_url: 'https://github.com/expressjs/express', latest_release_number: '4.18.0', versions_count: 100 }),
+  ], async () => {
+    const response = await ecosystemsAdapter.run({ text: 'npmjs.org/express' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ecosystems') ?? true
+  }))
+
+  await add('re_869_deps_dev_success_normalizes_package', () => withAdapterFetch([
+    jsonResponse({ packageKey: { system: 'NPM', name: 'react' }, versions: [{ versionKey: { system: 'NPM', name: 'react', version: '18.0.0' }, publishedAt: '2022-01-01', isDefault: true }] }),
+  ], async () => {
+    const response = await depsDevAdapter.run({ text: 'npm/react' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'deps_dev') ?? true
+  }))
+
+  await add('re_870_homebrew_success_normalizes_formula', () => withAdapterFetch([
+    jsonResponse({ name: 'wget', full_name: 'wget', desc: 'Internet file retriever', license: 'GPL-3.0-or-later', homepage: 'https://www.gnu.org/software/wget/', versions: { stable: '1.21.3' } }),
+  ], async () => {
+    const response = await homebrewAdapter.run({ text: 'wget' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'homebrew') ?? true
+  }))
+
+  await add('re_871_mdn_web_docs_success_normalizes_document', () => withAdapterFetch([
+    jsonResponse({ documents: [{ mdn_url: '/en-US/docs/Web/API/fetch', title: 'fetch()', summary: 'The fetch() method starts a request.', locale: 'en-US' }] }),
+  ], async () => {
+    const response = await mdnWebDocsAdapter.run({ text: 'fetch' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'mdn_web_docs') ?? true
+  }))
+
+  await add('re_872_rosetta_code_success_normalizes_search_hit', () => withAdapterFetch([
+    jsonResponse({ query: { search: [{ pageid: 123, title: 'Quicksort', snippet: 'A <span>sort</span> algorithm', wordcount: 500, timestamp: '2020-01-01' }] } }),
+  ], async () => {
+    const response = await rosettaCodeAdapter.run({ text: 'quicksort' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'rosetta_code') ?? true
+  }))
+
+  await add('re_873_greynoise_success_normalizes_community_result', () => withAdapterFetch([
+    jsonResponse({ ip: '8.8.8.8', noise: false, riot: true, classification: 'benign', name: 'Google Public DNS', message: 'Success' }),
+  ], async () => {
+    const response = await greynoiseAdapter.run({ text: '8.8.8.8' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'greynoise') ?? true
+  }))
+
+  await add('re_874_phishstats_success_normalizes_entry', () => withAdapterFetch([
+    jsonResponse([{ id: 12345, url: 'https://phish.example.com', ip: '1.2.3.4', countryname: 'Romania', title: 'Fake PayPal', date: '2024-01-01', score: 8.5, host: 'phish.example.com' }]),
+  ], async () => {
+    const response = await phishstatsAdapter.run({ text: 'paypal' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'phishstats') ?? true
+  }))
+
+  await add('re_875_virustotal_success_normalizes_result', () => withEnv({ VIRUSTOTAL_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ data: [{ id: '8.8.8.8', type: 'ip_address', attributes: { last_analysis_stats: { malicious: 0, suspicious: 0, harmless: 70 }, type_description: 'IP address' } }] }),
+  ], async () => {
+    const response = await virustotalAdapter.run({ text: '8.8.8.8' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'virustotal') ?? true
+  })))
+
+  await add('re_876_abuseipdb_success_normalizes_check', () => withEnv({ ABUSEIPDB_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ data: { ipAddress: '8.8.8.8', abuseConfidenceScore: 0, countryCode: 'US', isp: 'Google LLC', usageType: 'Data Center', totalReports: 0, lastReportedAt: null } }),
+  ], async () => {
+    const response = await abuseipdbAdapter.run({ text: '8.8.8.8' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'abuseipdb') ?? true
+  })))
+
+  await add('re_877_hybrid_analysis_success_normalizes_sample', () => withEnv({ HYBRID_ANALYSIS_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ result: [{ sha256: 'abc123def456', submit_name: 'test.exe', verdict: 'malicious', vx_family: 'TestFamily', analysis_start_time: '2024-01-01' }], count: 1 }),
+  ], async () => {
+    const response = await hybridAnalysisAdapter.run({ text: 'test.exe' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'hybrid_analysis') ?? true
+  })))
+
+  await add('re_878_ontobee_success_decodes_sparql_binding', () => withAdapterFetch([
+    jsonResponse({ results: { bindings: [{ s: { value: 'http://purl.obolibrary.org/obo/MONDO_0005015' }, label: { value: 'diabetes mellitus' } }] } }),
+  ], async () => {
+    const response = await ontobeeAdapter.run({ text: 'diabetes' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ontobee') ?? true
+  }))
+
+  await add('re_879_umls_success_normalizes_concept', () => withEnv({ UMLS_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ result: { results: [{ ui: 'C0011849', name: 'Diabetes Mellitus', rootSource: 'MSH' }] } }),
+  ], async () => {
+    const response = await umlsAdapter.run({ text: 'diabetes' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'umls') ?? true
+  })))
+
+  await add('re_880_loinc_fhir_success_normalizes_lookup', () => withEnv({ LOINC_FHIR_USERNAME: 'test-user', LOINC_FHIR_PASSWORD: 'test-pass' }, () => withAdapterFetch([
+    jsonResponse({ parameter: [{ name: 'display', valueString: 'Cholesterol [Mass/volume] in Serum or Plasma' }] }),
+  ], async () => {
+    const response = await loincFhirAdapter.run({ text: '2093-3' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'loinc_fhir') ?? true
+  })))
+
+  await add('re_881_wikipathways_success_decodes_sparql_binding', () => withAdapterFetch([
+    jsonResponse({ results: { bindings: [{ pathway: { value: 'https://identifiers.org/wikipathways/WP1584' }, title: { value: 'Type II diabetes mellitus' } }] } }),
+  ], async () => {
+    const response = await wikipathwaysAdapter.run({ text: 'diabetes' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'wikipathways') ?? true
+  }))
+
+  await add('re_882_cellosaurus_success_normalizes_cell_line', () => withAdapterFetch([
+    jsonResponse({ Cellosaurus: { 'cell-line-list': [{ 'accession-list': [{ type: 'primary', value: 'CVCL_0030' }], 'name-list': [{ type: 'identifier', value: 'HeLa' }, { type: 'synonym', value: 'HELA' }] }] } }),
+  ], async () => {
+    const response = await cellosaurusAdapter.run({ text: 'HeLa' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'cellosaurus') ?? true
+  }))
+
+  await add('re_883_metabolomics_workbench_success_normalizes_numeric_keyed_object', () => withAdapterFetch([
+    jsonResponse({ '1': { study_id: 'ST004967', study_title: 'Test diabetes study', species: 'Homo sapiens', institute: 'Test Institute', analysis_type: 'LC-MS', submission_date: '2024-01-01' } }),
+  ], async () => {
+    const response = await metabolomicsWorkbenchAdapter.run({ text: 'diabetes' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'metabolomics_workbench') ?? true
+  }))
+
+  await add('re_884_npatlas_success_normalizes_compound', () => withAdapterFetch([
+    jsonResponse([{ npaid: 'NPA000001', original_name: 'Penicillin G', mol_formula: 'C16H18N2O4S', original_organism: 'Penicillium chrysogenum', original_doi: '10.1000/test' }]),
+  ], async () => {
+    const response = await npatlasAdapter.run({ text: 'penicillin' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'npatlas') ?? true
+  }))
+
+  await add('re_885_wellcome_collection_success_normalizes_work', () => withAdapterFetch([
+    jsonResponse({ results: [{ id: 'abc123', title: 'A history of medicine', description: 'A book about medicine.', workType: { label: 'Books' } }] }),
+  ], async () => {
+    const response = await wellcomeCollectionAdapter.run({ text: 'medicine' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'wellcome_collection') ?? true
+  }))
+
+  await add('re_886_bhl_success_normalizes_publication', () => withEnv({ BHL_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ Status: 'ok', Result: [{ TitleID: 12345, FullTitle: 'On the Origin of Species', PublisherName: 'John Murray', PublicationDate: '1859' }] }),
+  ], async () => {
+    const response = await bhlAdapter.run({ text: 'darwin' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'bhl') ?? true
+  })))
+
+  await add('re_887_google_kg_search_success_normalizes_entity', () => withEnv({ GOOGLE_KG_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ itemListElement: [{ result: { '@id': 'kg:/m/0jcx', name: 'Albert Einstein', description: 'Physicist', url: 'https://en.wikipedia.org/wiki/Albert_Einstein' } }] }),
+  ], async () => {
+    const response = await googleKgSearchAdapter.run({ text: 'Einstein' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'google_kg_search') ?? true
+  })))
+
+  await add('re_888_merriam_webster_success_normalizes_definition', () => withEnv({ MERRIAM_WEBSTER_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse([{ shortdef: ['a procedure for critical evaluation'] }]),
+  ], async () => {
+    const response = await merriamWebsterAdapter.run({ text: 'test' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'merriam_webster') ?? true
+  })))
+
+  await add('re_889_brave_search_success_normalizes_web_result', () => withEnv({ BRAVE_SEARCH_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ web: { results: [{ url: 'https://example.com', title: 'Example', description: 'An example site.' }] } }),
+  ], async () => {
+    const response = await braveSearchAdapter.run({ text: 'test' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'brave_search') ?? true
+  })))
+
+  await add('re_890_checklistbank_success_normalizes_taxon', () => withAdapterFetch([
+    jsonResponse({ result: [{ usage: { id: '4CGXF', datasetKey: '3LR', name: { scientificName: 'Panthera leo', rank: 'species' }, status: 'accepted' } }] }),
+  ], async () => {
+    const response = await checklistbankAdapter.run({ text: 'Panthera leo' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'checklistbank') ?? true
+  }))
+
+  await add('re_891_eol_success_normalizes_result', () => withAdapterFetch([
+    jsonResponse({ results: [{ id: 328672, title: 'Panthera leo', link: 'https://eol.org/pages/328672', content: 'The lion is a large cat.' }] }),
+  ], async () => {
+    const response = await eolAdapter.run({ text: 'lion' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'eol') ?? true
+  }))
+
+  await add('re_892_globi_success_normalizes_interaction', () => withAdapterFetch([
+    jsonResponse({ columns: ['source_taxon_name', 'interaction_type', 'target_taxon_name', 'study_title'], data: [['Homo sapiens', 'eats', 'Bos taurus', 'Test dietary study']] }),
+  ], async () => {
+    const response = await globiAdapter.run({ text: 'Homo sapiens' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'globi') ?? true
+  }))
+
+  await add('re_893_mushroom_observer_success_normalizes_observation', () => withAdapterFetch([
+    jsonResponse({ results: [{ id: 123456, date: '2020-06-01', confidence: 90, consensus: { name: 'Amanita muscaria' }, notes: 'Found near birch trees.' }] }),
+  ], async () => {
+    const response = await mushroomObserverAdapter.run({ text: 'Amanita muscaria' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'mushroom_observer') ?? true
+  }))
+
+  await add('re_894_arctic_data_center_success_normalizes_solr_doc', () => withAdapterFetch([
+    jsonResponse({ response: { docs: [{ id: 'urn:uuid:test-1', title: 'Permafrost temperature study', abstract: 'A study of permafrost.', dateUploaded: '2020-01-01', dataUrl: 'https://arcticdata.io/data/1' }] } }),
+  ], async () => {
+    const response = await arcticDataCenterAdapter.run({ text: 'permafrost' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'arctic_data_center') ?? true
+  }))
+
+  await add('re_895_cbeta_success_normalizes_canon_text', () => withAdapterFetch([
+    jsonResponse({ num_found: 1, results: [{ id: 21548, canon: 'T', file: 'T0001', title: '般若波羅蜜多心經', byline: '玄奘 譯', time_dynasty: '唐' }] }),
+  ], async () => {
+    const response = await cbetaAdapter.run({ text: '般若' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'cbeta') ?? true
+  }))
+
+  await add('re_896_ebl_success_normalizes_fragment', () => withAdapterFetch([
+    jsonResponse({ museumNumber: 'K.1', publication: 'CT 1', description: 'A cuneiform fragment.', collection: 'Kouyunjik' }),
+  ], async () => {
+    const response = await eblAdapter.run({ text: 'K.1' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ebl') ?? true
+  }))
+
+  await add('re_897_mercado_publico_success_normalizes_tender', () => withEnv({ MERCADO_PUBLICO_TICKET: 'test-ticket-not-real' }, () => withAdapterFetch([
+    jsonResponse({ Listado: [{ CodigoExterno: '750301-1-L124', Nombre: 'Adquisicion de insumos', Descripcion: 'Compra de insumos medicos.', Estado: 'Activa', FechaPublicacion: '2024-01-01', Comprador: { NombreOrganismo: 'Hospital Regional' } }] }),
+  ], async () => {
+    const response = await mercadoPublicoAdapter.run({ text: '750301-1-L124' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'mercado_publico') ?? true
+  })))
+
+  await add('re_898_inpe_bdc_success_normalizes_collection', () => withAdapterFetch([
+    jsonResponse({ collections: [{ id: 'S2-16D-2', title: 'Sentinel-2 16-day composite', description: 'Sentinel-2 surface reflectance composite.', keywords: ['sentinel'], extent: { spatial: { bbox: [[-180, -90, 180, 90]] }, temporal: { interval: [['2020-01-01T00:00:00Z', null]] } } }] }),
+  ], async () => {
+    const response = await inpeBdcAdapter.run({ text: 'sentinel' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'inpe_bdc') ?? true
+  }))
+
+  await add('re_899_pdok_success_normalizes_location', () => withAdapterFetch([
+    jsonResponse({ response: { numFound: 1, docs: [{ id: 'gem-0b2a8b92856b27f86fbd67ab35808ebf', weergavenaam: 'Gemeente Amsterdam', type: 'gemeente', gemeentenaam: 'Amsterdam', provincienaam: 'Noord-Holland', centroide_ll: 'POINT(4.9 52.3)', bron: 'Bestuurlijke Grenzen' }] } }),
+  ], async () => {
+    const response = await pdokAdapter.run({ text: 'Amsterdam' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'pdok') ?? true
+  }))
+
+  await add('re_900_satnogs_success_normalizes_satellite', () => withAdapterFetch([
+    jsonResponse([{ sat_id: 'ISSX-0000-0000-0000-0001', norad_cat_id: 25544, name: 'ISS (ZARYA)', names: 'International Space Station', status: 'alive', operator: 'NASA/Roscosmos', countries: 'US,RU', launched: '1998-11-20T00:00:00Z', website: 'https://example.com' }]),
+  ], async () => {
+    const response = await satnogsAdapter.run({ text: 'ISS' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'satnogs') ?? true
+  }))
+
+  await add('re_901_nomad_repository_success_normalizes_entry', () => withAdapterFetch([
+    jsonResponse({ data: [{ entry_id: 'test-entry-1', upload_id: 'test-upload-1', origin: 'Test Author', upload_create_time: '2020-01-01', results: { material: { chemical_formula_hill: 'Si', elements: ['Si'], structural_type: 'bulk' } } }] }),
+  ], async () => {
+    const response = await nomadRepositoryAdapter.run({ text: 'Si' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'nomad_repository') ?? true
+  }))
+
+  await add('re_902_kramerius_success_normalizes_document', () => withAdapterFetch([
+    jsonResponse({ response: { docs: [{ PID: 'uuid:08f3ba90-c42f-11dc-9207-000d606f5dc6', 'dc.title': 'Praha', 'dc.creator': ['Author'], datum_str: '1900', language: ['cze'], document_type: ['monograph'], dostupnost: 'public' }] } }),
+  ], async () => {
+    const response = await krameriusAdapter.run({ text: 'praha' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'kramerius') ?? true
+  }))
+
+  await add('re_903_bdl_poland_success_normalizes_variable', () => withAdapterFetch([
+    jsonResponse({ totalRecords: 1, results: [{ id: 72305, n1: 'Ludność ogółem', subjectId: 'K1', measureUnitName: 'osoba' }] }),
+  ], async () => {
+    const response = await bdlPolandAdapter.run({ text: 'ludność' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'bdl_poland') ?? true
+  }))
+
+  await add('re_904_israel_cbs_success_normalizes_index_point', () => withAdapterFetch([
+    jsonResponse({ month: [{ code: 120010, name: 'CPI general', date: [{ year: 2024, month: 1, monthDesc: 'January', percent: 0.3, percentYear: 1.5, currBase: { baseDesc: '2024 average', value: 105.1 } }] }] }),
+  ], async () => {
+    const response = await israelCbsAdapter.run({ text: '120010' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'israel_cbs') ?? true
+  }))
+
+  await add('re_905_nomis_uk_success_normalizes_observation', () => withAdapterFetch([
+    jsonResponse({ obs: [{ dataset: { value: 'NM_1_1', description: "Jobseeker's Allowance" }, geography: { value: 2092957697, description: 'United Kingdom' }, time: { value: '2024-01', description: 'January 2024' }, obs_value: { value: 100 }, obs_status: { description: 'normal' } }] }),
+  ], async () => {
+    const response = await nomisUkAdapter.run({ text: 'NM_1_1' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'nomis_uk') ?? true
+  }))
+
+  await add('re_906_abs_australia_success_decodes_sdmx_json', () => withAdapterFetch([
+    jsonResponse({ data: { dataSets: [{ series: { '0:0:0:0:0': { observations: { '0': [7.4] } } } }], structures: [{ dimensions: { observation: [{ id: 'TIME_PERIOD', values: [{ id: '2024-01', name: '2024-01' }] }] } }] } }),
+  ], async () => {
+    const response = await absAustraliaAdapter.run({ text: 'CPI' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'abs_australia') ?? true
+  }))
+
+  await add('re_907_argentina_series_success_normalizes_point', () => withAdapterFetch([
+    jsonResponse({ data: [['2024-01-01', 8.5]], meta: [{ frequency: 'day', start_date: '2024-01-01', end_date: '2024-01-01' }, { catalog: { title: 'Datos Programación Macroeconómica' }, dataset: { title: 'Tipo de Cambio', description: 'Serie de tipo de cambio.', source: 'BCRA' } }] }),
+  ], async () => {
+    const response = await argentinaSeriesAdapter.run({ text: '168.1_T_CAMBIOR_D_0_0_26' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'argentina_series') ?? true
+  }))
+
+  await add('re_908_data_gov_my_success_normalizes_row', () => withAdapterFetch([
+    jsonResponse([{ age: 'overall_age', sex: 'overall_sex', date: '2020-01-01', state: 'Johor', ethnicity: 'overall_ethnicity', population: 4009.7 }]),
+  ], async () => {
+    const response = await dataGovMyAdapter.run({ text: 'population_state' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'data_gov_my') ?? true
+  }))
+
+  await add('re_909_datos_abiertos_colombia_success_normalizes_resource', () => withAdapterFetch([
+    jsonResponse({ results: [{ resource: { id: 'gt2j-8ykr', name: 'Casos positivos de COVID-19', description: 'Casos confirmados por departamento.', attribution: 'Ministerio de Salud', createdAt: '2020-01-01', updatedAt: '2024-01-01' }, classification: { domain_category: 'Salud y Protección Social', domain_tags: ['salud', 'covid'] } }] }),
+  ], async () => {
+    const response = await datosAbiertosColombiaAdapter.run({ text: 'salud' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'datos_abiertos_colombia') ?? true
+  }))
+
+  await add('re_910_ine_tempus3_success_normalizes_data_point', () => withAdapterFetch([
+    jsonResponse([{ COD: 'IPC251852', Nombre: 'National. Overall index.', Data: [{ Fecha: 1764543600000, FK_Periodo: 12, Anyo: 2024, Valor: 119.942 }] }]),
+  ], async () => {
+    const response = await ineTempus3Adapter.run({ text: '50913' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ine_tempus3') ?? true
+  }))
+
+  await add('re_911_singstat_success_normalizes_table_row', () => withAdapterFetch([
+    jsonResponse({ Data: { title: 'Singapore Residents By Age Group', footnote: 'Data refer to Singapore residents.', datasource: 'SINGAPORE DEPARTMENT OF STATISTICS', row: [{ seriesNo: '1', rowText: 'Total Residents', uoM: 'Number', columns: [{ key: '2024', value: '3600000' }] }] } }),
+  ], async () => {
+    const response = await singstatAdapter.run({ text: 'M810011' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'singstat') ?? true
+  }))
+
+  await add('re_912_usgs_m2m_success_normalizes_scene', () => withEnv({ USGS_M2M_USERNAME: 'test-user-not-real', USGS_M2M_TOKEN: 'test-token-not-real' }, () => withAdapterFetch([
+    jsonResponse({ data: 'test-auth-token-not-real', errorCode: null, errorMessage: null }),
+    jsonResponse({ data: { results: [{ entityId: 'LC80010012024001LGN00', displayId: 'LC08_L2SP_001001_20240101_20240101_02_T1', publishDate: '2024-01-01', cloudCover: 5.2, browse: [{ browsePath: 'https://example.com/browse.jpg' }] }] }, errorCode: null, errorMessage: null }),
+  ], async () => {
+    const response = await usgsM2mAdapter.run({ text: 'landsat_ot_c2_l2' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'usgs_m2m') ?? true
+  })))
+
+  await add('re_913_n2yo_success_normalizes_tle', () => withEnv({ N2YO_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ info: { satname: 'SPACE STATION', satid: 25544, transactionscount: 1 }, tle: '1 25544U 98067A   24001.00000000  .00016717  00000-0  10270-3 0  9994\n2 25544  51.6416 339.6448 0006317  55.6524 304.5292 15.49560932' }),
+  ], async () => {
+    const response = await n2yoAdapter.run({ text: '25544' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'n2yo') ?? true
+  })))
+
+  await add('re_914_ariadne_portal_success_normalizes_hit', () => withAdapterFetch([
+    jsonResponse({ total: { value: 88126 }, hits: [{ id: 'abc123', data: { title: { text: 'Pottery sherd', language: 'en' }, description: { text: 'A Roman pottery fragment.' }, identifier: 'https://ariadne-infrastructure.eu/aocat/Resource/1', landingPage: 'https://finds.org.uk/database/artefacts/record/id/1', issued: '2003-07-07', accessRights: 'CC-BY', country: ['GB'], contributor: [{ name: 'Archaeology Data Service', institution: 'ADS' }], nativeSubject: [{ prefLabel: 'pottery' }] } }] }),
+  ], async () => {
+    const response = await ariadnePortalAdapter.run({ text: 'pottery' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ariadne_portal') ?? true
+  }))
+
+  await add('re_915_ohm_overpass_success_normalizes_historical_element', () => withAdapterFetch([
+    jsonResponse({ elements: [{ type: 'node', id: 2084450176, lat: 52.5167175, lon: 13.4068301, tags: { name: 'Berlin', start_date: '1237', end_date: '1746' } }] }),
+  ], async () => {
+    const response = await ohmOverpassAdapter.run({ text: 'Berlin near 52.5,13.4' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ohm_overpass') ?? true
+  }))
+
+  await add('re_916_stack_exchange_success_normalizes_question', () => withAdapterFetch([
+    jsonResponse({ items: [{ question_id: 231767, title: 'What does the "yield" keyword do in Python?', link: 'https://stackoverflow.com/questions/231767', tags: ['python', 'generator'], owner: { display_name: 'Alex. S.' }, score: 13135, view_count: 3497899, answer_count: 51, is_answered: true, creation_date: 1224800471, content_license: 'CC BY-SA 4.0' }] }),
+  ], async () => {
+    const response = await stackExchangeAdapter.run({ text: 'python yield' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'stack_exchange') ?? true
+  }))
+
+  await add('re_917_ecmwf_cds_success_normalizes_collection', () => withAdapterFetch([
+    jsonResponse({ collections: [{ id: 'reanalysis-era5-pressure-levels', title: 'ERA5 hourly data on pressure levels', description: 'ERA5 is the fifth generation ECMWF reanalysis.', license: 'CC-BY-4.0', keywords: ['Product type: Reanalysis'], extent: { spatial: { bbox: [[0, -89, 360, 89]] }, temporal: { interval: [['1940-01-01T00:00:00+00:00', null]] } } }] }),
+  ], async () => {
+    const response = await ecmwfCdsAdapter.run({ text: 'era5' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ecmwf_cds') ?? true
+  }))
+
+  await add('re_918_met_office_datahub_success_normalizes_forecast_point', () => withEnv({ MET_OFFICE_DATAHUB_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ features: [{ properties: { location: { name: 'London' }, timeSeries: [{ time: '2024-01-01T12:00:00Z', screenTemperature: 8.5, windSpeed10m: 3.2, totalPrecipAmount: 0 }] } }] }),
+  ], async () => {
+    const response = await metOfficeDataHubAdapter.run({ text: '51.5,-0.1' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'met_office_datahub') ?? true
+  })))
+
+  await add('re_919_ndl_search_success_parses_rss_item', () => withAdapterFetch([
+    textResponse('<rss><channel><item><title>Test Title</title><link>https://ndlsearch.ndl.go.jp/books/R000000004-I1</link><dc:title>Test Title</dc:title><dc:creator>Test Author</dc:creator><dc:description>A test description.</dc:description><pubDate>Thu, 23 Feb 2017 19:30:51 +0900</pubDate></item></channel></rss>', 200, 'application/xml'),
+  ], async () => {
+    const response = await ndlSearchAdapter.run({ text: 'test' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'ndl_search') ?? true
+  }))
+
+  await add('re_920_swisscovery_success_normalizes_pnx_doc', () => withAdapterFetch([
+    jsonResponse({ docs: [{ '@id': 'https://eu03.alma.exlibrisgroup.com/primaws/rest/pub/pnxs/L/991170244053905501', pnx: { display: { title: ['Shakespeare.'], type: ['journal'], language: ['eng'], creationdate: ['2005-'], publisher: ['London : Taylor & Francis'], contributor: ['British Shakespeare Association'], subject: ['Shakespeare'], mms: ['991170244053905501'] } } }] }),
+  ], async () => {
+    const response = await swisscoveryAdapter.run({ text: 'shakespeare' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'swisscovery') ?? true
+  }))
 
   return results
 }

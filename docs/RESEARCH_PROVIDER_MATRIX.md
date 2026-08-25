@@ -1,5 +1,19 @@
 # Research Engine — Provider Matrix
 
+**Note (Earth Knowledge Registry reconciliation mission)**: this file was
+found stale at the start of that mission — it predates `mitre_attack` and
+`gleif` (added with zero rows here) and undercounted the provider total (29
+vs the actual 31 at the time). The authoritative, always-regeneratable source
+of truth for provider-vs-registry reconciliation is now
+`docs/earth-knowledge/gap-matrix.md` +
+`lib/earth-knowledge/completionRegistry.generated.ts` (regenerate via
+`node scripts/earth-knowledge/build-completion-registry.mjs`). This file
+remains the more detailed per-adapter narrative (capabilities, exact
+endpoints, repair history) — rows below for `mitre_attack`, `gleif`, and the
+19 providers added completing the registry's "First 25" are appended in the
+same format but more tersely; see the adapter's own `providerEnv.ts`
+descriptor `notes` field for full detail.
+
 Status as of this build. "Configured" reflects only env-variable presence in
 the runtime environment this was built in — it will differ per-deploy based
 on which Vercel env vars the Commander has actually set. "Implemented" is a
@@ -53,6 +67,27 @@ live check against the real upstream API.
 | Library of Congress | cultural_heritage | none required | Yes | Yes (`re_61`, `re_62`) | READY | Global JSON search only. Capability: `search` only — no getById. |
 | Wikidata | knowledge_graph | `WIKIMEDIA_USER_AGENT_BASE` | Yes | Yes (`re_63`, `re_64`) | READY* | Action API search + entity labels/descriptions/aliases, both behind one search call; no SPARQL exposed. Capability: `search` only — entity enrichment is not an independently callable getById. |
 | Common Crawl | web_archive | `COMMON_CRAWL_USER_AGENT_BASE`, `COMMON_CRAWL_COLLECTION_ID` | Yes | Yes (`re_194`–`re_204`, `re_277`–`re_321`, `re_323`, `re_328`–`re_331`, `re_336`–`re_339`, `re_391`–`re_394`, mocked) | READY | CDX-compatible Index Server API GET /{collectionId}-index only. `COMMON_CRAWL_COLLECTION_ID` is a new required Commander-set env var — this build does not auto-discover "the current" crawl id (would require a disallowed live `collinfo.json` fetch). No WARC retrieval — filename/offset/length pointers never read into output. Repair pass: shares the same expanded SSRF target-URL regression matrix as Wayback (`re_277`–`re_321`) — see `RESEARCH_ENGINE_SECURITY.md`. Micro-repair: an explicit nonstandard target port (e.g. `:8443`) is rejected, not accepted (`re_323`, `re_328`–`re_331`); a no-port URL or explicit default port (`:443`) remains allowed (`re_336`–`re_339`). Capability: `historicalCaptures` only (bounded URL lookup, no free-text search). |
+| MITRE ATT&CK | cyber_threat_intelligence | none required | Yes | Yes (`re_700`, added this mission — zero coverage before) | READY, LIVE_VERIFIED this mission | Official TAXII 2.1/STIX 2.1 server (`attack-taxii.mitre.org`), Enterprise ATT&CK collection only. Public, unauthenticated. Structured threat-knowledge/reference data, not live telemetry. |
+| GLEIF LEI API | legal_entity_reference | none required | Yes | Yes (`re_701`, added this mission — zero coverage before) | READY, LIVE_VERIFIED this mission | Official public JSON:API v1. `/lei-records/{LEI}` exact lookup or bounded legal-name filtering. Public, unauthenticated. |
+| OSV.dev | cyber_threat_intelligence | none | Yes | Yes (`re_709`) | READY, LIVE_VERIFIED | POST /v1/query package+version/purl lookup (not free-text). Evidence class `VULNERABILITY_EXISTS`, kept distinct from `cisa_kev`. |
+| NVD API 2.0 | cyber_threat_intelligence | none (`NVD_API_KEY` optional) | Yes | Yes (`re_710`) | READY, LIVE_VERIFIED | GET /rest/json/cves/2.0. Evidence class `CONFIRMED_EXPLOITED` when `cisaExploitAdd` present, else `VULNERABILITY_EXISTS`; never fabricates EPSS. |
+| CISA KEV Catalog | cyber_threat_intelligence | none | Yes | Yes (`re_711`) | READY, LIVE_VERIFIED | Bulk static JSON, cached and filtered client-side. Every entry is `CONFIRMED_EXPLOITED` by definition of KEV membership. |
+| OSM Overpass API | geospatial | none (`OSM_OVERPASS_USER_AGENT_BASE` optional) | Yes | Yes (`re_712`, `re_713`) | READY, LIVE_VERIFIED (public instance occasionally 406/504s — external flakiness, not a code defect) | POST Overpass QL to `overpass-api.de`. Query must be `"<name> near <lat>,<lon>[,<radiusKm>]"` — unbounded worldwide search rejected outright. `nwr`+`out center` so way/relation results (most named places) get usable coordinates. Geofabrik bulk extracts are a distinct BULK_ONLY mechanism, not implemented as a REST adapter. |
+| GeoNames | geospatial | `GEONAMES_USERNAME` | Yes | Yes (`re_714`, `re_715`) | IMPLEMENTED_CREDENTIAL_BLOCKED — not a secret, but requires a real Commander signup at geonames.org | GET /searchJSON. API errors return HTTP 200 with a `status.message` field — detected explicitly. |
+| Eurostat Database API | economics | none | Yes | Yes (`re_716`, `re_717`) | READY, LIVE_VERIFIED | GET JSON-stat 2.0 dataset endpoint. No free-text search API (real constraint) — small keyword→dataset-code lookup table or an exact code. Real JSON-stat flat-index decode, capped at 20 sample points. |
+| Wikipedia REST API | general_web | `WIKIMEDIA_USER_AGENT_BASE` (shared with `wikidata`) | Yes | Yes (`re_702`) | READY, LIVE_VERIFIED | GET /api/rest_v1/page/summary/{title}, English only. Title lookup (`getById`), not free-text search. |
+| Europe PMC | scholarly | none | Yes | Yes (`re_703`) | READY, LIVE_VERIFIED | GET /europepmc/webservices/rest/search. |
+| ClinicalTrials.gov API v2 | clinical_trials | none | Yes | Yes (`re_704`) | READY, LIVE_VERIFIED | GET /api/v2/studies. No API key exists for this API. |
+| openFDA | pharmaceuticals | none (`OPENFDA_API_KEY` optional) | Yes | Yes (`re_705`) | READY, LIVE_VERIFIED | GET /drug/label.json. A zero-result query 404s (treated as honest empty, not an error). |
+| PubChem PUG REST | chemistry | none | Yes | Yes (`re_706`) | READY, LIVE_VERIFIED | GET compound-name property lookup (`getById`). Uses `ConnectivitySMILES` — the older `CanonicalSMILES` property name does not exist in the current schema (confirmed live). |
+| GBIF Occurrence Search | biodiversity | none | Yes | Yes (`re_707`) | READY, LIVE_VERIFIED | GET /v1/occurrence/search, scientificName-scoped. |
+| UniProt REST API | genetics_molecular | none | Yes | Yes (`re_708`) | READY, LIVE_VERIFIED | GET /uniprotkb/search, fixed narrow field list. |
+| US Census Bureau Data API | statistics | none declared (`CENSUS_API_KEY` optional) | Yes | Yes (`re_718`, `re_719`) | IMPLEMENTED_ACCESS_DEGRADED — documented as optional-key, but a live call this mission showed the 2023 ACS1 dataset now 302-redirects to a "Missing Key" page without one | GET ACS1, fixed to variable B01001_001E. Always requests all states (`for=state:*`) and filters client-side by name — Census requires numeric FIPS codes, not postal abbreviations, to scope a single state server-side. |
+| Congress.gov API | government_legislation | `CONGRESS_GOV_API_KEY` | Yes | Yes (`re_720`) | IMPLEMENTED_CREDENTIAL_BLOCKED | GET /v3/bill[/{congress}]. Rides the shared api.data.gov key infrastructure (distinct env var from govinfo). |
+| GovInfo API | government_legislation | `GOVINFO_API_KEY` | Yes | Yes (`re_721`) | IMPLEMENTED_CREDENTIAL_BLOCKED | GET /collections/{code}/{date}, fixed 30-day trailing window. POST /search (free-text) documented but not implemented, to keep every adapter in this codebase GET-only. |
+| SEC EDGAR Full-Text Search | financial_regulatory | `SEC_EDGAR_USER_AGENT_BASE` | Yes | Yes (`re_722`) | IMPLEMENTED_CREDENTIAL_BLOCKED | GET efts.sec.gov/LATEST/search-index. No API key exists, but SEC requires a descriptive User-Agent (org + contact email) or requests 403. |
+| ORCID Public API | researcher_identity | `ORCID_CLIENT_ID`, `ORCID_CLIENT_SECRET` | Yes | Yes (`re_723`) | IMPLEMENTED_CREDENTIAL_BLOCKED — genuinely requires OAuth2 client_credentials despite "public API" branding | POST oauth/token (module-level cached token) then GET pub.orcid.org/v3.0/expanded-search. |
+| ReliefWeb API v2 | humanitarian | `RELIEFWEB_APPNAME` | Yes | Yes (`re_724`) | IMPLEMENTED_CREDENTIAL_BLOCKED — not secret, but a pre-approved appname is required per ReliefWeb's Nov 2025 policy change | GET /v2/reports. |
 
 `*` = READY pending the actual credential being present in the deployed
 environment; code path is complete and unit-tested against mocked responses
@@ -62,6 +97,20 @@ during this build (see `RESEARCH_ENGINE_RUNBOOK.md` for how to run an
 explicit, manual live check).
 
 ## Summary
+
+**Update (Earth Knowledge Registry reconciliation mission)**: totals below
+this line are historical (as of the "Remaining 15"/FMCSA build phases). The
+computed-from-code totals as of this mission's end are **50 total provider
+IDs, 43 implemented (real fetch+parse adapter), 7 stub-only** (`uspto`,
+`world_bank_data_catalog`, `world_bank_projects`, `world_bank_finances`,
+`world_bank_climate`, `imf_sdmx`, `usgs_national_map` — unchanged, none were
+touched this mission). Of the 43 implemented, 19 (`mitre_attack`, `gleif`,
+plus the 19 rows added directly above) had never been either deterministically
+tested or live-verified before this mission closed both gaps. See
+`docs/earth-knowledge/gap-matrix.md` for the full registry-vs-provider
+reconciliation and `scripts/run-research-engine-live-validation.mjs` for the
+live-proof harness (new this mission — previously **zero** research-engine
+providers had any live-verification script at all).
 
 - **22 of 29 implemented**: the original 14 (Exa, GitHub, NCBI/PubMed, FRED,
   arXiv, Crossref, NASA GIBS (reused), World Bank Indicators, USGS
