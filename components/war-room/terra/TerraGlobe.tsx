@@ -28,6 +28,9 @@ import { useEffect, useRef, useState } from 'react'
 // these classes existing. Importing the package's own CSS (not a copy) — standard Cesium+Next.js
 // integration practice.
 import 'cesium/Build/Cesium/Widgets/widgets.css'
+import type { Viewer as CesiumViewer } from 'cesium'
+import { featureIdFromTerraEntityId } from '@/lib/terra/cesiumEntityId'
+import type { TerraClickPoint } from '@/lib/terra/types'
 
 export type TerraImageryTier = 'photorealistic_3d_tiles' | 'openstreetmap'
 
@@ -38,13 +41,34 @@ export type TerraGlobeStatus =
 
 type TerraGlobeProps = {
   onStatusChange?: (status: TerraGlobeStatus) => void
+  /** Fires once, right after the Cesium Viewer is constructed — the hand-off point for any
+   * layer component (e.g. the earthquake layer) that needs to add its own DataSource. */
+  onViewerReady?: (viewer: CesiumViewer) => void
+  /** A left-click that hit a Terra-managed entity (see lib/terra/cesiumEntityId.ts) — the
+   * feature's raw id, not a bare coordinate. */
+  onEntityClick?: (featureId: string) => void
+  /** A left-click that did NOT hit a Terra entity — either a real ground coordinate or a
+   * confirmed miss (clicked past the globe's edge). Never fires for entity clicks. */
+  onGroundClick?: (point: TerraClickPoint) => void
 }
 
 const OSM_ATTRIBUTION_URL = 'https://tile.openstreetmap.org/'
 
-export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
+export function TerraGlobe({ onStatusChange, onViewerReady, onEntityClick, onGroundClick }: TerraGlobeProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<TerraGlobeStatus>({ phase: 'loading' })
+
+  // The boot effect below intentionally runs once (Cesium initialization is expensive and must
+  // not re-run on every parent render) — these refs let the click handler it installs always see
+  // the latest callback identity without that effect depending on them.
+  const onEntityClickRef = useRef(onEntityClick)
+  const onGroundClickRef = useRef(onGroundClick)
+  const onViewerReadyRef = useRef(onViewerReady)
+  useEffect(() => {
+    onEntityClickRef.current = onEntityClick
+    onGroundClickRef.current = onGroundClick
+    onViewerReadyRef.current = onViewerReady
+  }, [onEntityClick, onGroundClick, onViewerReady])
 
   useEffect(() => {
     onStatusChange?.(status)
@@ -53,6 +77,7 @@ export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
   useEffect(() => {
     let cancelled = false
     let viewerHandle: { destroy: () => void } | null = null
+    let clickHandler: { destroy: () => void } | null = null
 
     async function boot() {
       const container = containerRef.current
@@ -113,6 +138,44 @@ export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
           return
         }
 
+        // No Cesium World Terrain is configured this phase (needs an ion token — see status
+        // reporting above), so the viewer's terrainProvider is Cesium's default
+        // EllipsoidTerrainProvider. Detected here, not assumed, so a real terrain provider added
+        // in a later phase is picked up automatically without touching this handler.
+        const hasRealTerrain = !(viewer.terrainProvider instanceof Cesium.EllipsoidTerrainProvider)
+
+        const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
+        handler.setInputAction((click: { position: import('cesium').Cartesian2 }) => {
+          const picked = viewer.scene.pick(click.position)
+          if (Cesium.defined(picked) && picked.id instanceof Cesium.Entity) {
+            const featureId = featureIdFromTerraEntityId(picked.id.id)
+            if (featureId) {
+              onEntityClickRef.current?.(featureId)
+              return
+            }
+          }
+
+          const cartesian = hasRealTerrain
+            ? (viewer.scene.pickPosition(click.position) ?? viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid))
+            : viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid)
+
+          if (!cartesian) {
+            onGroundClickRef.current?.({ ok: false }) // click missed the globe entirely (e.g. clicked past the limb into space)
+            return
+          }
+          const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
+          onGroundClickRef.current?.({
+            ok: true,
+            longitude: Cesium.Math.toDegrees(cartographic.longitude),
+            latitude: Cesium.Math.toDegrees(cartographic.latitude),
+            height: hasRealTerrain ? cartographic.height : null,
+            hasTerrainHeight: hasRealTerrain,
+          })
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+        clickHandler = handler
+
+        onViewerReadyRef.current?.(viewer)
+
         setStatus({
           phase: 'ready',
           imageryTier: 'openstreetmap',
@@ -129,6 +192,7 @@ export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
 
     return () => {
       cancelled = true
+      clickHandler?.destroy()
       viewerHandle?.destroy()
     }
   }, [])
