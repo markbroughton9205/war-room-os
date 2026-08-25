@@ -99,18 +99,24 @@ explicit, manual live check).
 ## Summary
 
 **Update (Earth Knowledge Registry reconciliation mission)**: totals below
-this line are historical (as of the "Remaining 15"/FMCSA build phases). The
-computed-from-code totals as of this mission's end are **50 total provider
-IDs, 43 implemented (real fetch+parse adapter), 7 stub-only** (`uspto`,
-`world_bank_data_catalog`, `world_bank_projects`, `world_bank_finances`,
-`world_bank_climate`, `imf_sdmx`, `usgs_national_map` — unchanged, none were
-touched this mission). Of the 43 implemented, 19 (`mitre_attack`, `gleif`,
-plus the 19 rows added directly above) had never been either deterministically
-tested or live-verified before this mission closed both gaps. See
-`docs/earth-knowledge/gap-matrix.md` for the full registry-vs-provider
-reconciliation and `scripts/run-research-engine-live-validation.mjs` for the
-live-proof harness (new this mission — previously **zero** research-engine
-providers had any live-verification script at all).
+this line are historical (as of the "Remaining 15"/FMCSA build phases), and
+the "50 total / 43 implemented" figure once written directly above this line
+was itself only a mid-mission checkpoint (the "First 25" wave) — also now
+stale. The computed-from-code totals as of this mission's actual end are
+**249 total provider IDs, 245 implemented (real fetch+parse adapter), 4
+stub-only** (`uspto`, `world_bank_data_catalog`, `world_bank_finances`,
+`world_bank_climate`). Three of the seven stubs the mission started with —
+`world_bank_projects`, `usgs_national_map`, `imf_sdmx` — were resolved to
+real, live-confirmed adapters in a later pass; the remaining four each carry
+a live-confirmed blocker (see their `notes` field in
+`lib/research-engine/config/providerEnv.ts`), not silence. See
+`docs/earth-knowledge/gap-matrix.md` for the full, always-regeneratable
+registry-vs-provider reconciliation (`node
+scripts/earth-knowledge/build-completion-registry.mjs`) and
+`scripts/run-research-engine-live-validation.mjs` for the live-proof harness
+(new this mission — previously **zero** research-engine providers had any
+live-verification script at all; 190 have now been confirmed with a real
+network call).
 
 - **22 of 29 implemented**: the original 14 (Exa, GitHub, NCBI/PubMed, FRED,
   arXiv, Crossref, NASA GIBS (reused), World Bank Indicators, USGS
