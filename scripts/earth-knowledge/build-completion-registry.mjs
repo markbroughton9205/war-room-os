@@ -510,7 +510,7 @@ const FORCED_CLASSIFICATION_MAP = {
   },
   'e-periodica (eth library)': {
     state: 'MISSING',
-    note: 'Not independently confirmed within this session\'s time budget — e-periodica\'s IIIF-based access was not probed for a working query/search endpoint distinct from the plain IIIF manifest delivery already noted elsewhere in the registry (cross-referenced primarily under cat13).',
+    note: 'Confirmed this mission: both a guessed classic search path (/digbib/dossearch?format=json, real HTTP 400) and a guessed REST path (/api/search, real HTTP 404) returned genuine app-server error pages, not bot walls — no working query/search endpoint found distinct from the plain IIIF manifest delivery already noted elsewhere in the registry (cross-referenced primarily under cat13). Not built against an unconfirmed endpoint.',
   },
   'data.go.kr': {
     state: 'MISSING',
@@ -530,11 +530,11 @@ const FORCED_CLASSIFICATION_MAP = {
   },
   'redalyc journal api': {
     state: 'MISSING',
-    note: 'Not independently confirmed within this session\'s time budget — no real endpoint or auth mechanism was probed for Redalyc\'s journal API.',
+    note: 'Confirmed this mission: api.redalyc.org resolves and returns HTTP 200, but serves the same main-site HTML (title "Sistema de Información Científica Redalyc") as www.redalyc.org, not a distinct API — it is not a separate API host. The specific documented docs path (/docs/) real-404s with a genuine Java servlet error ("SRVE0190E: File not found"), and the TLS certificate served does not cover the api.redalyc.org hostname at all (a shared wildcard cert for the main site). No working, distinctly-hosted API found. Not built against an unconfirmed/likely-nonexistent endpoint.',
   },
   'kisti scienceon / ndsl open service (korea)': {
     state: 'MISSING',
-    note: 'Not independently confirmed within this session\'s time budget — no real endpoint or auth mechanism was probed for KISTI\'s ScienceON/NDSL open service.',
+    note: 'Confirmed this mission: both scienceon.kisti.re.kr and apigateway.kisti.re.kr connection-timed-out repeatedly from this network — could not confirm live/dead status or endpoint shape either way within this session\'s time budget, the same class of finding already recorded elsewhere in this map for other geo-distant government hosts (e.g. Saudi GASTAT). Not built against an endpoint that could not be reached.',
   },
   'lens.org': {
     state: 'MISSING',
@@ -581,8 +581,8 @@ const FORCED_CLASSIFICATION_MAP = {
     note: 'Confirmed live this mission: librivox.org/api/feed/audiobooks returned genuinely malformed/truncated JSON on a first call (an unterminated string mid-response) and then empty (0-byte) responses on immediate retries — real, reproduced API instability at the source, not a wrong path or transient blip. Not built against a currently unreliable JSON contract.',
   },
   'shamela library': {
-    state: 'MISSING',
-    note: 'Not independently confirmed within this session\'s time budget — no real machine-readable API was located for al-Maktaba al-Shamela; the library is widely known to be primarily a downloadable-application/database product rather than a web API.',
+    state: 'BULK_ONLY',
+    note: 'Confirmed this mission via a real third-party reverse-engineered client (github.com/ragaeeb/shamela): shamela.ws does expose a real API, but its two endpoints (/api/master_patch, /api/books) are a database-sync/patch-distribution mechanism — requests return download URLs for SQLite-database or JSON book/master-index dumps, not query results from a live search endpoint. The API key required is not self-service (the client\'s own docs say "I cannot provide API keys... contact mail@shamela.ws"). Correctly bulk-only, not a live search API even with credentials.',
   },
   'impresso — media monitoring of the past': {
     state: 'MISSING',

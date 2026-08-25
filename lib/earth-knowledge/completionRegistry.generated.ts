@@ -4071,7 +4071,7 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "implementationState": "MISSING",
     "providerId": null,
     "adapterPath": null,
-    "notes": "Not independently confirmed within this session's time budget — e-periodica's IIIF-based access was not probed for a working query/search endpoint distinct from the plain IIIF manifest delivery already noted elsewhere in the registry (cross-referenced primarily under cat13)."
+    "notes": "Confirmed this mission: both a guessed classic search path (/digbib/dossearch?format=json, real HTTP 400) and a guessed REST path (/api/search, real HTTP 404) returned genuine app-server error pages, not bot walls — no working query/search endpoint found distinct from the plain IIIF manifest delivery already noted elsewhere in the registry (cross-referenced primarily under cat13). Not built against an unconfirmed endpoint."
   },
   {
     "sourceId": "ek_13_perseus_open_greek_and_latin_corpora",
@@ -5431,7 +5431,7 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "implementationState": "MISSING",
     "providerId": null,
     "adapterPath": null,
-    "notes": "Not independently confirmed within this session's time budget — no real endpoint or auth mechanism was probed for Redalyc's journal API."
+    "notes": "Confirmed this mission: api.redalyc.org resolves and returns HTTP 200, but serves the same main-site HTML (title \"Sistema de Información Científica Redalyc\") as www.redalyc.org, not a distinct API — it is not a separate API host. The specific documented docs path (/docs/) real-404s with a genuine Java servlet error (\"SRVE0190E: File not found\"), and the TLS certificate served does not cover the api.redalyc.org hostname at all (a shared wildcard cert for the main site). No working, distinctly-hosted API found. Not built against an unconfirmed/likely-nonexistent endpoint."
   },
   {
     "sourceId": "ek_16_cyberleninka_oai_pmh",
@@ -5499,7 +5499,7 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "implementationState": "MISSING",
     "providerId": null,
     "adapterPath": null,
-    "notes": "Not independently confirmed within this session's time budget — no real endpoint or auth mechanism was probed for KISTI's ScienceON/NDSL open service."
+    "notes": "Confirmed this mission: both scienceon.kisti.re.kr and apigateway.kisti.re.kr connection-timed-out repeatedly from this network — could not confirm live/dead status or endpoint shape either way within this session's time budget, the same class of finding already recorded elsewhere in this map for other geo-distant government hosts (e.g. Saudi GASTAT). Not built against an endpoint that could not be reached."
   },
   {
     "sourceId": "ek_16_scopus_elsevier",
@@ -8029,10 +8029,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL (cross-ref cat25)",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
+    "implementationState": "BULK_ONLY",
     "providerId": null,
     "adapterPath": null,
-    "notes": "Not independently confirmed within this session's time budget — no real machine-readable API was located for al-Maktaba al-Shamela; the library is widely known to be primarily a downloadable-application/database product rather than a web API."
+    "notes": "Confirmed this mission via a real third-party reverse-engineered client (github.com/ragaeeb/shamela): shamela.ws does expose a real API, but its two endpoints (/api/master_patch, /api/books) are a database-sync/patch-distribution mechanism — requests return download URLs for SQLite-database or JSON book/master-index dumps, not query results from a live search endpoint. The API key required is not self-service (the client's own docs say \"I cannot provide API keys... contact mail@shamela.ws\"). Correctly bulk-only, not a live search API even with credentials."
   },
   {
     "sourceId": "ek_21_aozora_bunko_catalog_csv_text_zips",
@@ -9262,11 +9262,11 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
 
 export const EARTH_KNOWLEDGE_STATE_COUNTS: Record<string, number> = {
   "LIVE_IMPLEMENTED": 189,
-  "BULK_ONLY": 87,
+  "BULK_ONLY": 88,
   "IMPLEMENTED_NOT_LIVE_VERIFIED": 11,
   "IMPLEMENTED_ACCESS_DEGRADED": 5,
   "IMPLEMENTED_CREDENTIAL_BLOCKED": 46,
-  "MISSING": 90,
+  "MISSING": 89,
   "DISCONTINUED": 12,
   "SEARCH_INTERFACE_ONLY": 59,
   "COMMERCIAL_GATED": 20,
