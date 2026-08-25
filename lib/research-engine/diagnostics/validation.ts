@@ -254,6 +254,9 @@ import { econstorAdapter } from '@/lib/research-engine/providers/econstor'
 import { w3cApiAdapter } from '@/lib/research-engine/providers/w3cApi'
 import { wtoTimeseriesAdapter } from '@/lib/research-engine/providers/wtoTimeseries'
 import { eStatJapanAdapter } from '@/lib/research-engine/providers/eStatJapan'
+import { worldBankProjectsAdapter } from '@/lib/research-engine/providers/worldBankProjects'
+import { usgsNationalMapAdapter } from '@/lib/research-engine/providers/usgsNationalMap'
+import { imfSdmxAdapter } from '@/lib/research-engine/providers/imfSdmx'
 import { IMPLEMENTED_PROVIDER_ADAPTERS } from '@/lib/research-engine/providers/registry'
 import type { ResearchDocument, ResearchProviderId } from '@/lib/research-engine/core/types'
 
@@ -523,12 +526,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_17_router_rejects_unimplemented_provider_with_reason', () => {
-    // usgs_national_map has no required env var and remains unimplemented
-    // (BLOCKED — MISSING AUTHORITATIVE CONTRACT), so this isolates the
-    // "adapter not implemented" rejection path from "env missing".
-    const decision = routeResearchQuery({ text: 'test', intent: 'maps_geospatial' })
-    const usgsNationalMap = decision.rejectedProviders.find(entry => entry.provider === 'usgs_national_map')
-    return Boolean(usgsNationalMap && /not implemented/i.test(usgsNationalMap.reason)) || `usgs_national_map rejection: ${JSON.stringify(usgsNationalMap)}`
+    // world_bank_climate has no required env var and remains unimplemented
+    // (confirmed live this mission: real Cloudflare JS-challenge block on
+    // every path, EXTERNAL_BLOCKER), so this isolates the "adapter not
+    // implemented" rejection path from "env missing".
+    const decision = routeResearchQuery({ text: 'test', intent: 'climate_environment' })
+    const worldBankClimate = decision.rejectedProviders.find(entry => entry.provider === 'world_bank_climate')
+    return Boolean(worldBankClimate && /not implemented/i.test(worldBankClimate.reason)) || `world_bank_climate rejection: ${JSON.stringify(worldBankClimate)}`
   })
 
   await add('re_18_router_selects_only_configured_implemented_providers', () => {
@@ -1003,6 +1007,9 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       w3c_api: ['search'],
       wto_timeseries: ['timeSeries'],
       e_stat_japan: ['search'],
+      world_bank_projects: ['search'],
+      usgs_national_map: ['search'],
+      imf_sdmx: ['timeSeries'],
     }
     const implemented = RESEARCH_PROVIDER_ENV.filter(descriptor => descriptor.implemented)
     const offenders = implemented.filter(descriptor => {
@@ -1772,7 +1779,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   // --- Batch 1A: registry/provider-count integrity (Phase 8) ---
 
   const BATCH_1A_TARGET_IDS = ['usgs_water', 'usgs_earthquake_feed', 'usgs_sciencebase'] as const
-  const UNAUTHORIZED_BATCH_1_IDS = ['imf_sdmx', 'world_bank_data_catalog', 'world_bank_projects', 'world_bank_finances', 'world_bank_climate', 'usgs_national_map'] as const
+  const UNAUTHORIZED_BATCH_1_IDS = ['world_bank_data_catalog', 'world_bank_finances', 'world_bank_climate'] as const
 
   await add('re_100_registered_provider_count_is_31', () =>
     RESEARCH_PROVIDER_ENV.length === 249 || `expected 249 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
@@ -1780,8 +1787,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   await add('re_101_implemented_count_derives_to_24_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 242 && implementedAdapters === 242)
-      || `expected 242 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 245 && implementedAdapters === 245)
+      || `expected 245 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -1791,7 +1798,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       || `expected all three Batch 1A providers registered+implemented, missingFromRegistry=${JSON.stringify(missing)} notImplementedInDescriptor=${JSON.stringify(notImplementedInDescriptor)}`
   })
 
-  await add('re_103_six_unauthorized_batch1_providers_remain_unimplemented', () => {
+  await add('re_103_three_unauthorized_batch1_providers_remain_unimplemented', () => {
     const wronglyImplemented = UNAUTHORIZED_BATCH_1_IDS.filter(id => {
       const descriptor = RESEARCH_PROVIDER_ENV.find(d => d.id === id)
       return descriptor?.implemented === true || id in IMPLEMENTED_PROVIDER_ADAPTERS
@@ -3077,12 +3084,12 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
 
   await add('re_230_final_implemented_count_is_24', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 242 || `expected 242 implemented adapters, found ${count}`
+    return count === 245 || `expected 245 implemented adapters, found ${count}`
   })
 
   await add('re_231_final_unimplemented_count_is_7', () => {
     const count = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return count === 7 || `expected 7 unimplemented providers, found ${count}`
+    return count === 4 || `expected 4 unimplemented providers, found ${count}`
   })
 
   // --- Repair pass: H1 (IPv4-mapped IPv6 SSRF bypass) fix regression + M5 SSRF matrix expansion ---
@@ -4155,8 +4162,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const totalCount = RESEARCH_PROVIDER_ENV.length
     const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return (descriptor?.implemented === true && totalCount === 249 && implementedCount === 242 && blockedCount === 7)
-      || `expected fmcsa implemented plus a 242/7 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+    return (descriptor?.implemented === true && totalCount === 249 && implementedCount === 245 && blockedCount === 4)
+      || `expected fmcsa implemented plus a 245/4 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
   })
 
   await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {
@@ -4166,8 +4173,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     return equal || `descriptor implemented set and registry key set diverge: descriptors=${JSON.stringify(descriptorImplementedIds)} registry=${JSON.stringify(registryIds)}`
   })
 
-  await add('re_653_remaining_seven_blocked_providers_are_exactly_as_specified', () => {
-    const expected = ['imf_sdmx', 'usgs_national_map', 'uspto', 'world_bank_climate', 'world_bank_data_catalog', 'world_bank_finances', 'world_bank_projects'].sort()
+  await add('re_653_remaining_four_blocked_providers_are_exactly_as_specified', () => {
+    const expected = ['uspto', 'world_bank_climate', 'world_bank_data_catalog', 'world_bank_finances'].sort()
     const actual = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).map(d => d.id).sort()
     const equal = expected.length === actual.length && expected.every((id, i) => id === actual[i])
     return equal || `expected the remaining blocked set ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
@@ -6296,6 +6303,35 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
     return documentShapeIssue(response.documents[0], 'e_stat_japan') ?? true
   })))
+
+  await add('re_928_world_bank_projects_success_normalizes_project', () => withAdapterFetch([
+    jsonResponse({ total: '1', projects: { P505244: { id: 'P505244', project_name: 'Boosting Green Finance, Investment and Trade in Rwanda', regionname: 'Eastern and Southern Africa', countryname: ['Republic of Rwanda'], countryshortname: 'Rwanda', status: 'Active', boardapprovaldate: '2024-12-20T00:00:00Z', totalamt: '200,000,000', url: 'https://projects.worldbank.org/en/projects-operations/project-detail/P505244', sector1: { Name: 'Public Administration' } } } }),
+  ], async () => {
+    const response = await worldBankProjectsAdapter.run({ text: 'green finance' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'world_bank_projects') ?? true
+  }))
+
+  await add('re_929_usgs_national_map_success_normalizes_product', () => withAdapterFetch([
+    jsonResponse({ total: 1, items: [{ title: '3D Hydrography Program (3DHP) (Alaska)', moreInfo: 'USGS 3DHP hydrologic dataset.', sourceId: '69743a66d4be0260181a1220', metaUrl: 'https://www.sciencebase.gov/catalog/item/69743a66d4be0260181a1220', publicationDate: '2026-01-23', lastUpdated: '2026-01-23T20:41:06.655-07:00', extent: 'Alaska', format: 'FileGDB', downloadURL: 'https://prd-tnm.s3.amazonaws.com/example.zip' }] }),
+  ], async () => {
+    const response = await usgsNationalMapAdapter.run({ text: 'Alaska hydrography' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'usgs_national_map') ?? true
+  }))
+
+  await add('re_930_imf_sdmx_success_normalizes_observation', () => withAdapterFetch([
+    jsonResponse({
+      data: {
+        dataSets: [{ series: { '0:0:0:0:0': { observations: { '0': ['4930.72', null, 0, '1993M12', null] } } } }],
+        structures: [{ dimensions: { observation: [{ id: 'TIME_PERIOD', values: [{ value: '2018-M01' }] }] } }],
+      },
+    }),
+  ], async () => {
+    const response = await imfSdmxAdapter.run({ text: 'IMF.STA/CPI/~/BRA.CPI._T.IX.M' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'imf_sdmx') ?? true
+  }))
 
   return results
 }

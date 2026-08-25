@@ -261,6 +261,9 @@ const TEST_QUERIES = {
   w3c_api: 'html',
   wto_timeseries: 'ITS_MTV_AX',
   e_stat_japan: 'population',
+  world_bank_projects: 'green finance',
+  usgs_national_map: 'Alaska hydrography',
+  imf_sdmx: 'IMF.STA/CPI/~/BRA.CPI._T.IX.M',
 }
 
 const results = []

@@ -244,6 +244,9 @@ import { econstorAdapter } from '@/lib/research-engine/providers/econstor'
 import { w3cApiAdapter } from '@/lib/research-engine/providers/w3cApi'
 import { wtoTimeseriesAdapter } from '@/lib/research-engine/providers/wtoTimeseries'
 import { eStatJapanAdapter } from '@/lib/research-engine/providers/eStatJapan'
+import { worldBankProjectsAdapter } from '@/lib/research-engine/providers/worldBankProjects'
+import { usgsNationalMapAdapter } from '@/lib/research-engine/providers/usgsNationalMap'
+import { imfSdmxAdapter } from '@/lib/research-engine/providers/imfSdmx'
 
 /**
  * Only providers with a real, implemented adapter appear here. Every
@@ -495,6 +498,9 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   w3c_api: w3cApiAdapter,
   wto_timeseries: wtoTimeseriesAdapter,
   e_stat_japan: eStatJapanAdapter,
+  world_bank_projects: worldBankProjectsAdapter,
+  usgs_national_map: usgsNationalMapAdapter,
+  imf_sdmx: imfSdmxAdapter,
 }
 
 export function getImplementedAdapter(id: ResearchProviderId): ResearchProviderAdapter | null {

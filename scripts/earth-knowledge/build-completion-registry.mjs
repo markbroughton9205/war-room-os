@@ -1002,10 +1002,10 @@ const IMPLEMENTED_PROVIDERS = new Set([
   'datos_abiertos_colombia', 'ine_tempus3', 'singstat', 'usgs_m2m', 'n2yo', 'ariadne_portal',
   'ohm_overpass', 'stack_exchange', 'ecmwf_cds', 'met_office_datahub', 'ndl_search', 'swisscovery',
   'yago', 'data_commons', 'econstor', 'w3c_api', 'wto_timeseries', 'e_stat_japan',
+  'world_bank_projects', 'usgs_national_map', 'imf_sdmx',
 ])
 const STUB_PROVIDERS = new Set([
-  'uspto', 'world_bank_data_catalog', 'world_bank_projects', 'world_bank_finances',
-  'world_bank_climate', 'imf_sdmx', 'usgs_national_map',
+  'uspto', 'world_bank_data_catalog', 'world_bank_finances', 'world_bank_climate',
 ])
 // Providers confirmed LIVE by a real, reproducible network call this mission
 // via scripts/run-research-engine-live-validation.mjs — real HTTP request,
