@@ -252,6 +252,12 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   met_office_datahub: ['data.hub.api.metoffice.gov.uk'],
   ndl_search: ['ndlsearch.ndl.go.jp'],
   swisscovery: ['swisscovery.slsp.ch'],
+  yago: ['yago-knowledge.org'],
+  data_commons: ['api.datacommons.org'],
+  econstor: ['www.econstor.eu'],
+  w3c_api: ['api.w3.org'],
+  wto_timeseries: ['api.wto.org'],
+  e_stat_japan: ['api.e-stat.go.jp'],
 }
 
 export function isAllowedHost(provider: ResearchProviderId, hostname: string): boolean {

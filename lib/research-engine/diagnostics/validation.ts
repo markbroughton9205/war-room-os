@@ -248,6 +248,12 @@ import { ecmwfCdsAdapter } from '@/lib/research-engine/providers/ecmwfCds'
 import { metOfficeDataHubAdapter } from '@/lib/research-engine/providers/metOfficeDataHub'
 import { ndlSearchAdapter } from '@/lib/research-engine/providers/ndlSearch'
 import { swisscoveryAdapter } from '@/lib/research-engine/providers/swisscovery'
+import { yagoAdapter } from '@/lib/research-engine/providers/yago'
+import { dataCommonsAdapter } from '@/lib/research-engine/providers/dataCommons'
+import { econstorAdapter } from '@/lib/research-engine/providers/econstor'
+import { w3cApiAdapter } from '@/lib/research-engine/providers/w3cApi'
+import { wtoTimeseriesAdapter } from '@/lib/research-engine/providers/wtoTimeseries'
+import { eStatJapanAdapter } from '@/lib/research-engine/providers/eStatJapan'
 import { IMPLEMENTED_PROVIDER_ADAPTERS } from '@/lib/research-engine/providers/registry'
 import type { ResearchDocument, ResearchProviderId } from '@/lib/research-engine/core/types'
 
@@ -414,7 +420,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const add = async (id: string, fn: () => boolean | string | Promise<boolean | string>) => results.push(await test(id, fn))
 
   await add('re_01_all_31_providers_registered', () =>
-    RESEARCH_PROVIDER_ENV.length === 243 || `expected 243 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 249 || `expected 249 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_02_missing_required_env_not_configured', () => {
     const emptyEnv = { NODE_ENV: 'test' } as NodeJS.ProcessEnv
@@ -991,6 +997,12 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       met_office_datahub: ['getById'],
       ndl_search: ['search'],
       swisscovery: ['search'],
+      yago: ['search'],
+      data_commons: ['getById'],
+      econstor: ['search'],
+      w3c_api: ['search'],
+      wto_timeseries: ['timeSeries'],
+      e_stat_japan: ['search'],
     }
     const implemented = RESEARCH_PROVIDER_ENV.filter(descriptor => descriptor.implemented)
     const offenders = implemented.filter(descriptor => {
@@ -1763,13 +1775,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const UNAUTHORIZED_BATCH_1_IDS = ['imf_sdmx', 'world_bank_data_catalog', 'world_bank_projects', 'world_bank_finances', 'world_bank_climate', 'usgs_national_map'] as const
 
   await add('re_100_registered_provider_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 243 || `expected 243 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 249 || `expected 249 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_101_implemented_count_derives_to_24_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 236 && implementedAdapters === 236)
-      || `expected 110 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 242 && implementedAdapters === 242)
+      || `expected 242 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -3061,11 +3073,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_229_final_provider_descriptor_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 243 || `expected 243 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 249 || `expected 249 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_230_final_implemented_count_is_24', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 236 || `expected 236 implemented adapters, found ${count}`
+    return count === 242 || `expected 242 implemented adapters, found ${count}`
   })
 
   await add('re_231_final_unimplemented_count_is_7', () => {
@@ -4143,8 +4155,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const totalCount = RESEARCH_PROVIDER_ENV.length
     const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return (descriptor?.implemented === true && totalCount === 243 && implementedCount === 236 && blockedCount === 7)
-      || `expected fmcsa implemented plus a 236/7 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+    return (descriptor?.implemented === true && totalCount === 249 && implementedCount === 242 && blockedCount === 7)
+      || `expected fmcsa implemented plus a 242/7 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
   })
 
   await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {
@@ -6236,6 +6248,54 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
     return documentShapeIssue(response.documents[0], 'swisscovery') ?? true
   }))
+
+  await add('re_921_yago_success_normalizes_sparql_binding', () => withAdapterFetch([
+    jsonResponse({ results: { bindings: [{ entity: { value: 'https://yago-knowledge.org/resource/Albert_Einstein' }, label: { value: 'Albert Einstein' } }] } }),
+  ], async () => {
+    const response = await yagoAdapter.run({ text: 'Einstein' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'yago') ?? true
+  }))
+
+  await add('re_922_data_commons_success_normalizes_dcid_node', () => withEnv({ DATA_COMMONS_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ data: { 'geoId/06085': { arcs: { name: { nodes: [{ value: 'Santa Clara County' }] }, typeOf: { nodes: [{ name: 'Place' }] }, description: { nodes: [{ value: 'A county in California.' }] } } } } }),
+  ], async () => {
+    const response = await dataCommonsAdapter.run({ text: 'geoId/06085' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'data_commons') ?? true
+  })))
+
+  await add('re_923_econstor_success_parses_oai_dc_record', () => withAdapterFetch([
+    textResponse('<OAI-PMH><ListRecords><record><header><identifier>oai:econstor.eu:10419/123456</identifier></header><metadata><oai_dc:dc><dc:title>Test Working Paper on Trade</dc:title><dc:creator>Jane Doe</dc:creator><dc:description>A test abstract about trade.</dc:description><dc:date>2020</dc:date><dc:language>eng</dc:language><dc:identifier>http://hdl.handle.net/10419/123456</dc:identifier></oai_dc:dc></metadata></record></ListRecords></OAI-PMH>', 200, 'application/xml'),
+  ], async () => {
+    const response = await econstorAdapter.run({ text: 'trade' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'econstor') ?? true
+  }))
+
+  await add('re_924_w3c_api_success_normalizes_specification', () => withAdapterFetch([
+    jsonResponse({ _embedded: { specifications: [{ shortname: 'html', title: 'HTML Standard', description: 'The HTML specification.', status: 'Recommendation', shortlink: 'https://www.w3.org/TR/html/' }] } }),
+  ], async () => {
+    const response = await w3cApiAdapter.run({ text: 'html' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'w3c_api') ?? true
+  }))
+
+  await add('re_926_wto_timeseries_success_normalizes_data_point', () => withEnv({ WTO_API_KEY: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ Dataset: [{ IndicatorCode: 'ITS_MTV_AX', ReportingEconomyCode: '842', ReportingEconomy: 'United States of America', Period: '2023', Value: 2018000, Unit: 'USD million', ProductOrSector: 'Total merchandise' }] }),
+  ], async () => {
+    const response = await wtoTimeseriesAdapter.run({ text: 'ITS_MTV_AX' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'wto_timeseries') ?? true
+  })))
+
+  await add('re_927_e_stat_japan_success_normalizes_table', () => withEnv({ ESTAT_JAPAN_APP_ID: 'test-key-not-real' }, () => withAdapterFetch([
+    jsonResponse({ GET_STATS_LIST: { RESULT: { STATUS: 0 }, DATALIST_INF: { TABLE_INF: [{ '@id': '0003348423', STAT_NAME: { '$': 'Population Census' }, GOV_ORG: { '$': 'Ministry of Internal Affairs and Communications' }, STATISTICS_NAME: 'Population Census 2020', TITLE: { '$': 'Population by prefecture' }, CYCLE: 'Quinquennial', SURVEY_DATE: 202010, UPDATED_DATE: '2021-06-25' }] } } }),
+  ], async () => {
+    const response = await eStatJapanAdapter.run({ text: 'population' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    return documentShapeIssue(response.documents[0], 'e_stat_japan') ?? true
+  })))
 
   return results
 }

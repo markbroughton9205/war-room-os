@@ -252,6 +252,12 @@ export type ResearchProviderId =
   | 'met_office_datahub'
   | 'ndl_search'
   | 'swisscovery'
+  | 'yago'
+  | 'data_commons'
+  | 'econstor'
+  | 'w3c_api'
+  | 'wto_timeseries'
+  | 'e_stat_japan'
 
 export type ResearchProviderCategory =
   | 'general_web'

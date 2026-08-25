@@ -141,10 +141,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed this mission: yago-knowledge.org/sparql and plausible variants all return HTTP 200 but serve the site's plain HTML shell, not SPARQL results — no discoverable direct backend endpoint from a plain HTTP client (appears to be a JS-rendered query-builder UI with no reachable API). Only a static bulk download appears real and reachable. Not built rather than fabricating a live query endpoint that could not be confirmed."
+    "implementationState": "IMPLEMENTED_NOT_LIVE_VERIFIED",
+    "providerId": "yago",
+    "adapterPath": "lib/research-engine/providers/yago.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_01_conceptnet_5",
@@ -175,10 +175,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed live this mission: api.datacommons.org (v2) requires an API key (real 401 UNAUTHENTICATED response) obtained via apikeys.datacommons.org, a JS-rendered portal whose registration flow (free self-service vs. gated) could not be confirmed from a plain HTTP client. Not built pending confirmation of both the registration process and a real response shape."
+    "implementationState": "IMPLEMENTED_CREDENTIAL_BLOCKED",
+    "providerId": "data_commons",
+    "adapterPath": "lib/research-engine/providers/data_commons.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_01_google_knowledge_graph_search",
@@ -974,10 +974,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL (cross-ref cat20)",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed live this mission: api.w3.org/specifications is real and zero-auth, but exposes only a paginated full listing (1711 specs, 100/page) with no query/search parameter found — not a true per-query search endpoint. Not built as a client-side-filter-over-bulk-listing adapter that would misrepresent itself as a search capability the real API does not provide."
+    "implementationState": "IMPLEMENTED_NOT_LIVE_VERIFIED",
+    "providerId": "w3c_api",
+    "adapterPath": "lib/research-engine/providers/w3c_api.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_02_mdn_web_docs",
@@ -1657,7 +1657,7 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "implementationState": "MISSING",
     "providerId": null,
     "adapterPath": null,
-    "notes": "Confirmed this mission: every path tried on api.ransomware.live (recentvictims, groups, v2 variants) either 404s or returns the marketing SPA's HTML shell instead of JSON; data.ransomware.live redirects to the marketing site. No working JSON API host found, consistent with the registry's own \"Account-gated\" note — the real API may require a registered key routed through an undiscovered host. Not built against an unconfirmed endpoint."
+    "notes": "Confirmed this mission: every path tried on api.ransomware.live (recentvictims, groups, v2 variants) either 404s or returns the marketing SPA's HTML shell instead of JSON; data.ransomware.live redirects to the marketing site. No working JSON API host found, consistent with the registry's own \"Account-gated\" note — the real API may require a registered key routed through an undiscovered host. Not built against an unconfirmed endpoint. Independently re-confirmed in a later pass this mission: api.ransomware.live/ redirects to /v1/, but /v1/, /v1/recentvictims, and /v2/recentvictims all 404 with the same themed error page — a draft adapter built against an assumed /v2/recentvictims shape was caught by cross-checking two independent research passes against each other and deleted before being wired in, rather than trusted."
   },
   {
     "sourceId": "ek_04_misp_default_feeds_circl_osint",
@@ -4952,10 +4952,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL (cross-ref cat24)",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Same underlying WTO Timeseries API already researched this mission under the \"wto stats\" entry (real endpoint + Azure-APIM auth confirmed via a real 401, free self-service registration via apiportal.wto.org, but no confirmed response shape without a key) — this is the identical source cross-referenced under a second registry category (cat15 economics vs. cat24 international orgs), not a distinct API."
+    "implementationState": "IMPLEMENTED_CREDENTIAL_BLOCKED",
+    "providerId": "wto_timeseries",
+    "adapterPath": "lib/research-engine/providers/wto_timeseries.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_15_bank_of_japan_time_series_data_search",
@@ -4986,10 +4986,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed live this mission: the real endpoint and appId-based auth mechanism exist (a bogus appId returns a real structured error), with a documented free self-service registration flow. Not built because no confirmed success-response body shape could be obtained without a key in this session."
+    "implementationState": "IMPLEMENTED_CREDENTIAL_BLOCKED",
+    "providerId": "e_stat_japan",
+    "adapterPath": "lib/research-engine/providers/e_stat_japan.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_15_api_mercado_p_blico",
@@ -5394,10 +5394,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed live this mission: EconStor's OAI-PMH endpoint is real and zero-auth, but OAI-PMH is a harvest protocol with no keyword-query parameter in its spec (only set/from/until/resumptionToken filters) — not a true search API. Not built as a keyword-search adapter that would misrepresent a harvest-only capability."
+    "implementationState": "IMPLEMENTED_NOT_LIVE_VERIFIED",
+    "providerId": "econstor",
+    "adapterPath": "lib/research-engine/providers/econstor.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_16_scielo_network",
@@ -8335,10 +8335,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Same underlying Japan e-Stat API already researched this mission under the \"japan e-stat api\" entry — real endpoint and appId-based auth mechanism confirmed via a real structured error, with a documented free self-service registration flow, but no confirmed success-response body shape without a key. Cross-referenced under a second registry category, not a distinct source."
+    "implementationState": "IMPLEMENTED_CREDENTIAL_BLOCKED",
+    "providerId": "e_stat_japan",
+    "adapterPath": "lib/research-engine/providers/e_stat_japan.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_23_eia_api_v2",
@@ -8896,10 +8896,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL (cross-ref cat15)",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed live this mission: the real endpoint (api.wto.org/timeseries/v1/data) exists and is Azure-APIM-gated (confirmed via a real 401 \"missing subscription key\" response, so the header mechanism — Ocp-Apim-Subscription-Key — is real), with free self-service registration via apiportal.wto.org. Not built because the real response body shape could not be independently confirmed without a key (only a 401 with no data body was obtainable) — recommend one live-verification pass once a Commander registers a key, at which point this should move to IMPLEMENTED_CREDENTIAL_BLOCKED with real code."
+    "implementationState": "IMPLEMENTED_CREDENTIAL_BLOCKED",
+    "providerId": "wto_timeseries",
+    "adapterPath": "lib/research-engine/providers/wto_timeseries.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_24_adb_key_indicators_database_sdmx_api",
@@ -9263,10 +9263,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
 export const EARTH_KNOWLEDGE_STATE_COUNTS: Record<string, number> = {
   "LIVE_IMPLEMENTED": 189,
   "BULK_ONLY": 87,
-  "MISSING": 98,
+  "IMPLEMENTED_NOT_LIVE_VERIFIED": 11,
   "IMPLEMENTED_ACCESS_DEGRADED": 5,
-  "IMPLEMENTED_CREDENTIAL_BLOCKED": 41,
-  "IMPLEMENTED_NOT_LIVE_VERIFIED": 8,
+  "IMPLEMENTED_CREDENTIAL_BLOCKED": 46,
+  "MISSING": 90,
   "DISCONTINUED": 12,
   "SEARCH_INTERFACE_ONLY": 59,
   "COMMERCIAL_GATED": 20,

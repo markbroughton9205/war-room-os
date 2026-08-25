@@ -255,6 +255,12 @@ const TEST_QUERIES = {
   met_office_datahub: '51.5,-0.1',
   ndl_search: 'test',
   swisscovery: 'shakespeare',
+  yago: 'Einstein',
+  data_commons: 'geoId/06085',
+  econstor: 'trade',
+  w3c_api: 'html',
+  wto_timeseries: 'ITS_MTV_AX',
+  e_stat_japan: 'population',
 }
 
 const results = []

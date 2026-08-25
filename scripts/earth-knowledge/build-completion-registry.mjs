@@ -294,6 +294,13 @@ const PROVIDER_MATCHERS = {
   met_office_datahub: ['Met Office Weather DataHub (UK)'],
   ndl_search: ['NDL Search API (Japan)'],
   swisscovery: ['Swissbib/swisscovery (Switzerland)'],
+  // --- Implemented this mission, Phase 2 batch (7) ---
+  yago: ['YAGO 4.5'],
+  data_commons: ['Data Commons'],
+  econstor: ['EconStor OAI-PMH'],
+  w3c_api: ['W3C API'],
+  wto_timeseries: ['WTO APIs (Timeseries + QR)', 'WTO Stats / Timeseries API'],
+  e_stat_japan: ['Japan e-Stat API', 'e-Stat API v3'],
 }
 
 // Registry sources with a deliberate, researched, non-default classification
@@ -329,10 +336,6 @@ const FORCED_CLASSIFICATION_MAP = {
     state: 'MISSING',
     note: 'Confirmed live this mission: IOM DTM\'s real API is Azure-APIM-hosted behind a JS-rendered SPA portal (dtm-apim-portal.iom.int) requiring a registered subscription key. Could not confirm the real base host/endpoint paths or response shape via direct HTTP probing in the time available (the portal itself does not render its docs to a plain fetch). Not built rather than fabricating an endpoint contract that could not be verified.',
   },
-  'wto stats': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: the real endpoint (api.wto.org/timeseries/v1/data) exists and is Azure-APIM-gated (confirmed via a real 401 "missing subscription key" response, so the header mechanism — Ocp-Apim-Subscription-Key — is real), with free self-service registration via apiportal.wto.org. Not built because the real response body shape could not be independently confirmed without a key (only a 401 with no data body was obtainable) — recommend one live-verification pass once a Commander registers a key, at which point this should move to IMPLEMENTED_CREDENTIAL_BLOCKED with real code.',
-  },
   'adb key indicators': {
     state: 'MISSING',
     note: 'Confirmed this mission: kidb.adb.org is a JS-rendered Inertia.js/Laravel SPA shell with no working REST/SDMX endpoint found despite probing multiple plausible paths (/api/rest/dataflow, /sdmxapi/rest/dataflow, /rest/dataflow, /v1/rest/dataflow — all 404); sdmx.adb.org does not resolve at all. Not built rather than fabricating an SDMX contract with no confirmed working endpoint.',
@@ -345,21 +348,9 @@ const FORCED_CLASSIFICATION_MAP = {
     state: 'MISSING',
     note: 'Confirmed live this mission: only the bare API root (/api/v2/) is public — it returns an endpoint map, but every real content endpoint tested (projects list, open-to-collaborate notices) returns a real 403 "Authentication not provided." A token is required per the project\'s own wiki docs, but whether it is genuinely free self-service or requires manual approval was not confirmed in this session. Not built as a speculative auth flow against an unconfirmed token-acquisition process.',
   },
-  'yago 4.5': {
-    state: 'MISSING',
-    note: 'Confirmed this mission: yago-knowledge.org/sparql and plausible variants all return HTTP 200 but serve the site\'s plain HTML shell, not SPARQL results — no discoverable direct backend endpoint from a plain HTTP client (appears to be a JS-rendered query-builder UI with no reachable API). Only a static bulk download appears real and reachable. Not built rather than fabricating a live query endpoint that could not be confirmed.',
-  },
   'babelnet': {
     state: 'MISSING',
     note: 'Confirmed live this mission: the real endpoint and key-based auth mechanism exist (a bogus key returns a real 403 with a documented error message), but no valid response body shape could be confirmed or found documented anywhere accessible in this session — unlike nasa_ads/epo_ops/materials_project (built against officially documented schemas despite missing credentials), BabelNet\'s actual success-response shape is unknown. Not built against a completely unconfirmed response contract.',
-  },
-  'data commons': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: api.datacommons.org (v2) requires an API key (real 401 UNAUTHENTICATED response) obtained via apikeys.datacommons.org, a JS-rendered portal whose registration flow (free self-service vs. gated) could not be confirmed from a plain HTTP client. Not built pending confirmation of both the registration process and a real response shape.',
-  },
-  'w3c api': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: api.w3.org/specifications is real and zero-auth, but exposes only a paginated full listing (1711 specs, 100/page) with no query/search parameter found — not a true per-query search endpoint. Not built as a client-side-filter-over-bulk-listing adapter that would misrepresent itself as a search capability the real API does not provide.',
   },
   'who icd api': {
     state: 'MISSING',
@@ -404,10 +395,6 @@ const FORCED_CLASSIFICATION_MAP = {
   'kosis open api': {
     state: 'MISSING',
     note: 'Confirmed live this mission: the real endpoint and apiKey-based auth mechanism exist (a bogus key returns a real structured Korean-language error), with a documented free account-based key request process. Not built because no confirmed success-response body shape could be obtained without a key in this session.',
-  },
-  'japan e-stat api': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: the real endpoint and appId-based auth mechanism exist (a bogus appId returns a real structured error), with a documented free self-service registration flow. Not built because no confirmed success-response body shape could be obtained without a key in this session.',
   },
   'inegi indicadores api': {
     state: 'MISSING',
@@ -529,10 +516,6 @@ const FORCED_CLASSIFICATION_MAP = {
     state: 'MISSING',
     note: 'Confirmed live this mission (covers both the cat14 "공공데이터포털 Open APIs" and cat16 "공공데이터포털" cross-referenced rows): apis.data.go.kr is real and serviceKey-gated (a bogus key returns a real structured Korean-language "SERVICE_KEY_IS_NOT_REGISTERED_ERROR"), but the portal fronts thousands of independently-registered per-service endpoints, each with its own distinct schema and its own separate serviceKey registration — there is no single unified query capability "data.go.kr" as a whole represents, the same federated-many-endpoint structural limitation already established for other multi-instance platforms in this mission. Not built as a fake unified adapter over a federated service catalog.',
   },
-  'wto apis (timeseries + qr)': {
-    state: 'MISSING',
-    note: 'Same underlying WTO Timeseries API already researched this mission under the "wto stats" entry (real endpoint + Azure-APIM auth confirmed via a real 401, free self-service registration via apiportal.wto.org, but no confirmed response shape without a key) — this is the identical source cross-referenced under a second registry category (cat15 economics vs. cat24 international orgs), not a distinct API.',
-  },
   'ocds + ocp data registry': {
     state: 'BULK_ONLY',
     note: 'Same underlying Open Contracting Partnership source already researched this mission under the "open contracting partnership" entry — a discovery/bulk-download portal over ~50+ independent national/city OCDS publishers with heterogeneous access methods, not one unified query API. Cross-referenced under a second registry category (cat15 economics), not a distinct source.',
@@ -608,10 +591,6 @@ const FORCED_CLASSIFICATION_MAP = {
   'anno — austrian newspapers online (önb)': {
     state: 'MISSING',
     note: 'Confirmed this mission: a guessed search-API path on anno.onb.ac.at returned the site\'s Angular application shell (HTML), not JSON — no working API endpoint was located within this session\'s time budget, consistent with the registry\'s own "(search API unofficial)" note.',
-  },
-  'e-stat api v3': {
-    state: 'MISSING',
-    note: 'Same underlying Japan e-Stat API already researched this mission under the "japan e-stat api" entry — real endpoint and appId-based auth mechanism confirmed via a real structured error, with a documented free self-service registration flow, but no confirmed success-response body shape without a key. Cross-referenced under a second registry category, not a distinct source.',
   },
   'emiss open data api (fedstat)': {
     state: 'EXTERNAL_BLOCKER',
@@ -716,10 +695,6 @@ const FORCED_CLASSIFICATION_MAP = {
   'national library of israel': {
     state: 'MISSING',
     note: 'Confirmed this mission: api.nli.org.il does not resolve at all; a guessed Primo/Ex Libris discovery host also does not resolve. Not built against an unconfirmed, unreachable endpoint.',
-  },
-  'econstor oai-pmh': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: EconStor\'s OAI-PMH endpoint is real and zero-auth, but OAI-PMH is a harvest protocol with no keyword-query parameter in its spec (only set/from/until/resumptionToken filters) — not a true search API. Not built as a keyword-search adapter that would misrepresent a harvest-only capability.',
   },
   'cern repository': {
     state: 'MISSING',
@@ -855,7 +830,7 @@ const FORCED_CLASSIFICATION_MAP = {
   },
   'ransomware.live': {
     state: 'MISSING',
-    note: 'Confirmed this mission: every path tried on api.ransomware.live (recentvictims, groups, v2 variants) either 404s or returns the marketing SPA\'s HTML shell instead of JSON; data.ransomware.live redirects to the marketing site. No working JSON API host found, consistent with the registry\'s own "Account-gated" note — the real API may require a registered key routed through an undiscovered host. Not built against an unconfirmed endpoint.',
+    note: 'Confirmed this mission: every path tried on api.ransomware.live (recentvictims, groups, v2 variants) either 404s or returns the marketing SPA\'s HTML shell instead of JSON; data.ransomware.live redirects to the marketing site. No working JSON API host found, consistent with the registry\'s own "Account-gated" note — the real API may require a registered key routed through an undiscovered host. Not built against an unconfirmed endpoint. Independently re-confirmed in a later pass this mission: api.ransomware.live/ redirects to /v1/, but /v1/, /v1/recentvictims, and /v2/recentvictims all 404 with the same themed error page — a draft adapter built against an assumed /v2/recentvictims shape was caught by cross-checking two independent research passes against each other and deleted before being wired in, rather than trusted.',
   },
   'gitlab advisory database': {
     state: 'BULK_ONLY',
@@ -1026,6 +1001,7 @@ const IMPLEMENTED_PROVIDERS = new Set([
   'bdl_poland', 'israel_cbs', 'nomis_uk', 'abs_australia', 'argentina_series', 'data_gov_my',
   'datos_abiertos_colombia', 'ine_tempus3', 'singstat', 'usgs_m2m', 'n2yo', 'ariadne_portal',
   'ohm_overpass', 'stack_exchange', 'ecmwf_cds', 'met_office_datahub', 'ndl_search', 'swisscovery',
+  'yago', 'data_commons', 'econstor', 'w3c_api', 'wto_timeseries', 'e_stat_japan',
 ])
 const STUB_PROVIDERS = new Set([
   'uspto', 'world_bank_data_catalog', 'world_bank_projects', 'world_bank_finances',
@@ -1087,6 +1063,7 @@ const CREDENTIAL_BLOCKED_PROVIDERS = new Set([
   'virustotal', 'abuseipdb', 'hybrid_analysis',
   'umls', 'loinc_fhir', 'bhl', 'google_kg_search', 'merriam_webster', 'brave_search',
   'mercado_publico', 'usgs_m2m', 'n2yo', 'met_office_datahub',
+  'data_commons', 'wto_timeseries', 'e_stat_japan',
 ])
 // Providers whose adapter ran for real this session but whose credential
 // value, though present in .env.local, was substituted with a redacted

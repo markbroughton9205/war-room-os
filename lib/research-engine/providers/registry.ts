@@ -238,6 +238,12 @@ import { ecmwfCdsAdapter } from '@/lib/research-engine/providers/ecmwfCds'
 import { metOfficeDataHubAdapter } from '@/lib/research-engine/providers/metOfficeDataHub'
 import { ndlSearchAdapter } from '@/lib/research-engine/providers/ndlSearch'
 import { swisscoveryAdapter } from '@/lib/research-engine/providers/swisscovery'
+import { yagoAdapter } from '@/lib/research-engine/providers/yago'
+import { dataCommonsAdapter } from '@/lib/research-engine/providers/dataCommons'
+import { econstorAdapter } from '@/lib/research-engine/providers/econstor'
+import { w3cApiAdapter } from '@/lib/research-engine/providers/w3cApi'
+import { wtoTimeseriesAdapter } from '@/lib/research-engine/providers/wtoTimeseries'
+import { eStatJapanAdapter } from '@/lib/research-engine/providers/eStatJapan'
 
 /**
  * Only providers with a real, implemented adapter appear here. Every
@@ -483,6 +489,12 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   met_office_datahub: metOfficeDataHubAdapter,
   ndl_search: ndlSearchAdapter,
   swisscovery: swisscoveryAdapter,
+  yago: yagoAdapter,
+  data_commons: dataCommonsAdapter,
+  econstor: econstorAdapter,
+  w3c_api: w3cApiAdapter,
+  wto_timeseries: wtoTimeseriesAdapter,
+  e_stat_japan: eStatJapanAdapter,
 }
 
 export function getImplementedAdapter(id: ResearchProviderId): ResearchProviderAdapter | null {
