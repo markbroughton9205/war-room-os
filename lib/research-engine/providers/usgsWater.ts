@@ -49,9 +49,15 @@ class UsgsWaterProviderError extends Error {
   }
 }
 
+// Confirmed live (this mission): the bare host 404s (an S3-backed "NoSuchKey"
+// error, not a normal API 404) — the real, current API root requires the
+// /ogcapi/v0 path segment, confirmed via a real /ogcapi/v0/collections
+// listing (daily, continuous, field-measurements, etc.). A pre-existing gap
+// between this codebase's default and the real endpoint, caught by live
+// validation.
 function baseUrl(): string {
   const descriptor = providerEnvDescriptor(PROVIDER)
-  return (descriptor && resolveBaseUrl('USGS_WATER_API_BASE_URL', descriptor)) || 'https://api.waterdata.usgs.gov'
+  return (descriptor && resolveBaseUrl('USGS_WATER_API_BASE_URL', descriptor)) || 'https://api.waterdata.usgs.gov/ogcapi/v0'
 }
 
 function apiKeyHeaders(): Record<string, string> {

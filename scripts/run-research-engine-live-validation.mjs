@@ -26,7 +26,7 @@ const TEST_QUERIES = {
   uspto: 'patent',
   courtlistener: 'contract dispute',
   internet_archive: 'moon landing',
-  wayback: 'example.com',
+  wayback: 'https://example.com',
   world_bank_indicators: 'NY.GDP.MKTP.CD for USA',
   world_bank_data_catalog: 'population',
   world_bank_projects: 'infrastructure',
@@ -274,7 +274,25 @@ function record(id, pass, detail) {
 
 const testedAt = new Date().toISOString()
 
-for (const descriptor of RESEARCH_PROVIDER_ENV) {
+// Optional batch selection so a Commander/CI run can validate a bounded
+// subset per invocation instead of firing all ~200 configured providers in
+// one long-running pass — controlled-batch execution, not a correctness
+// requirement of the harness itself. LIVE_VALIDATION_PROVIDERS: explicit
+// comma-separated id list (takes precedence). LIVE_VALIDATION_OFFSET /
+// LIVE_VALIDATION_LIMIT: slice of RESEARCH_PROVIDER_ENV in declared order.
+const explicitIds = process.env.LIVE_VALIDATION_PROVIDERS
+  ? new Set(process.env.LIVE_VALIDATION_PROVIDERS.split(',').map(s => s.trim()).filter(Boolean))
+  : null
+const offset = Number(process.env.LIVE_VALIDATION_OFFSET ?? 0)
+const limit = process.env.LIVE_VALIDATION_LIMIT ? Number(process.env.LIVE_VALIDATION_LIMIT) : RESEARCH_PROVIDER_ENV.length
+const batch = explicitIds
+  ? RESEARCH_PROVIDER_ENV.filter(d => explicitIds.has(d.id))
+  : RESEARCH_PROVIDER_ENV.slice(offset, offset + limit)
+if (explicitIds || process.env.LIVE_VALIDATION_OFFSET || process.env.LIVE_VALIDATION_LIMIT) {
+  console.log(`Batch mode: testing ${batch.length}/${RESEARCH_PROVIDER_ENV.length} providers.`)
+}
+
+for (const descriptor of batch) {
   const providerId = descriptor.id
   const adapter = IMPLEMENTED_PROVIDER_ADAPTERS[providerId]
   if (!adapter) {
