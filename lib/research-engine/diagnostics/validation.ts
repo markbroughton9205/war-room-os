@@ -6056,10 +6056,15 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   }))
 
   await add('re_896_ebl_success_normalizes_fragment', () => withAdapterFetch([
-    jsonResponse({ museumNumber: 'K.1', publication: 'CT 1', description: 'A cuneiform fragment.', collection: 'Kouyunjik' }),
+    // Real shape (confirmed live this mission via GET /api/fragments/K.1):
+    // museumNumber is a structured object, not a flat string — a prior
+    // version of both this mock and the adapter's type assumed the wrong
+    // (flat-string) shape, caught only by live validation.
+    jsonResponse({ museumNumber: { prefix: 'K', number: '1', suffix: '' }, publication: 'CT 1', description: 'A cuneiform fragment.', collection: 'Kouyunjik' }),
   ], async () => {
     const response = await eblAdapter.run({ text: 'K.1' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].providerRecordId !== 'K.1') return `expected providerRecordId "K.1", got ${response.documents[0].providerRecordId}`
     return documentShapeIssue(response.documents[0], 'ebl') ?? true
   }))
 

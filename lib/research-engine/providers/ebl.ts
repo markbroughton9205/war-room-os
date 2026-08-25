@@ -14,7 +14,18 @@ const MUSEUM_NUMBER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9+.\s/-]{0,40}$/
 // eBL's list/search endpoint rejects every query-param name tried
 // (confirmed live: real 422 "Invalid parameters" for all guesses) — this
 // is a getById-only adapter (museum number lookup), not free-text search.
-type Fragment = { museumNumber?: string; publication?: string; description?: string; collection?: string }
+// Repair (this mission, caught by live validation): `museumNumber` is a
+// real structured { prefix, number, suffix } object, not a flat string —
+// confirmed live against GET /api/fragments/K.1. The prior flat-string type
+// let a wrong runtime value silently flow into providerRecordId/identifiers
+// as "[object Object]"; deterministic tests never caught it because their
+// mock response was self-consistently built against the same wrong type.
+type MuseumNumber = { prefix?: string; number?: string; suffix?: string }
+type Fragment = { museumNumber?: MuseumNumber; publication?: string; description?: string; collection?: string }
+
+function formatMuseumNumber(m: MuseumNumber): string {
+  return [m.prefix, m.number].filter(Boolean).join('.') + (m.suffix ?? '')
+}
 
 async function lookup(query: ResearchQuery) {
   const started = Date.now()
@@ -33,13 +44,14 @@ async function lookup(query: ResearchQuery) {
   if (!data?.museumNumber) {
     return { ok: true as const, response: okResponse(PROVIDER, { documents: [], durationMs: Date.now() - started }) }
   }
+  const displayNumber = formatMuseumNumber(data.museumNumber)
 
-  const canonicalUrl = `https://www.ebl.lmu.de/fragmentarium/${encodeURIComponent(data.museumNumber)}`
+  const canonicalUrl = `https://www.ebl.lmu.de/fragmentarium/${encodeURIComponent(displayNumber)}`
   const documents = [makeDocument({
-    id: `ebl:${data.museumNumber}`,
+    id: `ebl:${displayNumber}`,
     provider: PROVIDER,
-    providerRecordId: data.museumNumber,
-    title: data.museumNumber,
+    providerRecordId: displayNumber,
+    title: displayNumber,
     summary: data.description ?? null,
     contentSnippet: data.publication ?? null,
     canonicalUrl,
@@ -52,7 +64,7 @@ async function lookup(query: ResearchQuery) {
     updatedAt: null,
     geography: null,
     language: null,
-    identifiers: { ebl_museum_number: data.museumNumber },
+    identifiers: { ebl_museum_number: displayNumber },
     subjects: data.collection ? [data.collection] : [],
     license: null,
     accessStatus: 'open',
