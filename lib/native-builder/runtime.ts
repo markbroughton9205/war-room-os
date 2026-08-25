@@ -47,6 +47,50 @@ import { buildCanonicalSystemHealthSnapshot, type CanonicalSystemHealthSnapshot,
 import { classifyRepairScope, type RepairScopeClassification } from './repairScopeClassifier'
 import { listRepairsForIssue } from './storage'
 
+// ---------------------------------------------------------------------------
+// Phase L (Hardening). A genuine concurrency bug found and fixed during this phase: two
+// approveAndApply() calls racing on the SAME repairId (e.g. a double-click, or two Commander
+// clients both approving before either's response returns) could both read the
+// 'awaiting_local_execution_approval' state, both pass the transition() check, and both proceed
+// to apply — corrupting the target file (proven by engineeringHardening.validation.ts's
+// hardening_07/08 cases before this fix landed: the file ended up with fragments of both the
+// broken and fixed content). The state machine (NATIVE_REPAIR_TRANSITIONS) alone is not
+// sufficient serialization when two calls both read the pre-transition state before either
+// writes it back — this is the standard read-then-write TOCTOU race, and it needed real
+// mutual exclusion, not a bigger state machine.
+//
+// Fix: a small in-process, per-repairId async mutex. Deliberately in-process only (this is a
+// single Node server process; storage.ts has no cross-process lock and adding one — e.g. a
+// Postgres advisory lock — would be new infrastructure this phase's "no new sink unless
+// demonstrated necessary" discipline argues against for a problem an in-process lock fully
+// solves). Wraps every mutating native-builder entry point that can legally run against the same
+// repairId (approveAndApply, commanderResolve, rollbackNow) so none of the three can race each
+// other either (e.g. approve() and rollbackNow() firing concurrently).
+// ---------------------------------------------------------------------------
+const repairLocks = new Map<string, Promise<unknown>>()
+
+async function withRepairLock<T>(repairId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = repairLocks.get(repairId) ?? Promise.resolve()
+  const current = previous.then(fn, fn)
+  // Chain the next waiter behind THIS call's settlement (ignoring its outcome — a failed
+  // approval must not deadlock the next legitimate call on the same repairId). Stored once so
+  // the cleanup check below compares against the SAME promise reference it published.
+  const tail = current.then(
+    () => undefined,
+    () => undefined,
+  )
+  repairLocks.set(repairId, tail)
+  try {
+    return await current
+  } finally {
+    // Only clear the map entry if nothing newer has queued behind us, so we don't leak a
+    // never-cleared reference for every repairId ever touched.
+    if (repairLocks.get(repairId) === tail) {
+      repairLocks.delete(repairId)
+    }
+  }
+}
+
 export class InvalidStateTransitionError extends Error {
   constructor(from: NativeRepairState, to: NativeRepairState) {
     super(`Illegal native-repair transition: ${from} -> ${to}`)
@@ -363,6 +407,10 @@ export async function planRepair(repairId: string, opts: PlanRepairOptions = {})
 // ---------------------------------------------------------------------------
 
 export async function approveAndApply(repairId: string, approvalGranted: boolean): Promise<NativeRepairRecord> {
+  return withRepairLock(repairId, () => approveAndApplyUnlocked(repairId, approvalGranted))
+}
+
+async function approveAndApplyUnlocked(repairId: string, approvalGranted: boolean): Promise<NativeRepairRecord> {
   const record = await requireRepair(repairId)
   if (!approvalGranted) {
     throw new Error('approveAndApply requires explicit approvalGranted: true — this is a defense-in-depth check behind the API route\'s assertAutoOrApproval gate.')
@@ -426,6 +474,10 @@ export async function approveAndApply(repairId: string, approvalGranted: boolean
 // ---------------------------------------------------------------------------
 
 export async function commanderResolve(repairId: string, accepted: boolean): Promise<NativeRepairRecord> {
+  return withRepairLock(repairId, () => commanderResolveUnlocked(repairId, accepted))
+}
+
+async function commanderResolveUnlocked(repairId: string, accepted: boolean): Promise<NativeRepairRecord> {
   const record = await requireRepair(repairId)
 
   if (!accepted) {
@@ -452,6 +504,10 @@ export async function commanderResolve(repairId: string, accepted: boolean): Pro
 }
 
 export async function rollbackNow(repairId: string): Promise<NativeRepairRecord> {
+  return withRepairLock(repairId, () => rollbackNowUnlocked(repairId))
+}
+
+async function rollbackNowUnlocked(repairId: string): Promise<NativeRepairRecord> {
   const record = await requireRepair(repairId)
   await rollbackRepairFiles(repairId)
 
