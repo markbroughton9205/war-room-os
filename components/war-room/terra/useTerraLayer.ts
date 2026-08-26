@@ -1,22 +1,24 @@
 'use client'
 
 /**
- * Client-side data hook for Terra's earthquake layer. Talks only to
- * /api/terra/earthquakes (this app's own Next.js API route) — never to earthquake.usgs.gov
- * directly, and never re-implements what lib/research-engine/providers/usgsEarthquakeFeed.ts
- * already does server-side.
+ * Terra's generic client-side layer data hook (Phase 3) — replaces the Phase 1/2
+ * useTerraEarthquakeFeed.ts, which was hardwired to one layer. Talks only to
+ * /api/terra/layers/{layerId} (this app's own Next.js API route) — never to any upstream provider
+ * host directly — parameterized by layerId so every catalog entry in lib/terra/layerCatalog.ts
+ * shares this one hook instead of each layer getting its own copy-pasted fetch hook.
  *
- * State is deliberately honest: a failed refresh never clears previously-displayed data (no
- * flicker to empty) but is reported as 'stale', never silently re-labeled 'live'. A failed first
- * load with nothing to fall back on is reported as 'error', never as fabricated demo markers.
+ * State machine and stale-vs-error semantics are unchanged from Phase 1/2: a failed refresh never
+ * clears previously-displayed data (no flicker to empty) but is reported as 'stale', never
+ * silently re-labeled 'live'; a failed first load with nothing to fall back on is 'error', never
+ * fabricated demo markers.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TerraGeoFeature } from '@/lib/terra/types'
 
-export type TerraEarthquakeFeedState = 'loading' | 'live' | 'empty' | 'error' | 'stale'
+export type TerraLayerFeedState = 'loading' | 'live' | 'empty' | 'error' | 'stale'
 
-export type TerraEarthquakeFeedResult = {
-  state: TerraEarthquakeFeedState
+export type TerraLayerFeedResult = {
+  state: TerraLayerFeedState
   features: TerraGeoFeature[]
   skippedCount: number
   lastFetchedAt: string | null
@@ -24,10 +26,10 @@ export type TerraEarthquakeFeedResult = {
   refresh: () => void
 }
 
-// Conservative — well above the Research Engine's own 60s live-feed cache TTL for this provider
-// (lib/research-engine/cache/ttlCache.ts CACHE_TTL.liveFeed), so an automatic refresh is very
-// unlikely to ever force a real upstream USGS call; it mostly re-reads the existing server cache.
-// A plain interval timer, cleared on unmount — no background job/worker/queue introduced.
+// Conservative — well above the Research Engine's own live-feed cache TTL (lib/research-engine/
+// cache/ttlCache.ts CACHE_TTL.liveFeed=60s), so an automatic refresh is very unlikely to ever
+// force a real upstream call; it mostly re-reads the existing server cache. A plain interval
+// timer, cleared on unmount — no background job/worker/queue introduced.
 const AUTO_REFRESH_MS = 120_000
 
 type ApiResponse = {
@@ -39,8 +41,8 @@ type ApiResponse = {
   error: { message: string } | null
 }
 
-export function useTerraEarthquakeFeed(enabled: boolean): TerraEarthquakeFeedResult {
-  const [state, setState] = useState<TerraEarthquakeFeedState>('loading')
+export function useTerraLayer(layerId: string, enabled: boolean): TerraLayerFeedResult {
+  const [state, setState] = useState<TerraLayerFeedState>('loading')
   const [features, setFeatures] = useState<TerraGeoFeature[]>([])
   const [skippedCount, setSkippedCount] = useState(0)
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null)
@@ -56,13 +58,13 @@ export function useTerraEarthquakeFeed(enabled: boolean): TerraEarthquakeFeedRes
     const requestId = ++requestIdRef.current
     if (!hasLoadedOnceRef.current) setState('loading')
     try {
-      const res = await fetch('/api/terra/earthquakes', { cache: 'no-store' })
+      const res = await fetch(`/api/terra/layers/${encodeURIComponent(layerId)}`, { cache: 'no-store' })
       if (requestId !== requestIdRef.current) return // superseded by a later request
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const body: ApiResponse = await res.json()
       hasLoadedOnceRef.current = true
       if (body.status === 'error') {
-        setLastErrorMessage(body.error?.message ?? 'Earthquake feed request failed.')
+        setLastErrorMessage(body.error?.message ?? `Layer "${layerId}" request failed.`)
         setState(featureCountRef.current > 0 ? 'stale' : 'error')
         return
       }
@@ -77,16 +79,16 @@ export function useTerraEarthquakeFeed(enabled: boolean): TerraEarthquakeFeedRes
       hasLoadedOnceRef.current = true
       setLastErrorMessage(error instanceof Error ? error.message : String(error))
       setState(featureCountRef.current > 0 ? 'stale' : 'error')
-      console.error('[terra] earthquake feed request failed', error)
+      console.error(`[terra] layer "${layerId}" request failed`, error)
     }
-  }, [])
+  }, [layerId])
 
   useEffect(() => {
     if (!enabled) return
-    // Deferred a tick rather than called synchronously in the effect body — `load` sets state
-    // (the initial 'loading' status) before its first await, and this repo's lint rules treat a
-    // synchronous setState-from-effect as a cascading-render risk. A zero-delay timeout is the
-    // standard escape hatch: identical behavior, no synchronous setState during the commit phase.
+    // Deferred a tick rather than called synchronously in the effect body — see useTerraLayer's
+    // Phase 1 predecessor for the same fix: `load` sets state (the initial 'loading' status)
+    // before its first await, and this repo's lint rules treat a synchronous setState-from-effect
+    // as a cascading-render risk. A zero-delay timeout is the standard escape hatch.
     const kickoff = setTimeout(() => void load(), 0)
     const interval = setInterval(() => void load(), AUTO_REFRESH_MS)
     return () => {

@@ -14,7 +14,7 @@
  * ever construct a TerraGeoFeature by hand from a raw provider response again; every event flows
  * through TerraIntelligenceEvent first (see lib/terra/projectTerraIntelligenceEvent.ts).
  */
-import type { ResearchProviderId } from '@/lib/research-engine/core/types'
+import type { ResearchProviderId, ResearchProviderResponse } from '@/lib/research-engine/core/types'
 import type { EvidenceConfidenceTier } from '@/lib/intelligence/intelligencePacket'
 
 // ---------------------------------------------------------------------------
@@ -31,9 +31,17 @@ import type { EvidenceConfidenceTier } from '@/lib/intelligence/intelligencePack
 export const TERRA_INTELLIGENCE_DOMAINS = ['hazards', 'research', 'opportunity', 'threat', 'science', 'weather', 'government', 'other'] as const
 export type TerraIntelligenceDomain = (typeof TERRA_INTELLIGENCE_DOMAINS)[number]
 
-/** One member today. Written as a union (matching lib/mission-runtime/types.ts's
- * RUNTIME_MISSION_KINDS convention) so a second event kind is additive, not a breaking rename. */
-export const TERRA_INTELLIGENCE_EVENT_KINDS = ['earthquake'] as const
+/** Written as a union (matching lib/mission-runtime/types.ts's RUNTIME_MISSION_KINDS convention)
+ * so a new event kind is additive, not a breaking rename. Each member here corresponds to a real
+ * provider actually integrated into Terra (see lib/terra/layerCatalog.ts) — never added
+ * speculatively ahead of a real integration:
+ *   - 'earthquake': usgs_earthquake, usgs_earthquake_feed (Phase 1-3)
+ *   - 'water_gauge_reading': usgs_water — one event per monitoring station, not per reading; the
+ *     station's recent daily values live in `properties`, not as separate events (Phase 3)
+ *   - 'aircraft_state': opensky — a live position report, proving the LATENT_GEO extraction
+ *     boundary (lib/terra/normalizeLatentGeoDocument.ts) against a real provider (Phase 3)
+ */
+export const TERRA_INTELLIGENCE_EVENT_KINDS = ['earthquake', 'water_gauge_reading', 'aircraft_state'] as const
 export type TerraIntelligenceEventKind = (typeof TERRA_INTELLIGENCE_EVENT_KINDS)[number]
 
 /**
@@ -151,3 +159,31 @@ export type TerraGeoFeature = {
 export type TerraClickPoint =
   | { ok: false }
   | { ok: true; longitude: number; latitude: number; height: number | null; hasTerrainHeight: boolean }
+
+export type NormalizeResult = { events: TerraIntelligenceEvent[]; skippedCount: number }
+
+/**
+ * One entry in lib/terra/layerCatalog.ts — a genuinely renderable Terra layer, declared, not
+ * inferred. Adding a new layer means adding one entry that references an existing
+ * ResearchProviderId and an existing normalize function; it never means writing a second Research
+ * Engine call path, a second provider client, or per-layer branching inside a React component —
+ * the generic route (app/api/terra/layers/[layerId]/route.ts) and the generic Cesium renderer
+ * (components/war-room/terra/TerraFeatureLayer.tsx) are the same code for every entry here.
+ */
+export type TerraLayerDefinition = {
+  /** Stable key used in the URL (/api/terra/layers/{id}) and as the Cesium DataSource name. */
+  id: string
+  providerId: ResearchProviderId
+  kind: TerraIntelligenceEventKind
+  domain: TerraIntelligenceDomain
+  label: string
+  description: string
+  /** The query text sent to executeResearch when the Commander has not overridden it — the same
+   * "fixed, documented default" convention usgs_earthquake_feed's own adapter already uses for
+   * its magnitude/period selection, not a new pattern invented here. */
+  defaultQueryText: string
+  /** Maps this provider's raw ResearchProviderResponse to TerraIntelligenceEvent[] — the one
+   * provider-specific step in the whole pipeline. Everything downstream (projection, rendering)
+   * is generic. */
+  normalize: (response: ResearchProviderResponse) => NormalizeResult
+}

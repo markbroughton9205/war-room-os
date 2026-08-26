@@ -1,19 +1,22 @@
 /**
- * Terra's mapping from usgs_earthquake_feed's raw Research Engine output to the canonical
- * TerraIntelligenceEvent (Phase 2). Pure, side-effect-free: takes exactly what
- * lib/research-engine/providers/usgsEarthquakeFeed.ts's run() already produced
- * (ResearchGeoFeature[] + ResearchDocument[]) and maps it — no network call, no provider-specific
- * fetch logic here, that stays inside the existing adapter, which this function never bypasses or
- * duplicates.
+ * Terra's mapping from either USGS earthquake provider's raw Research Engine output to the
+ * canonical TerraIntelligenceEvent (Phase 3). Both usgs_earthquake (lib/research-engine/providers/
+ * usgsEarthquake.ts, a flexible custom-range catalog search) and usgs_earthquake_feed
+ * (usgsEarthquakeFeed.ts, a fixed recent-significant-events feed) return the exact same GeoJSON
+ * shape — id/geometry/properties{mag,place,time,updated,url,tsunami,alert,type,status} — so one
+ * mapping function serves both, parameterized only by which providerId called it. This replaces
+ * Phase 1/2's usgs_earthquake_feed-only normalizeUsgsEarthquakeFeed.ts; nothing about how
+ * usgs_earthquake_feed itself is queried or cached changed, only that this mapping step is now
+ * shared rather than duplicated when usgs_earthquake was promoted alongside it.
  *
- * This is the one earthquake-specific mapping function in Terra. Everything downstream of its
- * output (spatial projection, Cesium rendering) is generic — see
- * lib/terra/projectTerraIntelligenceEvent.ts, which knows nothing about earthquakes.
+ * Pure, side-effect-free: no network call, no provider-specific fetch logic here — that stays
+ * inside the existing adapters, which this function never bypasses or duplicates.
  */
-import type { ResearchDocument, ResearchGeoFeature } from '@/lib/research-engine/core/types'
-import type { TerraIntelligenceEvent } from '@/lib/terra/types'
+import type { ResearchProviderId, ResearchProviderResponse } from '@/lib/research-engine/core/types'
+import type { NormalizeResult } from '@/lib/terra/types'
 
-const PROVIDER_ID = 'usgs_earthquake_feed' as const
+export const EARTHQUAKE_PROVIDER_IDS = ['usgs_earthquake', 'usgs_earthquake_feed'] as const
+export type UsgsEarthquakeProviderId = (typeof EARTHQUAKE_PROVIDER_IDS)[number]
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -37,22 +40,12 @@ function isoOrNull(epochMs: unknown): string | null {
   return Number.isNaN(Date.parse(iso)) ? null : iso
 }
 
-export type NormalizeUsgsEarthquakeFeedResult = {
-  events: TerraIntelligenceEvent[]
-  /** geoFeatures that were present but had no legitimately projectable coordinates — never
-   * silently dropped without being counted. */
-  skippedCount: number
-}
-
-export function normalizeUsgsEarthquakeFeed(
-  geoFeatures: ResearchGeoFeature[],
-  documents: ResearchDocument[],
-): NormalizeUsgsEarthquakeFeedResult {
-  const documentsById = new Map(documents.map(doc => [doc.providerRecordId, doc]))
-  const events: TerraIntelligenceEvent[] = []
+export function normalizeUsgsEarthquakeGeoFeatures(providerId: UsgsEarthquakeProviderId, response: ResearchProviderResponse): NormalizeResult {
+  const documentsById = new Map(response.documents.map(doc => [doc.providerRecordId, doc]))
+  const events: NormalizeResult['events'] = []
   let skippedCount = 0
 
-  for (const geoFeature of geoFeatures) {
+  for (const geoFeature of response.geoFeatures) {
     const point = extractLonLatDepth(geoFeature.coordinates)
     if (!point) {
       skippedCount += 1
@@ -68,10 +61,10 @@ export function normalizeUsgsEarthquakeFeed(
     // surface-level event).
     const altitude = point.depthKm !== null ? -(point.depthKm * 1000) : null
 
-    // USGS's feed gives exactly two distinct timestamps: when the quake happened
-    // (properties.time) and when USGS last revised the record (properties.updated). There is no
-    // third, separately-meaningful "published" timestamp in this source — publishedAt is left
-    // null rather than duplicating observedAt into it just to populate the field.
+    // Both USGS earthquake sources give exactly two distinct timestamps: when the quake happened
+    // (properties.time) and when USGS last revised the record (properties.updated). Neither
+    // exposes a third, separately-meaningful "published" timestamp — publishedAt is left null
+    // rather than duplicating observedAt into it just to populate the field.
     const observedAt = isoOrNull(props.time) ?? doc?.publishedAt ?? null
     const updatedAt = isoOrNull(props.updated) ?? doc?.updatedAt ?? null
     const place = typeof props.place === 'string' ? props.place : null
@@ -88,10 +81,10 @@ export function normalizeUsgsEarthquakeFeed(
           isHistorical: doc.provenance.isHistorical,
         }
       : {
-          // Defensive fallback only — every real usgs_earthquake_feed response pairs each
-          // geoFeature with a document sharing the same id (see the adapter's own features.map
+          // Defensive fallback only — every real response from either provider pairs each
+          // geoFeature with a document sharing the same id (see each adapter's own features.map
           // for both arrays). Never expected to execute against real data.
-          provider: PROVIDER_ID,
+          provider: providerId as ResearchProviderId,
           sourceUrl: canonicalUrl,
           retrievedAt: new Date().toISOString(),
           fromCache: false,
@@ -102,10 +95,7 @@ export function normalizeUsgsEarthquakeFeed(
       id: geoFeature.id,
       domain: 'hazards',
       kind: 'earthquake',
-      providerId: PROVIDER_ID,
-      // Raw Research Engine output through the Research Engine's own provider gate, unedited —
-      // this is the only layer class Phase 2 produces. See TerraLayerClass's doc comment for why
-      // the other three are reserved, not defaulted-to.
+      providerId,
       layerClass: 'observed',
       title,
       summary: doc?.summary ?? null,
@@ -115,7 +105,7 @@ export function normalizeUsgsEarthquakeFeed(
       temporalStatus: provenance.isHistorical ? 'historical' : 'current',
       geography: { kind: 'point', longitude: point.lon, latitude: point.lat, altitude },
       // No evidence-scoring pipeline runs on raw USGS feed data this phase — honestly null, never
-      // a fabricated confidence value. See TerraEvidenceClassification's doc comment.
+      // a fabricated confidence value.
       evidence: null,
       properties: props,
       provenance,
