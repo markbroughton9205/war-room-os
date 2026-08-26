@@ -32,6 +32,8 @@ import { TerraEarthImagery } from './TerraEarthImagery'
 import { TERRA_LAYER_SUMMARIES, type TerraLayerSummary } from '@/lib/terra/layerCatalogSummary'
 import { TERRA_TIME_WINDOW_PRESETS, filterTerraFeaturesByTime, shouldAutoRefreshTerraLayer, terraFeaturesShallowEqual } from '@/lib/terra/terraTime'
 import type { TerraClickPoint, TerraGeoFeature, TerraIntelligenceEventKind, TerraTimeMode, TerraTimeWindow } from '@/lib/terra/types'
+import type { TerraLocationTarget } from '@/lib/terra/locationCommand'
+import { TerraLocationCommandInput } from './TerraLocationCommandInput'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -330,7 +332,7 @@ function TerraLayerRow({
   )
 }
 
-export function TerraShell() {
+export function TerraShell({ presentation = 'workspace' }: { presentation?: 'workspace' | 'command-center' }) {
   const [globeStatus, setGlobeStatus] = useState<TerraGlobeStatus>({ phase: 'loading' })
   const [viewer, setViewer] = useState<CesiumViewer | null>(null)
   const [selection, setSelection] = useState<Selection>({ kind: 'none' })
@@ -387,32 +389,49 @@ export function TerraShell() {
     setSelection({ kind: 'feature', layerId, featureId })
   }, [])
 
+  const handleResolvedLocation = useCallback((target: TerraLocationTarget) => {
+    if (!viewer || viewer.isDestroyed()) return
+    void import('cesium').then(Cesium => {
+      if (viewer.isDestroyed()) return
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(target.longitude, target.latitude, 1_800_000),
+        duration: 1.8,
+      })
+    })
+  }, [viewer])
+
+  const commandCenter = presentation === 'command-center'
+
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-black text-white">
+    <div className={`relative w-full overflow-hidden bg-black text-white ${commandCenter ? 'h-full min-h-0' : 'h-screen'}`}>
       <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onEntityClick={handleEntityClick} onGroundClick={handleGroundClick} />
       <TerraEarthImagery viewer={viewer} selectedTime={clock.time.currentTime} />
 
       {/* Top instrumentation bar — mission status + identity + real hazard summary. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-4">
+      <div className={`pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 ${commandCenter ? 'p-3 pr-[48%]' : 'p-4'}`}>
         <div className="pointer-events-auto rounded border border-white/10 bg-black/70 px-3 py-2 backdrop-blur-sm">
-          <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-400">War Room · Terra</h1>
-          <p className="mt-0.5 text-[10px] text-slate-500">Planetary Intelligence Environment — Phase 6: real-time planet + 4D time engine</p>
+          <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-400">{commandCenter ? 'God’s Eye · Terra' : 'War Room · Terra'}</h1>
+          <p className="mt-0.5 text-[10px] text-slate-500">{commandCenter ? 'Live planetary command center' : 'Planetary Intelligence Environment — Phase 6: real-time planet + 4D time engine'}</p>
         </div>
-        <div className="pointer-events-auto flex flex-wrap justify-center gap-x-4 gap-y-1 rounded border border-white/10 bg-black/70 px-3 py-2 text-[10px] backdrop-blur-sm">
+        {!commandCenter && <div className="pointer-events-auto flex flex-wrap justify-center gap-x-4 gap-y-1 rounded border border-white/10 bg-black/70 px-3 py-2 text-[10px] backdrop-blur-sm">
           {hazardSummary.map(item => (
             <span key={item.label} className="whitespace-nowrap">
               <span className="text-slate-500">{item.label} </span>
               <span className="font-mono font-bold text-emerald-400">{item.value}</span>
             </span>
           ))}
-        </div>
-        <div className="pointer-events-auto rounded border border-white/10 bg-black/70 px-3 py-2 text-[11px] backdrop-blur-sm">
+        </div>}
+        {!commandCenter && <div className="pointer-events-auto rounded border border-white/10 bg-black/70 px-3 py-2 text-[11px] backdrop-blur-sm">
           <StatusLine status={globeStatus} />
-        </div>
+        </div>}
+      </div>
+
+      <div className={`absolute left-3 top-[4.5rem] z-20 ${commandCenter ? 'w-[min(31rem,48%)]' : 'left-1/2 w-[min(34rem,44vw)] -translate-x-1/2'}`}>
+        <TerraLocationCommandInput onResolvedLocation={handleResolvedLocation} />
       </div>
 
       {/* Left rail — layer controls + Earth Knowledge placeholder. */}
-      <div className="pointer-events-none absolute left-0 top-20 flex w-72 flex-col gap-2 p-4">
+      {!commandCenter && <div className="pointer-events-none absolute left-0 top-20 flex w-72 flex-col gap-2 p-4">
         <div className="pointer-events-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
           <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Layer Controls</p>
           <ul className="space-y-1 text-[11px] text-slate-400">
@@ -480,10 +499,10 @@ export function TerraShell() {
             <p className="text-[10.5px] text-slate-500">Click missed the globe.</p>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Right rail — Live Council dock + selected-feature / provenance panel. */}
-      <div className="pointer-events-none absolute right-0 top-20 flex w-72 flex-col gap-2 p-4">
+      {!commandCenter && <div className="pointer-events-none absolute right-0 top-20 flex w-72 flex-col gap-2 p-4">
         <div className="pointer-events-auto">
           <PlaceholderPanel
             title="Live Council Dock"
@@ -519,10 +538,10 @@ export function TerraShell() {
             />
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Bottom bar — 4D timeline + Commander annotation placeholder. */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-4">
+      {!commandCenter && <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-4">
         <TerraTimeline
           time={clock.time}
           onGoLive={clock.goLive}
@@ -543,7 +562,7 @@ export function TerraShell() {
             note="Not wired yet. Will be a distinct, clearly-labeled layer class — never merged with Observed Data or AI Analysis layers."
           />
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

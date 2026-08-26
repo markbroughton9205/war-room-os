@@ -10,6 +10,7 @@ import { __setResearchFetchForTests } from '@/lib/research-engine/security/safeF
 import { __resetCacheForTests } from '@/lib/research-engine/cache/ttlCache'
 import { __resetProviderGateForTests } from '@/lib/research-engine/security/providerGate'
 import { resolvePlaceNameViaNominatim } from './resolveGeography'
+import { parseTerraCoordinates } from './locationCommand'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 
@@ -36,6 +37,10 @@ async function withMockedFetch<T>(response: Response, fn: () => Promise<T>): Pro
 
 async function run(): Promise<CaseResult[]> {
   const results: CaseResult[] = []
+
+  const direct = parseTerraCoordinates('40.7128, -74.0060')
+  results.push(check('typed_coordinates_resolve_without_guessing', direct?.latitude === 40.7128 && direct.longitude === -74.006, JSON.stringify(direct)))
+  results.push(check('out_of_range_coordinates_are_rejected', parseTerraCoordinates('91, 181') === null, '91, 181'))
 
   // --- Exact/strong: exactly one real coordinate-bearing candidate ---
   await withMockedFetch(

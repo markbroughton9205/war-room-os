@@ -5,6 +5,7 @@ import type { FormEvent } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
+import { GodsEyeCommandCenter } from '@/components/war-room/terra/GodsEyeCommandCenter'
 import { APPROVAL_RISK_GATES, SECURE_APPROVAL_RISKS } from '@/lib/kernel/approvals'
 import { KERNEL_EVENT_SCHEMA, KERNEL_EVENT_TYPES } from '@/lib/kernel/events'
 import { MEMORY_POLICY } from '@/lib/kernel/memoryPolicy'
@@ -12717,7 +12718,7 @@ function Home() {
               />
             </div>
           ) : (
-        <CouncilWorkspace
+        <GodsEyeCommandCenter council={<CouncilWorkspace
           scrollContainerRef={scrollContainerRef}
           onScroll={handleScroll}
           toolbar={(
@@ -13046,7 +13047,7 @@ function Home() {
               />
             </>
           )}
-        />
+        />} />
           )}
         />
         )}
