@@ -44,9 +44,11 @@ type FeedCollection = { metadata?: FeedMetadata; features?: FeedFeature[] }
 
 class UsgsEarthquakeFeedProviderError extends Error {
   category: 'upstream_error' | 'parse_error'
-  constructor(message: string, category: 'upstream_error' | 'parse_error') {
+  httpStatus: number | null
+  constructor(message: string, category: 'upstream_error' | 'parse_error', httpStatus: number | null = null) {
     super(message)
     this.category = category
+    this.httpStatus = httpStatus
   }
 }
 
@@ -156,12 +158,12 @@ async function run(query: ResearchQuery) {
     return await withProviderGate(PROVIDER, async () => {
       const outcome = await fetchFeed(query)
       if (outcome.ok) return outcome.response
-      if (outcome.kind === 'http_error') throw new UsgsEarthquakeFeedProviderError(`USGS Real-Time Earthquake Feed request failed with HTTP ${outcome.status}`, 'upstream_error')
+      if (outcome.kind === 'http_error') throw new UsgsEarthquakeFeedProviderError(`USGS Real-Time Earthquake Feed upstream request failed with HTTP ${outcome.status}`, 'upstream_error', outcome.status)
       throw new UsgsEarthquakeFeedProviderError(outcome.message, 'parse_error')
     })
   } catch (error) {
     if (error instanceof UsgsEarthquakeFeedProviderError) {
-      return errorResponse(PROVIDER, { provider: PROVIDER, category: error.category, message: error.message, httpStatus: null }, 0)
+      return errorResponse(PROVIDER, { provider: PROVIDER, category: error.category, message: error.message, httpStatus: error.httpStatus }, 0)
     }
     return errorResponse(PROVIDER, { provider: PROVIDER, category: 'upstream_error', message: error instanceof Error ? error.message : String(error), httpStatus: null }, 0)
   }

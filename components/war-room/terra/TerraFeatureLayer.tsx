@@ -78,7 +78,11 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
 
     async function attach() {
       const Cesium = await import('cesium')
-      if (cancelled) return
+      // The dynamic import is the async gap where a sibling TerraGlobe remount (observed under
+      // React StrictMode's dev-only double-invoke, and possible on any fast-refresh reload) can
+      // destroy this exact `viewer` before this closure resumes — `cancelled` alone only tracks
+      // this effect's own unmount, not a viewer torn down out from under it.
+      if (cancelled || viewer!.isDestroyed()) return
       created = new Cesium.CustomDataSource(`terra-layer-${layerId}`)
       viewer!.dataSources.add(created)
       dataSourceRef.current = created
@@ -87,10 +91,14 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
 
     return () => {
       cancelled = true
-      if (created) {
+      // Cesium's Viewer getters (dataSources, clock, ...) throw once the viewer itself has been
+      // destroyed — real behavior observed in authenticated browser testing during React
+      // StrictMode's dev-only double-invoke of this cleanup around a torn-down TerraGlobe. Every
+      // other viewer-touching cleanup in Terra checks this first; this one didn't.
+      if (created && !viewer.isDestroyed()) {
         viewer.dataSources.remove(created, true)
-        if (dataSourceRef.current === created) dataSourceRef.current = null
       }
+      if (dataSourceRef.current === created) dataSourceRef.current = null
     }
   }, [viewer, layerId])
 

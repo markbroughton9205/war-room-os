@@ -82,23 +82,28 @@ export function useTerraClock(viewer: CesiumViewer | null): UseTerraClockResult 
     lastAdvanceAtRef.current = Date.now()
   }, [])
 
-  // State -> Cesium. Re-runs on every currentTime change too (covers an explicit scrub
-  // immediately) — harmless in live/playing mode where currentTime changes are themselves sourced
-  // from Cesium a moment earlier in the same tick, so re-pushing it is idempotent, not a fight.
+  // React -> Cesium is reserved for control changes. Tick-derived currentTime is deliberately
+  // excluded: writing every sampled Cesium time straight back into the same clock creates a
+  // feedback path and repeatedly restarts its epoch. Explicit scrubs/go-live update the clock in
+  // their action callbacks below.
   useEffect(() => {
     if (!viewer) return
     const targetViewer = viewer
     let cancelled = false
     async function sync() {
       const Cesium = await import('cesium')
-      if (cancelled) return
-      applyTerraTimeToViewerClock(targetViewer, Cesium, time)
+      // The dynamic import is an async gap where a sibling TerraGlobe remount (observed under
+      // React StrictMode's dev-only double-invoke, and possible on any fast-refresh reload) can
+      // destroy this exact viewer before this closure resumes — `cancelled` alone only tracks
+      // this effect's own unmount, not a viewer torn down out from under it.
+      if (cancelled || targetViewer.isDestroyed()) return
+      applyTerraTimeToViewerClock(targetViewer, Cesium, timeRef.current)
     }
     void sync()
     return () => {
       cancelled = true
     }
-  }, [viewer, time])
+  }, [viewer, time.mode, time.playbackRate, time.playing])
 
   // Cesium -> state, bounded rate, one listener for the hook's whole lifetime.
   useEffect(() => {
@@ -108,7 +113,8 @@ export function useTerraClock(viewer: CesiumViewer | null): UseTerraClockResult 
 
     async function attach() {
       const Cesium = await import('cesium')
-      if (cancelled) return
+      // Same async-gap race as the sync effect above.
+      if (cancelled || viewer!.isDestroyed()) return
 
       const onTick = () => {
         const now = Date.now()
@@ -131,8 +137,13 @@ export function useTerraClock(viewer: CesiumViewer | null): UseTerraClockResult 
         }
       }
 
-      viewer!.clock.onTick.addEventListener(onTick)
-      removeListener = () => viewer!.clock.onTick.removeEventListener(onTick)
+      // Captured once here, not re-read from `viewer` at cleanup time: viewer.clock is a getter
+      // that throws once the viewer is destroyed (real behavior observed in authenticated browser
+      // testing, under React StrictMode's dev-only double-invoke of this cleanup). The Clock object
+      // itself stays a valid, inert target for removeEventListener regardless.
+      const clock = viewer!.clock
+      clock.onTick.addEventListener(onTick)
+      removeListener = () => clock.onTick.removeEventListener(onTick)
     }
     void attach()
 
@@ -144,18 +155,30 @@ export function useTerraClock(viewer: CesiumViewer | null): UseTerraClockResult 
 
   const goLive = useCallback(() => {
     const nowIso = new Date().toISOString()
-    setTime(returnToLiveTerraTime(nowIso))
+    const next = returnToLiveTerraTime(nowIso)
+    setTime(next)
+    if (viewer) {
+      void import('cesium').then(Cesium => {
+        if (!viewer.isDestroyed()) applyTerraTimeToViewerClock(viewer, Cesium, next)
+      })
+    }
     bus.emit({ type: 'terra.time.returned_live', at: nowIso })
     bus.emit({ type: 'terra.time.mode.changed', mode: 'live', at: nowIso })
-  }, [bus])
+  }, [bus, viewer])
 
   const scrub = useCallback((isoTime: string) => {
     const wasLive = timeRef.current.mode === 'live'
-    setTime(prev => scrubTerraTime(prev, isoTime))
+    const next = scrubTerraTime(timeRef.current, isoTime)
+    setTime(next)
+    if (viewer) {
+      void import('cesium').then(Cesium => {
+        if (!viewer.isDestroyed()) applyTerraTimeToViewerClock(viewer, Cesium, next)
+      })
+    }
     const at = new Date().toISOString()
     if (wasLive) bus.emit({ type: 'terra.time.mode.changed', mode: 'historical', at })
     bus.emit({ type: 'terra.time.selected.changed', currentTime: isoTime, at })
-  }, [bus])
+  }, [bus, viewer])
 
   const play = useCallback(() => {
     setTime(prev => playTerraTime(prev))

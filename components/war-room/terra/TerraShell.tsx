@@ -28,8 +28,9 @@ import { useTerraLayer } from './useTerraLayer'
 import { useTerraClock } from './useTerraClock'
 import { useTerraCinematicOrbit } from './useTerraCinematicOrbit'
 import { TerraTimeline } from './TerraTimeline'
+import { TerraEarthImagery } from './TerraEarthImagery'
 import { TERRA_LAYER_SUMMARIES, type TerraLayerSummary } from '@/lib/terra/layerCatalogSummary'
-import { TERRA_TIME_WINDOW_PRESETS, filterTerraFeaturesByTime, shouldAutoRefreshTerraLayer } from '@/lib/terra/terraTime'
+import { TERRA_TIME_WINDOW_PRESETS, filterTerraFeaturesByTime, shouldAutoRefreshTerraLayer, terraFeaturesShallowEqual } from '@/lib/terra/terraTime'
 import type { TerraClickPoint, TerraGeoFeature, TerraIntelligenceEventKind, TerraTimeMode, TerraTimeWindow } from '@/lib/terra/types'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
@@ -56,11 +57,13 @@ function StatusLine({ status }: { status: TerraGlobeStatus }) {
   if (status.phase === 'error') {
     return <span className="text-amber-400">Globe failed to initialize: {status.message}</span>
   }
-  const imageryLabel = status.imageryTier === 'photorealistic_3d_tiles' ? 'Google Photorealistic 3D Tiles' : 'OpenStreetMap (no credential required)'
   return (
     <span className="text-emerald-400">
-      Base imagery: {imageryLabel}
-      {!status.hasIonToken && <span className="text-slate-500"> · Cesium ion token not configured — terrain/Bing tiers unavailable</span>}
+      Satellite imagery: NASA GIBS daily
+      <span className="text-slate-500"> · OSM fallback ready</span>
+      {status.hasIonToken
+        ? <span className="text-cyan-400"> · Cesium ion terrain active</span>
+        : <span className="text-amber-400"> · Cesium ion token not configured; terrain unavailable</span>}
     </span>
   )
 }
@@ -344,7 +347,7 @@ export function TerraShell() {
   const selectedWindow: TerraTimeWindow = useMemo(() => TERRA_TIME_WINDOW_PRESETS.find(p => p.id === selectedWindowId)?.window ?? null, [selectedWindowId])
 
   const handleFeaturesChange = useCallback((layerId: string, features: TerraGeoFeature[]) => {
-    setLayerFeatures(prev => (prev[layerId] === features ? prev : { ...prev, [layerId]: features }))
+    setLayerFeatures(prev => (terraFeaturesShallowEqual(prev[layerId], features) ? prev : { ...prev, [layerId]: features }))
   }, [])
 
   const selectedFeature = useMemo(() => {
@@ -387,6 +390,7 @@ export function TerraShell() {
   return (
     <div className="relative h-screen w-full overflow-hidden bg-black text-white">
       <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onEntityClick={handleEntityClick} onGroundClick={handleGroundClick} />
+      <TerraEarthImagery viewer={viewer} selectedTime={clock.time.currentTime} />
 
       {/* Top instrumentation bar — mission status + identity + real hazard summary. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-4">
@@ -413,16 +417,12 @@ export function TerraShell() {
           <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Layer Controls</p>
           <ul className="space-y-1 text-[11px] text-slate-400">
             <li className="flex items-center justify-between">
-              <span>Base imagery</span>
-              <span className="text-emerald-400">OSM</span>
+              <span>Base imagery + clouds</span>
+              <span className="text-emerald-400">NASA GIBS True Color · daily</span>
             </li>
-            <li className="flex items-center justify-between opacity-40">
-              <span>Photorealistic 3D Tiles</span>
-              <span>no key</span>
-            </li>
-            <li className="flex items-center justify-between opacity-40">
+            <li className={`flex items-center justify-between ${globeStatus.phase === 'ready' && globeStatus.hasIonToken ? '' : 'opacity-40'}`}>
               <span>Terrain (Cesium World Terrain)</span>
-              <span>no token</span>
+              <span>{globeStatus.phase === 'ready' && globeStatus.hasIonToken ? 'active' : 'no token'}</span>
             </li>
           </ul>
         </div>

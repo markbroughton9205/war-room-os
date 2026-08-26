@@ -13,14 +13,10 @@
  * Client-only by construction (Cesium requires `window`/WebGL) — always render this inside a
  * dynamic import with `ssr: false` from a Server Component page.
  *
- * Honest degradation, matching this codebase's "no fake data" standard: Google's Photorealistic 3D
- * Tiles require a billed Google Maps Platform key, and Cesium World Terrain / Bing imagery require
- * a Cesium ion token. Neither is configured in this environment (or, likely, most self-hosted
- * War Room deployments until a Commander explicitly provisions them) — so this component NEVER
- * silently falls back to a fabricated "premium" appearance. It uses OpenStreetMap raster tiles
- * (no credential required, ODbL-licensed, attribution rendered on-screen) as the base imagery, and
- * clearly reports which imagery tier is active via `onStatusChange` — never claims photorealistic
- * tiles are active when they aren't.
+ * Honest degradation, matching this codebase's "no fake data" standard: NASA GIBS supplies the
+ * credential-free photographic surface through TerraEarthImagery, OSM stays beneath it as the
+ * network fallback, and Cesium World Terrain activates only when a real public ion token is
+ * configured. Status reporting never labels a missing credential as a connection outage.
  */
 import { useEffect, useRef, useState } from 'react'
 // Cesium's own base stylesheet (canvas sizing, credit container, cesium-viewer/-widget classes).
@@ -32,7 +28,7 @@ import type { Viewer as CesiumViewer } from 'cesium'
 import { featureIdFromTerraEntityId } from '@/lib/terra/cesiumEntityId'
 import type { TerraClickPoint } from '@/lib/terra/types'
 
-export type TerraImageryTier = 'photorealistic_3d_tiles' | 'openstreetmap'
+export type TerraImageryTier = 'nasa_gibs_with_osm_fallback'
 
 export type TerraGlobeStatus =
   | { phase: 'loading' }
@@ -100,12 +96,17 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onEntityClick, onGro
           Cesium.Ion.defaultAccessToken = ionToken!.trim()
         }
 
-        // Credential-free base imagery — see file header. Google Photorealistic 3D Tiles are a
-        // documented future enhancement (Phase H+), not wired here without a real key.
+        // Credential-free fallback remains available beneath the NASA GIBS photographic layers.
         const osmProvider = new Cesium.OpenStreetMapImageryProvider({ url: OSM_ATTRIBUTION_URL })
+
+        // A configured public token enables the real Cesium World Terrain service. The token is
+        // read only from Next's public environment at build time and is never hardcoded here.
+        const terrainProvider = hasIonToken ? await Cesium.createWorldTerrainAsync() : undefined
+        if (cancelled) return
 
         const viewer = new Cesium.Viewer(container, {
           baseLayer: new Cesium.ImageryLayer(osmProvider),
+          ...(terrainProvider ? { terrainProvider } : {}),
           // War Room builds its own instrumentation chrome around this surface (see
           // TerraShell.tsx) rather than Cesium's default widget set — matches the "high-density
           // but readable controls" direction, not Cesium's stock UI.
@@ -183,7 +184,7 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onEntityClick, onGro
 
         setStatus({
           phase: 'ready',
-          imageryTier: 'openstreetmap',
+          imageryTier: 'nasa_gibs_with_osm_fallback',
           hasIonToken,
         })
       } catch (error) {

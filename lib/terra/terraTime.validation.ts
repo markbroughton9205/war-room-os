@@ -18,6 +18,7 @@ import {
   scrubTerraTime,
   setTerraPlaybackRate,
   shouldAutoRefreshTerraLayer,
+  terraFeaturesShallowEqual,
   TERRA_TIME_WINDOW_PRESETS,
 } from './terraTime'
 
@@ -160,6 +161,36 @@ function run(): CaseResult[] {
     let state = createLiveTerraTimeState('2026-08-26T12:00:00.000Z')
     for (let i = 0; i < 1000; i++) state = advanceLiveTerraTime(state, `2026-08-26T12:00:${String(i % 60).padStart(2, '0')}.000Z`)
     results.push(check('repeated_pure_advancement_never_throws_or_leaks_state', typeof state.currentTime === 'string', `currentTime=${state.currentTime}`))
+  }
+
+  // --- Browser repair regression: filterTerraFeaturesByTime must return the EXACT same array
+  // reference for the default (null-window) case, every call, regardless of how many times
+  // selectedTimeIso changes — this is the fix for the real "Maximum update depth exceeded" loop
+  // observed in authenticated browser testing (TerraShell.handleFeaturesChange re-firing once per
+  // second purely because a brand-new-but-identical array reference reached it on every clock
+  // tick). A `.filter()` call that always allocates, even when nothing is excluded, would
+  // reintroduce that loop. ---
+  {
+    const featureA = makeFeature({ id: 'a', timestamp: '2026-08-26T11:00:00.000Z' })
+    const featureB = makeFeature({ id: 'b', timestamp: '2026-08-26T11:30:00.000Z' })
+    const input = [featureA, featureB]
+    const firstCall = filterTerraFeaturesByTime(input, '2026-08-26T12:00:00.000Z', null)
+    const secondCall = filterTerraFeaturesByTime(input, '2026-08-26T12:00:05.000Z', null) // selectedTime advanced, as it does every tick in live mode
+    results.push(check('null_window_filter_returns_the_exact_same_array_reference_as_input', firstCall === input && secondCall === input, `firstCall===input:${firstCall === input} secondCall===input:${secondCall === input}`))
+  }
+
+  // --- terraFeaturesShallowEqual: the second half of the same fix — catches a genuinely new
+  // array reference (e.g. from a real re-fetch, or a non-null time window) that still describes
+  // identical features, so a parent's setState can correctly bail out instead of looping. ---
+  {
+    const featureA = makeFeature({ id: 'a', timestamp: '2026-08-26T11:00:00.000Z' })
+    const featureA2 = makeFeature({ id: 'a', timestamp: '2026-08-26T11:00:00.000Z' }) // a distinct object, same real content
+    results.push(check('shallow_equal_true_for_same_reference', terraFeaturesShallowEqual([featureA], [featureA]), 'expected true'))
+    results.push(check('shallow_equal_true_for_same_content_different_reference', terraFeaturesShallowEqual([featureA], [featureA2]), 'expected true'))
+    results.push(check('shallow_equal_false_for_different_length', !terraFeaturesShallowEqual([featureA], []), 'expected false'))
+    results.push(check('shallow_equal_false_for_different_timestamp', !terraFeaturesShallowEqual([featureA], [makeFeature({ id: 'a', timestamp: '2026-08-26T12:00:00.000Z' })]), 'expected false'))
+    results.push(check('shallow_equal_false_for_undefined_left_even_against_empty_right', !terraFeaturesShallowEqual(undefined, []), 'expected false — "no previous value" is distinct from "previously empty"'))
+    results.push(check('shallow_equal_false_for_undefined_left_and_nonempty_right', !terraFeaturesShallowEqual(undefined, [featureA]), 'expected false'))
   }
 
   return results

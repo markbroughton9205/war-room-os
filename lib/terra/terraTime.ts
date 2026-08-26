@@ -104,7 +104,27 @@ export function isTerraGeoFeatureVisibleAtTime(feature: TerraGeoFeature, selecte
 }
 
 export function filterTerraFeaturesByTime(features: TerraGeoFeature[], selectedTimeIso: string, window: TerraTimeWindow): TerraGeoFeature[] {
+  // Preserve the provider array identity for the default ALL view. Besides avoiding needless
+  // filtering work on every one-second clock label update, this gives React consumers a stable
+  // semantic value: time advancing cannot manufacture a "new" feature collection when no time
+  // window was requested.
+  if (window === null) return features
   return features.filter(feature => isTerraGeoFeatureVisibleAtTime(feature, selectedTimeIso, window))
+}
+
+/** Content equality for a layer's feature list — the second half of the fix for the browser's
+ * "Maximum update depth exceeded" loop in TerraShell.handleFeaturesChange. filterTerraFeaturesByTime
+ * already preserves array identity for the default (null-window) case; this catches every other
+ * case where a genuinely new array reference reaches the parent (a non-null time window, or a
+ * fresh fetch) but describes the same features — comparing only `id`+`timestamp` per index is
+ * enough to detect a real content change without a full deep-equality pass over `properties`. */
+export function terraFeaturesShallowEqual(left: TerraGeoFeature[] | undefined, right: TerraGeoFeature[]): boolean {
+  if (left === right) return true
+  if (!left || left.length !== right.length) return false
+  return left.every((feature, index) => {
+    const candidate = right[index]
+    return feature.id === candidate.id && feature.timestamp === candidate.timestamp
+  })
 }
 
 export type TerraTimeWindowPreset = { id: string; label: string; window: TerraTimeWindow }

@@ -37,6 +37,7 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
   const [suppressedByReducedMotion, setSuppressedByReducedMotion] = useState(false)
   const lastInteractionAtRef = useRef(0)
   const pausedByUserRef = useRef(false)
+  const orbitingRef = useRef(false)
 
   useEffect(() => {
     lastInteractionAtRef.current = Date.now()
@@ -45,7 +46,10 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
   const pause = useCallback(() => {
     lastInteractionAtRef.current = Date.now()
     pausedByUserRef.current = true
-    setOrbiting(false)
+    if (orbitingRef.current) {
+      orbitingRef.current = false
+      setOrbiting(false)
+    }
   }, [])
 
   const resume = useCallback(() => {
@@ -55,6 +59,10 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
     // again — an explicit "Resume" click is exactly the deliberate override the idle timer
     // exists to eventually reach on its own.
     lastInteractionAtRef.current = Date.now() - IDLE_RESUME_DELAY_MS
+    if (!orbitingRef.current) {
+      orbitingRef.current = true
+      setOrbiting(true)
+    }
   }, [])
 
   // Real user input only — never Cesium's own camera-changed event, which this hook's own
@@ -87,7 +95,11 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
 
   useEffect(() => {
     if (!viewer || !enabled || suppressedByReducedMotion) {
-      const timeout = setTimeout(() => setOrbiting(false), 0)
+      const timeout = setTimeout(() => {
+        if (!orbitingRef.current) return
+        orbitingRef.current = false
+        setOrbiting(false)
+      }, 0)
       return () => clearTimeout(timeout)
     }
 
@@ -111,7 +123,12 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
         const now = Date.now()
         const idleFor = now - lastInteractionAtRef.current
         const shouldOrbit = !pausedByUserRef.current && idleFor >= IDLE_RESUME_DELAY_MS
-        setOrbiting(previous => (previous === shouldOrbit ? previous : shouldOrbit))
+        // rAF owns camera motion only. React is notified solely on the two semantic state edges,
+        // never once per animation frame.
+        if (orbitingRef.current !== shouldOrbit) {
+          orbitingRef.current = shouldOrbit
+          setOrbiting(shouldOrbit)
+        }
 
         if (!shouldOrbit || !viewer || viewer.isDestroyed()) {
           lastFrameAt = null
