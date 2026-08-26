@@ -64,7 +64,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ lay
     })
   }
 
-  const { events, skippedCount } = layer.normalize(providerResponse)
+  const { events, skippedCount } = await layer.normalize(providerResponse)
   const features = projectTerraIntelligenceEvents(events)
 
   return NextResponse.json({

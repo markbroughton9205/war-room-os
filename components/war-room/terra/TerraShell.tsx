@@ -4,7 +4,8 @@
  * Terra Shell — Phase G/H (foundation) + Phase 1/2 (first live layer + event model) + Phase 3
  * (multi-layer spatial integration).
  *
- * Every entry in TERRA_LAYER_CATALOG (lib/terra/layerCatalog.ts) gets one TerraLayerRow: its own
+ * Every entry in TERRA_LAYER_SUMMARIES (lib/terra/layerCatalogSummary.ts, a client-safe mirror of
+ * lib/terra/layerCatalog.ts) gets one TerraLayerRow: its own
  * enable toggle, its own useTerraLayer fetch, and its own headless TerraFeatureLayer renderer —
  * the same generic code path for every layer, never a per-provider branch here. Only
  * usgs_earthquake_feed starts enabled by default (preserving Phase 1/2's exact prior behavior);
@@ -24,8 +25,8 @@ import dynamic from 'next/dynamic'
 import type { Viewer as CesiumViewer } from 'cesium'
 import type { TerraGlobeStatus } from './TerraGlobe'
 import { useTerraLayer } from './useTerraLayer'
-import { TERRA_LAYER_CATALOG } from '@/lib/terra/layerCatalog'
-import type { TerraClickPoint, TerraGeoFeature, TerraIntelligenceEventKind, TerraLayerDefinition } from '@/lib/terra/types'
+import { TERRA_LAYER_SUMMARIES, type TerraLayerSummary } from '@/lib/terra/layerCatalogSummary'
+import type { TerraClickPoint, TerraGeoFeature, TerraIntelligenceEventKind } from '@/lib/terra/types'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -81,11 +82,34 @@ const KIND_DETAIL_LABEL: Record<TerraIntelligenceEventKind, string> = {
   earthquake: 'Earthquake',
   water_gauge_reading: 'Water Gauge Reading',
   aircraft_state: 'Aircraft Position',
+  heritage_site: 'Heritage Site',
+  place: 'Place',
+  geographic_feature: 'Geographic Feature',
+  weather_observation: 'Weather Observation',
+  biodiversity_observation: 'Biodiversity Observation',
 }
 
-// Only usgs_earthquake_feed matches Phase 1/2's exact prior default (enabled on load); the three
-// newly-promoted layers this phase start off.
+// Coordinate origin — Phase 4's explicit provenance requirement: a Commander must be able to
+// tell an observed coordinate apart from an extracted one apart from a resolved one at a glance.
+const COORDINATE_ORIGIN_LABEL: Record<TerraGeoFeature['coordinateOrigin'], string> = {
+  observed: 'Observed (provider-reported)',
+  source_embedded: 'Extracted (source-embedded)',
+  resolved: 'Resolved (place-name lookup)',
+}
+
+// Only usgs_earthquake_feed matches Phase 1/2's exact prior default (enabled on load); every
+// other layer starts off so making a live external call is always a deliberate Commander action.
 const DEFAULT_ENABLED_LAYER_IDS = new Set<string>(['usgs_earthquake_feed'])
+
+// Phase 4: the catalog is now large enough (15 layers) to warrant grouping rather than one flat
+// list — grouped by TerraIntelligenceDomain, the same coarse grouping already on every event.
+const LAYER_GROUPS: { label: string; domains: TerraLayerSummary['domain'][] }[] = [
+  { label: 'Hazards', domains: ['hazards'] },
+  { label: 'Weather', domains: ['weather'] },
+  { label: 'Science', domains: ['science'] },
+  { label: 'Research & Heritage', domains: ['research'] },
+  { label: 'Other', domains: ['other', 'opportunity', 'threat', 'government'] },
+]
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
@@ -129,9 +153,47 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
           {feature.timestamp && <Row label="Last position report" value={new Date(feature.timestamp).toLocaleString()} />}
         </>
       )
+    case 'heritage_site':
+      return (
+        <>
+          <Row label="Coordinates" value={coords} mono />
+          {typeof feature.properties.findspot === 'string' && <Row label="Findspot" value={feature.properties.findspot} />}
+        </>
+      )
+    case 'place':
+      return <Row label="Coordinates" value={coords} mono />
+    case 'geographic_feature':
+      return <Row label="Coordinates" value={coords} mono />
+    case 'weather_observation':
+      return <Row label="Coordinates" value={coords} mono />
+    case 'biodiversity_observation':
+      return (
+        <>
+          <Row label="Coordinates" value={coords} mono />
+          {typeof feature.properties.water_body === 'string' && <Row label="Water body" value={feature.properties.water_body} />}
+          {typeof feature.properties.country === 'string' && <Row label="Country" value={feature.properties.country} />}
+        </>
+      )
     default:
       return <Row label="Coordinates" value={coords} mono />
   }
+}
+
+function CoordinateOriginFields({ feature }: { feature: TerraGeoFeature }) {
+  return (
+    <>
+      <Row label="Coordinate origin" value={COORDINATE_ORIGIN_LABEL[feature.coordinateOrigin]} />
+      {feature.geoResolution && (
+        <>
+          <Row label="Resolved via" value={feature.geoResolution.resolverProviderId} />
+          <Row label="Resolver query" value={feature.geoResolution.queryUsed} />
+          {feature.geoResolution.quality === 'strong' || feature.geoResolution.quality === 'exact' ? (
+            <Row label="Match" value={feature.geoResolution.matchTitle} />
+          ) : null}
+        </>
+      )}
+    </>
+  )
 }
 
 function TerraLayerRow({
@@ -140,7 +202,7 @@ function TerraLayerRow({
   selection,
   onFeaturesChange,
 }: {
-  layer: TerraLayerDefinition
+  layer: TerraLayerSummary
   viewer: CesiumViewer | null
   selection: Selection
   onFeaturesChange: (layerId: string, features: TerraGeoFeature[]) => void
@@ -260,11 +322,20 @@ export function TerraShell() {
           </ul>
         </div>
 
-        <div className="pointer-events-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
+        <div className="pointer-events-auto max-h-[52vh] overflow-y-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
           <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Data Layers</p>
-          {TERRA_LAYER_CATALOG.map(layer => (
-            <TerraLayerRow key={layer.id} layer={layer} viewer={viewer} selection={selection} onFeaturesChange={handleFeaturesChange} />
-          ))}
+          {LAYER_GROUPS.map(group => {
+            const layers = TERRA_LAYER_SUMMARIES.filter(layer => group.domains.includes(layer.domain))
+            if (layers.length === 0) return null
+            return (
+              <div key={group.label} className="mt-2 first:mt-0">
+                <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">{group.label}</p>
+                {layers.map(layer => (
+                  <TerraLayerRow key={layer.id} layer={layer} viewer={viewer} selection={selection} onFeaturesChange={handleFeaturesChange} />
+                ))}
+              </div>
+            )
+          })}
         </div>
 
         <div className="pointer-events-auto">
@@ -317,6 +388,7 @@ export function TerraShell() {
             <p className="text-[12px] font-semibold text-slate-100">{selectedFeature.title}</p>
             <dl className="mt-2 space-y-1 text-[11px] text-slate-400">
               <FeatureDetailFields feature={selectedFeature} />
+              <CoordinateOriginFields feature={selectedFeature} />
               <Row label="Provider" value={selectedFeature.provenance.provider} />
             </dl>
             {selectedFeature.rawReference.canonicalUrl && (

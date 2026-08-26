@@ -67,9 +67,15 @@ async function search(query: ResearchQuery) {
         organization: occ.institutionCode ?? null,
         publishedAt: occ.eventDate ?? null,
         updatedAt: null,
-        geography: occ.waterBody ?? null,
+        // Real decimalLatitude/decimalLongitude, when present, take priority over the coarser
+        // waterBody region name — a pre-existing bug (discovered during Terra Phase 3's live
+        // reconciliation of LATENT_GEO providers) computed `geo` for use in `summary` prose but
+        // never actually assigned it here, silently discarding every occurrence's real
+        // coordinates in favor of waterBody (or nothing). waterBody is preserved in `identifiers`
+        // rather than lost outright when coordinates are present.
+        geography: geo ?? occ.waterBody ?? null,
         language: null,
-        identifiers: { obis_occurrence_id: id },
+        identifiers: { obis_occurrence_id: id, ...(occ.waterBody ? { water_body: occ.waterBody } : {}) },
         subjects: [],
         license: null,
         accessStatus: 'open',

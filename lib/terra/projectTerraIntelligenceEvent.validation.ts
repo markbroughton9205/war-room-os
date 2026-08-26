@@ -27,7 +27,8 @@ function makeEvent(overrides: Partial<TerraIntelligenceEvent> = {}): TerraIntell
     publishedAt: null,
     updatedAt: null,
     temporalStatus: 'current',
-    geography: { kind: 'point', longitude: 12.5, latitude: -4.2, altitude: -12000 },
+    geography: { kind: 'point', longitude: 12.5, latitude: -4.2, altitude: -12000, coordinateOrigin: 'observed' },
+    geoResolution: null,
     evidence: null,
     properties: { mag: 5.0 },
     provenance: { provider: 'usgs_earthquake_feed', sourceUrl: 'https://earthquake.usgs.gov/earthquakes/eventpage/evt-1', retrievedAt: '2026-08-25T12:05:00.000Z', fromCache: false, isHistorical: false },
@@ -46,6 +47,32 @@ function run(): CaseResult[] {
     results.push(check('projected_id_and_event_id_are_both_set_and_equal_for_a_1to1_point_projection', feature?.id === 'evt-1' && feature?.eventId === 'evt-1', `id=${feature?.id} eventId=${feature?.eventId}`))
     results.push(check('provider_and_kind_carried_through_unchanged', feature?.providerId === 'usgs_earthquake_feed' && feature?.kind === 'earthquake', `providerId=${feature?.providerId} kind=${feature?.kind}`))
     results.push(check('timestamp_prefers_observed_at', feature?.timestamp === '2026-08-25T12:00:00.000Z', `timestamp=${feature?.timestamp}`))
+    results.push(check('coordinate_origin_carried_through_unchanged', feature?.coordinateOrigin === 'observed', `coordinateOrigin=${feature?.coordinateOrigin}`))
+  }
+
+  // Terra Phase 4: a 'resolved' geography's full resolver provenance must survive the projection
+  // step unchanged — a Commander inspecting a projected feature must be able to tell it apart
+  // from an 'observed'/'source_embedded' point.
+  {
+    const resolution = {
+      quality: 'strong' as const,
+      longitude: 12.5,
+      latitude: -4.2,
+      altitude: null,
+      resolutionMethod: 'place_name_lookup' as const,
+      resolverProviderId: 'nominatim' as const,
+      sourceEntityId: 'edh:HD012345',
+      queryUsed: 'Lazio',
+      matchTitle: 'Lazio, Italia',
+      sourceUrl: 'https://nominatim.openstreetmap.org/ui/details.html?osmtype=R&osmid=1',
+      retrievedAt: '2026-08-25T12:00:00.000Z',
+    }
+    const feature = projectTerraIntelligenceEventToGeoFeature(makeEvent({
+      geography: { kind: 'point', longitude: 12.5, latitude: -4.2, altitude: null, coordinateOrigin: 'resolved' },
+      geoResolution: resolution,
+    }))
+    results.push(check('resolved_geography_projects_into_geo_feature_correctly', feature?.longitude === 12.5 && feature?.latitude === -4.2, `feature=${JSON.stringify(feature)}`))
+    results.push(check('resolved_geography_preserves_resolver_provenance', feature?.coordinateOrigin === 'resolved' && JSON.stringify(feature?.geoResolution) === JSON.stringify(resolution), `coordinateOrigin=${feature?.coordinateOrigin} geoResolution=${JSON.stringify(feature?.geoResolution)}`))
   }
 
   {

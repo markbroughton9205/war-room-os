@@ -93,7 +93,8 @@ export function normalizeUsgsWaterStations(response: ResearchProviderResponse): 
       publishedAt: null,
       updatedAt: doc?.updatedAt ?? null,
       temporalStatus: provenance.isHistorical ? 'historical' : 'current',
-      geography: { kind: 'point', longitude: point.lon, latitude: point.lat, altitude: null },
+      geography: { kind: 'point', longitude: point.lon, latitude: point.lat, altitude: null, coordinateOrigin: 'observed' },
+      geoResolution: null,
       // No evidence-scoring pipeline runs on raw USGS data this phase — honestly null.
       evidence: null,
       // Bounded escape hatch: the latest reading plus the full (already-capped) point series and

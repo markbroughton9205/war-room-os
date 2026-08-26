@@ -1,0 +1,109 @@
+/**
+ * Deterministic regression suite for the geo-resolution boundary — the exact/ambiguous/unresolved
+ * ambiguity handling this mission's mission text requires, tested against mocked nominatim HTTP
+ * responses (never a real network call in this file; see the Phase 4 completion report for the
+ * bounded live-verification evidence). Run directly:
+ *   node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/terra/resolveGeography.validation.ts
+ */
+import { pathToFileURL } from 'node:url'
+import { __setResearchFetchForTests } from '@/lib/research-engine/security/safeFetch'
+import { __resetCacheForTests } from '@/lib/research-engine/cache/ttlCache'
+import { __resetProviderGateForTests } from '@/lib/research-engine/security/providerGate'
+import { resolvePlaceNameViaNominatim } from './resolveGeography'
+
+type CaseResult = { name: string; pass: boolean; detail: string }
+
+function check(name: string, pass: boolean, detail: string): CaseResult {
+  return { name, pass, detail }
+}
+
+function jsonResponse(data: unknown): Response {
+  return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+}
+
+async function withMockedFetch<T>(response: Response, fn: () => Promise<T>): Promise<T> {
+  __resetProviderGateForTests()
+  __resetCacheForTests()
+  __setResearchFetchForTests((async () => response) as typeof fetch)
+  try {
+    return await fn()
+  } finally {
+    __setResearchFetchForTests(null)
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+  }
+}
+
+async function run(): Promise<CaseResult[]> {
+  const results: CaseResult[] = []
+
+  // --- Exact/strong: exactly one real coordinate-bearing candidate ---
+  await withMockedFetch(
+    jsonResponse([{ place_id: 145205353, osm_type: 'relation', osm_id: 62422, lat: '52.5173885', lon: '13.3951309', display_name: 'Berlin, Deutschland', name: 'Berlin', class: 'boundary', type: 'administrative' }]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('Berlin, Germany', 'edh:test-1')
+      results.push(check('single_candidate_resolves_strong', resolved.quality === 'strong', `quality=${resolved.quality}`))
+      if (resolved.quality === 'strong' || resolved.quality === 'exact') {
+        results.push(check('resolved_coordinates_match_mocked_response', resolved.latitude === 52.5173885 && resolved.longitude === 13.3951309, `lat=${resolved.latitude} lon=${resolved.longitude}`))
+        results.push(check('resolver_provider_id_is_nominatim', resolved.resolverProviderId === 'nominatim', `resolverProviderId=${resolved.resolverProviderId}`))
+        results.push(check('source_entity_id_preserved', resolved.sourceEntityId === 'edh:test-1', `sourceEntityId=${resolved.sourceEntityId}`))
+        results.push(check('query_used_preserved', resolved.queryUsed === 'Berlin, Germany', `queryUsed=${resolved.queryUsed}`))
+        results.push(check('resolution_method_is_place_name_lookup', resolved.resolutionMethod === 'place_name_lookup', `resolutionMethod=${resolved.resolutionMethod}`))
+        results.push(check('no_fake_confidence_score_only_categorical_quality', !('confidence' in resolved), `keys=${Object.keys(resolved).join(',')}`))
+      }
+    },
+  )
+
+  // --- Ambiguous: two distinct coordinate-bearing candidates — must NOT auto-select either ---
+  await withMockedFetch(
+    jsonResponse([
+      { place_id: 1, lat: '51.5', lon: '-0.1', display_name: 'Richmond, London, UK', name: 'Richmond' },
+      { place_id: 2, lat: '37.5', lon: '-77.4', display_name: 'Richmond, Virginia, USA', name: 'Richmond' },
+    ]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('Richmond', 'edh:test-2')
+      results.push(check('multiple_candidates_stay_ambiguous_not_auto_selected', resolved.quality === 'ambiguous', `quality=${resolved.quality}`))
+      results.push(check('ambiguous_result_carries_no_coordinates', !('longitude' in resolved), `keys=${Object.keys(resolved).join(',')}`))
+    },
+  )
+
+  // --- Unresolved: zero candidates ---
+  await withMockedFetch(jsonResponse([]), async () => {
+    const resolved = await resolvePlaceNameViaNominatim('Nonexistent Place Xyzzy123', 'edh:test-3')
+    results.push(check('missing_place_stays_unresolved_not_fabricated', resolved.quality === 'unresolved', `quality=${resolved.quality}`))
+    results.push(check('unresolved_result_carries_no_coordinates', !('longitude' in resolved), `keys=${Object.keys(resolved).join(',')}`))
+  })
+
+  // --- Empty query text: unresolved without even attempting a network call ---
+  {
+    const resolved = await resolvePlaceNameViaNominatim('   ', 'edh:test-4')
+    results.push(check('empty_query_text_is_unresolved_immediately', resolved.quality === 'unresolved', `quality=${resolved.quality}`))
+  }
+
+  // --- A candidate whose geography is present but not a real coordinate string (e.g. a country
+  // list) is not miscounted as a valid candidate ---
+  await withMockedFetch(
+    jsonResponse([{ place_id: 3, lat: 'not-a-number', lon: '13.4', display_name: 'Malformed', name: 'Malformed' }]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('Malformed Place', 'edh:test-5')
+      results.push(check('malformed_coordinate_candidate_is_not_treated_as_valid', resolved.quality === 'unresolved', `quality=${resolved.quality}`))
+    },
+  )
+
+  return results
+}
+
+export async function runTerraResolveGeographyValidation(): Promise<CaseResult[]> {
+  return run()
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runTerraResolveGeographyValidation().then(results => {
+    for (const result of results) {
+      console.log(`${result.pass ? 'PASS' : 'FAIL'} ${result.name} ${result.detail}`)
+    }
+    const failed = results.filter(r => !r.pass)
+    console.log(`Terra resolveGeography validation: ${results.length - failed.length}/${results.length} PASS`)
+    if (failed.length) process.exit(1)
+  })
+}

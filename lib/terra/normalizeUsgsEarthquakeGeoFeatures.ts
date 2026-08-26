@@ -103,7 +103,8 @@ export function normalizeUsgsEarthquakeGeoFeatures(providerId: UsgsEarthquakePro
       publishedAt: null,
       updatedAt,
       temporalStatus: provenance.isHistorical ? 'historical' : 'current',
-      geography: { kind: 'point', longitude: point.lon, latitude: point.lat, altitude },
+      geography: { kind: 'point', longitude: point.lon, latitude: point.lat, altitude, coordinateOrigin: 'observed' },
+      geoResolution: null,
       // No evidence-scoring pipeline runs on raw USGS feed data this phase — honestly null, never
       // a fabricated confidence value.
       evidence: null,

@@ -33,6 +33,8 @@ export function projectTerraIntelligenceEventToGeoFeature(event: TerraIntelligen
     properties: event.properties,
     provenance: event.provenance,
     rawReference: event.rawReference,
+    coordinateOrigin: event.geography.coordinateOrigin,
+    geoResolution: event.geoResolution,
   }
 }
 

@@ -40,8 +40,24 @@ export type TerraIntelligenceDomain = (typeof TERRA_INTELLIGENCE_DOMAINS)[number
  *     station's recent daily values live in `properties`, not as separate events (Phase 3)
  *   - 'aircraft_state': opensky — a live position report, proving the LATENT_GEO extraction
  *     boundary (lib/terra/normalizeLatentGeoDocument.ts) against a real provider (Phase 3)
+ *   - 'heritage_site': idai_gazetteer, pleiades, whg — archaeological/historical gazetteer places
+ *     (Phase 4)
+ *   - 'place': nominatim — a general geocoded place-name search result (Phase 4)
+ *   - 'geographic_feature': osm_overpass, ohm_overpass — named OSM/OpenHistoricalMap map features
+ *     resolved near a given point (Phase 4)
+ *   - 'weather_observation': met_no, open_meteo (Phase 4)
+ *   - 'biodiversity_observation': obis, gbif (Phase 4)
  */
-export const TERRA_INTELLIGENCE_EVENT_KINDS = ['earthquake', 'water_gauge_reading', 'aircraft_state'] as const
+export const TERRA_INTELLIGENCE_EVENT_KINDS = [
+  'earthquake',
+  'water_gauge_reading',
+  'aircraft_state',
+  'heritage_site',
+  'place',
+  'geographic_feature',
+  'weather_observation',
+  'biodiversity_observation',
+] as const
 export type TerraIntelligenceEventKind = (typeof TERRA_INTELLIGENCE_EVENT_KINDS)[number]
 
 /**
@@ -60,13 +76,75 @@ export type TerraTemporalStatus = 'current' | 'historical' | 'scheduled'
 export type TerraLayerClass = 'observed' | 'curated_knowledge' | 'ai_analysis' | 'commander_annotation'
 
 /**
+ * How a TerraGeography's coordinates were obtained — a distinct dimension from TerraLayerClass
+ * (which is about what KIND of truth the event is, observed/curated/AI/Commander) and from
+ * TerraEvidenceClassification (which is about corroboration strength). Phase 4's explicit
+ * provenance requirement: these three must never look identical to a Commander inspecting an
+ * event.
+ *   - 'observed': the provider's own structured geoFeature (DIRECT_GEO — e.g. usgs_earthquake's
+ *     GeoJSON coordinates).
+ *   - 'source_embedded': coordinates were already present in the provider's normalized
+ *     ResearchDocument (e.g. a `geography` field), extracted deterministically by
+ *     normalizeLatentGeoDocument.ts — never geocoded or inferred.
+ *   - 'resolved': War Room looked up a place/entity name through another provider (the
+ *     lib/terra/resolveGeography.ts boundary) — see TerraIntelligenceEvent.geoResolution for the
+ *     full resolver provenance this implies.
+ */
+export const TERRA_COORDINATE_ORIGINS = ['observed', 'source_embedded', 'resolved'] as const
+export type TerraCoordinateOrigin = (typeof TERRA_COORDINATE_ORIGINS)[number]
+
+/**
  * A single geographic point, in decimal degrees, WGS84 — the only geometry kind implemented this
  * phase. `region` (a bounding area) and `path` (a track/route) are real, anticipated future needs
  * (per the Phase 2 mission's "future-safe region/path capability") deliberately left unimplemented
  * — adding either is a new union member, additive, not a rewrite of this type or of
  * projectTerraIntelligenceEvent.ts's point-only projection logic.
  */
-export type TerraGeography = { kind: 'point'; longitude: number; latitude: number; altitude: number | null }
+export type TerraGeography = { kind: 'point'; longitude: number; latitude: number; altitude: number | null; coordinateOrigin: TerraCoordinateOrigin }
+
+/**
+ * The result of one lib/terra/resolveGeography.ts lookup (Phase 4) — the ONLY sanctioned way an
+ * ENTITY_GEO_RESOLVABLE source (a real place/entity name, no coordinates of its own) gets a
+ * point on the globe. Ambiguity is a first-class, honest outcome, not an error to paper over:
+ * 'ambiguous' and 'unresolved' results carry no coordinates at all and must never be projected.
+ * No numeric confidence score is invented — categorical match quality only, since neither
+ * nominatim nor any other resolver this codebase uses supplies a real calibrated confidence
+ * number.
+ */
+export const TERRA_GEO_RESOLUTION_METHODS = ['place_name_lookup'] as const
+export type TerraGeoResolutionMethod = (typeof TERRA_GEO_RESOLUTION_METHODS)[number]
+
+export const TERRA_GEO_MATCH_QUALITY = ['exact', 'strong', 'ambiguous', 'unresolved'] as const
+export type TerraGeoMatchQuality = (typeof TERRA_GEO_MATCH_QUALITY)[number]
+
+export type TerraResolvedGeography =
+  | {
+      quality: 'exact' | 'strong'
+      longitude: number
+      latitude: number
+      altitude: number | null
+      resolutionMethod: TerraGeoResolutionMethod
+      resolverProviderId: ResearchProviderId
+      /** id of the record whose geography this resolution was performed for — the source
+       * document's own provider-scoped id, not a Terra-invented one. */
+      sourceEntityId: string
+      /** The exact place-name text sent to the resolver. */
+      queryUsed: string
+      /** The resolver's own matched-place title, for a Commander to sanity-check the match. */
+      matchTitle: string
+      sourceUrl: string | null
+      retrievedAt: string
+    }
+  | {
+      quality: 'ambiguous' | 'unresolved'
+      resolverProviderId: ResearchProviderId
+      sourceEntityId: string
+      queryUsed: string
+      retrievedAt: string
+      /** Honest, human-readable reason — never fabricated, always traceable to what the resolver
+       * actually returned (or didn't). */
+      reason: string
+    }
 
 /**
  * Reuses War Room's existing evidence vocabulary rather than inventing a Terra-specific
@@ -120,6 +198,12 @@ export type TerraIntelligenceEvent = {
   temporalStatus: TerraTemporalStatus
   /** Null when this event has no (yet) projectable location — a legitimate state, not an error. */
   geography: TerraGeography | null
+  /** Full resolver provenance when geography.coordinateOrigin === 'resolved' — null in every
+   * other case, including when geography itself is null (never resolved) or came from
+   * 'observed'/'source_embedded' origins. Kept as a distinct field rather than folded into
+   * `provenance` so the four-layer TerraProvenance (Observed Data / Curated Knowledge / AI
+   * Analysis / Commander Annotation) is never conflated with "how the coordinate was obtained." */
+  geoResolution: TerraResolvedGeography | null
   evidence: TerraEvidenceClassification
   /** Bounded, kind-specific observed values read directly from the source — magnitude, depth,
    * review status, etc. for 'earthquake' — never reinterpreted or scored by Terra itself. Same
@@ -150,6 +234,11 @@ export type TerraGeoFeature = {
   properties: Record<string, unknown>
   provenance: TerraProvenance
   rawReference: TerraIntelligenceEvent['rawReference']
+  /** Mirrors the source event's geography.coordinateOrigin — carried onto the projection so the
+   * UI can show "observed / extracted / resolved" without a second lookup back into the event. */
+  coordinateOrigin: TerraCoordinateOrigin
+  /** Mirrors the source event's geoResolution — present only when coordinateOrigin === 'resolved'. */
+  geoResolution: TerraResolvedGeography | null
 }
 
 /**
@@ -185,5 +274,10 @@ export type TerraLayerDefinition = {
   /** Maps this provider's raw ResearchProviderResponse to TerraIntelligenceEvent[] — the one
    * provider-specific step in the whole pipeline. Everything downstream (projection, rendering)
    * is generic. */
-  normalize: (response: ResearchProviderResponse) => NormalizeResult
+  /** Synchronous for every DIRECT_GEO/LATENT_GEO layer (the common case — no network call beyond
+   * the Research Engine response already in hand). May return a Promise for a layer whose
+   * normalize step needs an explicit geo-resolution lookup (lib/terra/resolveGeography.ts) —
+   * `await`ing an already-resolved synchronous value is a no-op, so every existing normalizer
+   * needed no change for this to become additive rather than a breaking signature change. */
+  normalize: (response: ResearchProviderResponse) => NormalizeResult | Promise<NormalizeResult>
 }

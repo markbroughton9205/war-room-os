@@ -4517,7 +4517,21 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   ], async () => {
     const response = await gbifAdapter.run({ text: 'Puma concolor' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    // Terra Phase 4 regression: real decimalLatitude/decimalLongitude must reach `geography` as
+    // the exact "lat X, lon Y" string Terra's LATENT_GEO extractor matches — the same bug class
+    // fixed in obis.ts (coordinates computed for `summary` prose only, never assigned here).
+    if (response.documents[0].geography !== 'lat 40.1, lon -105.2') return `expected real coordinates in geography, got ${JSON.stringify(response.documents[0].geography)}`
+    if (response.documents[0].identifiers.country !== 'United States') return `expected country preserved in identifiers, got ${JSON.stringify(response.documents[0].identifiers)}`
     return documentShapeIssue(response.documents[0], 'gbif') ?? true
+  }))
+
+  await add('re_707b_gbif_missing_coordinates_falls_back_to_country_in_geography', () => withAdapterFetch([
+    jsonResponse({ count: 1, results: [{ key: 1, scientificName: 'Example species', country: 'Canada', basisOfRecord: 'HUMAN_OBSERVATION' }] }),
+  ], async () => {
+    const response = await gbifAdapter.run({ text: 'Example species' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].geography !== 'Canada') return `expected country fallback in geography when coordinates are absent, got ${JSON.stringify(response.documents[0].geography)}`
+    return true
   }))
 
   await add('re_708_uniprot_success_normalizes_entry', () => withAdapterFetch([
@@ -4762,11 +4776,26 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   }))
 
   await add('re_738_obis_success_normalizes_occurrence', () => withAdapterFetch([
-    jsonResponse({ total: 1, results: [{ id: '00042a5b-d420-450d-ba01-8a59bcfc6d4f', scientificName: 'Orcinus orca', decimalLatitude: 60.1, decimalLongitude: -2.3, eventDate: '2025-06-30T11:01:16', basisOfRecord: 'HumanObservation' }] }),
+    jsonResponse({ total: 1, results: [{ id: '00042a5b-d420-450d-ba01-8a59bcfc6d4f', scientificName: 'Orcinus orca', decimalLatitude: 60.1, decimalLongitude: -2.3, eventDate: '2025-06-30T11:01:16', basisOfRecord: 'HumanObservation', waterBody: 'North Sea' }] }),
   ], async () => {
     const response = await obisAdapter.run({ text: 'Orcinus orca' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    // Terra Phase 4 regression: real decimalLatitude/decimalLongitude must reach `geography` as
+    // the exact "lat X, lon Y" string Terra's LATENT_GEO extractor matches — a prior bug computed
+    // this string for use in `summary` prose only and silently discarded it here in favor of
+    // waterBody (or nothing). waterBody must still survive, just relocated to `identifiers`.
+    if (response.documents[0].geography !== 'lat 60.1, lon -2.3') return `expected real coordinates in geography, got ${JSON.stringify(response.documents[0].geography)}`
+    if (response.documents[0].identifiers.water_body !== 'North Sea') return `expected waterBody preserved in identifiers, got ${JSON.stringify(response.documents[0].identifiers)}`
     return documentShapeIssue(response.documents[0], 'obis') ?? true
+  }))
+
+  await add('re_738b_obis_missing_coordinates_falls_back_to_water_body_in_geography', () => withAdapterFetch([
+    jsonResponse({ total: 1, results: [{ id: 'no-coords-1', scientificName: 'Example species', basisOfRecord: 'HumanObservation', waterBody: 'Pacific Ocean' }] }),
+  ], async () => {
+    const response = await obisAdapter.run({ text: 'Example species' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].geography !== 'Pacific Ocean') return `expected waterBody fallback in geography when coordinates are absent, got ${JSON.stringify(response.documents[0].geography)}`
+    return true
   }))
 
   await add('re_739_worms_success_normalizes_aphia_record', () => withAdapterFetch([

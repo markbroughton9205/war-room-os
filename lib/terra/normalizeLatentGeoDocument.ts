@@ -93,7 +93,8 @@ export function normalizeLatentGeoDocuments(documents: ResearchDocument[], optio
       publishedAt: null,
       updatedAt: doc.updatedAt,
       temporalStatus: doc.provenance.isHistorical ? 'historical' : 'current',
-      geography: { kind: 'point', longitude: point.lon, latitude: point.lat, altitude: null },
+      geography: { kind: 'point', longitude: point.lon, latitude: point.lat, altitude: null, coordinateOrigin: 'source_embedded' },
+      geoResolution: null,
       // No evidence-scoring pipeline runs on raw Research Engine documents this phase — honestly
       // null, never a fabricated confidence value.
       evidence: null,
