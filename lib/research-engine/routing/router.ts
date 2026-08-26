@@ -21,7 +21,7 @@ const INTENT_PROVIDER_MAP: Record<ResearchQueryIntent, ResearchProviderId[]> = {
   global_development: ['world_bank_indicators', 'world_bank_projects', 'world_bank_finances', 'world_bank_climate', 'imf_sdmx', 'reliefweb', 'un_sdg', 'idb_open_data', 'iati_datastore'],
   finance_public_data: ['fred', 'world_bank_finances', 'sec_edgar', 'brazil_transparencia'],
   climate_environment: ['world_bank_climate', 'nasa_gibs', 'nasa', 'usgs_water', 'open_meteo', 'noaa_cdo', 'met_no', 'noaa_swpc', 'nws_weather', 'arctic_data_center', 'ecmwf_cds', 'met_office_datahub'],
-  earthquakes_hazards: ['usgs_earthquake', 'usgs_earthquake_feed', 'nasa_gibs', 'usgs_sciencebase'],
+  earthquakes_hazards: ['usgs_earthquake', 'usgs_earthquake_feed', 'nasa_gibs', 'usgs_sciencebase', 'nhc_current_storms', 'nasa_eonet', 'tsunami_gov', 'nws_weather'],
   water_hydrology: ['usgs_water', 'usgs_national_map', 'world_bank_climate'],
   maps_geospatial: ['nasa_gibs', 'usgs_national_map', 'usgs_sciencebase', 'osm_overpass', 'geonames', 'nominatim', 'nasa_cmr', 'copernicus_dataspace', 'opentopography', 'pdok', 'ohm_overpass'],
   historical_web: ['wayback', 'internet_archive', 'common_crawl', 'library_of_congress', 'ohm_overpass'],

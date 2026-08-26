@@ -87,6 +87,12 @@ const KIND_DETAIL_LABEL: Record<TerraIntelligenceEventKind, string> = {
   geographic_feature: 'Geographic Feature',
   weather_observation: 'Weather Observation',
   biodiversity_observation: 'Biodiversity Observation',
+  tropical_cyclone: 'Tropical Cyclone',
+  wildfire_incident: 'Wildfire Incident',
+  volcano_event: 'Volcanic Activity',
+  flood_event: 'Flood Event',
+  severe_weather_alert: 'Severe Weather Alert',
+  tsunami_alert: 'Tsunami Bulletin',
 }
 
 // Coordinate origin — Phase 4's explicit provenance requirement: a Commander must be able to
@@ -174,6 +180,47 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
           {typeof feature.properties.country === 'string' && <Row label="Country" value={feature.properties.country} />}
         </>
       )
+    case 'tropical_cyclone':
+      return (
+        <>
+          {typeof feature.properties.classification === 'string' && <Row label="Classification" value={feature.properties.classification} />}
+          <Row label="Position" value={coords} mono />
+          {typeof feature.properties.intensityKt === 'number' && <Row label="Max sustained wind" value={`${feature.properties.intensityKt} kt`} />}
+          {typeof feature.properties.pressureMb === 'number' && <Row label="Pressure" value={`${feature.properties.pressureMb} mb`} />}
+          {typeof feature.properties.basin === 'string' && <Row label="Basin" value={feature.properties.basin} />}
+          {typeof feature.properties.movementSpeedKt === 'number' && <Row label="Movement" value={`${feature.properties.movementSpeedKt} kt`} />}
+          <Row label="Forecast track" value="Not rendered — real NHC KMZ link only" />
+        </>
+      )
+    case 'wildfire_incident':
+    case 'volcano_event':
+    case 'flood_event':
+      return (
+        <>
+          <Row label="Coordinates" value={coords} mono />
+          {typeof feature.properties.magnitudeValue === 'number' && <Row label="Magnitude" value={`${feature.properties.magnitudeValue} ${typeof feature.properties.magnitudeUnit === 'string' ? feature.properties.magnitudeUnit : ''}`.trim()} />}
+          {typeof feature.properties.date === 'string' && <Row label="Observed" value={new Date(feature.properties.date).toLocaleString()} />}
+        </>
+      )
+    case 'severe_weather_alert':
+      return (
+        <>
+          {typeof feature.properties.event === 'string' && <Row label="Alert type" value={feature.properties.event} />}
+          {typeof feature.properties.severity === 'string' && <Row label="Severity (source)" value={feature.properties.severity} />}
+          {typeof feature.properties.urgency === 'string' && <Row label="Urgency (source)" value={feature.properties.urgency} />}
+          {typeof feature.properties.certainty === 'string' && <Row label="Certainty (source)" value={feature.properties.certainty} />}
+          {typeof feature.properties.expires === 'string' && <Row label="Expires" value={new Date(feature.properties.expires).toLocaleString()} />}
+        </>
+      )
+    case 'tsunami_alert':
+      return (
+        <>
+          <Row label="Coordinates" value={coords} mono />
+          {typeof feature.properties.category === 'string' && <Row label="NOAA category" value={feature.properties.category} />}
+          {typeof feature.properties.preliminary_magnitude === 'string' && <Row label="Preliminary magnitude" value={feature.properties.preliminary_magnitude} />}
+          {typeof feature.properties.affected_region === 'string' && <Row label="Affected region" value={feature.properties.affected_region} />}
+        </>
+      )
     default:
       return <Row label="Coordinates" value={coords} mono />
   }
@@ -208,7 +255,7 @@ function TerraLayerRow({
   onFeaturesChange: (layerId: string, features: TerraGeoFeature[]) => void
 }) {
   const [enabled, setEnabled] = useState(() => DEFAULT_ENABLED_LAYER_IDS.has(layer.id))
-  const feed = useTerraLayer(layer.id, enabled)
+  const feed = useTerraLayer(layer.id, enabled, layer.refreshIntervalMs)
 
   useEffect(() => {
     onFeaturesChange(layer.id, feed.features)
@@ -270,6 +317,21 @@ export function TerraShell() {
     return (layerFeatures[selection.layerId] ?? []).find(f => f.id === selection.featureId) ?? null
   }, [selection, layerFeatures])
 
+  // Real counts from whichever hazard layers are actually enabled and loaded — never a static or
+  // placeholder number. A layer that isn't enabled contributes 0, honestly (not "unknown"),
+  // matching handleFeaturesChange's own per-layer state.
+  const hazardSummary = useMemo(() => {
+    const count = (layerId: string) => layerFeatures[layerId]?.length ?? 0
+    return [
+      { label: 'EARTHQUAKES', value: count('usgs_earthquake_feed') + count('usgs_earthquake') },
+      { label: 'ACTIVE CYCLONES', value: count('nhc_current_storms') },
+      { label: 'WILDFIRES', value: count('nasa_eonet_wildfires') },
+      { label: 'VOLCANOES', value: count('nasa_eonet_volcanoes') },
+      { label: 'WEATHER ALERTS', value: count('nws_severe_weather_alerts') },
+      { label: 'TSUNAMI BULLETINS', value: count('tsunami_gov') },
+    ]
+  }, [layerFeatures])
+
   const handleGroundClick = useCallback((point: TerraClickPoint) => {
     setSelection(point.ok ? { kind: 'ground', point } : { kind: 'miss' })
   }, [])
@@ -291,11 +353,19 @@ export function TerraShell() {
     <div className="relative h-screen w-full overflow-hidden bg-black text-white">
       <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onEntityClick={handleEntityClick} onGroundClick={handleGroundClick} />
 
-      {/* Top instrumentation bar — mission status + identity. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-4">
+      {/* Top instrumentation bar — mission status + identity + real hazard summary. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-4">
         <div className="pointer-events-auto rounded border border-white/10 bg-black/70 px-3 py-2 backdrop-blur-sm">
           <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-400">War Room · Terra</h1>
-          <p className="mt-0.5 text-[10px] text-slate-500">Planetary Intelligence Environment — Phase 3: multi-layer spatial integration</p>
+          <p className="mt-0.5 text-[10px] text-slate-500">Planetary Intelligence Environment — Phase 5: live hazard intelligence</p>
+        </div>
+        <div className="pointer-events-auto flex flex-wrap justify-center gap-x-4 gap-y-1 rounded border border-white/10 bg-black/70 px-3 py-2 text-[10px] backdrop-blur-sm">
+          {hazardSummary.map(item => (
+            <span key={item.label} className="whitespace-nowrap">
+              <span className="text-slate-500">{item.label} </span>
+              <span className="font-mono font-bold text-emerald-400">{item.value}</span>
+            </span>
+          ))}
         </div>
         <div className="pointer-events-auto rounded border border-white/10 bg-black/70 px-3 py-2 text-[11px] backdrop-blur-sm">
           <StatusLine status={globeStatus} />

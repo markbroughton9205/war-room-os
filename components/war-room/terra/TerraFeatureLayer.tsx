@@ -1,15 +1,17 @@
 'use client'
 
 /**
- * Terra's generic Cesium feature renderer (Phase 3) — replaces the Phase 1/2
- * TerraEarthquakeLayer.tsx, which was hardwired to one kind. Renders any TerraGeoFeature[] as
- * Cesium point entities; the only kind-specific logic is `resolveStyle`, a small pure function
- * mapping a feature's `kind` to a size/color — never a separate Cesium component per provider.
- * Renders nothing itself (headless); the globe is the only visible surface.
+ * Terra's generic Cesium feature renderer (Phase 3, extended Phase 5). Renders any
+ * TerraGeoFeature[] as Cesium point entities — or, for `geometryKind: 'region'` (Phase 5's real
+ * polygon warning areas), a Cesium polygon entity — branching only on geometry/kind, never on
+ * providerId. Still headless (renders nothing itself; the globe is the only visible surface), and
+ * still one component for every layer — no TerraHurricaneLayer.tsx/TerraWildfireLayer.tsx/etc.
  *
  * Every style stays restrained and non-sensational: no red/yellow/green severity gradient, since
  * none of these observed-data sources supply a War Room risk assessment for this layer to imply.
- * Color varies only enough to let a Commander visually tell layers apart on the globe at once.
+ * Color varies only enough to let a Commander visually tell layers apart on the globe at once —
+ * including for the new Phase 5 hazard kinds, whose color is chosen by domain grouping (hazards),
+ * not by any source-supplied severity value.
  */
 import { useEffect, useRef } from 'react'
 import type { CustomDataSource, Viewer as CesiumViewer } from 'cesium'
@@ -28,10 +30,13 @@ const MIN_PIXEL_SIZE = 7
 const MAX_PIXEL_SIZE = 22
 const SELECTED_OUTLINE_BOOST = 3
 
-// Observed Data cyan (this app's four-layer provenance model) for the hazards domain's two
-// kinds, kept as two distinguishable shades rather than one identical color, plus a neutral slate
-// for the one non-hazards kind wired this phase (aircraft). None of these encode severity —
-// magnitude scaling (earthquake only) is the sole data-driven visual variation.
+// Observed Data cyan (this app's four-layer provenance model) for the hazards domain's original
+// two kinds, kept as distinguishable shades rather than one identical color; a neutral slate for
+// the one non-hazards kind wired in Phase 3 (aircraft); amber/orange-family shades for Phase 5's
+// hazard kinds, chosen only to keep six new hazard layers visually distinguishable from each
+// other and from the pre-existing cyan/teal hazard layers — never a severity gradient tied to any
+// source-supplied value. Magnitude scaling (earthquake only) remains the sole data-driven size
+// variation.
 function resolveStyle(kind: TerraIntelligenceEventKind, feature: TerraGeoFeature): { color: string; pixelSize: number } {
   switch (kind) {
     case 'earthquake': {
@@ -43,6 +48,18 @@ function resolveStyle(kind: TerraIntelligenceEventKind, feature: TerraGeoFeature
       return { color: '#2DD4BF', pixelSize: 10 }
     case 'aircraft_state':
       return { color: '#94A3B8', pixelSize: 8 }
+    case 'tropical_cyclone':
+      return { color: '#FB923C', pixelSize: 16 }
+    case 'wildfire_incident':
+      return { color: '#F97316', pixelSize: 11 }
+    case 'volcano_event':
+      return { color: '#EF4444', pixelSize: 11 }
+    case 'flood_event':
+      return { color: '#60A5FA', pixelSize: 11 }
+    case 'severe_weather_alert':
+      return { color: '#FACC15', pixelSize: 10 }
+    case 'tsunami_alert':
+      return { color: '#22D3EE', pixelSize: 10 }
     default:
       return { color: '#38BDF8', pixelSize: MIN_PIXEL_SIZE }
   }
@@ -94,13 +111,37 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
       for (const feature of features) {
         const isSelected = feature.id === selectedId
         const { color, pixelSize } = resolveStyle(feature.kind, feature)
+        // Composite "{layerId}:{featureId}" — not just featureId — so a click resolves back to
+        // the correct layer even when two layers share a raw provider record id (e.g. the same
+        // real earthquake appearing in both usgs_earthquake_feed and a usgs_earthquake catalog
+        // search covering the same window). Parsed back apart in TerraShell's handleEntityClick.
+        const entityId = terraEntityId(`${layerId}:${feature.id}`)
+
+        if (feature.geometryKind === 'region' && feature.regionRings && feature.regionRings[0]) {
+          // The real exterior ring only — holes (further rings) are not rendered this phase; no
+          // Phase 5 source's warning areas actually carry one, and Cesium's PolygonHierarchy hole
+          // support would be speculative complexity for data that doesn't exist yet.
+          const flatDegrees = feature.regionRings[0].flatMap(([lon, lat]) => [lon, lat])
+          dataSource!.entities.add({
+            id: entityId,
+            polygon: {
+              hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(flatDegrees)),
+              material: Cesium.Color.fromCssColorString(color).withAlpha(isSelected ? 0.35 : 0.18),
+              outline: true,
+              outlineColor: isSelected ? Cesium.Color.WHITE : Cesium.Color.fromCssColorString(color).withAlpha(0.9),
+              outlineWidth: isSelected ? 2 : 1,
+              height: 0,
+              // A real warning polygon on the US mainland is easily large enough to render as a
+              // filled shape at any reasonable globe zoom; unlike the sparse point layers, no
+              // "stays visible through the globe" override is needed or wanted here.
+              classificationType: Cesium.ClassificationType.TERRAIN,
+            },
+          })
+          continue
+        }
 
         dataSource!.entities.add({
-          // Composite "{layerId}:{featureId}" — not just featureId — so a click resolves back to
-          // the correct layer even when two layers share a raw provider record id (e.g. the same
-          // real earthquake appearing in both usgs_earthquake_feed and a usgs_earthquake catalog
-          // search covering the same window). Parsed back apart in TerraShell's handleEntityClick.
-          id: terraEntityId(`${layerId}:${feature.id}`),
+          id: entityId,
           position: Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude),
           point: {
             pixelSize: pixelSize + (isSelected ? SELECTED_OUTLINE_BOOST : 0),

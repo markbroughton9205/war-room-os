@@ -32,6 +32,7 @@ function run(): CaseResult[] {
     if (layer.domain !== summary.domain) mismatches.push(`${summary.id}: domain "${summary.domain}" !== "${layer.domain}"`)
     if (layer.kind !== summary.kind) mismatches.push(`${summary.id}: kind "${summary.kind}" !== "${layer.kind}"`)
     if (layer.description !== summary.description) mismatches.push(`${summary.id}: description text differs`)
+    if ((layer.refreshIntervalMs ?? null) !== (summary.refreshIntervalMs ?? null)) mismatches.push(`${summary.id}: refreshIntervalMs ${summary.refreshIntervalMs} !== ${layer.refreshIntervalMs}`)
   }
   results.push(check('every_summary_entry_matches_its_catalog_entry', mismatches.length === 0, mismatches.join(' | ')))
 

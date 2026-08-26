@@ -262,6 +262,9 @@ import { ssbNorwayAdapter } from '@/lib/research-engine/providers/ssbNorway'
 import { statfinFinlandAdapter } from '@/lib/research-engine/providers/statfinFinland'
 import { statisticsDenmarkAdapter } from '@/lib/research-engine/providers/statisticsDenmark'
 import { unDesaPopulationAdapter } from '@/lib/research-engine/providers/unDesaPopulation'
+import { nhcCurrentStormsAdapter } from '@/lib/research-engine/providers/nhcCurrentStorms'
+import { nasaEonetAdapter } from '@/lib/research-engine/providers/nasaEonet'
+import { tsunamiGovAdapter } from '@/lib/research-engine/providers/tsunamiGov'
 import { IMPLEMENTED_PROVIDER_ADAPTERS } from '@/lib/research-engine/providers/registry'
 import type { ResearchDocument, ResearchProviderId } from '@/lib/research-engine/core/types'
 
@@ -428,7 +431,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const add = async (id: string, fn: () => boolean | string | Promise<boolean | string>) => results.push(await test(id, fn))
 
   await add('re_01_all_31_providers_registered', () =>
-    RESEARCH_PROVIDER_ENV.length === 254 || `expected 254 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 257 || `expected 257 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_02_missing_required_env_not_configured', () => {
     const emptyEnv = { NODE_ENV: 'test' } as NodeJS.ProcessEnv
@@ -926,7 +929,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       guide_to_pharmacology: ['search'],
       clinpgx: ['search'],
       pbdb: ['search'],
-      nws_weather: ['search'],
+      nws_weather: ['search', 'geoSearch'],
       japan_egov_hourei: ['search'],
       australia_frl: ['search'],
       uk_gazette: ['search'],
@@ -1020,6 +1023,9 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       statfin_finland: ['timeSeries'],
       statistics_denmark: ['timeSeries'],
       un_desa_population: ['search'],
+      nhc_current_storms: ['list', 'geoSearch'],
+      nasa_eonet: ['list', 'geoSearch'],
+      tsunami_gov: ['list'],
     }
     const implemented = RESEARCH_PROVIDER_ENV.filter(descriptor => descriptor.implemented)
     const offenders = implemented.filter(descriptor => {
@@ -1792,13 +1798,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const UNAUTHORIZED_BATCH_1_IDS = ['world_bank_data_catalog', 'world_bank_finances', 'world_bank_climate'] as const
 
   await add('re_100_registered_provider_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 254 || `expected 254 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 257 || `expected 257 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_101_implemented_count_derives_to_24_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 250 && implementedAdapters === 250)
-      || `expected 250 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 253 && implementedAdapters === 253)
+      || `expected 253 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -3090,11 +3096,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_229_final_provider_descriptor_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 254 || `expected 254 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 257 || `expected 257 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_230_final_implemented_count_is_24', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 250 || `expected 250 implemented adapters, found ${count}`
+    return count === 253 || `expected 253 implemented adapters, found ${count}`
   })
 
   await add('re_231_final_unimplemented_count_is_7', () => {
@@ -4172,8 +4178,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const totalCount = RESEARCH_PROVIDER_ENV.length
     const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return (descriptor?.implemented === true && totalCount === 254 && implementedCount === 250 && blockedCount === 4)
-      || `expected fmcsa implemented plus a 250/4 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+    return (descriptor?.implemented === true && totalCount === 257 && implementedCount === 253 && blockedCount === 4)
+      || `expected fmcsa implemented plus a 253/4 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
   })
 
   await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {
@@ -6470,6 +6476,99 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const coordinates = response.geoFeatures[0]?.coordinates as number[] | undefined
     if (response.geoFeatures.length !== 1 || coordinates?.[0] !== 18.6) return `expected one geoFeature carrying real coordinates, got ${JSON.stringify(response.geoFeatures)}`
     return documentShapeIssue(response.documents[0], 'un_desa_population') ?? true
+  }))
+
+  // --- Terra Phase 5 (2026-08-26): live planetary hazard intelligence providers ---
+
+  await add('re_936_nhc_current_storms_success_normalizes_active_storm', () => withAdapterFetch([
+    jsonResponse({ activeStorms: [{ id: 'ep092026', binNumber: 'EP4', name: 'Iselle', classification: 'TS', intensity: '45', pressure: '996', latitude: '21.3N', longitude: '122.5W', latitudeNumeric: 21.3, longitudeNumeric: -122.5, movementDir: 285, movementSpeed: 9, lastUpdate: '2026-08-26T03:00:00.000Z', publicAdvisory: { advNum: '011', issuance: '2026-08-26T03:00:00.000Z', url: 'https://www.nhc.noaa.gov/text/MIATCPEP4.shtml' }, forecastTrack: { kmzFile: 'https://www.nhc.noaa.gov/storm_graphics/api/EP092026_011adv_TRACK.kmz' } }] }),
+  ], async () => {
+    const response = await nhcCurrentStormsAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0 || response.geoFeatures.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const nhcCoords = response.geoFeatures[0].coordinates as number[]
+    if (nhcCoords?.[0] !== -122.5 || nhcCoords?.[1] !== 21.3) return `unexpected coordinates: ${JSON.stringify(response.geoFeatures[0].coordinates)}`
+    if ((response.geoFeatures[0].properties as Record<string, unknown>).basin !== 'EP') return `expected basin EP derived from binNumber, got ${JSON.stringify(response.geoFeatures[0].properties)}`
+    return documentShapeIssue(response.documents[0], 'nhc_current_storms') ?? true
+  }))
+
+  await add('re_936b_nhc_current_storms_missing_coordinates_are_skipped', () => withAdapterFetch([
+    jsonResponse({ activeStorms: [{ id: 'no-coords', name: 'Ghost', classification: 'TS' }] }),
+  ], async () => {
+    const response = await nhcCurrentStormsAdapter.run({ text: '' })
+    if (!response.ok) return `expected ok success, got ${JSON.stringify(response)}`
+    return (response.documents.length === 0 && response.geoFeatures.length === 0) || `expected storm without coordinates to be skipped, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_937_nasa_eonet_success_normalizes_wildfire', () => withAdapterFetch([
+    jsonResponse({ events: [{ id: 'EONET_23209', title: 'Wildfire Old Deer, Carson, Texas', link: 'https://eonet.gsfc.nasa.gov/api/v3/events/EONET_23209', categories: [{ id: 'wildfires' }], sources: [{ id: 'IRWIN', url: 'https://irwin.doi.gov/observer/incidents/2026-TXTXS-267516' }], geometry: [{ date: '2026-08-23T20:38:00Z', type: 'Point', coordinates: [-101.217, 35.4635], magnitudeValue: 676, magnitudeUnit: 'acres' }] }] }),
+  ], async () => {
+    const response = await nasaEonetAdapter.run({ text: 'wildfires' })
+    if (!response.ok || response.documents.length === 0 || response.geoFeatures.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const eonetCoords = response.geoFeatures[0].coordinates as number[]
+    if (eonetCoords?.[0] !== -101.217) return `unexpected coordinates: ${JSON.stringify(response.geoFeatures[0].coordinates)}`
+    return documentShapeIssue(response.documents[0], 'nasa_eonet') ?? true
+  }))
+
+  await add('re_937b_nasa_eonet_rejects_invalid_category', () => withAdapterFetch([], async () => {
+    const response = await nasaEonetAdapter.run({ text: 'not-a-real-category' })
+    return (!response.ok && response.documents.length === 0) || `expected an error for an unallowlisted category, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_937c_nasa_eonet_uses_most_recent_geometry_by_date_not_array_order', () => withAdapterFetch([
+    jsonResponse({ events: [{ id: 'EONET_TEST', title: 'Test Event', categories: [{ id: 'volcanoes' }], geometry: [
+      { date: '2026-08-25T00:00:00Z', type: 'Point', coordinates: [10, 10] },
+      { date: '2026-08-20T00:00:00Z', type: 'Point', coordinates: [20, 20] },
+    ] }] }),
+  ], async () => {
+    const response = await nasaEonetAdapter.run({ text: 'volcanoes' })
+    const volcCoords = response.geoFeatures[0]?.coordinates as number[] | undefined
+    return volcCoords?.[0] === 10 || `expected the chronologically latest geometry (2026-08-25), got ${JSON.stringify(response.geoFeatures[0]?.coordinates)}`
+  }))
+
+  await add('re_938_tsunami_gov_success_parses_atom_entry', () => withAdapterFetch([
+    textResponse('<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:geo="http://www.w3.org/2003/01/geo/wgs84_pos#"><entry><title>60 miles SE of Iliamna, Alaska</title><updated>2026-08-24T20:21:42Z</updated><geo:lat>59.000</geo:lat><geo:long>-154.300</geo:long><summary type="xhtml"><![CDATA[<strong>Category:</strong> Information<br/><strong>Preliminary Magnitude: </strong>4.1(Mwp)<br/><strong>Affected Region: </strong>60 miles SE of Iliamna, Alaska<br/>]]></summary><id>urn:uuid:test-1</id><link rel="alternate" title="Bulletin" href="https://www.tsunami.gov/events/PAAQ/test/WEAK53.txt" type="application/xml" /></entry></feed>', 200, 'application/xml'),
+  ], async () => {
+    const response = await tsunamiGovAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const doc = response.documents[0]
+    if (doc.geography !== 'lat 59, lon -154.3') return `expected parsed geo:lat/geo:long, got ${JSON.stringify(doc.geography)}`
+    if (doc.identifiers.category !== 'Information') return `expected real NOAA category preserved verbatim, got ${JSON.stringify(doc.identifiers)}`
+    return documentShapeIssue(doc, 'tsunami_gov') ?? true
+  }))
+
+  await add('re_938b_tsunami_gov_empty_feed_is_empty_not_an_error', () => withAdapterFetch([
+    textResponse('<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>', 200, 'application/xml'),
+  ], async () => {
+    const response = await tsunamiGovAdapter.run({ text: '' })
+    return (response.ok && response.documents.length === 0) || `expected an honest empty result, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_939_nws_weather_alerts_success_normalizes_polygon_alert', () => withAdapterFetch([
+    jsonResponse({ features: [{
+      properties: { id: 'urn:oid:test-alert-1', areaDesc: 'Potter, TX', event: 'Flood Advisory', severity: 'Minor', certainty: 'Observed', urgency: 'Expected', status: 'Actual', messageType: 'Alert', category: 'Met', headline: 'Flood Advisory issued', senderName: 'NWS Amarillo TX', sent: '2026-08-25T23:12:00-05:00', effective: '2026-08-25T23:12:00-05:00', expires: '2026-08-26T02:00:00-05:00', web: 'https://alerts.weather.gov/test' },
+      geometry: { type: 'Polygon', coordinates: [[[-101.93, 35.53], [-101.81, 35.62], [-101.62, 35.62], [-101.72, 35.37], [-101.93, 35.53]]] },
+    }] }),
+  ], async () => {
+    const response = await nwsWeatherAdapter.run({ text: 'alerts' })
+    if (!response.ok || response.documents.length === 0 || response.geoFeatures.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.geoFeatures[0].geometryType !== 'Polygon') return `expected a preserved real Polygon geometry, got ${response.geoFeatures[0].geometryType}`
+    if (response.documents[0].identifiers.severity !== 'Minor') return `expected real NWS severity preserved verbatim (never reinterpreted), got ${JSON.stringify(response.documents[0].identifiers)}`
+    return documentShapeIssue(response.documents[0], 'nws_weather') ?? true
+  }))
+
+  await add('re_939b_nws_weather_alerts_zone_only_alert_has_no_geo_feature', () => withAdapterFetch([
+    jsonResponse({ features: [{ properties: { id: 'urn:oid:test-alert-2', areaDesc: 'Some County', event: 'Heat Advisory', severity: 'Moderate', certainty: 'Likely', urgency: 'Expected', status: 'Actual' }, geometry: null }] }),
+  ], async () => {
+    const response = await nwsWeatherAdapter.run({ text: 'alerts' })
+    return (response.ok && response.documents.length === 1 && response.geoFeatures.length === 0) || `expected a zone-only (geometry: null) alert to produce a document but no geoFeature (never a fabricated point), got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_939c_nws_weather_forecast_mode_still_dispatches_correctly_alongside_alerts', () => withAdapterFetch([
+    jsonResponse({ properties: { forecast: 'https://api.weather.gov/gridpoints/LWX/97,71/forecast', relativeLocation: { properties: { city: 'Washington', state: 'DC' } } } }),
+    jsonResponse({ properties: { periods: [{ name: 'Tonight', startTime: '2024-01-01T18:00:00-05:00' }] } }),
+  ], async () => {
+    const response = await nwsWeatherAdapter.run({ text: '38.8894,-77.0352' })
+    return (response.ok && response.documents.length === 1 && response.documents[0].contentType === 'weather_forecast') || `forecast dispatch regressed after adding alerts capability: ${JSON.stringify(response)}`
   }))
 
   return results

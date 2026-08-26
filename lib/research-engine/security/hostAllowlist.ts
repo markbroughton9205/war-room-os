@@ -263,6 +263,9 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   statfin_finland: ['statfin.stat.fi'],
   statistics_denmark: ['api.statbank.dk'],
   un_desa_population: ['population.un.org'],
+  nhc_current_storms: ['www.nhc.noaa.gov'],
+  nasa_eonet: ['eonet.gsfc.nasa.gov'],
+  tsunami_gov: ['www.tsunami.gov'],
 }
 
 export function isAllowedHost(provider: ResearchProviderId, hostname: string): boolean {

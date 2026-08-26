@@ -47,6 +47,21 @@ export type TerraIntelligenceDomain = (typeof TERRA_INTELLIGENCE_DOMAINS)[number
  *     resolved near a given point (Phase 4)
  *   - 'weather_observation': met_no, open_meteo (Phase 4)
  *   - 'biodiversity_observation': obis, gbif (Phase 4)
+ *   - 'tropical_cyclone': nhc_current_storms — current observed position only; the real forecast
+ *     track/cone are published as zip/KMZ GIS files this codebase does not parse this phase, so no
+ *     forecast track is represented (never approximated as a fake one) (Phase 5)
+ *   - 'wildfire_incident': nasa_eonet (category=wildfires) — a named incident (e.g. via IRWIN),
+ *     distinct in kind from a raw satellite thermal-anomaly detection, which no integrated
+ *     provider supplies this phase (Phase 5)
+ *   - 'volcano_event': nasa_eonet (category=volcanoes) (Phase 5)
+ *   - 'flood_event': nasa_eonet (category=floods) (Phase 5)
+ *   - 'severe_weather_alert': nws_weather (alerts capability) — a real NWS CAP alert (Severe
+ *     Thunderstorm Warning, Flash Flood Warning, Red Flag Warning, etc.); the real `event` string
+ *     and severity/urgency/certainty are preserved verbatim in `properties`, never reinterpreted
+ *     into a War Room-invented severity scale (Phase 5)
+ *   - 'tsunami_alert': tsunami_gov — the real NOAA category (Information/Watch/Advisory/Warning)
+ *     preserved verbatim; most real entries are "Information" statements confirming no danger,
+ *     which is the honest common case (Phase 5)
  */
 export const TERRA_INTELLIGENCE_EVENT_KINDS = [
   'earthquake',
@@ -57,6 +72,12 @@ export const TERRA_INTELLIGENCE_EVENT_KINDS = [
   'geographic_feature',
   'weather_observation',
   'biodiversity_observation',
+  'tropical_cyclone',
+  'wildfire_incident',
+  'volcano_event',
+  'flood_event',
+  'severe_weather_alert',
+  'tsunami_alert',
 ] as const
 export type TerraIntelligenceEventKind = (typeof TERRA_INTELLIGENCE_EVENT_KINDS)[number]
 
@@ -94,13 +115,29 @@ export const TERRA_COORDINATE_ORIGINS = ['observed', 'source_embedded', 'resolve
 export type TerraCoordinateOrigin = (typeof TERRA_COORDINATE_ORIGINS)[number]
 
 /**
- * A single geographic point, in decimal degrees, WGS84 — the only geometry kind implemented this
- * phase. `region` (a bounding area) and `path` (a track/route) are real, anticipated future needs
- * (per the Phase 2 mission's "future-safe region/path capability") deliberately left unimplemented
- * — adding either is a new union member, additive, not a rewrite of this type or of
- * projectTerraIntelligenceEvent.ts's point-only projection logic.
+ * A single geographic point, in decimal degrees, WGS84 — the point-only geometry every Phase 1-4
+ * layer used.
  */
-export type TerraGeography = { kind: 'point'; longitude: number; latitude: number; altitude: number | null; coordinateOrigin: TerraCoordinateOrigin }
+export type TerraPointGeography = { kind: 'point'; longitude: number; latitude: number; altitude: number | null; coordinateOrigin: TerraCoordinateOrigin }
+
+/**
+ * A polygon area, in decimal degrees WGS84 — added Phase 5, backed by real inline GeoJSON Polygon
+ * data (NWS CAP alert warning areas), not a bounding-box approximation invented here. `rings`
+ * mirrors GeoJSON Polygon.coordinates exactly: the first ring is the exterior boundary, any
+ * further rings are holes (none of Terra's Phase 5 sources emit holes, but the shape is kept
+ * spec-faithful rather than narrowed to "one ring" and needing a breaking change later).
+ * MultiPolygon inputs are honestly skipped upstream (lib/terra/normalizeNwsAlerts.ts), not
+ * collapsed into one ring here.
+ *
+ * `path` (a track/route — e.g. a tropical cyclone's forecast track) remains deliberately
+ * unimplemented this phase: no integrated Phase 5 source exposes an inline, parseable track
+ * (NHC's real forecast track is only published as zip/KMZ GIS files) — adding `path` without a
+ * real backing source would be exactly the "giant generic GIS abstraction" the Phase 5 mission
+ * warned against building speculatively.
+ */
+export type TerraRegionGeography = { kind: 'region'; rings: number[][][]; coordinateOrigin: TerraCoordinateOrigin }
+
+export type TerraGeography = TerraPointGeography | TerraRegionGeography
 
 /**
  * The result of one lib/terra/resolveGeography.ts lookup (Phase 4) — the ONLY sanctioned way an
@@ -225,6 +262,10 @@ export type TerraGeoFeature = {
   eventId: string
   providerId: ResearchProviderId
   kind: TerraIntelligenceEventKind
+  /** For geometryKind 'region', the real polygon's vertex-average centroid (a simple mean of the
+   * exterior ring's real vertices, computed in lib/terra/projectTerraIntelligenceEvent.ts — never
+   * an area-weighted centroid, and never fabricated) — used for click-target/label placement, not
+   * claimed to be an "observed position." */
   longitude: number
   latitude: number
   altitude: number | null
@@ -239,6 +280,13 @@ export type TerraGeoFeature = {
   coordinateOrigin: TerraCoordinateOrigin
   /** Mirrors the source event's geoResolution — present only when coordinateOrigin === 'resolved'. */
   geoResolution: TerraResolvedGeography | null
+  /** 'point' for every Phase 1-4 layer and most Phase 5 layers; 'region' only for a real
+   * polygon-bearing event (Phase 5's severe_weather_alert). Renderers branch on this, never on
+   * providerId. */
+  geometryKind: 'point' | 'region'
+  /** Real polygon vertices (GeoJSON Polygon.coordinates shape) — present only when geometryKind
+   * is 'region'; null for every point feature. */
+  regionRings: number[][][] | null
 }
 
 /**
@@ -280,4 +328,13 @@ export type TerraLayerDefinition = {
    * `await`ing an already-resolved synchronous value is a no-op, so every existing normalizer
    * needed no change for this to become additive rather than a breaking signature change. */
   normalize: (response: ResearchProviderResponse) => NormalizeResult | Promise<NormalizeResult>
+  /** How often useTerraLayer's auto-refresh timer re-fetches this layer, in milliseconds — Phase
+   * 5's source-appropriate refresh policy (mission section 10): a fixed feed like NHC's active
+   * storms or NWS alerts genuinely changes over minutes, while a slower-moving catalog like EONET
+   * incidents or a gazetteer search does not need the same cadence. Always well above the
+   * Research Engine's own live-feed cache TTL (60s) for that layer's provider, so an "aggressive"
+   * refresh setting still mostly re-reads the existing server cache rather than forcing a real
+   * upstream call. Optional — defaults to 120_000 (Phase 1-4's original fixed interval) when
+   * omitted, so every pre-Phase-5 catalog entry needed no change. */
+  refreshIntervalMs?: number
 }

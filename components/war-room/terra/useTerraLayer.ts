@@ -26,11 +26,14 @@ export type TerraLayerFeedResult = {
   refresh: () => void
 }
 
-// Conservative — well above the Research Engine's own live-feed cache TTL (lib/research-engine/
-// cache/ttlCache.ts CACHE_TTL.liveFeed=60s), so an automatic refresh is very unlikely to ever
-// force a real upstream call; it mostly re-reads the existing server cache. A plain interval
-// timer, cleared on unmount — no background job/worker/queue introduced.
-const AUTO_REFRESH_MS = 120_000
+// The Phase 1-4 default, still used by every layer that doesn't declare its own
+// refreshIntervalMs — well above the Research Engine's own live-feed cache TTL
+// (lib/research-engine/cache/ttlCache.ts CACHE_TTL.liveFeed=60s), so an automatic refresh is very
+// unlikely to ever force a real upstream call; it mostly re-reads the existing server cache. A
+// plain interval timer, cleared on unmount — no background job/worker/queue introduced. Phase 5
+// lets a layer override this (lib/terra/layerCatalogSummary.ts's refreshIntervalMs) for a
+// source-appropriate cadence rather than one fixed rate for every hazard feed.
+const DEFAULT_AUTO_REFRESH_MS = 120_000
 
 type ApiResponse = {
   status: 'success' | 'empty' | 'error'
@@ -41,7 +44,7 @@ type ApiResponse = {
   error: { message: string } | null
 }
 
-export function useTerraLayer(layerId: string, enabled: boolean): TerraLayerFeedResult {
+export function useTerraLayer(layerId: string, enabled: boolean, refreshIntervalMs: number = DEFAULT_AUTO_REFRESH_MS): TerraLayerFeedResult {
   const [state, setState] = useState<TerraLayerFeedState>('loading')
   const [features, setFeatures] = useState<TerraGeoFeature[]>([])
   const [skippedCount, setSkippedCount] = useState(0)
@@ -90,12 +93,12 @@ export function useTerraLayer(layerId: string, enabled: boolean): TerraLayerFeed
     // before its first await, and this repo's lint rules treat a synchronous setState-from-effect
     // as a cascading-render risk. A zero-delay timeout is the standard escape hatch.
     const kickoff = setTimeout(() => void load(), 0)
-    const interval = setInterval(() => void load(), AUTO_REFRESH_MS)
+    const interval = setInterval(() => void load(), refreshIntervalMs)
     return () => {
       clearTimeout(kickoff)
       clearInterval(interval)
     }
-  }, [enabled, load])
+  }, [enabled, load, refreshIntervalMs])
 
   return {
     state: enabled ? state : 'empty',

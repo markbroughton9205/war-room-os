@@ -4,29 +4,35 @@
  *   TerraIntelligenceEvent -> TerraGeoFeature (Cesium rendering projection)
  *
  * Deliberately provider-agnostic and kind-agnostic — it knows nothing about earthquakes, USGS, or
- * any other domain. Any current or future TerraIntelligenceEvent with a point geography projects
- * through this exact function; there is no per-domain projector to keep in sync.
+ * any other domain. Any current or future TerraIntelligenceEvent with a projectable geography
+ * projects through this exact function; there is no per-domain projector to keep in sync.
  *
- * Pure, side-effect-free: no network, no Cesium import (Cesium-specific Entity construction stays
- * in components/war-room/terra/TerraEarthquakeLayer.tsx, which only needs plain numbers).
+ * Pure, side-effect-free: no network, no Cesium import (Cesium-specific Entity/Polygon
+ * construction stays in components/war-room/terra/TerraFeatureLayer.tsx, which only needs plain
+ * numbers).
  */
 import type { TerraGeoFeature, TerraIntelligenceEvent } from '@/lib/terra/types'
 
-/** Null when the event has no (yet) projectable geography — an honest, expected outcome, not an
- * error. Only 'point' geography is implemented; a future 'region'/'path' geometry kind would need
- * its own case here (and, likely, a different Terra rendering component — a bounding area or a
- * track isn't a single Cesium point Entity), not a silent point-only approximation of it. */
-export function projectTerraIntelligenceEventToGeoFeature(event: TerraIntelligenceEvent): TerraGeoFeature | null {
-  if (!event.geography || event.geography.kind !== 'point') return null
+/** The real exterior ring's simple vertex-average — never an area-weighted centroid, and never
+ * fabricated: every coordinate averaged is a real vertex the source itself supplied. Used only as
+ * a representative click-target/label point for a region geometry; the real ring is preserved
+ * separately in TerraGeoFeature.regionRings for the renderer to draw. */
+function ringCentroid(exteriorRing: number[][]): { longitude: number; latitude: number } {
+  const sum = exteriorRing.reduce((acc, [lon, lat]) => ({ lon: acc.lon + lon, lat: acc.lat + lat }), { lon: 0, lat: 0 })
+  return { longitude: sum.lon / exteriorRing.length, latitude: sum.lat / exteriorRing.length }
+}
 
-  return {
+/** Null when the event has no (yet) projectable geography — an honest, expected outcome, not an
+ * error. Both 'point' and 'region' geometry kinds are implemented; a future 'path' geometry kind
+ * would need its own case here, not a silent point-only approximation of it. */
+export function projectTerraIntelligenceEventToGeoFeature(event: TerraIntelligenceEvent): TerraGeoFeature | null {
+  if (!event.geography) return null
+
+  const base = {
     id: event.id,
     eventId: event.id,
     providerId: event.providerId,
     kind: event.kind,
-    longitude: event.geography.longitude,
-    latitude: event.geography.latitude,
-    altitude: event.geography.altitude,
     timestamp: event.observedAt ?? event.publishedAt ?? null,
     title: event.title,
     summary: event.summary,
@@ -36,6 +42,33 @@ export function projectTerraIntelligenceEventToGeoFeature(event: TerraIntelligen
     coordinateOrigin: event.geography.coordinateOrigin,
     geoResolution: event.geoResolution,
   }
+
+  if (event.geography.kind === 'point') {
+    return {
+      ...base,
+      longitude: event.geography.longitude,
+      latitude: event.geography.latitude,
+      altitude: event.geography.altitude,
+      geometryKind: 'point',
+      regionRings: null,
+    }
+  }
+
+  if (event.geography.kind === 'region') {
+    const exteriorRing = event.geography.rings[0]
+    if (!exteriorRing || exteriorRing.length < 3) return null
+    const centroid = ringCentroid(exteriorRing)
+    return {
+      ...base,
+      longitude: centroid.longitude,
+      latitude: centroid.latitude,
+      altitude: null,
+      geometryKind: 'region',
+      regionRings: event.geography.rings,
+    }
+  }
+
+  return null
 }
 
 export function projectTerraIntelligenceEvents(events: TerraIntelligenceEvent[]): TerraGeoFeature[] {

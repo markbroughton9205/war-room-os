@@ -22,6 +22,7 @@ function check(name: string, pass: boolean, detail: string): CaseResult {
 const REQUIRES_NON_EMPTY_QUERY_TEXT = new Set([
   'usgs_water', 'opensky', 'idai_gazetteer', 'nominatim', 'pleiades', 'whg',
   'osm_overpass', 'ohm_overpass', 'met_no', 'open_meteo', 'obis', 'gbif', 'edh',
+  'nasa_eonet', 'nws_weather',
 ])
 
 function run(): CaseResult[] {
@@ -51,6 +52,16 @@ function run(): CaseResult[] {
   // from the LATENT_GEO_SAFE layers around it.
   const edh = TERRA_LAYER_CATALOG.find(l => l.id === 'edh')
   results.push(check('edh_geo_resolution_layer_is_cataloged', edh?.providerId === 'edh' && edh?.kind === 'heritage_site', `edh=${JSON.stringify(edh)}`))
+
+  // Phase 5: hazard layers with genuinely different update cadences must declare a distinct,
+  // source-appropriate refreshIntervalMs — not silently share one fixed rate.
+  const nhc = TERRA_LAYER_CATALOG.find(l => l.id === 'nhc_current_storms')
+  const eonetWildfires = TERRA_LAYER_CATALOG.find(l => l.id === 'nasa_eonet_wildfires')
+  results.push(check('hazard_layers_with_slower_cadences_declare_a_refresh_override', typeof nhc?.refreshIntervalMs === 'number' && typeof eonetWildfires?.refreshIntervalMs === 'number', `nhc=${nhc?.refreshIntervalMs} eonet=${eonetWildfires?.refreshIntervalMs}`))
+  results.push(check('refresh_overrides_are_not_all_identical_to_each_other', nhc?.refreshIntervalMs !== eonetWildfires?.refreshIntervalMs, `nhc=${nhc?.refreshIntervalMs} eonet=${eonetWildfires?.refreshIntervalMs}`))
+
+  const badRefresh = TERRA_LAYER_CATALOG.find(l => typeof l.refreshIntervalMs === 'number' && l.refreshIntervalMs < 60_000)
+  results.push(check('no_refresh_interval_is_faster_than_a_reasonable_floor', !badRefresh, `offender=${badRefresh?.id} refreshIntervalMs=${badRefresh?.refreshIntervalMs}`))
 
   return results
 }

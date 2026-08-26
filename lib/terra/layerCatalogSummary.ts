@@ -19,6 +19,9 @@ export type TerraLayerSummary = {
   domain: TerraIntelligenceDomain
   kind: TerraIntelligenceEventKind
   description: string
+  /** Mirrors TerraLayerDefinition.refreshIntervalMs — undefined means "use useTerraLayer's own
+   * default," not "never refresh." */
+  refreshIntervalMs?: number
 }
 
 export const TERRA_LAYER_SUMMARIES: TerraLayerSummary[] = [
@@ -37,4 +40,10 @@ export const TERRA_LAYER_SUMMARIES: TerraLayerSummary[] = [
   { id: 'obis', label: 'Ocean Biodiversity Observations (OBIS)', domain: 'science', kind: 'biodiversity_observation', description: 'Marine species occurrence records from the Ocean Biodiversity Information System.' },
   { id: 'gbif', label: 'Species Occurrences (GBIF)', domain: 'science', kind: 'biodiversity_observation', description: 'Species occurrence records from the Global Biodiversity Information Facility.' },
   { id: 'edh', label: 'Roman Inscriptions (EDH) — Geo-Resolved', domain: 'research', kind: 'heritage_site', description: 'Epigraphic Database Heidelberg Roman inscriptions, geo-resolved by modern region/country name via nominatim.' },
+  { id: 'nhc_current_storms', label: 'Active Tropical Cyclones (NHC)', domain: 'hazards', kind: 'tropical_cyclone', description: 'NOAA National Hurricane Center — every currently active tropical/subtropical/post-tropical cyclone, all basins. Current observed position only; forecast track is linked, not rendered.', refreshIntervalMs: 5 * 60 * 1000 },
+  { id: 'nasa_eonet_wildfires', label: 'Active Wildfires (NASA EONET)', domain: 'hazards', kind: 'wildfire_incident', description: 'Named wildfire incidents (e.g. via IRWIN), not raw satellite thermal-anomaly detections — NASA EONET, category=wildfires.', refreshIntervalMs: 10 * 60 * 1000 },
+  { id: 'nasa_eonet_volcanoes', label: 'Active Volcanic Activity (NASA EONET)', domain: 'hazards', kind: 'volcano_event', description: 'Currently active volcanoes (Smithsonian Global Volcanism Program via NASA EONET, category=volcanoes).', refreshIntervalMs: 10 * 60 * 1000 },
+  { id: 'nasa_eonet_floods', label: 'Active Floods (NASA EONET)', domain: 'hazards', kind: 'flood_event', description: 'Currently open flood events (NASA EONET, category=floods) — may legitimately be empty; a real empty result, never a fabricated one.', refreshIntervalMs: 10 * 60 * 1000 },
+  { id: 'nws_severe_weather_alerts', label: 'Severe Weather Alerts (NWS)', domain: 'hazards', kind: 'severe_weather_alert', description: 'Real NOAA/NWS CAP alerts (Severe Thunderstorm Warning, Flash Flood Warning, Red Flag Warning, etc.) with real polygon warning areas.' },
+  { id: 'tsunami_gov', label: 'Tsunami Bulletins (NOAA NTWC)', domain: 'hazards', kind: 'tsunami_alert', description: 'NOAA National Tsunami Warning Center bulletins. Most real entries are "Information" statements confirming no danger — the honest common case, not a broken feed.' },
 ]

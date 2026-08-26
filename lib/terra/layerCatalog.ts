@@ -17,11 +17,22 @@ import 'server-only'
  * gbif.ts) through the SAME normalizeLatentGeoDocuments boundary Phase 3 built, plus one
  * ENTITY_GEO_RESOLVABLE entry (edh) proving the new geo-resolution boundary
  * (lib/terra/resolveGeography.ts, lib/terra/normalizeEdhInscriptions.ts) end to end.
+ *
+ * Phase 5 adds Terra's first live planetary HAZARD intelligence family: nhc_current_storms
+ * (tropical_cyclone — the "active hurricanes" gap Terra Phase 0 identified), nasa_eonet
+ * (wildfire_incident/volcano_event/flood_event — one shared normalizer, three catalog entries),
+ * nws_weather's new alerts capability (severe_weather_alert — Terra's first real polygon/region
+ * geometry), and tsunami_gov (tsunami_alert, reusing the existing LATENT_GEO extraction boundary
+ * unchanged since its `geography` field is already an exact "lat X, lon Y" string). Each declares
+ * a source-appropriate refreshIntervalMs rather than sharing one fixed polling rate.
  */
 import { normalizeUsgsEarthquakeGeoFeatures } from '@/lib/terra/normalizeUsgsEarthquakeGeoFeatures'
 import { normalizeUsgsWaterStations } from '@/lib/terra/normalizeUsgsWaterStations'
 import { normalizeLatentGeoDocuments } from '@/lib/terra/normalizeLatentGeoDocument'
 import { normalizeEdhInscriptions } from '@/lib/terra/normalizeEdhInscriptions'
+import { normalizeNhcCurrentStorms } from '@/lib/terra/normalizeNhcCurrentStorms'
+import { normalizeNasaEonet } from '@/lib/terra/normalizeNasaEonet'
+import { normalizeNwsAlerts } from '@/lib/terra/normalizeNwsAlerts'
 import type { TerraLayerDefinition } from '@/lib/terra/types'
 
 export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
@@ -187,6 +198,79 @@ export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
     description: 'Epigraphic Database Heidelberg Roman inscriptions, geo-resolved by modern region/country name via nominatim.',
     defaultQueryText: 'Roma',
     normalize: normalizeEdhInscriptions,
+  },
+  {
+    id: 'nhc_current_storms',
+    providerId: 'nhc_current_storms',
+    kind: 'tropical_cyclone',
+    domain: 'hazards',
+    label: 'Active Tropical Cyclones (NHC)',
+    description: 'NOAA National Hurricane Center — every currently active tropical/subtropical/post-tropical cyclone, all basins. Current observed position only; forecast track is linked, not rendered.',
+    defaultQueryText: '',
+    // Advisories issue roughly every 6h during a storm's lifecycle (more often near landfall) —
+    // 5 minutes is a responsive-but-bounded check-in, well above the source's own real update
+    // cadence, not a fixed "same as everything else" rate.
+    refreshIntervalMs: 5 * 60 * 1000,
+    normalize: normalizeNhcCurrentStorms,
+  },
+  {
+    id: 'nasa_eonet_wildfires',
+    providerId: 'nasa_eonet',
+    kind: 'wildfire_incident',
+    domain: 'hazards',
+    label: 'Active Wildfires (NASA EONET)',
+    description: 'Named wildfire incidents (e.g. via IRWIN), not raw satellite thermal-anomaly detections — NASA EONET, category=wildfires.',
+    defaultQueryText: 'wildfires',
+    // EONET's own catalog updates on the order of hours, not minutes.
+    refreshIntervalMs: 10 * 60 * 1000,
+    normalize: response => normalizeNasaEonet(response, { kind: 'wildfire_incident', domain: 'hazards' }),
+  },
+  {
+    id: 'nasa_eonet_volcanoes',
+    providerId: 'nasa_eonet',
+    kind: 'volcano_event',
+    domain: 'hazards',
+    label: 'Active Volcanic Activity (NASA EONET)',
+    description: 'Currently active volcanoes (Smithsonian Global Volcanism Program via NASA EONET, category=volcanoes).',
+    defaultQueryText: 'volcanoes',
+    refreshIntervalMs: 10 * 60 * 1000,
+    normalize: response => normalizeNasaEonet(response, { kind: 'volcano_event', domain: 'hazards' }),
+  },
+  {
+    id: 'nasa_eonet_floods',
+    providerId: 'nasa_eonet',
+    kind: 'flood_event',
+    domain: 'hazards',
+    label: 'Active Floods (NASA EONET)',
+    description: 'Currently open flood events (NASA EONET, category=floods) — may legitimately be empty; a real empty result, never a fabricated one.',
+    defaultQueryText: 'floods',
+    refreshIntervalMs: 10 * 60 * 1000,
+    normalize: response => normalizeNasaEonet(response, { kind: 'flood_event', domain: 'hazards' }),
+  },
+  {
+    id: 'nws_severe_weather_alerts',
+    providerId: 'nws_weather',
+    kind: 'severe_weather_alert',
+    domain: 'hazards',
+    label: 'Severe Weather Alerts (NWS)',
+    // Nationwide active alerts — real CAP severity/urgency/certainty preserved verbatim in
+    // properties. Zone-only alerts (no real polygon) are honestly skipped, not geo-resolved from
+    // a compound multi-county area description.
+    description: 'Real NOAA/NWS CAP alerts (Severe Thunderstorm Warning, Flash Flood Warning, Red Flag Warning, etc.) with real polygon warning areas.',
+    defaultQueryText: 'alerts',
+    normalize: normalizeNwsAlerts,
+  },
+  {
+    id: 'tsunami_gov',
+    providerId: 'tsunami_gov',
+    kind: 'tsunami_alert',
+    domain: 'hazards',
+    label: 'Tsunami Bulletins (NOAA NTWC)',
+    // tsunami_gov's own `geography` field is already an exact "lat X, lon Y" string — reuses the
+    // existing LATENT_GEO extraction boundary unchanged, not a new normalizer.
+    description: 'NOAA National Tsunami Warning Center bulletins. Most real entries are "Information" statements confirming no danger — the honest common case, not a broken feed.',
+    defaultQueryText: '',
+    normalize: response => normalizeLatentGeoDocuments(response.documents, { providerId: 'tsunami_gov', kind: 'tsunami_alert', domain: 'hazards' }),
   },
 ]
 

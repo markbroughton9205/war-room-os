@@ -249,6 +249,9 @@ import { ssbNorwayAdapter } from '@/lib/research-engine/providers/ssbNorway'
 import { statfinFinlandAdapter } from '@/lib/research-engine/providers/statfinFinland'
 import { statisticsDenmarkAdapter } from '@/lib/research-engine/providers/statisticsDenmark'
 import { unDesaPopulationAdapter } from '@/lib/research-engine/providers/unDesaPopulation'
+import { nhcCurrentStormsAdapter } from '@/lib/research-engine/providers/nhcCurrentStorms'
+import { nasaEonetAdapter } from '@/lib/research-engine/providers/nasaEonet'
+import { tsunamiGovAdapter } from '@/lib/research-engine/providers/tsunamiGov'
 import { worldBankProjectsAdapter } from '@/lib/research-engine/providers/worldBankProjects'
 import { usgsNationalMapAdapter } from '@/lib/research-engine/providers/usgsNationalMap'
 import { imfSdmxAdapter } from '@/lib/research-engine/providers/imfSdmx'
@@ -508,6 +511,9 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   statfin_finland: statfinFinlandAdapter,
   statistics_denmark: statisticsDenmarkAdapter,
   un_desa_population: unDesaPopulationAdapter,
+  nhc_current_storms: nhcCurrentStormsAdapter,
+  nasa_eonet: nasaEonetAdapter,
+  tsunami_gov: tsunamiGovAdapter,
   world_bank_projects: worldBankProjectsAdapter,
   usgs_national_map: usgsNationalMapAdapter,
   imf_sdmx: imfSdmxAdapter,

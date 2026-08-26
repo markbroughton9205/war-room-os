@@ -263,6 +263,9 @@ export type ResearchProviderId =
   | 'statfin_finland'
   | 'statistics_denmark'
   | 'un_desa_population'
+  | 'nhc_current_storms'
+  | 'nasa_eonet'
+  | 'tsunami_gov'
 
 export type ResearchProviderCategory =
   | 'general_web'
