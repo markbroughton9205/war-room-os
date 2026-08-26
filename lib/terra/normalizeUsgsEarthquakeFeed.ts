@@ -1,12 +1,17 @@
 /**
- * Terra's normalization boundary for usgs_earthquake_feed — the only provider wired into Terra
- * this phase. Pure, side-effect-free: takes exactly what lib/research-engine/providers/
- * usgsEarthquakeFeed.ts's run() already produced (ResearchGeoFeature[] + ResearchDocument[]) and
- * projects it into TerraGeoFeature[]. No network call, no provider-specific fetch logic here —
- * that stays inside the existing adapter, which this function never bypasses or duplicates.
+ * Terra's mapping from usgs_earthquake_feed's raw Research Engine output to the canonical
+ * TerraIntelligenceEvent (Phase 2). Pure, side-effect-free: takes exactly what
+ * lib/research-engine/providers/usgsEarthquakeFeed.ts's run() already produced
+ * (ResearchGeoFeature[] + ResearchDocument[]) and maps it — no network call, no provider-specific
+ * fetch logic here, that stays inside the existing adapter, which this function never bypasses or
+ * duplicates.
+ *
+ * This is the one earthquake-specific mapping function in Terra. Everything downstream of its
+ * output (spatial projection, Cesium rendering) is generic — see
+ * lib/terra/projectTerraIntelligenceEvent.ts, which knows nothing about earthquakes.
  */
 import type { ResearchDocument, ResearchGeoFeature } from '@/lib/research-engine/core/types'
-import type { TerraGeoFeature } from '@/lib/terra/types'
+import type { TerraIntelligenceEvent } from '@/lib/terra/types'
 
 const PROVIDER_ID = 'usgs_earthquake_feed' as const
 
@@ -33,8 +38,9 @@ function isoOrNull(epochMs: unknown): string | null {
 }
 
 export type NormalizeUsgsEarthquakeFeedResult = {
-  features: TerraGeoFeature[]
-  /** geoFeatures that were present but had no legitimately projectable coordinates. */
+  events: TerraIntelligenceEvent[]
+  /** geoFeatures that were present but had no legitimately projectable coordinates — never
+   * silently dropped without being counted. */
   skippedCount: number
 }
 
@@ -43,7 +49,7 @@ export function normalizeUsgsEarthquakeFeed(
   documents: ResearchDocument[],
 ): NormalizeUsgsEarthquakeFeedResult {
   const documentsById = new Map(documents.map(doc => [doc.providerRecordId, doc]))
-  const features: TerraGeoFeature[] = []
+  const events: TerraIntelligenceEvent[] = []
   let skippedCount = 0
 
   for (const geoFeature of geoFeatures) {
@@ -62,44 +68,60 @@ export function normalizeUsgsEarthquakeFeed(
     // surface-level event).
     const altitude = point.depthKm !== null ? -(point.depthKm * 1000) : null
 
-    const timestamp = isoOrNull(props.time) ?? doc?.publishedAt ?? null
+    // USGS's feed gives exactly two distinct timestamps: when the quake happened
+    // (properties.time) and when USGS last revised the record (properties.updated). There is no
+    // third, separately-meaningful "published" timestamp in this source — publishedAt is left
+    // null rather than duplicating observedAt into it just to populate the field.
+    const observedAt = isoOrNull(props.time) ?? doc?.publishedAt ?? null
+    const updatedAt = isoOrNull(props.updated) ?? doc?.updatedAt ?? null
     const place = typeof props.place === 'string' ? props.place : null
     const magnitude = typeof props.mag === 'number' ? props.mag : null
     const title = doc?.title ?? (magnitude !== null ? `M${magnitude} — ${place ?? 'Unknown location'}` : place ?? 'Unknown location')
     const canonicalUrl = typeof props.url === 'string' ? props.url : doc?.canonicalUrl ?? null
 
-    features.push({
+    const provenance = doc
+      ? {
+          provider: doc.provenance.provider,
+          sourceUrl: doc.provenance.sourceUrl || canonicalUrl,
+          retrievedAt: doc.provenance.retrievedAt,
+          fromCache: doc.provenance.fromCache,
+          isHistorical: doc.provenance.isHistorical,
+        }
+      : {
+          // Defensive fallback only — every real usgs_earthquake_feed response pairs each
+          // geoFeature with a document sharing the same id (see the adapter's own features.map
+          // for both arrays). Never expected to execute against real data.
+          provider: PROVIDER_ID,
+          sourceUrl: canonicalUrl,
+          retrievedAt: new Date().toISOString(),
+          fromCache: false,
+          isHistorical: false,
+        }
+
+    events.push({
       id: geoFeature.id,
+      domain: 'hazards',
+      kind: 'earthquake',
       providerId: PROVIDER_ID,
-      kind: PROVIDER_ID,
-      longitude: point.lon,
-      latitude: point.lat,
-      altitude,
-      timestamp,
+      // Raw Research Engine output through the Research Engine's own provider gate, unedited —
+      // this is the only layer class Phase 2 produces. See TerraLayerClass's doc comment for why
+      // the other three are reserved, not defaulted-to.
+      layerClass: 'observed',
       title,
       summary: doc?.summary ?? null,
+      observedAt,
+      publishedAt: null,
+      updatedAt,
+      temporalStatus: provenance.isHistorical ? 'historical' : 'current',
+      geography: { kind: 'point', longitude: point.lon, latitude: point.lat, altitude },
+      // No evidence-scoring pipeline runs on raw USGS feed data this phase — honestly null, never
+      // a fabricated confidence value. See TerraEvidenceClassification's doc comment.
+      evidence: null,
       properties: props,
-      provenance: doc
-        ? {
-            provider: doc.provenance.provider,
-            sourceUrl: doc.provenance.sourceUrl || canonicalUrl,
-            retrievedAt: doc.provenance.retrievedAt,
-            fromCache: doc.provenance.fromCache,
-            isHistorical: doc.provenance.isHistorical,
-          }
-        : {
-            // Defensive fallback only — every real usgs_earthquake_feed response pairs each
-            // geoFeature with a document sharing the same id (see the adapter's own
-            // features.map for both arrays). Never expected to execute against real data.
-            provider: PROVIDER_ID,
-            sourceUrl: canonicalUrl,
-            retrievedAt: new Date().toISOString(),
-            fromCache: false,
-            isHistorical: false,
-          },
-      rawReference: { documentId: doc?.id ?? null, canonicalUrl },
+      provenance,
+      rawReference: { documentId: doc?.id ?? null, providerRecordId: geoFeature.id, canonicalUrl },
     })
   }
 
-  return { features, skippedCount }
+  return { events, skippedCount }
 }

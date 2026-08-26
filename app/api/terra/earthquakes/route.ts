@@ -2,12 +2,15 @@ import { NextResponse } from 'next/server'
 import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { executeResearch } from '@/lib/research-engine/core/execute'
 import { normalizeUsgsEarthquakeFeed } from '@/lib/terra/normalizeUsgsEarthquakeFeed'
+import { projectTerraIntelligenceEvents } from '@/lib/terra/projectTerraIntelligenceEvent'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /**
- * Terra's earthquake layer data route — Phase 1's single wired source.
+ * Terra's earthquake layer data route — Phase 1's single wired source, now (Phase 2) flowing
+ * through the canonical TerraIntelligenceEvent model rather than mapping straight to a
+ * Cesium-shaped feature.
  *
  * This does not call USGS directly and does not implement a second USGS client: it calls
  * executeResearch(), the exact same Research Engine entry point app/api/research/search/route.ts
@@ -19,6 +22,10 @@ export const dynamic = 'force-dynamic'
  * Query text is left empty, which the adapter's own parseFeedSelection() resolves to its
  * documented conservative default (magnitude 4.5, past day) — a deliberate, already-existing
  * provider decision, not a new one made here.
+ *
+ * The response shape (`features: TerraGeoFeature[]`) is unchanged from Phase 1 on purpose —
+ * useTerraEarthquakeFeed.ts and TerraEarthquakeLayer.tsx need no changes; only the server-side
+ * pipeline that produces `features` now runs through TerraIntelligenceEvent first.
  */
 export async function GET() {
   const commander = await requireCommanderSession('Terra earthquake layer')
@@ -51,7 +58,8 @@ export async function GET() {
     })
   }
 
-  const { features, skippedCount } = normalizeUsgsEarthquakeFeed(providerResponse.geoFeatures, providerResponse.documents)
+  const { events, skippedCount } = normalizeUsgsEarthquakeFeed(providerResponse.geoFeatures, providerResponse.documents)
+  const features = projectTerraIntelligenceEvents(events)
 
   return NextResponse.json({
     tool: 'terra-earthquakes',
