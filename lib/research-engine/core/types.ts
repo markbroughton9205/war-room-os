@@ -258,6 +258,11 @@ export type ResearchProviderId =
   | 'w3c_api'
   | 'wto_timeseries'
   | 'e_stat_japan'
+  | 'scb_sweden'
+  | 'ssb_norway'
+  | 'statfin_finland'
+  | 'statistics_denmark'
+  | 'un_desa_population'
 
 export type ResearchProviderCategory =
   | 'general_web'

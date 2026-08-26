@@ -257,6 +257,11 @@ import { eStatJapanAdapter } from '@/lib/research-engine/providers/eStatJapan'
 import { worldBankProjectsAdapter } from '@/lib/research-engine/providers/worldBankProjects'
 import { usgsNationalMapAdapter } from '@/lib/research-engine/providers/usgsNationalMap'
 import { imfSdmxAdapter } from '@/lib/research-engine/providers/imfSdmx'
+import { scbSwedenAdapter } from '@/lib/research-engine/providers/scbSweden'
+import { ssbNorwayAdapter } from '@/lib/research-engine/providers/ssbNorway'
+import { statfinFinlandAdapter } from '@/lib/research-engine/providers/statfinFinland'
+import { statisticsDenmarkAdapter } from '@/lib/research-engine/providers/statisticsDenmark'
+import { unDesaPopulationAdapter } from '@/lib/research-engine/providers/unDesaPopulation'
 import { IMPLEMENTED_PROVIDER_ADAPTERS } from '@/lib/research-engine/providers/registry'
 import type { ResearchDocument, ResearchProviderId } from '@/lib/research-engine/core/types'
 
@@ -423,7 +428,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const add = async (id: string, fn: () => boolean | string | Promise<boolean | string>) => results.push(await test(id, fn))
 
   await add('re_01_all_31_providers_registered', () =>
-    RESEARCH_PROVIDER_ENV.length === 249 || `expected 249 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 254 || `expected 254 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_02_missing_required_env_not_configured', () => {
     const emptyEnv = { NODE_ENV: 'test' } as NodeJS.ProcessEnv
@@ -1010,6 +1015,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       world_bank_projects: ['search'],
       usgs_national_map: ['search'],
       imf_sdmx: ['timeSeries'],
+      scb_sweden: ['timeSeries'],
+      ssb_norway: ['timeSeries'],
+      statfin_finland: ['timeSeries'],
+      statistics_denmark: ['timeSeries'],
+      un_desa_population: ['search'],
     }
     const implemented = RESEARCH_PROVIDER_ENV.filter(descriptor => descriptor.implemented)
     const offenders = implemented.filter(descriptor => {
@@ -1782,13 +1792,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const UNAUTHORIZED_BATCH_1_IDS = ['world_bank_data_catalog', 'world_bank_finances', 'world_bank_climate'] as const
 
   await add('re_100_registered_provider_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 249 || `expected 249 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 254 || `expected 254 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_101_implemented_count_derives_to_24_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 245 && implementedAdapters === 245)
-      || `expected 245 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 250 && implementedAdapters === 250)
+      || `expected 250 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -3080,11 +3090,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_229_final_provider_descriptor_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 249 || `expected 249 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 254 || `expected 254 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_230_final_implemented_count_is_24', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 245 || `expected 245 implemented adapters, found ${count}`
+    return count === 250 || `expected 250 implemented adapters, found ${count}`
   })
 
   await add('re_231_final_unimplemented_count_is_7', () => {
@@ -4162,8 +4172,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const totalCount = RESEARCH_PROVIDER_ENV.length
     const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return (descriptor?.implemented === true && totalCount === 249 && implementedCount === 245 && blockedCount === 4)
-      || `expected fmcsa implemented plus a 245/4 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+    return (descriptor?.implemented === true && totalCount === 254 && implementedCount === 250 && blockedCount === 4)
+      || `expected fmcsa implemented plus a 250/4 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
   })
 
   await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {
@@ -6336,6 +6346,101 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const response = await imfSdmxAdapter.run({ text: 'IMF.STA/CPI/~/BRA.CPI._T.IX.M' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
     return documentShapeIssue(response.documents[0], 'imf_sdmx') ?? true
+  }))
+
+  // --- Earth Knowledge Implementation Exhaustion mission (2026-08-25): PxWeb-family national
+  // statistics providers + UN DESA reference metadata. Two mocked calls each (GET table metadata,
+  // POST query), matching the real two-step live flow verified against SCB/SSB/StatFin/Denmark. ---
+
+  // Response bodies can only be read once — each test needs its own fresh Response instances
+  // rather than sharing one across multiple withAdapterFetch calls (a shared instance's body
+  // stream is already consumed after the first test reads it).
+  function makePxWebMetadataFixture() {
+    return jsonResponse({
+      title: 'Test Population Table',
+      variables: [
+        { code: 'Region', text: 'region', values: ['00'], valueTexts: ['Sweden'], elimination: true },
+        { code: 'ContentsCode', text: 'observations', values: ['BE0101N1'], valueTexts: ['Population'] },
+        { code: 'Tid', text: 'year', values: ['2021', '2022', '2023'], valueTexts: ['2021', '2022', '2023'], time: true },
+      ],
+    })
+  }
+  function makePxWebDataFixture() {
+    return jsonResponse({
+      version: '2.0',
+      class: 'dataset',
+      id: ['Region', 'ContentsCode', 'Tid'],
+      size: [1, 1, 3],
+      dimension: {
+        Region: { label: 'region', category: { index: { '00': 0 }, label: { '00': 'Sweden' } } },
+        ContentsCode: { label: 'observations', category: { index: { BE0101N1: 0 }, label: { BE0101N1: 'Population' }, unit: { BE0101N1: { base: 'number', decimals: 0 } } } },
+        Tid: { label: 'year', category: { index: { '2021': 0, '2022': 1, '2023': 2 }, label: { '2021': '2021', '2022': '2022', '2023': '2023' } } },
+      },
+      value: [10_380_000, 10_450_000, 10_520_000],
+    })
+  }
+
+  await add('re_931_scb_sweden_success_normalizes_table', () => withAdapterFetch([makePxWebMetadataFixture(), makePxWebDataFixture()], async () => {
+    const response = await scbSwedenAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0 || response.timeSeries.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.timeSeries[0].points.length !== 3) return `expected 3 time series points, got ${response.timeSeries[0].points.length}`
+    if (response.timeSeries[0].points[0].date !== '2021' || response.timeSeries[0].points[0].value !== 10_380_000) return `unexpected first point: ${JSON.stringify(response.timeSeries[0].points[0])}`
+    if (response.timeSeries[0].unit !== 'number') return `expected unit "number" extracted from JSON-stat2, got ${response.timeSeries[0].unit}`
+    return documentShapeIssue(response.documents[0], 'scb_sweden') ?? true
+  }))
+
+  await add('re_932_ssb_norway_success_normalizes_table', () => withAdapterFetch([makePxWebMetadataFixture(), makePxWebDataFixture()], async () => {
+    const response = await ssbNorwayAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0 || response.timeSeries.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.timeSeries[0].points.length !== 3) return `expected 3 time series points, got ${response.timeSeries[0].points.length}`
+    return documentShapeIssue(response.documents[0], 'ssb_norway') ?? true
+  }))
+
+  await add('re_933_statfin_finland_success_normalizes_table', () => withAdapterFetch([makePxWebMetadataFixture(), makePxWebDataFixture()], async () => {
+    const response = await statfinFinlandAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0 || response.timeSeries.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.timeSeries[0].points.length !== 3) return `expected 3 time series points, got ${response.timeSeries[0].points.length}`
+    return documentShapeIssue(response.documents[0], 'statfin_finland') ?? true
+  }))
+
+  await add('re_934_statistics_denmark_success_normalizes_table', () => withAdapterFetch([
+    jsonResponse({ id: 'FOLK1A', text: 'Population at the first day of the quarter', variables: [
+      { id: 'OMRÅDE', elimination: true, values: [{ id: '000', text: 'All Denmark' }] },
+      { id: 'Tid', elimination: false, values: [{ id: '2023K1', text: '2023Q1' }, { id: '2023K2', text: '2023Q2' }] },
+    ] }),
+    // `id`/`size`/`role` nested INSIDE `dimension` (not at the dataset root, where the JSON-stat2
+    // spec and every classic PxWebApi host places them) — Statistics Denmark's real live response
+    // shape, confirmed during this mission's live verification. This exact shape caught a real
+    // bug: statisticsDenmark.ts originally assumed `dataset.id` existed at the root and crashed.
+    jsonResponse({ dataset: {
+      dimension: {
+        ContentsCode: { label: 'Indhold', category: { index: { FOLK1A: 0 }, label: { FOLK1A: 'Population' } } },
+        Tid: { label: 'tid', category: { index: { '2023K1': 0, '2023K2': 1 }, label: { '2023K1': '2023K1', '2023K2': '2023K2' } } },
+        id: ['ContentsCode', 'Tid'],
+        size: [1, 2],
+        role: { metric: ['ContentsCode'], time: ['Tid'] },
+      },
+      label: 'Population at the first day of the quarter by Indhold and time',
+      source: 'Statistics Denmark',
+      value: [5_930_000, 5_932_654],
+    } }),
+  ], async () => {
+    const response = await statisticsDenmarkAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0 || response.timeSeries.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.timeSeries[0].points.length !== 2) return `expected 2 time series points, got ${response.timeSeries[0].points.length}`
+    if (response.timeSeries[0].points[1].date !== '2023K2' || response.timeSeries[0].points[1].value !== 5_932_654) return `unexpected second point: ${JSON.stringify(response.timeSeries[0].points[1])}`
+    return documentShapeIssue(response.documents[0], 'statistics_denmark') ?? true
+  }))
+
+  await add('re_935_un_desa_population_success_normalizes_reference_metadata', () => withAdapterFetch([
+    jsonResponse({ data: [{ id: 4, name: 'Sweden', iso3: 'SWE', iso2: 'SE', longitude: 18.6, latitude: 60.1 }] }),
+    jsonResponse({ data: [{ id: 49, name: 'Total Population', shortName: 'TPopulation', description: 'De facto total population.' }] }),
+  ], async () => {
+    const response = await unDesaPopulationAdapter.run({ text: 'Sweden' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const coordinates = response.geoFeatures[0]?.coordinates as number[] | undefined
+    if (response.geoFeatures.length !== 1 || coordinates?.[0] !== 18.6) return `expected one geoFeature carrying real coordinates, got ${JSON.stringify(response.geoFeatures)}`
+    return documentShapeIssue(response.documents[0], 'un_desa_population') ?? true
   }))
 
   return results

@@ -258,6 +258,11 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   w3c_api: ['api.w3.org'],
   wto_timeseries: ['api.wto.org'],
   e_stat_japan: ['api.e-stat.go.jp'],
+  scb_sweden: ['api.scb.se'],
+  ssb_norway: ['data.ssb.no'],
+  statfin_finland: ['statfin.stat.fi'],
+  statistics_denmark: ['api.statbank.dk'],
+  un_desa_population: ['population.un.org'],
 }
 
 export function isAllowedHost(provider: ResearchProviderId, hostname: string): boolean {

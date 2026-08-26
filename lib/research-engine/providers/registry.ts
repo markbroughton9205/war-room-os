@@ -244,6 +244,11 @@ import { econstorAdapter } from '@/lib/research-engine/providers/econstor'
 import { w3cApiAdapter } from '@/lib/research-engine/providers/w3cApi'
 import { wtoTimeseriesAdapter } from '@/lib/research-engine/providers/wtoTimeseries'
 import { eStatJapanAdapter } from '@/lib/research-engine/providers/eStatJapan'
+import { scbSwedenAdapter } from '@/lib/research-engine/providers/scbSweden'
+import { ssbNorwayAdapter } from '@/lib/research-engine/providers/ssbNorway'
+import { statfinFinlandAdapter } from '@/lib/research-engine/providers/statfinFinland'
+import { statisticsDenmarkAdapter } from '@/lib/research-engine/providers/statisticsDenmark'
+import { unDesaPopulationAdapter } from '@/lib/research-engine/providers/unDesaPopulation'
 import { worldBankProjectsAdapter } from '@/lib/research-engine/providers/worldBankProjects'
 import { usgsNationalMapAdapter } from '@/lib/research-engine/providers/usgsNationalMap'
 import { imfSdmxAdapter } from '@/lib/research-engine/providers/imfSdmx'
@@ -498,6 +503,11 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   w3c_api: w3cApiAdapter,
   wto_timeseries: wtoTimeseriesAdapter,
   e_stat_japan: eStatJapanAdapter,
+  scb_sweden: scbSwedenAdapter,
+  ssb_norway: ssbNorwayAdapter,
+  statfin_finland: statfinFinlandAdapter,
+  statistics_denmark: statisticsDenmarkAdapter,
+  un_desa_population: unDesaPopulationAdapter,
   world_bank_projects: worldBankProjectsAdapter,
   usgs_national_map: usgsNationalMapAdapter,
   imf_sdmx: imfSdmxAdapter,

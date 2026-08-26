@@ -301,6 +301,13 @@ const PROVIDER_MATCHERS = {
   w3c_api: ['W3C API'],
   wto_timeseries: ['WTO APIs (Timeseries + QR)', 'WTO Stats / Timeseries API'],
   e_stat_japan: ['Japan e-Stat API', 'e-Stat API v3'],
+
+  // --- Built during the Earth Knowledge Implementation Exhaustion mission (2026-08-25) ---
+  scb_sweden: ['SCB Statistical Database API'],
+  ssb_norway: ['SSB API'],
+  statfin_finland: ['StatFin PxWeb API'],
+  statistics_denmark: ['StatBank Denmark API'],
+  un_desa_population: ['UN DESA Population Division'],
 }
 
 // Registry sources with a deliberate, researched, non-default classification
@@ -340,10 +347,6 @@ const FORCED_CLASSIFICATION_MAP = {
     state: 'MISSING',
     note: 'Confirmed this mission: kidb.adb.org is a JS-rendered Inertia.js/Laravel SPA shell with no working REST/SDMX endpoint found despite probing multiple plausible paths (/api/rest/dataflow, /sdmxapi/rest/dataflow, /rest/dataflow, /v1/rest/dataflow — all 404); sdmx.adb.org does not resolve at all. Not built rather than fabricating an SDMX contract with no confirmed working endpoint.',
   },
-  'un desa population division': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: population.un.org/dataportalapi\'s locations/indicators metadata endpoints are zero-auth, but the actual population-data query endpoint (/data/indicators/{id}/locations/{id}/start/{y}/end/{y}) returns a real 401 with WWW-Authenticate: Bearer — a genuine current access-policy change, not a path error. Not built as a metadata-only adapter (locations/indicators lists alone are not a meaningful population-data capability) rather than a real data-query adapter that cannot function without credentials whose acquisition path was not confirmed.',
-  },
   'local contexts hub': {
     state: 'MISSING',
     note: 'Confirmed live this mission: only the bare API root (/api/v2/) is public — it returns an endpoint map, but every real content endpoint tested (projects list, open-to-collaborate notices) returns a real 403 "Authentication not provided." A token is required per the project\'s own wiki docs, but whether it is genuinely free self-service or requires manual approval was not confirmed in this session. Not built as a speculative auth flow against an unconfirmed token-acquisition process.',
@@ -380,18 +383,6 @@ const FORCED_CLASSIFICATION_MAP = {
     state: 'MISSING',
     note: 'Confirmed this mission: the REST service host (genesis.destatis.de, redirected from www-genesis.destatis.de) is alive (a parameterless helloworld/whoami call succeeds), but every parameterized call — including with GENESIS\'s own documented guest test credentials — redirects to an announcement/maintenance page rather than returning authenticated data. Could not determine whether this is a genuine outage or a changed auth flow; not built against an unconfirmed, currently non-responsive auth path.',
   },
-  'scb statistical database api': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: SCB\'s PXWEB API is real and zero-auth, but requires the caller to already know a specific table path AND that table\'s own variable/value codes (discovered via a separate metadata GET per table) before a data POST can succeed — there is no general free-text query across all SCB tables. Not built as a single-table-only adapter that would not generalize to a meaningful query capability without a much larger table+variable-code catalog this pass did not build.',
-  },
-  'statbank denmark api': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: same PXWEB-family constraint as SCB (Sweden) — real, zero-auth, but requires per-table variable-code discovery before querying, with no cross-table free-text search. Not built for the same reason.',
-  },
-  'ssb api': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: same PXWEB-family constraint as SCB (Sweden) and StatBank (Denmark) — real, zero-auth, but requires per-table variable-code discovery before querying, with no cross-table free-text search. Not built for the same reason.',
-  },
   'kosis open api': {
     state: 'MISSING',
     note: 'Confirmed live this mission: the real endpoint and apiKey-based auth mechanism exist (a bogus key returns a real structured Korean-language error), with a documented free account-based key request process. Not built because no confirmed success-response body shape could be obtained without a key in this session.',
@@ -425,12 +416,8 @@ const FORCED_CLASSIFICATION_MAP = {
     note: 'Confirmed live this mission: data.un.org/ws/rest/data (and the /WS/rest/data variant) both return a real, consistently-reproduced HTTP 500 from the underlying IIS server on every call — a hard, confirmed failure of the legacy API stack, not an intermittent degradation. Upgraded from the registry\'s own "DEGRADED (legacy stack)" note now that live evidence shows a hard failure rather than a working-but-slow service.',
   },
   'openstat api': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: openstat.psa.gov.ph/PXWeb/api/v1 is real and zero-auth, but is PXWEB-family — same structural constraint already established for SCB/StatBank/SSB (Sweden/Denmark/Norway) elsewhere in this map: real data queries require per-table navigation to discover variable/value codes, then a POST with a JSON query body, with no cross-table free-text search. Not built for the same reason.',
-  },
-  'statfin pxweb api': {
-    state: 'MISSING',
-    note: 'Confirmed live this mission: both statfin.stat.fi/PXWeb/api/v1 and the newer pxdata.stat.fi/PxWeb/api/v1 are real and zero-auth, but are PXWEB-family — same per-table-navigation constraint as SCB/StatBank/SSB/OpenSTAT elsewhere in this map. Not built for the same reason.',
+    state: 'EXTERNAL_BLOCKER',
+    note: 'Confirmed live during the Earth Knowledge Implementation Exhaustion mission (2026-08-25): openstat.psa.gov.ph/PXWeb/api/v1 is real, zero-auth, and structurally identical to the now-implemented SCB/SSB/StatFin/StatBank-Denmark PxWeb-family providers — but every tested query (3 independent tables: a population projection, a 2020 census total, and a province-level breakdown) returned exactly the placeholder value 1.0 regardless of the real category selected (e.g. "Philippines / Total Population" = 1.0), a genuine current data-integrity problem on PSA\'s live system, not a query-construction issue. Upgraded from MISSING to EXTERNAL_BLOCKER now that live evidence shows a confirmed source-side data anomaly rather than an unexplored structural limitation; not built against data this session confirmed is not currently trustworthy.',
   },
   'griis': {
     state: 'DUPLICATE_COVERAGE',
@@ -551,10 +538,6 @@ const FORCED_CLASSIFICATION_MAP = {
   'mapillary (street-level imagery)': {
     state: 'MISSING',
     note: 'Confirmed live this mission: graph.mapillary.com is real and returns a real structured OAuth error for an invalid token — Mapillary (Meta-owned) uses a full OAuth2 app-registration flow, not a simple API key, and this session did not confirm the registration process or a response shape within its time budget.',
-  },
-  'ndl digital collections iiif': {
-    state: 'MISSING',
-    note: 'This is IIIF (image/manifest delivery) access to digitized NDL items, not a keyword-search capability — distinct from the "NDL Search API (Japan)" row this mission built as the ndl_search adapter, which already provides real catalog search coverage including links into the digitized collection. Not built as a manifest-delivery adapter that would misrepresent itself as search.',
   },
   'polona (poland)': {
     state: 'MISSING',
@@ -936,6 +919,7 @@ function findForcedClassification(sourceName) {
 // source count larger"). Checked before the normal provider matcher.
 const DUPLICATE_COVERAGE_MAP = {
   'go vulnerability database': { providerId: 'osv_dev', note: 'Confirmed live this mission: Go\'s vulnerability database is fully OSV-schema-native and already queryable through the existing osv_dev adapter via ecosystem "Go" (e.g. query "Go:golang.org/x/text@0.3.6"). vuln.go.dev\'s native site is a separate static index+per-ID-JSON structure serving the identical underlying data — building a second adapter would duplicate it for no new capability.' },
+  'ndl digital collections iiif': { providerId: 'ndl_search', note: 'Reclassified from MISSING during the Earth Knowledge Implementation Exhaustion mission (2026-08-25) — the prior entry\'s own note already established this is IIIF (image/manifest delivery) access to digitized NDL items, not a keyword-search capability, and that the existing "NDL Search API (Japan)" row (built as the ndl_search adapter) already provides real catalog search coverage including links into the digitized collection. A genuinely separate manifest-delivery adapter would duplicate that coverage for no new query capability, so this belongs in DUPLICATE_COVERAGE rather than MISSING/IMPLEMENTABLE_NOT_IMPLEMENTED.' },
 }
 
 function findDuplicateCoverage(sourceName) {
@@ -1003,6 +987,7 @@ const IMPLEMENTED_PROVIDERS = new Set([
   'ohm_overpass', 'stack_exchange', 'ecmwf_cds', 'met_office_datahub', 'ndl_search', 'swisscovery',
   'yago', 'data_commons', 'econstor', 'w3c_api', 'wto_timeseries', 'e_stat_japan',
   'world_bank_projects', 'usgs_national_map', 'imf_sdmx',
+  'scb_sweden', 'ssb_norway', 'statfin_finland', 'statistics_denmark', 'un_desa_population',
 ])
 const STUB_PROVIDERS = new Set([
   'uspto', 'world_bank_data_catalog', 'world_bank_finances', 'world_bank_climate',
@@ -1053,6 +1038,9 @@ const LIVE_VERIFIED_PROVIDERS = new Set([
   'israel_cbs', 'nomis_uk', 'abs_australia', 'argentina_series', 'data_gov_my',
   'datos_abiertos_colombia', 'ine_tempus3', 'singstat', 'ariadne_portal',
   'ohm_overpass', 'stack_exchange', 'ecmwf_cds', 'ndl_search', 'swisscovery',
+  // Confirmed live during the Earth Knowledge Implementation Exhaustion mission
+  // (2026-08-25): real HTTP requests, real parsed population figures/reference records.
+  'scb_sweden', 'ssb_norway', 'statfin_finland', 'statistics_denmark', 'un_desa_population',
 ])
 // Providers whose required credential is genuinely ABSENT from this
 // environment (confirmed: not present in .env.local at all, not merely

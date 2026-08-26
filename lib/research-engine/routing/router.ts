@@ -36,9 +36,9 @@ const INTENT_PROVIDER_MAP: Record<ResearchQueryIntent, ResearchProviderId[]> = {
   materials_science: ['materials_project', 'oqmd', 'aflow', 'nomad_repository'],
   biodiversity: ['gbif', 'uniprot', 'inaturalist', 'obis', 'worms', 'itis', 'pbdb', 'bhl', 'checklistbank', 'eol', 'globi', 'mushroom_observer'],
   genetics: ['uniprot', 'ncbi', 'ensembl', 'rcsb_pdb', 'string_db', 'gnomad', 'ena_portal', 'ncbi_datasets', 'alphafold_db', 'reactome', 'intact', 'kegg', 'metabolights', 'pride_archive', 'wikipathways', 'cellosaurus', 'metabolomics_workbench'],
-  statistics_demographics: ['us_census', 'eurostat', 'world_bank_indicators', 'geonames', 'statcan_wds', 'uk_ons', 'insee_melodi', 'unesco_uis', 'sidra_brazil', 'cbs_statline', 'bdl_poland', 'israel_cbs', 'nomis_uk', 'abs_australia', 'data_gov_my', 'datos_abiertos_colombia', 'ine_tempus3', 'singstat', 'e_stat_japan'],
+  statistics_demographics: ['us_census', 'eurostat', 'world_bank_indicators', 'geonames', 'statcan_wds', 'uk_ons', 'insee_melodi', 'unesco_uis', 'sidra_brazil', 'cbs_statline', 'bdl_poland', 'israel_cbs', 'nomis_uk', 'abs_australia', 'data_gov_my', 'datos_abiertos_colombia', 'ine_tempus3', 'singstat', 'e_stat_japan', 'scb_sweden', 'ssb_norway', 'statfin_finland', 'statistics_denmark', 'un_desa_population'],
   government_legislation: ['congress_gov', 'govinfo', 'courtlistener', 'federal_register', 'uk_legislation', 'japan_egov_hourei', 'australia_frl', 'uk_gazette'],
-  humanitarian_events: ['reliefweb', 'world_bank_indicators', 'unhcr_data', 'ocha_fts'],
+  humanitarian_events: ['reliefweb', 'world_bank_indicators', 'unhcr_data', 'ocha_fts', 'un_desa_population'],
 }
 
 function rejectionReason(provider: ResearchProviderId): string {
