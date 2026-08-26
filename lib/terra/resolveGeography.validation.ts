@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url'
 import { __setResearchFetchForTests } from '@/lib/research-engine/security/safeFetch'
 import { __resetCacheForTests } from '@/lib/research-engine/cache/ttlCache'
 import { __resetProviderGateForTests } from '@/lib/research-engine/security/providerGate'
-import { resolvePlaceNameViaNominatim } from './resolveGeography'
+import { resolvePlaceNameViaNominatim, reverseResolveCoordinatesViaNominatim } from './resolveGeography'
 import { parseTerraCoordinates } from './locationCommand'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
@@ -58,6 +58,27 @@ async function run(): Promise<CaseResult[]> {
       }
     },
   )
+
+  // --- Click-to-context reverse resolution: provider label enriches the exact clicked point. ---
+  await withMockedFetch(
+    jsonResponse({ place_id: 99, osm_type: 'node', osm_id: 1234, lat: '40.71275', lon: '-74.00595', display_name: 'City Hall, 260 Broadway, New York, New York, USA', name: 'New York City Hall', class: 'amenity', type: 'townhall', address: { house_number: '260', road: 'Broadway', city: 'New York', state: 'New York', country: 'United States' } }),
+    async () => {
+      const resolved = await reverseResolveCoordinatesViaNominatim({ latitude: 40.7128, longitude: -74.006, height: 12, hasTerrainHeight: true, selectedAt: '2026-08-26T12:00:00.000Z' })
+      results.push(check('reverse_click_resolves_provider_supported_context', resolved.status === 'resolved' && resolved.location.confidence === 'provider_supported', JSON.stringify(resolved)))
+      results.push(check('reverse_click_preserves_exact_clicked_coordinates', resolved.location.latitude === 40.7128 && resolved.location.longitude === -74.006, `lat=${resolved.location.latitude} lon=${resolved.location.longitude}`))
+      results.push(check('reverse_click_preserves_height_provenance', resolved.location.height === 12 && resolved.location.hasTerrainHeight, `height=${resolved.location.height}`))
+      results.push(check('reverse_click_carries_nominatim_provenance', resolved.location.source === 'nominatim' && Boolean(resolved.location.sourceUrl), `source=${resolved.location.source}`))
+      results.push(check('reverse_click_exposes_place_address_region', resolved.location.place === 'New York City Hall' && resolved.location.address === '260 Broadway, New York' && resolved.location.region === 'New York, United States', JSON.stringify(resolved.location)))
+    },
+  )
+
+  // A valid Earth coordinate remains active when the provider has no reverse match. No fallback
+  // place name is inferred from a nearby result or fabricated locally.
+  await withMockedFetch(jsonResponse({ error: 'Unable to geocode' }), async () => {
+    const resolved = await reverseResolveCoordinatesViaNominatim({ latitude: 0, longitude: -140, height: null, hasTerrainHeight: false })
+    results.push(check('reverse_unavailable_retains_coordinate_only_context', resolved.status === 'coordinate_only' && resolved.location.latitude === 0 && resolved.location.longitude === -140, JSON.stringify(resolved)))
+    results.push(check('reverse_unavailable_is_explicitly_unresolved', resolved.location.status === 'coordinate_only' && resolved.location.detail.includes('unavailable'), resolved.location.detail))
+  })
 
   // --- Ambiguous: two distinct coordinate-bearing candidates — must NOT auto-select either ---
   await withMockedFetch(

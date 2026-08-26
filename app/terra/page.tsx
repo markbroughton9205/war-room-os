@@ -9,13 +9,14 @@
  */
 import { WarRoomUiModeProvider } from '@/components/war-room/WarRoomUiModeContext'
 import { TerraShell } from '@/components/war-room/terra/TerraShell'
+import { TerraActiveLocationProvider } from '@/components/war-room/terra/TerraActiveLocationContext'
 
 export const dynamic = 'force-dynamic'
 
 export default function TerraPage() {
   return (
     <WarRoomUiModeProvider>
-      <TerraShell />
+      <TerraActiveLocationProvider><TerraShell /></TerraActiveLocationProvider>
     </WarRoomUiModeProvider>
   )
 }

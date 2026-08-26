@@ -12,9 +12,9 @@
  * the three newly-promoted layers start off so making a live external call is always a
  * deliberate Commander action.
  *
- * Remaining panels (Earth Knowledge, Live Council, time engine, Commander annotation
- * persistence) stay honestly-labeled PLACEHOLDERS — none of them are wired yet, matching this
- * repo's "no fake dashboards" standard.
+ * Earth Knowledge's active-location surface is wired to the existing Research Engine/Nominatim
+ * boundary. Remaining Council and Commander annotation surfaces stay honestly-labeled
+ * placeholders in the dedicated workspace, matching this repo's "no fake dashboards" standard.
  *
  * Selection state (a clicked coordinate or a clicked feature marker) is local component state
  * only — never written to war_room_audit_logs or anywhere else. Camera movement and exploratory
@@ -33,7 +33,10 @@ import { TERRA_LAYER_SUMMARIES, type TerraLayerSummary } from '@/lib/terra/layer
 import { TERRA_TIME_WINDOW_PRESETS, filterTerraFeaturesByTime, shouldAutoRefreshTerraLayer, terraFeaturesShallowEqual } from '@/lib/terra/terraTime'
 import type { TerraClickPoint, TerraGeoFeature, TerraIntelligenceEventKind, TerraTimeMode, TerraTimeWindow } from '@/lib/terra/types'
 import type { TerraLocationTarget } from '@/lib/terra/locationCommand'
+import type { TerraActiveLocation, TerraReverseLocationResolution } from '@/lib/terra/activeLocation'
 import { TerraLocationCommandInput } from './TerraLocationCommandInput'
+import { TerraEarthKnowledgePanel } from './TerraEarthKnowledgePanel'
+import { useTerraActiveLocation } from './TerraActiveLocationContext'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -337,6 +340,10 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
   const [viewer, setViewer] = useState<CesiumViewer | null>(null)
   const [selection, setSelection] = useState<Selection>({ kind: 'none' })
   const [layerFeatures, setLayerFeatures] = useState<Record<string, TerraGeoFeature[]>>({})
+  const { activeLocation, setActiveLocation } = useTerraActiveLocation()
+  const reverseRequestRef = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null })
+
+  useEffect(() => () => reverseRequestRef.current.controller?.abort(), [])
 
   // Phase 6: Terra's 4D clock — real Earth orientation/lighting follows viewer.clock.currentTime
   // (see TerraGlobe.tsx's enableLighting + useTerraClock.ts), which this hook is the only thing
@@ -372,9 +379,54 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
     ]
   }, [layerFeatures])
 
+  const activateCoordinate = useCallback((point: Extract<TerraClickPoint, { ok: true }>) => {
+    reverseRequestRef.current.controller?.abort()
+    const controller = new AbortController()
+    const sequence = reverseRequestRef.current.sequence + 1
+    reverseRequestRef.current = { sequence, controller }
+    const selectedAt = new Date().toISOString()
+    const coordinateLabel = `${point.latitude.toFixed(4)}°, ${point.longitude.toFixed(4)}°`
+    const pending: TerraActiveLocation = {
+      latitude: point.latitude,
+      longitude: point.longitude,
+      height: point.height,
+      hasTerrainHeight: point.hasTerrainHeight,
+      label: coordinateLabel,
+      place: null,
+      address: null,
+      region: null,
+      source: 'coordinates',
+      sourceLabel: 'Commander-selected coordinates',
+      sourceUrl: null,
+      status: 'resolving',
+      confidence: 'coordinate_only',
+      detail: 'Exact coordinate is active while reverse geocoding resolves the supported place or address.',
+      selectedAt,
+    }
+    setActiveLocation(pending)
+
+    const params = new URLSearchParams({ lat: String(point.latitude), lon: String(point.longitude) })
+    if (point.height !== null) params.set('height', String(point.height))
+    if (point.hasTerrainHeight) params.set('terrain', '1')
+    void fetch(`/api/terra/resolve-location?${params}`, { cache: 'no-store', signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error(`Resolver returned HTTP ${response.status}.`)
+        return response.json() as Promise<TerraReverseLocationResolution>
+      })
+      .then(result => {
+        if (reverseRequestRef.current.sequence !== sequence) return
+        setActiveLocation({ ...result.location, selectedAt })
+      })
+      .catch(error => {
+        if (controller.signal.aborted || reverseRequestRef.current.sequence !== sequence) return
+        setActiveLocation({ ...pending, status: 'coordinate_only', detail: `Reverse geocoding unavailable: ${error instanceof Error ? error.message : String(error)}` })
+      })
+  }, [setActiveLocation])
+
   const handleGroundClick = useCallback((point: TerraClickPoint) => {
     setSelection(point.ok ? { kind: 'ground', point } : { kind: 'miss' })
-  }, [])
+    if (point.ok) activateCoordinate(point)
+  }, [activateCoordinate])
 
   // TerraFeatureLayer composes each Cesium entity id as "{layerId}:{featureId}" (see
   // TerraFeatureLayer.tsx) specifically so a click can be resolved back to the correct layer even
@@ -387,9 +439,32 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
     const layerId = compositeId.slice(0, separatorIndex)
     const featureId = compositeId.slice(separatorIndex + 1)
     setSelection({ kind: 'feature', layerId, featureId })
-  }, [])
+    const feature = (layerFeatures[layerId] ?? []).find(item => item.id === featureId)
+    if (feature) {
+      activateCoordinate({ ok: true, latitude: feature.latitude, longitude: feature.longitude, height: feature.altitude, hasTerrainHeight: false })
+    }
+  }, [activateCoordinate, layerFeatures])
 
   const handleResolvedLocation = useCallback((target: TerraLocationTarget) => {
+    reverseRequestRef.current.controller?.abort()
+    reverseRequestRef.current = { sequence: reverseRequestRef.current.sequence + 1, controller: null }
+    setActiveLocation({
+      latitude: target.latitude,
+      longitude: target.longitude,
+      height: null,
+      hasTerrainHeight: false,
+      label: target.label,
+      place: target.source === 'nominatim' ? target.label : null,
+      address: target.source === 'nominatim' ? target.label : null,
+      region: null,
+      source: target.source,
+      sourceLabel: target.source === 'nominatim' ? 'OpenStreetMap Nominatim' : 'Commander-selected coordinates',
+      sourceUrl: null,
+      status: target.source === 'nominatim' ? 'resolved' : 'coordinate_only',
+      confidence: target.source === 'nominatim' ? 'provider_supported' : 'coordinate_only',
+      detail: target.source === 'nominatim' ? 'Provider-supported typed-location match; no numeric confidence was supplied.' : 'Exact typed coordinates; reverse place context was not requested.',
+      selectedAt: new Date().toISOString(),
+    })
     if (!viewer || viewer.isDestroyed()) return
     void import('cesium').then(Cesium => {
       if (viewer.isDestroyed()) return
@@ -398,7 +473,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
         duration: 1.8,
       })
     })
-  }, [viewer])
+  }, [setActiveLocation, viewer])
 
   const commandCenter = presentation === 'command-center'
 
@@ -428,6 +503,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
 
       <div className={`absolute left-3 top-[4.5rem] z-20 ${commandCenter ? 'w-[min(31rem,48%)]' : 'left-1/2 w-[min(34rem,44vw)] -translate-x-1/2'}`}>
         <TerraLocationCommandInput onResolvedLocation={handleResolvedLocation} />
+        {commandCenter && <TerraEarthKnowledgePanel location={activeLocation} onDismiss={() => setActiveLocation(null)} compact />}
       </div>
 
       {/* Left rail — layer controls + Earth Knowledge placeholder. */}
@@ -446,7 +522,11 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
           </ul>
         </div>
 
-        <div className="pointer-events-auto max-h-[52vh] overflow-y-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
+        <div className="pointer-events-auto">
+          <TerraEarthKnowledgePanel location={activeLocation} onDismiss={() => setActiveLocation(null)} />
+        </div>
+
+        <div className="pointer-events-auto max-h-[34vh] overflow-y-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
           <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Data Layers</p>
           {LAYER_GROUPS.map(group => {
             const layers = TERRA_LAYER_SUMMARIES.filter(layer => group.domains.includes(layer.domain))
@@ -469,13 +549,6 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
               </div>
             )
           })}
-        </div>
-
-        <div className="pointer-events-auto">
-          <PlaceholderPanel
-            title="Earth Knowledge Panel"
-            note="Not wired yet. Will consume War Room's existing Earth Knowledge Registry and Research Engine directly — no separate registry planned or built here (later phase)."
-          />
         </div>
 
         {selection.kind === 'ground' && (

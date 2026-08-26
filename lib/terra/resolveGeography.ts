@@ -35,6 +35,8 @@ import 'server-only'
 import { executeResearch } from '@/lib/research-engine/core/execute'
 import type { ResearchProviderId } from '@/lib/research-engine/core/types'
 import type { TerraResolvedGeography } from '@/lib/terra/types'
+import type { TerraActiveLocation, TerraReverseLocationResolution } from '@/lib/terra/activeLocation'
+import { reverseNominatimCoordinates } from '@/lib/research-engine/providers/nominatim'
 
 const RESOLVER_PROVIDER_ID: ResearchProviderId = 'nominatim'
 
@@ -126,5 +128,66 @@ export async function resolvePlaceNameViaNominatim(placeName: string, sourceEnti
     matchTitle: only.doc.title,
     sourceUrl: only.doc.canonicalUrl,
     retrievedAt,
+  }
+}
+
+export async function reverseResolveCoordinatesViaNominatim(input: {
+  latitude: number
+  longitude: number
+  height: number | null
+  hasTerrainHeight: boolean
+  selectedAt?: string
+}): Promise<TerraReverseLocationResolution> {
+  const selectedAt = input.selectedAt ?? new Date().toISOString()
+  const coordinateLabel = `${input.latitude.toFixed(4)}°, ${input.longitude.toFixed(4)}°`
+  const coordinateOnly = (detail: string): TerraActiveLocation => ({
+    latitude: input.latitude,
+    longitude: input.longitude,
+    height: input.height,
+    hasTerrainHeight: input.hasTerrainHeight,
+    label: coordinateLabel,
+    place: null,
+    address: null,
+    region: null,
+    source: 'coordinates',
+    sourceLabel: 'Commander-selected coordinates',
+    sourceUrl: null,
+    status: 'coordinate_only',
+    confidence: 'coordinate_only',
+    detail,
+    selectedAt,
+  })
+
+  if (!Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90 ||
+      !Number.isFinite(input.longitude) || input.longitude < -180 || input.longitude > 180) {
+    return { status: 'coordinate_only', location: coordinateOnly('Coordinates are outside valid geographic ranges; no provider lookup was attempted.') }
+  }
+
+  const resolution = await reverseNominatimCoordinates(input.latitude, input.longitude)
+  if (!resolution.ok) {
+    return { status: 'coordinate_only', location: coordinateOnly(`Reverse geocoding unavailable: ${resolution.reason}`) }
+  }
+
+  return {
+    status: 'resolved',
+    location: {
+      latitude: input.latitude,
+      longitude: input.longitude,
+      height: input.height,
+      hasTerrainHeight: input.hasTerrainHeight,
+      label: resolution.label,
+      place: resolution.place,
+      address: resolution.address,
+      region: resolution.region,
+      source: 'nominatim',
+      sourceLabel: 'OpenStreetMap Nominatim',
+      sourceUrl: resolution.sourceUrl,
+      status: 'resolved',
+      confidence: 'provider_supported',
+      detail: resolution.category
+        ? `Provider-supported reverse match (${resolution.category}); no numeric confidence was supplied.`
+        : 'Provider-supported reverse match; no numeric confidence was supplied.',
+      selectedAt,
+    },
   }
 }

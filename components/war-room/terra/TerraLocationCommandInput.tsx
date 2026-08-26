@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { TerraLocationResolution, TerraLocationTarget } from '@/lib/terra/locationCommand'
 
 export type TerraLocationCommandHandler = (target: TerraLocationTarget) => void
@@ -8,15 +8,23 @@ export type TerraLocationCommandHandler = (target: TerraLocationTarget) => void
 export function TerraLocationCommandInput({ onResolvedLocation }: { onResolvedLocation: TerraLocationCommandHandler }) {
   const [command, setCommand] = useState('')
   const [state, setState] = useState<{ phase: 'idle' | 'resolving' | 'resolved' | 'error'; message: string }>({ phase: 'idle', message: '' })
+  const requestRef = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null })
+
+  useEffect(() => () => requestRef.current.controller?.abort(), [])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     const query = command.trim()
     if (!query) return
+    requestRef.current.controller?.abort()
+    const controller = new AbortController()
+    const sequence = requestRef.current.sequence + 1
+    requestRef.current = { sequence, controller }
     setState({ phase: 'resolving', message: 'Resolving location…' })
     try {
-      const response = await fetch(`/api/terra/resolve-location?q=${encodeURIComponent(query)}`, { cache: 'no-store' })
+      const response = await fetch(`/api/terra/resolve-location?q=${encodeURIComponent(query)}`, { cache: 'no-store', signal: controller.signal })
       const result = await response.json() as TerraLocationResolution
+      if (requestRef.current.sequence !== sequence) return
       if (result.status !== 'resolved') {
         setState({ phase: 'error', message: result.message })
         return
@@ -24,6 +32,7 @@ export function TerraLocationCommandInput({ onResolvedLocation }: { onResolvedLo
       onResolvedLocation(result.target)
       setState({ phase: 'resolved', message: `Flying to ${result.target.label}` })
     } catch {
+      if (controller.signal.aborted || requestRef.current.sequence !== sequence) return
       setState({ phase: 'error', message: 'Location resolver is unavailable. No destination was selected.' })
     }
   }
