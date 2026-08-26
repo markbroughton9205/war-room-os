@@ -49,6 +49,17 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+/** Parses the four bbox_* identifier strings nominatim.ts attaches onto a search document (see
+ * that file's `search()`) back into a real bounding box — undefined/malformed input honestly
+ * yields `null`, never a guessed or zero-sized box. */
+function bboxFromIdentifierStrings(south?: string, north?: string, west?: string, east?: string): { south: number; north: number; west: number; east: number } | null {
+  if (south === undefined || north === undefined || west === undefined || east === undefined) return null
+  const parsed = { south: Number(south), north: Number(north), west: Number(west), east: Number(east) }
+  if (!Object.values(parsed).every(isFiniteNumber)) return null
+  if (parsed.south > parsed.north || parsed.west > parsed.east) return null
+  return parsed
+}
+
 export async function resolvePlaceNameViaNominatim(placeName: string, sourceEntityId: string): Promise<TerraResolvedGeography> {
   const retrievedAt = new Date().toISOString()
   const queryUsed = placeName.trim()
@@ -116,6 +127,8 @@ export async function resolvePlaceNameViaNominatim(placeName: string, sourceEnti
   }
 
   const only = candidates[0]
+  const { class: placeClass, type: placeTypeValue, bbox_south, bbox_north, bbox_west, bbox_east } = only.doc.identifiers
+  const boundingBox = bboxFromIdentifierStrings(bbox_south, bbox_north, bbox_west, bbox_east)
   return {
     quality: 'strong',
     longitude: only.lon,
@@ -128,6 +141,8 @@ export async function resolvePlaceNameViaNominatim(placeName: string, sourceEnti
     matchTitle: only.doc.title,
     sourceUrl: only.doc.canonicalUrl,
     retrievedAt,
+    placeType: placeClass && placeTypeValue ? `${placeClass}/${placeTypeValue}` : null,
+    boundingBox,
   }
 }
 

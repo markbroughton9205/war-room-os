@@ -4588,6 +4588,28 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     return documentShapeIssue(response.documents[0], 'osm_overpass') ?? true
   }))
 
+  // God's Eye multi-scale phase: the category-based "what's around here" grammar, distinct from
+  // the pre-existing named-feature search above — both must keep working on the same adapter.
+  await add('re_713b_osm_overpass_category_query_returns_named_pois', () => withAdapterFetch([
+    jsonResponse({ elements: [{ type: 'node', id: 987654, lat: 51.5007, lon: -0.1246, tags: { name: 'London Eye', tourism: 'attraction' } }] }),
+  ], async () => {
+    const response = await osmOverpassAdapter.run({ text: 'category:landmark near 51.5074,-0.1278,3' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].title !== 'London Eye') return `expected the element's own name tag as title, got ${response.documents[0].title}`
+    return documentShapeIssue(response.documents[0], 'osm_overpass') ?? true
+  }))
+
+  await add('re_713c_osm_overpass_category_pattern_takes_priority_over_named_pattern', () => withAdapterFetch([
+    jsonResponse({ elements: [] }),
+  ], async () => {
+    // Regression guard: NEAR_PATTERN's lazy name group would otherwise happily match
+    // "category:landmark" as a literal (and useless) feature name — CATEGORY_NEAR_PATTERN must be
+    // checked first. An empty-but-OK result here (not a rejection, not a search for the literal
+    // string "category:landmark") proves the category branch, not the named branch, handled it.
+    const response = await osmOverpassAdapter.run({ text: 'category:landmark near 51.5074,-0.1278,3' })
+    return (response.ok === true && response.documents.length === 0) || `expected an ok-but-empty category search, got ${JSON.stringify(response)}`
+  }))
+
   await add('re_714_geonames_success_normalizes_place', () => withEnv({ GEONAMES_USERNAME: 'warroom_validation_test' }, () => withAdapterFetch([
     jsonResponse({ totalResultsCount: 1, geonames: [{ geonameId: 2643743, name: 'London', toponymName: 'London', countryName: 'United Kingdom', fcodeName: 'capital of a political entity' }] }),
   ], async () => {
@@ -5084,6 +5106,19 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const response = await nominatimAdapter.run({ text: 'Paris, France' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
     return documentShapeIssue(response.documents[0], 'nominatim') ?? true
+  }))
+
+  // God's Eye multi-scale phase: class/type/boundingbox carried through `identifiers` for Terra's
+  // search-driven camera framing (lib/terra/resolveGeography.ts reads these back out).
+  await add('re_770b_nominatim_search_carries_class_type_and_boundingbox', () => withAdapterFetch([
+    jsonResponse([{ place_id: 97683695, osm_type: 'relation', osm_id: 71525, lat: '48.8534951', lon: '2.3483915', display_name: 'Paris, Île-de-France, France', class: 'boundary', type: 'administrative', boundingbox: ['48.815', '48.902', '2.224', '2.470'] }]),
+  ], async () => {
+    const response = await nominatimAdapter.run({ text: 'Paris, France' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const identifiers = response.documents[0].identifiers
+    if (identifiers.class !== 'boundary' || identifiers.type !== 'administrative') return `expected class/type in identifiers, got ${JSON.stringify(identifiers)}`
+    if (identifiers.bbox_south !== '48.815' || identifiers.bbox_north !== '48.902' || identifiers.bbox_west !== '2.224' || identifiers.bbox_east !== '2.470') return `expected real bbox_* identifiers, got ${JSON.stringify(identifiers)}`
+    return true
   }))
 
   await add('re_771_nasa_cmr_success_normalizes_collection', () => withAdapterFetch([

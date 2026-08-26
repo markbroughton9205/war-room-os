@@ -24,6 +24,12 @@ type Props = {
   enabled: boolean
   features: TerraGeoFeature[]
   selectedId: string | null
+  /** God's Eye multi-scale phase: enables Cesium's own built-in entity clustering
+   * (DataSource.clustering) — real, standard Cesium API, not a hand-rolled clustering
+   * implementation. Off by default (every existing hazard layer keeps rendering one marker per
+   * feature, unclustered) — a merged blob is wrong for "how many distinct earthquakes are here,"
+   * but right for "roughly how many landmarks are in this area" at broad zoom. */
+  cluster?: boolean
 }
 
 const MIN_PIXEL_SIZE = 7
@@ -60,12 +66,17 @@ function resolveStyle(kind: TerraIntelligenceEventKind, feature: TerraGeoFeature
       return { color: '#FACC15', pixelSize: 10 }
     case 'tsunami_alert':
       return { color: '#22D3EE', pixelSize: 10 }
+    case 'landmark_poi':
+      return { color: '#A78BFA', pixelSize: 9 }
     default:
       return { color: '#38BDF8', pixelSize: MIN_PIXEL_SIZE }
   }
 }
 
-export function TerraFeatureLayer({ layerId, viewer, enabled, features, selectedId }: Props) {
+const CLUSTER_PIXEL_RANGE = 60
+const CLUSTER_MINIMUM_SIZE = 3
+
+export function TerraFeatureLayer({ layerId, viewer, enabled, features, selectedId, cluster = false }: Props) {
   const dataSourceRef = useRef<CustomDataSource | null>(null)
 
   // Owns the DataSource's lifecycle against this specific viewer instance only. Recreated per
@@ -84,6 +95,11 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
       // this effect's own unmount, not a viewer torn down out from under it.
       if (cancelled || viewer!.isDestroyed()) return
       created = new Cesium.CustomDataSource(`terra-layer-${layerId}`)
+      if (cluster) {
+        created.clustering.enabled = true
+        created.clustering.pixelRange = CLUSTER_PIXEL_RANGE
+        created.clustering.minimumClusterSize = CLUSTER_MINIMUM_SIZE
+      }
       viewer!.dataSources.add(created)
       dataSourceRef.current = created
     }
@@ -100,7 +116,7 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
       }
       if (dataSourceRef.current === created) dataSourceRef.current = null
     }
-  }, [viewer, layerId])
+  }, [viewer, layerId, cluster])
 
   // Redraws entities whenever the feature list, selection, or visibility changes. Cheap at this
   // phase's scale (tens of points, capped at 100 by the adapter) — full removeAll()+rebuild, not

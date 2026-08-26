@@ -55,6 +55,37 @@ async function run(): Promise<CaseResult[]> {
         results.push(check('query_used_preserved', resolved.queryUsed === 'Berlin, Germany', `queryUsed=${resolved.queryUsed}`))
         results.push(check('resolution_method_is_place_name_lookup', resolved.resolutionMethod === 'place_name_lookup', `resolutionMethod=${resolved.resolutionMethod}`))
         results.push(check('no_fake_confidence_score_only_categorical_quality', !('confidence' in resolved), `keys=${Object.keys(resolved).join(',')}`))
+        // God's Eye multi-scale phase: real class/type carried through, real absence of a
+        // boundingbox in the mocked response honestly yields null (never a fabricated box).
+        results.push(check('place_type_carries_real_nominatim_class_and_type', resolved.placeType === 'boundary/administrative', `placeType=${resolved.placeType}`))
+        results.push(check('missing_boundingbox_yields_null_not_fabricated', resolved.boundingBox === null, `boundingBox=${JSON.stringify(resolved.boundingBox)}`))
+      }
+    },
+  )
+
+  // --- God's Eye multi-scale phase: a real Nominatim boundingbox is parsed and threaded through
+  // for search-driven camera framing. ---
+  await withMockedFetch(
+    jsonResponse([{ place_id: 2, osm_type: 'relation', osm_id: 51477, lat: '39.7837304', lon: '-100.4458824', display_name: 'United States', name: 'United States', class: 'boundary', type: 'administrative', boundingbox: ['15.7834721', '71.5388001', '-180.0', '-63.8888']}]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('United States', 'edh:test-bbox')
+      results.push(check('bbox_candidate_resolves_strong', resolved.quality === 'strong', `quality=${resolved.quality}`))
+      if (resolved.quality === 'strong' || resolved.quality === 'exact') {
+        const bbox = resolved.boundingBox
+        results.push(check('real_boundingbox_is_parsed_into_real_numbers', bbox !== null && bbox !== undefined && bbox.south === 15.7834721 && bbox.north === 71.5388001 && bbox.west === -180 && bbox.east === -63.8888, JSON.stringify(bbox)))
+      }
+    },
+  )
+
+  // --- A malformed boundingbox (non-numeric, or south > north) never yields a fabricated box. ---
+  await withMockedFetch(
+    jsonResponse([{ place_id: 3, osm_type: 'node', osm_id: 9, lat: '10', lon: '10', display_name: 'Bad Bbox', name: 'Bad Bbox', class: 'place', type: 'city', boundingbox: ['not-a-number', '10', '10', '11'] }]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('Bad Bbox Place', 'edh:test-bbox-bad')
+      if (resolved.quality === 'strong' || resolved.quality === 'exact') {
+        results.push(check('malformed_boundingbox_yields_null_not_fabricated', resolved.boundingBox === null, JSON.stringify(resolved.boundingBox)))
+      } else {
+        results.push(check('malformed_boundingbox_yields_null_not_fabricated', false, `unexpected quality=${resolved.quality}`))
       }
     },
   )

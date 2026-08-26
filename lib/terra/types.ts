@@ -78,6 +78,11 @@ export const TERRA_INTELLIGENCE_EVENT_KINDS = [
   'flood_event',
   'severe_weather_alert',
   'tsunami_alert',
+  /** God's Eye multi-scale phase: a nearby landmark/attraction/civic POI discovered via a
+   * bounded Overpass query around the active location — distinct from 'place' (a named
+   * geocoding search result) and 'geographic_feature' (a named-search Overpass result), since
+   * this kind is always auto-populated by camera proximity, never a manual search. */
+  'landmark_poi',
 ] as const
 export type TerraIntelligenceEventKind = (typeof TERRA_INTELLIGENCE_EVENT_KINDS)[number]
 
@@ -171,6 +176,15 @@ export type TerraResolvedGeography =
       matchTitle: string
       sourceUrl: string | null
       retrievedAt: string
+      /** Nominatim's own "class/type" classification (e.g. "place/country", "building/house"),
+       * verbatim — undefined for resolvers that don't supply one. Used only for display and for
+       * choosing a search-driven camera destination (God's Eye multi-scale phase); never a
+       * fabricated categorization. */
+      placeType?: string | null
+      /** Nominatim's own result bounding box, verbatim — undefined when the resolver doesn't
+       * supply one. Lets a search-driven camera fly to a rectangle sized to the actual matched
+       * place (a country's real bbox vs. a single address') instead of one fixed altitude. */
+      boundingBox?: { south: number; north: number; west: number; east: number } | null
     }
   | {
       quality: 'ambiguous' | 'unresolved'

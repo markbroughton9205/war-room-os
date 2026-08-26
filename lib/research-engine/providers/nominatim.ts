@@ -46,7 +46,21 @@ type NominatimAddress = {
   country?: string
 }
 
-type NominatimResult = { place_id?: number; osm_type?: string; osm_id?: number; lat?: string; lon?: string; display_name?: string; name?: string; class?: string; type?: string; address?: NominatimAddress }
+type NominatimResult = {
+  place_id?: number
+  osm_type?: string
+  osm_id?: number
+  lat?: string
+  lon?: string
+  display_name?: string
+  name?: string
+  class?: string
+  type?: string
+  address?: NominatimAddress
+  /** Nominatim's own result bounding box: [south, north, west, east] as strings. Present on every
+   * /search result by default (no extra request param needed) — not present on /reverse. */
+  boundingbox?: [string, string, string, string]
+}
 
 export type NominatimReverseResult =
   | { ok: true; label: string; place: string | null; address: string | null; region: string | null; latitude: number; longitude: number; sourceUrl: string | null; category: string | null }
@@ -133,6 +147,20 @@ async function search(query: ResearchQuery) {
     .map(row => {
       const stableId = row.osm_type && row.osm_id ? `${row.osm_type}:${row.osm_id}` : String(row.place_id)
       const canonicalUrl = row.osm_type && row.osm_id ? `https://www.openstreetmap.org/${row.osm_type}/${row.osm_id}` : null
+      // God's Eye multi-scale phase: carried through `identifiers` (the same string-bag field
+      // normalizeLatentGeoDocument.ts already reads for opensky/met_no-style extra structured
+      // data) rather than widening ResearchDocument's shape — lib/terra/resolveGeography.ts reads
+      // these back out for search-driven camera framing; every other Nominatim caller ignores them.
+      const identifiers: Record<string, string> = { place_id: String(row.place_id) }
+      if (row.class) identifiers.class = row.class
+      if (row.type) identifiers.type = row.type
+      if (Array.isArray(row.boundingbox) && row.boundingbox.length === 4) {
+        const [south, north, west, east] = row.boundingbox
+        identifiers.bbox_south = south
+        identifiers.bbox_north = north
+        identifiers.bbox_west = west
+        identifiers.bbox_east = east
+      }
       return makeDocument({
         id: `nominatim:${stableId}`,
         provider: PROVIDER,
@@ -150,7 +178,7 @@ async function search(query: ResearchQuery) {
         updatedAt: null,
         geography: row.lat && row.lon ? `lat ${row.lat}, lon ${row.lon}` : null,
         language: null,
-        identifiers: { place_id: String(row.place_id) },
+        identifiers,
         subjects: [],
         license: 'ODbL',
         accessStatus: 'open',

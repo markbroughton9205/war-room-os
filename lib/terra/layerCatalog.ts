@@ -135,6 +135,21 @@ export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
     normalize: response => normalizeLatentGeoDocuments(response.documents, { providerId: 'osm_overpass', kind: 'geographic_feature', domain: 'other' }),
   },
   {
+    id: 'nearby_landmarks',
+    providerId: 'osm_overpass',
+    kind: 'landmark_poi',
+    domain: 'other',
+    label: 'Nearby Landmarks & POIs (Overpass)',
+    // God's Eye multi-scale phase: driven entirely by TerraShell's camera-scale + active-location
+    // state via useTerraLayer's queryOverride param (see components/war-room/terra/TerraShell.tsx)
+    // — this defaultQueryText is never actually requested in practice (the layer only fetches once
+    // a real override is computed), but every layer needs a real, documented default per this
+    // catalog's own convention, so it uses the same real example radius as osm_overpass above.
+    description: 'Named landmarks, attractions, and civic/natural/transit POIs near the active location — requires "category:<landmark|natural|civic|transit> near <lat>,<lon>[,<radiusKm>]".',
+    defaultQueryText: 'category:landmark near 51.5074,-0.1278,3',
+    normalize: response => normalizeLatentGeoDocuments(response.documents, { providerId: 'osm_overpass', kind: 'landmark_poi', domain: 'other' }),
+  },
+  {
     id: 'ohm_overpass',
     providerId: 'ohm_overpass',
     kind: 'geographic_feature',

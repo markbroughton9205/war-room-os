@@ -27,6 +27,7 @@ import type { TerraGlobeStatus } from './TerraGlobe'
 import { useTerraLayer } from './useTerraLayer'
 import { useTerraClock } from './useTerraClock'
 import { useTerraCinematicOrbit } from './useTerraCinematicOrbit'
+import { useTerraCameraScale } from './useTerraCameraScale'
 import { TerraTimeline } from './TerraTimeline'
 import { TerraEarthImagery } from './TerraEarthImagery'
 import { TERRA_LAYER_SUMMARIES, type TerraLayerSummary } from '@/lib/terra/layerCatalogSummary'
@@ -37,6 +38,7 @@ import type { TerraActiveLocation, TerraReverseLocationResolution } from '@/lib/
 import { TerraLocationCommandInput } from './TerraLocationCommandInput'
 import { TerraEarthKnowledgePanel } from './TerraEarthKnowledgePanel'
 import { useTerraActiveLocation } from './TerraActiveLocationContext'
+import { TERRA_STREET_LEVEL_IMAGERY_MESSAGE } from '@/lib/terra/streetLevelImagery'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -65,10 +67,13 @@ function StatusLine({ status }: { status: TerraGlobeStatus }) {
   return (
     <span className="text-emerald-400">
       Satellite imagery: NASA GIBS daily
-      <span className="text-slate-500"> · OSM fallback ready</span>
+      <span className="text-slate-500"> · OSM local detail ready</span>
       {status.hasIonToken
-        ? <span className="text-cyan-400"> · Cesium ion terrain active</span>
-        : <span className="text-amber-400"> · Cesium ion token not configured; terrain unavailable</span>}
+        ? <span className="text-cyan-400"> · Terrain active</span>
+        : <span className="text-amber-400"> · Terrain fallback (ion token not configured)</span>}
+      {status.hasIonToken && status.hasOsmBuildings
+        ? <span className="text-cyan-400"> · 3D Buildings active</span>
+        : <span className="text-amber-400"> · 3D Buildings unavailable{status.hasIonToken ? '' : ' (ion token not configured)'}</span>}
     </span>
   )
 }
@@ -105,6 +110,7 @@ const KIND_DETAIL_LABEL: Record<TerraIntelligenceEventKind, string> = {
   flood_event: 'Flood Event',
   severe_weather_alert: 'Severe Weather Alert',
   tsunami_alert: 'Tsunami Bulletin',
+  landmark_poi: 'Nearby Landmark',
 }
 
 // Coordinate origin — Phase 4's explicit provenance requirement: a Commander must be able to
@@ -233,6 +239,16 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
           {typeof feature.properties.affected_region === 'string' && <Row label="Affected region" value={feature.properties.affected_region} />}
         </>
       )
+    case 'landmark_poi':
+      return (
+        <>
+          <Row label="Coordinates" value={coords} mono />
+          {Array.isArray(feature.properties.subjects) && feature.properties.subjects.length > 0 && (
+            <Row label="OSM tags" value={feature.properties.subjects.filter((s): s is string => typeof s === 'string').join(', ')} />
+          )}
+          {typeof feature.properties.osm_id === 'string' && <Row label="OSM record" value={feature.properties.osm_id} mono />}
+        </>
+      )
     default:
       return <Row label="Coordinates" value={coords} mono />
   }
@@ -335,6 +351,50 @@ function TerraLayerRow({
   )
 }
 
+// God's Eye multi-scale phase, mission section 10: a handful of real countries (the United
+// States, Russia, France, Fiji, New Zealand — anywhere with territory on both sides of the
+// antimeridian) have a Nominatim bounding box whose longitude span is at or near the full -180..
+// 180 range — technically correct (the United States really does span it, via the Aleutians and
+// Pacific territories), but flying the camera to fit it shows the whole planet, not "the
+// country." Confirmed live against the real API during browser verification (searching "United
+// States" returned west=-180, east=180). Recentered on the resolved point with a capped span
+// rather than discarded — still real data, just framed usefully instead of literally globally.
+const DEGENERATE_LONGITUDE_SPAN_DEG = 350
+const RECENTERED_LONGITUDE_SPAN_DEG = 60
+
+// Confirmed live during browser verification: searching an exact single-building address (the
+// White House) returns a real Nominatim bbox only ~34m x ~53m (its building footprint).
+// Cesium.Rectangle.fromDegrees + camera.flyTo fits that so tightly the resulting camera height
+// sits below OSM's actual raster tile resolution — the result was a blank viewport, not a usable
+// close-up. Padded to a minimum span (still centered on the real resolved point, never a
+// different coordinate) so a building-sized result still produces a real, tile-covered view.
+const MIN_RECTANGLE_SPAN_DEG = 0.004
+
+function terraFlyToRectangleDegrees(target: TerraLocationTarget, boundingBox: NonNullable<TerraLocationTarget['boundingBox']>): { west: number; south: number; east: number; north: number } {
+  const { south, north, west, east } = boundingBox
+  if (east - west >= DEGENERATE_LONGITUDE_SPAN_DEG) {
+    const half = RECENTERED_LONGITUDE_SPAN_DEG / 2
+    return { west: target.longitude - half, south, east: target.longitude + half, north }
+  }
+  const halfMin = MIN_RECTANGLE_SPAN_DEG / 2
+  return {
+    west: Math.min(west, target.longitude - halfMin),
+    east: Math.max(east, target.longitude + halfMin),
+    south: Math.min(south, target.latitude - halfMin),
+    north: Math.max(north, target.latitude + halfMin),
+  }
+}
+
+/** Plain top-level helper (not inline in the component/effect body) for the same reason
+ * useTerraClock.ts's applyTerraTimeToViewerClock is one: this repo's react-hooks/immutability
+ * lint rule flags mutating a Cesium object reachable from a hook argument/useState value when
+ * done inline inside a hook or component body, even via a read-only-looking property set. A
+ * differently-named local parameter on a plain function outside that scope is the established
+ * escape hatch — see components/war-room/terra/useTerraClock.ts's own comment on this. */
+function applyTerraBuildingsVisibility(tileset: import('cesium').Cesium3DTileset, visible: boolean): void {
+  tileset.show = visible
+}
+
 export function TerraShell({ presentation = 'workspace' }: { presentation?: 'workspace' | 'command-center' }) {
   const [globeStatus, setGlobeStatus] = useState<TerraGlobeStatus>({ phase: 'loading' })
   const [viewer, setViewer] = useState<CesiumViewer | null>(null)
@@ -351,6 +411,21 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
   const clock = useTerraClock(viewer)
   // Camera-only, deliberately separate from clock/time state — see useTerraCinematicOrbit.ts.
   const cinematic = useTerraCinematicOrbit(viewer, clock.time.mode === 'live')
+
+  // God's Eye multi-scale phase: the one discrete camera-altitude signal gating 3D Buildings
+  // visibility and the nearby-landmarks layer below — see useTerraCameraScale.ts for the
+  // documented threshold reasoning.
+  const cameraScale = useTerraCameraScale(viewer)
+  const [buildingsTileset, setBuildingsTileset] = useState<import('cesium').Cesium3DTileset | null>(null)
+  const isLocalScale = cameraScale.level === 'local' || cameraScale.level === 'building'
+
+  // Cesium OSM Buildings' own internal LOD (maximumScreenSpaceError) already limits detail at any
+  // given screen size, but `.show` is still gated on our own scale signal so the tileset never
+  // requests a single tile while the Commander is at global/regional altitude.
+  useEffect(() => {
+    if (!buildingsTileset) return
+    applyTerraBuildingsVisibility(buildingsTileset, isLocalScale)
+  }, [buildingsTileset, isLocalScale])
 
   const [selectedWindowId, setSelectedWindowId] = useState('all')
   const selectedWindow: TerraTimeWindow = useMemo(() => TERRA_TIME_WINDOW_PRESETS.find(p => p.id === selectedWindowId)?.window ?? null, [selectedWindowId])
@@ -378,6 +453,31 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
       { label: 'TSUNAMI BULLETINS', value: count('tsunami_gov') },
     ]
   }, [layerFeatures])
+
+  // God's Eye multi-scale phase, mission section 8/9: nearby landmarks/attractions/POIs, bounded
+  // to the Commander's active location (never a global query) and gated to city/local/building
+  // camera scale (never fetched at global/regional altitude). Anchored to `activeLocation` — a
+  // deliberate Commander click or search — rather than a continuously-recentering camera target,
+  // matching Earth Knowledge's existing "active location" semantics and, as a direct consequence,
+  // already satisfying "debounced camera-settle": panning the camera alone never changes
+  // `activeLocation`, so this never issues a request while the camera is merely moving.
+  const nearbyLandmarksQuery = useMemo(() => {
+    if (!activeLocation) return null
+    if (cameraScale.level !== 'city' && cameraScale.level !== 'local' && cameraScale.level !== 'building') return null
+    const radiusKm = cameraScale.level === 'city' ? 5 : cameraScale.level === 'local' ? 1.5 : 0.5
+    return `category:landmark near ${activeLocation.latitude},${activeLocation.longitude},${radiusKm}`
+  }, [activeLocation, cameraScale.level])
+  const nearbyLandmarksAutoRefreshAllowed = shouldAutoRefreshTerraLayer(clock.time.mode)
+  const nearbyLandmarks = useTerraLayer('nearby_landmarks', nearbyLandmarksQuery !== null, undefined, nearbyLandmarksAutoRefreshAllowed, nearbyLandmarksQuery)
+  useEffect(() => {
+    // Deferred a tick — see useTerraLayer.ts's own identical kickoff pattern for why: this repo's
+    // lint rules treat a setState call reachable by direct static analysis from an effect body as
+    // a cascading-render risk (TerraLayerRow's analogous `onFeaturesChange(...)` call is exempt
+    // only because it receives that setter through an opaque prop the analyzer can't see into).
+    const timeout = setTimeout(() => handleFeaturesChange('nearby_landmarks', nearbyLandmarks.features), 0)
+    return () => clearTimeout(timeout)
+  }, [nearbyLandmarks.features, handleFeaturesChange])
+  const nearbySelectedId = selection.kind === 'feature' && selection.layerId === 'nearby_landmarks' ? selection.featureId : null
 
   const activateCoordinate = useCallback((point: Extract<TerraClickPoint, { ok: true }>) => {
     reverseRequestRef.current.controller?.abort()
@@ -468,10 +568,24 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
     if (!viewer || viewer.isDestroyed()) return
     void import('cesium').then(Cesium => {
       if (viewer.isDestroyed()) return
-      viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(target.longitude, target.latitude, 1_800_000),
-        duration: 1.8,
-      })
+      // God's Eye multi-scale phase, mission section 10: fly to a destination SIZED to what was
+      // actually found, using Nominatim's own result bounding box — a real country's bbox is
+      // large (camera settles far out), a single address/building's bbox is tiny (camera settles
+      // close in) — rather than one fixed altitude for every search result. A typed bare
+      // coordinate (no resolver involved, so no bbox) falls back to a close/local-scale altitude,
+      // since a Commander typing exact lat,lon is almost always pointing at one specific spot.
+      if (target.boundingBox) {
+        const { west, south, east, north } = terraFlyToRectangleDegrees(target, target.boundingBox)
+        viewer.camera.flyTo({
+          destination: Cesium.Rectangle.fromDegrees(west, south, east, north),
+          duration: 1.8,
+        })
+      } else {
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(target.longitude, target.latitude, 3_000),
+          duration: 1.8,
+        })
+      }
     })
   }, [setActiveLocation, viewer])
 
@@ -479,8 +593,9 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
 
   return (
     <div className={`relative w-full overflow-hidden bg-black text-white ${commandCenter ? 'h-full min-h-0' : 'h-screen'}`}>
-      <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onEntityClick={handleEntityClick} onGroundClick={handleGroundClick} />
+      <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onBuildingsTilesetReady={setBuildingsTileset} onEntityClick={handleEntityClick} onGroundClick={handleGroundClick} />
       <TerraEarthImagery viewer={viewer} selectedTime={clock.time.currentTime} />
+      <TerraFeatureLayer layerId="nearby_landmarks" viewer={viewer} enabled={nearbyLandmarksQuery !== null} features={nearbyLandmarks.features} selectedId={nearbySelectedId} cluster />
 
       {/* Top instrumentation bar — mission status + identity + real hazard summary. */}
       <div className={`pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 ${commandCenter ? 'p-3 pr-[48%]' : 'p-4'}`}>
@@ -503,7 +618,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
 
       <div className={`absolute left-3 top-[4.5rem] z-20 ${commandCenter ? 'w-[min(31rem,48%)]' : 'left-1/2 w-[min(34rem,44vw)] -translate-x-1/2'}`}>
         <TerraLocationCommandInput onResolvedLocation={handleResolvedLocation} />
-        {commandCenter && <TerraEarthKnowledgePanel location={activeLocation} onDismiss={() => setActiveLocation(null)} compact />}
+        {commandCenter && <TerraEarthKnowledgePanel location={activeLocation} onDismiss={() => setActiveLocation(null)} nearby={{ active: nearbyLandmarksQuery !== null, state: nearbyLandmarks.state, features: nearbyLandmarks.features }} compact />}
       </div>
 
       {/* Left rail — layer controls + Earth Knowledge placeholder. */}
@@ -512,18 +627,34 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
           <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Layer Controls</p>
           <ul className="space-y-1 text-[11px] text-slate-400">
             <li className="flex items-center justify-between">
+              <span>Camera scale</span>
+              <span className="font-mono uppercase text-emerald-400">{cameraScale.level}</span>
+            </li>
+            <li className="flex items-center justify-between">
               <span>Base imagery + clouds</span>
               <span className="text-emerald-400">NASA GIBS True Color · daily</span>
             </li>
             <li className={`flex items-center justify-between ${globeStatus.phase === 'ready' && globeStatus.hasIonToken ? '' : 'opacity-40'}`}>
               <span>Terrain (Cesium World Terrain)</span>
-              <span>{globeStatus.phase === 'ready' && globeStatus.hasIonToken ? 'active' : 'no token'}</span>
+              <span>{globeStatus.phase === 'ready' && globeStatus.hasIonToken ? 'active' : 'fallback'}</span>
+            </li>
+            <li className={`flex items-center justify-between ${globeStatus.phase === 'ready' && globeStatus.hasOsmBuildings ? '' : 'opacity-40'}`}>
+              <span>3D Buildings (Cesium OSM Buildings)</span>
+              <span>{globeStatus.phase === 'ready' && globeStatus.hasOsmBuildings ? (isLocalScale ? 'active' : 'ready · zoom in') : 'unavailable'}</span>
+            </li>
+            <li className={`flex items-center justify-between ${nearbyLandmarksQuery !== null ? '' : 'opacity-40'}`}>
+              <span>Nearby Landmarks & POIs</span>
+              <span>{nearbyLandmarksQuery === null ? 'zoom in + select a location' : nearbyLandmarks.state}</span>
+            </li>
+            <li className={`flex items-center justify-between opacity-40 ${isLocalScale ? '' : 'hidden'}`}>
+              <span>Street-level photography</span>
+              <span className="text-right text-[9px] leading-tight">{TERRA_STREET_LEVEL_IMAGERY_MESSAGE}</span>
             </li>
           </ul>
         </div>
 
         <div className="pointer-events-auto">
-          <TerraEarthKnowledgePanel location={activeLocation} onDismiss={() => setActiveLocation(null)} />
+          <TerraEarthKnowledgePanel location={activeLocation} onDismiss={() => setActiveLocation(null)} nearby={{ active: nearbyLandmarksQuery !== null, state: nearbyLandmarks.state, features: nearbyLandmarks.features }} />
         </div>
 
         <div className="pointer-events-auto max-h-[34vh] overflow-y-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">

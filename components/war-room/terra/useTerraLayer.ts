@@ -53,6 +53,13 @@ export function useTerraLayer(
   // `refresh()` action below. True (the default) preserves every pre-Phase-6 layer's exact prior
   // behavior for a caller that hasn't been updated to pass Terra's live/historical mode through.
   autoRefreshAllowed: boolean = true,
+  // God's Eye multi-scale phase: `undefined` (every pre-existing call site) means "use the
+  // catalog's own defaultQueryText," exactly as before. `null` means "enabled, but no real bounded
+  // query exists yet" (e.g. no active location) — fetch is skipped, not sent with an empty q=.
+  // A real string overrides defaultQueryText via the route's existing `?q=` support and refetches
+  // whenever it changes, e.g. TerraShell recomputing "category:landmark near <lat>,<lon>,<r>" as
+  // the Commander's active location or camera scale changes.
+  queryOverride?: string | null,
 ): TerraLayerFeedResult {
   const [state, setState] = useState<TerraLayerFeedState>('loading')
   const [features, setFeatures] = useState<TerraGeoFeature[]>([])
@@ -70,7 +77,8 @@ export function useTerraLayer(
     const requestId = ++requestIdRef.current
     if (!hasLoadedOnceRef.current) setState('loading')
     try {
-      const res = await fetch(`/api/terra/layers/${encodeURIComponent(layerId)}`, { cache: 'no-store' })
+      const qs = queryOverride ? `?q=${encodeURIComponent(queryOverride)}` : ''
+      const res = await fetch(`/api/terra/layers/${encodeURIComponent(layerId)}${qs}`, { cache: 'no-store' })
       if (requestId !== requestIdRef.current) return // superseded by a later request
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const body: ApiResponse = await res.json()
@@ -93,10 +101,10 @@ export function useTerraLayer(
       setState(featureCountRef.current > 0 ? 'stale' : 'error')
       console.error(`[terra] layer "${layerId}" request failed`, error)
     }
-  }, [layerId])
+  }, [layerId, queryOverride])
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || queryOverride === null) return
     // Deferred a tick rather than called synchronously in the effect body — see useTerraLayer's
     // Phase 1 predecessor for the same fix: `load` sets state (the initial 'loading' status)
     // before its first await, and this repo's lint rules treat a synchronous setState-from-effect
@@ -107,7 +115,7 @@ export function useTerraLayer(
       clearTimeout(kickoff)
       if (interval !== null) clearInterval(interval)
     }
-  }, [enabled, load, refreshIntervalMs, autoRefreshAllowed])
+  }, [enabled, load, refreshIntervalMs, autoRefreshAllowed, queryOverride])
 
   return {
     state: enabled ? state : 'empty',

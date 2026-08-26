@@ -48,6 +48,8 @@ export async function GET(request: NextRequest) {
         longitude: resolution.longitude,
         label: resolution.matchTitle,
         source: 'nominatim',
+        placeType: resolution.placeType ?? null,
+        boundingBox: resolution.boundingBox ?? null,
       },
     })
   }

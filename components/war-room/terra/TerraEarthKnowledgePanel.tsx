@@ -1,10 +1,29 @@
 'use client'
 
 import type { TerraActiveLocation } from '@/lib/terra/activeLocation'
+import type { TerraGeoFeature } from '@/lib/terra/types'
 
-export function TerraEarthKnowledgePanel({ location, onDismiss, compact = false }: {
+export type TerraNearbyLandmarksSummary = {
+  /** Whether the nearby-landmarks layer is currently gated on (a location is active AND the
+   * camera is at city/local/building scale) — distinct from `state`, which describes the fetch
+   * itself once active. */
+  active: boolean
+  state: 'loading' | 'live' | 'empty' | 'error' | 'stale'
+  features: TerraGeoFeature[]
+}
+
+const NEARBY_STATE_LABEL: Record<TerraNearbyLandmarksSummary['state'], string> = {
+  loading: 'Searching…',
+  live: 'Live',
+  empty: 'None found in range',
+  error: 'Unavailable',
+  stale: 'Stale (last successful search)',
+}
+
+export function TerraEarthKnowledgePanel({ location, onDismiss, nearby, compact = false }: {
   location: TerraActiveLocation | null
   onDismiss: () => void
+  nearby?: TerraNearbyLandmarksSummary
   compact?: boolean
 }) {
   return (
@@ -30,6 +49,30 @@ export function TerraEarthKnowledgePanel({ location, onDismiss, compact = false 
           </dl>
           <p className={`mt-1.5 text-[10px] leading-snug ${location.status === 'coordinate_only' ? 'text-amber-300/90' : 'text-slate-500'} ${compact ? 'hidden sm:block' : ''}`}>{location.detail}</p>
           {location.sourceUrl && <a href={location.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[10px] text-cyan-400 hover:underline">Open provenance source ↗</a>}
+
+          {/* God's Eye multi-scale phase, mission section 9: Earth Knowledge deepens with nearby
+              landmarks/POIs once the camera is close enough for a bounded search to make sense —
+              never a global list, never fabricated when the search hasn't run yet or found nothing. */}
+          {nearby && (
+            <div className={`mt-2 border-t border-white/10 pt-1.5 ${compact ? 'hidden sm:block' : ''}`}>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-400/60">Nearby Landmarks</p>
+              {!nearby.active ? (
+                <p className="mt-0.5 text-[10px] text-slate-500">Zoom in to city scale or closer to search nearby.</p>
+              ) : nearby.state === 'error' ? (
+                <p className="mt-0.5 text-[10px] text-amber-300/90">{NEARBY_STATE_LABEL.error} — OpenStreetMap Overpass did not respond.</p>
+              ) : nearby.features.length === 0 ? (
+                <p className="mt-0.5 text-[10px] text-slate-500">{NEARBY_STATE_LABEL[nearby.state]}</p>
+              ) : (
+                <ul className="mt-0.5 space-y-0.5 text-[10.5px] text-slate-300">
+                  {nearby.features.slice(0, 6).map(feature => (
+                    <li key={feature.id} className="truncate">{feature.title}</li>
+                  ))}
+                  {nearby.features.length > 6 && <li className="text-slate-500">+{nearby.features.length - 6} more</li>}
+                </ul>
+              )}
+              <p className="mt-0.5 text-[9px] text-slate-600">Source: OpenStreetMap (Overpass)</p>
+            </div>
+          )}
         </div>
       )}
     </section>

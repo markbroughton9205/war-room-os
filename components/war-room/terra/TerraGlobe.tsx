@@ -32,7 +32,7 @@ export type TerraImageryTier = 'nasa_gibs_with_osm_fallback'
 
 export type TerraGlobeStatus =
   | { phase: 'loading' }
-  | { phase: 'ready'; imageryTier: TerraImageryTier; hasIonToken: boolean }
+  | { phase: 'ready'; imageryTier: TerraImageryTier; hasIonToken: boolean; hasOsmBuildings: boolean }
   | { phase: 'error'; message: string }
 
 type TerraGlobeProps = {
@@ -40,6 +40,11 @@ type TerraGlobeProps = {
   /** Fires once, right after the Cesium Viewer is constructed — the hand-off point for any
    * layer component (e.g. the earthquake layer) that needs to add its own DataSource. */
   onViewerReady?: (viewer: CesiumViewer) => void
+  /** Fires once, after Cesium OSM Buildings has been attached to the scene (a real ion global
+   * asset, only requested when hasIonToken) — `null` when no ion token is configured or the
+   * asset request failed, so a caller can gate a "3D Buildings" visibility toggle without probing
+   * the scene's primitives itself. God's Eye multi-scale phase. */
+  onBuildingsTilesetReady?: (tileset: import('cesium').Cesium3DTileset | null) => void
   /** A left-click that hit a Terra-managed entity (see lib/terra/cesiumEntityId.ts) — the
    * feature's raw id, not a bare coordinate. */
   onEntityClick?: (featureId: string) => void
@@ -50,7 +55,7 @@ type TerraGlobeProps = {
 
 const OSM_ATTRIBUTION_URL = 'https://tile.openstreetmap.org/'
 
-export function TerraGlobe({ onStatusChange, onViewerReady, onEntityClick, onGroundClick }: TerraGlobeProps) {
+export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetReady, onEntityClick, onGroundClick }: TerraGlobeProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<TerraGlobeStatus>({ phase: 'loading' })
 
@@ -60,11 +65,13 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onEntityClick, onGro
   const onEntityClickRef = useRef(onEntityClick)
   const onGroundClickRef = useRef(onGroundClick)
   const onViewerReadyRef = useRef(onViewerReady)
+  const onBuildingsTilesetReadyRef = useRef(onBuildingsTilesetReady)
   useEffect(() => {
     onEntityClickRef.current = onEntityClick
     onGroundClickRef.current = onGroundClick
     onViewerReadyRef.current = onViewerReady
-  }, [onEntityClick, onGroundClick, onViewerReady])
+    onBuildingsTilesetReadyRef.current = onBuildingsTilesetReady
+  }, [onEntityClick, onGroundClick, onViewerReady, onBuildingsTilesetReady])
 
   useEffect(() => {
     onStatusChange?.(status)
@@ -144,11 +151,38 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onEntityClick, onGro
           return
         }
 
-        // No Cesium World Terrain is configured this phase (needs an ion token — see status
-        // reporting above), so the viewer's terrainProvider is Cesium's default
-        // EllipsoidTerrainProvider. Detected here, not assumed, so a real terrain provider added
-        // in a later phase is picked up automatically without touching this handler.
+        // Real, detected fact — not assumed from hasIonToken alone — so a terrainProvider added or
+        // changed for any reason is picked up automatically without touching this handler.
         const hasRealTerrain = !(viewer.terrainProvider instanceof Cesium.EllipsoidTerrainProvider)
+
+        // God's Eye multi-scale phase: Cesium OSM Buildings (real ODbL-licensed OSM building
+        // footprints extruded to real reported heights, hosted as Cesium ion's global asset) —
+        // only requested when a real ion token is configured, matching the same honest-degradation
+        // rule as Cesium World Terrain above. A configured token doesn't guarantee asset access
+        // (account/entitlement issues are real and independent of network health), so this is its
+        // own try/catch: a failure here degrades only "3D Buildings unavailable," never the whole
+        // globe. Starts hidden — TerraShell shows it only once the camera is at local/building
+        // scale (see useTerraCameraScale.ts), so no building tiles are requested at global/
+        // regional altitude before that gating effect runs.
+        let osmBuildingsTileset: import('cesium').Cesium3DTileset | null = null
+        if (hasIonToken) {
+          try {
+            const tileset = await Cesium.createOsmBuildingsAsync()
+            if (cancelled) {
+              tileset.destroy()
+            } else {
+              tileset.show = false
+              viewer.scene.primitives.add(tileset)
+              osmBuildingsTileset = tileset
+            }
+          } catch {
+            osmBuildingsTileset = null
+          }
+        }
+        if (cancelled) {
+          viewer.destroy()
+          return
+        }
 
         const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
         handler.setInputAction((click: { position: import('cesium').Cartesian2 }) => {
@@ -181,11 +215,13 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onEntityClick, onGro
         clickHandler = handler
 
         onViewerReadyRef.current?.(viewer)
+        onBuildingsTilesetReadyRef.current?.(osmBuildingsTileset)
 
         setStatus({
           phase: 'ready',
           imageryTier: 'nasa_gibs_with_osm_fallback',
           hasIonToken,
+          hasOsmBuildings: osmBuildingsTileset !== null,
         })
       } catch (error) {
         if (cancelled) return
