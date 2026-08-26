@@ -44,7 +44,16 @@ type ApiResponse = {
   error: { message: string } | null
 }
 
-export function useTerraLayer(layerId: string, enabled: boolean, refreshIntervalMs: number = DEFAULT_AUTO_REFRESH_MS): TerraLayerFeedResult {
+export function useTerraLayer(
+  layerId: string,
+  enabled: boolean,
+  refreshIntervalMs: number = DEFAULT_AUTO_REFRESH_MS,
+  // Phase 6, mission section 13: the recurring auto-refresh timer only — never the initial load
+  // (a layer still shows data once toggled on in historical mode) and never the manual
+  // `refresh()` action below. True (the default) preserves every pre-Phase-6 layer's exact prior
+  // behavior for a caller that hasn't been updated to pass Terra's live/historical mode through.
+  autoRefreshAllowed: boolean = true,
+): TerraLayerFeedResult {
   const [state, setState] = useState<TerraLayerFeedState>('loading')
   const [features, setFeatures] = useState<TerraGeoFeature[]>([])
   const [skippedCount, setSkippedCount] = useState(0)
@@ -93,12 +102,12 @@ export function useTerraLayer(layerId: string, enabled: boolean, refreshInterval
     // before its first await, and this repo's lint rules treat a synchronous setState-from-effect
     // as a cascading-render risk. A zero-delay timeout is the standard escape hatch.
     const kickoff = setTimeout(() => void load(), 0)
-    const interval = setInterval(() => void load(), refreshIntervalMs)
+    const interval = autoRefreshAllowed ? setInterval(() => void load(), refreshIntervalMs) : null
     return () => {
       clearTimeout(kickoff)
-      clearInterval(interval)
+      if (interval !== null) clearInterval(interval)
     }
-  }, [enabled, load, refreshIntervalMs])
+  }, [enabled, load, refreshIntervalMs, autoRefreshAllowed])
 
   return {
     state: enabled ? state : 'empty',

@@ -20,13 +20,17 @@
  * only — never written to war_room_audit_logs or anywhere else. Camera movement and exploratory
  * clicks are transient UI state, not War Room events.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import type { Viewer as CesiumViewer } from 'cesium'
 import type { TerraGlobeStatus } from './TerraGlobe'
 import { useTerraLayer } from './useTerraLayer'
+import { useTerraClock } from './useTerraClock'
+import { useTerraCinematicOrbit } from './useTerraCinematicOrbit'
+import { TerraTimeline } from './TerraTimeline'
 import { TERRA_LAYER_SUMMARIES, type TerraLayerSummary } from '@/lib/terra/layerCatalogSummary'
-import type { TerraClickPoint, TerraGeoFeature, TerraIntelligenceEventKind } from '@/lib/terra/types'
+import { TERRA_TIME_WINDOW_PRESETS, filterTerraFeaturesByTime, shouldAutoRefreshTerraLayer } from '@/lib/terra/terraTime'
+import type { TerraClickPoint, TerraGeoFeature, TerraIntelligenceEventKind, TerraTimeMode, TerraTimeWindow } from '@/lib/terra/types'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -248,25 +252,46 @@ function TerraLayerRow({
   viewer,
   selection,
   onFeaturesChange,
+  timeMode,
+  selectedTime,
+  timeWindow,
 }: {
   layer: TerraLayerSummary
   viewer: CesiumViewer | null
   selection: Selection
   onFeaturesChange: (layerId: string, features: TerraGeoFeature[]) => void
+  timeMode: TerraTimeMode
+  selectedTime: string
+  timeWindow: TerraTimeWindow
 }) {
   const [enabled, setEnabled] = useState(() => DEFAULT_ENABLED_LAYER_IDS.has(layer.id))
-  const feed = useTerraLayer(layer.id, enabled, layer.refreshIntervalMs)
+  const autoRefreshAllowed = shouldAutoRefreshTerraLayer(timeMode)
+  const feed = useTerraLayer(layer.id, enabled, layer.refreshIntervalMs, autoRefreshAllowed)
+
+  // Mission section 7: returning to live must "refresh live-data layers where appropriate" — a
+  // one-time explicit refresh on the historical->live edge, not a new continuous poll.
+  const wasLiveRef = useRef(timeMode === 'live')
+  useEffect(() => {
+    if (timeMode === 'live' && !wasLiveRef.current && enabled) feed.refresh()
+    wasLiveRef.current = timeMode === 'live'
+  }, [timeMode, enabled, feed])
+
+  // Section 8/9: 4D visibility filtering over already-loaded data — never a re-fetch. `window:
+  // null` (the 'ALL' preset, the default) reproduces Phase 1-5's exact prior "show everything
+  // loaded" behavior exactly, so no existing layer's visible output changes unless a Commander
+  // deliberately narrows the window or scrubs into the past.
+  const visibleFeatures = useMemo(() => filterTerraFeaturesByTime(feed.features, selectedTime, timeWindow), [feed.features, selectedTime, timeWindow])
 
   useEffect(() => {
-    onFeaturesChange(layer.id, feed.features)
-  }, [layer.id, feed.features, onFeaturesChange])
+    onFeaturesChange(layer.id, visibleFeatures)
+  }, [layer.id, visibleFeatures, onFeaturesChange])
 
   const feedStatus = FEED_STATE_LABEL[feed.state]
   const selectedId = selection.kind === 'feature' && selection.layerId === layer.id ? selection.featureId : null
 
   return (
     <div className="border-t border-white/10 pt-2 first:border-t-0 first:pt-0 first:mt-0 mt-2">
-      <TerraFeatureLayer layerId={layer.id} viewer={viewer} enabled={enabled} features={feed.features} selectedId={selectedId} />
+      <TerraFeatureLayer layerId={layer.id} viewer={viewer} enabled={enabled} features={visibleFeatures} selectedId={selectedId} />
       <div className="flex items-center justify-between text-[11px]">
         <span className="text-slate-300">{layer.label}</span>
         <button
@@ -307,6 +332,16 @@ export function TerraShell() {
   const [viewer, setViewer] = useState<CesiumViewer | null>(null)
   const [selection, setSelection] = useState<Selection>({ kind: 'none' })
   const [layerFeatures, setLayerFeatures] = useState<Record<string, TerraGeoFeature[]>>({})
+
+  // Phase 6: Terra's 4D clock — real Earth orientation/lighting follows viewer.clock.currentTime
+  // (see TerraGlobe.tsx's enableLighting + useTerraClock.ts), which this hook is the only thing
+  // that ever sets.
+  const clock = useTerraClock(viewer)
+  // Camera-only, deliberately separate from clock/time state — see useTerraCinematicOrbit.ts.
+  const cinematic = useTerraCinematicOrbit(viewer, clock.time.mode === 'live')
+
+  const [selectedWindowId, setSelectedWindowId] = useState('all')
+  const selectedWindow: TerraTimeWindow = useMemo(() => TERRA_TIME_WINDOW_PRESETS.find(p => p.id === selectedWindowId)?.window ?? null, [selectedWindowId])
 
   const handleFeaturesChange = useCallback((layerId: string, features: TerraGeoFeature[]) => {
     setLayerFeatures(prev => (prev[layerId] === features ? prev : { ...prev, [layerId]: features }))
@@ -357,7 +392,7 @@ export function TerraShell() {
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-4">
         <div className="pointer-events-auto rounded border border-white/10 bg-black/70 px-3 py-2 backdrop-blur-sm">
           <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-400">War Room · Terra</h1>
-          <p className="mt-0.5 text-[10px] text-slate-500">Planetary Intelligence Environment — Phase 5: live hazard intelligence</p>
+          <p className="mt-0.5 text-[10px] text-slate-500">Planetary Intelligence Environment — Phase 6: real-time planet + 4D time engine</p>
         </div>
         <div className="pointer-events-auto flex flex-wrap justify-center gap-x-4 gap-y-1 rounded border border-white/10 bg-black/70 px-3 py-2 text-[10px] backdrop-blur-sm">
           {hazardSummary.map(item => (
@@ -401,7 +436,16 @@ export function TerraShell() {
               <div key={group.label} className="mt-2 first:mt-0">
                 <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">{group.label}</p>
                 {layers.map(layer => (
-                  <TerraLayerRow key={layer.id} layer={layer} viewer={viewer} selection={selection} onFeaturesChange={handleFeaturesChange} />
+                  <TerraLayerRow
+                    key={layer.id}
+                    layer={layer}
+                    viewer={viewer}
+                    selection={selection}
+                    onFeaturesChange={handleFeaturesChange}
+                    timeMode={clock.time.mode}
+                    selectedTime={clock.time.currentTime}
+                    timeWindow={selectedWindow}
+                  />
                 ))}
               </div>
             )
@@ -477,11 +521,22 @@ export function TerraShell() {
         )}
       </div>
 
-      {/* Bottom bar — time controls + Commander annotation placeholder. */}
+      {/* Bottom bar — 4D timeline + Commander annotation placeholder. */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-4">
-        <div className="pointer-events-auto">
-          <PlaceholderPanel title="Time Controls" note="4D time engine not wired yet (later phase). Globe currently shows the present moment only." />
-        </div>
+        <TerraTimeline
+          time={clock.time}
+          onGoLive={clock.goLive}
+          onScrub={clock.scrub}
+          onPlay={clock.play}
+          onPause={clock.pause}
+          onPlaybackRateChange={clock.setPlaybackRate}
+          windowPresets={TERRA_TIME_WINDOW_PRESETS}
+          selectedWindowId={selectedWindowId}
+          onWindowChange={setSelectedWindowId}
+          cinematicOrbiting={cinematic.orbiting}
+          cinematicSuppressedByReducedMotion={cinematic.suppressedByReducedMotion}
+          onResumeCinematic={cinematic.resume}
+        />
         <div className="pointer-events-auto">
           <PlaceholderPanel
             title="Commander Annotation"

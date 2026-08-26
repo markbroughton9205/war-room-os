@@ -126,7 +126,12 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onEntityClick, onGro
 
         // Required attribution stays visible (ODbL) — styled to match Terra's instrumentation
         // aesthetic in globals via #terra-globe-root, never hidden.
-        viewer.scene.globe.enableLighting = false
+        // Phase 6: real sun-relative lighting, computed by Cesium purely from viewer.clock's
+        // current time — no separate astronomy/rotation logic exists anywhere in Terra. This is
+        // the entire "real day/night terminator" implementation; components/war-room/terra/
+        // useTerraClock.ts only ever sets viewer.clock.currentTime, never touches lighting
+        // directly.
+        viewer.scene.globe.enableLighting = true
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true
         viewer.scene.fog.enabled = true
         viewer.targetFrameRate = 60

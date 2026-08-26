@@ -297,6 +297,67 @@ export type TerraClickPoint =
   | { ok: false }
   | { ok: true; longitude: number; latitude: number; height: number | null; hasTerrainHeight: boolean }
 
+/**
+ * Terra's authoritative clock state (Phase 6). Deliberately just 'live' | 'historical' —
+ * 'scheduled' as a distinct MODE (as opposed to a per-event TerraTemporalStatus, which already
+ * exists) was considered and left out: no Terra source this phase actually produces a
+ * meaningfully-navigable future/scheduled event stream, so a third mode would have no real
+ * content behind it. TerraTemporalStatus's existing 'scheduled' value remains reserved for
+ * exactly that future need.
+ *
+ * In-memory only — never persisted, and specifically never at frame rate. `currentTime` in 'live'
+ * mode is Cesium's own `viewer.clock.currentTime`, read back into this state at a bounded rate
+ * (see components/war-room/terra/useTerraClock.ts), not independently computed here.
+ */
+export const TERRA_TIME_MODES = ['live', 'historical'] as const
+export type TerraTimeMode = (typeof TERRA_TIME_MODES)[number]
+
+/** 1x is real-time historical playback; 600x advances 10 real-world minutes of Terra time per
+ * real second — fast enough to scrub through a day in a few minutes without being a meaningless
+ * blur. Chosen as a small, fixed set (matching TERRA_PLAYBACK_RATES-style additive-union
+ * conventions elsewhere in this file) rather than an arbitrary continuous slider. */
+export const TERRA_PLAYBACK_RATES = [1, 10, 60, 600] as const
+export type TerraPlaybackRate = (typeof TERRA_PLAYBACK_RATES)[number]
+
+export type TerraTimeState = {
+  mode: TerraTimeMode
+  /** ISO 8601 UTC timestamp — the single authoritative "as of when" Terra is currently showing. */
+  currentTime: string
+  playbackRate: TerraPlaybackRate
+  /** Only meaningful in 'historical' mode — live mode's clock always progresses via Cesium's own
+   * render loop; this never gates it. */
+  playing: boolean
+  /** Reserved for a future real clock-drift correction (comparing Terra's local clock against a
+   * trusted server time source) — honestly 0 until such a source exists, never a fabricated
+   * offset. */
+  liveOffsetMs: number
+  /** ISO timestamp of the last time this state was in 'live' mode and synced to real time; null
+   * until the first live sync happens. */
+  lastLiveSyncAt: string | null
+}
+
+/**
+ * A bounded display window for 4D event-visibility filtering (Phase 6) — `null` means
+ * unwindowed ("visible once it has occurred, exactly Phase 1-5's existing always-show
+ * behavior"), the default and the only value every pre-Phase-6 layer needs to keep working
+ * unchanged. A non-null window additionally hides events older than `lookbackMs` relative to the
+ * selected time, and reveals not-yet-occurred (relative to selected time) events within
+ * `lookaheadMs` of it.
+ */
+export type TerraTimeWindow = { lookbackMs: number; lookaheadMs: number } | null
+
+/**
+ * Bounded semantic time-context transitions (Phase 6) — an extension point for a future Council
+ * context bridge, not a bridge itself (none exists yet). Emitted only on meaningful mode/selection
+ * transitions, never per-tick/per-frame — see lib/terra/terraTime.ts's createTerraTimeEventBus.
+ */
+export type TerraTimeContextEvent =
+  | { type: 'terra.time.mode.changed'; mode: TerraTimeMode; at: string }
+  | { type: 'terra.time.selected.changed'; currentTime: string; at: string }
+  | { type: 'terra.time.returned_live'; at: string }
+  | { type: 'terra.playback.started'; rate: TerraPlaybackRate; at: string }
+  | { type: 'terra.playback.paused'; at: string }
+
 export type NormalizeResult = { events: TerraIntelligenceEvent[]; skippedCount: number }
 
 /**
