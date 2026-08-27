@@ -39,6 +39,11 @@ import { TerraLocationCommandInput } from './TerraLocationCommandInput'
 import { TerraEarthKnowledgePanel } from './TerraEarthKnowledgePanel'
 import { useTerraActiveLocation } from './TerraActiveLocationContext'
 import { TERRA_STREET_LEVEL_IMAGERY_MESSAGE } from '@/lib/terra/streetLevelImagery'
+import { buildTerraEventIntelligenceQuery } from '@/lib/terra/eventIntelligenceQuery'
+import { resolveTerraEventCameraFraming } from '@/lib/terra/eventCameraFraming'
+import { isTerraRequestStale } from '@/lib/terra/requestSequence'
+import { useTerraRelatedIntelligence } from './useTerraRelatedIntelligence'
+import { TerraRelatedIntelligencePanel } from './TerraRelatedIntelligencePanel'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -279,6 +284,7 @@ function TerraLayerRow({
   timeMode,
   selectedTime,
   timeWindow,
+  hideControls = false,
 }: {
   layer: TerraLayerSummary
   viewer: CesiumViewer | null
@@ -287,6 +293,12 @@ function TerraLayerRow({
   timeMode: TerraTimeMode
   selectedTime: string
   timeWindow: TerraTimeWindow
+  /** God's Eye command-center mode has no room for the layer-toggle/status control chrome, but
+   * event markers must still fetch and render there (mission section 15: event click must work on
+   * both surfaces) — this suppresses only the visible control UI below, never the
+   * useTerraLayer fetch or the TerraFeatureLayer render, so it's the same single layer
+   * implementation in both presentations, not a second one. */
+  hideControls?: boolean
 }) {
   const [enabled, setEnabled] = useState(() => DEFAULT_ENABLED_LAYER_IDS.has(layer.id))
   const autoRefreshAllowed = shouldAutoRefreshTerraLayer(timeMode)
@@ -312,6 +324,10 @@ function TerraLayerRow({
 
   const feedStatus = FEED_STATE_LABEL[feed.state]
   const selectedId = selection.kind === 'feature' && selection.layerId === layer.id ? selection.featureId : null
+
+  if (hideControls) {
+    return <TerraFeatureLayer layerId={layer.id} viewer={viewer} enabled={enabled} features={visibleFeatures} selectedId={selectedId} />
+  }
 
   return (
     <div className="border-t border-white/10 pt-2 first:border-t-0 first:pt-0 first:mt-0 mt-2">
@@ -400,7 +416,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
   const [viewer, setViewer] = useState<CesiumViewer | null>(null)
   const [selection, setSelection] = useState<Selection>({ kind: 'none' })
   const [layerFeatures, setLayerFeatures] = useState<Record<string, TerraGeoFeature[]>>({})
-  const { activeLocation, setActiveLocation } = useTerraActiveLocation()
+  const { activeLocation, setActiveLocation, setSelectedEvent } = useTerraActiveLocation()
   const reverseRequestRef = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null })
 
   useEffect(() => () => reverseRequestRef.current.controller?.abort(), [])
@@ -438,6 +454,18 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
     if (selection.kind !== 'feature') return null
     return (layerFeatures[selection.layerId] ?? []).find(f => f.id === selection.featureId) ?? null
   }, [selection, layerFeatures])
+
+  // Event -> exact-location intelligence phase, mission section 7/8: a bounded semantic query
+  // built from the selected event's own title/kind plus (once resolved) its reverse-resolved
+  // region — see lib/terra/eventIntelligenceQuery.ts. `null` (no event selected) skips the fetch
+  // entirely, matching nearbyLandmarksQuery's identical "null = don't fetch" convention below. The
+  // query string only changes on a real selection change or the resolving->resolved transition, so
+  // this never re-fetches on camera pan/zoom/orbit/clock ticks.
+  const relatedIntelligenceQuery = useMemo(() => {
+    if (!selectedFeature) return null
+    return buildTerraEventIntelligenceQuery(selectedFeature, activeLocation)
+  }, [selectedFeature, activeLocation])
+  const relatedIntelligence = useTerraRelatedIntelligence(relatedIntelligenceQuery)
 
   // Real counts from whichever hazard layers are actually enabled and loaded — never a static or
   // placeholder number. A layer that isn't enabled contributes 0, honestly (not "unknown"),
@@ -514,19 +542,41 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
         return response.json() as Promise<TerraReverseLocationResolution>
       })
       .then(result => {
-        if (reverseRequestRef.current.sequence !== sequence) return
+        if (isTerraRequestStale(sequence, reverseRequestRef.current.sequence)) return
         setActiveLocation({ ...result.location, selectedAt })
       })
       .catch(error => {
-        if (controller.signal.aborted || reverseRequestRef.current.sequence !== sequence) return
+        if (controller.signal.aborted || isTerraRequestStale(sequence, reverseRequestRef.current.sequence)) return
         setActiveLocation({ ...pending, status: 'coordinate_only', detail: `Reverse geocoding unavailable: ${error instanceof Error ? error.message : String(error)}` })
       })
   }, [setActiveLocation])
 
   const handleGroundClick = useCallback((point: TerraClickPoint) => {
     setSelection(point.ok ? { kind: 'ground', point } : { kind: 'miss' })
+    // A ground click is Earth Knowledge-only (mission section 14) — never the full
+    // event-intelligence path, so any previously selected event/Related Intelligence context is
+    // cleared rather than left stale alongside a now-unrelated active location.
+    setSelectedEvent(null)
     if (point.ok) activateCoordinate(point)
-  }, [activateCoordinate])
+  }, [activateCoordinate, setSelectedEvent])
+
+  // Event -> exact-location intelligence phase: flies the Cesium camera to the event's own
+  // observed coordinates (never a re-geocoded or inferred position — see
+  // lib/terra/eventCameraFraming.ts), framed by kind/geometry rather than one fixed altitude for
+  // every event. A destroyed/not-yet-ready viewer is a legitimate skip, not an error — the
+  // observed-data panel and reverse-geocoded Earth Knowledge context remain available regardless.
+  const flyToEventFeature = useCallback((feature: TerraGeoFeature) => {
+    if (!viewer || viewer.isDestroyed()) return
+    const framing = resolveTerraEventCameraFraming(feature)
+    void import('cesium').then(Cesium => {
+      if (viewer.isDestroyed()) return
+      if (framing.mode === 'rectangle') {
+        viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(framing.west, framing.south, framing.east, framing.north), duration: 1.8 })
+      } else {
+        viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(framing.longitude, framing.latitude, framing.altitudeMeters), duration: 1.8 })
+      }
+    })
+  }, [viewer])
 
   // TerraFeatureLayer composes each Cesium entity id as "{layerId}:{featureId}" (see
   // TerraFeatureLayer.tsx) specifically so a click can be resolved back to the correct layer even
@@ -541,9 +591,13 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
     setSelection({ kind: 'feature', layerId, featureId })
     const feature = (layerFeatures[layerId] ?? []).find(item => item.id === featureId)
     if (feature) {
+      // The event's own observed coordinates remain authoritative for both Earth Knowledge
+      // reverse-resolution and camera targeting — never re-geocoded or inferred from anywhere else.
       activateCoordinate({ ok: true, latitude: feature.latitude, longitude: feature.longitude, height: feature.altitude, hasTerrainHeight: false })
+      setSelectedEvent(feature)
+      flyToEventFeature(feature)
     }
-  }, [activateCoordinate, layerFeatures])
+  }, [activateCoordinate, layerFeatures, setSelectedEvent, flyToEventFeature])
 
   const handleResolvedLocation = useCallback((target: TerraLocationTarget) => {
     reverseRequestRef.current.controller?.abort()
@@ -597,6 +651,27 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
       <TerraEarthImagery viewer={viewer} selectedTime={clock.time.currentTime} />
       <TerraFeatureLayer layerId="nearby_landmarks" viewer={viewer} enabled={nearbyLandmarksQuery !== null} features={nearbyLandmarks.features} selectedId={nearbySelectedId} cluster />
 
+      {/* God's Eye command center has no Data Layers control panel (see the workspace-only left
+          rail below), but its event markers must still fetch and render — otherwise there is
+          nothing on the front-page globe to click, and the entire event-intelligence flow would
+          be workspace-only despite mission section 15 requiring both surfaces. Same TerraLayerRow
+          component as the workspace's own layer list, just headless (hideControls) here; the two
+          mounts are mutually exclusive with `!commandCenter` below, so no layer is ever fetched
+          twice. */}
+      {commandCenter && TERRA_LAYER_SUMMARIES.map(layer => (
+        <TerraLayerRow
+          key={layer.id}
+          layer={layer}
+          viewer={viewer}
+          selection={selection}
+          onFeaturesChange={handleFeaturesChange}
+          timeMode={clock.time.mode}
+          selectedTime={clock.time.currentTime}
+          timeWindow={selectedWindow}
+          hideControls
+        />
+      ))}
+
       {/* Top instrumentation bar — mission status + identity + real hazard summary. */}
       <div className={`pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 ${commandCenter ? 'p-3 pr-[48%]' : 'p-4'}`}>
         <div className="pointer-events-auto rounded border border-white/10 bg-black/70 px-3 py-2 backdrop-blur-sm">
@@ -619,6 +694,14 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
       <div className={`absolute left-3 top-[4.5rem] z-20 ${commandCenter ? 'w-[min(31rem,48%)]' : 'left-1/2 w-[min(34rem,44vw)] -translate-x-1/2'}`}>
         <TerraLocationCommandInput onResolvedLocation={handleResolvedLocation} />
         {commandCenter && <TerraEarthKnowledgePanel location={activeLocation} onDismiss={() => setActiveLocation(null)} nearby={{ active: nearbyLandmarksQuery !== null, state: nearbyLandmarks.state, features: nearbyLandmarks.features }} compact />}
+        {/* God's Eye command center has no right rail (see below), so Related Intelligence for an
+            event selection folds in here, directly under Earth Knowledge — same semantic behavior
+            as the full /terra workspace's right-rail panel, just a different layout slot. */}
+        {commandCenter && selectedFeature && (
+          <div className="mt-2">
+            <TerraRelatedIntelligencePanel feed={relatedIntelligence} active compact />
+          </div>
+        )}
       </div>
 
       {/* Left rail — layer controls + Earth Knowledge placeholder. */}
@@ -718,7 +801,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
           <div className="pointer-events-auto rounded border border-cyan-400/30 bg-black/70 p-3 backdrop-blur-sm">
             <div className="mb-2 flex items-center justify-between">
               <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Observed Data — {KIND_DETAIL_LABEL[selectedFeature.kind]}</p>
-              <button type="button" onClick={() => setSelection({ kind: 'none' })} className="text-[10px] text-slate-500 hover:text-slate-300">
+              <button type="button" onClick={() => { setSelection({ kind: 'none' }); setSelectedEvent(null) }} className="text-[10px] text-slate-500 hover:text-slate-300">
                 dismiss
               </button>
             </div>
@@ -740,6 +823,15 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
               title="Provenance / Source Panel"
               note="Click a feature marker to see its observed detail here. Future phases add Curated Earth Knowledge, Council Analysis, and Commander Annotation as distinct, never-blended panels."
             />
+          </div>
+        )}
+
+        {/* Related Intelligence — deliberately a separate, differently colored panel from Observed
+            Data above; never blended into it. Only ever renders normalized results from the
+            existing Research Engine (see lib/terra/relatedIntelligence.ts). */}
+        {selectedFeature && (
+          <div className="pointer-events-auto">
+            <TerraRelatedIntelligencePanel feed={relatedIntelligence} active />
           </div>
         )}
       </div>}
