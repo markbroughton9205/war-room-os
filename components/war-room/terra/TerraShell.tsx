@@ -44,6 +44,10 @@ import { resolveTerraEventCameraFraming } from '@/lib/terra/eventCameraFraming'
 import { isTerraRequestStale } from '@/lib/terra/requestSequence'
 import { useTerraRelatedIntelligence } from './useTerraRelatedIntelligence'
 import { TerraRelatedIntelligencePanel } from './TerraRelatedIntelligencePanel'
+import { useTerraCameraViewRectangle } from './useTerraCameraViewRectangle'
+import { useTerraAircraftTrails } from './useTerraAircraftTrails'
+import { buildTerraAircraftBoundingBoxQuery } from '@/lib/terra/aircraftBoundingBox'
+import { summarizeTerraAircraftFeatures } from '@/lib/terra/aircraftRegionalSummary'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -179,7 +183,13 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
           <Row label="Coordinates" value={coords} mono />
           {typeof feature.properties.callsign === 'string' && <Row label="Callsign" value={feature.properties.callsign} />}
           {typeof feature.properties.icao24 === 'string' && <Row label="ICAO24" value={feature.properties.icao24} mono />}
-          {feature.timestamp && <Row label="Last position report" value={new Date(feature.timestamp).toLocaleString()} />}
+          {typeof feature.properties.originCountry === 'string' && <Row label="Origin country" value={feature.properties.originCountry} />}
+          <Row label="Altitude" value={feature.altitude !== null ? `${Math.round(feature.altitude).toLocaleString()} m` : 'not reported'} />
+          {typeof feature.properties.velocityMps === 'number' && <Row label="Ground speed" value={`${Math.round(feature.properties.velocityMps * 3.6)} km/h`} />}
+          {typeof feature.properties.headingDeg === 'number' && <Row label="Heading" value={`${Math.round(feature.properties.headingDeg)}°`} />}
+          {typeof feature.properties.verticalRateMps === 'number' && <Row label="Vertical rate" value={`${feature.properties.verticalRateMps.toFixed(1)} m/s`} />}
+          <Row label="On ground" value={feature.properties.onGround === true ? 'Yes' : feature.properties.onGround === false ? 'No' : 'not reported'} />
+          {feature.timestamp && <Row label="Last contact" value={new Date(feature.timestamp).toLocaleString()} />}
         </>
       )
     case 'heritage_site':
@@ -416,7 +426,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
   const [viewer, setViewer] = useState<CesiumViewer | null>(null)
   const [selection, setSelection] = useState<Selection>({ kind: 'none' })
   const [layerFeatures, setLayerFeatures] = useState<Record<string, TerraGeoFeature[]>>({})
-  const { activeLocation, setActiveLocation, setSelectedEvent } = useTerraActiveLocation()
+  const { activeLocation, setActiveLocation, setSelectedEvent, setAircraftSummary } = useTerraActiveLocation()
   const reverseRequestRef = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null })
 
   useEffect(() => () => reverseRequestRef.current.controller?.abort(), [])
@@ -506,6 +516,47 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
     return () => clearTimeout(timeout)
   }, [nearbyLandmarks.features, handleFeaturesChange])
   const nearbySelectedId = selection.kind === 'feature' && selection.layerId === 'nearby_landmarks' ? selection.featureId : null
+
+  // Live-aviation phase, mission section 5: the Commander's live camera view rectangle, recomputed
+  // only on a real camera.moveEnd (see useTerraCameraViewRectangle.ts) — the bbox-query analogue of
+  // nearbyLandmarksQuery's point+radius above.
+  const cameraViewRectangle = useTerraCameraViewRectangle(viewer)
+  // Off by default in the full workspace (every non-earthquake layer's "deliberate Commander
+  // action" convention — see DEFAULT_ENABLED_LAYER_IDS above); on by default in the God's Eye
+  // command center specifically, since that surface has no Data Layers toggle UI at all and the
+  // mission requires real aircraft visible there without a manual step (mirrors why
+  // usgs_earthquake_feed alone is grandfathered into DEFAULT_ENABLED_LAYER_IDS).
+  const [aircraftEnabled, setAircraftEnabled] = useState(() => presentation === 'command-center')
+  // Gated off entirely at global camera scale (never a world-sized bbox query — mission section
+  // 5/16) and null while the layer is off, matching every other layer's "null query = don't fetch"
+  // convention. lib/terra/aircraftBoundingBox.ts applies its own span/validity backstop on top of
+  // this scale gate.
+  const aircraftBoundingBoxQuery = useMemo(() => {
+    if (!aircraftEnabled) return null
+    if (cameraScale.level === 'global') return null
+    return buildTerraAircraftBoundingBoxQuery(cameraViewRectangle.rectangle)
+  }, [aircraftEnabled, cameraScale.level, cameraViewRectangle.rectangle])
+  const aircraftAutoRefreshAllowed = shouldAutoRefreshTerraLayer(clock.time.mode)
+  // 60s — matched to (never faster than) the Research Engine's own live-feed cache TTL for
+  // opensky and this repo's no-layer-faster-than-60s floor; see layerCatalog.ts's opensky entry.
+  const aircraft = useTerraLayer('opensky', aircraftBoundingBoxQuery !== null, 60_000, aircraftAutoRefreshAllowed, aircraftBoundingBoxQuery)
+  useEffect(() => {
+    const timeout = setTimeout(() => handleFeaturesChange('opensky', aircraft.features), 0)
+    return () => clearTimeout(timeout)
+  }, [aircraft.features, handleFeaturesChange])
+  const aircraftSelectedId = selection.kind === 'feature' && selection.layerId === 'opensky' ? selection.featureId : null
+  // Session-only trail, never a provider historical track — see lib/terra/aircraftTrail.ts.
+  const aircraftTrails = useTerraAircraftTrails(aircraft.features, aircraftBoundingBoxQuery !== null)
+  // Bounded, honest Observed Data summary — never the raw feed itself — handed to the existing
+  // Council semantic-context extension point below.
+  const aircraftRegionalSummary = useMemo(
+    () => summarizeTerraAircraftFeatures(aircraft.features, clock.time.currentTime),
+    [aircraft.features, clock.time.currentTime],
+  )
+  useEffect(() => {
+    const timeout = setTimeout(() => setAircraftSummary(aircraftBoundingBoxQuery !== null ? aircraftRegionalSummary : null), 0)
+    return () => clearTimeout(timeout)
+  }, [aircraftRegionalSummary, aircraftBoundingBoxQuery, setAircraftSummary])
 
   const activateCoordinate = useCallback((point: Extract<TerraClickPoint, { ok: true }>) => {
     reverseRequestRef.current.controller?.abort()
@@ -650,6 +701,11 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
       <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onBuildingsTilesetReady={setBuildingsTileset} onEntityClick={handleEntityClick} onGroundClick={handleGroundClick} />
       <TerraEarthImagery viewer={viewer} selectedTime={clock.time.currentTime} />
       <TerraFeatureLayer layerId="nearby_landmarks" viewer={viewer} enabled={nearbyLandmarksQuery !== null} features={nearbyLandmarks.features} selectedId={nearbySelectedId} cluster />
+      {/* Live-aviation phase: rendered unconditionally in both presentations (mission section 15
+          requires event click/selection to work on both the front-page God's Eye and the full
+          /terra workspace) — `cluster` so a dense region simplifies at broad zoom instead of
+          becoming an overlapping-marker mess (mission section 3/14). */}
+      <TerraFeatureLayer layerId="opensky" viewer={viewer} enabled={aircraftBoundingBoxQuery !== null} features={aircraft.features} selectedId={aircraftSelectedId} cluster trails={aircraftTrails} />
 
       {/* God's Eye command center has no Data Layers control panel (see the workspace-only left
           rail below), but its event markers must still fetch and render — otherwise there is
@@ -658,7 +714,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
           component as the workspace's own layer list, just headless (hideControls) here; the two
           mounts are mutually exclusive with `!commandCenter` below, so no layer is ever fetched
           twice. */}
-      {commandCenter && TERRA_LAYER_SUMMARIES.map(layer => (
+      {commandCenter && TERRA_LAYER_SUMMARIES.filter(layer => layer.id !== 'opensky').map(layer => (
         <TerraLayerRow
           key={layer.id}
           layer={layer}
@@ -743,7 +799,11 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
         <div className="pointer-events-auto max-h-[34vh] overflow-y-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
           <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Data Layers</p>
           {LAYER_GROUPS.map(group => {
-            const layers = TERRA_LAYER_SUMMARIES.filter(layer => group.domains.includes(layer.domain))
+            // 'opensky' is deliberately excluded here — it gets its own bespoke, camera-bbox-driven
+            // Aircraft section below (a fixed default-query toggle wouldn't make sense for a layer
+            // whose whole point is following the Commander's live view), never a second listing of
+            // the same layer.
+            const layers = TERRA_LAYER_SUMMARIES.filter(layer => group.domains.includes(layer.domain) && layer.id !== 'opensky')
             if (layers.length === 0) return null
             return (
               <div key={group.label} className="mt-2 first:mt-0">
@@ -763,6 +823,63 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
               </div>
             )
           })}
+
+          {/* Live-aviation phase: bespoke, not a TerraLayerRow — its query is the Commander's live
+              camera view (lib/terra/aircraftBoundingBox.ts), not a fixed defaultQueryText, so a
+              generic on/off-against-one-default-query row doesn't fit this layer. */}
+          <div className="mt-2 border-t border-white/10 pt-2">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">Aviation</p>
+            <div className="mt-1 border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-300">Aircraft (OpenSky)</span>
+                <button
+                  type="button"
+                  onClick={() => setAircraftEnabled(prev => !prev)}
+                  className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
+                    aircraftEnabled ? 'border-emerald-400/60 text-emerald-400' : 'border-white/20 text-slate-500'
+                  }`}
+                  aria-pressed={aircraftEnabled}
+                >
+                  {aircraftEnabled ? 'On' : 'Off'}
+                </button>
+              </div>
+              {aircraftEnabled && (
+                <div className="mt-1 space-y-1">
+                  {/* Checks the exact same condition useTerraLayer is actually gated on
+                      (aircraftBoundingBoxQuery === null) — not just cameraScale.level === 'global'
+                      — so this message can never claim "LIVE" while lib/terra/aircraftBoundingBox
+                      .ts has honestly refused to build a query for some other reason (e.g. a
+                      shallow viewing angle whose visible-region rectangle exceeds
+                      MAX_BBOX_SPAN_DEG even at a non-global camera scale level). Confirmed live
+                      during browser verification: this exact mismatch let the status line show
+                      "LIVE" while no real query had ever been sent. */}
+                  {aircraftBoundingBoxQuery === null ? (
+                    <p className="text-[10.5px] text-amber-300/90">Zoom in, or pan to a smaller region — the current view is too wide for a bounded aircraft query.</p>
+                  ) : (
+                    <>
+                      <p className={`text-[10px] font-bold uppercase tracking-widest ${FEED_STATE_LABEL[aircraft.state]?.color ?? 'text-slate-400'}`}>
+                        {FEED_STATE_LABEL[aircraft.state]?.text ?? 'LOADING…'}
+                      </p>
+                      <p className="text-[10.5px] text-slate-500">
+                        {aircraftRegionalSummary.totalCount} aircraft
+                        {aircraftRegionalSummary.totalCount > 0 && ` · ${aircraftRegionalSummary.airborneCount} airborne · ${aircraftRegionalSummary.onGroundCount} on ground`}
+                        {aircraftRegionalSummary.staleCount > 0 && ` · ${aircraftRegionalSummary.staleCount} stale`}
+                      </p>
+                      {aircraft.lastFetchedAt && <p className="text-[10.5px] text-slate-500">Last fetched: {new Date(aircraft.lastFetchedAt).toLocaleTimeString()}</p>}
+                      {aircraft.lastErrorMessage && <p className="text-[10.5px] text-red-400">{aircraft.lastErrorMessage}</p>}
+                      <button
+                        type="button"
+                        onClick={aircraft.refresh}
+                        className="mt-0.5 rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300 hover:border-emerald-400/60 hover:text-emerald-400"
+                      >
+                        Refresh now
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {selection.kind === 'ground' && (

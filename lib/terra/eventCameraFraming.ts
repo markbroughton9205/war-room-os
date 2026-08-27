@@ -41,7 +41,9 @@ const EVENT_KIND_POINT_ALTITUDE_M: Partial<Record<TerraIntelligenceEventKind, nu
   // A severe-weather alert without an inline polygon (point fallback) still gets a regional view.
   severe_weather_alert: 150_000,
   water_gauge_reading: 20_000,
-  aircraft_state: 30_000,
+  // Close enough to see the selected aircraft against its immediate ground context, without being
+  // so close the camera clips through a still-airborne aircraft's own altitude.
+  aircraft_state: 20_000,
   weather_observation: 30_000,
   biodiversity_observation: 30_000,
   heritage_site: 10_000,

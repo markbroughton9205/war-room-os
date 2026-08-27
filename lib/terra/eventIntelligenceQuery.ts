@@ -25,7 +25,10 @@ const TERRA_EVENT_KIND_QUERY_LABEL: Record<TerraIntelligenceEventKind, string | 
   severe_weather_alert: 'severe weather',
   tsunami_alert: 'tsunami',
   water_gauge_reading: null,
-  aircraft_state: null,
+  // A callsign/tail title (e.g. "UAL123") never says "aircraft" on its own — unlike the fallback
+  // "Aircraft {icao24}" title, which already does and is left undoubled by the existing
+  // titleLower.includes(kindLabel) guard below.
+  aircraft_state: 'aircraft',
   heritage_site: null,
   place: null,
   geographic_feature: null,

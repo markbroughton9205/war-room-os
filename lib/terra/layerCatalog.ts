@@ -29,6 +29,7 @@ import 'server-only'
 import { normalizeUsgsEarthquakeGeoFeatures } from '@/lib/terra/normalizeUsgsEarthquakeGeoFeatures'
 import { normalizeUsgsWaterStations } from '@/lib/terra/normalizeUsgsWaterStations'
 import { normalizeLatentGeoDocuments } from '@/lib/terra/normalizeLatentGeoDocument'
+import { normalizeOpenSkyAircraft } from '@/lib/terra/normalizeOpenSkyAircraft'
 import { normalizeEdhInscriptions } from '@/lib/terra/normalizeEdhInscriptions'
 import { normalizeNhcCurrentStorms } from '@/lib/terra/normalizeNhcCurrentStorms'
 import { normalizeNasaEonet } from '@/lib/terra/normalizeNasaEonet'
@@ -77,10 +78,22 @@ export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
     label: 'Aircraft Positions (OpenSky)',
     // The bounding box documented directly in the adapter's own validation error message
     // (lib/research-engine/providers/opensky.ts) — Switzerland, a small, well-known example box,
-    // not an arbitrarily chosen region.
+    // not an arbitrarily chosen region. Only used as a fallback if this route is ever called
+    // without an explicit `?q=` override; TerraShell's real aircraft layer always supplies one
+    // built from the Commander's live camera view (lib/terra/aircraftBoundingBox.ts).
     description: 'Live OpenSky Network aircraft state vectors within a bounding box.',
     defaultQueryText: '45.8,5.9,47.8,10.5',
-    normalize: response => normalizeLatentGeoDocuments(response.documents, { providerId: 'opensky', kind: 'aircraft_state', domain: 'other' }),
+    // Live aircraft intelligence phase: a dedicated normalizer (not the generic
+    // normalizeLatentGeoDocuments boundary the other 7 LATENT_GEO providers still share) so real
+    // altitude/heading/velocity/vertical-rate/on-ground fields survive into typed properties
+    // instead of being dropped.
+    normalize: response => normalizeOpenSkyAircraft(response.documents),
+    // Aircraft move continuously — refreshed far more often than any hazard layer, but matched to
+    // (never faster than) the Research Engine's own 60s live-feed cache TTL for opensky
+    // (lib/research-engine/cache/ttlCache.ts CACHE_TTL.liveFeed) and this repo's own
+    // no-layer-faster-than-60s floor (see layerCatalog.validation.ts) — refreshing any faster
+    // would just re-poll the same cached response without ever seeing fresher data.
+    refreshIntervalMs: 60_000,
   },
   {
     id: 'idai_gazetteer',

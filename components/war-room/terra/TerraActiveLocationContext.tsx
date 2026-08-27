@@ -3,6 +3,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import type { TerraActiveLocation } from '@/lib/terra/activeLocation'
 import type { TerraGeoFeature } from '@/lib/terra/types'
+import type { TerraAircraftRegionalSummary } from '@/lib/terra/aircraftRegionalSummary'
 
 type TerraActiveLocationContextValue = {
   activeLocation: TerraActiveLocation | null
@@ -11,9 +12,17 @@ type TerraActiveLocationContextValue = {
    * location arose from one — null for a plain ground click/typed search. Smallest typed Council
    * extension point for this phase (see useTerraActiveLocation's doc comment below): carries the
    * selected event alongside the location it's already handing off, without building any Council
-   * runtime here. */
+   * runtime here. Also doubles as "selected aircraft" (kind === 'aircraft_state') — the live
+   * aviation phase adds no separate selectedAircraft type since TerraGeoFeature already carries
+   * everything a selected aircraft needs. */
   selectedEvent: TerraGeoFeature | null
   setSelectedEvent: (feature: TerraGeoFeature | null) => void
+  /** Live-aviation phase: a bounded, current summary of the aircraft layer's own loaded feature
+   * set (count/airborne/on-ground/stale/average altitude — see
+   * lib/terra/aircraftRegionalSummary.ts) — never the raw feature array itself. `null` when the
+   * aircraft layer is off or has never loaded. */
+  aircraftSummary: TerraAircraftRegionalSummary | null
+  setAircraftSummary: (summary: TerraAircraftRegionalSummary | null) => void
 }
 
 const TerraActiveLocationContext = createContext<TerraActiveLocationContextValue | null>(null)
@@ -21,13 +30,18 @@ const TerraActiveLocationContext = createContext<TerraActiveLocationContextValue
 export function TerraActiveLocationProvider({ children }: { children: ReactNode }) {
   const [activeLocation, setActiveLocation] = useState<TerraActiveLocation | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<TerraGeoFeature | null>(null)
-  const value = useMemo(() => ({ activeLocation, setActiveLocation, selectedEvent, setSelectedEvent }), [activeLocation, selectedEvent])
+  const [aircraftSummary, setAircraftSummary] = useState<TerraAircraftRegionalSummary | null>(null)
+  const value = useMemo(
+    () => ({ activeLocation, setActiveLocation, selectedEvent, setSelectedEvent, aircraftSummary, setAircraftSummary }),
+    [activeLocation, selectedEvent, aircraftSummary],
+  )
   return <TerraActiveLocationContext.Provider value={value}>{children}</TerraActiveLocationContext.Provider>
 }
 
-/** Semantic handoff for the existing/future Council. It intentionally contains only location and
- * (as of the event-intelligence phase) the exact selected event behind it — never a Related
- * Intelligence result list, a Council session, a provider, or a conversation runtime. */
+/** Semantic handoff for the existing/future Council. It intentionally contains only location, the
+ * exact selected event/aircraft behind it, and a bounded aircraft regional summary — never a
+ * Related Intelligence result list, the raw aircraft feed, a Council session, a provider, or a
+ * conversation runtime. */
 export function useTerraActiveLocation() {
   const value = useContext(TerraActiveLocationContext)
   if (!value) throw new Error('useTerraActiveLocation must be used inside TerraActiveLocationProvider')

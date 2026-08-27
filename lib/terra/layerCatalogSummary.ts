@@ -28,7 +28,7 @@ export const TERRA_LAYER_SUMMARIES: TerraLayerSummary[] = [
   { id: 'usgs_earthquake_feed', label: 'Earthquakes — Recent Feed (USGS)', domain: 'hazards', kind: 'earthquake', description: 'USGS real-time significant-earthquake feed (fixed magnitude/period selection).' },
   { id: 'usgs_earthquake', label: 'Earthquakes — Catalog Search (USGS)', domain: 'hazards', kind: 'earthquake', description: 'USGS earthquake catalog, default 30-day window, minimum magnitude 4.5.' },
   { id: 'usgs_water', label: 'Water Monitoring Station (USGS)', domain: 'hazards', kind: 'water_gauge_reading', description: 'USGS real-time water monitoring station — a single site queried by number.' },
-  { id: 'opensky', label: 'Aircraft Positions (OpenSky)', domain: 'other', kind: 'aircraft_state', description: 'Live OpenSky Network aircraft state vectors within a bounding box.' },
+  { id: 'opensky', label: 'Aircraft Positions (OpenSky)', domain: 'other', kind: 'aircraft_state', description: 'Live OpenSky Network aircraft state vectors within a bounding box.', refreshIntervalMs: 60_000 },
   { id: 'idai_gazetteer', label: 'iDAI.gazetteer — Archaeological Places', domain: 'research', kind: 'heritage_site', description: 'German Archaeological Institute gazetteer of archaeological/historical places.' },
   { id: 'nominatim', label: 'Place Search (OpenStreetMap Nominatim)', domain: 'other', kind: 'place', description: 'General-purpose OpenStreetMap place-name geocoding search.' },
   { id: 'pleiades', label: 'Pleiades — Ancient World Places', domain: 'research', kind: 'heritage_site', description: 'Gazetteer of places in the ancient Greek and Roman world.' },

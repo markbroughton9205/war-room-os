@@ -17,6 +17,8 @@ import { useEffect, useRef } from 'react'
 import type { CustomDataSource, Viewer as CesiumViewer } from 'cesium'
 import { terraEntityId } from '@/lib/terra/cesiumEntityId'
 import type { TerraGeoFeature, TerraIntelligenceEventKind } from '@/lib/terra/types'
+import { terraAircraftBillboardRotationRadians } from '@/lib/terra/aircraftOrientation'
+import type { TerraAircraftTrailPoint } from '@/lib/terra/aircraftTrail'
 
 type Props = {
   layerId: string
@@ -30,7 +32,22 @@ type Props = {
    * feature, unclustered) — a merged blob is wrong for "how many distinct earthquakes are here,"
    * but right for "roughly how many landmarks are in this area" at broad zoom. */
   cluster?: boolean
+  /** Live-aviation phase: bounded session-only trails, keyed by icao24
+   * (components/war-room/terra/useTerraAircraftTrails.ts) — only ever read for `kind ===
+   * 'aircraft_state'` features; every other layer passes nothing and renders exactly as before. */
+  trails?: Record<string, TerraAircraftTrailPoint[]>
 }
+
+// A minimal upward-pointing glyph (drawn in white so Cesium's billboard `color` tint reproduces
+// resolveStyle's exact aircraft color) — authored pointing north at rotation 0, matching
+// terraAircraftBillboardRotationRadians' documented convention. Base64-encoded inline (not a
+// public/ asset file, and deliberately not a plain URL-encoded `data:` URI — confirmed live during
+// browser verification that Cesium's own billboard image loader silently fails to resolve a
+// `data:image/svg+xml;charset=utf-8,<url-encoded>` URI, even though a plain `<img>` tag loads it
+// fine, whereas the base64 form loads correctly in both).
+const AIRCRAFT_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><path d="M14 1 L20 19 L14 15 L8 19 Z" fill="white"/></svg>',
+)}`
 
 const MIN_PIXEL_SIZE = 7
 const MAX_PIXEL_SIZE = 22
@@ -76,7 +93,7 @@ function resolveStyle(kind: TerraIntelligenceEventKind, feature: TerraGeoFeature
 const CLUSTER_PIXEL_RANGE = 60
 const CLUSTER_MINIMUM_SIZE = 3
 
-export function TerraFeatureLayer({ layerId, viewer, enabled, features, selectedId, cluster = false }: Props) {
+export function TerraFeatureLayer({ layerId, viewer, enabled, features, selectedId, cluster = false, trails }: Props) {
   const dataSourceRef = useRef<CustomDataSource | null>(null)
 
   // Owns the DataSource's lifecycle against this specific viewer instance only. Recreated per
@@ -164,6 +181,27 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
           continue
         }
 
+        // Live-aviation phase: an aircraft with a real reported heading gets a directional glyph
+        // instead of a plain dot — orientation only reflects a heading the source actually
+        // supplied (mission requirement: never fabricate one). An aircraft with no heading (e.g.
+        // some on-ground reports) falls through to the same plain point every other kind uses.
+        const headingDeg = feature.kind === 'aircraft_state' && typeof feature.properties.headingDeg === 'number' ? feature.properties.headingDeg : null
+        if (headingDeg !== null) {
+          dataSource!.entities.add({
+            id: entityId,
+            position: Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude, feature.altitude ?? 0),
+            billboard: {
+              image: AIRCRAFT_GLYPH_DATA_URI,
+              color: Cesium.Color.fromCssColorString(isSelected ? '#FFFFFF' : color),
+              scale: isSelected ? 1.35 : 1,
+              rotation: terraAircraftBillboardRotationRadians(headingDeg),
+              alignedAxis: Cesium.Cartesian3.ZERO, // screen-space rotation, not geographic — see aircraftOrientation.ts
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+          })
+          continue
+        }
+
         dataSource!.entities.add({
           id: entityId,
           position: Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude),
@@ -176,13 +214,32 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
           },
         })
       }
+
+      // Live-aviation phase: a short session-only trail per aircraft (never a fabricated or
+      // provider-historical track — see lib/terra/aircraftTrail.ts) rendered as a thin polyline
+      // through its own real recent observed positions only.
+      if (trails) {
+        for (const [icao24, points] of Object.entries(trails)) {
+          if (points.length < 2) continue
+          const flatDegrees = points.flatMap(point => [point.longitude, point.latitude])
+          dataSource!.entities.add({
+            id: terraEntityId(`${layerId}:trail:${icao24}`),
+            polyline: {
+              positions: Cesium.Cartesian3.fromDegreesArray(flatDegrees),
+              width: 1.5,
+              material: Cesium.Color.fromCssColorString('#94A3B8').withAlpha(0.45),
+              clampToGround: false,
+            },
+          })
+        }
+      }
     }
     void render()
 
     return () => {
       cancelled = true
     }
-  }, [features, selectedId, enabled, layerId])
+  }, [features, selectedId, enabled, layerId, trails])
 
   return null
 }
