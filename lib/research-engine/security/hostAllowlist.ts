@@ -275,6 +275,13 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   aisstream: ['stream.aisstream.io'],
   aishub_marine: ['data.aishub.net'],
   noaa_access_ais: ['hub.marinecadastre.gov', 'coast.noaa.gov'],
+  // God's Eye Traffic & Camera Intelligence phase — both hosts independently verified live this
+  // build (real HTTP 200 responses fetched during development). Note: the actual camera JPEG
+  // bytes for digitraffic_road_cameras are hosted at weathercam.digitraffic.fi, but that host is
+  // never fetched by this adapter/allowlist — it's only ever loaded directly by the Commander's
+  // browser as an <img> src, the same way every other external provenance link in this app is.
+  digitraffic_road_cameras: ['tie.digitraffic.fi'],
+  drivebc_events: ['api.open511.gov.bc.ca'],
 }
 
 export function isAllowedHost(provider: ResearchProviderId, hostname: string): boolean {

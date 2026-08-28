@@ -23,7 +23,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { BuilderWorkspace } from '@/components/war-room/builder/BuilderWorkspace'
 
-const BASE_PATH = '/war-room/engineering'
+const DEFAULT_BASE_PATH = '/war-room/engineering'
 
 type MissionListItem = {
   id: string
@@ -51,7 +51,7 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'text-slate-500',
 }
 
-export function EngineeringMissionConsole() {
+export function EngineeringMissionConsole({ basePath = DEFAULT_BASE_PATH }: { basePath?: string }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const activeMissionId = searchParams.get('mission')
@@ -86,7 +86,7 @@ export function EngineeringMissionConsole() {
         <div className="flex flex-col gap-1">
           <button
             type="button"
-            onClick={() => router.replace(BASE_PATH)}
+            onClick={() => router.replace(basePath)}
             className={`rounded border px-2 py-1 text-left text-[11px] ${
               !activeMissionId ? 'border-emerald-500 text-emerald-300' : 'border-transparent text-slate-400 hover:border-slate-700'
             }`}
@@ -100,7 +100,7 @@ export function EngineeringMissionConsole() {
             <button
               key={m.id}
               type="button"
-              onClick={() => router.replace(`${BASE_PATH}?mission=${m.id}`)}
+              onClick={() => router.replace(`${basePath}?mission=${m.id}`)}
               className={`rounded border px-2 py-1 text-left text-[11px] ${
                 activeMissionId === m.id ? 'border-emerald-500 text-emerald-200' : 'border-transparent text-slate-400 hover:border-slate-700'
               }`}
@@ -120,7 +120,7 @@ export function EngineeringMissionConsole() {
       </aside>
 
       <div>
-        <BuilderWorkspace basePath={BASE_PATH} />
+        <BuilderWorkspace basePath={basePath} />
       </div>
     </div>
   )

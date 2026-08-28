@@ -88,6 +88,19 @@ export const TERRA_INTELLIGENCE_EVENT_KINDS = [
    * geocoding search result) and 'geographic_feature' (a named-search Overpass result), since
    * this kind is always auto-populated by camera proximity, never a manual search. */
   'landmark_poi',
+  /** God's Eye Traffic & Camera Intelligence phase: a single road-camera preset (one physical
+   * view/direction) from digitraffic_road_cameras (Fintraffic, Finland) — 'still' feedType only
+   * this phase (a periodically-refreshed JPEG snapshot, never presented as live video). Real
+   * per-preset direction/road metadata and a real measured capture time drive the
+   * LIVE/STILL/STALE/OFFLINE truth doctrine (see lib/terra/roadCameraStaleness.ts) — never
+   * fabricated when the source didn't supply it. */
+  'traffic_camera',
+  /** God's Eye Traffic & Camera Intelligence phase: a real source-backed road event (crash,
+   * closure, construction, hazard, weather-related restriction) from drivebc_events (DriveBC /
+   * Open511, British Columbia) — the real Open511 event_type/severity/status vocabulary is
+   * preserved verbatim in `properties`, never reinterpreted into a War Room-invented scale
+   * (matches severe_weather_alert's existing CAP-preservation convention). */
+  'traffic_event',
 ] as const
 export type TerraIntelligenceEventKind = (typeof TERRA_INTELLIGENCE_EVENT_KINDS)[number]
 
@@ -147,7 +160,18 @@ export type TerraPointGeography = { kind: 'point'; longitude: number; latitude: 
  */
 export type TerraRegionGeography = { kind: 'region'; rings: number[][][]; coordinateOrigin: TerraCoordinateOrigin }
 
-export type TerraGeography = TerraPointGeography | TerraRegionGeography
+/**
+ * A line/corridor geometry, in decimal degrees WGS84 — added the God's Eye Traffic & Camera
+ * Intelligence phase, backed by real inline GeoJSON LineString data (DriveBC/Open511 road-event
+ * corridors — a construction zone or closure spanning a real stretch of highway, not a single
+ * point). `coordinates` mirrors GeoJSON LineString.coordinates exactly (an ordered list of real
+ * source-supplied vertices). This is the `path` geometry kind earlier Terra phases deliberately
+ * left unimplemented for lack of a real parseable backing source (see the historical note this
+ * comment replaces in git history) — DriveBC's Open511 feed is that real source.
+ */
+export type TerraPathGeography = { kind: 'path'; coordinates: number[][]; coordinateOrigin: TerraCoordinateOrigin }
+
+export type TerraGeography = TerraPointGeography | TerraRegionGeography | TerraPathGeography
 
 /**
  * The result of one lib/terra/resolveGeography.ts lookup (Phase 4) — the ONLY sanctioned way an
@@ -300,12 +324,16 @@ export type TerraGeoFeature = {
   /** Mirrors the source event's geoResolution — present only when coordinateOrigin === 'resolved'. */
   geoResolution: TerraResolvedGeography | null
   /** 'point' for every Phase 1-4 layer and most Phase 5 layers; 'region' only for a real
-   * polygon-bearing event (Phase 5's severe_weather_alert). Renderers branch on this, never on
-   * providerId. */
-  geometryKind: 'point' | 'region'
+   * polygon-bearing event (Phase 5's severe_weather_alert); 'line' only for a real
+   * LineString-bearing event (God's Eye Traffic phase's drivebc_events corridor closures).
+   * Renderers branch on this, never on providerId. */
+  geometryKind: 'point' | 'region' | 'line'
   /** Real polygon vertices (GeoJSON Polygon.coordinates shape) — present only when geometryKind
-   * is 'region'; null for every point feature. */
+   * is 'region'; null for every point/line feature. */
   regionRings: number[][][] | null
+  /** Real LineString vertices (GeoJSON LineString.coordinates shape) — present only when
+   * geometryKind is 'line'; null for every point/region feature. */
+  pathCoordinates: number[][] | null
 }
 
 /**

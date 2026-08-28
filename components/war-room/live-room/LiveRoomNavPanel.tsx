@@ -1,6 +1,7 @@
 'use client'
 
 import { memo } from 'react'
+import Link from 'next/link'
 
 import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import { COUNCIL_FLOW_MODE_LABELS } from '@/lib/council/councilMode'
@@ -80,6 +81,12 @@ export const LiveRoomNavPanel = memo(function LiveRoomNavPanel({
             )
           })}
         </ul>
+        <Link
+          href="/war-room/code-operator"
+          className="mt-2 block w-full rounded border border-emerald-900/50 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-widest text-emerald-300 transition hover:bg-emerald-950/20"
+        >
+          Code Operator
+        </Link>
       </nav>
 
       <section

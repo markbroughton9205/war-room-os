@@ -49,19 +49,19 @@ export function LiveRoomShell({
       </div>
 
       <div className="relative z-10 flex flex-shrink-0 flex-col">{header}</div>
-      <div className="relative z-10 flex-shrink-0">{intelRow}</div>
+      {intelRow ? <div className="relative z-10 flex-shrink-0">{intelRow}</div> : null}
 
       <main
         className={
           chatExpanded
-            ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-2 overflow-hidden px-2 pt-2 lg:gap-3 lg:px-3'
-            : 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-2 overflow-hidden px-2 pt-2 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_minmax(0,14rem)] lg:gap-3 lg:px-3'
+            ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden'
+            : 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden'
         }
         data-testid="live-room-center"
       >
-        <div className={chatExpanded ? 'hidden' : 'hidden min-h-0 lg:block'}>{leftNav}</div>
+        <div className="hidden">{leftNav}</div>
         <div className="flex min-h-0 min-w-0 flex-col">{council}</div>
-        <div className={chatExpanded ? 'hidden' : 'hidden min-h-0 lg:block'}>{rightPanel}</div>
+        <div className="hidden">{rightPanel}</div>
       </main>
 
       {activePanelId && dockPanel ? (
@@ -86,7 +86,7 @@ export function LiveRoomShell({
             />
           </div>
         </footer>
-        <div className="live-room-console flex-shrink-0">{commandConsole}</div>
+        {commandConsole ? <div className="live-room-console flex-shrink-0">{commandConsole}</div> : null}
       </div>
     </section>
   )

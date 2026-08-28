@@ -142,6 +142,10 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetRe
         // directly.
         viewer.scene.globe.enableLighting = true
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true
+        if (viewer.scene.skyBox) viewer.scene.skyBox.show = true
+        if (viewer.scene.sun) viewer.scene.sun.show = true
+        if (viewer.scene.moon) viewer.scene.moon.show = true
+        viewer.scene.highDynamicRange = true
         viewer.scene.fog.enabled = true
         viewer.targetFrameRate = 60
 

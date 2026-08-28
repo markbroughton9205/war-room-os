@@ -31,6 +31,8 @@ import { normalizeUsgsWaterStations } from '@/lib/terra/normalizeUsgsWaterStatio
 import { normalizeLatentGeoDocuments } from '@/lib/terra/normalizeLatentGeoDocument'
 import { normalizeOpenSkyAircraft } from '@/lib/terra/normalizeOpenSkyAircraft'
 import { normalizeDigitrafficMarineVessels } from '@/lib/terra/normalizeDigitrafficMarineVessels'
+import { normalizeDigitrafficRoadCameras } from '@/lib/terra/normalizeDigitrafficRoadCameras'
+import { normalizeDriveBcTrafficEvents } from '@/lib/terra/normalizeDriveBcTrafficEvents'
 import { normalizeEdhInscriptions } from '@/lib/terra/normalizeEdhInscriptions'
 import { normalizeNhcCurrentStorms } from '@/lib/terra/normalizeNhcCurrentStorms'
 import { normalizeNasaEonet } from '@/lib/terra/normalizeNasaEonet'
@@ -114,6 +116,32 @@ export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
     // Matched to (never faster than) the Research Engine's own 60s live-feed cache TTL for
     // digitraffic_marine and this repo's no-layer-faster-than-60s floor — same reasoning as
     // opensky's identical refreshIntervalMs above.
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'digitraffic_road_cameras',
+    providerId: 'digitraffic_road_cameras',
+    kind: 'traffic_camera',
+    domain: 'other',
+    label: 'Traffic Cameras (Digitraffic Road — Finland)',
+    // Helsinki metro area — the adapter's own documented example, same convention as the maritime
+    // entry above. TerraShell's real layer always supplies a bbox from the live camera view via
+    // lib/terra/roadCameraBoundingBox.ts.
+    description: 'Live Digitraffic (Fintraffic) road weathercam still images + real capture freshness within a bounding box — Finnish national road network only.',
+    defaultQueryText: '59.9,24.5,60.3,25.3',
+    normalize: response => normalizeDigitrafficRoadCameras(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'drivebc_events',
+    providerId: 'drivebc_events',
+    kind: 'traffic_event',
+    domain: 'other',
+    label: 'Traffic Events (DriveBC / Open511 — British Columbia)',
+    // Greater Vancouver — the adapter's own documented example.
+    description: 'Live DriveBC (Open511) source-backed road events — crashes, closures, construction, hazards — within a bounding box. British Columbia only.',
+    defaultQueryText: '-123.3,49.0,-122.7,49.4',
+    normalize: response => normalizeDriveBcTrafficEvents(response.documents),
     refreshIntervalMs: 60_000,
   },
   {

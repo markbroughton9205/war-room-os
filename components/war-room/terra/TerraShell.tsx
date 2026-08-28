@@ -40,6 +40,12 @@ import { TerraLocationCommandInput } from './TerraLocationCommandInput'
 import { TerraEarthKnowledgePanel } from './TerraEarthKnowledgePanel'
 import { useTerraActiveLocation } from './TerraActiveLocationContext'
 import { TERRA_STREET_LEVEL_IMAGERY_MESSAGE } from '@/lib/terra/streetLevelImagery'
+import {
+  terraHighResAerialUnavailable,
+  TERRA_HIGH_RES_AERIAL_UNAVAILABLE_MESSAGE,
+  TERRA_OPEN_MAP_DETAIL_LABEL,
+  TERRA_CLOSE_MAP_DETAIL_LABEL,
+} from '@/lib/terra/aerialImagery'
 import { buildTerraEventIntelligenceQuery } from '@/lib/terra/eventIntelligenceQuery'
 import { resolveTerraEventCameraFraming } from '@/lib/terra/eventCameraFraming'
 import { isTerraRequestStale } from '@/lib/terra/requestSequence'
@@ -51,6 +57,8 @@ import { useTerraVesselTrails } from './useTerraVesselTrails'
 import { buildTerraAircraftBoundingBoxQuery } from '@/lib/terra/aircraftBoundingBox'
 import { summarizeTerraAircraftFeatures } from '@/lib/terra/aircraftRegionalSummary'
 import { buildTerraMaritimeBoundingBoxQuery, terraCameraViewHasMaritimeCoverage } from '@/lib/terra/maritimeBoundingBox'
+import { buildTerraRoadCameraBoundingBoxQuery } from '@/lib/terra/roadCameraBoundingBox'
+import { buildTerraTrafficEventBoundingBoxQuery } from '@/lib/terra/trafficEventBoundingBox'
 import { summarizeTerraVesselFeatures } from '@/lib/terra/vesselRegionalSummary'
 import { resolveTerraMaritimeCoverageState, TERRA_MARITIME_COVERAGE_LABELS } from '@/lib/terra/maritimeCoverage'
 
@@ -71,7 +79,7 @@ type Selection =
   | { kind: 'ground'; point: Extract<TerraClickPoint, { ok: true }> }
   | { kind: 'feature'; layerId: string; featureId: string }
 
-function StatusLine({ status }: { status: TerraGlobeStatus }) {
+function StatusLine({ status, aerialImageryActive }: { status: TerraGlobeStatus; aerialImageryActive: boolean }) {
   if (status.phase === 'loading') {
     return <span className="text-slate-500">Initializing…</span>
   }
@@ -81,7 +89,10 @@ function StatusLine({ status }: { status: TerraGlobeStatus }) {
   return (
     <span className="text-emerald-400">
       Satellite imagery: NASA GIBS daily
-      <span className="text-slate-500"> · OSM local detail ready</span>
+      {aerialImageryActive
+        ? <span className="text-cyan-400"> · ion World Imagery close-range</span>
+        : <span className="text-amber-400"> · high-res aerial unavailable{status.hasIonToken ? '' : ' (ion token not configured)'}</span>}
+      <span className="text-slate-500"> · OSM map-detail available</span>
       {status.hasIonToken
         ? <span className="text-cyan-400"> · Terrain active</span>
         : <span className="text-amber-400"> · Terrain fallback (ion token not configured)</span>}
@@ -98,6 +109,47 @@ function PlaceholderPanel({ title, note }: { title: string; note: string }) {
       <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-emerald-400/80">{title}</p>
       <p className="text-[11px] leading-snug text-slate-500">{note}</p>
     </div>
+  )
+}
+
+function TerraProviderCapabilityDock({
+  localDetailActive,
+  buildingsActive,
+  aerialImageryActive,
+  mapDetailMode,
+  onToggleMapDetail,
+}: {
+  localDetailActive: boolean
+  buildingsActive: boolean
+  aerialImageryActive: boolean
+  mapDetailMode: boolean
+  onToggleMapDetail: () => void
+}) {
+  return (
+    <details className="group pointer-events-auto w-[min(22rem,calc(100vw-1.5rem))] rounded-xl border border-white/10 bg-slate-950/80 shadow-2xl backdrop-blur-xl">
+      <summary className="cursor-pointer list-none px-3 py-2 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-300">Layers &amp; provenance <span className="float-right text-cyan-300 group-open:rotate-45">+</span></summary>
+      <div className="space-y-2 border-t border-white/10 px-3 py-3 text-[9px]">
+        <div className="flex items-start justify-between gap-3">
+          <span className="text-slate-400">Satellite / aerial</span>
+          <span className={aerialImageryActive ? 'text-right text-emerald-300' : 'text-right text-amber-300'}>
+            {aerialImageryActive ? 'NASA GIBS daily · ion World Imagery close-range' : 'NASA GIBS daily · aerial asset unavailable'}
+          </span>
+        </div>
+        <div className="flex items-start justify-between gap-3">
+          <span className="text-slate-400">Map detail (OSM)</span>
+          <span className="text-right">
+            <button type="button" onClick={onToggleMapDetail} className={`rounded border px-1.5 py-0.5 font-bold uppercase tracking-wide ${mapDetailMode ? 'border-cyan-400/50 text-cyan-300' : 'border-white/20 text-slate-400 hover:text-slate-200'}`}>
+              {mapDetailMode ? 'On · roads/labels/POIs' : 'Off · optional overlay'}
+            </button>
+          </span>
+        </div>
+        <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Buildings</span><span className={buildingsActive ? 'text-right text-emerald-300' : 'text-right text-amber-300'}>{buildingsActive ? (localDetailActive ? 'Cesium OSM Buildings active' : 'Ready · zoom to local scale') : 'Provider token unavailable'}</span></div>
+        <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Street photography</span><span className="max-w-[13rem] text-right text-amber-300">Provider slot · not configured</span></div>
+        <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Live traffic</span><span className="max-w-[13rem] text-right text-amber-300">No authorized provider configured</span></div>
+        <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Public cameras</span><span className="max-w-[13rem] text-right text-amber-300">No camera registry/provider configured</span></div>
+        <p className="border-t border-white/10 pt-2 leading-relaxed text-slate-500">Unavailable layers never render invented markers, people, buildings, motion, or feeds.</p>
+      </div>
+    </details>
   )
 }
 
@@ -126,6 +178,20 @@ const KIND_DETAIL_LABEL: Record<TerraIntelligenceEventKind, string> = {
   severe_weather_alert: 'Severe Weather Alert',
   tsunami_alert: 'Tsunami Bulletin',
   landmark_poi: 'Nearby Landmark',
+  traffic_camera: 'Traffic Camera',
+  traffic_event: 'Traffic Event',
+}
+
+// God's Eye Traffic phase truth doctrine — never call a still image live video, never call stale
+// media live (see lib/terra/roadCameraStaleness.ts). Colors intentionally mirror this file's
+// existing FEED_STATE_LABEL palette (emerald=current, amber=degraded, red=error) rather than
+// inventing a second scheme.
+const CAMERA_FRESHNESS_LABEL: Record<string, { text: string; color: string }> = {
+  live_video: { text: 'LIVE VIDEO', color: 'text-emerald-400' },
+  still_image: { text: 'STILL IMAGE — CURRENT', color: 'text-emerald-400' },
+  stale: { text: 'STALE', color: 'text-amber-400' },
+  offline: { text: 'OFFLINE', color: 'text-red-400' },
+  unknown: { text: 'UNKNOWN', color: 'text-slate-400' },
 }
 
 // Coordinate origin — Phase 4's explicit provenance requirement: a Commander must be able to
@@ -285,6 +351,44 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
             <Row label="OSM tags" value={feature.properties.subjects.filter((s): s is string => typeof s === 'string').join(', ')} />
           )}
           {typeof feature.properties.osm_id === 'string' && <Row label="OSM record" value={feature.properties.osm_id} mono />}
+        </>
+      )
+    case 'traffic_camera': {
+      const freshness = typeof feature.properties.freshness === 'string' ? feature.properties.freshness : 'unknown'
+      const freshnessMeta = CAMERA_FRESHNESS_LABEL[freshness] ?? CAMERA_FRESHNESS_LABEL.unknown
+      return (
+        <>
+          <Row label="Coordinates" value={coords} mono />
+          {typeof feature.properties.road === 'string' && <Row label="Road" value={feature.properties.road} />}
+          {typeof feature.properties.direction === 'string' && <Row label="Direction" value={feature.properties.direction.replace(/_/g, ' ').toLowerCase()} />}
+          <Row label="Feed type" value="Still image (refreshing)" />
+          <div className="flex justify-between"><dt>Status</dt><dd className={freshnessMeta.color}>{freshnessMeta.text}</dd></div>
+          {feature.timestamp && <Row label="Captured" value={new Date(feature.timestamp).toLocaleString()} />}
+          {typeof feature.properties.collectionIntervalSec === 'number' && <Row label="Refresh interval" value={`${feature.properties.collectionIntervalSec}s`} />}
+          {typeof feature.properties.imageUrl === 'string' && (
+            // eslint-disable-next-line @next/next/no-img-element -- external provider-hosted still image, refreshed at source cadence; not a Next-optimizable local asset.
+            <img
+              src={feature.properties.imageUrl}
+              alt={`${feature.title} — road camera still image`}
+              className="mt-1 w-full rounded border border-white/10"
+              loading="lazy"
+            />
+          )}
+          <Row label="Attribution" value="Fintraffic / digitraffic.fi, CC BY 4.0" />
+        </>
+      )
+    }
+    case 'traffic_event':
+      return (
+        <>
+          {typeof feature.properties.eventType === 'string' && <Row label="Event type" value={feature.properties.eventType} />}
+          {typeof feature.properties.severity === 'string' && <Row label="Severity (source)" value={feature.properties.severity} />}
+          {typeof feature.properties.status === 'string' && <Row label="Status" value={feature.properties.status} />}
+          {typeof feature.properties.road === 'string' && <Row label="Road" value={feature.properties.road} />}
+          {typeof feature.properties.direction === 'string' && <Row label="Direction" value={feature.properties.direction} />}
+          {typeof feature.properties.laneState === 'string' && <Row label="Lane state" value={feature.properties.laneState} />}
+          <Row label="Geometry" value={feature.geometryKind === 'line' ? `Corridor (${feature.pathCoordinates?.length ?? 0} vertices)` : coords} mono={feature.geometryKind !== 'line'} />
+          {feature.timestamp && <Row label="Last updated" value={new Date(feature.timestamp).toLocaleString()} />}
         </>
       )
     default:
@@ -468,6 +572,13 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
   const [buildingsTileset, setBuildingsTileset] = useState<import('cesium').Cesium3DTileset | null>(null)
   const isLocalScale = cameraScale.level === 'local' || cameraScale.level === 'building'
 
+  // God's Eye Terra imagery phase: real detected outcome of the Cesium ion World Imagery (Bing
+  // Maps Aerial) asset request in TerraEarthImagery.tsx — never assumed from token presence alone.
+  // `mapDetailMode` is the Commander's explicit escape hatch to the OSM raster base.
+  const [aerialImageryAvailable, setAerialImageryAvailable] = useState(false)
+  const [mapDetailMode, setMapDetailMode] = useState(false)
+  const highResAerialUnavailable = terraHighResAerialUnavailable(aerialImageryAvailable, cameraScale.level)
+
   // Cesium OSM Buildings' own internal LOD (maximumScreenSpaceError) already limits detail at any
   // given screen size, but `.show` is still gated on our own scale signal so the tileset never
   // requests a single tile while the Commander is at global/regional altitude.
@@ -635,6 +746,41 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
     return () => clearTimeout(timeout)
   }, [maritimeRegionalSummary, maritimeCoverageState, maritimeBoundingBoxQuery, setMaritimeSummary])
 
+  // God's Eye Traffic & Camera Intelligence phase — same bespoke camera-bbox-driven pattern as
+  // aircraft/maritime above. Each source's own buildTerra*BoundingBoxQuery already gates on that
+  // source's real coverage envelope internally (Finland for road cameras, British Columbia for
+  // DriveBC events) and returns null outside it, the same way maritimeBoundingBox.ts does — a
+  // dedicated NO_COVERAGE-vs-zero-observed resolver (mirroring maritimeCoverage.ts) is a clean,
+  // small follow-up, not required for a first working layer (matches this file's existing OpenSky
+  // treatment, which also has bounded real coverage without one).
+  const [roadCamerasEnabled, setRoadCamerasEnabled] = useState(() => presentation === 'command-center')
+  const roadCameraBoundingBoxQuery = useMemo(() => {
+    if (!roadCamerasEnabled) return null
+    if (cameraScale.level === 'global') return null
+    return buildTerraRoadCameraBoundingBoxQuery(cameraViewRectangle.rectangle)
+  }, [roadCamerasEnabled, cameraScale.level, cameraViewRectangle.rectangle])
+  const roadCameraAutoRefreshAllowed = shouldAutoRefreshTerraLayer(clock.time.mode)
+  const roadCameras = useTerraLayer('digitraffic_road_cameras', roadCameraBoundingBoxQuery !== null, 60_000, roadCameraAutoRefreshAllowed, roadCameraBoundingBoxQuery)
+  useEffect(() => {
+    const timeout = setTimeout(() => handleFeaturesChange('digitraffic_road_cameras', roadCameras.features), 0)
+    return () => clearTimeout(timeout)
+  }, [roadCameras.features, handleFeaturesChange])
+  const roadCameraSelectedId = selection.kind === 'feature' && selection.layerId === 'digitraffic_road_cameras' ? selection.featureId : null
+
+  const [trafficEventsEnabled, setTrafficEventsEnabled] = useState(() => presentation === 'command-center')
+  const trafficEventBoundingBoxQuery = useMemo(() => {
+    if (!trafficEventsEnabled) return null
+    if (cameraScale.level === 'global') return null
+    return buildTerraTrafficEventBoundingBoxQuery(cameraViewRectangle.rectangle)
+  }, [trafficEventsEnabled, cameraScale.level, cameraViewRectangle.rectangle])
+  const trafficEventAutoRefreshAllowed = shouldAutoRefreshTerraLayer(clock.time.mode)
+  const trafficEvents = useTerraLayer('drivebc_events', trafficEventBoundingBoxQuery !== null, 60_000, trafficEventAutoRefreshAllowed, trafficEventBoundingBoxQuery)
+  useEffect(() => {
+    const timeout = setTimeout(() => handleFeaturesChange('drivebc_events', trafficEvents.features), 0)
+    return () => clearTimeout(timeout)
+  }, [trafficEvents.features, handleFeaturesChange])
+  const trafficEventSelectedId = selection.kind === 'feature' && selection.layerId === 'drivebc_events' ? selection.featureId : null
+
   const activateCoordinate = useCallback((point: Extract<TerraClickPoint, { ok: true }>) => {
     reverseRequestRef.current.controller?.abort()
     const controller = new AbortController()
@@ -776,7 +922,13 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
   return (
     <div className={`relative w-full overflow-hidden bg-black text-white ${commandCenter ? 'h-full min-h-0' : 'h-screen'}`}>
       <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onBuildingsTilesetReady={setBuildingsTileset} onEntityClick={handleEntityClick} onGroundClick={handleGroundClick} />
-      <TerraEarthImagery viewer={viewer} selectedTime={clock.time.currentTime} />
+      <TerraEarthImagery
+        viewer={viewer}
+        selectedTime={clock.time.currentTime}
+        hasIonToken={globeStatus.phase === 'ready' && globeStatus.hasIonToken}
+        mapDetailMode={mapDetailMode}
+        onAerialImageryAvailabilityChange={setAerialImageryAvailable}
+      />
       <TerraFeatureLayer layerId="nearby_landmarks" viewer={viewer} enabled={nearbyLandmarksQuery !== null} features={nearbyLandmarks.features} selectedId={nearbySelectedId} cluster />
       {/* Live-aviation phase: rendered unconditionally in both presentations (mission section 15
           requires event click/selection to work on both the front-page God's Eye and the full
@@ -786,6 +938,11 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
       {/* Terra Phase 3 — Maritime Source Federation: same bespoke camera-bbox-driven pattern as
           aircraft above, rendered unconditionally in both presentations for the same reason. */}
       <TerraFeatureLayer layerId="digitraffic_marine" viewer={viewer} enabled={maritimeBoundingBoxQuery !== null} features={maritime.features} selectedId={maritimeSelectedId} cluster trails={maritimeTrails} />
+      {/* God's Eye Traffic & Camera Intelligence phase: same bespoke camera-bbox-driven pattern as
+          aircraft/maritime above, rendered unconditionally in both presentations for the same
+          reason. */}
+      <TerraFeatureLayer layerId="digitraffic_road_cameras" viewer={viewer} enabled={roadCameraBoundingBoxQuery !== null} features={roadCameras.features} selectedId={roadCameraSelectedId} cluster />
+      <TerraFeatureLayer layerId="drivebc_events" viewer={viewer} enabled={trafficEventBoundingBoxQuery !== null} features={trafficEvents.features} selectedId={trafficEventSelectedId} />
 
       {/* God's Eye command center has no Data Layers control panel (see the workspace-only left
           rail below), but its event markers must still fetch and render — otherwise there is
@@ -794,7 +951,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
           component as the workspace's own layer list, just headless (hideControls) here; the two
           mounts are mutually exclusive with `!commandCenter` below, so no layer is ever fetched
           twice. */}
-      {commandCenter && TERRA_LAYER_SUMMARIES.filter(layer => layer.id !== 'opensky' && layer.id !== 'digitraffic_marine').map(layer => (
+      {commandCenter && TERRA_LAYER_SUMMARIES.filter(layer => layer.id !== 'opensky' && layer.id !== 'digitraffic_marine' && layer.id !== 'digitraffic_road_cameras' && layer.id !== 'drivebc_events').map(layer => (
         <TerraLayerRow
           key={layer.id}
           layer={layer}
@@ -813,6 +970,17 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
         <div className="pointer-events-auto rounded border border-white/10 bg-black/70 px-3 py-2 backdrop-blur-sm">
           <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-400">{commandCenter ? 'God’s Eye · Terra' : 'War Room · Terra'}</h1>
           <p className="mt-0.5 text-[10px] text-slate-500">{commandCenter ? 'Live planetary command center' : 'Planetary Intelligence Environment — Phase 6: real-time planet + 4D time engine'}</p>
+          {highResAerialUnavailable && (
+            <button
+              type="button"
+              onClick={() => setMapDetailMode(v => !v)}
+              className="mt-1.5 flex items-center gap-1.5 rounded border border-amber-500/40 bg-amber-950/40 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-amber-300 hover:bg-amber-900/50"
+              title="NASA GIBS is a real daily photograph capped at city-scale resolution; no ion-backed aerial asset is available at this zoom. Toggle the OSM map-detail base instead."
+            >
+              {TERRA_HIGH_RES_AERIAL_UNAVAILABLE_MESSAGE}
+              <span className="text-cyan-300">{mapDetailMode ? TERRA_CLOSE_MAP_DETAIL_LABEL : TERRA_OPEN_MAP_DETAIL_LABEL}</span>
+            </button>
+          )}
         </div>
         {!commandCenter && <div className="pointer-events-auto flex flex-wrap justify-center gap-x-4 gap-y-1 rounded border border-white/10 bg-black/70 px-3 py-2 text-[10px] backdrop-blur-sm">
           {hazardSummary.map(item => (
@@ -823,7 +991,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
           ))}
         </div>}
         {!commandCenter && <div className="pointer-events-auto rounded border border-white/10 bg-black/70 px-3 py-2 text-[11px] backdrop-blur-sm">
-          <StatusLine status={globeStatus} />
+          <StatusLine status={globeStatus} aerialImageryActive={aerialImageryAvailable} />
         </div>}
       </div>
 
@@ -840,6 +1008,18 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
         )}
       </div>
 
+      {commandCenter ? (
+        <div className="pointer-events-none absolute bottom-12 left-3 z-30">
+          <TerraProviderCapabilityDock
+            localDetailActive={isLocalScale}
+            buildingsActive={globeStatus.phase === 'ready' && globeStatus.hasOsmBuildings}
+            aerialImageryActive={aerialImageryAvailable}
+            mapDetailMode={mapDetailMode}
+            onToggleMapDetail={() => setMapDetailMode(v => !v)}
+          />
+        </div>
+      ) : null}
+
       {/* Left rail — layer controls + Earth Knowledge placeholder. */}
       {!commandCenter && <div className="pointer-events-none absolute bottom-36 left-0 top-20 flex w-72 flex-col gap-2 overflow-y-auto overscroll-contain p-4">
         <div className="pointer-events-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
@@ -852,6 +1032,16 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
             <li className="flex items-center justify-between">
               <span>Base imagery + clouds</span>
               <span className="text-emerald-400">NASA GIBS True Color · daily</span>
+            </li>
+            <li className={`flex items-center justify-between ${aerialImageryAvailable ? '' : 'opacity-40'}`}>
+              <span>Aerial (ion World Imagery)</span>
+              <span>{aerialImageryAvailable ? 'active · close-range' : 'unavailable'}</span>
+            </li>
+            <li className="flex items-center justify-between">
+              <span>Map detail (OSM)</span>
+              <button type="button" onClick={() => setMapDetailMode(v => !v)} className={mapDetailMode ? 'font-bold text-cyan-300' : 'text-slate-400 hover:text-slate-200'}>
+                {mapDetailMode ? 'on' : 'off'}
+              </button>
             </li>
             <li className={`flex items-center justify-between ${globeStatus.phase === 'ready' && globeStatus.hasIonToken ? '' : 'opacity-40'}`}>
               <span>Terrain (Cesium World Terrain)</span>
@@ -883,7 +1073,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
             // own bespoke, camera-bbox-driven section below (a fixed default-query toggle wouldn't
             // make sense for a layer whose whole point is following the Commander's live view),
             // never a second listing of the same layer.
-            const layers = TERRA_LAYER_SUMMARIES.filter(layer => group.domains.includes(layer.domain) && layer.id !== 'opensky' && layer.id !== 'digitraffic_marine')
+            const layers = TERRA_LAYER_SUMMARIES.filter(layer => group.domains.includes(layer.domain) && layer.id !== 'opensky' && layer.id !== 'digitraffic_marine' && layer.id !== 'digitraffic_road_cameras' && layer.id !== 'drivebc_events')
             if (layers.length === 0) return null
             return (
               <div key={group.label} className="mt-2 first:mt-0">
@@ -1008,6 +1198,91 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
                       <button
                         type="button"
                         onClick={maritime.refresh}
+                        className="mt-0.5 rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300 hover:border-emerald-400/60 hover:text-emerald-400"
+                      >
+                        Refresh now
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* God's Eye Traffic & Camera Intelligence phase: same bespoke camera-bbox-driven
+              pattern as Aviation/Maritime above. Each source's own bounding-box builder already
+              refuses to build a query outside its real coverage envelope (Finland for road
+              cameras, British Columbia for DriveBC events), so a null query here is always an
+              honest "no bounded query possible right now," never a fabricated LIVE state. */}
+          <div className="mt-2 border-t border-white/10 pt-2">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">Traffic</p>
+            <div className="mt-1 border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-300">Cameras (Digitraffic Road — Finland)</span>
+                <button
+                  type="button"
+                  onClick={() => setRoadCamerasEnabled(prev => !prev)}
+                  className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
+                    roadCamerasEnabled ? 'border-emerald-400/60 text-emerald-400' : 'border-white/20 text-slate-500'
+                  }`}
+                  aria-pressed={roadCamerasEnabled}
+                >
+                  {roadCamerasEnabled ? 'On' : 'Off'}
+                </button>
+              </div>
+              {roadCamerasEnabled && (
+                <div className="mt-1 space-y-1">
+                  {roadCameraBoundingBoxQuery === null ? (
+                    <p className="text-[10.5px] text-amber-300/90">Zoom in, or pan to Finland&apos;s road network — the current view is too wide, or outside camera coverage, for a bounded query.</p>
+                  ) : (
+                    <>
+                      <p className={`text-[10px] font-bold uppercase tracking-widest ${FEED_STATE_LABEL[roadCameras.state]?.color ?? 'text-slate-400'}`}>
+                        {FEED_STATE_LABEL[roadCameras.state]?.text ?? 'LOADING…'}
+                      </p>
+                      <p className="text-[10.5px] text-slate-500">{roadCameras.features.length} camera{roadCameras.features.length === 1 ? '' : 's'} in view</p>
+                      {roadCameras.lastFetchedAt && <p className="text-[10.5px] text-slate-500">Last fetched: {new Date(roadCameras.lastFetchedAt).toLocaleTimeString()}</p>}
+                      {roadCameras.lastErrorMessage && <p className="text-[10.5px] text-red-400">{roadCameras.lastErrorMessage}</p>}
+                      <button
+                        type="button"
+                        onClick={roadCameras.refresh}
+                        className="mt-0.5 rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300 hover:border-emerald-400/60 hover:text-emerald-400"
+                      >
+                        Refresh now
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="mt-1 border-t border-white/10 pt-2">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-300">Events (DriveBC / Open511 — British Columbia)</span>
+                <button
+                  type="button"
+                  onClick={() => setTrafficEventsEnabled(prev => !prev)}
+                  className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
+                    trafficEventsEnabled ? 'border-emerald-400/60 text-emerald-400' : 'border-white/20 text-slate-500'
+                  }`}
+                  aria-pressed={trafficEventsEnabled}
+                >
+                  {trafficEventsEnabled ? 'On' : 'Off'}
+                </button>
+              </div>
+              {trafficEventsEnabled && (
+                <div className="mt-1 space-y-1">
+                  {trafficEventBoundingBoxQuery === null ? (
+                    <p className="text-[10.5px] text-amber-300/90">Zoom in, or pan to British Columbia — the current view is too wide, or outside DriveBC coverage, for a bounded query.</p>
+                  ) : (
+                    <>
+                      <p className={`text-[10px] font-bold uppercase tracking-widest ${FEED_STATE_LABEL[trafficEvents.state]?.color ?? 'text-slate-400'}`}>
+                        {FEED_STATE_LABEL[trafficEvents.state]?.text ?? 'LOADING…'}
+                      </p>
+                      <p className="text-[10.5px] text-slate-500">{trafficEvents.features.length} active event{trafficEvents.features.length === 1 ? '' : 's'} in view</p>
+                      {trafficEvents.lastFetchedAt && <p className="text-[10.5px] text-slate-500">Last fetched: {new Date(trafficEvents.lastFetchedAt).toLocaleTimeString()}</p>}
+                      {trafficEvents.lastErrorMessage && <p className="text-[10.5px] text-red-400">{trafficEvents.lastErrorMessage}</p>}
+                      <button
+                        type="button"
+                        onClick={trafficEvents.refresh}
                         className="mt-0.5 rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300 hover:border-emerald-400/60 hover:text-emerald-400"
                       >
                         Refresh now

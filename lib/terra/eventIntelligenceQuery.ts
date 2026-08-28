@@ -38,6 +38,12 @@ const TERRA_EVENT_KIND_QUERY_LABEL: Record<TerraIntelligenceEventKind, string | 
   weather_observation: null,
   biodiversity_observation: null,
   landmark_poi: null,
+  // A camera's title is its station/preset name (e.g. "Road 51 Inkoo — Hankoon") — never says
+  // "traffic camera" on its own.
+  traffic_camera: 'traffic camera',
+  // A traffic event's title is its real Open511 headline (e.g. "CONSTRUCTION") — already
+  // descriptive; doubling it would just repeat the same word.
+  traffic_event: null,
 }
 
 const COORDINATE_MATCH_EPSILON_DEG = 0.0005

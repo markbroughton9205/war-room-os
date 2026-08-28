@@ -9,7 +9,7 @@ import { constants as FsConstants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import type { NativeRepairProposal, StructuredPatch } from './types'
 import { validatePatchPolicy } from './patchPolicy'
-import { resolveRepoRelativePath, readRepoFile } from './repositoryInspector'
+import { assertCanonicalRepoPath, resolveRepoRelativePath, readRepoFile } from './repositoryInspector'
 import { rollbackRepair, snapshotFileBeforePatch } from './rollback'
 
 function sha256(text: string): string {
@@ -39,6 +39,7 @@ export type PatchApplyResult = {
 
 async function applyOnePatch(repairId: string, patch: StructuredPatch): Promise<PatchApplyFileOutcome> {
   const abs = resolveRepoRelativePath(patch.file)
+  await assertCanonicalRepoPath(abs, patch.operation === 'create_file')
 
   if (patch.operation === 'create_file') {
     if (await fileExists(abs)) {

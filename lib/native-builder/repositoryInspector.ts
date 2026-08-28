@@ -4,7 +4,7 @@
  * lib/repo/status.ts and lib/repo/diff.ts. This module is the ONLY place in native-builder that
  * touches the filesystem for reads outside of the rollback snapshot store.
  */
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { resolveRepoRoot } from '@/lib/repo/paths'
 import { getRepoStatus } from '@/lib/repo/status'
@@ -58,6 +58,21 @@ export function resolveRepoRelativePath(relPath: string): string {
   return abs
 }
 
+export async function assertCanonicalRepoPath(absPath: string, allowMissingLeaf = false): Promise<void> {
+  const root = await realpath(resolveRepoRoot())
+  let canonical: string
+  try {
+    canonical = await realpath(absPath)
+  } catch (error) {
+    if (!allowMissingLeaf) throw error
+    canonical = path.join(await realpath(path.dirname(absPath)), path.basename(absPath))
+  }
+  const rel = path.relative(root, canonical)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new RepoAccessDeniedError('Path resolves through a symlink outside the workspace.')
+  }
+}
+
 export type RepoFileReadResult =
   | { ok: true; relPath: string; content: string; sizeBytes: number }
   | { ok: false; relPath: string; error: string }
@@ -67,6 +82,7 @@ export type RepoFileReadResult =
 export async function readRepoFile(relPath: string): Promise<RepoFileReadResult> {
   try {
     const abs = resolveRepoRelativePath(relPath)
+    await assertCanonicalRepoPath(abs)
     const info = await stat(abs)
     if (!info.isFile()) return { ok: false, relPath, error: 'Not a regular file.' }
     if (info.size > MAX_FILE_READ_BYTES) {
@@ -111,6 +127,7 @@ async function walkFiles(dir: string, root: string, out: string[], budget: { rem
 export async function searchRepoText(query: string, opts?: { pathPrefix?: string }): Promise<RepoSearchHit[]> {
   const root = path.resolve(resolveRepoRoot())
   const startDir = opts?.pathPrefix ? resolveRepoRelativePath(opts.pathPrefix) : root
+  await assertCanonicalRepoPath(startDir)
   const files: string[] = []
   await walkFiles(startDir, root, files, { remaining: MAX_SEARCH_FILES })
 
@@ -162,6 +179,7 @@ export async function readPackageScripts(): Promise<Record<string, string>> {
 export async function listRepoFiles(pathPrefix?: string): Promise<string[]> {
   const root = path.resolve(resolveRepoRoot())
   const startDir = pathPrefix ? resolveRepoRelativePath(pathPrefix) : root
+  await assertCanonicalRepoPath(startDir)
   const out: string[] = []
   await walkFiles(startDir, root, out, { remaining: MAX_SEARCH_FILES })
   return out.map(f => path.relative(root, f).split(path.sep).join('/')).sort()

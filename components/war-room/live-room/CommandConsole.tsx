@@ -53,6 +53,7 @@ export const CommandConsole = memo(function CommandConsole({
   onAttachmentRemove,
 }: CommandConsoleProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const commandInputRef = useRef<HTMLInputElement>(null)
   const attachmentBusy = attachmentStatus === 'uploading' || attachmentStatus === 'processing'
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -77,12 +78,21 @@ export const CommandConsole = memo(function CommandConsole({
         }}
       >
         <div
-          className="flex min-w-0 flex-1 items-center gap-2 rounded border border-emerald-700/50 px-2.5 py-1.5 sm:px-3 sm:py-2"
+          className="flex min-w-0 flex-1 cursor-text items-stretch gap-2 rounded border border-emerald-700/50 px-2.5 py-1.5 sm:px-3 sm:py-2"
           style={{ background: 'rgba(0,20,8,0.55)', boxShadow: 'inset 0 0 20px rgba(0,255,102,0.04)' }}
+          onMouseDown={e => {
+            // Clicking anywhere in the composer surface (including padding around the input's
+            // own line box) must focus the input, not fall through to the Cesium canvas behind it.
+            if (e.target !== commandInputRef.current) {
+              e.preventDefault()
+              commandInputRef.current?.focus()
+            }
+          }}
         >
-          <span className="hidden shrink-0 text-[10px] font-bold tracking-widest text-emerald-400 sm:inline">RA&apos;EL@WARROOM:~$</span>
-          <span className="shrink-0 text-[10px] font-bold tracking-widest text-emerald-400 sm:hidden">~$</span>
+          <span className="hidden shrink-0 self-center text-[10px] font-bold tracking-widest text-emerald-400 sm:inline">RA&apos;EL@WARROOM:~$</span>
+          <span className="shrink-0 self-center text-[10px] font-bold tracking-widest text-emerald-400 sm:hidden">~$</span>
           <input
+            ref={commandInputRef}
             data-command-surface-id="live-council-primary-decree"
             data-command-surface-role="primary_decree"
             type="text"
@@ -96,7 +106,7 @@ export const CommandConsole = memo(function CommandConsole({
             }}
             placeholder="Enter command or decree…"
             disabled={loading}
-            className="min-w-0 flex-1 bg-transparent text-sm tracking-wide text-emerald-100 outline-none placeholder:text-emerald-900/80"
+            className="min-w-0 flex-1 self-stretch bg-transparent text-sm tracking-wide text-emerald-100 outline-none placeholder:text-emerald-900/80"
             aria-label="Council command"
           />
         </div>

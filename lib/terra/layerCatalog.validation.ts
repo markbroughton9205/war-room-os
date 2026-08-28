@@ -22,7 +22,7 @@ function check(name: string, pass: boolean, detail: string): CaseResult {
 const REQUIRES_NON_EMPTY_QUERY_TEXT = new Set([
   'usgs_water', 'opensky', 'digitraffic_marine', 'idai_gazetteer', 'nominatim', 'pleiades', 'whg',
   'osm_overpass', 'ohm_overpass', 'met_no', 'open_meteo', 'obis', 'gbif', 'edh',
-  'nasa_eonet', 'nws_weather',
+  'nasa_eonet', 'nws_weather', 'digitraffic_road_cameras', 'drivebc_events',
 ])
 
 function run(): CaseResult[] {

@@ -10,22 +10,38 @@ const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514'
 
+/** Matches the fetch budget already used for Grok/Gemini research-role calls (see callGrok/callGemini below). */
+const RESEARCH_PROVIDER_TIMEOUT_MS = 22_000
+
 async function callOpenAi(user: string, system: string, maxTokens: number): Promise<string> {
-  const res = await fetch(OPENAI_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${process.env.OPENAI_API_KEY || ''}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      max_tokens: maxTokens,
-    }),
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), RESEARCH_PROVIDER_TIMEOUT_MS)
+  let res: Response
+  try {
+    res = await fetch(OPENAI_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${process.env.OPENAI_API_KEY || ''}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        max_tokens: maxTokens,
+      }),
+    })
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error(`OpenAI timed out after ${RESEARCH_PROVIDER_TIMEOUT_MS / 1000}s`)
+    }
+    throw e
+  } finally {
+    clearTimeout(timeout)
+  }
   const data = await res.json() as { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
   if (!res.ok) throw new Error(data?.error?.message || `OpenAI failed (${res.status})`)
   const text = data.choices?.[0]?.message?.content
@@ -34,20 +50,33 @@ async function callOpenAi(user: string, system: string, maxTokens: number): Prom
 }
 
 async function callClaude(user: string, system: string, maxTokens: number): Promise<string> {
-  const res = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY || '',
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: 'user', content: user }],
-    }),
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), RESEARCH_PROVIDER_TIMEOUT_MS)
+  let res: Response
+  try {
+    res = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: maxTokens,
+        system,
+        messages: [{ role: 'user', content: user }],
+      }),
+    })
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error(`Anthropic timed out after ${RESEARCH_PROVIDER_TIMEOUT_MS / 1000}s`)
+    }
+    throw e
+  } finally {
+    clearTimeout(timeout)
+  }
   const data = await res.json() as { content?: { text?: string }[]; error?: { message?: string } }
   if (!res.ok) throw new Error(data?.error?.message || `Anthropic failed (${res.status})`)
   const text = data.content?.[0]?.text

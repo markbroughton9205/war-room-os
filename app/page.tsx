@@ -6140,9 +6140,12 @@ function Home() {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const addSystemMessageRef = useRef<((content: string) => void) | null>(null)
   const submitDecreeRef = useRef<((decree: string, mode?: CouncilMode) => Promise<void>) | null>(null)
+  const terraCouncilContextRef = useRef<string | null>(null)
   const loadMemoriesRef = useRef<(() => Promise<void>) | null>(null)
   const lastDecreeIntentRef = useRef<ClassifyRaElMessageResult | null>(null)
   const decreeRoundGenRef = useRef(0)
+  /** `decreeRoundGenRef` value for which the optimistic "Retrieving live intelligence..." HUD was resolved to a real result. */
+  const liveResearchHudResolvedRoundRef = useRef(0)
   const autonomousOrchInFlightRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const councilPausedRef = useRef(false)
@@ -9111,6 +9114,10 @@ function Home() {
   }
 
   const submitDecree = async (decree: string, mode?: CouncilMode) => {
+    const terraContext = terraCouncilContextRef.current
+    if (mode !== 'continue' && terraContext) {
+      decree = `${decree}\n\n[CURRENT TERRA CONTEXT — live globe selection; preserve provenance and do not infer missing facts]\n${terraContext}`
+    }
     let decreeCompletedOk = false
     let decreeMatrixFailed = false
     const myRound = ++decreeRoundGenRef.current
@@ -9328,6 +9335,9 @@ function Home() {
           data,
         }
         mergeContinuationFromChatJson(out.data, continuationMergeOpts)
+        if (out.data.liveResearchAttempted && out.data.liveResearchUi) {
+          liveResearchHudResolvedRoundRef.current = myRound
+        }
         return out
       } finally {
         window.clearTimeout(hangId)
@@ -10797,6 +10807,25 @@ function Home() {
         if (toolIntent) endToolRequest()
         if (decreeCompletedOk && !decreeMatrixFailed && !controller.signal.aborted) {
           matrixStatus('success', 'Council response ready')
+        }
+        // Bounded exit for the optimistic "Retrieving live intelligence..." HUD: if this decree
+        // round never resolved it to a real result (provider timeout, stream closed without
+        // synthesis, all families failed, or a 200 response with no usable payload), replace it
+        // with a truthful degraded state instead of leaving it stuck forever.
+        if (mode !== 'continue' && decreeRequiresLiveRetrieval && liveResearchHudResolvedRoundRef.current !== myRound) {
+          const timedOut = controller.signal.aborted
+          setLiveResearchHud(prev =>
+            prev && prev.mode === 'active' && prev.councilPhase === 'evidence'
+              ? {
+                  mode: 'failed',
+                  sourcesCount: 0,
+                  label: timedOut
+                    ? 'Council degraded — provider timed out; no synthesis returned.'
+                    : 'Council degraded — no synthesis provider returned a usable response.',
+                  councilPhase: 'released',
+                }
+              : prev,
+          )
         }
         setLoading(false)
       }
@@ -12431,29 +12460,7 @@ function Home() {
               missionHint={councilContinueStatusLine}
             />
           )}
-          intelRow={(
-            <MatrixTopIntelRow
-              location={commanderLocation}
-              threadId={liveCouncilConvId ?? undefined}
-              onCouncilHandoff={injectLiveEnvironmentDecree}
-              onCouncilResearchHandoff={handleCouncilResearchHandoff}
-              opportunityCount={incomeOpportunities.length}
-              headlineOverride={
-                liveResearchHud && liveResearchHud.mode !== 'inactive'
-                  ? liveResearchHud.label
-                  : null
-              }
-              urgentWarning={
-                chatHealthLabel && chatHealthLabel !== 'Ready'
-                  ? chatHealthLabel
-                  : null
-              }
-              missionStatus={matrixMissionStatusLabel}
-              councilHealthLabel={matrixCouncilHealthLabel}
-              activityFeedLabel={activityFeedLabel}
-              onExpandIntel={() => setLiveRoomWorkspace('expanded_intel')}
-            />
-          )}
+          intelRow={null}
           leftNav={(
             <LiveRoomNavPanel
               activePanelId={dockPanelId}
@@ -12472,22 +12479,7 @@ function Home() {
               onOpenPanel={id => setDockPanelId(id)}
             />
           )}
-          commandConsole={(
-            <CommandConsole
-              command={command}
-              onCommandChange={setCommand}
-              onSubmit={handleDecree}
-              loading={loading}
-              councilFlowMode={councilFlowMode}
-              onCouncilFlowModeChange={persistCouncilFlowMode}
-              showFlowModeSelect={false}
-              attachmentFileName={attachedFile?.fileName ?? null}
-              attachmentStatus={attachmentStatus}
-              attachmentError={attachmentError}
-              onAttachmentSelect={file => void handleAttachmentSelect(file)}
-              onAttachmentRemove={handleAttachmentRemove}
-            />
-          )}
+          commandConsole={null}
           activePanelId={dockPanelId}
           onPanelChange={id => {
             setDockPanelId(id)
@@ -12601,7 +12593,36 @@ function Home() {
               />
             </div>
           ) : (
-        <GodsEyeCommandCenter council={<CouncilWorkspace
+        <GodsEyeCommandCenter
+          onTerraContextChange={context => { terraCouncilContextRef.current = context }}
+          councilComposer={<CommandConsole
+            command={command}
+            onCommandChange={setCommand}
+            onSubmit={handleDecree}
+            loading={loading}
+            councilFlowMode={councilFlowMode}
+            onCouncilFlowModeChange={persistCouncilFlowMode}
+            showFlowModeSelect={false}
+            attachmentFileName={attachedFile?.fileName ?? null}
+            attachmentStatus={attachmentStatus}
+            attachmentError={attachmentError}
+            onAttachmentSelect={file => void handleAttachmentSelect(file)}
+            onAttachmentRemove={handleAttachmentRemove}
+          />}
+          intelOverlay={<MatrixTopIntelRow
+            location={commanderLocation}
+            threadId={liveCouncilConvId ?? undefined}
+            onCouncilHandoff={injectLiveEnvironmentDecree}
+            onCouncilResearchHandoff={handleCouncilResearchHandoff}
+            opportunityCount={incomeOpportunities.length}
+            headlineOverride={liveResearchHud && liveResearchHud.mode !== 'inactive' ? liveResearchHud.label : null}
+            urgentWarning={chatHealthLabel && chatHealthLabel !== 'Ready' ? chatHealthLabel : null}
+            missionStatus={matrixMissionStatusLabel}
+            councilHealthLabel={matrixCouncilHealthLabel}
+            activityFeedLabel={activityFeedLabel}
+            onExpandIntel={() => setLiveRoomWorkspace('expanded_intel')}
+          />}
+          council={<CouncilWorkspace
           scrollContainerRef={scrollContainerRef}
           onScroll={handleScroll}
           toolbar={(

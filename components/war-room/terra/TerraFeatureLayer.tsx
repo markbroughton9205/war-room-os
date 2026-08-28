@@ -97,6 +97,17 @@ function resolveStyle(kind: TerraIntelligenceEventKind, feature: TerraGeoFeature
       return { color: '#22D3EE', pixelSize: 10 }
     case 'landmark_poi':
       return { color: '#A78BFA', pixelSize: 9 }
+    case 'traffic_camera':
+      return { color: '#FBBF24', pixelSize: 9 }
+    case 'traffic_event': {
+      // Visual weight only varies by real source-reported severity (Open511's own MAJOR/MODERATE/
+      // MINOR/UNKNOWN vocabulary, preserved verbatim in properties.severity) — never a War
+      // Room-invented risk score, matching this file's existing "no severity gradient we made up"
+      // rule for every other kind.
+      const severity = typeof feature.properties.severity === 'string' ? feature.properties.severity : null
+      const pixelSize = severity === 'MAJOR' ? 13 : severity === 'MODERATE' ? 11 : 9
+      return { color: '#F87171', pixelSize }
+    }
     default:
       return { color: '#38BDF8', pixelSize: MIN_PIXEL_SIZE }
   }
@@ -188,6 +199,24 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
               // filled shape at any reasonable globe zoom; unlike the sparse point layers, no
               // "stays visible through the globe" override is needed or wanted here.
               classificationType: Cesium.ClassificationType.TERRAIN,
+            },
+          })
+          continue
+        }
+
+        // God's Eye Traffic phase: a real LineString-backed road-event corridor (drivebc_events)
+        // renders as an actual line, not a collapsed point — mission requirement. Distinct from
+        // the aircraft/vessel session-only trail polylines below (this is the event's own real
+        // geometry, not a derived recent-position history).
+        if (feature.geometryKind === 'line' && feature.pathCoordinates && feature.pathCoordinates.length >= 2) {
+          const flatDegrees = feature.pathCoordinates.flatMap(([lon, lat]) => [lon, lat])
+          dataSource!.entities.add({
+            id: entityId,
+            polyline: {
+              positions: Cesium.Cartesian3.fromDegreesArray(flatDegrees),
+              width: isSelected ? 6 : 4,
+              material: Cesium.Color.fromCssColorString(color).withAlpha(isSelected ? 0.95 : 0.75),
+              clampToGround: true,
             },
           })
           continue

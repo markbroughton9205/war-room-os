@@ -31,6 +31,7 @@ function makeVessel(overrides: Partial<TerraGeoFeature> = {}): TerraGeoFeature {
     geoResolution: null,
     geometryKind: 'point',
     regionRings: null,
+    pathCoordinates: null,
     ...overrides,
   }
 }
