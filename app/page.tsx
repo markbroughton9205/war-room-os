@@ -840,7 +840,6 @@ type OpportunityScoutStatus = 'idle' | 'searching' | 'reviewing' | 'found' | 'er
 type ProviderHealth = 'online' | 'standby' | 'offline' | 'error'
 type RaelActionStatus = 'pending' | 'answered' | 'expired'
 type RaelActionUrgency = 'low' | 'medium' | 'high'
-type SmsBridgeStatus = 'not configured' | 'standby' | 'online' | 'error'
 type RepoScanStatus = 'idle' | 'scanning' | 'indexed' | 'error'
 type ProviderConnectionStatus = 'online' | 'standby' | 'error' | 'not_connected'
 type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'kimi' | 'redteam'
@@ -860,12 +859,6 @@ type RaelActionItem = {
   answered_at?: string
 }
 
-type SmsBridgeState = {
-  status: SmsBridgeStatus
-  lastNotification: string | null
-  message: string
-  sending: boolean
-}
 
 type OpportunityScoutState = {
   status: OpportunityScoutStatus
@@ -1060,12 +1053,6 @@ const INITIAL_ECONOMIC_SCOUT_DIAGNOSTICS: EconomicScoutDiagnostics = {
   ranked_preview: [],
   missing_api_keys: [],
   last_updated_at: null,
-}
-const INITIAL_SMS_BRIDGE_STATE: SmsBridgeState = {
-  status: 'standby',
-  lastNotification: null,
-  message: 'SMS Bridge ready for configuration check.',
-  sending: false,
 }
 const INITIAL_REPO_AWARENESS_STATE: RepoAwarenessState = {
   repoStatus: 'idle',
@@ -4245,65 +4232,15 @@ const MemoryRecallPanel = memo(function MemoryRecallPanel({ recall }: { recall: 
   )
 })
 
-function SmsBridgePanel({
-  bridge,
-  onTest,
-}: {
-  bridge: SmsBridgeState
-  onTest: () => void
-}) {
-  const statusColors: Record<SmsBridgeStatus, string> = {
-    'not configured': '#666',
-    standby: '#FFD700',
-    online: '#34D399',
-    error: '#EF4444',
-  }
-
-  return (
-    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
-      style={{ background: 'rgba(96,165,250,0.018)' }}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#60A5FA' }}>
-            SMS BRIDGE
-          </h2>
-          <p className="mt-1 text-xs" style={{ color: '#666' }}>
-            Phone notification bridge for action queue approvals.
-          </p>
-        </div>
-        <button type="button" onClick={onTest} disabled={bridge.sending}
-          className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
-          style={{ border: '1px solid rgba(96,165,250,0.4)', color: '#60A5FA', background: 'rgba(0,0,0,0.25)' }}>
-          {bridge.sending ? 'Sending...' : 'Test Notification'}
-        </button>
-      </div>
-      <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}>
-          <span style={{ color: '#444' }}>STATUS </span>
-          <span style={{ color: statusColors[bridge.status] }}>{bridge.status.toUpperCase()}</span>
-        </div>
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}>
-          <span style={{ color: '#444' }}>LAST NOTIFICATION </span>
-          <span style={{ color: '#888' }}>{bridge.lastNotification ? new Date(bridge.lastNotification).toLocaleString() : 'None'}</span>
-        </div>
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}>
-          <span style={{ color: '#888' }}>{bridge.message}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function NeedsRaelPanel({
   actions,
   opportunities,
   onRespond,
-  onNotify,
 }: {
   actions: RaelActionItem[]
   opportunities: IncomeOpportunity[]
   onRespond: (actionId: string, response: string) => void
-  onNotify: (action: RaelActionItem) => void
 }) {
   const urgencyStyles: Record<RaelActionUrgency, { color: string; border: string; background: string }> = {
     low: { color: '#60A5FA', border: 'rgba(96,165,250,0.28)', background: 'rgba(96,165,250,0.06)' },
@@ -4399,13 +4336,6 @@ function NeedsRaelPanel({
                         {option}
                       </button>
                     ))}
-                    {action.urgency === 'high' && (
-                      <button type="button" onClick={() => onNotify(action)}
-                        className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
-                        style={{ border: '1px solid rgba(52,211,153,0.4)', color: '#34D399', background: 'rgba(0,0,0,0.2)' }}>
-                        Notify Ra&apos;el
-                      </button>
-                    )}
                   </div>
                 ) : (
                   <div className="mt-3 rounded px-2 py-2 text-xs"
@@ -6189,7 +6119,6 @@ function Home() {
   const [sourceConnectionsLoading, setSourceConnectionsLoading] = useState(false)
   const [paymentLedger, setPaymentLedger] = useState<PaymentLedgerState>(INITIAL_PAYMENT_LEDGER_STATE)
   const [raelActions, setRaelActions] = useState<RaelActionItem[]>([])
-  const [smsBridge, setSmsBridge] = useState<SmsBridgeState>(INITIAL_SMS_BRIDGE_STATE)
   const [usageRows, setUsageRows] = useState<UsageEstimate[]>(BASE_USAGE_ROWS)
   const [currentDecreeCost, setCurrentDecreeCost] = useState(0)
   const [sessionCost, setSessionCost] = useState(0)
@@ -7582,51 +7511,6 @@ function Home() {
       body: JSON.stringify({ status: 'answered', answer: response, answered_at: answeredAt }),
     }).catch(() => undefined)
     addSystemMessage(`Ra'el answered action queue: ${response}`)
-  }
-
-  const sendSmsNotification = async (message: string) => {
-    setSmsBridge(prev => ({ ...prev, sending: true, message: 'Sending SMS notification...' }))
-    try {
-      const res = await fetch('/api/sms/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
-      })
-      const data = await res.json()
-
-      if (!res.ok) {
-        setSmsBridge(prev => ({
-          ...prev,
-          status: data.status === 'not_configured' ? 'not configured' : 'error',
-          message: data.message ?? 'SMS notification failed',
-          sending: false,
-        }))
-        return
-      }
-
-      setSmsBridge({
-        status: 'online',
-        lastNotification: data.sentAt ?? new Date().toISOString(),
-        message: data.message ?? 'SMS notification sent',
-        sending: false,
-      })
-    } catch {
-      setSmsBridge(prev => ({
-        ...prev,
-        status: 'error',
-        message: 'SMS notification failed',
-        sending: false,
-      }))
-    }
-  }
-
-  const testSmsBridge = () => {
-    void sendSmsNotification('War Room SMS Bridge test. Reply STATUS to confirm command handling.')
-  }
-
-  const notifyRaelAction = (action: RaelActionItem) => {
-    const options = action.response_options.join(' / ')
-    void sendSmsNotification(`War Room needs Ra'el: ${action.title}. ${action.question} Reply options: ${options}.`)
   }
 
   useEffect(() => {
@@ -11951,7 +11835,6 @@ function Home() {
       gapVerification: operatorGapVerificationContext,
       silentUi: {
         archiveRecallNotConnected: !ARCHIVE_RECALL_CLIENT_AVAILABLE,
-        smsControlsNotConnected: true,
         repoScanPlaceholders: true,
       },
       operatorLabels: [
@@ -12656,7 +12539,7 @@ function Home() {
                     {activeFamiliesSection}
                     {activeOrdersStrip}
                     {pendingNeedsRael ? (
-                      <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
+                      <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} />
                     ) : null}
                   </>
                 )}
@@ -13197,9 +13080,8 @@ function Home() {
                   <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FBBF24' }}>APPROVALS / ACTION QUEUE</h2>
                   <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void loadRaelActions()}>Refresh approvals</button>
                 </div>
-                <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
+                <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} />
                 <StandingPermissionsPanel />
-                <SmsBridgePanel bridge={smsBridge} onTest={testSmsBridge} />
               </>
             )}
             {operatorTab === 'system' && (

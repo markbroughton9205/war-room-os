@@ -3,6 +3,7 @@ import 'server-only'
 import type { ResearchProviderId } from '@/lib/research-engine/core/types'
 import type { ResearchProviderAdapter } from '@/lib/research-engine/providers/adapter'
 import { githubAdapter } from '@/lib/research-engine/providers/github'
+import { digitrafficMarineAdapter } from '@/lib/research-engine/providers/digitraffic_marine'
 import { arxivAdapter } from '@/lib/research-engine/providers/arxiv'
 import { crossrefAdapter } from '@/lib/research-engine/providers/crossref'
 import { fredAdapter } from '@/lib/research-engine/providers/fred'
@@ -390,6 +391,7 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   unhcr_data: unhcrDataAdapter,
   ocha_fts: ochaFtsAdapter,
   opensky: openskyAdapter,
+  digitraffic_marine: digitrafficMarineAdapter,
   cbdb: cbdbAdapter,
   eclac_cepalstat: eclacCepalstatAdapter,
   oecd_data_explorer: oecdDataExplorerAdapter,

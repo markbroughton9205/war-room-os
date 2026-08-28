@@ -109,7 +109,6 @@ export type GapFinderContext = {
   commanderDismissedIds?: Partial<Record<string, string>>
   silentUi?: {
     archiveRecallNotConnected?: boolean
-    smsControlsNotConnected?: boolean
     repoScanPlaceholders?: boolean
   }
   operatorLabels?: string[]

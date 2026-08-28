@@ -15,6 +15,7 @@
  */
 import { useEffect, useRef } from 'react'
 import type { CustomDataSource, Viewer as CesiumViewer } from 'cesium'
+import { loadCesium } from './loadCesiumRuntime'
 import { terraEntityId } from '@/lib/terra/cesiumEntityId'
 import type { TerraGeoFeature, TerraIntelligenceEventKind } from '@/lib/terra/types'
 import { terraAircraftBillboardRotationRadians } from '@/lib/terra/aircraftOrientation'
@@ -32,9 +33,11 @@ type Props = {
    * feature, unclustered) — a merged blob is wrong for "how many distinct earthquakes are here,"
    * but right for "roughly how many landmarks are in this area" at broad zoom. */
   cluster?: boolean
-  /** Live-aviation phase: bounded session-only trails, keyed by icao24
-   * (components/war-room/terra/useTerraAircraftTrails.ts) — only ever read for `kind ===
-   * 'aircraft_state'` features; every other layer passes nothing and renders exactly as before. */
+  /** Bounded session-only trails, keyed by icao24 (aircraft,
+   * components/war-room/terra/useTerraAircraftTrails.ts) or MMSI (vessels,
+   * useTerraVesselTrails.ts) — each TerraFeatureLayer instance only ever renders its own layer's
+   * features, so the key namespace never collides across layers; every other layer passes nothing
+   * and renders exactly as before. */
   trails?: Record<string, TerraAircraftTrailPoint[]>
 }
 
@@ -47,6 +50,13 @@ type Props = {
 // fine, whereas the base64 form loads correctly in both).
 const AIRCRAFT_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
   '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><path d="M14 1 L20 19 L14 15 L8 19 Z" fill="white"/></svg>',
+)}`
+
+// Elongated hull/bow shape (also authored pointing north at rotation 0) so a vessel with a real
+// reported heading is visually distinguishable from an aircraft's arrowhead glyph at a glance,
+// reusing the exact same rotation convention (terraAircraftBillboardRotationRadians).
+const VESSEL_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><path d="M14 2 L19 10 L19 22 L14 26 L9 22 L9 10 Z" fill="white"/></svg>',
 )}`
 
 const MIN_PIXEL_SIZE = 7
@@ -71,6 +81,8 @@ function resolveStyle(kind: TerraIntelligenceEventKind, feature: TerraGeoFeature
       return { color: '#2DD4BF', pixelSize: 10 }
     case 'aircraft_state':
       return { color: '#94A3B8', pixelSize: 8 }
+    case 'vessel_position':
+      return { color: '#38E1C6', pixelSize: 8 }
     case 'tropical_cyclone':
       return { color: '#FB923C', pixelSize: 16 }
     case 'wildfire_incident':
@@ -105,7 +117,7 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
     let created: CustomDataSource | null = null
 
     async function attach() {
-      const Cesium = await import('cesium')
+      const Cesium = await loadCesium()
       // The dynamic import is the async gap where a sibling TerraGlobe remount (observed under
       // React StrictMode's dev-only double-invoke, and possible on any fast-refresh reload) can
       // destroy this exact `viewer` before this closure resumes — `cancelled` alone only tracks
@@ -144,7 +156,7 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
     let cancelled = false
 
     async function render() {
-      const Cesium = await import('cesium')
+      const Cesium = await loadCesium()
       if (cancelled) return
       dataSource!.entities.removeAll()
       if (!enabled) return
@@ -181,17 +193,20 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
           continue
         }
 
-        // Live-aviation phase: an aircraft with a real reported heading gets a directional glyph
-        // instead of a plain dot — orientation only reflects a heading the source actually
-        // supplied (mission requirement: never fabricate one). An aircraft with no heading (e.g.
-        // some on-ground reports) falls through to the same plain point every other kind uses.
-        const headingDeg = feature.kind === 'aircraft_state' && typeof feature.properties.headingDeg === 'number' ? feature.properties.headingDeg : null
+        // Live-aviation phase (extended to Maritime, Terra Phase 3): an aircraft/vessel with a
+        // real reported heading gets a directional glyph instead of a plain dot — orientation
+        // only reflects a heading the source actually supplied (mission requirement: never
+        // fabricate one). A feature with no heading (e.g. some on-ground aircraft reports, or a
+        // vessel report with the AIS heading-not-available sentinel already filtered to null
+        // upstream) falls through to the same plain point every other kind uses.
+        const headingKind = feature.kind === 'aircraft_state' || feature.kind === 'vessel_position'
+        const headingDeg = headingKind && typeof feature.properties.headingDeg === 'number' ? feature.properties.headingDeg : null
         if (headingDeg !== null) {
           dataSource!.entities.add({
             id: entityId,
             position: Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude, feature.altitude ?? 0),
             billboard: {
-              image: AIRCRAFT_GLYPH_DATA_URI,
+              image: feature.kind === 'vessel_position' ? VESSEL_GLYPH_DATA_URI : AIRCRAFT_GLYPH_DATA_URI,
               color: Cesium.Color.fromCssColorString(isSelected ? '#FFFFFF' : color),
               scale: isSelected ? 1.35 : 1,
               rotation: terraAircraftBillboardRotationRadians(headingDeg),
@@ -219,11 +234,11 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
       // provider-historical track — see lib/terra/aircraftTrail.ts) rendered as a thin polyline
       // through its own real recent observed positions only.
       if (trails) {
-        for (const [icao24, points] of Object.entries(trails)) {
+        for (const [trailKey, points] of Object.entries(trails)) {
           if (points.length < 2) continue
           const flatDegrees = points.flatMap(point => [point.longitude, point.latitude])
           dataSource!.entities.add({
-            id: terraEntityId(`${layerId}:trail:${icao24}`),
+            id: terraEntityId(`${layerId}:trail:${trailKey}`),
             polyline: {
               positions: Cesium.Cartesian3.fromDegreesArray(flatDegrees),
               width: 1.5,

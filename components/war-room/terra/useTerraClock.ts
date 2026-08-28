@@ -23,6 +23,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
+import { loadCesium } from './loadCesiumRuntime'
 import type { TerraPlaybackRate, TerraTimeState } from '@/lib/terra/types'
 import {
   advanceHistoricalTerraTime,
@@ -91,7 +92,7 @@ export function useTerraClock(viewer: CesiumViewer | null): UseTerraClockResult 
     const targetViewer = viewer
     let cancelled = false
     async function sync() {
-      const Cesium = await import('cesium')
+      const Cesium = await loadCesium()
       // The dynamic import is an async gap where a sibling TerraGlobe remount (observed under
       // React StrictMode's dev-only double-invoke, and possible on any fast-refresh reload) can
       // destroy this exact viewer before this closure resumes — `cancelled` alone only tracks
@@ -112,7 +113,7 @@ export function useTerraClock(viewer: CesiumViewer | null): UseTerraClockResult 
     let removeListener: (() => void) | null = null
 
     async function attach() {
-      const Cesium = await import('cesium')
+      const Cesium = await loadCesium()
       // Same async-gap race as the sync effect above.
       if (cancelled || viewer!.isDestroyed()) return
 
@@ -158,7 +159,7 @@ export function useTerraClock(viewer: CesiumViewer | null): UseTerraClockResult 
     const next = returnToLiveTerraTime(nowIso)
     setTime(next)
     if (viewer) {
-      void import('cesium').then(Cesium => {
+      void loadCesium().then(Cesium => {
         if (!viewer.isDestroyed()) applyTerraTimeToViewerClock(viewer, Cesium, next)
       })
     }
@@ -171,7 +172,7 @@ export function useTerraClock(viewer: CesiumViewer | null): UseTerraClockResult 
     const next = scrubTerraTime(timeRef.current, isoTime)
     setTime(next)
     if (viewer) {
-      void import('cesium').then(Cesium => {
+      void loadCesium().then(Cesium => {
         if (!viewer.isDestroyed()) applyTerraTimeToViewerClock(viewer, Cesium, next)
       })
     }

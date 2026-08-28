@@ -17,6 +17,7 @@ const INTENT_PROVIDER_MAP: Record<ResearchQueryIntent, ResearchProviderId[]> = {
   patents_inventions: ['uspto', 'crossref', 'github', 'wikidata', 'epo_ops'],
   government_contracts: ['sam_gov', 'fmcsa', 'world_bank_projects', 'usaspending', 'eu_ted', 'mercado_publico'],
   transportation_carriers: ['fmcsa', 'opensky'],
+  maritime_traffic: ['digitraffic_marine'],
   economics_macro: ['fred', 'imf_sdmx', 'world_bank_indicators', 'eurostat', 'sec_edgar', 'ecb_sdw', 'bank_of_canada', 'bis_stats', 'eia', 'eclac_cepalstat', 'oecd_data_explorer', 'argentina_series', 'wto_timeseries'],
   global_development: ['world_bank_indicators', 'world_bank_projects', 'world_bank_finances', 'world_bank_climate', 'imf_sdmx', 'reliefweb', 'un_sdg', 'idb_open_data', 'iati_datastore'],
   finance_public_data: ['fred', 'world_bank_finances', 'sec_edgar', 'brazil_transparencia'],

@@ -44,6 +44,8 @@ const EVENT_KIND_POINT_ALTITUDE_M: Partial<Record<TerraIntelligenceEventKind, nu
   // Close enough to see the selected aircraft against its immediate ground context, without being
   // so close the camera clips through a still-airborne aircraft's own altitude.
   aircraft_state: 20_000,
+  // Close enough to see the selected vessel against its immediate coastal/harbor context.
+  vessel_position: 15_000,
   weather_observation: 30_000,
   biodiversity_observation: 30_000,
   heritage_site: 10_000,

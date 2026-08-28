@@ -33,7 +33,7 @@ const TEMPLATES: OpportunityPacket[] = [
     startupCost: '$50–$250',
     estimatedRevenue: '$400–$1,200/mo per contractor vertical',
     timeToLaunch: '1–2 weeks',
-    toolsRequired: ['Twilio or OpenPhone', 'Zapier', 'simple web form', 'calendar link'],
+    toolsRequired: ['OpenPhone or another compliant call platform', 'Zapier', 'simple web form', 'calendar link'],
     targetCustomer: 'HVAC, plumbing, roofing contractors losing jobs to voicemail',
     executionDifficulty: 'low',
     confidence: FALLBACK_CONFIDENCE,

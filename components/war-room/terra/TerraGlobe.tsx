@@ -25,6 +25,7 @@ import { useEffect, useRef, useState } from 'react'
 // integration practice.
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import type { Viewer as CesiumViewer } from 'cesium'
+import { loadCesium } from './loadCesiumRuntime'
 import { featureIdFromTerraEntityId } from '@/lib/terra/cesiumEntityId'
 import type { TerraClickPoint } from '@/lib/terra/types'
 
@@ -94,7 +95,7 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetRe
         // specific to this app).
         ;(window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = '/cesium/'
 
-        const Cesium = await import('cesium')
+        const Cesium = await loadCesium()
         if (cancelled) return
 
         const ionToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN

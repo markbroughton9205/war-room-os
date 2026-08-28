@@ -4,6 +4,8 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from 're
 import type { TerraActiveLocation } from '@/lib/terra/activeLocation'
 import type { TerraGeoFeature } from '@/lib/terra/types'
 import type { TerraAircraftRegionalSummary } from '@/lib/terra/aircraftRegionalSummary'
+import type { TerraVesselRegionalSummary } from '@/lib/terra/vesselRegionalSummary'
+import type { TerraMaritimeCoverageState } from '@/lib/terra/maritimeCoverage'
 
 type TerraActiveLocationContextValue = {
   activeLocation: TerraActiveLocation | null
@@ -23,6 +25,12 @@ type TerraActiveLocationContextValue = {
    * aircraft layer is off or has never loaded. */
   aircraftSummary: TerraAircraftRegionalSummary | null
   setAircraftSummary: (summary: TerraAircraftRegionalSummary | null) => void
+  /** Terra Phase 3 (Maritime Source Federation): the same bounded-summary pattern as
+   * aircraftSummary, plus the coverage-truth state (lib/terra/maritimeCoverage.ts) — required
+   * alongside the summary so a Council consumer can never mistake a NO_COVERAGE region for a
+   * genuinely empty one. `null` when the Maritime layer is off or has never loaded. */
+  maritimeSummary: { regional: TerraVesselRegionalSummary; coverageState: TerraMaritimeCoverageState } | null
+  setMaritimeSummary: (summary: { regional: TerraVesselRegionalSummary; coverageState: TerraMaritimeCoverageState } | null) => void
 }
 
 const TerraActiveLocationContext = createContext<TerraActiveLocationContextValue | null>(null)
@@ -31,9 +39,10 @@ export function TerraActiveLocationProvider({ children }: { children: ReactNode 
   const [activeLocation, setActiveLocation] = useState<TerraActiveLocation | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<TerraGeoFeature | null>(null)
   const [aircraftSummary, setAircraftSummary] = useState<TerraAircraftRegionalSummary | null>(null)
+  const [maritimeSummary, setMaritimeSummary] = useState<TerraActiveLocationContextValue['maritimeSummary']>(null)
   const value = useMemo(
-    () => ({ activeLocation, setActiveLocation, selectedEvent, setSelectedEvent, aircraftSummary, setAircraftSummary }),
-    [activeLocation, selectedEvent, aircraftSummary],
+    () => ({ activeLocation, setActiveLocation, selectedEvent, setSelectedEvent, aircraftSummary, setAircraftSummary, maritimeSummary, setMaritimeSummary }),
+    [activeLocation, selectedEvent, aircraftSummary, maritimeSummary],
   )
   return <TerraActiveLocationContext.Provider value={value}>{children}</TerraActiveLocationContext.Provider>
 }

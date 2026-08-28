@@ -91,12 +91,6 @@ export const ENV_VAR_GROUPS: EnvVarGroupDef[] = [
     required: [],
     optional: ['WAR_ROOM_AUDIT_POST_SECRET', 'WAR_ROOM_MEMORY_PROPOSALS_ENABLED'],
   },
-  {
-    id: 'twilio',
-    label: 'Twilio / SMS',
-    required: [],
-    optional: ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_PHONE_NUMBER', 'RAEL_PHONE_NUMBER'],
-  },
 ]
 
 function presence(name: string): EnvVarPresence {

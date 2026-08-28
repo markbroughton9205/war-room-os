@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
+import { loadCesium } from './loadCesiumRuntime'
 import { buildGibsTileUrlTemplate } from '@/lib/earth-intelligence/gibsTileUrl'
 import { TERRA_SCALE_THRESHOLDS_M } from './useTerraCameraScale'
 
@@ -55,7 +56,7 @@ export function TerraEarthImagery({ viewer, selectedTime }: { viewer: CesiumView
     // setState per Cesium frame/camera event" performance mandate.
     let fadeInProgress = 0
 
-    void import('cesium').then(Cesium => {
+    void loadCesium().then(Cesium => {
       if (cancelled || targetViewer.isDestroyed()) return
 
       // True Color is a real daily photograph (VIIRS/NOAA-20 corrected reflectance) — clouds are

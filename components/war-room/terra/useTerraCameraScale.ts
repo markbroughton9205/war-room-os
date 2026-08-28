@@ -34,6 +34,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
+import { loadCesium } from './loadCesiumRuntime'
 
 export type TerraScaleLevel = 'global' | 'regional' | 'city' | 'local' | 'building'
 
@@ -107,7 +108,7 @@ export function useTerraCameraScale(viewer: CesiumViewer | null): TerraCameraSca
     let detach: (() => void) | null = null
 
     async function attach() {
-      await import('cesium')
+      await loadCesium()
       if (cancelled || !isTerraCesiumViewerAlive(targetViewer)) return
 
       configureTerraCameraChangeSensitivity(targetViewer)

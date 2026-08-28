@@ -30,6 +30,7 @@ import { normalizeUsgsEarthquakeGeoFeatures } from '@/lib/terra/normalizeUsgsEar
 import { normalizeUsgsWaterStations } from '@/lib/terra/normalizeUsgsWaterStations'
 import { normalizeLatentGeoDocuments } from '@/lib/terra/normalizeLatentGeoDocument'
 import { normalizeOpenSkyAircraft } from '@/lib/terra/normalizeOpenSkyAircraft'
+import { normalizeDigitrafficMarineVessels } from '@/lib/terra/normalizeDigitrafficMarineVessels'
 import { normalizeEdhInscriptions } from '@/lib/terra/normalizeEdhInscriptions'
 import { normalizeNhcCurrentStorms } from '@/lib/terra/normalizeNhcCurrentStorms'
 import { normalizeNasaEonet } from '@/lib/terra/normalizeNasaEonet'
@@ -93,6 +94,26 @@ export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
     // (lib/research-engine/cache/ttlCache.ts CACHE_TTL.liveFeed) and this repo's own
     // no-layer-faster-than-60s floor (see layerCatalog.validation.ts) — refreshing any faster
     // would just re-poll the same cached response without ever seeing fresher data.
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'digitraffic_marine',
+    providerId: 'digitraffic_marine',
+    kind: 'vessel_position',
+    domain: 'other',
+    label: 'Vessel Positions (Digitraffic Marine — Finland)',
+    // A small real bbox around the Helsinki/Gulf of Finland approaches — the adapter's own
+    // documented example (lib/research-engine/providers/digitraffic_marine.ts), matching
+    // usgs_water's "real example site number" and opensky's "real example bbox" convention. Only
+    // used as a fallback if this route is ever called without an explicit `?q=` override;
+    // TerraShell's real Maritime layer always supplies one built from the Commander's live camera
+    // view via lib/terra/maritimeBoundingBox.ts, gated by the Maritime Coverage Resolver.
+    description: 'Live Digitraffic (Fintraffic) AIS vessel positions + static/voyage metadata within a bounding box — Finnish territorial waters/EEZ only, not global blue-water AIS coverage.',
+    defaultQueryText: '59.0,24.0,60.5,26.0',
+    normalize: response => normalizeDigitrafficMarineVessels(response.documents),
+    // Matched to (never faster than) the Research Engine's own 60s live-feed cache TTL for
+    // digitraffic_marine and this repo's no-layer-faster-than-60s floor — same reasoning as
+    // opensky's identical refreshIntervalMs above.
     refreshIntervalMs: 60_000,
   },
   {

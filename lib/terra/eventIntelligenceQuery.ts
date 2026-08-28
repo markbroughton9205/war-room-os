@@ -29,6 +29,9 @@ const TERRA_EVENT_KIND_QUERY_LABEL: Record<TerraIntelligenceEventKind, string | 
   // "Aircraft {icao24}" title, which already does and is left undoubled by the existing
   // titleLower.includes(kindLabel) guard below.
   aircraft_state: 'aircraft',
+  // A vessel's title is its name (or "Vessel {mmsi}" fallback, matching aircraft's "Aircraft
+  // {icao24}" convention) — neither says "vessel" on its own, so this is never doubled.
+  vessel_position: 'vessel',
   heritage_site: null,
   place: null,
   geographic_feature: null,

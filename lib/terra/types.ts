@@ -40,6 +40,10 @@ export type TerraIntelligenceDomain = (typeof TERRA_INTELLIGENCE_DOMAINS)[number
  *     station's recent daily values live in `properties`, not as separate events (Phase 3)
  *   - 'aircraft_state': opensky — a live position report, proving the LATENT_GEO extraction
  *     boundary (lib/terra/normalizeLatentGeoDocument.ts) against a real provider (Phase 3)
+ *   - 'vessel_position': digitraffic_marine, Terra Phase 3 (Maritime Source Federation) — a live
+ *     AIS position report, the same "dedicated normalizer over a real state-vector-style feed"
+ *     pattern 'aircraft_state' established. Coverage is Finnish territorial/EEZ waters only (see
+ *     lib/terra/maritimeSourceRegistry.ts) — never implied as global blue-water AIS coverage.
  *   - 'heritage_site': idai_gazetteer, pleiades, whg — archaeological/historical gazetteer places
  *     (Phase 4)
  *   - 'place': nominatim — a general geocoded place-name search result (Phase 4)
@@ -67,6 +71,7 @@ export const TERRA_INTELLIGENCE_EVENT_KINDS = [
   'earthquake',
   'water_gauge_reading',
   'aircraft_state',
+  'vessel_position',
   'heritage_site',
   'place',
   'geographic_feature',

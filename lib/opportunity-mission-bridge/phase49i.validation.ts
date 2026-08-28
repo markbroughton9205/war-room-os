@@ -375,7 +375,7 @@ export function runPhase49iValidation(): Phase49iValidationResult[] {
   add('no-email-or-message-send', () => {
     for (const file of BRIDGE_SOURCE_FILES) {
       const text = source(file)
-      if (/twilio|sendMessage|sendEmail|nodemailer/i.test(text)) return `${file} references a messaging integration`
+      if (/sendSms|sendMessage|sendEmail|nodemailer/i.test(text)) return `${file} references a messaging integration`
     }
     return true
   })

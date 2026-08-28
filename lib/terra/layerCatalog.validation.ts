@@ -20,7 +20,7 @@ function check(name: string, pass: boolean, detail: string): CaseResult {
 // text with no meaningful zero-auth "give me anything" default — a blank defaultQueryText for one
 // of these would silently produce an always-empty layer.
 const REQUIRES_NON_EMPTY_QUERY_TEXT = new Set([
-  'usgs_water', 'opensky', 'idai_gazetteer', 'nominatim', 'pleiades', 'whg',
+  'usgs_water', 'opensky', 'digitraffic_marine', 'idai_gazetteer', 'nominatim', 'pleiades', 'whg',
   'osm_overpass', 'ohm_overpass', 'met_no', 'open_meteo', 'obis', 'gbif', 'edh',
   'nasa_eonet', 'nws_weather',
 ])

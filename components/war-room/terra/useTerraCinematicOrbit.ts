@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
+import { loadCesium } from './loadCesiumRuntime'
 
 // Roughly one full revolution every ~13 real minutes — "subtle and cinematic," never a fast
 // screensaver spin.
@@ -109,7 +110,7 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
     let CesiumModule: typeof import('cesium') | null = null
 
     async function loop() {
-      const Cesium = await import('cesium')
+      const Cesium = await loadCesium()
       if (cancelled) return
       CesiumModule = Cesium
 

@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import type { Viewer as CesiumViewer } from 'cesium'
+import { loadCesium } from './loadCesiumRuntime'
 import type { TerraGlobeStatus } from './TerraGlobe'
 import { useTerraLayer } from './useTerraLayer'
 import { useTerraClock } from './useTerraClock'
@@ -46,8 +47,12 @@ import { useTerraRelatedIntelligence } from './useTerraRelatedIntelligence'
 import { TerraRelatedIntelligencePanel } from './TerraRelatedIntelligencePanel'
 import { useTerraCameraViewRectangle } from './useTerraCameraViewRectangle'
 import { useTerraAircraftTrails } from './useTerraAircraftTrails'
+import { useTerraVesselTrails } from './useTerraVesselTrails'
 import { buildTerraAircraftBoundingBoxQuery } from '@/lib/terra/aircraftBoundingBox'
 import { summarizeTerraAircraftFeatures } from '@/lib/terra/aircraftRegionalSummary'
+import { buildTerraMaritimeBoundingBoxQuery, terraCameraViewHasMaritimeCoverage } from '@/lib/terra/maritimeBoundingBox'
+import { summarizeTerraVesselFeatures } from '@/lib/terra/vesselRegionalSummary'
+import { resolveTerraMaritimeCoverageState, TERRA_MARITIME_COVERAGE_LABELS } from '@/lib/terra/maritimeCoverage'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -108,6 +113,7 @@ const KIND_DETAIL_LABEL: Record<TerraIntelligenceEventKind, string> = {
   earthquake: 'Earthquake',
   water_gauge_reading: 'Water Gauge Reading',
   aircraft_state: 'Aircraft Position',
+  vessel_position: 'Vessel Position',
   heritage_site: 'Heritage Site',
   place: 'Place',
   geographic_feature: 'Geographic Feature',
@@ -190,6 +196,23 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
           {typeof feature.properties.verticalRateMps === 'number' && <Row label="Vertical rate" value={`${feature.properties.verticalRateMps.toFixed(1)} m/s`} />}
           <Row label="On ground" value={feature.properties.onGround === true ? 'Yes' : feature.properties.onGround === false ? 'No' : 'not reported'} />
           {feature.timestamp && <Row label="Last contact" value={new Date(feature.timestamp).toLocaleString()} />}
+        </>
+      )
+    case 'vessel_position':
+      return (
+        <>
+          <Row label="Coordinates" value={coords} mono />
+          {typeof feature.properties.mmsi === 'string' && <Row label="MMSI" value={feature.properties.mmsi} mono />}
+          {typeof feature.properties.imo === 'string' && <Row label="IMO" value={feature.properties.imo} mono />}
+          {typeof feature.properties.callSign === 'string' && <Row label="Callsign" value={feature.properties.callSign} />}
+          {typeof feature.properties.shipTypeLabel === 'string' && <Row label="Type" value={feature.properties.shipTypeLabel} />}
+          {typeof feature.properties.speedKnots === 'number' && <Row label="Speed" value={`${feature.properties.speedKnots.toFixed(1)} kn`} />}
+          {typeof feature.properties.courseDeg === 'number' && <Row label="Course" value={`${Math.round(feature.properties.courseDeg)}°`} />}
+          {typeof feature.properties.headingDeg === 'number' && <Row label="Heading" value={`${Math.round(feature.properties.headingDeg)}°`} />}
+          {typeof feature.properties.navStatLabel === 'string' && <Row label="Nav status" value={feature.properties.navStatLabel} />}
+          {typeof feature.properties.destination === 'string' && <Row label="Destination" value={feature.properties.destination} />}
+          {typeof feature.properties.draughtMeters === 'number' && <Row label="Draught" value={`${feature.properties.draughtMeters.toFixed(1)} m`} />}
+          {feature.timestamp && <Row label="Last observed" value={new Date(feature.timestamp).toLocaleString()} />}
         </>
       )
     case 'heritage_site':
@@ -426,7 +449,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
   const [viewer, setViewer] = useState<CesiumViewer | null>(null)
   const [selection, setSelection] = useState<Selection>({ kind: 'none' })
   const [layerFeatures, setLayerFeatures] = useState<Record<string, TerraGeoFeature[]>>({})
-  const { activeLocation, setActiveLocation, setSelectedEvent, setAircraftSummary } = useTerraActiveLocation()
+  const { activeLocation, setActiveLocation, setSelectedEvent, setAircraftSummary, setMaritimeSummary } = useTerraActiveLocation()
   const reverseRequestRef = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null })
 
   useEffect(() => () => reverseRequestRef.current.controller?.abort(), [])
@@ -558,6 +581,60 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
     return () => clearTimeout(timeout)
   }, [aircraftRegionalSummary, aircraftBoundingBoxQuery, setAircraftSummary])
 
+  // Terra Phase 3 — Maritime Source Federation. Mirrors the aircraft block above exactly, with one
+  // architectural addition: the Maritime Coverage Resolver (lib/terra/maritimeBoundingBox.ts's
+  // terraCameraViewHasMaritimeCoverage + buildTerraMaritimeBoundingBoxQuery), since
+  // digitraffic_marine's coverage is a specific, bounded region (Finnish waters), not a genuine
+  // global feed like OpenSky — a camera view outside that region must produce NO_COVERAGE, never
+  // "0 vessels observed" (see lib/terra/maritimeCoverage.ts).
+  const [maritimeEnabled, setMaritimeEnabled] = useState(() => presentation === 'command-center')
+  const maritimeHasCoverage = useMemo(() => terraCameraViewHasMaritimeCoverage(cameraViewRectangle.rectangle), [cameraViewRectangle.rectangle])
+  const maritimeBoundingBoxQuery = useMemo(() => {
+    if (!maritimeEnabled) return null
+    if (cameraScale.level === 'global') return null
+    return buildTerraMaritimeBoundingBoxQuery(cameraViewRectangle.rectangle)
+  }, [maritimeEnabled, cameraScale.level, cameraViewRectangle.rectangle])
+  const maritimeAutoRefreshAllowed = shouldAutoRefreshTerraLayer(clock.time.mode)
+  // 60s — matched to (never faster than) the Research Engine's own live-feed cache TTL for
+  // digitraffic_marine and this repo's no-layer-faster-than-60s floor; see layerCatalog.ts's
+  // digitraffic_marine entry.
+  const maritime = useTerraLayer('digitraffic_marine', maritimeBoundingBoxQuery !== null, 60_000, maritimeAutoRefreshAllowed, maritimeBoundingBoxQuery)
+  useEffect(() => {
+    const timeout = setTimeout(() => handleFeaturesChange('digitraffic_marine', maritime.features), 0)
+    return () => clearTimeout(timeout)
+  }, [maritime.features, handleFeaturesChange])
+  const maritimeSelectedId = selection.kind === 'feature' && selection.layerId === 'digitraffic_marine' ? selection.featureId : null
+  // Session-only trail, never a provider historical track — see lib/terra/aircraftTrail.ts (the
+  // point-bounding logic useTerraVesselTrails.ts reuses).
+  const maritimeTrails = useTerraVesselTrails(maritime.features, maritimeBoundingBoxQuery !== null)
+  const maritimeCoverageState = useMemo(
+    () => resolveTerraMaritimeCoverageState({
+      hasKnownCoverage: maritimeHasCoverage,
+      boundingBoxQuery: maritimeBoundingBoxQuery,
+      feedState: maritime.state,
+      lastErrorMessage: maritime.lastErrorMessage,
+    }),
+    [maritimeHasCoverage, maritimeBoundingBoxQuery, maritime.state, maritime.lastErrorMessage],
+  )
+  // Bounded, honest Observed Data summary — never the raw feed itself — handed to the existing
+  // Council semantic-context extension point below, alongside the coverage-truth state so Council
+  // can never mistake NO_COVERAGE for a genuinely empty region.
+  const maritimeRegionalSummary = useMemo(
+    () => summarizeTerraVesselFeatures(maritime.features, clock.time.currentTime),
+    [maritime.features, clock.time.currentTime],
+  )
+  useEffect(() => {
+    // Gated on maritimeBoundingBoxQuery !== null — the exact same condition the aircraft summary
+    // effect above uses (never just the maritimeEnabled toggle). This matters beyond consistency:
+    // useTerraLayer.ts returns a brand-new `[]` literal for `features` on every render while
+    // `enabled` is false, so summarizeTerraVesselFeatures (and this object literal) would otherwise
+    // never stop producing a fresh non-null value once maritimeEnabled is true, and setState would
+    // never see two `Object.is`-equal values to stop re-rendering on — confirmed live during
+    // browser verification as a real "Maximum update depth exceeded" loop before this fix.
+    const timeout = setTimeout(() => setMaritimeSummary(maritimeBoundingBoxQuery !== null ? { regional: maritimeRegionalSummary, coverageState: maritimeCoverageState } : null), 0)
+    return () => clearTimeout(timeout)
+  }, [maritimeRegionalSummary, maritimeCoverageState, maritimeBoundingBoxQuery, setMaritimeSummary])
+
   const activateCoordinate = useCallback((point: Extract<TerraClickPoint, { ok: true }>) => {
     reverseRequestRef.current.controller?.abort()
     const controller = new AbortController()
@@ -619,7 +696,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
   const flyToEventFeature = useCallback((feature: TerraGeoFeature) => {
     if (!viewer || viewer.isDestroyed()) return
     const framing = resolveTerraEventCameraFraming(feature)
-    void import('cesium').then(Cesium => {
+    void loadCesium().then(Cesium => {
       if (viewer.isDestroyed()) return
       if (framing.mode === 'rectangle') {
         viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(framing.west, framing.south, framing.east, framing.north), duration: 1.8 })
@@ -671,7 +748,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
       selectedAt: new Date().toISOString(),
     })
     if (!viewer || viewer.isDestroyed()) return
-    void import('cesium').then(Cesium => {
+    void loadCesium().then(Cesium => {
       if (viewer.isDestroyed()) return
       // God's Eye multi-scale phase, mission section 10: fly to a destination SIZED to what was
       // actually found, using Nominatim's own result bounding box — a real country's bbox is
@@ -706,6 +783,9 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
           /terra workspace) — `cluster` so a dense region simplifies at broad zoom instead of
           becoming an overlapping-marker mess (mission section 3/14). */}
       <TerraFeatureLayer layerId="opensky" viewer={viewer} enabled={aircraftBoundingBoxQuery !== null} features={aircraft.features} selectedId={aircraftSelectedId} cluster trails={aircraftTrails} />
+      {/* Terra Phase 3 — Maritime Source Federation: same bespoke camera-bbox-driven pattern as
+          aircraft above, rendered unconditionally in both presentations for the same reason. */}
+      <TerraFeatureLayer layerId="digitraffic_marine" viewer={viewer} enabled={maritimeBoundingBoxQuery !== null} features={maritime.features} selectedId={maritimeSelectedId} cluster trails={maritimeTrails} />
 
       {/* God's Eye command center has no Data Layers control panel (see the workspace-only left
           rail below), but its event markers must still fetch and render — otherwise there is
@@ -714,7 +794,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
           component as the workspace's own layer list, just headless (hideControls) here; the two
           mounts are mutually exclusive with `!commandCenter` below, so no layer is ever fetched
           twice. */}
-      {commandCenter && TERRA_LAYER_SUMMARIES.filter(layer => layer.id !== 'opensky').map(layer => (
+      {commandCenter && TERRA_LAYER_SUMMARIES.filter(layer => layer.id !== 'opensky' && layer.id !== 'digitraffic_marine').map(layer => (
         <TerraLayerRow
           key={layer.id}
           layer={layer}
@@ -761,7 +841,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
       </div>
 
       {/* Left rail — layer controls + Earth Knowledge placeholder. */}
-      {!commandCenter && <div className="pointer-events-none absolute left-0 top-20 flex w-72 flex-col gap-2 p-4">
+      {!commandCenter && <div className="pointer-events-none absolute bottom-36 left-0 top-20 flex w-72 flex-col gap-2 overflow-y-auto overscroll-contain p-4">
         <div className="pointer-events-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
           <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Layer Controls</p>
           <ul className="space-y-1 text-[11px] text-slate-400">
@@ -799,11 +879,11 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
         <div className="pointer-events-auto max-h-[34vh] overflow-y-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
           <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Data Layers</p>
           {LAYER_GROUPS.map(group => {
-            // 'opensky' is deliberately excluded here — it gets its own bespoke, camera-bbox-driven
-            // Aircraft section below (a fixed default-query toggle wouldn't make sense for a layer
-            // whose whole point is following the Commander's live view), never a second listing of
-            // the same layer.
-            const layers = TERRA_LAYER_SUMMARIES.filter(layer => group.domains.includes(layer.domain) && layer.id !== 'opensky')
+            // 'opensky' and 'digitraffic_marine' are deliberately excluded here — each gets its
+            // own bespoke, camera-bbox-driven section below (a fixed default-query toggle wouldn't
+            // make sense for a layer whose whole point is following the Commander's live view),
+            // never a second listing of the same layer.
+            const layers = TERRA_LAYER_SUMMARIES.filter(layer => group.domains.includes(layer.domain) && layer.id !== 'opensky' && layer.id !== 'digitraffic_marine')
             if (layers.length === 0) return null
             return (
               <div key={group.label} className="mt-2 first:mt-0">
@@ -870,6 +950,64 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
                       <button
                         type="button"
                         onClick={aircraft.refresh}
+                        className="mt-0.5 rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300 hover:border-emerald-400/60 hover:text-emerald-400"
+                      >
+                        Refresh now
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Terra Phase 3 — Maritime Source Federation: same bespoke pattern as Aviation above.
+              The coverage-truth state (lib/terra/maritimeCoverage.ts) is checked and rendered
+              FIRST, before the generic feed state — a NO_COVERAGE region must never be shown as
+              "LIVE — NO EVENTS" the way FEED_STATE_LABEL's generic 'empty' mapping would read. */}
+          <div className="mt-2 border-t border-white/10 pt-2">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">Maritime</p>
+            <div className="mt-1 border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-300">Vessels (Digitraffic — Finnish Waters)</span>
+                <button
+                  type="button"
+                  onClick={() => setMaritimeEnabled(prev => !prev)}
+                  className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
+                    maritimeEnabled ? 'border-emerald-400/60 text-emerald-400' : 'border-white/20 text-slate-500'
+                  }`}
+                  aria-pressed={maritimeEnabled}
+                >
+                  {maritimeEnabled ? 'On' : 'Off'}
+                </button>
+              </div>
+              {maritimeEnabled && (
+                <div className="mt-1 space-y-1">
+                  {cameraScale.level === 'global' ? (
+                    <p className="text-[10.5px] text-amber-300/90">Zoom in, or pan to a smaller region — the current view is too wide for a bounded vessel query.</p>
+                  ) : maritimeCoverageState === 'NO_COVERAGE' ? (
+                    <p className="text-[10.5px] text-amber-300/90">No registered AIS source covers this region (currently: Finnish territorial waters/EEZ only). This is a coverage gap, not a claim that no vessels are present.</p>
+                  ) : (
+                    <>
+                      <p className={`text-[10px] font-bold uppercase tracking-widest ${
+                        maritimeCoverageState === 'LIVE_DATA_PRESENT' ? 'text-emerald-400'
+                        : maritimeCoverageState === 'NO_VESSELS_OBSERVED' ? 'text-slate-400'
+                        : maritimeCoverageState === 'PENDING' ? 'text-slate-400'
+                        : maritimeCoverageState === 'DELAYED_DATA' ? 'text-amber-400'
+                        : 'text-red-400'
+                      }`}>
+                        {TERRA_MARITIME_COVERAGE_LABELS[maritimeCoverageState]}
+                      </p>
+                      <p className="text-[10.5px] text-slate-500">
+                        {maritimeRegionalSummary.totalCount} vessel{maritimeRegionalSummary.totalCount === 1 ? '' : 's'}
+                        {maritimeRegionalSummary.totalCount > 0 && ` · ${maritimeRegionalSummary.movingCount} moving · ${maritimeRegionalSummary.stationaryCount} stationary`}
+                        {maritimeRegionalSummary.staleCount > 0 && ` · ${maritimeRegionalSummary.staleCount} stale`}
+                      </p>
+                      {maritime.lastFetchedAt && <p className="text-[10.5px] text-slate-500">Last fetched: {new Date(maritime.lastFetchedAt).toLocaleTimeString()}</p>}
+                      {maritime.lastErrorMessage && <p className="text-[10.5px] text-red-400">{maritime.lastErrorMessage}</p>}
+                      <button
+                        type="button"
+                        onClick={maritime.refresh}
                         className="mt-0.5 rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300 hover:border-emerald-400/60 hover:text-emerald-400"
                       >
                         Refresh now

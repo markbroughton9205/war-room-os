@@ -266,6 +266,16 @@ export type ResearchProviderId =
   | 'nhc_current_storms'
   | 'nasa_eonet'
   | 'tsunami_gov'
+  // Terra Phase 3 — Maritime Source Federation. Only digitraffic_marine has a real adapter
+  // (implemented: true below); the other four are honest registry-only entries — a real,
+  // independently-verified official source with a documented activation blocker
+  // (ACCOUNT_REQUIRED/CREDENTIAL_REQUIRED/TERMS_DEPENDENT/HISTORICAL_ONLY — see
+  // lib/terra/maritimeSourceRegistry.ts), never a placeholder invented for symmetry.
+  | 'digitraffic_marine'
+  | 'barentswatch_ais'
+  | 'aisstream'
+  | 'aishub_marine'
+  | 'noaa_access_ais'
 
 export type ResearchProviderCategory =
   | 'general_web'
@@ -298,6 +308,7 @@ export type ResearchProviderCategory =
   | 'humanitarian'
   | 'medical_biomedical'
   | 'materials_science'
+  | 'maritime'
 
 export type ResearchProviderCapability =
   | 'search'
@@ -377,6 +388,7 @@ export type ResearchQueryIntent =
   | 'statistics_demographics'
   | 'government_legislation'
   | 'humanitarian_events'
+  | 'maritime_traffic'
 
 export type ResearchQuery = {
   text: string

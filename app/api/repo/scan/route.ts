@@ -100,7 +100,6 @@ function detectFeatures(files: RepoFile[], searchableText: string) {
     { name: 'Action Queue', detected: fileSet.has('app/api/actions/route.ts') || searchableText.includes('NeedsRaelPanel') },
     { name: 'Files Vault', detected: fileSet.has('app/api/files/upload/route.ts') || searchableText.includes('FilesEvidenceVaultPanel') },
     { name: 'Baby AI', detected: fileSet.has('app/baby/page.tsx') || fileSet.has('app/api/baby/chat/route.ts') },
-    { name: 'SMS Bridge', detected: fileSet.has('app/api/sms/send/route.ts') || searchableText.includes('SmsBridgePanel') },
     { name: 'Payments/Payouts', detected: searchableText.includes('PaymentsPayoutsPanel') },
     { name: 'Grok integration placeholders', detected: fileSet.has('app/api/income/grok/route.ts') || searchableText.includes('GROK') },
   ].filter(feature => feature.detected)

@@ -12,6 +12,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
+import { loadCesium } from './loadCesiumRuntime'
 import type { TerraDegreeRectangle } from '@/lib/terra/aircraftBoundingBox'
 
 export type TerraCameraViewRectangle = {
@@ -58,7 +59,7 @@ export function useTerraCameraViewRectangle(viewer: CesiumViewer | null): TerraC
     let detach: (() => void) | null = null
 
     async function attach() {
-      const CesiumModule = await import('cesium')
+      const CesiumModule = await loadCesium()
       if (cancelled || !isTerraCesiumViewerAlive(targetViewer)) return
 
       const recompute = () => {
