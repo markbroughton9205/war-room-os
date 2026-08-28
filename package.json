@@ -7,6 +7,7 @@
     "predev": "node scripts/copy-cesium-assets.mjs",
     "prebuild": "node scripts/validate-commander-identity.cjs && node scripts/copy-cesium-assets.mjs",
     "build": "next build",
+    "postbuild": "node scripts/write-build-meta.mjs",
     "start": "next start",
     "lint": "eslint",
     "validate:approval-issuance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-approval-issuance-gate16.mjs",
@@ -31,6 +32,8 @@
     "validate:settlement-intelligence:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-settlement-intelligence-live-validation.mjs",
     "validate:settlement-corroboration": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-settlement-corroboration-validation.mjs",
     "validate:research-intent": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/research/researchIntent.validation.ts",
+    "validate:build-meta": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/deploy/buildMeta.validation.ts",
+    "validate:runtime-integrity-deployment": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/runtime/deploymentIntegrityReconciliation.validation.ts",
     "validate:public-rss": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/research/publicRssFeeds.validation.ts",
     "validate:nws-alerts": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/research/nwsAlerts.validation.ts",
     "validate:public-rss:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-public-rss-live-validation.mjs"

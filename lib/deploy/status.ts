@@ -6,6 +6,7 @@ import type {
   DeploymentProvider,
   DeployStatusResponse,
   DevServerHint,
+  LocalBuildMeta,
   ProductionConfig,
   SupabaseDeployReadiness,
 } from './types'
@@ -23,6 +24,37 @@ export function resolveGitCommitShortFromEnv(): string | null {
   const raw = trimEnv('VERCEL_GIT_COMMIT_SHA') || trimEnv('GITHUB_SHA') || trimEnv('CF_PAGES_COMMIT_SHA')
   if (!raw) return null
   return raw.length >= 7 ? raw.slice(0, 7) : raw
+}
+
+function isLocalBuildMetaShape(value: unknown): value is LocalBuildMeta {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  const isNullableString = (x: unknown) => x === null || typeof x === 'string'
+  return (
+    isNullableString(v.gitSha)
+    && isNullableString(v.gitShort)
+    && (v.gitDirty === null || typeof v.gitDirty === 'boolean')
+    && isNullableString(v.gitRef)
+    && isNullableString(v.builtAt)
+  )
+}
+
+/**
+ * Reads .next/build-meta.json, written by scripts/write-build-meta.mjs
+ * during `postbuild` (must run after `next build`, which clears and
+ * regenerates `.next/` — a `prebuild`-written file would be wiped). Absent
+ * on a fresh checkout with no build yet, or when
+ * the file is malformed — both return null rather than throwing, since this
+ * is an awareness-only hint, never load-bearing for the app to run.
+ */
+export async function readLocalBuildMeta(): Promise<LocalBuildMeta | null> {
+  try {
+    const raw = await readFile(path.join(process.cwd(), '.next', 'build-meta.json'), 'utf8')
+    const parsed: unknown = JSON.parse(raw)
+    return isLocalBuildMetaShape(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 function withHttps(url: string): string {
@@ -231,6 +263,7 @@ export async function collectDeployStatus(): Promise<DeployStatusResponse> {
   const supabase = buildSupabaseReadiness()
   const blockers = collectBlockers(supabase)
   const hasBuildScript = await readHasBuildScript()
+  const localBuild = await readLocalBuildMeta()
 
   const offlineHint =
     localDevProbe !== 'disabled' && devServerReachable === false
@@ -242,7 +275,8 @@ export async function collectDeployStatus(): Promise<DeployStatusResponse> {
     checkedAt,
     provider,
     lastDeployment,
-    gitCommitShort: resolveGitCommitShortFromEnv(),
+    gitCommitShort: resolveGitCommitShortFromEnv() ?? localBuild?.gitShort ?? null,
+    localBuild,
     localDev,
     ...(offlineHint ? { offlineHint } : {}),
     production,

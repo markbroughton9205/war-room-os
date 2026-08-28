@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated CesiumJS vendor assets copied by scripts/copy-cesium-assets.mjs
+    // from node_modules/cesium/Build/Cesium — third-party, gitignored, no
+    // first-party source.
+    "public/cesium/**",
   ]),
 ]);
 

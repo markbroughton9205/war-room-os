@@ -4,6 +4,8 @@
  * (no cross-request in-memory caching of probe results).
  */
 import { getOrchestrationQueueDepth } from '@/lib/orchestration/taskOrchestrator'
+import { collectDeployStatus } from '@/lib/deploy/status'
+import type { DeployStatusResponse } from '@/lib/deploy/types'
 import {
   buildDeploymentIntegrityRollup,
   buildInternetRollupFromInternetStatusJson,
@@ -92,6 +94,24 @@ function trimEnv(name: string): string {
   return typeof process.env[name] === 'string' ? process.env[name]!.trim() : ''
 }
 
+/**
+ * `/api/deploy/status` sits behind the session middleware, so a self-fetch
+ * of it from here (as `deployRes` below still does, for the deploy_status
+ * subsystem row's engines/runtime fields) comes back unauthenticated and
+ * fails. The `deployment` rollup only needs the git-identity fields, which
+ * `collectDeployStatus()` — the same function the route calls — already
+ * resolves correctly with no auth involved, since it's an in-process call.
+ * Wrapped defensively so a failure here can't take down the whole
+ * Promise.all this feeds into, matching every other probe in this file.
+ */
+async function safeCollectDeployStatus(): Promise<DeployStatusResponse | null> {
+  try {
+    return await collectDeployStatus()
+  } catch {
+    return null
+  }
+}
+
 export type CollectRuntimeIntegrityOptions = {
   councilMode?: string | null
 }
@@ -113,6 +133,7 @@ export async function collectRuntimeIntegrityPartial(
     rtcRes,
     internetRes,
     deployRes,
+    deployStatusDirect,
     toolsInternetRes,
     toolsResearchRes,
     actionProbe,
@@ -126,6 +147,7 @@ export async function collectRuntimeIntegrityPartial(
     fetchJson(base, '/api/red-team-coder/status'),
     fetchJson(base, '/api/internet/status'),
     fetchJson(base, '/api/deploy/status'),
+    safeCollectDeployStatus(),
     fetchJson(base, '/api/tools/internet/status', 8000),
     fetchJson(base, '/api/tools/research', 8000),
     probeTable('war_room_actions', 'id'),
@@ -198,7 +220,7 @@ export async function collectRuntimeIntegrityPartial(
       toolsResearchJson: toolsResearchRes.ok ? toolsResearchRes.json : {},
       internetStatusJson: internetRes.ok ? internetRes.json : undefined,
     }),
-    deployment: buildDeploymentIntegrityRollup(deployRes.ok ? deployRes.json : {}),
+    deployment: buildDeploymentIntegrityRollup(deployStatusDirect ?? {}),
     councilMode,
   }
 }

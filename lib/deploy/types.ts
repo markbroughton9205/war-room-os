@@ -92,13 +92,33 @@ export type SupabaseDeployReadiness = {
   status: 'configured' | 'config_needed'
 }
 
+/**
+ * Generated at build time by scripts/write-build-meta.mjs into
+ * .next/build-meta.json (gitignored, regenerated every build). This is the
+ * only source of git identity for a locally-built, NSSM-run production
+ * server, which has no CI env vars.
+ */
+export type LocalBuildMeta = {
+  gitSha: string | null
+  gitShort: string | null
+  gitDirty: boolean | null
+  gitRef: string | null
+  builtAt: string | null
+}
+
 export type DeployStatusResponse = {
   awarenessOnly: true
   checkedAt: string
   provider: DeploymentProvider
   lastDeployment: string | null
-  /** Short git SHA when platform env exposes it (never fabricated). */
+  /**
+   * Short git SHA. Prefers CI/platform env (Vercel/GitHub/Cloudflare Pages)
+   * when present; falls back to `localBuild.gitShort` for a local NSSM
+   * build. Never fabricated.
+   */
   gitCommitShort?: string | null
+  /** Generated build metadata for a local build (null when absent — e.g. no build has run yet, or git is unavailable). */
+  localBuild?: LocalBuildMeta | null
   localDev: DevServerHint
   /**
    * Present only when localhost probe ran (`DEPLOY_STATUS_PROBE_LOCALHOST=1`) and GET / did not succeed.
