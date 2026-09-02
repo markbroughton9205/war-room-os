@@ -18,6 +18,7 @@ import {
   reportIssue,
   planRepair,
   approveAndApply,
+  cancelMissionExecution,
   commanderResolve,
   rollbackNow,
   summarizeFailureEvidenceForReplan,
@@ -144,6 +145,7 @@ function project(issue: NativeIssueRecord, repair: NativeRepairRecord): RuntimeM
     validationResults: repair.validationResults,
     verification: repair.verification,
     diff: repair.diffEvidence,
+    commitPreparation: repair.commitPreparation,
     auditable: true,
     raw: { issue, repair },
   }
@@ -237,6 +239,19 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
     const repair = await rollbackNow(missionId)
     const issue = await getIssue(repair.issueId)
     if (!issue) throw new Error(`No issue found for repair ${missionId} after rollbackNow.`)
+    return project(issue, repair)
+  },
+
+  /**
+   * Commander cancellation — including mid-execution. Delegates to native-builder's
+   * cancelMissionExecution(), which kills the tracked child-process tree (cross-platform) for
+   * applying/validating repairs and legally transitions pre-apply repairs. The cancellation itself
+   * is audit-logged by runtime.ts's persist(), including exactly which process trees were killed.
+   */
+  async cancel(missionId, reason) {
+    const repair = await cancelMissionExecution(missionId, reason)
+    const issue = await getIssue(repair.issueId)
+    if (!issue) throw new Error(`No issue found for repair ${missionId} after cancelMissionExecution.`)
     return project(issue, repair)
   },
 

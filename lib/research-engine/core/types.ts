@@ -93,6 +93,7 @@ export type ResearchProviderId =
   | 'companies_house'
   | 'ecb_sdw'
   | 'bank_of_canada'
+  | 'bank_of_england_iadb'
   | 'bis_stats'
   | 'eia'
   | 'statcan_wds'
@@ -282,6 +283,23 @@ export type ResearchProviderId =
   // adapter behind them yet).
   | 'digitraffic_road_cameras'
   | 'drivebc_events'
+  // God's Eye Phase 2 — Traffic Flow + Road Weather + Ontario 511. All four real adapters,
+  // keyless, zero-cost (see lib/terra/roadTrafficSourceRegistry.ts for the full reconciled
+  // candidate list this phase reviewed).
+  | 'webtris'
+  | 'digitraffic_road_weather'
+  | 'ontario_511_cameras'
+  | 'ontario_511_events'
+  // God's Eye Phase 3 — global traffic expansion. All seven real adapters, keyless, zero-cost,
+  // every endpoint verified live this build (see lib/terra/roadTrafficSourceRegistry.ts for the
+  // per-source evidence notes, including the gated candidates that did NOT become providers).
+  | 'hong_kong_td_cameras'
+  | 'quebec_511_cameras'
+  | 'quebec_511_events'
+  | 'jartic_traffic_volumes'
+  | 'wzdx_wsdot'
+  | 'wzdx_iowa_dot'
+  | 'wzdx_kytc'
 
 export type ResearchProviderCategory =
   | 'general_web'

@@ -1,0 +1,14 @@
+{
+  "router_source_hash": "aff133438870a6de68d2675c8be8e86648a0fe0b3a6949ef3de880c0182ca842",
+  "router_source_unchanged": true,
+  "lexical_hash_match": true,
+  "wrim0_hash_before": "d1affa599ff967313b476e649062c7d969606b8e9f6fa1410f12a41d857ba015",
+  "wrim0_hash_after": "d1affa599ff967313b476e649062c7d969606b8e9f6fa1410f12a41d857ba015",
+  "wrim_unchanged": true,
+  "WR_NATIVE_ROUTER_V1_PILOT_before": "1",
+  "WR_NATIVE_ROUTER_V1_PILOT_after": "1",
+  "pilot_flag_unchanged": true,
+  "native_router_logic_changed": false,
+  "multi_tool": "BLOCKED",
+  "execute_ts_node01_still_imports_applyPilotToResearchDecision": true
+}

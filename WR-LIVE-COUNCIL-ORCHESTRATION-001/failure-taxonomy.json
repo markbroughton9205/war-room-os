@@ -1,0 +1,16 @@
+{
+  "layers": [
+    "AUTH",
+    "REQUEST",
+    "PROVIDER",
+    "RATE_LIMIT",
+    "TRANSPORT",
+    "STREAM_PARSER",
+    "TIMEOUT",
+    "ORCHESTRATOR",
+    "PERSISTENCE",
+    "UI",
+    "DEPENDENCY",
+    "UNKNOWN"
+  ]
+}

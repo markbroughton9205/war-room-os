@@ -33,6 +33,15 @@ import { normalizeOpenSkyAircraft } from '@/lib/terra/normalizeOpenSkyAircraft'
 import { normalizeDigitrafficMarineVessels } from '@/lib/terra/normalizeDigitrafficMarineVessels'
 import { normalizeDigitrafficRoadCameras } from '@/lib/terra/normalizeDigitrafficRoadCameras'
 import { normalizeDriveBcTrafficEvents } from '@/lib/terra/normalizeDriveBcTrafficEvents'
+import { normalizeWebtrisTrafficFlow } from '@/lib/terra/normalizeWebtrisTrafficFlow'
+import { normalizeDigitrafficRoadWeather } from '@/lib/terra/normalizeDigitrafficRoadWeather'
+import { normalizeOntarioTrafficCameras } from '@/lib/terra/normalizeOntarioTrafficCameras'
+import { normalizeOntarioTrafficEvents } from '@/lib/terra/normalizeOntarioTrafficEvents'
+import { normalizeHongKongTrafficCameras } from '@/lib/terra/normalizeHongKongTrafficCameras'
+import { normalizeQuebecTrafficCameras } from '@/lib/terra/normalizeQuebecTrafficCameras'
+import { normalizeQuebecTrafficEvents } from '@/lib/terra/normalizeQuebecTrafficEvents'
+import { normalizeJarticTrafficFlow } from '@/lib/terra/normalizeJarticTrafficFlow'
+import { normalizeWzdxWorkZones } from '@/lib/terra/normalizeWzdxWorkZones'
 import { normalizeEdhInscriptions } from '@/lib/terra/normalizeEdhInscriptions'
 import { normalizeNhcCurrentStorms } from '@/lib/terra/normalizeNhcCurrentStorms'
 import { normalizeNasaEonet } from '@/lib/terra/normalizeNasaEonet'
@@ -143,6 +152,144 @@ export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
     defaultQueryText: '-123.3,49.0,-122.7,49.4',
     normalize: response => normalizeDriveBcTrafficEvents(response.documents),
     refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'webtris',
+    providerId: 'webtris',
+    kind: 'traffic_flow_observation',
+    domain: 'other',
+    label: 'Traffic Flow (WebTRIS — National Highways, UK)',
+    // The M25/London area — the adapter's own documented example. Every observation this layer
+    // returns is historical (see lib/research-engine/providers/webtris.ts) — never presented as
+    // live, however fresh the fetch that retrieved it was.
+    description: 'Historical WebTRIS (National Highways) roadside sensor speed/volume observations within a bounding box — England strategic road network only. Source data lags real time by roughly two months; never rendered as live.',
+    defaultQueryText: '51.3,-0.6,51.7,0.3',
+    normalize: response => normalizeWebtrisTrafficFlow(response.documents),
+    // Matches this source's own real cadence (a batch statistical report, not a live feed) — no
+    // value in polling faster than the Research Engine's own timeSeries cache TTL for it.
+    refreshIntervalMs: 6 * 60 * 60 * 1000,
+  },
+  {
+    id: 'digitraffic_road_weather',
+    providerId: 'digitraffic_road_weather',
+    kind: 'road_weather_observation',
+    domain: 'weather',
+    label: 'Road Weather (Digitraffic — Finland)',
+    description: 'Live Digitraffic (Fintraffic) road-weather station observations (air/road/ground temperature, humidity, visibility, wind, precipitation) within a bounding box — Finnish national road network only.',
+    defaultQueryText: '59.9,24.5,60.3,25.3',
+    normalize: response => normalizeDigitrafficRoadWeather(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'ontario_511_cameras',
+    providerId: 'ontario_511_cameras',
+    kind: 'traffic_camera',
+    domain: 'other',
+    label: 'Traffic Cameras (Ontario 511 — Canada)',
+    // Toronto/QEW area — the adapter's own documented example.
+    description: 'Live Ontario 511 (511on.ca) traffic camera stills within a bounding box — Ontario, Canada only. Licensing/redistribution terms not independently confirmed this build.',
+    defaultQueryText: '43.5,-79.6,43.9,-79.1',
+    normalize: response => normalizeOntarioTrafficCameras(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'ontario_511_events',
+    providerId: 'ontario_511_events',
+    kind: 'traffic_event',
+    domain: 'other',
+    label: 'Traffic Events (Ontario 511 — Canada)',
+    description: 'Live Ontario 511 (511on.ca) source-backed road events — crashes, closures, construction, hazards — within a bounding box. Ontario, Canada only.',
+    defaultQueryText: '43.5,-79.6,43.9,-79.1',
+    normalize: response => normalizeOntarioTrafficEvents(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  // God's Eye Phase 3 — global traffic expansion. Seven new layers, every one backed by a real,
+  // keyless, live-verified-this-build adapter (see lib/terra/roadTrafficSourceRegistry.ts).
+  {
+    id: 'hong_kong_td_cameras',
+    providerId: 'hong_kong_td_cameras',
+    kind: 'traffic_camera',
+    domain: 'other',
+    label: 'Traffic Cameras (Hong Kong TD — Hong Kong SAR)',
+    // Urban Hong Kong (HK Island + Kowloon) — a real, documented example area. TerraShell's real
+    // layer always supplies a bbox from the live camera view via lib/terra/hongKongBoundingBox.ts.
+    description: 'Live Hong Kong Transport Department traffic snapshot cameras within a bounding box — Hong Kong SAR only. Snapshot JPEGs via the documented tdcctv.data.one.gov.hk/{key}.JPG pattern; no per-image capture timestamp in the source metadata, so freshness is honestly unknown.',
+    defaultQueryText: '22.25,114.10,22.35,114.25',
+    normalize: response => normalizeHongKongTrafficCameras(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'quebec_511_cameras',
+    providerId: 'quebec_511_cameras',
+    kind: 'traffic_camera',
+    domain: 'other',
+    label: 'Traffic Cameras (Québec 511 — Canada)',
+    // Montréal area — the adapter's own documented example.
+    description: 'Live Québec 511 (MTMD WFS) traffic camera sites within a bounding box — Québec, Canada only. The source publishes an HTML viewer page per camera, not a direct JPEG — no imageUrl is ever fabricated.',
+    defaultQueryText: '45.3,-74.2,45.8,-73.3',
+    normalize: response => normalizeQuebecTrafficCameras(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'quebec_511_events',
+    providerId: 'quebec_511_events',
+    kind: 'traffic_event',
+    domain: 'other',
+    label: 'Traffic Events (Québec 511 — Canada)',
+    description: 'Live Québec 511 (MTMD WFS) road events — closures, construction, restrictions — within a bounding box. Real French-language source vocabulary and real Point/LineString geometry preserved verbatim. Québec, Canada only.',
+    defaultQueryText: '45.3,-74.2,45.8,-73.3',
+    normalize: response => normalizeQuebecTrafficEvents(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'jartic_traffic_volumes',
+    providerId: 'jartic_traffic_volumes',
+    kind: 'traffic_flow_observation',
+    domain: 'other',
+    label: 'Traffic Volumes (JARTIC — Japan)',
+    // Tokyo area — the adapter's own documented example. Observations are hourly JST buckets with
+    // a ~2-hour publication lag (empirically bracketed live this build) — recent, honestly
+    // 'current', never a hardcoded lag.
+    description: 'Near-real-time JARTIC (Japan) hourly directional traffic-volume observations within a bounding box — national Japan coverage. Vehicle counts only; no speed or congestion label is ever invented.',
+    defaultQueryText: '35.0,139.0,36.0,140.0',
+    normalize: response => normalizeJarticTrafficFlow(response.documents),
+    refreshIntervalMs: 15 * 60 * 1000,
+  },
+  {
+    id: 'wzdx_wsdot',
+    providerId: 'wzdx_wsdot',
+    kind: 'traffic_event',
+    domain: 'other',
+    label: 'Work Zones (WSDOT WZDx — Washington State)',
+    // Seattle metro — a real example area within the feed's state coverage.
+    description: 'Live WSDOT WZDx v4.2 work-zone road events within a bounding box — Washington State only. Feed self-reports a 60-second update cadence.',
+    defaultQueryText: '47.2,-122.6,47.9,-121.9',
+    normalize: response => normalizeWzdxWorkZones(response.documents, 'wzdx_wsdot'),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'wzdx_iowa_dot',
+    providerId: 'wzdx_iowa_dot',
+    kind: 'traffic_event',
+    domain: 'other',
+    label: 'Work Zones (Iowa DOT WZDx)',
+    // Des Moines metro — a real example area within the feed's state coverage.
+    description: 'Live Iowa DOT WZDx v4.0 work-zone road events within a bounding box — Iowa only. Feed registry documents a 1-minute update cadence.',
+    defaultQueryText: '41.4,-93.9,41.8,-93.4',
+    normalize: response => normalizeWzdxWorkZones(response.documents, 'wzdx_iowa_dot'),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'wzdx_kytc',
+    providerId: 'wzdx_kytc',
+    kind: 'traffic_event',
+    domain: 'other',
+    label: 'Work Zones (KYTC WZDx — Kentucky)',
+    // Louisville metro — a real example area within the feed's state coverage.
+    description: 'Live KYTC WZDx v4.1 work-zone road events within a bounding box — Kentucky only. Feed registry documents a 30-minute update cadence.',
+    defaultQueryText: '38.0,-85.9,38.4,-85.4',
+    normalize: response => normalizeWzdxWorkZones(response.documents, 'wzdx_kytc'),
+    refreshIntervalMs: 5 * 60 * 1000,
   },
   {
     id: 'idai_gazetteer',

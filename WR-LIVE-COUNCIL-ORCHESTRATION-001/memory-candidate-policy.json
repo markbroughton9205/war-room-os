@@ -1,0 +1,6 @@
+{
+  "gate": "decideMemoryCandidatePrompt",
+  "social_no_prompt": true,
+  "durable_fixture_may_prompt": true,
+  "no_autosave": true
+}

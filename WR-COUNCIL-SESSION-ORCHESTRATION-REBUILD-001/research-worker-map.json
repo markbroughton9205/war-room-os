@@ -1,0 +1,14 @@
+{
+  "used_by_chat": [
+    "war_room_live_research_router",
+    "tavily",
+    "public_rss",
+    "nws_alerts",
+    "grok_framing",
+    "direct_url_fetch",
+    "gemini_evidence_synthesis"
+  ],
+  "not_invoked_per_turn": [
+    "research_engine_registry"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "new_chat": true,
+  "list": true,
+  "rename": true,
+  "archive": "existing DELETE soft-archive",
+  "search": "client filter + GET ?q="
+}

@@ -27,7 +27,7 @@ import type { StableGroupPriorReply } from '@/lib/council/stableGroupChat'
 import type { CouncilRuntimeTraceSnapshot } from '@/lib/council/runtimeTrace'
 import type { CouncilProgressRuntimeSnapshot } from '@/lib/council/progress-events/runtime'
 import type { DeliberationSession } from '@/lib/council/family-deliberation'
-import { matrixStatus } from '@/lib/ui/matrixStatusBus'
+import { matrixChannelStatus, matrixStatus } from '@/lib/ui/matrixStatusBus'
 import type { CouncilShadowSelectionReport, ShadowFeatureMode } from '@/lib/council/adaptive-assembly'
 
 export type CouncilChatRequestBody = {
@@ -172,7 +172,7 @@ export async function postCouncilChat(
     throw error
   }
   if (res.ok) {
-    matrixStatus('inbound', 'Council response received')
+    matrixChannelStatus('cyan', 'Council response received')
   } else {
     matrixStatus('error', `Council request failed (HTTP ${res.status})`)
   }

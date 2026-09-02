@@ -18,6 +18,7 @@ function redact(value: unknown): unknown {
 }
 
 async function appendTamperEvidentAudit(message: string, metadata: Record<string, unknown>): Promise<void> {
+  await withAuditAppendLock(async () => {
   const file = path.join(resolveBaseRepoRoot(), '.war-room', 'audit', 'code-operator.jsonl')
   await mkdir(path.dirname(file), { recursive: true })
   let previousHash = 'GENESIS'
@@ -29,6 +30,18 @@ async function appendTamperEvidentAudit(message: string, metadata: Record<string
   const event = { at: new Date().toISOString(), actor: 'system', category: 'repo', message: redact(message), metadata: redact(metadata), previousHash }
   const hash = createHash('sha256').update(JSON.stringify(event)).digest('hex')
   await appendFile(file, `${JSON.stringify({ ...event, hash })}\n`, { encoding: 'utf8', mode: 0o600 })
+  })
+}
+
+// The ledger used to read its tail and append without mutual exclusion. Concurrent repairs could
+// therefore read the same predecessor and create valid, but forked, hash-chain segments. Keep the
+// lock at module scope so every audit producer in this Node process shares one append queue.
+let auditAppendTail: Promise<void> = Promise.resolve()
+
+async function withAuditAppendLock<T>(operation: () => Promise<T>): Promise<T> {
+  const run = auditAppendTail.then(operation, operation)
+  auditAppendTail = run.then(() => undefined, () => undefined)
+  return run
 }
 
 export async function logWarRoomRepoAudit(message: string, metadata: Record<string, unknown> = {}) {

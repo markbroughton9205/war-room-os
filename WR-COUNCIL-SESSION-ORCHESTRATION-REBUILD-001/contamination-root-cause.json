@@ -1,0 +1,15 @@
+{
+  "primary": [
+    "Mount restore reused first metadata.council.source=live_council conversation (often Panama thread)",
+    "assembleContext injected ALL global directives/project/world/summary/last 20 messages on every turn including greetings",
+    "RAEL_PROFILE contained Goal: Panama relocation on non-ping turns",
+    "isLightweightPingDecree missed 'quick status ping' and 'Hey council whats going on'",
+    "isPriorContextDecreeRelevant treated short decrees (3 words) as keep-all; 'council' counted as overlap",
+    "Stable Group always ran family_to_family_v1 which skipped live research and used assembler context"
+  ],
+  "persistent_synthesis_global_injection": false,
+  "full_transcript_reuse_same_conversation": true,
+  "memory_retrieval_unconditional_assembler": true,
+  "commander_profile_panama_goal": true,
+  "topic_specific_panama_filter": false
+}

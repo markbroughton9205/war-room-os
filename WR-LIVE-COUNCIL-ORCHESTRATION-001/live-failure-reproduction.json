@@ -1,0 +1,6 @@
+{
+  "A_hi_council": "conversationIntent bus keyword council previously maxFamilies=1 so only ChatGPT; now SOCIAL_CHECKIN maxFamilies=6",
+  "B_council_check_in": "intentClassifier attendance + classifyCouncilTurn KNOWLEDGE_QUESTION FULL + attendanceWave 2-5s parallel + memory prompt because coordination tier",
+  "exact_only_chatgpt_cause": "Hi council matched PHASE4_BUS_KEYWORDS /council/ with length<=140 \u2192 maxFamilies 1",
+  "exact_checkin_cause": "check-in classified attendance (short batch) and not lightweight ping, so full opportunity/greeting-not-applied prompts plus Claude timeout/credit failure"
+}

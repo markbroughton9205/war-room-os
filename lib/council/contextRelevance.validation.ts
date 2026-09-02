@@ -110,6 +110,10 @@ const greetingMatrix: { input: string; expectedPing: boolean }[] = [
   { input: 'hello Panama', expectedPing: false },
   { input: 'hey relocation', expectedPing: false },
   { input: 'good morning schools', expectedPing: false },
+  { input: 'quick status ping', expectedPing: true },
+  { input: 'Hey council whats going on', expectedPing: true },
+  { input: 'Council check in', expectedPing: true },
+  { input: 'Hi council', expectedPing: true },
 ]
 const greetingMatrixResults = greetingMatrix.map(c => ({
   ...c,
@@ -149,6 +153,8 @@ export function runContextRelevanceValidation(): CaseResult[] {
       String(elaboratedStatusCheckNotTreatedAsBarePing),
     ),
     ...matrixChecks,
+    check('context_relevance_14_quick_status_ping_drops_panama', !isPriorContextDecreeRelevant('quick status ping', 'Panama visas and property law'), 'ping panama'),
+    check('context_relevance_15_hey_going_on_drops_panama', !isPriorContextDecreeRelevant("Hey council whats going on", 'Panama relocation logistics'), 'going on panama'),
   ]
 }
 

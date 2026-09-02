@@ -1,7 +1,7 @@
 'use client'
 
 import { postCouncilChat } from '@/lib/council/liveChatPipeline'
-import { matrixStatus } from '@/lib/ui/matrixStatusBus'
+import { matrixChannelStatus, matrixStatus } from '@/lib/ui/matrixStatusBus'
 import {
   createCouncilStreamReconciliationState,
   reconcileCouncilStreamEnvelope,
@@ -136,12 +136,12 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
     // -- every actual Council decree submitted through the composer goes through here -- rather
     // than being duplicated at each of the several callers of postIncrementalCouncilChat.
     if (event.envelope.envelopeType === 'opened') {
-      matrixStatus('inbound', 'Council stream opened')
+      matrixChannelStatus('cyan', 'Council stream opened')
       callbacks.onOpened?.(event.envelope)
     }
     if (event.envelope.envelopeType === 'progress') {
       progressCount += 1
-      matrixStatus('inbound', 'Council response streaming…')
+      matrixChannelStatus('cyan', 'Council response streaming…')
       callbacks.onProgress?.(event.envelope)
     }
     if (event.envelope.envelopeType === 'final') {

@@ -4,6 +4,7 @@
  * Multi-family **greeting** widening is handled in `conversationIntent` + `greetingRouting`, not here.
  */
 import { resolveEconomicOpsRouting } from '@/lib/economic/routing'
+import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialCheckin'
 
 export type IntentKind =
   | 'greeting'
@@ -35,6 +36,8 @@ export function classifyIntentFromDecree(text: string): IntentKind {
   if (/\bsilent\b|\bhold\s*responses\b|\bno\s*responses\b/i.test(t)) return 'silent'
 
   if (GREETING_LINE.test(raw.trim()) || (GREETING_PREFIX.test(raw) && raw.length < 80)) return 'greeting'
+
+  if (isSocialCouncilCheckin(raw)) return 'greeting'
 
   if (/\battendance\b|\bcheck-?in\b|\broll\s*call\b|\bpresence\s*only\b|\bpresence\b.*\bcheck\b/i.test(t)) return 'attendance'
 

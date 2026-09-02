@@ -4901,10 +4901,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed this mission: the Bank of England's IADB is real and zero-auth (REST-ish CSV per the registry's own access-type column), but its actual request-parameter shape (series codes, date-range query encoding) could not be confirmed via direct probing within this session's time budget. Not built against an unconfirmed request contract."
+    "implementationState": "LIVE_IMPLEMENTED",
+    "providerId": "bank_of_england_iadb",
+    "adapterPath": "lib/research-engine/providers/bank_of_england_iadb.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_15_bank_of_canada_valet_api",
@@ -9261,11 +9261,11 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
 ]
 
 export const EARTH_KNOWLEDGE_STATE_COUNTS: Record<string, number> = {
-  "LIVE_IMPLEMENTED": 200,
+  "LIVE_IMPLEMENTED": 201,
   "BULK_ONLY": 88,
   "IMPLEMENTED_ACCESS_DEGRADED": 5,
   "IMPLEMENTED_CREDENTIAL_BLOCKED": 46,
-  "MISSING": 82,
+  "MISSING": 81,
   "IMPLEMENTED_NOT_LIVE_VERIFIED": 5,
   "DISCONTINUED": 12,
   "SEARCH_INTERFACE_ONLY": 59,

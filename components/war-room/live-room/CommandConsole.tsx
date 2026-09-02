@@ -2,7 +2,7 @@
 
 import { memo, useRef, type ChangeEvent, type FormEvent } from 'react'
 import { COUNCIL_FLOW_MODE_LABELS, type CouncilFlowMode } from '@/lib/council/councilMode'
-import { matrixStatus } from '@/lib/ui/matrixStatusBus'
+import { matrixChannelStatus } from '@/lib/ui/matrixStatusBus'
 
 export type AttachmentStatus = 'idle' | 'uploading' | 'processing' | 'ready' | 'error'
 
@@ -72,7 +72,7 @@ export const CommandConsole = memo(function CommandConsole({
         onSubmit={event => {
           event.preventDefault()
           if (!loading && command.trim()) {
-            matrixStatus('outbound', 'Decree sent to Council…')
+            matrixChannelStatus('violet', 'Decree sent to Council…')
           }
           void onSubmit(event)
         }}

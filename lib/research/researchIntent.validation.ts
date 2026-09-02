@@ -78,6 +78,9 @@ const economyStateTriggers = detectResearchIntent('how is the economy doing', { 
 // already \b-bounded regexes, never .includes(), so this must stay false).
 const worldUpToApostropheTriggers = detectResearchIntent("what's the world up to", { intentKind: 'natural' })
 const explainWhatHeSaidNoResearch = detectResearchIntent('can you explain what he said about the deal', { intentKind: 'natural' })
+const worldGoingOnWithWorld = detectResearchIntent("Council, what's going on with the world?", { intentKind: 'natural' })
+const heyCouncilNoResearchFast = detectResearchIntent('Hey council', { intentKind: 'greeting' })
+const quickStatusPingNoResearch = detectResearchIntent('Quick status ping', { intentKind: 'natural' })
 
 export function runResearchIntentValidation(): CaseResult[] {
   return [
@@ -176,6 +179,21 @@ export function runResearchIntentValidation(): CaseResult[] {
       'research_intent_11b_explain_what_he_said_no_research_substring_regression_guard',
       !explainWhatHeSaidNoResearch.shouldResearch,
       JSON.stringify(explainWhatHeSaidNoResearch),
+    ),
+    check(
+      'research_intent_12_world_going_on_with_the_world_triggers',
+      worldGoingOnWithWorld.shouldResearch,
+      JSON.stringify(worldGoingOnWithWorld),
+    ),
+    check(
+      'research_intent_13_hey_council_no_research',
+      !heyCouncilNoResearchFast.shouldResearch,
+      JSON.stringify(heyCouncilNoResearchFast),
+    ),
+    check(
+      'research_intent_14_quick_status_ping_no_research',
+      !quickStatusPingNoResearch.shouldResearch,
+      JSON.stringify(quickStatusPingNoResearch),
     ),
   ]
 }

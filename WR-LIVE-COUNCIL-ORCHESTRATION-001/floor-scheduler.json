@@ -1,0 +1,11 @@
+{
+  "order": [
+    "chatgpt",
+    "claude",
+    "grok",
+    "gemini",
+    "red_team"
+  ],
+  "visible_concurrent": 1,
+  "skips_unconfigured": true
+}

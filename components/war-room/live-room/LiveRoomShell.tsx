@@ -24,6 +24,8 @@ export type LiveRoomShellProps = {
    * itself is never remounted, so transcript/scroll state persists across toggling either way.
    */
   chatExpanded?: boolean
+  sessionNavOpen?: boolean
+  inspectorOpen?: boolean
 }
 
 export function LiveRoomShell({
@@ -38,7 +40,18 @@ export function LiveRoomShell({
   dockPanel,
   systemHealthGapCount,
   chatExpanded = false,
+  sessionNavOpen = true,
+  inspectorOpen = false,
 }: LiveRoomShellProps) {
+  const showLeft = !chatExpanded && sessionNavOpen
+  const showRight = !chatExpanded && inspectorOpen
+  const gridClass = showLeft && showRight
+    ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-[16rem_minmax(0,1fr)_18rem] overflow-hidden'
+    : showLeft
+      ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] overflow-hidden'
+      : showRight
+        ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_18rem] overflow-hidden'
+        : 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden'
   return (
     <section
       className="live-room-shell relative z-10 flex min-h-0 w-full flex-1 flex-col [--live-room-console-pad:3.5rem] [--live-room-dock-pad:3.25rem] [--live-room-bottom-reserved:calc(var(--live-room-console-pad)+var(--live-room-dock-pad))] sm:[--live-room-console-pad:3.75rem]"
@@ -52,16 +65,12 @@ export function LiveRoomShell({
       {intelRow ? <div className="relative z-10 flex-shrink-0">{intelRow}</div> : null}
 
       <main
-        className={
-          chatExpanded
-            ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden'
-            : 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden'
-        }
+        className={gridClass}
         data-testid="live-room-center"
       >
-        <div className="hidden">{leftNav}</div>
+        <div className={showLeft ? 'min-h-0 overflow-hidden p-2' : 'hidden'}>{leftNav}</div>
         <div className="flex min-h-0 min-w-0 flex-col">{council}</div>
-        <div className="hidden">{rightPanel}</div>
+        <div className={showRight ? 'min-h-0 overflow-hidden p-2' : 'hidden'}>{rightPanel}</div>
       </main>
 
       {activePanelId && dockPanel ? (

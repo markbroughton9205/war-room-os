@@ -12,6 +12,7 @@ export type SynthesisCardProps = {
  */
 export const SynthesisCard = memo(function SynthesisCard({ synthesis }: SynthesisCardProps) {
   const [copied, setCopied] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)
   const text = synthesis?.trim()
   if (!text) return null
 
@@ -38,6 +39,13 @@ export const SynthesisCard = memo(function SynthesisCard({ synthesis }: Synthesi
         >
           SYNTHESIS
         </h3>
+        <button
+          type="button"
+          onClick={() => setCollapsed(v => !v)}
+          className="text-[10px] tracking-widest px-2 py-1 rounded border border-cyan-800/60 text-cyan-300/80"
+        >
+          {collapsed ? 'Show' : 'Hide'}
+        </button>
         {typeof navigator !== 'undefined' && navigator.clipboard ? (
           <button
             type="button"
@@ -49,11 +57,15 @@ export const SynthesisCard = memo(function SynthesisCard({ synthesis }: Synthesi
           </button>
         ) : null}
       </div>
+      {collapsed ? (
+        <p className="mt-2 text-[11px] text-slate-500">Optional inspector copy — full synthesis is in the Council stream.</p>
+      ) : (
       <div className="mt-2 max-w-full space-y-2 text-[12px] leading-relaxed text-emerald-100/90 break-words whitespace-pre-wrap">
         {renderParagraphs.map((paragraph, index) => (
           <p key={index}>{paragraph}</p>
         ))}
       </div>
+      )}
     </section>
   )
 })

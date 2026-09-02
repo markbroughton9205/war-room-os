@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react'
 
-import { matrixStatus } from '@/lib/ui/matrixStatusBus'
+import { matrixChannelStatus, matrixStatus } from '@/lib/ui/matrixStatusBus'
 
 export function useMatrixStatus() {
   const signalWorking = useCallback((message = 'Working…') => {
@@ -10,11 +10,11 @@ export function useMatrixStatus() {
   }, [])
 
   const signalOutbound = useCallback((message = 'Request sent…') => {
-    matrixStatus('outbound', message)
+    matrixChannelStatus('violet', message)
   }, [])
 
   const signalInbound = useCallback((message = 'Response received') => {
-    matrixStatus('inbound', message)
+    matrixChannelStatus('cyan', message)
   }, [])
 
   const signalSuccess = useCallback((message = 'Ready') => {
@@ -22,7 +22,7 @@ export function useMatrixStatus() {
   }, [])
 
   const signalVerified = useCallback((message = 'Verified') => {
-    matrixStatus('verified', message)
+    matrixChannelStatus('white', message)
   }, [])
 
   const signalWarning = useCallback((message = 'Attention needed') => {

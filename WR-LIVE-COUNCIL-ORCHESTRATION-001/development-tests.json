@@ -1,0 +1,10 @@
+{
+  "orchestration_validators": "32/32",
+  "session_orchestration": "23/23",
+  "context_relevance": "28/28",
+  "greeting": "10/10",
+  "family_deliberation": "25/25",
+  "tsc_mission_files": "clean",
+  "tsc_repo": "preexisting WRIM/router errors remain",
+  "eslint_mission": "0 errors; 1 preexisting unused warning in page.tsx"
+}

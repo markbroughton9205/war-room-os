@@ -76,7 +76,7 @@ export function resolveProviderTimeoutMs(args: {
   }
 
   if (ik === 'greeting' || ik === 'natural' || ik === 'silent') {
-    return expandedBump(6500, args.mode) // 5–8s
+    return expandedBump(20_000, args.mode) // first-token friendly; overall still bounded by stream budget
   }
 
   return expandedBump(6500, args.mode)

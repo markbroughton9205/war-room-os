@@ -1,0 +1,12 @@
+{
+  "turn_id": "councilLogicalRequestId / commander_turn_id on deliberation session",
+  "binds": [
+    "session_id=conversationId",
+    "commander message",
+    "intent",
+    "research decision",
+    "evidence packet",
+    "round_id",
+    "synthesis"
+  ]
+}

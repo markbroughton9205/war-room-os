@@ -1,0 +1,24 @@
+{
+  "env_variable_names_openai_anthropic": "MATCH",
+  "openai_secret_wiring_match": true,
+  "anthropic_secret_wiring_match": true,
+  "both_hosts_placeholder_sentinel": true,
+  "launch_agent": {
+    "label": "com.warroom.node01",
+    "working_directory": "/Users/markbroughton/WarRoomNode01",
+    "environment_variable_names": ["PATH"],
+    "WR_NATIVE_ROUTER_V1_PILOT_in_plist": false,
+    "WR_NATIVE_ROUTER_V1_PILOT_in_node01_dotenv": "1"
+  },
+  "dotenv": {
+    "dev": "/Users/markbroughton/Developer/war-room-os/.env.local",
+    "node01": "/Users/markbroughton/WarRoomNode01/.env.local"
+  },
+  "flag_drift": {
+    "WR_NATIVE_ROUTER_V1_PILOT_in_dev_dotenv": false,
+    "WR_NATIVE_ROUTER_V1_PILOT_in_node01_dotenv": true,
+    "left_unchanged": true
+  },
+  "model_names": "gpt-4o hardcoded on both trees for ChatGPT family",
+  "secret_loading": "Next.js .env.local; no LaunchAgent provider keys"
+}

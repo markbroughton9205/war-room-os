@@ -9,6 +9,9 @@ import type { NativeRepairProposal, PatchPolicyResult, PatchPolicyViolation, Str
 
 export const MAX_CHANGED_FILES = 5
 export const MAX_CHANGED_LINES = 150
+/** Conservative fixed line-budget charge for a delete_file patch (policy reads nothing from disk,
+ * so the real line count is unknowable here — see validateOnePatch). */
+export const DELETE_FILE_LINE_COST = 50
 
 /** Directories/files a patch may never touch, regardless of extension. */
 const BLOCKED_PATH_PATTERNS: RegExp[] = [
@@ -67,6 +70,26 @@ function validateOnePatch(patch: StructuredPatch, violations: PatchPolicyViolati
   if (!ALLOWED_EXTENSIONS.has(ext)) {
     violations.push({ rule: 'file_type_denylist', file: rel, detail: `File extension "${ext || '(none)'}" is not in the allowed set (${[...ALLOWED_EXTENSIONS].join(', ')}).` })
     return null
+  }
+
+  if (patch.operation === 'delete_file') {
+    // Deletion counts toward the same file budget as any other change (the seenFiles/max-files
+    // check below is operation-agnostic). The line budget cannot be charged structurally — the
+    // file's length lives on disk and this function deliberately reads nothing from disk — so a
+    // deletion is charged a conservative fixed cost instead of pretending to be free.
+    if (!patch.expectedOriginalHash) {
+      violations.push({ rule: 'malformed_patch', file: rel, detail: 'delete_file requires expectedOriginalHash for stale-file protection.' })
+      return null
+    }
+    if (patch.commanderConfirmed !== true) {
+      violations.push({ rule: 'delete_requires_approval', file: rel, detail: 'delete_file requires commanderConfirmed: true on the patch itself — deletion must be explicitly confirmed by the Commander in the proposal, not just gated at the route.' })
+      return null
+    }
+    if (patch.newFileContent !== undefined || patch.replacementText !== undefined || patch.matchText !== undefined) {
+      violations.push({ rule: 'malformed_patch', file: rel, detail: 'delete_file must not carry matchText/replacementText/newFileContent.' })
+      return null
+    }
+    return { rel, lines: DELETE_FILE_LINE_COST }
   }
 
   if (patch.operation === 'create_file') {

@@ -1,0 +1,6 @@
+{
+  "fake_sleep": false,
+  "raf_coalesce": true,
+  "reduced_motion": true,
+  "source": "provider TEXT_DELTA"
+}

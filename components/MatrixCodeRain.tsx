@@ -58,10 +58,10 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
   // hook dependency) so a status change never tears down/recreates the draw effect below; it just
   // recolors the next frame. Reverts to 'idle' on its own via matrixStatusBus's auto-idle timers.
   const statusSnap = useSyncExternalStore(subscribeMatrixStatus, getMatrixStatusSnapshot, getMatrixStatusServerSnapshot)
-  const statusRef = useRef(statusSnap.kind)
+  const statusRef = useRef({ kind: statusSnap.kind, channel: statusSnap.channel })
   useEffect(() => {
-    statusRef.current = statusSnap.kind
-  }, [statusSnap.kind, statusSnap.tick])
+    statusRef.current = { kind: statusSnap.kind, channel: statusSnap.channel }
+  }, [statusSnap.kind, statusSnap.channel, statusSnap.tick])
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -113,10 +113,9 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
       const delta = Math.min(96, time - (lastTimeRef.current || time))
       lastTimeRef.current = time
 
-      const runtimeKind = statusRef.current
-      const isIdle = runtimeKind === 'idle'
-      const runtimeColor = isIdle ? null : matrixRuntimeRgb(runtimeKind)
-      const runtimeIntensity = isIdle ? 1 : matrixRuntimeIntensity(runtimeKind)
+      const isIdle = statusRef.current.kind === 'idle'
+      const runtimeColor = isIdle ? null : matrixRuntimeRgb(statusRef.current.channel)
+      const runtimeIntensity = isIdle ? 1 : matrixRuntimeIntensity(statusRef.current.channel)
 
       context.fillStyle = 'rgba(0, 0, 0, 0.11)'
       context.fillRect(0, 0, width, height)
@@ -169,7 +168,7 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
   if (reducedMotion) {
     // Reduced motion keeps the underlying state legible (Phase G) as a static tint -- no pulse,
     // no animation, just the current real color standing in place of the moving rain.
-    const rgb = statusSnap.kind === 'idle' ? GREEN : matrixRuntimeRgb(statusSnap.kind)
+    const rgb = statusSnap.kind === 'idle' ? GREEN : matrixRuntimeRgb(statusSnap.channel)
     return (
       <div
         aria-hidden

@@ -1,0 +1,9 @@
+{
+  "session_orchestration": "22/22",
+  "research_intent": "23/23",
+  "context_relevance": "26/26",
+  "assemble": "12/12",
+  "family_deliberation": "25/25",
+  "tsc": "PASS",
+  "passed_total": "108/108 named cases + tsc"
+}

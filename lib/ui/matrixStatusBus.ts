@@ -1,49 +1,93 @@
 'use client'
 
 /**
- * 'outbound'/'inbound'/'verified' extend the original idle/working/success/warning/error set
- * (Council Command UI + Functional Matrix Runtime phase) so producers can distinguish "a request
- * just went out" (outbound), "a provider/Council response physically arrived" (inbound) from the
- * generic "something is in flight" (working) and "routine success" (success) — and so a rare,
- * high-confidence first-verified-data moment (verified) reads differently from routine traffic.
- * Every existing caller of 'idle'/'working'/'success'/'warning'/'error' is unaffected.
+ * Matrix status bus — single client-side sink for the MatrixRain visual system.
+ *
+ * Channel model (full War Room palette):
+ * - cyan   — incoming intelligence / provider data arriving
+ * - violet — outgoing requests / provider queries
+ * - amber  — processing / synthesis / waiting
+ * - green  — successful completion / healthy baseline (idle maps here)
+ * - red    — failure / disconnect / critical
+ * - white  — important verified completion / high-confidence intelligence arrival
+ *
+ * Backward compatibility: the legacy `matrixStatus(kind, message)` kinds
+ * (idle/working/success/warning/error) are unchanged at call sites and map onto
+ * channels via LEGACY_KIND_CHANNEL. New code should call
+ * `matrixChannelStatus(channel, message)` directly (see lib/ui/runtimeEventBridge.ts).
  */
-export type MatrixStatusKind = 'idle' | 'working' | 'success' | 'warning' | 'error' | 'outbound' | 'inbound' | 'verified'
+
+export type MatrixChannel = 'cyan' | 'violet' | 'amber' | 'green' | 'red' | 'white'
+
+export type MatrixLegacyKind = 'idle' | 'working' | 'success' | 'warning' | 'error'
+
+/** Snapshot kind: legacy kinds are preserved for old call sites; channel emissions carry the channel name. */
+export type MatrixStatusKind = MatrixLegacyKind | MatrixChannel
+
+export const MATRIX_CHANNELS = ['cyan', 'violet', 'amber', 'green', 'red', 'white'] as const
+
+/** Legacy kind → channel mapping (working→amber, warning→amber, success→green, error→red, idle→green baseline). */
+export const LEGACY_KIND_CHANNEL: Record<MatrixLegacyKind, MatrixChannel> = {
+  idle: 'green',
+  working: 'amber',
+  success: 'green',
+  warning: 'amber',
+  error: 'red',
+}
 
 export type MatrixStatusSnapshot = {
   kind: MatrixStatusKind
+  /** Resolved palette channel; this is what the visual system renders. */
+  channel: MatrixChannel
   message: string
   /** Monotonic tick for subscribers; changes on each emission. */
   tick: number
+  /** Client clock of the emission; 0 for the SSR/idle snapshot. Used for flash-decay rendering. */
+  emittedAtMs: number
 }
 
 /** Stable idle snapshot for SSR / getServerSnapshot (must not allocate per call). */
 export const MATRIX_IDLE_SNAPSHOT: MatrixStatusSnapshot = Object.freeze({
   kind: 'idle',
+  channel: 'green',
   message: '',
   tick: 0,
+  emittedAtMs: 0,
 })
 
 const THROTTLE_MS = 380
-const AUTO_IDLE_MS: Record<Exclude<MatrixStatusKind, 'idle'>, number> = {
-  outbound: 0,
-  working: 0,
-  inbound: 900,
-  success: 1_400,
-  verified: 1_600,
-  warning: 1_100,
-  error: 1_800,
+
+/** Auto-idle delay per channel; 0 means "sticky until explicitly replaced". */
+const AUTO_IDLE_MS: Record<MatrixChannel, number> = {
+  cyan: 900,
+  violet: 900,
+  amber: 0,
+  green: 1_400,
+  red: 1_800,
+  white: 1_200,
 }
 
-const PRIORITY: Record<MatrixStatusKind, number> = {
-  idle: 0,
-  outbound: 1,
-  working: 1,
-  inbound: 2,
-  warning: 2,
-  success: 3,
-  verified: 4,
-  error: 5,
+/**
+ * Simultaneous-emission priority: red > white > violet/cyan > amber > green baseline.
+ * Higher number wins when a lower-priority signal arrives inside the throttle window.
+ */
+export const MATRIX_CHANNEL_PRIORITY: Record<MatrixChannel, number> = {
+  green: 0,
+  amber: 1,
+  cyan: 2,
+  violet: 2,
+  white: 3,
+  red: 4,
+}
+
+export function isMatrixChannel(value: string): value is MatrixChannel {
+  return (MATRIX_CHANNELS as readonly string[]).includes(value)
+}
+
+/** Resolve any status kind (legacy or channel) to its palette channel. */
+export function resolveMatrixChannel(kind: MatrixStatusKind): MatrixChannel {
+  if (isMatrixChannel(kind)) return kind
+  return LEGACY_KIND_CHANNEL[kind]
 }
 
 let snapshot: MatrixStatusSnapshot = MATRIX_IDLE_SNAPSHOT
@@ -63,13 +107,13 @@ function clearIdleTimer() {
   }
 }
 
-function scheduleIdle(kind: Exclude<MatrixStatusKind, 'idle'>) {
-  const delay = AUTO_IDLE_MS[kind]
+function scheduleIdle(channel: MatrixChannel) {
+  const delay = AUTO_IDLE_MS[channel]
   if (delay <= 0) return
   clearIdleTimer()
   idleTimer = setTimeout(() => {
     idleTimer = null
-    emit({ kind: 'idle', message: '', tick: snapshot.tick + 1 })
+    emit({ kind: 'idle', channel: 'green', message: '', tick: snapshot.tick + 1, emittedAtMs: Date.now() })
   }, delay)
 }
 
@@ -86,33 +130,43 @@ export function subscribeMatrixStatus(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
-/** Publish matrix rain + caption feedback (client-only bus). */
-export function matrixStatus(
-  kind: Exclude<MatrixStatusKind, 'idle'>,
-  message: string,
-): void {
+function publish(kind: MatrixStatusKind, message: string): void {
   if (typeof window === 'undefined') return
   const trimmed = message.trim()
   if (!trimmed) return
 
+  const channel = resolveMatrixChannel(kind)
   const now = Date.now()
-  const incomingPriority = PRIORITY[kind]
-  const currentPriority = PRIORITY[snapshot.kind]
+  const incomingPriority = MATRIX_CHANNEL_PRIORITY[channel]
+  const currentPriority = MATRIX_CHANNEL_PRIORITY[snapshot.channel]
   const withinThrottle = now - lastEmitAt < THROTTLE_MS
 
-  if (withinThrottle && incomingPriority <= currentPriority && kind !== 'error') {
+  if (withinThrottle && incomingPriority <= currentPriority && channel !== 'red') {
     return
   }
 
   lastEmitAt = now
   clearIdleTimer()
-  emit({ kind, message: trimmed, tick: snapshot.tick + 1 })
-  scheduleIdle(kind)
+  emit({ kind, channel, message: trimmed, tick: snapshot.tick + 1, emittedAtMs: now })
+  scheduleIdle(channel)
+}
+
+/** Publish matrix rain + caption feedback using a legacy kind (client-only bus). */
+export function matrixStatus(
+  kind: Exclude<MatrixLegacyKind, 'idle'>,
+  message: string,
+): void {
+  publish(kind, message)
+}
+
+/** Publish matrix rain + caption feedback using a palette channel directly. */
+export function matrixChannelStatus(channel: MatrixChannel, message: string): void {
+  publish(channel, message)
 }
 
 export function matrixStatusIdle(): void {
   if (typeof window === 'undefined') return
   clearIdleTimer()
   if (snapshot.kind === 'idle') return
-  emit({ kind: 'idle', message: '', tick: snapshot.tick + 1 })
+  emit({ kind: 'idle', channel: 'green', message: '', tick: snapshot.tick + 1, emittedAtMs: Date.now() })
 }

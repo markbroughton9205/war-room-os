@@ -89,6 +89,7 @@ import { opensanctionsAdapter } from '@/lib/research-engine/providers/opensancti
 import { companiesHouseAdapter } from '@/lib/research-engine/providers/companiesHouse'
 import { ecbSdwAdapter } from '@/lib/research-engine/providers/ecbSdw'
 import { bankOfCanadaAdapter } from '@/lib/research-engine/providers/bankOfCanada'
+import { bankOfEnglandIadbAdapter } from '@/lib/research-engine/providers/bankOfEnglandIadb'
 import { bisStatsAdapter } from '@/lib/research-engine/providers/bisStats'
 import { eiaAdapter } from '@/lib/research-engine/providers/eia'
 import { statcanWdsAdapter } from '@/lib/research-engine/providers/statcanWds'
@@ -431,7 +432,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const add = async (id: string, fn: () => boolean | string | Promise<boolean | string>) => results.push(await test(id, fn))
 
   await add('re_01_all_31_providers_registered', () =>
-    RESEARCH_PROVIDER_ENV.length === 264 || `expected 264 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 276 || `expected 276 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_02_missing_required_env_not_configured', () => {
     const emptyEnv = { NODE_ENV: 'test' } as NodeJS.ProcessEnv
@@ -850,6 +851,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       companies_house: ['search'],
       ecb_sdw: ['timeSeries'],
       bank_of_canada: ['timeSeries'],
+      bank_of_england_iadb: ['timeSeries'],
       bis_stats: ['timeSeries'],
       eia: ['timeSeries'],
       statcan_wds: ['timeSeries'],
@@ -1029,6 +1031,17 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       digitraffic_marine: ['geoSearch'],
       digitraffic_road_cameras: ['geoSearch'],
       drivebc_events: ['geoSearch'],
+      webtris: ['geoSearch'],
+      digitraffic_road_weather: ['geoSearch'],
+      ontario_511_cameras: ['geoSearch'],
+      ontario_511_events: ['geoSearch'],
+      hong_kong_td_cameras: ['geoSearch'],
+      quebec_511_cameras: ['geoSearch'],
+      quebec_511_events: ['geoSearch'],
+      jartic_traffic_volumes: ['geoSearch'],
+      wzdx_wsdot: ['geoSearch'],
+      wzdx_iowa_dot: ['geoSearch'],
+      wzdx_kytc: ['geoSearch'],
     }
     const implemented = RESEARCH_PROVIDER_ENV.filter(descriptor => descriptor.implemented)
     const offenders = implemented.filter(descriptor => {
@@ -1801,13 +1814,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const UNAUTHORIZED_BATCH_1_IDS = ['world_bank_data_catalog', 'world_bank_finances', 'world_bank_climate'] as const
 
   await add('re_100_registered_provider_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 264 || `expected 264 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 276 || `expected 276 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_101_implemented_count_derives_to_24_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 256 && implementedAdapters === 256)
-      || `expected 256 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 268 && implementedAdapters === 268)
+      || `expected 268 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -3099,11 +3112,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_229_final_provider_descriptor_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 264 || `expected 264 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 276 || `expected 276 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_230_final_implemented_count_is_24', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 256 || `expected 256 implemented adapters, found ${count}`
+    return count === 268 || `expected 268 implemented adapters, found ${count}`
   })
 
   await add('re_231_final_unimplemented_count_is_7', () => {
@@ -4181,8 +4194,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const totalCount = RESEARCH_PROVIDER_ENV.length
     const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return (descriptor?.implemented === true && totalCount === 264 && implementedCount === 256 && blockedCount === 8)
-      || `expected fmcsa implemented plus a 256/8 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+    return (descriptor?.implemented === true && totalCount === 276 && implementedCount === 268 && blockedCount === 8)
+      || `expected fmcsa implemented plus a 268/8 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
   })
 
   await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {
@@ -6610,6 +6623,22 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   ], async () => {
     const response = await nwsWeatherAdapter.run({ text: '38.8894,-77.0352' })
     return (response.ok && response.documents.length === 1 && response.documents[0].contentType === 'weather_forecast') || `forecast dispatch regressed after adding alerts capability: ${JSON.stringify(response)}`
+  }))
+
+  await add('re_940_bank_of_england_iadb_success_normalizes_csv_observation', () => withAdapterFetch([
+    textResponse('DATE,IUDBEDR\r\n02 Jan 2024,5.25\r\n03 Jan 2024,5.25\r\n', 200, 'application/csv'),
+  ], async () => {
+    const response = await bankOfEnglandIadbAdapter.run({ text: 'IUDBEDR' })
+    if (!response.ok || response.documents.length !== 2) return `expected 2 decoded observations, got ${JSON.stringify(response)}`
+    if (response.documents[0].identifiers.boe_series !== 'IUDBEDR') return `expected real series code preserved, got ${JSON.stringify(response.documents[0].identifiers)}`
+    return documentShapeIssue(response.documents[0], 'bank_of_england_iadb') ?? true
+  }))
+
+  await add('re_940b_bank_of_england_iadb_skips_blank_non_publication_days', () => withAdapterFetch([
+    textResponse('DATE,IUDBEDR\r\n05 Jan 2024,5.25\r\n06 Jan 2024,\r\n07 Jan 2024,\r\n08 Jan 2024,5.25\r\n', 200, 'application/csv'),
+  ], async () => {
+    const response = await bankOfEnglandIadbAdapter.run({ text: 'IUDBEDR' })
+    return (response.ok && response.documents.length === 2) || `expected blank weekend cells dropped (never synthesized), got ${JSON.stringify(response)}`
   }))
 
   return results

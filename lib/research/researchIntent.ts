@@ -31,11 +31,15 @@ const LIVE_CURRENT_TRIGGERS: RegExp[] = [
  * explicit words such as "latest", "today", or "search". */
 const WORLD_STATE_TRIGGERS: RegExp[] = [
   /\bwhat(?:'s|s|\s+is)\s+(?:the\s+)?world\s+(?:up\s+to{1,2}|doing|like)\b/i,
-  /\bwhat(?:'s|s|\s+is)\s+(?:going\s+on|happening)\s+(?:in|around)\s+the\s+world\b/i,
+  /\bwhat(?:'s|s|\s+is)\s+(?:going\s+on|happening)\s+(?:in|around|with)\s+(?:the\s+)?world\b/i,
+  /\bcouncil[,!]?\s+what(?:'s|s|\s+is)\s+going\s+on\s+with\s+(?:the\s+)?world\b/i,
   /\b(?:catch|bring)\s+me\s+up\s+(?:on|to\s+speed)\b/i,
   /\b(?:world|global|national|local)\s+(?:news|update|briefing|outlook)\b/i,
   /\bhow(?:'s|s|\s+is|\s+are)\s+(?:the\s+)?(?:economy|markets?|politics|weather|technology|tech\s+sector|job\s+market|housing\s+market)\b/i,
   /\bwhat\s+(?:are|is)\s+(?:the\s+)?(?:economy|markets?|politics|weather|technology|tech\s+sector|job\s+market|housing\s+market)\s+(?:doing|like)\b/i,
+  /\bwhat(?:'s|s|\s+is)\s+(?:happening|going\s+on)\s+(?:today|right\s+now)\b/i,
+  /\bwhat(?:'s|s|\s+is)\s+going\s+on\s+with\s+(?:ai|artificial\s+intelligence)\b/i,
+  /\bbitcoin\b.{0,40}\b(?:price|trading|at|worth)\b/i,
 ]
 
 const INTERNET_EXPLICIT: RegExp[] = [

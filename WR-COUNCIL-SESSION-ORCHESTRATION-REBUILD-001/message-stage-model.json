@@ -1,0 +1,16 @@
+{
+  "stages": [
+    "COMMANDER",
+    "OPENING",
+    "RESPONSE",
+    "DEBATE",
+    "RED_TEAM",
+    "REVISION",
+    "SYNTHESIS",
+    "RESEARCH_STATUS",
+    "SYSTEM",
+    "LEGACY",
+    "UNKNOWN_STAGE"
+  ],
+  "legacy_rows": "LEGACY when metadata.councilStage absent"
+}

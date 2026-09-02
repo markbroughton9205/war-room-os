@@ -120,6 +120,8 @@ function familySynthesisOperation(): CommanderOperation {
       familyDeliberationTurn: {
         turn_id: 'turn-final',
         session_id: 'session-family',
+        round_id: 'round-family',
+        commander_turn_id: 'commander-turn-family',
         mission_id: 'request-family',
         mission_version: 1,
         provider_family: 'chatgpt',
@@ -195,6 +197,8 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
       familyDeliberationTurn: {
         turn_id: 'turn-reply',
         session_id: 'reply-session',
+        round_id: 'round-reply',
+        commander_turn_id: 'commander-turn-reply',
         mission_id: 'reply-request',
         mission_version: 1,
         provider_family: 'gemini',

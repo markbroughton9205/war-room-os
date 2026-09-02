@@ -11,6 +11,7 @@ import {
   shouldPauseWorkersDueToResources,
   tryAcquireWorkerSlot,
 } from '@/lib/workers/limits'
+import { observeWarRoomApiTool } from '@/lib/modular-intelligence/warRoomToolTrajectoryObserve'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -103,6 +104,20 @@ export async function POST(req: Request) {
       metadata: { auto: true, actionKind: ACTION_KIND, mode: state.mode },
     })
   }
+
+  const tavilyOnly = Array.isArray(providers) && providers.length === 1 && providers[0] === 'tavily'
+  observeWarRoomApiTool({
+    toolId: tavilyOnly ? 'web' : 'research',
+    requestText: query,
+    arguments: { query },
+    ok: true,
+    status: 'complete',
+    resultMeta: {
+      op: 'internet_search',
+      providerCount: result.providerOrder.length,
+      providers: result.providerOrder.join(','),
+    },
+  })
 
   return jsonWithPersistence({ result }, sup.ok)
 }
