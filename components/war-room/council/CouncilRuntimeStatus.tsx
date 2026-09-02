@@ -15,37 +15,51 @@ import {
   type MatrixStatusKind,
 } from '@/lib/ui/matrixStatusBus'
 
+// Keyed by every string MatrixStatusKind can actually be: the five legacy kinds a
+// matrixStatus() caller passes, plus the six matrixChannelStatus() palette channels a
+// runtimeEventBridge.ts caller passes directly as `kind` (lib/ui/matrixStatusBus.ts's `publish`
+// stores whatever kind string it was given). Covering both keeps this legible for legacy callers
+// (PROCESSING vs DEGRADED, both amber) without a second status vocabulary.
 const STATUS_LABEL: Record<MatrixStatusKind, string> = {
   idle: 'CONNECTED',
-  outbound: 'QUERYING',
-  inbound: 'DATA INBOUND',
   working: 'PROCESSING',
   success: 'COMPLETE',
-  verified: 'VERIFIED',
   warning: 'DEGRADED',
   error: 'CRITICAL',
+  violet: 'QUERYING',
+  cyan: 'DATA INBOUND',
+  amber: 'PROCESSING',
+  green: 'COMPLETE',
+  red: 'CRITICAL',
+  white: 'VERIFIED',
 }
 
 const STATUS_DOT_CLASS: Record<MatrixStatusKind, string> = {
   idle: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.85)]',
-  outbound: 'bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.85)]',
-  inbound: 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.85)]',
   working: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.85)]',
   success: 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.95)]',
-  verified: 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.95)]',
   warning: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.85)]',
   error: 'bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.95)]',
+  violet: 'bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.85)]',
+  cyan: 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.85)]',
+  amber: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.85)]',
+  green: 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.95)]',
+  red: 'bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.95)]',
+  white: 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.95)]',
 }
 
 const STATUS_TEXT_CLASS: Record<MatrixStatusKind, string> = {
   idle: 'text-emerald-300',
-  outbound: 'text-violet-300',
-  inbound: 'text-cyan-300',
   working: 'text-amber-300',
   success: 'text-emerald-300',
-  verified: 'text-white',
   warning: 'text-amber-300',
   error: 'text-red-300',
+  violet: 'text-violet-300',
+  cyan: 'text-cyan-300',
+  amber: 'text-amber-300',
+  green: 'text-emerald-300',
+  red: 'text-red-300',
+  white: 'text-white',
 }
 
 export function CouncilRuntimeStatus() {
