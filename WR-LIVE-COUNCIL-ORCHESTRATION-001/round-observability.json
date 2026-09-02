@@ -1,0 +1,4 @@
+{
+  "reuses": "councilProgress + inspector",
+  "floorStream_hud": true
+}

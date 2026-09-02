@@ -1,0 +1,12 @@
+{
+  "social": {
+    "firstTokenMs": 20000,
+    "idleMs": 12000,
+    "overallMs": 32000
+  },
+  "council": {
+    "firstTokenMs": 20000,
+    "idleMs": 18000,
+    "overallMs": 45000
+  }
+}

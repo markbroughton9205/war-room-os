@@ -1,0 +1,10 @@
+{
+  "context": "Node01 .env.local ANTHROPIC_API_KEY",
+  "auth_success": false,
+  "http_status": 401,
+  "error_class": "http_error",
+  "sanitized_error": "invalid x-api-key",
+  "claude_models_listed": false,
+  "standalone_health": "UNHEALTHY",
+  "secret_printed": false
+}

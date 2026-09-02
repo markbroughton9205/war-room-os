@@ -1,0 +1,15 @@
+{
+  "taxonomy": [
+    "GREETING",
+    "STATUS_CHECK",
+    "KNOWLEDGE_QUESTION",
+    "FRESHNESS_SENSITIVE",
+    "TIME_SENSITIVE",
+    "RESEARCH_REQUEST",
+    "STRATEGIC_ANALYSIS",
+    "DIRECTIVE",
+    "FOLLOW_UP",
+    "EXPLICIT_MEMORY"
+  ],
+  "native_router": "still only applyPilotToResearchDecision; not duplicated"
+}

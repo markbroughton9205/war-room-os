@@ -24,7 +24,18 @@ import type { RuntimeMission } from './types'
 
 export const ENGINEERING_STREAM_VERSION = 1
 
-export type EngineeringStreamEnvelopeType = 'opened' | 'progress' | 'final' | 'error' | 'closed'
+export type EngineeringStreamEnvelopeType = 'opened' | 'progress' | 'final' | 'error' | 'closed' | 'command_output'
+
+/** One live-output entry, mirrored from lib/native-builder/commandOutput.ts's CommandOutputEntry
+ * (redeclared here so this module stays importable by code that must not pull in the native-builder
+ * process/buffer machinery). Already secret-redacted before it ever entered the buffer. */
+export type EngineeringStreamCommandOutput = {
+  sequence: number
+  operationId: string
+  stream: 'stdout' | 'stderr' | 'system'
+  text: string
+  at: string
+}
 
 export type EngineeringStreamTerminalState = 'mission_terminal' | 'client_disconnected' | 'transport_error' | 'not_found'
 
@@ -41,6 +52,7 @@ export type EngineeringStreamEnvelope =
   | (EngineeringStreamEnvelopeBase & { envelopeType: 'final'; mission: RuntimeMission })
   | (EngineeringStreamEnvelopeBase & { envelopeType: 'error'; error: { code: string; message: string } })
   | (EngineeringStreamEnvelopeBase & { envelopeType: 'closed'; terminalState: EngineeringStreamTerminalState })
+  | (EngineeringStreamEnvelopeBase & { envelopeType: 'command_output'; missionId: string; entries: EngineeringStreamCommandOutput[] })
 
 const TERMINAL_STATUSES = new Set(['completed', 'rolled_back', 'blocked', 'cancelled'])
 

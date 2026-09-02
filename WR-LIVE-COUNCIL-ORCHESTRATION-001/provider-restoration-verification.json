@@ -1,0 +1,63 @@
+{
+  "mission": "WR-LIVE-COUNCIL-ORCHESTRATION-001",
+  "phase": "LIVE COUNCIL PROVIDER RESTORATION VERIFICATION",
+  "secrets_printed": false,
+  "branch": "mac-current-development-sync",
+  "head": "973f0a792c249d15c9564599fb853ce471dc2b25",
+  "env_shape": {
+    "OPENAI_API_KEY": { "present": true, "usable_shape": true, "prefix_class": "sk" },
+    "ANTHROPIC_API_KEY": { "present": true, "usable_shape": true, "prefix_class": "sk-ant" },
+    "XAI_API_KEY": { "present": true, "usable_shape": true, "prefix_class": "unprefixed_alnum", "live": "AUTH_REJECTED" },
+    "GEMINI_API_KEY": { "present": true, "usable_shape": true, "prefix_class": "AIza", "live": "STREAM_PASS" }
+  },
+  "openai": {
+    "ok": true,
+    "httpStatus": 200,
+    "streamed": true,
+    "firstDeltaMs": 982,
+    "level": "FULL_COUNCIL_PATH_HEALTH"
+  },
+  "anthropic": {
+    "minimal_ok": false,
+    "stream_ok": false,
+    "council_path_ok": false,
+    "httpStatus": 400,
+    "classified": "BILLING",
+    "mentionsCredit": true,
+    "mentionsAuth": false,
+    "mentionsRate": false,
+    "sawStop": false,
+    "level": "UNHEALTHY"
+  },
+  "grok": {
+    "ok": false,
+    "httpStatus": 400,
+    "classified": "AUTH",
+    "provider_message_class": "incorrect_api_key",
+    "xai_returns_400_not_401": true,
+    "prefix_retry_xai_dash": "still_incorrect_key",
+    "level": "UNHEALTHY"
+  },
+  "gemini": {
+    "ok": true,
+    "httpStatus": 200,
+    "streamed": true,
+    "modelId": "gemini-2.5-flash",
+    "firstByteMs": 765,
+    "level": "FULL_COUNCIL_PATH_HEALTH"
+  },
+  "production_gate": "STOP",
+  "reason": "Anthropic full Council path is BILLING 400. Configured Claude remains unhealthy. Grok AUTH rejected. Do not promote Node01.",
+  "node01_modified": false,
+  "native_router_sha256": "9a294e12cd9063350ed2a4ee2907fc04d6aa46413d88fa2eec8950fc2f61fad3",
+  "native_router_changed": false,
+  "wrim_checkpoint_sha256": "d1affa599ff967313b476e649062c7d969606b8e9f6fa1410f12a41d857ba015",
+  "wrim_changed": false,
+  "validators": {
+    "live_orchestration": "35/35",
+    "session_orchestration": "23/23",
+    "context_relevance": "28/28",
+    "greeting": "10/10",
+    "family_deliberation": "25/25"
+  }
+}

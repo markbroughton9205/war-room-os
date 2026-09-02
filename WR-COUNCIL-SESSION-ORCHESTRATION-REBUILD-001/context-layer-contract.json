@@ -1,0 +1,17 @@
+{
+  "allowed": [
+    "current_turn",
+    "session_history",
+    "durable_memory_gated",
+    "council_working_state_same_session",
+    "turn_evidence",
+    "terra_when_pinned",
+    "standing_instructions"
+  ],
+  "not_auto": [
+    "prior_session_transcript",
+    "old_synthesis",
+    "old_opportunity",
+    "historical_mission_momentum"
+  ]
+}

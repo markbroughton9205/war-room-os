@@ -1,0 +1,15 @@
+{
+  "phases": [
+    "ROUND_CREATED",
+    "CLASSIFYING",
+    "RESEARCHING",
+    "EVIDENCE_READY",
+    "DELIBERATING",
+    "RED_TEAM",
+    "REVISION",
+    "SYNTHESIS",
+    "COMPLETE",
+    "FAILED"
+  ],
+  "engine": "extends DeliberationSession + live-orchestration/roundMachine.ts"
+}

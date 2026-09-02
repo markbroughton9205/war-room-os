@@ -1,0 +1,8 @@
+{
+  "checkpoint_final_sha256_before": "d1affa599ff967313b476e649062c7d969606b8e9f6fa1410f12a41d857ba015",
+  "checkpoint_final_sha256_after": "d1affa599ff967313b476e649062c7d969606b8e9f6fa1410f12a41d857ba015",
+  "file": "model-lab/manifests/wrim0_checkpoints/checkpoint-final.safetensors",
+  "changed": false,
+  "training": false,
+  "lora": false
+}

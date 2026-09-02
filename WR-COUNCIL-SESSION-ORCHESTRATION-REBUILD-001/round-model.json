@@ -1,0 +1,4 @@
+{
+  "round_id": "DeliberationSession.round_id created per family-to-family pass",
+  "legacy": "old rows have no round_id in SQL; in-memory rounds only"
+}

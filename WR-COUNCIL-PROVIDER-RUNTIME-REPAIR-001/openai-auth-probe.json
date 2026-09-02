@@ -1,0 +1,10 @@
+{
+  "context": "Node01 .env.local OPENAI_API_KEY via same loader next start uses",
+  "auth_success": false,
+  "http_status": 401,
+  "error_class": "http_error",
+  "sanitized_error": "Incorrect API key",
+  "gpt4o_listed": false,
+  "model_access": "NOT_REACHED",
+  "secret_printed": false
+}

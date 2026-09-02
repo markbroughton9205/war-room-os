@@ -44,6 +44,11 @@ const TERRA_EVENT_KIND_QUERY_LABEL: Record<TerraIntelligenceEventKind, string | 
   // A traffic event's title is its real Open511 headline (e.g. "CONSTRUCTION") — already
   // descriptive; doubling it would just repeat the same word.
   traffic_event: null,
+  // A flow observation's title is a road/site name (e.g. "A1M/2259B") — never says "traffic" on
+  // its own.
+  traffic_flow_observation: 'traffic flow',
+  // A road-weather station's title is its station name — never says "weather" on its own.
+  road_weather_observation: 'road weather',
 }
 
 const COORDINATE_MATCH_EPSILON_DEG = 0.0005

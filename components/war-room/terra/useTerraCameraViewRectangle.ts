@@ -10,7 +10,7 @@
  * query scoped to what's actually on screen, rather than a point+radius query like
  * nearby_landmarks' — this is the one new piece of camera-state plumbing that phase needs.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
 import type { TerraDegreeRectangle } from '@/lib/terra/aircraftBoundingBox'
@@ -78,5 +78,8 @@ export function useTerraCameraViewRectangle(viewer: CesiumViewer | null): TerraC
     }
   }, [viewer])
 
-  return { rectangle, settledAt }
+  // Stable identity across renders that don't change either field — every consumer keys effects
+  // and memos off this returned object (not just `.rectangle`), so a fresh wrapper on every call
+  // would defeat their dependency-array comparisons even though the underlying value hasn't moved.
+  return useMemo(() => ({ rectangle, settledAt }), [rectangle, settledAt])
 }

@@ -1,0 +1,12 @@
+{
+  "primary": "B. INVALID_OR_REVOKED_SECRET",
+  "secondary": "truthy placeholder sentinel; Anthropic independently invalid; UI leaked raw OpenAI auth text",
+  "exact_root_cause": "Council openai:gpt-4o reads OPENAI_API_KEY from Node01 .env.local. The value is a present non-key placeholder. OpenAI returns HTTP 401. Dependent Council turns fail because opening output_message_id is absent by design.",
+  "exact_repair_conclusion": "Minimal code repair applied: unusable sentinels are not configured; provider auth errors are sanitized. Valid OpenAI and Anthropic keys were not supplied and were not invented. Council deliberation is not restored.",
+  "remaining_provider_risks": [
+    "No usable OPENAI_API_KEY",
+    "No usable ANTHROPIC_API_KEY",
+    "Other provider keys on both hosts are also bracket placeholders or empty"
+  ],
+  "next_recommendation": "Commander supplies real OPENAI_API_KEY and ANTHROPIC_API_KEY in Node01 .env.local (and development), restart com.warroom.node01, then rerun a bounded Council smoke."
+}

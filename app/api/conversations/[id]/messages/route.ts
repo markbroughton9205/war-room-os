@@ -105,6 +105,32 @@ export async function POST(
     .select('id,conversation_id,role,content,family,metadata,created_at')
     .single()
 
+  if (!error && data) {
+    const preview = content.trim().slice(0, 160)
+    void sup.client
+      .from(TABLE_CONVERSATIONS)
+      .update({
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', conversationId)
+    const { data: existingMeta } = await sup.client
+      .from(TABLE_CONVERSATIONS)
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle()
+    const prev = existingMeta?.metadata && typeof existingMeta.metadata === 'object' && !Array.isArray(existingMeta.metadata)
+      ? (existingMeta.metadata as Record<string, unknown>)
+      : {}
+    const prevCouncil = prev.council && typeof prev.council === 'object' && !Array.isArray(prev.council)
+      ? (prev.council as Record<string, unknown>)
+      : {}
+    void sup.client
+      .from(TABLE_CONVERSATIONS)
+      .update({ metadata: { ...prev, council: { ...prevCouncil, lastPreview: preview } } })
+      .eq('id', conversationId)
+  }
+
   if (error) {
     const supabase = warRoomSupabaseFailurePayload(TABLE_MESSAGES, error, { operation: 'insert' })
     return jsonWithPersistence(

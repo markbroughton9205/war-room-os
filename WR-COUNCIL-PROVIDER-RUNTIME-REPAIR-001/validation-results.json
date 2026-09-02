@@ -1,0 +1,12 @@
+{
+  "dev_openai_models_probe": "HTTP 401 Incorrect API key",
+  "dev_anthropic_models_probe": "HTTP 401 invalid x-api-key",
+  "node01_openai_models_probe": "HTTP 401 Incorrect API key",
+  "node01_anthropic_models_probe": "HTTP 401 invalid x-api-key",
+  "sanitizer_contract": "PASS",
+  "placeholder_treated_unconfigured": true,
+  "council_full_round": "BLOCKED_NO_USABLE_KEYS",
+  "node01_production_build": "PASS",
+  "node01_restart": "PASS",
+  "login_smoke": "PASS"
+}

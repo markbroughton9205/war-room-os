@@ -1,0 +1,4 @@
+{
+  "adapter": "lib/council/live-orchestration/adapters/grok.ts",
+  "live_canary": "SKIPPED unusable XAI_API_KEY"
+}

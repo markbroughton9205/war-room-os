@@ -1,0 +1,12 @@
+{
+  "levels": [
+    "AUTH_HEALTH",
+    "MINIMAL_INFERENCE_HEALTH",
+    "STREAMING_HEALTH",
+    "FULL_COUNCIL_PATH_HEALTH"
+  ],
+  "openai_live": "FULL_COUNCIL_PATH_HEALTH",
+  "anthropic_live": "UNHEALTHY_BILLING_HTTP_400",
+  "grok_live": "UNHEALTHY_AUTH_INCORRECT_KEY_HTTP_400",
+  "gemini_live": "FULL_COUNCIL_PATH_HEALTH"
+}

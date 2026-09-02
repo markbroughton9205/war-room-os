@@ -1,0 +1,21 @@
+{
+  "taxonomy": [
+    "SOCIAL_CHECKIN",
+    "GREETING",
+    "STATUS_CHECK",
+    "KNOWLEDGE_QUESTION",
+    "FRESHNESS_SENSITIVE",
+    "RESEARCH_REQUEST",
+    "STRATEGIC_ANALYSIS",
+    "DIRECTIVE",
+    "FOLLOW_UP",
+    "EXPLICIT_MEMORY"
+  ],
+  "duplicate_classifier": false,
+  "social_examples": [
+    "Hi council",
+    "Council check in",
+    "Everybody here?",
+    "Team check in"
+  ]
+}

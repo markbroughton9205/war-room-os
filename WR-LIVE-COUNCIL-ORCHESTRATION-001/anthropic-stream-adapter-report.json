@@ -1,0 +1,6 @@
+{
+  "adapter": "lib/council/live-orchestration/adapters/anthropic.ts",
+  "parses_content_block_delta": true,
+  "live_canary": "FAIL HTTP 400 credit",
+  "not_parsed_as_openai": true
+}

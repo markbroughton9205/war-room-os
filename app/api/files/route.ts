@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { fileUploadInProgress } from '@/lib/filesUploadActivity'
 import { createSupabaseServerClient } from '@/lib/supabaseServer'
+import { observeWarRoomApiTool } from '@/lib/modular-intelligence/warRoomToolTrajectoryObserve'
 
 type FileRow = Record<string, unknown>
 
@@ -98,6 +99,15 @@ export async function GET(req: Request) {
     .order('uploaded_at', { ascending: false })
 
   if (queryError) {
+    observeWarRoomApiTool({
+      toolId: 'files',
+      requestText: 'TOOL=files\npath=list',
+      arguments: { path: 'list' },
+      ok: false,
+      status: 'error',
+      error: queryError.message,
+      resultMeta: { op: 'list' },
+    })
     return NextResponse.json({
       tool: 'files',
       status: 'error',
@@ -106,6 +116,14 @@ export async function GET(req: Request) {
     }, { status: 500 })
   }
 
+  observeWarRoomApiTool({
+    toolId: 'files',
+    requestText: 'TOOL=files\npath=list',
+    arguments: { path: 'list' },
+    ok: true,
+    status: 'complete',
+    resultMeta: { op: 'list', count: (data ?? []).length },
+  })
   return NextResponse.json({
     tool: 'files',
     status: 'complete',

@@ -7,6 +7,8 @@ import {
   type KimiErrorKind,
 } from '@/lib/providers/kimi'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
+import { sanitizeProviderPublicError } from '@/lib/providers/publicError'
+import { envHasUsableProviderSecret } from '@/lib/providers/secretPresence'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
@@ -35,23 +37,20 @@ export type DirectProviderCallResult = {
   kimiDiagnostics?: KimiDiagnostics
 }
 
-function sanitizeProviderError(message: string): string {
-  return toDisplayText(message)
-    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
-    .replace(/\bsk-[a-zA-Z0-9_-]{8,}\b/gi, '[redacted]')
-    .replace(/\b(api[_-]?key|token|secret|password)\s*[:=]\s*\S+/gi, '$1=[redacted]')
-    .slice(0, 280)
+function sanitizeProviderError(message: string, family?: DirectProviderFamily): string {
+  return sanitizeProviderPublicError(message, family)
 }
 
 async function callOpenAi(prompt: string, system: string, maxTokens: number, signal?: AbortSignal): Promise<DirectProviderCallResult> {
-  if (!process.env.OPENAI_API_KEY) {
+  const openaiKey = process.env.OPENAI_API_KEY
+  if (!envHasUsableProviderSecret('OPENAI_API_KEY') || !openaiKey) {
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'OPENAI_API_KEY not configured' }
   }
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      authorization: `Bearer ${openaiKey}`,
     },
     signal,
     body: JSON.stringify({
@@ -69,7 +68,7 @@ async function callOpenAi(prompt: string, system: string, maxTokens: number, sig
       ok: false,
       text: '',
       transportStatus: res.status,
-      error: sanitizeProviderError(data?.error?.message || `OpenAI failed (${res.status})`),
+      error: sanitizeProviderError(data?.error?.message || `OpenAI failed (${res.status})`, 'chatgpt'),
     }
   }
   const text = data.choices?.[0]?.message?.content
@@ -80,14 +79,15 @@ async function callOpenAi(prompt: string, system: string, maxTokens: number, sig
 }
 
 async function callAnthropic(prompt: string, system: string, maxTokens: number, signal?: AbortSignal): Promise<DirectProviderCallResult> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const anthropicKey = process.env.ANTHROPIC_API_KEY
+  if (!envHasUsableProviderSecret('ANTHROPIC_API_KEY') || !anthropicKey) {
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'ANTHROPIC_API_KEY not configured' }
   }
   const res = await fetch(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'x-api-key': anthropicKey,
       'anthropic-version': '2023-06-01',
     },
     signal,
@@ -104,7 +104,7 @@ async function callAnthropic(prompt: string, system: string, maxTokens: number, 
       ok: false,
       text: '',
       transportStatus: res.status,
-      error: sanitizeProviderError(data?.error?.message || `Anthropic failed (${res.status})`),
+      error: sanitizeProviderError(data?.error?.message || `Anthropic failed (${res.status})`, 'claude'),
     }
   }
   const text = data.content?.[0]?.text
@@ -293,14 +293,14 @@ export function isProviderFamilyConfigured(family: DirectProviderFamily): boolea
   switch (family) {
     case 'claude':
     case 'red_team':
-      return Boolean(process.env.ANTHROPIC_API_KEY)
+      return envHasUsableProviderSecret('ANTHROPIC_API_KEY')
     case 'chatgpt':
     case 'baby':
-      return Boolean(process.env.OPENAI_API_KEY)
+      return envHasUsableProviderSecret('OPENAI_API_KEY')
     case 'grok':
-      return Boolean(process.env.XAI_API_KEY)
+      return envHasUsableProviderSecret('XAI_API_KEY')
     case 'gemini':
-      return Boolean(process.env.GEMINI_API_KEY)
+      return envHasUsableProviderSecret('GEMINI_API_KEY')
     case 'kimi':
       return isKimiConfigured()
     default:

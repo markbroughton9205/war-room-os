@@ -5,6 +5,8 @@ const OBJECT_FIELD_KEYS = ['summary', 'title', 'body', 'text', 'content', 'messa
 const SECRET_PATTERNS: RegExp[] = [
   /\bsk-[a-zA-Z0-9_-]{8,}\b/gi,
   /Bearer\s+\S+/gi,
+  /Incorrect API key provided:\s*\S+/gi,
+  /invalid x-api-key[^.\n]*/gi,
   /api[_-]?key[=:]\s*\S+/gi,
   /appid=[^&\s]+/gi,
   /\bkey=[^&\s]+/gi,
@@ -22,7 +24,7 @@ function redactSecrets(text: string): string {
  */
 export function toDisplayText(value: unknown): string {
   if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'string') return redactSecrets(value.trim())
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   if (Array.isArray(value)) {
     const parts = value.map(item => toDisplayText(item)).filter(Boolean)
@@ -33,7 +35,7 @@ export function toDisplayText(value: unknown): string {
     const record = value as Record<string, unknown>
     for (const key of OBJECT_FIELD_KEYS) {
       const field = record[key]
-      if (typeof field === 'string' && field.trim()) return field.trim()
+      if (typeof field === 'string' && field.trim()) return redactSecrets(field.trim())
     }
     try {
       const json = JSON.stringify(value)

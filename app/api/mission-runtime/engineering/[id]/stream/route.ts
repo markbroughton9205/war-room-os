@@ -1,5 +1,6 @@
 import { getMissionExecutionStrategy } from '@/lib/mission-runtime'
 import { runInResolvedWorkspace } from '@/lib/mission-runtime/withWorkspace'
+import { getCommandOutput } from '@/lib/native-builder/commandOutput'
 import {
   encodeEngineeringStreamEnvelope,
   encodeEngineeringStreamComment,
@@ -94,6 +95,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         emit({ version: 1, envelopeType: 'opened', requestId: id, sequence: sequence++, emittedAt: new Date().toISOString(), missionId: id })
         emit({ version: 1, envelopeType: 'progress', requestId: id, sequence: sequence++, emittedAt: new Date().toISOString(), mission: initial })
         let lastFingerprint = missionProgressFingerprint(initial)
+        // Live command output side channel (native-builder's ring buffer): entries are emitted
+        // incrementally by sequence, independent of the mission-state fingerprint — validation
+        // output arrives WHILE the repair record itself is still mid-'validating' and unchanged.
+        let lastOutputSequence = 0
+        const emitNewCommandOutput = (): void => {
+          const entries = getCommandOutput(id, lastOutputSequence)
+          if (!entries.length) return
+          lastOutputSequence = entries[entries.length - 1]!.sequence
+          emit({ version: 1, envelopeType: 'command_output', requestId: id, sequence: sequence++, emittedAt: new Date().toISOString(), missionId: id, entries })
+        }
+        emitNewCommandOutput()
         if (isTerminalMissionStatus(initial.status)) {
           emit({ version: 1, envelopeType: 'final', requestId: id, sequence: sequence++, emittedAt: new Date().toISOString(), mission: initial })
           closeWith('mission_terminal')
@@ -105,6 +117,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           void (async () => {
             if (closed) return
             pollCount += 1
+            emitNewCommandOutput()
             const polled = await runInResolvedWorkspace(workspaceId, async () => {
               const strategy = getMissionExecutionStrategy('engineering')
               return strategy.get(id)

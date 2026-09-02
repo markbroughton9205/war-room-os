@@ -687,6 +687,12 @@ export const SOVEREIGN_MODEL_LAB_TRANSITIONS: Record<SovereignModelLabState, rea
   cancelled: [],
 }
 
+/** Explicit corrective transitions. Kept separate from forward lifecycle transitions so truth
+ * repair is narrow, reviewable, and cannot become a general state-machine escape hatch. */
+export const SOVEREIGN_MODEL_LAB_RECOVERY_TRANSITIONS: Partial<Record<SovereignModelLabState, readonly SovereignModelLabState[]>> = {
+  tokenizer_ready: ['tokenizer_plan_ready', 'tokenizer_not_planned'],
+}
+
 export type SovereignModelLabHistoryEntry = {
   state: SovereignModelLabState
   at: string

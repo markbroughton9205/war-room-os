@@ -1,0 +1,4 @@
+{
+  "unit": "retry/taxonomy/partial-stream policy encoded",
+  "live_injection": "not run against production credentials"
+}

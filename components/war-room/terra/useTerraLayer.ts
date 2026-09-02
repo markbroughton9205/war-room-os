@@ -12,8 +12,9 @@
  * silently re-labeled 'live'; a failed first load with nothing to fall back on is 'error', never
  * fabricated demo markers.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useRef, useState } from 'react'
 import type { TerraGeoFeature } from '@/lib/terra/types'
+import { bridgeTerraFeedState } from '@/lib/ui/runtimeEventBridge'
 
 export type TerraLayerFeedState = 'loading' | 'live' | 'empty' | 'error' | 'stale'
 
@@ -68,6 +69,11 @@ export function useTerraLayer(
   const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null)
   const hasLoadedOnceRef = useRef(false)
   const requestIdRef = useRef(0)
+  // In-flight request cancellation: a superseded requery (queryOverride change, manual refresh)
+  // or an unmount aborts the previous fetch outright instead of letting it run to completion and
+  // only then discarding the result — real network/request savings on rapid camera pans, not just
+  // stale-write protection (which requestIdRef below still provides).
+  const abortRef = useRef<AbortController | null>(null)
   // Tracks the latest feature count outside React state so the failure branch below can decide
   // stale-vs-error without making `load` depend on `features` (which would recreate it — and the
   // auto-refresh interval that depends on it — every time the feed updates).
@@ -75,30 +81,46 @@ export function useTerraLayer(
 
   const load = useCallback(async () => {
     const requestId = ++requestIdRef.current
-    if (!hasLoadedOnceRef.current) setState('loading')
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    // Matrix runtime bridge (lib/ui/runtimeEventBridge.ts): every feed-state transition is
+    // surfaced to the Matrix palette channel bus, not just rendered in TerraShell's own chrome.
+    // Every setState below is wrapped in startTransition: this hook is instantiated once per Terra
+    // layer (a dozen-plus on the God's Eye command center), so a burst of feeds all resolving
+    // around the same moment — the common case right after the globe mounts — must never compete,
+    // as high-priority synchronous updates, with whatever the Commander is doing in the Council
+    // composer at that exact moment.
+    const transition = (next: TerraLayerFeedState) => {
+      startTransition(() => setState(next))
+      bridgeTerraFeedState(layerId, next)
+    }
+    if (!hasLoadedOnceRef.current) transition('loading')
     try {
       const qs = queryOverride ? `?q=${encodeURIComponent(queryOverride)}` : ''
-      const res = await fetch(`/api/terra/layers/${encodeURIComponent(layerId)}${qs}`, { cache: 'no-store' })
+      const res = await fetch(`/api/terra/layers/${encodeURIComponent(layerId)}${qs}`, { cache: 'no-store', signal: controller.signal })
       if (requestId !== requestIdRef.current) return // superseded by a later request
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const body: ApiResponse = await res.json()
       hasLoadedOnceRef.current = true
       if (body.status === 'error') {
         setLastErrorMessage(body.error?.message ?? `Layer "${layerId}" request failed.`)
-        setState(featureCountRef.current > 0 ? 'stale' : 'error')
+        transition(featureCountRef.current > 0 ? 'stale' : 'error')
         return
       }
       featureCountRef.current = body.features.length
-      setFeatures(body.features)
-      setSkippedCount(body.skippedCount)
-      setLastFetchedAt(body.fetchedAt)
-      setLastErrorMessage(null)
-      setState(body.features.length === 0 ? 'empty' : 'live')
+      startTransition(() => {
+        setFeatures(body.features)
+        setSkippedCount(body.skippedCount)
+        setLastFetchedAt(body.fetchedAt)
+        setLastErrorMessage(null)
+      })
+      transition(body.features.length === 0 ? 'empty' : 'live')
     } catch (error) {
-      if (requestId !== requestIdRef.current) return
+      if (controller.signal.aborted || requestId !== requestIdRef.current) return
       hasLoadedOnceRef.current = true
-      setLastErrorMessage(error instanceof Error ? error.message : String(error))
-      setState(featureCountRef.current > 0 ? 'stale' : 'error')
+      startTransition(() => setLastErrorMessage(error instanceof Error ? error.message : String(error)))
+      transition(featureCountRef.current > 0 ? 'stale' : 'error')
       console.error(`[terra] layer "${layerId}" request failed`, error)
     }
   }, [layerId, queryOverride])
@@ -114,6 +136,7 @@ export function useTerraLayer(
     return () => {
       clearTimeout(kickoff)
       if (interval !== null) clearInterval(interval)
+      abortRef.current?.abort()
     }
   }, [enabled, load, refreshIntervalMs, autoRefreshAllowed, queryOverride])
 

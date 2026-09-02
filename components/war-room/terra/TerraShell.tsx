@@ -20,7 +20,7 @@
  * only — never written to war_room_audit_logs or anywhere else. Camera movement and exploratory
  * clicks are transient UI state, not War Room events.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
@@ -55,12 +55,16 @@ import { useTerraCameraViewRectangle } from './useTerraCameraViewRectangle'
 import { useTerraAircraftTrails } from './useTerraAircraftTrails'
 import { useTerraVesselTrails } from './useTerraVesselTrails'
 import { buildTerraAircraftBoundingBoxQuery } from '@/lib/terra/aircraftBoundingBox'
+import { terraCameraRectSignature } from '@/lib/terra/cameraRectSignature'
 import { summarizeTerraAircraftFeatures } from '@/lib/terra/aircraftRegionalSummary'
 import { buildTerraMaritimeBoundingBoxQuery, terraCameraViewHasMaritimeCoverage } from '@/lib/terra/maritimeBoundingBox'
-import { buildTerraRoadCameraBoundingBoxQuery } from '@/lib/terra/roadCameraBoundingBox'
-import { buildTerraTrafficEventBoundingBoxQuery } from '@/lib/terra/trafficEventBoundingBox'
 import { summarizeTerraVesselFeatures } from '@/lib/terra/vesselRegionalSummary'
-import { resolveTerraMaritimeCoverageState, TERRA_MARITIME_COVERAGE_LABELS } from '@/lib/terra/maritimeCoverage'
+import { resolveTerraMaritimeCoverageState, TERRA_MARITIME_COVERAGE_LABELS, type TerraMaritimeCoverageState } from '@/lib/terra/maritimeCoverage'
+import type { TerraCoverageTruthState } from '@/lib/terra/coverageTruth'
+import { TerraCoverageBadge } from './TerraCoverageBadge'
+import { TerraTrafficLayer } from './TerraTrafficLayer'
+import { TERRA_TRAFFIC_LAYER_DEFS } from './terraTrafficLayerDefs'
+import { TerraCameraHoverCard } from './TerraCameraHoverCard'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -91,14 +95,14 @@ function StatusLine({ status, aerialImageryActive }: { status: TerraGlobeStatus;
       Satellite imagery: NASA GIBS daily
       {aerialImageryActive
         ? <span className="text-cyan-400"> · ion World Imagery close-range</span>
-        : <span className="text-amber-400"> · high-res aerial unavailable{status.hasIonToken ? '' : ' (ion token not configured)'}</span>}
+        : <span className="text-amber-400"> · high-res aerial unavailable{status.hasIonToken ? '' : ' (Cesium ion account token required)'}</span>}
       <span className="text-slate-500"> · OSM map-detail available</span>
       {status.hasIonToken
         ? <span className="text-cyan-400"> · Terrain active</span>
-        : <span className="text-amber-400"> · Terrain fallback (ion token not configured)</span>}
+        : <span className="text-amber-400"> · Terrain fallback (Cesium ion account token required for premium terrain)</span>}
       {status.hasIonToken && status.hasOsmBuildings
         ? <span className="text-cyan-400"> · 3D Buildings active</span>
-        : <span className="text-amber-400"> · 3D Buildings unavailable{status.hasIonToken ? '' : ' (ion token not configured)'}</span>}
+        : <span className="text-amber-400"> · 3D Buildings unavailable{status.hasIonToken ? '' : ' (Cesium ion account token required)'}</span>}
     </span>
   )
 }
@@ -144,9 +148,9 @@ function TerraProviderCapabilityDock({
           </span>
         </div>
         <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Buildings</span><span className={buildingsActive ? 'text-right text-emerald-300' : 'text-right text-amber-300'}>{buildingsActive ? (localDetailActive ? 'Cesium OSM Buildings active' : 'Ready · zoom to local scale') : 'Provider token unavailable'}</span></div>
-        <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Street photography</span><span className="max-w-[13rem] text-right text-amber-300">Provider slot · not configured</span></div>
-        <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Live traffic</span><span className="max-w-[13rem] text-right text-amber-300">No authorized provider configured</span></div>
-        <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Public cameras</span><span className="max-w-[13rem] text-right text-amber-300">No camera registry/provider configured</span></div>
+        <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Street photography</span><span className="max-w-[13rem] text-right text-slate-400">External provider account and imagery terms required</span></div>
+        <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Road intelligence</span><span className="max-w-[13rem] text-right text-emerald-300">Government feeds enabled · events, weather, cameras, historical flow</span></div>
+        <div className="flex items-start justify-between gap-3"><span className="text-slate-400">Public cameras</span><span className="max-w-[13rem] text-right text-emerald-300">Digitraffic (Finland) · Ontario 511 · Hong Kong TD · Québec 511</span></div>
         <p className="border-t border-white/10 pt-2 leading-relaxed text-slate-500">Unavailable layers never render invented markers, people, buildings, motion, or feeds.</p>
       </div>
     </details>
@@ -180,6 +184,8 @@ const KIND_DETAIL_LABEL: Record<TerraIntelligenceEventKind, string> = {
   landmark_poi: 'Nearby Landmark',
   traffic_camera: 'Traffic Camera',
   traffic_event: 'Traffic Event',
+  traffic_flow_observation: 'Traffic Flow Observation',
+  road_weather_observation: 'Road Weather Observation',
 }
 
 // God's Eye Traffic phase truth doctrine — never call a still image live video, never call stale
@@ -192,6 +198,28 @@ const CAMERA_FRESHNESS_LABEL: Record<string, { text: string; color: string }> = 
   stale: { text: 'STALE', color: 'text-amber-400' },
   offline: { text: 'OFFLINE', color: 'text-red-400' },
   unknown: { text: 'UNKNOWN', color: 'text-slate-400' },
+}
+
+// Phase 3: per-provider camera attribution (previously hardcoded to the two Phase 1/2 sources).
+const CAMERA_ATTRIBUTION: Record<string, string> = {
+  digitraffic_road_cameras: 'Fintraffic / digitraffic.fi, CC BY 4.0',
+  ontario_511_cameras: 'Ontario 511 (511on.ca), Government of Ontario',
+  hong_kong_td_cameras: 'Transport Department, Government of the Hong Kong SAR (data.gov.hk)',
+  quebec_511_cameras: 'Québec 511 — Ministère des Transports et de la Mobilité durable',
+}
+
+// Maritime's richer bespoke resolver (lib/terra/maritimeCoverage.ts — RATE_LIMITED, DELAYED_DATA,
+// NO_VESSELS_OBSERVED) keeps its own label text, but its states surface through the SAME shared
+// TerraCoverageBadge as every traffic layer, mapped here onto the shared 7-state truth vocabulary
+// (lib/terra/coverageTruth.ts) for color — one coherent visual model for the Commander.
+const MARITIME_COVERAGE_BADGE_STATE: Record<TerraMaritimeCoverageState, TerraCoverageTruthState> = {
+  PENDING: 'LOADING',
+  LIVE_DATA_PRESENT: 'LIVE',
+  NO_VESSELS_OBSERVED: 'NO_DATA',
+  NO_COVERAGE: 'NO_COVERAGE',
+  SOURCE_OFFLINE: 'OFFLINE',
+  DELAYED_DATA: 'STALE',
+  RATE_LIMITED: 'OFFLINE',
 }
 
 // Coordinate origin — Phase 4's explicit provenance requirement: a Commander must be able to
@@ -356,25 +384,52 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
     case 'traffic_camera': {
       const freshness = typeof feature.properties.freshness === 'string' ? feature.properties.freshness : 'unknown'
       const freshnessMeta = CAMERA_FRESHNESS_LABEL[freshness] ?? CAMERA_FRESHNESS_LABEL.unknown
+      // Québec 511 publishes an HTML viewer page per camera, never a direct JPEG (see
+      // lib/terra/normalizeQuebecTrafficCameras.ts) — a link, never an <img>.
+      const viewerUrl = typeof feature.properties.viewerUrl === 'string' ? feature.properties.viewerUrl : null
+      // Ontario 511 and Hong Kong TD images are proxied (app/api/terra/camera-image/route.ts)
+      // rather than hotlinked directly — this phase's camera-image proxy boundary. Digitraffic's
+      // imageUrl stays a direct hotlink, matching Phase 1's existing, unchanged behavior.
+      const proxiedImageUrl =
+        feature.providerId === 'ontario_511_cameras' && typeof feature.properties.viewId === 'string'
+          ? `/api/terra/camera-image?provider=ontario_511_cameras&id=${encodeURIComponent(feature.properties.viewId)}`
+          : feature.providerId === 'hong_kong_td_cameras' && typeof feature.properties.cameraId === 'string'
+            ? `/api/terra/camera-image?provider=hong_kong_td_cameras&id=${encodeURIComponent(feature.properties.cameraId)}`
+            : null
+      const directImageUrl = feature.providerId === 'digitraffic_road_cameras' && typeof feature.properties.imageUrl === 'string' ? feature.properties.imageUrl : null
       return (
         <>
           <Row label="Coordinates" value={coords} mono />
           {typeof feature.properties.road === 'string' && <Row label="Road" value={feature.properties.road} />}
           {typeof feature.properties.direction === 'string' && <Row label="Direction" value={feature.properties.direction.replace(/_/g, ' ').toLowerCase()} />}
-          <Row label="Feed type" value="Still image (refreshing)" />
+          <Row label="Feed type" value={viewerUrl ? 'HTML viewer at source (no direct still published)' : 'Still image (refreshing)'} />
           <div className="flex justify-between"><dt>Status</dt><dd className={freshnessMeta.color}>{freshnessMeta.text}</dd></div>
           {feature.timestamp && <Row label="Captured" value={new Date(feature.timestamp).toLocaleString()} />}
           {typeof feature.properties.collectionIntervalSec === 'number' && <Row label="Refresh interval" value={`${feature.properties.collectionIntervalSec}s`} />}
-          {typeof feature.properties.imageUrl === 'string' && (
-            // eslint-disable-next-line @next/next/no-img-element -- external provider-hosted still image, refreshed at source cadence; not a Next-optimizable local asset.
+          {proxiedImageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- proxied still image, not a Next-optimizable local asset.
             <img
-              src={feature.properties.imageUrl}
+              src={proxiedImageUrl}
               alt={`${feature.title} — road camera still image`}
               className="mt-1 w-full rounded border border-white/10"
               loading="lazy"
             />
           )}
-          <Row label="Attribution" value="Fintraffic / digitraffic.fi, CC BY 4.0" />
+          {directImageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- external provider-hosted still image, refreshed at source cadence; not a Next-optimizable local asset.
+            <img
+              src={directImageUrl}
+              alt={`${feature.title} — road camera still image`}
+              className="mt-1 w-full rounded border border-white/10"
+              loading="lazy"
+            />
+          )}
+          {viewerUrl && (
+            <a href={viewerUrl} target="_blank" rel="noreferrer" className="mt-1 block rounded border border-white/15 px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-widest text-cyan-300 hover:border-cyan-400/60">
+              View at source (HTML viewer)
+            </a>
+          )}
+          <Row label="Attribution" value={CAMERA_ATTRIBUTION[feature.providerId] ?? feature.provenance.provider} />
         </>
       )
     }
@@ -387,8 +442,60 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
           {typeof feature.properties.road === 'string' && <Row label="Road" value={feature.properties.road} />}
           {typeof feature.properties.direction === 'string' && <Row label="Direction" value={feature.properties.direction} />}
           {typeof feature.properties.laneState === 'string' && <Row label="Lane state" value={feature.properties.laneState} />}
+          {typeof feature.properties.isFullClosure === 'boolean' && <Row label="Full closure" value={feature.properties.isFullClosure ? 'Yes' : 'No'} />}
           <Row label="Geometry" value={feature.geometryKind === 'line' ? `Corridor (${feature.pathCoordinates?.length ?? 0} vertices)` : coords} mono={feature.geometryKind !== 'line'} />
           {feature.timestamp && <Row label="Last updated" value={new Date(feature.timestamp).toLocaleString()} />}
+        </>
+      )
+    case 'traffic_flow_observation':
+      // Phase 3: JARTIC (Japan) is volume-only and hourly with a ~2h publication lag — no speed
+      // field exists (the source publishes counts only; inventing one would be fabrication), and
+      // the recency label follows WebTRIS's honest "never live" pattern below.
+      if (feature.providerId === 'jartic_traffic_volumes') {
+        return (
+          <>
+            <Row label="Coordinates" value={coords} mono />
+            {typeof feature.properties.siteId === 'string' && <Row label="Site" value={feature.properties.siteId} mono />}
+            {typeof feature.properties.vehicleFlowCountUp === 'number' && <Row label="Hourly volume (up)" value={String(feature.properties.vehicleFlowCountUp)} />}
+            {typeof feature.properties.vehicleFlowCountDown === 'number' && <Row label="Hourly volume (down)" value={String(feature.properties.vehicleFlowCountDown)} />}
+            {typeof feature.properties.observationDateJst === 'string' && (
+              <Row
+                label="Observation (JST)"
+                value={`${feature.properties.observationDateJst}${typeof feature.properties.observationHourBandJst === 'string' ? ` ${feature.properties.observationHourBandJst}` : ''}`}
+              />
+            )}
+            <div className="flex justify-between"><dt>Data recency</dt><dd className="text-amber-400">HOURLY DATA — LAGS REAL TIME (~2 HOURS), NOT LIVE</dd></div>
+            <Row label="Attribution" value="JARTIC (Japan Road Traffic Information Center)" />
+          </>
+        )
+      }
+      return (
+        <>
+          <Row label="Coordinates" value={coords} mono />
+          {typeof feature.properties.road === 'string' && <Row label="Road" value={feature.properties.road} />}
+          {typeof feature.properties.direction === 'string' && <Row label="Direction" value={feature.properties.direction} />}
+          {typeof feature.properties.speedMph === 'number' && <Row label="Observed speed" value={`${feature.properties.speedMph} mph`} />}
+          {typeof feature.properties.vehicleFlowCount === 'number' && <Row label="Observed vehicle flow" value={String(feature.properties.vehicleFlowCount)} />}
+          <Row label="Free-flow baseline" value="Not supplied by source" />
+          <div className="flex justify-between"><dt>Data recency</dt><dd className="text-amber-400">HISTORICAL — NOT LIVE</dd></div>
+          {typeof feature.properties.reportDate === 'string' && <Row label="Report date" value={feature.properties.reportDate} />}
+          <Row label="Attribution" value="National Highways, UK Open Government Licence" />
+        </>
+      )
+    case 'road_weather_observation':
+      return (
+        <>
+          <Row label="Coordinates" value={coords} mono />
+          {typeof feature.properties.airTemperatureC === 'number' && <Row label="Air temperature" value={`${feature.properties.airTemperatureC}°C`} />}
+          {typeof feature.properties.roadSurfaceTemperatureC === 'number' && <Row label="Road surface temperature" value={`${feature.properties.roadSurfaceTemperatureC}°C`} />}
+          {typeof feature.properties.relativeHumidityPct === 'number' && <Row label="Relative humidity" value={`${feature.properties.relativeHumidityPct}%`} />}
+          {typeof feature.properties.visibilityKm === 'number' && <Row label="Visibility" value={`${feature.properties.visibilityKm} km`} />}
+          {typeof feature.properties.windAverageMs === 'number' && <Row label="Average wind" value={`${feature.properties.windAverageMs} m/s`} />}
+          {typeof feature.properties.windDirectionDeg === 'number' && <Row label="Wind direction" value={`${feature.properties.windDirectionDeg}°`} />}
+          {typeof feature.properties.precipitationIntensityMmH === 'number' && <Row label="Precipitation intensity" value={`${feature.properties.precipitationIntensityMmH} mm/h`} />}
+          {typeof feature.properties.frictionCoefficient === 'number' && <Row label="Friction coefficient" value={String(feature.properties.frictionCoefficient)} />}
+          {feature.timestamp && <Row label="Observed" value={new Date(feature.timestamp).toLocaleString()} />}
+          <Row label="Attribution" value="Fintraffic / digitraffic.fi, CC BY 4.0" />
         </>
       )
     default:
@@ -548,7 +655,7 @@ function applyTerraBuildingsVisibility(tileset: import('cesium').Cesium3DTileset
   tileset.show = visible
 }
 
-export function TerraShell({ presentation = 'workspace' }: { presentation?: 'workspace' | 'command-center' }) {
+function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'workspace' | 'command-center' }) {
   const [globeStatus, setGlobeStatus] = useState<TerraGlobeStatus>({ phase: 'loading' })
   const [viewer, setViewer] = useState<CesiumViewer | null>(null)
   const [selection, setSelection] = useState<Selection>({ kind: 'none' })
@@ -746,40 +853,41 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
     return () => clearTimeout(timeout)
   }, [maritimeRegionalSummary, maritimeCoverageState, maritimeBoundingBoxQuery, setMaritimeSummary])
 
-  // God's Eye Traffic & Camera Intelligence phase — same bespoke camera-bbox-driven pattern as
-  // aircraft/maritime above. Each source's own buildTerra*BoundingBoxQuery already gates on that
-  // source's real coverage envelope internally (Finland for road cameras, British Columbia for
-  // DriveBC events) and returns null outside it, the same way maritimeBoundingBox.ts does — a
-  // dedicated NO_COVERAGE-vs-zero-observed resolver (mirroring maritimeCoverage.ts) is a clean,
-  // small follow-up, not required for a first working layer (matches this file's existing OpenSky
-  // treatment, which also has bounded real coverage without one).
-  const [roadCamerasEnabled, setRoadCamerasEnabled] = useState(() => presentation === 'command-center')
-  const roadCameraBoundingBoxQuery = useMemo(() => {
-    if (!roadCamerasEnabled) return null
-    if (cameraScale.level === 'global') return null
-    return buildTerraRoadCameraBoundingBoxQuery(cameraViewRectangle.rectangle)
-  }, [roadCamerasEnabled, cameraScale.level, cameraViewRectangle.rectangle])
-  const roadCameraAutoRefreshAllowed = shouldAutoRefreshTerraLayer(clock.time.mode)
-  const roadCameras = useTerraLayer('digitraffic_road_cameras', roadCameraBoundingBoxQuery !== null, 60_000, roadCameraAutoRefreshAllowed, roadCameraBoundingBoxQuery)
-  useEffect(() => {
-    const timeout = setTimeout(() => handleFeaturesChange('digitraffic_road_cameras', roadCameras.features), 0)
-    return () => clearTimeout(timeout)
-  }, [roadCameras.features, handleFeaturesChange])
-  const roadCameraSelectedId = selection.kind === 'feature' && selection.layerId === 'digitraffic_road_cameras' ? selection.featureId : null
+  // God's Eye Traffic & Camera Intelligence phases (1/2/3): all 13 bounded-coverage traffic
+  // layers — including the 7 Phase 3 layers from lib/terra/PHASE3_HANDOFF_UI_LANE.md — are wired
+  // through the single generic TerraTrafficLayer component (see terraTrafficLayerDefs.ts), each
+  // owning its own enabled state, bbox-gated query, useTerraLayer fetch, coverage-truth badge,
+  // and TerraFeatureLayer render. They report features up through the same handleFeaturesChange
+  // every other layer uses, so selection, the hazard summary, and the hover preview below work
+  // identically for all of them.
 
-  const [trafficEventsEnabled, setTrafficEventsEnabled] = useState(() => presentation === 'command-center')
-  const trafficEventBoundingBoxQuery = useMemo(() => {
-    if (!trafficEventsEnabled) return null
-    if (cameraScale.level === 'global') return null
-    return buildTerraTrafficEventBoundingBoxQuery(cameraViewRectangle.rectangle)
-  }, [trafficEventsEnabled, cameraScale.level, cameraViewRectangle.rectangle])
-  const trafficEventAutoRefreshAllowed = shouldAutoRefreshTerraLayer(clock.time.mode)
-  const trafficEvents = useTerraLayer('drivebc_events', trafficEventBoundingBoxQuery !== null, 60_000, trafficEventAutoRefreshAllowed, trafficEventBoundingBoxQuery)
+  // Phase 3 camera hover preview: raw hover signal from TerraGlobe's MOUSE_MOVE pick (composite
+  // "{layerId}:{featureId}" + canvas-relative position), resolved to a real traffic_camera feature
+  // below. Imagery fetch policy (dwell-gated, never preloaded) lives in TerraCameraHoverCard.
+  const [cameraHover, setCameraHover] = useState<{ compositeId: string; x: number; y: number } | null>(null)
+  const handleEntityHover = useCallback((compositeId: string | null, position: { x: number; y: number } | null) => {
+    setCameraHover(compositeId && position ? { compositeId, x: position.x, y: position.y } : null)
+  }, [])
+  // A camera move invalidates the anchored screen position — dismiss rather than leave a stale
+  // card. Compared by the rectangle's own value (not object identity) via a ref-guarded effect —
+  // mirroring TerraTrafficLayer's layerCoverage publisher — so a wrapper object recreated without
+  // the underlying view actually changing can never re-trigger this or cascade into a render loop.
+  const cameraRectSignature = terraCameraRectSignature(cameraViewRectangle.rectangle)
+  const lastCameraRectSignatureRef = useRef(cameraRectSignature)
   useEffect(() => {
-    const timeout = setTimeout(() => handleFeaturesChange('drivebc_events', trafficEvents.features), 0)
-    return () => clearTimeout(timeout)
-  }, [trafficEvents.features, handleFeaturesChange])
-  const trafficEventSelectedId = selection.kind === 'feature' && selection.layerId === 'drivebc_events' ? selection.featureId : null
+    if (lastCameraRectSignatureRef.current === cameraRectSignature) return
+    lastCameraRectSignatureRef.current = cameraRectSignature
+    setCameraHover(prev => (prev !== null ? null : prev))
+  }, [cameraRectSignature])
+  const hoveredCameraFeature = useMemo(() => {
+    if (!cameraHover) return null
+    const separatorIndex = cameraHover.compositeId.indexOf(':')
+    if (separatorIndex === -1) return null
+    const layerId = cameraHover.compositeId.slice(0, separatorIndex)
+    const featureId = cameraHover.compositeId.slice(separatorIndex + 1)
+    const feature = (layerFeatures[layerId] ?? []).find(item => item.id === featureId)
+    return feature && feature.kind === 'traffic_camera' ? feature : null
+  }, [cameraHover, layerFeatures])
 
   const activateCoordinate = useCallback((point: Extract<TerraClickPoint, { ok: true }>) => {
     reverseRequestRef.current.controller?.abort()
@@ -921,7 +1029,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
 
   return (
     <div className={`relative w-full overflow-hidden bg-black text-white ${commandCenter ? 'h-full min-h-0' : 'h-screen'}`}>
-      <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onBuildingsTilesetReady={setBuildingsTileset} onEntityClick={handleEntityClick} onGroundClick={handleGroundClick} />
+      <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onBuildingsTilesetReady={setBuildingsTileset} onEntityClick={handleEntityClick} onGroundClick={handleGroundClick} onEntityHover={handleEntityHover} />
       <TerraEarthImagery
         viewer={viewer}
         selectedTime={clock.time.currentTime}
@@ -938,11 +1046,42 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
       {/* Terra Phase 3 — Maritime Source Federation: same bespoke camera-bbox-driven pattern as
           aircraft above, rendered unconditionally in both presentations for the same reason. */}
       <TerraFeatureLayer layerId="digitraffic_marine" viewer={viewer} enabled={maritimeBoundingBoxQuery !== null} features={maritime.features} selectedId={maritimeSelectedId} cluster trails={maritimeTrails} />
-      {/* God's Eye Traffic & Camera Intelligence phase: same bespoke camera-bbox-driven pattern as
-          aircraft/maritime above, rendered unconditionally in both presentations for the same
-          reason. */}
-      <TerraFeatureLayer layerId="digitraffic_road_cameras" viewer={viewer} enabled={roadCameraBoundingBoxQuery !== null} features={roadCameras.features} selectedId={roadCameraSelectedId} cluster />
-      <TerraFeatureLayer layerId="drivebc_events" viewer={viewer} enabled={trafficEventBoundingBoxQuery !== null} features={trafficEvents.features} selectedId={trafficEventSelectedId} />
+      {/* God's Eye Traffic phases 1–3: all 13 bounded-coverage traffic layers render through the
+          one generic TerraTrafficLayer (terraTrafficLayerDefs.ts). In the full workspace the
+          toggle/status rows live in the Data Layers rail below (the {!commandCenter} mount);
+          here in command-center mode the same components mount headless (hideControls) so event
+          markers still fetch and render — the two mounts are mutually exclusive, so no layer is
+          ever fetched twice. */}
+      {commandCenter && TERRA_TRAFFIC_LAYER_DEFS.map(def => (
+        <TerraTrafficLayer
+          key={def.layerId}
+          def={def}
+          viewer={viewer}
+          selection={selection}
+          onFeaturesChange={handleFeaturesChange}
+          timeMode={clock.time.mode}
+          cameraScaleLevel={cameraScale.level}
+          rectangle={cameraViewRectangle.rectangle}
+          defaultEnabled
+          hideControls
+        />
+      ))}
+      {/* Phase 3 camera hover preview — screen-anchored card near the hovered traffic_camera
+          entity; click-through opens the same full detail panel a marker click does. */}
+      {hoveredCameraFeature && cameraHover && (
+        <TerraCameraHoverCard
+          key={hoveredCameraFeature.id}
+          feature={hoveredCameraFeature}
+          x={cameraHover.x}
+          y={cameraHover.y}
+          onOpen={() => {
+            const compositeId = cameraHover.compositeId
+            setCameraHover(null)
+            handleEntityClick(compositeId)
+          }}
+          onDismiss={() => setCameraHover(null)}
+        />
+      )}
 
       {/* God's Eye command center has no Data Layers control panel (see the workspace-only left
           rail below), but its event markers must still fetch and render — otherwise there is
@@ -951,7 +1090,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
           component as the workspace's own layer list, just headless (hideControls) here; the two
           mounts are mutually exclusive with `!commandCenter` below, so no layer is ever fetched
           twice. */}
-      {commandCenter && TERRA_LAYER_SUMMARIES.filter(layer => layer.id !== 'opensky' && layer.id !== 'digitraffic_marine' && layer.id !== 'digitraffic_road_cameras' && layer.id !== 'drivebc_events').map(layer => (
+      {commandCenter && TERRA_LAYER_SUMMARIES.filter(layer => layer.id !== 'opensky' && layer.id !== 'digitraffic_marine' && !TERRA_TRAFFIC_LAYER_DEFS.some(def => def.layerId === layer.id)).map(layer => (
         <TerraLayerRow
           key={layer.id}
           layer={layer}
@@ -1073,7 +1212,7 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
             // own bespoke, camera-bbox-driven section below (a fixed default-query toggle wouldn't
             // make sense for a layer whose whole point is following the Commander's live view),
             // never a second listing of the same layer.
-            const layers = TERRA_LAYER_SUMMARIES.filter(layer => group.domains.includes(layer.domain) && layer.id !== 'opensky' && layer.id !== 'digitraffic_marine' && layer.id !== 'digitraffic_road_cameras' && layer.id !== 'drivebc_events')
+            const layers = TERRA_LAYER_SUMMARIES.filter(layer => group.domains.includes(layer.domain) && layer.id !== 'opensky' && layer.id !== 'digitraffic_marine' && !TERRA_TRAFFIC_LAYER_DEFS.some(def => def.layerId === layer.id))
             if (layers.length === 0) return null
             return (
               <div key={group.label} className="mt-2 first:mt-0">
@@ -1179,15 +1318,9 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
                     <p className="text-[10.5px] text-amber-300/90">No registered AIS source covers this region (currently: Finnish territorial waters/EEZ only). This is a coverage gap, not a claim that no vessels are present.</p>
                   ) : (
                     <>
-                      <p className={`text-[10px] font-bold uppercase tracking-widest ${
-                        maritimeCoverageState === 'LIVE_DATA_PRESENT' ? 'text-emerald-400'
-                        : maritimeCoverageState === 'NO_VESSELS_OBSERVED' ? 'text-slate-400'
-                        : maritimeCoverageState === 'PENDING' ? 'text-slate-400'
-                        : maritimeCoverageState === 'DELAYED_DATA' ? 'text-amber-400'
-                        : 'text-red-400'
-                      }`}>
-                        {TERRA_MARITIME_COVERAGE_LABELS[maritimeCoverageState]}
-                      </p>
+                      {/* Maritime's richer bespoke states surface through the same shared badge
+                          as every traffic layer — one coherent coverage-truth visual model. */}
+                      <TerraCoverageBadge state={MARITIME_COVERAGE_BADGE_STATE[maritimeCoverageState]} label={TERRA_MARITIME_COVERAGE_LABELS[maritimeCoverageState]} />
                       <p className="text-[10.5px] text-slate-500">
                         {maritimeRegionalSummary.totalCount} vessel{maritimeRegionalSummary.totalCount === 1 ? '' : 's'}
                         {maritimeRegionalSummary.totalCount > 0 && ` · ${maritimeRegionalSummary.movingCount} moving · ${maritimeRegionalSummary.stationaryCount} stationary`}
@@ -1209,89 +1342,27 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
             </div>
           </div>
 
-          {/* God's Eye Traffic & Camera Intelligence phase: same bespoke camera-bbox-driven
-              pattern as Aviation/Maritime above. Each source's own bounding-box builder already
-              refuses to build a query outside its real coverage envelope (Finland for road
-              cameras, British Columbia for DriveBC events), so a null query here is always an
-              honest "no bounded query possible right now," never a fabricated LIVE state. */}
+          {/* God's Eye Traffic phases 1–3: all 13 bounded-coverage traffic layers (6 Phase 1/2 +
+              7 Phase 3) render through the one generic TerraTrafficLayer — each owns its own
+              toggle, camera-view-bbox query (gated on camera scale AND the source's real coverage
+              envelope), useTerraLayer fetch, shared coverage-truth badge, and TerraFeatureLayer
+              render. The same components mount headless in command-center mode above; the two
+              mounts are mutually exclusive, so no layer is ever fetched twice. */}
           <div className="mt-2 border-t border-white/10 pt-2">
             <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">Traffic</p>
-            <div className="mt-1 border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-300">Cameras (Digitraffic Road — Finland)</span>
-                <button
-                  type="button"
-                  onClick={() => setRoadCamerasEnabled(prev => !prev)}
-                  className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
-                    roadCamerasEnabled ? 'border-emerald-400/60 text-emerald-400' : 'border-white/20 text-slate-500'
-                  }`}
-                  aria-pressed={roadCamerasEnabled}
-                >
-                  {roadCamerasEnabled ? 'On' : 'Off'}
-                </button>
-              </div>
-              {roadCamerasEnabled && (
-                <div className="mt-1 space-y-1">
-                  {roadCameraBoundingBoxQuery === null ? (
-                    <p className="text-[10.5px] text-amber-300/90">Zoom in, or pan to Finland&apos;s road network — the current view is too wide, or outside camera coverage, for a bounded query.</p>
-                  ) : (
-                    <>
-                      <p className={`text-[10px] font-bold uppercase tracking-widest ${FEED_STATE_LABEL[roadCameras.state]?.color ?? 'text-slate-400'}`}>
-                        {FEED_STATE_LABEL[roadCameras.state]?.text ?? 'LOADING…'}
-                      </p>
-                      <p className="text-[10.5px] text-slate-500">{roadCameras.features.length} camera{roadCameras.features.length === 1 ? '' : 's'} in view</p>
-                      {roadCameras.lastFetchedAt && <p className="text-[10.5px] text-slate-500">Last fetched: {new Date(roadCameras.lastFetchedAt).toLocaleTimeString()}</p>}
-                      {roadCameras.lastErrorMessage && <p className="text-[10.5px] text-red-400">{roadCameras.lastErrorMessage}</p>}
-                      <button
-                        type="button"
-                        onClick={roadCameras.refresh}
-                        className="mt-0.5 rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300 hover:border-emerald-400/60 hover:text-emerald-400"
-                      >
-                        Refresh now
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="mt-1 border-t border-white/10 pt-2">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-300">Events (DriveBC / Open511 — British Columbia)</span>
-                <button
-                  type="button"
-                  onClick={() => setTrafficEventsEnabled(prev => !prev)}
-                  className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
-                    trafficEventsEnabled ? 'border-emerald-400/60 text-emerald-400' : 'border-white/20 text-slate-500'
-                  }`}
-                  aria-pressed={trafficEventsEnabled}
-                >
-                  {trafficEventsEnabled ? 'On' : 'Off'}
-                </button>
-              </div>
-              {trafficEventsEnabled && (
-                <div className="mt-1 space-y-1">
-                  {trafficEventBoundingBoxQuery === null ? (
-                    <p className="text-[10.5px] text-amber-300/90">Zoom in, or pan to British Columbia — the current view is too wide, or outside DriveBC coverage, for a bounded query.</p>
-                  ) : (
-                    <>
-                      <p className={`text-[10px] font-bold uppercase tracking-widest ${FEED_STATE_LABEL[trafficEvents.state]?.color ?? 'text-slate-400'}`}>
-                        {FEED_STATE_LABEL[trafficEvents.state]?.text ?? 'LOADING…'}
-                      </p>
-                      <p className="text-[10.5px] text-slate-500">{trafficEvents.features.length} active event{trafficEvents.features.length === 1 ? '' : 's'} in view</p>
-                      {trafficEvents.lastFetchedAt && <p className="text-[10.5px] text-slate-500">Last fetched: {new Date(trafficEvents.lastFetchedAt).toLocaleTimeString()}</p>}
-                      {trafficEvents.lastErrorMessage && <p className="text-[10.5px] text-red-400">{trafficEvents.lastErrorMessage}</p>}
-                      <button
-                        type="button"
-                        onClick={trafficEvents.refresh}
-                        className="mt-0.5 rounded border border-white/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300 hover:border-emerald-400/60 hover:text-emerald-400"
-                      >
-                        Refresh now
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+            {TERRA_TRAFFIC_LAYER_DEFS.map(def => (
+              <TerraTrafficLayer
+                key={def.layerId}
+                def={def}
+                viewer={viewer}
+                selection={selection}
+                onFeaturesChange={handleFeaturesChange}
+                timeMode={clock.time.mode}
+                cameraScaleLevel={cameraScale.level}
+                rectangle={cameraViewRectangle.rectangle}
+                defaultEnabled={false}
+              />
+            ))}
           </div>
         </div>
 
@@ -1392,3 +1463,10 @@ export function TerraShell({ presentation = 'workspace' }: { presentation?: 'wor
     </div>
   )
 }
+
+// God's Eye command-center composer (app/page.tsx) recreates its own JSX (and every inline
+// callback) on every Commander keystroke, which otherwise forces this entire Cesium-backed subtree
+// through a full React re-render per keystroke purely from parent churn — `presentation` is this
+// component's only prop, and it never changes after mount, so a shallow-props memo skips all of
+// that unnecessary work without affecting any of TerraShell's own state/context-driven updates.
+export const TerraShell = memo(TerraShellComponent)

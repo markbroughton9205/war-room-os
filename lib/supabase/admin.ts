@@ -2,7 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import { SERVER_ONLY_SUPABASE_SECRET_LABEL, SUPABASE_SERVICE_ROLE_ENV } from '@/lib/security/sensitiveEnv'
 
 /**
- * Server-only Supabase client using the service role JWT only.
+ * Server-only Supabase client using the project secret key.
+ * Accepts a modern `sb_secret_` server secret or a legacy JWT with role `service_role`.
  * Do not import this module from client components or shared code that ships to the browser.
  *
  * Uses `NEXT_PUBLIC_SUPABASE_URL` (project URL) and the server-only Supabase role secret only.
@@ -18,7 +19,17 @@ function assertServiceRoleKeyShape(key: string | undefined): asserts key is stri
   if (!key?.trim()) {
     throw new Error(`${SERVER_ONLY_SUPABASE_SECRET_LABEL} is not configured`)
   }
-  const parts = key.trim().split('.')
+  const trimmed = key.trim()
+  if (trimmed.startsWith('sb_publishable_')) {
+    throw new Error(
+      `${SERVER_ONLY_SUPABASE_SECRET_LABEL} must be the service_role secret from Supabase (Project Settings API), not the anon or publishable key.`,
+    )
+  }
+  // Modern Secret keys (sb_secret_...) are opaque; they are not JWTs.
+  if (trimmed.startsWith('sb_secret_')) {
+    return
+  }
+  const parts = trimmed.split('.')
   if (parts.length !== 3) {
     throw new Error(
       `${SERVER_ONLY_SUPABASE_SECRET_LABEL} must be the JWT-style secret from Supabase (Project Settings API).`,

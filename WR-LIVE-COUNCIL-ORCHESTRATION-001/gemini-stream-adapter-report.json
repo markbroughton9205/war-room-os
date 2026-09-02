@@ -1,0 +1,4 @@
+{
+  "adapter": "lib/council/live-orchestration/adapters/gemini.ts",
+  "live_canary": "SKIPPED unusable GEMINI_API_KEY"
+}

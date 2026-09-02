@@ -1,4 +1,5 @@
 import { listEngineeringAgents, type EngineeringAgentRegistryEntry } from './engineeringAgentRegistry'
+import { CODEX_ENGINEERING_AGENT } from './codexEngineeringAgent'
 import type { EngineeringTaskPacket } from './engineeringTaskPacket'
 
 export type EngineeringStatusBridge = {
@@ -30,7 +31,7 @@ export function buildEngineeringStatusBridge(input: {
     },
     codex: {
       status: 'cloud provider only',
-      missingConfiguration: 'No autonomous engineering executor is wired. Cursor remains manual-only.',
+      missingConfiguration: CODEX_ENGINEERING_AGENT.missingConfiguration,
     },
     latestTaskPacket: input.latestTaskPacket,
     lastValidationResult: input.latestTaskPacket ? 'pending Commander-approved execution' : 'none',

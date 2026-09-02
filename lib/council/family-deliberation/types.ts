@@ -33,6 +33,8 @@ export type DeliberationClaim = {
 export type DeliberationTurn = {
   turn_id: string
   session_id: string
+  round_id: string
+  commander_turn_id: string
   mission_id: string
   mission_version: number
   provider_family: CouncilOrchestrationFamily
@@ -63,6 +65,8 @@ export type DeliberationTurn = {
 export type DeliberationSession = {
   schema_version: '48c3a.family-deliberation.v1'
   session_id: string
+  round_id: string
+  commander_turn_id: string
   mission_id: string
   mission_version: number
   commander_message_id: string

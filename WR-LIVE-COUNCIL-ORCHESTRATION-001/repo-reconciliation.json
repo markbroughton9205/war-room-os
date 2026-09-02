@@ -1,0 +1,36 @@
+{
+  "branch": "node01-source-sync",
+  "head": "973f0a792c249d15c9564599fb853ce471dc2b25",
+  "git_status": "dirty_worktree_preexisting_plus_this_mission",
+  "foundation_rebuild_present": true,
+  "council_stream_transport": "app/api/chat/stream/route.ts + lib/council/incremental-transport",
+  "incremental_transport": "lib/council/incremental-transport",
+  "provider_adapter_paths": [
+    "lib/council/live-orchestration/adapters",
+    "lib/council/providerDirectCall.ts",
+    "app/api/chat/execute.ts"
+  ],
+  "family_deliberation_runtime": "lib/council/family-deliberation/runtime.ts",
+  "liveChatPipeline": "lib/council/liveChatPipeline.ts",
+  "message_persistence": "war_room_conversations + execute persistence",
+  "ui_render_path": "app/page.tsx gather + Council packet render",
+  "typing_hud": "typingFamily + floorStream",
+  "memory_candidate_path": "app/page.tsx setMemorySavePrompt gated by decideMemoryCandidatePrompt",
+  "provider_health": "lib/providers/health.ts + live-orchestration/healthLevels.ts",
+  "retry": "lib/council/live-orchestration/retryPolicy.ts max 1 before visible token",
+  "timeouts": "first_token/idle/overall via timeoutPolicy.ts",
+  "claude_call_path": "streamAnthropicMessages via streamCouncilFamily",
+  "openai_call_path": "streamOpenAiChat via streamCouncilFamily",
+  "gemini_call_path": "streamGeminiCouncil (key unusable in this env)",
+  "grok_call_path": "streamGrokChat (key unusable in this env)",
+  "providers_previously_complete_json": true,
+  "stream_event_schemas": "progress diagnostic TEXT_DELTA + incremental envelopes opened/progress/final/error/closed",
+  "attempt_idempotency": "attemptIdFor/logicalMessageIdFor",
+  "full_council_floor_order": [
+    "chatgpt",
+    "claude",
+    "grok",
+    "gemini",
+    "red_team"
+  ]
+}

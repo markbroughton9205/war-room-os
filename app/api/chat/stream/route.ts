@@ -158,6 +158,11 @@ export function createCouncilStreamPostHandler(executeRequest: CouncilStreamExec
           }
           const data: CouncilChatJson = isCouncilChatJson(responseBody) ? responseBody : { error: 'Invalid Council response.' }
           finalProgress = data.councilProgress ?? finalProgress
+          // AGI Wave 1 — fire-and-forget experience capture; never awaited on the critical path
+          // and never allowed to affect the SSE envelope below.
+          void import('@/lib/agi-experience/captureFromChatResponse')
+            .then(mod => mod.captureExperienceFromChatJson(data as unknown as Record<string, unknown>))
+            .catch(() => null)
           const requestId = finalProgress?.requestId ?? operationId ?? transportId
           if (!opened) emitOpened(requestId)
           if (!response.ok) {

@@ -1,0 +1,54 @@
+{
+  "mission": "WR-COUNCIL-PROVIDER-RUNTIME-REPAIR-001",
+  "openai_adapter": {
+    "council_live_path": "app/api/chat/execute.ts:callChatGPT",
+    "shared_adapter": "lib/ai/providers/openai.ts:completeOpenAIChat",
+    "direct_test_adapter": "lib/council/providerDirectCall.ts:callOpenAi"
+  },
+  "anthropic_adapter": {
+    "council_live_path": "app/api/chat/execute.ts:callClaude",
+    "direct_test_adapter": "lib/council/providerDirectCall.ts:callAnthropic",
+    "no_lib_ai_providers_anthropic_file": true
+  },
+  "council_orchestration": {
+    "path": "app/api/chat/execute.ts:runFamilyToFamilyDeliberation",
+    "runtime_helpers": "lib/council/family-deliberation/runtime.ts"
+  },
+  "model_provider_registry": {
+    "display_mapping": "lib/council/family-deliberation/runtime.ts:providerModelForFamily",
+    "openai_model_hardcoded": "gpt-4o",
+    "anthropic_model_in_execute": "claude-sonnet-5",
+    "anthropic_model_in_direct_test": "claude-sonnet-4-20250514"
+  },
+  "environment_variable_loading": {
+    "source": "Next.js loads .env.local for next start / next dev",
+    "launch_agent": "com.warroom.node01",
+    "launch_agent_env_var_names": ["PATH"],
+    "launch_agent_does_not_inject_provider_keys": true
+  },
+  "credential_resolution": {
+    "openai_env": "OPENAI_API_KEY",
+    "anthropic_env": "ANTHROPIC_API_KEY",
+    "no_database_provider_settings": true
+  },
+  "production_runtime_config": {
+    "host_dir": "/Users/markbroughton/WarRoomNode01",
+    "url": "https://warroomos.com",
+    "bind": "127.0.0.1:3000",
+    "command": "next start -H 127.0.0.1 -p 3000"
+  },
+  "fallback_logic": {
+    "opening_failure_stops_dependent_turns": true,
+    "does_not_fabricate_dialogue": true
+  },
+  "provider_health_error_normalization": {
+    "health": "lib/providers/health.ts",
+    "canonical": "lib/runtime/canonicalStatus.ts",
+    "http_route": "app/api/providers/health/route.ts",
+    "public_error": "lib/providers/publicError.ts"
+  },
+  "message_dependency_provenance": {
+    "output_message_id_only_if_complete": "lib/council/family-deliberation/runtime.ts:appendDeliberationTurn",
+    "opening_required_for_claude_and_later": true
+  }
+}

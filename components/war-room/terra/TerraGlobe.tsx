@@ -52,11 +52,19 @@ type TerraGlobeProps = {
   /** A left-click that did NOT hit a Terra entity — either a real ground coordinate or a
    * confirmed miss (clicked past the globe's edge). Never fires for entity clicks. */
   onGroundClick?: (point: TerraClickPoint) => void
+  /** Pointer hover over a Terra-managed entity (composite "{layerId}:{featureId}", same id shape
+   * as onEntityClick) plus the cursor's canvas-relative screen position — or nulls when the
+   * pointer is over no entity. Fires on entity change immediately; position-only updates are
+   * throttled (~80ms) so a resting pointer doesn't re-render the shell every frame. Powers the
+   * traffic-camera hover preview (TerraCameraHoverCard). */
+  onEntityHover?: (compositeId: string | null, position: { x: number; y: number } | null) => void
 }
+
+const HOVER_POSITION_THROTTLE_MS = 80
 
 const OSM_ATTRIBUTION_URL = 'https://tile.openstreetmap.org/'
 
-export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetReady, onEntityClick, onGroundClick }: TerraGlobeProps) {
+export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetReady, onEntityClick, onGroundClick, onEntityHover }: TerraGlobeProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<TerraGlobeStatus>({ phase: 'loading' })
 
@@ -67,12 +75,14 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetRe
   const onGroundClickRef = useRef(onGroundClick)
   const onViewerReadyRef = useRef(onViewerReady)
   const onBuildingsTilesetReadyRef = useRef(onBuildingsTilesetReady)
+  const onEntityHoverRef = useRef(onEntityHover)
   useEffect(() => {
     onEntityClickRef.current = onEntityClick
     onGroundClickRef.current = onGroundClick
     onViewerReadyRef.current = onViewerReady
     onBuildingsTilesetReadyRef.current = onBuildingsTilesetReady
-  }, [onEntityClick, onGroundClick, onViewerReady, onBuildingsTilesetReady])
+    onEntityHoverRef.current = onEntityHover
+  }, [onEntityClick, onGroundClick, onViewerReady, onBuildingsTilesetReady, onEntityHover])
 
   useEffect(() => {
     onStatusChange?.(status)
@@ -217,6 +227,29 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetRe
             hasTerrainHeight: hasRealTerrain,
           })
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+
+        // Hover pick (Phase 3 camera preview): entity changes fire immediately; same-entity
+        // position updates are throttled so a moving pointer doesn't re-render the shell per frame.
+        let lastHoverId: string | null = null
+        let lastHoverFireAt = 0
+        handler.setInputAction((movement: { endPosition: import('cesium').Cartesian2 }) => {
+          if (!onEntityHoverRef.current) return
+          const picked = viewer.scene.pick(movement.endPosition)
+          let hoverId: string | null = null
+          if (Cesium.defined(picked) && picked.id instanceof Cesium.Entity) {
+            hoverId = featureIdFromTerraEntityId(picked.id.id)
+          }
+          const now = Date.now()
+          if (hoverId !== lastHoverId) {
+            lastHoverId = hoverId
+            lastHoverFireAt = now
+          } else if (now - lastHoverFireAt < HOVER_POSITION_THROTTLE_MS) {
+            return
+          } else {
+            lastHoverFireAt = now
+          }
+          onEntityHoverRef.current(hoverId, { x: movement.endPosition.x, y: movement.endPosition.y })
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
         clickHandler = handler
 
         onViewerReadyRef.current?.(viewer)

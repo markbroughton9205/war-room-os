@@ -274,7 +274,6 @@ import {
   CouncilMembersPanel,
   CouncilWorkspace,
   DockPanelContent,
-  LiveRoomNavPanel,
   LiveRoomShell,
   LiveRoomModeProvider,
   MatrixTopIntelRow,
@@ -284,6 +283,22 @@ import {
   type AttachmentStatus,
   type DockPanelId,
 } from '@/components/war-room/live-room'
+import { CouncilSessionNavigator, type CouncilSessionListItem } from '@/components/war-room/council/CouncilSessionNavigator'
+import { CouncilContextInspector } from '@/components/war-room/council/CouncilContextInspector'
+import {
+  actorStageLine,
+  classifyCouncilTurn,
+  generateNeutralSessionTitle,
+  shouldAutoTitle,
+  shouldRunFamilyDeliberation,
+  stageFromDeliberationRole,
+  stageFromPersistedMetadata,
+  stageLabel,
+} from '@/lib/council/session-orchestration'
+import { decideMemoryCandidatePrompt } from '@/lib/council/live-orchestration/memoryCandidateGate'
+import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialCheckin'
+import { createPresentationBuffer } from '@/lib/council/live-orchestration/presentationBuffer'
+import { failureUiLabel } from '@/lib/council/live-orchestration/failureTaxonomy'
 import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
 import { formatCouncilOsSweepMarkdown } from '@/lib/war-room-sweep/formatCouncilResponse'
 import type { SweepReport } from '@/lib/war-room-sweep/types'
@@ -364,6 +379,11 @@ const CouncilDeliberationStream = dynamic(
   { ssr: false },
 )
 
+const AgiWaveOnePanel = dynamic(
+  () => import('@/components/war-room/agi-wave1/AgiWaveOnePanel').then(mod => mod.AgiWaveOnePanel),
+  { ssr: false },
+)
+
 const ConversationStatePanel = dynamic(
   () => import('@/components/war-room/council/ConversationStatePanel').then(mod => mod.ConversationStatePanel),
   {
@@ -407,6 +427,9 @@ export type CouncilMessage = {
   analystOperationsPacket?: AnalystOperationsPacket
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
+  councilStage?: import('@/lib/council/session-orchestration').CouncilMessageStage
+  commanderTurnId?: string | null
+  deliberationRoundId?: string | null
   shadowCouncilAssembly?: CouncilShadowSelectionReport
   councilProgress?: CouncilProgressRuntimeSnapshot
 }
@@ -558,15 +581,17 @@ function applyCouncilThreadHygiene(
     if (key) seenNoise.add(key)
     const family = parseCouncilMessageFamily(message.familyName)
     if (latestDecree && family && message.messageType === 'response' && councilOperationGroupKey(message, messages) === `turn:${latestDecree.id}`) {
-      const existing = latestRoundFamilyResponses.get(family)
+      const stageKey = message.councilStage ?? message.familyDeliberationTurn?.turn_role ?? 'response'
+      const collapseKey = `${family}:${stageKey}`
+      const existing = latestRoundFamilyResponses.get(collapseKey)
       if (existing) {
         const index = visibleMessages.findIndex(item => item.id === existing.id)
         if (index >= 0) visibleMessages[index] = message
-        latestRoundFamilyResponses.set(family, message)
+        latestRoundFamilyResponses.set(collapseKey, message)
         collapsedCount += 1
         continue
       }
-      latestRoundFamilyResponses.set(family, message)
+      latestRoundFamilyResponses.set(collapseKey, message)
     }
     visibleMessages.push(message)
   }
@@ -574,7 +599,7 @@ function applyCouncilThreadHygiene(
   return { visibleMessages, collapsedCount }
 }
 
-const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Goal: Panama relocation. Motivated by vision of success. Wants truth about systems that harm Black and low income communities.`
+const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Standing preference: wants truth about systems that harm Black and low income communities. Planning content such as relocation is durable memory, not standing profile.`
 
 function cloudEngineIdForCouncilFamily(f: CouncilOrchestrationFamily): EngineId | null {
   if (f === 'chatgpt' || f === 'baby') return 'chatgpt'
@@ -644,10 +669,13 @@ function mapWarRoomRowToCouncilMessage(
     content: string
     family?: string | null
     created_at: string
+    metadata?: Record<string, unknown>
   },
   opts?: { decreeText?: string; promptIntent?: PromptIntent; stabilityMode?: boolean },
 ): CouncilMessage {
   const ts = row.created_at ? new Date(row.created_at).toLocaleTimeString() : '--:--'
+  const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : undefined
+  const persistedStage = meta ? stageFromPersistedMetadata(meta) : undefined
   if (row.role === 'user') {
     return {
       id: row.id,
@@ -658,6 +686,7 @@ function mapWarRoomRowToCouncilMessage(
       icon: '⚔',
       provider: '',
       messageType: 'decree',
+      councilStage: persistedStage && persistedStage !== 'LEGACY' ? persistedStage : 'COMMANDER',
     }
   }
   if (row.role === 'system') {
@@ -682,6 +711,7 @@ function mapWarRoomRowToCouncilMessage(
     icon: '•',
     provider: '',
     messageType: 'response',
+    councilStage: persistedStage && persistedStage !== 'LEGACY' ? persistedStage : 'LEGACY',
   }
   return applyLiveCouncilRenderGate(base, opts)
 }
@@ -1899,7 +1929,18 @@ const MessageBubble = memo(function MessageBubble({
       </div>
       <div className={`flex-1 max-w-2xl ${isRael ? 'items-end' : 'items-start'} flex flex-col`}>
         <div className={`flex flex-wrap items-center gap-2 mb-1 ${isRael ? 'flex-row-reverse' : ''}`}>
-          <span className="text-xs font-bold tracking-widest" style={{ color: msg.color }}>{msg.familyName}</span>
+          <span className="text-xs font-bold tracking-widest" style={{ color: msg.color }}>
+            {msg.familyDeliberationTurn
+              ? actorStageLine(msg.familyName, stageFromDeliberationRole(msg.familyDeliberationTurn.turn_role))
+              : msg.councilStage && msg.councilStage !== 'LEGACY' && msg.councilStage !== 'UNKNOWN_STAGE'
+                ? actorStageLine(msg.familyName, msg.councilStage)
+                : msg.familyName}
+          </span>
+          {msg.councilStage || msg.familyDeliberationTurn ? (
+            <span className="text-[10px] uppercase tracking-widest" style={{ color: '#94a3b8' }}>
+              {stageLabel(msg.familyDeliberationTurn ? stageFromDeliberationRole(msg.familyDeliberationTurn.turn_role) : (msg.councilStage ?? 'LEGACY'))}
+            </span>
+          ) : null}
           {msg.provider && <span className="text-xs" style={{ color: '#444' }}>{msg.provider}</span>}
           <span className="text-xs" style={{ color: '#333' }}>{msg.timestamp}</span>
           <span className="text-xs px-1 rounded" style={{ color: '#555', background: '#111' }}>{msg.messageType}</span>
@@ -5999,6 +6040,7 @@ function Home() {
 
   const [loading, setLoading] = useState(false)
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
+  const [floorStream, setFloorStream] = useState<{ family: string; text: string; status: string } | null>(null)
   const [toolBarHealth, setToolBarHealth] = useState(initialToolBarHealth)
   const [toolBarActivity, setToolBarActivity] = useState<Partial<Record<ToolId, ToolBarLabel>>>({})
   const [operatorTab, setOperatorTab] = useState<OperatorTab>('command')
@@ -6178,6 +6220,10 @@ function Home() {
   const [engineList, setEngineList] = useState<EngineStatus[]>([])
   const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
   const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
+  const [councilSessionList, setCouncilSessionList] = useState<CouncilSessionListItem[]>([])
+  const [councilSessionSearch, setCouncilSessionSearch] = useState('')
+  const [councilSessionNavOpen, setCouncilSessionNavOpen] = useState(true)
+  const [councilInspectorOpen, setCouncilInspectorOpen] = useState(false)
   const [liveCouncilLoadState, setLiveCouncilLoadState] = useState<'restoring' | 'ready' | 'session_only' | 'error'>('restoring')
   const [liveRoomWorkspace, setLiveRoomWorkspace] = useState<'council' | 'expanded_intel'>('council')
   /**
@@ -6768,25 +6814,30 @@ function Home() {
           return
         }
 
-        const j = await res.json() as { conversations?: { id: string; metadata?: Record<string, unknown> }[] }
+        const j = await res.json() as { conversations?: { id: string; title?: string; last_message_at?: string | null; updated_at?: string | null; created_at?: string | null; state?: string; metadata?: Record<string, unknown> }[] }
         const convs = Array.isArray(j.conversations) ? j.conversations : []
+        setCouncilSessionList(convs.map(c => ({
+          id: c.id,
+          title: typeof c.title === 'string' ? c.title : 'Untitled thread',
+          last_message_at: c.last_message_at,
+          updated_at: c.updated_at,
+          created_at: c.created_at,
+          state: c.state,
+          preview: typeof (c.metadata as { council?: { lastPreview?: string } } | undefined)?.council?.lastPreview === 'string'
+            ? (c.metadata as { council: { lastPreview: string } }).council.lastPreview
+            : null,
+          metadata: c.metadata ?? null,
+        })))
         let id: string | null = typeof sessionStorage !== 'undefined'
           ? sessionStorage.getItem(LIVE_COUNCIL_CONV_STORAGE_KEY)
           : null
         if (id && !convs.some(c => c.id === id)) id = null
         if (!id) {
-          const live = convs.find(c => {
-            const m = c.metadata as { council?: { source?: string } } | undefined
-            return m?.council?.source === 'live_council'
-          })
-          if (live) id = live.id
-        }
-        if (!id) {
           const cre = await fetch('/api/conversations', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              title: 'Live Council',
+            title: 'New Council Session',
               metadata: { council: { source: 'live_council', incomeOperationsMode: false } },
             }),
           })
@@ -9245,7 +9296,7 @@ function Home() {
 
     const postCouncilChatDecreeGather = async (
       body: Parameters<typeof postCouncilChat>[0],
-      continuationMergeOpts?: { ignoreContinuation?: boolean },
+      continuationMergeOpts?: { ignoreContinuation?: boolean; onTextDelta?: (delta: string, family?: string) => void },
     ) => {
       const merged = new AbortController()
       const onDecreeAbort = () => merged.abort()
@@ -9284,6 +9335,14 @@ function Home() {
               if (!isCurrentDecreeAsync()) return
               setIncrementalCouncilTransportStatus('receiving')
               setIncrementalCouncilProgress(envelope.snapshot)
+              const diagnostic = envelope.progressEvent.payload.diagnostic
+              const delta = diagnostic?.code === 'TEXT_DELTA' ? diagnostic.sanitizedMetadata?.textDelta : null
+              if (diagnostic && typeof delta === 'string' && delta) {
+                const familyHint = typeof diagnostic.sanitizedMetadata?.family === 'string'
+                  ? diagnostic.sanitizedMetadata.family
+                  : envelope.progressEvent.family ?? undefined
+                continuationMergeOpts?.onTextDelta?.(delta, familyHint)
+              }
             },
             onFinal: envelope => {
               if (isCurrentDecreeAsync()) {
@@ -9794,6 +9853,16 @@ function Home() {
         }
 
         setFamilyDuty(prev => ({ ...prev, [family]: 'working' }))
+        const floorLabel = rosterLabel(family)
+        setTypingFamily(orchestrationFamilyToTypingFamily(family) ?? floorLabel as TypingFamily)
+        setFloorStream({ family: floorLabel, text: '', status: 'CONNECTING' })
+        const streamBuffer = createPresentationBuffer(delta => {
+          setFloorStream(prev => {
+            const familyName = floorLabel
+            const base = prev?.family === familyName ? prev.text : ''
+            return { family: familyName, text: base + delta, status: 'STREAMING' }
+          })
+        })
         const isDirectInvoke = Boolean(cmd.directInvocation && cmd.targetFamilies[0] === family)
         const transientDirectStatusMessageIds: string[] = []
         const postDirectUnavailable = async (rt: ProviderFamilyOutcomeStatus, detail?: string) => {
@@ -9889,7 +9958,7 @@ function Home() {
                     : {}),
                   ...(diagnosticSequential ? { diagnosticIntentMode } : {}),
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
-                }, attendanceWave ? { ignoreContinuation: true } : undefined)
+                }, attendanceWave ? { ignoreContinuation: true, onTextDelta: delta => streamBuffer.push(delta) } : { onTextDelta: delta => streamBuffer.push(delta) })
 
                 if (chatRes.ok && chatData.councilProviderHttpStatus === 'timed_out') {
                   runtime = 'TIMED_OUT'
@@ -9987,7 +10056,19 @@ function Home() {
             }
           }
         } finally {
+          streamBuffer.flush()
+          streamBuffer.dispose()
           setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
+        }
+
+        if ((runtime === 'FAILED' || runtime === 'TIMED_OUT') && !textOut?.trim()) {
+          const layer = runtime === 'TIMED_OUT' ? 'TIMEOUT' : 'PROVIDER'
+          const line = failureUiLabel(rosterLabel(family), layer, runtimeDetail)
+          gatherPostSystem(line)
+          void gatherPostLive({ role: 'system', content: line, family: 'SYSTEM' })
+          setFloorStream({ family: rosterLabel(family), text: '', status: 'FAILED' })
+        } else if (runtime === 'RESPONDED') {
+          setFloorStream(prev => prev ? { ...prev, status: 'COMPLETE' } : prev)
         }
 
         return {
@@ -10009,7 +10090,7 @@ function Home() {
        */
       const formatFamilyDeliberationContent = (turn: DeliberationTurn): string => {
         if (turn.full_response.trim()) return turn.full_response
-        return `${turn.provider_label} didn't get a response in this round${turn.failure_reason ? ` — ${turn.failure_reason}` : ''}.`
+        return `${turn.provider_label} didn't get a response in this round${turn.failure_reason ? ` — ${toDisplayText(turn.failure_reason)}` : ''}.`
       }
 
       const runFamilyDeliberationGather = async () => {
@@ -10082,6 +10163,9 @@ function Home() {
               degraded: !complete,
               familyDeliberationTurn: turn,
               familyDeliberationEvidenceReferences: deliberation.evidence_references,
+              councilStage: stageFromDeliberationRole(turn.turn_role),
+              commanderTurnId: turn.commander_turn_id,
+              deliberationRoundId: turn.round_id,
               shadowCouncilAssembly: turn.turn_id === shadowReadoutTurnId ? deliberationData.shadowCouncilAssembly : undefined,
               councilProgress: deliberationData.councilProgress,
             })
@@ -10154,6 +10238,7 @@ function Home() {
             councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
           }
           setTypingFamily(null)
+          setFloorStream(null)
           setFamilyDuty(Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])))
           return true
         } catch {
@@ -10161,16 +10246,15 @@ function Home() {
         }
       }
 
-      if (stableGroupSequential) {
+      if (stableGroupSequential && shouldRunFamilyDeliberation(classifyCouncilTurn(decree))) {
         const deliberationHandled = await runFamilyDeliberationGather()
         if (deliberationHandled) return
       }
 
       const outcomeByFamily = new Map<CouncilOrchestrationFamily, GatherCell>()
-      /** Parallel in-flight gathers only for non-sequential decree gathers (sequential diagnostics must not fan out). */
-      const gatherPromises = diagnosticSequential || stableGroupSequential
-        ? []
-        : orderForGather.map(family =>
+      /** Parallel in-flight gathers only for attendance visual release. Council floor is sequential. */
+      const gatherPromises = attendanceWave && !diagnosticSequential && !stableGroupSequential
+        ? orderForGather.map(family =>
             gatherFamily(family).then(cell => {
               const prev = outcomeByFamily.get(family)
               if (prev?.textOut?.trim() && cell.textOut?.trim()) return prev
@@ -10178,6 +10262,7 @@ function Home() {
               return cell
             }),
           )
+        : []
 
       const mapSoftCapCells = (): GatherCell[] =>
         directedOrder.map(family => {
@@ -10283,6 +10368,8 @@ function Home() {
           stableGroupPriorThisTurn.length > 0
           && !controller.signal.aborted
           && !councilPausedRef.current
+          && !isSocialCouncilCheckin(decree)
+          && classifyCouncilTurn(decree).depth === 'FULL'
         ) {
           try {
             const { res: finalRes, data: finalData } = await postCouncilChatDecreeGather({
@@ -10323,6 +10410,14 @@ function Home() {
           } catch {
             /* optional final synthesis — skip on failure */
           }
+        }
+      } else if (!attendanceWave) {
+        for (const family of orderForGather) {
+          if (controller.signal.aborted || councilPausedRef.current) break
+          const cell = await gatherFamily(family)
+          const prev = outcomeByFamily.get(family)
+          if (prev?.textOut?.trim() && cell.textOut?.trim()) continue
+          outcomeByFamily.set(family, cell)
         }
       } else {
         await Promise.allSettled(gatherPromises)
@@ -10702,6 +10797,7 @@ function Home() {
         lastAutonomousHadLiveResearchRef.current = false
         lastAutonomousResearchFamilyRef.current = null
         setTypingFamily(null)
+        setFloorStream(null)
         setLiveResearchHud(null)
         setFamilyDuty(Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])))
         setFamilyCurrentFocus({})
@@ -10709,9 +10805,13 @@ function Home() {
 
       if (
         anySuccess
-        && intent.tier !== 'casual'
         && !inputText().toLowerCase().includes('continue council discussion')
-        && !attendanceWave
+        && decideMemoryCandidatePrompt({
+          commanderText: decree,
+          intentTier: intent.tier,
+          attendanceWave,
+          anySuccess,
+        }).shouldPrompt
       ) {
         const memoryActionId = `memory-save-${Date.now()}`
         addRaelAction({
@@ -10804,6 +10904,7 @@ function Home() {
         }
         sequentialDiagnostics.stop()
         setTypingFamily(null)
+        setFloorStream(null)
         if (toolIntent) endToolRequest()
         if (decreeCompletedOk && !decreeMatrixFailed && !controller.signal.aborted) {
           matrixStatus('success', 'Council response ready')
@@ -11097,6 +11198,17 @@ function Home() {
      * If external channels are ambiguous, prefer user text containing "Ra'el" — not wired here.
      */
     appendVisibleRaelDecree(decree)
+    const activeSession = councilSessionList.find(s => s.id === liveCouncilConvId)
+    if (liveCouncilConvId && shouldAutoTitle(activeSession?.title, Boolean((activeSession?.metadata as { council?: { titleLocked?: boolean } } | undefined)?.council?.titleLocked))) {
+      const nextTitle = generateNeutralSessionTitle(decree)
+      void fetch(`/api/conversations/${liveCouncilConvId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: nextTitle, mergeMetadata: true, metadata: { council: { lastPreview: decree.slice(0, 140) } } }),
+      }).then(() => {
+        setCouncilSessionList(prev => prev.map(s => s.id === liveCouncilConvId ? { ...s, title: nextTitle, preview: decree.slice(0, 140) } : s))
+      }).catch(() => undefined)
+    }
 
     if (!mode && await handleContinuationAuthorityCommand(decree)) {
       return
@@ -11437,7 +11549,7 @@ function Home() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: reason === 'archive' ? 'Live Council Archive Follow-up' : 'Live Council',
+            title: reason === 'archive' ? 'Live Council Archive Follow-up' : 'New Council Session',
             metadata: { council: { source: 'live_council', incomeOperationsMode, previousSession: liveCouncilConvId ?? councilSnapRef.current.sessionId } },
           }),
         })
@@ -11447,6 +11559,7 @@ function Home() {
           if (id) {
             sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
             setLiveCouncilConvId(id)
+            void refreshCouncilSessionList()
           }
         }
       } catch {
@@ -11456,6 +11569,77 @@ function Home() {
     addSystemMessage(reason === 'archive'
       ? 'Session archived. Clean council session is ready.'
       : 'New Council Session ready. Approved memory and provider state preserved.', { force: true })
+  }
+
+  const refreshCouncilSessionList = async () => {
+    try {
+      const res = await fetch('/api/conversations', { cache: 'no-store' })
+      if (!res.ok) return
+      const j = await res.json() as { conversations?: CouncilSessionListItem[] }
+      const convs = Array.isArray(j.conversations) ? j.conversations : []
+      setCouncilSessionList(convs.map(c => ({
+        ...c,
+        preview: typeof (c.metadata as { council?: { lastPreview?: string } } | undefined)?.council?.lastPreview === 'string'
+          ? (c.metadata as { council: { lastPreview: string } }).council.lastPreview
+          : c.preview ?? null,
+      })))
+    } catch {
+      /* session list optional */
+    }
+  }
+
+  const openCouncilSession = async (id: string) => {
+    if (!id || id === liveCouncilConvId) return
+    resetCouncilTemporaryRuntime()
+    sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
+    setLiveCouncilConvId(id)
+    liveCouncilConvIdRef.current = id
+    councilDispatch({ type: 'SET_MESSAGES', payload: [] })
+    const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
+    if (!tr.ok) return
+    const tj = await tr.json() as {
+      messages?: { id: string; role: string; content: string; family?: string | null; created_at: string; metadata?: Record<string, unknown> }[]
+    }
+    const rows = Array.isArray(tj.messages) ? tj.messages : []
+    const latestRow = [...rows].reverse().find(row => row.role === 'user')
+    const rowsDecreeText = latestRow ? latestRow.content.trim() : ''
+    const rowsPromptIntent = rowsDecreeText ? detectPromptIntent(rowsDecreeText) : undefined
+    const mapped = normalizeCouncilMessageIds(
+      rows
+        .filter(row =>
+          shouldPersistCouncilMessage(
+            councilMessageFromWarRoomRow({
+              role: row.role,
+              content: row.content,
+              family: row.family,
+              metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : undefined,
+            }),
+            councilPersistenceCtx,
+          ),
+        )
+        .map(row => mapWarRoomRowToCouncilMessage(row, {
+          decreeText: rowsDecreeText,
+          promptIntent: rowsPromptIntent,
+          stabilityMode: councilPassthroughMode,
+        })),
+      'persisted',
+    )
+    councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
+  }
+
+  const renameCouncilSession = async (id: string, title: string) => {
+    await fetch(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, mergeMetadata: true, metadata: { council: { titleLocked: true } } }),
+    })
+    setCouncilSessionList(prev => prev.map(s => s.id === id ? { ...s, title } : s))
+  }
+
+  const archiveCouncilSessionFromList = async (id: string) => {
+    await fetch(`/api/conversations/${id}`, { method: 'DELETE' })
+    setCouncilSessionList(prev => prev.filter(s => s.id !== id))
+    if (id === liveCouncilConvId) void startFreshCouncilSession('new')
   }
 
   const clearCouncilSession = () => {
@@ -12454,6 +12638,8 @@ function Home() {
         <LiveRoomShell
           systemHealthGapCount={operatorGapCount}
           chatExpanded={isChatExpanded}
+          sessionNavOpen={councilSessionNavOpen}
+          inspectorOpen={councilInspectorOpen}
           header={(
             <WarRoomOsHeader
               systemStatusLine={chatHealthLabel}
@@ -12462,21 +12648,46 @@ function Home() {
           )}
           intelRow={null}
           leftNav={(
-            <LiveRoomNavPanel
-              activePanelId={dockPanelId}
-              councilFlowMode={councilFlowMode}
-              sessionId={liveCouncilConvId}
-              sessionStartedAt={sessionStartedAt}
-              onSelectPanel={setDockPanelId}
-              onEndSession={() => startTransition(archiveCurrentCouncilSession)}
+            <CouncilSessionNavigator
+              sessions={councilSessionList}
+              activeId={liveCouncilConvId}
+              search={councilSessionSearch}
+              onSearch={setCouncilSessionSearch}
+              onNewChat={() => startTransition(() => { void startFreshCouncilSession('new') })}
+              onSelect={id => startTransition(() => { void openCouncilSession(id) })}
+              onRename={(id, title) => { void renameCouncilSession(id, title) }}
+              onArchive={id => { void archiveCouncilSessionFromList(id) }}
             />
           )}
           rightPanel={(
-            <CouncilMembersPanel
-              providerStatuses={providerHealth.providers}
-              providerLabels={providerHealth.labels}
-              operationStatuses={familyOperationStatuses}
-              onOpenPanel={id => setDockPanelId(id)}
+            <CouncilContextInspector
+              evidence={(
+                <div>
+                  <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-cyan-300">Turn evidence</p>
+                  <p>{liveResearchHud && liveResearchHud.mode !== 'inactive' ? liveResearchHud.label : 'No evidence packet on this turn.'}</p>
+                  {liveResearchHud?.intelligence?.sourcesPreview ? <p className="mt-2">{liveResearchHud.intelligence.sourcesPreview}</p> : null}
+                </div>
+              )}
+              research={(
+                <div>
+                  <p>{liveResearchHud?.label ?? 'Research idle'}</p>
+                  {liveResearchHud?.intelligence ? (
+                    <p className="mt-2">Freshness {liveResearchHud.intelligence.freshness}. Contradictions {liveResearchHud.intelligence.contradictionWarnings}.</p>
+                  ) : null}
+                </div>
+              )}
+              terra={<p>{terraCouncilContextRef.current ? 'Terra context is attached to the current turn only.' : 'No Terra pin.'}</p>}
+              diagnostics={(
+                <div className="space-y-2">
+                  <CouncilMembersPanel
+                    providerStatuses={providerHealth.providers}
+                    providerLabels={providerHealth.labels}
+                    operationStatuses={familyOperationStatuses}
+                    onOpenPanel={id => setDockPanelId(id)}
+                  />
+                  <SynthesisCard synthesis={conversationRuntimeSnapshot?.latestSynthesis} />
+                </div>
+              )}
             />
           )}
           commandConsole={null}
@@ -12552,6 +12763,7 @@ function Home() {
                     />
                     <ConversationStatePanel runtime={conversationRuntimeSnapshot} />
                     <CouncilDeliberationStream threadId={liveCouncilConvId} enabled />
+                    <AgiWaveOnePanel conversationId={liveCouncilConvId} persistenceAvailable={persistenceAvailable} />
                     <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />
                   </div>
                 )}
@@ -12651,6 +12863,22 @@ function Home() {
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => setCouncilSessionNavOpen(v => !v)}
+              className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+              style={{ border: '1px solid #34d399', color: '#6ee7b7' }}
+            >
+              {councilSessionNavOpen ? 'Hide Sessions' : 'Sessions'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCouncilInspectorOpen(v => !v)}
+              className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
+              style={{ border: '1px solid #67e8f9', color: '#a5f3fc' }}
+            >
+              {councilInspectorOpen ? 'Hide Inspector' : 'Inspector'}
+            </button>
             <button
               type="button"
               onClick={() => setDockPanelId('live-council')}
@@ -12858,7 +13086,19 @@ function Home() {
           )}
 
           {typingFamily && (
-            <TypingIndicator familyName={typingFamily} label={familyPresence[typingFamily].label} />
+            <TypingIndicator familyName={typingFamily} label={familyPresence[typingFamily]?.label ?? String(typingFamily)} />
+          )}
+          {floorStream && (floorStream.text || floorStream.status === 'STREAMING' || floorStream.status === 'CONNECTING') && (
+            <div
+              className="ml-11 mb-3 rounded border px-3 py-2 text-sm"
+              style={{ borderColor: '#3a2e00', background: 'rgba(255,215,0,0.04)', color: '#E5E5E5' }}
+              aria-live="polite"
+            >
+              <div className="text-[10px] uppercase tracking-widest mb-1" style={{ color: '#FFD700' }}>
+                {floorStream.family} · {floorStream.status}
+              </div>
+              {floorStream.text || (floorStream.status === 'CONNECTING' ? 'Connecting…' : '')}
+            </div>
           )}
 
           {councilMounted && showContinue && (
@@ -12942,14 +13182,11 @@ function Home() {
         </>
           )}
           inlineBelowThread={(
-            <>
-              <SynthesisCard synthesis={conversationRuntimeSnapshot?.latestSynthesis} />
-              <AmbientActivityFeed
-                familyPresence={familyPresence}
-                typingFamily={typingFamily}
-                runtime={conversationRuntimeSnapshot}
-              />
-            </>
+            <AmbientActivityFeed
+              familyPresence={familyPresence}
+              typingFamily={typingFamily}
+              runtime={conversationRuntimeSnapshot}
+            />
           )}
         />} />
           )}

@@ -101,6 +101,19 @@ export const TERRA_INTELLIGENCE_EVENT_KINDS = [
    * preserved verbatim in `properties`, never reinterpreted into a War Room-invented scale
    * (matches severe_weather_alert's existing CAP-preservation convention). */
   'traffic_event',
+  /** God's Eye Phase 2: a single real traffic-flow observation (speed/vehicle-volume) from a
+   * roadside sensor site — webtris (National Highways, UK) this phase. Distinct from
+   * 'traffic_event': this is a routine sensor reading, not an incident. `properties` carries only
+   * source-supplied speed/flow values; no free-flow baseline or congestion label is ever invented
+   * (see lib/research-engine/providers/webtris.ts). webtris' own observations are always
+   * historical/STALE (see that adapter's header comment) — 'current' vs 'historical'
+   * temporalStatus reflects that honestly, never forced to 'current' for display consistency. */
+  'traffic_flow_observation',
+  /** God's Eye Phase 2: a single real road-weather station observation — digitraffic_road_weather
+   * (Fintraffic, Finland) this phase. Real source-supplied fields only (air/road/ground
+   * temperature, humidity, visibility, wind, precipitation); a field the source didn't report is
+   * null, never synthesized (see lib/research-engine/providers/digitraffic_road_weather.ts). */
+  'road_weather_observation',
 ] as const
 export type TerraIntelligenceEventKind = (typeof TERRA_INTELLIGENCE_EVENT_KINDS)[number]
 

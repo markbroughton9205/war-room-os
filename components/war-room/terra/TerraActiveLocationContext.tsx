@@ -1,11 +1,12 @@
 'use client'
 
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import type { TerraActiveLocation } from '@/lib/terra/activeLocation'
 import type { TerraGeoFeature } from '@/lib/terra/types'
 import type { TerraAircraftRegionalSummary } from '@/lib/terra/aircraftRegionalSummary'
 import type { TerraVesselRegionalSummary } from '@/lib/terra/vesselRegionalSummary'
 import type { TerraMaritimeCoverageState } from '@/lib/terra/maritimeCoverage'
+import type { TerraCoverageTruthState } from '@/lib/terra/coverageTruth'
 
 type TerraActiveLocationContextValue = {
   activeLocation: TerraActiveLocation | null
@@ -31,6 +32,16 @@ type TerraActiveLocationContextValue = {
    * genuinely empty one. `null` when the Maritime layer is off or has never loaded. */
   maritimeSummary: { regional: TerraVesselRegionalSummary; coverageState: TerraMaritimeCoverageState } | null
   setMaritimeSummary: (summary: { regional: TerraVesselRegionalSummary; coverageState: TerraMaritimeCoverageState } | null) => void
+  /** WAR ROOM TERRA LINKED per-layer coverage wiring (additive, optional): the current
+   * coverage-truth state (lib/terra/coverageTruth.ts) of each visible Terra layer, keyed by
+   * layer id. Optional so existing providers/consumers keep working unchanged; consumers must
+   * treat `undefined` as "no per-layer coverage evidence available" (graceful absent). Each
+   * state is an OBSERVED availability fact about the provider feed — never a condition verdict. */
+  layerCoverage?: Partial<Record<string, TerraCoverageTruthState>>
+  /** Functional-update-capable (Dispatch<SetStateAction>) so N layer components can each publish
+   * their own layer id additively without stale-closure merges; passing a full replacement object
+   * still type-checks, so existing callers are unaffected. */
+  setLayerCoverage?: Dispatch<SetStateAction<Partial<Record<string, TerraCoverageTruthState>>>>
 }
 
 const TerraActiveLocationContext = createContext<TerraActiveLocationContextValue | null>(null)
@@ -40,9 +51,10 @@ export function TerraActiveLocationProvider({ children }: { children: ReactNode 
   const [selectedEvent, setSelectedEvent] = useState<TerraGeoFeature | null>(null)
   const [aircraftSummary, setAircraftSummary] = useState<TerraAircraftRegionalSummary | null>(null)
   const [maritimeSummary, setMaritimeSummary] = useState<TerraActiveLocationContextValue['maritimeSummary']>(null)
+  const [layerCoverage, setLayerCoverage] = useState<Partial<Record<string, TerraCoverageTruthState>>>({})
   const value = useMemo(
-    () => ({ activeLocation, setActiveLocation, selectedEvent, setSelectedEvent, aircraftSummary, setAircraftSummary, maritimeSummary, setMaritimeSummary }),
-    [activeLocation, selectedEvent, aircraftSummary, maritimeSummary],
+    () => ({ activeLocation, setActiveLocation, selectedEvent, setSelectedEvent, aircraftSummary, setAircraftSummary, maritimeSummary, setMaritimeSummary, layerCoverage, setLayerCoverage }),
+    [activeLocation, selectedEvent, aircraftSummary, maritimeSummary, layerCoverage],
   )
   return <TerraActiveLocationContext.Provider value={value}>{children}</TerraActiveLocationContext.Provider>
 }

@@ -1,0 +1,4 @@
+{
+  "promoted": false,
+  "reason": "Anthropic Council-path still HTTP 400 BILLING. Grok still AUTH (incorrect API key). Gemini now live-healthy. Production smoke not authorized."
+}

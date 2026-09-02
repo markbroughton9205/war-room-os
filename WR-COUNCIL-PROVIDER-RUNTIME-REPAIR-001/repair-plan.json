@@ -1,0 +1,22 @@
+{
+  "primary": "B. INVALID_OR_REVOKED_SECRET",
+  "primary_detail": "OPENAI_API_KEY is present but a non-key bracket placeholder; OpenAI HTTP 401 Incorrect API key. Same on dev and Node01.",
+  "secondary": [
+    "Effective missing real secret (truthy sentinel bypassed missing-key short-circuit)",
+    "UI/provider exception leak of raw OpenAI auth text",
+    "Anthropic ANTHROPIC_API_KEY independently invalid (HTTP 401 invalid x-api-key)"
+  ],
+  "not_primary": {
+    "wrong_env_var": false,
+    "secret_loading_bug": false,
+    "model_mapping_bug": false,
+    "stale_node01_only": false,
+    "orchestration_defect": false
+  },
+  "applied_code_repair": [
+    "Treat placeholder sentinels as unconfigured",
+    "Sanitize provider auth errors for UI/logs",
+    "Health probes skip unusable secrets and report gpt-4o / Claude listing when authenticated"
+  ],
+  "not_applied": "Did not invent or rotate API keys. Commander must supply valid OPENAI_API_KEY and ANTHROPIC_API_KEY."
+}

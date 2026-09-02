@@ -1,0 +1,7 @@
+{
+  "max_before_visible": 1,
+  "retry_after_visible": false,
+  "retry_401": false,
+  "retry_5xx": true,
+  "retry_429": true
+}

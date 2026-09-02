@@ -4,6 +4,8 @@
  */
 
 import { decreeAsksMultiFamilyGreeting } from '@/lib/council/greetingRouting'
+import { isLightweightPingDecree } from '@/lib/council/contextRelevance'
+import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialCheckin'
 
 export type ConversationIntentTier = 'casual' | 'coordination' | 'council_full' | 'income_ops'
 
@@ -49,6 +51,15 @@ function busKeywordHit(text: string): boolean {
 
 export function classifyRaElMessage(text: string): ClassifyRaElMessageResult {
   const raw = text.trim()
+
+  if (isSocialCouncilCheckin(raw) || isLightweightPingDecree(raw)) {
+    return {
+      tier: 'coordination',
+      shouldEmitBusEvents: false,
+      shouldRunFamilyRound: true,
+      maxFamilies: 6,
+    }
+  }
 
   const isGreetingOrThanks = GREETING_OR_THANKS_PATTERN.test(raw) || THANKS_ONLY_PATTERN.test(raw)
 

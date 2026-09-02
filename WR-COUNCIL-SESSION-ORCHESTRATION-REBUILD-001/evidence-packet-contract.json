@@ -1,0 +1,13 @@
+{
+  "type": "LiveResearchEvidencePacket",
+  "turn_scoped": true,
+  "fields": [
+    "usedLiveResearch",
+    "generatedAt",
+    "sources",
+    "findings",
+    "confidence",
+    "freshness",
+    "contradictions"
+  ]
+}

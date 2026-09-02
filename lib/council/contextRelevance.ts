@@ -9,11 +9,14 @@
  * would itself be a truthfulness regression.
  */
 
+import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialCheckin'
+
 const STOP_WORDS = new Set([
   'that', 'this', 'with', 'from', 'into', 'about', 'there', 'their', 'should', 'would',
   'could', 'needs', 'need', 'must', 'have', 'has', 'what', 'when', 'where', 'which', 'while',
   'your', 'you', 'they', 'them', 'here', 'been', 'being', 'were', 'will', 'shall', 'each',
   'more', 'most', 'some', 'than', 'then', 'also', 'just', 'like', 'over', 'such', 'only',
+  'council', 'family', 'going', 'whats', 'please', 'chatgpt', 'claude', 'gemini', 'status',
 ])
 
 /** Explicit "keep going on the same thing" signals — when present, prior context is always kept. */
@@ -39,8 +42,9 @@ const LIGHTWEIGHT_PING_PATTERNS: RegExp[] = [
       `(?:[,!\\s]+(?:${GREETING_ADDRESSEE}))?[!?.\\s]*$`,
     'i',
   ),
-  /^(?:quick\s+)?(?:check(?:ing)?[\s-]?in|status\s+check|just\s+checking\s+in)[!?.\s]*$/i,
+  /^(?:quick\s+)?(?:check(?:ing)?[\s-]?in|status\s+check|status\s+ping|just\s+checking\s+in)[!?.\s]*$/i,
   /^(?:you\s+there|still\s+there|ping|test)[!?.\s]*$/i,
+  /^(?:(?:hey|hi|hello)\s+)?(?:council[,!]?\s+)?(?:what(?:'s|s|\s+is)\s+going\s+on)[!?.\s]*$/i,
 ]
 
 /**
@@ -52,6 +56,7 @@ export function isLightweightPingDecree(decreeText: string): boolean {
   const decree = decreeText?.trim() ?? ''
   if (!decree) return false
   if (CONTINUATION_SIGNALS.test(decree)) return false
+  if (isSocialCouncilCheckin(decree)) return true
   return LIGHTWEIGHT_PING_PATTERNS.some(p => p.test(decree))
 }
 
