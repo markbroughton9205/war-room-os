@@ -72,7 +72,7 @@ export const CommandConsole = memo(function CommandConsole({
         onSubmit={event => {
           event.preventDefault()
           if (!loading && command.trim()) {
-            matrixStatus('working', 'Council thinking…')
+            matrixStatus('outbound', 'Decree sent to Council…')
           }
           void onSubmit(event)
         }}

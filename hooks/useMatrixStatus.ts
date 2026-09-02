@@ -9,8 +9,20 @@ export function useMatrixStatus() {
     matrixStatus('working', message)
   }, [])
 
+  const signalOutbound = useCallback((message = 'Request sent…') => {
+    matrixStatus('outbound', message)
+  }, [])
+
+  const signalInbound = useCallback((message = 'Response received') => {
+    matrixStatus('inbound', message)
+  }, [])
+
   const signalSuccess = useCallback((message = 'Ready') => {
     matrixStatus('success', message)
+  }, [])
+
+  const signalVerified = useCallback((message = 'Verified') => {
+    matrixStatus('verified', message)
   }, [])
 
   const signalWarning = useCallback((message = 'Attention needed') => {
@@ -21,5 +33,5 @@ export function useMatrixStatus() {
     matrixStatus('error', message)
   }, [])
 
-  return { signalWorking, signalSuccess, signalWarning, signalError }
+  return { signalWorking, signalOutbound, signalInbound, signalSuccess, signalVerified, signalWarning, signalError }
 }

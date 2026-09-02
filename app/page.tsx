@@ -6,6 +6,7 @@ import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
 import { GodsEyeCommandCenter } from '@/components/war-room/terra/GodsEyeCommandCenter'
+import { CouncilCommandControls } from '@/components/war-room/council/CouncilCommandControls'
 import { APPROVAL_RISK_GATES, SECURE_APPROVAL_RISKS } from '@/lib/kernel/approvals'
 import { KERNEL_EVENT_SCHEMA, KERNEL_EVENT_TYPES } from '@/lib/kernel/events'
 import { MEMORY_POLICY } from '@/lib/kernel/memoryPolicy'
@@ -12626,67 +12627,16 @@ function Home() {
           scrollContainerRef={scrollContainerRef}
           onScroll={handleScroll}
           toolbar={(
-        <div className="flex w-full flex-wrap items-center justify-between gap-2">
-          <span className="text-[10px] font-bold tracking-widest text-emerald-300">
-            {councilContinueStatusLine}
-          </span>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div className="flex flex-wrap items-center gap-1" role="radiogroup" aria-label="Council conversation mode">
-              {(['direct', 'stable_group', 'full_council'] as const).map(mode => (
-                <button
-                  key={mode}
-                  type="button"
-                  role="radio"
-                  aria-checked={councilFlowMode === mode}
-                  title={COUNCIL_FLOW_MODE_LABELS[mode]}
-                  onClick={() => persistCouncilFlowMode(mode)}
-                  className="rounded px-2 py-0.5 text-[9px] tracking-widest"
-                  style={{
-                    border: councilFlowMode === mode ? '1px solid #FFD700' : '1px solid #333',
-                    color: councilFlowMode === mode ? '#FFD700' : '#888',
-                    fontWeight: councilFlowMode === mode ? 'bold' : 'normal',
-                  }}
-                >
-                  {mode === 'direct' ? 'Direct' : mode === 'stable_group' ? 'Stable Group' : 'Full Council'}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => setDockPanelId('live-council')}
-              className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
-              style={{ border: '1px solid #93C5FD', color: '#93C5FD' }}
-              aria-label="Open council controls"
-              title="Controls"
-            >
-              ⚙ Controls
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsChatExpanded(prev => !prev)}
-              className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
-              style={{
-                border: isChatExpanded ? '1px solid #FFD700' : '1px solid #93C5FD',
-                color: isChatExpanded ? '#FFD700' : '#93C5FD',
-              }}
-              aria-label={isChatExpanded ? 'Collapse chat to normal dashboard' : 'Expand chat to full view'}
-              aria-pressed={isChatExpanded}
-              title={isChatExpanded ? 'Collapse Chat' : 'Expand Chat'}
-            >
-              {isChatExpanded ? '⤡ Collapse Chat' : '⤢ Expand Chat'}
-            </button>
-            {!autoScrollEnabled ? (
-              <button
-                type="button"
-                onClick={jumpToLatest}
-                className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
-                style={{ background: '#FFD700', color: '#000' }}
-              >
-                Go to latest
-              </button>
-            ) : null}
-          </div>
-        </div>
+            <CouncilCommandControls
+              councilFlowMode={councilFlowMode}
+              onCouncilFlowModeChange={persistCouncilFlowMode}
+              onOpenControls={() => setDockPanelId('live-council')}
+              isChatExpanded={isChatExpanded}
+              onToggleExpand={() => setIsChatExpanded(prev => !prev)}
+              autoScrollEnabled={autoScrollEnabled}
+              onJumpToLatest={jumpToLatest}
+              statusLine={councilContinueStatusLine}
+            />
       )}
           preamble={(
         <>

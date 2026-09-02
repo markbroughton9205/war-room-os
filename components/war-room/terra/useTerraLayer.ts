@@ -14,6 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TerraGeoFeature } from '@/lib/terra/types'
+import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 
 export type TerraLayerFeedState = 'loading' | 'live' | 'empty' | 'error' | 'stale'
 
@@ -72,6 +73,10 @@ export function useTerraLayer(
   // stale-vs-error without making `load` depend on `features` (which would recreate it — and the
   // auto-refresh interval that depends on it — every time the feed updates).
   const featureCountRef = useRef(0)
+  // Matrix runtime signal: true once this layer has ever shown real (>0) features. The *first*
+  // transition into real data is a genuinely different, rarer moment ("verified" / white pulse)
+  // than every later routine refresh ("inbound" / cyan) -- both are real events, never fabricated.
+  const everHadDataRef = useRef(false)
 
   const load = useCallback(async () => {
     const requestId = ++requestIdRef.current
@@ -86,6 +91,7 @@ export function useTerraLayer(
       if (body.status === 'error') {
         setLastErrorMessage(body.error?.message ?? `Layer "${layerId}" request failed.`)
         setState(featureCountRef.current > 0 ? 'stale' : 'error')
+        matrixStatus('error', `Terra layer "${layerId}" failed`)
         return
       }
       featureCountRef.current = body.features.length
@@ -94,11 +100,20 @@ export function useTerraLayer(
       setLastFetchedAt(body.fetchedAt)
       setLastErrorMessage(null)
       setState(body.features.length === 0 ? 'empty' : 'live')
+      if (body.features.length > 0) {
+        if (!everHadDataRef.current) {
+          everHadDataRef.current = true
+          matrixStatus('verified', `Terra layer "${layerId}" live`)
+        } else {
+          matrixStatus('inbound', `Terra layer "${layerId}" updated`)
+        }
+      }
     } catch (error) {
       if (requestId !== requestIdRef.current) return
       hasLoadedOnceRef.current = true
       setLastErrorMessage(error instanceof Error ? error.message : String(error))
       setState(featureCountRef.current > 0 ? 'stale' : 'error')
+      matrixStatus('error', `Terra layer "${layerId}" disconnected`)
       console.error(`[terra] layer "${layerId}" request failed`, error)
     }
   }, [layerId, queryOverride])

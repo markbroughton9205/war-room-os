@@ -4,6 +4,27 @@ import { useEffect, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { TerraShell } from './TerraShell'
 import { TerraActiveLocationProvider, useTerraActiveLocation } from './TerraActiveLocationContext'
+import { CouncilRuntimeStatus } from '@/components/war-room/council/CouncilRuntimeStatus'
+import { CouncilGodsEyeStatus } from '@/components/war-room/council/CouncilGodsEyeStatus'
+import type { TerraIntelligenceEventKind } from '@/lib/terra/types'
+
+/** Short, human labels for the "War Room Terra Linked" pill -- covers every selectable Terra
+ * object kind (location search, vessel, aircraft, traffic camera/event, and the rest of the
+ * catalog) so the Commander always knows what kind of thing is currently selected, not just its
+ * name. Falls back to the raw kind string for any future kind added to the catalog. */
+const TERRA_SELECTION_KIND_LABEL: Partial<Record<TerraIntelligenceEventKind, string>> = {
+  vessel_position: 'VESSEL',
+  aircraft_state: 'AIRCRAFT',
+  traffic_camera: 'CAMERA',
+  traffic_event: 'ROAD EVENT',
+  earthquake: 'EARTHQUAKE',
+  tropical_cyclone: 'STORM',
+  wildfire_incident: 'WILDFIRE',
+  volcano_event: 'VOLCANO',
+  flood_event: 'FLOOD',
+  severe_weather_alert: 'WEATHER ALERT',
+  tsunami_alert: 'TSUNAMI ALERT',
+}
 
 function TerraCouncilContextBridge({ onContextChange }: { onContextChange?: (context: string | null) => void }) {
   const { activeLocation, selectedEvent } = useTerraActiveLocation()
@@ -47,13 +68,22 @@ function TerraCouncilContextBridge({ onContextChange }: { onContextChange?: (con
 
 function ActiveTerraContextPill() {
   const { activeLocation, selectedEvent } = useTerraActiveLocation()
+  const kindLabel = selectedEvent ? TERRA_SELECTION_KIND_LABEL[selectedEvent.kind] : null
+  const contextText = selectedEvent?.title ?? activeLocation?.label ?? 'Select a place or live marker to add context'
   return (
     <div className="flex min-w-0 items-center gap-2 border-b border-white/10 bg-slate-950/90 px-3 py-1.5 text-[9px] backdrop-blur-xl">
       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.9)]" />
-      <span className="shrink-0 font-bold uppercase tracking-[0.18em] text-emerald-300">Terra linked</span>
-      <span className="truncate text-slate-400" title={activeLocation?.label ?? 'No active globe selection'}>
-        {selectedEvent?.title ?? activeLocation?.label ?? 'Select a place or live marker to add context'}
+      <span className="shrink-0 font-bold uppercase tracking-[0.18em] text-emerald-300">War Room Terra Linked</span>
+      <CouncilGodsEyeStatus />
+      {kindLabel ? (
+        <span className="shrink-0 rounded border border-cyan-400/30 px-1 text-[8px] font-bold tracking-widest text-cyan-300">
+          {kindLabel}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 truncate text-slate-400" title={activeLocation?.label ?? 'No active globe selection'}>
+        {contextText}
       </span>
+      <CouncilRuntimeStatus />
     </div>
   )
 }

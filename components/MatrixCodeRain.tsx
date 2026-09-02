@@ -1,6 +1,12 @@
 'use client'
 
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import {
+  getMatrixStatusServerSnapshot,
+  getMatrixStatusSnapshot,
+  subscribeMatrixStatus,
+} from '@/lib/ui/matrixStatusBus'
+import { matrixRuntimeIntensity, matrixRuntimeRgb } from '@/lib/ui/matrixRuntimeColors'
 
 const CHARSET = '01ABCDEFGHIJKLMNOPQRSTUVWXYZ{}[]<>/\\|#$%+=*'
 const GOLD = '255, 215, 0'
@@ -47,6 +53,15 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
   const streamsRef = useRef<Stream[]>([])
   const lastTimeRef = useRef(0)
   const [reducedMotion, setReducedMotion] = useState(false)
+
+  // Real runtime state only -- never fabricated. Read via a ref inside the animation loop (not a
+  // hook dependency) so a status change never tears down/recreates the draw effect below; it just
+  // recolors the next frame. Reverts to 'idle' on its own via matrixStatusBus's auto-idle timers.
+  const statusSnap = useSyncExternalStore(subscribeMatrixStatus, getMatrixStatusSnapshot, getMatrixStatusServerSnapshot)
+  const statusRef = useRef(statusSnap.kind)
+  useEffect(() => {
+    statusRef.current = statusSnap.kind
+  }, [statusSnap.kind, statusSnap.tick])
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -98,6 +113,11 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
       const delta = Math.min(96, time - (lastTimeRef.current || time))
       lastTimeRef.current = time
 
+      const runtimeKind = statusRef.current
+      const isIdle = runtimeKind === 'idle'
+      const runtimeColor = isIdle ? null : matrixRuntimeRgb(runtimeKind)
+      const runtimeIntensity = isIdle ? 1 : matrixRuntimeIntensity(runtimeKind)
+
       context.fillStyle = 'rgba(0, 0, 0, 0.11)'
       context.fillRect(0, 0, width, height)
       context.textAlign = 'center'
@@ -121,9 +141,9 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
 
           const fade = Math.max(0, 1 - i / stream.length)
           const isHead = i === 0
-          const useGold = stream.highlight && (isHead || i === 1)
-          const alpha = (isHead ? 0.52 : 0.28 * fade) * stream.depth
-          const color = useGold ? GOLD : GREEN
+          const useGold = !runtimeColor && stream.highlight && (isHead || i === 1)
+          const alpha = (isHead ? 0.52 : 0.28 * fade) * stream.depth * runtimeIntensity
+          const color = runtimeColor ?? (useGold ? GOLD : GREEN)
 
           context.shadowBlur = isHead ? 12 : 5
           context.shadowColor = `rgba(${color}, ${alpha})`
@@ -147,11 +167,14 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
   }, [reducedMotion])
 
   if (reducedMotion) {
+    // Reduced motion keeps the underlying state legible (Phase G) as a static tint -- no pulse,
+    // no animation, just the current real color standing in place of the moving rain.
+    const rgb = statusSnap.kind === 'idle' ? GREEN : matrixRuntimeRgb(statusSnap.kind)
     return (
       <div
         aria-hidden
         className="pointer-events-none fixed inset-0 z-0 h-screen w-screen"
-        style={{ background: 'radial-gradient(circle at top, rgba(0, 255, 65, 0.05), rgba(0, 0, 0, 0.2) 45%)' }}
+        style={{ background: `radial-gradient(circle at top, rgba(${rgb}, 0.05), rgba(0, 0, 0, 0.2) 45%)` }}
       />
     )
   }

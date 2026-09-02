@@ -1,6 +1,14 @@
 'use client'
 
-export type MatrixStatusKind = 'idle' | 'working' | 'success' | 'warning' | 'error'
+/**
+ * 'outbound'/'inbound'/'verified' extend the original idle/working/success/warning/error set
+ * (Council Command UI + Functional Matrix Runtime phase) so producers can distinguish "a request
+ * just went out" (outbound), "a provider/Council response physically arrived" (inbound) from the
+ * generic "something is in flight" (working) and "routine success" (success) — and so a rare,
+ * high-confidence first-verified-data moment (verified) reads differently from routine traffic.
+ * Every existing caller of 'idle'/'working'/'success'/'warning'/'error' is unaffected.
+ */
+export type MatrixStatusKind = 'idle' | 'working' | 'success' | 'warning' | 'error' | 'outbound' | 'inbound' | 'verified'
 
 export type MatrixStatusSnapshot = {
   kind: MatrixStatusKind
@@ -18,18 +26,24 @@ export const MATRIX_IDLE_SNAPSHOT: MatrixStatusSnapshot = Object.freeze({
 
 const THROTTLE_MS = 380
 const AUTO_IDLE_MS: Record<Exclude<MatrixStatusKind, 'idle'>, number> = {
+  outbound: 0,
   working: 0,
+  inbound: 900,
   success: 1_400,
+  verified: 1_600,
   warning: 1_100,
   error: 1_800,
 }
 
 const PRIORITY: Record<MatrixStatusKind, number> = {
   idle: 0,
+  outbound: 1,
   working: 1,
+  inbound: 2,
   warning: 2,
   success: 3,
-  error: 4,
+  verified: 4,
+  error: 5,
 }
 
 let snapshot: MatrixStatusSnapshot = MATRIX_IDLE_SNAPSHOT
