@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import type { CouncilRosterMembershipState } from '@/lib/council/live-orchestration/rosterHealth'
 import {
   COUNCIL_REQUEST_STATE_SCHEMA_VERSION,
   type CouncilAuditReviewType,
@@ -113,6 +114,7 @@ export type CouncilProgressEventPayload = {
   outcome?: CouncilFamilyOutcome
   timeoutMs?: number
   reason?: string
+  rosterMembership?: CouncilRosterMembershipState
   priorResponse?: CouncilPriorResponseDeliveryPayload
   fallback?: CouncilFallbackPayload
   audit?: CouncilAuditPayload

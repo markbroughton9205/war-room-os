@@ -12657,19 +12657,21 @@ function Home() {
           sessionNavOpen={councilSessionNavOpen}
           inspectorOpen={councilInspectorOpen}
           header={(
-            <WarRoomOsHeader
-              systemStatusLine={chatHealthLabel}
-              missionHint={councilContinueStatusLine}
-            />
-            {councilRoster?.degradedByRoster ? (
-              <div
-                className="border-b px-4 py-1.5 text-[9px] font-semibold uppercase tracking-widest text-amber-200/90 sm:px-6"
-                style={{ borderColor: 'rgba(251,191,36,0.35)', background: 'rgba(251,191,36,0.08)' }}
-                role="status"
-              >
-                {compactFamilyRosterLine(councilRoster)}
-              </div>
-            ) : null}
+            <>
+              <WarRoomOsHeader
+                systemStatusLine={chatHealthLabel}
+                missionHint={councilContinueStatusLine}
+              />
+              {councilRoster?.degradedByRoster ? (
+                <div
+                  className="border-b px-4 py-1.5 text-[9px] font-semibold uppercase tracking-widest text-amber-200/90 sm:px-6"
+                  style={{ borderColor: 'rgba(251,191,36,0.35)', background: 'rgba(251,191,36,0.08)' }}
+                  role="status"
+                >
+                  {compactFamilyRosterLine(councilRoster)}
+                </div>
+              ) : null}
+            </>
           )}
           intelRow={null}
           leftNav={(

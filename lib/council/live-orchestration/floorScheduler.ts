@@ -31,7 +31,7 @@ export function resolveVisibleFloorOrder(input: {
     if (family === 'red_team' && input.includeRedTeam === false) return false
     if (input.configured[family] === false) return false
     if (input.eligible && input.eligible[family] === false) return false
-    return input.configured[family] !== false
+    return true
   })
 }
 
