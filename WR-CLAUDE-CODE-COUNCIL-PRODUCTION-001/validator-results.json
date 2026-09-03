@@ -1,0 +1,26 @@
+{
+  "results": [
+    { "name": "live orchestration", "script": "scripts/run-live-council-orchestration-validation.mjs", "result": "37/37 PASS", "matches_brief": true },
+    { "name": "session isolation", "script": "lib/council/session-orchestration/sessionOrchestration.validation.ts", "result": "23/23 PASS", "matches_brief": true },
+    { "name": "context relevance", "script": "scripts/run-context-relevance-validation.mjs", "result": "28/28 PASS", "matches_brief": true },
+    { "name": "greeting/social-checkin", "script": "scripts/run-greeting-prompt-validation.mjs", "result": "10/10 PASS", "matches_brief": true },
+    { "name": "family deliberation", "script": "scripts/run-family-deliberation-validation.mjs", "result": "25/25 PASS", "matches_brief": true },
+    { "name": "family operation status (bonus, not in brief's named list)", "script": "scripts/run-family-operation-status-validation.mjs", "result": "23/23 PASS" },
+    { "name": "incremental council transport / stream adapters", "script": "scripts/run-incremental-council-transport-validation.mjs", "result": "107/108 PASS", "note": "1 pre-existing structural-regex failure (c4c_structural_001), see below" },
+    { "name": "live council response normalization", "script": "scripts/run-live-council-response-normalization-validation.mjs", "result": "12/12 PASS" },
+    { "name": "live council provider canary", "script": "scripts/run-live-council-provider-canary.mjs", "result": "PASS", "note": "hit real ChatGPT/Gemini APIs once for a live streaming byte-level canary check" },
+    { "name": "council render gate", "script": "scripts/run-council-render-gate-validation.mjs", "result": "7/7 PASS" },
+    { "name": "live council persona-cluster", "script": "scripts/run-live-council-persona-cluster-validation.mjs", "result": "32/32 PASS" },
+    { "name": "memory candidate gate", "script": "covered inline inside live-orchestration suite (memory_01..memory_06)", "result": "6/6 PASS (subset of the 37/37)" }
+  ],
+  "total_pass": "310/311",
+  "known_failure": {
+    "id": "c4c_structural_001_json_route_calls_shared_execution_once",
+    "file": "lib/council/incremental-transport/validation.ts",
+    "checked_file": "app/api/chat/route.ts",
+    "cause": "This structural self-test regex expects `return executeCouncilChatRequest(req)` verbatim, but route.ts (unrelated AGI Wave 1 experience-capture instrumentation, already committed on origin/mac-current-development-sync before this mission) wraps it as `const response = await executeCouncilChatRequest(req); ...; return response`. The single-execution-path invariant the test cares about still holds; only the literal regex is stale.",
+    "verified_preexisting": "Confirmed identical on origin/mac-current-development-sync before any work this session (git show origin/mac-current-development-sync:app/api/chat/route.ts matches current file exactly for this region).",
+    "classification": "Category C - preexisting, unrelated to this Council mission, not WRIM/Native Router. Not modified per 'do not force PASS' guidance.",
+    "action_taken": "none - recorded, not fixed"
+  }
+}

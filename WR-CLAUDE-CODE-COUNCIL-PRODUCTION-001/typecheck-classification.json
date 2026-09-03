@@ -1,0 +1,43 @@
+{
+  "tsc_command": "pnpm exec tsc --noEmit",
+  "initial_run": {
+    "exit_code": 2,
+    "errors": 5,
+    "all_in": "app/page.tsx (lines 12664-13157)",
+    "classification": "A - introduced by this Council mission's merge (see source-lineage.json post_merge_bug_found)",
+    "action": "fixed - wrapped unwrapped JSX siblings in a Fragment; cascade errors resolved as a side effect"
+  },
+  "second_run_after_fix_1": {
+    "exit_code": 2,
+    "errors": 2,
+    "council_scoped": [
+      { "file": "app/api/chat/execute.ts:2567", "error": "TS2353 rosterMembership does not exist on CouncilProgressEventPayload", "classification": "A - introduced by Cursor's WIP roster-health wiring, type never extended", "action": "fixed - added rosterMembership?: CouncilRosterMembershipState to the payload type" },
+      { "file": "lib/council/live-orchestration/floorScheduler.ts:34", "error": "TS2367 unintentional comparison, true|undefined vs false", "classification": "A - introduced by Cursor's WIP eligible-family guard leaving a now-redundant recheck", "action": "fixed - replaced `return input.configured[family] !== false` with `return true` (equivalent given the guards above)" }
+    ],
+    "preexisting_wrim_native_router_scoped": 10
+  },
+  "final_run": {
+    "exit_code": 2,
+    "council_scoped_errors": 0,
+    "remaining_errors": 10,
+    "remaining_error_files": [
+      "lib/modular-intelligence/nativeRouterV1Pilot.validation.ts",
+      "lib/modular-intelligence/runtimeTrajectoryObserver.validation.ts",
+      "lib/modular-intelligence/trajectoryObserverStatus.ts",
+      "lib/modular-intelligence/warRoomToolTrajectoryObserve.ts",
+      "scripts/wrim-modular/collect_class_diverse_runtime.ts",
+      "scripts/wrim-modular/collect_memory_runtime.ts",
+      "scripts/wrim-modular/probe_memory_stores.ts"
+    ],
+    "classification": "B - preexisting WRIM/Native Router errors",
+    "verification": "git diff --stat origin/node02-mac-reconciled HEAD -- lib/modular-intelligence scripts/wrim-modular returns empty (zero bytes touched by this branch)",
+    "action": "none - not modified, per 'do not modify WRIM or Native Router merely to force the Council build to PASS'"
+  },
+  "lint": {
+    "command": "pnpm lint",
+    "exit_code": 0,
+    "errors": 0,
+    "warnings": 10,
+    "warnings_note": "all pre-existing unused-var warnings across unrelated files (including a false-positive warning inside .venv-wrim/'s vendored sklearn JS, which eslint should not be scanning at all - unrelated to this mission, not fixed)"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "scope": "lib/modular-intelligence/ (Native Router V1 + related pilot/shadow/observer code)",
+  "hash_method": "sha256 of each file's sha256, sorted by path, hashed again (directory fingerprint)",
+  "hash_before": "a1ec65abb25545368dc066b84cbc7e36ddc87c88b00422de9dd35a6dd8f67152",
+  "hash_after": "a1ec65abb25545368dc066b84cbc7e36ddc87c88b00422de9dd35a6dd8f67152",
+  "unchanged": true,
+  "policy_lexical_confidence_frozen_candidate_pilot_semantics_touched": false,
+  "note": "app/api/chat/execute.ts (a Council file) has a pre-existing, unmodified static import into lib/modular-intelligence/nativeRouterV1Pilot.ts (applyPilotToResearchDecision) and lib/modular-intelligence/chatTrajectoryObserver.ts. This wiring already existed on origin/mac-current-development-sync before this mission (verified). Because Node01 currently has zero files under lib/modular-intelligence/ (git ls-tree at 34f05e8 returns nothing), promoting execute.ts to Node01 necessarily introduces these two specific files to production for the first time, unmodified and hash-identical to origin. This is disclosed explicitly in production-delta.json rather than silently included - it is a pre-existing structural dependency, not new Native Router work performed by this mission."
+}

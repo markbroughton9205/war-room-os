@@ -1,0 +1,34 @@
+{
+  "mission": "WR-CLAUDE-CODE-COUNCIL-PRODUCTION-001",
+  "phase": "0-2: pre-build inspection + branch creation",
+  "executor_environment": "local (this Mac), not cloud/codespace",
+  "repo_path": "/Users/markbroughton/Developer/war-room-os",
+  "starting_branch": "mac-current-development-sync",
+  "starting_head": "0055504",
+  "remote": "https://github.com/markbroughton9205/war-room-os.git",
+  "upstream": "origin/mac-current-development-sync",
+  "ahead_behind_origin_at_start": "0 / 0",
+  "repo_corruption_found": {
+    "description": "Three stale 0-byte .lock files inside .git/refs/heads/ (main.lock.stale, integrate/jasmine-onboarding-ui-review.lock, .lock.stale5) were breaking `git fetch` entirely (\"did not send all necessary objects\"). Consistent with a git process being killed mid-operation while Cursor was resource-bound.",
+    "action_taken": "Deleted the three lock artifacts (not real refs, zero data loss risk). git fetch confirmed working afterward.",
+    "risk": "none - these were git's own crash-recovery lock files, not branches or commits"
+  },
+  "dirty_working_tree_found_on_mac_current_development_sync": {
+    "tracked_modifications": 12,
+    "untracked_additions": ["WR-LIVE-COUNCIL-ORCHESTRATION-001/healthy-roster-results.json", "lib/council/live-orchestration/rosterHealth.server.ts", "lib/council/live-orchestration/rosterHealth.ts", "scripts/run-healthy-roster-live-round.mjs", "scripts/run-healthy-roster-world-brief.mjs"],
+    "junk_excluded": ["model-lab/ (real WRIM corpora/manifests, not gitignored, not in history)", ".venv-wrim/ (python venv)", "_to_delete_phase*_patch x8 (stale format-patch exports)", "lib/native-builder/__fixtures__/__scratchDelete.ts (self-labeled scratch fixture)"],
+    "interpretation": "Cursor's in-progress healthy-roster-mode Council work, left uncommitted when the session became resource-bound. Preserved via targeted git stash (only the meaningful files), not discarded."
+  },
+  "node/pnpm_versions": { "node": "v24.19.0", "pnpm": "10.34.5", "npm": "11.17.0" },
+  "environment_resources": { "cpu_cores": 8, "ram_gb": 8, "note": "matches mission brief's '8GB Mac' description; confirmed resource-constrained during this session (see typecheck-classification.json / browser-smoke.json)" },
+  "node01_production_state_at_inspection_time": {
+    "path": "/Users/markbroughton/WarRoomNode01",
+    "head": "34f05e8 (detached HEAD, feat(terra): add live aircraft intelligence)",
+    "ancestor_of_both_dev_branches": true,
+    "anomaly": "~150 uncommitted file changes already present in the working tree, including untracked dirs lib/wrim1-training/, lib/modular-intelligence/, lib/agi-experience/ that resemble WRIM/AGI-lab experimental work. Provenance unknown. Commander decision: leave as-is, snapshot only, do not touch this round.",
+    "launch_agent": "com.warroom.node01 loaded and running (PID 928)",
+    "local_reachability": "127.0.0.1:3000 -> HTTP 307",
+    "public_reachability": "https://warroomos.com -> HTTP 307",
+    "cloudflared_config_present": true
+  }
+}

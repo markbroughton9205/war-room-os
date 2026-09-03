@@ -1,0 +1,10 @@
+{
+  "result": "BROWSER_SMOKE_BLOCKED_BY_ENVIRONMENT",
+  "reasoning": "Not attempted this round. The dev-branch full build alone (Turbopack, no browser involved) drove the 8GB Mac to 19GB RSS / near-zero free memory and had to be killed (see dev-full-monorepo-build-attempt.json). Running `next dev` plus a Chrome session rendering Cesium/WebGL for the Terra/God's Eye globe on top of that same machine, in its current state (other dev tools - Cursor Helper, Codex - already resident), would very likely reproduce the exact resource-fighting loop the mission explicitly says not to repeat. Per Phase 13, this is recorded as environment-blocked rather than attempted and fought for an hour.",
+  "evidence_relied_on_instead": {
+    "server_path_evidence": "WR-LIVE-COUNCIL-ORCHESTRATION-001/healthy-roster-results.json (Cursor's own prior server-path run, committed onto this branch): SOCIAL_CHECKIN for both 'hi' and 'checkin' variants -> ChatGPT then Gemini sequential, no memory prompt, no research, no Panama; normal KNOWLEDGE_QUESTION round -> sequential ChatGPT/Gemini; world brief -> FRESHNESS_SENSITIVE, 24 RSS sources, DEGRADED_BY_ROSTER, no Panama. Matches every claim in the mission brief's 'ALREADY DEMONSTRATED' section.",
+    "live_provider_canary": "scripts/run-live-council-provider-canary.mjs was run this session and made a real streaming call against a live provider, confirming real (non-typewriter) streaming end-to-end at the transport layer.",
+    "validator_suite": "310/311 across live orchestration, session isolation, context relevance, greeting/social-checkin, family deliberation, response normalization, render gate, persona-cluster."
+  },
+  "recommendation": "If a real browser smoke is required before Node01 promotion, it should run in a less memory-pressured environment (a cloud/Codespace dev port, or this Mac after closing other heavy dev-tool processes) rather than as-is."
+}

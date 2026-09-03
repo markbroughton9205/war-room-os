@@ -1,0 +1,24 @@
+{
+  "branches_compared": ["origin/mac-current-development-sync", "origin/node02-mac-reconciled"],
+  "mac_current_development_sync_sha": "00555046d2073e3bc1545662e55f9846615e196b",
+  "node02_mac_reconciled_sha": "adcfe7f5966fcc594b3b171488bde9a9545c55da",
+  "sha_match_to_mission_brief": true,
+  "relationship": "node02-mac-reconciled is a strict fast-forward superset of mac-current-development-sync: merge-base(mac-sync, node02) == mac-current-development-sync HEAD. node02 is mac-sync + 4 additional commits, mac-sync has 0 commits node02 lacks.",
+  "node02_only_commits": 4,
+  "node02_only_diff": {
+    "files_changed": 22,
+    "insertions": 1037,
+    "deletions": 99,
+    "content": "Pure UI/Matrix/God's Eye/deploy-integrity additions: CouncilCommandControls, CouncilGodsEyeStatus, CouncilRuntimeStatus, CommandIcons, MatrixCodeRain enhancements, matrixRuntimeColors, godsEyeStatusAdapter, GodsEyeCommandCenter status wiring, deploy/buildMeta + deploymentIntegrityReconciliation validation, write-build-meta script.",
+    "council_orchestration_core_touched": false,
+    "verification": "grep across the diff for live-orchestration|rosterHealth|floorScheduler|session-isolation|memory found zero matches"
+  },
+  "preferred_end_state_resolution": "Because node02-mac-reconciled == mac-current-development-sync (latest Council Foundation/orchestration) + Node02 UI/Matrix/God's Eye additions, with zero divergence, the 'preferred end state' IS origin/node02-mac-reconciled itself. No merge was required, only a base selection.",
+  "chosen_base_for_work_branch": "origin/node02-mac-reconciled",
+  "cursor_wip_reconciliation": {
+    "action": "Cursor's uncommitted healthy-roster-mode work (captured via targeted git stash from mac-current-development-sync) was popped onto a new branch built from origin/node02-mac-reconciled.",
+    "conflicts": "app/page.tsx was the only file touched by both sides (Cursor's WIP added a degraded-roster header banner + roster-eligibility filtering; node02 replaced the toolbar block with <CouncilCommandControls/>). git auto-merged with no conflict markers.",
+    "post_merge_bug_found": "The auto-merge left <WarRoomOsHeader/> and the conditional degraded-roster <div> as two unwrapped JSX siblings inside header={(...)}, which is invalid JSX/TSX and cascaded into unrelated parse errors ~500 lines downstream. Not a git conflict (no markers), a silent structural issue from a clean line-based merge. Fixed by wrapping both in a Fragment; verified the fix by isolating with ts.transpileModule before/after (cascade errors gone) and full project tsc afterward.",
+    "excluded_from_new_branch": ["model-lab/", ".venv-wrim/", "_to_delete_phase*_patch (x8)", "lib/native-builder/__fixtures__/__scratchDelete.ts", "scripts/*/__pycache__/"]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "env_vars_present_in_dot_env_local": ["WR_COUNCIL_ROSTER_CHATGPT", "WR_COUNCIL_ROSTER_GEMINI", "WR_COUNCIL_ROSTER_CLAUDE", "WR_COUNCIL_ROSTER_GROK"],
+  "values_printed": false,
+  "implementation_file": "lib/council/live-orchestration/rosterHealth.ts",
+  "states_implemented": ["ACTIVE", "CONFIGURED", "UNAVAILABLE", "UNAVAILABLE_BILLING", "UNAVAILABLE_AUTH", "FAILED_DURING_ROUND", "SKIPPED_BY_POLICY"],
+  "claude_state": "CONFIGURED / UNAVAILABLE_BILLING",
+  "grok_state": "CONFIGURED / UNAVAILABLE_AUTH",
+  "red_team_state": "SKIPPED_BY_POLICY (no existing healthy Red Team provider mapping found; no new mapping created)",
+  "unhealthy_providers_excluded_from_floor": true,
+  "verification": "roster_01_unhealthy_not_floor_eligible case inside the 37/37 live-orchestration validation suite passes; floorScheduler.ts resolveVisibleFloorOrder() filters out any family where input.eligible[family] === false",
+  "degraded_label": "COUNCIL DEGRADED · 2/4 PROVIDERS ACTIVE",
+  "secrets_deleted_or_removed": false
+}

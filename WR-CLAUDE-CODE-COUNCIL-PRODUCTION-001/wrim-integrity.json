@@ -1,0 +1,15 @@
+{
+  "wrim0_checkpoint_sha_expected": "d1affa599ff967313b476e649062c7d969606b8e9f6fa1410f12a41d857ba015",
+  "wrim0_checkpoint_sha_documented_in_repo": "d1affa599ff967313b476e649062c7d969606b8e9f6fa1410f12a41d857ba015",
+  "documented_at": "docs/WRIM_FROZEN_CORE_ARCHITECTURE.md",
+  "match": true,
+  "scope_hashed": "lib/wrim1-training/ + lib/wrim1-dataset/ (directory fingerprint, same method as router-integrity.json)",
+  "hash_before": "a8fdba1a67d4029c69b6034b912db23585ea4a4ff1f3057f47d60196e4a83601",
+  "hash_after": "a8fdba1a67d4029c69b6034b912db23585ea4a4ff1f3057f47d60196e4a83601",
+  "unchanged": true,
+  "training_performed": false,
+  "lora_performed": false,
+  "wrim_council_member_work_performed": false,
+  "model_lab_touched": false,
+  "model_lab_note": "model-lab/ and .venv-wrim/ were found sitting uncommitted in the dev working tree at session start (real WRIM corpora/manifests/raw_intake, not gitignored, not in git history). Explicitly excluded from the review branch and from every commit made this session."
+}
