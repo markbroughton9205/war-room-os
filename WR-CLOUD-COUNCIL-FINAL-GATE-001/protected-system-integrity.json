@@ -1,0 +1,28 @@
+{
+  "mission": "WR-CLOUD-COUNCIL-FINAL-GATE-001",
+  "phase": "protected-system integrity check (tripwire, not busywork)",
+  "commit_tested": "a5c6eb69bcc4440fa86b7017e048b0cfc9a03a8a",
+  "method": "sha256-of-sha256 directory fingerprint: find <dir(s)> -type f | sort, run `shasum -a 256 <file>` on each (producing standard 'hash  path' lines), concatenate those lines in path-sorted order, then shasum -a 256 the concatenated text. Verified this exact method by brute-forcing several candidate concatenation variants (bare-hash-only, hash-list re-sorted, path+hash concatenation, no-separator concatenation) against the known lib/modular-intelligence baseline until an exact match was found - the matching method is 'standard shasum output lines, in path order, hashed again'.",
+  "lib_modular_intelligence": {
+    "file_count": 33,
+    "baseline_fingerprint": "a1ec65abb25545368dc066b84cbc7e36ddc87c88b00422de9dd35a6dd8f67152",
+    "computed_fingerprint": "a1ec65abb25545368dc066b84cbc7e36ddc87c88b00422de9dd35a6dd8f67152",
+    "match": true,
+    "corroboration": "git status --porcelain lib/modular-intelligence/ returned empty (no untracked/modified files) and git ls-files lib/modular-intelligence/ | wc -l also returned 33, consistent with the fingerprint match. No file under lib/modular-intelligence/ was read for editing purposes in this session - only for import-tracing (read-only) as explicitly permitted by the mission's hard constraints."
+  },
+  "lib_wrim1_training_plus_dataset": {
+    "dirs": ["lib/wrim1-training/", "lib/wrim1-dataset/"],
+    "file_count": 38,
+    "baseline_fingerprint": "a8fdba1a67d4029c69b6034b912db23585ea4a4ff1f3057f47d60196e4a83601",
+    "computed_fingerprint": "a8fdba1a67d4029c69b6034b912db23585ea4a4ff1f3057f47d60196e4a83601",
+    "match": true
+  },
+  "wrim0_checkpoint_sha_doc_check": {
+    "file": "docs/WRIM_FROZEN_CORE_ARCHITECTURE.md",
+    "expected": "d1affa599ff967313b476e649062c7d969606b8e9f6fa1410f12a41d857ba015",
+    "found_at_line_5": "d1affa599ff967313b476e649062c7d969606b8e9f6fa1410f12a41d857ba015",
+    "match": true
+  },
+  "overall_result": "PASS - all three protected-system integrity checks match the prior session's recorded baselines exactly, on the exact same commit. No modification occurred (expected, trivially, since this session did not touch any of these paths) - confirmed rather than assumed.",
+  "modification_actions_taken": "NONE. No file under lib/modular-intelligence/, lib/wrim1-training/, lib/wrim1-dataset/, model-lab/, scripts/wrim-modular/, or scripts/wrim1-training/ was edited, and no training/closeout script under those paths was run, per the mission's hard constraints."
+}

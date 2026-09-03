@@ -1,0 +1,33 @@
+{
+  "mission": "WR-CLOUD-COUNCIL-FINAL-GATE-001",
+  "phase": "5 - full cloud build",
+  "command": "pnpm run build",
+  "result": "FAIL",
+  "classification": "B - pre-existing unrelated repo issue (NOT a Council regression, NOT a cloud environment/memory issue this time)",
+  "elapsed_s_approx": 40,
+  "stages_reached": [
+    "prebuild: commander-identity gate skipped for VERCEL_ENV=local (expected in this environment)",
+    "prebuild: Cesium assets copied",
+    "next build (Turbopack) started",
+    "'Creating an optimized production build ...' - Compiled successfully in 28.1s",
+    "Running TypeScript ... - FAILED here"
+  ],
+  "failure_detail": {
+    "file": "lib/modular-intelligence/nativeRouterV1Pilot.validation.ts",
+    "line": "321:45",
+    "error": "TS2352: Conversion of type '{ WR_NATIVE_ROUTER_V1_SHADOW: string; }' to type 'ProcessEnv' may be a mistake because neither type sufficiently overlaps with the other.",
+    "root_cause": "next build's internal TypeScript check (run as part of 'next build', distinct from a standalone 'pnpm exec tsc --noEmit') type-checks the ENTIRE project including files outside the Council import closure. This is the identical pre-existing WRIM/Native-Router error already confirmed by 'pnpm exec tsc --noEmit' and already classified Category B in the prior session's typecheck-classification.json (and independently reconfirmed in this session's validator-results.json). It is not new, not Council-scoped, and not touched.",
+    "action_taken": "None. Per mission instruction, WRIM/Native Router/AGI-experiment code under lib/modular-intelligence/ was not modified to force a build pass, and no build configuration (next.config.ts, tsconfig.json) was modified to skip or ignore type errors."
+  },
+  "memory_observation": {
+    "method": "Background watchdog polling ps RSS of the build process tree + vm_stat/vm.swapusage every 15s, with an OOM-guard kill threshold set at 5.5GB RSS to protect the shared host machine (this same 8GB Mac hosts the user's live desktop session with several other heavy apps already running).",
+    "peak_rss_observed_kb": 815920,
+    "peak_rss_observed_gb_approx": 0.78,
+    "free_ram_during_build_mb": "57-58 (already tight before build started, due to other running apps - Cursor, ChatGPT/Codex, Claude.app)",
+    "swap_free_during_build_mb": "~1436-1579",
+    "oom_guard_triggered": false,
+    "comparison_to_prior_session": "The prior session's dev-full-monorepo-build-attempt.json recorded the same 'pnpm run build' growing to 19GB RSS / 18GB compressed and getting stuck indefinitely at 'Creating an optimized production build ...', requiring a manual SIGKILL. This session's build instead compiled successfully in 28.1s at under 1GB RSS peak and failed cleanly (exit code 1, real TypeScript error) within roughly 40 seconds total, well before any memory pressure crisis. This is a genuinely different, better outcome than the prior session - not merely a repeat of the earlier OOM."
+  },
+  "interpretation": "This is an honest FAIL, not a fabricated PASS and not an environment-blocked result. The build got substantially further than before (past the memory-exhaustion point that blocked the prior session) and failed for a legitimate, already-known, out-of-scope code reason: Next.js's own build-time type-check does not scope itself to only the files a route actually needs at runtime - it checks the whole tsconfig 'include' set, so any pre-existing error anywhere in the repo (even in code Council never touches) blocks 'next build' for the whole app. 'pnpm exec tsc --noEmit' and the 10/11-validator suite both independently confirm the Council-scoped code itself is clean.",
+  "would_a_fix_be_in_scope": "No. Fixing this would require either (a) editing the pre-existing lib/modular-intelligence/*.validation.ts type error, which is explicitly forbidden WRIM/Native-Router-adjacent code, or (b) changing next.config.ts/tsconfig.json build behavior (e.g. typescript.ignoreBuildErrors), which is a project-wide policy change outside this mission's authorization and was not requested. Recorded as a real, honest build blocker instead."
+}

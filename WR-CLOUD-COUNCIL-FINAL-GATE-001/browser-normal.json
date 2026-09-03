@@ -1,0 +1,16 @@
+{
+  "mission": "WR-CLOUD-COUNCIL-FINAL-GATE-001",
+  "phase": "7 - browser smoke: bounded ordinary Council question",
+  "status": "BROWSER_SMOKE_BLOCKED_NO_CREDENTIALS",
+  "reason": "Same root cause as browser-social.json: no real provider API keys available in this environment. Not attempted.",
+  "not_fabricated": "No response content, streaming order, or dedup behavior was fabricated or guessed at. This test was not run.",
+  "would_have_tested": [
+    "New chat, one bounded ordinary Council question (e.g. a simple factual question)",
+    "ChatGPT then Gemini sequential real streaming",
+    "No duplicate messages",
+    "Claude not invoked",
+    "Grok not invoked",
+    "Red Team SKIPPED_BY_POLICY if it appears at all"
+  ],
+  "corroborating_non_live_evidence": "live-orchestration validator's stream_02_openai_delta / stream_03_gemini_single_line_sse / idempotency_01 cases and live-response-normalization validator's duplicate-contribution-insert-once case (both fully PASS in this environment) cover the logic for sequential streaming and dedup, but again do not substitute for a real live API run."
+}

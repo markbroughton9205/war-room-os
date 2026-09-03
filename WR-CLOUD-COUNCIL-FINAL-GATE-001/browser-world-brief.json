@@ -1,0 +1,21 @@
+{
+  "mission": "WR-CLOUD-COUNCIL-FINAL-GATE-001",
+  "phase": "8 - browser smoke: \"Council, what's going on with the world?\"",
+  "status": "BROWSER_SMOKE_BLOCKED_NO_CREDENTIALS",
+  "reason": "Same root cause as browser-social.json and browser-normal.json: no real provider API keys available in this environment, and this phase additionally needs a real research/search provider (Tavily/Firecrawl/Brave etc.) none of which are configured here either. Not attempted.",
+  "not_fabricated": "No source count, evidence packet, or floor order was fabricated or guessed at. This test was not run.",
+  "would_have_tested": [
+    "New chat, send \"Council, what's going on with the world?\"",
+    "Classification as FRESHNESS_SENSITIVE",
+    "Real research runs, a source count is recorded",
+    "An evidence packet is built and the SAME packet is used for both ChatGPT and Gemini",
+    "ChatGPT floor then Gemini floor",
+    "Claude not invoked, Grok not invoked",
+    "Red Team not fabricated",
+    "Round quality marked DEGRADED_BY_ROSTER",
+    "No Panama contamination"
+  ],
+  "source_count": null,
+  "floor_order_observed": null,
+  "corroborating_non_live_evidence": "context-relevance validator's iso_05_world_brief_full_research / iso_19_world_query_decomposed / iso_20_all_research_failed_no_pretend cases (28/28 PASS) and live-orchestration validator's isolation_01_social_no_research case confirm the classification and no-fabrication logic, but do not substitute for a real research run against live search providers, which this environment does not have credentials for."
+}

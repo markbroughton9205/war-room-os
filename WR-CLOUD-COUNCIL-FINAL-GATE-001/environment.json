@@ -1,0 +1,40 @@
+{
+  "mission": "WR-CLOUD-COUNCIL-FINAL-GATE-001",
+  "phase": "2 - environment report",
+  "critical_finding": "This 'cloud' execution environment is, empirically, the SAME physical machine as the prior local session that hit OOM, not a distinct cloud environment with more headroom. hostname, CPU model, and total physical RAM are all identical to what repo-reconciliation.json recorded for the prior WR-CLAUDE-CODE-COUNCIL-PRODUCTION-001 session. This is reported honestly per the mission's own instruction not to fabricate a distinct-environment narrative.",
+  "hostname": "Marks-MacBook-Pro.local",
+  "os": "macOS 26.6.2 (Darwin 25.6.0), arm64",
+  "cpu": "Apple M1, 8 cores",
+  "ram_total_bytes": 8589934592,
+  "ram_total_gb": 8.0,
+  "ram_note": "Identical to the 8GB figure recorded by the prior local session in repo-reconciliation.json (environment_resources.ram_gb: 8, note: 'matches mission brief's 8GB Mac description'). At time of the build attempt this session, the machine was already running several heavy Electron apps (Cursor, ChatGPT/Codex, Claude.app, Terminal) consuming most of physical RAM; swap was already 4565MB/6144MB used before this session started any Council work.",
+  "disk": {
+    "filesystem": "/dev/disk3s1",
+    "size": "460Gi",
+    "used": "378Gi",
+    "avail": "55Gi",
+    "capacity_used_pct": 88
+  },
+  "repo_path_this_session": "/private/tmp/claude-501/-Users-markbroughton/3ab857c4-823c-4803-a3cc-a6580858d6a5/scratchpad/wr-cloud/repo",
+  "repo_source": "Fresh git clone from https://github.com/markbroughton9205/war-room-os.git (not a reuse of any local checkout) - this satisfies the mission's clean-clone requirement even though the underlying hardware is shared with the prior session.",
+  "branch": "claude-council-production-review",
+  "head_sha_full": "a5c6eb69bcc4440fa86b7017e048b0cfc9a03a8a",
+  "head_sha_short": "a5c6eb6",
+  "sha_verification": "MATCH - checked out branch resolved to the exact required commit on first checkout, no additional commits or rebases were needed",
+  "node_version": "v24.19.0",
+  "pnpm_version": "10.34.5",
+  "npm_version": "11.17.0",
+  "versions_note": "Identical to node/pnpm versions recorded by the prior session in repo-reconciliation.json (node v24.19.0, pnpm 10.34.5, npm 11.17.0) - further confirming this is the same machine/toolchain, not an independently provisioned cloud image.",
+  "env_local_present_in_fresh_clone": false,
+  "env_example_present": true,
+  "provider_api_key_env_vars_checked_by_name_only": {
+    "OPENAI_API_KEY": "NOT SET",
+    "ANTHROPIC_API_KEY": "NOT SET",
+    "XAI_API_KEY": "NOT SET",
+    "GEMINI_API_KEY": "NOT SET",
+    "GOOGLE_API_KEY": "NOT SET"
+  },
+  "roster_health_env_var_dependency": "lib/council/live-orchestration/rosterHealth.server.ts checks presence of OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY, GEMINI_API_KEY (ANTHROPIC_API_KEY reused for red_team) via envHasUsableProviderSecret(). None of these are present in this fresh clone's shell environment or in a .env.local (none exists).",
+  "credentials_verdict": "NO real provider API keys are available in this cloud environment. This is stated plainly and honestly, not fabricated. This determines that Phases 6-8 (live browser/provider smoke) are BLOCKED_NO_CREDENTIALS in this environment - see browser-social.json, browser-normal.json, browser-world-brief.json.",
+  "secrets_handling": "No secret values were ever printed, echoed, or written to any artifact in this session. Only presence/absence by variable NAME was checked."
+}
