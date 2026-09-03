@@ -25,6 +25,12 @@ Grok/xAI: HTTP **400 AUTH** — provider message class `incorrect_api_key`. Pref
 
 Node01: not modified. WRIM checkpoint SHA unchanged. Native Router source hash unchanged.
 
-Node01 was not rebuilt or restarted. Promotion is blocked until Anthropic credit/request succeeds and Grok/Gemini configuration is truthful.
+## Healthy-roster degraded mode
+
+Anthropic billing was deferred by Commander. Live policy marks Claude UNAVAILABLE_BILLING and Grok UNAVAILABLE_AUTH while keeping role definitions. Floor assignment is ChatGPT → Gemini only. Red Team is SKIPPED_BY_POLICY.
+
+Live sequential streams passed for `"Hi council"`, `"Council check in"`, and a bounded hash-table question. World brief reused existing research workers (24 RSS sources this run; Tavily not ok; Grok research not ok). Families received the same evidence text. Panama: no. Round quality: DEGRADED_BY_ROSTER.
+
+Node01 was not promoted. Degraded production review packet is prepared in `production-delta.json`.
 
 Artifacts: `WR-LIVE-COUNCIL-ORCHESTRATION-001/`.

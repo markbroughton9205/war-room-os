@@ -11,6 +11,7 @@ import { resolveStreamTimeoutBudget } from './timeoutPolicy'
 import { healthLevelFromProbe } from './healthLevels'
 import { attemptIdFor, logicalMessageIdFor } from './attemptIdempotency'
 import { intentLaneFromTurnIntent } from './types'
+import { buildCouncilRosterSnapshot } from './rosterHealth'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 function check(name: string, pass: boolean, detail = ''): CaseResult {
@@ -64,6 +65,11 @@ export function runLiveCouncilOrchestrationValidation(): CaseResult[] {
     check('round_01_social_path', socialCheckinPhasePath().join('>') === 'ROUND_CREATED>CLASSIFYING>DELIBERATING>COMPLETE', 'path'),
     check('round_02_illegal_transition', !canTransitionRoundPhase('COMPLETE', 'RESEARCHING'), 'complete→research'),
     check('floor_01_order', floor.join(',') === 'chatgpt,claude,grok,gemini,red_team', floor.join(',')),
+    check('floor_04_healthy_roster_skips_unhealthy', resolveVisibleFloorOrder({
+      configured: { chatgpt: true, claude: true, grok: true, gemini: true, red_team: true },
+      eligible: { chatgpt: true, claude: false, grok: false, gemini: true, red_team: false },
+      includeRedTeam: true,
+    }).join(',') === 'chatgpt,gemini', 'healthy floor'),
     check('floor_02_one_visible', visibleConcurrentFamilies(snap) === 1 && snap.current === 'chatgpt', JSON.stringify(snap)),
     check('floor_03_next', nextEligibleFloor(participants.map(p => p.family === 'chatgpt' ? { ...p, state: 'COMPLETE' } : p)) === 'claude', 'next'),
     check('stream_01_anthropic_not_openai', anthropicDeltaFromFixture() === 'Present.', 'anthropic'),
@@ -99,6 +105,21 @@ export function runLiveCouncilOrchestrationValidation(): CaseResult[] {
     check('idempotency_01', attemptIdFor({ roundId: 'r1', family: 'claude', stage: 'RESPONSE', attempt: 2 }).includes('attempt-2')
       && logicalMessageIdFor({ roundId: 'r1', family: 'claude', stage: 'RESPONSE' }) === 'r1:claude:RESPONSE', 'ids'),
     check('isolation_01_social_no_research', !checkIn.shouldResearch && !hi.shouldResearch, 'no research'),
+    check('roster_01_unhealthy_not_floor_eligible', (() => {
+      const snap = buildCouncilRosterSnapshot({
+        configured: { chatgpt: true, claude: true, grok: true, gemini: true, red_team: true },
+        overrides: { claude: 'UNAVAILABLE_BILLING', grok: 'UNAVAILABLE_AUTH' },
+      })
+      return snap.families.chatgpt?.floorEligible === true
+        && snap.families.gemini?.floorEligible === true
+        && snap.families.claude?.floorEligible === false
+        && snap.families.grok?.floorEligible === false
+        && snap.families.claude?.unavailableReason === 'UNAVAILABLE_BILLING'
+        && snap.families.grok?.unavailableReason === 'UNAVAILABLE_AUTH'
+        && snap.redTeam === 'SKIPPED_BY_POLICY'
+        && snap.degradedByRoster
+        && snap.activeFloorFamilies.join(',') === 'chatgpt,gemini'
+    })(), 'roster'),
   ]
 }
 

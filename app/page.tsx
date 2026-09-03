@@ -298,6 +298,7 @@ import {
 } from '@/lib/council/session-orchestration'
 import { decideMemoryCandidatePrompt } from '@/lib/council/live-orchestration/memoryCandidateGate'
 import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialCheckin'
+import { compactFamilyRosterLine, type CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
 import { createPresentationBuffer } from '@/lib/council/live-orchestration/presentationBuffer'
 import { failureUiLabel } from '@/lib/council/live-orchestration/failureTaxonomy'
 import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
@@ -6120,6 +6121,7 @@ function Home() {
   const [memories, setMemories] = useState<MemoryEntry[]>([])
   const [repoAwareness, setRepoAwareness] = useState<RepoAwarenessState>(INITIAL_REPO_AWARENESS_STATE)
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
+  const [councilRoster, setCouncilRoster] = useState<CouncilRosterSnapshot | null>(null)
   const [canonicalRuntimeStatus, setCanonicalRuntimeStatus] = useState<CanonicalRuntimeStatus | null>(null)
   const [redTeamCoder, setRedTeamCoder] = useState<RedTeamCoderUiState>(INITIAL_RED_TEAM_CODER_STATE)
   const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
@@ -7842,6 +7844,7 @@ function Home() {
         }
       }
       setProviderHealth({ providers: prov, labels: lab })
+      if (data.councilRoster?.families) setCouncilRoster(data.councilRoster)
     } catch {
       setCanonicalRuntimeStatus(null)
       setProviderHealth(prev => ({
@@ -9666,14 +9669,24 @@ function Home() {
         order = [...order, ...casualFallbacks.filter(f => !order.includes(f))]
       }
       if (skipGeminiForSessionRef.current) order = order.filter(f => f !== 'gemini')
+      const applyHealthyRoster = (families: CouncilOrchestrationFamily[]) =>
+        families.filter(family => {
+          if (family === 'gemini' && skipGeminiForSessionRef.current) return false
+          const row = councilRoster?.families[family]
+          if (!row) return family === 'chatgpt' || family === 'gemini'
+          return row.floorEligible
+        })
+      order = applyHealthyRoster(order)
 
-      const directedOrder = attendanceWave
-        ? buildAttendanceDirectedOrder({
-            cmd,
-            decree,
-            participationToggles,
-          })
-        : filterOrchestrationOrderByCommand(order, cmd, decree)
+      const directedOrder = applyHealthyRoster(
+        attendanceWave
+          ? buildAttendanceDirectedOrder({
+              cmd,
+              decree,
+              participationToggles,
+            })
+          : filterOrchestrationOrderByCommand(order, cmd, decree),
+      )
       const diagnosticIntentMode = resolveDiagnosticIntentMode(decree)
       const diagnosticSequential =
         councilFlowModeEffective !== 'stable_group'
@@ -9681,7 +9694,9 @@ function Home() {
         && !attendanceWave
       const stableGroupSequential =
         councilFlowModeEffective === 'stable_group' && !attendanceWave && !cmd.directInvocation
-      const orderForGather = diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder
+      const orderForGather = applyHealthyRoster(
+        diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder,
+      )
       const councilLogicalRequestId = createMessageId('council-logical-request')
       decreeSubmitFaultAnchor = orderForGather[0] ?? directedOrder[0]
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
@@ -12646,6 +12661,15 @@ function Home() {
               systemStatusLine={chatHealthLabel}
               missionHint={councilContinueStatusLine}
             />
+            {councilRoster?.degradedByRoster ? (
+              <div
+                className="border-b px-4 py-1.5 text-[9px] font-semibold uppercase tracking-widest text-amber-200/90 sm:px-6"
+                style={{ borderColor: 'rgba(251,191,36,0.35)', background: 'rgba(251,191,36,0.08)' }}
+                role="status"
+              >
+                {compactFamilyRosterLine(councilRoster)}
+              </div>
+            ) : null}
           )}
           intelRow={null}
           leftNav={(
@@ -12684,6 +12708,7 @@ function Home() {
                     providerStatuses={providerHealth.providers}
                     providerLabels={providerHealth.labels}
                     operationStatuses={familyOperationStatuses}
+                    councilRoster={councilRoster}
                     onOpenPanel={id => setDockPanelId(id)}
                   />
                   <SynthesisCard synthesis={conversationRuntimeSnapshot?.latestSynthesis} />

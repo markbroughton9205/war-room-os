@@ -128,7 +128,9 @@ import {
 } from '@/lib/council/stableGroupChat'
 import { filterDecreeRelevantPriorReplies, isLightweightPingDecree } from '@/lib/council/contextRelevance'
 import { familyIsStreamConfigured, streamCouncilFamily } from '@/lib/council/live-orchestration/streamProvider'
+import { resolveLiveCouncilRoster, familyIsFloorEligible } from '@/lib/council/live-orchestration/rosterHealth.server'
 import { resolveVisibleFloorOrder } from '@/lib/council/live-orchestration/floorScheduler'
+import { rosterToFloorFlags } from '@/lib/council/live-orchestration/rosterHealth'
 import { classifyProviderFailure } from '@/lib/council/live-orchestration/failureTaxonomy'
 import type { CouncilFailureLayer } from '@/lib/council/live-orchestration/types'
 import {
@@ -737,6 +739,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     typeof body.conversationId === 'string' && /^[0-9a-f-]{36}$/i.test(body.conversationId.trim())
       ? body.conversationId.trim()
       : null
+  const liveCouncilRoster = resolveLiveCouncilRoster()
+  const liveCouncilFloor = rosterToFloorFlags(liveCouncilRoster)
   const councilLogicalRequestId =
     typeof body.councilLogicalRequestId === 'string' && body.councilLogicalRequestId.trim()
       ? body.councilLogicalRequestId.trim()
@@ -775,6 +779,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         {
           ...payload,
           conversationId: payload.conversationId ?? conversationId,
+          councilRoster: liveCouncilRoster,
           agiContextSnapshotId: warRoomContextSnapshotId,
           agiContextAssemblyDurationMs: contextAssemblyDurationMs,
         },
@@ -1673,8 +1678,18 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     if (family === 'kimi' && !isKimiConfigured()) {
       return { family: familyName, content: 'Kimi not configured', status: 'UNAVAILABLE', failureLayer: 'AUTH' }
     }
+    if (!familyIsFloorEligible(family) && family !== 'kimi') {
+      const row = liveCouncilRoster.families[family]
+      const layer =
+        row?.unavailableReason === 'UNAVAILABLE_BILLING'
+          ? 'BILLING'
+          : row?.unavailableReason === 'UNAVAILABLE_AUTH'
+            ? 'AUTH'
+            : 'REQUEST'
+      return { family: familyName, content: '', status: 'UNAVAILABLE', failureLayer: layer }
+    }
     if (!familyIsStreamConfigured(family) && family !== 'kimi') {
-      return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE', failureLayer: 'AUTH' }
+      return { family: familyName, content: '', status: 'UNAVAILABLE', failureLayer: 'AUTH' }
     }
 
     const systemFor = (): string => {
@@ -1872,13 +1887,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       module: 'app/api/chat/route.ts:family_to_family_deliberation',
       inputSummary: { requestedMode: 'family_to_family_v1', turnIntent: classifiedTurn.intent },
       outputSummary: { selectedFamilies: resolveVisibleFloorOrder({
-        configured: {
-          chatgpt: familyIsStreamConfigured('chatgpt'),
-          claude: familyIsStreamConfigured('claude'),
-          grok: familyIsStreamConfigured('grok'),
-          gemini: familyIsStreamConfigured('gemini'),
-          red_team: familyIsStreamConfigured('red_team'),
-        },
+        configured: liveCouncilFloor.configured,
+        eligible: liveCouncilFloor.eligible,
         includeRedTeam: classifiedTurn.intent !== 'SOCIAL_CHECKIN',
       }) },
       stateChange: 'Floor-controlled sequential families using configured providers only.',
@@ -1886,13 +1896,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
 
     const skipSocialDeepStages = classifiedTurn.intent === 'SOCIAL_CHECKIN' || classifiedTurn.depth === 'FAST'
     const primaryFamilies = resolveVisibleFloorOrder({
-      configured: {
-        chatgpt: familyIsStreamConfigured('chatgpt'),
-        claude: familyIsStreamConfigured('claude'),
-        grok: familyIsStreamConfigured('grok'),
-        gemini: familyIsStreamConfigured('gemini'),
-        red_team: false,
-      },
+      configured: liveCouncilFloor.configured,
+      eligible: liveCouncilFloor.eligible,
       includeRedTeam: false,
     })
     let speakingOrder = 0
@@ -1905,7 +1910,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     }
 
     const availableIds = completedOutputIds()
-    if (!skipSocialDeepStages && familyIsStreamConfigured('red_team') && availableIds.length > 0) {
+    if (!skipSocialDeepStages && familyIsFloorEligible('red_team') && availableIds.length > 0) {
       speakingOrder += 1
       await callTurn('red_team', 'red_team_challenge', speakingOrder, {
         inputMessageIds: [session.commander_message_id, ...availableIds],
@@ -2007,13 +2012,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       // client may still send these fields (harmless, backward compatible),
       // but this path has no use for them.
       const deliberationFamilies = resolveVisibleFloorOrder({
-        configured: {
-          chatgpt: familyIsStreamConfigured('chatgpt'),
-          claude: familyIsStreamConfigured('claude'),
-          grok: familyIsStreamConfigured('grok'),
-          gemini: familyIsStreamConfigured('gemini'),
-          red_team: familyIsStreamConfigured('red_team'),
-        },
+        configured: liveCouncilFloor.configured,
+        eligible: liveCouncilFloor.eligible,
         includeRedTeam: classifiedTurn.intent !== 'SOCIAL_CHECKIN',
       })
       councilProgress = createCouncilProgressRuntimeTracker({
@@ -2287,12 +2287,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     }
 
     if (!councilSingleFamily) {
-      const activeFamilies: CouncilSingleFamily[] = [
-        ...(envHasUsableProviderSecret('OPENAI_API_KEY') ? (['chatgpt'] as const) : []),
-        ...(envHasUsableProviderSecret('ANTHROPIC_API_KEY') ? (['claude'] as const) : []),
-        ...(envHasUsableProviderSecret('XAI_API_KEY') ? (['grok'] as const) : []),
-        ...(envHasUsableProviderSecret('GEMINI_API_KEY') ? (['gemini'] as const) : []),
-      ]
+      const activeFamilies: CouncilSingleFamily[] = resolveVisibleFloorOrder({
+        configured: liveCouncilFloor.configured,
+        eligible: liveCouncilFloor.eligible,
+        includeRedTeam: false,
+      }).filter((family): family is CouncilSingleFamily => family !== 'red_team' && family !== 'kimi' && family !== 'baby')
       councilTrace.record('providers_selected', {
         module: 'app/api/chat/route.ts:parallel_provider_selection',
         inputSummary: {
@@ -2311,7 +2310,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         requestIdSeed: councilTrace.councilTraceId,
         commanderTurnRef: conversationId ?? 'api-chat-parallel-providers',
         flowMode: 'full_council',
-        executionStrategy: 'server_parallel',
+        executionStrategy: 'server_sequential_streaming_future',
         expectedFamilies: activeFamilies,
         selectedFamilies: activeFamilies,
         selectionAuthority: 'system_selected',
@@ -2375,22 +2374,20 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           timeoutMs: PROVIDER_TIMEOUT_MS,
           prompt: summarizeTextForTrace(baseUserPrompt),
         },
-        outputSummary: { started: true, callMode: 'parallel' },
-        stateChange: 'Parallel provider calls started simultaneously.',
+        outputSummary: { started: true, callMode: 'sequential_floor' },
+        stateChange: 'Floor-controlled sequential provider calls started.',
       })
       recordCouncilProgressProviderStart(councilProgress, activeFamilies)
-      const providerResults = await Promise.all(
-        activeFamilies.map(family =>
-          withTimeout(
-            displayFamilyName(family),
-            callCouncilProvider(family, baseUserPrompt),
-            PROVIDER_TIMEOUT_MS,
-          ),
-        ),
-      )
-      activeFamilies.forEach((family, index) => {
-        recordCouncilProgressProviderResult(councilProgress, family, providerResults[index])
-      })
+      const providerResults: ProviderResult[] = []
+      for (const family of activeFamilies) {
+        const result = await withTimeout(
+          displayFamilyName(family),
+          callCouncilProvider(family, baseUserPrompt),
+          PROVIDER_TIMEOUT_MS,
+        )
+        providerResults.push(result)
+        recordCouncilProgressProviderResult(councilProgress, family, result)
+      }
       const providerResponses = providerResults.map(result => ({
         family: result.family,
         responseId: councilTrace.registerProviderResponse(result.family),
@@ -2539,6 +2536,51 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           ...computeLiveResearchClientUi(liveResearchPacket, true),
           responseCompletion: 'partial',
         }
+      }
+
+      if (
+        councilSingleFamily !== 'kimi'
+        && councilSingleFamily !== 'bridge_architect'
+        && !familyIsFloorEligible(councilSingleFamily)
+      ) {
+        const row = liveCouncilRoster.families[councilSingleFamily]
+        const result: ProviderResult = {
+          family: displayFamilyName(councilSingleFamily),
+          content: '',
+          status: 'UNAVAILABLE',
+          failureLayer:
+            row?.unavailableReason === 'UNAVAILABLE_BILLING'
+              ? 'BILLING'
+              : row?.unavailableReason === 'UNAVAILABLE_AUTH'
+                ? 'AUTH'
+                : 'REQUEST',
+        }
+        councilProgress.record({
+          eventType: 'family_not_reached',
+          source: 'server_orchestrator',
+          family: councilSingleFamily,
+          payload: {
+            outcome: 'not_reached',
+            readiness: 'unavailable',
+            providerLabel: displayFamilyName(councilSingleFamily),
+            reason: row?.uiDetail ?? 'SKIPPED_BY_POLICY',
+            rosterMembership: row?.membership ?? 'UNAVAILABLE',
+          },
+        })
+        recordCouncilProgressSyntheticAudit(councilProgress, [councilSingleFamily], [result])
+        councilProgress.closeIfTerminal()
+        await safeAudit({
+          success: false,
+          flow: 'continue_single',
+          councilSingleFamily,
+          reason: 'roster_ineligible',
+        })
+        return NextResponse.json(withTrace({
+          result,
+          results: [result],
+          skippedByRoster: true,
+          roundQuality: liveCouncilRoster.degradedByRoster ? 'DEGRADED_BY_ROSTER' : 'FULL',
+        }))
       }
 
       if (councilSingleFamily === 'bridge_architect') {

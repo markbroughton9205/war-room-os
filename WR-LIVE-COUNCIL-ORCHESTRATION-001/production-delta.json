@@ -1,4 +1,23 @@
 {
   "promoted": false,
-  "reason": "Anthropic Council-path still HTTP 400 BILLING. Grok still AUTH (incorrect API key). Gemini now live-healthy. Production smoke not authorized."
+  "prepared": true,
+  "mode": "DEGRADED_HEALTHY_ROSTER",
+  "reason": "Development healthy-roster validation passed. This prompt did not authorize Node01 promotion. Exact delta is the live-orchestration roster/floor/UI files plus execute.ts and page.tsx Council order filter. Env policy WR_COUNCIL_ROSTER_* must be copied, not the whole dirty tree.",
+  "required_env": [
+    "WR_COUNCIL_ROSTER_CHATGPT=ACTIVE",
+    "WR_COUNCIL_ROSTER_GEMINI=ACTIVE",
+    "WR_COUNCIL_ROSTER_CLAUDE=UNAVAILABLE_BILLING",
+    "WR_COUNCIL_ROSTER_GROK=UNAVAILABLE_AUTH"
+  ],
+  "core_files": [
+    "lib/council/live-orchestration/rosterHealth.ts",
+    "lib/council/live-orchestration/rosterHealth.server.ts",
+    "lib/council/live-orchestration/floorScheduler.ts",
+    "lib/council/live-orchestration/validation.ts",
+    "app/api/chat/execute.ts",
+    "app/page.tsx",
+    "lib/runtime/canonicalStatus.ts",
+    "components/war-room/live-room/CouncilMembersPanel.tsx",
+    "components/war-room/live-room/LiveRoomTopBar.tsx"
+  ]
 }

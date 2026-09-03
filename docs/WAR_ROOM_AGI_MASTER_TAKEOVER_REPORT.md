@@ -402,7 +402,7 @@ WAR ROOM NATIVE ROUTER V1 FRESH GENERALIZATION — PASS (fresh generalization de
 WAR ROOM NATIVE ROUTER V1 CANDIDATE PROMOTION — PASS (lifecycle CANDIDATE; not serving; multi-tool blocked)  
 WAR ROOM COUNCIL PROVIDER RUNTIME REPAIR — FAIL (OpenAI/Anthropic placeholders; Council not restored; redaction applied)  
 WAR ROOM COUNCIL FOUNDATION REBUILD — PASS (sessions/context/research-first/UI; Node01 not promoted; WRIM native member not started)  
-WAR ROOM LIVE COUNCIL ORCHESTRATION — FAIL (social lane + memory gate + stream adapters in development; OpenAI+Gemini stream canary PASS; Anthropic 400 BILLING; Grok AUTH incorrect key; Node01 not promoted)  
+WAR ROOM LIVE COUNCIL ORCHESTRATION — FAIL as full 4-family production; HEALTHY ROSTER MODE PASS in development (OpenAI+Gemini; Claude BILLING; Grok AUTH; Node01 not promoted)  
 WRIM1-RUN-000003 — NOT YET AUTHORIZED  
 WRIM-1.1 CANDIDATE — NOT BETTER THAN WRIM-0  
 PROMOTION — REJECTED  

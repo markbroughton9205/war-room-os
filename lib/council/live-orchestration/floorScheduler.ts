@@ -18,6 +18,7 @@ export type FloorSnapshot = {
 
 export function resolveVisibleFloorOrder(input: {
   configured: Partial<Record<CouncilOrchestrationFamily, boolean>>
+  eligible?: Partial<Record<CouncilOrchestrationFamily, boolean>>
   includeRedTeam?: boolean
   includeKimi?: boolean
 }): CouncilOrchestrationFamily[] {
@@ -28,6 +29,8 @@ export function resolveVisibleFloorOrder(input: {
   }
   return order.filter(family => {
     if (family === 'red_team' && input.includeRedTeam === false) return false
+    if (input.configured[family] === false) return false
+    if (input.eligible && input.eligible[family] === false) return false
     return input.configured[family] !== false
   })
 }
@@ -52,7 +55,7 @@ export function nextEligibleFloor(participants: FloorParticipant[]): CouncilOrch
     p.configured && (p.state === 'FLOOR_GRANTED' || p.state === 'CONNECTING' || p.state === 'STREAMING' || p.state === 'RETRYING'),
   )
   if (granted) return granted.family
-  return participants.find(p => p.configured && (p.state === 'PENDING' || p.state === 'WAITING'))?.family ?? null
+  return participants.find(p => p.configured && p.state !== 'SKIPPED' && (p.state === 'PENDING' || p.state === 'WAITING'))?.family ?? null
 }
 
 export function visibleConcurrentFamilies(snapshot: FloorSnapshot): number {
