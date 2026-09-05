@@ -4,7 +4,7 @@ import type { CouncilOrchestrationFamily } from '@/components/council/councilSes
 import { familyIsStreamConfigured, streamCouncilFamily } from '../streamProvider'
 import type { BackendMetadata, ModelBackendInvokeInput, ModelBackendInvokeResult } from './types'
 
-const EXTERNAL_PROVIDER_BY_SEAT: Record<CouncilOrchestrationFamily, string> = {
+export const EXTERNAL_PROVIDER_BY_SEAT: Record<CouncilOrchestrationFamily, string> = {
   chatgpt: 'openai',
   baby: 'openai',
   claude: 'anthropic',
@@ -15,7 +15,7 @@ const EXTERNAL_PROVIDER_BY_SEAT: Record<CouncilOrchestrationFamily, string> = {
   bridge_architect: 'unknown',
 }
 
-function modelLabelForSeat(seat: CouncilOrchestrationFamily): string {
+export function modelLabelForSeat(seat: CouncilOrchestrationFamily): string {
   if (seat === 'chatgpt' || seat === 'baby') return 'gpt-4o'
   if (seat === 'claude' || seat === 'red_team') return 'claude-sonnet-5'
   if (seat === 'grok') return 'grok (configured)'

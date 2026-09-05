@@ -12,6 +12,7 @@
     "lint": "eslint",
     "validate:native-builder": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-native-builder-validation.mjs && node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-native-builder-extended-validation.mjs",
     "validate:council-local-backend": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-local-backend-foundation-validation.mjs",
+    "validate:council-backend-status-ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-backend-status-ui-validation.mjs",
     "validate:mission-runtime": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-mission-runtime-validation.mjs",
     "validate:ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ui/matrixStatusBus.validation.ts && node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ui/runtimeEventBridge.validation.ts",
     "validate:approval-issuance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-approval-issuance-gate16.mjs",

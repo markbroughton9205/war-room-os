@@ -1,8 +1,8 @@
 import 'server-only'
 
-import { probeOllama, requestOllamaCompletion } from '@/lib/native-builder/ollamaClient'
+import { probeOllama, requestOllamaCompletion, type OllamaProbeResult } from '@/lib/native-builder/ollamaClient'
 import type { CouncilFailureLayer } from '../types'
-import { localRegistryEntryForSlot } from './localModelRegistry'
+import { localRegistryEntryForSlot, type LocalModelRegistryEntry } from './localModelRegistry'
 import { SEAT_LOCAL_ROLE_SLOT } from './seatRoleSlot'
 import type { BackendMetadata, ModelBackendInvokeInput, ModelBackendInvokeResult } from './types'
 
@@ -117,4 +117,25 @@ export async function invokeLocalBackend(input: ModelBackendInvokeInput): Promis
     status: 'OK',
   }
   return { ok: true, text: result.text, partial: false, backend }
+}
+
+export type LocalCandidateHealth = 'READY' | 'UNAVAILABLE' | 'MODEL_NOT_INSTALLED' | 'NOT_CONFIGURED'
+
+/**
+ * Pure, non-invoking health classification for status/UI display. Takes an already-fetched
+ * probeOllama() result so a status endpoint can probe once and derive health for every seat/slot
+ * from that single snapshot, rather than re-probing per row. Never runs a completion — this is
+ * exactly the reachable+installed gate invokeLocalBackend() checks before it would generate,
+ * stopped short of actually generating, so it never reports READY without a real, current probe.
+ */
+export function localCandidateHealthFromProbe(
+  entry: LocalModelRegistryEntry | null,
+  probe: OllamaProbeResult,
+): LocalCandidateHealth {
+  if (!entry) return 'NOT_CONFIGURED'
+  if (!probe.available) return 'UNAVAILABLE'
+  const installed = probe.models.some(
+    name => name === entry.modelId || name.startsWith(`${entry.modelId.split(':')[0]}:`),
+  )
+  return installed ? 'READY' : 'MODEL_NOT_INSTALLED'
 }
