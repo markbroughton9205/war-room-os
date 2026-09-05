@@ -17,6 +17,8 @@ import {
   type LocalCandidateHealth,
 } from '@/lib/council/live-orchestration/backends'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { nebulaAgentForSeat } from '@/lib/council/nebula/identity'
+import { NEBULA_SHARED_BRAIN_SUMMARY } from '@/lib/council/nebula/modelProfile'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -64,6 +66,11 @@ type SeatActiveStatus = 'READY' | 'DEGRADED' | 'RATE_LIMITED' | 'UNAVAILABLE' | 
 type SeatStatusRow = {
   seat: CouncilOrchestrationFamily
   label: string
+  /** Nebula Council identity for this seat (e.g. 'AURORA'), or null when this seat has no Nebula
+   * mapping yet (bridge_architect, baby — see lib/council/nebula/identity.ts). This is the ONLY
+   * field a UI should render as the agent's name; `active.provider`/`active.model` below are
+   * backend provenance for Inspector/diagnostics, never a substitute identity. */
+  agentIdentity: string | null
   active: {
     backendType: 'EXTERNAL'
     provider: string
@@ -81,6 +88,8 @@ type SeatStatusRow = {
     repo: string | null
     modelId: string | null
     quantization: string | null
+    runtime: string | null
+    sharedBacking: boolean
     enabled: boolean
     health: LocalCandidateHealth
   }
@@ -114,10 +123,12 @@ export async function GET() {
     const slot = SEAT_LOCAL_ROLE_SLOT[seat] ?? null
     const entry = slot ? localRegistryEntryForSlot(slot) : null
     const localHealth = localCandidateHealthFromProbe(entry, probe)
+    const sharedBacking = Boolean(slot) && Object.values(SEAT_LOCAL_ROLE_SLOT).filter(item => item === slot).length > 1
 
     return {
       seat,
       label: rosterEntry.label,
+      agentIdentity: nebulaAgentForSeat(seat)?.name ?? null,
       active: {
         backendType: 'EXTERNAL',
         provider: providerDisplayName(providerId),
@@ -146,6 +157,8 @@ export async function GET() {
         repo: entry?.repo ?? null,
         modelId: entry?.modelId ?? null,
         quantization: entry?.quant ?? null,
+        runtime: entry?.runtime ?? null,
+        sharedBacking,
         enabled: Boolean(entry),
         health: localHealth,
       },
@@ -223,6 +236,7 @@ export async function GET() {
       },
       seats,
       diversity,
+      nebulaSharedBrain: NEBULA_SHARED_BRAIN_SUMMARY,
       localRegistry,
       guardrails: {
         apiKeysExposed: false,

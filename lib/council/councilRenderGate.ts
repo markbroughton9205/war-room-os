@@ -19,6 +19,7 @@ import {
 } from '@/lib/council/stabilityMode'
 import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import { toDisplayText } from '@/lib/council/toDisplayText'
+import { seatForDisplayIdentity } from '@/lib/council/nebula/identity'
 import {
   countMeaningfulTokens,
   detectGreetingOnlyResponse,
@@ -71,6 +72,8 @@ export type CouncilRenderGateResult = {
 }
 
 export function parseCouncilMessageFamily(familyName: unknown): CouncilOrchestrationFamily | null {
+  const fromNebula = seatForDisplayIdentity(familyName)
+  if (fromNebula) return fromNebula
   const raw = toDisplayText(familyName).replace(/\s+family$/i, '').trim().toLowerCase()
   if (/red\s*team/.test(raw)) return 'red_team'
   const key = raw.replace(/\s+/g, '_')

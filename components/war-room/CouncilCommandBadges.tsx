@@ -6,6 +6,7 @@ import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import type { CouncilRenderPacket } from '@/lib/council/renderPacket'
 import { attendanceBadgeLabel } from '@/lib/council/attendanceReadiness'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
 
 const BADGES: { mode: CouncilCommand['mode']; label: string }[] = [
   { mode: 'attendance', label: 'ATTENDANCE' },
@@ -15,7 +16,7 @@ const BADGES: { mode: CouncilCommand['mode']; label: string }[] = [
   { mode: 'research', label: 'RESEARCH' },
   { mode: 'council', label: 'COUNCIL ACTIVE' },
   { mode: 'emergency', label: 'EMERGENCY' },
-  { mode: 'red_team_only', label: 'RED TEAM' },
+  { mode: 'red_team_only', label: 'PHOENIX' },
   { mode: 'analysis', label: 'ANALYSIS' },
 ]
 
@@ -38,9 +39,9 @@ const PACKET_STATUS_LABEL: Record<CouncilRenderPacket['packetStatus'], string> =
 }
 
 function familyShort(id: CouncilOrchestrationFamily): string {
-  if (id === 'red_team') return 'Red Team'
   if (id === 'bridge_architect') return 'Bridge'
-  return id.replace(/_/g, ' ')
+  if (id === 'baby') return 'Baby AI'
+  return displayNameForSeat(id, id.replace(/_/g, ' '))
 }
 
 function providerStatusLabel(st: ProviderFamilyOutcomeStatus): string {

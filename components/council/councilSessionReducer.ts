@@ -4,6 +4,7 @@ import {
 } from './councilConstants'
 import { createMessageId } from '@/lib/council/messageIds'
 import { compactDisplayWhitespace } from '@/lib/council/toDisplayText'
+import { NEBULA_COUNCIL_INITIALIZATION_BANNER } from '@/lib/council/nebula/identity'
 import type {
   CouncilLifecycleState,
   CouncilOrchestrationFamily,
@@ -14,7 +15,7 @@ import type {
 export const INITIAL_COUNCIL_MESSAGES: PersistedCouncilMessage[] = [{
   id: '0',
   familyName: 'SYSTEM',
-  content: "War Room initialized. ChatGPT, Claude, Grok, and Gemini Families present. Speak your decree, Ra'el.",
+  content: NEBULA_COUNCIL_INITIALIZATION_BANNER,
   timestamp: '--:--',
   color: '#FFD700',
   icon: '⚔',

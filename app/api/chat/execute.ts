@@ -127,7 +127,8 @@ import {
   type StableGroupPriorReply,
 } from '@/lib/council/stableGroupChat'
 import { filterDecreeRelevantPriorReplies, isLightweightPingDecree } from '@/lib/council/contextRelevance'
-import { invokeCouncilSeat, type SeatInvokeStatus } from '@/lib/council/live-orchestration/backends'
+import { invokeCouncilSeat, resolveCouncilRoutingMode, type SeatInvokeStatus } from '@/lib/council/live-orchestration/backends'
+import type { BackendMetadata } from '@/lib/council/live-orchestration/backends/types'
 import { resolveLiveCouncilRoster, familyIsFloorEligible } from '@/lib/council/live-orchestration/rosterHealth.server'
 import { resolveVisibleFloorOrder } from '@/lib/council/live-orchestration/floorScheduler'
 import { rosterToFloorFlags } from '@/lib/council/live-orchestration/rosterHealth'
@@ -144,8 +145,16 @@ import {
 import {
   buildGreetingSystemPrompt,
   buildStableGroupGreetingUserPrompt,
+  GREETING_META_BY_FAMILY,
   STABLE_GROUP_GREETING_META,
 } from '@/lib/council/greetingPrompt'
+import { displayNameForSeat, nebulaAgentForSeat, seatForDisplayIdentity } from '@/lib/council/nebula/identity'
+import { buildNebulaRuntimeSystemPrompt } from '@/lib/council/nebula/persona'
+import {
+  buildRuntimeStatusGroundingBlock,
+  buildRuntimeStatusSystemPrompt,
+  isWarRoomRuntimeStatusDecree,
+} from '@/lib/council/nebula/runtimeStatus'
 import { appendProviderIdentityToCouncilSystem } from '@/lib/council/providerIdentity'
 import {
   buildProviderTokenDiagnostics,
@@ -264,6 +273,7 @@ type ProviderResult = {
   failureLayer?: CouncilFailureLayer
   partial?: boolean
   attempt?: number
+  backend?: BackendMetadata
 }
 
 /**
@@ -281,15 +291,9 @@ export function mapSeatInvokeStatusToProviderResultStatus(status: SeatInvokeStat
 const PROVIDER_TIMEOUT_MS = 45_000
 
 function displayFamilyName(family: CouncilSingleFamily): string {
-  if (family === 'chatgpt') return 'ChatGPT'
-  if (family === 'claude') return 'Claude'
-  if (family === 'grok') return 'Grok'
-  if (family === 'gemini') return 'Gemini'
-  if (family === 'kimi') return 'Kimi'
-  if (family === 'red_team') return 'RED TEAM'
   if (family === 'baby') return 'Baby AI'
   if (family === 'bridge_architect') return 'Bridge Architect'
-  return family
+  return displayNameForSeat(family, family)
 }
 
 function deliberationStatusFromProviderStatus(status: ProviderResultStatus): DeliberationCompletionStatus {
@@ -306,14 +310,21 @@ function providerResultForDeliberation(
   return {
     family,
     providerLabel: displayFamilyName(family),
-    providerModel: providerModelForFamily(family),
+    providerModel: result.backend?.model ?? providerModelForFamily(family),
     content: result.status === 'OK' ? result.content : '',
     status: deliberationStatusFromProviderStatus(result.status),
     failureReason: result.status === 'OK' ? null : sanitizeProviderPublicError(result.error ?? result.content ?? result.status, family),
+    backendType: result.backend?.backendType ?? null,
+    backendProvider: result.backend?.provider ?? null,
+    backendRuntime: result.backend?.host ?? null,
+    fallbackFrom: result.backend?.fallbackFrom ?? null,
+    errorCode: result.failureLayer ?? result.backend?.failureClass ?? null,
   }
 }
 
 function familyFromDirectValue(value: string): CouncilSingleFamily | null {
+  const fromNebula = seatForDisplayIdentity(value)
+  if (fromNebula && fromNebula !== 'baby' && fromNebula !== 'bridge_architect') return fromNebula
   if (value === 'Claude') return 'claude'
   if (value === 'ChatGPT') return 'chatgpt'
   if (value === 'Grok') return 'grok'
@@ -906,6 +917,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
    * ignored.
    */
   const classifiedTurn = classifyCouncilTurn(raelDirectiveText)
+  const isRuntimeStatusCheck =
+    classifiedTurn.intent === 'STATUS_CHECK' || isWarRoomRuntimeStatusDecree(raelDirectiveText)
   const isLightweightGreeting =
     isLightweightPingDecree(raelDirectiveText)
     || classifiedTurn.intent === 'SOCIAL_CHECKIN'
@@ -1156,60 +1169,62 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   const greetingSystemPrompt = (label: string, roleShort: string, familyKey: CouncilOrchestrationFamily): string =>
     buildGreetingSystemPrompt(label, roleShort, providerRuntimeStates?.[familyKey])
 
-  const gptSystem = isLightweightGreeting
-    ? greetingSystemPrompt('ChatGPT Family', 'synthesis and prioritization', 'chatgpt')
-    : withCouncilIdentityLayer(
-      withOpportunityMandate(
-        `You are ChatGPT Family in Ra'el's War Room. Role: synthesize, prioritize, and convert distinct family inputs into a coherent plan without repeating labels unless adding new value. Personality: strategic and direct — you're the one helping lead the plan, organizing the move rather than filing a report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
-        'chatgpt',
-      ),
-      'chatgpt',
+  const runtimeStatusGrounding = isRuntimeStatusCheck
+    ? buildRuntimeStatusGroundingBlock({
+        routingMode: resolveCouncilRoutingMode(),
+        providerStates: providerRuntimeStates,
+      })
+    : ''
+  if (runtimeStatusGrounding) {
+    warRoomContextBlock = [runtimeStatusGrounding, warRoomContextBlock].filter(Boolean).join('\n\n')
+  }
+
+  const nebulaSystemFor = (
+    seat: StableGroupFamily,
+    fallbackBody: string,
+  ): string => {
+    const meta = GREETING_META_BY_FAMILY[seat]
+    const agent = nebulaAgentForSeat(seat)
+    const name = agent?.name ?? meta.label
+    if (isRuntimeStatusCheck) {
+      return buildRuntimeStatusSystemPrompt(name, meta.roleShort, runtimeStatusGrounding)
+    }
+    if (isLightweightGreeting) {
+      return greetingSystemPrompt(name, meta.roleShort, seat)
+    }
+    const identityBlock = agent
+      ? buildNebulaRuntimeSystemPrompt({ agentId: agent.id, extraPolicy: fallbackBody })
+      : `You are ${name} in Ra'el's War Room. ${fallbackBody}`
+    return withCouncilIdentityLayer(
+      withOpportunityMandate(identityBlock, seat),
+      seat,
     )
-  const claudeSystem = isLightweightGreeting
-    ? greetingSystemPrompt('Claude Family', 'architecture and truth boundaries', 'claude')
-    : withCouncilIdentityLayer(
-      withOpportunityMandate(
-        `You are Claude Family in Ra'el's War Room. Role: architecture, invariants, truth boundaries, persistence, rollback, and evidence restraint. Personality: thoughtful, honest, dry humor — you catch what others might be missing and challenge it carefully, without sounding stiff or like a formal review. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
-        'claude',
-      ),
-      'claude',
-    )
-  const grokSystem = isLightweightGreeting
-    ? greetingSystemPrompt('Grok Family', 'signals and contradiction analysis', 'grok')
-    : withCouncilIdentityLayer(
-      withOpportunityMandate(
-        `You are Grok Family in Ra'el's War Room. Role: external signal volatility only when sources or live intelligence evidence are present, plus sharp contradiction spotting. Personality: blunt and unconventional — surface the angle nobody else is bringing up. A little personality is welcome, just don't lose the thread into unserious territory. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Important: if live tools or intelligence evidence are not provided in the prompt, do not pretend you searched X or the web; call it a telemetry gap or hypothesis. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
-        'grok',
-      ),
-      'grok',
-    )
-  const geminiSystem = isLightweightGreeting
-    ? greetingSystemPrompt('Gemini Family', 'research and long-context analysis', 'gemini')
-    : withCouncilIdentityLayer(
-      withOpportunityMandate(
-        `You are Gemini Family in Ra'el's War Room. Role: large-context reasoning, long evidence comparison, cross-source correlation, and multimodal interpretation only when the thread actually includes images/PDFs or pasted excerpts. Personality: connective and curious — you help the family see how the pieces fit together and broaden the picture, in plain conversational language, not a structured writeup. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not claim live web, image/PDF ingestion, or tools you were not given in the prompt. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
-        'gemini',
-      ),
-      'gemini',
-    )
-  const kimiSystem = isLightweightGreeting
-    ? greetingSystemPrompt('Kimi Family', 'task decomposition and execution planning', 'kimi')
-    : withCouncilIdentityLayer(
-      withOpportunityMandate(
-        `You are Kimi Family in Ra'el's War Room. Role: task decomposition, execution planning, long-context reasoning, and step breakdown with dependencies. Personality: practical, ordered, calm. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Do not invent completed work or hidden tools. Use Ra'el profile only when directly relevant to the decree: ${profile}`,
-        'kimi',
-      ),
-      'kimi',
-    )
-  const redTeamSystem = isLightweightGreeting
-    ? greetingSystemPrompt('Red Team', 'adversarial review', 'red_team')
-    : withCouncilIdentityLayer(
-      withOpportunityMandate(
-        `You are Red Team in Ra'el's War Room — the protective one, watching for where a plan could fail. Personality: protective, direct, like family saying "hold up" before Ra'el walks into something — not a compliance officer. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence, but say it the way someone who has his back would say it — never as a legal disclaimer or automated risk report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
-        'red_team',
-      ),
-      'red_team',
-    )
+  }
+
+  const gptSystem = nebulaSystemFor(
+    'chatgpt',
+    `Operational notes: integrate independent findings; expose dissent; preserve uncertainty; do not invent evidence or treat your own synthesis as evidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  )
+  const claudeSystem = nebulaSystemFor(
+    'claude',
+    `Operational notes: inspect before change; define interfaces and data models; do not own business strategy or invent unsupported product assumptions. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  )
+  const grokSystem = nebulaSystemFor(
+    'grok',
+    `Operational notes: return evidence packets with provenance; surface contradictions and missing evidence; do not verify as LUMEN or decide strategic desirability. If live tools are not in the prompt, call it a telemetry gap. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  )
+  const geminiSystem = nebulaSystemFor(
+    'gemini',
+    `Operational notes: break conclusions into atomic claims; classify support; calibrate confidence to evidence; do not treat agreement as proof or perform broad discovery as your primary job. Do not claim tools you were not given. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  )
+  const kimiSystem = nebulaSystemFor(
+    'kimi',
+    `Operational notes: define objective and constraints; generate options; expose assumptions; sequence phases; name information that would change the plan. Do not act as final synthesizer or verify research claims. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  )
+  const redTeamSystem = nebulaSystemFor(
+    'red_team',
+    `Operational notes: attack assumptions; name failure modes, likelihood, impact, mitigations, the strongest counterexample, and recovery; do not object for theater or replace LUMEN. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+  )
   const babySystem = isLightweightGreeting
     ? greetingSystemPrompt('Baby AI', 'observational council witness', 'baby')
     : `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
@@ -1774,6 +1789,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           family: familyName,
           content: seatResult.text.trim(),
           status: 'OK',
+          backend: seatResult.backend,
         }
       }
       return {
@@ -1784,6 +1800,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         failureLayer: seatResult.backend.failureClass,
         partial: seatResult.partial,
         timeoutMs: PROVIDER_TIMEOUT_MS,
+        backend: seatResult.backend,
       }
     } catch (error) {
       return {
@@ -1912,18 +1929,20 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       stateChange: 'Floor-controlled sequential families using configured providers only.',
     })
 
-    const skipSocialDeepStages = classifiedTurn.intent === 'SOCIAL_CHECKIN' || classifiedTurn.depth === 'FAST'
+    const skipSocialDeepStages = classifiedTurn.intent === 'SOCIAL_CHECKIN' || (classifiedTurn.depth === 'FAST' && classifiedTurn.intent !== 'STATUS_CHECK')
     const primaryFamilies = resolveVisibleFloorOrder({
       configured: liveCouncilFloor.configured,
       eligible: liveCouncilFloor.eligible,
       includeRedTeam: false,
     })
+    const runAuroraSynthesis = !skipSocialDeepStages || classifiedTurn.intent === 'STATUS_CHECK'
     let speakingOrder = 0
     for (const family of primaryFamilies) {
+      if (runAuroraSynthesis && family === 'chatgpt') continue
       speakingOrder += 1
       const role = family === 'chatgpt' ? 'opening_position' : 'direct_response'
       await callTurn(family, role, speakingOrder, {
-        inputMessageIds: [session.commander_message_id, ...completedOutputIds()],
+        inputMessageIds: [session.commander_message_id],
       })
     }
 
@@ -1935,16 +1954,16 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         challengeTargetIds: availableIds,
       })
     } else if (!skipSocialDeepStages && availableIds.length === 0) {
-      appendUnresolvedTurn('red_team', 'red_team_challenge', speakingOrder + 1, 'No completed primary-family messages were available; Red Team was not invented.')
+      appendUnresolvedTurn('red_team', 'red_team_challenge', speakingOrder + 1, 'No completed primary-family messages were available; PHOENIX was not invented.')
     }
 
-    if (!skipSocialDeepStages && classifiedTurn.depth === 'FULL' && completedOutputIds().length > 0) {
+    if (runAuroraSynthesis && (completedOutputIds().length > 0 || classifiedTurn.intent === 'STATUS_CHECK')) {
       speakingOrder += 1
       await callTurn('chatgpt', 'council_synthesis', speakingOrder, {
         inputMessageIds: [session.commander_message_id, ...completedOutputIds()],
       })
     } else if (skipSocialDeepStages) {
-      session.diagnostics.push('Social check-in: family acknowledgments completed the round without synthesis or Red Team challenge.')
+      session.diagnostics.push('Social check-in: family acknowledgments completed the round without synthesis or PHOENIX challenge.')
     } else {
       session.diagnostics.push('Synthesis not requested because no completed family outputs were available.')
     }

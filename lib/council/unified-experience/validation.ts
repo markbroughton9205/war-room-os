@@ -241,7 +241,7 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
     ['troubleshooting request receives operation timeline', operation({ requestText: 'debug this issue', content: 'Debug plan.' }).requestKind === 'troubleshooting'],
     ['approval review receives operation timeline', operation({ requestText: 'approve this packet?', content: 'Approval review.' }).requestKind === 'approval_review'],
     ['direct invocation remains direct', direct.mode === 'direct' && direct.summary.title === 'Direct result'],
-    ['stable group shows actual participant', base.events.some(event => event.familyLabel === 'Claude' && event.type === 'family_responded')],
+    ['stable group shows actual participant', base.events.some(event => (event.familyLabel === 'ORION' || event.familyLabel === 'Claude') && event.type === 'family_responded')],
     ['full Council mode is representable', buildCommanderOperationFromMessages(threeFamilyInputs()).mode === 'full_council'],
     ['system-only result does not invent provider', system.events.every(event => !event.isActualProviderOutput)],
     ['unknown family displays safe label', operation({ familyName: 'Oracle' }).events.some(event => event.familyLabel === 'Unknown Council family')],
@@ -276,7 +276,7 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
   ])
 
   next = pushCases(results, next, [
-    ['valid reply target renders identified reply label', replyOperation.events.some(event => event.replyToLabel === 'Claude')],
+    ['valid reply target renders identified reply label', replyOperation.events.some(event => event.replyToLabel === 'ORION' || event.replyToLabel === 'Claude')],
     ['absent reply target renders no reply label', base.events.every(event => event.replyToLabel === null)],
     ['vague Replying to real event wording is absent', !/Replying to real event/.test(source)],
     ['later event is not automatically called reply', !source.includes('index - 1')],
@@ -313,16 +313,16 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
   ])
 
   next = pushCases(results, next, [
-    ['Claude output labels Claude', base.events.some(event => event.familyLabel === 'Claude' && event.outputText?.includes('Claude'))],
-    ['Gemini output labels Gemini', operation({ familyName: 'Gemini', content: 'Gemini response.' }).events.some(event => event.familyLabel === 'Gemini')],
-    ['Grok failure labels Grok', failed.events.some(event => event.familyLabel === 'Grok' && event.type === 'family_failed')],
-    ['Kimi unavailable labels Kimi', unavailable.events.some(event => event.familyLabel === 'Kimi' && event.type === 'family_unavailable')],
-    ['Red Team output labels Red Team', operation({ familyName: 'Red Team', content: 'Risk review.' }).events.some(event => event.familyLabel === 'Red Team')],
+    ['Claude output labels ORION', base.events.some(event => (event.familyLabel === 'ORION' || event.familyLabel === 'Claude') && event.outputText?.includes('Claude'))],
+    ['Gemini output labels LUMEN', operation({ familyName: 'Gemini', content: 'Gemini response.' }).events.some(event => event.familyLabel === 'LUMEN' || event.familyLabel === 'Gemini')],
+    ['Grok failure labels PULSAR', failed.events.some(event => (event.familyLabel === 'PULSAR' || event.familyLabel === 'Grok') && event.type === 'family_failed')],
+    ['Kimi unavailable labels NOVA', unavailable.events.some(event => (event.familyLabel === 'NOVA' || event.familyLabel === 'Kimi') && event.type === 'family_unavailable')],
+    ['Red Team output labels PHOENIX', operation({ familyName: 'Red Team', content: 'Risk review.' }).events.some(event => event.familyLabel === 'PHOENIX' || event.familyLabel === 'Red Team')],
     ['unknown family displays safe label from family mapper', familyIdFromLabel('Oracle') === 'unknown' && operation({ familyName: 'Oracle' }).events.some(event => event.familyLabel === 'Unknown Council family')],
     ['system-state event does not claim provider output', system.events.every(event => event.provenance !== 'provider_response' || event.isActualProviderOutput === false)],
     ['provider output includes real message reference', base.events.some(event => event.isActualProviderOutput && event.messageId === 'msg-1')],
     ['assignment has no invented output text', project.events.filter(event => event.type === 'lane_assigned').every(event => event.isActualProviderOutput === false)],
-    ['synthesis identifies actual synthesizer when known', withSynthesis.events.some(event => event.type === 'synthesis_completed' && event.familyLabel === 'ChatGPT')],
+    ['synthesis identifies actual synthesizer when known', withSynthesis.events.some(event => event.type === 'synthesis_completed' && (event.familyLabel === 'AURORA' || event.familyLabel === 'ChatGPT'))],
   ])
 
   next = pushCases(results, next, [
@@ -361,7 +361,7 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
   next = pushCases(results, next, [
     ['includes request', noFinalCopy.includes('REQUEST')],
     ['includes operation status', noFinalCopy.includes('OPERATION STATUS')],
-    ['includes actual family contributions', noFinalCopy.includes('Claude - Architecture / Systems - Responded')],
+    ['includes actual family contributions', noFinalCopy.includes('Claude - Architecture / Systems - Responded') || noFinalCopy.includes('ORION - Architecture / Systems - Responded')],
     ['includes failures', buildReadableCommanderOperationCopy(failed).includes('Failed')],
     ['includes unavailable families', buildReadableCommanderOperationCopy(unavailable).includes('Unavailable')],
     ['no-final copy omits final briefing section', !noFinalCopy.includes('FINAL COMMANDER BRIEFING')],
@@ -397,7 +397,7 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
     ['Control cannot appear through familyId', operation({ familyName: 'Control', content: 'Policy.' }).events.every(event => event.familyId !== 'unknown' && String(event.familyId) !== 'control')],
     ['Control cannot appear through familyLabel', operation({ familyName: 'Control', content: 'Policy.' }).events.every(event => event.familyLabel !== 'Control')],
     ['normalized Control label cannot bypass guard', familyIdFromLabel(' cOnTrOl ') === 'system'],
-    ['Control-like text inside provider content does not falsely fail identity', operation({ familyName: 'Claude', content: 'Control plane analysis only.' }).events.some(event => event.familyLabel === 'Claude')],
+    ['Control-like text inside provider content does not falsely fail identity', operation({ familyName: 'Claude', content: 'Control plane analysis only.' }).events.some(event => event.familyLabel === 'ORION' || event.familyLabel === 'Claude')],
     ['approval gate remains visible as runtime state', project.events.some(event => event.provenance === 'approval_state' && event.familyId === null)],
     ['approval gate does not become a family', project.events.filter(event => event.type === 'approval_required').every(event => event.familyLabel === null)],
     ['execution mode remains visible as runtime state', ['direct', 'stable_group', 'full_council', 'system', 'unknown'].includes(base.mode)],
@@ -434,7 +434,7 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
     ['uppercase "CHATGPT FAMILY" variant resolves to chatgpt', familyIdFromLabel('CHATGPT FAMILY') === 'chatgpt'],
     [
       'a real "X Family" message renders its true family label, not Unknown Council family',
-      operation({ familyName: 'Claude Family', content: 'Real Claude answer.' }).events.some(event => event.familyId === 'claude' && event.familyLabel === 'Claude'),
+      operation({ familyName: 'Claude Family', content: 'Real Claude answer.' }).events.some(event => event.familyId === 'claude' && (event.familyLabel === 'ORION' || event.familyLabel === 'Claude')),
     ],
     [
       'multi-family "X Family" transcript resolves every family, not just Red Team',
@@ -448,8 +448,8 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
     // Regression guard: the "Family" suffix strip must not become broad/fuzzy matching.
     ['unrelated text ending in "Family" is still unknown', familyIdFromLabel('Royal Family') === 'unknown'],
     ['unrelated single-word text is still unknown', familyIdFromLabel('Oracle') === 'unknown'],
-    ['unmapped roster label "Bridge Architect" remains unknown (unproven, out of scope)', familyIdFromLabel('Bridge Architect') === 'unknown'],
-    ['unmapped roster label "Baby AI" remains unknown (unproven, out of scope)', familyIdFromLabel('Baby AI') === 'unknown'],
+    ['roster label "Bridge Architect" resolves to bridge_architect', familyIdFromLabel('Bridge Architect') === 'bridge_architect'],
+    ['roster label "Baby AI" resolves to baby', familyIdFromLabel('Baby AI') === 'baby'],
   ])
 
   return results

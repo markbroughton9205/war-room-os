@@ -29,8 +29,8 @@ export const COUNCIL_PLANNING_KEYWORDS = /\b(plan|council|organize|money|income)
 export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   {
     id: 'chatgpt',
-    label: 'ChatGPT Family',
-    role: 'Strategy, revenue, synthesis',
+    label: 'Aurora Council',
+    role: 'Calibrated integration / final Council synthesis',
     provider: 'OpenAI',
     optional: false,
     engineId: 'chatgpt',
@@ -39,8 +39,8 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   },
   {
     id: 'claude',
-    label: 'Claude Family',
-    role: 'Architecture, truth, precision',
+    label: 'Orion Council',
+    role: 'Engineering / architecture / operational viability',
     provider: 'Anthropic',
     optional: false,
     engineId: 'claude',
@@ -49,8 +49,8 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   },
   {
     id: 'grok',
-    label: 'Grok Family',
-    role: 'Signals, contradictions, framing',
+    label: 'Pulsar Council',
+    role: 'Evidence discovery / research / signals',
     provider: 'xAI',
     optional: false,
     engineId: 'grok',
@@ -59,8 +59,8 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   },
   {
     id: 'gemini',
-    label: 'Gemini Family',
-    role: 'Reasoning, synthesis, long context',
+    label: 'Lumen Council',
+    role: 'Claim verification / calibration / traceability',
     provider: 'Google',
     optional: false,
     engineId: 'gemini',
@@ -69,8 +69,8 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   },
   {
     id: 'kimi',
-    label: 'Kimi Family',
-    role: 'Decomposition, task sequencing, execution planning',
+    label: 'Nova Council',
+    role: 'Strategy / options / sequencing / planning',
     provider: 'Moonshot',
     optional: false,
     engineId: 'kimi',
@@ -79,8 +79,8 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   },
   {
     id: 'red_team',
-    label: 'Red Team',
-    role: 'Adversarial review',
+    label: 'Phoenix Council',
+    role: 'Adversarial review / failure analysis / recovery',
     provider: 'Anthropic (adversarial)',
     optional: true,
     engineId: 'claude',

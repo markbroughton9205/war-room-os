@@ -98,6 +98,7 @@ import {
   type CouncilDutyState,
   type CouncilParticipationToggles,
 } from '@/lib/council/familyRoster'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
 import { extractProposedCouncilActions } from '@/lib/council/extractCouncilActions'
 import { classifyRaElMessage, type ClassifyRaElMessageResult } from '@/lib/council/conversationIntent'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
@@ -4443,11 +4444,11 @@ function FamilyPresencePanel({
   geminiEngine: EngineStatus | null
 }) {
   const coreFamilies = [
-    { name: 'ChatGPT Family', role: 'orchestration/synthesis', color: '#34D399' },
-    { name: 'Claude Family', role: 'architecture/systems reasoning', color: '#A78BFA' },
-    { name: 'Grok Family', role: 'realtime radar, signal detection, X/web intelligence, current-event monitoring', color: '#F97316' },
+    { name: 'AURORA', role: 'orchestration/synthesis', color: '#34D399' },
+    { name: 'ORION', role: 'architecture/systems reasoning', color: '#A78BFA' },
+    { name: 'PULSAR', role: 'realtime radar, signal detection, X/web intelligence, current-event monitoring', color: '#F97316' },
     {
-      name: 'Gemini Family',
+      name: 'LUMEN',
       role: 'large-context analysis, document synthesis, multimodal interpretation, research assist (when engine-control reports functional)',
       color: '#38BDF8',
     },
@@ -4624,13 +4625,13 @@ function BabyAiObserverPanel({
   opportunities: IncomeOpportunity[]
 }) {
   const familyContributions = [
-    { family: 'Claude Family', skill: 'architecture, governance, systems thinking', color: '#A78BFA' },
-    { family: 'ChatGPT Family', skill: 'strategy, synthesis, communication', color: '#34D399' },
-    { family: 'Kimi Family', skill: 'decomposition, task sequencing, execution planning', color: '#60A5FA' },
-    { family: 'Grok Family', skill: 'realtime signal awareness', color: '#F97316' },
-    { family: 'Gemini Family', skill: 'reasoning, synthesis, multimodal interpretation, research assist, large-context analysis', color: '#38BDF8' },
+    { family: 'ORION', skill: 'architecture, governance, systems thinking', color: '#A78BFA' },
+    { family: 'AURORA', skill: 'strategy, synthesis, communication', color: '#34D399' },
+    { family: 'NOVA', skill: 'decomposition, task sequencing, execution planning', color: '#60A5FA' },
+    { family: 'PULSAR', skill: 'realtime signal awareness', color: '#F97316' },
+    { family: 'LUMEN', skill: 'reasoning, synthesis, multimodal interpretation, research assist, large-context analysis', color: '#38BDF8' },
     { family: 'Codex Agent', skill: 'coding, build, deployment awareness', color: '#FFD700' },
-    { family: 'Red Team', skill: 'risk detection, contradiction checking', color: '#EF4444' },
+    { family: 'PHOENIX', skill: 'risk detection, contradiction checking', color: '#EF4444' },
     { family: 'Archivist / Memory', skill: 'continuity and pattern memory', color: '#38BDF8' },
   ]
   const hardRules = [
@@ -4740,11 +4741,11 @@ function BabyAiObserverPanel({
 
 
 const CLOUD_AGENT_FAMILIES = [
-  { family: 'ChatGPT Family', provider: 'OpenAI', role: 'Strategy synthesis, orchestration, and response framing.', status: 'Cloud API provider' },
-  { family: 'Claude Family', provider: 'Anthropic', role: 'Architecture review, invariants, and implementation risk.', status: 'Architecture reviewer' },
-  { family: 'Grok Family', provider: 'xAI', role: 'Signal triage, contradictions, and opportunity framing.', status: 'Cloud API provider' },
-  { family: 'Gemini Family', provider: 'Google', role: 'Long-context reasoning, synthesis, and research support.', status: 'Cloud API provider' },
-  { family: 'Red Team', provider: 'Anthropic', role: 'Adversarial risk review and approval-boundary challenge.', status: 'Risk reviewer' },
+  { family: 'AURORA', provider: 'OpenAI', role: 'Strategy synthesis, orchestration, and response framing.', status: 'Cloud API provider' },
+  { family: 'ORION', provider: 'Anthropic', role: 'Architecture review, invariants, and implementation risk.', status: 'Architecture reviewer' },
+  { family: 'PULSAR', provider: 'xAI', role: 'Signal triage, contradictions, and opportunity framing.', status: 'Cloud API provider' },
+  { family: 'LUMEN', provider: 'Google', role: 'Long-context reasoning, synthesis, and research support.', status: 'Cloud API provider' },
+  { family: 'PHOENIX', provider: 'Anthropic', role: 'Adversarial risk review and approval-boundary challenge.', status: 'Risk reviewer' },
 ]
 
 const PROVIDER_CONFIGURATION_ITEMS = [
@@ -8541,78 +8542,82 @@ function Home() {
 
   const orchestrationVisual = (f: CouncilOrchestrationFamily) => {
     const pk = orchestrationFamilyToTypingFamily(f)
+    const nebulaName = displayNameForSeat(f, f === 'red_team' ? 'PHOENIX' : f === 'baby' ? 'Baby AI' : f === 'bridge_architect' ? 'Bridge Architect' : f)
     if (f === 'red_team') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: 'RED TEAM',
+        bubbleFamilyName: nebulaName,
         colorOverride: '#F87171',
         iconOverride: '⚔',
         provider: 'Red Team · adversarial',
-        thinkingLabel: 'Red Team pressure-testing...',
-        streamingLabel: 'Red Team streaming...',
+        thinkingLabel: `${nebulaName} pressure-testing...`,
+        streamingLabel: `${nebulaName} streaming...`,
       }
     }
     if (f === 'baby') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: 'BABY AI',
+        bubbleFamilyName: nebulaName,
         colorOverride: '#5EEAD4',
         iconOverride: '◔',
         provider: 'Baby AI · observer',
-        thinkingLabel: 'Baby AI observing...',
-        streamingLabel: 'Baby AI streaming...',
+        thinkingLabel: `${nebulaName} observing...`,
+        streamingLabel: `${nebulaName} streaming...`,
       }
     }
     if (f === 'kimi') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: 'Kimi Family',
-        provider: 'Local · Kimi',
-        thinkingLabel: 'Kimi decomposing...',
-        streamingLabel: 'Kimi streaming...',
+        bubbleFamilyName: nebulaName,
+        provider: 'Moonshot · kimi',
+        thinkingLabel: `${nebulaName} decomposing...`,
+        streamingLabel: `${nebulaName} streaming...`,
       }
     }
     if (f === 'bridge_architect') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: 'Bridge Architect',
+        bubbleFamilyName: nebulaName,
         provider: 'Local · bridge',
-        thinkingLabel: 'Bridge Architect reasoning...',
-        streamingLabel: 'Bridge Architect streaming...',
+        thinkingLabel: `${nebulaName} reasoning...`,
+        streamingLabel: `${nebulaName} streaming...`,
       }
     }
     if (f === 'claude') {
       return {
         presenceKey: pk,
+        bubbleFamilyName: nebulaName,
         provider: 'Anthropic · claude-sonnet',
-        thinkingLabel: 'Claude thinking...',
-        streamingLabel: 'Claude streaming...',
+        thinkingLabel: `${nebulaName} thinking...`,
+        streamingLabel: `${nebulaName} streaming...`,
       }
     }
     if (f === 'gemini') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: 'Gemini Family',
+        bubbleFamilyName: nebulaName,
         provider: geminiEngineRow?.probedModelId
           ? `Google · ${geminiEngineRow.probedModelId}`
           : (geminiEngineRow?.providerLabel ?? 'Google Gemini'),
-        thinkingLabel: 'Gemini reasoning...',
-        streamingLabel: 'Gemini streaming...',
+        thinkingLabel: `${nebulaName} reasoning...`,
+        streamingLabel: `${nebulaName} streaming...`,
       }
     }
     if (f === 'grok') {
       return {
         presenceKey: pk,
+        bubbleFamilyName: nebulaName,
         provider: 'xAI · grok',
-        thinkingLabel: 'Grok scanning signals...',
-        streamingLabel: 'Grok streaming...',
+        thinkingLabel: `${nebulaName} scanning signals...`,
+        streamingLabel: `${nebulaName} streaming...`,
       }
     }
     return {
       presenceKey: pk,
+      bubbleFamilyName: nebulaName,
       provider: 'OpenAI · gpt-4o',
-      thinkingLabel: 'ChatGPT analyzing...',
-      streamingLabel: 'ChatGPT streaming...',
+      thinkingLabel: `${nebulaName} analyzing...`,
+      streamingLabel: `${nebulaName} streaming...`,
     }
   }
 
@@ -9100,7 +9105,7 @@ function Home() {
       })
       await streamFamilyMessage({
         familyName: 'CHATGPT FAMILY',
-        bubbleFamilyName: 'CHATGPT FAMILY',
+        bubbleFamilyName: displayNameForSeat('chatgpt', 'AURORA'),
         content: report.markdown,
         provider: 'Council Research Team',
         messageId: createMessageId('chatgpt'),
@@ -9260,7 +9265,7 @@ function Home() {
     }
 
     const rosterLabel = (fid: CouncilOrchestrationFamily) =>
-      COUNCIL_ROSTER.find(r => r.id === fid)?.label ?? fid
+      displayNameForSeat(fid, COUNCIL_ROSTER.find(r => r.id === fid)?.label ?? fid)
 
     const logCouncilStreamDiagnostic = (label: string, payload: Record<string, unknown>) => {
       if (process.env.NODE_ENV !== 'development') return
@@ -9954,7 +9959,7 @@ function Home() {
                   councilLogicalTurnTotal: orderForGather.length,
                   activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
                   ...(councilFlowModeEffective === 'stable_group'
-                    ? { stableGroupPriorReplies: stableGroupPriorThisTurn }
+                    ? { stableGroupPriorReplies: [] }
                     : {}),
                   ...(sequentialDiagnosticApiRef.current
                     ? {
@@ -10078,10 +10083,6 @@ function Home() {
         }
 
         if ((runtime === 'FAILED' || runtime === 'TIMED_OUT') && !textOut?.trim()) {
-          const layer = runtime === 'TIMED_OUT' ? 'TIMEOUT' : 'PROVIDER'
-          const line = failureUiLabel(rosterLabel(family), layer, runtimeDetail)
-          gatherPostSystem(line)
-          void gatherPostLive({ role: 'system', content: line, family: 'SYSTEM' })
           setFloorStream({ family: rosterLabel(family), text: '', status: 'FAILED' })
         } else if (runtime === 'RESPONDED') {
           setFloorStream(prev => prev ? { ...prev, status: 'COMPLETE' } : prev)
@@ -10163,20 +10164,21 @@ function Home() {
 
             const vis = orchestrationVisual(family)
             const meta = FAMILY_META[vis.presenceKey]
-            const bubbleFamilyName = complete
-              ? (vis.bubbleFamilyName ?? rosterLabel(family))
-              : 'SYSTEM'
+            if (!complete) {
+              continue
+            }
+            const bubbleFamilyName = vis.bubbleFamilyName ?? rosterLabel(family)
             const displayContent = formatFamilyDeliberationContent(turn)
             messagesToAdd.push({
               id: turn.output_message_id ?? turn.turn_id,
               familyName: bubbleFamilyName,
               content: displayContent,
               timestamp: new Date(turn.completed_at ?? Date.now()).toLocaleTimeString(),
-              color: complete ? (vis.colorOverride ?? meta.color) : '#FFD700',
-              icon: complete ? (vis.iconOverride ?? meta.icon) : '⚙',
-              provider: turn.provider_model ?? turn.provider_label,
-              messageType: complete ? 'response' : 'system',
-              degraded: !complete,
+              color: vis.colorOverride ?? meta.color,
+              icon: vis.iconOverride ?? meta.icon,
+              provider: turn.backend_provider ?? turn.provider_model ?? vis.provider,
+              messageType: 'response',
+              degraded: false,
               familyDeliberationTurn: turn,
               familyDeliberationEvidenceReferences: deliberation.evidence_references,
               councilStage: stageFromDeliberationRole(turn.turn_role),
@@ -10385,7 +10387,7 @@ function Home() {
           && !controller.signal.aborted
           && !councilPausedRef.current
           && !isSocialCouncilCheckin(decree)
-          && classifyCouncilTurn(decree).depth === 'FULL'
+          && (classifyCouncilTurn(decree).depth === 'FULL' || classifyCouncilTurn(decree).intent === 'STATUS_CHECK')
         ) {
           try {
             const { res: finalRes, data: finalData } = await postCouncilChatDecreeGather({

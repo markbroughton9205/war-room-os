@@ -8,6 +8,7 @@ export type LocalCandidateHealth = 'READY' | 'UNAVAILABLE' | 'MODEL_NOT_INSTALLE
 export type SeatBackendStatus = {
   seat: string
   label: string
+  agentIdentity?: string | null
   active: {
     backendType: 'EXTERNAL'
     provider: string
@@ -25,6 +26,8 @@ export type SeatBackendStatus = {
     repo: string | null
     modelId: string | null
     quantization: string | null
+    runtime?: string | null
+    sharedBacking?: boolean
     enabled: boolean
     health: LocalCandidateHealth
   }
@@ -57,6 +60,15 @@ export type BackendStatusSnapshot = {
   ollama: { reachable: boolean; baseUrl: string; installedModelCount: number; probeLatencyMs: number }
   seats: SeatBackendStatus[]
   diversity: { uniqueModels: number; totalRespondingSeats: number; sharedModelGroups: { model: string; seats: string[] }[] }
+  nebulaSharedBrain?: {
+    modelId: string
+    parameterClass: string
+    runtime: string
+    roleSlot: string
+    sharedBacking: boolean
+    agentIdentities: string[]
+    note: string
+  }
   localRegistry: LocalRegistryRow[]
   guardrails: Record<string, boolean | string>
 }

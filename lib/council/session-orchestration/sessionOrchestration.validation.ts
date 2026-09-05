@@ -86,6 +86,7 @@ export function runCouncilSessionOrchestrationValidation(): CaseResult[] {
     check('iso_20_all_research_failed_no_pretend', applyResearchFailurePolicy(failedPacket).pretendLiveEvidence === false && applyResearchFailurePolicy(failedPacket).synthesisMustMarkGaps, JSON.stringify(applyResearchFailurePolicy(failedPacket))),
     check('iso_21_session_b_history_no_panama', !sessionHistoryContainsTopic([], 'Panama'), 'empty b'),
     check('iso_22_hello_no_research', !detectResearchIntent('Hey council', { intentKind: 'greeting' }).shouldResearch, 'hey council research'),
+    check('iso_23_war_room_status_summary_is_status_check', classifyCouncilTurn('Council, give me a short status summary of War Room.').intent === 'STATUS_CHECK', JSON.stringify(classifyCouncilTurn('Council, give me a short status summary of War Room.'))),
   ]
 }
 
