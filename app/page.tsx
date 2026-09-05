@@ -54,6 +54,7 @@ import {
   type DeliberationEvidenceReference,
   type DeliberationTurn,
 } from '@/lib/council/family-deliberation'
+import type { NebulaRoundHealth } from '@/lib/council/nebula/round'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 import { ArchiveViewer } from '@/components/war-room/council/ArchiveViewer'
 import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoundary'
@@ -430,6 +431,9 @@ export type CouncilMessage = {
   analystOperationsPacket?: AnalystOperationsPacket
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
+  /** Nebula RoundHealth projection (Inspector/diagnostics) — never a substitute for the visible
+   * conversation content; failures live here, not as raw SYSTEM report cards. */
+  roundHealth?: NebulaRoundHealth
   councilStage?: import('@/lib/council/session-orchestration').CouncilMessageStage
   commanderTurnId?: string | null
   deliberationRoundId?: string | null
@@ -10185,6 +10189,7 @@ function Home() {
               commanderTurnId: turn.commander_turn_id,
               deliberationRoundId: turn.round_id,
               shadowCouncilAssembly: turn.turn_id === shadowReadoutTurnId ? deliberationData.shadowCouncilAssembly : undefined,
+              roundHealth: turn.turn_id === shadowReadoutTurnId ? deliberationData.roundHealth : undefined,
               councilProgress: deliberationData.councilProgress,
             })
 

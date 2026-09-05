@@ -195,8 +195,8 @@ import {
   buildDeliberationPrompt,
   createDeliberationProgressRecorder,
   createDeliberationSession,
+  deriveFamilyDeliberationRoundOutcome,
   evidenceReferencesFromLiveResearch,
-  formatDeliberationTurnForChat,
   providerModelForFamily,
 } from '@/lib/council/family-deliberation'
 import type {
@@ -2080,21 +2080,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         stateChange: 'Family deliberation provider calls started in strict speaking order.',
       })
       const familyDeliberation = await runFamilyToFamilyDeliberation(councilProgress)
-      const resultTurns = familyDeliberation.turns.filter(turn =>
-        turn.output_message_id || turn.completion_status !== 'complete',
-      )
-      const results = resultTurns.map(turn => ({
-        family: turn.completion_status === 'complete' ? turn.provider_label : 'SYSTEM',
-        content: formatDeliberationTurnForChat(turn, familyDeliberation.evidence_references),
-        status:
-          turn.completion_status === 'complete'
-            ? 'OK'
-            : turn.completion_status === 'timed_out'
-              ? 'TIMED_OUT'
-              : turn.completion_status === 'unavailable'
-                ? 'UNAVAILABLE'
-                : 'FAILED',
-      }))
+      // Nebula RoundHealth projection: complete turns become normal Nebula-attributed results;
+      // a non-complete turn never becomes its own raw-report SYSTEM card in the primary
+      // conversation — that detail belongs to roundHealth (Inspector/diagnostics). See
+      // lib/council/family-deliberation/runtime.ts:deriveFamilyDeliberationRoundOutcome.
+      const { results, roundHealth } = deriveFamilyDeliberationRoundOutcome(familyDeliberation)
       const synthesis = familyDeliberation.synthesis_turn_id
         ? familyDeliberation.turns.find(turn => turn.turn_id === familyDeliberation.synthesis_turn_id)
         : null
@@ -2149,6 +2139,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       return NextResponse.json(withTrace(attachShadowMetadata({
         results,
         familyDeliberation,
+        roundHealth,
         councilSingleResponse: synthesis?.full_response ?? '',
         hardStop: false,
         mode: 'family_to_family_deliberation',

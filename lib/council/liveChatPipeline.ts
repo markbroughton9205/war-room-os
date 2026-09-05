@@ -27,6 +27,7 @@ import type { StableGroupPriorReply } from '@/lib/council/stableGroupChat'
 import type { CouncilRuntimeTraceSnapshot } from '@/lib/council/runtimeTrace'
 import type { CouncilProgressRuntimeSnapshot } from '@/lib/council/progress-events/runtime'
 import type { DeliberationSession } from '@/lib/council/family-deliberation'
+import type { NebulaRoundHealth } from '@/lib/council/nebula/round'
 import { matrixChannelStatus, matrixStatus } from '@/lib/ui/matrixStatusBus'
 import type { CouncilShadowSelectionReport, ShadowFeatureMode } from '@/lib/council/adaptive-assembly'
 
@@ -143,6 +144,8 @@ export type CouncilChatJson = {
   familyDeliberation?: DeliberationSession
   /** Phase 48-C3B2: advisory-only shadow recommendation metadata, never used for execution. */
   shadowCouncilAssembly?: CouncilShadowSelectionReport
+  /** Nebula RoundHealth projection for this round (Inspector/diagnostics only). */
+  roundHealth?: NebulaRoundHealth
 }
 
 /**
