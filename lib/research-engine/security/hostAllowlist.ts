@@ -93,6 +93,7 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   companies_house: ['api.company-information.service.gov.uk'],
   ecb_sdw: ['data-api.ecb.europa.eu'],
   bank_of_canada: ['www.bankofcanada.ca'],
+  bank_of_england_iadb: ['www.bankofengland.co.uk'],
   bis_stats: ['stats.bis.org'],
   eia: ['api.eia.gov'],
   statcan_wds: ['www150.statcan.gc.ca'],
@@ -258,6 +259,60 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   w3c_api: ['api.w3.org'],
   wto_timeseries: ['api.wto.org'],
   e_stat_japan: ['api.e-stat.go.jp'],
+  scb_sweden: ['api.scb.se'],
+  ssb_norway: ['data.ssb.no'],
+  statfin_finland: ['statfin.stat.fi'],
+  statistics_denmark: ['api.statbank.dk'],
+  un_desa_population: ['population.un.org'],
+  nhc_current_storms: ['www.nhc.noaa.gov'],
+  nasa_eonet: ['eonet.gsfc.nasa.gov'],
+  tsunami_gov: ['www.tsunami.gov'],
+  // Terra Phase 3 — Maritime Source Federation. digitraffic_marine is the only one of these five
+  // an adapter actually calls this phase; the other four are registered against their real
+  // official host (independently verified this build) so the allowlist stays truthful even before
+  // an adapter exists — never a placeholder/example.com host.
+  digitraffic_marine: ['meri.digitraffic.fi'],
+  barentswatch_ais: ['live.ais.barentswatch.no', 'id.barentswatch.no'],
+  aisstream: ['stream.aisstream.io'],
+  aishub_marine: ['data.aishub.net'],
+  noaa_access_ais: ['hub.marinecadastre.gov', 'coast.noaa.gov'],
+  // God's Eye Traffic & Camera Intelligence phase — both hosts independently verified live this
+  // build (real HTTP 200 responses fetched during development). Note: the actual camera JPEG
+  // bytes for digitraffic_road_cameras are hosted at weathercam.digitraffic.fi, but that host is
+  // never fetched by this adapter/allowlist — it's only ever loaded directly by the Commander's
+  // browser as an <img> src, the same way every other external provenance link in this app is.
+  // weathercam.digitraffic.fi is the real host of the camera JPEG bytes themselves — added this
+  // phase for app/api/terra/camera-image/route.ts (lib/terra/cameraImageProxy.ts), which reuses
+  // this same allowlist rather than inventing a second one. digitraffic_road_cameras.ts's own
+  // adapter (this file's neighbor) still only ever calls tie.digitraffic.fi.
+  digitraffic_road_cameras: ['tie.digitraffic.fi', 'weathercam.digitraffic.fi'],
+  drivebc_events: ['api.open511.gov.bc.ca'],
+  // God's Eye Phase 2 — every host independently verified live this build (real HTTP 200
+  // responses fetched during development, gzip/compression quirks and all — see each adapter's
+  // own header comment for the exact confirmed shape).
+  webtris: ['webtris.nationalhighways.co.uk'],
+  digitraffic_road_weather: ['tie.digitraffic.fi'],
+  // 511on.ca's camera "view" URLs (https://511on.ca/map/Cctv/{id}) return the raw JPEG directly
+  // (verified live this build — content-type: image/jpeg) rather than an HTML viewer page as
+  // Phase 1's registry note assumed; ontario_511_cameras' own adapter only ever fetches the
+  // metadata endpoint below, never the image host itself (mirrors digitraffic_road_cameras'
+  // existing "adapter fetches metadata only, browser/proxy loads the image" split) — the image
+  // host is allowlisted separately for app/api/terra/camera-image/route.ts, not here.
+  ontario_511_cameras: ['511on.ca'],
+  ontario_511_events: ['511on.ca'],
+  // God's Eye Phase 3 — every host independently verified live this build (real HTTP 200
+  // responses fetched during development; see each adapter's own header comment for the exact
+  // confirmed shape).
+  // tdcctv.data.one.gov.hk is the real host of the HK snapshot JPEGs themselves — allowlisted for
+  // lib/terra/cameraImageProxy.ts (mirroring the weathercam.digitraffic.fi precedent above), while
+  // the hong_kong_td_cameras adapter itself only ever fetches the static.data.gov.hk CSV metadata.
+  hong_kong_td_cameras: ['static.data.gov.hk', 'tdcctv.data.one.gov.hk'],
+  quebec_511_cameras: ['ws.mapserver.transports.gouv.qc.ca'],
+  quebec_511_events: ['ws.mapserver.transports.gouv.qc.ca'],
+  jartic_traffic_volumes: ['api.jartic-open-traffic.org'],
+  wzdx_wsdot: ['wzdx.wsdot.wa.gov'],
+  wzdx_iowa_dot: ['iowa-atms.cloud-q-free.com'],
+  wzdx_kytc: ['storage.googleapis.com'],
 }
 
 export function isAllowedHost(provider: ResearchProviderId, hostname: string): boolean {

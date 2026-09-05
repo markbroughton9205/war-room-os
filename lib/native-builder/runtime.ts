@@ -40,6 +40,9 @@ import { validatePatchPolicy } from './patchPolicy'
 import { applyProposal } from './patchApplier'
 import { listSnapshots, rollbackRepair as rollbackRepairFiles } from './rollback'
 import { runValidationOperations } from './validationRunner'
+import { redactSecretsFromOutput } from './outputRedaction'
+import { clearRepairCancellation, isRepairCancellationRequested, killProcessesForRepair, markRepairCancelled } from './processRegistry'
+import { buildCommitPreparation } from './commitPreparation'
 import { verifyIssueResolved } from './repairVerifier'
 import { deriveImmunityArtifact } from './immunity'
 import { issueFromSystemHealthCheck } from './issueIngest'
@@ -124,6 +127,10 @@ async function persist(record: NativeRepairRecord, auditMessage: string): Promis
     issueId: record.issueId,
     ...(workspaceId ? { workspaceId } : {}),
   })
+  // Wave 4.2: terminal repair evidence must survive the live process. This is a projection of
+  // already-produced observable results only; it neither executes nor advances the repair.
+  const { captureNativeBuilderEvidence } = await import('@/lib/real-evidence/nativeBuilderBridge')
+  await captureNativeBuilderEvidence(record, workspaceId)
   return record
 }
 
@@ -432,7 +439,10 @@ async function approveAndApplyUnlocked(repairId: string, approvalGranted: boolea
 
   const validating = await persist(transition(applying, 'validating', 'Patch applied; running validations.'), 'running validations')
 
-  const validationResults = await runValidationOperations(validating.selectedProposal!.validations)
+  // Streaming path: output chunks land in the per-repair ring buffer (commandOutput.ts) as they
+  // arrive so the SSE stream route can show live progress; the child processes are registered in
+  // processRegistry.ts so cancelMissionExecution() can kill the whole tree mid-validation.
+  const validationResults = await runValidationOperations(validating.selectedProposal!.validations, { repairId })
   const issue = await requireIssue(validating.issueId)
   const verification = verifyIssueResolved(issue, validationResults)
 
@@ -441,8 +451,9 @@ async function approveAndApplyUnlocked(repairId: string, approvalGranted: boolea
   // builder itself created (create_file) or a file that was never git-added has no baseline to
   // diff against, so git legitimately returns nothing even though a real change was made. Fall
   // back to a before/after rendering built directly from the rollback snapshots we already took,
-  // so diff evidence is never silently empty for a real applied patch.
-  const diffText = diffPreview.diff || (await buildSnapshotDiffFallback(applying.id))
+  // so diff evidence is never silently empty for a real applied patch. All diff text is
+  // secret-redacted BEFORE it is persisted — diff evidence lives in .war-room/ storage.
+  const diffText = redactSecretsFromOutput(diffPreview.diff || (await buildSnapshotDiffFallback(applying.id)))
   const diffEvidence = {
     diff: diffText,
     truncated: diffPreview.truncated,
@@ -452,19 +463,32 @@ async function approveAndApplyUnlocked(repairId: string, approvalGranted: boolea
 
   const withEvidence: NativeRepairRecord = { ...validating, validationResults, verification, diffEvidence }
 
+  // Cancellation mid-validation: cancelMissionExecution() already moved the record to 'cancelled'
+  // while these validations were running. Persist the evidence we DID gather onto the cancelled
+  // record (auditability) instead of attempting an illegal cancelled -> verification_* transition.
+  const fresh = await getRepair(repairId)
+  if (fresh?.state === 'cancelled' || isRepairCancellationRequested(repairId)) {
+    clearRepairCancellation(repairId)
+    return persist({ ...withEvidence, ...(fresh ?? {}), validationResults, verification, diffEvidence, updatedAt: new Date().toISOString() }, 'validation evidence recorded after cancellation')
+  }
+
   if (verification.status === 'verification_blocked') {
     return persist(transition(withEvidence, 'verification_failed', verification.evidence.join(' ')), 'verification failed')
   }
 
   if (verification.status === 'partially_verified') {
+    const partialPrep = buildCommitPreparation(issue, withEvidence)
+    const withPartialPrep: NativeRepairRecord = partialPrep ? { ...withEvidence, commitPreparation: partialPrep } : withEvidence
     return persist(
-      transition(withEvidence, 'partially_verified', 'No validation directly re-ran the exact original check — flagging as partially verified before Commander review.'),
+      transition(withPartialPrep, 'partially_verified', 'No validation directly re-ran the exact original check — flagging as partially verified before Commander review.'),
       'partially verified, awaiting Commander decision',
     )
   }
 
+  const prep = buildCommitPreparation(issue, withEvidence)
+  const withPrep: NativeRepairRecord = prep ? { ...withEvidence, commitPreparation: prep } : withEvidence
   return persist(
-    transition(withEvidence, 'awaiting_commander_review', `Verification: ${verification.status}. Awaiting final Commander acceptance.`),
+    transition(withPrep, 'awaiting_commander_review', `Verification: ${verification.status}. Awaiting final Commander acceptance.`),
     'awaiting Commander review',
   )
 }
@@ -495,7 +519,10 @@ async function commanderResolveUnlocked(repairId: string, accepted: boolean): Pr
   await saveIssue(resolvedIssue)
 
   const immunityOutcome = deriveImmunityArtifact(record, issue)
-  const withImmunity: NativeRepairRecord = { ...record, immunityOutcome }
+  // Refresh (or create) the commit preparation at acceptance time so the artifact the Commander
+  // sees on a resolved mission reflects the final accepted state. Data only — never executed.
+  const prep = buildCommitPreparation(issue, record)
+  const withImmunity: NativeRepairRecord = { ...record, immunityOutcome, ...(prep ? { commitPreparation: prep } : {}) }
   const note = immunityOutcome.created
     ? `Commander accepted the repair. Immunity added: ${immunityOutcome.artifact.type} (${immunityOutcome.artifact.files.join(', ')}).`
     : `Commander accepted the repair. No immunity artifact created: ${immunityOutcome.reason}`
@@ -526,6 +553,34 @@ async function rollbackNowUnlocked(repairId: string): Promise<NativeRepairRecord
 export async function cancelRepair(repairId: string, reason?: string): Promise<NativeRepairRecord> {
   const record = await requireRepair(repairId)
   return persist(transition(record, 'cancelled', reason ?? 'Cancelled by Commander before any patch was applied.'), 'cancelled')
+}
+
+/**
+ * Cancel a repair that is actively applying or validating: marks the cancellation flag (so the
+ * sequential validation runner skips every operation that hasn't started yet), kills every tracked
+ * child process AND its tree (cross-platform — see processRegistry.ts), then transitions to
+ * 'cancelled'. The in-flight approveAndApply() observes the cancelled state after its current
+ * operation exits and persists the partial evidence onto the cancelled record rather than
+ * attempting an illegal transition out of it. For pre-apply states this delegates to cancelRepair.
+ */
+export async function cancelMissionExecution(repairId: string, reason?: string): Promise<NativeRepairRecord> {
+  const record = await requireRepair(repairId)
+  if (record.state === 'cancelled') return record
+  if (record.state === 'resolved' || record.state === 'rolled_back') {
+    throw new Error(`Cannot cancel a repair in terminal state ${record.state} — use rollback if files need reverting.`)
+  }
+  if (record.state !== 'applying_patch' && record.state !== 'validating') {
+    return cancelRepair(repairId, reason)
+  }
+  markRepairCancelled(repairId)
+  const killed = await killProcessesForRepair(repairId)
+  const killedNote = killed.length
+    ? ` Killed ${killed.length} process tree(s): ${killed.map(k => `${k.label} (pid ${k.killed})`).join(', ')}.`
+    : ' No active child processes were tracked.'
+  return persist(
+    transition(record, 'cancelled', `${reason ?? 'Cancelled by Commander during execution.'}${killedNote}`),
+    'cancelled during execution, processes killed',
+  )
 }
 
 /** Before/after text built from this repair's own rollback snapshots (original content) plus the

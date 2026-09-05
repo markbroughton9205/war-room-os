@@ -3,6 +3,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { mapRawMemoryRuntimeState } from '@/lib/memory/runtimeState'
 import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { assertLiveActionsAllowed } from '@/lib/security/actionRoutePolicy'
+import { observeWarRoomApiTool } from '@/lib/modular-intelligence/warRoomToolTrajectoryObserve'
 
 type MemoryEntry = {
   id?: string
@@ -93,6 +94,14 @@ export async function GET(req: Request) {
     .limit(10)
 
   if (!error) {
+    observeWarRoomApiTool({
+      toolId: 'memory',
+      requestText: 'TOOL=memory\nquery=list_recent',
+      arguments: { query: 'list_recent' },
+      ok: true,
+      status: 'complete',
+      resultMeta: { count: (data ?? []).length, op: 'list' },
+    })
     return NextResponse.json({
       tool: 'memory',
       status: 'complete',
@@ -109,6 +118,15 @@ export async function GET(req: Request) {
 
   if (fallback.error) {
     const runtime = mapRawMemoryRuntimeState(fallback.error)
+    observeWarRoomApiTool({
+      toolId: 'memory',
+      requestText: 'TOOL=memory\nquery=list_recent',
+      arguments: { query: 'list_recent' },
+      ok: false,
+      status: runtime.state.toLowerCase(),
+      error: runtime.commanderPhrase,
+      resultMeta: { op: 'list', failed: true },
+    })
     return NextResponse.json({
       tool: 'memory',
       status: runtime.state.toLowerCase(),
@@ -117,6 +135,15 @@ export async function GET(req: Request) {
       memories: [],
     })
   }
+
+  observeWarRoomApiTool({
+    toolId: 'memory',
+    requestText: 'TOOL=memory\nquery=list_recent',
+    arguments: { query: 'list_recent' },
+    ok: true,
+    status: 'complete',
+    resultMeta: { count: (fallback.data ?? []).length, op: 'list', fallback: true },
+  })
 
   return NextResponse.json({
     tool: 'memory',
@@ -156,6 +183,15 @@ export async function POST(req: Request) {
   }
 
   if (!memory.content) {
+    observeWarRoomApiTool({
+      toolId: 'memory',
+      requestText: 'TOOL=memory\nquery=save',
+      arguments: { query: 'save' },
+      ok: false,
+      status: 'error',
+      error: 'MISSING_ARGUMENT',
+      resultMeta: { op: 'save', validation: 'MISSING_ARGUMENT' },
+    })
     return NextResponse.json({
       tool: 'memory',
       status: 'error',
@@ -174,6 +210,14 @@ export async function POST(req: Request) {
     .single()
 
   if (!error) {
+    observeWarRoomApiTool({
+      toolId: 'memory',
+      requestText: 'TOOL=memory\nquery=save',
+      arguments: { query: 'save' },
+      ok: true,
+      status: 'complete',
+      resultMeta: { op: 'save', id: String((data as { id?: string })?.id ?? '') },
+    })
     return NextResponse.json({
       tool: 'memory',
       status: 'complete',

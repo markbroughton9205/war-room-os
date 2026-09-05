@@ -1,0 +1,54 @@
+{
+  "mission": "WR-LIVE-COUNCIL-ORCHESTRATION-001",
+  "phase": "HEALTHY-ROSTER LIVE VALIDATION",
+  "secrets_printed": false,
+  "deployed": false,
+  "healthy_roster_mode": "PASS",
+  "active": ["chatgpt", "gemini"],
+  "claude": "UNAVAILABLE_BILLING",
+  "grok": "UNAVAILABLE_AUTH",
+  "red_team": "SKIPPED_BY_POLICY",
+  "degraded_label": "COUNCIL DEGRADED · 2/4 PROVIDERS ACTIVE",
+  "openai_stream": "PASS",
+  "gemini_stream": "PASS",
+  "social_hi": {
+    "intent": "SOCIAL_CHECKIN",
+    "order": ["chatgpt", "gemini"],
+    "chatgpt_ok": true,
+    "gemini_ok": true,
+    "totalMs": 2095,
+    "memory": false
+  },
+  "social_checkin": {
+    "intent": "SOCIAL_CHECKIN",
+    "order": ["chatgpt", "gemini"],
+    "chatgpt_ok": true,
+    "gemini_ok": true,
+    "totalMs": 1872,
+    "memory": false
+  },
+  "normal": {
+    "intent": "KNOWLEDGE_QUESTION",
+    "order": ["chatgpt", "gemini"],
+    "chatgpt_ok": true,
+    "gemini_ok": true,
+    "totalMs": 1854
+  },
+  "world_brief": {
+    "intent": "FRESHNESS_SENSITIVE",
+    "researchMs": 1722,
+    "sourceCount": 24,
+    "rssCount": 24,
+    "tavilyOk": false,
+    "evidenceStatus": "PARTIAL_RSS",
+    "order": ["chatgpt", "gemini"],
+    "redTeam": "SKIPPED_BY_POLICY",
+    "roundQuality": "DEGRADED_BY_ROSTER",
+    "panama": false,
+    "chatgpt_ok": true,
+    "gemini_ok": true
+  },
+  "browser_new_chat": "not_run_this_pass_server_path_demonstrated",
+  "node01": false,
+  "production": "NOT_PROMOTED"
+}

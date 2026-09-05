@@ -51,6 +51,9 @@ dev-out.txt
 # personal Claude Code instructions (not shared)
 CLAUDE.local.md
 
+# WRIM-1 ephemeral Commander authorization token (never commit)
+model-lab/manifests/wave9/commander-authorization.token
+
 # Terra Foundation (Phase G) — CesiumJS static assets (Workers/Assets/ThirdParty/Widgets),
 # ~8-23MB of vendor binaries copied from node_modules/cesium at dev/build time by
 # scripts/copy-cesium-assets.mjs. Never hand-edited, never committed — reproducible from the

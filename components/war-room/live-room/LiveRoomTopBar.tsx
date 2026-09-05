@@ -26,12 +26,14 @@ export const LiveRoomTopBar = memo(function LiveRoomTopBar({
   chatHealthLabel,
   councilStateLabel,
   missionExtra,
+  rosterLine,
 }: {
   providerStripKeys: string[]
   providerHealth: ProviderHealthStrip
   chatHealthLabel: string
   councilStateLabel: string
   missionExtra?: string
+  rosterLine?: string
 }) {
   const mission = missionLabel(chatHealthLabel, councilStateLabel)
 
@@ -47,6 +49,9 @@ export const LiveRoomTopBar = memo(function LiveRoomTopBar({
           {missionExtra ? ` · ${missionExtra}` : ''}
         </span>
       </div>
+      {rosterLine ? (
+        <div className="text-[9px] font-semibold uppercase tracking-widest text-amber-200/90">{rosterLine}</div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10px] font-bold tracking-widest text-slate-500">Providers</span>
         {providerStripKeys.map(k => {

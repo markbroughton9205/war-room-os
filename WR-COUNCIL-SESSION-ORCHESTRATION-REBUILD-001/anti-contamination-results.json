@@ -1,0 +1,5 @@
+{
+  "locked_tests": "sessionOrchestration 22/22 + contextRelevance panama ping cases",
+  "cross_session_contamination_rate_locked": 0,
+  "live_provider_run": false
+}

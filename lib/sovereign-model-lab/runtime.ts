@@ -14,13 +14,14 @@
  * startTokenizerTrainingForProgram) — never from a dry run, a dependency probe, or a config file
  * alone.
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { resolveRepoRoot } from '@/lib/repo/paths'
 import { logWarRoomRepoAudit } from '@/lib/war-room/repoAudit'
 import {
   REQUIRED_TOKENIZER_SPECIAL_TOKENS,
+  SOVEREIGN_MODEL_LAB_RECOVERY_TRANSITIONS,
   SOVEREIGN_MODEL_LAB_TRANSITIONS,
   type DatasetAccessStatus,
   type DatasetLicenseRecord,
@@ -77,6 +78,13 @@ const CORPUS_ID = 'WRM-001'
 /** Generous for a tiny local corpus, still bounded — never unbounded. */
 const TOKENIZER_MAX_RUNTIME_MS = 10 * 60 * 1000
 
+export function tokenizerArtifactNamespaceHash(input: {
+  corpusRecordChecksum: string; algorithm: TokenizerAlgorithm; requestedVocabSize: number
+  recommendedVocabSize: number; minimumFrequency: number; seed: number
+}): string {
+  return createHash('sha256').update(JSON.stringify(input)).digest('hex')
+}
+
 export class InvalidSovereignStateTransitionError extends Error {
   constructor(from: SovereignModelLabState, to: SovereignModelLabState) {
     super(`Illegal sovereign-model-lab transition: ${from} -> ${to}`)
@@ -89,6 +97,13 @@ function transition(program: SovereignModelLabProgram, next: SovereignModelLabSt
   if (!allowed.includes(next)) {
     throw new InvalidSovereignStateTransitionError(program.state, next)
   }
+  const at = new Date().toISOString()
+  return { ...program, state: next, history: [...program.history, { state: next, at, note }], updatedAt: at }
+}
+
+function recoveryTransition(program: SovereignModelLabProgram, next: SovereignModelLabState, note: string): SovereignModelLabProgram {
+  const allowed = SOVEREIGN_MODEL_LAB_RECOVERY_TRANSITIONS[program.state] ?? []
+  if (!allowed.includes(next)) throw new InvalidSovereignStateTransitionError(program.state, next)
   const at = new Date().toISOString()
   return { ...program, state: next, history: [...program.history, { state: next, at, note }], updatedAt: at }
 }
@@ -386,7 +401,17 @@ export async function createTokenizerPlan(programId: string, opts: {
     ? `Requested vocab_size=${opts.vocabSize} exceeds what this corpus (${totalChars} characters) can usefully support. Recommending ${recommendedVocabSize} instead.`
     : null
 
-  const outputDir = path.join(resolveSovereignModelLabStorageRoot(), 'tokenizers', CORPUS_ID, corpusVersion)
+  // Namespace artifacts by the immutable inputs that determine tokenizer output. A same-corpus
+  // A/B plan can no longer overwrite another experiment's tokenizer or training manifest.
+  const planNamespaceHash = tokenizerArtifactNamespaceHash({
+    corpusRecordChecksum: corpusManifest.recordChecksum,
+    algorithm: opts.algorithm,
+    requestedVocabSize: opts.vocabSize,
+    recommendedVocabSize,
+    minimumFrequency,
+    seed,
+  })
+  const outputDir = path.join(resolveSovereignModelLabStorageRoot(), 'tokenizers', CORPUS_ID, corpusVersion, planNamespaceHash)
   const manifestOutputPath = path.join(outputDir, 'training-manifest.json')
   const corpusJsonlPath = path.join(corpusVersionDir(CORPUS_ID, corpusVersion), 'corpus.jsonl')
   const scriptPath = path.join(resolveRepoRoot(), 'scripts', 'sovereign-model-lab', 'train_wrm001_tokenizer.py')
@@ -602,10 +627,10 @@ export async function recheckProgramTruth(
   const program = await requireProgram(programId)
   const result = migrateProgramState({ program, ...relatedInputs })
   if (result.migrated) {
-    // Deliberately bypasses transition()'s legality check — this is a corrective action fixing a
-    // previously-incorrect persisted state, not a normal forward transition.
-    await saveProgram(result.program)
-    await logWarRoomRepoAudit(`sovereign-model-lab: program truth reconciled — ${result.reason}`, { programId, from: program.state, to: result.program.state })
+    const recovered = recoveryTransition(program, result.program.state, result.reason ?? 'Program truth reconciled.')
+    result.program = recovered
+    await saveProgram(recovered)
+    await logWarRoomRepoAudit(`sovereign-model-lab: program truth reconciled — ${result.reason}`, { programId, from: program.state, to: recovered.state, transitionKind: 'formal_recovery' })
   }
   return result
 }
@@ -651,6 +676,27 @@ export async function cancelProgram(programId: string, reason?: string): Promise
   const program = await requireProgram(programId)
   const next = transition(program, 'cancelled', reason ?? 'Cancelled by Commander.')
   return persist(next, 'program cancelled')
+}
+
+/** Legal reuse path for a new program that should not re-ingest an already-approved corpus.
+ * hardware_audit → blocked → tokenizer_not_planned. Does not bypass the transition table. */
+export async function reuseApprovedCorpusForTokenizerPlanning(
+  programId: string,
+  datasetManifestId: string,
+  note: string,
+): Promise<SovereignModelLabProgram> {
+  const program = await requireProgram(programId)
+  const blocked = transition(program, 'blocked', 'Corpus already approved on a sibling program; skip duplicate ingest.')
+  const withManifest: SovereignModelLabProgram = { ...blocked, datasetManifestId }
+  const next = transition(withManifest, 'tokenizer_not_planned', note)
+  return persist(next, 'reused approved corpus for tokenizer planning')
+}
+
+/** Legal retry after tokenizer_failed. Forward map already allows tokenizer_failed → tokenizer_not_planned. */
+export async function retryTokenizerPlanningAfterFailure(programId: string, note: string): Promise<SovereignModelLabProgram> {
+  const program = await requireProgram(programId)
+  const next = transition(program, 'tokenizer_not_planned', note)
+  return persist(next, 'retry tokenizer planning after failure')
 }
 
 async function requireProgram(programId: string): Promise<SovereignModelLabProgram> {

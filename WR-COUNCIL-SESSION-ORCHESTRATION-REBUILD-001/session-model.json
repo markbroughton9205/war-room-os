@@ -1,0 +1,8 @@
+{
+  "reused": "war_room_conversations",
+  "session_id": "conversation UUID immutable",
+  "title": "title column + metadata.council.titleLocked",
+  "mode": "councilFlowMode in client; not a DB column",
+  "status": "state active|paused|archived + deleted_at",
+  "ownership": "existing War Room persistence/auth; no new user table"
+}

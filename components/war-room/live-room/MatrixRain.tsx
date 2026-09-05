@@ -6,13 +6,15 @@ import {
   getMatrixStatusServerSnapshot,
   getMatrixStatusSnapshot,
   subscribeMatrixStatus,
-  type MatrixStatusKind,
+  type MatrixChannel,
 } from '@/lib/ui/matrixStatusBus'
 
 const CHARSET = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿ0123456789ABCDEF'
 const GREEN = '0, 255, 102'
-const YELLOW = '234, 179, 8'
 const RED = '248, 113, 113'
+
+/** White flash-decay window: how long a white burst stays at elevated brightness. */
+const WHITE_FLASH_DECAY_MS = 1_400
 
 type Stream = {
   x: number
@@ -40,55 +42,133 @@ function makeStreams(width: number, height: number, mobile: boolean): Stream[] {
   }))
 }
 
-function rgbForKind(kind: MatrixStatusKind, timeMs: number): string {
-  switch (kind) {
-    case 'working': {
+/**
+ * Per-channel color behavior. Every channel must be visually distinct:
+ * - cyan   inflow shimmer (fast brightness oscillation sweeping toward teal)
+ * - violet outbound (slow hue drift between violet and indigo)
+ * - amber  processing pulse (sinusoidal brightness pulse)
+ * - green  healthy baseline (gentle glow)
+ * - red    failure (glitch handled at the head glyph below)
+ * - white  verified completion (bright flash that decays since emission)
+ */
+function rgbForChannel(channel: MatrixChannel, timeMs: number, emittedAtMs: number): string {
+  switch (channel) {
+    case 'cyan': {
+      const shimmer = 0.5 + 0.5 * Math.sin(timeMs * 0.012)
+      return `${Math.floor(20 + 14 * shimmer)}, ${Math.floor(190 + 60 * shimmer)}, ${Math.floor(220 + 35 * shimmer)}`
+    }
+    case 'violet': {
+      const drift = 0.5 + 0.5 * Math.sin(timeMs * 0.003)
+      return `${Math.floor(150 + 30 * drift)}, ${Math.floor(120 + 20 * (1 - drift))}, 250`
+    }
+    case 'amber': {
       const pulse = 0.55 + 0.45 * Math.sin(timeMs * 0.006)
-      return pulse > 0.5 ? YELLOW : GREEN
+      return `${Math.floor(200 + 55 * pulse)}, ${Math.floor(150 + 45 * pulse)}, 8`
     }
-    case 'success': {
-      const pulse = 0.7 + 0.3 * Math.sin(timeMs * 0.01)
-      return `0, ${Math.floor(220 + 35 * pulse)}, ${Math.floor(90 + 40 * pulse)}`
-    }
-    case 'warning':
-      return YELLOW
-    case 'error':
+    case 'red':
       return RED
-    case 'idle':
+    case 'white': {
+      const elapsed = emittedAtMs > 0 ? timeMs - emittedAtMs : WHITE_FLASH_DECAY_MS
+      const decay = Math.max(0, Math.min(1, 1 - elapsed / WHITE_FLASH_DECAY_MS))
+      const level = Math.floor(180 + 75 * decay)
+      return `${level}, ${Math.floor(level * 0.97)}, ${Math.floor(level * 1.04) > 255 ? 255 : Math.floor(level * 1.04)}`
+    }
+    case 'green':
     default:
       return GREEN
   }
 }
 
-function alphaScale(kind: MatrixStatusKind, mobile: boolean): number {
+function alphaScale(channel: MatrixChannel, mobile: boolean): number {
   const base = mobile ? 0.75 : 1
-  switch (kind) {
-    case 'success':
-      return base * 1.35
-    case 'warning':
-      return base * 1.2
-    case 'error':
-      return base * 1.1
-    case 'working':
+  switch (channel) {
+    case 'white':
+      return base * 1.45
+    case 'cyan':
+      return base * 1.25
+    case 'violet':
+      return base * 1.15
+    case 'amber':
       return base * 1.05
+    case 'red':
+      return base * 1.1
     default:
       return base
   }
 }
 
-function MatrixStatusCaption({ message, kind }: { message: string; kind: MatrixStatusKind }) {
-  if (!message || kind === 'idle') return null
+function speedMultiplier(channel: MatrixChannel): number {
+  switch (channel) {
+    case 'cyan':
+      return 1.25 // inflow accelerates the rain
+    case 'violet':
+      return 0.85 // outbound slows to a deliberate drift
+    case 'amber':
+      return 1.35
+    case 'white':
+      return 1.5
+    case 'red':
+      return 1.15
+    default:
+      return 1
+  }
+}
 
-  const tone =
-    kind === 'error'
-      ? 'text-red-300/90'
-      : kind === 'warning' || kind === 'working'
-        ? 'text-amber-200/85'
-        : 'text-emerald-300/90'
+function trailAlpha(channel: MatrixChannel): number {
+  switch (channel) {
+    case 'red':
+      return 0.2
+    case 'white':
+      return 0.08
+    case 'cyan':
+      return 0.11
+    default:
+      return 0.14
+  }
+}
+
+function captionTone(channel: MatrixChannel): string {
+  switch (channel) {
+    case 'cyan':
+      return 'text-cyan-300/90'
+    case 'violet':
+      return 'text-violet-300/90'
+    case 'amber':
+      return 'text-amber-200/85'
+    case 'red':
+      return 'text-red-300/90'
+    case 'white':
+      return 'text-slate-100/95'
+    case 'green':
+    default:
+      return 'text-emerald-300/90'
+  }
+}
+
+function reducedMotionGlow(channel: MatrixChannel): string {
+  switch (channel) {
+    case 'cyan':
+      return 'rgba(34,211,238,0.05)'
+    case 'violet':
+      return 'rgba(167,139,250,0.05)'
+    case 'amber':
+      return 'rgba(234,179,8,0.05)'
+    case 'red':
+      return 'rgba(248,113,113,0.06)'
+    case 'white':
+      return 'rgba(226,232,240,0.06)'
+    case 'green':
+    default:
+      return 'rgba(0,255,102,0.04)'
+  }
+}
+
+function MatrixStatusCaption({ message, channel }: { message: string; channel: MatrixChannel }) {
+  if (!message) return null
 
   return (
     <p
-      className={`pointer-events-none absolute inset-x-0 z-[1] mx-auto max-w-md px-4 text-center text-[9px] font-semibold uppercase tracking-[0.28em] transition-opacity duration-300 sm:text-[10px] ${tone}`}
+      className={`pointer-events-none absolute inset-x-0 z-[1] mx-auto max-w-md px-4 text-center text-[9px] font-semibold uppercase tracking-[0.28em] transition-opacity duration-300 sm:text-[10px] ${captionTone(channel)}`}
       style={{
         bottom: 'calc(var(--live-room-bottom-reserved, 7rem) + 0.35rem)',
         textShadow: '0 0 12px rgba(0,0,0,0.85)',
@@ -107,7 +187,8 @@ export const MatrixRain = memo(function MatrixRain() {
   const rafRef = useRef<number | null>(null)
   const streamsRef = useRef<Stream[]>([])
   const lastTimeRef = useRef(0)
-  const statusRef = useRef<MatrixStatusKind>('idle')
+  const channelRef = useRef<MatrixChannel>('green')
+  const emittedAtRef = useRef(0)
   const [reducedMotion, setReducedMotion] = useState(false)
   const [mobile, setMobile] = useState(false)
 
@@ -118,8 +199,9 @@ export const MatrixRain = memo(function MatrixRain() {
   )
 
   useEffect(() => {
-    statusRef.current = statusSnap.kind
-  }, [statusSnap.kind, statusSnap.tick])
+    channelRef.current = statusSnap.channel
+    emittedAtRef.current = statusSnap.emittedAtMs
+  }, [statusSnap.channel, statusSnap.emittedAtMs, statusSnap.tick])
 
   useEffect(() => {
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -170,14 +252,13 @@ export const MatrixRain = memo(function MatrixRain() {
       const delta = Math.min(64, time - (lastTimeRef.current || time))
       lastTimeRef.current = time
 
-      const kind = statusRef.current
-      const rgb = rgbForKind(kind, time)
-      const scale = alphaScale(kind, mobile)
-      const speedMul =
-        kind === 'warning' ? 1.35 : kind === 'error' ? 1.15 : kind === 'success' ? 1.08 : 1
-      const trailAlpha = kind === 'error' ? 0.2 : kind === 'success' ? 0.1 : 0.14
+      const channel = channelRef.current
+      const rgb = rgbForChannel(channel, time, emittedAtRef.current)
+      const scale = alphaScale(channel, mobile)
+      const speedMul = speedMultiplier(channel)
+      const trail = trailAlpha(channel)
 
-      context.fillStyle = `rgba(0, 0, 0, ${trailAlpha})`
+      context.fillStyle = `rgba(0, 0, 0, ${trail})`
       context.fillRect(0, 0, width, height)
       context.textAlign = 'center'
       context.font = `${streamsRef.current[0]?.fontSize ?? 13}px ui-monospace, monospace`
@@ -193,11 +274,11 @@ export const MatrixRain = memo(function MatrixRain() {
           if (y < -stream.fontSize || y > height + stream.fontSize) continue
           const fade = Math.max(0, 1 - i / stream.length)
           let headAlpha = (i === 0 ? 0.22 : 0.1 * fade) * scale
-          if (kind === 'error' && i === 0 && Math.random() > 0.82) {
+          if (channel === 'red' && i === 0 && Math.random() > 0.82) {
             headAlpha *= 0.35
           }
           const glitchX =
-            kind === 'error' && i === 0 ? (Math.random() - 0.5) * (mobile ? 4 : 8) : 0
+            channel === 'red' && i === 0 ? (Math.random() - 0.5) * (mobile ? 4 : 8) : 0
           context.fillStyle = `rgba(${rgb}, ${headAlpha})`
           context.fillText(pickChar(), stream.x + glitchX, y)
         }
@@ -217,20 +298,16 @@ export const MatrixRain = memo(function MatrixRain() {
   }, [mobile, reducedMotion])
 
   if (reducedMotion) {
-    const kind = statusSnap.kind
-    const glow =
-      kind === 'error'
-        ? 'rgba(248,113,113,0.06)'
-        : kind === 'warning' || kind === 'working'
-          ? 'rgba(234,179,8,0.05)'
-          : 'rgba(0,255,102,0.04)'
+    const channel = statusSnap.channel
     return (
       <div className="pointer-events-none absolute inset-0 z-0" aria-hidden>
         <div
           className="absolute inset-0"
-          style={{ background: `radial-gradient(ellipse at 50% 0%, ${glow}, transparent 55%)` }}
+          style={{
+            background: `radial-gradient(ellipse at 50% 0%, ${reducedMotionGlow(channel)}, transparent 55%)`,
+          }}
         />
-        <MatrixStatusCaption message={statusSnap.message} kind={kind} />
+        <MatrixStatusCaption message={statusSnap.message} channel={channel} />
       </div>
     )
   }
@@ -242,7 +319,7 @@ export const MatrixRain = memo(function MatrixRain() {
         className="h-full w-full"
         style={{ mixBlendMode: 'screen', opacity: 'var(--war-room-matrix-opacity)' }}
       />
-      <MatrixStatusCaption message={statusSnap.message} kind={statusSnap.kind} />
+      <MatrixStatusCaption message={statusSnap.message} channel={statusSnap.channel} />
     </div>
   )
 })

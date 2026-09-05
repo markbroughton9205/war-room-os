@@ -367,3 +367,8 @@ approval gate suite); (e) `tsc`, ESLint, `build`, and
 `git diff --check` all pass (see commit report); (f) any capability stronger than documented is
 explicitly reported (done — section 12). Committing this work to version control, pushing, merging,
 and deploying are separate, later steps not authorized by this document.
+
+## 16. Modular intelligence (Phase 1, 2026-08-31)
+
+Capability **modules** are not registered as merged `ModelManifest` checkpoints. `modelRegistry.ts` remains lineage/ownership for full models and re-exports `buildCapabilityModuleRecord` from `lib/modular-intelligence`. Frozen WRIM-0 + detachable modules + composed runtime identity live in `scripts/wrim-modular/` and `lib/modular-intelligence/`. See `docs/WAR_ROOM_MODULAR_INTELLIGENCE_PHASE1.md`. This does not add a model-training state to `SovereignModelLabState`.
+

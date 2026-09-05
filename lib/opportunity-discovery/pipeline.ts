@@ -1,6 +1,5 @@
 import { fetchProvider } from './adapters'
 import { isQualifying } from './core'
-import { notifyCommander } from './notifications'
 import { detectNewOrChanged, discoveryPersistenceState } from './state'
 import type { DiscoveryProvider, NotificationResult } from './types'
 
@@ -11,8 +10,7 @@ export async function runOpportunityDiscovery(options: { providers?: DiscoveryPr
   const { newMatches, unchanged } = detectNewOrChanged(qualifying)
   const notifications: NotificationResult[] = []
   for (const record of newMatches) {
-    if (options.deliverExternal && notifications.every(item => item.state !== 'EXTERNAL_DELIVERY')) notifications.push(await notifyCommander(record, options.env))
-    else notifications.push({ state: 'NOTIFICATION_GENERATED', channel: null, providerMessageId: null, body: (await import('./notifications')).buildDiscoveryNotification(record), error: null })
+    notifications.push({ state: 'NOTIFICATION_GENERATED', channel: null, providerMessageId: null, body: (await import('./notifications')).buildDiscoveryNotification(record), error: null })
   }
   const operationalEvents = sourceResults.flatMap(source => source.records.map(record => ({
     provider: source.provider,

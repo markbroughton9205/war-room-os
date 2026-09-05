@@ -166,7 +166,11 @@ async function search(query: ResearchQuery) {
   const geoFeatures: ResearchGeoFeature[] = features
     .filter(feature => feature.geometry && isValidWaterCoordinates(feature.geometry.coordinates))
     .map(feature => ({
-      id: feature.id ?? monitoringLocationId,
+      // The raw feature's own `.id` is a per-reading record id (unique per observation, not per
+      // station), so keying on it defeated the dedupe below. Every feature in one response
+      // belongs to the single monitoring_location_id this query was scoped to — using that
+      // instead is both correct and simpler, since it needs no per-feature property lookup.
+      id: monitoringLocationId,
       geometryType: feature.geometry!.type,
       coordinates: feature.geometry!.coordinates,
       properties: (feature.properties ?? {}) as unknown as Record<string, unknown>,

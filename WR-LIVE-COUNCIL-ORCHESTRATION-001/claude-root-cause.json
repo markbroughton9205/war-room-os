@@ -1,0 +1,16 @@
+{
+  "layers": [
+    "REQUEST",
+    "RATE_LIMIT"
+  ],
+  "primary_live_canary": "Anthropic HTTP 400 invalid_request_error; message mentions credit/billing; stream and non-stream both 400",
+  "claude_api_unreachable": false,
+  "transport_failed": false,
+  "orchestrator_failed": false,
+  "persistence_failed": false,
+  "ui_failed": false,
+  "api_itself_rejected": true,
+  "auth_401": false,
+  "model_mention_in_error": false,
+  "previous_production_symptom": "Claude Family did not complete this Council round \u2014 compounded by attendance timeout and dependency halt in family deliberation"
+}

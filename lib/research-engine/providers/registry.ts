@@ -3,6 +3,20 @@ import 'server-only'
 import type { ResearchProviderId } from '@/lib/research-engine/core/types'
 import type { ResearchProviderAdapter } from '@/lib/research-engine/providers/adapter'
 import { githubAdapter } from '@/lib/research-engine/providers/github'
+import { digitrafficMarineAdapter } from '@/lib/research-engine/providers/digitraffic_marine'
+import { digitrafficRoadCamerasAdapter } from '@/lib/research-engine/providers/digitraffic_road_cameras'
+import { drivebcEventsAdapter } from '@/lib/research-engine/providers/drivebc_events'
+import { webtrisAdapter } from '@/lib/research-engine/providers/webtris'
+import { digitrafficRoadWeatherAdapter } from '@/lib/research-engine/providers/digitraffic_road_weather'
+import { ontario511CamerasAdapter } from '@/lib/research-engine/providers/ontario_511_cameras'
+import { ontario511EventsAdapter } from '@/lib/research-engine/providers/ontario_511_events'
+import { hongKongTdCamerasAdapter } from '@/lib/research-engine/providers/hong_kong_td_cameras'
+import { quebec511CamerasAdapter } from '@/lib/research-engine/providers/quebec_511_cameras'
+import { quebec511EventsAdapter } from '@/lib/research-engine/providers/quebec_511_events'
+import { jarticTrafficVolumesAdapter } from '@/lib/research-engine/providers/jartic_traffic_volumes'
+import { wzdxWsdotAdapter } from '@/lib/research-engine/providers/wzdx_wsdot'
+import { wzdxIowaDotAdapter } from '@/lib/research-engine/providers/wzdx_iowa_dot'
+import { wzdxKytcAdapter } from '@/lib/research-engine/providers/wzdx_kytc'
 import { arxivAdapter } from '@/lib/research-engine/providers/arxiv'
 import { crossrefAdapter } from '@/lib/research-engine/providers/crossref'
 import { fredAdapter } from '@/lib/research-engine/providers/fred'
@@ -24,6 +38,7 @@ import { commonCrawlAdapter } from '@/lib/research-engine/providers/commonCrawl'
 import { samGovAdapter } from '@/lib/research-engine/providers/samGov'
 import { nasaAdapter } from '@/lib/research-engine/providers/nasa'
 import { fmcsaAdapter } from '@/lib/research-engine/providers/fmcsa'
+import { bankOfEnglandIadbAdapter } from '@/lib/research-engine/providers/bankOfEnglandIadb'
 import { mitreAttackAdapter } from '@/lib/research-engine/providers/mitreAttack'
 import { gleifAdapter } from '@/lib/research-engine/providers/gleif'
 import { osvDevAdapter } from '@/lib/research-engine/providers/osvDev'
@@ -244,6 +259,14 @@ import { econstorAdapter } from '@/lib/research-engine/providers/econstor'
 import { w3cApiAdapter } from '@/lib/research-engine/providers/w3cApi'
 import { wtoTimeseriesAdapter } from '@/lib/research-engine/providers/wtoTimeseries'
 import { eStatJapanAdapter } from '@/lib/research-engine/providers/eStatJapan'
+import { scbSwedenAdapter } from '@/lib/research-engine/providers/scbSweden'
+import { ssbNorwayAdapter } from '@/lib/research-engine/providers/ssbNorway'
+import { statfinFinlandAdapter } from '@/lib/research-engine/providers/statfinFinland'
+import { statisticsDenmarkAdapter } from '@/lib/research-engine/providers/statisticsDenmark'
+import { unDesaPopulationAdapter } from '@/lib/research-engine/providers/unDesaPopulation'
+import { nhcCurrentStormsAdapter } from '@/lib/research-engine/providers/nhcCurrentStorms'
+import { nasaEonetAdapter } from '@/lib/research-engine/providers/nasaEonet'
+import { tsunamiGovAdapter } from '@/lib/research-engine/providers/tsunamiGov'
 import { worldBankProjectsAdapter } from '@/lib/research-engine/providers/worldBankProjects'
 import { usgsNationalMapAdapter } from '@/lib/research-engine/providers/usgsNationalMap'
 import { imfSdmxAdapter } from '@/lib/research-engine/providers/imfSdmx'
@@ -333,6 +356,7 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   companies_house: companiesHouseAdapter,
   ecb_sdw: ecbSdwAdapter,
   bank_of_canada: bankOfCanadaAdapter,
+  bank_of_england_iadb: bankOfEnglandIadbAdapter,
   bis_stats: bisStatsAdapter,
   eia: eiaAdapter,
   statcan_wds: statcanWdsAdapter,
@@ -382,6 +406,20 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   unhcr_data: unhcrDataAdapter,
   ocha_fts: ochaFtsAdapter,
   opensky: openskyAdapter,
+  digitraffic_marine: digitrafficMarineAdapter,
+  digitraffic_road_cameras: digitrafficRoadCamerasAdapter,
+  drivebc_events: drivebcEventsAdapter,
+  webtris: webtrisAdapter,
+  digitraffic_road_weather: digitrafficRoadWeatherAdapter,
+  ontario_511_cameras: ontario511CamerasAdapter,
+  ontario_511_events: ontario511EventsAdapter,
+  hong_kong_td_cameras: hongKongTdCamerasAdapter,
+  quebec_511_cameras: quebec511CamerasAdapter,
+  quebec_511_events: quebec511EventsAdapter,
+  jartic_traffic_volumes: jarticTrafficVolumesAdapter,
+  wzdx_wsdot: wzdxWsdotAdapter,
+  wzdx_iowa_dot: wzdxIowaDotAdapter,
+  wzdx_kytc: wzdxKytcAdapter,
   cbdb: cbdbAdapter,
   eclac_cepalstat: eclacCepalstatAdapter,
   oecd_data_explorer: oecdDataExplorerAdapter,
@@ -498,6 +536,14 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   w3c_api: w3cApiAdapter,
   wto_timeseries: wtoTimeseriesAdapter,
   e_stat_japan: eStatJapanAdapter,
+  scb_sweden: scbSwedenAdapter,
+  ssb_norway: ssbNorwayAdapter,
+  statfin_finland: statfinFinlandAdapter,
+  statistics_denmark: statisticsDenmarkAdapter,
+  un_desa_population: unDesaPopulationAdapter,
+  nhc_current_storms: nhcCurrentStormsAdapter,
+  nasa_eonet: nasaEonetAdapter,
+  tsunami_gov: tsunamiGovAdapter,
   world_bank_projects: worldBankProjectsAdapter,
   usgs_national_map: usgsNationalMapAdapter,
   imf_sdmx: imfSdmxAdapter,

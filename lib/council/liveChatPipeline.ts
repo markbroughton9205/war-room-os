@@ -27,6 +27,7 @@ import type { StableGroupPriorReply } from '@/lib/council/stableGroupChat'
 import type { CouncilRuntimeTraceSnapshot } from '@/lib/council/runtimeTrace'
 import type { CouncilProgressRuntimeSnapshot } from '@/lib/council/progress-events/runtime'
 import type { DeliberationSession } from '@/lib/council/family-deliberation'
+import { matrixChannelStatus, matrixStatus } from '@/lib/ui/matrixStatusBus'
 import type { CouncilShadowSelectionReport, ShadowFeatureMode } from '@/lib/council/adaptive-assembly'
 
 export type CouncilChatRequestBody = {
@@ -144,16 +145,37 @@ export type CouncilChatJson = {
   shadowCouncilAssembly?: CouncilShadowSelectionReport
 }
 
+/**
+ * Canonical /api/chat call for every Council request (see file doc comment). Matrix runtime
+ * signals sit here rather than in each of the several page.tsx call sites, so every Council round
+ * -- direct, autonomous-continue, family loop -- reports the same real inbound/error moment
+ * without duplicating the wiring per caller. 'inbound', not 'success', on res.ok: this only knows
+ * a response physically arrived, not that the Council's answer was substantively good (data.error
+ * can still be set on a 200) -- the more conservative, honest label.
+ */
 export async function postCouncilChat(
   body: CouncilChatRequestBody,
   signal?: AbortSignal,
 ): Promise<{ res: Response; data: CouncilChatJson }> {
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal,
-  })
+  let res: Response
+  try {
+    res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    })
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === 'AbortError')) {
+      matrixStatus('error', 'Council request failed')
+    }
+    throw error
+  }
+  if (res.ok) {
+    matrixChannelStatus('cyan', 'Council response received')
+  } else {
+    matrixStatus('error', `Council request failed (HTTP ${res.status})`)
+  }
   let data: CouncilChatJson = {}
   try {
     data = (await res.json()) as CouncilChatJson

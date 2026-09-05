@@ -5,6 +5,8 @@ import type { FormEvent } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
+import { GodsEyeCommandCenter } from '@/components/war-room/terra/GodsEyeCommandCenter'
+import { CouncilCommandControls } from '@/components/war-room/council/CouncilCommandControls'
 import { APPROVAL_RISK_GATES, SECURE_APPROVAL_RISKS } from '@/lib/kernel/approvals'
 import { KERNEL_EVENT_SCHEMA, KERNEL_EVENT_TYPES } from '@/lib/kernel/events'
 import { MEMORY_POLICY } from '@/lib/kernel/memoryPolicy'
@@ -273,7 +275,6 @@ import {
   CouncilMembersPanel,
   CouncilWorkspace,
   DockPanelContent,
-  LiveRoomNavPanel,
   LiveRoomShell,
   LiveRoomModeProvider,
   MatrixTopIntelRow,
@@ -283,6 +284,23 @@ import {
   type AttachmentStatus,
   type DockPanelId,
 } from '@/components/war-room/live-room'
+import { CouncilSessionNavigator, type CouncilSessionListItem } from '@/components/war-room/council/CouncilSessionNavigator'
+import { CouncilContextInspector } from '@/components/war-room/council/CouncilContextInspector'
+import {
+  actorStageLine,
+  classifyCouncilTurn,
+  generateNeutralSessionTitle,
+  shouldAutoTitle,
+  shouldRunFamilyDeliberation,
+  stageFromDeliberationRole,
+  stageFromPersistedMetadata,
+  stageLabel,
+} from '@/lib/council/session-orchestration'
+import { decideMemoryCandidatePrompt } from '@/lib/council/live-orchestration/memoryCandidateGate'
+import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialCheckin'
+import { compactFamilyRosterLine, type CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
+import { createPresentationBuffer } from '@/lib/council/live-orchestration/presentationBuffer'
+import { failureUiLabel } from '@/lib/council/live-orchestration/failureTaxonomy'
 import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
 import { formatCouncilOsSweepMarkdown } from '@/lib/war-room-sweep/formatCouncilResponse'
 import type { SweepReport } from '@/lib/war-room-sweep/types'
@@ -363,6 +381,11 @@ const CouncilDeliberationStream = dynamic(
   { ssr: false },
 )
 
+const AgiWaveOnePanel = dynamic(
+  () => import('@/components/war-room/agi-wave1/AgiWaveOnePanel').then(mod => mod.AgiWaveOnePanel),
+  { ssr: false },
+)
+
 const ConversationStatePanel = dynamic(
   () => import('@/components/war-room/council/ConversationStatePanel').then(mod => mod.ConversationStatePanel),
   {
@@ -406,6 +429,9 @@ export type CouncilMessage = {
   analystOperationsPacket?: AnalystOperationsPacket
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
+  councilStage?: import('@/lib/council/session-orchestration').CouncilMessageStage
+  commanderTurnId?: string | null
+  deliberationRoundId?: string | null
   shadowCouncilAssembly?: CouncilShadowSelectionReport
   councilProgress?: CouncilProgressRuntimeSnapshot
 }
@@ -557,15 +583,17 @@ function applyCouncilThreadHygiene(
     if (key) seenNoise.add(key)
     const family = parseCouncilMessageFamily(message.familyName)
     if (latestDecree && family && message.messageType === 'response' && councilOperationGroupKey(message, messages) === `turn:${latestDecree.id}`) {
-      const existing = latestRoundFamilyResponses.get(family)
+      const stageKey = message.councilStage ?? message.familyDeliberationTurn?.turn_role ?? 'response'
+      const collapseKey = `${family}:${stageKey}`
+      const existing = latestRoundFamilyResponses.get(collapseKey)
       if (existing) {
         const index = visibleMessages.findIndex(item => item.id === existing.id)
         if (index >= 0) visibleMessages[index] = message
-        latestRoundFamilyResponses.set(family, message)
+        latestRoundFamilyResponses.set(collapseKey, message)
         collapsedCount += 1
         continue
       }
-      latestRoundFamilyResponses.set(family, message)
+      latestRoundFamilyResponses.set(collapseKey, message)
     }
     visibleMessages.push(message)
   }
@@ -573,7 +601,7 @@ function applyCouncilThreadHygiene(
   return { visibleMessages, collapsedCount }
 }
 
-const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Goal: Panama relocation. Motivated by vision of success. Wants truth about systems that harm Black and low income communities.`
+const RAEL_PROFILE = `Commander: Ra'el (Mark Broughton). Mission: generational wealth and sovereignty. Philosophy: Nation of Islam economic self-determination, Black ownership, ancestral wisdom. Businesses: Higher Vision Inc, Broughton Transports LLC, RUAH patent. Family: Jasmine, seven children. Standing preference: wants truth about systems that harm Black and low income communities. Planning content such as relocation is durable memory, not standing profile.`
 
 function cloudEngineIdForCouncilFamily(f: CouncilOrchestrationFamily): EngineId | null {
   if (f === 'chatgpt' || f === 'baby') return 'chatgpt'
@@ -643,10 +671,13 @@ function mapWarRoomRowToCouncilMessage(
     content: string
     family?: string | null
     created_at: string
+    metadata?: Record<string, unknown>
   },
   opts?: { decreeText?: string; promptIntent?: PromptIntent; stabilityMode?: boolean },
 ): CouncilMessage {
   const ts = row.created_at ? new Date(row.created_at).toLocaleTimeString() : '--:--'
+  const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : undefined
+  const persistedStage = meta ? stageFromPersistedMetadata(meta) : undefined
   if (row.role === 'user') {
     return {
       id: row.id,
@@ -657,6 +688,7 @@ function mapWarRoomRowToCouncilMessage(
       icon: '⚔',
       provider: '',
       messageType: 'decree',
+      councilStage: persistedStage && persistedStage !== 'LEGACY' ? persistedStage : 'COMMANDER',
     }
   }
   if (row.role === 'system') {
@@ -681,6 +713,7 @@ function mapWarRoomRowToCouncilMessage(
     icon: '•',
     provider: '',
     messageType: 'response',
+    councilStage: persistedStage && persistedStage !== 'LEGACY' ? persistedStage : 'LEGACY',
   }
   return applyLiveCouncilRenderGate(base, opts)
 }
@@ -839,7 +872,6 @@ type OpportunityScoutStatus = 'idle' | 'searching' | 'reviewing' | 'found' | 'er
 type ProviderHealth = 'online' | 'standby' | 'offline' | 'error'
 type RaelActionStatus = 'pending' | 'answered' | 'expired'
 type RaelActionUrgency = 'low' | 'medium' | 'high'
-type SmsBridgeStatus = 'not configured' | 'standby' | 'online' | 'error'
 type RepoScanStatus = 'idle' | 'scanning' | 'indexed' | 'error'
 type ProviderConnectionStatus = 'online' | 'standby' | 'error' | 'not_connected'
 type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'kimi' | 'redteam'
@@ -859,12 +891,6 @@ type RaelActionItem = {
   answered_at?: string
 }
 
-type SmsBridgeState = {
-  status: SmsBridgeStatus
-  lastNotification: string | null
-  message: string
-  sending: boolean
-}
 
 type OpportunityScoutState = {
   status: OpportunityScoutStatus
@@ -1059,12 +1085,6 @@ const INITIAL_ECONOMIC_SCOUT_DIAGNOSTICS: EconomicScoutDiagnostics = {
   ranked_preview: [],
   missing_api_keys: [],
   last_updated_at: null,
-}
-const INITIAL_SMS_BRIDGE_STATE: SmsBridgeState = {
-  status: 'standby',
-  lastNotification: null,
-  message: 'SMS Bridge ready for configuration check.',
-  sending: false,
 }
 const INITIAL_REPO_AWARENESS_STATE: RepoAwarenessState = {
   repoStatus: 'idle',
@@ -1911,7 +1931,18 @@ const MessageBubble = memo(function MessageBubble({
       </div>
       <div className={`flex-1 max-w-2xl ${isRael ? 'items-end' : 'items-start'} flex flex-col`}>
         <div className={`flex flex-wrap items-center gap-2 mb-1 ${isRael ? 'flex-row-reverse' : ''}`}>
-          <span className="text-xs font-bold tracking-widest" style={{ color: msg.color }}>{msg.familyName}</span>
+          <span className="text-xs font-bold tracking-widest" style={{ color: msg.color }}>
+            {msg.familyDeliberationTurn
+              ? actorStageLine(msg.familyName, stageFromDeliberationRole(msg.familyDeliberationTurn.turn_role))
+              : msg.councilStage && msg.councilStage !== 'LEGACY' && msg.councilStage !== 'UNKNOWN_STAGE'
+                ? actorStageLine(msg.familyName, msg.councilStage)
+                : msg.familyName}
+          </span>
+          {msg.councilStage || msg.familyDeliberationTurn ? (
+            <span className="text-[10px] uppercase tracking-widest" style={{ color: '#94a3b8' }}>
+              {stageLabel(msg.familyDeliberationTurn ? stageFromDeliberationRole(msg.familyDeliberationTurn.turn_role) : (msg.councilStage ?? 'LEGACY'))}
+            </span>
+          ) : null}
           {msg.provider && <span className="text-xs" style={{ color: '#444' }}>{msg.provider}</span>}
           <span className="text-xs" style={{ color: '#333' }}>{msg.timestamp}</span>
           <span className="text-xs px-1 rounded" style={{ color: '#555', background: '#111' }}>{msg.messageType}</span>
@@ -4244,65 +4275,15 @@ const MemoryRecallPanel = memo(function MemoryRecallPanel({ recall }: { recall: 
   )
 })
 
-function SmsBridgePanel({
-  bridge,
-  onTest,
-}: {
-  bridge: SmsBridgeState
-  onTest: () => void
-}) {
-  const statusColors: Record<SmsBridgeStatus, string> = {
-    'not configured': '#666',
-    standby: '#FFD700',
-    online: '#34D399',
-    error: '#EF4444',
-  }
-
-  return (
-    <div className="border-b border-yellow-900 px-6 py-3 flex-shrink-0"
-      style={{ background: 'rgba(96,165,250,0.018)' }}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#60A5FA' }}>
-            SMS BRIDGE
-          </h2>
-          <p className="mt-1 text-xs" style={{ color: '#666' }}>
-            Phone notification bridge for action queue approvals.
-          </p>
-        </div>
-        <button type="button" onClick={onTest} disabled={bridge.sending}
-          className="rounded px-3 py-2 text-xs font-bold tracking-widest disabled:opacity-40"
-          style={{ border: '1px solid rgba(96,165,250,0.4)', color: '#60A5FA', background: 'rgba(0,0,0,0.25)' }}>
-          {bridge.sending ? 'Sending...' : 'Test Notification'}
-        </button>
-      </div>
-      <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}>
-          <span style={{ color: '#444' }}>STATUS </span>
-          <span style={{ color: statusColors[bridge.status] }}>{bridge.status.toUpperCase()}</span>
-        </div>
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}>
-          <span style={{ color: '#444' }}>LAST NOTIFICATION </span>
-          <span style={{ color: '#888' }}>{bridge.lastNotification ? new Date(bridge.lastNotification).toLocaleString() : 'None'}</span>
-        </div>
-        <div className="rounded px-3 py-2" style={{ border: '1px solid #222', background: 'rgba(0,0,0,0.28)' }}>
-          <span style={{ color: '#888' }}>{bridge.message}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function NeedsRaelPanel({
   actions,
   opportunities,
   onRespond,
-  onNotify,
 }: {
   actions: RaelActionItem[]
   opportunities: IncomeOpportunity[]
   onRespond: (actionId: string, response: string) => void
-  onNotify: (action: RaelActionItem) => void
 }) {
   const urgencyStyles: Record<RaelActionUrgency, { color: string; border: string; background: string }> = {
     low: { color: '#60A5FA', border: 'rgba(96,165,250,0.28)', background: 'rgba(96,165,250,0.06)' },
@@ -4398,13 +4379,6 @@ function NeedsRaelPanel({
                         {option}
                       </button>
                     ))}
-                    {action.urgency === 'high' && (
-                      <button type="button" onClick={() => onNotify(action)}
-                        className="rounded px-3 py-1 text-[10px] font-bold tracking-widest"
-                        style={{ border: '1px solid rgba(52,211,153,0.4)', color: '#34D399', background: 'rgba(0,0,0,0.2)' }}>
-                        Notify Ra&apos;el
-                      </button>
-                    )}
                   </div>
                 ) : (
                   <div className="mt-3 rounded px-2 py-2 text-xs"
@@ -6068,6 +6042,7 @@ function Home() {
 
   const [loading, setLoading] = useState(false)
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
+  const [floorStream, setFloorStream] = useState<{ family: string; text: string; status: string } | null>(null)
   const [toolBarHealth, setToolBarHealth] = useState(initialToolBarHealth)
   const [toolBarActivity, setToolBarActivity] = useState<Partial<Record<ToolId, ToolBarLabel>>>({})
   const [operatorTab, setOperatorTab] = useState<OperatorTab>('command')
@@ -6146,6 +6121,7 @@ function Home() {
   const [memories, setMemories] = useState<MemoryEntry[]>([])
   const [repoAwareness, setRepoAwareness] = useState<RepoAwarenessState>(INITIAL_REPO_AWARENESS_STATE)
   const [providerHealth, setProviderHealth] = useState<ProviderHealthState>(INITIAL_PROVIDER_HEALTH)
+  const [councilRoster, setCouncilRoster] = useState<CouncilRosterSnapshot | null>(null)
   const [canonicalRuntimeStatus, setCanonicalRuntimeStatus] = useState<CanonicalRuntimeStatus | null>(null)
   const [redTeamCoder, setRedTeamCoder] = useState<RedTeamCoderUiState>(INITIAL_RED_TEAM_CODER_STATE)
   const [latestEngineeringTaskPacket, setLatestEngineeringTaskPacket] = useState<EngineeringTaskPacket | null>(null)
@@ -6188,7 +6164,6 @@ function Home() {
   const [sourceConnectionsLoading, setSourceConnectionsLoading] = useState(false)
   const [paymentLedger, setPaymentLedger] = useState<PaymentLedgerState>(INITIAL_PAYMENT_LEDGER_STATE)
   const [raelActions, setRaelActions] = useState<RaelActionItem[]>([])
-  const [smsBridge, setSmsBridge] = useState<SmsBridgeState>(INITIAL_SMS_BRIDGE_STATE)
   const [usageRows, setUsageRows] = useState<UsageEstimate[]>(BASE_USAGE_ROWS)
   const [currentDecreeCost, setCurrentDecreeCost] = useState(0)
   const [sessionCost, setSessionCost] = useState(0)
@@ -6210,9 +6185,12 @@ function Home() {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const addSystemMessageRef = useRef<((content: string) => void) | null>(null)
   const submitDecreeRef = useRef<((decree: string, mode?: CouncilMode) => Promise<void>) | null>(null)
+  const terraCouncilContextRef = useRef<string | null>(null)
   const loadMemoriesRef = useRef<(() => Promise<void>) | null>(null)
   const lastDecreeIntentRef = useRef<ClassifyRaElMessageResult | null>(null)
   const decreeRoundGenRef = useRef(0)
+  /** `decreeRoundGenRef` value for which the optimistic "Retrieving live intelligence..." HUD was resolved to a real result. */
+  const liveResearchHudResolvedRoundRef = useRef(0)
   const autonomousOrchInFlightRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const councilPausedRef = useRef(false)
@@ -6245,6 +6223,10 @@ function Home() {
   const [engineList, setEngineList] = useState<EngineStatus[]>([])
   const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
   const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
+  const [councilSessionList, setCouncilSessionList] = useState<CouncilSessionListItem[]>([])
+  const [councilSessionSearch, setCouncilSessionSearch] = useState('')
+  const [councilSessionNavOpen, setCouncilSessionNavOpen] = useState(true)
+  const [councilInspectorOpen, setCouncilInspectorOpen] = useState(false)
   const [liveCouncilLoadState, setLiveCouncilLoadState] = useState<'restoring' | 'ready' | 'session_only' | 'error'>('restoring')
   const [liveRoomWorkspace, setLiveRoomWorkspace] = useState<'council' | 'expanded_intel'>('council')
   /**
@@ -6835,25 +6817,30 @@ function Home() {
           return
         }
 
-        const j = await res.json() as { conversations?: { id: string; metadata?: Record<string, unknown> }[] }
+        const j = await res.json() as { conversations?: { id: string; title?: string; last_message_at?: string | null; updated_at?: string | null; created_at?: string | null; state?: string; metadata?: Record<string, unknown> }[] }
         const convs = Array.isArray(j.conversations) ? j.conversations : []
+        setCouncilSessionList(convs.map(c => ({
+          id: c.id,
+          title: typeof c.title === 'string' ? c.title : 'Untitled thread',
+          last_message_at: c.last_message_at,
+          updated_at: c.updated_at,
+          created_at: c.created_at,
+          state: c.state,
+          preview: typeof (c.metadata as { council?: { lastPreview?: string } } | undefined)?.council?.lastPreview === 'string'
+            ? (c.metadata as { council: { lastPreview: string } }).council.lastPreview
+            : null,
+          metadata: c.metadata ?? null,
+        })))
         let id: string | null = typeof sessionStorage !== 'undefined'
           ? sessionStorage.getItem(LIVE_COUNCIL_CONV_STORAGE_KEY)
           : null
         if (id && !convs.some(c => c.id === id)) id = null
         if (!id) {
-          const live = convs.find(c => {
-            const m = c.metadata as { council?: { source?: string } } | undefined
-            return m?.council?.source === 'live_council'
-          })
-          if (live) id = live.id
-        }
-        if (!id) {
           const cre = await fetch('/api/conversations', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              title: 'Live Council',
+            title: 'New Council Session',
               metadata: { council: { source: 'live_council', incomeOperationsMode: false } },
             }),
           })
@@ -7583,51 +7570,6 @@ function Home() {
     addSystemMessage(`Ra'el answered action queue: ${response}`)
   }
 
-  const sendSmsNotification = async (message: string) => {
-    setSmsBridge(prev => ({ ...prev, sending: true, message: 'Sending SMS notification...' }))
-    try {
-      const res = await fetch('/api/sms/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
-      })
-      const data = await res.json()
-
-      if (!res.ok) {
-        setSmsBridge(prev => ({
-          ...prev,
-          status: data.status === 'not_configured' ? 'not configured' : 'error',
-          message: data.message ?? 'SMS notification failed',
-          sending: false,
-        }))
-        return
-      }
-
-      setSmsBridge({
-        status: 'online',
-        lastNotification: data.sentAt ?? new Date().toISOString(),
-        message: data.message ?? 'SMS notification sent',
-        sending: false,
-      })
-    } catch {
-      setSmsBridge(prev => ({
-        ...prev,
-        status: 'error',
-        message: 'SMS notification failed',
-        sending: false,
-      }))
-    }
-  }
-
-  const testSmsBridge = () => {
-    void sendSmsNotification('War Room SMS Bridge test. Reply STATUS to confirm command handling.')
-  }
-
-  const notifyRaelAction = (action: RaelActionItem) => {
-    const options = action.response_options.join(' / ')
-    void sendSmsNotification(`War Room needs Ra'el: ${action.title}. ${action.question} Reply options: ${options}.`)
-  }
-
   useEffect(() => {
     addSystemMessageRef.current = addSystemMessage
   })
@@ -7902,6 +7844,7 @@ function Home() {
         }
       }
       setProviderHealth({ providers: prov, labels: lab })
+      if (data.councilRoster?.families) setCouncilRoster(data.councilRoster)
     } catch {
       setCanonicalRuntimeStatus(null)
       setProviderHealth(prev => ({
@@ -9226,6 +9169,10 @@ function Home() {
   }
 
   const submitDecree = async (decree: string, mode?: CouncilMode) => {
+    const terraContext = terraCouncilContextRef.current
+    if (mode !== 'continue' && terraContext) {
+      decree = `${decree}\n\n[CURRENT TERRA CONTEXT — live globe selection; preserve provenance and do not infer missing facts]\n${terraContext}`
+    }
     let decreeCompletedOk = false
     let decreeMatrixFailed = false
     const myRound = ++decreeRoundGenRef.current
@@ -9353,7 +9300,7 @@ function Home() {
 
     const postCouncilChatDecreeGather = async (
       body: Parameters<typeof postCouncilChat>[0],
-      continuationMergeOpts?: { ignoreContinuation?: boolean },
+      continuationMergeOpts?: { ignoreContinuation?: boolean; onTextDelta?: (delta: string, family?: string) => void },
     ) => {
       const merged = new AbortController()
       const onDecreeAbort = () => merged.abort()
@@ -9392,6 +9339,14 @@ function Home() {
               if (!isCurrentDecreeAsync()) return
               setIncrementalCouncilTransportStatus('receiving')
               setIncrementalCouncilProgress(envelope.snapshot)
+              const diagnostic = envelope.progressEvent.payload.diagnostic
+              const delta = diagnostic?.code === 'TEXT_DELTA' ? diagnostic.sanitizedMetadata?.textDelta : null
+              if (diagnostic && typeof delta === 'string' && delta) {
+                const familyHint = typeof diagnostic.sanitizedMetadata?.family === 'string'
+                  ? diagnostic.sanitizedMetadata.family
+                  : envelope.progressEvent.family ?? undefined
+                continuationMergeOpts?.onTextDelta?.(delta, familyHint)
+              }
             },
             onFinal: envelope => {
               if (isCurrentDecreeAsync()) {
@@ -9443,6 +9398,9 @@ function Home() {
           data,
         }
         mergeContinuationFromChatJson(out.data, continuationMergeOpts)
+        if (out.data.liveResearchAttempted && out.data.liveResearchUi) {
+          liveResearchHudResolvedRoundRef.current = myRound
+        }
         return out
       } finally {
         window.clearTimeout(hangId)
@@ -9711,14 +9669,24 @@ function Home() {
         order = [...order, ...casualFallbacks.filter(f => !order.includes(f))]
       }
       if (skipGeminiForSessionRef.current) order = order.filter(f => f !== 'gemini')
+      const applyHealthyRoster = (families: CouncilOrchestrationFamily[]) =>
+        families.filter(family => {
+          if (family === 'gemini' && skipGeminiForSessionRef.current) return false
+          const row = councilRoster?.families[family]
+          if (!row) return family === 'chatgpt' || family === 'gemini'
+          return row.floorEligible
+        })
+      order = applyHealthyRoster(order)
 
-      const directedOrder = attendanceWave
-        ? buildAttendanceDirectedOrder({
-            cmd,
-            decree,
-            participationToggles,
-          })
-        : filterOrchestrationOrderByCommand(order, cmd, decree)
+      const directedOrder = applyHealthyRoster(
+        attendanceWave
+          ? buildAttendanceDirectedOrder({
+              cmd,
+              decree,
+              participationToggles,
+            })
+          : filterOrchestrationOrderByCommand(order, cmd, decree),
+      )
       const diagnosticIntentMode = resolveDiagnosticIntentMode(decree)
       const diagnosticSequential =
         councilFlowModeEffective !== 'stable_group'
@@ -9726,7 +9694,9 @@ function Home() {
         && !attendanceWave
       const stableGroupSequential =
         councilFlowModeEffective === 'stable_group' && !attendanceWave && !cmd.directInvocation
-      const orderForGather = diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder
+      const orderForGather = applyHealthyRoster(
+        diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder,
+      )
       const councilLogicalRequestId = createMessageId('council-logical-request')
       decreeSubmitFaultAnchor = orderForGather[0] ?? directedOrder[0]
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
@@ -9899,6 +9869,16 @@ function Home() {
         }
 
         setFamilyDuty(prev => ({ ...prev, [family]: 'working' }))
+        const floorLabel = rosterLabel(family)
+        setTypingFamily(orchestrationFamilyToTypingFamily(family) ?? floorLabel as TypingFamily)
+        setFloorStream({ family: floorLabel, text: '', status: 'CONNECTING' })
+        const streamBuffer = createPresentationBuffer(delta => {
+          setFloorStream(prev => {
+            const familyName = floorLabel
+            const base = prev?.family === familyName ? prev.text : ''
+            return { family: familyName, text: base + delta, status: 'STREAMING' }
+          })
+        })
         const isDirectInvoke = Boolean(cmd.directInvocation && cmd.targetFamilies[0] === family)
         const transientDirectStatusMessageIds: string[] = []
         const postDirectUnavailable = async (rt: ProviderFamilyOutcomeStatus, detail?: string) => {
@@ -9994,7 +9974,7 @@ function Home() {
                     : {}),
                   ...(diagnosticSequential ? { diagnosticIntentMode } : {}),
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
-                }, attendanceWave ? { ignoreContinuation: true } : undefined)
+                }, attendanceWave ? { ignoreContinuation: true, onTextDelta: delta => streamBuffer.push(delta) } : { onTextDelta: delta => streamBuffer.push(delta) })
 
                 if (chatRes.ok && chatData.councilProviderHttpStatus === 'timed_out') {
                   runtime = 'TIMED_OUT'
@@ -10092,7 +10072,19 @@ function Home() {
             }
           }
         } finally {
+          streamBuffer.flush()
+          streamBuffer.dispose()
           setFamilyDuty(prev => ({ ...prev, [family]: 'standing_by' }))
+        }
+
+        if ((runtime === 'FAILED' || runtime === 'TIMED_OUT') && !textOut?.trim()) {
+          const layer = runtime === 'TIMED_OUT' ? 'TIMEOUT' : 'PROVIDER'
+          const line = failureUiLabel(rosterLabel(family), layer, runtimeDetail)
+          gatherPostSystem(line)
+          void gatherPostLive({ role: 'system', content: line, family: 'SYSTEM' })
+          setFloorStream({ family: rosterLabel(family), text: '', status: 'FAILED' })
+        } else if (runtime === 'RESPONDED') {
+          setFloorStream(prev => prev ? { ...prev, status: 'COMPLETE' } : prev)
         }
 
         return {
@@ -10114,7 +10106,7 @@ function Home() {
        */
       const formatFamilyDeliberationContent = (turn: DeliberationTurn): string => {
         if (turn.full_response.trim()) return turn.full_response
-        return `${turn.provider_label} didn't get a response in this round${turn.failure_reason ? ` — ${turn.failure_reason}` : ''}.`
+        return `${turn.provider_label} didn't get a response in this round${turn.failure_reason ? ` — ${toDisplayText(turn.failure_reason)}` : ''}.`
       }
 
       const runFamilyDeliberationGather = async () => {
@@ -10187,6 +10179,9 @@ function Home() {
               degraded: !complete,
               familyDeliberationTurn: turn,
               familyDeliberationEvidenceReferences: deliberation.evidence_references,
+              councilStage: stageFromDeliberationRole(turn.turn_role),
+              commanderTurnId: turn.commander_turn_id,
+              deliberationRoundId: turn.round_id,
               shadowCouncilAssembly: turn.turn_id === shadowReadoutTurnId ? deliberationData.shadowCouncilAssembly : undefined,
               councilProgress: deliberationData.councilProgress,
             })
@@ -10259,6 +10254,7 @@ function Home() {
             councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'active' })
           }
           setTypingFamily(null)
+          setFloorStream(null)
           setFamilyDuty(Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])))
           return true
         } catch {
@@ -10266,16 +10262,15 @@ function Home() {
         }
       }
 
-      if (stableGroupSequential) {
+      if (stableGroupSequential && shouldRunFamilyDeliberation(classifyCouncilTurn(decree))) {
         const deliberationHandled = await runFamilyDeliberationGather()
         if (deliberationHandled) return
       }
 
       const outcomeByFamily = new Map<CouncilOrchestrationFamily, GatherCell>()
-      /** Parallel in-flight gathers only for non-sequential decree gathers (sequential diagnostics must not fan out). */
-      const gatherPromises = diagnosticSequential || stableGroupSequential
-        ? []
-        : orderForGather.map(family =>
+      /** Parallel in-flight gathers only for attendance visual release. Council floor is sequential. */
+      const gatherPromises = attendanceWave && !diagnosticSequential && !stableGroupSequential
+        ? orderForGather.map(family =>
             gatherFamily(family).then(cell => {
               const prev = outcomeByFamily.get(family)
               if (prev?.textOut?.trim() && cell.textOut?.trim()) return prev
@@ -10283,6 +10278,7 @@ function Home() {
               return cell
             }),
           )
+        : []
 
       const mapSoftCapCells = (): GatherCell[] =>
         directedOrder.map(family => {
@@ -10388,6 +10384,8 @@ function Home() {
           stableGroupPriorThisTurn.length > 0
           && !controller.signal.aborted
           && !councilPausedRef.current
+          && !isSocialCouncilCheckin(decree)
+          && classifyCouncilTurn(decree).depth === 'FULL'
         ) {
           try {
             const { res: finalRes, data: finalData } = await postCouncilChatDecreeGather({
@@ -10428,6 +10426,14 @@ function Home() {
           } catch {
             /* optional final synthesis — skip on failure */
           }
+        }
+      } else if (!attendanceWave) {
+        for (const family of orderForGather) {
+          if (controller.signal.aborted || councilPausedRef.current) break
+          const cell = await gatherFamily(family)
+          const prev = outcomeByFamily.get(family)
+          if (prev?.textOut?.trim() && cell.textOut?.trim()) continue
+          outcomeByFamily.set(family, cell)
         }
       } else {
         await Promise.allSettled(gatherPromises)
@@ -10807,6 +10813,7 @@ function Home() {
         lastAutonomousHadLiveResearchRef.current = false
         lastAutonomousResearchFamilyRef.current = null
         setTypingFamily(null)
+        setFloorStream(null)
         setLiveResearchHud(null)
         setFamilyDuty(Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])))
         setFamilyCurrentFocus({})
@@ -10814,9 +10821,13 @@ function Home() {
 
       if (
         anySuccess
-        && intent.tier !== 'casual'
         && !inputText().toLowerCase().includes('continue council discussion')
-        && !attendanceWave
+        && decideMemoryCandidatePrompt({
+          commanderText: decree,
+          intentTier: intent.tier,
+          attendanceWave,
+          anySuccess,
+        }).shouldPrompt
       ) {
         const memoryActionId = `memory-save-${Date.now()}`
         addRaelAction({
@@ -10909,9 +10920,29 @@ function Home() {
         }
         sequentialDiagnostics.stop()
         setTypingFamily(null)
+        setFloorStream(null)
         if (toolIntent) endToolRequest()
         if (decreeCompletedOk && !decreeMatrixFailed && !controller.signal.aborted) {
           matrixStatus('success', 'Council response ready')
+        }
+        // Bounded exit for the optimistic "Retrieving live intelligence..." HUD: if this decree
+        // round never resolved it to a real result (provider timeout, stream closed without
+        // synthesis, all families failed, or a 200 response with no usable payload), replace it
+        // with a truthful degraded state instead of leaving it stuck forever.
+        if (mode !== 'continue' && decreeRequiresLiveRetrieval && liveResearchHudResolvedRoundRef.current !== myRound) {
+          const timedOut = controller.signal.aborted
+          setLiveResearchHud(prev =>
+            prev && prev.mode === 'active' && prev.councilPhase === 'evidence'
+              ? {
+                  mode: 'failed',
+                  sourcesCount: 0,
+                  label: timedOut
+                    ? 'Council degraded — provider timed out; no synthesis returned.'
+                    : 'Council degraded — no synthesis provider returned a usable response.',
+                  councilPhase: 'released',
+                }
+              : prev,
+          )
         }
         setLoading(false)
       }
@@ -11183,6 +11214,17 @@ function Home() {
      * If external channels are ambiguous, prefer user text containing "Ra'el" — not wired here.
      */
     appendVisibleRaelDecree(decree)
+    const activeSession = councilSessionList.find(s => s.id === liveCouncilConvId)
+    if (liveCouncilConvId && shouldAutoTitle(activeSession?.title, Boolean((activeSession?.metadata as { council?: { titleLocked?: boolean } } | undefined)?.council?.titleLocked))) {
+      const nextTitle = generateNeutralSessionTitle(decree)
+      void fetch(`/api/conversations/${liveCouncilConvId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: nextTitle, mergeMetadata: true, metadata: { council: { lastPreview: decree.slice(0, 140) } } }),
+      }).then(() => {
+        setCouncilSessionList(prev => prev.map(s => s.id === liveCouncilConvId ? { ...s, title: nextTitle, preview: decree.slice(0, 140) } : s))
+      }).catch(() => undefined)
+    }
 
     if (!mode && await handleContinuationAuthorityCommand(decree)) {
       return
@@ -11523,7 +11565,7 @@ function Home() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: reason === 'archive' ? 'Live Council Archive Follow-up' : 'Live Council',
+            title: reason === 'archive' ? 'Live Council Archive Follow-up' : 'New Council Session',
             metadata: { council: { source: 'live_council', incomeOperationsMode, previousSession: liveCouncilConvId ?? councilSnapRef.current.sessionId } },
           }),
         })
@@ -11533,6 +11575,7 @@ function Home() {
           if (id) {
             sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
             setLiveCouncilConvId(id)
+            void refreshCouncilSessionList()
           }
         }
       } catch {
@@ -11542,6 +11585,77 @@ function Home() {
     addSystemMessage(reason === 'archive'
       ? 'Session archived. Clean council session is ready.'
       : 'New Council Session ready. Approved memory and provider state preserved.', { force: true })
+  }
+
+  const refreshCouncilSessionList = async () => {
+    try {
+      const res = await fetch('/api/conversations', { cache: 'no-store' })
+      if (!res.ok) return
+      const j = await res.json() as { conversations?: CouncilSessionListItem[] }
+      const convs = Array.isArray(j.conversations) ? j.conversations : []
+      setCouncilSessionList(convs.map(c => ({
+        ...c,
+        preview: typeof (c.metadata as { council?: { lastPreview?: string } } | undefined)?.council?.lastPreview === 'string'
+          ? (c.metadata as { council: { lastPreview: string } }).council.lastPreview
+          : c.preview ?? null,
+      })))
+    } catch {
+      /* session list optional */
+    }
+  }
+
+  const openCouncilSession = async (id: string) => {
+    if (!id || id === liveCouncilConvId) return
+    resetCouncilTemporaryRuntime()
+    sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
+    setLiveCouncilConvId(id)
+    liveCouncilConvIdRef.current = id
+    councilDispatch({ type: 'SET_MESSAGES', payload: [] })
+    const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
+    if (!tr.ok) return
+    const tj = await tr.json() as {
+      messages?: { id: string; role: string; content: string; family?: string | null; created_at: string; metadata?: Record<string, unknown> }[]
+    }
+    const rows = Array.isArray(tj.messages) ? tj.messages : []
+    const latestRow = [...rows].reverse().find(row => row.role === 'user')
+    const rowsDecreeText = latestRow ? latestRow.content.trim() : ''
+    const rowsPromptIntent = rowsDecreeText ? detectPromptIntent(rowsDecreeText) : undefined
+    const mapped = normalizeCouncilMessageIds(
+      rows
+        .filter(row =>
+          shouldPersistCouncilMessage(
+            councilMessageFromWarRoomRow({
+              role: row.role,
+              content: row.content,
+              family: row.family,
+              metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : undefined,
+            }),
+            councilPersistenceCtx,
+          ),
+        )
+        .map(row => mapWarRoomRowToCouncilMessage(row, {
+          decreeText: rowsDecreeText,
+          promptIntent: rowsPromptIntent,
+          stabilityMode: councilPassthroughMode,
+        })),
+      'persisted',
+    )
+    councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
+  }
+
+  const renameCouncilSession = async (id: string, title: string) => {
+    await fetch(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, mergeMetadata: true, metadata: { council: { titleLocked: true } } }),
+    })
+    setCouncilSessionList(prev => prev.map(s => s.id === id ? { ...s, title } : s))
+  }
+
+  const archiveCouncilSessionFromList = async (id: string) => {
+    await fetch(`/api/conversations/${id}`, { method: 'DELETE' })
+    setCouncilSessionList(prev => prev.filter(s => s.id !== id))
+    if (id === liveCouncilConvId) void startFreshCouncilSession('new')
   }
 
   const clearCouncilSession = () => {
@@ -11950,7 +12064,6 @@ function Home() {
       gapVerification: operatorGapVerificationContext,
       silentUi: {
         archiveRecallNotConnected: !ARCHIVE_RECALL_CLIENT_AVAILABLE,
-        smsControlsNotConnected: true,
         repoScanPlaceholders: true,
       },
       operatorLabels: [
@@ -12541,69 +12654,71 @@ function Home() {
         <LiveRoomShell
           systemHealthGapCount={operatorGapCount}
           chatExpanded={isChatExpanded}
+          sessionNavOpen={councilSessionNavOpen}
+          inspectorOpen={councilInspectorOpen}
           header={(
-            <WarRoomOsHeader
-              systemStatusLine={chatHealthLabel}
-              missionHint={councilContinueStatusLine}
-            />
+            <>
+              <WarRoomOsHeader
+                systemStatusLine={chatHealthLabel}
+                missionHint={councilContinueStatusLine}
+              />
+              {councilRoster?.degradedByRoster ? (
+                <div
+                  className="border-b px-4 py-1.5 text-[9px] font-semibold uppercase tracking-widest text-amber-200/90 sm:px-6"
+                  style={{ borderColor: 'rgba(251,191,36,0.35)', background: 'rgba(251,191,36,0.08)' }}
+                  role="status"
+                >
+                  {compactFamilyRosterLine(councilRoster)}
+                </div>
+              ) : null}
+            </>
           )}
-          intelRow={(
-            <MatrixTopIntelRow
-              location={commanderLocation}
-              threadId={liveCouncilConvId ?? undefined}
-              onCouncilHandoff={injectLiveEnvironmentDecree}
-              onCouncilResearchHandoff={handleCouncilResearchHandoff}
-              opportunityCount={incomeOpportunities.length}
-              headlineOverride={
-                liveResearchHud && liveResearchHud.mode !== 'inactive'
-                  ? liveResearchHud.label
-                  : null
-              }
-              urgentWarning={
-                chatHealthLabel && chatHealthLabel !== 'Ready'
-                  ? chatHealthLabel
-                  : null
-              }
-              missionStatus={matrixMissionStatusLabel}
-              councilHealthLabel={matrixCouncilHealthLabel}
-              activityFeedLabel={activityFeedLabel}
-              onExpandIntel={() => setLiveRoomWorkspace('expanded_intel')}
-            />
-          )}
+          intelRow={null}
           leftNav={(
-            <LiveRoomNavPanel
-              activePanelId={dockPanelId}
-              councilFlowMode={councilFlowMode}
-              sessionId={liveCouncilConvId}
-              sessionStartedAt={sessionStartedAt}
-              onSelectPanel={setDockPanelId}
-              onEndSession={() => startTransition(archiveCurrentCouncilSession)}
+            <CouncilSessionNavigator
+              sessions={councilSessionList}
+              activeId={liveCouncilConvId}
+              search={councilSessionSearch}
+              onSearch={setCouncilSessionSearch}
+              onNewChat={() => startTransition(() => { void startFreshCouncilSession('new') })}
+              onSelect={id => startTransition(() => { void openCouncilSession(id) })}
+              onRename={(id, title) => { void renameCouncilSession(id, title) }}
+              onArchive={id => { void archiveCouncilSessionFromList(id) }}
             />
           )}
           rightPanel={(
-            <CouncilMembersPanel
-              providerStatuses={providerHealth.providers}
-              providerLabels={providerHealth.labels}
-              operationStatuses={familyOperationStatuses}
-              onOpenPanel={id => setDockPanelId(id)}
+            <CouncilContextInspector
+              evidence={(
+                <div>
+                  <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-cyan-300">Turn evidence</p>
+                  <p>{liveResearchHud && liveResearchHud.mode !== 'inactive' ? liveResearchHud.label : 'No evidence packet on this turn.'}</p>
+                  {liveResearchHud?.intelligence?.sourcesPreview ? <p className="mt-2">{liveResearchHud.intelligence.sourcesPreview}</p> : null}
+                </div>
+              )}
+              research={(
+                <div>
+                  <p>{liveResearchHud?.label ?? 'Research idle'}</p>
+                  {liveResearchHud?.intelligence ? (
+                    <p className="mt-2">Freshness {liveResearchHud.intelligence.freshness}. Contradictions {liveResearchHud.intelligence.contradictionWarnings}.</p>
+                  ) : null}
+                </div>
+              )}
+              terra={<p>{terraCouncilContextRef.current ? 'Terra context is attached to the current turn only.' : 'No Terra pin.'}</p>}
+              diagnostics={(
+                <div className="space-y-2">
+                  <CouncilMembersPanel
+                    providerStatuses={providerHealth.providers}
+                    providerLabels={providerHealth.labels}
+                    operationStatuses={familyOperationStatuses}
+                    councilRoster={councilRoster}
+                    onOpenPanel={id => setDockPanelId(id)}
+                  />
+                  <SynthesisCard synthesis={conversationRuntimeSnapshot?.latestSynthesis} />
+                </div>
+              )}
             />
           )}
-          commandConsole={(
-            <CommandConsole
-              command={command}
-              onCommandChange={setCommand}
-              onSubmit={handleDecree}
-              loading={loading}
-              councilFlowMode={councilFlowMode}
-              onCouncilFlowModeChange={persistCouncilFlowMode}
-              showFlowModeSelect={false}
-              attachmentFileName={attachedFile?.fileName ?? null}
-              attachmentStatus={attachmentStatus}
-              attachmentError={attachmentError}
-              onAttachmentSelect={file => void handleAttachmentSelect(file)}
-              onAttachmentRemove={handleAttachmentRemove}
-            />
-          )}
+          commandConsole={null}
           activePanelId={dockPanelId}
           onPanelChange={id => {
             setDockPanelId(id)
@@ -12655,7 +12770,7 @@ function Home() {
                     {activeFamiliesSection}
                     {activeOrdersStrip}
                     {pendingNeedsRael ? (
-                      <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
+                      <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} />
                     ) : null}
                   </>
                 )}
@@ -12676,6 +12791,7 @@ function Home() {
                     />
                     <ConversationStatePanel runtime={conversationRuntimeSnapshot} />
                     <CouncilDeliberationStream threadId={liveCouncilConvId} enabled />
+                    <AgiWaveOnePanel conversationId={liveCouncilConvId} persistenceAvailable={persistenceAvailable} />
                     <ScoutDiagnosticsPanel diagnostics={economicScoutDiagnostics} />
                   </div>
                 )}
@@ -12717,71 +12833,53 @@ function Home() {
               />
             </div>
           ) : (
-        <CouncilWorkspace
+        <GodsEyeCommandCenter
+          onTerraContextChange={context => { terraCouncilContextRef.current = context }}
+          councilComposer={<CommandConsole
+            command={command}
+            onCommandChange={setCommand}
+            onSubmit={handleDecree}
+            loading={loading}
+            councilFlowMode={councilFlowMode}
+            onCouncilFlowModeChange={persistCouncilFlowMode}
+            showFlowModeSelect={false}
+            attachmentFileName={attachedFile?.fileName ?? null}
+            attachmentStatus={attachmentStatus}
+            attachmentError={attachmentError}
+            onAttachmentSelect={file => void handleAttachmentSelect(file)}
+            onAttachmentRemove={handleAttachmentRemove}
+          />}
+          intelOverlay={<MatrixTopIntelRow
+            location={commanderLocation}
+            threadId={liveCouncilConvId ?? undefined}
+            onCouncilHandoff={injectLiveEnvironmentDecree}
+            onCouncilResearchHandoff={handleCouncilResearchHandoff}
+            opportunityCount={incomeOpportunities.length}
+            headlineOverride={liveResearchHud && liveResearchHud.mode !== 'inactive' ? liveResearchHud.label : null}
+            urgentWarning={chatHealthLabel && chatHealthLabel !== 'Ready' ? chatHealthLabel : null}
+            missionStatus={matrixMissionStatusLabel}
+            councilHealthLabel={matrixCouncilHealthLabel}
+            activityFeedLabel={activityFeedLabel}
+            onExpandIntel={() => setLiveRoomWorkspace('expanded_intel')}
+          />}
+          council={<CouncilWorkspace
           scrollContainerRef={scrollContainerRef}
           onScroll={handleScroll}
           toolbar={(
-        <div className="flex w-full flex-wrap items-center justify-between gap-2">
-          <span className="text-[10px] font-bold tracking-widest text-emerald-300">
-            {councilContinueStatusLine}
-          </span>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div className="flex flex-wrap items-center gap-1" role="radiogroup" aria-label="Council conversation mode">
-              {(['direct', 'stable_group', 'full_council'] as const).map(mode => (
-                <button
-                  key={mode}
-                  type="button"
-                  role="radio"
-                  aria-checked={councilFlowMode === mode}
-                  title={COUNCIL_FLOW_MODE_LABELS[mode]}
-                  onClick={() => persistCouncilFlowMode(mode)}
-                  className="rounded px-2 py-0.5 text-[9px] tracking-widest"
-                  style={{
-                    border: councilFlowMode === mode ? '1px solid #FFD700' : '1px solid #333',
-                    color: councilFlowMode === mode ? '#FFD700' : '#888',
-                    fontWeight: councilFlowMode === mode ? 'bold' : 'normal',
-                  }}
-                >
-                  {mode === 'direct' ? 'Direct' : mode === 'stable_group' ? 'Stable Group' : 'Full Council'}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => setDockPanelId('live-council')}
-              className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
-              style={{ border: '1px solid #93C5FD', color: '#93C5FD' }}
-              aria-label="Open council controls"
-              title="Controls"
-            >
-              ⚙ Controls
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsChatExpanded(prev => !prev)}
-              className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
-              style={{
-                border: isChatExpanded ? '1px solid #FFD700' : '1px solid #93C5FD',
-                color: isChatExpanded ? '#FFD700' : '#93C5FD',
-              }}
-              aria-label={isChatExpanded ? 'Collapse chat to normal dashboard' : 'Expand chat to full view'}
-              aria-pressed={isChatExpanded}
-              title={isChatExpanded ? 'Collapse Chat' : 'Expand Chat'}
-            >
-              {isChatExpanded ? '⤡ Collapse Chat' : '⤢ Expand Chat'}
-            </button>
-            {!autoScrollEnabled ? (
-              <button
-                type="button"
-                onClick={jumpToLatest}
-                className="rounded px-2 py-1 text-[10px] font-bold tracking-widest"
-                style={{ background: '#FFD700', color: '#000' }}
-              >
-                Go to latest
-              </button>
-            ) : null}
-          </div>
-        </div>
+            <CouncilCommandControls
+              councilFlowMode={councilFlowMode}
+              onCouncilFlowModeChange={persistCouncilFlowMode}
+              onOpenControls={() => setDockPanelId('live-council')}
+              isChatExpanded={isChatExpanded}
+              onToggleExpand={() => setIsChatExpanded(prev => !prev)}
+              autoScrollEnabled={autoScrollEnabled}
+              onJumpToLatest={jumpToLatest}
+              statusLine={councilContinueStatusLine}
+              sessionNavOpen={councilSessionNavOpen}
+              onToggleSessionNav={() => setCouncilSessionNavOpen(v => !v)}
+              inspectorOpen={councilInspectorOpen}
+              onToggleInspector={() => setCouncilInspectorOpen(v => !v)}
+            />
       )}
           preamble={(
         <>
@@ -12953,7 +13051,19 @@ function Home() {
           )}
 
           {typingFamily && (
-            <TypingIndicator familyName={typingFamily} label={familyPresence[typingFamily].label} />
+            <TypingIndicator familyName={typingFamily} label={familyPresence[typingFamily]?.label ?? String(typingFamily)} />
+          )}
+          {floorStream && (floorStream.text || floorStream.status === 'STREAMING' || floorStream.status === 'CONNECTING') && (
+            <div
+              className="ml-11 mb-3 rounded border px-3 py-2 text-sm"
+              style={{ borderColor: '#3a2e00', background: 'rgba(255,215,0,0.04)', color: '#E5E5E5' }}
+              aria-live="polite"
+            >
+              <div className="text-[10px] uppercase tracking-widest mb-1" style={{ color: '#FFD700' }}>
+                {floorStream.family} · {floorStream.status}
+              </div>
+              {floorStream.text || (floorStream.status === 'CONNECTING' ? 'Connecting…' : '')}
+            </div>
           )}
 
           {councilMounted && showContinue && (
@@ -13037,16 +13147,13 @@ function Home() {
         </>
           )}
           inlineBelowThread={(
-            <>
-              <SynthesisCard synthesis={conversationRuntimeSnapshot?.latestSynthesis} />
-              <AmbientActivityFeed
-                familyPresence={familyPresence}
-                typingFamily={typingFamily}
-                runtime={conversationRuntimeSnapshot}
-              />
-            </>
+            <AmbientActivityFeed
+              familyPresence={familyPresence}
+              typingFamily={typingFamily}
+              runtime={conversationRuntimeSnapshot}
+            />
           )}
-        />
+        />} />
           )}
         />
         )}
@@ -13196,9 +13303,8 @@ function Home() {
                   <h2 className="text-xs font-bold tracking-widest" style={{ color: '#FBBF24' }}>APPROVALS / ACTION QUEUE</h2>
                   <button type="button" className="rounded px-2 py-1 text-[10px] font-bold" style={{ border: '1px solid #555', color: '#ccc' }} onClick={() => void loadRaelActions()}>Refresh approvals</button>
                 </div>
-                <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} onNotify={notifyRaelAction} />
+                <NeedsRaelPanel actions={raelActions} opportunities={incomeOpportunities} onRespond={respondToRaelAction} />
                 <StandingPermissionsPanel />
-                <SmsBridgePanel bridge={smsBridge} onTest={testSmsBridge} />
               </>
             )}
             {operatorTab === 'system' && (

@@ -1,0 +1,11 @@
+{
+  "observed_label": "openai:gpt-4o",
+  "source": "hardcoded in lib/council/family-deliberation/runtime.ts providerModelForFamily and app/api/chat/execute.ts callChatGPT model field",
+  "intentional": true,
+  "legacy_stale": false,
+  "fallback_alias": false,
+  "database_configured": false,
+  "environment_configured": false,
+  "contributes_to_observed_auth_failure": false,
+  "note": "OpenAI rejected the credential before model authorization. gpt-4o mapping is display plus Chat Completions model id, not the 401 cause."
+}

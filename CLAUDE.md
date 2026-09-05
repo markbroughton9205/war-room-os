@@ -29,7 +29,7 @@ War Room is a solo-built Next.js 16 (App Router) + React 19 + TypeScript agentic
 
 - `SUPABASE_SERVICE_ROLE_KEY` must stay server-only — never prefix it (or any secret) with `NEXT_PUBLIC_`. It's used server-side by `/api/tools/memory`.
 - `SUPABASE_FILES_BUCKET` must exactly match the actual Supabase Storage bucket name, including spaces/capitalization (currently `War Room Files`).
-- `.env.example` is out of date vs. actual usage — real `.env.local` also includes `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`, `MOONSHOT_API_KEY`, `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, Twilio vars, and more.
+- `.env.example` is out of date vs. actual usage — real `.env.local` also includes `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`, `MOONSHOT_API_KEY`, `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, and more.
 - Payment operations must route through secure provider integrations, require explicit War Room approval, and must never store raw routing/account numbers.
 
 ## Approval-gated workflow

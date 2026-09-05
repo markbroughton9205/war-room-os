@@ -20,6 +20,7 @@ export interface WorkspaceRecord {
 }
 
 const REGISTRY_REL = path.join('.war-room', 'workspaces', 'registry.json')
+export const CODE_OPERATOR_ALLOWED_ROOTS = ['/Users/markbroughton/Developer/war-room-os'] as const
 
 function registryPath(): string {
   return path.join(resolveBaseRepoRoot(), REGISTRY_REL)
@@ -67,6 +68,10 @@ async function validateAndCanonicalizeRoot(candidate: string): Promise<string> {
   } catch {
     throw new WorkspaceValidationError('Workspace path does not exist.')
   }
+  const allowedRoots = await Promise.all(CODE_OPERATOR_ALLOWED_ROOTS.map(root => realpath(root)))
+  if (!allowedRoots.includes(canonical)) {
+    throw new WorkspaceValidationError('Workspace is not in the Code Operator allowlist.')
+  }
   const st = await stat(canonical)
   if (!st.isDirectory()) {
     throw new WorkspaceValidationError('Workspace path is not a directory.')
@@ -84,11 +89,12 @@ async function validateAndCanonicalizeRoot(candidate: string): Promise<string> {
 }
 
 export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
-  return readRegistry()
+  const allowedRoots = new Set(await Promise.all(CODE_OPERATOR_ALLOWED_ROOTS.map(root => realpath(root))))
+  return (await readRegistry()).filter(workspace => allowedRoots.has(workspace.root))
 }
 
 export async function getWorkspace(id: string): Promise<WorkspaceRecord | null> {
-  const all = await readRegistry()
+  const all = await listWorkspaces()
   return all.find(w => w.id === id) ?? null
 }
 

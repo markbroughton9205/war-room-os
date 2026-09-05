@@ -35,6 +35,7 @@ import type {
   NativeIssueRecord,
   NativeRepairRecord,
   NativeRepairState,
+  NativeCommitPreparation,
   NativeDiffEvidence,
   NativeValidationResult,
   NativeVerificationResult,
@@ -165,6 +166,10 @@ export interface MissionExecutionStrategy<TRequest> {
   /** Explicit rollback outside the accept/reject flow. Callers MUST have already passed
    * assertAutoOrApproval with policy.rollbackActionKind. */
   rollback(missionId: string): Promise<RuntimeMission>
+  /** Optional — Commander cancellation of a mission, including while it is applying/validating:
+   * kills the active child process tree (see lib/native-builder/processRegistry.ts) and moves the
+   * mission to 'cancelled'. Optional for the same future-strategy discipline as list(). */
+  cancel?(missionId: string, reason?: string): Promise<RuntimeMission>
   /** Optional — added in Phase D (War Room Engineering Mission UI) to back an "active missions"
    * list, the one capability neither Foundation Hardening nor Phase A needed. Optional so any
    * future strategy that genuinely cannot support listing (unlikely, but not this module's call to
@@ -289,6 +294,9 @@ export type RuntimeMission = {
   validationResults: NativeValidationResult[]
   verification?: NativeVerificationResult
   diff?: NativeDiffEvidence
+  /** Prepared commit message + ordered staging plan, generated at review/resolve time. Pure data —
+   * the commitCapable: false invariant above is unchanged; nothing here executes git. */
+  commitPreparation?: NativeCommitPreparation
   /** True once verification/commander-review land here — never true from a mere apply. */
   auditable: true
   raw: {

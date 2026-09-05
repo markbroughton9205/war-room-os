@@ -41,7 +41,7 @@ export type ProviderDiscoveryResult = {
 
 export type NotificationResult = {
   state: 'NOTIFICATION_GENERATED' | 'EXTERNAL_DELIVERY' | 'BLOCKED_BY_ENVIRONMENT' | 'NOT_REQUIRED'
-  channel: 'sms' | null
+  channel: null
   providerMessageId: string | null
   body: string | null
   error: string | null

@@ -1,0 +1,13 @@
+{
+  "pre_repair_leak": true,
+  "leak_path": "callChatGPT threw OpenAI error.message into ProviderResult.error; UI interpolated turn.failure_reason. OpenAI echoes the presented key in Incorrect API key provided: ...",
+  "toDisplayText_strings_previously_unredacted": true,
+  "repair": {
+    "sanitizeProviderPublicError": "lib/providers/publicError.ts",
+    "toDisplayText_redacts_strings": true,
+    "execute_and_ui_wired": true
+  },
+  "user_facing_auth_form": "OpenAI authentication failed.",
+  "error_class_preserved": true,
+  "secrets_in_this_report": false
+}

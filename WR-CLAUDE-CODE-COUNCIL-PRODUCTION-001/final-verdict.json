@@ -1,0 +1,16 @@
+{
+  "mission": "WR-CLAUDE-CODE-COUNCIL-PRODUCTION-001",
+  "stop_state_reached": "RECONCILIATION + VALIDATION + TYPECHECK/LINT + EXACT PRODUCTION DELTA (candidate) complete. BROWSER SMOKE and full monorepo BUILD both environment-blocked, honestly recorded (not fabricated). Stopped before Node01 per Commander checkpoint decision - Node01 was never touched.",
+  "verdicts": {
+    "overall": "WAR ROOM CLAUDE CODE COUNCIL PRODUCTION - FAIL",
+    "overall_reason": "Not a code-correctness failure. Node01 was never promoted, built, or restarted this session (by the Commander's own checkpoint instruction), so 'PASS' (which requires a working production restart) cannot honestly be claimed yet. All dev-side gates that COULD run this session passed.",
+    "streaming": "WAR ROOM COUNCIL - OPENAI + GEMINI PRODUCTION STREAMING NOT DEMONSTRATED",
+    "streaming_note": "Demonstrated in dev (live provider canary + prior server-path healthy-roster run), not in production - production was not touched.",
+    "health_aware_floor": "WAR ROOM COUNCIL - HEALTH-AWARE PRODUCTION FLOOR NOT DEMONSTRATED",
+    "health_aware_floor_note": "Demonstrated in dev via validators + healthy-roster-results.json; not yet demonstrated against the live production deployment.",
+    "degraded_mode_truthful": "WAR ROOM COUNCIL - PRODUCTION DEGRADED MODE NOT TRUTHFUL",
+    "degraded_mode_truthful_note": "Not applicable/tested yet - production has not been promoted, so there is no production degraded-mode claim to evaluate. In DEV, the degraded state is truthfully represented (COUNCIL DEGRADED · 2/4 PROVIDERS ACTIVE, roster contract, validators).",
+    "wrim_readiness": "WAR ROOM COUNCIL - NOT READY FOR WRIM NATIVE MEMBER PHASE 1"
+  },
+  "next_recommendation": "Get Commander sign-off on WR-CLAUDE-CODE-COUNCIL-PRODUCTION-001/production-delta.json (121 files, 7 flagged for review, 1 needs-verification item re: lib/agi-experience presence on Node01), then run Phase 17-21 (Node01 snapshot, roster env, promotion of exactly those 121 files, build, restart, local+public health check) with the same fail-fast discipline used this session. Recommend attempting Node01's build with other heavy dev-tool processes (Cursor Helper, Codex) closed first, given this session's dev-monorepo build hit real memory exhaustion on this machine."
+}

@@ -4,12 +4,12 @@
  * and the whole proposal is applied transactionally: if any file in the batch fails, everything
  * already written in this run is reverted before returning.
  */
-import { access, writeFile } from 'node:fs/promises'
+import { access, rm, writeFile } from 'node:fs/promises'
 import { constants as FsConstants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import type { NativeRepairProposal, StructuredPatch } from './types'
 import { validatePatchPolicy } from './patchPolicy'
-import { resolveRepoRelativePath, readRepoFile } from './repositoryInspector'
+import { assertCanonicalRepoPath, resolveRepoRelativePath, readRepoFile } from './repositoryInspector'
 import { rollbackRepair, snapshotFileBeforePatch } from './rollback'
 
 function sha256(text: string): string {
@@ -39,6 +39,26 @@ export type PatchApplyResult = {
 
 async function applyOnePatch(repairId: string, patch: StructuredPatch): Promise<PatchApplyFileOutcome> {
   const abs = resolveRepoRelativePath(patch.file)
+  await assertCanonicalRepoPath(abs, patch.operation === 'create_file')
+
+  if (patch.operation === 'delete_file') {
+    const current = await readRepoFile(patch.file)
+    if (!current.ok) {
+      return { file: patch.file, ok: false, detail: `Cannot read file to delete: ${current.error}` }
+    }
+    if (sha256(current.content) !== patch.expectedOriginalHash) {
+      return {
+        file: patch.file,
+        ok: false,
+        detail: 'Stale-file rejection: file content changed since the proposal was generated (hash mismatch). Re-plan against the current file.',
+      }
+    }
+    // Snapshot with existedBefore: true so rollbackRepair() restores the exact content — same
+    // mechanism that already restores modified files; deletion is only "undo-able" because of it.
+    await snapshotFileBeforePatch(repairId, patch.file, current.content, true)
+    await rm(abs, { force: true })
+    return { file: patch.file, ok: true, detail: 'File deleted (snapshot retained for rollback).' }
+  }
 
   if (patch.operation === 'create_file') {
     if (await fileExists(abs)) {

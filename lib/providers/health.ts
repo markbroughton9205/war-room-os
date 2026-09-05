@@ -5,6 +5,7 @@ import {
   type ProviderIntegrityRuntimeSnapshot,
 } from '@/lib/providers/integrityRuntime'
 import { probeKimiApi } from '@/lib/providers/kimi'
+import { hasUsableProviderSecret } from '@/lib/providers/secretPresence'
 
 export type ProviderRuntimeHealth =
   | 'CONNECTED'
@@ -97,7 +98,7 @@ const lastSuccessByProvider: Partial<Record<ProviderRuntimeId, string>> = {}
 function envValue(names: string[]): string | null {
   for (const name of names) {
     const value = process.env[name]?.trim()
-    if (value) return value
+    if (value && hasUsableProviderSecret(value)) return value
   }
   return null
 }
@@ -190,7 +191,11 @@ async function jsonFetch<T>(url: string, init: RequestInit): Promise<{ data: T; 
       : typeof (body.error as { message?: unknown } | undefined)?.message === 'string'
         ? String((body.error as { message?: unknown }).message)
         : response.statusText
-    throw new ProviderHttpError(response.status, errorMessage, rateLimitReset(response.headers))
+    const safeMessage =
+      /incorrect api key|invalid api key|invalid_api_key|invalid x-api-key|authentication/i.test(errorMessage)
+        ? `Provider rejected credentials with HTTP ${response.status}.`
+        : errorMessage
+    throw new ProviderHttpError(response.status, safeMessage, rateLimitReset(response.headers))
   }
 
   return { data: data as T, headers: response.headers }
@@ -214,9 +219,13 @@ async function probeOpenAi(apiKey: string): Promise<ProbeResult> {
       Accept: 'application/json',
     },
   })
+  const ids = (data.data ?? []).map(model => model.id ?? '').filter(Boolean)
+  const gpt4oListed = ids.includes('gpt-4o')
   return {
-    activeModels: compactModels((data.data ?? []).map(model => model.id ?? '').filter(model => /gpt|o[0-9]/i.test(model))),
-    note: 'OpenAI models endpoint responded.',
+    activeModels: compactModels(ids.filter(model => /gpt|o[0-9]/i.test(model))),
+    note: gpt4oListed
+      ? 'OpenAI models endpoint responded; gpt-4o listed.'
+      : 'OpenAI models endpoint responded; gpt-4o not listed for this credential.',
   }
 }
 
@@ -229,9 +238,13 @@ async function probeAnthropic(apiKey: string): Promise<ProbeResult> {
       Accept: 'application/json',
     },
   })
+  const ids = (data.data ?? []).map(model => model.id ?? '').filter(Boolean)
+  const claudeListed = ids.some(id => /claude/i.test(id))
   return {
-    activeModels: compactModels((data.data ?? []).map(model => model.id ?? '').filter(model => /claude/i.test(model))),
-    note: 'Anthropic models endpoint responded.',
+    activeModels: compactModels(ids.filter(model => /claude/i.test(model))),
+    note: claudeListed
+      ? 'Anthropic models endpoint responded; Claude models listed.'
+      : 'Anthropic models endpoint responded; no Claude model ids in sample.',
   }
 }
 

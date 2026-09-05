@@ -1,6 +1,7 @@
 'use client'
 
 import { postCouncilChat } from '@/lib/council/liveChatPipeline'
+import { matrixChannelStatus, matrixStatus } from '@/lib/ui/matrixStatusBus'
 import {
   createCouncilStreamReconciliationState,
   reconcileCouncilStreamEnvelope,
@@ -62,6 +63,7 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
         transportStarted: false,
       }
     }
+    matrixStatus('error', 'Council stream transport unavailable')
     return {
       finalResponse: null,
       responseStatus: response.status,
@@ -101,6 +103,7 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
   const handleParserEvent = (event: CouncilStreamParserEvent) => {
     if (!event.ok) {
       callbacks.onMalformedEnvelope?.(event)
+      matrixStatus('error', 'Council stream sent a malformed envelope')
       error = {
         version: '48c4c.council-stream.v1',
         envelopeType: 'error',
@@ -123,24 +126,34 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
         emittedAt: new Date().toISOString(),
         error: reconciled.error,
       }
+      matrixStatus('error', 'Council stream reconciliation failed')
       callbacks.onError?.(error)
       return
     }
     if (!reconciled.accepted) return
     if (event.envelope.envelopeType !== 'opened') executionStarted = true
-    if (event.envelope.envelopeType === 'opened') callbacks.onOpened?.(event.envelope)
+    // Matrix runtime signals sit at this single real dispatch point for the whole SSE lifecycle
+    // -- every actual Council decree submitted through the composer goes through here -- rather
+    // than being duplicated at each of the several callers of postIncrementalCouncilChat.
+    if (event.envelope.envelopeType === 'opened') {
+      matrixChannelStatus('cyan', 'Council stream opened')
+      callbacks.onOpened?.(event.envelope)
+    }
     if (event.envelope.envelopeType === 'progress') {
       progressCount += 1
+      matrixChannelStatus('cyan', 'Council response streaming…')
       callbacks.onProgress?.(event.envelope)
     }
     if (event.envelope.envelopeType === 'final') {
       finalResponse = event.envelope.finalResponse
       responseStatus = event.envelope.httpStatus
       responseOk = event.envelope.ok
+      matrixStatus(event.envelope.ok ? 'success' : 'error', event.envelope.ok ? 'Council response complete' : 'Council response failed')
       callbacks.onFinal?.(event.envelope)
     }
     if (event.envelope.envelopeType === 'error') {
       error = event.envelope
+      matrixStatus('error', event.envelope.error?.message || 'Council stream failed')
       callbacks.onError?.(event.envelope)
     }
     if (event.envelope.envelopeType === 'closed') {
@@ -185,6 +198,7 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
   }
 
   if (!finalResponse && !error && !options.signal?.aborted) {
+    matrixStatus('error', 'Council stream ended without a final response')
     error = {
       version: '48c4c.council-stream.v1',
       envelopeType: 'error',

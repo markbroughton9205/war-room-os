@@ -4901,10 +4901,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed this mission: the Bank of England's IADB is real and zero-auth (REST-ish CSV per the registry's own access-type column), but its actual request-parameter shape (series codes, date-range query encoding) could not be confirmed via direct probing within this session's time budget. Not built against an unconfirmed request contract."
+    "implementationState": "LIVE_IMPLEMENTED",
+    "providerId": "bank_of_england_iadb",
+    "adapterPath": "lib/research-engine/providers/bank_of_england_iadb.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_15_bank_of_canada_valet_api",
@@ -7111,10 +7111,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "This is IIIF (image/manifest delivery) access to digitized NDL items, not a keyword-search capability — distinct from the \"NDL Search API (Japan)\" row this mission built as the ndl_search adapter, which already provides real catalog search coverage including links into the digitized collection. Not built as a manifest-delivery adapter that would misrepresent itself as search."
+    "implementationState": "DUPLICATE_COVERAGE",
+    "providerId": "ndl_search",
+    "adapterPath": "lib/research-engine/providers/ndl_search.ts (see registry.ts for exact filename)",
+    "notes": "Reclassified from MISSING during the Earth Knowledge Implementation Exhaustion mission (2026-08-25) — the prior entry's own note already established this is IIIF (image/manifest delivery) access to digitized NDL items, not a keyword-search capability, and that the existing \"NDL Search API (Japan)\" row (built as the ndl_search adapter) already provides real catalog search coverage including links into the digitized collection. A genuinely separate manifest-delivery adapter would duplicate that coverage for no new query capability, so this belongs in DUPLICATE_COVERAGE rather than MISSING/IMPLEMENTABLE_NOT_IMPLEMENTED."
   },
   {
     "sourceId": "ek_21_japan_search_web_api_sparql",
@@ -8590,10 +8590,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
+    "implementationState": "EXTERNAL_BLOCKER",
     "providerId": null,
     "adapterPath": null,
-    "notes": "Confirmed live this mission: openstat.psa.gov.ph/PXWeb/api/v1 is real and zero-auth, but is PXWEB-family — same structural constraint already established for SCB/StatBank/SSB (Sweden/Denmark/Norway) elsewhere in this map: real data queries require per-table navigation to discover variable/value codes, then a POST with a JSON query body, with no cross-table free-text search. Not built for the same reason."
+    "notes": "Confirmed live during the Earth Knowledge Implementation Exhaustion mission (2026-08-25): openstat.psa.gov.ph/PXWeb/api/v1 is real, zero-auth, and structurally identical to the now-implemented SCB/SSB/StatFin/StatBank-Denmark PxWeb-family providers — but every tested query (3 independent tables: a population projection, a 2020 census total, and a province-level breakdown) returned exactly the placeholder value 1.0 regardless of the real category selected (e.g. \"Philippines / Total Population\" = 1.0), a genuine current data-integrity problem on PSA's live system, not a query-construction issue. Upgraded from MISSING to EXTERNAL_BLOCKER now that live evidence shows a confirmed source-side data anomaly rather than an unexplored structural limitation; not built against data this session confirmed is not currently trustworthy."
   },
   {
     "sourceId": "ek_23_saudi_open_data_platform_api_gastat",
@@ -8624,10 +8624,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL (unverified from sandbox)",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed live this mission: SCB's PXWEB API is real and zero-auth, but requires the caller to already know a specific table path AND that table's own variable/value codes (discovered via a separate metadata GET per table) before a data POST can succeed — there is no general free-text query across all SCB tables. Not built as a single-table-only adapter that would not generalize to a meaningful query capability without a much larger table+variable-code catalog this pass did not build."
+    "implementationState": "LIVE_IMPLEMENTED",
+    "providerId": "scb_sweden",
+    "adapterPath": "lib/research-engine/providers/scb_sweden.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_23_sidra_api_agregados",
@@ -8675,10 +8675,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed live this mission: same PXWEB-family constraint as SCB (Sweden) and StatBank (Denmark) — real, zero-auth, but requires per-table variable-code discovery before querying, with no cross-table free-text search. Not built for the same reason."
+    "implementationState": "LIVE_IMPLEMENTED",
+    "providerId": "ssb_norway",
+    "adapterPath": "lib/research-engine/providers/ssb_norway.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_23_statbank_denmark_api",
@@ -8692,10 +8692,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed live this mission: same PXWEB-family constraint as SCB (Sweden) — real, zero-auth, but requires per-table variable-code discovery before querying, with no cross-table free-text search. Not built for the same reason."
+    "implementationState": "LIVE_IMPLEMENTED",
+    "providerId": "statistics_denmark",
+    "adapterPath": "lib/research-engine/providers/statistics_denmark.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_23_statcan_wds",
@@ -8726,10 +8726,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed live this mission: both statfin.stat.fi/PXWeb/api/v1 and the newer pxdata.stat.fi/PxWeb/api/v1 are real and zero-auth, but are PXWEB-family — same per-table-navigation constraint as SCB/StatBank/SSB/OpenSTAT elsewhere in this map. Not built for the same reason."
+    "implementationState": "LIVE_IMPLEMENTED",
+    "providerId": "statfin_finland",
+    "adapterPath": "lib/research-engine/providers/statfin_finland.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_23_taiwan_dgbas_national_statistics",
@@ -9134,10 +9134,10 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
     "registryStatus": "OPERATIONAL",
     "evidenceClass": null,
     "isFirst25": false,
-    "implementationState": "MISSING",
-    "providerId": null,
-    "adapterPath": null,
-    "notes": "Confirmed live this mission: population.un.org/dataportalapi's locations/indicators metadata endpoints are zero-auth, but the actual population-data query endpoint (/data/indicators/{id}/locations/{id}/start/{y}/end/{y}) returns a real 401 with WWW-Authenticate: Bearer — a genuine current access-policy change, not a path error. Not built as a metadata-only adapter (locations/indicators lists alone are not a meaningful population-data capability) rather than a real data-query adapter that cannot function without credentials whose acquisition path was not confirmed."
+    "implementationState": "LIVE_IMPLEMENTED",
+    "providerId": "un_desa_population",
+    "adapterPath": "lib/research-engine/providers/un_desa_population.ts (see registry.ts for exact filename)",
+    "notes": null
   },
   {
     "sourceId": "ek_24_unesco_uis_data_api_bdds",
@@ -9261,17 +9261,17 @@ export const EARTH_KNOWLEDGE_COMPLETION_REGISTRY: EarthKnowledgeSourceRecord[] =
 ]
 
 export const EARTH_KNOWLEDGE_STATE_COUNTS: Record<string, number> = {
-  "LIVE_IMPLEMENTED": 195,
+  "LIVE_IMPLEMENTED": 201,
   "BULK_ONLY": 88,
   "IMPLEMENTED_ACCESS_DEGRADED": 5,
   "IMPLEMENTED_CREDENTIAL_BLOCKED": 46,
-  "MISSING": 89,
+  "MISSING": 81,
   "IMPLEMENTED_NOT_LIVE_VERIFIED": 5,
   "DISCONTINUED": 12,
   "SEARCH_INTERFACE_ONLY": 59,
   "COMMERCIAL_GATED": 20,
-  "EXTERNAL_BLOCKER": 15,
-  "DUPLICATE_COVERAGE": 6,
+  "EXTERNAL_BLOCKER": 16,
+  "DUPLICATE_COVERAGE": 7,
   "STUB_ONLY": 2
 }
 

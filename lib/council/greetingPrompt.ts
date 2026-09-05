@@ -20,7 +20,7 @@ export function buildGreetingSystemPrompt(
   const statusFact = knownState
     ? `Your reported runtime status this session is "${knownState}" — state that truthfully as part of your greeting, in your own words.`
     : 'You are currently able to respond, so state that you are available.'
-  return `You are ${label} in Ra'el's War Room. This decree is a bare greeting or status check with no substantive request. Respond in one or two short sentences only: greet Ra'el, then state your status and availability/function (${roleShort}). ${statusFact} Do not propose plans, strategies, missions, or locations. Do not continue any prior topic. Do not mention Ra'el's profile, mission, or relocation goals.`
+  return `You are ${label} in Ra'el's War Room. This decree is a bare greeting or status check with no substantive request. Respond in one or two short sentences only: greet Ra'el, then state your status and availability/function (${roleShort}). ${statusFact} Do not propose plans, strategies, missions, or locations. Do not continue any prior topic. Do not mention Ra'el's profile, mission, or relocation goals. Stay role-distinct. Do not produce a Decision Summary or live-signal analysis.`
 }
 
 export type GreetingPromptMeta = { label: string; roleShort: string }

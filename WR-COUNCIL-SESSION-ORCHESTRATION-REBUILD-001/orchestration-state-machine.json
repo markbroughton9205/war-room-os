@@ -1,0 +1,18 @@
+{
+  "FAST": [
+    "COMMANDER",
+    "optional family replies",
+    "no research",
+    "no red team",
+    "no revisions"
+  ],
+  "FULL": [
+    "INTENT",
+    "RESEARCH",
+    "OPENING",
+    "RESPONSE",
+    "RED_TEAM",
+    "REVISION",
+    "SYNTHESIS"
+  ]
+}

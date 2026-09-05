@@ -1,0 +1,5 @@
+{
+  "default_injection": false,
+  "gate": "lib/council/session-orchestration/memoryInfluence.ts",
+  "plan_opportunity_low_influence": true
+}

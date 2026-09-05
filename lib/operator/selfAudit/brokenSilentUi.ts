@@ -25,23 +25,6 @@ export function auditBrokenSilentUi(ctx: SelfAuditContext): OperatorGap[] {
     )
   }
 
-  if (silent.smsControlsNotConnected) {
-    gaps.push(
-      selfAuditGap({
-        id: 'self-audit-sms-controls-silent',
-        title: 'SMS council controls not connected',
-        plainLanguage: 'Text-message pause/resume/scout replies are placeholders only.',
-        meaning: 'Inbound SMS routes acknowledge commands but do not change live council state.',
-        area: 'Command Intel',
-        category: 'Broken/Silent UI',
-        kind: 'issue',
-        severity: 'low',
-        recommendedFix: 'Use the live command console; ignore SMS until integration is approved.',
-        cursorCommand: 'Document SMS stub in app/api/sms/inbound/route.ts; hide from operator deck if confusing.',
-      }),
-    )
-  }
-
   if (silent.repoScanPlaceholders) {
     gaps.push(
       selfAuditGap({

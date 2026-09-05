@@ -1,0 +1,64 @@
+/**
+ * Client-safe summary of lib/terra/layerCatalog.ts — id/label/domain/kind/description only, no
+ * `normalize` function and no import of it. TerraShell.tsx ('use client') needs to render the
+ * layer list and group it by domain, but the full catalog now transitively imports
+ * lib/terra/resolveGeography.ts -> executeResearch() -> the server-only Research Engine adapter
+ * chain (added this phase for the EDH ENTITY_GEO_RESOLVABLE layer); importing layerCatalog.ts
+ * directly from a client component would bundle that entire server-only chain into the browser.
+ *
+ * This file intentionally duplicates the display fields rather than re-exporting a mapped subset
+ * of TERRA_LAYER_CATALOG, specifically so it carries zero runtime imports from
+ * lib/terra/layerCatalog.ts or anything it imports. lib/terra/layerCatalogSummary.validation.ts
+ * cross-checks this list against the real catalog so the two can never silently drift apart.
+ */
+import type { TerraIntelligenceDomain, TerraIntelligenceEventKind } from '@/lib/terra/types'
+
+export type TerraLayerSummary = {
+  id: string
+  label: string
+  domain: TerraIntelligenceDomain
+  kind: TerraIntelligenceEventKind
+  description: string
+  /** Mirrors TerraLayerDefinition.refreshIntervalMs — undefined means "use useTerraLayer's own
+   * default," not "never refresh." */
+  refreshIntervalMs?: number
+}
+
+export const TERRA_LAYER_SUMMARIES: TerraLayerSummary[] = [
+  { id: 'usgs_earthquake_feed', label: 'Earthquakes — Recent Feed (USGS)', domain: 'hazards', kind: 'earthquake', description: 'USGS real-time significant-earthquake feed (fixed magnitude/period selection).' },
+  { id: 'usgs_earthquake', label: 'Earthquakes — Catalog Search (USGS)', domain: 'hazards', kind: 'earthquake', description: 'USGS earthquake catalog, default 30-day window, minimum magnitude 4.5.' },
+  { id: 'usgs_water', label: 'Water Monitoring Station (USGS)', domain: 'hazards', kind: 'water_gauge_reading', description: 'USGS real-time water monitoring station — a single site queried by number.' },
+  { id: 'opensky', label: 'Aircraft Positions (OpenSky)', domain: 'other', kind: 'aircraft_state', description: 'Live OpenSky Network aircraft state vectors within a bounding box.', refreshIntervalMs: 60_000 },
+  { id: 'digitraffic_marine', label: 'Vessel Positions (Digitraffic Marine — Finland)', domain: 'other', kind: 'vessel_position', description: 'Live Digitraffic (Fintraffic) AIS vessel positions + static/voyage metadata within a bounding box — Finnish territorial waters/EEZ only, not global blue-water AIS coverage.', refreshIntervalMs: 60_000 },
+  { id: 'digitraffic_road_cameras', label: 'Traffic Cameras (Digitraffic Road — Finland)', domain: 'other', kind: 'traffic_camera', description: 'Live Digitraffic (Fintraffic) road weathercam still images + real capture freshness within a bounding box — Finnish national road network only.', refreshIntervalMs: 60_000 },
+  { id: 'drivebc_events', label: 'Traffic Events (DriveBC / Open511 — British Columbia)', domain: 'other', kind: 'traffic_event', description: 'Live DriveBC (Open511) source-backed road events — crashes, closures, construction, hazards — within a bounding box. British Columbia only.', refreshIntervalMs: 60_000 },
+  { id: 'webtris', label: 'Traffic Flow (WebTRIS — National Highways, UK)', domain: 'other', kind: 'traffic_flow_observation', description: 'Historical WebTRIS (National Highways) roadside sensor speed/volume observations within a bounding box — England strategic road network only. Source data lags real time by roughly two months; never rendered as live.', refreshIntervalMs: 6 * 60 * 60 * 1000 },
+  { id: 'digitraffic_road_weather', label: 'Road Weather (Digitraffic — Finland)', domain: 'weather', kind: 'road_weather_observation', description: 'Live Digitraffic (Fintraffic) road-weather station observations (air/road/ground temperature, humidity, visibility, wind, precipitation) within a bounding box — Finnish national road network only.', refreshIntervalMs: 60_000 },
+  { id: 'ontario_511_cameras', label: 'Traffic Cameras (Ontario 511 — Canada)', domain: 'other', kind: 'traffic_camera', description: 'Live Ontario 511 (511on.ca) traffic camera stills within a bounding box — Ontario, Canada only. Licensing/redistribution terms not independently confirmed this build.', refreshIntervalMs: 60_000 },
+  { id: 'ontario_511_events', label: 'Traffic Events (Ontario 511 — Canada)', domain: 'other', kind: 'traffic_event', description: 'Live Ontario 511 (511on.ca) source-backed road events — crashes, closures, construction, hazards — within a bounding box. Ontario, Canada only.', refreshIntervalMs: 60_000 },
+  { id: 'hong_kong_td_cameras', label: 'Traffic Cameras (Hong Kong TD — Hong Kong SAR)', domain: 'other', kind: 'traffic_camera', description: 'Live Hong Kong Transport Department traffic snapshot cameras within a bounding box — Hong Kong SAR only. Snapshot JPEGs via the documented tdcctv.data.one.gov.hk/{key}.JPG pattern; no per-image capture timestamp in the source metadata, so freshness is honestly unknown.', refreshIntervalMs: 60_000 },
+  { id: 'quebec_511_cameras', label: 'Traffic Cameras (Québec 511 — Canada)', domain: 'other', kind: 'traffic_camera', description: 'Live Québec 511 (MTMD WFS) traffic camera sites within a bounding box — Québec, Canada only. The source publishes an HTML viewer page per camera, not a direct JPEG — no imageUrl is ever fabricated.', refreshIntervalMs: 60_000 },
+  { id: 'quebec_511_events', label: 'Traffic Events (Québec 511 — Canada)', domain: 'other', kind: 'traffic_event', description: 'Live Québec 511 (MTMD WFS) road events — closures, construction, restrictions — within a bounding box. Real French-language source vocabulary and real Point/LineString geometry preserved verbatim. Québec, Canada only.', refreshIntervalMs: 60_000 },
+  { id: 'jartic_traffic_volumes', label: 'Traffic Volumes (JARTIC — Japan)', domain: 'other', kind: 'traffic_flow_observation', description: 'Near-real-time JARTIC (Japan) hourly directional traffic-volume observations within a bounding box — national Japan coverage. Vehicle counts only; no speed or congestion label is ever invented.', refreshIntervalMs: 15 * 60 * 1000 },
+  { id: 'wzdx_wsdot', label: 'Work Zones (WSDOT WZDx — Washington State)', domain: 'other', kind: 'traffic_event', description: 'Live WSDOT WZDx v4.2 work-zone road events within a bounding box — Washington State only. Feed self-reports a 60-second update cadence.', refreshIntervalMs: 60_000 },
+  { id: 'wzdx_iowa_dot', label: 'Work Zones (Iowa DOT WZDx)', domain: 'other', kind: 'traffic_event', description: 'Live Iowa DOT WZDx v4.0 work-zone road events within a bounding box — Iowa only. Feed registry documents a 1-minute update cadence.', refreshIntervalMs: 60_000 },
+  { id: 'wzdx_kytc', label: 'Work Zones (KYTC WZDx — Kentucky)', domain: 'other', kind: 'traffic_event', description: 'Live KYTC WZDx v4.1 work-zone road events within a bounding box — Kentucky only. Feed registry documents a 30-minute update cadence.', refreshIntervalMs: 5 * 60 * 1000 },
+  { id: 'idai_gazetteer', label: 'iDAI.gazetteer — Archaeological Places', domain: 'research', kind: 'heritage_site', description: 'German Archaeological Institute gazetteer of archaeological/historical places.' },
+  { id: 'nominatim', label: 'Place Search (OpenStreetMap Nominatim)', domain: 'other', kind: 'place', description: 'General-purpose OpenStreetMap place-name geocoding search.' },
+  { id: 'pleiades', label: 'Pleiades — Ancient World Places', domain: 'research', kind: 'heritage_site', description: 'Gazetteer of places in the ancient Greek and Roman world.' },
+  { id: 'whg', label: 'World Historical Gazetteer', domain: 'research', kind: 'heritage_site', description: 'World Historical Gazetteer place index. Country-code-only records are honestly skipped, not misread as coordinates.' },
+  { id: 'osm_overpass', label: 'OpenStreetMap Features (Overpass)', domain: 'other', kind: 'geographic_feature', description: 'Named OpenStreetMap features near a point — requires "<name> near <lat>,<lon>[,<radiusKm>]".' },
+  { id: 'nearby_landmarks', label: 'Nearby Landmarks & POIs (Overpass)', domain: 'other', kind: 'landmark_poi', description: 'Named landmarks, attractions, and civic/natural/transit POIs near the active location — requires "category:<landmark|natural|civic|transit> near <lat>,<lon>[,<radiusKm>]".' },
+  { id: 'ohm_overpass', label: 'OpenHistoricalMap Features (Overpass)', domain: 'research', kind: 'geographic_feature', description: 'Named OpenHistoricalMap historical features near a point — requires "<name> near <lat>,<lon>[,<radiusKm>]".' },
+  { id: 'met_no', label: 'Weather Forecast (MET Norway)', domain: 'weather', kind: 'weather_observation', description: 'MET Norway Locationforecast at a coordinate — requires "<lat>,<lon>".' },
+  { id: 'open_meteo', label: 'Weather Forecast (Open-Meteo)', domain: 'weather', kind: 'weather_observation', description: 'Open-Meteo forecast at a coordinate — requires "<lat>,<lon>".' },
+  { id: 'obis', label: 'Ocean Biodiversity Observations (OBIS)', domain: 'science', kind: 'biodiversity_observation', description: 'Marine species occurrence records from the Ocean Biodiversity Information System.' },
+  { id: 'gbif', label: 'Species Occurrences (GBIF)', domain: 'science', kind: 'biodiversity_observation', description: 'Species occurrence records from the Global Biodiversity Information Facility.' },
+  { id: 'edh', label: 'Roman Inscriptions (EDH) — Geo-Resolved', domain: 'research', kind: 'heritage_site', description: 'Epigraphic Database Heidelberg Roman inscriptions, geo-resolved by modern region/country name via nominatim.' },
+  { id: 'nhc_current_storms', label: 'Active Tropical Cyclones (NHC)', domain: 'hazards', kind: 'tropical_cyclone', description: 'NOAA National Hurricane Center — every currently active tropical/subtropical/post-tropical cyclone, all basins. Current observed position only; forecast track is linked, not rendered.', refreshIntervalMs: 5 * 60 * 1000 },
+  { id: 'nasa_eonet_wildfires', label: 'Active Wildfires (NASA EONET)', domain: 'hazards', kind: 'wildfire_incident', description: 'Named wildfire incidents (e.g. via IRWIN), not raw satellite thermal-anomaly detections — NASA EONET, category=wildfires.', refreshIntervalMs: 10 * 60 * 1000 },
+  { id: 'nasa_eonet_volcanoes', label: 'Active Volcanic Activity (NASA EONET)', domain: 'hazards', kind: 'volcano_event', description: 'Currently active volcanoes (Smithsonian Global Volcanism Program via NASA EONET, category=volcanoes).', refreshIntervalMs: 10 * 60 * 1000 },
+  { id: 'nasa_eonet_floods', label: 'Active Floods (NASA EONET)', domain: 'hazards', kind: 'flood_event', description: 'Currently open flood events (NASA EONET, category=floods) — may legitimately be empty; a real empty result, never a fabricated one.', refreshIntervalMs: 10 * 60 * 1000 },
+  { id: 'nws_severe_weather_alerts', label: 'Severe Weather Alerts (NWS)', domain: 'hazards', kind: 'severe_weather_alert', description: 'Real NOAA/NWS CAP alerts (Severe Thunderstorm Warning, Flash Flood Warning, Red Flag Warning, etc.) with real polygon warning areas.' },
+  { id: 'tsunami_gov', label: 'Tsunami Bulletins (NOAA NTWC)', domain: 'hazards', kind: 'tsunami_alert', description: 'NOAA National Tsunami Warning Center bulletins. Most real entries are "Information" statements confirming no danger — the honest common case, not a broken feed.' },
+]

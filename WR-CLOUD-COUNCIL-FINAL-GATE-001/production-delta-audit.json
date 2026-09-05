@@ -1,0 +1,931 @@
+{
+  "mission": "WR-CLOUD-COUNCIL-FINAL-GATE-001",
+  "phase": "9 - production delta audit (independent re-derivation, not a rubber stamp of the prior session's 121-file list)",
+  "commit_tested": "a5c6eb69bcc4440fa86b7017e048b0cfc9a03a8a",
+  "node01_base_commit_used_for_diff": "34f05e8",
+  "node01_base_commit_verification": "34f05e8 exists in this repo's own git history (git cat-file -t 34f05e8 => commit), so the changed-file set vs Node01's base was computed directly via `git diff --name-only 34f05e8 HEAD` (784 files) rather than trusting the prior session's reported 767-file figure. The 17-file difference (784-767) is fully accounted for by the WR-CLAUDE-CODE-COUNCIL-PRODUCTION-001/ artifacts directory the prior session committed after it measured its own 767-file diff - confirmed by `git log --oneline 34f05e8..HEAD` and by counting files under that directory in the diff.",
+  "methodology": {
+    "summary": "Independent static import-closure trace from the same 4 Council entry points (app/api/chat/route.ts, app/api/chat/execute.ts, app/api/chat/stream/route.ts, app/page.tsx), written as a standalone regex-based Node.js tracer (not reusing any prior session code) that follows both static import/export...from statements AND dynamic import()/require() calls, resolving '@/*' path alias and relative paths with the same extension/index resolution rules as the project's tsconfig. Intersected against the real 784-file changed-vs-Node01-base set to get 'files Council structurally needs AND that are actually different from Node01's base' - the same logical operation the prior session described using in its 'method' field, just re-run independently rather than trusted at face value.",
+    "raw_trace_result": "766 internal files reachable from the 4 entry points with zero unresolved import specifiers (spot-checked; the naive full closure is large - about equal to the full 767/784-file diff - because app/page.tsx is one giant monolithic component that also renders unrelated features like Opportunity Discovery, income-loot, and dozens of Terra/God's Eye layers in the same file; this matches the prior session's own observation that the raw diff and the raw reachable set are both dominated by unrelated accretion).",
+    "verification_of_flagged_items": "Specifically re-traced and manually confirmed the two items the mission asked for special attention on: (1) lib/agi-experience/captureFromChatResponse.ts IS a real, unmodified, unavoidable static import in app/api/chat/route.ts as committed, confirmed correctly excluded from Council scope by the prior session, and confirmed the identical presence-on-Node01 risk (untracked lib/agi-experience/ dir of unknown contents) ALSO applies transitively via lib/modular-intelligence/runtimeTrajectoryCapture.ts and experienceHooks.ts, a risk the prior session's needs_verification list did not explicitly capture (see 'audit_findings' below). (2) lib/modular-intelligence/chatTrajectoryObserver.ts and nativeRouterV1Pilot.ts are confirmed genuinely load-bearing, static, unconditional VALUE imports in app/api/chat/execute.ts (lines 71-72) - execute.ts will not build without them - and both are confirmed unmodified/pre-existing (git diff vs their own history shows this branch did not touch them; protected-system-integrity.json's fingerprint match further confirms the whole lib/modular-intelligence/ directory is untouched)."
+  },
+  "audit_findings": {
+    "gaps_found_in_prior_121_list": {
+      "missed_dynamic_imports": [
+        "components/war-room/council/CouncilDeliberationStream.tsx - real Council deliberation-stream UI, rendered unconditionally in app/page.tsx via next/dynamic(). This is DIRECT_COUNCIL functionality and its absence from the prior delta is a genuine gap, not a stylistic one.",
+        "components/war-room/terra/TerraFeatureLayer.tsx - required by TerraShell.tsx and TerraTrafficLayer.tsx (both already correctly in the prior delta) via next/dynamic(). Without it, promoting just the prior 121 files would leave those two files unable to render.",
+        "components/war-room/agi-wave1/AgiWaveOnePanel.tsx - rendered unconditionally in app/page.tsx next to CouncilDeliberationStream via next/dynamic(). Same category precedent as lib/opportunity-agents/types.ts already in the prior delta: unrelated feature, but page.tsx will not render without it."
+      ],
+      "root_cause_of_the_miss": "next/dynamic(() => import('...')) calls are dynamic import() expressions, which a purely static 'import ... from' scanner (or a human reading only top-level import statements) would miss. The prior session's own production-delta.json 'method' field does not describe how it handled dynamic imports specifically, and these 3 real gaps are consistent with that step having been skipped or done manually rather than with a tool that follows import().",
+      "missed_transitive_dependencies_of_already-flagged_files": {
+        "description": "chatTrajectoryObserver.ts and nativeRouterV1Pilot.ts were correctly identified as required, but their OWN import chains were not traced further. Both are static, unconditional VALUE imports (not type-only), so their dependencies are real build/runtime requirements, not just typecheck conveniences.",
+        "modular_intelligence_files_missing_from_prior_delta": [
+          "lib/modular-intelligence/composedRuntime.ts",
+          "lib/modular-intelligence/experienceHooks.ts",
+          "lib/modular-intelligence/frozenRouterShadow.ts",
+          "lib/modular-intelligence/frozenRouterShadowGate.ts",
+          "lib/modular-intelligence/nativeRouterV1Gate.ts",
+          "lib/modular-intelligence/nativeRouterV1PilotGate.ts",
+          "lib/modular-intelligence/nativeRouterV1Shadow.ts",
+          "lib/modular-intelligence/runtimeTrajectoryCapture.ts",
+          "lib/modular-intelligence/toolCatalog.ts",
+          "lib/modular-intelligence/toolIntent.ts",
+          "lib/modular-intelligence/toolRouter.ts",
+          "lib/modular-intelligence/trajectoryObservationGate.ts",
+          "lib/modular-intelligence/trajectoryObserver.ts",
+          "lib/modular-intelligence/trajectorySourceTypes.ts",
+          "lib/modular-intelligence/types.ts"
+        ],
+        "significance": "Node01 has ZERO files under lib/modular-intelligence/ in its git-tracked base commit (34f05e8), per repo-reconciliation.json. If ONLY the prior session's 121 files (which include just chatTrajectoryObserver.ts and nativeRouterV1Pilot.ts from this directory) were promoted, app/api/chat/execute.ts would fail to build on Node01 - these 15 additional files are genuinely, structurally required, unmodified, frozen Native-Router-adjacent code. This is the most consequential finding of this audit: the prior 121-file delta, if applied literally, would not compile.",
+        "action_taken_this_session": "READ ONLY, for tracing purposes, as explicitly permitted by this mission's hard constraints. None of these files were edited. protected-system-integrity.json confirms the whole lib/modular-intelligence/ directory fingerprint is unchanged from the prior baseline."
+      },
+      "widened_needs_verification_scope": {
+        "description": "The prior session flagged exactly one needs_verification_at_promotion_time item: lib/agi-experience/captureFromChatResponse.ts (a DIRECT import of route.ts). This audit found the identical Node01-provenance risk also applies, via a different import path, to 3 more files that the required modular-intelligence chain depends on. These are NOT added to the promote list (consistent with how the prior session treated captureFromChatResponse.ts - excluded from Council scope, deferred to promotion-time verification), but are flagged here so the risk is not silently narrower than it actually is.",
+        "files": [
+          "lib/agi-experience/capture.ts",
+          "lib/agi-experience/types.ts",
+          "lib/wrim1-training/types.ts"
+        ]
+      }
+    },
+    "over_inclusions_found_in_prior_121_list": {
+      "description": "4 files in the prior delta are confirmed byte-identical to Node01's base commit (34f05e8) via `git diff` - Node01 already has these exact files, so re-promoting them is a harmless no-op, not a correctness bug, but not necessary for a MINIMUM delta either.",
+      "files": [
+        "lib/opportunity-agents/sources/types.ts",
+        "lib/opportunity-agents/types.ts",
+        "lib/revenue-engine/model.ts",
+        "lib/revenue-engine/persistence.ts"
+      ],
+      "reclassified_as": "ALREADY_PRESENT_ON_NODE01"
+    },
+    "additional_already_present_files_found_while_tracing_the_new_gaps": {
+      "description": "While tracing the newly-found modular-intelligence gap, 3 more reachable files turned up that are also byte-identical to Node01's base commit - these were never in the prior 121 list and do NOT need to be added, because Node01 already has them unchanged.",
+      "files": [
+        "lib/security/sensitiveEnv.ts",
+        "lib/tools/toolRegistry.ts",
+        "lib/war-room/persistence.ts"
+      ]
+    },
+    "unrelated_exclude_findings": "None. Every file in the prior 121-file list was independently confirmed to be either genuine Council/UI code or a real, traceable compile/render dependency of app/page.tsx or app/api/chat/execute.ts - including the large Terra/God's Eye subsystem, which is co-rendered in the same monolithic app/page.tsx shell and is a real, verified page-render dependency (e.g. TerraShell.tsx and TerraTrafficLayer.tsx both dynamically import TerraFeatureLayer.tsx, confirming the whole Terra chain is load-bearing for page.tsx, not decorative). Nothing was reclassified UNRELATED_EXCLUDE."
+  },
+  "final_classification": [
+    {
+      "path": "app/api/chat/execute.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council chat execution entry points"
+    },
+    {
+      "path": "app/api/chat/route.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council chat execution entry points"
+    },
+    {
+      "path": "app/api/chat/stream/route.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council chat execution entry points"
+    },
+    {
+      "path": "app/page.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Single monolithic page component; contains the Council live-room render path"
+    },
+    {
+      "path": "components/MatrixCodeRain.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/agi-wave1/AgiWaveOnePanel.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY (page-shell dependency, unrelated AGI feature) - dynamically imported and rendered unconditionally in app/page.tsx (line ~12794), directly adjacent to CouncilDeliberationStream. Same category precedent as lib/opportunity-agents/types.ts already in the delta: not Council functionality, but page.tsx will not compile/render without it."
+    },
+    {
+      "path": "components/war-room/council/CommandIcons.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council command controls / status / session navigator UI"
+    },
+    {
+      "path": "components/war-room/council/CouncilCommandControls.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council command controls / status / session navigator UI"
+    },
+    {
+      "path": "components/war-room/council/CouncilContextInspector.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council command controls / status / session navigator UI"
+    },
+    {
+      "path": "components/war-room/council/CouncilDeliberationStream.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": false,
+      "note": "DIRECT_COUNCIL - real-time Council deliberation stream UI, dynamically imported and rendered unconditionally in the Council live-room section of app/page.tsx (line ~12793). Missed by the prior session's static-import-only trace because it is loaded via next/dynamic(() => import(...)) rather than a top-level import statement."
+    },
+    {
+      "path": "components/war-room/council/CouncilGodsEyeStatus.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council command controls / status / session navigator UI"
+    },
+    {
+      "path": "components/war-room/council/CouncilRuntimeStatus.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council command controls / status / session navigator UI"
+    },
+    {
+      "path": "components/war-room/council/CouncilSessionNavigator.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council command controls / status / session navigator UI"
+    },
+    {
+      "path": "components/war-room/live-room/CommandConsole.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council chat shell, top bar, member panel, matrix rain"
+    },
+    {
+      "path": "components/war-room/live-room/CouncilMembersPanel.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council chat shell, top bar, member panel, matrix rain"
+    },
+    {
+      "path": "components/war-room/live-room/LiveRoomNavPanel.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council chat shell, top bar, member panel, matrix rain"
+    },
+    {
+      "path": "components/war-room/live-room/LiveRoomShell.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council chat shell, top bar, member panel, matrix rain"
+    },
+    {
+      "path": "components/war-room/live-room/LiveRoomTopBar.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council chat shell, top bar, member panel, matrix rain"
+    },
+    {
+      "path": "components/war-room/live-room/MatrixRain.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council chat shell, top bar, member panel, matrix rain"
+    },
+    {
+      "path": "components/war-room/live-room/SynthesisCard.tsx",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council chat shell, top bar, member panel, matrix rain"
+    },
+    {
+      "path": "components/war-room/terra/GodsEyeCommandCenter.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/TerraActiveLocationContext.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/TerraCameraHoverCard.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/TerraCoverageBadge.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/TerraEarthImagery.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/TerraFeatureLayer.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - dynamically imported (next/dynamic) by components/war-room/terra/TerraShell.tsx and TerraTrafficLayer.tsx, both already in the delta. Without it those two files (and therefore app/page.tsx) cannot render."
+    },
+    {
+      "path": "components/war-room/terra/TerraGlobe.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/TerraShell.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/TerraTrafficLayer.tsx",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/loadCesiumRuntime.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/terraTrafficLayerDefs.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/useTerraCameraScale.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/useTerraCameraViewRectangle.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/useTerraCinematicOrbit.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/useTerraClock.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/useTerraLayer.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "components/war-room/terra/useTerraVesselTrails.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "hooks/useMatrixStatus.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Shared status-bus/runtime-event-bridge used by both Council and Matrix UI"
+    },
+    {
+      "path": "lib/configuration/configurationRegistry.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Env alias / configuration registry read by Council providers"
+    },
+    {
+      "path": "lib/configuration/envAlias.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Env alias / configuration registry read by Council providers"
+    },
+    {
+      "path": "lib/context-assembler/types.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Pure type declarations (MemoryRecordRow etc.) required by session-orchestration/memoryInfluence.ts - no runtime AGI-wave logic"
+    },
+    {
+      "path": "lib/council-research/providers.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council research provider registry"
+    },
+    {
+      "path": "lib/council/contextRelevance.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council orchestration support module"
+    },
+    {
+      "path": "lib/council/conversationIntent.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council orchestration support module"
+    },
+    {
+      "path": "lib/council/family-deliberation/runtime.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Truthful multi-family deliberation runtime"
+    },
+    {
+      "path": "lib/council/family-deliberation/types.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Truthful multi-family deliberation runtime"
+    },
+    {
+      "path": "lib/council/greetingPrompt.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council orchestration support module"
+    },
+    {
+      "path": "lib/council/incremental-transport/client.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Incremental council transport client"
+    },
+    {
+      "path": "lib/council/intentClassifier.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council orchestration support module"
+    },
+    {
+      "path": "lib/council/live-orchestration/adapters/anthropic.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/adapters/gemini.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/adapters/grok.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/adapters/openai.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/failureTaxonomy.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/floorScheduler.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/memoryCandidateGate.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/presentationBuffer.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/retryPolicy.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/rosterHealth.server.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/rosterHealth.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/socialCheckin.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/sseParse.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/streamContract.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/streamProvider.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/timeoutPolicy.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/live-orchestration/types.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Core Council live-orchestration engine (healthy-roster mode)"
+    },
+    {
+      "path": "lib/council/liveChatPipeline.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council orchestration support module"
+    },
+    {
+      "path": "lib/council/progress-events/types.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Adds rosterMembership to the progress-event payload type used by execute.ts"
+    },
+    {
+      "path": "lib/council/providerTimeouts.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council orchestration support module"
+    },
+    {
+      "path": "lib/council/session-orchestration/evidenceFailure.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Session isolation, intent classification, research-worker dispatch"
+    },
+    {
+      "path": "lib/council/session-orchestration/index.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Session isolation, intent classification, research-worker dispatch"
+    },
+    {
+      "path": "lib/council/session-orchestration/isolation.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Session isolation, intent classification, research-worker dispatch"
+    },
+    {
+      "path": "lib/council/session-orchestration/memoryInfluence.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Session isolation, intent classification, research-worker dispatch"
+    },
+    {
+      "path": "lib/council/session-orchestration/messageStage.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Session isolation, intent classification, research-worker dispatch"
+    },
+    {
+      "path": "lib/council/session-orchestration/queryDecompose.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Session isolation, intent classification, research-worker dispatch"
+    },
+    {
+      "path": "lib/council/session-orchestration/researchWorkers.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Session isolation, intent classification, research-worker dispatch"
+    },
+    {
+      "path": "lib/council/session-orchestration/sessionTitle.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Session isolation, intent classification, research-worker dispatch"
+    },
+    {
+      "path": "lib/council/session-orchestration/turnIntent.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Session isolation, intent classification, research-worker dispatch"
+    },
+    {
+      "path": "lib/council/session-orchestration/types.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Session isolation, intent classification, research-worker dispatch"
+    },
+    {
+      "path": "lib/council/toDisplayText.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Council orchestration support module"
+    },
+    {
+      "path": "lib/deploy/status.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Node02 deploy-integrity reconciliation + build-meta additions"
+    },
+    {
+      "path": "lib/deploy/types.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Node02 deploy-integrity reconciliation + build-meta additions"
+    },
+    {
+      "path": "lib/modular-intelligence/chatTrajectoryObserver.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Statically imported by app/api/chat/execute.ts already on origin/mac-current-development-sync before this mission (not new work). Included unmodified because execute.ts cannot compile without it. See router-integrity.json."
+    },
+    {
+      "path": "lib/modular-intelligence/composedRuntime.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - transitively imported by nativeRouterV1Pilot.ts (already in delta) via toolRouter.ts chain. Node01 has zero modular-intelligence files at base commit 34f05e8, so this is structurally required, same reasoning as the two top-level files already flagged."
+    },
+    {
+      "path": "lib/modular-intelligence/experienceHooks.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - same chain as composedRuntime.ts."
+    },
+    {
+      "path": "lib/modular-intelligence/frozenRouterShadow.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - same chain."
+    },
+    {
+      "path": "lib/modular-intelligence/frozenRouterShadowGate.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - same chain."
+    },
+    {
+      "path": "lib/modular-intelligence/nativeRouterV1Gate.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - same chain."
+    },
+    {
+      "path": "lib/modular-intelligence/nativeRouterV1Pilot.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Statically imported by app/api/chat/execute.ts already on origin/mac-current-development-sync before this mission (not new work). Included unmodified because execute.ts cannot compile without it. See router-integrity.json."
+    },
+    {
+      "path": "lib/modular-intelligence/nativeRouterV1PilotGate.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - directly imported by nativeRouterV1Pilot.ts (isNativeRouterV1PilotEnabled)."
+    },
+    {
+      "path": "lib/modular-intelligence/nativeRouterV1Shadow.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - same chain."
+    },
+    {
+      "path": "lib/modular-intelligence/runtimeTrajectoryCapture.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - directly imported by BOTH chatTrajectoryObserver.ts and nativeRouterV1Pilot.ts (captureRuntimeTrajectory)."
+    },
+    {
+      "path": "lib/modular-intelligence/toolCatalog.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - directly imported by nativeRouterV1Pilot.ts (getUnifiedTool)."
+    },
+    {
+      "path": "lib/modular-intelligence/toolIntent.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - same chain (toolRouter.ts dependency)."
+    },
+    {
+      "path": "lib/modular-intelligence/toolRouter.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - directly imported by nativeRouterV1Pilot.ts (executeNormalizedRequest, routeToolIntent)."
+    },
+    {
+      "path": "lib/modular-intelligence/trajectoryObservationGate.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - same chain."
+    },
+    {
+      "path": "lib/modular-intelligence/trajectoryObserver.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - same chain."
+    },
+    {
+      "path": "lib/modular-intelligence/trajectorySourceTypes.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - directly imported by nativeRouterV1Pilot.ts (TrajectorySourceType)."
+    },
+    {
+      "path": "lib/modular-intelligence/types.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": false,
+      "note": "REQUIRED_TRANSITIVE_DEPENDENCY - directly imported by nativeRouterV1Pilot.ts (ToolRouterResult)."
+    },
+    {
+      "path": "lib/operator/gapFinder.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Self-audit gap finder / broken-silent-UI detector referenced from execute.ts path"
+    },
+    {
+      "path": "lib/operator/selfAudit/brokenSilentUi.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Self-audit gap finder / broken-silent-UI detector referenced from execute.ts path"
+    },
+    {
+      "path": "lib/operator/selfAudit/types.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Self-audit gap finder / broken-silent-UI detector referenced from execute.ts path"
+    },
+    {
+      "path": "lib/opportunity-agents/sources/types.ts",
+      "category": "ALREADY_PRESENT_ON_NODE01",
+      "in_prior_121": true,
+      "note": "Confirmed byte-identical to Node01 base commit 34f05e8 via git diff (zero bytes changed). Reclassified from the prior session's promote-list; copying it again is a harmless no-op but not necessary for a MINIMUM delta."
+    },
+    {
+      "path": "lib/opportunity-agents/types.ts",
+      "category": "ALREADY_PRESENT_ON_NODE01",
+      "in_prior_121": true,
+      "note": "Confirmed byte-identical to Node01 base commit 34f05e8 via git diff (zero bytes changed). Reclassified from the prior session's promote-list; copying it again is a harmless no-op but not necessary for a MINIMUM delta."
+    },
+    {
+      "path": "lib/providers/health.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Shared provider health/error-sanitization/secret-presence helpers"
+    },
+    {
+      "path": "lib/providers/publicError.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Shared provider health/error-sanitization/secret-presence helpers"
+    },
+    {
+      "path": "lib/providers/secretPresence.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Shared provider health/error-sanitization/secret-presence helpers"
+    },
+    {
+      "path": "lib/research-engine/core/types.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Research intent detection used by the world-brief freshness-sensitive path"
+    },
+    {
+      "path": "lib/research/researchIntent.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Research intent detection used by the world-brief freshness-sensitive path"
+    },
+    {
+      "path": "lib/revenue-engine/model.ts",
+      "category": "ALREADY_PRESENT_ON_NODE01",
+      "in_prior_121": true,
+      "note": "Confirmed byte-identical to Node01 base commit 34f05e8 via git diff (zero bytes changed). Reclassified from the prior session's promote-list; copying it again is a harmless no-op but not necessary for a MINIMUM delta."
+    },
+    {
+      "path": "lib/revenue-engine/persistence.ts",
+      "category": "ALREADY_PRESENT_ON_NODE01",
+      "in_prior_121": true,
+      "note": "Confirmed byte-identical to Node01 base commit 34f05e8 via git diff (zero bytes changed). Reclassified from the prior session's promote-list; copying it again is a harmless no-op but not necessary for a MINIMUM delta."
+    },
+    {
+      "path": "lib/runtime/canonicalStatus.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Canonical status aggregator Council roster reporting reads from"
+    },
+    {
+      "path": "lib/runtime/runtimeIntegrityCollect.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Canonical status aggregator Council roster reporting reads from"
+    },
+    {
+      "path": "lib/supabase/admin.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Supabase admin client used by canonical status"
+    },
+    {
+      "path": "lib/terra/aerialImagery.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/cameraRectSignature.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/coverageTruth.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/digitrafficRoadWeatherBoundingBox.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/eventCameraFraming.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/eventIntelligenceQuery.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/godsEyeStatusAdapter.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/hongKongBoundingBox.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/jarticBoundingBox.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/layerCatalogSummary.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/maritimeBoundingBox.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/maritimeCoverage.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/ontarioBoundingBox.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/quebec511BoundingBox.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/roadCameraBoundingBox.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/terraLinkedStatus.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/trafficEventBoundingBox.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/types.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/vesselRegionalSummary.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/vesselStaleness.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/webtrisBoundingBox.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/terra/wzdxBoundingBox.ts",
+      "category": "REQUIRED_TRANSITIVE_DEPENDENCY",
+      "in_prior_121": true,
+      "note": "Required for app/page.tsx to compile/render - God's Eye is rendered in the same shell as Council, not itself Council logic"
+    },
+    {
+      "path": "lib/ui/matrixRuntimeColors.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Shared status-bus/runtime-event-bridge used by both Council and Matrix UI"
+    },
+    {
+      "path": "lib/ui/matrixStatusBus.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Shared status-bus/runtime-event-bridge used by both Council and Matrix UI"
+    },
+    {
+      "path": "lib/ui/runtimeEventBridge.ts",
+      "category": "DIRECT_COUNCIL",
+      "in_prior_121": true,
+      "note": "Shared status-bus/runtime-event-bridge used by both Council and Matrix UI"
+    }
+  ],
+  "counts": {
+    "DIRECT_COUNCIL": 62,
+    "REQUIRED_TRANSITIVE_DEPENDENCY": 73,
+    "ALREADY_PRESENT_ON_NODE01": 4,
+    "NEW_REQUIRED_ON_NODE01": 0,
+    "UNRELATED_EXCLUDE": 0
+  },
+  "NEW_REQUIRED_ON_NODE01_note": "0 - every file requiring promotion cleanly fit either DIRECT_COUNCIL (Council's own orchestration/UI code) or REQUIRED_TRANSITIVE_DEPENDENCY (a specific, traced, named compile/render dependency). No ambiguous 'new but uncategorizable' file was found, so this bucket is empty rather than used as a catch-all.",
+  "needs_verification_not_in_promote_list": {
+    "lib/agi-experience/capture.ts": "Type-only/value dependency of lib/modular-intelligence/runtimeTrajectoryCapture.ts (captureExperience). Same risk class as lib/agi-experience/captureFromChatResponse.ts already flagged by the prior session: Node01 already has an untracked lib/agi-experience/ directory of unknown provenance. NOT added to the promote list - flagged for verification at actual promotion time, consistent with the prior session's treatment of captureFromChatResponse.ts.",
+    "lib/agi-experience/types.ts": "Type-only dependency (CaptureExperienceInput) of lib/modular-intelligence/experienceHooks.ts and types.ts. Same risk class and treatment as capture.ts above.",
+    "lib/wrim1-training/types.ts": "Type-only dependency (PromotionState) of lib/modular-intelligence/types.ts. Node01 already has an untracked lib/wrim1-training/ directory of unknown provenance (same repo-reconciliation.json anomaly note). NOT added to the promote list - flagged for verification at actual promotion time. This mission's hard constraints forbid touching lib/wrim1-training/ in any case."
+  },
+  "delta_summary": {
+    "prior_session_candidate_count": 121,
+    "this_audit_minimum_delta_count": 135,
+    "net_change": 14,
+    "additions": 18,
+    "additions_breakdown": "1 DIRECT_COUNCIL (CouncilDeliberationStream.tsx) + 2 REQUIRED_TRANSITIVE_DEPENDENCY page-shell files (TerraFeatureLayer.tsx, AgiWaveOnePanel.tsx) + 15 REQUIRED_TRANSITIVE_DEPENDENCY modular-intelligence files",
+    "removals": 4,
+    "removals_breakdown": "4 files reclassified ALREADY_PRESENT_ON_NODE01 (byte-identical to Node01 base, confirmed via git diff): lib/opportunity-agents/sources/types.ts, lib/opportunity-agents/types.ts, lib/revenue-engine/model.ts, lib/revenue-engine/persistence.ts",
+    "arithmetic": "121 - 4 + 18 = 135"
+  },
+  "overall_verdict": "The prior session's 121-file candidate delta was a good-faith, mostly-correct first pass, but this independent audit found it was NOT actually complete: applied literally, it would have failed to compile on Node01 because of the missing modular-intelligence transitive chain and the 3 dynamic-import UI files. This audit's minimum, independently-verified production delta is 135 files. The prior session's own explicit caution ('CANDIDATE - not yet applied to Node01') and Commander-checkpoint stop before touching Node01 meant this gap was never actually exercised against production, so no harm occurred - but it is exactly the kind of gap this cloud final-gate audit exists to catch before a real promotion."
+}

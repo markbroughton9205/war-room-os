@@ -1,0 +1,9 @@
+{
+  "research": false,
+  "synthesis": false,
+  "revision": false,
+  "memory_candidate": false,
+  "red_team_adversarial": false,
+  "providers_generate_acks": true,
+  "hardcoded_canned": false
+}

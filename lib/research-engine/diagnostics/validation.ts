@@ -89,6 +89,7 @@ import { opensanctionsAdapter } from '@/lib/research-engine/providers/opensancti
 import { companiesHouseAdapter } from '@/lib/research-engine/providers/companiesHouse'
 import { ecbSdwAdapter } from '@/lib/research-engine/providers/ecbSdw'
 import { bankOfCanadaAdapter } from '@/lib/research-engine/providers/bankOfCanada'
+import { bankOfEnglandIadbAdapter } from '@/lib/research-engine/providers/bankOfEnglandIadb'
 import { bisStatsAdapter } from '@/lib/research-engine/providers/bisStats'
 import { eiaAdapter } from '@/lib/research-engine/providers/eia'
 import { statcanWdsAdapter } from '@/lib/research-engine/providers/statcanWds'
@@ -257,6 +258,14 @@ import { eStatJapanAdapter } from '@/lib/research-engine/providers/eStatJapan'
 import { worldBankProjectsAdapter } from '@/lib/research-engine/providers/worldBankProjects'
 import { usgsNationalMapAdapter } from '@/lib/research-engine/providers/usgsNationalMap'
 import { imfSdmxAdapter } from '@/lib/research-engine/providers/imfSdmx'
+import { scbSwedenAdapter } from '@/lib/research-engine/providers/scbSweden'
+import { ssbNorwayAdapter } from '@/lib/research-engine/providers/ssbNorway'
+import { statfinFinlandAdapter } from '@/lib/research-engine/providers/statfinFinland'
+import { statisticsDenmarkAdapter } from '@/lib/research-engine/providers/statisticsDenmark'
+import { unDesaPopulationAdapter } from '@/lib/research-engine/providers/unDesaPopulation'
+import { nhcCurrentStormsAdapter } from '@/lib/research-engine/providers/nhcCurrentStorms'
+import { nasaEonetAdapter } from '@/lib/research-engine/providers/nasaEonet'
+import { tsunamiGovAdapter } from '@/lib/research-engine/providers/tsunamiGov'
 import { IMPLEMENTED_PROVIDER_ADAPTERS } from '@/lib/research-engine/providers/registry'
 import type { ResearchDocument, ResearchProviderId } from '@/lib/research-engine/core/types'
 
@@ -423,7 +432,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const add = async (id: string, fn: () => boolean | string | Promise<boolean | string>) => results.push(await test(id, fn))
 
   await add('re_01_all_31_providers_registered', () =>
-    RESEARCH_PROVIDER_ENV.length === 249 || `expected 249 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 276 || `expected 276 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_02_missing_required_env_not_configured', () => {
     const emptyEnv = { NODE_ENV: 'test' } as NodeJS.ProcessEnv
@@ -842,6 +851,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       companies_house: ['search'],
       ecb_sdw: ['timeSeries'],
       bank_of_canada: ['timeSeries'],
+      bank_of_england_iadb: ['timeSeries'],
       bis_stats: ['timeSeries'],
       eia: ['timeSeries'],
       statcan_wds: ['timeSeries'],
@@ -921,7 +931,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       guide_to_pharmacology: ['search'],
       clinpgx: ['search'],
       pbdb: ['search'],
-      nws_weather: ['search'],
+      nws_weather: ['search', 'geoSearch'],
       japan_egov_hourei: ['search'],
       australia_frl: ['search'],
       uk_gazette: ['search'],
@@ -1010,6 +1020,28 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       world_bank_projects: ['search'],
       usgs_national_map: ['search'],
       imf_sdmx: ['timeSeries'],
+      scb_sweden: ['timeSeries'],
+      ssb_norway: ['timeSeries'],
+      statfin_finland: ['timeSeries'],
+      statistics_denmark: ['timeSeries'],
+      un_desa_population: ['search'],
+      nhc_current_storms: ['list', 'geoSearch'],
+      nasa_eonet: ['list', 'geoSearch'],
+      tsunami_gov: ['list'],
+      digitraffic_marine: ['geoSearch'],
+      digitraffic_road_cameras: ['geoSearch'],
+      drivebc_events: ['geoSearch'],
+      webtris: ['geoSearch'],
+      digitraffic_road_weather: ['geoSearch'],
+      ontario_511_cameras: ['geoSearch'],
+      ontario_511_events: ['geoSearch'],
+      hong_kong_td_cameras: ['geoSearch'],
+      quebec_511_cameras: ['geoSearch'],
+      quebec_511_events: ['geoSearch'],
+      jartic_traffic_volumes: ['geoSearch'],
+      wzdx_wsdot: ['geoSearch'],
+      wzdx_iowa_dot: ['geoSearch'],
+      wzdx_kytc: ['geoSearch'],
     }
     const implemented = RESEARCH_PROVIDER_ENV.filter(descriptor => descriptor.implemented)
     const offenders = implemented.filter(descriptor => {
@@ -1782,13 +1814,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const UNAUTHORIZED_BATCH_1_IDS = ['world_bank_data_catalog', 'world_bank_finances', 'world_bank_climate'] as const
 
   await add('re_100_registered_provider_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 249 || `expected 249 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 276 || `expected 276 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_101_implemented_count_derives_to_24_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 245 && implementedAdapters === 245)
-      || `expected 245 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 268 && implementedAdapters === 268)
+      || `expected 268 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -3080,16 +3112,16 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_229_final_provider_descriptor_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 249 || `expected 249 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 276 || `expected 276 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_230_final_implemented_count_is_24', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 245 || `expected 245 implemented adapters, found ${count}`
+    return count === 268 || `expected 268 implemented adapters, found ${count}`
   })
 
   await add('re_231_final_unimplemented_count_is_7', () => {
     const count = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return count === 4 || `expected 4 unimplemented providers, found ${count}`
+    return count === 8 || `expected 8 unimplemented providers, found ${count}`
   })
 
   // --- Repair pass: H1 (IPv4-mapped IPv6 SSRF bypass) fix regression + M5 SSRF matrix expansion ---
@@ -4162,8 +4194,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const totalCount = RESEARCH_PROVIDER_ENV.length
     const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return (descriptor?.implemented === true && totalCount === 249 && implementedCount === 245 && blockedCount === 4)
-      || `expected fmcsa implemented plus a 245/4 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+    return (descriptor?.implemented === true && totalCount === 276 && implementedCount === 268 && blockedCount === 8)
+      || `expected fmcsa implemented plus a 268/8 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
   })
 
   await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {
@@ -4174,7 +4206,10 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_653_remaining_four_blocked_providers_are_exactly_as_specified', () => {
-    const expected = ['uspto', 'world_bank_climate', 'world_bank_data_catalog', 'world_bank_finances'].sort()
+    // Terra Phase 3 adds four honest Maritime Source Federation registry-only entries
+    // (ACCOUNT_REQUIRED/CREDENTIAL_REQUIRED/TERMS_DEPENDENT/HISTORICAL_ONLY — see
+    // lib/terra/maritimeSourceRegistry.ts) alongside the four pre-existing blocked providers.
+    const expected = ['uspto', 'world_bank_climate', 'world_bank_data_catalog', 'world_bank_finances', 'barentswatch_ais', 'aisstream', 'aishub_marine', 'noaa_access_ais'].sort()
     const actual = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).map(d => d.id).sort()
     const equal = expected.length === actual.length && expected.every((id, i) => id === actual[i])
     return equal || `expected the remaining blocked set ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
@@ -4507,7 +4542,21 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   ], async () => {
     const response = await gbifAdapter.run({ text: 'Puma concolor' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    // Terra Phase 4 regression: real decimalLatitude/decimalLongitude must reach `geography` as
+    // the exact "lat X, lon Y" string Terra's LATENT_GEO extractor matches — the same bug class
+    // fixed in obis.ts (coordinates computed for `summary` prose only, never assigned here).
+    if (response.documents[0].geography !== 'lat 40.1, lon -105.2') return `expected real coordinates in geography, got ${JSON.stringify(response.documents[0].geography)}`
+    if (response.documents[0].identifiers.country !== 'United States') return `expected country preserved in identifiers, got ${JSON.stringify(response.documents[0].identifiers)}`
     return documentShapeIssue(response.documents[0], 'gbif') ?? true
+  }))
+
+  await add('re_707b_gbif_missing_coordinates_falls_back_to_country_in_geography', () => withAdapterFetch([
+    jsonResponse({ count: 1, results: [{ key: 1, scientificName: 'Example species', country: 'Canada', basisOfRecord: 'HUMAN_OBSERVATION' }] }),
+  ], async () => {
+    const response = await gbifAdapter.run({ text: 'Example species' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].geography !== 'Canada') return `expected country fallback in geography when coordinates are absent, got ${JSON.stringify(response.documents[0].geography)}`
+    return true
   }))
 
   await add('re_708_uniprot_success_normalizes_entry', () => withAdapterFetch([
@@ -4556,6 +4605,28 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const response = await osmOverpassAdapter.run({ text: 'Eiffel Tower near 48.8584,2.2945,5' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
     return documentShapeIssue(response.documents[0], 'osm_overpass') ?? true
+  }))
+
+  // God's Eye multi-scale phase: the category-based "what's around here" grammar, distinct from
+  // the pre-existing named-feature search above — both must keep working on the same adapter.
+  await add('re_713b_osm_overpass_category_query_returns_named_pois', () => withAdapterFetch([
+    jsonResponse({ elements: [{ type: 'node', id: 987654, lat: 51.5007, lon: -0.1246, tags: { name: 'London Eye', tourism: 'attraction' } }] }),
+  ], async () => {
+    const response = await osmOverpassAdapter.run({ text: 'category:landmark near 51.5074,-0.1278,3' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].title !== 'London Eye') return `expected the element's own name tag as title, got ${response.documents[0].title}`
+    return documentShapeIssue(response.documents[0], 'osm_overpass') ?? true
+  }))
+
+  await add('re_713c_osm_overpass_category_pattern_takes_priority_over_named_pattern', () => withAdapterFetch([
+    jsonResponse({ elements: [] }),
+  ], async () => {
+    // Regression guard: NEAR_PATTERN's lazy name group would otherwise happily match
+    // "category:landmark" as a literal (and useless) feature name — CATEGORY_NEAR_PATTERN must be
+    // checked first. An empty-but-OK result here (not a rejection, not a search for the literal
+    // string "category:landmark") proves the category branch, not the named branch, handled it.
+    const response = await osmOverpassAdapter.run({ text: 'category:landmark near 51.5074,-0.1278,3' })
+    return (response.ok === true && response.documents.length === 0) || `expected an ok-but-empty category search, got ${JSON.stringify(response)}`
   }))
 
   await add('re_714_geonames_success_normalizes_place', () => withEnv({ GEONAMES_USERNAME: 'warroom_validation_test' }, () => withAdapterFetch([
@@ -4752,11 +4823,26 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   }))
 
   await add('re_738_obis_success_normalizes_occurrence', () => withAdapterFetch([
-    jsonResponse({ total: 1, results: [{ id: '00042a5b-d420-450d-ba01-8a59bcfc6d4f', scientificName: 'Orcinus orca', decimalLatitude: 60.1, decimalLongitude: -2.3, eventDate: '2025-06-30T11:01:16', basisOfRecord: 'HumanObservation' }] }),
+    jsonResponse({ total: 1, results: [{ id: '00042a5b-d420-450d-ba01-8a59bcfc6d4f', scientificName: 'Orcinus orca', decimalLatitude: 60.1, decimalLongitude: -2.3, eventDate: '2025-06-30T11:01:16', basisOfRecord: 'HumanObservation', waterBody: 'North Sea' }] }),
   ], async () => {
     const response = await obisAdapter.run({ text: 'Orcinus orca' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    // Terra Phase 4 regression: real decimalLatitude/decimalLongitude must reach `geography` as
+    // the exact "lat X, lon Y" string Terra's LATENT_GEO extractor matches — a prior bug computed
+    // this string for use in `summary` prose only and silently discarded it here in favor of
+    // waterBody (or nothing). waterBody must still survive, just relocated to `identifiers`.
+    if (response.documents[0].geography !== 'lat 60.1, lon -2.3') return `expected real coordinates in geography, got ${JSON.stringify(response.documents[0].geography)}`
+    if (response.documents[0].identifiers.water_body !== 'North Sea') return `expected waterBody preserved in identifiers, got ${JSON.stringify(response.documents[0].identifiers)}`
     return documentShapeIssue(response.documents[0], 'obis') ?? true
+  }))
+
+  await add('re_738b_obis_missing_coordinates_falls_back_to_water_body_in_geography', () => withAdapterFetch([
+    jsonResponse({ total: 1, results: [{ id: 'no-coords-1', scientificName: 'Example species', basisOfRecord: 'HumanObservation', waterBody: 'Pacific Ocean' }] }),
+  ], async () => {
+    const response = await obisAdapter.run({ text: 'Example species' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.documents[0].geography !== 'Pacific Ocean') return `expected waterBody fallback in geography when coordinates are absent, got ${JSON.stringify(response.documents[0].geography)}`
+    return true
   }))
 
   await add('re_739_worms_success_normalizes_aphia_record', () => withAdapterFetch([
@@ -5039,6 +5125,19 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const response = await nominatimAdapter.run({ text: 'Paris, France' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
     return documentShapeIssue(response.documents[0], 'nominatim') ?? true
+  }))
+
+  // God's Eye multi-scale phase: class/type/boundingbox carried through `identifiers` for Terra's
+  // search-driven camera framing (lib/terra/resolveGeography.ts reads these back out).
+  await add('re_770b_nominatim_search_carries_class_type_and_boundingbox', () => withAdapterFetch([
+    jsonResponse([{ place_id: 97683695, osm_type: 'relation', osm_id: 71525, lat: '48.8534951', lon: '2.3483915', display_name: 'Paris, Île-de-France, France', class: 'boundary', type: 'administrative', boundingbox: ['48.815', '48.902', '2.224', '2.470'] }]),
+  ], async () => {
+    const response = await nominatimAdapter.run({ text: 'Paris, France' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const identifiers = response.documents[0].identifiers
+    if (identifiers.class !== 'boundary' || identifiers.type !== 'administrative') return `expected class/type in identifiers, got ${JSON.stringify(identifiers)}`
+    if (identifiers.bbox_south !== '48.815' || identifiers.bbox_north !== '48.902' || identifiers.bbox_west !== '2.224' || identifiers.bbox_east !== '2.470') return `expected real bbox_* identifiers, got ${JSON.stringify(identifiers)}`
+    return true
   }))
 
   await add('re_771_nasa_cmr_success_normalizes_collection', () => withAdapterFetch([
@@ -6336,6 +6435,210 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const response = await imfSdmxAdapter.run({ text: 'IMF.STA/CPI/~/BRA.CPI._T.IX.M' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
     return documentShapeIssue(response.documents[0], 'imf_sdmx') ?? true
+  }))
+
+  // --- Earth Knowledge Implementation Exhaustion mission (2026-08-25): PxWeb-family national
+  // statistics providers + UN DESA reference metadata. Two mocked calls each (GET table metadata,
+  // POST query), matching the real two-step live flow verified against SCB/SSB/StatFin/Denmark. ---
+
+  // Response bodies can only be read once — each test needs its own fresh Response instances
+  // rather than sharing one across multiple withAdapterFetch calls (a shared instance's body
+  // stream is already consumed after the first test reads it).
+  function makePxWebMetadataFixture() {
+    return jsonResponse({
+      title: 'Test Population Table',
+      variables: [
+        { code: 'Region', text: 'region', values: ['00'], valueTexts: ['Sweden'], elimination: true },
+        { code: 'ContentsCode', text: 'observations', values: ['BE0101N1'], valueTexts: ['Population'] },
+        { code: 'Tid', text: 'year', values: ['2021', '2022', '2023'], valueTexts: ['2021', '2022', '2023'], time: true },
+      ],
+    })
+  }
+  function makePxWebDataFixture() {
+    return jsonResponse({
+      version: '2.0',
+      class: 'dataset',
+      id: ['Region', 'ContentsCode', 'Tid'],
+      size: [1, 1, 3],
+      dimension: {
+        Region: { label: 'region', category: { index: { '00': 0 }, label: { '00': 'Sweden' } } },
+        ContentsCode: { label: 'observations', category: { index: { BE0101N1: 0 }, label: { BE0101N1: 'Population' }, unit: { BE0101N1: { base: 'number', decimals: 0 } } } },
+        Tid: { label: 'year', category: { index: { '2021': 0, '2022': 1, '2023': 2 }, label: { '2021': '2021', '2022': '2022', '2023': '2023' } } },
+      },
+      value: [10_380_000, 10_450_000, 10_520_000],
+    })
+  }
+
+  await add('re_931_scb_sweden_success_normalizes_table', () => withAdapterFetch([makePxWebMetadataFixture(), makePxWebDataFixture()], async () => {
+    const response = await scbSwedenAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0 || response.timeSeries.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.timeSeries[0].points.length !== 3) return `expected 3 time series points, got ${response.timeSeries[0].points.length}`
+    if (response.timeSeries[0].points[0].date !== '2021' || response.timeSeries[0].points[0].value !== 10_380_000) return `unexpected first point: ${JSON.stringify(response.timeSeries[0].points[0])}`
+    if (response.timeSeries[0].unit !== 'number') return `expected unit "number" extracted from JSON-stat2, got ${response.timeSeries[0].unit}`
+    return documentShapeIssue(response.documents[0], 'scb_sweden') ?? true
+  }))
+
+  await add('re_932_ssb_norway_success_normalizes_table', () => withAdapterFetch([makePxWebMetadataFixture(), makePxWebDataFixture()], async () => {
+    const response = await ssbNorwayAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0 || response.timeSeries.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.timeSeries[0].points.length !== 3) return `expected 3 time series points, got ${response.timeSeries[0].points.length}`
+    return documentShapeIssue(response.documents[0], 'ssb_norway') ?? true
+  }))
+
+  await add('re_933_statfin_finland_success_normalizes_table', () => withAdapterFetch([makePxWebMetadataFixture(), makePxWebDataFixture()], async () => {
+    const response = await statfinFinlandAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0 || response.timeSeries.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.timeSeries[0].points.length !== 3) return `expected 3 time series points, got ${response.timeSeries[0].points.length}`
+    return documentShapeIssue(response.documents[0], 'statfin_finland') ?? true
+  }))
+
+  await add('re_934_statistics_denmark_success_normalizes_table', () => withAdapterFetch([
+    jsonResponse({ id: 'FOLK1A', text: 'Population at the first day of the quarter', variables: [
+      { id: 'OMRÅDE', elimination: true, values: [{ id: '000', text: 'All Denmark' }] },
+      { id: 'Tid', elimination: false, values: [{ id: '2023K1', text: '2023Q1' }, { id: '2023K2', text: '2023Q2' }] },
+    ] }),
+    // `id`/`size`/`role` nested INSIDE `dimension` (not at the dataset root, where the JSON-stat2
+    // spec and every classic PxWebApi host places them) — Statistics Denmark's real live response
+    // shape, confirmed during this mission's live verification. This exact shape caught a real
+    // bug: statisticsDenmark.ts originally assumed `dataset.id` existed at the root and crashed.
+    jsonResponse({ dataset: {
+      dimension: {
+        ContentsCode: { label: 'Indhold', category: { index: { FOLK1A: 0 }, label: { FOLK1A: 'Population' } } },
+        Tid: { label: 'tid', category: { index: { '2023K1': 0, '2023K2': 1 }, label: { '2023K1': '2023K1', '2023K2': '2023K2' } } },
+        id: ['ContentsCode', 'Tid'],
+        size: [1, 2],
+        role: { metric: ['ContentsCode'], time: ['Tid'] },
+      },
+      label: 'Population at the first day of the quarter by Indhold and time',
+      source: 'Statistics Denmark',
+      value: [5_930_000, 5_932_654],
+    } }),
+  ], async () => {
+    const response = await statisticsDenmarkAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0 || response.timeSeries.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.timeSeries[0].points.length !== 2) return `expected 2 time series points, got ${response.timeSeries[0].points.length}`
+    if (response.timeSeries[0].points[1].date !== '2023K2' || response.timeSeries[0].points[1].value !== 5_932_654) return `unexpected second point: ${JSON.stringify(response.timeSeries[0].points[1])}`
+    return documentShapeIssue(response.documents[0], 'statistics_denmark') ?? true
+  }))
+
+  await add('re_935_un_desa_population_success_normalizes_reference_metadata', () => withAdapterFetch([
+    jsonResponse({ data: [{ id: 4, name: 'Sweden', iso3: 'SWE', iso2: 'SE', longitude: 18.6, latitude: 60.1 }] }),
+    jsonResponse({ data: [{ id: 49, name: 'Total Population', shortName: 'TPopulation', description: 'De facto total population.' }] }),
+  ], async () => {
+    const response = await unDesaPopulationAdapter.run({ text: 'Sweden' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const coordinates = response.geoFeatures[0]?.coordinates as number[] | undefined
+    if (response.geoFeatures.length !== 1 || coordinates?.[0] !== 18.6) return `expected one geoFeature carrying real coordinates, got ${JSON.stringify(response.geoFeatures)}`
+    return documentShapeIssue(response.documents[0], 'un_desa_population') ?? true
+  }))
+
+  // --- Terra Phase 5 (2026-08-26): live planetary hazard intelligence providers ---
+
+  await add('re_936_nhc_current_storms_success_normalizes_active_storm', () => withAdapterFetch([
+    jsonResponse({ activeStorms: [{ id: 'ep092026', binNumber: 'EP4', name: 'Iselle', classification: 'TS', intensity: '45', pressure: '996', latitude: '21.3N', longitude: '122.5W', latitudeNumeric: 21.3, longitudeNumeric: -122.5, movementDir: 285, movementSpeed: 9, lastUpdate: '2026-08-26T03:00:00.000Z', publicAdvisory: { advNum: '011', issuance: '2026-08-26T03:00:00.000Z', url: 'https://www.nhc.noaa.gov/text/MIATCPEP4.shtml' }, forecastTrack: { kmzFile: 'https://www.nhc.noaa.gov/storm_graphics/api/EP092026_011adv_TRACK.kmz' } }] }),
+  ], async () => {
+    const response = await nhcCurrentStormsAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0 || response.geoFeatures.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const nhcCoords = response.geoFeatures[0].coordinates as number[]
+    if (nhcCoords?.[0] !== -122.5 || nhcCoords?.[1] !== 21.3) return `unexpected coordinates: ${JSON.stringify(response.geoFeatures[0].coordinates)}`
+    if ((response.geoFeatures[0].properties as Record<string, unknown>).basin !== 'EP') return `expected basin EP derived from binNumber, got ${JSON.stringify(response.geoFeatures[0].properties)}`
+    return documentShapeIssue(response.documents[0], 'nhc_current_storms') ?? true
+  }))
+
+  await add('re_936b_nhc_current_storms_missing_coordinates_are_skipped', () => withAdapterFetch([
+    jsonResponse({ activeStorms: [{ id: 'no-coords', name: 'Ghost', classification: 'TS' }] }),
+  ], async () => {
+    const response = await nhcCurrentStormsAdapter.run({ text: '' })
+    if (!response.ok) return `expected ok success, got ${JSON.stringify(response)}`
+    return (response.documents.length === 0 && response.geoFeatures.length === 0) || `expected storm without coordinates to be skipped, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_937_nasa_eonet_success_normalizes_wildfire', () => withAdapterFetch([
+    jsonResponse({ events: [{ id: 'EONET_23209', title: 'Wildfire Old Deer, Carson, Texas', link: 'https://eonet.gsfc.nasa.gov/api/v3/events/EONET_23209', categories: [{ id: 'wildfires' }], sources: [{ id: 'IRWIN', url: 'https://irwin.doi.gov/observer/incidents/2026-TXTXS-267516' }], geometry: [{ date: '2026-08-23T20:38:00Z', type: 'Point', coordinates: [-101.217, 35.4635], magnitudeValue: 676, magnitudeUnit: 'acres' }] }] }),
+  ], async () => {
+    const response = await nasaEonetAdapter.run({ text: 'wildfires' })
+    if (!response.ok || response.documents.length === 0 || response.geoFeatures.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const eonetCoords = response.geoFeatures[0].coordinates as number[]
+    if (eonetCoords?.[0] !== -101.217) return `unexpected coordinates: ${JSON.stringify(response.geoFeatures[0].coordinates)}`
+    return documentShapeIssue(response.documents[0], 'nasa_eonet') ?? true
+  }))
+
+  await add('re_937b_nasa_eonet_rejects_invalid_category', () => withAdapterFetch([], async () => {
+    const response = await nasaEonetAdapter.run({ text: 'not-a-real-category' })
+    return (!response.ok && response.documents.length === 0) || `expected an error for an unallowlisted category, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_937c_nasa_eonet_uses_most_recent_geometry_by_date_not_array_order', () => withAdapterFetch([
+    jsonResponse({ events: [{ id: 'EONET_TEST', title: 'Test Event', categories: [{ id: 'volcanoes' }], geometry: [
+      { date: '2026-08-25T00:00:00Z', type: 'Point', coordinates: [10, 10] },
+      { date: '2026-08-20T00:00:00Z', type: 'Point', coordinates: [20, 20] },
+    ] }] }),
+  ], async () => {
+    const response = await nasaEonetAdapter.run({ text: 'volcanoes' })
+    const volcCoords = response.geoFeatures[0]?.coordinates as number[] | undefined
+    return volcCoords?.[0] === 10 || `expected the chronologically latest geometry (2026-08-25), got ${JSON.stringify(response.geoFeatures[0]?.coordinates)}`
+  }))
+
+  await add('re_938_tsunami_gov_success_parses_atom_entry', () => withAdapterFetch([
+    textResponse('<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:geo="http://www.w3.org/2003/01/geo/wgs84_pos#"><entry><title>60 miles SE of Iliamna, Alaska</title><updated>2026-08-24T20:21:42Z</updated><geo:lat>59.000</geo:lat><geo:long>-154.300</geo:long><summary type="xhtml"><![CDATA[<strong>Category:</strong> Information<br/><strong>Preliminary Magnitude: </strong>4.1(Mwp)<br/><strong>Affected Region: </strong>60 miles SE of Iliamna, Alaska<br/>]]></summary><id>urn:uuid:test-1</id><link rel="alternate" title="Bulletin" href="https://www.tsunami.gov/events/PAAQ/test/WEAK53.txt" type="application/xml" /></entry></feed>', 200, 'application/xml'),
+  ], async () => {
+    const response = await tsunamiGovAdapter.run({ text: '' })
+    if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    const doc = response.documents[0]
+    if (doc.geography !== 'lat 59, lon -154.3') return `expected parsed geo:lat/geo:long, got ${JSON.stringify(doc.geography)}`
+    if (doc.identifiers.category !== 'Information') return `expected real NOAA category preserved verbatim, got ${JSON.stringify(doc.identifiers)}`
+    return documentShapeIssue(doc, 'tsunami_gov') ?? true
+  }))
+
+  await add('re_938b_tsunami_gov_empty_feed_is_empty_not_an_error', () => withAdapterFetch([
+    textResponse('<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>', 200, 'application/xml'),
+  ], async () => {
+    const response = await tsunamiGovAdapter.run({ text: '' })
+    return (response.ok && response.documents.length === 0) || `expected an honest empty result, got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_939_nws_weather_alerts_success_normalizes_polygon_alert', () => withAdapterFetch([
+    jsonResponse({ features: [{
+      properties: { id: 'urn:oid:test-alert-1', areaDesc: 'Potter, TX', event: 'Flood Advisory', severity: 'Minor', certainty: 'Observed', urgency: 'Expected', status: 'Actual', messageType: 'Alert', category: 'Met', headline: 'Flood Advisory issued', senderName: 'NWS Amarillo TX', sent: '2026-08-25T23:12:00-05:00', effective: '2026-08-25T23:12:00-05:00', expires: '2026-08-26T02:00:00-05:00', web: 'https://alerts.weather.gov/test' },
+      geometry: { type: 'Polygon', coordinates: [[[-101.93, 35.53], [-101.81, 35.62], [-101.62, 35.62], [-101.72, 35.37], [-101.93, 35.53]]] },
+    }] }),
+  ], async () => {
+    const response = await nwsWeatherAdapter.run({ text: 'alerts' })
+    if (!response.ok || response.documents.length === 0 || response.geoFeatures.length === 0) return `expected ok success, got ${JSON.stringify(response)}`
+    if (response.geoFeatures[0].geometryType !== 'Polygon') return `expected a preserved real Polygon geometry, got ${response.geoFeatures[0].geometryType}`
+    if (response.documents[0].identifiers.severity !== 'Minor') return `expected real NWS severity preserved verbatim (never reinterpreted), got ${JSON.stringify(response.documents[0].identifiers)}`
+    return documentShapeIssue(response.documents[0], 'nws_weather') ?? true
+  }))
+
+  await add('re_939b_nws_weather_alerts_zone_only_alert_has_no_geo_feature', () => withAdapterFetch([
+    jsonResponse({ features: [{ properties: { id: 'urn:oid:test-alert-2', areaDesc: 'Some County', event: 'Heat Advisory', severity: 'Moderate', certainty: 'Likely', urgency: 'Expected', status: 'Actual' }, geometry: null }] }),
+  ], async () => {
+    const response = await nwsWeatherAdapter.run({ text: 'alerts' })
+    return (response.ok && response.documents.length === 1 && response.geoFeatures.length === 0) || `expected a zone-only (geometry: null) alert to produce a document but no geoFeature (never a fabricated point), got ${JSON.stringify(response)}`
+  }))
+
+  await add('re_939c_nws_weather_forecast_mode_still_dispatches_correctly_alongside_alerts', () => withAdapterFetch([
+    jsonResponse({ properties: { forecast: 'https://api.weather.gov/gridpoints/LWX/97,71/forecast', relativeLocation: { properties: { city: 'Washington', state: 'DC' } } } }),
+    jsonResponse({ properties: { periods: [{ name: 'Tonight', startTime: '2024-01-01T18:00:00-05:00' }] } }),
+  ], async () => {
+    const response = await nwsWeatherAdapter.run({ text: '38.8894,-77.0352' })
+    return (response.ok && response.documents.length === 1 && response.documents[0].contentType === 'weather_forecast') || `forecast dispatch regressed after adding alerts capability: ${JSON.stringify(response)}`
+  }))
+
+  await add('re_940_bank_of_england_iadb_success_normalizes_csv_observation', () => withAdapterFetch([
+    textResponse('DATE,IUDBEDR\r\n02 Jan 2024,5.25\r\n03 Jan 2024,5.25\r\n', 200, 'application/csv'),
+  ], async () => {
+    const response = await bankOfEnglandIadbAdapter.run({ text: 'IUDBEDR' })
+    if (!response.ok || response.documents.length !== 2) return `expected 2 decoded observations, got ${JSON.stringify(response)}`
+    if (response.documents[0].identifiers.boe_series !== 'IUDBEDR') return `expected real series code preserved, got ${JSON.stringify(response.documents[0].identifiers)}`
+    return documentShapeIssue(response.documents[0], 'bank_of_england_iadb') ?? true
+  }))
+
+  await add('re_940b_bank_of_england_iadb_skips_blank_non_publication_days', () => withAdapterFetch([
+    textResponse('DATE,IUDBEDR\r\n05 Jan 2024,5.25\r\n06 Jan 2024,\r\n07 Jan 2024,\r\n08 Jan 2024,5.25\r\n', 200, 'application/csv'),
+  ], async () => {
+    const response = await bankOfEnglandIadbAdapter.run({ text: 'IUDBEDR' })
+    return (response.ok && response.documents.length === 2) || `expected blank weekend cells dropped (never synthesized), got ${JSON.stringify(response)}`
   }))
 
   return results

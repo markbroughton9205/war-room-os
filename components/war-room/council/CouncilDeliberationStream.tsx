@@ -1,7 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { CognitiveBusEventType } from '@/lib/cognitive-bus/types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CognitiveBusEvent, CognitiveBusEventType } from '@/lib/cognitive-bus/types'
+import { bridgeCognitiveBusEvent } from '@/lib/ui/runtimeEventBridge'
 
 type BusEventRow = {
   id: string
@@ -70,11 +71,30 @@ function formatEventSummary(event: BusEventRow): string {
   }
 }
 
+/**
+ * Normalize a polled bus row into the CognitiveBusEvent shape the Matrix bridge resolves:
+ * provider_packet / operator_packet rows nest their structured packet under `payload.packet`,
+ * while resolveCognitiveBusEvent reads integrity_status / confidence / status at the top level.
+ */
+function toBridgeableBusEvent(row: BusEventRow): CognitiveBusEvent {
+  const payload: Record<string, unknown> = { ...(row.payload ?? {}) }
+  const nested = payload.packet as Record<string, unknown> | undefined
+  if (nested) {
+    if (row.type === 'provider_packet') {
+      payload.integrity_status ??= nested.integrity_status
+      payload.confidence ??= nested.confidence
+    }
+    if (row.type === 'operator_packet') payload.status ??= nested.status
+  }
+  return { id: row.id, threadId: '', type: row.type as CognitiveBusEventType, at: row.at, payload }
+}
+
 export function CouncilDeliberationStream(props: { threadId: string | null; enabled?: boolean }) {
   const { threadId, enabled = true } = props
   const [snapshot, setSnapshot] = useState<BusSnapshot | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const bridgedEventIdsRef = useRef<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
     if (!threadId || !enabled) return
@@ -88,6 +108,12 @@ export function CouncilDeliberationStream(props: { threadId: string | null; enab
         return
       }
       setSnapshot(data)
+      // Matrix runtime bridge: emit each newly-applied CognitiveBusEvent exactly once.
+      for (const row of data.events ?? []) {
+        if (bridgedEventIdsRef.current.has(row.id)) continue
+        bridgedEventIdsRef.current.add(row.id)
+        bridgeCognitiveBusEvent(toBridgeableBusEvent(row))
+      }
     } catch {
       setError('Council deliberation stream unavailable.')
     } finally {

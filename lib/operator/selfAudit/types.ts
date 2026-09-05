@@ -47,7 +47,6 @@ export type SelfAuditContext = {
   /** UI surfaces that advertise incomplete wiring. */
   silentUi?: {
     archiveRecallNotConnected?: boolean
-    smsControlsNotConnected?: boolean
     repoScanPlaceholders?: boolean
   }
   /** Operator-visible labels scanned for jargon. */

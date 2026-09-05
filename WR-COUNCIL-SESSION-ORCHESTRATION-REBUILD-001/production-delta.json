@@ -1,0 +1,21 @@
+{
+  "promoted": false,
+  "reason": "Dirty worktree; live Council smoke not run; do not copy entire tree to Node01",
+  "candidate_files": [
+    "lib/council/session-orchestration/**",
+    "lib/context-assembler/assemble.ts",
+    "lib/context-assembler/types.ts",
+    "lib/council/contextRelevance.ts",
+    "lib/research/researchIntent.ts",
+    "lib/council/family-deliberation/types.ts",
+    "lib/council/family-deliberation/runtime.ts",
+    "app/api/chat/execute.ts",
+    "app/api/conversations/route.ts",
+    "app/api/conversations/[id]/messages/route.ts",
+    "app/page.tsx",
+    "components/war-room/live-room/LiveRoomShell.tsx",
+    "components/war-room/live-room/SynthesisCard.tsx",
+    "components/war-room/council/CouncilSessionNavigator.tsx",
+    "components/war-room/council/CouncilContextInspector.tsx"
+  ]
+}

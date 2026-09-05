@@ -1,0 +1,20 @@
+{
+  "mission": "WR-CLOUD-COUNCIL-FINAL-GATE-001",
+  "phase": "6 - browser smoke: 'Hi council' / 'Council check in'",
+  "status": "BROWSER_SMOKE_BLOCKED_NO_CREDENTIALS",
+  "reason": "No real provider API keys (OPENAI_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY) are present in this environment - confirmed absent both as shell env vars and via a missing .env.local in the fresh clone (see environment.json). lib/council/live-orchestration/rosterHealth.server.ts derives roster health directly from presence of these keys, so starting the dev server here would show ALL FOUR council members as unconfigured/unavailable rather than the expected degraded-but-real 2/4-active state (ChatGPT+Gemini healthy, Claude billing-unavailable, Grok auth-unavailable) that this mission is meant to verify. Running the smoke test anyway would not exercise real streaming behavior and could produce a misleading artifact, so it was not attempted.",
+  "not_fabricated": "No response content, floor order, or roster banner was fabricated or guessed at. This test was not run.",
+  "would_have_tested": [
+    "Sending 'Hi council' in a fresh chat session, then 'Council check in' in another fresh chat session",
+    "Classification as SOCIAL_CHECKIN",
+    "ChatGPT streams first, then Gemini",
+    "One visible floor holder at a time",
+    "No Claude response, no Grok response",
+    "No research invoked",
+    "No synthesis invoked",
+    "No memory-save prompt",
+    "No unrelated 'Panama' content bleeding in",
+    "Roster shown truthfully as degraded (2/4 active)"
+  ],
+  "corroborating_non_live_evidence": "The relevant behavior is covered by pure-logic validators that DID run and pass in this environment: greeting/social-checkin validator (10/10 PASS), context-relevance validator's greeting matrix (28/28 PASS, includes 'hi council', 'council check in' cases explicitly), and live-orchestration validator's roster_01_unhealthy_not_floor_eligible / memory_02_checkin / isolation_01_social_no_research cases (37/37 PASS). These confirm the underlying orchestration LOGIC is correct, but do not substitute for an actual live browser/API run against real providers, which requires credentials this environment does not have."
+}

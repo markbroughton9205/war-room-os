@@ -1,0 +1,7 @@
+{
+  "research_parallel": true,
+  "families_sequential": true,
+  "red_team_requires_available_primaries": true,
+  "synthesis_skipped_on_social": true,
+  "no_fabricated_parents": true
+}

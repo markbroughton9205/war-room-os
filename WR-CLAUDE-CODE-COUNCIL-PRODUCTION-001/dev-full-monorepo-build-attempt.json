@@ -1,0 +1,18 @@
+{
+  "note": "This records the FULL-MONOREPO dev-branch build attempt on claude-council-production-review, not a Node01 production build. Node01 promotion was not attempted this round per the Commander's checkpoint decision.",
+  "command": "pnpm run build",
+  "result": "BUILD_BLOCKED_BY_ENVIRONMENT",
+  "detail": {
+    "stage_reached": "prebuild completed (commander-identity gate skipped for local, Cesium assets copied); next build / Turbopack started 'Creating an optimized production build...' and never progressed past that line",
+    "resource_observation": "next build's worker process grew to 19GB RSS / 18GB compressed on an 8-core/8GB physical-RAM machine; process state went to macOS 'stuck'; system free memory dropped to ~70MB",
+    "action_taken": "killed the build process (SIGKILL) rather than let it thrash indefinitely, per the mission's explicit instruction not to repeat Cursor's failed resource-fighting loop",
+    "exit_code": 137
+  },
+  "interpretation": "This is very likely explained by the SIZE of the full dev monorepo, not the Council feature: the diff from Node01's current base (34f05e8) to this branch is 767 files / ~105K lines, most of it unrelated AGI-wave/WRIM/income-loot/terra-intelligence accretion that Node01 does not have and that this mission does not intend to promote (see production-delta.json - only 121 of those 767 files are actually in the Council delta). Node01's own build, receiving only the 121-file curated delta on top of a tree that already builds and serves traffic today, has a materially smaller footprint and was NOT attempted or blocked - it remains untested.",
+  "not_yet_run": "Node01's actual production build (Phase 19) - deferred until the Commander clears Node01 promotion.",
+  "correctness_evidence_in_lieu_of_a_full_build": [
+    "pnpm exec tsc --noEmit: 0 Council-scoped errors (see typecheck-classification.json)",
+    "pnpm lint: 0 errors",
+    "310/311 relevant Council validators PASS (see validator-results.json)"
+  ]
+}

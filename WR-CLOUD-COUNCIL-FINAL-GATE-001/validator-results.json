@@ -1,0 +1,66 @@
+{
+  "mission": "WR-CLOUD-COUNCIL-FINAL-GATE-001",
+  "phase": "4 - validate the checkpoint",
+  "commit_tested": "a5c6eb69bcc4440fa86b7017e048b0cfc9a03a8a",
+  "install": {
+    "command": "pnpm install",
+    "result": "PASS",
+    "elapsed_s": 12.2,
+    "detail": "Lockfile up to date, resolution skipped, 443/443 packages reused from local pnpm store, 0 downloaded. node_modules, .next, .venv-wrim, model-lab, __pycache__, and any Cesium asset cache were all confirmed absent before install."
+  },
+  "validators": [
+    { "name": "live orchestration", "script": "scripts/run-live-council-orchestration-validation.mjs", "result": "37/37 PASS", "expected": "37/37", "match": true },
+    { "name": "session isolation", "script": "lib/council/session-orchestration/sessionOrchestration.validation.ts", "result": "23/23 PASS", "expected": "23/23", "match": true },
+    { "name": "context relevance", "script": "scripts/run-context-relevance-validation.mjs", "result": "28/28 PASS", "expected": "28/28", "match": true },
+    { "name": "greeting/social-checkin", "script": "scripts/run-greeting-prompt-validation.mjs", "result": "10/10 PASS", "expected": "10/10", "match": true },
+    { "name": "family deliberation", "script": "scripts/run-family-deliberation-validation.mjs", "result": "25/25 PASS", "expected": "25/25", "match": true },
+    { "name": "family operation status", "script": "scripts/run-family-operation-status-validation.mjs", "result": "23/23 PASS", "expected": "23/23", "match": true },
+    { "name": "incremental council transport / stream adapters", "script": "scripts/run-incremental-council-transport-validation.mjs", "result": "107/108 PASS", "expected": "107/108", "match": true, "known_failure": "c4c_structural_001_json_route_calls_shared_execution_once - confirmed identical to the prior session's recorded pre-existing stale-regex failure, not modified" },
+    { "name": "live council response normalization", "script": "scripts/run-live-council-response-normalization-validation.mjs", "result": "12/12 PASS", "expected": "12/12", "match": true },
+    { "name": "council render gate", "script": "scripts/run-council-render-gate-validation.mjs", "result": "7/7 PASS", "expected": "7/7", "match": true },
+    { "name": "live council persona-cluster", "script": "scripts/run-live-council-persona-cluster-validation.mjs", "result": "32/32 PASS", "expected": "32/32", "match": true }
+  ],
+  "total_pass": "304/305",
+  "known_failure_matches_prior_session": true,
+  "live_provider_canary": {
+    "script": "scripts/run-live-council-provider-canary.mjs",
+    "status": "SKIPPED",
+    "reason": "No real provider API keys present in this environment (see environment.json). Skipped per mission instruction to only run this if real keys are confirmed present."
+  },
+  "typecheck": {
+    "command": "pnpm exec tsc --noEmit",
+    "exit_code": 2,
+    "total_errors": 11,
+    "council_scoped_errors": 0,
+    "council_scoped_dirs_checked": ["lib/council/", "components/war-room/council/", "components/war-room/live-room/", "app/api/chat/", "app/page.tsx"],
+    "error_files": [
+      "lib/modular-intelligence/nativeRouterV1Pilot.validation.ts",
+      "lib/modular-intelligence/runtimeTrajectoryObserver.validation.ts",
+      "lib/modular-intelligence/trajectoryObserverStatus.ts",
+      "lib/modular-intelligence/warRoomToolTrajectoryObserve.ts",
+      "scripts/wrim-modular/collect_class_diverse_runtime.ts",
+      "scripts/wrim-modular/collect_memory_runtime.ts",
+      "scripts/wrim-modular/probe_memory_stores.ts"
+    ],
+    "classification": "Category B - pre-existing, confined entirely to lib/modular-intelligence/ and scripts/wrim-modular/, zero Council-scoped errors. Not modified (do not touch WRIM/Native Router code).",
+    "discrepancy_vs_prior_session": "Prior session's typecheck-classification.json recorded 'remaining_errors: 10' for these exact same 7 files. Independently recounting this session's raw tsc output gives 11 distinct 'error TS####' occurrences across the identical 7 files, identical line numbers, identical error codes/messages (verified via grep -c and manual line-by-line comparison). This is almost certainly a manual counting slip in the prior session's summary JSON (10 vs 11), not a real behavioral difference - file set, line numbers, and error text are byte-identical to what was previously documented. Reported honestly rather than silently matching the prior count.",
+    "elapsed_s": 46.1
+  },
+  "lint": {
+    "command": "pnpm lint",
+    "exit_code": 0,
+    "errors": 0,
+    "warnings": 7,
+    "warnings_detail": [
+      "app/api/debug/trajectory-observer/route.ts:3 - unused var",
+      "app/page.tsx:12445 - unused var",
+      "lib/income-loot/validation.ts:143 - unused var",
+      "lib/modular-intelligence/trajectoryObserver.ts:3 - unused var",
+      "scripts/earth-knowledge/build-completion-registry.mjs:1270 - unused var",
+      "scripts/run-live-council-provider-canary.mjs:248 - unused var",
+      "scripts/wrim-modular/collect_memory_runtime.ts:433 - unused var"
+    ],
+    "warnings_note": "7 warnings vs the prior session's 10 - the difference is exactly the 3 warnings the prior session noted came from .venv-wrim/'s vendored sklearn JS (a false-positive eslint scan target). .venv-wrim/ does not exist in this fresh clone (never installed), so those 3 false-positive warnings cannot occur here. The remaining 7 are identical pre-existing unused-var warnings.",
+    "elapsed_s": 66.4
+  }
+}

@@ -103,12 +103,18 @@ function testStateMachineExtension(): CaseResult[] {
   const partiallyVerifiedTargets = NATIVE_REPAIR_TRANSITIONS.partially_verified
   const cancelledTerminal = NATIVE_REPAIR_TRANSITIONS.cancelled.length === 0
   const detectedCanCancel = NATIVE_REPAIR_TRANSITIONS.detected.includes('cancelled')
-  const applyingCannotCancel = !NATIVE_REPAIR_TRANSITIONS.applying_patch.includes('cancelled')
+  // Mid-execution cancellation is now a sanctioned transition: the Code Operator wave added
+  // applying_patch/validating -> 'cancelled' so a Commander can abort a running validation
+  // (processRegistry kills the child-process tree; runtime.cancelMissionExecution persists the
+  // transition with a killed-process audit note). Cancellation still never rolls files back —
+  // rollback remains the only path that reverts an applied patch.
+  const applyingCanCancel = NATIVE_REPAIR_TRANSITIONS.applying_patch.includes('cancelled')
+  const validatingCanCancel = NATIVE_REPAIR_TRANSITIONS.validating.includes('cancelled')
   return [
     check('state_ext_01_partially_verified_can_resolve_or_rollback', partiallyVerifiedTargets.includes('resolved') && partiallyVerifiedTargets.includes('rolled_back'), JSON.stringify(partiallyVerifiedTargets)),
     check('state_ext_02_cancelled_is_terminal', cancelledTerminal, JSON.stringify(NATIVE_REPAIR_TRANSITIONS.cancelled)),
     check('state_ext_03_cancel_allowed_before_apply', detectedCanCancel, JSON.stringify(NATIVE_REPAIR_TRANSITIONS.detected)),
-    check('state_ext_04_cancel_not_allowed_mid_apply', applyingCannotCancel, JSON.stringify(NATIVE_REPAIR_TRANSITIONS.applying_patch)),
+    check('state_ext_04_cancel_allowed_mid_apply_kills_process_tree', applyingCanCancel && validatingCanCancel, JSON.stringify({ applying: NATIVE_REPAIR_TRANSITIONS.applying_patch, validating: NATIVE_REPAIR_TRANSITIONS.validating })),
   ]
 }
 

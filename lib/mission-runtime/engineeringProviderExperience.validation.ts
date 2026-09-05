@@ -33,6 +33,7 @@ import {
   listProviderFamilyStatus,
   resolveConfiguredProviderFamily,
 } from '@/lib/council/providerDirectCall'
+import { envHasUsableProviderSecret } from '@/lib/providers/secretPresence'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 function check(name: string, pass: boolean, detail: string): CaseResult {
@@ -53,10 +54,10 @@ async function resetNativeBuilderState(): Promise<void> {
 function testEnvironmentHasNoConfiguredCredentials(): CaseResult[] {
   const results: CaseResult[] = []
   const realConfigured = {
-    claude: Boolean(process.env.ANTHROPIC_API_KEY),
-    chatgpt: Boolean(process.env.OPENAI_API_KEY),
-    grok: Boolean(process.env.XAI_API_KEY),
-    gemini: Boolean(process.env.GEMINI_API_KEY),
+    claude: isProviderFamilyConfigured('claude'),
+    chatgpt: isProviderFamilyConfigured('chatgpt'),
+    grok: isProviderFamilyConfigured('grok'),
+    gemini: isProviderFamilyConfigured('gemini'),
   }
   results.push(check(
     'provider_01_this_environment_has_no_coder_credentials_configured',
@@ -68,10 +69,10 @@ function testEnvironmentHasNoConfiguredCredentials(): CaseResult[] {
 
 function testIsProviderFamilyConfiguredMatchesRealEnv(): CaseResult[] {
   const results: CaseResult[] = []
-  results.push(check('provider_02_claude_matches_real_env', isProviderFamilyConfigured('claude') === Boolean(process.env.ANTHROPIC_API_KEY), String(isProviderFamilyConfigured('claude'))))
-  results.push(check('provider_03_chatgpt_matches_real_env', isProviderFamilyConfigured('chatgpt') === Boolean(process.env.OPENAI_API_KEY), String(isProviderFamilyConfigured('chatgpt'))))
-  results.push(check('provider_04_grok_matches_real_env', isProviderFamilyConfigured('grok') === Boolean(process.env.XAI_API_KEY), String(isProviderFamilyConfigured('grok'))))
-  results.push(check('provider_05_gemini_matches_real_env', isProviderFamilyConfigured('gemini') === Boolean(process.env.GEMINI_API_KEY), String(isProviderFamilyConfigured('gemini'))))
+  results.push(check('provider_02_claude_matches_real_env', isProviderFamilyConfigured('claude') === envHasUsableProviderSecret('ANTHROPIC_API_KEY'), String(isProviderFamilyConfigured('claude'))))
+  results.push(check('provider_03_chatgpt_matches_real_env', isProviderFamilyConfigured('chatgpt') === envHasUsableProviderSecret('OPENAI_API_KEY'), String(isProviderFamilyConfigured('chatgpt'))))
+  results.push(check('provider_04_grok_matches_real_env', isProviderFamilyConfigured('grok') === envHasUsableProviderSecret('XAI_API_KEY'), String(isProviderFamilyConfigured('grok'))))
+  results.push(check('provider_05_gemini_matches_real_env', isProviderFamilyConfigured('gemini') === envHasUsableProviderSecret('GEMINI_API_KEY'), String(isProviderFamilyConfigured('gemini'))))
   return results
 }
 

@@ -1,0 +1,11 @@
+{
+  "session_entity": "war_room_conversations.id",
+  "messages": "war_room_messages",
+  "conversation_id_semantics": "UUID thread; reused until New Chat; mount restore previously picked first live_council row",
+  "deliberation_session_id": "was aliased to conversationId; round_id now separate",
+  "execute": "app/api/chat/execute.ts",
+  "assembler": "lib/context-assembler/assemble.ts",
+  "research": "lib/research/researchRouter.ts (live); lib/research-engine unused by chat",
+  "native_router": "applyPilotToResearchDecision only; unchanged",
+  "ui": "app/page.tsx LiveRoomShell previously hid both side panels"
+}

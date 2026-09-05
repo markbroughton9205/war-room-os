@@ -10,6 +10,8 @@ Fixed CLI contract — unknown arguments are rejected by construction (argparse.
 parse_known_args). No shell string is ever built from these arguments; they are passed straight
 through to the tokenizer library's Python API.
 """
+from __future__ import annotations
+
 import argparse
 import json
 import sys

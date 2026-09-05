@@ -67,9 +67,15 @@ async function search(query: ResearchQuery) {
         organization: null,
         publishedAt: row.eventDate ?? null,
         updatedAt: null,
-        geography: row.country ?? null,
+        // Real decimalLatitude/decimalLongitude, when present, take priority over the coarser
+        // country name — the same pre-existing bug class discovered in obis.ts during Terra
+        // Phase 4's reconciliation of LATENT_GEO providers: `geoFeature` was computed for
+        // `summary` prose but never actually assigned to a structured field, silently discarding
+        // every occurrence's real coordinates in favor of country (or nothing). country is
+        // preserved in `identifiers` rather than lost outright when coordinates are present.
+        geography: geoFeature ?? row.country ?? null,
         language: null,
-        identifiers: { gbif_occurrence_key: key },
+        identifiers: { gbif_occurrence_key: key, ...(row.country ? { country: row.country } : {}) },
         subjects: row.kingdom ? [row.kingdom] : [],
         license: row.license ?? null,
         accessStatus: 'open',

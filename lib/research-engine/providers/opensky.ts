@@ -55,9 +55,18 @@ async function search(query: ResearchQuery) {
       const icao24 = s[0]
       const callsign = s[1]?.trim() || null
       const country = s[2]
+      const lastContact = s[4]
       const lon = s[5]
       const lat = s[6]
+      const baroAltitude = s[7]
       const onGround = s[8]
+      const velocity = s[9]
+      const trueTrack = s[10]
+      const verticalRate = s[11]
+      const geoAltitude = s[13]
+      // baro_altitude is the more commonly populated of the two real OpenSky altitude fields;
+      // geo_altitude is used only when it's null, never both averaged or guessed between.
+      const altitudeMeters = baroAltitude ?? geoAltitude
       const canonicalUrl = `https://opensky-network.org/aircraft-profile?icao24=${icao24}`
       return makeDocument({
         id: `opensky:${icao24}`,
@@ -76,7 +85,24 @@ async function search(query: ResearchQuery) {
         updatedAt: null,
         geography: lat != null && lon != null ? `lat ${lat}, lon ${lon}` : country ?? null,
         language: null,
-        identifiers: { icao24, ...(callsign ? { callsign } : {}) },
+        // Every real OpenSky state-vector field this adapter can honestly extract, carried as
+        // strings in the existing identifiers bag (the same "extra structured field" escape hatch
+        // normalizeNwsAlerts.ts already uses for severity/urgency/certainty) — never fabricated
+        // when the source reports null (origin/destination/operator/registration/model are not
+        // part of this endpoint at all and are never invented here).
+        identifiers: {
+          icao24,
+          ...(callsign ? { callsign } : {}),
+          ...(country ? { originCountry: country } : {}),
+          ...(lat != null ? { latitude: String(lat) } : {}),
+          ...(lon != null ? { longitude: String(lon) } : {}),
+          ...(altitudeMeters != null ? { altitudeMeters: String(altitudeMeters) } : {}),
+          ...(velocity != null ? { velocityMps: String(velocity) } : {}),
+          ...(trueTrack != null ? { headingDeg: String(trueTrack) } : {}),
+          ...(verticalRate != null ? { verticalRateMps: String(verticalRate) } : {}),
+          onGround: String(onGround),
+          ...(lastContact != null ? { lastContactIso: new Date(lastContact * 1000).toISOString() } : {}),
+        },
         subjects: [],
         license: null,
         accessStatus: 'open',

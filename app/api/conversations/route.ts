@@ -8,18 +8,27 @@ export const dynamic = 'force-dynamic'
 
 const TABLE_CONVERSATIONS = 'war_room_conversations'
 
-export async function GET() {
+export async function GET(req: Request) {
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ conversations: [] }, false)
   }
 
-  const { data, error } = await sup.client
+  const url = new URL(req.url)
+  const q = url.searchParams.get('q')?.trim() ?? ''
+
+  let query = sup.client
     .from(TABLE_CONVERSATIONS)
     .select('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at')
     .is('deleted_at', null)
     .order('updated_at', { ascending: false })
     .limit(200)
+
+  if (q) {
+    query = query.ilike('title', `%${q.replace(/%/g, '')}%`)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     const supabase = warRoomSupabaseFailurePayload(TABLE_CONVERSATIONS, error, { operation: 'select' })

@@ -1,0 +1,13 @@
+{
+  "classification": "EXPECTED_DEPENDENCY_BEHAVIOR",
+  "orchestration_defect": false,
+  "opening_node_required": true,
+  "no_prior_message_id_expected": true,
+  "independent_families_blocked_after_opening_failure": true,
+  "design_reason": "appendDeliberationTurn only assigns output_message_id when status is complete and content is non-empty. runFamilyToFamilyDeliberation stops dependent turns when opening.output_message_id is null.",
+  "claude_failure_this_incident": "dependency-only for the observed round (Claude was not invoked)",
+  "claude_standalone_credential": "independently invalid placeholder; would fail if invoked",
+  "red_team_failure": "dependency-only for the observed round",
+  "revision_failure": "dependency-only for the observed round",
+  "council_graph_changed": false
+}

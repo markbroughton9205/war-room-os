@@ -77,9 +77,16 @@ const ENV_ALIAS_DEFINITIONS: EnvAliasDefinition[] = [
   },
 ]
 
+const ENV_PLACEHOLDER_PATTERN = /^(?:\[(?:sensitive|redacted|secret|placeholder)\]|(?:change[-_ ]?me|placeholder|todo|replace[-_ ]?me|your[-_ ].*[-_ ]?here))$/i
+
+export function usableEnvValue(value: string | undefined): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed || ENV_PLACEHOLDER_PATTERN.test(trimmed.replace(/^['"]|['"]$/g, ''))) return null
+  return trimmed
+}
+
 function trimmedEnvValue(env: NodeJS.ProcessEnv, name: string): string | null {
-  const value = env[name]?.trim()
-  return value ? value : null
+  return usableEnvValue(env[name])
 }
 
 function definitionForKey(key: EnvAliasKey): EnvAliasDefinition {

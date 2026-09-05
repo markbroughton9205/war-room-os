@@ -1,0 +1,14 @@
+{
+  "states": [
+    "PENDING",
+    "WAITING",
+    "FLOOR_GRANTED",
+    "CONNECTING",
+    "STREAMING",
+    "COMPLETE",
+    "FAILED",
+    "SKIPPED",
+    "RETRYING",
+    "PARTIAL"
+  ]
+}

@@ -13,14 +13,10 @@
  * Client-only by construction (Cesium requires `window`/WebGL) — always render this inside a
  * dynamic import with `ssr: false` from a Server Component page.
  *
- * Honest degradation, matching this codebase's "no fake data" standard: Google's Photorealistic 3D
- * Tiles require a billed Google Maps Platform key, and Cesium World Terrain / Bing imagery require
- * a Cesium ion token. Neither is configured in this environment (or, likely, most self-hosted
- * War Room deployments until a Commander explicitly provisions them) — so this component NEVER
- * silently falls back to a fabricated "premium" appearance. It uses OpenStreetMap raster tiles
- * (no credential required, ODbL-licensed, attribution rendered on-screen) as the base imagery, and
- * clearly reports which imagery tier is active via `onStatusChange` — never claims photorealistic
- * tiles are active when they aren't.
+ * Honest degradation, matching this codebase's "no fake data" standard: NASA GIBS supplies the
+ * credential-free photographic surface through TerraEarthImagery, OSM stays beneath it as the
+ * network fallback, and Cesium World Terrain activates only when a real public ion token is
+ * configured. Status reporting never labels a missing credential as a connection outage.
  */
 import { useEffect, useRef, useState } from 'react'
 // Cesium's own base stylesheet (canvas sizing, credit container, cesium-viewer/-widget classes).
@@ -28,23 +24,65 @@ import { useEffect, useRef, useState } from 'react'
 // these classes existing. Importing the package's own CSS (not a copy) — standard Cesium+Next.js
 // integration practice.
 import 'cesium/Build/Cesium/Widgets/widgets.css'
+import type { Viewer as CesiumViewer } from 'cesium'
+import { loadCesium } from './loadCesiumRuntime'
+import { featureIdFromTerraEntityId } from '@/lib/terra/cesiumEntityId'
+import type { TerraClickPoint } from '@/lib/terra/types'
 
-export type TerraImageryTier = 'photorealistic_3d_tiles' | 'openstreetmap'
+export type TerraImageryTier = 'nasa_gibs_with_osm_fallback'
 
 export type TerraGlobeStatus =
   | { phase: 'loading' }
-  | { phase: 'ready'; imageryTier: TerraImageryTier; hasIonToken: boolean }
+  | { phase: 'ready'; imageryTier: TerraImageryTier; hasIonToken: boolean; hasOsmBuildings: boolean }
   | { phase: 'error'; message: string }
 
 type TerraGlobeProps = {
   onStatusChange?: (status: TerraGlobeStatus) => void
+  /** Fires once, right after the Cesium Viewer is constructed — the hand-off point for any
+   * layer component (e.g. the earthquake layer) that needs to add its own DataSource. */
+  onViewerReady?: (viewer: CesiumViewer) => void
+  /** Fires once, after Cesium OSM Buildings has been attached to the scene (a real ion global
+   * asset, only requested when hasIonToken) — `null` when no ion token is configured or the
+   * asset request failed, so a caller can gate a "3D Buildings" visibility toggle without probing
+   * the scene's primitives itself. God's Eye multi-scale phase. */
+  onBuildingsTilesetReady?: (tileset: import('cesium').Cesium3DTileset | null) => void
+  /** A left-click that hit a Terra-managed entity (see lib/terra/cesiumEntityId.ts) — the
+   * feature's raw id, not a bare coordinate. */
+  onEntityClick?: (featureId: string) => void
+  /** A left-click that did NOT hit a Terra entity — either a real ground coordinate or a
+   * confirmed miss (clicked past the globe's edge). Never fires for entity clicks. */
+  onGroundClick?: (point: TerraClickPoint) => void
+  /** Pointer hover over a Terra-managed entity (composite "{layerId}:{featureId}", same id shape
+   * as onEntityClick) plus the cursor's canvas-relative screen position — or nulls when the
+   * pointer is over no entity. Fires on entity change immediately; position-only updates are
+   * throttled (~80ms) so a resting pointer doesn't re-render the shell every frame. Powers the
+   * traffic-camera hover preview (TerraCameraHoverCard). */
+  onEntityHover?: (compositeId: string | null, position: { x: number; y: number } | null) => void
 }
+
+const HOVER_POSITION_THROTTLE_MS = 80
 
 const OSM_ATTRIBUTION_URL = 'https://tile.openstreetmap.org/'
 
-export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
+export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetReady, onEntityClick, onGroundClick, onEntityHover }: TerraGlobeProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<TerraGlobeStatus>({ phase: 'loading' })
+
+  // The boot effect below intentionally runs once (Cesium initialization is expensive and must
+  // not re-run on every parent render) — these refs let the click handler it installs always see
+  // the latest callback identity without that effect depending on them.
+  const onEntityClickRef = useRef(onEntityClick)
+  const onGroundClickRef = useRef(onGroundClick)
+  const onViewerReadyRef = useRef(onViewerReady)
+  const onBuildingsTilesetReadyRef = useRef(onBuildingsTilesetReady)
+  const onEntityHoverRef = useRef(onEntityHover)
+  useEffect(() => {
+    onEntityClickRef.current = onEntityClick
+    onGroundClickRef.current = onGroundClick
+    onViewerReadyRef.current = onViewerReady
+    onBuildingsTilesetReadyRef.current = onBuildingsTilesetReady
+    onEntityHoverRef.current = onEntityHover
+  }, [onEntityClick, onGroundClick, onViewerReady, onBuildingsTilesetReady, onEntityHover])
 
   useEffect(() => {
     onStatusChange?.(status)
@@ -53,6 +91,7 @@ export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
   useEffect(() => {
     let cancelled = false
     let viewerHandle: { destroy: () => void } | null = null
+    let clickHandler: { destroy: () => void } | null = null
 
     async function boot() {
       const container = containerRef.current
@@ -66,7 +105,7 @@ export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
         // specific to this app).
         ;(window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = '/cesium/'
 
-        const Cesium = await import('cesium')
+        const Cesium = await loadCesium()
         if (cancelled) return
 
         const ionToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN
@@ -75,12 +114,17 @@ export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
           Cesium.Ion.defaultAccessToken = ionToken!.trim()
         }
 
-        // Credential-free base imagery — see file header. Google Photorealistic 3D Tiles are a
-        // documented future enhancement (Phase H+), not wired here without a real key.
+        // Credential-free fallback remains available beneath the NASA GIBS photographic layers.
         const osmProvider = new Cesium.OpenStreetMapImageryProvider({ url: OSM_ATTRIBUTION_URL })
+
+        // A configured public token enables the real Cesium World Terrain service. The token is
+        // read only from Next's public environment at build time and is never hardcoded here.
+        const terrainProvider = hasIonToken ? await Cesium.createWorldTerrainAsync() : undefined
+        if (cancelled) return
 
         const viewer = new Cesium.Viewer(container, {
           baseLayer: new Cesium.ImageryLayer(osmProvider),
+          ...(terrainProvider ? { terrainProvider } : {}),
           // War Room builds its own instrumentation chrome around this surface (see
           // TerraShell.tsx) rather than Cesium's default widget set — matches the "high-density
           // but readable controls" direction, not Cesium's stock UI.
@@ -101,8 +145,17 @@ export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
 
         // Required attribution stays visible (ODbL) — styled to match Terra's instrumentation
         // aesthetic in globals via #terra-globe-root, never hidden.
-        viewer.scene.globe.enableLighting = false
+        // Phase 6: real sun-relative lighting, computed by Cesium purely from viewer.clock's
+        // current time — no separate astronomy/rotation logic exists anywhere in Terra. This is
+        // the entire "real day/night terminator" implementation; components/war-room/terra/
+        // useTerraClock.ts only ever sets viewer.clock.currentTime, never touches lighting
+        // directly.
+        viewer.scene.globe.enableLighting = true
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true
+        if (viewer.scene.skyBox) viewer.scene.skyBox.show = true
+        if (viewer.scene.sun) viewer.scene.sun.show = true
+        if (viewer.scene.moon) viewer.scene.moon.show = true
+        viewer.scene.highDynamicRange = true
         viewer.scene.fog.enabled = true
         viewer.targetFrameRate = 60
 
@@ -113,10 +166,100 @@ export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
           return
         }
 
+        // Real, detected fact — not assumed from hasIonToken alone — so a terrainProvider added or
+        // changed for any reason is picked up automatically without touching this handler.
+        const hasRealTerrain = !(viewer.terrainProvider instanceof Cesium.EllipsoidTerrainProvider)
+
+        // God's Eye multi-scale phase: Cesium OSM Buildings (real ODbL-licensed OSM building
+        // footprints extruded to real reported heights, hosted as Cesium ion's global asset) —
+        // only requested when a real ion token is configured, matching the same honest-degradation
+        // rule as Cesium World Terrain above. A configured token doesn't guarantee asset access
+        // (account/entitlement issues are real and independent of network health), so this is its
+        // own try/catch: a failure here degrades only "3D Buildings unavailable," never the whole
+        // globe. Starts hidden — TerraShell shows it only once the camera is at local/building
+        // scale (see useTerraCameraScale.ts), so no building tiles are requested at global/
+        // regional altitude before that gating effect runs.
+        let osmBuildingsTileset: import('cesium').Cesium3DTileset | null = null
+        if (hasIonToken) {
+          try {
+            const tileset = await Cesium.createOsmBuildingsAsync()
+            if (cancelled) {
+              tileset.destroy()
+            } else {
+              tileset.show = false
+              viewer.scene.primitives.add(tileset)
+              osmBuildingsTileset = tileset
+            }
+          } catch {
+            osmBuildingsTileset = null
+          }
+        }
+        if (cancelled) {
+          viewer.destroy()
+          return
+        }
+
+        const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
+        handler.setInputAction((click: { position: import('cesium').Cartesian2 }) => {
+          const picked = viewer.scene.pick(click.position)
+          if (Cesium.defined(picked) && picked.id instanceof Cesium.Entity) {
+            const featureId = featureIdFromTerraEntityId(picked.id.id)
+            if (featureId) {
+              onEntityClickRef.current?.(featureId)
+              return
+            }
+          }
+
+          const cartesian = hasRealTerrain
+            ? (viewer.scene.pickPosition(click.position) ?? viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid))
+            : viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid)
+
+          if (!cartesian) {
+            onGroundClickRef.current?.({ ok: false }) // click missed the globe entirely (e.g. clicked past the limb into space)
+            return
+          }
+          const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
+          onGroundClickRef.current?.({
+            ok: true,
+            longitude: Cesium.Math.toDegrees(cartographic.longitude),
+            latitude: Cesium.Math.toDegrees(cartographic.latitude),
+            height: hasRealTerrain ? cartographic.height : null,
+            hasTerrainHeight: hasRealTerrain,
+          })
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+
+        // Hover pick (Phase 3 camera preview): entity changes fire immediately; same-entity
+        // position updates are throttled so a moving pointer doesn't re-render the shell per frame.
+        let lastHoverId: string | null = null
+        let lastHoverFireAt = 0
+        handler.setInputAction((movement: { endPosition: import('cesium').Cartesian2 }) => {
+          if (!onEntityHoverRef.current) return
+          const picked = viewer.scene.pick(movement.endPosition)
+          let hoverId: string | null = null
+          if (Cesium.defined(picked) && picked.id instanceof Cesium.Entity) {
+            hoverId = featureIdFromTerraEntityId(picked.id.id)
+          }
+          const now = Date.now()
+          if (hoverId !== lastHoverId) {
+            lastHoverId = hoverId
+            lastHoverFireAt = now
+          } else if (now - lastHoverFireAt < HOVER_POSITION_THROTTLE_MS) {
+            return
+          } else {
+            lastHoverFireAt = now
+          }
+          onEntityHoverRef.current(hoverId, { x: movement.endPosition.x, y: movement.endPosition.y })
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
+        clickHandler = handler
+
+        onViewerReadyRef.current?.(viewer)
+        onBuildingsTilesetReadyRef.current?.(osmBuildingsTileset)
+
         setStatus({
           phase: 'ready',
-          imageryTier: 'openstreetmap',
+          imageryTier: 'nasa_gibs_with_osm_fallback',
           hasIonToken,
+          hasOsmBuildings: osmBuildingsTileset !== null,
         })
       } catch (error) {
         if (cancelled) return
@@ -129,6 +272,7 @@ export function TerraGlobe({ onStatusChange }: TerraGlobeProps) {
 
     return () => {
       cancelled = true
+      clickHandler?.destroy()
       viewerHandle?.destroy()
     }
   }, [])

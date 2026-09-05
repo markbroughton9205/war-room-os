@@ -17,11 +17,12 @@ const INTENT_PROVIDER_MAP: Record<ResearchQueryIntent, ResearchProviderId[]> = {
   patents_inventions: ['uspto', 'crossref', 'github', 'wikidata', 'epo_ops'],
   government_contracts: ['sam_gov', 'fmcsa', 'world_bank_projects', 'usaspending', 'eu_ted', 'mercado_publico'],
   transportation_carriers: ['fmcsa', 'opensky'],
+  maritime_traffic: ['digitraffic_marine'],
   economics_macro: ['fred', 'imf_sdmx', 'world_bank_indicators', 'eurostat', 'sec_edgar', 'ecb_sdw', 'bank_of_canada', 'bis_stats', 'eia', 'eclac_cepalstat', 'oecd_data_explorer', 'argentina_series', 'wto_timeseries'],
   global_development: ['world_bank_indicators', 'world_bank_projects', 'world_bank_finances', 'world_bank_climate', 'imf_sdmx', 'reliefweb', 'un_sdg', 'idb_open_data', 'iati_datastore'],
   finance_public_data: ['fred', 'world_bank_finances', 'sec_edgar', 'brazil_transparencia'],
   climate_environment: ['world_bank_climate', 'nasa_gibs', 'nasa', 'usgs_water', 'open_meteo', 'noaa_cdo', 'met_no', 'noaa_swpc', 'nws_weather', 'arctic_data_center', 'ecmwf_cds', 'met_office_datahub'],
-  earthquakes_hazards: ['usgs_earthquake', 'usgs_earthquake_feed', 'nasa_gibs', 'usgs_sciencebase'],
+  earthquakes_hazards: ['usgs_earthquake', 'usgs_earthquake_feed', 'nasa_gibs', 'usgs_sciencebase', 'nhc_current_storms', 'nasa_eonet', 'tsunami_gov', 'nws_weather'],
   water_hydrology: ['usgs_water', 'usgs_national_map', 'world_bank_climate'],
   maps_geospatial: ['nasa_gibs', 'usgs_national_map', 'usgs_sciencebase', 'osm_overpass', 'geonames', 'nominatim', 'nasa_cmr', 'copernicus_dataspace', 'opentopography', 'pdok', 'ohm_overpass'],
   historical_web: ['wayback', 'internet_archive', 'common_crawl', 'library_of_congress', 'ohm_overpass'],
@@ -36,9 +37,9 @@ const INTENT_PROVIDER_MAP: Record<ResearchQueryIntent, ResearchProviderId[]> = {
   materials_science: ['materials_project', 'oqmd', 'aflow', 'nomad_repository'],
   biodiversity: ['gbif', 'uniprot', 'inaturalist', 'obis', 'worms', 'itis', 'pbdb', 'bhl', 'checklistbank', 'eol', 'globi', 'mushroom_observer'],
   genetics: ['uniprot', 'ncbi', 'ensembl', 'rcsb_pdb', 'string_db', 'gnomad', 'ena_portal', 'ncbi_datasets', 'alphafold_db', 'reactome', 'intact', 'kegg', 'metabolights', 'pride_archive', 'wikipathways', 'cellosaurus', 'metabolomics_workbench'],
-  statistics_demographics: ['us_census', 'eurostat', 'world_bank_indicators', 'geonames', 'statcan_wds', 'uk_ons', 'insee_melodi', 'unesco_uis', 'sidra_brazil', 'cbs_statline', 'bdl_poland', 'israel_cbs', 'nomis_uk', 'abs_australia', 'data_gov_my', 'datos_abiertos_colombia', 'ine_tempus3', 'singstat', 'e_stat_japan'],
+  statistics_demographics: ['us_census', 'eurostat', 'world_bank_indicators', 'geonames', 'statcan_wds', 'uk_ons', 'insee_melodi', 'unesco_uis', 'sidra_brazil', 'cbs_statline', 'bdl_poland', 'israel_cbs', 'nomis_uk', 'abs_australia', 'data_gov_my', 'datos_abiertos_colombia', 'ine_tempus3', 'singstat', 'e_stat_japan', 'scb_sweden', 'ssb_norway', 'statfin_finland', 'statistics_denmark', 'un_desa_population'],
   government_legislation: ['congress_gov', 'govinfo', 'courtlistener', 'federal_register', 'uk_legislation', 'japan_egov_hourei', 'australia_frl', 'uk_gazette'],
-  humanitarian_events: ['reliefweb', 'world_bank_indicators', 'unhcr_data', 'ocha_fts'],
+  humanitarian_events: ['reliefweb', 'world_bank_indicators', 'unhcr_data', 'ocha_fts', 'un_desa_population'],
 }
 
 function rejectionReason(provider: ResearchProviderId): string {

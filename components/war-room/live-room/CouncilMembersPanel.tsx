@@ -8,6 +8,7 @@ import {
   type FamilyOperationStatus,
   type FamilyOperationTone,
 } from '@/lib/council/familyOperationStatus'
+import type { CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
 
 type ProviderConnectionStatus = 'online' | 'standby' | 'not_connected' | 'error'
 
@@ -17,6 +18,7 @@ export type CouncilMembersPanelProps = {
   /** Current-operation outcome per family (keyed by roster id) — distinct from `providerStatuses`
    * connectivity. Absent entries render connectivity only, matching prior behavior. */
   operationStatuses?: Partial<Record<string, FamilyOperationStatus>>
+  councilRoster?: CouncilRosterSnapshot | null
   onOpenPanel?: (panel: 'command-intel' | 'operations' | 'memory-core' | 'approvals' | 'analytics' | 'red-team' | 'system-health' | 'settings') => void
 }
 
@@ -101,6 +103,7 @@ export const CouncilMembersPanel = memo(function CouncilMembersPanel({
   providerStatuses,
   providerLabels,
   operationStatuses,
+  councilRoster,
   onOpenPanel,
 }: CouncilMembersPanelProps) {
   return (
@@ -111,11 +114,21 @@ export const CouncilMembersPanel = memo(function CouncilMembersPanel({
     >
       <div>
         <p className="text-[9px] font-bold uppercase tracking-[0.35em] text-emerald-500/80">Council Members</p>
+        {councilRoster?.degradedByRoster ? (
+          <p className="mt-1 text-[8px] font-semibold uppercase tracking-widest text-amber-300/90">
+            {councilRoster.degradedLabel}
+          </p>
+        ) : null}
         <ul className="mt-2 space-y-2">
           {MEMBER_ORDER.map(member => {
-            const status = statusForMember(member.id, member.rosterId, providerStatuses)
+            const rosterRow = member.rosterId ? councilRoster?.families[member.rosterId as keyof typeof councilRoster.families] : undefined
+            const status = rosterRow
+              ? (rosterRow.uiStatus === 'READY' ? 'online' : 'unavailable')
+              : statusForMember(member.id, member.rosterId, providerStatuses)
             const detailKey = member.rosterId ?? member.id
-            const presentation = memberStatusPresentation(status, providerLabels?.[detailKey])
+            const presentation = rosterRow
+              ? { tone: rosterRow.uiStatus === 'READY' ? 'ready' as const : 'unavailable' as const, label: rosterRow.uiStatus }
+              : memberStatusPresentation(status, providerLabels?.[detailKey])
             const operationStatus = member.rosterId ? operationStatuses?.[member.rosterId] : undefined
             const operationPresentation = operationStatus ? FAMILY_OPERATION_STATUS_PRESENTATION[operationStatus] : null
             const dot = operationPresentation

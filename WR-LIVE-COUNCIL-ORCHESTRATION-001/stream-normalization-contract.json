@@ -1,0 +1,10 @@
+{
+  "semantics": [
+    "MESSAGE_STARTED",
+    "TEXT_DELTA",
+    "MESSAGE_COMPLETED",
+    "MESSAGE_FAILED"
+  ],
+  "transport": "diagnostic_recorded TEXT_DELTA on existing SSE progress",
+  "no_cot": true
+}

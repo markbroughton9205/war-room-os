@@ -106,11 +106,11 @@ export const NATIVE_REPAIR_TRANSITIONS: Record<NativeRepairState, readonly Nativ
   inspecting_repository: ['planning', 'blocked', 'cancelled'],
   planning: ['awaiting_local_execution_approval', 'escalation_recommended', 'blocked', 'cancelled'],
   awaiting_local_execution_approval: ['applying_patch', 'blocked', 'escalation_recommended', 'cancelled'],
-  applying_patch: ['validating', 'blocked'],
+  applying_patch: ['validating', 'blocked', 'cancelled'],
   // partially_verified is a distinct, honest outcome from a full 'resolved': the direct recheck
   // for this issue class never ran, so the Commander sees that caveat before deciding, instead of
   // it being silently folded into the same review state as a fully-proven fix.
-  validating: ['verification_failed', 'partially_verified', 'awaiting_commander_review', 'blocked'],
+  validating: ['verification_failed', 'partially_verified', 'awaiting_commander_review', 'blocked', 'cancelled'],
   verification_failed: ['rolled_back', 'planning', 'escalation_recommended', 'blocked'],
   // Directly actionable (not funneled through awaiting_commander_review) so the Commander can
   // accept-with-the-caveat-shown or reject in one step — the UI still displays the
@@ -138,7 +138,7 @@ export type NativeRepairHistoryEntry = {
 // Structured patches (what a proposal is allowed to contain)
 // ---------------------------------------------------------------------------
 
-export type StructuredPatchOperation = 'replace_range' | 'insert_after' | 'insert_before' | 'create_file'
+export type StructuredPatchOperation = 'replace_range' | 'insert_after' | 'insert_before' | 'create_file' | 'delete_file'
 
 export type StructuredPatch = {
   operation: StructuredPatchOperation
@@ -155,6 +155,11 @@ export type StructuredPatch = {
   replacementText?: string
   /** Full content for create_file only. */
   newFileContent?: string
+  /** Required for delete_file (and meaningless otherwise): explicit Commander confirmation that
+   * this exact file may be deleted. patchPolicy rejects any delete_file patch where this is not
+   * literally true — deletion is irreversible-looking enough that the proposal itself must carry
+   * proof the Commander saw and accepted it, not just the route-level apply approval. */
+  commanderConfirmed?: boolean
 }
 
 export type NativePlannedChange = {
@@ -227,6 +232,7 @@ export type PatchPolicyViolation = {
     | 'max_lines_exceeded'
     | 'issue_relevance'
     | 'malformed_patch'
+    | 'delete_requires_approval'
   file?: string
   detail: string
 }
@@ -364,6 +370,34 @@ export type NativeIterationPolicy = {
 }
 
 // ---------------------------------------------------------------------------
+// Commit preparation (NO git mutations — commitCapable stays false forever)
+// ---------------------------------------------------------------------------
+
+/** One ordered entry of the staging plan a Commander would feed to `git add` manually. */
+export type NativeStagingPlanEntry = {
+  file: string
+  operation: StructuredPatchOperation
+  rationale: string
+}
+
+/** Generated at mission completion (awaiting review / resolved). Pure data — nothing in this
+ * module (or anywhere in native-builder / mission-runtime) ever runs git add/commit/push. The
+ * `commitCapable: false` invariant in lib/mission-runtime/types.ts is unchanged; this artifact
+ * exists so the Commander stops hand-writing commit messages and staging lists from the diff. */
+export type NativeCommitPreparation = {
+  commitMessage: string
+  stagingPlan: NativeStagingPlanEntry[]
+  /** Honest provenance — which proposer/validation set this message summarizes. */
+  basis: {
+    proposerId: string
+    sourceKind: string
+    validationsPassed: string[]
+    diffHash?: string
+  }
+  generatedAt: string
+}
+
+// ---------------------------------------------------------------------------
 // Repair record (persisted)
 // ---------------------------------------------------------------------------
 
@@ -395,6 +429,10 @@ export type NativeRepairRecord = {
   /** Optional, backwards-compatible for the same reason as the two fields above — Phase G. */
   iterationPolicy?: NativeIterationPolicy
   iterationAttempts?: NativeIterationAttempt[]
+  /** Optional, backwards-compatible (absent on records written before this field existed;
+   * isRepairRecord does not require it). Prepared commit message + staging plan, written when the
+   * repair reaches review/resolved. Never executed — commitCapable: false invariant stands. */
+  commitPreparation?: NativeCommitPreparation
   createdAt: string
   updatedAt: string
 }

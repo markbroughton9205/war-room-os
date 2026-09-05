@@ -41,6 +41,12 @@ type RuntimeMissionLite = {
   validationResults: { operation: { id: string; targets?: string[] }; ok: boolean; exitCode: number | null; stdout: string; stderr: string; durationMs: number }[]
   verification?: { status: string; fingerprintRecurred: boolean; evidence: string[] }
   diff?: { diff: string; truncated: boolean; changedFiles: string[] }
+  commitPreparation?: {
+    commitMessage: string
+    stagingPlan: { file: string; operation: string; rationale: string }[]
+    basis: { proposerId: string; sourceKind: string; validationsPassed: string[]; diffHash?: string }
+    generatedAt: string
+  }
   raw: {
     issue: { title: string; severity: string; source: string; evidence: string[] }
     repair: {
@@ -53,6 +59,10 @@ type RuntimeMissionLite = {
 }
 
 const ACTIVE_STATES = new Set(['applying', 'validating', 'inspecting'])
+const CANCELLABLE_STATES = new Set(['created', 'inspecting', 'awaiting_approval', 'applying', 'validating', 'blocked'])
+/** Client-side mirror of the server ring buffer bound (commandOutput.ts) — the server already
+ * bounds what it keeps; this just stops an unbounded array from accumulating in React state. */
+const MAX_LIVE_OUTPUT_LINES = 2000
 
 async function getJson<T>(url: string): Promise<{ ok: boolean; data?: T; error?: string }> {
   try {
@@ -164,7 +174,17 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
   // original 2s poll if EventSource isn't available (e.g. non-browser test harness) or the
   // stream errors.
   const [liveStreaming, setLiveStreaming] = useState(false)
+  const [liveOutput, setLiveOutput] = useState<{ stream: string; text: string }[]>([])
   const activeMissionId = mission && ACTIVE_STATES.has(mission.status) ? mission.id : null
+  const liveOutputMissionRef = useRef<string | null>(null)
+  useEffect(() => {
+    // Reset the live-output pane when a different mission becomes active — output is per-repair.
+    if (activeMissionId !== liveOutputMissionRef.current) {
+      liveOutputMissionRef.current = activeMissionId
+      const timer = window.setTimeout(() => setLiveOutput([]), 0)
+      return () => window.clearTimeout(timer)
+    }
+  }, [activeMissionId])
   useEffect(() => {
     if (pollRef.current) window.clearInterval(pollRef.current)
     const resetTimer = window.setTimeout(() => setLiveStreaming(false), 0)
@@ -202,14 +222,26 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
         /* ignore malformed frame */
       }
     }
+    const onCommandOutput = (evt: MessageEvent<string>) => {
+      try {
+        const parsed = JSON.parse(evt.data) as { envelopeType: string; entries?: { stream: string; text: string }[] }
+        if (parsed.envelopeType !== 'command_output' || !parsed.entries?.length) return
+        setLiveStreaming(true)
+        setLiveOutput(prev => [...prev, ...parsed.entries!].slice(-MAX_LIVE_OUTPUT_LINES))
+      } catch {
+        /* ignore malformed frame */
+      }
+    }
     source.addEventListener('progress', onEnvelope)
     source.addEventListener('final', onEnvelope)
+    source.addEventListener('command_output', onCommandOutput)
     source.addEventListener('error', startFallbackPolling)
 
     return () => {
       window.clearTimeout(resetTimer)
       source.removeEventListener('progress', onEnvelope)
       source.removeEventListener('final', onEnvelope)
+      source.removeEventListener('command_output', onCommandOutput)
       source.removeEventListener('error', startFallbackPolling)
       source.close()
       if (pollRef.current) window.clearInterval(pollRef.current)
@@ -337,6 +369,19 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
     mission &&
     void runAction('rollback', async () => {
       const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/rollback`, { approval_granted: true })
+      if (!result.ok) throw new Error(result.error)
+      if (result.data) setMission(result.data.mission)
+    })
+
+  // Cancel is deliberately NOT approval-gated (stopping work is the safe direction — the route
+  // mirrors native-builder's own ungated /cancel). Mid-execution, the server kills the active
+  // validation process tree before transitioning the mission to 'cancelled'.
+  const cancel = () =>
+    mission &&
+    void runAction('cancel', async () => {
+      const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/cancel`, {
+        reason: 'Cancelled by Commander from the Builder workspace.',
+      })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
     })
@@ -587,6 +632,15 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
               >
                 Rollback
               </button>
+              <button
+                type="button"
+                disabled={busy !== null || !CANCELLABLE_STATES.has(mission.status)}
+                className="rounded border border-orange-500/40 px-2 py-1 text-orange-300 disabled:opacity-40"
+                onClick={cancel}
+                title="Cancel this mission. During apply/validation this also kills the active command process tree. Cancelling never mutates files — use Rollback to revert an applied patch."
+              >
+                Cancel
+              </button>
             </div>
             {lastError ? <p className="mt-2 text-red-400">{lastError}</p> : null}
 
@@ -639,13 +693,52 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
                       ))}
                     </div>
                   ) : null}
+                  {liveOutput.length > 0 || mission.status === 'validating' || mission.status === 'applying' ? (
+                    <div className="mt-2 border-t border-white/10 pt-2">
+                      <p className="text-slate-500">
+                        Live command output {liveStreaming ? <span className="animate-pulse text-emerald-400">● streaming</span> : null}
+                        {liveOutput.length >= MAX_LIVE_OUTPUT_LINES ? ' (tail — older lines evicted)' : ''}
+                      </p>
+                      <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-black/40 p-2 text-[9px] text-slate-300">
+                        {liveOutput.length
+                          ? liveOutput.map(e => `${e.stream === 'stderr' ? '! ' : e.stream === 'system' ? '# ' : '> '}${e.text}`).join('')
+                          : '(waiting for command output…)'}
+                      </pre>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
               {tab === 'diff' ? (
-                <pre className="whitespace-pre-wrap rounded border border-white/10 bg-black/40 p-2 text-[10px] text-slate-300">
-                  {mission.diff?.diff || '(no diff yet)'}
-                </pre>
+                <div>
+                  <pre className="whitespace-pre-wrap rounded border border-white/10 bg-black/40 p-2 text-[10px] text-slate-300">
+                    {mission.diff?.diff || '(no diff yet)'}
+                  </pre>
+                  {mission.commitPreparation ? (
+                    <div className="mt-2 rounded border border-cyan-500/20 bg-black/30 p-2">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-cyan-300">
+                        Prepared commit (never executed — stage &amp; commit manually)
+                      </p>
+                      <pre className="whitespace-pre-wrap rounded border border-white/10 bg-black/40 p-2 text-[10px] text-emerald-200">
+                        {mission.commitPreparation.commitMessage}
+                      </pre>
+                      <p className="mb-1 mt-2 text-[10px] font-bold uppercase tracking-widest text-cyan-300">Staging plan</p>
+                      <ul className="list-disc pl-4 text-slate-400">
+                        {mission.commitPreparation.stagingPlan.map((entry, i) => (
+                          <li key={i}>
+                            <span className="text-white">{entry.file}</span> — {entry.operation} — {entry.rationale}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-1 text-slate-500">
+                        Basis: {mission.commitPreparation.basis.proposerId} ({mission.commitPreparation.basis.sourceKind})
+                        {mission.commitPreparation.basis.validationsPassed.length
+                          ? ` · validations passed: ${mission.commitPreparation.basis.validationsPassed.join(', ')}`
+                          : ' · no validations recorded as passed'}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
 
               {tab === 'validation' ? (

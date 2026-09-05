@@ -1,0 +1,30 @@
+{
+  "reviewed": true,
+  "unrelated_dirty_tree_not_promoted": true,
+  "dev_files": [
+    "lib/providers/secretPresence.ts",
+    "lib/providers/publicError.ts",
+    "lib/providers/health.ts",
+    "lib/council/toDisplayText.ts",
+    "lib/council/providerDirectCall.ts",
+    "lib/mission-runtime/engineeringProviderExperience.validation.ts",
+    "app/api/chat/execute.ts",
+    "app/page.tsx"
+  ],
+  "node01_files": [
+    "lib/providers/secretPresence.ts",
+    "lib/providers/publicError.ts",
+    "lib/providers/health.ts",
+    "lib/council/toDisplayText.ts",
+    "lib/council/providerDirectCall.ts",
+    "app/api/chat/execute.ts (surgical provider sanitizer/presence only; native router hook preserved)",
+    "app/page.tsx (failure_reason display redaction only)"
+  ],
+  "not_promoted": [
+    "Native Router V1 logic",
+    "WRIM/LoRA/EXP006",
+    "unrelated Terra/UI dirty tree",
+    "council deliberation graph"
+  ],
+  "environment": "no secret values written"
+}
