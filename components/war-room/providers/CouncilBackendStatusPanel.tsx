@@ -1,57 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-
-type SeatActiveStatus = 'READY' | 'DEGRADED' | 'RATE_LIMITED' | 'UNAVAILABLE' | 'UNKNOWN'
-type LocalCandidateHealth = 'READY' | 'UNAVAILABLE' | 'MODEL_NOT_INSTALLED' | 'NOT_CONFIGURED'
-
-type SeatBackendStatus = {
-  seat: string
-  label: string
-  active: {
-    backendType: 'EXTERNAL'
-    provider: string
-    model: string
-    status: SeatActiveStatus
-    failureClass?: 'AUTH' | 'RATE_LIMIT'
-    latencyMs: number | null
-    fallbackUsed: boolean
-    note: string
-  }
-  localCandidate: {
-    roleSlot: string | null
-    repo: string | null
-    modelId: string | null
-    quantization: string | null
-    enabled: boolean
-    health: LocalCandidateHealth
-  }
-}
-
-type LocalRegistryRow = {
-  slot: string
-  repo: string
-  modelId: string
-  quantization: string
-  runtime: string
-  residentPolicy: string
-  enabled: boolean
-  health: LocalCandidateHealth
-}
-
-type BackendStatusSnapshot = {
-  generatedAt: string
-  routingFoundation: string
-  liveRouting: string
-  routingModeResolved: string
-  routingModeNote: string
-  localModelPool: string
-  ollama: { reachable: boolean; baseUrl: string; installedModelCount: number; probeLatencyMs: number }
-  seats: SeatBackendStatus[]
-  diversity: { uniqueModels: number; totalRespondingSeats: number; sharedModelGroups: { model: string; seats: string[] }[] }
-  localRegistry: LocalRegistryRow[]
-  guardrails: Record<string, boolean | string>
-}
+import { useCouncilBackendStatus } from './useCouncilBackendStatus'
+import type { LocalCandidateHealth, LocalRegistryRow, SeatActiveStatus, SeatBackendStatus } from './useCouncilBackendStatus'
 
 function toneColor(tone: 'ready' | 'degraded' | 'unavailable' | 'metadata') {
   if (tone === 'ready') return '#34D399'
@@ -108,30 +58,64 @@ function Metric({ label, value }: { label: string; value: string }) {
   )
 }
 
+function SeatCard({ row }: { row: SeatBackendStatus }) {
+  return (
+    <article className="rounded border border-white/10 bg-black/25 p-3" data-testid={`council-backend-status-${row.seat}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-white">{row.label}</h3>
+          <p className="mt-1 text-[10px] text-slate-500">seat: {row.seat}</p>
+        </div>
+        <Pill label={row.active.status} tone={seatStatusTone(row.active.status)} />
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        <Metric label="Backend" value={row.active.backendType} />
+        <Metric label="Provider" value={row.active.provider} />
+        <Metric label="Model" value={row.active.model} />
+        <Metric label="Fallback" value={row.active.fallbackUsed ? 'YES' : 'NO'} />
+        <Metric label="Latency" value={formatLatency(row.active.latencyMs)} />
+        <Metric label="Failure class" value={row.active.failureClass ?? '—'} />
+      </div>
+      {row.active.fallbackUsed ? (
+        <p className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-200/90">
+          FALLBACK USED{row.active.fallbackReason ? ` — ${row.active.fallbackReason}` : ''}
+        </p>
+      ) : null}
+      <div className="mt-3 rounded border border-white/10 bg-black/20 p-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[9px] font-semibold uppercase tracking-widest text-slate-400">
+            Local candidate {row.localCandidate.roleSlot ? `(${row.localCandidate.roleSlot})` : ''}
+          </span>
+          <Pill label={localHealthLabel(row.localCandidate.health)} tone={localHealthTone(row.localCandidate.health)} />
+        </div>
+        <p className="mt-1 text-[10px] text-slate-500">
+          {row.localCandidate.enabled ? row.localCandidate.repo : 'no enabled local candidate configured'}
+        </p>
+      </div>
+    </article>
+  )
+}
+
+function PoolCard({ entry }: { entry: LocalRegistryRow }) {
+  return (
+    <article className="rounded border border-white/10 bg-black/25 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-semibold text-white">{entry.slot}</h4>
+        <Pill label={entry.enabled ? localHealthLabel(entry.health) : 'DISABLED'} tone={entry.enabled ? localHealthTone(entry.health) : 'metadata'} />
+      </div>
+      <p className="mt-1 text-[10px] text-slate-500">{entry.repo}</p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+        <Metric label="Runtime" value={entry.runtime} />
+        <Metric label="Quant" value={entry.quantization} />
+        <Metric label="Resident policy" value={entry.residentPolicy} />
+        <Metric label="Enabled" value={entry.enabled ? 'yes' : 'no'} />
+      </div>
+    </article>
+  )
+}
+
 export function CouncilBackendStatusPanel() {
-  const [snapshot, setSnapshot] = useState<BackendStatusSnapshot | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/council/backend-status', { cache: 'no-store' })
-      const body = (await res.json()) as BackendStatusSnapshot & { error?: string }
-      if (!res.ok) throw new Error((body as { error?: string }).error || 'Council backend status failed')
-      setSnapshot(body)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Council backend status failed')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0)
-    return () => window.clearTimeout(timer)
-  }, [load])
+  const { snapshot, loading, error, load } = useCouncilBackendStatus()
 
   return (
     <section className="mx-auto mt-14 max-w-6xl border-t border-sky-900/50 pt-10">
@@ -176,39 +160,7 @@ export function CouncilBackendStatusPanel() {
 
       <div className="grid gap-3 lg:grid-cols-2">
         {(snapshot?.seats ?? []).map(row => (
-          <article key={row.seat} className="rounded border border-white/10 bg-black/25 p-3" data-testid={`council-backend-status-${row.seat}`}>
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-semibold text-white">{row.label}</h3>
-                <p className="mt-1 text-[10px] text-slate-500">seat: {row.seat}</p>
-              </div>
-              <Pill label={row.active.status} tone={seatStatusTone(row.active.status)} />
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              <Metric label="Backend" value={row.active.backendType} />
-              <Metric label="Provider" value={row.active.provider} />
-              <Metric label="Model" value={row.active.model} />
-              <Metric label="Fallback" value={row.active.fallbackUsed ? 'YES' : 'NO'} />
-              <Metric label="Latency" value={formatLatency(row.active.latencyMs)} />
-              <Metric label="Failure class" value={row.active.failureClass ?? '—'} />
-            </div>
-            {row.active.fallbackUsed ? (
-              <p className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-200/90">
-                FALLBACK USED — {row.active.note}
-              </p>
-            ) : null}
-            <div className="mt-3 rounded border border-white/10 bg-black/20 p-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[9px] font-semibold uppercase tracking-widest text-slate-400">
-                  Local candidate {row.localCandidate.roleSlot ? `(${row.localCandidate.roleSlot})` : ''}
-                </span>
-                <Pill label={localHealthLabel(row.localCandidate.health)} tone={localHealthTone(row.localCandidate.health)} />
-              </div>
-              <p className="mt-1 text-[10px] text-slate-500">
-                {row.localCandidate.enabled ? row.localCandidate.repo : 'no enabled local candidate configured'}
-              </p>
-            </div>
-          </article>
+          <SeatCard key={row.seat} row={row} />
         ))}
       </div>
 
@@ -241,19 +193,7 @@ export function CouncilBackendStatusPanel() {
         </header>
         <div className="grid gap-2 lg:grid-cols-2">
           {(snapshot?.localRegistry ?? []).map(entry => (
-            <article key={entry.slot} className="rounded border border-white/10 bg-black/25 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h4 className="text-sm font-semibold text-white">{entry.slot}</h4>
-                <Pill label={entry.enabled ? localHealthLabel(entry.health) : 'DISABLED'} tone={entry.enabled ? localHealthTone(entry.health) : 'metadata'} />
-              </div>
-              <p className="mt-1 text-[10px] text-slate-500">{entry.repo}</p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <Metric label="Runtime" value={entry.runtime} />
-                <Metric label="Quant" value={entry.quantization} />
-                <Metric label="Resident policy" value={entry.residentPolicy} />
-                <Metric label="Enabled" value={entry.enabled ? 'yes' : 'no'} />
-              </div>
-            </article>
+            <PoolCard key={entry.slot} entry={entry} />
           ))}
         </div>
       </section>

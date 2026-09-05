@@ -11,7 +11,9 @@ import {
   localCandidateHealthFromProbe,
   localRegistryEntryForSlot,
   modelLabelForSeat,
+  providerDisplayName,
   resolveCouncilRoutingMode,
+  safeOllamaBaseUrl,
   type LocalCandidateHealth,
 } from '@/lib/council/live-orchestration/backends'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
@@ -53,6 +55,7 @@ type SeatStatusRow = {
     failureClass?: 'AUTH' | 'RATE_LIMIT'
     latencyMs: number | null
     fallbackUsed: boolean
+    fallbackReason: string | null
     note: string
   }
   localCandidate: {
@@ -99,12 +102,21 @@ export async function GET() {
       label: rosterEntry.label,
       active: {
         backendType: 'EXTERNAL',
-        provider: providerId,
+        provider: providerDisplayName(providerId),
         model: status === 'READY' || status === 'DEGRADED' || status === 'RATE_LIMITED' ? modelLabelForSeat(seat) : 'unconfigured',
         status,
         failureClass,
         latencyMs: providerStatus?.latencyMs ?? null,
-        fallbackUsed: providerStatus?.integrity.fallback_used ?? false,
+        // Live Council execution is still EXTERNAL_ONLY (app/api/chat/execute.ts is not wired to
+        // invokeCouncilSeat() yet), so no Council LOCAL -> EXTERNAL backend-routing fallback can
+        // exist for any seat right now. `providerStatus.integrity.fallback_used` is a DIFFERENT,
+        // pre-existing signal from lib/providers/health.ts's own retry/integrity pipeline — it
+        // reflects that pipeline's internal fallback behavior, not this mission's backend-routing
+        // fallback concept, and must never be reused here even though the names coincide. Once a
+        // later mission wires real invokeCouncilSeat() results through, this should read the real
+        // BackendMetadata.fallbackFrom/fallbackReason from that call instead.
+        fallbackUsed: false,
+        fallbackReason: null,
         note: providerStatus?.note ?? 'No canonical provider entry for this seat.',
       },
       localCandidate: {
@@ -159,7 +171,9 @@ export async function GET() {
       localModelPool: probe.available ? 'CONFIGURED / NOT ACTIVATED' : 'CONFIGURED / NOT ACTIVATED / RUNTIME UNREACHABLE',
       ollama: {
         reachable: probe.available,
-        baseUrl: probe.baseUrl,
+        // Reconstructed from protocol+hostname+port only — never the raw configured URL, so a
+        // credential-bearing OLLAMA_BASE_URL (e.g. embedded basic-auth userinfo) can't leak here.
+        baseUrl: safeOllamaBaseUrl(probe.baseUrl),
         installedModelCount: probe.models.length,
         probeLatencyMs,
       },

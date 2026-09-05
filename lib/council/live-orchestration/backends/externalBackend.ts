@@ -15,6 +15,22 @@ export const EXTERNAL_PROVIDER_BY_SEAT: Record<CouncilOrchestrationFamily, strin
   bridge_architect: 'unknown',
 }
 
+const PROVIDER_DISPLAY_NAME: Record<string, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  google: 'Google',
+  xai: 'xAI',
+  moonshot: 'Moonshot',
+  ollama: 'Ollama',
+  unknown: 'unconfigured',
+}
+
+/** Display-only. Never changes provider identity — `EXTERNAL_PROVIDER_BY_SEAT` values (the ids
+ * actually used for lookups/matching) are untouched; this only formats a label for the UI. */
+export function providerDisplayName(providerId: string): string {
+  return PROVIDER_DISPLAY_NAME[providerId] ?? providerId
+}
+
 export function modelLabelForSeat(seat: CouncilOrchestrationFamily): string {
   if (seat === 'chatgpt' || seat === 'baby') return 'gpt-4o'
   if (seat === 'claude' || seat === 'red_team') return 'claude-sonnet-5'

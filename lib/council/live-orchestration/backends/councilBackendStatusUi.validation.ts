@@ -1,9 +1,11 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import { GET as backendStatusGet } from '@/app/api/council/backend-status/route'
-import { EXTERNAL_PROVIDER_BY_SEAT } from './externalBackend'
-import { localCandidateHealthFromProbe } from './localBackend'
+import { EXTERNAL_PROVIDER_BY_SEAT, providerDisplayName } from './externalBackend'
+import { localCandidateHealthFromProbe, safeOllamaBaseUrl } from './localBackend'
+import { LOCAL_MODEL_REGISTRY } from './localModelRegistry'
 import { computeModelDiversity } from './diversity'
 import { projectSeatBackendStatusRows } from './uiStatusProjection'
 import { runCouncilLocalBackendFoundationValidation } from './localBackendFoundation.validation'
@@ -23,7 +25,7 @@ async function fetchSnapshot() {
     liveRouting: string
     routingModeResolved: string
     routingModeNote: string
-    ollama: { reachable: boolean; installedModelCount: number; probeLatencyMs: number }
+    ollama: { reachable: boolean; baseUrl: string; installedModelCount: number; probeLatencyMs: number }
     seats: {
       seat: string
       label: string
@@ -35,6 +37,7 @@ async function fetchSnapshot() {
         failureClass?: string
         latencyMs: number | null
         fallbackUsed: boolean
+        fallbackReason: string | null
         note: string
       }
       localCandidate: { roleSlot: string | null; repo: string | null; modelId: string | null; quantization: string | null; enabled: boolean; health: string }
@@ -92,6 +95,38 @@ function executeRouteSource(): string {
   return readFileSync(path, 'utf8')
 }
 
+function repoRoot(): string {
+  // lib/council/live-orchestration/backends/<this file> -> 4 levels up to repo root.
+  return fileURLToPath(new URL('../../../../', import.meta.url))
+}
+
+/**
+ * Real git-diff execution-safety check: `git diff HEAD --name-only` compares the working tree
+ * directly against HEAD, so it catches BOTH staged and unstaged changes (unlike bare `git diff`,
+ * which only compares working tree to the index and can miss a staged-but-uncommitted change).
+ * Paths are ordinary repo-root-relative strings passed straight to git — no manual relative-URL
+ * arithmetic, so there's no `../../` depth to get wrong.
+ */
+function gitDiffAgainstHead(paths: string[]): string {
+  try {
+    return execFileSync('git', ['diff', 'HEAD', '--name-only', '--', ...paths], {
+      cwd: repoRoot(),
+      encoding: 'utf8',
+    }).trim()
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
+const EXECUTION_CRITICAL_PATHS = [
+  'app/api/chat/execute.ts',
+  'lib/council/live-orchestration/streamProvider.ts',
+  'lib/council/live-orchestration/adapters/anthropic.ts',
+  'lib/council/live-orchestration/adapters/openai.ts',
+  'lib/council/live-orchestration/adapters/gemini.ts',
+  'lib/council/live-orchestration/adapters/grok.ts',
+]
+
 export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[]> {
   const results: CaseResult[] = []
 
@@ -106,12 +141,30 @@ export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[
     ),
   )
 
-  // 2. External backend metadata projects correctly.
+  // 2. External backend metadata projects correctly — provider is the display-formatted name
+  //    (e.g. "Anthropic"), never the raw internal id, but still traceable back to it 1:1.
   results.push(
     check(
       'external backend metadata projects correctly',
-      snapshot.seats.every(row => row.active.backendType === 'EXTERNAL' && row.active.provider === (EXTERNAL_PROVIDER_BY_SEAT as Record<string, string>)[row.seat]),
-      'every row backendType=EXTERNAL and provider matches EXTERNAL_PROVIDER_BY_SEAT',
+      snapshot.seats.every(
+        row => row.active.backendType === 'EXTERNAL'
+          && row.active.provider === providerDisplayName((EXTERNAL_PROVIDER_BY_SEAT as Record<string, string>)[row.seat]),
+      ),
+      'every row backendType=EXTERNAL and provider matches providerDisplayName(EXTERNAL_PROVIDER_BY_SEAT[seat])',
+    ),
+  )
+
+  // 2b. Provider display helper is display-only — identity lookups still use the raw id.
+  results.push(
+    check(
+      'provider display helper formats without changing provider identity',
+      providerDisplayName('openai') === 'OpenAI'
+      && providerDisplayName('anthropic') === 'Anthropic'
+      && providerDisplayName('google') === 'Google'
+      && providerDisplayName('xai') === 'xAI'
+      && providerDisplayName('moonshot') === 'Moonshot'
+      && providerDisplayName('made-up-id') === 'made-up-id',
+      'known ids map to display names; unknown ids pass through unchanged',
     ),
   )
 
@@ -254,23 +307,30 @@ export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[
     ),
   )
 
-  // 19. Current production execution path unchanged — source-level proxy: execute.ts does not
-  //     import the new backends module (authoritative git-diff check is run separately, see report).
-  const executeSource = executeRouteSource()
+  // 19-20. Execution-critical files unchanged — a real `git diff HEAD --name-only` across
+  // execute.ts, streamProvider.ts, and all 4 provider adapters, in one check. Empty output is the
+  // only passing state; any listed path means one of these files has an uncommitted change.
+  const executionDiff = gitDiffAgainstHead(EXECUTION_CRITICAL_PATHS)
   results.push(
     check(
-      'current production execution path unchanged (no backends import)',
-      !executeSource.includes('live-orchestration/backends'),
-      'app/api/chat/execute.ts does not import lib/council/live-orchestration/backends',
+      'execution-critical files unchanged (git diff HEAD)',
+      executionDiff.length === 0,
+      executionDiff.length === 0 ? 'git diff HEAD --name-only reports no changes across all 6 files' : `changed=${executionDiff}`,
     ),
   )
 
-  // 20. app/api/chat/execute.ts untouched — same proxy; authoritative check is `git diff` (external).
+  // execute.ts specifically: still calls the pre-existing unmodified streamProvider.ts exports
+  // directly, and does not import this mission's new backends module — a second, independent
+  // signal alongside the git diff above (source content, not just "no diff since HEAD").
+  const executeSource = executeRouteSource()
   results.push(
     check(
-      'app/api/chat/execute.ts untouched (source-level proxy)',
-      executeSource.includes('familyIsStreamConfigured') && executeSource.includes('streamCouncilFamily'),
-      'execute.ts still calls the original, unmodified streamProvider.ts exports directly',
+      'app/api/chat/execute.ts still calls the original unmodified streamProvider.ts exports',
+      executeSource.includes('familyIsStreamConfigured')
+      && executeSource.includes('streamCouncilFamily')
+      && !executeSource.includes('live-orchestration/backends')
+      && !executeSource.includes('invokeCouncilSeat'),
+      `familyIsStreamConfigured=${executeSource.includes('familyIsStreamConfigured')} streamCouncilFamily=${executeSource.includes('streamCouncilFamily')} backendsImport=${executeSource.includes('live-orchestration/backends')}`,
     ),
   )
 
@@ -297,6 +357,62 @@ export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[
       'UI keeps seat and backend identity as distinct fields',
       source.includes('row.seat') && source.includes('row.active.model') && source.includes('row.active.provider'),
       'component renders seat, model, and provider as separate accessors',
+    ),
+  )
+
+  // 24. Mandatory fallback-semantics fix: live seat rows must never claim a Council LOCAL ->
+  // EXTERNAL backend-routing fallback occurred, since live routing is still EXTERNAL_ONLY and no
+  // such fallback can exist yet. `provider.integrity.fallback_used` (a different, pre-existing
+  // signal from lib/providers/health.ts's own retry pipeline) must not leak into this field.
+  const routeSourceForFallbackComment = readFileSync(
+    fileURLToPath(new URL('../../../../app/api/council/backend-status/route.ts', import.meta.url)),
+    'utf8',
+  )
+  results.push(
+    check(
+      'no fake Council backend-routing fallback from live seat rows',
+      snapshot.seats.every(row => row.active.fallbackUsed === false && row.active.fallbackReason === null)
+      && routeSourceForFallbackComment.includes('integrity.fallback_used')
+      && routeSourceForFallbackComment.toLowerCase().includes('must never be reused here'),
+      `fallbackUsed values: ${snapshot.seats.map(row => row.active.fallbackUsed).join(',')}; explanatory comment present=${routeSourceForFallbackComment.toLowerCase().includes('must never be reused here')}`,
+    ),
+  )
+
+  // 25. Secret-in-URL: a credential-bearing local runtime URL must never leak into the response.
+  const maliciousOllamaUrl = 'http://user:sk-ant-TOTALLY-FAKE-URL-SECRET@localhost:11434'
+  const sanitizedOllamaUrl = safeOllamaBaseUrl(maliciousOllamaUrl)
+  results.push(
+    check(
+      'credential-bearing local runtime URL cannot leak through the API response',
+      !sanitizedOllamaUrl.includes('user')
+      && !sanitizedOllamaUrl.includes('sk-ant-TOTALLY-FAKE-URL-SECRET')
+      && !sanitizedOllamaUrl.includes('@')
+      && sanitizedOllamaUrl === 'http://localhost:11434'
+      && !snapshot.ollama.baseUrl.includes('@'),
+      `sanitized="${sanitizedOllamaUrl}" liveOllamaBaseUrl="${snapshot.ollama.baseUrl}"`,
+    ),
+  )
+
+  // 26. RESEARCH slot represented honestly: disabled, reuses GENERAL's exact model (not a
+  // separate weight), and never reported as a live/READY backend on its own.
+  const generalEntry = LOCAL_MODEL_REGISTRY.find(entry => entry.slot === 'GENERAL')
+  const researchEntry = LOCAL_MODEL_REGISTRY.find(entry => entry.slot === 'RESEARCH')
+  const researchNeverReady = localCandidateHealthFromProbe(
+    researchEntry?.enabled ? researchEntry : null,
+    fakeProbe({ available: true, models: [researchEntry?.modelId ?? ''] }),
+  ) !== 'READY'
+  results.push(
+    check(
+      'RESEARCH slot disabled and honestly represented as reusing GENERAL',
+      Boolean(
+        researchEntry
+        && researchEntry.enabled === false
+        && generalEntry
+        && researchEntry.modelId === generalEntry.modelId
+        && researchEntry.repo === generalEntry.repo
+        && researchNeverReady,
+      ),
+      `RESEARCH.enabled=${researchEntry?.enabled} RESEARCH.repo=${researchEntry?.repo} GENERAL.repo=${generalEntry?.repo} neverReady=${researchNeverReady}`,
     ),
   )
 
