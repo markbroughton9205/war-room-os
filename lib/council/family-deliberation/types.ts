@@ -60,6 +60,12 @@ export type DeliberationTurn = {
   confidence: number | null
   recommended_action: string
   revision_status: 'not_revision' | 'revised' | 'stood_firm' | 'invalid_revision'
+  agent_identity?: string | null
+  backend_type?: 'LOCAL' | 'EXTERNAL' | null
+  backend_provider?: string | null
+  backend_runtime?: string | null
+  fallback_from?: 'LOCAL' | 'EXTERNAL' | null
+  error_code?: string | null
 }
 
 export type DeliberationSession = {
@@ -86,4 +92,9 @@ export type DeliberationProviderResult = {
   content: string
   status: DeliberationCompletionStatus
   failureReason?: string | null
+  backendType?: 'LOCAL' | 'EXTERNAL' | null
+  backendProvider?: string | null
+  backendRuntime?: string | null
+  fallbackFrom?: 'LOCAL' | 'EXTERNAL' | null
+  errorCode?: string | null
 }

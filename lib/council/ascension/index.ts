@@ -1,0 +1,45 @@
+export {
+  ASCENSION_AUTONOMY_GUARD,
+  ASCENSION_LOOP,
+  ASCENSION_PROMOTION_PIPELINE,
+  LESSON_TERMINAL_STATES,
+  type AgentEvolutionProfile,
+  type AgentSkillRecord,
+  type AscensionAutonomyGuard,
+  type AscensionFoundation,
+  type AscensionLoopStage,
+  type AscensionPromotionStage,
+  type CommanderApprovalRequiredChange,
+  type EvolutionEvidence,
+  type EvolutionEvidenceKind,
+  type ExperienceRecord,
+  type LessonCandidate,
+  type LessonCandidateType,
+  type LessonPromotionStatus,
+  type PromotionGateId,
+  type PromotionGateResult,
+  type PromotionRecord,
+} from './types'
+export {
+  ASCENSION_FOUNDATION,
+  NEBULA_EVOLUTION_PROFILES,
+  canApplySkillGrowth,
+  proposeSkillGrowth,
+} from './profiles'
+export {
+  autonomyBlocksDirectLessonInstall,
+  createLessonCandidate,
+  experienceChangesProductionBehavior,
+  isTestableLessonCandidate,
+  pulsarPrimarySourceLessonFixture,
+  recordExperience,
+} from './lessons'
+export {
+  COMMANDER_APPROVAL_REQUIRED_CHANGES,
+  allPromotionGatesExist,
+  decideLessonPromotion,
+  evaluatePromotionGates,
+  experienceIsNotPromotion,
+  productionBehaviorMayChange,
+  requiresCommanderApproval,
+} from './promotion'

@@ -64,13 +64,13 @@ export type AdaptiveCouncilReadoutEligibilityInput = {
 }
 
 const FAMILY_LABELS: Record<CouncilOrchestrationFamily, string> = {
-  chatgpt: 'ChatGPT',
-  claude: 'Claude',
-  grok: 'Grok',
-  gemini: 'Gemini',
-  red_team: 'Red Team',
+  chatgpt: 'AURORA',
+  claude: 'ORION',
+  grok: 'PULSAR',
+  gemini: 'LUMEN',
+  red_team: 'PHOENIX',
   baby: 'Baby AI Observer',
-  kimi: 'Kimi',
+  kimi: 'NOVA',
   bridge_architect: 'Bridge Architect',
 }
 

@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react'
 
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
 import type { ConversationRuntimeSnapshot } from '@/lib/conversation-runtime/types'
 import type { ProviderFamilyConversationState } from '@/lib/provider-state/types'
 
@@ -20,9 +21,9 @@ const FOCUS_STYLE: Record<ProviderFamilyConversationState['focusLabel'], string>
 }
 
 function familyLabel(family: CouncilOrchestrationFamily): string {
-  if (family === 'red_team') return 'Red Team'
   if (family === 'bridge_architect') return 'Bridge'
-  return family.charAt(0).toUpperCase() + family.slice(1)
+  if (family === 'baby') return 'Baby AI'
+  return displayNameForSeat(family, family.charAt(0).toUpperCase() + family.slice(1))
 }
 
 export function ConversationStatePanel({

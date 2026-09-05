@@ -43,9 +43,18 @@ async function fetchSnapshot() {
         fallbackReason: string | null
         note: string
       }
-      localCandidate: { roleSlot: string | null; repo: string | null; modelId: string | null; quantization: string | null; enabled: boolean; health: string }
+      localCandidate: { roleSlot: string | null; repo: string | null; modelId: string | null; quantization: string | null; runtime?: string | null; sharedBacking?: boolean; enabled: boolean; health: string }
     }[]
     diversity: { uniqueModels: number; totalRespondingSeats: number; sharedModelGroups: { model: string; seats: string[] }[] }
+    nebulaSharedBrain?: {
+      modelId: string
+      parameterClass: string
+      runtime: string
+      roleSlot: string
+      sharedBacking: boolean
+      agentIdentities: string[]
+      note: string
+    }
     localRegistry: { slot: string; enabled: boolean; health: string }[]
     guardrails: Record<string, boolean | string>
   }
@@ -400,6 +409,19 @@ export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[
   const requiredLabels = ['READY', 'UNAVAILABLE', 'MODEL NOT INSTALLED', 'NOT INSTALLED / UNKNOWN', 'RATE_LIMITED']
   const missingLabels = requiredLabels.filter(label => !source.includes(label))
   results.push(check('required status label vocabulary present in UI', missingLabels.length === 0, missingLabels.length ? `missing=${missingLabels.join(',')}` : 'all required labels present'))
+
+  results.push(
+    check(
+      'nebula shared brain disclosed in diagnostics',
+      Boolean(snapshot.nebulaSharedBrain)
+        && snapshot.nebulaSharedBrain?.modelId === 'huihui_ai/qwen3-abliterated:14b'
+        && snapshot.nebulaSharedBrain?.sharedBacking === true
+        && snapshot.nebulaSharedBrain?.agentIdentities.length === 8
+        && source.includes('Shared backing')
+        && source.includes('nebulaSharedBrain'),
+      `model=${snapshot.nebulaSharedBrain?.modelId} shared=${snapshot.nebulaSharedBrain?.sharedBacking} agents=${snapshot.nebulaSharedBrain?.agentIdentities.join(',')}`,
+    ),
+  )
 
   // 23. Seat identity kept separate from backend identity in the UI source (no field aliasing).
   results.push(

@@ -10,6 +10,11 @@ const PROVIDER_FAILURE_SUBSTRINGS = [
   'the operation was aborted',
   'timed out',
   'fetch failed',
+  'model_not_installed',
+  'no enabled local registry slot',
+  'provider contribution unavailable',
+  'council provider calls did not return',
+  "didn't get a response in this round",
 ] as const
 
 export function shouldSuppressProviderFailureFromChatStream(

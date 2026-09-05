@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
 import type { LiveResearchEvidencePacket } from '@/lib/runtime/liveResearchEvidencePacket'
 import type {
   DeliberationClaim,
@@ -20,15 +21,11 @@ export function createDeliberationId(prefix: string): string {
 }
 
 export function familyDisplayName(family: CouncilOrchestrationFamily): string {
-  if (family === 'chatgpt') return 'ChatGPT'
-  if (family === 'claude') return 'Claude'
-  if (family === 'grok') return 'Grok'
-  if (family === 'gemini') return 'Gemini'
-  if (family === 'kimi') return 'Kimi'
-  if (family === 'red_team') return 'RED TEAM'
-  if (family === 'baby') return 'Baby AI'
-  if (family === 'bridge_architect') return 'Bridge Architect'
-  return family
+  const fallback =
+    family === 'baby' ? 'Baby AI'
+    : family === 'bridge_architect' ? 'Bridge Architect'
+    : family
+  return displayNameForSeat(family, fallback)
 }
 
 export function providerModelForFamily(family: CouncilOrchestrationFamily): string | null {
@@ -176,6 +173,12 @@ export function appendDeliberationTurn(
     confidence: complete ? 0.64 : null,
     recommended_action: complete ? 'Review this position inside the Council exchange before acting.' : 'No action; provider contribution unresolved.',
     revision_status: revisionStatus,
+    agent_identity: displayNameForSeat(input.family),
+    backend_type: input.providerResult.backendType ?? null,
+    backend_provider: input.providerResult.backendProvider ?? null,
+    backend_runtime: input.providerResult.backendRuntime ?? null,
+    fallback_from: input.providerResult.fallbackFrom ?? null,
+    error_code: input.providerResult.errorCode ?? null,
   }
   session.turns.push(turn)
   if (input.role === 'council_synthesis') {
@@ -288,7 +291,7 @@ function roleInstruction(role: DeliberationTurnRole): string {
     return "Turn role: direct response. Respond to what the prior family actually said, in your own words — agree, push back, or add to it. Do not cite it by message ID or label your reply with sections; just talk about the substance."
   }
   if (role === 'red_team_challenge') {
-    return "Turn role: Red Team challenge. Push back on the prior family's position by name, not by message ID. Focus on assumptions, missing evidence, and failure modes — say it like you're the one in the room saying \"hold up,\" not filing a finding."
+    return "Turn role: PHOENIX challenge. Push back on the prior agent's position by name, not by message ID. Focus on assumptions, missing evidence, and failure modes — say it like you're the one in the room saying \"hold up,\" not filing a finding."
   }
   if (role === 'revision_or_stand_firm') {
     return "Turn role: revision or stand firm. Respond to the Red Team challenge directly, in your own words — either revise your position or stand firm, and say why. No message-ID citations or labeled sections."
@@ -310,7 +313,7 @@ export function formatDeliberationTurnForChat(turn: DeliberationTurn, references
       ? `Revision of: ${turn.revision_of_message_id} (${turn.revision_status})`
       : `Revision status: ${turn.revision_status}`
   return [
-    `Provider: ${turn.provider_label}${turn.provider_model ? ` · ${turn.provider_model}` : ''}`,
+    `Agent: ${turn.provider_label}${turn.provider_model ? ` · backend ${turn.provider_model}` : ''}`,
     `Role: ${turn.turn_role}`,
     responseLine,
     revisionLine,

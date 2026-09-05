@@ -38,12 +38,12 @@ export type CouncilOperationPathMapping = {
 }
 
 const FAMILY_LABELS: Record<CouncilOrchestrationFamily | 'system' | 'unknown', string> = {
-  chatgpt: 'ChatGPT',
-  claude: 'Claude',
-  grok: 'Grok',
-  gemini: 'Gemini',
-  kimi: 'Kimi',
-  red_team: 'Red Team',
+  chatgpt: 'AURORA',
+  claude: 'ORION',
+  grok: 'PULSAR',
+  gemini: 'LUMEN',
+  kimi: 'NOVA',
+  red_team: 'PHOENIX',
   baby: 'Baby AI Observer',
   bridge_architect: 'Bridge Architect',
   system: 'System Status',

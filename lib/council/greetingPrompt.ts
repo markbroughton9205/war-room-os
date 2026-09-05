@@ -27,12 +27,12 @@ export type GreetingPromptMeta = { label: string; roleShort: string }
 
 /** Non-stable-group (Direct / Full Council) family labels — matches each family's full persona prompt. */
 export const GREETING_META_BY_FAMILY: Record<CouncilOrchestrationFamily, GreetingPromptMeta> = {
-  chatgpt: { label: 'ChatGPT Family', roleShort: 'synthesis and prioritization' },
-  claude: { label: 'Claude Family', roleShort: 'architecture and truth boundaries' },
-  grok: { label: 'Grok Family', roleShort: 'signals and contradiction analysis' },
-  gemini: { label: 'Gemini Family', roleShort: 'research and long-context analysis' },
-  kimi: { label: 'Kimi Family', roleShort: 'task decomposition and execution planning' },
-  red_team: { label: 'Red Team', roleShort: 'adversarial review' },
+  chatgpt: { label: 'AURORA', roleShort: 'calibrated integration and final Council synthesis' },
+  claude: { label: 'ORION', roleShort: 'architecture and operational viability' },
+  grok: { label: 'PULSAR', roleShort: 'evidence discovery and signals' },
+  gemini: { label: 'LUMEN', roleShort: 'claim verification and calibration' },
+  kimi: { label: 'NOVA', roleShort: 'strategy, options, and sequencing' },
+  red_team: { label: 'PHOENIX', roleShort: 'adversarial review and recovery' },
   baby: { label: 'Baby AI', roleShort: 'observational council witness' },
   // Always short-circuited to "currently unavailable" in execute.ts's callCouncilProvider
   // before any system prompt is built — entry exists only to satisfy the Record type.

@@ -3,6 +3,7 @@
 import { memo } from 'react'
 
 import { COUNCIL_ROSTER } from '@/lib/council/familyRoster'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
 import {
   FAMILY_OPERATION_STATUS_PRESENTATION,
   type FamilyOperationStatus,
@@ -44,12 +45,12 @@ const OPERATION_TONE_DOT: Record<FamilyOperationTone, { color: string; glow?: st
 
 const MEMBER_ORDER: { id: string; label: string; rosterId?: string }[] = [
   { id: 'rael', label: "Ra'el", rosterId: undefined },
-  { id: 'chatgpt', label: 'ChatGPT', rosterId: 'chatgpt' },
-  { id: 'claude', label: 'Claude', rosterId: 'claude' },
-  { id: 'gemini', label: 'Gemini', rosterId: 'gemini' },
-  { id: 'grok', label: 'Grok', rosterId: 'grok' },
-  { id: 'kimi', label: 'Kimi', rosterId: 'kimi' },
-  { id: 'red_team', label: 'Red Team', rosterId: 'red_team' },
+  { id: 'chatgpt', label: displayNameForSeat('chatgpt', 'AURORA'), rosterId: 'chatgpt' },
+  { id: 'claude', label: displayNameForSeat('claude', 'ORION'), rosterId: 'claude' },
+  { id: 'gemini', label: displayNameForSeat('gemini', 'LUMEN'), rosterId: 'gemini' },
+  { id: 'grok', label: displayNameForSeat('grok', 'PULSAR'), rosterId: 'grok' },
+  { id: 'kimi', label: displayNameForSeat('kimi', 'NOVA'), rosterId: 'kimi' },
+  { id: 'red_team', label: displayNameForSeat('red_team', 'PHOENIX'), rosterId: 'red_team' },
 ]
 
 const QUICK_TOOLS: { label: string; panel: 'command-intel' | 'operations' | 'memory-core' | 'system-health' }[] = [

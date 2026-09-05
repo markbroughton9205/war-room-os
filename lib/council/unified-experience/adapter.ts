@@ -1,6 +1,7 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { DeliberationTurn } from '@/lib/council/family-deliberation'
 import type { ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
+import { displayNameForSeat, seatForDisplayIdentity } from '@/lib/council/nebula/identity'
 import { countOperationFamilyContributions } from './operationSummary'
 import type {
   CommanderBriefing,
@@ -42,22 +43,34 @@ export type CouncilOperationMessageInput = {
 
 const FAMILY_BY_LABEL: Record<string, CouncilOrchestrationFamily | 'system' | 'unknown'> = {
   CHATGPT: 'chatgpt',
+  AURORA: 'chatgpt',
+  'AURORA COUNCIL': 'chatgpt',
   CLAUDE: 'claude',
+  ORION: 'claude',
+  'ORION COUNCIL': 'claude',
   GROK: 'grok',
+  PULSAR: 'grok',
+  'PULSAR COUNCIL': 'grok',
   GEMINI: 'gemini',
+  LUMEN: 'gemini',
+  'LUMEN COUNCIL': 'gemini',
   KIMI: 'kimi',
+  NOVA: 'kimi',
+  'NOVA COUNCIL': 'kimi',
   'RED TEAM': 'red_team',
+  PHOENIX: 'red_team',
+  'PHOENIX COUNCIL': 'red_team',
   SYSTEM: 'system',
   CONTROL: 'system',
 }
 
 const FAMILY_LABELS: Record<CouncilOrchestrationFamily | 'system' | 'unknown', string> = {
-  chatgpt: 'ChatGPT',
-  claude: 'Claude',
-  grok: 'Grok',
-  gemini: 'Gemini',
-  kimi: 'Kimi',
-  red_team: 'Red Team',
+  chatgpt: 'AURORA',
+  claude: 'ORION',
+  grok: 'PULSAR',
+  gemini: 'LUMEN',
+  kimi: 'NOVA',
+  red_team: 'PHOENIX',
   baby: 'Baby AI Observer',
   bridge_architect: 'Bridge Architect',
   system: 'System Status',
@@ -92,12 +105,17 @@ function normalizedFamilyLabelKey(label: string): string {
 }
 
 export function familyIdFromLabel(label: string): CouncilOrchestrationFamily | 'system' | 'unknown' {
-  return FAMILY_BY_LABEL[normalizedFamilyLabelKey(label)] ?? 'unknown'
+  const key = normalizedFamilyLabelKey(label)
+  if (key === 'SYSTEM' || key === 'CONTROL') return 'system'
+  const fromNebula = seatForDisplayIdentity(label)
+  if (fromNebula) return fromNebula
+  return FAMILY_BY_LABEL[key] ?? 'unknown'
 }
 
 export function familyLabel(family: CouncilOrchestrationFamily | 'system' | 'unknown' | null): string | null {
   if (!family) return null
-  return FAMILY_LABELS[family] ?? FAMILY_LABELS.unknown
+  if (family === 'system' || family === 'unknown') return FAMILY_LABELS[family]
+  return displayNameForSeat(family, FAMILY_LABELS[family])
 }
 
 function roleLabel(family: CouncilOrchestrationFamily | 'system' | 'unknown' | null): string | null {

@@ -10,6 +10,8 @@ import {
   estimateTextTokens,
   STABLE_GROUP_PROMPT_TOKEN_CEILING,
 } from '@/lib/council/providerTokenDiagnostics'
+import { nebulaAgentForSeat } from '@/lib/council/nebula/identity'
+import { buildAuroraFinalSynthesisRole, buildNebulaStableGroupRole } from '@/lib/council/nebula/persona'
 
 export { STABLE_GROUP_PROMPT_TOKEN_CEILING }
 
@@ -27,22 +29,15 @@ const SENTENCE_LIMIT =
   'Reply in plain language. Maximum 4–6 sentences. No bullet scaffolds unless Ra\'el asked for a list.'
 
 const ROLE_BY_FAMILY: Record<StableGroupFamily, string> = {
-  chatgpt:
-    "You are ChatGPT Family — strategic and direct, the one helping lead the plan: restate Ra'el's point simply, then add the one useful angle that organizes the next move. Talk like you're leading, not filing a report.",
-  claude:
-    "You are Claude Family — thoughtful: catch what might be missing and raise it carefully, without sounding stiff. Add the constraint or sequencing point that actually changes the plan.",
-  grok:
-    "You are Grok Family — blunt and unconventional: say the angle nobody else is bringing up. External volatility or contradiction only when evidence is in the prompt; otherwise say telemetry gap, plainly, like you're just being straight with the room.",
-  gemini:
-    "You are Gemini Family — connect the dots: show how prior family lines fit together or where they don't, broadening the picture rather than repeating it. Respond with at least 2-3 sentences addressing the Commander's message directly — do not reply with only a greeting or acknowledgment.",
-  kimi:
-    'You are Kimi Family — decompose Ra\'el\'s ask into ordered steps, dependencies, and execution checks; stay practical and concise.',
-  red_team:
-    'You are Red Team — the protective one: say "hold up" when something could break, in one sharp, natural pass — material risks, overconfidence, or missing evidence. Sound like family looking out for Ra\'el, not a compliance report. No theatrical alarmism.',
+  chatgpt: buildNebulaStableGroupRole(nebulaAgentForSeat('chatgpt')!),
+  claude: buildNebulaStableGroupRole(nebulaAgentForSeat('claude')!),
+  grok: buildNebulaStableGroupRole(nebulaAgentForSeat('grok')!),
+  gemini: buildNebulaStableGroupRole(nebulaAgentForSeat('gemini')!),
+  kimi: buildNebulaStableGroupRole(nebulaAgentForSeat('kimi')!),
+  red_team: buildNebulaStableGroupRole(nebulaAgentForSeat('red_team')!),
 }
 
-const FINAL_SYNTHESIS_ROLE =
-  "You are ChatGPT Family — optional closing synthesis: one short, natural paragraph weaving what the family already said; no new topics, no report structure."
+const FINAL_SYNTHESIS_ROLE = buildAuroraFinalSynthesisRole()
 
 export function isStableGroupFamily(family: string): family is StableGroupFamily {
   return (STABLE_GROUP_FAMILY_ORDER as readonly string[]).includes(family)

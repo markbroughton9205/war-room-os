@@ -50,9 +50,9 @@ export function buildAssemblePolicyForTurn(commanderText: string, extras?: Parti
     depth: extras?.depth ?? classified.depth,
     intent: extras?.intent ?? classified.intent,
     commanderText: extras?.commanderText ?? commanderText,
-    allowDurableMemory: extras?.allowDurableMemory ?? (classified.intent === 'EXPLICIT_MEMORY' || classified.depth === 'FULL'),
-    includeAssemblerRecentMessages: extras?.includeAssemblerRecentMessages ?? classified.depth === 'FULL',
-    includeProjectState: extras?.includeProjectState ?? (classified.depth === 'FULL' && classified.intent !== 'KNOWLEDGE_QUESTION'),
+    allowDurableMemory: extras?.allowDurableMemory ?? (classified.intent === 'EXPLICIT_MEMORY' || (classified.depth === 'FULL' && classified.intent !== 'STATUS_CHECK')),
+    includeAssemblerRecentMessages: extras?.includeAssemblerRecentMessages ?? (classified.depth === 'FULL' && classified.intent !== 'STATUS_CHECK'),
+    includeProjectState: extras?.includeProjectState ?? (classified.depth === 'FULL' && classified.intent !== 'KNOWLEDGE_QUESTION' && classified.intent !== 'STATUS_CHECK'),
     includeTerra: Boolean(extras?.includeTerra),
   }
 }

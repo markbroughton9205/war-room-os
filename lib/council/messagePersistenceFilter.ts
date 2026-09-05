@@ -12,11 +12,29 @@ const CORE_PERSISTABLE_FAMILY_IDS = new Set<CouncilOrchestrationFamily>([
   'grok',
   'gemini',
   'red_team',
+  'kimi',
 ])
 
-const PERSISTABLE_FAMILY_LABELS = new Set(
-  COUNCIL_ROSTER.filter(r => CORE_PERSISTABLE_FAMILY_IDS.has(r.id)).map(r => r.label.toUpperCase()),
-)
+const PERSISTABLE_FAMILY_LABELS = new Set([
+  ...COUNCIL_ROSTER.filter(r => CORE_PERSISTABLE_FAMILY_IDS.has(r.id)).map(r => r.label.toUpperCase()),
+  'AURORA',
+  'NOVA',
+  'PULSAR',
+  'PHOENIX',
+  'ORION',
+  'LUMEN',
+  'CHATGPT',
+  'CHATGPT FAMILY',
+  'CLAUDE',
+  'CLAUDE FAMILY',
+  'GROK',
+  'GROK FAMILY',
+  'GEMINI',
+  'GEMINI FAMILY',
+  'KIMI',
+  'KIMI FAMILY',
+  'RED TEAM',
+])
 
 const NON_SUCCESS_PROVIDER_RUNTIME = new Set<ProviderFamilyOutcomeStatus>([
   'FAILED',

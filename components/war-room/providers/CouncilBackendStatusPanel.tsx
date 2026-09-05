@@ -63,8 +63,8 @@ function SeatCard({ row }: { row: SeatBackendStatus }) {
     <article className="rounded border border-white/10 bg-black/25 p-3" data-testid={`council-backend-status-${row.seat}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-white">{row.label}</h3>
-          <p className="mt-1 text-[10px] text-slate-500">seat: {row.seat}</p>
+          <h3 className="text-sm font-semibold text-white">{row.agentIdentity ?? row.label}</h3>
+          <p className="mt-1 text-[10px] text-slate-500">seat: {row.seat}{row.agentIdentity && row.agentIdentity !== row.label ? ` · ${row.label}` : ''}</p>
         </div>
         <Pill label={row.active.status} tone={seatStatusTone(row.active.status)} />
       </div>
@@ -89,8 +89,16 @@ function SeatCard({ row }: { row: SeatBackendStatus }) {
           <Pill label={localHealthLabel(row.localCandidate.health)} tone={localHealthTone(row.localCandidate.health)} />
         </div>
         <p className="mt-1 text-[10px] text-slate-500">
-          {row.localCandidate.enabled ? row.localCandidate.repo : 'no enabled local candidate configured'}
+          {row.localCandidate.enabled
+            ? `${row.localCandidate.runtime ?? 'local'} · ${row.localCandidate.modelId ?? row.localCandidate.repo}`
+            : 'no enabled local candidate configured'}
         </p>
+        {row.localCandidate.enabled ? (
+          <p className="mt-1 text-[10px] text-amber-200/80">
+            Shared backing: {row.localCandidate.sharedBacking ? 'YES' : 'NO'}
+            {row.localCandidate.sharedBacking ? ' — not a dedicated per-seat model' : ''}
+          </p>
+        ) : null}
       </div>
     </article>
   )
@@ -160,6 +168,18 @@ export function CouncilBackendStatusPanel() {
           }
         />
       </div>
+      {snapshot?.nebulaSharedBrain ? (
+        <div className="mb-4 rounded border border-amber-500/30 bg-amber-500/5 p-3 text-[11px] text-amber-100/90">
+          <div className="text-[9px] font-semibold uppercase tracking-widest text-amber-300">Nebula shared brain</div>
+          <p className="mt-1 font-mono">
+            {snapshot.nebulaSharedBrain.runtime} · {snapshot.nebulaSharedBrain.modelId} · {snapshot.nebulaSharedBrain.parameterClass} · slot {snapshot.nebulaSharedBrain.roleSlot}
+          </p>
+          <p className="mt-1">
+            Shared backing: {snapshot.nebulaSharedBrain.sharedBacking ? 'YES' : 'NO'} — {snapshot.nebulaSharedBrain.agentIdentities.join(', ')}
+          </p>
+          <p className="mt-1 text-slate-400">{snapshot.nebulaSharedBrain.note}</p>
+        </div>
+      ) : null}
       {snapshot?.routingModeNote ? <p className="mb-4 text-[10px] leading-relaxed text-slate-500">{snapshot.routingModeNote}</p> : null}
 
       <div className="grid gap-3 lg:grid-cols-2">

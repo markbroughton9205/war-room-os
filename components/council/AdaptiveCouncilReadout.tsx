@@ -147,8 +147,8 @@ function ReadoutBody({ viewModel }: { viewModel: AdaptiveCouncilReadoutViewModel
       </section>
 
       <section className="grid gap-2 md:grid-cols-2">
-        <ValueLine label="Red Team recommended" value={viewModel.recommendedRedTeam === null ? 'Unknown' : viewModel.recommendedRedTeam ? 'Yes' : 'No'} />
-        <ValueLine label="Red Team participated" value={viewModel.actualRedTeamIncluded === null ? 'Unknown' : viewModel.actualRedTeamIncluded ? 'Yes' : 'No'} />
+        <ValueLine label="PHOENIX recommended" value={viewModel.recommendedRedTeam === null ? 'Unknown' : viewModel.recommendedRedTeam ? 'Yes' : 'No'} />
+        <ValueLine label="PHOENIX participated" value={viewModel.actualRedTeamIncluded === null ? 'Unknown' : viewModel.actualRedTeamIncluded ? 'Yes' : 'No'} />
         <ValueLine label="Evidence recommended" value={viewModel.evidenceRequired === null ? 'Unknown' : viewModel.evidenceRequired ? 'Yes' : 'No'} />
         <ValueLine label="Live information recommended" value={viewModel.liveDataRequired === null ? 'Unknown' : viewModel.liveDataRequired ? 'Yes' : 'No'} />
       </section>
@@ -210,8 +210,8 @@ export function AdaptiveCouncilReadout(props: AdaptiveCouncilReadoutProps) {
       <ReadoutBody viewModel={viewModel} />
       <span className="sr-only">
         Recommendation compared with actual execution. This readout has no execution controls.
-        Red Team recommended: <BooleanTruth value={viewModel.recommendedRedTeam} />.
-        Red Team participated: <BooleanTruth value={viewModel.actualRedTeamIncluded} />.
+        PHOENIX recommended: <BooleanTruth value={viewModel.recommendedRedTeam} />.
+        PHOENIX participated: <BooleanTruth value={viewModel.actualRedTeamIncluded} />.
       </span>
     </details>
   )
