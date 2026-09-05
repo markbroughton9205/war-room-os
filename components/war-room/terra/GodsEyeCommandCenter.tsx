@@ -10,6 +10,8 @@ import { CouncilRuntimeStatus } from '@/components/war-room/council/CouncilRunti
 import { CouncilGodsEyeStatus } from '@/components/war-room/council/CouncilGodsEyeStatus'
 import { resolveCouncilGodsEyeStatus } from '@/lib/terra/godsEyeStatusAdapter'
 import type { TerraIntelligenceEventKind } from '@/lib/terra/types'
+import { formatTerraAircraftCouncilSummary } from '@/lib/terra/aircraftCouncilSummary'
+import { formatTerraVesselCouncilSummary } from '@/lib/terra/vesselCouncilSummary'
 
 /** Short, human labels for the "War Room Terra Linked" pill -- covers every selectable Terra
  * object kind (location search, vessel, aircraft, traffic camera/event, and the rest of the
@@ -36,7 +38,7 @@ function inferenceConfidence(status: TerraLinkedStatusResult): string {
 }
 
 function TerraCouncilContextBridge({ onContextChange }: { onContextChange?: (context: string | null) => void }) {
-  const { activeLocation, selectedEvent, layerCoverage } = useTerraActiveLocation()
+  const { activeLocation, selectedEvent, layerCoverage, aircraftSummary, maritimeSummary } = useTerraActiveLocation()
   useEffect(() => {
     if (!activeLocation) return onContextChange?.(null)
     const lines = [
@@ -90,6 +92,18 @@ function TerraCouncilContextBridge({ onContextChange }: { onContextChange?: (con
         if (typeof p.windAverageMs === 'number') lines.push(`Average wind: ${p.windAverageMs} m/s`)
         if (typeof p.precipitationIntensityMmH === 'number') lines.push(`Precipitation intensity: ${p.precipitationIntensityMmH} mm/h`)
       }
+      // Live-aviation and Maritime Source Federation (Terra Phase 3): route the selected
+      // aircraft/vessel and its bounded regional summary through the dedicated formatters those
+      // phases built specifically for this bridge (lib/terra/aircraftCouncilSummary.ts,
+      // lib/terra/vesselCouncilSummary.ts) — previously wired to TerraActiveLocationContext but
+      // never actually read here, so Council got the generic location pin and nothing else for
+      // either kind. Same OBSERVED-only doctrine: both formatters emit only source-reported fields.
+      if (selectedEvent.kind === 'aircraft_state') {
+        lines.push(formatTerraAircraftCouncilSummary(selectedEvent, aircraftSummary))
+      }
+      if (selectedEvent.kind === 'vessel_position') {
+        lines.push(formatTerraVesselCouncilSummary(selectedEvent, maritimeSummary?.regional ?? null, maritimeSummary?.coverageState ?? null))
+      }
     }
     // Per-layer coverage truth: OBSERVED availability facts about each visible provider feed
     // (vocabulary: lib/terra/coverageTruth.ts). Availability only — never a condition verdict.
@@ -110,7 +124,7 @@ function TerraCouncilContextBridge({ onContextChange }: { onContextChange?: (con
     lines.push(`Basis: ${status.reasons.length > 0 ? status.reasons.join(' | ') : 'no qualifying evidence signal from the current selection or layer coverage'}`)
     lines.push(`Confidence: ${inferenceConfidence(status)}`)
     onContextChange?.(lines.join('\n'))
-  }, [activeLocation, onContextChange, selectedEvent, layerCoverage])
+  }, [activeLocation, onContextChange, selectedEvent, layerCoverage, aircraftSummary, maritimeSummary])
   return null
 }
 
