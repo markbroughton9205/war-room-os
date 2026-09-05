@@ -1,0 +1,18 @@
+{
+  "name": "wr-engineer-node",
+  "version": "0.1.0",
+  "private": true,
+  "description": "War Room WR-Engineer lightweight remote engineering node — outbound-only, explicitly-enrolled machine daemon. Windows/macOS/Linux (pure Node.js, no native dependencies).",
+  "type": "module",
+  "bin": {
+    "wr-engineer-node": "./src/cli.ts"
+  },
+  "scripts": {
+    "pair": "node --experimental-transform-types src/cli.ts pair",
+    "register": "node --experimental-transform-types src/cli.ts register",
+    "heartbeat": "node --experimental-transform-types src/cli.ts heartbeat"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  }
+}

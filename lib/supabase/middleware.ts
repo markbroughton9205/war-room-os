@@ -34,6 +34,14 @@ const PUBLIC_API_PATHS = new Set([
   '/api/payments/proof',
   '/api/tools/internet/status',
   '/api/tools/research',
+  // WR-Engineer remote node endpoints: the caller is a paired machine, not a signed-in Commander
+  // browser session — no Supabase cookie exists to present. Each route enforces its own
+  // authorization internally (pairing/attempt: unguessable, short-lived, one-time-use code; every
+  // other node call: the node's own hashed device credential via lib/wr-engineer/node/identity.ts's
+  // authenticateNode) — same "shared secret enforced by the route itself" pattern as the other
+  // entries in this set.
+  '/api/wr-engineer/nodes/pairing/attempt',
+  '/api/wr-engineer/nodes/heartbeat',
 ])
 
 const PUBLIC_API_PREFIXES = ['/api/debug/']

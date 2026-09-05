@@ -76,3 +76,55 @@ export {
   WrEngineerNotInitializedError,
   WrEngineerNoActiveMissionError,
 } from './runtime'
+
+// ---------------------------------------------------------------------------
+// Phase 2: remote node, pairing, protocol, sessions, Native Builder bridge.
+// ---------------------------------------------------------------------------
+
+export * as wrEngineerNodeTypes from './node/types'
+export { JsonFileNodeStore, wrEngineerNodeStore, type NodeStore } from './node/store'
+export {
+  generatePairingCode,
+  requestPairing,
+  authorizePairing,
+  rejectPairing,
+  sweepExpiredPairingTokens,
+  PairingError,
+  DEFAULT_PAIRING_TTL_MS,
+} from './node/pairing'
+export {
+  authenticateNode,
+  recordHeartbeat,
+  getNodeConnectionStatus,
+  revokeNode,
+  rotateNodeCredential,
+} from './node/identity'
+export {
+  registerRepository,
+  listRepositoriesForNode,
+  applyRepositoryStatusReport,
+  requireBoundRepository,
+  RepositoryRegistrationError,
+} from './node/repository'
+export * as wrEngineerProtocol from './node/protocol'
+
+export * as wrEngineerSessionTypes from './session/types'
+export { JsonFileSessionStore, wrEngineerSessionStore, type SessionStore } from './session/store'
+export {
+  createSession,
+  setSessionAgentState,
+  assembleSessionContext,
+  sendCommanderMessage,
+  recordToolActivity,
+  SessionBindingError,
+} from './session/session'
+
+export { logWrEngineerAudit } from './audit'
+
+export {
+  bridgeProposalToNativeBuilder,
+  WR_ENGINEER_BRIDGE_NEVER_APPLIES,
+  type BridgeOutcome,
+  type BridgeRejectionReason,
+  type BridgeIssueMeta,
+} from './nativeBuilderBridge'
