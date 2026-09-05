@@ -8,6 +8,7 @@
  * Carries the fields the mission brief requires a session to be aware of.
  */
 import type { AgentState, MissionContext } from '../types'
+import type { WrEngineerEditProposal } from '../codeEditProposals'
 
 export type EngineeringChatRole = 'commander' | 'wr_engineer' | 'system'
 
@@ -30,6 +31,23 @@ export type ToolActivityEvent = {
   occurredAt: string
 }
 
+/**
+ * Proposal lifecycle (Phase 3). Only the pre-bridge states are ever STORED on a session — once a
+ * proposal is bridged, native-builder's own repair record is the authoritative source for
+ * AWAITING_APPROVAL/APPLIED/VALIDATING/VALID/FAILED/ROLLED_BACK (see
+ * lib/wr-engineer/session/proposalState.ts's deriveProposalState — "reuse Native Builder's actual
+ * state where possible rather than duplicating truth," per the mission brief). NONE/GENERATING/
+ * INVALID/READY/BRIDGED are the only values a session record itself carries.
+ */
+export const STORED_PROPOSAL_STATES = ['NONE', 'GENERATING', 'INVALID', 'READY', 'BRIDGED'] as const
+export type StoredProposalState = (typeof STORED_PROPOSAL_STATES)[number]
+
+export const PROPOSAL_STATES = [
+  'NONE', 'GENERATING', 'INVALID', 'READY', 'BRIDGED',
+  'AWAITING_APPROVAL', 'APPLIED', 'VALIDATING', 'VALID', 'FAILED', 'ROLLED_BACK',
+] as const
+export type ProposalState = (typeof PROPOSAL_STATES)[number]
+
 export type EngineeringSession = {
   sessionId: string
   /** Commander/user identity — the Supabase auth.users id via requireCommanderSession(), not a
@@ -49,6 +67,11 @@ export type EngineeringSession = {
   mission: MissionContext | null
   constraints: string[]
   agentState: AgentState
+  proposalState: StoredProposalState
+  activeProposal: WrEngineerEditProposal | null
+  nativeBuilderIssueId: string | null
+  nativeBuilderRepairId: string | null
+  lastProposalRejection: { reasons: string[] } | null
   createdAt: string
   updatedAt: string
 }

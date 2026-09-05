@@ -61,6 +61,11 @@ export async function createSession(
     mission: null,
     constraints: input.constraints ?? [],
     agentState: 'READY',
+    proposalState: 'NONE',
+    activeProposal: null,
+    nativeBuilderIssueId: null,
+    nativeBuilderRepairId: null,
+    lastProposalRejection: null,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   }
@@ -176,6 +181,74 @@ export async function sendCommanderMessage(
   const session = await setSessionAgentState(sessionStore, sessionId, result.ok ? 'READY' : 'BLOCKED')
 
   return { commanderMessage, replyMessage, session }
+}
+
+// ---------------------------------------------------------------------------
+// Proposal lifecycle (Phase 3) — only NONE/GENERATING/INVALID/READY/BRIDGED are ever stored here;
+// see session/types.ts's StoredProposalState header for why the post-bridge states are always
+// derived from native-builder's own repair record instead.
+// ---------------------------------------------------------------------------
+
+export async function setProposalGenerating(sessionStore: SessionStore, sessionId: string, now: Date = new Date()): Promise<EngineeringSession> {
+  const session = await requireSession(sessionStore, sessionId)
+  const updated: EngineeringSession = {
+    ...session,
+    proposalState: 'GENERATING',
+    activeProposal: null,
+    nativeBuilderIssueId: null,
+    nativeBuilderRepairId: null,
+    lastProposalRejection: null,
+    updatedAt: now.toISOString(),
+  }
+  await sessionStore.saveSession(updated)
+  return updated
+}
+
+export async function setProposalReady(
+  sessionStore: SessionStore,
+  sessionId: string,
+  proposal: EngineeringSession['activeProposal'],
+  now: Date = new Date(),
+): Promise<EngineeringSession> {
+  const session = await requireSession(sessionStore, sessionId)
+  const updated: EngineeringSession = { ...session, proposalState: 'READY', activeProposal: proposal, lastProposalRejection: null, updatedAt: now.toISOString() }
+  await sessionStore.saveSession(updated)
+  return updated
+}
+
+export async function setProposalInvalid(sessionStore: SessionStore, sessionId: string, reasons: string[], now: Date = new Date()): Promise<EngineeringSession> {
+  const session = await requireSession(sessionStore, sessionId)
+  const updated: EngineeringSession = {
+    ...session,
+    proposalState: 'INVALID',
+    activeProposal: null,
+    nativeBuilderIssueId: null,
+    nativeBuilderRepairId: null,
+    lastProposalRejection: { reasons },
+    updatedAt: now.toISOString(),
+  }
+  await sessionStore.saveSession(updated)
+  return updated
+}
+
+export async function setProposalBridged(
+  sessionStore: SessionStore,
+  sessionId: string,
+  issueId: string,
+  repairId: string,
+  now: Date = new Date(),
+): Promise<EngineeringSession> {
+  const session = await requireSession(sessionStore, sessionId)
+  const updated: EngineeringSession = {
+    ...session,
+    proposalState: 'BRIDGED',
+    nativeBuilderIssueId: issueId,
+    nativeBuilderRepairId: repairId,
+    lastProposalRejection: null,
+    updatedAt: now.toISOString(),
+  }
+  await sessionStore.saveSession(updated)
+  return updated
 }
 
 export async function recordToolActivity(

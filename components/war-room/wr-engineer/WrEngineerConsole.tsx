@@ -5,23 +5,25 @@
  *
  * Modeled on app/war-room/code-operator/page.tsx's visual language (rounded border/bg-black
  * panels, emerald/cyan/amber/red semantic colors, text-[10px] uppercase tracking-widest headers)
- * rather than the disconnected legacy WarRoomShell/Sidebar chrome (see Phase 2 research: that
+ * rather than the disconnected legacy WarRoomShell/Sidebar chrome — see Phase 2 research: that
  * chrome's nav buttons are `disabled` and explicitly documented as "not connected on this legacy
- * route" — this page does not build on it).
+ * route."
  *
- * No realtime push transport exists yet for a remote node (Phase 2 research: no websockets, no
- * Supabase Realtime channel usage anywhere in this app) — this console polls the session snapshot
- * every few seconds while a session is open, the same honest fallback
- * lib/mission-runtime/engineeringStream.ts's own client already uses when EventSource isn't
- * available. A true push-based stream (mirroring that module's SSE pattern) is a clean, bounded
- * Phase 3 addition, not required for the foundation this phase establishes.
+ * Phase 3: live SSE stream (app/api/wr-engineer/sessions/[sessionId]/stream/route.ts) replaces the
+ * Phase 2 4-second poll. The GET .../sessions/[sessionId] snapshot route is UNCHANGED in purpose
+ * and stays the explicit-refresh / reconnect fallback per the mission brief — never removed.
+ * Messages/tool events are merged by id (a Map keyed by id) whether they arrive via the initial
+ * snapshot, a granular stream event, or a fallback poll, so a reconnect can never duplicate an
+ * already-rendered item.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { StatusPill } from './StatusPill'
 
 type ConnectionStatus = 'ONLINE' | 'OFFLINE'
 type PairingState = 'WAITING' | 'PAIRING' | 'AUTHORIZED' | 'EXPIRED' | 'REJECTED'
 type AgentState = 'READY' | 'WORKING' | 'BLOCKED' | 'VALIDATING' | 'COMPLETE' | 'FAILED'
+type ProposalState = 'NONE' | 'GENERATING' | 'INVALID' | 'READY' | 'BRIDGED' | 'AWAITING_APPROVAL' | 'APPLIED' | 'VALIDATING' | 'VALID' | 'FAILED' | 'ROLLED_BACK'
+type StreamStatus = 'CONNECTED' | 'RECONNECTING' | 'DISCONNECTED'
 
 type NodeSummary = {
   nodeId: string
@@ -48,6 +50,17 @@ type PairingToken = {
   expiresAt: string
 }
 
+type PlannedChangeSummary = { file: string; reason: string; operation: string; matchText?: string; replacementText?: string; newFileContent?: string }
+type ActiveProposal = {
+  id: string
+  diagnosis: string
+  confidence: string
+  relevantFiles: string[]
+  plannedChanges: PlannedChangeSummary[]
+  risks: string[]
+  rollbackPlan: string
+}
+
 type SessionRecord = {
   sessionId: string
   nodeId: string
@@ -58,28 +71,41 @@ type SessionRecord = {
   agentState: AgentState
   constraints: string[]
   mission: unknown
+  activeProposal: ActiveProposal | null
+  nativeBuilderIssueId: string | null
+  nativeBuilderRepairId: string | null
+  lastProposalRejection: { reasons: string[] } | null
 }
 
 type ChatMessage = { id: string; role: 'commander' | 'wr_engineer' | 'system'; content: string; createdAt: string }
 type ToolEvent = { id: string; tool: string; detail: string; outcome: 'PASS' | 'FAIL'; occurredAt: string }
 
 const AGENT_STATE_COLOR: Record<AgentState, 'emerald' | 'amber' | 'red' | 'cyan' | 'slate'> = {
-  READY: 'emerald',
-  WORKING: 'cyan',
-  VALIDATING: 'cyan',
-  BLOCKED: 'amber',
-  COMPLETE: 'emerald',
-  FAILED: 'red',
+  READY: 'emerald', WORKING: 'cyan', VALIDATING: 'cyan', BLOCKED: 'amber', COMPLETE: 'emerald', FAILED: 'red',
+}
+const PROPOSAL_STATE_COLOR: Record<ProposalState, 'emerald' | 'amber' | 'red' | 'cyan' | 'slate'> = {
+  NONE: 'slate', GENERATING: 'cyan', INVALID: 'red', READY: 'amber', BRIDGED: 'cyan',
+  AWAITING_APPROVAL: 'amber', APPLIED: 'cyan', VALIDATING: 'cyan', VALID: 'emerald', FAILED: 'red', ROLLED_BACK: 'slate',
+}
+const STREAM_STATUS_COLOR: Record<StreamStatus, 'emerald' | 'amber' | 'red'> = {
+  CONNECTED: 'emerald', RECONNECTING: 'amber', DISCONNECTED: 'red',
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  })
+  const res = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(body.error ?? `Request failed: ${res.status}`)
   return body as T
+}
+
+function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
+  const byId = new Map(existing.map(item => [item.id, item]))
+  for (const item of incoming) byId.set(item.id, item)
+  return Array.from(byId.values()).sort((a, b) => {
+    const ao = 'occurredAt' in a ? (a as unknown as { occurredAt: string }).occurredAt : (a as unknown as { createdAt: string }).createdAt
+    const bo = 'occurredAt' in b ? (b as unknown as { occurredAt: string }).occurredAt : (b as unknown as { createdAt: string }).createdAt
+    return ao.localeCompare(bo)
+  })
 }
 
 export function WrEngineerConsole() {
@@ -88,6 +114,8 @@ export function WrEngineerConsole() {
   const [repositories, setRepositories] = useState<RepositorySummary[]>([])
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null)
   const [session, setSession] = useState<SessionRecord | null>(null)
+  const [proposalState, setProposalState] = useState<ProposalState>('NONE')
+  const [repairState, setRepairState] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -95,6 +123,10 @@ export function WrEngineerConsole() {
   const [pairingCode, setPairingCode] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>('DISCONNECTED')
+  const [diffExpanded, setDiffExpanded] = useState(false)
+
+  const sessionIdRef = useRef<string | null>(null)
 
   const refreshNodes = useCallback(async () => {
     const data = await api<{ nodes: NodeSummary[] }>('/api/wr-engineer/nodes')
@@ -111,18 +143,17 @@ export function WrEngineerConsole() {
     setRepositories(data.repositories)
   }, [])
 
+  /** Explicit-refresh / reconnect fallback — unchanged in purpose from Phase 2. */
   const refreshSession = useCallback(async (sessionId: string) => {
-    const data = await api<{ session: SessionRecord; messages: ChatMessage[]; toolEvents: ToolEvent[] }>(`/api/wr-engineer/sessions/${sessionId}`)
+    const data = await api<{ session: SessionRecord; messages: ChatMessage[]; toolEvents: ToolEvent[]; proposalState: ProposalState; repairState: string | null }>(`/api/wr-engineer/sessions/${sessionId}`)
     setSession(data.session)
-    setMessages(data.messages)
-    setToolEvents(data.toolEvents)
+    setMessages(prev => mergeById(prev, data.messages))
+    setToolEvents(prev => mergeById(prev, data.toolEvents))
+    setProposalState(data.proposalState)
+    setRepairState(data.repairState)
   }, [])
 
   useEffect(() => {
-    // Deferred a tick — this repo's react-hooks/set-state-in-effect lint rule flags a setState
-    // call reachable by static analysis from an effect body (see
-    // components/war-room/terra/useTerraAircraftTrails.ts / AgiWaveOnePanel.tsx for the same
-    // escape hatch already established elsewhere in this codebase).
     const timeout = setTimeout(() => {
       void refreshNodes()
       void refreshPairingTokens()
@@ -139,13 +170,79 @@ export function WrEngineerConsole() {
     return () => clearTimeout(timeout)
   }, [selectedNodeId, refreshRepositories])
 
+  // Live SSE stream, falling back to polling the snapshot route if EventSource is unavailable or
+  // the stream errors out — the snapshot route itself is never removed (mission brief).
   useEffect(() => {
-    if (!session) return
-    const interval = setInterval(() => {
-      void refreshSession(session.sessionId)
-    }, 4000)
-    return () => clearInterval(interval)
-  }, [session, refreshSession])
+    sessionIdRef.current = session?.sessionId ?? null
+    if (!session) {
+      return
+    }
+    const sessionId = session.sessionId
+    let pollFallback: ReturnType<typeof setInterval> | null = null
+    const startFallbackPolling = () => {
+      if (pollFallback) return
+      setStreamStatus('DISCONNECTED')
+      pollFallback = setInterval(() => {
+        if (sessionIdRef.current) void refreshSession(sessionIdRef.current)
+      }, 4000)
+    }
+
+    if (typeof EventSource === 'undefined') {
+      startFallbackPolling()
+      return () => {
+        if (pollFallback) clearInterval(pollFallback)
+      }
+    }
+
+    const source = new EventSource(`/api/wr-engineer/sessions/${sessionId}/stream`)
+
+    const onSnapshot = (ev: MessageEvent) => {
+      const envelope = JSON.parse(ev.data)
+      const snap = envelope.snapshot
+      setSession(snap.session)
+      setMessages(prev => mergeById(prev, snap.messages))
+      setToolEvents(prev => mergeById(prev, snap.toolEvents))
+      setProposalState(snap.proposalState)
+      setRepairState(snap.repairState)
+    }
+    const onMessageCreated = (ev: MessageEvent) => {
+      const envelope = JSON.parse(ev.data)
+      setMessages(prev => mergeById(prev, [envelope.message]))
+    }
+    const onToolEvent = (ev: MessageEvent) => {
+      const envelope = JSON.parse(ev.data)
+      setToolEvents(prev => mergeById(prev, [envelope.event]))
+    }
+    const onOpen = () => setStreamStatus('CONNECTED')
+    const onError = () => {
+      if (source.readyState === EventSource.CONNECTING) {
+        setStreamStatus('RECONNECTING')
+        return
+      }
+      setStreamStatus('DISCONNECTED')
+      source.close()
+      startFallbackPolling()
+    }
+
+    source.addEventListener('open', onOpen)
+    source.addEventListener('session.snapshot', onSnapshot)
+    source.addEventListener('message.created', onMessageCreated)
+    source.addEventListener('tool.completed', onToolEvent)
+    source.addEventListener('tool.failed', onToolEvent)
+    source.addEventListener('error', onError)
+
+    return () => {
+      source.removeEventListener('open', onOpen)
+      source.removeEventListener('session.snapshot', onSnapshot)
+      source.removeEventListener('message.created', onMessageCreated)
+      source.removeEventListener('tool.completed', onToolEvent)
+      source.removeEventListener('tool.failed', onToolEvent)
+      source.removeEventListener('error', onError)
+      source.close()
+      if (pollFallback) clearInterval(pollFallback)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- session identity change (new session) is the only intended re-subscribe trigger; refreshSession is stable via useCallback.
+  }, [session?.sessionId])
 
   const runGuarded = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true)
@@ -196,6 +293,8 @@ export function WrEngineerConsole() {
       setSession(data.session)
       setMessages([])
       setToolEvents([])
+      setProposalState('NONE')
+      setRepairState(null)
     })
 
   const handleSendMessage = () =>
@@ -203,10 +302,7 @@ export function WrEngineerConsole() {
       if (!session || !chatInput.trim()) return
       const content = chatInput
       setChatInput('')
-      await api(`/api/wr-engineer/sessions/${session.sessionId}/messages`, {
-        method: 'POST',
-        body: JSON.stringify({ content }),
-      })
+      await api(`/api/wr-engineer/sessions/${session.sessionId}/messages`, { method: 'POST', body: JSON.stringify({ content }) })
       await refreshSession(session.sessionId)
     })
 
@@ -219,6 +315,7 @@ export function WrEngineerConsole() {
 
   const selectedNode = useMemo(() => nodes.find(n => n.nodeId === selectedNodeId) ?? null, [nodes, selectedNodeId])
   const selectedRepository = useMemo(() => repositories.find(r => r.repositoryId === selectedRepositoryId) ?? null, [repositories, selectedRepositoryId])
+  const visibleStreamStatus: StreamStatus = session ? streamStatus : 'DISCONNECTED'
 
   return (
     <div className="grid gap-4 lg:grid-cols-[280px_1fr_320px]">
@@ -241,20 +338,8 @@ export function WrEngineerConsole() {
               </li>
             ))}
           </ul>
-          <button
-            disabled={busy}
-            onClick={() => void handleGeneratePairingCode()}
-            className="mt-2 rounded border border-emerald-900/60 px-2 py-1 text-[10px] uppercase tracking-widest text-emerald-300 disabled:opacity-40"
-          >
-            + Add Computer
-          </button>
-          <button
-            disabled={busy}
-            onClick={() => void handleSimulateLocalNode()}
-            className="mt-1 rounded border border-cyan-900/60 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-300 disabled:opacity-40"
-          >
-            Simulate Local Node (dev)
-          </button>
+          <button disabled={busy} onClick={() => void handleGeneratePairingCode()} className="mt-2 rounded border border-emerald-900/60 px-2 py-1 text-[10px] uppercase tracking-widest text-emerald-300 disabled:opacity-40">+ Add Computer</button>
+          <button disabled={busy} onClick={() => void handleSimulateLocalNode()} className="mt-1 rounded border border-cyan-900/60 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-300 disabled:opacity-40">Simulate Local Node (dev)</button>
           {pairingCode && (
             <p className="mt-2 rounded border border-amber-900/60 bg-black/40 p-2 text-[10px] text-amber-300">
               Pairing code (shown once): <span className="font-mono">{pairingCode}</span>
@@ -289,13 +374,7 @@ export function WrEngineerConsole() {
             ))}
           </ul>
           {selectedNode && selectedRepository && !session && (
-            <button
-              disabled={busy}
-              onClick={() => void handleStartSession()}
-              className="mt-2 rounded border border-emerald-900/60 px-2 py-1 text-[10px] uppercase tracking-widest text-emerald-300 disabled:opacity-40"
-            >
-              Start Engineering Session
-            </button>
+            <button disabled={busy} onClick={() => void handleStartSession()} className="mt-2 rounded border border-emerald-900/60 px-2 py-1 text-[10px] uppercase tracking-widest text-emerald-300 disabled:opacity-40">Start Engineering Session</button>
           )}
         </Panel>
       </aside>
@@ -322,6 +401,10 @@ export function WrEngineerConsole() {
             <div>
               <p className="text-[9px] uppercase tracking-widest text-slate-600">Agent</p>
               {session ? <StatusPill label={session.agentState} color={AGENT_STATE_COLOR[session.agentState]} /> : <StatusPill label="READY" color="slate" />}
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-widest text-slate-600">Stream</p>
+              <StatusPill label={visibleStreamStatus} color={STREAM_STATUS_COLOR[visibleStreamStatus]} />
             </div>
           </div>
         </Panel>
@@ -355,7 +438,57 @@ export function WrEngineerConsole() {
         </Panel>
 
         <Panel title="Proposed Changes">
-          <p className="text-[11px] text-slate-500">No proposal produced yet. WR-Engineer&apos;s edit-proposal interface (lib/wr-engineer/codeEditProposals.ts) and the Native Builder bridge are wired and tested, but the chat loop does not yet auto-generate proposals from conversation — a bounded Phase 3 addition. [ VIEW DIFF ] and [ PREPARE APPLY ] activate here once a proposal exists.</p>
+          {proposalState === 'NONE' && (
+            <p className="text-[11px] text-slate-500">No proposal yet. Ask WR-Engineer to fix or build something specific in chat — a concrete proposal will appear here automatically when it identifies one.</p>
+          )}
+          {proposalState === 'GENERATING' && <p className="text-[11px] text-cyan-300">Generating proposal…</p>}
+          {proposalState === 'INVALID' && (
+            <div className="text-[11px] text-red-400">
+              <p className="font-bold uppercase tracking-widest">Proposal rejected</p>
+              <ul className="mt-1 list-disc pl-4">
+                {(session?.lastProposalRejection?.reasons ?? []).map((reason, i) => <li key={i}>{reason}</li>)}
+              </ul>
+            </div>
+          )}
+          {session?.activeProposal && proposalState !== 'INVALID' && proposalState !== 'NONE' && (
+            <div className="flex flex-col gap-2 text-[11px]">
+              <div className="flex items-center justify-between">
+                <StatusPill label={proposalState} color={PROPOSAL_STATE_COLOR[proposalState]} />
+                <span className="text-slate-500">confidence: {session.activeProposal.confidence}</span>
+              </div>
+              <p className="text-slate-300">{session.activeProposal.diagnosis}</p>
+              <p className="text-slate-500">{session.activeProposal.relevantFiles.length} file(s): {session.activeProposal.relevantFiles.join(', ')}</p>
+              {session.nativeBuilderRepairId && (
+                <p className="text-slate-500">
+                  Native Builder repair: <span className="font-mono">{session.nativeBuilderRepairId.slice(0, 12)}</span>
+                  {repairState && <> — <StatusPill label={repairState} color="cyan" /></>}
+                </p>
+              )}
+              <div className="flex gap-2">
+                <button onClick={() => setDiffExpanded(v => !v)} className="rounded border border-cyan-900/60 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-300">
+                  {diffExpanded ? 'Hide Diff' : 'View Diff'}
+                </button>
+                {session.nativeBuilderRepairId && (
+                  <a href="/native-builder" className="rounded border border-amber-900/60 px-2 py-1 text-[10px] uppercase tracking-widest text-amber-300">
+                    Prepare Apply — Open in Native Builder
+                  </a>
+                )}
+              </div>
+              {diffExpanded && (
+                <div className="flex flex-col gap-2 rounded border border-white/10 bg-black/40 p-2">
+                  {session.activeProposal.plannedChanges.map((change, i) => (
+                    <div key={i} className="font-mono text-[10px] text-slate-300">
+                      <p className="text-cyan-300">{change.operation} — {change.file}</p>
+                      <p className="text-slate-500">{change.reason}</p>
+                      {change.matchText && <p className="text-red-400">- {change.matchText}</p>}
+                      {change.replacementText && <p className="text-emerald-400">+ {change.replacementText}</p>}
+                      {change.newFileContent && <pre className="whitespace-pre-wrap text-emerald-400">{change.newFileContent}</pre>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </Panel>
 
         <Panel title="Validation">

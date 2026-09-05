@@ -128,3 +128,52 @@ export {
   type BridgeRejectionReason,
   type BridgeIssueMeta,
 } from './nativeBuilderBridge'
+
+// ---------------------------------------------------------------------------
+// Phase 3: chat-driven proposal generation, session-scoped validation, live SSE stream.
+// ---------------------------------------------------------------------------
+
+export {
+  parseStructuredModelResponse,
+  STRUCTURED_RESPONSE_INSTRUCTIONS,
+  type ModelProposal,
+  type ModelProposedChange,
+  type ModelProposedPatch,
+  type StructuredModelResponse,
+  type StructuredResponseParseResult,
+} from './structuredResponse'
+
+export {
+  validateProposedChangeShapes,
+  sessionRepositoryMatchesServerWorkspace,
+  type ProposalValidationResult,
+} from './proposalValidation'
+
+export { sendEngineeringChatMessage, type EngineeringChatResult, type ProposalOutcome } from './engineeringChat'
+
+export {
+  PROPOSAL_STATES,
+  STORED_PROPOSAL_STATES,
+  type ProposalState,
+  type StoredProposalState,
+} from './session/types'
+export { deriveProposalState, proposalStateFromRepairState, isStoredProposalState } from './session/proposalState'
+export {
+  setProposalGenerating,
+  setProposalReady,
+  setProposalInvalid,
+  setProposalBridged,
+} from './session/session'
+
+export {
+  WR_ENGINEER_STREAM_VERSION,
+  encodeWrEngineerStreamEnvelope,
+  encodeWrEngineerStreamComment,
+  snapshotToBaseline,
+  computeStreamDeltas,
+  type WrEngineerStreamEnvelope,
+  type WrEngineerStreamEnvelopeType,
+  type WrEngineerSessionSnapshot,
+  type StreamBaseline,
+  type StreamDeltaResult,
+} from './sessionStream'

@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { wrEngineerNodeStore } from '@/lib/wr-engineer/node/store'
 import { wrEngineerSessionStore } from '@/lib/wr-engineer/session/store'
-import { SessionBindingError, sendCommanderMessage } from '@/lib/wr-engineer/session/session'
+import { SessionBindingError } from '@/lib/wr-engineer/session/session'
+import { sendEngineeringChatMessage } from '@/lib/wr-engineer/engineeringChat'
 import { CouncilProviderModelAdapter } from '@/lib/wr-engineer/modelAdapter'
 import { logWrEngineerAudit } from '@/lib/wr-engineer/audit'
 
@@ -32,8 +33,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ session
   }
 
   try {
-    const result = await sendCommanderMessage(wrEngineerSessionStore, wrEngineerNodeStore, devModelAdapter, sessionId, body.content)
-    await logWrEngineerAudit('engineering chat message exchanged', { sessionId, adapterId: devModelAdapter.id })
+    const result = await sendEngineeringChatMessage(wrEngineerSessionStore, wrEngineerNodeStore, devModelAdapter, sessionId, body.content)
+    await logWrEngineerAudit('engineering chat message exchanged', { sessionId, adapterId: devModelAdapter.id, proposalOutcome: result.proposalOutcome.kind })
     return NextResponse.json(result)
   } catch (error) {
     if (error instanceof SessionBindingError) {
