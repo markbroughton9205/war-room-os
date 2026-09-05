@@ -37,9 +37,26 @@ export const runtime = 'nodejs'
  * models-list probe (see guardrails.cloudProviderProbeNote below), never a real Council response.
  * No API keys, auth headers, or raw provider payloads are read or returned.
  *
- * Live Council chat (app/api/chat/execute.ts) is NOT wired to this backend layer yet — every seat
- * below is reported by what is ACTUALLY live (external), plus an informational, clearly-labeled
- * "local candidate" health check that is never presented as currently serving Council calls.
+ * Live Council chat (app/api/chat/execute.ts) IS wired to this backend layer as of the
+ * council-live-routing mission — every seat call there now goes through invokeCouncilSeat(),
+ * which resolves per-request from resolveCouncilRoutingMode() (env COUNCIL_ROUTING_MODE, unset
+ * everywhere real -> EXTERNAL_ONLY). `liveRoutingWired: true` below reflects that real fact.
+ *
+ * This route is, and remains, a PASSIVE snapshot: it has no per-invocation telemetry and does not
+ * observe what any individual live request actually did. Two fields make that boundary explicit
+ * rather than papering over it:
+ *   - `localReadyForLiveRouting` is a real, computable fact — "is a local candidate enabled,
+ *     currently probed healthy, AND would the resolved mode even consider it" — but it is
+ *     READINESS/ELIGIBILITY, not proof any live seat ran locally. False under EXTERNAL_ONLY by
+ *     construction (invokeExternalBackend() never touches local); can be true under a non-default
+ *     mode purely from config+health, independent of whether a real call has ever gone through it.
+ *   - `localServingLiveSeats` is always the literal string 'UNKNOWN' here. Answering it for real
+ *     would require per-invocation backend telemetry, which this mission deliberately does not
+ *     add (see the council-live-routing-truth-hardening mission). Do not infer a boolean from
+ *     `localReadyForLiveRouting` and present it as this field's answer.
+ * Every seat below is reported by what is ACTUALLY live (external, resolved the same way a real
+ * request would), plus an informational, clearly-labeled "local candidate" health check that is
+ * never presented as currently serving Council calls.
  */
 
 type SeatActiveStatus = 'READY' | 'DEGRADED' | 'RATE_LIMITED' | 'UNAVAILABLE' | 'UNKNOWN'
@@ -54,7 +71,8 @@ type SeatStatusRow = {
     status: SeatActiveStatus
     failureClass?: 'AUTH' | 'RATE_LIMIT'
     latencyMs: number | null
-    fallbackUsed: boolean
+    /** null = unknown/not observed (this route has no per-invocation telemetry), never a claim of "no fallback". */
+    fallbackUsed: boolean | null
     fallbackReason: string | null
     note: string
   }
@@ -107,15 +125,19 @@ export async function GET() {
         status,
         failureClass,
         latencyMs: providerStatus?.latencyMs ?? null,
-        // Live Council execution is still EXTERNAL_ONLY (app/api/chat/execute.ts is not wired to
-        // invokeCouncilSeat() yet), so no Council LOCAL -> EXTERNAL backend-routing fallback can
-        // exist for any seat right now. `providerStatus.integrity.fallback_used` is a DIFFERENT,
+        // This route is a passive health snapshot — it does not observe or persist the outcome of
+        // any individual live invokeCouncilSeat() call, so real per-call fallback metadata
+        // (BackendMetadata.fallbackFrom/fallbackReason) is not available here.
+        // fallbackUsed: null means UNKNOWN / NOT OBSERVED — it is NOT a claim that no fallback
+        // happened. Reporting `false` here would be a lie now that execute.ts genuinely routes
+        // through invokeCouncilSeat(); this route simply has no visibility into what any given
+        // live request actually did. `providerStatus.integrity.fallback_used` is a DIFFERENT,
         // pre-existing signal from lib/providers/health.ts's own retry/integrity pipeline — it
-        // reflects that pipeline's internal fallback behavior, not this mission's backend-routing
-        // fallback concept, and must never be reused here even though the names coincide. Once a
-        // later mission wires real invokeCouncilSeat() results through, this should read the real
-        // BackendMetadata.fallbackFrom/fallbackReason from that call instead.
-        fallbackUsed: false,
+        // reflects that pipeline's internal fallback behavior, not this mission's Council
+        // backend-routing fallback concept, and must never be reused here even though the names
+        // coincide. A future mission that adds per-call invocation logging could read real
+        // BackendMetadata.fallbackFrom/fallbackReason from that log instead of reporting unknown.
+        fallbackUsed: null,
         fallbackReason: null,
         note: providerStatus?.note ?? 'No canonical provider entry for this seat.',
       },
@@ -159,15 +181,37 @@ export async function GET() {
     health: localCandidateHealthFromProbe(entry.enabled ? entry : null, probe),
   }))
 
+  const resolvedMode = resolveCouncilRoutingMode()
+  // READINESS/ELIGIBILITY, not proof of actual serving. Conservative by construction:
+  // EXTERNAL_ONLY structurally never touches local (proven, not guessed —
+  // invokeExternalBackend() is the only path invokeCouncilSeat() can take under it), so this is
+  // false there regardless of local health. Under any other mode this turns true purely from
+  // config+health — a local candidate is BOTH enabled AND currently probed healthy — which is
+  // NOT proof any live seat has actually run locally. Do not present this value as an answer to
+  // "is local serving live seats right now" — that question is answered by localServingLiveSeats
+  // below, which stays the literal string 'UNKNOWN' until real per-invocation telemetry exists.
+  const localReadyForLiveRouting =
+    resolvedMode !== 'EXTERNAL_ONLY' && seats.some(row => row.localCandidate.enabled && row.localCandidate.health === 'READY')
+
   return NextResponse.json(
     {
       generatedAt: new Date().toISOString(),
       routingFoundation: 'AVAILABLE',
-      liveRouting: 'EXTERNAL_ONLY',
-      routingModeResolved: resolveCouncilRoutingMode(),
+      // True: app/api/chat/execute.ts calls invokeCouncilSeat() for every non-kimi seat. This is
+      // NOT a claim that local models are active — see routingModeResolved/localServingLiveSeats.
+      liveRoutingWired: true,
+      routingModeResolved: resolvedMode,
+      localBackendAvailable: probe.available,
+      // Readiness/eligibility — real, computed, but NOT proof a live seat actually ran locally.
+      localReadyForLiveRouting,
+      // Always 'UNKNOWN': this route has no per-invocation telemetry. Never infer this from
+      // localReadyForLiveRouting — readiness and "did it actually happen" are different questions.
+      localServingLiveSeats: 'UNKNOWN' as const,
       routingModeNote:
-        'routingModeResolved reflects lib/council/live-orchestration/backends config only. ' +
-        'app/api/chat/execute.ts is not wired to it yet, so liveRouting stays EXTERNAL_ONLY regardless.',
+        'routingModeResolved is what app/api/chat/execute.ts actually resolves per live request via ' +
+        'invokeCouncilSeat() (env COUNCIL_ROUTING_MODE; unset -> EXTERNAL_ONLY). liveRoutingWired=true ' +
+        'means the call happens for real. localReadyForLiveRouting is config+health readiness, not ' +
+        'proof of serving; localServingLiveSeats stays UNKNOWN until real per-invocation telemetry exists.',
       localModelPool: probe.available ? 'CONFIGURED / NOT ACTIVATED' : 'CONFIGURED / NOT ACTIVATED / RUNTIME UNREACHABLE',
       ollama: {
         reachable: probe.available,

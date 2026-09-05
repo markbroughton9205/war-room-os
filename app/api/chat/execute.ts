@@ -127,7 +127,7 @@ import {
   type StableGroupPriorReply,
 } from '@/lib/council/stableGroupChat'
 import { filterDecreeRelevantPriorReplies, isLightweightPingDecree } from '@/lib/council/contextRelevance'
-import { familyIsStreamConfigured, streamCouncilFamily } from '@/lib/council/live-orchestration/streamProvider'
+import { invokeCouncilSeat, type SeatInvokeStatus } from '@/lib/council/live-orchestration/backends'
 import { resolveLiveCouncilRoster, familyIsFloorEligible } from '@/lib/council/live-orchestration/rosterHealth.server'
 import { resolveVisibleFloorOrder } from '@/lib/council/live-orchestration/floorScheduler'
 import { rosterToFloorFlags } from '@/lib/council/live-orchestration/rosterHealth'
@@ -264,6 +264,18 @@ type ProviderResult = {
   failureLayer?: CouncilFailureLayer
   partial?: boolean
   attempt?: number
+}
+
+/**
+ * SeatInvokeStatus ('OK' | 'FAILED' | 'TIMED_OUT' | 'UNAVAILABLE' | 'NO_LOCAL_BACKEND') ->
+ * ProviderResultStatus. Under EXTERNAL_ONLY (the default/production mode) invokeExternalBackend()
+ * only ever produces the first four values — identical to the old streamCouncilFamily() status —
+ * so this mapping is the identity function in production today. NO_LOCAL_BACKEND (only reachable
+ * under a non-default COUNCIL_ROUTING_MODE) maps to UNAVAILABLE, the closest honest equivalent.
+ */
+export function mapSeatInvokeStatusToProviderResultStatus(status: SeatInvokeStatus): ProviderResultStatus {
+  if (status === 'NO_LOCAL_BACKEND') return 'UNAVAILABLE'
+  return status
 }
 
 const PROVIDER_TIMEOUT_MS = 45_000
@@ -1688,9 +1700,10 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
             : 'REQUEST'
       return { family: familyName, content: '', status: 'UNAVAILABLE', failureLayer: layer }
     }
-    if (!familyIsStreamConfigured(family) && family !== 'kimi') {
-      return { family: familyName, content: '', status: 'UNAVAILABLE', failureLayer: 'AUTH' }
-    }
+    // The "is this family's external provider configured" check that used to live here
+    // (familyIsStreamConfigured) now happens inside invokeCouncilSeat() -> invokeExternalBackend(),
+    // which performs the identical check before ever reaching streamCouncilFamily. See the
+    // non-kimi branch below.
 
     const systemFor = (): string => {
       if (family === 'chatgpt') return gptSystem
@@ -1741,30 +1754,35 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         return { family: familyName, content: kimiResult.data.text.trim(), status: 'OK' }
       }
 
-      const streamed = await streamCouncilFamily({
-        family,
-        system: systemFor(),
-        prompt: userPrompt,
+      // Council Seat Router entry point. Under the default/production routing mode
+      // (COUNCIL_ROUTING_MODE unset -> EXTERNAL_ONLY), invokeCouncilSeat() resolves straight to
+      // invokeExternalBackend(), which is itself a pass-through to the same streamCouncilFamily()
+      // call this replaced — same provider adapters, same retry/timeout policy, same real
+      // token-by-token onDelta streaming. Only a non-default COUNCIL_ROUTING_MODE (never set in
+      // this environment) can route a seat to a local backend instead.
+      const seatResult = await invokeCouncilSeat({
+        seat: family,
+        systemPrompt: systemFor(),
+        userPrompt,
         maxTokens,
-        timeoutKind: isLightweightGreeting ? 'social' : classifiedTurn.shouldResearch ? 'research' : 'council',
+        signal: new AbortController().signal,
         onDelta: emitDelta,
+        timeoutKind: isLightweightGreeting ? 'social' : classifiedTurn.shouldResearch ? 'research' : 'council',
       })
-      if (streamed.ok) {
+      if (seatResult.ok) {
         return {
           family: familyName,
-          content: streamed.text.trim(),
+          content: seatResult.text.trim(),
           status: 'OK',
-          attempt: streamed.attempt,
         }
       }
       return {
         family: familyName,
-        content: streamed.partial ? streamed.text.trim() : '',
-        status: streamed.status,
-        error: streamed.error,
-        failureLayer: streamed.failureLayer,
-        partial: streamed.partial,
-        attempt: streamed.attempt,
+        content: seatResult.partial ? seatResult.text.trim() : '',
+        status: mapSeatInvokeStatusToProviderResultStatus(seatResult.backend.status),
+        error: seatResult.backend.fallbackReason ?? undefined,
+        failureLayer: seatResult.backend.failureClass,
+        partial: seatResult.partial,
         timeoutMs: PROVIDER_TIMEOUT_MS,
       }
     } catch (error) {

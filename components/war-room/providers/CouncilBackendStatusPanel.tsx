@@ -72,11 +72,11 @@ function SeatCard({ row }: { row: SeatBackendStatus }) {
         <Metric label="Backend" value={row.active.backendType} />
         <Metric label="Provider" value={row.active.provider} />
         <Metric label="Model" value={row.active.model} />
-        <Metric label="Fallback" value={row.active.fallbackUsed ? 'YES' : 'NO'} />
+        <Metric label="Fallback" value={row.active.fallbackUsed === null ? '—' : row.active.fallbackUsed ? 'YES' : 'NO'} />
         <Metric label="Latency" value={formatLatency(row.active.latencyMs)} />
         <Metric label="Failure class" value={row.active.failureClass ?? '—'} />
       </div>
-      {row.active.fallbackUsed ? (
+      {row.active.fallbackUsed === true ? (
         <p className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-200/90">
           FALLBACK USED{row.active.fallbackReason ? ` — ${row.active.fallbackReason}` : ''}
         </p>
@@ -129,7 +129,8 @@ export function CouncilBackendStatusPanel() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Pill label={`Live routing: ${snapshot?.liveRouting ?? 'checking'}`} tone="metadata" />
+          <Pill label={`Live routing wired: ${snapshot ? (snapshot.liveRoutingWired ? 'YES' : 'NO') : 'checking'}`} tone="metadata" />
+          <Pill label={`Local serving live seats: ${snapshot ? snapshot.localServingLiveSeats : 'checking'}`} tone="metadata" />
           <button
             type="button"
             onClick={() => void load()}
@@ -143,9 +144,12 @@ export function CouncilBackendStatusPanel() {
 
       {error ? <div className="mb-4 rounded border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">{error}</div> : null}
 
-      <div className="mb-4 grid gap-3 md:grid-cols-4">
+      <div className="mb-4 grid gap-3 md:grid-cols-3 lg:grid-cols-6">
         <Metric label="Routing Foundation" value={snapshot?.routingFoundation ?? 'checking'} />
-        <Metric label="Routing Mode Resolved" value={snapshot?.routingModeResolved ?? 'checking'} />
+        <Metric label="Current Mode" value={snapshot?.routingModeResolved ?? 'checking'} />
+        <Metric label="Local Backend" value={snapshot ? (snapshot.localBackendAvailable ? 'AVAILABLE' : 'NOT AVAILABLE') : 'checking'} />
+        <Metric label="Local Ready For Live Routing" value={snapshot ? (snapshot.localReadyForLiveRouting ? 'YES' : 'NO') : 'checking'} />
+        <Metric label="Local Serving Live Seats" value={snapshot ? snapshot.localServingLiveSeats : 'checking'} />
         <Metric label="Local Model Pool" value={snapshot?.localModelPool ?? 'checking'} />
         <Metric
           label="Ollama"

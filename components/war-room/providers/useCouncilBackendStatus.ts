@@ -15,7 +15,8 @@ export type SeatBackendStatus = {
     status: SeatActiveStatus
     failureClass?: 'AUTH' | 'RATE_LIMIT'
     latencyMs: number | null
-    fallbackUsed: boolean
+    /** null = unknown/not observed — this is a passive snapshot with no per-invocation telemetry, never a claim of "no fallback". */
+    fallbackUsed: boolean | null
     fallbackReason: string | null
     note: string
   }
@@ -43,8 +44,14 @@ export type LocalRegistryRow = {
 export type BackendStatusSnapshot = {
   generatedAt: string
   routingFoundation: string
-  liveRouting: string
+  /** True: app/api/chat/execute.ts genuinely calls invokeCouncilSeat(). NOT a claim that local is active. */
+  liveRoutingWired: boolean
   routingModeResolved: string
+  localBackendAvailable: boolean
+  /** Real readiness/eligibility (config + current health + mode permits local). NOT proof any live seat actually ran locally. */
+  localReadyForLiveRouting: boolean
+  /** Always 'UNKNOWN' — no per-invocation telemetry exists yet. Never infer this from localReadyForLiveRouting. */
+  localServingLiveSeats: 'UNKNOWN'
   routingModeNote: string
   localModelPool: string
   ollama: { reachable: boolean; baseUrl: string; installedModelCount: number; probeLatencyMs: number }

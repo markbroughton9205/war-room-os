@@ -22,8 +22,11 @@ function check(name: string, pass: boolean, detail: string): CaseResult {
 async function fetchSnapshot() {
   const res = await backendStatusGet()
   const body = (await res.json()) as {
-    liveRouting: string
+    liveRoutingWired: boolean
     routingModeResolved: string
+    localBackendAvailable: boolean
+    localReadyForLiveRouting: boolean
+    localServingLiveSeats: 'UNKNOWN'
     routingModeNote: string
     ollama: { reachable: boolean; baseUrl: string; installedModelCount: number; probeLatencyMs: number }
     seats: {
@@ -36,7 +39,7 @@ async function fetchSnapshot() {
         status: string
         failureClass?: string
         latencyMs: number | null
-        fallbackUsed: boolean
+        fallbackUsed: boolean | null
         fallbackReason: string | null
         note: string
       }
@@ -118,8 +121,13 @@ function gitDiffAgainstHead(paths: string[]): string {
   }
 }
 
-const EXECUTION_CRITICAL_PATHS = [
-  'app/api/chat/execute.ts',
+// Deliberately does NOT include app/api/chat/execute.ts — this suite's charter is the status
+// UI/API, not the live execution path, and a later, separate, explicitly-chartered mission
+// (council-live-routing) legitimately wires execute.ts to invokeCouncilSeat(). Guarding
+// execute.ts's own content is that mission's own validation suite's job, not this one's.
+// This suite still guards that the underlying provider request/streaming logic itself is
+// never duplicated or rewritten, regardless of what calls it.
+const PROVIDER_REQUEST_LOGIC_PATHS = [
   'lib/council/live-orchestration/streamProvider.ts',
   'lib/council/live-orchestration/adapters/anthropic.ts',
   'lib/council/live-orchestration/adapters/openai.ts',
@@ -237,13 +245,43 @@ export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[
     ),
   )
 
-  // 12. EXTERNAL_ONLY represented correctly — liveRouting stays EXTERNAL_ONLY even if resolved mode changes.
+  // 12. EXTERNAL_ONLY represented correctly — under the default (no env override), wired=true but
+  // localReadyForLiveRouting is structurally guaranteed false: invokeExternalBackend() is the only
+  // path invokeCouncilSeat() can take under EXTERNAL_ONLY, so this isn't environment-dependent.
+  // localServingLiveSeats stays the literal 'UNKNOWN' regardless of mode — this route has no
+  // per-invocation telemetry, so it never claims to know whether a live seat actually served.
+  results.push(
+    check(
+      'EXTERNAL_ONLY represented correctly (wired does not imply local is ready or serving)',
+      snapshot.liveRoutingWired === true
+      && snapshot.routingModeResolved === 'EXTERNAL_ONLY'
+      && snapshot.localReadyForLiveRouting === false
+      && snapshot.localServingLiveSeats === 'UNKNOWN',
+      `liveRoutingWired=${snapshot.liveRoutingWired} routingModeResolved=${snapshot.routingModeResolved} localReadyForLiveRouting=${snapshot.localReadyForLiveRouting} localServingLiveSeats=${snapshot.localServingLiveSeats}`,
+    ),
+  )
+
+  // 12c. Local readiness is never presented as proof local actually served a live seat — the two
+  // fields must be able to disagree in principle (readiness is config+health, serving is
+  // per-invocation fact this route cannot observe), proven here by localServingLiveSeats staying
+  // 'UNKNOWN' even in a hypothetical/non-default mode where localReadyForLiveRouting COULD be true.
+  const { body: readinessProbe } = await withEnv({ ...NO_CLOUD_KEYS, COUNCIL_ROUTING_MODE: 'LOCAL_FIRST' }, () => fetchSnapshot())
+  results.push(
+    check(
+      'local readiness is not presented as proof of actual serving',
+      readinessProbe.localServingLiveSeats === 'UNKNOWN',
+      `under LOCAL_FIRST: localReadyForLiveRouting=${readinessProbe.localReadyForLiveRouting} localServingLiveSeats=${readinessProbe.localServingLiveSeats} (must stay UNKNOWN regardless of readiness)`,
+    ),
+  )
+
+  // 12b. routingModeResolved is genuinely dynamic (reads real env), not a hardcoded value — proven
+  // by actually changing it via COUNCIL_ROUTING_MODE and observing the response change.
   const { body: snapshotWithLocalFirstEnv } = await withEnv({ ...NO_CLOUD_KEYS, COUNCIL_ROUTING_MODE: 'LOCAL_FIRST' }, () => fetchSnapshot())
   results.push(
     check(
-      'EXTERNAL_ONLY represented correctly (liveRouting never implies local is live)',
-      snapshotWithLocalFirstEnv.liveRouting === 'EXTERNAL_ONLY' && snapshotWithLocalFirstEnv.routingModeResolved === 'LOCAL_FIRST',
-      `liveRouting=${snapshotWithLocalFirstEnv.liveRouting} routingModeResolved=${snapshotWithLocalFirstEnv.routingModeResolved}`,
+      'routingModeResolved reflects real env, not a hardcoded value',
+      snapshotWithLocalFirstEnv.routingModeResolved === 'LOCAL_FIRST' && snapshotWithLocalFirstEnv.liveRoutingWired === true,
+      `routingModeResolved=${snapshotWithLocalFirstEnv.routingModeResolved} liveRoutingWired=${snapshotWithLocalFirstEnv.liveRoutingWired}`,
     ),
   )
 
@@ -307,30 +345,42 @@ export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[
     ),
   )
 
-  // 19-20. Execution-critical files unchanged — a real `git diff HEAD --name-only` across
-  // execute.ts, streamProvider.ts, and all 4 provider adapters, in one check. Empty output is the
-  // only passing state; any listed path means one of these files has an uncommitted change.
-  const executionDiff = gitDiffAgainstHead(EXECUTION_CRITICAL_PATHS)
+  // 19. Underlying provider request/streaming logic unchanged — a real `git diff HEAD --name-only`
+  // across streamProvider.ts and all 4 provider adapters. Empty output is the only passing state.
+  // execute.ts is deliberately NOT in this list — see PROVIDER_REQUEST_LOGIC_PATHS's comment.
+  const providerLogicDiff = gitDiffAgainstHead(PROVIDER_REQUEST_LOGIC_PATHS)
   results.push(
     check(
-      'execution-critical files unchanged (git diff HEAD)',
-      executionDiff.length === 0,
-      executionDiff.length === 0 ? 'git diff HEAD --name-only reports no changes across all 6 files' : `changed=${executionDiff}`,
+      'underlying provider request/streaming logic unchanged (git diff HEAD)',
+      providerLogicDiff.length === 0,
+      providerLogicDiff.length === 0 ? 'git diff HEAD --name-only reports no changes across streamProvider.ts + 4 adapters' : `changed=${providerLogicDiff}`,
     ),
   )
 
-  // execute.ts specifically: still calls the pre-existing unmodified streamProvider.ts exports
-  // directly, and does not import this mission's new backends module — a second, independent
-  // signal alongside the git diff above (source content, not just "no diff since HEAD").
+  // 20. The specific function this suite's concern actually covers — callCouncilProvider, the
+  // Council seat dispatch function — builds no parallel provider system of its own. execute.ts
+  // as a WHOLE file has long had unrelated direct-fetch helpers (callChatGPT/callClaude, used by
+  // entirely different features elsewhere in the file, pre-existing and untouched here) — this
+  // check is deliberately scoped to just the one function this mission's integration touches,
+  // not the whole 3000+ line file, so it isn't tripped by unrelated pre-existing code.
   const executeSource = executeRouteSource()
+  const callCouncilProviderStart = executeSource.indexOf('const callCouncilProvider = async (')
+  const callCouncilProviderEnd = executeSource.indexOf('const runFamilyToFamilyDeliberation = async (')
+  const callCouncilProviderSource =
+    callCouncilProviderStart >= 0 && callCouncilProviderEnd > callCouncilProviderStart
+      ? executeSource.slice(callCouncilProviderStart, callCouncilProviderEnd)
+      : ''
+  const directProviderUrls = ['api.anthropic.com', 'api.openai.com', 'api.x.ai', 'generativelanguage.googleapis.com']
+  const foundDirectUrls = directProviderUrls.filter(url => callCouncilProviderSource.includes(url))
   results.push(
     check(
-      'app/api/chat/execute.ts still calls the original unmodified streamProvider.ts exports',
-      executeSource.includes('familyIsStreamConfigured')
-      && executeSource.includes('streamCouncilFamily')
-      && !executeSource.includes('live-orchestration/backends')
-      && !executeSource.includes('invokeCouncilSeat'),
-      `familyIsStreamConfigured=${executeSource.includes('familyIsStreamConfigured')} streamCouncilFamily=${executeSource.includes('streamCouncilFamily')} backendsImport=${executeSource.includes('live-orchestration/backends')}`,
+      'callCouncilProvider builds no parallel provider system (no direct cloud provider URLs)',
+      callCouncilProviderSource.length > 0 && foundDirectUrls.length === 0,
+      callCouncilProviderSource.length === 0
+        ? 'could not locate callCouncilProvider function boundaries in execute.ts'
+        : foundDirectUrls.length === 0
+          ? 'no direct provider URLs found within callCouncilProvider'
+          : `found=${foundDirectUrls.join(',')}`,
     ),
   )
 
@@ -360,18 +410,35 @@ export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[
     ),
   )
 
+  // 23b. UI never calls readiness "serving" — localReadyForLiveRouting and localServingLiveSeats
+  // are rendered as two distinct fields, and the "serving" label always shows the literal
+  // 'UNKNOWN' string interpolation rather than a derived YES/NO boolean rendering (which would
+  // imply this route can prove actual serving, which it cannot).
+  results.push(
+    check(
+      'UI never calls readiness "serving"',
+      source.includes('localReadyForLiveRouting')
+      && source.includes('snapshot.localServingLiveSeats')
+      && !source.includes('localServingLiveSeats ? ')
+      && !/localServingLiveSeats\s*\?\s*'YES'\s*:\s*'NO'/.test(source),
+      'panel renders localReadyForLiveRouting (YES/NO) and localServingLiveSeats (always the literal UNKNOWN string) as distinct fields, never conflated',
+    ),
+  )
+
   // 24. Mandatory fallback-semantics fix: live seat rows must never claim a Council LOCAL ->
-  // EXTERNAL backend-routing fallback occurred, since live routing is still EXTERNAL_ONLY and no
-  // such fallback can exist yet. `provider.integrity.fallback_used` (a different, pre-existing
-  // signal from lib/providers/health.ts's own retry pipeline) must not leak into this field.
+  // EXTERNAL backend-routing fallback definitively did NOT happen, since this route has no
+  // per-invocation telemetry and genuinely cannot know. fallbackUsed is null (unknown/not
+  // observed), never false (which would be a false claim of "no fallback"). Separately,
+  // `provider.integrity.fallback_used` (a different, pre-existing signal from
+  // lib/providers/health.ts's own retry pipeline) must not leak into this field either way.
   const routeSourceForFallbackComment = readFileSync(
     fileURLToPath(new URL('../../../../app/api/council/backend-status/route.ts', import.meta.url)),
     'utf8',
   )
   results.push(
     check(
-      'no fake Council backend-routing fallback from live seat rows',
-      snapshot.seats.every(row => row.active.fallbackUsed === false && row.active.fallbackReason === null)
+      'fallback unknown, never falsely claimed as "no fallback"',
+      snapshot.seats.every(row => row.active.fallbackUsed === null && row.active.fallbackReason === null)
       && routeSourceForFallbackComment.includes('integrity.fallback_used')
       && routeSourceForFallbackComment.toLowerCase().includes('must never be reused here'),
       `fallbackUsed values: ${snapshot.seats.map(row => row.active.fallbackUsed).join(',')}; explanatory comment present=${routeSourceForFallbackComment.toLowerCase().includes('must never be reused here')}`,
