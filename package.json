@@ -16,6 +16,7 @@
     "validate:council-live-routing": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-live-routing-validation.mjs",
     "validate:council-general-local-activation": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-general-local-activation-validation.mjs",
     "validate:council-nebula": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-nebula-validation.mjs",
+    "validate:council-live-group-execution": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-live-group-execution-validation.mjs",
     "validate:mission-runtime": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-mission-runtime-validation.mjs",
     "validate:ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ui/matrixStatusBus.validation.ts && node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ui/runtimeEventBridge.validation.ts",
     "validate:approval-issuance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-approval-issuance-gate16.mjs",

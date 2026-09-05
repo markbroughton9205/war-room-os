@@ -1,5 +1,6 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { displayNameForSeat } from '@/lib/council/nebula/identity'
+import { auroraDegradedRoundNotice, projectRoundHealth, shouldSurfaceFailureInConversation, type NebulaRoundHealth } from '@/lib/council/nebula/round'
 import type { LiveResearchEvidencePacket } from '@/lib/runtime/liveResearchEvidencePacket'
 import type {
   DeliberationClaim,
@@ -327,4 +328,39 @@ export function formatDeliberationTurnForChat(turn: DeliberationTurn, references
     `Confidence: ${turn.confidence == null ? 'unresolved' : Math.round(turn.confidence * 100) + '%'}`,
     `Recommended action: ${turn.recommended_action}`,
   ].join('\n')
+}
+
+export type FamilyDeliberationRoundResult = {
+  family: string
+  content: string
+  status: 'OK' | 'TIMED_OUT' | 'UNAVAILABLE' | 'FAILED'
+}
+
+export type FamilyDeliberationRoundOutcome = {
+  results: FamilyDeliberationRoundResult[]
+  roundHealth: NebulaRoundHealth
+}
+
+/**
+ * Live Group/deliberation entrypoint outcome (called by app/api/chat/execute.ts's
+ * family_to_family_deliberation branch — the same function this suite's regression validation
+ * exercises). A non-complete turn never becomes its own raw-report SYSTEM card in the primary
+ * conversation; that data belongs to roundHealth (Inspector/diagnostics). Only when the entire
+ * round produced nothing (shouldSurfaceFailureInConversation) does the Commander get a single,
+ * compact, honest notice instead of silence.
+ */
+export function deriveFamilyDeliberationRoundOutcome(session: DeliberationSession): FamilyDeliberationRoundOutcome {
+  const roundHealth = projectRoundHealth(session)
+  const results: FamilyDeliberationRoundResult[] = session.turns
+    .filter(turn => turn.completion_status === 'complete' && turn.output_message_id)
+    .map(turn => ({
+      family: turn.provider_label,
+      content: formatDeliberationTurnForChat(turn, session.evidence_references),
+      status: 'OK',
+    }))
+  if (shouldSurfaceFailureInConversation(roundHealth)) {
+    const notice = auroraDegradedRoundNotice(roundHealth)
+    if (notice) results.push({ family: 'SYSTEM', content: notice, status: 'FAILED' })
+  }
+  return { results, roundHealth }
 }

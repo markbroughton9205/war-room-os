@@ -54,6 +54,7 @@ import {
   type DeliberationEvidenceReference,
   type DeliberationTurn,
 } from '@/lib/council/family-deliberation'
+import type { NebulaRoundHealth } from '@/lib/council/nebula/round'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 import { ArchiveViewer } from '@/components/war-room/council/ArchiveViewer'
 import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoundary'
@@ -430,6 +431,9 @@ export type CouncilMessage = {
   analystOperationsPacket?: AnalystOperationsPacket
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
+  /** Nebula RoundHealth projection (Inspector/diagnostics) — never a substitute for the visible
+   * conversation content; failures live here, not as raw SYSTEM report cards. */
+  roundHealth?: NebulaRoundHealth
   councilStage?: import('@/lib/council/session-orchestration').CouncilMessageStage
   commanderTurnId?: string | null
   deliberationRoundId?: string | null
@@ -10144,8 +10148,16 @@ function Home() {
             messagesToAdd.filter(message => message.messageType === 'response' && message.content.trim()).length
           const runtimeByFamily: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
           const detailsByFamily: CouncilProviderRuntimeDetails = {}
+          // synthesis_turn_id only names a turn that WAS ATTEMPTED as synthesis — it can point at
+          // one that failed. Only use it when that turn actually completed; otherwise fall back
+          // to the latest complete turn, same as when synthesis_turn_id is absent entirely.
+          // Otherwise roundHealth/shadowCouncilAssembly would attach to no message at all in a
+          // partial-failure round where synthesis itself failed but other seats completed.
+          const completedSynthesisTurnId = deliberation.synthesis_turn_id
+            ? turns.find(turn => turn.turn_id === deliberation.synthesis_turn_id && turn.completion_status === 'complete' && Boolean(turn.output_message_id))?.turn_id
+            : undefined
           const shadowReadoutTurnId =
-            deliberation.synthesis_turn_id
+            completedSynthesisTurnId
             ?? [...turns].reverse().find(turn => turn.completion_status === 'complete' && Boolean(turn.output_message_id))?.turn_id
             ?? null
 
@@ -10185,6 +10197,7 @@ function Home() {
               commanderTurnId: turn.commander_turn_id,
               deliberationRoundId: turn.round_id,
               shadowCouncilAssembly: turn.turn_id === shadowReadoutTurnId ? deliberationData.shadowCouncilAssembly : undefined,
+              roundHealth: turn.turn_id === shadowReadoutTurnId ? deliberationData.roundHealth : undefined,
               councilProgress: deliberationData.councilProgress,
             })
 
@@ -10225,6 +10238,33 @@ function Home() {
               })
               runtimeByFamily[family] = 'RESPONDED'
               anySuccess = true
+            }
+          }
+
+          // deriveFamilyDeliberationRoundOutcome's one compact degraded-round notice is
+          // intentionally labeled family: 'SYSTEM' — extractReadableCouncilContributions
+          // (above) deliberately excludes SYSTEM as "not real provider text", so a fully failed
+          // round would otherwise render nothing at all here (the Provider Issues banner still
+          // covers it, but roundHealth would never reach the Inspector). Render it explicitly,
+          // once, only when every other attempt produced nothing.
+          if (messagesToAdd.length === 0 && deliberationData.roundHealth?.degraded) {
+            const notice = deliberationData.results?.find(row => row.family === 'SYSTEM')
+            if (notice?.content) {
+              messagesToAdd.push({
+                id: `roundhealth-${deliberationData.councilProgress?.requestId ?? deliberation.session_id}`,
+                familyName: 'SYSTEM',
+                content: notice.content,
+                timestamp: new Date().toLocaleTimeString(),
+                color: '#FFD700',
+                icon: '⚙',
+                provider: '',
+                messageType: 'system',
+                roundHealth: deliberationData.roundHealth,
+              })
+              void postLiveCouncilMessage(
+                { role: 'system', content: notice.content, family: 'SYSTEM' },
+                { allowProviderFailureMessage: true },
+              )
             }
           }
 
