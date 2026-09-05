@@ -152,6 +152,7 @@ OPEN_ARTIFACT = re.compile(
 )
 WITHOUT_OPEN = re.compile(r"\b(without opening|do not open|don't open)\b", re.I)
 PUBLIC_PAGE_OPEN = re.compile(r"\bopen the .{0,60}(page|site|listing)\b", re.I)
+ALREADY_DONE_QUESTION = re.compile(r"\b(did (we|you|i) already|have (we|you|i) already)\b", re.I)
 MEMORY_ALREADY = re.compile(
     r"\b(did we already|we already (approve|decide|assign|reserve|set|agree|log|adopt)|"
     r"already (approve|decide|assign|reserve|set|agree|log))\b",
@@ -322,6 +323,8 @@ def evidence_flags(text: str) -> dict[str, bool]:
     prior_concrete = bool(multi and ((not vague) or concrete_hit) and len(prior_u) > 12)
     digest = bool(DIGEST_ACT.search(raw))
     exact = bool(EXACT_PAYLOAD.search(raw) or (digest and re.search(r":\s+\S+", raw)))
+    already_done_question = bool(ALREADY_DONE_QUESTION.search(raw))
+    open_artifact = bool((OPEN_ARTIFACT.search(raw) or OPEN_VERB_ARTIFACT.search(raw)) and not already_done_question)
     return {
         "multi_turn": multi,
         "prior_concrete": prior_concrete,
@@ -329,8 +332,8 @@ def evidence_flags(text: str) -> dict[str, bool]:
         "negation_or_supplied_context": bool(NEGATE_WEB.search(raw)),
         "not_missing_given": not bool(MISSING_GIVEN.search(raw)),
         "missing_given": bool(MISSING_GIVEN.search(raw)),
-        "open_artifact": bool(OPEN_ARTIFACT.search(raw) or OPEN_VERB_ARTIFACT.search(raw)),
-        "not_open_artifact": not bool(OPEN_ARTIFACT.search(raw) or OPEN_VERB_ARTIFACT.search(raw)),
+        "open_artifact": open_artifact,
+        "not_open_artifact": not open_artifact,
         "not_without_open": not bool(WITHOUT_OPEN.search(raw)),
         "without_open": bool(WITHOUT_OPEN.search(raw)),
         "memory_already": bool(MEMORY_ALREADY.search(raw)),
