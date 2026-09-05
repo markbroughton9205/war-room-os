@@ -124,7 +124,12 @@ VAGUE_STORE = re.compile(
     re.I,
 )
 CONCRETE_VALUE = re.compile(
-    r"(\d|['\"].+['\"]|uses |wear |covers |runs |opening line is |hold time is |ceiling is )",
+    r"(\d|['\"].+['\"]|uses |wear |covers |runs |opening line is |hold time is |ceiling is |"
+    r"\bat\s+[\w'-]+(?:\s+[\w'-]+){0,4}\.?\s*$)",
+    re.I,
+)
+EXPLICIT_WITHHELD_VALUE = re.compile(
+    r"\b(i am not (repeating|quoting)|did not restate|not quoting again|not repeating it|not restating it)\b",
     re.I,
 )
 OPEN_VERB_ARTIFACT = re.compile(
@@ -311,7 +316,8 @@ def evidence_flags(text: str) -> dict[str, bool]:
     prior_u = prior or ""
     body = current if current else raw
     vague = bool(multi and VAGUE_STORE.search(prior_u))
-    concrete_hit = bool(multi and CONCRETE_VALUE.search(prior_u))
+    explicit_withheld = bool(multi and EXPLICIT_WITHHELD_VALUE.search(prior_u))
+    concrete_hit = bool(multi and CONCRETE_VALUE.search(prior_u) and not explicit_withheld)
     prior_underspecified = bool(multi and vague and not concrete_hit)
     prior_concrete = bool(multi and ((not vague) or concrete_hit) and len(prior_u) > 12)
     digest = bool(DIGEST_ACT.search(raw))
