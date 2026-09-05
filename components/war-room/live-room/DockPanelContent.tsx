@@ -42,6 +42,10 @@ const ProviderRuntimePanel = dynamic(
   () => import('@/components/war-room/providers/ProviderRuntimePanel').then(m => m.ProviderRuntimePanel),
   { ssr: false, loading: () => <PanelSkeleton label="AI Team Status" /> },
 )
+const CouncilBackendStatusPanel = dynamic(
+  () => import('@/components/war-room/providers/CouncilBackendStatusPanel').then(m => m.CouncilBackendStatusPanel),
+  { ssr: false, loading: () => <PanelSkeleton label="Council Backend Status" /> },
+)
 const OpportunityScoutPanel = dynamic(
   () => import('@/components/war-room/opportunities/OpportunityScoutPanel').then(m => m.OpportunityScoutPanel),
   { ssr: false, loading: () => <PanelSkeleton label="Operations" /> },
@@ -316,6 +320,10 @@ export const DockPanelContent = memo(function DockPanelContent({
           <section>
             <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-fuchsia-200">AI Team Status</p>
             <ProviderRuntimePanel />
+          </section>
+          <section>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-fuchsia-200">Council Backend Status</p>
+            <CouncilBackendStatusPanel />
           </section>
           <RuntimeIntegrityPanel />
         </div>

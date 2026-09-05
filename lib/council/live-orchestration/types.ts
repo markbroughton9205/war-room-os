@@ -44,6 +44,12 @@ export const COUNCIL_FAILURE_LAYERS = [
   'PERSISTENCE',
   'UI',
   'DEPENDENCY',
+  /** Local backend (e.g. Ollama) unreachable at its configured host. See lib/council/live-orchestration/backends. */
+  'LOCAL_UNAVAILABLE',
+  /** Local backend reachable, but the resolved model tag is not pulled/installed there. */
+  'MODEL_NOT_INSTALLED',
+  /** Local backend reachable and model installed, but the completion call itself failed. */
+  'MODEL_LOAD_FAILED',
   'UNKNOWN',
 ] as const
 
