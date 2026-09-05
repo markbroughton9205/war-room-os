@@ -194,6 +194,7 @@ INCOMPATIBLE = re.compile(
     re.I,
 )
 PATH_LIKE = re.compile(r"(docs/|lib/|scripts/|\.md\b|\.json\b|path\s*=)", re.I)
+DECLARED_TOOL_DIRECTIVE = re.compile(r"\btool\s*=\s*([a-z0-9_-]+)", re.I)
 
 RULE_SPECS = [
     {
@@ -361,6 +362,24 @@ def evidence_flags(text: str) -> dict[str, bool]:
         "not_path_like": not bool(PATH_LIKE.search(raw)),
         "path_like": bool(PATH_LIKE.search(raw)),
     }
+
+
+def declared_tool_class(raw: str) -> str | None:
+    """Recognize an explicit compact-protocol tool directive (e.g. "TOOL=memory").
+
+    This is a lexical-fallback-layer signal, not a new deterministic rule: it only
+    narrows the capability shortlist handed to the lexical/WRIM cascade when no
+    deterministic rule has already resolved a high-confidence class. It reuses the
+    router's own existing tool-id/EVAL6-class vocabulary rather than any per-fixture
+    string, so it generalizes to any input using this declared-tool protocol.
+    """
+    m = DECLARED_TOOL_DIRECTIVE.search(raw)
+    if not m:
+        return None
+    norm = re.sub(r"[^a-z0-9]", "", m.group(1).lower())
+    if norm in {"none", "notool"}:
+        return "NO_TOOL"
+    return TOOL_ID_TO_EVAL6.get(norm)
 
 
 def classify_information_state(text: str, flags: dict[str, bool] | None = None) -> dict[str, Any]:
@@ -632,6 +651,11 @@ def combine_route(
         shortlist = shortlist_from_state(state, gate) if use_state_shortlist and mode not in {"lex", "wrim", "lex_wrim"} else list(CLASS_NAMES)
         if mode in {"lex", "wrim", "lex_wrim"}:
             shortlist = list(CLASS_NAMES)
+        elif use_state_shortlist:
+            declared = declared_tool_class(text)
+            if declared:
+                shortlist = [declared]
+                reason.append("declared_tool_directive")
         if mode == "lex":
             predicted = lex_pred or "NO_TOOL"
             decision_stage = "lexical_only"
