@@ -25,7 +25,6 @@ export function observeWarRoomApiTool(input: {
       source_type: 'REAL_RUNTIME',
       insertion_point: `app/api/tools-or-files:${input.toolId}`,
       provider: 'war_room_api',
-      context_dependence: 'UNKNOWN',
       provenance: { endpoint_status: input.status, authority: 'war_room_tool_registry' },
     })
   } catch (err) {

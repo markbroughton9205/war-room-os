@@ -827,7 +827,7 @@ async function main() {
     identity: 'REAL-RUNTIME-CLASS-DIVERSITY-V1',
     estimated_runtime_minutes: 30,
     observer_enabled_dev: observerEnabled,
-    production_node_env_blocked: process.env.NODE_ENV === 'production',
+    production_node_env_blocked: (process.env.NODE_ENV as string) === 'production',
     original_observer_proof_intact: observerProofIntact,
     pre_observer_REAL_RUNTIME: preObserver.REAL_RUNTIME ?? 11,
     env_names_loaded_count: envLoaded.names_present.length,

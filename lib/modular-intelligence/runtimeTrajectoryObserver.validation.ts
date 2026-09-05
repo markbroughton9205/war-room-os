@@ -163,12 +163,12 @@ check('13 review state starts RAW', () => {
 
 check('14 no auto-VERIFIED', () => {
   assert.equal(captured.every((r) => r.auto_verified === false), true)
-  assert.equal(captured.every((r) => r.review_state !== 'VERIFIED'), true)
+  assert.equal(captured.every((r) => (r.review_state as string) !== 'VERIFIED'), true)
 })
 
 check('15 no auto-curriculum', () => {
   assert.equal(captured.every((r) => r.auto_curriculum === false), true)
-  assert.equal(captured.every((r) => r.review_state !== 'CURRICULUM_CANDIDATE'), true)
+  assert.equal(captured.every((r) => (r.review_state as string) !== 'CURRICULUM_CANDIDATE'), true)
 })
 
 check('16 no auto-training', () => {

@@ -229,7 +229,7 @@ async function queryMemoryStores(needle: string): Promise<{
     }
     stores_queried.push(table)
     for (const raw of data ?? []) {
-      const row = raw as Record<string, unknown>
+      const row = raw as unknown as Record<string, unknown>
       const mapped = fields(row)
       if (mapped.haystack.toLowerCase().includes(lowered)) {
         hits.push({
@@ -665,7 +665,7 @@ async function main() {
     identity: 'REAL-RUNTIME-MEMORY-V1',
     estimated_runtime_minutes: 20,
     observer_enabled_dev: observerEnabled,
-    production_node_env_blocked: process.env.NODE_ENV === 'production',
+    production_node_env_blocked: (process.env.NODE_ENV as string) === 'production',
     original_observer_proof_intact: observerProofIntact,
     class_diversity_ledger_intact: classDivIntact,
     pre_observer_REAL_RUNTIME: preObserver.REAL_RUNTIME ?? 11,

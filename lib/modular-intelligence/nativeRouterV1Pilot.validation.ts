@@ -318,7 +318,10 @@ check('23 shadow flag remains independent', () => {
     isNativeRouterV1PilotEnabled({ NODE_ENV: 'production', WR_NATIVE_ROUTER_V1_PILOT: '1' } as NodeJS.ProcessEnv),
     true,
   )
-  assert.equal(isNativeRouterV1PilotEnabled({ WR_NATIVE_ROUTER_V1_SHADOW: '1' } as NodeJS.ProcessEnv), false)
+  assert.equal(
+    isNativeRouterV1PilotEnabled({ NODE_ENV: 'production', WR_NATIVE_ROUTER_V1_SHADOW: '1' } as NodeJS.ProcessEnv),
+    false,
+  )
 })
 
 check('24 NO_TOOL eligible', () => {
@@ -437,7 +440,10 @@ check('32 R03 unchanged', () => {
 })
 
 check('33 kill switch is env-only', () => {
-  assert.equal(isNativeRouterV1PilotEnabled({ WR_NATIVE_ROUTER_V1_PILOT: '0' } as NodeJS.ProcessEnv), false)
+  assert.equal(
+    isNativeRouterV1PilotEnabled({ NODE_ENV: 'production', WR_NATIVE_ROUTER_V1_PILOT: '0' } as NodeJS.ProcessEnv),
+    false,
+  )
 })
 
 check('34 rollback conceptual: flag off restores existing router', () => {

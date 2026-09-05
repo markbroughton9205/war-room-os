@@ -65,7 +65,7 @@ async function countTable(
     if (msg.includes('schema cache')) error_class = 'schema_cache'
     return { ok: false, count: 0, classified: {}, error_class, error_code: code || null }
   }
-  const rows = (data ?? []) as Record<string, unknown>[]
+  const rows = (data ?? []) as unknown as Record<string, unknown>[]
   const classified: Record<string, number> = {}
   for (const row of rows) {
     for (const tag of classify(haystackOf(row))) {
