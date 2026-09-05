@@ -98,14 +98,19 @@ export async function runLiveGroupExecutionLiveCheck(): Promise<LiveGroupExecuti
   const noFrontierIdentity = roundResults.every(r => !FRONTIER_NAME_PATTERN.test(r.family))
   const distinctIdentities = new Set(roundResults.map(r => r.family)).size === roundResults.length
   const auroraFinal = roundResults.some(r => r.family === 'AURORA')
-  const successfulCallsWereLocal = rawBackends.filter(b => b.ok).every(b => b.backendType === 'LOCAL')
-  const sharedModelUsed = rawBackends.filter(b => b.ok).every(b => b.model === NEBULA_SHARED_LOCAL_MODEL_ID)
+  // Every seat actually called must have succeeded, not merely "no failures among whichever
+  // subset happened to succeed" — .filter(ok).every(...) on an empty set is vacuously true and
+  // would pass even if every real call failed.
+  const allSeatsAttempted = rawBackends.length === seats.length
+  const allSeatsSucceeded = allSeatsAttempted && rawBackends.every(b => b.ok)
+  const successfulCallsWereLocal = allSeatsSucceeded && rawBackends.every(b => b.backendType === 'LOCAL')
+  const sharedModelUsed = allSeatsSucceeded && rawBackends.every(b => b.model === NEBULA_SHARED_LOCAL_MODEL_ID)
 
   results.push({
     name: 'live_group_execution_real_round_uses_nebula_identities',
-    pass: noFrontierIdentity && distinctIdentities && roundHealth.synthesizerIdentity === 'AURORA'
-      && successfulCallsWereLocal && sharedModelUsed,
-    detail: `families=${roundResults.map(r => r.family).join(',')} backends=${rawBackends.map(b => `${b.seat}:${b.backendType}/${b.model}/ok=${b.ok}`).join('|')} degraded=${roundHealth.degraded} aurora_final=${auroraFinal}`,
+    pass: noFrontierIdentity && distinctIdentities && auroraFinal && roundHealth.synthesisAvailable
+      && allSeatsSucceeded && successfulCallsWereLocal && sharedModelUsed,
+    detail: `families=${roundResults.map(r => r.family).join(',')} backends=${rawBackends.map(b => `${b.seat}:${b.backendType}/${b.model}/ok=${b.ok}`).join('|')} degraded=${roundHealth.degraded} aurora_final=${auroraFinal} synthesisAvailable=${roundHealth.synthesisAvailable}`,
   })
 
   return results

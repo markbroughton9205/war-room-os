@@ -10233,6 +10233,29 @@ function Home() {
             }
           }
 
+          // deriveFamilyDeliberationRoundOutcome's one compact degraded-round notice is
+          // intentionally labeled family: 'SYSTEM' — extractReadableCouncilContributions
+          // (above) deliberately excludes SYSTEM as "not real provider text", so a fully failed
+          // round would otherwise render nothing at all here (the Provider Issues banner still
+          // covers it, but roundHealth would never reach the Inspector). Render it explicitly,
+          // once, only when every other attempt produced nothing.
+          if (messagesToAdd.length === 0 && deliberationData.roundHealth?.degraded) {
+            const notice = deliberationData.results?.find(row => row.family === 'SYSTEM')
+            if (notice?.content) {
+              messagesToAdd.push({
+                id: `roundhealth-${deliberationData.councilProgress?.requestId ?? deliberation.session_id}`,
+                familyName: 'SYSTEM',
+                content: notice.content,
+                timestamp: new Date().toLocaleTimeString(),
+                color: '#FFD700',
+                icon: '⚙',
+                provider: '',
+                messageType: 'system',
+                roundHealth: deliberationData.roundHealth,
+              })
+            }
+          }
+
           if (messagesToAdd.length) addMessages(messagesToAdd)
           providerRuntimeStates = runtimeByFamily
           providerRuntimeDetails = detailsByFamily
