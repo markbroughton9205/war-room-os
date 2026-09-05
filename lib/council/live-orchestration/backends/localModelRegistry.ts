@@ -30,9 +30,23 @@ export type LocalModelRegistryEntry = {
  */
 export const LOCAL_MODEL_REGISTRY: LocalModelRegistryEntry[] = [
   {
+    // Provenance verified 2026-09-05 via the Ollama registry manifest API (no auth required):
+    //   registry.ollama.ai/v2/huihui_ai/qwen3-abliterated/manifests/14b
+    //   registry.ollama.ai/v2/huihui_ai/qwen3-abliterated/manifests/14b-v2
+    // Both return an IDENTICAL model-layer digest (sha256:25bb9ad6ab7dfe4b5fcff944facdf09e3a
+    // 035a7d04dcf6e2de5f566e102efec8, 9,001,748,832 bytes) — so Ollama's own registry confirms
+    // the plain "14b" tag being pulled here IS byte-identical to what Ollama itself labels
+    // "14b-v2". The manifest's license layer resolves to Apache-2.0. What is NOT independently
+    // confirmed: which specific Hugging Face repo this was converted from — Ollama's library
+    // page (ollama.com/huihui_ai/qwen3-abliterated) attributes it only to the generic
+    // "Qwen/qwen3" base collection, never a named huihui-ai HF repo path. The previous `repo`
+    // value here (huihui-ai/Huihui-Qwen3-14B-abliterated-v2) was an assumption, not a verified
+    // fact, so `repo` below points at the actually-verified Ollama source instead of guessing
+    // an unconfirmed HF repo string. Do not "upgrade" this to a specific HF repo path without
+    // the same kind of independent verification performed here.
     slot: 'GENERAL',
     modelId: 'huihui_ai/qwen3-abliterated:14b',
-    repo: 'huihui-ai/Huihui-Qwen3-14B-abliterated-v2',
+    repo: 'ollama.com/huihui_ai/qwen3-abliterated',
     runtime: 'ollama',
     quant: 'Q4_K_M',
     roleSuitability: ['GENERAL'],
@@ -74,9 +88,11 @@ export const LOCAL_MODEL_REGISTRY: LocalModelRegistryEntry[] = [
     health: 'UNKNOWN',
   },
   {
+    // Mirrors GENERAL's modelId/repo (see the provenance note on that entry) — mechanically
+    // consistent since RESEARCH reuses GENERAL's weight by design, not a separately-verified claim.
     slot: 'RESEARCH',
     modelId: 'huihui_ai/qwen3-abliterated:14b',
-    repo: 'huihui-ai/Huihui-Qwen3-14B-abliterated-v2',
+    repo: 'ollama.com/huihui_ai/qwen3-abliterated',
     runtime: 'ollama',
     quant: 'Q4_K_M',
     roleSuitability: ['RESEARCH', 'GENERAL'],
