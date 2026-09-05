@@ -3,7 +3,7 @@ import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { wrEngineerNodeStore } from '@/lib/wr-engineer/node/store'
 import { wrEngineerSessionStore } from '@/lib/wr-engineer/session/store'
 import { SessionBindingError } from '@/lib/wr-engineer/session/session'
-import { sendEngineeringChatMessage } from '@/lib/wr-engineer/engineeringChat'
+import { sendInspectingEngineeringChatMessage as sendEngineeringChatMessage } from '@/lib/wr-engineer/engineeringChat'
 import { CouncilProviderModelAdapter } from '@/lib/wr-engineer/modelAdapter'
 import { logWrEngineerAudit } from '@/lib/wr-engineer/audit'
 

@@ -9,6 +9,7 @@
  */
 import type { AgentState, MissionContext } from '../types'
 import type { WrEngineerEditProposal } from '../codeEditProposals'
+import type { CompactTurnEvidence, ProposalFileGrounding, TurnPhase } from '../turnEvidence'
 
 export type EngineeringChatRole = 'commander' | 'wr_engineer' | 'system'
 
@@ -20,7 +21,7 @@ export type EngineeringChatMessage = {
   createdAt: string
 }
 
-export type ToolActivityOutcome = 'PASS' | 'FAIL'
+export type ToolActivityOutcome = 'STARTED' | 'PASS' | 'FAIL'
 
 export type ToolActivityEvent = {
   id: string
@@ -29,6 +30,8 @@ export type ToolActivityEvent = {
   detail: string
   outcome: ToolActivityOutcome
   occurredAt: string
+  turnId?: string
+  target?: string
 }
 
 /**
@@ -72,6 +75,10 @@ export type EngineeringSession = {
   nativeBuilderIssueId: string | null
   nativeBuilderRepairId: string | null
   lastProposalRejection: { reasons: string[] } | null
+  /** UI-visible inspect-loop phase — does not replace agentState. Optional so Phase 2/3 session records remain valid. */
+  turnPhase?: TurnPhase
+  lastTurnEvidence?: CompactTurnEvidence | null
+  proposalGrounding?: ProposalFileGrounding[] | null
   createdAt: string
   updatedAt: string
 }

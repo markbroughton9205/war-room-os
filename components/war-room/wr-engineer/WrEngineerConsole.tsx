@@ -75,10 +75,19 @@ type SessionRecord = {
   nativeBuilderIssueId: string | null
   nativeBuilderRepairId: string | null
   lastProposalRejection: { reasons: string[] } | null
+  turnPhase?: 'THINKING' | 'INSPECTING' | 'READING' | 'SEARCHING' | 'ANALYZING' | 'PROPOSING' | 'READY' | 'BLOCKED' | 'FAILED'
+  lastTurnEvidence?: {
+    turnId: string
+    readFiles: { relPath: string; bytesRead: number; truncated: boolean }[]
+    searches: { query: string; matchCount: number }[]
+    gitObservations: { tool: string; summary: string }[]
+    toolCallCount: number
+  } | null
+  proposalGrounding?: { file: string; readThisTurn: boolean; matchTextObserved: boolean | null; nativeBuilderPolicy: 'PASS' | 'FAIL' | 'PENDING' }[] | null
 }
 
 type ChatMessage = { id: string; role: 'commander' | 'wr_engineer' | 'system'; content: string; createdAt: string }
-type ToolEvent = { id: string; tool: string; detail: string; outcome: 'PASS' | 'FAIL'; occurredAt: string }
+type ToolEvent = { id: string; tool: string; detail: string; outcome: 'STARTED' | 'PASS' | 'FAIL'; occurredAt: string; turnId?: string; target?: string }
 
 const AGENT_STATE_COLOR: Record<AgentState, 'emerald' | 'amber' | 'red' | 'cyan' | 'slate'> = {
   READY: 'emerald', WORKING: 'cyan', VALIDATING: 'cyan', BLOCKED: 'amber', COMPLETE: 'emerald', FAILED: 'red',
@@ -227,6 +236,7 @@ export function WrEngineerConsole() {
     source.addEventListener('open', onOpen)
     source.addEventListener('session.snapshot', onSnapshot)
     source.addEventListener('message.created', onMessageCreated)
+    source.addEventListener('tool.started', onToolEvent)
     source.addEventListener('tool.completed', onToolEvent)
     source.addEventListener('tool.failed', onToolEvent)
     source.addEventListener('error', onError)
@@ -235,6 +245,7 @@ export function WrEngineerConsole() {
       source.removeEventListener('open', onOpen)
       source.removeEventListener('session.snapshot', onSnapshot)
       source.removeEventListener('message.created', onMessageCreated)
+      source.removeEventListener('tool.started', onToolEvent)
       source.removeEventListener('tool.completed', onToolEvent)
       source.removeEventListener('tool.failed', onToolEvent)
       source.removeEventListener('error', onError)
@@ -403,6 +414,10 @@ export function WrEngineerConsole() {
               {session ? <StatusPill label={session.agentState} color={AGENT_STATE_COLOR[session.agentState]} /> : <StatusPill label="READY" color="slate" />}
             </div>
             <div>
+              <p className="text-[9px] uppercase tracking-widest text-slate-600">Inspect</p>
+              <StatusPill label={session?.turnPhase ?? 'READY'} color={session?.turnPhase === 'FAILED' || session?.turnPhase === 'BLOCKED' ? 'red' : session?.turnPhase && session.turnPhase !== 'READY' ? 'cyan' : 'slate'} />
+            </div>
+            <div>
               <p className="text-[9px] uppercase tracking-widest text-slate-600">Stream</p>
               <StatusPill label={visibleStreamStatus} color={STREAM_STATUS_COLOR[visibleStreamStatus]} />
             </div>
@@ -480,6 +495,16 @@ export function WrEngineerConsole() {
                     <div key={i} className="font-mono text-[10px] text-slate-300">
                       <p className="text-cyan-300">{change.operation} — {change.file}</p>
                       <p className="text-slate-500">{change.reason}</p>
+                      {(() => {
+                        const grounding = (session.proposalGrounding ?? []).find(g => g.file === change.file)
+                        return (
+                          <p className="text-[9px] uppercase tracking-widest text-slate-500">
+                            READ THIS TURN: {grounding?.readThisTurn ? 'YES' : 'NO'}
+                            {grounding?.matchTextObserved !== null && grounding?.matchTextObserved !== undefined ? ` · MATCHTEXT OBSERVED: ${grounding.matchTextObserved ? 'YES' : 'NO'}` : ''}
+                            {grounding ? ` · NATIVE BUILDER POLICY: ${grounding.nativeBuilderPolicy}` : ''}
+                          </p>
+                        )
+                      })()}
                       {change.matchText && <p className="text-red-400">- {change.matchText}</p>}
                       {change.replacementText && <p className="text-emerald-400">+ {change.replacementText}</p>}
                       {change.newFileContent && <pre className="whitespace-pre-wrap text-emerald-400">{change.newFileContent}</pre>}
@@ -506,6 +531,21 @@ export function WrEngineerConsole() {
           <p className="text-[11px] text-slate-300">{session?.mission ? JSON.stringify(session.mission) : 'no active mission'}</p>
         </Panel>
 
+        <Panel title="Evidence This Turn">
+          {!session?.lastTurnEvidence && <p className="text-[11px] text-slate-500">No inspection yet this session. WR-Engineer must read a file in the current turn before it can propose a change to it.</p>}
+          {session?.lastTurnEvidence && (
+            <ul className="flex flex-col gap-1 text-[11px] text-slate-300">
+              <li>{session.lastTurnEvidence.readFiles.length} file(s) read</li>
+              <li>{session.lastTurnEvidence.searches.length} search(es)</li>
+              <li>{session.lastTurnEvidence.gitObservations.length ? 'git status checked' : 'git not checked'}</li>
+              <li>tool calls: {session.lastTurnEvidence.toolCallCount}</li>
+              {session.proposalGrounding && (
+                <li>proposal targets: {session.proposalGrounding.filter(g => g.readThisTurn).length}/{session.proposalGrounding.length} files read</li>
+              )}
+            </ul>
+          )}
+        </Panel>
+
         <Panel title="Activity Timeline" className="flex-1">
           {toolEvents.length === 0 && <p className="text-[11px] text-slate-500">No tool activity yet.</p>}
           <ul className="flex flex-col gap-1">
@@ -513,8 +553,9 @@ export function WrEngineerConsole() {
               <li key={event.id} className="text-[10px]">
                 <span className="text-slate-600">{new Date(event.occurredAt).toLocaleTimeString()}</span>{' '}
                 <span className="text-cyan-300">{event.tool}</span>{' '}
+                {event.target && <span className="text-slate-500">{event.target} </span>}
                 <span className="text-slate-400">{event.detail}</span>{' '}
-                <StatusPill label={event.outcome} color={event.outcome === 'PASS' ? 'emerald' : 'red'} />
+                <StatusPill label={event.outcome} color={event.outcome === 'PASS' ? 'emerald' : event.outcome === 'STARTED' ? 'cyan' : 'red'} />
               </li>
             ))}
           </ul>

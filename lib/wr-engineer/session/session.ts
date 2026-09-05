@@ -66,6 +66,9 @@ export async function createSession(
     nativeBuilderIssueId: null,
     nativeBuilderRepairId: null,
     lastProposalRejection: null,
+    turnPhase: 'READY',
+    lastTurnEvidence: null,
+    proposalGrounding: null,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   }
@@ -251,6 +254,31 @@ export async function setProposalBridged(
   return updated
 }
 
+export async function setSessionTurnPhase(
+  sessionStore: SessionStore,
+  sessionId: string,
+  turnPhase: EngineeringSession['turnPhase'],
+  now: Date = new Date(),
+): Promise<EngineeringSession> {
+  const session = await requireSession(sessionStore, sessionId)
+  const updated: EngineeringSession = { ...session, turnPhase, updatedAt: now.toISOString() }
+  await sessionStore.saveSession(updated)
+  return updated
+}
+
+export async function saveTurnEvidence(
+  sessionStore: SessionStore,
+  sessionId: string,
+  lastTurnEvidence: EngineeringSession['lastTurnEvidence'],
+  proposalGrounding: EngineeringSession['proposalGrounding'] = null,
+  now: Date = new Date(),
+): Promise<EngineeringSession> {
+  const session = await requireSession(sessionStore, sessionId)
+  const updated: EngineeringSession = { ...session, lastTurnEvidence, proposalGrounding, updatedAt: now.toISOString() }
+  await sessionStore.saveSession(updated)
+  return updated
+}
+
 export async function recordToolActivity(
   sessionStore: SessionStore,
   sessionId: string,
@@ -258,6 +286,7 @@ export async function recordToolActivity(
   detail: string,
   outcome: ToolActivityEvent['outcome'],
   now: Date = new Date(),
+  extra?: { turnId?: string; target?: string },
 ): Promise<ToolActivityEvent> {
   await requireSession(sessionStore, sessionId)
   const event: ToolActivityEvent = {
@@ -267,6 +296,8 @@ export async function recordToolActivity(
     detail,
     outcome,
     occurredAt: now.toISOString(),
+    turnId: extra?.turnId,
+    target: extra?.target,
   }
   await sessionStore.appendToolEvent(event)
   return event

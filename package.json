@@ -15,6 +15,7 @@
     "validate:wr-engineer": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wr-engineer/wrEngineer.validation.ts",
     "validate:wr-engineer-phase2": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wr-engineer/wrEngineerPhase2.validation.ts",
     "validate:wr-engineer-phase3": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wr-engineer/wrEngineerPhase3.validation.ts",
+    "validate:wr-engineer-phase4": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wr-engineer/wrEngineerPhase4.validation.ts",
     "validate:ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ui/matrixStatusBus.validation.ts && node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ui/runtimeEventBridge.validation.ts",
     "validate:approval-issuance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-approval-issuance-gate16.mjs",
     "validate:earth-intelligence": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-earth-intelligence-validation.mjs",

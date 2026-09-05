@@ -113,6 +113,8 @@ export { JsonFileSessionStore, wrEngineerSessionStore, type SessionStore } from 
 export {
   createSession,
   setSessionAgentState,
+  setSessionTurnPhase,
+  saveTurnEvidence,
   assembleSessionContext,
   sendCommanderMessage,
   recordToolActivity,
@@ -149,7 +151,7 @@ export {
   type ProposalValidationResult,
 } from './proposalValidation'
 
-export { sendEngineeringChatMessage, type EngineeringChatResult, type ProposalOutcome } from './engineeringChat'
+export { sendEngineeringChatMessage, sendInspectingEngineeringChatMessage, type EngineeringChatResult, type ProposalOutcome } from './engineeringChat'
 
 export {
   PROPOSAL_STATES,
@@ -177,3 +179,42 @@ export {
   type StreamBaseline,
   type StreamDeltaResult,
 } from './sessionStream'
+
+// ---------------------------------------------------------------------------
+// Phase 4: inspect-before-propose tool loop, current-turn evidence, proposal grounding.
+// ---------------------------------------------------------------------------
+
+export {
+  INSPECT_TOOL_NAMES,
+  parseInspectTurnResponse,
+  wrapInspectToolRequest,
+  INSPECT_TURN_INSTRUCTIONS,
+  type InspectToolName,
+  type InspectTurnParseResult,
+} from './inspectContract'
+
+export {
+  INSPECT_BOUNDS,
+  MAX_TOOL_CALLS_PER_TURN,
+  MAX_FILES_READ_PER_TURN,
+  MAX_SEARCH_RESULTS,
+  MAX_FILE_BYTES_PER_READ,
+  MAX_TOTAL_CONTEXT_BYTES,
+} from './inspectBounds'
+
+export {
+  createTurnEvidence,
+  compactTurnEvidence,
+  groundProposalAgainstTurn,
+  TARGET_NOT_READ_THIS_TURN,
+  MATCH_TEXT_NOT_OBSERVED,
+  MATCH_TEXT_NOT_UNIQUE,
+  CREATE_FILE_CONTEXT_NOT_INSPECTED,
+  type EngineeringTurnEvidence,
+  type CompactTurnEvidence,
+  type ProposalFileGrounding,
+  type TurnPhase,
+} from './turnEvidence'
+
+export { executeInspectTool, resolveInspectExecutionMode } from './inspectTools'
+export { runInspectTurnLoop, buildTurnObservationPrompt } from './inspectLoop'

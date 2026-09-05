@@ -37,6 +37,7 @@ export type WrEngineerStreamEnvelopeType =
   | 'session.snapshot'
   | 'agent.state'
   | 'message.created'
+  | 'tool.started'
   | 'tool.completed'
   | 'tool.failed'
   | 'proposal.generating'
@@ -56,6 +57,7 @@ export type WrEngineerStreamEnvelope =
   | (Base & { envelopeType: 'session.snapshot'; snapshot: WrEngineerSessionSnapshot })
   | (Base & { envelopeType: 'agent.state'; agentState: AgentState })
   | (Base & { envelopeType: 'message.created'; message: EngineeringChatMessage })
+  | (Base & { envelopeType: 'tool.started'; event: ToolActivityEvent })
   | (Base & { envelopeType: 'tool.completed'; event: ToolActivityEvent })
   | (Base & { envelopeType: 'tool.failed'; event: ToolActivityEvent })
   | (Base & { envelopeType: 'proposal.generating' })
@@ -131,7 +133,8 @@ export function computeStreamDeltas(baseline: StreamBaseline, current: WrEnginee
   }
   if (current.toolEvents.length > baseline.toolEventCount) {
     for (const event of current.toolEvents.slice(baseline.toolEventCount)) {
-      envelopes.push({ envelopeType: event.outcome === 'PASS' ? 'tool.completed' : 'tool.failed', event })
+      const envelopeType = event.outcome === 'STARTED' ? 'tool.started' : event.outcome === 'PASS' ? 'tool.completed' : 'tool.failed'
+      envelopes.push({ envelopeType, event })
     }
     changed = true
   }

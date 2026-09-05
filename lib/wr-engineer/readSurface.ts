@@ -22,8 +22,9 @@ import {
   type RepoSearchHit,
   type RepoGitContext,
 } from '@/lib/mission-runtime/engineeringReadSurface'
+import { getRepoLog, type RepoLogEntry } from '@/lib/repo/status'
 
-export type { RepoFileReadResult, RepoSearchHit, RepoGitContext }
+export type { RepoFileReadResult, RepoSearchHit, RepoGitContext, RepoLogEntry }
 
 /** Flat, denylist-respecting directory listing. */
 export async function listRepositoryFiles(pathPrefix?: string): Promise<string[]> {
@@ -50,4 +51,9 @@ export async function inspectSymbolUsages(symbol: string, opts?: { pathPrefix?: 
  * (status, diff, current branch, HEAD SHA) from the mission brief's runtime capability list. */
 export async function getRepositoryContext(paths?: string[]): Promise<RepoGitContext> {
   return getEngineeringRepositoryContext(paths)
+}
+
+/** Read-only recent git log via lib/repo/status.ts's existing execFile git surface. */
+export async function getRepositoryLog(limit?: number): Promise<RepoLogEntry[]> {
+  return getRepoLog(limit)
 }

@@ -29,8 +29,12 @@ import {
   setProposalInvalid,
   setProposalReady,
   setSessionAgentState,
+  setSessionTurnPhase,
+  saveTurnEvidence,
+  recordToolActivity,
 } from './session/session'
-import { recordToolActivity } from './session/session'
+import { runInspectTurnLoop } from './inspectLoop'
+import { compactTurnEvidence, createTurnEvidence, groundProposalAgainstTurn } from './turnEvidence'
 
 export type ProposalOutcome =
   | { kind: 'none' }
@@ -39,6 +43,7 @@ export type ProposalOutcome =
   | { kind: 'ready_not_bridged'; note: string }
   | { kind: 'bridge_rejected'; bridge: Extract<BridgeOutcome, { accepted: false }> }
   | { kind: 'bridged'; bridge: Extract<BridgeOutcome, { accepted: true }> }
+  | { kind: 'bounded_stop'; reason: string }
 
 export type EngineeringChatResult = {
   commanderMessage: EngineeringChatMessage
@@ -236,4 +241,129 @@ async function generateAndBridgeProposal(
   await setProposalBridged(sessionStore, sessionId, bridgeOutcome.issue.id, bridgeOutcome.repair.id)
   await recordToolActivity(sessionStore, sessionId, 'BRIDGE_PROPOSAL', `repair ${bridgeOutcome.repair.id} awaiting Commander approval`, 'PASS')
   return { kind: 'bridged', bridge: bridgeOutcome }
+}
+
+/**
+ * Phase 4 Commander-facing chat: inspect-before-propose tool loop, then the same Native Builder
+ * bridge as Phase 3. sendEngineeringChatMessage remains the ungated Phase 3 entry (regression).
+ */
+export async function sendInspectingEngineeringChatMessage(
+  sessionStore: SessionStore,
+  nodeStore: NodeStore,
+  modelAdapter: ModelAdapter,
+  sessionId: string,
+  content: string,
+  memory: EngineeringMemoryStore = engineeringMemory,
+  now: Date = new Date(),
+): Promise<EngineeringChatResult> {
+  const session = await sessionStore.getSession(sessionId)
+  if (!session) throw new Error(`Unknown session: ${sessionId}`)
+
+  const commanderMessage: EngineeringChatMessage = {
+    id: randomUUID(),
+    sessionId,
+    role: 'commander',
+    content,
+    createdAt: now.toISOString(),
+  }
+  await sessionStore.appendMessage(commanderMessage)
+  await setSessionAgentState(sessionStore, sessionId, 'WORKING', now)
+  await setSessionTurnPhase(sessionStore, sessionId, 'THINKING', now)
+
+  const turn = createTurnEvidence({
+    turnId: randomUUID(),
+    sessionId,
+    nodeId: session.nodeId,
+    repositoryId: session.repositoryId,
+    now,
+  })
+
+  const identityContext = [
+    await assembleSessionContext(sessionStore, nodeStore, sessionId, memory),
+    `<<< STRUCTURED_RESPONSE_CONTRACT >>>\n${STRUCTURED_RESPONSE_INSTRUCTIONS}\n<<< END STRUCTURED_RESPONSE_CONTRACT >>>`,
+  ].join('\n\n')
+
+  const loop = await runInspectTurnLoop(session, modelAdapter, identityContext, content, turn, {
+    onPhase: async phase => {
+      await setSessionTurnPhase(sessionStore, sessionId, phase)
+    },
+    onToolStarted: async (tool, target, summary) => {
+      await recordToolActivity(sessionStore, sessionId, tool, summary, 'STARTED', new Date(), { turnId: turn.turnId, target })
+    },
+    onToolFinished: async (tool, target, summary, outcome) => {
+      await recordToolActivity(sessionStore, sessionId, tool, summary, outcome, new Date(), { turnId: turn.turnId, target })
+    },
+  })
+
+  turn.completedAt = new Date().toISOString()
+  const parsed = loop.structured
+
+  const replyMessage: EngineeringChatMessage = {
+    id: randomUUID(),
+    sessionId,
+    role: 'wr_engineer',
+    content: parsed.result.response,
+    createdAt: new Date().toISOString(),
+  }
+  await sessionStore.appendMessage(replyMessage)
+
+  if (loop.boundedStop) {
+    await saveTurnEvidence(sessionStore, sessionId, compactTurnEvidence(turn), null)
+    await setSessionTurnPhase(sessionStore, sessionId, 'BLOCKED')
+    const finalSession = await setSessionAgentState(sessionStore, sessionId, 'BLOCKED')
+    return { commanderMessage, replyMessage, session: finalSession, proposalOutcome: { kind: 'bounded_stop', reason: loop.boundReason ?? 'bounded limit' } }
+  }
+
+  if (parsed.parseFailed) {
+    await recordToolActivity(sessionStore, sessionId, 'PARSE_PROPOSAL', parsed.parseError ?? 'malformed proposal block', 'FAIL', new Date(), { turnId: turn.turnId })
+    await memory.record({
+      category: 'FAILURE',
+      summary: `WR-Engineer produced a malformed structured proposal in session ${sessionId}`,
+      detail: parsed.parseError ?? 'unknown parse error',
+      epistemicStatus: 'OBSERVED',
+      relatedRefs: [sessionId, turn.turnId],
+      tags: ['proposal-parse-failure'],
+    })
+  }
+
+  if (parsed.result.kind === 'response_only') {
+    await saveTurnEvidence(sessionStore, sessionId, compactTurnEvidence(turn), null)
+    await setSessionTurnPhase(sessionStore, sessionId, 'READY')
+    const finalSession = await setSessionAgentState(sessionStore, sessionId, 'READY')
+    return {
+      commanderMessage,
+      replyMessage,
+      session: finalSession,
+      proposalOutcome: parsed.parseFailed ? { kind: 'parse_failed', parseError: parsed.parseError } : { kind: 'none' },
+    }
+  }
+
+  await setSessionTurnPhase(sessionStore, sessionId, 'PROPOSING')
+  await setProposalGenerating(sessionStore, sessionId)
+
+  const grounded = groundProposalAgainstTurn(parsed.result.proposal, turn)
+  if (!grounded.ok) {
+    await setProposalInvalid(sessionStore, sessionId, grounded.reasons)
+    await saveTurnEvidence(sessionStore, sessionId, compactTurnEvidence(turn), grounded.grounding)
+    await recordToolActivity(sessionStore, sessionId, 'VALIDATE_PROPOSAL', grounded.reasons.join('; '), 'FAIL', new Date(), { turnId: turn.turnId })
+    await memory.record({
+      category: 'DECISION',
+      summary: `Proposal rejected — not grounded in current-turn inspection in session ${sessionId}`,
+      detail: grounded.reasons.join('; '),
+      epistemicStatus: 'OBSERVED',
+      relatedRefs: [sessionId, turn.turnId],
+      tags: ['proposal-rejected', 'target-not-read-this-turn'],
+    })
+    await setSessionTurnPhase(sessionStore, sessionId, 'READY')
+    const finalSession = await setSessionAgentState(sessionStore, sessionId, 'READY')
+    return { commanderMessage, replyMessage, session: finalSession, proposalOutcome: { kind: 'invalid', reasons: grounded.reasons } }
+  }
+
+  const outcome = await generateAndBridgeProposal(sessionStore, nodeStore, sessionId, session, parsed.result.proposal, memory)
+  const policy = outcome.kind === 'invalid' || outcome.kind === 'bridge_rejected' ? 'FAIL' : outcome.kind === 'bridged' || outcome.kind === 'ready_not_bridged' ? 'PASS' : 'PENDING'
+  const grounding = grounded.grounding.map(g => ({ ...g, nativeBuilderPolicy: policy as 'PASS' | 'FAIL' | 'PENDING' }))
+  await saveTurnEvidence(sessionStore, sessionId, compactTurnEvidence(turn), grounding)
+  await setSessionTurnPhase(sessionStore, sessionId, outcome.kind === 'invalid' || outcome.kind === 'bridge_rejected' ? 'FAILED' : 'READY')
+  const finalSession = await setSessionAgentState(sessionStore, sessionId, 'READY')
+  return { commanderMessage, replyMessage, session: finalSession, proposalOutcome: outcome }
 }

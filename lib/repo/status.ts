@@ -153,3 +153,19 @@ export async function getRepoStatus(): Promise<RepoStatus> {
     checkedAt: new Date().toISOString(),
   }
 }
+
+export type RepoLogEntry = { hash: string; subject: string }
+
+/** Read-only recent commit list — same execFile git surface as getRepoStatus(), never a second git
+ * implementation. Caps at 20 entries. Does not checkout, reset, commit, or push. */
+export async function getRepoLog(limit = 10): Promise<RepoLogEntry[]> {
+  const repoPath = resolveRepoRoot()
+  const capped = Math.max(1, Math.min(Math.floor(limit) || 10, 20))
+  const raw = await safeGit(['log', `-n${capped}`, '--pretty=format:%H%x09%s'], repoPath, '')
+  if (!raw.trim()) return []
+  return raw.split('\n').flatMap(line => {
+    const tab = line.indexOf('\t')
+    if (tab <= 0) return []
+    return [{ hash: line.slice(0, tab).trim(), subject: line.slice(tab + 1).trim() }]
+  })
+}
