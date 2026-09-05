@@ -10148,8 +10148,16 @@ function Home() {
             messagesToAdd.filter(message => message.messageType === 'response' && message.content.trim()).length
           const runtimeByFamily: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
           const detailsByFamily: CouncilProviderRuntimeDetails = {}
+          // synthesis_turn_id only names a turn that WAS ATTEMPTED as synthesis — it can point at
+          // one that failed. Only use it when that turn actually completed; otherwise fall back
+          // to the latest complete turn, same as when synthesis_turn_id is absent entirely.
+          // Otherwise roundHealth/shadowCouncilAssembly would attach to no message at all in a
+          // partial-failure round where synthesis itself failed but other seats completed.
+          const completedSynthesisTurnId = deliberation.synthesis_turn_id
+            ? turns.find(turn => turn.turn_id === deliberation.synthesis_turn_id && turn.completion_status === 'complete' && Boolean(turn.output_message_id))?.turn_id
+            : undefined
           const shadowReadoutTurnId =
-            deliberation.synthesis_turn_id
+            completedSynthesisTurnId
             ?? [...turns].reverse().find(turn => turn.completion_status === 'complete' && Boolean(turn.output_message_id))?.turn_id
             ?? null
 
@@ -10253,6 +10261,10 @@ function Home() {
                 messageType: 'system',
                 roundHealth: deliberationData.roundHealth,
               })
+              void postLiveCouncilMessage(
+                { role: 'system', content: notice.content, family: 'SYSTEM' },
+                { allowProviderFailureMessage: true },
+              )
             }
           }
 
