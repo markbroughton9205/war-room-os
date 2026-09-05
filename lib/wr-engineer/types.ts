@@ -8,6 +8,7 @@
  * validation.ts, codeEditProposals.ts, and each file's own header for exactly which existing
  * module it delegates to.
  */
+import type { ProviderFailureClass } from './providerFailure'
 
 // ---------------------------------------------------------------------------
 // Epistemic labeling (SOUL.md §6) — every factual claim WR-Engineer records or reports carries one
@@ -92,6 +93,13 @@ export type ModelAdapterResult = {
   adapterId: string
   epistemicStatus: EpistemicStatus
   error?: string
+  /** Phase 5 optional telemetry — ignored by Phase 1–4 callers. */
+  latencyMs?: number
+  failureClass?: ProviderFailureClass
+  runtime?: string
+  modelName?: string
+  answeredBy?: 'local' | 'external'
+  truncatedPrompt?: boolean
 }
 
 /** Every reasoning backend WR-Engineer can use — local, hosted, or (eventually) a native

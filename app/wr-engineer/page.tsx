@@ -14,7 +14,7 @@ export default function WrEngineerPage() {
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-emerald-500">War Room OS</p>
               <h1 className="text-xl font-bold uppercase tracking-widest text-emerald-300">WR-Engineer</h1>
-              <p className="mt-1 max-w-3xl text-[11px] text-slate-400">War Room&apos;s sovereign software-engineering specialist. Pair a machine, register a repository, and work with WR-Engineer directly — inspection and validation are live today; proposed edits flow through the same governed Native Builder apply/validate/rollback pipeline everywhere else in War Room does.</p>
+              <p className="mt-1 max-w-3xl text-[11px] text-slate-400">War Room&apos;s sovereign software-engineering specialist on NEBULA-GENESIS. Local coding engine first; optional external fallback. Inspection and validation are live today; proposed edits flow through Native Builder — the only write/apply authority.</p>
             </div>
             <Link href="/" className="rounded border border-emerald-900/60 px-3 py-1.5 text-[10px] uppercase tracking-widest text-emerald-300">Return to War Room</Link>
           </div>

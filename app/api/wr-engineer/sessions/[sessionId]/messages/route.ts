@@ -4,18 +4,10 @@ import { wrEngineerNodeStore } from '@/lib/wr-engineer/node/store'
 import { wrEngineerSessionStore } from '@/lib/wr-engineer/session/store'
 import { SessionBindingError } from '@/lib/wr-engineer/session/session'
 import { sendInspectingEngineeringChatMessage as sendEngineeringChatMessage } from '@/lib/wr-engineer/engineeringChat'
-import { CouncilProviderModelAdapter } from '@/lib/wr-engineer/modelAdapter'
+import { createWrEngineerChatAdapter } from '@/lib/wr-engineer/modelRouter'
 import { logWrEngineerAudit } from '@/lib/wr-engineer/audit'
 
 export const dynamic = 'force-dynamic'
-
-/**
- * Phase 2 development wiring only (per mission brief: "acceptable to connect an existing
- * available model/provider through the abstraction for development/testing"). Swapping this for a
- * local model, a War Room fine-tuned model, or the eventual native WR-Engineer model is a one-line
- * change here — no caller of ModelAdapter anywhere else needs to change (see modelAdapter.ts).
- */
-const devModelAdapter = new CouncilProviderModelAdapter('claude')
 
 export async function POST(req: Request, { params }: { params: Promise<{ sessionId: string }> }) {
   const session = await requireCommanderSession('WR-Engineer chat')
@@ -33,8 +25,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ session
   }
 
   try {
-    const result = await sendEngineeringChatMessage(wrEngineerSessionStore, wrEngineerNodeStore, devModelAdapter, sessionId, body.content)
-    await logWrEngineerAudit('engineering chat message exchanged', { sessionId, adapterId: devModelAdapter.id, proposalOutcome: result.proposalOutcome.kind })
+    const adapter = await createWrEngineerChatAdapter()
+    const result = await sendEngineeringChatMessage(wrEngineerSessionStore, wrEngineerNodeStore, adapter, sessionId, body.content)
+    await logWrEngineerAudit('engineering chat message exchanged', { sessionId, adapterId: adapter.id, proposalOutcome: result.proposalOutcome.kind })
     return NextResponse.json(result)
   } catch (error) {
     if (error instanceof SessionBindingError) {

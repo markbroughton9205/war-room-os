@@ -51,6 +51,8 @@ export {
 } from './missionContext'
 
 export { CouncilProviderModelAdapter, UnavailableLocalModelAdapter } from './modelAdapter'
+export { LocalWrEngineerModelAdapter } from './localModelAdapter'
+export { WrEngineerModelRouter, createWrEngineerChatAdapter } from './modelRouter'
 
 export * as wrEngineerReadSurface from './readSurface'
 export * as wrEngineerValidation from './validation'
@@ -218,3 +220,27 @@ export {
 
 export { executeInspectTool, resolveInspectExecutionMode } from './inspectTools'
 export { runInspectTurnLoop, buildTurnObservationPrompt } from './inspectLoop'
+
+// ---------------------------------------------------------------------------
+// Phase 5: local coding engine, Commander engine selection, health dashboard.
+// ---------------------------------------------------------------------------
+
+export {
+  ENGINE_MODES,
+  DEFAULT_ENGINE_MODE,
+  DEFAULT_LOCAL_RUNTIME,
+  DEFAULT_LOCAL_MODEL,
+  RECOMMENDED_LOCAL_MODEL,
+  LOCAL_INFERENCE_TIMEOUT_MS,
+  type EngineMode,
+  type EngineSelection,
+  type WrEngineerEngineDashboardState,
+  type LocalEngineStatus,
+} from './engineTypes'
+
+export { parseEngineSelection, JsonFileEngineSelectionStore, wrEngineerEngineSelectionStore } from './engineSelection'
+export { classifyProviderFailure, providerHealthFromFailure } from './providerFailure'
+export { boundSystemPrompt } from './localContext'
+export { redactEngineEndpoint, probeLocalRuntime, localEngineStatusFromProbe, getLocalEngineTelemetry } from './localEngine'
+export { buildEngineDashboardState, dashboardStateIsSecretFree } from './engineHealth'
+export { describeLocalEngineStartup, shouldStartOllamaServe } from './localEngineStartup'

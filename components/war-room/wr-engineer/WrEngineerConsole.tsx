@@ -24,6 +24,29 @@ type PairingState = 'WAITING' | 'PAIRING' | 'AUTHORIZED' | 'EXPIRED' | 'REJECTED
 type AgentState = 'READY' | 'WORKING' | 'BLOCKED' | 'VALIDATING' | 'COMPLETE' | 'FAILED'
 type ProposalState = 'NONE' | 'GENERATING' | 'INVALID' | 'READY' | 'BRIDGED' | 'AWAITING_APPROVAL' | 'APPLIED' | 'VALIDATING' | 'VALID' | 'FAILED' | 'ROLLED_BACK'
 type StreamStatus = 'CONNECTED' | 'RECONNECTING' | 'DISCONNECTED'
+type EngineMode = 'LOCAL' | 'AUTO' | 'EXTERNAL'
+type LocalEngineStatus = 'READY' | 'STARTING' | 'UNAVAILABLE'
+type ProviderHealthStatus = 'READY' | 'RATE_LIMITED' | 'UNAVAILABLE'
+
+type EngineStatusPayload = {
+  mode: EngineMode
+  activeEngine: 'local' | 'external' | 'none'
+  model: string
+  runtime: string
+  gpu: string
+  engineStatus: LocalEngineStatus | 'EXTERNAL_READY' | 'EXTERNAL_UNAVAILABLE' | 'EXTERNAL_RATE_LIMITED'
+  node: string
+  local: {
+    runtime: string
+    model: string
+    status: LocalEngineStatus
+    endpoint: string
+    lastLatencyMs: number | null
+    lastError: string | null
+  }
+  external: { provider: string; configured: boolean; status: ProviderHealthStatus }[]
+  fallbackAllowed: boolean
+}
 
 type NodeSummary = {
   nodeId: string
@@ -99,6 +122,11 @@ const PROPOSAL_STATE_COLOR: Record<ProposalState, 'emerald' | 'amber' | 'red' | 
 const STREAM_STATUS_COLOR: Record<StreamStatus, 'emerald' | 'amber' | 'red'> = {
   CONNECTED: 'emerald', RECONNECTING: 'amber', DISCONNECTED: 'red',
 }
+const ENGINE_STATUS_COLOR: Record<string, 'emerald' | 'amber' | 'red' | 'cyan' | 'slate'> = {
+  READY: 'emerald', STARTING: 'cyan', UNAVAILABLE: 'red',
+  EXTERNAL_READY: 'emerald', EXTERNAL_UNAVAILABLE: 'red', EXTERNAL_RATE_LIMITED: 'amber',
+  RATE_LIMITED: 'amber',
+}
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } })
@@ -134,8 +162,14 @@ export function WrEngineerConsole() {
   const [error, setError] = useState<string | null>(null)
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('DISCONNECTED')
   const [diffExpanded, setDiffExpanded] = useState(false)
+  const [engine, setEngine] = useState<EngineStatusPayload | null>(null)
 
   const sessionIdRef = useRef<string | null>(null)
+
+  const refreshEngine = useCallback(async () => {
+    const data = await api<EngineStatusPayload>('/api/wr-engineer/engine/status')
+    setEngine(data)
+  }, [])
 
   const refreshNodes = useCallback(async () => {
     const data = await api<{ nodes: NodeSummary[] }>('/api/wr-engineer/nodes')
@@ -166,9 +200,16 @@ export function WrEngineerConsole() {
     const timeout = setTimeout(() => {
       void refreshNodes()
       void refreshPairingTokens()
+      void refreshEngine()
     }, 0)
-    return () => clearTimeout(timeout)
-  }, [refreshNodes, refreshPairingTokens])
+    const poll = setInterval(() => {
+      void refreshEngine()
+    }, 8000)
+    return () => {
+      clearTimeout(timeout)
+      clearInterval(poll)
+    }
+  }, [refreshNodes, refreshPairingTokens, refreshEngine])
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -324,6 +365,18 @@ export function WrEngineerConsole() {
       await refreshSession(session.sessionId)
     })
 
+  const handleSelectEngine = (mode: EngineMode) =>
+    runGuarded(async () => {
+      await api('/api/wr-engineer/engine/selection', { method: 'POST', body: JSON.stringify({ mode }) })
+      await refreshEngine()
+    })
+
+  const handleTestLocalEngine = () =>
+    runGuarded(async () => {
+      await api('/api/wr-engineer/engine/test', { method: 'POST' })
+      await refreshEngine()
+    })
+
   const selectedNode = useMemo(() => nodes.find(n => n.nodeId === selectedNodeId) ?? null, [nodes, selectedNodeId])
   const selectedRepository = useMemo(() => repositories.find(r => r.repositoryId === selectedRepositoryId) ?? null, [repositories, selectedRepositoryId])
   const visibleStreamStatus: StreamStatus = session ? streamStatus : 'DISCONNECTED'
@@ -394,8 +447,28 @@ export function WrEngineerConsole() {
         <Panel title="WR-Engineer">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
+              <p className="text-[9px] uppercase tracking-widest text-slate-600">Engine</p>
+              <StatusPill label={engine?.mode ?? 'LOCAL'} color="cyan" />
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-widest text-slate-600">Model</p>
+              <p className="text-[11px] text-slate-200">{engine?.model ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-widest text-slate-600">Runtime</p>
+              <p className="text-[11px] text-slate-200">{engine?.runtime ?? 'ollama'}</p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-widest text-slate-600">GPU</p>
+              <p className="text-[11px] text-slate-200">{engine?.gpu ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase tracking-widest text-slate-600">Engine Status</p>
+              <StatusPill label={engine?.local.status === 'READY' ? 'LOCAL ENGINE READY' : engine?.local.status === 'STARTING' ? 'LOCAL ENGINE STARTING' : 'LOCAL UNAVAILABLE'} color={ENGINE_STATUS_COLOR[engine?.local.status ?? 'UNAVAILABLE'] ?? 'red'} />
+            </div>
+            <div>
               <p className="text-[9px] uppercase tracking-widest text-slate-600">Node</p>
-              <p className="text-[11px] text-slate-200">{selectedNode ? `${selectedNode.nodeName}` : 'NO NODE PAIRED'} {selectedNode && <StatusPill label={selectedNode.connectionStatus} color={selectedNode.connectionStatus === 'ONLINE' ? 'emerald' : 'slate'} />}</p>
+              <p className="text-[11px] text-slate-200">{engine?.node ?? selectedNode?.nodeName ?? 'NEBULA-GENESIS'} {selectedNode && <StatusPill label={selectedNode.connectionStatus} color={selectedNode.connectionStatus === 'ONLINE' ? 'emerald' : 'slate'} />}</p>
             </div>
             <div>
               <p className="text-[9px] uppercase tracking-widest text-slate-600">Repository</p>
@@ -421,6 +494,21 @@ export function WrEngineerConsole() {
               <p className="text-[9px] uppercase tracking-widest text-slate-600">Stream</p>
               <StatusPill label={visibleStreamStatus} color={STREAM_STATUS_COLOR[visibleStreamStatus]} />
             </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(['LOCAL', 'AUTO', 'EXTERNAL'] as EngineMode[]).map(mode => (
+              <button
+                key={mode}
+                disabled={busy}
+                onClick={() => void handleSelectEngine(mode)}
+                className={`rounded border px-2 py-1 text-[10px] uppercase tracking-widest disabled:opacity-40 ${engine?.mode === mode ? 'border-emerald-700 bg-emerald-950/40 text-emerald-300' : 'border-white/10 text-slate-400'}`}
+              >
+                {mode}
+              </button>
+            ))}
+            <button disabled={busy} onClick={() => void handleTestLocalEngine()} className="rounded border border-cyan-900/60 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-300 disabled:opacity-40">
+              Test Local Engine
+            </button>
           </div>
         </Panel>
 
@@ -524,6 +612,29 @@ export function WrEngineerConsole() {
       </main>
 
       <aside className="flex flex-col gap-4">
+        <Panel title="Local Engine">
+          <ul className="flex flex-col gap-1 text-[11px] text-slate-300">
+            <li>runtime: {engine?.local.runtime ?? 'ollama'}</li>
+            <li>model: {engine?.local.model ?? 'qwen2.5-coder:14b'}</li>
+            <li>endpoint: {engine?.local.endpoint ?? 'http://localhost:11434'}</li>
+            <li>status: <StatusPill label={engine?.local.status ?? 'UNAVAILABLE'} color={ENGINE_STATUS_COLOR[engine?.local.status ?? 'UNAVAILABLE'] ?? 'red'} /></li>
+            <li>latency: {engine?.local.lastLatencyMs != null ? `${engine.local.lastLatencyMs} ms` : '—'}</li>
+            <li>last error: {engine?.local.lastError ?? 'none'}</li>
+          </ul>
+        </Panel>
+
+        <Panel title="External Providers">
+          {(engine?.external ?? []).length === 0 && <p className="text-[11px] text-slate-500">No provider status yet.</p>}
+          <ul className="flex flex-col gap-1">
+            {(engine?.external ?? []).map(row => (
+              <li key={row.provider} className="flex items-center justify-between text-[11px] text-slate-300">
+                <span>{row.provider}</span>
+                <StatusPill label={row.status} color={ENGINE_STATUS_COLOR[row.status] ?? 'slate'} />
+              </li>
+            ))}
+          </ul>
+        </Panel>
+
         <Panel title="Mission / Context">
           <p className="text-[9px] uppercase tracking-widest text-slate-600">Constraints</p>
           <p className="text-[11px] text-slate-300">{session?.constraints.length ? session.constraints.join(', ') : 'none'}</p>
