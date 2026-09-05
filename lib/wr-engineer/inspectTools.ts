@@ -126,27 +126,32 @@ export async function executeInspectTool(
     return fail(turn, tool, rawArgs, execution.reason ?? 'FOUNDATION_ONLY')
   }
 
-  switch (tool) {
-    case 'read_file':
-      return executeReadFile(turn, rawArgs)
-    case 'search_files':
-      return executeSearchFiles(turn, rawArgs)
-    case 'list_repo_tree':
-      return executeListRepoTree(turn, rawArgs)
-    case 'git_status':
-      return executeGitStatus(turn, rawArgs)
-    case 'git_diff':
-      return executeGitDiff(turn, rawArgs)
-    case 'git_log':
-      return executeGitLog(turn, rawArgs)
-    case 'inspect_project_metadata':
-      return executeProjectMetadata(turn, rawArgs)
-    case 'inspect_runtime':
-      return executeRuntime(session, turn, rawArgs)
-    default: {
-      const exhaustive: never = tool
-      return fail(turn, exhaustive, rawArgs, `Unknown tool: ${String(tool)}`)
+  try {
+    switch (tool) {
+      case 'read_file':
+        return await executeReadFile(turn, rawArgs)
+      case 'search_files':
+        return await executeSearchFiles(turn, rawArgs)
+      case 'list_repo_tree':
+        return await executeListRepoTree(turn, rawArgs)
+      case 'git_status':
+        return await executeGitStatus(turn, rawArgs)
+      case 'git_diff':
+        return await executeGitDiff(turn, rawArgs)
+      case 'git_log':
+        return await executeGitLog(turn, rawArgs)
+      case 'inspect_project_metadata':
+        return await executeProjectMetadata(turn, rawArgs)
+      case 'inspect_runtime':
+        return await executeRuntime(session, turn, rawArgs)
+      default: {
+        const exhaustive: never = tool
+        return fail(turn, exhaustive, rawArgs, `Unknown tool: ${String(tool)}`)
+      }
     }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return fail(turn, tool, rawArgs, `Inspect tool failed: ${message}`)
   }
 }
 
