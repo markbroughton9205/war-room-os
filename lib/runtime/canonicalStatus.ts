@@ -12,7 +12,7 @@ import { listRevenueEngineSnapshot } from '@/lib/revenue-engine/persistence'
 import { listPersistedSignalSnapshot } from '@/lib/signals'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import type { TruthBoundaryLabel } from '@/lib/runtime/operationalReliabilityTypes'
-import { resolveLiveCouncilRoster } from '@/lib/council/live-orchestration/rosterHealth.server'
+import { resolveDisplayCouncilRoster } from '@/lib/council/live-orchestration/rosterHealth.server'
 import type { CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
 
 export type CanonicalRuntimeHealth = 'healthy' | 'degraded' | 'unavailable' | 'unknown'
@@ -524,7 +524,7 @@ export async function collectCanonicalRuntimeStatus(req: Request): Promise<Canon
     subsystems,
     providers,
     engineControl,
-    councilRoster: resolveLiveCouncilRoster(),
+    councilRoster: resolveDisplayCouncilRoster(),
     summary: {
       health: unavailableSubsystems.length ? 'degraded' : degradedSubsystems.length ? 'degraded' : 'healthy',
       confidence,

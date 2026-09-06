@@ -14,7 +14,7 @@ export type CouncilFlowMode = 'direct' | 'stable_group' | 'full_council'
 
 export const COUNCIL_FLOW_MODE_LABELS: Record<CouncilFlowMode, string> = {
   direct: 'Direct',
-  stable_group: 'Stable Group Chat — families build on each other with heavy systems off.',
+  stable_group: 'Stable Group Chat — Council members build on shared findings with heavy systems off.',
   full_council: 'Full Council',
 }
 

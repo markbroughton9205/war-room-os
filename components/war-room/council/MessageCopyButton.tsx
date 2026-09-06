@@ -50,8 +50,8 @@ export const MessageCopyButton = memo(function MessageCopyButton({
         type="button"
         className={COPY_BTN_CLASS}
         style={{ border: '1px solid rgba(148,163,184,0.2)', color: '#64748B' }}
-        aria-label="Copy message with family and timestamp"
-        title="Copy with family and timestamp"
+        aria-label="Copy message with agent and timestamp"
+        title="Copy with agent and timestamp"
         onClick={() => void runCopy(true)}
       >
         +meta
