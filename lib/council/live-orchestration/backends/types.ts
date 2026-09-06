@@ -36,6 +36,8 @@ export type BackendMetadata = {
   /** Local host identifier (e.g. 'http://localhost:11434') or 'cloud' for external providers. */
   host: string
   latencyMs: number
+  ttftMs?: number | null
+  tokensPerSecond?: number | null
   status: SeatInvokeStatus
   failureClass?: CouncilFailureLayer
   /** Set only when routing policy actually fell back from one backend type to the other. */

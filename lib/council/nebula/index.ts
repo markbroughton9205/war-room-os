@@ -64,7 +64,12 @@ export {
   memoryScopesAreSeparated,
 } from './memory'
 export { assembleNebulaContext, NEBULA_CONTEXT_MODULE_ORDER } from './contextAssembly'
-export { createCouncilRoundPlan, NEBULA_ROUND_FLOW } from './roundFlow'
+export { createCouncilRoundPlan, NEBULA_ROUND_FLOW, classifyAstraIntent, selectAgentsForIntent } from './roundFlow'
+export { createCouncilRound, transitionCouncilRound, terminalStatusFromHealth, type CouncilRound, type CouncilRoundStatus } from './roundState'
+export { createRoundBlackboard, upsertCompletedFinding, blackboardSummariesForPrompt } from './blackboard'
+export { stripHiddenReasoning, containsHiddenReasoning, extractVisibleModelText } from './thinkingStrip'
+export { presentAgentMessage, looksLikeStructuredDump, containsLegacyFamilyLanguage } from './presentation'
+export { nebulaCommanderEventLabel, isHiddenFromCommanderTimeline } from './visibleEvents'
 export { createExecutionRecord, identitySurvivesBackendChange } from './execution'
 export {
   NEBULA_MODEL_PROFILES,

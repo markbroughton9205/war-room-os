@@ -958,7 +958,16 @@ function runStructuralCases(): ValidationCase[] {
   const jsonRoute = source('app/api/chat/route.ts')
   const streamRoute = source('app/api/chat/stream/route.ts')
   const client = source('lib/council/incremental-transport/client.ts')
-  cases.push(makeCase('c4c_structural_001_json_route_calls_shared_execution_once', 'G. Structural execution proof', 'valid', (jsonRoute.match(/executeCouncilChatRequest/g) ?? []).length === 2 && /return executeCouncilChatRequest\(req\)/.test(jsonRoute)))
+  // Updated 2026-09-06 (nebula-council-streaming-runtime-repair cleanup): app/api/chat/route.ts
+  // now assigns `const response = await executeCouncilChatRequest(req)` so it can fire-and-forget
+  // an AGI-experience capture off a clone() of that same response before returning it — the
+  // `return executeCouncilChatRequest(req)` inline-call shape this case used to require no longer
+  // exists, but the invariant it exists to prove (executeCouncilChatRequest called exactly once,
+  // and the value that call produced — not a second orchestration path's output — is what the
+  // route returns) still holds. The regex below checks that invariant against the new shape
+  // instead of the old literal pattern; c4c_structural_003 below separately guards against a
+  // second real orchestration path being introduced.
+  cases.push(makeCase('c4c_structural_001_json_route_calls_shared_execution_once', 'G. Structural execution proof', 'valid', (jsonRoute.match(/executeCouncilChatRequest/g) ?? []).length === 2 && /const response = await executeCouncilChatRequest\(req\)/.test(jsonRoute) && /return response\b/.test(jsonRoute)))
   cases.push(makeCase('c4c_structural_002_stream_route_has_one_executor_call_site', 'G. Structural execution proof', 'valid', (streamRoute.match(/executeRequest\(req/g) ?? []).length === 1))
   cases.push(makeCase('c4c_structural_003_no_second_orchestration_function_in_routes', 'G. Structural execution proof', 'valid', !/orchestrateProviderResponse|completeGeminiCouncilMessage|callXAIChat|ANTHROPIC_URL|OPENAI_URL/.test(jsonRoute + streamRoute)))
   cases.push(makeCase('c4c_structural_004_no_provider_adapter_import_in_stream_route', 'G. Structural execution proof', 'valid', !/providers\/|ai\/providers|completeGemini|callXAI|Anthropic|OpenAI/i.test(streamRoute)))

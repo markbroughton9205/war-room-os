@@ -87,6 +87,14 @@ export function runCouncilSessionOrchestrationValidation(): CaseResult[] {
     check('iso_21_session_b_history_no_panama', !sessionHistoryContainsTopic([], 'Panama'), 'empty b'),
     check('iso_22_hello_no_research', !detectResearchIntent('Hey council', { intentKind: 'greeting' }).shouldResearch, 'hey council research'),
     check('iso_23_war_room_status_summary_is_status_check', classifyCouncilTurn('Council, give me a short status summary of War Room.').intent === 'STATUS_CHECK', JSON.stringify(classifyCouncilTurn('Council, give me a short status summary of War Room.'))),
+    check('iso_23b_status_check_runs_group_deliberation', shouldRunFamilyDeliberation(classifyCouncilTurn('Council, give me a short status summary of War Room.')), 'status check group round'),
+    check(
+      'iso_23c_fresh_round_runtime_health_is_status_check',
+      classifyCouncilTurn('Council, verify this is a fresh Council round and give me one sentence on current runtime health.').intent === 'STATUS_CHECK'
+        && shouldRunFamilyDeliberation(classifyCouncilTurn('Council, verify this is a fresh Council round and give me one sentence on current runtime health.'))
+        && !detectResearchIntent('Council, verify this is a fresh Council round and give me one sentence on current runtime health.').shouldResearch,
+      JSON.stringify(classifyCouncilTurn('Council, verify this is a fresh Council round and give me one sentence on current runtime health.')),
+    ),
   ]
 }
 

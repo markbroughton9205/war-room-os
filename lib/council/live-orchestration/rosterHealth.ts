@@ -197,6 +197,43 @@ export function rosterToFloorFlags(snapshot: CouncilRosterSnapshot): {
   return { configured, eligible }
 }
 
+const DISPLAY_OVERRIDE_FAMILIES: CouncilOrchestrationFamily[] = [...PRIMARY_FAMILIES, 'red_team']
+
+/**
+ * Display-only overlay for LOCAL_FIRST/LOCAL_ONLY/HYBRID routing. Cloud-key floor eligibility
+ * (used for real external-routing decisions elsewhere) is never mutated by this function — it
+ * returns a new snapshot. A family that isn't cloud-eligible but has an enabled local Nebula
+ * agent candidate is ALSO treated as present for Commander-facing membership/readiness display,
+ * since the Nebula agent genuinely can (and does) serve that seat locally. Exists so the Members
+ * panel doesn't report "0/4 PROVIDERS ACTIVE" cloud-key language while a local Nebula Council is
+ * actually operating.
+ */
+export function withNebulaLocalDisplayOverride(
+  snapshot: CouncilRosterSnapshot,
+  locallyEnabled: Partial<Record<CouncilOrchestrationFamily, boolean>>,
+): CouncilRosterSnapshot {
+  const families = { ...snapshot.families }
+  for (const family of DISPLAY_OVERRIDE_FAMILIES) {
+    const row = families[family]
+    if (row && !row.floorEligible && locallyEnabled[family]) {
+      families[family] = {
+        ...row,
+        floorEligible: true,
+        uiStatus: 'READY',
+        uiDetail: 'READY (local Nebula agent)',
+      }
+    }
+  }
+  const activeFloorFamilies = PRIMARY_FAMILIES.filter(family => families[family]?.floorEligible)
+  const activePrimaryCount = activeFloorFamilies.length
+  const redTeam: CouncilRosterSnapshot['redTeam'] = families.red_team?.floorEligible ? 'ACTIVE' : snapshot.redTeam
+  const degradedByRoster = activePrimaryCount < Math.max(snapshot.intendedPrimaryCount, 1) || redTeam !== 'ACTIVE'
+  const degradedLabel = degradedByRoster
+    ? `NEBULA COUNCIL DEGRADED · ${activePrimaryCount}/${Math.max(snapshot.intendedPrimaryCount, PRIMARY_FAMILIES.length)} AGENTS ACTIVE`
+    : 'NEBULA COUNCIL FULL ROSTER ACTIVE'
+  return { ...snapshot, families, activeFloorFamilies, activePrimaryCount, degradedByRoster, degradedLabel, redTeam }
+}
+
 export function compactFamilyRosterLine(snapshot: CouncilRosterSnapshot): string {
   const parts = (['chatgpt', 'claude', 'grok', 'gemini'] as const).map(family => {
     const row = snapshot.families[family]

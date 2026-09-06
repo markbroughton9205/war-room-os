@@ -99,7 +99,7 @@ export function createDeliberationProgressRecorder(
           eventType: 'family_dispatched',
           source: 'provider_adapter',
           family,
-          payload: { readiness: 'configured', providerLabel: family },
+          payload: { readiness: 'configured' },
         })
         recordPriorDelivery(family, priorTurns)
         if (priorTurns.some(turn => turn.output_message_id && turn.full_response.trim())) {

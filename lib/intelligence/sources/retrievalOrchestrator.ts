@@ -71,7 +71,15 @@ const MANDATORY_PATTERNS: { reason: MandatoryRetrievalReason; pattern: RegExp }[
 const RELOCATION_CODE_OR_META_CONTEXT =
   /\b(?:function|file|variable|method|class|module|component|regex|code|script|directory|folder|word|document|constant|property|parameter|argument)\b/i
 
+const INTERNAL_COUNCIL_RUNTIME_STATUS =
+  /(?:status\s+summary\s+of\s+(?:the\s+)?war\s*room|fresh\s+council\s+round|(?:current\s+)?runtime\s+(?:health|status)|system\s+health|(?:give\s+me\s+(?:a\s+)?)?(?:short\s+)?status\s+summary)/i
+const EXTERNAL_LIVE_OVERRIDE =
+  /\b(panama|visa|news|headlines|weather|markets?|election|bitcoin|freight|broughton|relocation)\b/i
+
 export function evaluateMandatoryLiveRetrieval(decree: string): RetrievalRequirement {
+  if (INTERNAL_COUNCIL_RUNTIME_STATUS.test(decree) && !EXTERNAL_LIVE_OVERRIDE.test(decree)) {
+    return { required: false, reasons: [], confidence: 0 }
+  }
   const reasons = MANDATORY_PATTERNS
     .filter(item => item.pattern.test(decree))
     .filter(item => item.reason !== 'relocation_planning' || !RELOCATION_CODE_OR_META_CONTEXT.test(decree))

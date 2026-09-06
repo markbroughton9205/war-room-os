@@ -1,6 +1,8 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
-import { displayNameForSeat } from '@/lib/council/nebula/identity'
+import { displayNameForSeat, nebulaAgentForSeat } from '@/lib/council/nebula/identity'
 import { auroraDegradedRoundNotice, projectRoundHealth, shouldSurfaceFailureInConversation, type NebulaRoundHealth } from '@/lib/council/nebula/round'
+import { presentAgentMessage } from '@/lib/council/nebula/presentation'
+import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
 import type { LiveResearchEvidencePacket } from '@/lib/runtime/liveResearchEvidencePacket'
 import type {
   DeliberationClaim,
@@ -165,8 +167,12 @@ export function appendDeliberationTurn(
     started_at: input.startedAt,
     completed_at: input.completedAt ?? new Date().toISOString(),
     failure_reason: input.providerResult.failureReason ?? null,
-    executive_position: input.providerResult.content.trim() ? summarizeExecutivePosition(input.providerResult.content) : '',
-    full_response: input.providerResult.content.trim() ? input.providerResult.content : '',
+    executive_position: input.providerResult.content.trim() ? summarizeExecutivePosition(stripHiddenReasoning(input.providerResult.content)) : '',
+    full_response: input.providerResult.content.trim() ? presentAgentMessage({
+      agentId: displayNameForSeat(input.family) ? nebulaAgentForSeat(input.family)?.id ?? null : null,
+      speaker: displayNameForSeat(input.family),
+      raw: input.providerResult.content,
+    }).prose : '',
     claims: complete ? inferClaims(input.providerResult.content, input.evidenceReferenceIds ?? []) : [],
     direct_agreements: [],
     direct_disagreements: [],
@@ -355,8 +361,12 @@ export function deriveFamilyDeliberationRoundOutcome(session: DeliberationSessio
     .filter(turn => turn.completion_status === 'complete' && turn.output_message_id)
     .map(turn => ({
       family: turn.provider_label,
-      content: formatDeliberationTurnForChat(turn, session.evidence_references),
-      status: 'OK',
+      content: presentAgentMessage({
+        agentId: nebulaAgentForSeat(turn.provider_family)?.id ?? null,
+        speaker: turn.provider_label,
+        raw: turn.full_response,
+      }).prose,
+      status: 'OK' as const,
     }))
   if (shouldSurfaceFailureInConversation(roundHealth)) {
     const notice = auroraDegradedRoundNotice(roundHealth)

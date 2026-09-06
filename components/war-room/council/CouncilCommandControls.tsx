@@ -94,6 +94,7 @@ export function CouncilCommandControls({
                 disabled={disabled}
                 onClick={() => onCouncilFlowModeChange(mode)}
                 className={ICON_BUTTON_BASE}
+                data-testid={`council-mode-${mode}`}
                 style={{
                   border: selected ? '1px solid #FFD700' : '1px solid #333',
                   color: selected ? '#FFD700' : '#888',

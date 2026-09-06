@@ -1,6 +1,7 @@
 import { detectResearchIntent, type ResearchIntentContext } from '@/lib/research/researchIntent'
 import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
 import { isEconomicOpsCommand } from '@/lib/economic/routing'
+import { classifyAstraIntent } from '@/lib/council/nebula/roundFlow'
 
 export type CouncilResearchIntentContext = ResearchIntentContext & {
   /** News Intel / explicit team research handoff */
@@ -65,6 +66,10 @@ export function detectCouncilResearchIntent(
 
   if (ctx?.sequentialDiagnostic) {
     return { triggered: false, shouldResearch: false, reasons: ['excluded_sequential_diagnostic'], confidence: 0 }
+  }
+
+  if (classifyAstraIntent(t) === 'STATUS_CHECK' && !ctx?.forceTeamResearch) {
+    return { triggered: false, shouldResearch: false, reasons: ['excluded_status_check'], confidence: 0 }
   }
 
   const base = detectResearchIntent(t, ctx)

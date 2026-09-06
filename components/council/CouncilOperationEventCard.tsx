@@ -26,12 +26,35 @@ const EVENT_TONE: Record<string, string> = {
 function eventLabel(type: string): string {
   if (type === 'family_waiting_prior_turn') return 'Waiting for prior turn'
   if (type === 'system_state_inspected') return 'System state inspected'
+  if (type === 'families_assigned') return 'Participants Selected'
+  if (type === 'council_mode_selected') return 'Council Round Created'
+  if (type === 'request_received') return 'Council Round Created'
+  if (type === 'family_queued') return 'Agent Queued'
+  if (type === 'family_started') return 'Agent Started'
+  if (type === 'family_responded') return 'Agent Responded'
+  if (type === 'family_skipped' || type === 'family_unavailable' || type === 'family_failed' || type === 'family_timed_out') return 'Agent Skipped'
+  if (type === 'operation_completed') return 'Council Round Completed'
+  if (type === 'operation_failed') return 'Council Round Completed · Degraded'
   return type.replaceAll('_', ' ').replace(/\b\w/g, char => char.toUpperCase())
+}
+
+function headingFor(event: CommanderOperationEvent): string {
+  if (
+    event.type === 'families_assigned'
+    || event.type === 'council_mode_selected'
+    || event.type === 'request_received'
+    || event.type === 'operation_completed'
+    || event.type === 'operation_failed'
+    || event.type === 'operation_cancelled'
+  ) {
+    return eventLabel(event.type)
+  }
+  return event.familyLabel ?? eventLabel(event.type)
 }
 
 export function CouncilOperationEventCard({ event }: CouncilOperationEventCardProps) {
   const tone = EVENT_TONE[event.type] ?? '#94A3B8'
-  const heading = event.familyLabel ?? eventLabel(event.type)
+  const heading = headingFor(event)
   const role = event.roleLabel ?? event.provenance.replaceAll('_', ' ')
 
   return (
@@ -61,9 +84,8 @@ export function CouncilOperationEventCard({ event }: CouncilOperationEventCardPr
         </header>
         <div className="mt-1 flex flex-wrap gap-2 text-[9px] uppercase tracking-widest" style={{ color: '#64748B' }}>
           <span>{event.provenance.replaceAll('_', ' ')}</span>
-          {event.timestamp ? <span>{event.timestamp}</span> : null}
           {event.messageId ? <span>Message linked</span> : null}
-          {event.isActualProviderOutput ? <span>Actual provider output</span> : <span>No provider output claimed</span>}
+          {event.isActualProviderOutput ? <span>Actual agent output</span> : <span>No agent output claimed</span>}
         </div>
         {event.replyToLabel ? (
           <p className="mt-2 text-[10px] tracking-widest" style={{ color: '#93C5FD' }}>
@@ -76,7 +98,7 @@ export function CouncilOperationEventCard({ event }: CouncilOperationEventCardPr
           </p>
         ) : (
           <p className="mt-2 text-xs leading-relaxed" style={{ color: '#64748B' }}>
-            No provider message is attached to this operational step.
+            No agent message is attached to this operational step.
           </p>
         )}
       </article>

@@ -87,7 +87,7 @@ export async function runCouncilResearchTeam(
     ? synth.content.trim()
     : [
         '## What\'s happening',
-        familyNotes.slice(0, 2000) || 'Families did not return synthesis; see source bundle only.',
+        familyNotes.slice(0, 2000) || 'Council agents did not return synthesis; see source bundle only.',
         '',
         '## Confidence level',
         'Low — synthesis provider unavailable.',

@@ -298,5 +298,11 @@ export function everyAgentHasOutputContract(): boolean {
 export function schemaPromptFor(agentId: NebulaAgentId): string {
   const spec = OUTPUT_CONTRACTS[agentId]
   const fields = spec.fields.map(field => `- ${field.field}: ${field.description}`).join('\n')
-  return `Required output structure for ${spec.agentId.toUpperCase()} (${spec.contractId}). Exact wording is not required; these fields are:\n${fields}`
+  return [
+    `Write a Commander-facing answer in clean natural prose as ${spec.agentId.toUpperCase()}.`,
+    'Do not dump JSON, schema field names, or structured objects into the visible answer.',
+    'Do not include <think> blocks, hidden reasoning, or scratchpad text.',
+    `Internally consider these fields for ${spec.contractId}, but keep them out of chat:`,
+    fields,
+  ].join('\n')
 }

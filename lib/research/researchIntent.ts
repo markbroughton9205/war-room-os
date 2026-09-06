@@ -151,6 +151,14 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
     return { shouldResearch: false, reasons: ['excluded_economic_ops'], confidence: 0 }
   }
 
+  const internalCouncilStatus =
+    /(?:status\s+summary\s+of\s+(?:the\s+)?war\s*room|(?:war\s*room|runtime)\s+status|system\s+health|(?:give\s+me\s+(?:a\s+)?)?(?:short\s+)?status\s+summary|fresh\s+council\s+round|(?:current\s+)?runtime\s+health)/i
+  const externalLiveOverride =
+    /\b(panama|visa|news|headlines|weather|markets?|election|bitcoin|freight|broughton|relocation)\b/i
+  if (internalCouncilStatus.test(t) && !externalLiveOverride.test(t)) {
+    return { shouldResearch: false, reasons: ['excluded_internal_council_status'], confidence: 0 }
+  }
+
   const mandatoryRetrieval = evaluateMandatoryLiveRetrieval(t)
 
   if (ctx?.attendanceFlow) {

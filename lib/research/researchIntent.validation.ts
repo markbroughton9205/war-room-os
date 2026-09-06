@@ -30,6 +30,10 @@ const helloNoResearch = detectResearchIntent('hello', { intentKind: 'greeting' }
 const hiCouncilNoResearch = detectResearchIntent('hi council', { intentKind: 'greeting' })
 const quickCheckInNoResearch = detectResearchIntent('quick check in', { intentKind: 'natural' })
 const statusCheckNoResearch = detectResearchIntent('status check', { intentKind: 'natural' })
+const freshRoundRuntimeHealthNoResearch = detectResearchIntent(
+  'Council, verify this is a fresh Council round and give me one sentence on current runtime health.',
+  { intentKind: 'natural' },
+)
 
 // 6. Commander adversarial case 9: a "status check" elaborated with a real current-information
 // ask (Panama visa requirements) must trigger research — a bare ping does not, but this is not
@@ -119,6 +123,11 @@ export function runResearchIntentValidation(): CaseResult[] {
       'research_intent_05d_bare_status_check_does_not_trigger_research',
       !statusCheckNoResearch.shouldResearch,
       JSON.stringify(statusCheckNoResearch),
+    ),
+    check(
+      'research_intent_05e_fresh_round_runtime_health_does_not_trigger_research',
+      !freshRoundRuntimeHealthNoResearch.shouldResearch,
+      JSON.stringify(freshRoundRuntimeHealthNoResearch),
     ),
     check(
       'research_intent_06_status_check_on_panama_visa_triggers_research',

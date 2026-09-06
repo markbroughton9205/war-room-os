@@ -1,6 +1,8 @@
 import 'server-only'
 
-import { probeOllama, requestOllamaCompletion, type OllamaProbeResult } from '@/lib/native-builder/ollamaClient'
+import { probeOllama, requestOllamaStreamingCompletion, type OllamaProbeResult } from '@/lib/native-builder/ollamaClient'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
+import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
 import type { CouncilFailureLayer } from '../types'
 import { localRegistryEntryForSlot, type LocalModelRegistryEntry } from './localModelRegistry'
 import { SEAT_LOCAL_ROLE_SLOT } from './seatRoleSlot'
@@ -20,11 +22,9 @@ function classifyLocalFailure(detail: string): CouncilFailureLayer {
  * Local backend adapter. Reuses lib/native-builder/ollamaClient.ts (the repo's one real Ollama
  * HTTP client) rather than duplicating a client — see that file's own header for why it exists.
  *
- * Known limitation: requestOllamaCompletion() is non-streaming and does not accept an external
- * AbortSignal (it owns a fixed internal 60s timeout). This adapter honestly reports the full
- * response as a single onDelta() call rather than faking token-by-token streaming. Wiring the
- * caller's `signal` through for true cancellation is a follow-up, not done in this phase since
- * ollamaClient.ts is shared with the unrelated native-builder feature.
+ * Streams Ollama NDJSON tokens through `onDelta`. Thinking is stripped and never concatenated
+ * into the Commander-facing text. Request options include keep_alive=-1 and think=false; they
+ * do not mutate host-wide Ollama daemon configuration.
  */
 export async function invokeLocalBackend(input: ModelBackendInvokeInput): Promise<ModelBackendInvokeResult> {
   const started = Date.now()
@@ -82,10 +82,17 @@ export async function invokeLocalBackend(input: ModelBackendInvokeInput): Promis
     return { ok: false, text: '', partial: false, backend }
   }
 
-  const result = await requestOllamaCompletion({
+  console.info(
+    `[nebula-local] identity=${displayNameForSeat(input.seat, input.seat)} seat=${input.seat} backend=LOCAL runtime=ollama model=${entry.modelId}`,
+  )
+  const result = await requestOllamaStreamingCompletion({
     model: entry.modelId,
     prompt: input.userPrompt,
     system: input.systemPrompt,
+    signal: input.signal,
+    onDelta: delta => {
+      if (delta) input.onDelta(delta)
+    },
   })
   const latencyMs = Date.now() - started
 
@@ -105,7 +112,7 @@ export async function invokeLocalBackend(input: ModelBackendInvokeInput): Promis
     return { ok: false, text: '', partial: false, backend }
   }
 
-  input.onDelta(result.text)
+  const text = stripHiddenReasoning(result.text)
   const backend: BackendMetadata = {
     backendType: 'LOCAL',
     provider: 'ollama',
@@ -114,9 +121,11 @@ export async function invokeLocalBackend(input: ModelBackendInvokeInput): Promis
     quantization: entry.quant,
     host,
     latencyMs,
+    ttftMs: result.metrics.ttftMs,
+    tokensPerSecond: result.metrics.tokensPerSecond,
     status: 'OK',
   }
-  return { ok: true, text: result.text, partial: false, backend }
+  return { ok: true, text, partial: false, backend }
 }
 
 export type LocalCandidateHealth = 'READY' | 'UNAVAILABLE' | 'MODEL_NOT_INSTALLED' | 'NOT_CONFIGURED'
