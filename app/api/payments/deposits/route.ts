@@ -17,7 +17,17 @@ function persistenceLabel(value: 'supabase' | 'session-only') {
   return value === 'supabase' ? 'Supabase persistent' : 'Session-only fallback'
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  // SEC-1 (audit finding, verified by direct method-level inspection): this path is listed in
+  // lib/supabase/middleware.ts's PUBLIC_API_PATHS specifically because that middleware's own
+  // comment says these routes "already enforce their own authorization" via
+  // assertActionRouteAuthorized. POST/PATCH below already do; GET never did, despite the same
+  // exemption applying to it - meaning it was reachable with zero authentication of any kind,
+  // returning the full deposit ledger. This was a straightforward implementation gap versus the
+  // system's own documented intent, not an ambiguous product decision.
+  const unauthorized = await assertActionRouteAuthorized(req)
+  if (unauthorized) return unauthorized
+
   const listed = await listDepositRecords()
   const deposits = listed.data
   const guard = await runPaymentGuard(deposits)
