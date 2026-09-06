@@ -15,7 +15,7 @@ const STATUS_PING =
   /^(?:(?:hey|hi|hello)\s+)?(?:council[,!]?\s+)?(?:quick\s+)?(?:status\s+ping|status(?:\s+check)?|ping)[!?.\s]*$/i
 
 const WAR_ROOM_RUNTIME_STATUS =
-  /(?:status\s+summary\s+of\s+(?:the\s+)?war\s*room|(?:war\s*room|runtime)\s+status|system\s+health|(?:give\s+me\s+(?:a\s+)?)?(?:short\s+)?status\s+summary)/i
+  /(?:status\s+summary\s+of\s+(?:the\s+)?war\s*room|(?:war\s*room|runtime)\s+status|system\s+health|(?:give\s+me\s+(?:a\s+)?)?(?:short\s+)?status\s+summary|fresh\s+council\s+round|(?:current\s+)?runtime\s+health)/i
 
 const PRESENCE_GOING_ON =
   /^(?:(?:hey|hi|hello)\s+)?(?:council[,!]?\s+)?(?:what(?:'s|s|\s+is)\s+going\s+on|whats\s+going\s+on)[!?.\s]*$/i
@@ -147,6 +147,9 @@ export function classifyCouncilTurn(text: string): ClassifiedCouncilTurn {
 }
 
 export function shouldRunFamilyDeliberation(classified: ClassifiedCouncilTurn): boolean {
+  // STATUS_CHECK stays FAST so it skips memory/research, but Group still needs a live
+  // Nebula round (ORION / LUMEN / AURORA) instead of the frontier engine-gate path.
+  if (classified.intent === 'STATUS_CHECK') return true
   return classified.depth === 'FULL'
 }
 

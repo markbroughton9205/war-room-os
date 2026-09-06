@@ -146,6 +146,8 @@ export type CouncilChatJson = {
   shadowCouncilAssembly?: CouncilShadowSelectionReport
   /** Nebula RoundHealth projection for this round (Inspector/diagnostics only). */
   roundHealth?: NebulaRoundHealth
+  /** Authoritative Nebula round state for this Commander turn. */
+  councilRound?: import('@/lib/council/nebula/roundState').CouncilRound
 }
 
 /**

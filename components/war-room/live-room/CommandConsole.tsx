@@ -108,6 +108,7 @@ export const CommandConsole = memo(function CommandConsole({
             disabled={loading}
             className="min-w-0 flex-1 self-stretch bg-transparent text-sm tracking-wide text-emerald-100 outline-none placeholder:text-emerald-900/80"
             aria-label="Council command"
+            data-testid="council-command-input"
           />
         </div>
 
@@ -182,6 +183,7 @@ export const CommandConsole = memo(function CommandConsole({
         <button
           type="submit"
           disabled={loading || !command.trim()}
+          data-testid="council-execute"
           className="shrink-0 rounded border border-emerald-400/60 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-black disabled:opacity-40 sm:px-5 sm:py-2"
           style={{ background: loading ? '#166534' : '#34d399', boxShadow: loading ? undefined : '0 0 16px rgba(52,211,153,0.35)' }}
         >

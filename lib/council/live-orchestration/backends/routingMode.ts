@@ -16,6 +16,15 @@ export function resolveCouncilRoutingMode(): CouncilRoutingMode {
 }
 
 /**
+ * Cloud API-key presence is backend availability, not Nebula agent eligibility.
+ * LOCAL_FIRST / LOCAL_ONLY / HYBRID must keep ASTRA-selected seats on the floor
+ * so invokeCouncilSeat can route them to Ollama before any external fallback.
+ */
+export function localRoutingBypassesCloudFloorGate(): boolean {
+  return resolveCouncilRoutingMode() !== 'EXTERNAL_ONLY'
+}
+
+/**
  * Default per-seat policy consulted only under HYBRID. grok/gemini favor EXTERNAL_FIRST because
  * their Council role depends on live grounding/current signal that local weights don't have;
  * red_team is pinned LOCAL_ONLY for maximum candor with no external logging; the rest default

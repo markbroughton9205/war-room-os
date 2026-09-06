@@ -18,6 +18,9 @@ const visaRequirements = evaluateMandatoryLiveRetrieval('what are the visa requi
 // Already-working reasons must remain unaffected (regression guard).
 const weatherStillRequired = evaluateMandatoryLiveRetrieval('what is the weather forecast today')
 const bareGreetingNotRequired = evaluateMandatoryLiveRetrieval('hello')
+const freshRoundRuntimeHealthNotRequired = evaluateMandatoryLiveRetrieval(
+  'Council, verify this is a fresh Council round and give me one sentence on current runtime health.',
+)
 
 // Requirement E — research-failure truthfulness: a qualifying request (relocation/travel) for
 // which every provider fails must NOT produce a false success/live-verified state, must not
@@ -81,6 +84,11 @@ export function runRetrievalOrchestratorValidation(): CaseResult[] {
       'retrieval_orchestrator_05_bare_greeting_not_required',
       !bareGreetingNotRequired.required,
       JSON.stringify(bareGreetingNotRequired),
+    ),
+    check(
+      'retrieval_orchestrator_05b_fresh_round_runtime_health_not_required',
+      !freshRoundRuntimeHealthNotRequired.required,
+      JSON.stringify(freshRoundRuntimeHealthNotRequired),
     ),
     check(
       'retrieval_orchestrator_06_failed_relocation_retrieval_not_falsely_successful',

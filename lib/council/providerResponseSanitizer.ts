@@ -4,6 +4,9 @@ import { detectPromptIntent, type PromptIntent } from '@/lib/council/promptInten
 import { shouldPassthroughCouncilProviderText } from '@/lib/council/stabilityMode'
 import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import { toDisplayText } from '@/lib/council/toDisplayText'
+import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
+import { presentAgentMessage } from '@/lib/council/nebula/presentation'
+import { nebulaAgentForSeat } from '@/lib/council/nebula/identity'
 
 export type SanitizedFamilyResponse = {
   displayText: string
@@ -29,7 +32,10 @@ export function sanitizeCouncilFamilyResponse(
     stabilityMode?: boolean
   },
 ): SanitizedFamilyResponse {
-  const text = toDisplayText(raw).trim()
+  const text = presentAgentMessage({
+    agentId: nebulaAgentForSeat(family)?.id ?? null,
+    raw: stripHiddenReasoning(toDisplayText(raw)),
+  }).prose.trim()
   const promptIntent = opts?.promptIntent ?? (opts?.decreeText ? detectPromptIntent(opts.decreeText) : undefined)
   const passthroughMode = opts?.stabilityMode ?? shouldPassthroughCouncilProviderText()
   if (passthroughMode) {

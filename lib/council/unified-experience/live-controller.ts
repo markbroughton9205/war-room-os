@@ -8,6 +8,8 @@ import {
   type CouncilOperationMessageInput,
 } from './adapter'
 import { countOperationFamilyContributions } from './operationSummary'
+import { nebulaCommanderEventLabel, isHiddenFromCommanderTimeline } from '@/lib/council/nebula/visibleEvents'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
 import type {
   CommanderBriefing,
   CommanderOperation,
@@ -47,7 +49,7 @@ const FAMILY_LABELS: Record<CouncilOrchestrationFamily | 'system' | 'unknown', s
   baby: 'Baby AI Observer',
   bridge_architect: 'Bridge Architect',
   system: 'System Status',
-  unknown: 'Unknown Council family',
+  unknown: 'Unknown Council agent',
 }
 
 const ROLE_LABELS: Record<CouncilOrchestrationFamily | 'system' | 'unknown', string> = {
@@ -160,6 +162,7 @@ function eventProvenance(event: CouncilProgressEventEnvelope): CommanderOperatio
 }
 
 function eventType(event: CouncilProgressEventEnvelope): CommanderOperationEventType | null {
+  if (isHiddenFromCommanderTimeline(event)) return null
   switch (event.eventType) {
     case 'request_created':
       return 'request_received'
@@ -212,58 +215,20 @@ function eventType(event: CouncilProgressEventEnvelope): CommanderOperationEvent
 }
 
 function eventStatusLabel(event: CouncilProgressEventEnvelope): string {
-  switch (event.eventType) {
-    case 'request_created':
-      return 'Request received'
-    case 'request_selection_resolved':
-      return 'Families assigned'
-    case 'request_started':
-      return 'Council mode selected'
-    case 'family_waiting':
-      return 'Assigned'
-    case 'family_queued':
-      return 'Queued'
-    case 'family_dispatched':
-    case 'family_response_started':
-      return 'Started'
-    case 'family_response_completed':
-      return 'Responded'
-    case 'family_failed':
-      return 'Failed'
-    case 'family_timed_out':
-      return 'Timed out'
-    case 'family_skipped_by_policy':
-    case 'family_stopped_by_commander':
-      return 'Skipped'
-    case 'family_not_reached':
-      return 'Unavailable'
-    case 'request_completed':
-      return 'Operation completed'
-    case 'request_failed':
-      return 'Operation failed'
-    case 'request_timed_out':
-      return 'Operation timed out'
-    case 'request_cancel_requested':
-      return 'Cancel requested'
-    case 'request_cancelled':
-      return 'Operation cancelled'
-    default:
-      return readableStatus(event.eventType)
-  }
+  return nebulaCommanderEventLabel(event) ?? readableStatus(event.eventType)
 }
 
 function eventOutput(event: CouncilProgressEventEnvelope): string | null {
   const parts: string[] = []
-  if (event.payload.providerLabel) parts.push(`Provider: ${event.payload.providerLabel}`)
   if (event.payload.readiness) parts.push(`Readiness: ${event.payload.readiness}`)
   if (event.payload.outcome) parts.push(`Outcome: ${event.payload.outcome}`)
   if (event.payload.reason) parts.push(`Reason: ${event.payload.reason}`)
-  if (event.payload.timeoutMs) parts.push(`Timeout: ${event.payload.timeoutMs}ms`)
   if (event.payload.audit) {
+    const nameFor = (family: string) => displayNameForSeat(family as CouncilOrchestrationFamily, family)
     parts.push(`Audit: ${event.payload.audit.reviewType}`)
-    parts.push(`Expected: ${event.payload.audit.expectedFamilies.join(', ') || 'none'}`)
-    parts.push(`Received: ${event.payload.audit.receivedFamilies.join(', ') || 'none'}`)
-    if (event.payload.audit.missingFamilies.length) parts.push(`Missing: ${event.payload.audit.missingFamilies.join(', ')}`)
+    parts.push(`Expected: ${event.payload.audit.expectedFamilies.map(nameFor).join(', ') || 'none'}`)
+    parts.push(`Received: ${event.payload.audit.receivedFamilies.map(nameFor).join(', ') || 'none'}`)
+    if (event.payload.audit.missingFamilies.length) parts.push(`Missing: ${event.payload.audit.missingFamilies.map(nameFor).join(', ')}`)
   }
   if (event.diagnostic?.safeMessage) parts.push(`Diagnostic: ${event.diagnostic.safeMessage}`)
   return parts.length ? parts.join('\n') : null
@@ -346,7 +311,8 @@ function progressStatus(events: readonly CommanderOperationEvent[], progress: Co
       : 'completed'
   }
   if (events.some(event => event.type === 'approval_required' || event.type === 'family_waiting_approval')) return 'waiting_approval'
-  if (events.some(event => event.type === 'family_started')) return 'waiting_for_provider'
+  if (events.some(event => event.type === 'synthesis_started' || event.familyId === 'chatgpt' && event.type === 'family_started')) return 'synthesizing'
+  if (events.some(event => event.type === 'family_started' || event.type === 'family_queued')) return 'running'
   if (events.some(event => event.type === 'families_assigned')) return 'assembling'
   if (events.some(event => event.type === 'council_mode_selected')) return 'running'
   if (events.some(event => event.type === 'request_received')) return 'received'
@@ -372,7 +338,7 @@ function summaryFor(mode: CommanderOperationMode, events: readonly CommanderOper
       ? 'System operation'
       : 'Council operation'
   const fragments = [
-    respondedCount ? `${respondedCount} runtime contribution${respondedCount === 1 ? '' : 's'} responded` : 'No provider response recorded yet',
+    respondedCount ? `${respondedCount} agent${respondedCount === 1 ? '' : 's'} responded` : 'ASTRA coordinating',
     failedCount ? `${failedCount} failed/timed out` : null,
     unavailableCount ? `${unavailableCount} unavailable` : null,
     skippedCount ? `${skippedCount} skipped` : null,

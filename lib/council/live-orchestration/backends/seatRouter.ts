@@ -79,4 +79,4 @@ export async function invokeCouncilSeat(input: ModelBackendInvokeInput): Promise
   return invokeForPolicy(policy, input)
 }
 
-export { resolveCouncilRoutingMode, resolveSeatBackendPolicy } from './routingMode'
+export { resolveCouncilRoutingMode, resolveSeatBackendPolicy, localRoutingBypassesCloudFloorGate } from './routingMode'

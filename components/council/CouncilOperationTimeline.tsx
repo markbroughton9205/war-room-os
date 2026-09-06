@@ -84,7 +84,7 @@ export function CouncilOperationTimeline({ input, inputs, operation: providedOpe
       className="mt-3 w-full max-w-2xl rounded px-3 py-3 text-xs"
       style={{ border: '1px solid rgba(52,211,153,0.18)', background: 'rgba(2,6,23,0.42)' }}
       aria-label="Council operation timeline"
-      aria-live={operation.status === 'running' || operation.status === 'waiting_for_provider' || operation.status === 'synthesizing' ? 'polite' : undefined}
+      aria-live={operation.status === 'running' || operation.status === 'waiting_for_provider' || operation.status === 'synthesizing' ? 'polite' : 'off'}
     >
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
@@ -156,9 +156,11 @@ export function CouncilOperationTimeline({ input, inputs, operation: providedOpe
       </section>
 
       {operation.status === 'running' || operation.status === 'waiting_for_provider' || operation.status === 'synthesizing' ? (
+        operation.timelineSource === 'authoritative_runtime_snapshot' ? (
         <p className="mt-3 rounded px-3 py-2 text-[10px] uppercase tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.18)', color: '#A7F3D0', background: 'rgba(0,0,0,0.18)' }}>
-          Operation running. Waiting for runtime update.
+          Operation running.
         </p>
+        ) : null
       ) : operation.status === 'waiting_approval' ? (
         <p className="mt-3 rounded px-3 py-2 text-[10px] uppercase tracking-widest" style={{ border: '1px solid rgba(253,230,138,0.22)', color: '#FDE68A', background: 'rgba(0,0,0,0.18)' }}>
           Awaiting approval.

@@ -254,7 +254,7 @@ function summaryFor(mode: CommanderOperationMode, events: readonly CommanderOper
       ? 'System status result'
       : 'Council result'
   const fragments = [
-    respondedCount ? `${respondedCount} contribution${respondedCount === 1 ? '' : 's'} responded` : 'No provider contribution recorded',
+    respondedCount ? `${respondedCount} contribution${respondedCount === 1 ? '' : 's'} responded` : 'No agent contribution recorded',
     failedCount ? `${failedCount} failed` : null,
     unavailableCount ? `${unavailableCount} unavailable` : null,
     skippedCount ? `${skippedCount} skipped` : null,

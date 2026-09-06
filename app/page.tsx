@@ -99,7 +99,13 @@ import {
   type CouncilDutyState,
   type CouncilParticipationToggles,
 } from '@/lib/council/familyRoster'
-import { displayNameForSeat } from '@/lib/council/nebula/identity'
+import { displayNameForSeat, nebulaAgentForSeat, NEBULA_AGENTS_BY_ID } from '@/lib/council/nebula/identity'
+import { createCouncilRoundPlan, seatsForParticipatingAgents } from '@/lib/council/nebula/roundFlow'
+import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
+import { presentAgentMessage } from '@/lib/council/nebula/presentation'
+import type { CouncilRound } from '@/lib/council/nebula/roundState'
+import { CouncilLiveRoundBanner } from '@/components/council/CouncilLiveRoundBanner'
+import { CouncilRoundInspector } from '@/components/council/CouncilRoundInspector'
 import { extractProposedCouncilActions } from '@/lib/council/extractCouncilActions'
 import { classifyRaElMessage, type ClassifyRaElMessageResult } from '@/lib/council/conversationIntent'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
@@ -439,6 +445,9 @@ export type CouncilMessage = {
   deliberationRoundId?: string | null
   shadowCouncilAssembly?: CouncilShadowSelectionReport
   councilProgress?: CouncilProgressRuntimeSnapshot
+  streaming?: boolean
+  roleLabel?: string
+  councilRound?: CouncilRound
 }
 
 type CouncilSessionLifecycle = 'active' | 'archived'
@@ -467,15 +476,20 @@ function applyLiveCouncilRenderGate(
   if (message.messageType === 'decree' || message.messageType === 'system') return message
   const family = parseCouncilMessageFamily(message.familyName)
   if (!family || message.messageType !== 'response') {
-    const content = sanitizeMemoryRuntimeText(toDisplayText(message.content))
+    const content = sanitizeMemoryRuntimeText(stripHiddenReasoning(toDisplayText(message.content)))
     return content === toDisplayText(message.content) ? message : { ...message, content }
   }
   if (opts?.stabilityMode) {
-    const content = sanitizeMemoryRuntimeText(toDisplayText(message.content))
+    const content = sanitizeMemoryRuntimeText(stripHiddenReasoning(toDisplayText(message.content)))
     if (content === toDisplayText(message.content) && !message.degraded) return message
     return { ...message, content, degraded: false, integrityStatus: content ? 'COMPLETE' : 'EMPTY' }
   }
-  const gate = applyCouncilRenderGate(family, message.content, {
+  const presented = presentAgentMessage({
+    agentId: nebulaAgentForSeat(family)?.id ?? null,
+    speaker: message.familyName,
+    raw: message.content,
+  })
+  const gate = applyCouncilRenderGate(family, presented.prose, {
     decreeText: opts?.decreeText,
     promptIntent: opts?.promptIntent,
     stabilityMode: opts?.stabilityMode,
@@ -1948,7 +1962,9 @@ const MessageBubble = memo(function MessageBubble({
               {stageLabel(msg.familyDeliberationTurn ? stageFromDeliberationRole(msg.familyDeliberationTurn.turn_role) : (msg.councilStage ?? 'LEGACY'))}
             </span>
           ) : null}
-          {msg.provider && <span className="text-xs" style={{ color: '#444' }}>{msg.provider}</span>}
+          {msg.streaming ? (
+            <span className="text-[10px] uppercase tracking-widest" style={{ color: '#86EFAC' }}>streaming</span>
+          ) : null}
           <span className="text-xs" style={{ color: '#333' }}>{msg.timestamp}</span>
           <span className="text-xs px-1 rounded" style={{ color: '#555', background: '#111' }}>{msg.messageType}</span>
           {(msg.messageType === 'response' || msg.messageType === 'decree') && msg.content.trim() ? (
@@ -1971,7 +1987,7 @@ const MessageBubble = memo(function MessageBubble({
             borderLeft: isRael ? 'none' : `2px solid ${msg.color}`,
             borderRight: isRael ? `2px solid ${msg.color}` : 'none',
           }}>
-          {msg.content}
+          {msg.content}{msg.streaming ? <span className="ml-0.5 animate-pulse" aria-hidden>▍</span> : null}
         </div>
         {!isRael && showOperationTimeline && operationTimelineInputs.length ? (
           <details className="mt-2 w-full max-w-2xl rounded border border-emerald-900/30" style={{ background: 'rgba(0,0,0,0.18)' }}>
@@ -2008,6 +2024,8 @@ const MessageBubble = memo(function MessageBubble({
             </summary>
             <div className="mt-2 grid gap-1 normal-case tracking-normal text-slate-300">
               <div>turn_id: {msg.familyDeliberationTurn.turn_id}</div>
+              <div>identity: {msg.familyDeliberationTurn.agent_identity ?? 'n/a'}</div>
+              <div>backend: {msg.familyDeliberationTurn.backend_type ?? 'n/a'} · {msg.familyDeliberationTurn.backend_runtime ?? msg.familyDeliberationTurn.backend_provider ?? 'n/a'} · {msg.familyDeliberationTurn.provider_model ?? 'n/a'}</div>
               <div>turn_role: {msg.familyDeliberationTurn.turn_role}</div>
               <div>speaking_order: {msg.familyDeliberationTurn.speaking_order}</div>
               <div>input_message_ids: {msg.familyDeliberationTurn.input_message_ids.join(', ') || 'none'}</div>
@@ -6048,6 +6066,13 @@ function Home() {
   const [loading, setLoading] = useState(false)
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
   const [floorStream, setFloorStream] = useState<{ family: string; text: string; status: string } | null>(null)
+  const [nebulaRoundShell, setNebulaRoundShell] = useState<{
+    roundId: string
+    status: string
+    agents: string[]
+    streamingAgent: string | null
+    streamingText: string
+  } | null>(null)
   const [toolBarHealth, setToolBarHealth] = useState(initialToolBarHealth)
   const [toolBarActivity, setToolBarActivity] = useState<Partial<Record<ToolId, ToolBarLabel>>>({})
   const [operatorTab, setOperatorTab] = useState<OperatorTab>('command')
@@ -9231,12 +9256,19 @@ function Home() {
     const toneMode = detectToneMode(decree)
     const outputModeInstruction = buildCouncilOutputModeInstruction(councilOutputMode)
     const intent = lastDecreeIntentRef.current ?? classifyRaElMessage(decree)
+    const classifiedTurnForSubmit = classifyCouncilTurn(decree)
     const teamResearchIntent = detectCouncilResearchIntent(decree, {
       forceTeamResearch: Boolean(pendingCouncilResearchContextRef.current),
     })
+    // Group and STATUS_CHECK stay on the local Nebula round. "current runtime health"
+    // must not be intercepted as Council Research Team (bare "current" is a live-retrieval false positive).
+    const keepLocalNebulaRound =
+      classifiedTurnForSubmit.intent === 'STATUS_CHECK'
+      || (councilFlowMode === 'stable_group' && !pendingCouncilResearchContextRef.current)
     if (
       mode !== 'continue'
       && teamResearchIntent.triggered
+      && !keepLocalNebulaRound
       && !detectOsSweepIntent(decree)
       && resolveEconomicOpsRouting(decree).mode !== 'economic_ops'
     ) {
@@ -9251,7 +9283,7 @@ function Home() {
       }
       return
     }
-    const decreeRequiresLiveRetrieval = detectResearchIntent(decree).shouldResearch
+    const decreeRequiresLiveRetrieval = !keepLocalNebulaRound && detectResearchIntent(decree).shouldResearch
     if (mode !== 'continue' && decreeRequiresLiveRetrieval) {
       setLiveResearchHud({
         mode: 'active',
@@ -9680,7 +9712,8 @@ function Home() {
       if (skipGeminiForSessionRef.current) order = order.filter(f => f !== 'gemini')
       const applyHealthyRoster = (families: CouncilOrchestrationFamily[]) =>
         families.filter(family => {
-          if (family === 'gemini' && skipGeminiForSessionRef.current) return false
+          if (family === 'gemini' && skipGeminiForSessionRef.current && councilFlowModeEffective !== 'stable_group') return false
+          if (councilFlowModeEffective === 'stable_group') return true
           const row = councilRoster?.families[family]
           if (!row) return family === 'chatgpt' || family === 'gemini'
           return row.floorEligible
@@ -10110,12 +10143,32 @@ function Home() {
        * panel, so they don't need to be baked into the visible prose as a report header.
        */
       const formatFamilyDeliberationContent = (turn: DeliberationTurn): string => {
-        if (turn.full_response.trim()) return turn.full_response
-        return `${turn.provider_label} didn't get a response in this round${turn.failure_reason ? ` — ${toDisplayText(turn.failure_reason)}` : ''}.`
+        if (turn.full_response.trim()) {
+          return presentAgentMessage({
+            agentId: nebulaAgentForSeat(turn.provider_family)?.id ?? null,
+            speaker: turn.provider_label,
+            raw: turn.full_response,
+          }).prose
+        }
+        return `${turn.provider_label} didn't complete this round.`
       }
 
       const runFamilyDeliberationGather = async () => {
         try {
+          const nebulaPlan = createCouncilRoundPlan({
+            roundId: councilLogicalRequestId,
+            commanderMessage: decree,
+          })
+          const nebulaSeats = seatsForParticipatingAgents(nebulaPlan.participatingAgentIds)
+          const nebulaNames = nebulaPlan.participatingAgentIds.map(id => NEBULA_AGENTS_BY_ID[id].name)
+          setNebulaRoundShell({
+            roundId: councilLogicalRequestId,
+            status: 'PLANNING',
+            agents: nebulaNames,
+            streamingAgent: 'ASTRA',
+            streamingText: '',
+          })
+          setFloorStream({ family: 'ASTRA', text: '', status: 'CONNECTING' })
           const { res: deliberationRes, data: deliberationData } = await postCouncilChatDecreeGather({
             message: decree,
             profile: RAEL_PROFILE,
@@ -10132,13 +10185,38 @@ function Home() {
             councilProviderRuntimeStates: providerRuntimeStates,
             councilFlowMode: 'stable_group',
             councilLogicalRequestId,
-            councilLogicalExpectedFamilies: ['chatgpt', 'claude', 'red_team'],
+            councilLogicalExpectedFamilies: nebulaSeats,
             councilLogicalTurnIndex: 0,
-            councilLogicalTurnTotal: 5,
+            councilLogicalTurnTotal: nebulaSeats.length,
             activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
             councilDeliberationMode: 'family_to_family_v1',
             ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
-          }, { ignoreContinuation: true })
+          }, {
+            ignoreContinuation: true,
+            onTextDelta: (delta, family) => {
+              const visible = stripHiddenReasoning(delta, { trim: false })
+              if (!visible) return
+              const name = family
+                ? displayNameForSeat(family as CouncilOrchestrationFamily, family)
+                : 'Council'
+              setNebulaRoundShell(prev => {
+                if (!prev || prev.roundId !== councilLogicalRequestId) return prev
+                const sameAgent = prev.streamingAgent === name
+                return {
+                  ...prev,
+                  status: name === 'AURORA' ? 'SYNTHESIZING' : 'EXECUTING',
+                  streamingAgent: name,
+                  agents: prev.agents.includes(name) ? prev.agents : [...prev.agents.filter(item => item !== 'ASTRA'), name],
+                  streamingText: sameAgent ? `${prev.streamingText}${visible}` : visible,
+                }
+              })
+              setFloorStream(prev => ({
+                family: name,
+                text: prev && prev.family === name ? `${prev.text}${visible}` : visible,
+                status: 'STREAMING',
+              }))
+            },
+          })
           if (!deliberationRes.ok || !deliberationData.familyDeliberation) return false
 
           const deliberation = deliberationData.familyDeliberation
@@ -10188,7 +10266,7 @@ function Home() {
               timestamp: new Date(turn.completed_at ?? Date.now()).toLocaleTimeString(),
               color: vis.colorOverride ?? meta.color,
               icon: vis.iconOverride ?? meta.icon,
-              provider: turn.backend_provider ?? turn.provider_model ?? vis.provider,
+              provider: '',
               messageType: 'response',
               degraded: false,
               familyDeliberationTurn: turn,
@@ -10198,6 +10276,7 @@ function Home() {
               deliberationRoundId: turn.round_id,
               shadowCouncilAssembly: turn.turn_id === shadowReadoutTurnId ? deliberationData.shadowCouncilAssembly : undefined,
               roundHealth: turn.turn_id === shadowReadoutTurnId ? deliberationData.roundHealth : undefined,
+              councilRound: turn.turn_id === shadowReadoutTurnId ? deliberationData.councilRound : undefined,
               councilProgress: deliberationData.councilProgress,
             })
 
@@ -10231,7 +10310,7 @@ function Home() {
                 timestamp: new Date().toLocaleTimeString(),
                 color: vis.colorOverride ?? meta.color,
                 icon: vis.iconOverride ?? meta.icon,
-                provider: vis.provider,
+                provider: '',
                 messageType: 'response',
                 councilProgress: deliberationData.councilProgress,
                 shadowCouncilAssembly: deliberationData.shadowCouncilAssembly,
@@ -10268,7 +10347,18 @@ function Home() {
             }
           }
 
-          if (messagesToAdd.length) addMessages(messagesToAdd)
+          if (messagesToAdd.length) {
+            addMessages(messagesToAdd)
+            setNebulaRoundShell(prev => prev && prev.roundId === councilLogicalRequestId
+              ? {
+                  ...prev,
+                  status: deliberationData.councilRound?.status ?? (deliberationData.roundHealth?.degraded ? 'COMPLETE_DEGRADED' : 'COMPLETE'),
+                  streamingAgent: null,
+                  streamingText: '',
+                  agents: Array.from(new Set(messagesToAdd.map(item => item.familyName))),
+                }
+              : prev)
+          }
           providerRuntimeStates = runtimeByFamily
           providerRuntimeDetails = detailsByFamily
           councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
@@ -10300,6 +10390,8 @@ function Home() {
           setFamilyDuty(Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])))
           return true
         } catch {
+          setNebulaRoundShell(null)
+          setFloorStream(null)
           return false
         }
       }
@@ -12748,6 +12840,39 @@ function Home() {
               terra={<p>{terraCouncilContextRef.current ? 'Terra context is attached to the current turn only.' : 'No Terra pin.'}</p>}
               diagnostics={(
                 <div className="space-y-2">
+                  <CouncilRoundInspector
+                    roundHealth={[...visibleCouncilMessages].reverse().find(item => item.roundHealth)?.roundHealth}
+                    councilRound={[...visibleCouncilMessages].reverse().find(item => item.councilRound)?.councilRound
+                      ?? (nebulaRoundShell ? {
+                        roundId: nebulaRoundShell.roundId,
+                        requestId: nebulaRoundShell.roundId,
+                        status: nebulaRoundShell.status as CouncilRound['status'],
+                        intent: 'GENERAL',
+                        selectedAgents: [],
+                        agentStates: {},
+                        findings: [],
+                        roundHealth: null,
+                        synthesis: nebulaRoundShell.streamingText || null,
+                        createdAt: nebulaRoundShell.roundId,
+                        startedAt: null,
+                        completedAt: null,
+                        metrics: {
+                          submit_to_ack_ms: null,
+                          submit_to_round_created_ms: null,
+                          astra_plan_ms: null,
+                          agent_queue_ms: null,
+                          agent_ttft_ms: null,
+                          agent_tokens_per_second: null,
+                          agent_total_ms: null,
+                          aurora_ttft_ms: null,
+                          round_total_ms: null,
+                          model_load_ms: null,
+                          render_delay_ms: null,
+                          queue_depth: nebulaRoundShell.agents.length,
+                        },
+                        inheritedPriorRound: false,
+                      } : null)}
+                  />
                   <CouncilMembersPanel
                     providerStatuses={providerHealth.providers}
                     providerLabels={providerHealth.labels}
@@ -12997,6 +13122,14 @@ function Home() {
           )}
           thread={(
         <>
+          {nebulaRoundShell && (nebulaRoundShell.status === 'PLANNING' || nebulaRoundShell.status === 'EXECUTING' || nebulaRoundShell.status === 'SYNTHESIZING' || nebulaRoundShell.streamingText) ? (
+            <CouncilLiveRoundBanner
+              status={nebulaRoundShell.status}
+              agents={nebulaRoundShell.agents}
+              streamingAgent={nebulaRoundShell.streamingAgent}
+              streamingText={nebulaRoundShell.streamingText}
+            />
+          ) : null}
           <CouncilMessageRows
             messages={visibleCouncilMessages}
             hiddenCount={hiddenCouncilMessageCount}
@@ -13031,7 +13164,7 @@ function Home() {
                 >
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>
-                      Incremental Council Transport
+                      Council Round
                     </div>
                     <div className="text-[9px] uppercase tracking-widest" style={{ color: '#94A3B8' }}>
                       {incrementalCouncilTransportStatus.replaceAll('_', ' ')}
@@ -13042,7 +13175,7 @@ function Home() {
                       id: incrementalCouncilProgress.requestId,
                       familyName: 'CONTROL',
                       content: incrementalCouncilRequestText ?? 'Council operation in progress.',
-                      timestamp: new Date().toLocaleTimeString(),
+                      timestamp: incrementalCouncilProgress.events[0]?.occurredAt ?? incrementalCouncilProgress.requestId,
                       provider: 'SSE',
                       messageType: 'system',
                       requestText: incrementalCouncilRequestText,

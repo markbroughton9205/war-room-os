@@ -127,7 +127,7 @@ import {
   type StableGroupPriorReply,
 } from '@/lib/council/stableGroupChat'
 import { filterDecreeRelevantPriorReplies, isLightweightPingDecree } from '@/lib/council/contextRelevance'
-import { invokeCouncilSeat, resolveCouncilRoutingMode, type SeatInvokeStatus } from '@/lib/council/live-orchestration/backends'
+import { invokeCouncilSeat, localRoutingBypassesCloudFloorGate, resolveCouncilRoutingMode, type SeatInvokeStatus } from '@/lib/council/live-orchestration/backends'
 import type { BackendMetadata } from '@/lib/council/live-orchestration/backends/types'
 import { resolveLiveCouncilRoster, familyIsFloorEligible } from '@/lib/council/live-orchestration/rosterHealth.server'
 import { resolveVisibleFloorOrder } from '@/lib/council/live-orchestration/floorScheduler'
@@ -155,6 +155,11 @@ import {
   buildRuntimeStatusSystemPrompt,
   isWarRoomRuntimeStatusDecree,
 } from '@/lib/council/nebula/runtimeStatus'
+import { createCouncilRoundPlan, seatsForParticipatingAgents } from '@/lib/council/nebula/roundFlow'
+import { createCouncilRound, terminalStatusFromHealth, transitionCouncilRound, type CouncilRound } from '@/lib/council/nebula/roundState'
+import { blackboardSummariesForPrompt, createRoundBlackboard, upsertCompletedFinding, type RoundBlackboard } from '@/lib/council/nebula/blackboard'
+import { presentAgentMessage } from '@/lib/council/nebula/presentation'
+import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
 import { appendProviderIdentityToCouncilSystem } from '@/lib/council/providerIdentity'
 import {
   buildProviderTokenDiagnostics,
@@ -310,13 +315,13 @@ function providerResultForDeliberation(
   return {
     family,
     providerLabel: displayFamilyName(family),
-    providerModel: result.backend?.model ?? providerModelForFamily(family),
+    providerModel: result.backend?.model ?? (localRoutingBypassesCloudFloorGate() ? null : providerModelForFamily(family)),
     content: result.status === 'OK' ? result.content : '',
     status: deliberationStatusFromProviderStatus(result.status),
     failureReason: result.status === 'OK' ? null : sanitizeProviderPublicError(result.error ?? result.content ?? result.status, family),
     backendType: result.backend?.backendType ?? null,
     backendProvider: result.backend?.provider ?? null,
-    backendRuntime: result.backend?.host ?? null,
+    backendRuntime: result.backend?.provider === 'ollama' ? 'ollama' : result.backend?.provider ?? null,
     fallbackFrom: result.backend?.fallbackFrom ?? null,
     errorCode: result.failureLayer ?? result.backend?.failureClass ?? null,
   }
@@ -925,6 +930,62 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     || ((classifiedTurn.intent === 'GREETING' || classifiedTurn.intent === 'STATUS_CHECK') && classifiedTurn.depth === 'FAST')
   const profile = isLightweightGreeting || !shouldInjectCommanderProfile(classifiedTurn) ? '' : rawProfileFromClient
   const familyDeliberationRequested = familyDeliberationRequestedRaw && shouldRunFamilyDeliberation(classifiedTurn)
+  const nebulaRoundPlan = createCouncilRoundPlan({
+    roundId: councilLogicalRequestId || councilTrace.councilTraceId,
+    commanderMessage: raelDirectiveText,
+  })
+  const nebulaSelectedSeats = seatsForParticipatingAgents(nebulaRoundPlan.participatingAgentIds)
+  let nebulaRound: CouncilRound = createCouncilRound({
+    roundId: nebulaRoundPlan.roundId,
+    requestId: councilTrace.councilTraceId,
+    plan: nebulaRoundPlan,
+  })
+  let nebulaBlackboard: RoundBlackboard = createRoundBlackboard(nebulaRoundPlan.roundId)
+  nebulaRound.metrics.submit_to_round_created_ms = 0
+  nebulaRound.metrics.astra_plan_ms = 0
+  nebulaRound.metrics.queue_depth = nebulaSelectedSeats.length
+  let nebulaDeliberationFamilies: CouncilSingleFamily[] = []
+
+  if (familyDeliberationRequested) {
+    const includeRedTeam = nebulaSelectedSeats.includes('red_team') && classifiedTurn.intent !== 'SOCIAL_CHECKIN'
+    const localCouncilLive = localRoutingBypassesCloudFloorGate()
+    const nebulaConfigured = Object.fromEntries(nebulaSelectedSeats.map(seat => [seat, true])) as Partial<Record<CouncilOrchestrationFamily, boolean>>
+    const floorOrder = resolveVisibleFloorOrder({
+      configured: localCouncilLive ? { ...liveCouncilFloor.configured, ...nebulaConfigured } : liveCouncilFloor.configured,
+      eligible: localCouncilLive ? { ...liveCouncilFloor.eligible, ...nebulaConfigured } : liveCouncilFloor.eligible,
+      includeRedTeam,
+    })
+    const selectedFloor = floorOrder.filter(family => nebulaSelectedSeats.includes(family))
+    // Agent eligibility comes from the ASTRA/Nebula plan. Cloud-key roster eligibility is
+    // backend availability and must not delete ORION/LUMEN/AURORA before invokeCouncilSeat.
+    nebulaDeliberationFamilies = (localCouncilLive && nebulaSelectedSeats.length
+      ? nebulaSelectedSeats
+      : selectedFloor.length
+        ? selectedFloor
+        : floorOrder.slice(0, 3)
+    ).filter((family): family is CouncilSingleFamily => family !== 'baby' && family !== 'bridge_architect')
+    councilProgress = createCouncilProgressRuntimeTracker({
+      eventObserver: options.progressEventObserver,
+      requestIdSeed: councilTrace.councilTraceId,
+      commanderTurnRef: conversationId ?? 'api-chat-family-deliberation',
+      flowMode: 'stable_group',
+      executionStrategy: 'server_sequential_streaming_future',
+      expectedFamilies: nebulaDeliberationFamilies,
+      selectedFamilies: nebulaDeliberationFamilies,
+      selectionAuthority: 'system_selected',
+    })
+    councilProgress.record({ eventType: 'request_created', source: 'server_orchestrator' })
+    councilProgress.record({
+      eventType: 'request_selection_resolved',
+      source: 'server_orchestrator',
+      payload: {
+        selectedFamilies: nebulaDeliberationFamilies,
+        expectedFamilies: nebulaDeliberationFamilies,
+      },
+    })
+    councilProgress.record({ eventType: 'request_started', source: 'server_orchestrator' })
+    nebulaRound = transitionCouncilRound(nebulaRound, 'PLANNING')
+  }
 
   const sequentialDiagnostic = body.sequentialDiagnostic === true
   const diagnosticTurnIndex = typeof body.diagnosticTurnIndex === 'number' ? body.diagnosticTurnIndex : undefined
@@ -991,7 +1052,9 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   const isAttendanceFlow =
     councilCommand.mode === 'attendance'
     || intentState.intent === 'attendance'
-    || councilGatherPhase === 'decree_soft'
+  // Incremental Group gathers send councilGatherPhase=decree_soft. That is a soft-timeout
+  // budget, not an attendance roll call. Treating it as attendance skipped local Ollama
+  // and marked cloud seats unavailable on every Group STATUS_CHECK.
 
   const directKey = message.trim().toLowerCase() as keyof typeof DIRECT_KEYS
   const directFamily =
@@ -1705,7 +1768,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     if (family === 'kimi' && !isKimiConfigured()) {
       return { family: familyName, content: 'Kimi not configured', status: 'UNAVAILABLE', failureLayer: 'AUTH' }
     }
-    if (!familyIsFloorEligible(family) && family !== 'kimi') {
+    if (!familyIsFloorEligible(family) && family !== 'kimi' && !localRoutingBypassesCloudFloorGate()) {
       const row = liveCouncilRoster.families[family]
       const layer =
         row?.unavailableReason === 'UNAVAILABLE_BILLING'
@@ -1742,7 +1805,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
             category: 'provider',
             code: 'TEXT_DELTA',
             safeMessage: 'delta',
-            sanitizedMetadata: { semantic: 'TEXT_DELTA', textDelta: delta.slice(0, 400), family },
+            sanitizedMetadata: { semantic: 'TEXT_DELTA', textDelta: delta.slice(0, 800), family },
           },
         },
       })
@@ -1787,7 +1850,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       if (seatResult.ok) {
         return {
           family: familyName,
-          content: seatResult.text.trim(),
+          content: presentAgentMessage({
+            agentId: nebulaAgentForSeat(family)?.id ?? null,
+            speaker: familyName,
+            raw: stripHiddenReasoning(seatResult.text.trim()),
+          }).prose,
           status: 'OK',
           backend: seatResult.backend,
         }
@@ -1888,14 +1955,27 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         evidenceReferences,
         priorTurns: session.turns,
         targetTurn: opts?.targetTurn,
-        contextBlock: warRoomContextBlock,
+        contextBlock: [
+          warRoomContextBlock,
+          blackboardSummariesForPrompt(nebulaBlackboard).length
+            ? `Shared round findings:\n${blackboardSummariesForPrompt(nebulaBlackboard).join('\n')}`
+            : '',
+        ].filter(Boolean).join('\n\n'),
       })
       progress.recordTurnStarted(family, role, session.turns)
-      const result = await withTimeout(
+      nebulaRound = nebulaRound.status === 'PLANNING' ? transitionCouncilRound(nebulaRound, 'EXECUTING') : nebulaRound
+      if (role === 'council_synthesis' && nebulaRound.status === 'EXECUTING') {
+        nebulaRound = transitionCouncilRound(nebulaRound, 'SYNTHESIZING')
+      }
+      const invokeOnce = () => withTimeout(
         displayFamilyName(family),
         callCouncilProvider(family, prompt),
         PROVIDER_TIMEOUT_MS,
       )
+      let result = await invokeOnce()
+      if ((result.status === 'FAILED' || result.status === 'TIMED_OUT') && result.backend?.backendType === 'LOCAL') {
+        result = await invokeOnce()
+      }
       const turn = appendDeliberationTurn(session, {
         family,
         role,
@@ -1915,6 +1995,36 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           || role === 'revision_or_stand_firm'
           || turn.completion_status !== 'complete',
       })
+      const agent = nebulaAgentForSeat(family)
+      if (result.backend?.ttftMs != null) {
+        if (family === 'chatgpt') nebulaRound.metrics.aurora_ttft_ms = result.backend.ttftMs
+        else if (nebulaRound.metrics.agent_ttft_ms == null) nebulaRound.metrics.agent_ttft_ms = result.backend.ttftMs
+      }
+      if (result.backend?.tokensPerSecond != null) {
+        nebulaRound.metrics.agent_tokens_per_second = result.backend.tokensPerSecond
+      }
+      if (agent) {
+        nebulaBlackboard = upsertCompletedFinding(nebulaBlackboard, {
+          agentId: agent.id,
+          roundId: session.round_id,
+          raw: turn.full_response,
+          provenance: {
+            backendType: turn.backend_type ?? null,
+            provider: turn.backend_provider ?? null,
+            runtime: turn.backend_runtime ?? null,
+            model: turn.provider_model ?? null,
+            fallbackFrom: turn.fallback_from ?? null,
+          },
+          startedAt: startedAt,
+          completedAt: turn.completed_at,
+          status: turn.completion_status === 'complete' ? 'completed' : turn.completion_status === 'unresolved' ? 'skipped' : 'failed',
+          metrics: {
+            ttftMs: result.backend?.ttftMs ?? null,
+            tokensPerSecond: result.backend?.tokensPerSecond ?? null,
+            totalMs: result.backend?.latencyMs ?? null,
+          },
+        })
+      }
       return turn
     }
 
@@ -1930,11 +2040,19 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     })
 
     const skipSocialDeepStages = classifiedTurn.intent === 'SOCIAL_CHECKIN' || (classifiedTurn.depth === 'FAST' && classifiedTurn.intent !== 'STATUS_CHECK')
-    const primaryFamilies = resolveVisibleFloorOrder({
-      configured: liveCouncilFloor.configured,
-      eligible: liveCouncilFloor.eligible,
-      includeRedTeam: false,
-    })
+    const localCouncilLive = localRoutingBypassesCloudFloorGate()
+    const primaryFamilies = (nebulaDeliberationFamilies.length
+      ? nebulaDeliberationFamilies
+      : resolveVisibleFloorOrder({
+          configured: localCouncilLive
+            ? { ...liveCouncilFloor.configured, ...Object.fromEntries(nebulaSelectedSeats.map(seat => [seat, true])) }
+            : liveCouncilFloor.configured,
+          eligible: localCouncilLive
+            ? { ...liveCouncilFloor.eligible, ...Object.fromEntries(nebulaSelectedSeats.map(seat => [seat, true])) }
+            : liveCouncilFloor.eligible,
+          includeRedTeam: false,
+        })
+    ).filter(family => family !== 'chatgpt' || !nebulaRoundPlan.participatingAgentIds.includes('aurora'))
     const runAuroraSynthesis = !skipSocialDeepStages || classifiedTurn.intent === 'STATUS_CHECK'
     let speakingOrder = 0
     for (const family of primaryFamilies) {
@@ -1947,13 +2065,13 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     }
 
     const availableIds = completedOutputIds()
-    if (!skipSocialDeepStages && familyIsFloorEligible('red_team') && availableIds.length > 0) {
+    if (!skipSocialDeepStages && familyIsFloorEligible('red_team') && availableIds.length > 0 && nebulaSelectedSeats.includes('red_team')) {
       speakingOrder += 1
       await callTurn('red_team', 'red_team_challenge', speakingOrder, {
         inputMessageIds: [session.commander_message_id, ...availableIds],
         challengeTargetIds: availableIds,
       })
-    } else if (!skipSocialDeepStages && availableIds.length === 0) {
+    } else if (!skipSocialDeepStages && availableIds.length === 0 && nebulaSelectedSeats.includes('red_team')) {
       appendUnresolvedTurn('red_team', 'red_team_challenge', speakingOrder + 1, 'No completed primary-family messages were available; PHOENIX was not invented.')
     }
 
@@ -2036,55 +2154,59 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     })
 
     if (familyDeliberationRequested) {
-      // councilLogicalRequestId/councilLogicalExpectedFamilies/
-      // councilLogicalTurnIndex/councilLogicalTurnTotal (parsed above from
-      // the request body) are intentionally not threaded into this tracker.
-      // Those fields exist to reconcile progress across the legacy
-      // multi-HTTP-call sequential shard path (see the councilSingleFamily
-      // tracker construction below), where each family turn is a separate
-      // request that needs to be correlated back to one logical decree.
-      // Family-to-family deliberation instead executes and reconciles every
-      // selected family's full turn sequence inside this single request/
-      // response, so there is no cross-call correlation need here -- the
-      // client may still send these fields (harmless, backward compatible),
-      // but this path has no use for them.
-      const deliberationFamilies = resolveVisibleFloorOrder({
-        configured: liveCouncilFloor.configured,
-        eligible: liveCouncilFloor.eligible,
-        includeRedTeam: classifiedTurn.intent !== 'SOCIAL_CHECKIN',
-      })
-      councilProgress = createCouncilProgressRuntimeTracker({
-        eventObserver: options.progressEventObserver,
-        requestIdSeed: councilTrace.councilTraceId,
-        commanderTurnRef: conversationId ?? 'api-chat-family-deliberation',
-        flowMode: 'stable_group',
-        executionStrategy: 'server_sequential_streaming_future',
-        expectedFamilies: deliberationFamilies,
-        selectedFamilies: deliberationFamilies,
-        selectionAuthority: 'system_selected',
-      })
-      councilProgress.record({ eventType: 'request_created', source: 'server_orchestrator' })
-      councilProgress.record({
-        eventType: 'request_selection_resolved',
-        source: 'server_orchestrator',
-        payload: {
-          selectedFamilies: deliberationFamilies,
+      const deliberationFamilies = nebulaDeliberationFamilies.length
+        ? nebulaDeliberationFamilies
+        : resolveVisibleFloorOrder({
+            configured: localRoutingBypassesCloudFloorGate()
+              ? { ...liveCouncilFloor.configured, ...Object.fromEntries(nebulaSelectedSeats.map(seat => [seat, true])) }
+              : liveCouncilFloor.configured,
+            eligible: localRoutingBypassesCloudFloorGate()
+              ? { ...liveCouncilFloor.eligible, ...Object.fromEntries(nebulaSelectedSeats.map(seat => [seat, true])) }
+              : liveCouncilFloor.eligible,
+            includeRedTeam: classifiedTurn.intent !== 'SOCIAL_CHECKIN',
+          })
+      if (!councilProgress) {
+        councilProgress = createCouncilProgressRuntimeTracker({
+          eventObserver: options.progressEventObserver,
+          requestIdSeed: councilTrace.councilTraceId,
+          commanderTurnRef: conversationId ?? 'api-chat-family-deliberation',
+          flowMode: 'stable_group',
+          executionStrategy: 'server_sequential_streaming_future',
           expectedFamilies: deliberationFamilies,
-        },
-      })
-      councilProgress.record({ eventType: 'request_started', source: 'server_orchestrator' })
+          selectedFamilies: deliberationFamilies,
+          selectionAuthority: 'system_selected',
+        })
+        councilProgress.record({ eventType: 'request_created', source: 'server_orchestrator' })
+        councilProgress.record({
+          eventType: 'request_selection_resolved',
+          source: 'server_orchestrator',
+          payload: {
+            selectedFamilies: deliberationFamilies,
+            expectedFamilies: deliberationFamilies,
+          },
+        })
+        councilProgress.record({ eventType: 'request_started', source: 'server_orchestrator' })
+      }
       councilTrace.record('provider_calls_started', {
         module: 'app/api/chat/route.ts:family_to_family_deliberation',
         inputSummary: { mode: 'family_to_family_v1', timeoutMs: PROVIDER_TIMEOUT_MS },
-        outputSummary: { callMode: 'sequential_family_to_family' },
+        outputSummary: { callMode: 'sequential_family_to_family', selectedFamilies: deliberationFamilies },
         stateChange: 'Family deliberation provider calls started in strict speaking order.',
       })
       const familyDeliberation = await runFamilyToFamilyDeliberation(councilProgress)
-      // Nebula RoundHealth projection: complete turns become normal Nebula-attributed results;
-      // a non-complete turn never becomes its own raw-report SYSTEM card in the primary
-      // conversation — that detail belongs to roundHealth (Inspector/diagnostics). See
-      // lib/council/family-deliberation/runtime.ts:deriveFamilyDeliberationRoundOutcome.
       const { results, roundHealth } = deriveFamilyDeliberationRoundOutcome(familyDeliberation)
+      nebulaRound.roundHealth = roundHealth
+      nebulaRound.findings = nebulaBlackboard.findings
+      nebulaRound.synthesis = familyDeliberation.turns.find(turn => turn.turn_id === familyDeliberation.synthesis_turn_id)?.full_response ?? null
+      nebulaRound.metrics.round_total_ms = Date.now() - Date.parse(nebulaRound.createdAt)
+      const terminal = terminalStatusFromHealth(roundHealth)
+      if (nebulaRound.status !== terminal) {
+        try {
+          nebulaRound = transitionCouncilRound(nebulaRound, terminal === 'FAILED' && nebulaRound.status === 'CREATED' ? 'FAILED' : terminal)
+        } catch {
+          nebulaRound = { ...nebulaRound, status: terminal, completedAt: new Date().toISOString() }
+        }
+      }
       const synthesis = familyDeliberation.synthesis_turn_id
         ? familyDeliberation.turns.find(turn => turn.turn_id === familyDeliberation.synthesis_turn_id)
         : null
@@ -2140,6 +2262,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         results,
         familyDeliberation,
         roundHealth,
+        councilRound: nebulaRound,
         councilSingleResponse: synthesis?.full_response ?? '',
         hardStop: false,
         mode: 'family_to_family_deliberation',
@@ -2570,6 +2693,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         councilSingleFamily !== 'kimi'
         && councilSingleFamily !== 'bridge_architect'
         && !familyIsFloorEligible(councilSingleFamily)
+        && !localRoutingBypassesCloudFloorGate()
       ) {
         const row = liveCouncilRoster.families[councilSingleFamily]
         const result: ProviderResult = {
