@@ -585,5 +585,36 @@ export async function runCouncilLiveRoutingValidation(): Promise<CaseResult[]> {
     ),
   )
 
+  // 35-37. Repair Wave 1 / P0-2: the single-agent "Continue" path (mode==='continue' &&
+  // councilSingleFamily) used to call callChatGPT/callClaude/callGrok/completeGeminiCouncilMessage
+  // directly — raw fetches with no COUNCIL_ROUTING_MODE awareness, so under LOCAL_FIRST with no
+  // cloud keys it hard-503'd instead of answering locally via Ollama. It was migrated onto
+  // callCouncilProvider()/invokeCouncilSeat(), the same LOCAL_FIRST-aware helper direct-mode
+  // already used. These cases prove the raw bypass functions are gone from execute.ts entirely
+  // (not just unused-in-continue-mode) and that the migration's dispatch set is in place.
+  results.push(
+    check(
+      'raw callChatGPT/callGrok fetch helpers removed from execute.ts',
+      !/\bcallChatGPT\b|\bcallGrok\b/.test(executeSource),
+      'no remaining reference to callChatGPT or callGrok anywhere in execute.ts',
+    ),
+  )
+  results.push(
+    check(
+      'raw completeGeminiCouncilMessage import/call removed from execute.ts',
+      !/completeGeminiCouncilMessage/.test(executeSource),
+      'no remaining reference to completeGeminiCouncilMessage anywhere in execute.ts',
+    ),
+  )
+  results.push(
+    check(
+      'Continue path routes chatgpt/claude/grok/gemini/red_team/baby through callCouncilProvider',
+      /LOCAL_ROUTED_CONTINUE_FAMILIES\s*=\s*new Set\(\['chatgpt', 'claude', 'grok', 'gemini', 'red_team', 'baby'\]\)/.test(executeSource)
+      && /LOCAL_ROUTED_CONTINUE_FAMILIES\.has\(councilSingleFamily\)/.test(executeSource)
+      && /callCouncilProvider\(councilSingleFamily, userPrompt, \{\s*systemPromptOverride/.test(executeSource),
+      'LOCAL_ROUTED_CONTINUE_FAMILIES set exists, is checked, and dispatches into callCouncilProvider with an override options object',
+    ),
+  )
+
   return results
 }

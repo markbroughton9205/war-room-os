@@ -13,6 +13,15 @@
 # testing
 /coverage
 
+# Playwright (real browser acceptance harness — validate:council-browser-live)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+# Authenticated storage state written by tests/auth.setup.ts — contains a live session cookie,
+# never commit.
+/.playwright-auth/
+
 # next.js
 /.next/
 /out/

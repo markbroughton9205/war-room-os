@@ -13128,6 +13128,7 @@ function Home() {
               agents={nebulaRoundShell.agents}
               streamingAgent={nebulaRoundShell.streamingAgent}
               streamingText={nebulaRoundShell.streamingText}
+              roundId={nebulaRoundShell.roundId}
             />
           ) : null}
           <CouncilMessageRows

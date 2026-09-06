@@ -3,6 +3,7 @@ import { emitEvent } from '@/lib/events/bus'
 import { recordDepositNotification } from '@/lib/payments/depositStore'
 import { recordPaymentAudit } from '@/lib/payments/paymentAudit'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,6 +12,14 @@ function persistenceLabel(value: 'supabase' | 'session-only') {
 }
 
 export async function POST(req: Request) {
+  // Wave 1 repair, audit finding P1-3: despite the webhook-sounding name, this route has no
+  // signature/service-secret verification, so it was never a genuine external webhook — it only
+  // relied on the app-wide "any authenticated user" gate. Narrowed to Commander-only, matching the
+  // rest of the payments surface. If a real external webhook integration is ever added here, it
+  // needs its own signature verification, not a relaxation of this check.
+  const commander = await requireCommanderSession('Deposit notification')
+  if (!commander.ok) return commander.response
+
   const sup = tryWarRoomSupabase()
   let depositId = ''
   try {
