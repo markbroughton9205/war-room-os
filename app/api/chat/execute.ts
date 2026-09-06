@@ -3692,6 +3692,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           client: sup.ok ? sup.client : null,
           responseText,
           fallbackPartition: councilSingleFamilyToMemoryPartition(councilSingleFamily),
+          emittingSeat: councilSingleFamily,
           conversationId,
           extraMetadata: { councilSingleFamily, route: '/api/chat' },
         })
