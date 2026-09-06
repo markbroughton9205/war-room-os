@@ -1,15 +1,7 @@
 import { NextResponse } from 'next/server'
-import { completeGeminiCouncilMessage } from '@/lib/ai/providers/geminiCouncil'
-import { callXAIChat } from '@/lib/ai/providers/xai'
 import { completeKimiChat, isKimiConfigured } from '@/lib/providers/kimi'
 import { envHasUsableProviderSecret } from '@/lib/providers/secretPresence'
 import { sanitizeCaughtProviderError, sanitizeProviderPublicError } from '@/lib/providers/publicError'
-import {
-  callClaudeFamilyWithEmptyContentRetry,
-  ClaudeEmptyContentError,
-  extractClaudeResponseText,
-  type ClaudeRetryAttemptInfo,
-} from '@/lib/providers/claudeResponseParsing'
 import { councilSingleFamilyToMemoryPartition, tryPersistMemoryProposalFromModelOutput } from '@/lib/memory/ingestFromModel'
 import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
@@ -233,9 +225,6 @@ function buildResearchAntiLoopAugment(threadBlock: string): string {
   ].join('\n')
 }
 
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
-const CLAUDE_MODEL = 'claude-sonnet-5'
 const DEFAULT_MAX_TOKENS = 220
 const EXPANDED_MAX_TOKENS = 520
 const STABLE_GROUP_MAX_TOKENS = 1200
@@ -541,133 +530,6 @@ function recordCouncilProgressSyntheticAudit(
   const audit = buildSyntheticIntegrityAuditPayload({ expectedFamilies, providerResults })
   tracker.record({ eventType: 'audit_scope_declared', source: 'integrity_layer', payload: { audit } })
   tracker.record({ eventType: 'audit_completed', source: 'integrity_layer', payload: { audit } })
-}
-
-/**
- * Content-free telemetry for the Claude empty-content retry path (`claude` and `red_team`, both
- * routed through callClaude()). Recorded as a `diagnostic_recorded` event, never a
- * `family_responded`/`family_failed`-family event, so it never affects
- * `countOperationFamilyContributions` — retries do not inflate the canonical contribution count.
- * Never carries provider text or prompts, only attempt number and a coarse outcome category.
- */
-function recordClaudeRetryTelemetry(
-  tracker: CouncilProgressRuntimeTracker | null,
-  family: 'claude' | 'red_team',
-  info: ClaudeRetryAttemptInfo,
-): void {
-  if (!tracker) return
-  tracker.record({
-    eventType: 'diagnostic_recorded',
-    source: 'provider_adapter',
-    family,
-    payload: {
-      diagnostic: {
-        category: 'provider',
-        code: `claude_retry_attempt_${info.attempt}_${info.outcome}`,
-        safeMessage:
-          info.attempt === 1 && info.outcome === 'success'
-            ? `${displayFamilyName(family)}: first attempt succeeded, no retry needed.`
-            : info.outcome === 'empty_content'
-              ? `${displayFamilyName(family)}: attempt ${info.attempt} returned empty content.`
-              : info.outcome === 'other_error'
-                ? `${displayFamilyName(family)}: attempt ${info.attempt} failed with a non-empty-content error (no retry triggered by this failure).`
-                : `${displayFamilyName(family)}: retry attempt ${info.attempt} succeeded.`,
-        providerFamily: family,
-        retryCount: info.attempt - 1,
-        sanitizedMetadata: {
-          attempt: info.attempt,
-          outcome: info.outcome,
-        },
-      },
-    },
-  })
-}
-
-async function callChatGPT(
-  prompt: string,
-  system: string,
-  maxTokens = DEFAULT_MAX_TOKENS,
-  signal?: AbortSignal,
-): Promise<string> {
-  const res = await fetch(OPENAI_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${process.env.OPENAI_API_KEY || ''}`,
-    },
-    signal,
-    body: JSON.stringify({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: prompt },
-      ],
-      max_tokens: maxTokens,
-    }),
-  })
-  const data = await res.json() as { choices?: { message?: { content?: string } }[]; error?: { message?: string } }
-  if (!res.ok) {
-    throw new Error(sanitizeProviderPublicError(data?.error?.message || `OpenAI request failed (${res.status})`, 'chatgpt'))
-  }
-  const text = data.choices?.[0]?.message?.content
-  if (typeof text !== 'string' || !text.trim()) {
-    throw new Error('ChatGPT returned empty content')
-  }
-  return text.trim()
-}
-
-async function callClaude(
-  prompt: string,
-  system: string,
-  maxTokens = DEFAULT_MAX_TOKENS,
-  signal?: AbortSignal,
-): Promise<string> {
-  const res = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY || '',
-      'anthropic-version': '2023-06-01',
-    },
-    signal,
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  })
-  const data = await res.json() as { content?: unknown; error?: { message?: string } }
-  if (!res.ok) {
-    throw new Error(sanitizeProviderPublicError(data?.error?.message || `Anthropic request failed (${res.status})`, 'claude'))
-  }
-  const text = extractClaudeResponseText(data.content)
-  if (!text.trim()) {
-    throw new ClaudeEmptyContentError('Claude returned empty content')
-  }
-  return text.trim()
-}
-
-async function callGrok(prompt: string, system: string, maxTokens = DEFAULT_MAX_TOKENS, timeoutMs?: number): Promise<string> {
-  const result = await callXAIChat({
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: prompt },
-    ],
-    maxTokens,
-    timeoutMs: timeoutMs ?? 30_000,
-  })
-
-  if (result.status !== 'online') {
-    const message = (typeof result.text === 'string' && result.text.trim())
-      ? result.text.trim()
-      : (result.error || 'Grok provider unavailable')
-    throw new Error(message)
-  }
-  if (!result.text?.trim()) {
-    throw new Error('Grok returned empty content')
-  }
-  return result.text.trim()
 }
 
 function buildThread(threadHistory: unknown) {
@@ -1759,7 +1621,17 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   const callCouncilProvider = async (
     family: CouncilSingleFamily,
     userPrompt: string,
-    opts?: { grokTimeoutMs?: number; onDelta?: (delta: string) => void },
+    opts?: {
+      grokTimeoutMs?: number
+      onDelta?: (delta: string) => void
+      /** Per-call system prompt override (e.g. a stable-group continuity prompt or a custom
+       * red_team/baby persona) — falls back to this family's default system prompt when absent. */
+      systemPromptOverride?: string
+      /** Per-call max-output-tokens override (e.g. Full Council/stable-group turns use
+       * STABLE_GROUP_MAX_TOKENS instead of the generic default) — falls back to the outer
+       * `maxTokens` closure value when absent. */
+      maxTokensOverride?: number
+    },
   ): Promise<ProviderResult> => {
     const familyName = displayFamilyName(family)
     if (family === 'bridge_architect') {
@@ -1783,7 +1655,10 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     // which performs the identical check before ever reaching streamCouncilFamily. See the
     // non-kimi branch below.
 
+    const callMaxTokens = opts?.maxTokensOverride ?? maxTokens
+
     const systemFor = (): string => {
+      if (opts?.systemPromptOverride) return opts.systemPromptOverride
       if (family === 'chatgpt') return gptSystem
       if (family === 'claude') return claudeSystem
       if (family === 'grok') return grokSystem
@@ -1814,9 +1689,9 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     try {
       if (family === 'kimi') {
         const kimiResult = await completeKimiChat({
-          system: kimiSystem,
+          system: opts?.systemPromptOverride ?? kimiSystem,
           messages: [{ role: 'user', content: userPrompt }],
-          maxTokens,
+          maxTokens: callMaxTokens,
           timeoutMs: PROVIDER_TIMEOUT_MS,
         })
         if (!kimiResult.ok) {
@@ -1832,17 +1707,17 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         return { family: familyName, content: kimiResult.data.text.trim(), status: 'OK' }
       }
 
-      // Council Seat Router entry point. Under the default/production routing mode
-      // (COUNCIL_ROUTING_MODE unset -> EXTERNAL_ONLY), invokeCouncilSeat() resolves straight to
-      // invokeExternalBackend(), which is itself a pass-through to the same streamCouncilFamily()
+      // Council Seat Router entry point. Under COUNCIL_ROUTING_MODE=LOCAL_FIRST (production's
+      // actual current setting), invokeCouncilSeat() tries the local Ollama/Nebula backend first
+      // and falls back to invokeExternalBackend() (a pass-through to the same streamCouncilFamily()
       // call this replaced — same provider adapters, same retry/timeout policy, same real
-      // token-by-token onDelta streaming. Only a non-default COUNCIL_ROUTING_MODE (never set in
-      // this environment) can route a seat to a local backend instead.
+      // token-by-token onDelta streaming) only if local fails. Under the default/unset
+      // EXTERNAL_ONLY mode it resolves straight to invokeExternalBackend() as before.
       const seatResult = await invokeCouncilSeat({
         seat: family,
         systemPrompt: systemFor(),
         userPrompt,
-        maxTokens,
+        maxTokens: callMaxTokens,
         signal: new AbortController().signal,
         onDelta: emitDelta,
         timeoutKind: isLightweightGreeting ? 'social' : classifiedTurn.shouldResearch ? 'research' : 'council',
@@ -2838,37 +2713,6 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         ? DIRECT_INVOCATION_GROK_TIMEOUT_MS
         : providerBudgetMs
 
-      const withBudgetSignal = () => {
-        const ac = new AbortController()
-        const tid = setTimeout(() => ac.abort(), providerBudgetMs)
-        return {
-          signal: ac.signal,
-          dispose: () => clearTimeout(tid),
-        }
-      }
-
-      // Claude (and Red Team, which also calls callClaude) occasionally returns an HTTP-success
-      // response with no usable text block. That's transient and worth exactly one retry with a
-      // fresh timeout budget before it's treated as a real failure — anything other than
-      // ClaudeEmptyContentError propagates immediately with no retry.
-      const callClaudeWithEmptyContentRetry = (
-        prompt: string,
-        system: string,
-        tokens: number,
-        retryTelemetryFamily: 'claude' | 'red_team',
-      ): Promise<string> =>
-        callClaudeFamilyWithEmptyContentRetry(
-          async () => {
-            const { signal, dispose } = withBudgetSignal()
-            try {
-              return await callClaude(prompt, system, tokens, signal)
-            } finally {
-              dispose()
-            }
-          },
-          (info: ClaudeRetryAttemptInfo) => recordClaudeRetryTelemetry(councilProgress, retryTelemetryFamily, info),
-        )
-
       // Live research is a truthfulness requirement, not a mode-specific feature: Stable Group
       // and attendance/Full Council rounds are no longer hard-excluded here. `detectResearchIntent`
       // below already receives `attendanceFlow` as a soft signal and down-weights pure roll-call/
@@ -3196,7 +3040,10 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       }
 
       let responseText = ''
-      let geminiDegradedReason: string | null = null
+      // Always null now: gemini's old "degraded soft-note instead of hard fail" branch was removed
+      // when this path migrated onto callCouncilProvider()/invokeCouncilSeat() (P0-2 fix) — gemini
+      // failures now degrade the same way every other seat's failures do.
+      const geminiDegradedReason: string | null = null
       let grokContinueInvokeStartedAt: number | undefined
       let grokContinueAuditTiming: { elapsedMs: number; timeoutMs: number } | null = null
       councilTrace.record('provider_calls_started', {
@@ -3211,83 +3058,106 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         stateChange: 'Single-family provider call started.',
       })
       recordCouncilProgressProviderStart(councilProgress, [councilSingleFamily])
+      const LOCAL_ROUTED_CONTINUE_FAMILIES = new Set(['chatgpt', 'claude', 'grok', 'gemini', 'red_team', 'baby'])
       try {
-        switch (councilSingleFamily) {
-          case 'chatgpt': {
-            const { signal, dispose } = withBudgetSignal()
-            try {
-              responseText = await callChatGPT(
-                userPrompt,
-                stableGroupSystemForFamily ?? gptSystem,
-                tokensForCall,
-                signal,
+        if (LOCAL_ROUTED_CONTINUE_FAMILIES.has(councilSingleFamily)) {
+          // Migrated off the raw per-provider direct-fetch helpers this file used to call here
+          // (audit finding P0-2): those bypassed invokeCouncilSeat/seatRouter entirely, so under
+          // COUNCIL_ROUTING_MODE=LOCAL_FIRST with no cloud keys a Commander "Continue"-ing a
+          // specific agent would hard-503 instead of answering locally via Ollama. This routes
+          // through the same callCouncilProvider() helper direct-mode already uses, which resolves
+          // through invokeCouncilSeat() (LOCAL_FIRST-aware) — preserving this flow's own system-
+          // prompt selection (stable-group continuity / red_team / baby personas) and token budget
+          // via the override options, since callCouncilProvider's defaults are generic.
+          const continueSystemPromptOverride: string | undefined =
+            councilSingleFamily === 'red_team'
+              ? stableGroupSystemForFamily
+                ?? (isLightweightGreeting
+                  ? greetingSystemPrompt('Red Team', 'adversarial review', 'red_team')
+                  : appendOpportunityMandateToSystem(
+                    `You are Red Team in Ra'el's War Room — the protective one, watching for where a plan could fail. Personality: protective, direct, like family saying "hold up" before Ra'el walks into something — not a compliance officer. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence, but say it the way someone who has his back would say it — never as a legal disclaimer or automated risk report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+                    'red_team',
+                  ))
+              : councilSingleFamily === 'baby'
+                ? stableGroupSystemForFamily
+                  ?? (isLightweightGreeting
+                    ? greetingSystemPrompt('Baby AI', 'observational council witness', 'baby')
+                    : `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`)
+                : stableGroupSystemForFamily ?? undefined
+
+          const grokContinueOuterTimeoutMs = grokContinueEligible
+            ? DIRECT_INVOCATION_GROK_OUTER_TIMEOUT_MS
+            : providerBudgetMs
+          if (grokContinueEligible) grokContinueInvokeStartedAt = Date.now()
+          const seatResult = await withTimeout(
+            displayFamilyName(councilSingleFamily),
+            callCouncilProvider(councilSingleFamily, userPrompt, {
+              systemPromptOverride: continueSystemPromptOverride,
+              maxTokensOverride: tokensForCall,
+            }),
+            grokContinueOuterTimeoutMs,
+          )
+          if (grokContinueEligible && grokContinueInvokeStartedAt !== undefined) {
+            grokContinueAuditTiming = {
+              elapsedMs: Date.now() - grokContinueInvokeStartedAt,
+              timeoutMs: grokContinueTimeoutMs,
+            }
+          }
+          const grokContinueTimeoutFailure =
+            councilSingleFamily === 'grok'
+            && grokContinueEligible
+            && (seatResult.status === 'TIMED_OUT' || (seatResult.status === 'FAILED' && /\btimed out\b/i.test(seatResult.error ?? '')))
+
+          await safeAudit({
+            success: seatResult.status === 'OK',
+            flow: 'continue_single',
+            councilSingleFamily,
+            status: seatResult.status,
+            error: seatResult.error,
+            ...(councilSingleFamily === 'grok' && grokContinueEligible
+              ? {
+                  provider: 'xai',
+                  mode: 'direct_invocation_grok',
+                  providerTimeoutMs: grokContinueTimeoutMs,
+                  outerTimeoutMs: grokContinueOuterTimeoutMs,
+                  elapsedMs: grokContinueAuditTiming?.elapsedMs ?? null,
+                  ...(seatResult.status === 'OK'
+                    ? { result: 'success' as const }
+                    : grokContinueTimeoutFailure
+                      ? { result: 'timeout' as const }
+                      : {}),
+                }
+              : {}),
+          })
+
+          if (seatResult.status !== 'OK') {
+            recordCouncilProgressSyntheticAudit(councilProgress, [councilSingleFamily], [seatResult])
+            councilProgress.closeIfTerminal()
+            const isTimeout = seatResult.status === 'TIMED_OUT' || grokContinueTimeoutFailure
+            const detail = grokContinueTimeoutFailure
+              ? GROK_FAMILY_DIRECT_INVOCATION_TIMEOUT_MESSAGE
+              : (seatResult.error ?? 'Provider call failed.')
+            if (isTimeout) {
+              markLiveResearchProviderFailed('timed_out')
+              return degradedProviderResponse(councilSingleFamily, 'timed_out', detail)
+            }
+            // A configuration-type failure (missing/invalid cloud key) only becomes a hard error
+            // when it's a genuine AUTH/BILLING failure — under LOCAL_FIRST/LOCAL_ONLY/HYBRID,
+            // invokeCouncilSeat already tried the local Ollama backend first, so reaching an
+            // AUTH/BILLING failureLayer here means local also genuinely failed, not that local
+            // routing was skipped.
+            const isConfigurationFailure = seatResult.failureLayer === 'AUTH' || seatResult.failureLayer === 'BILLING'
+            if (isConfigurationFailure && !isAttendanceFlow) {
+              return NextResponse.json(
+                withTrace({ error: 'council_configuration_error', message: detail, ...liveResearchJson() }),
+                { status: 503 },
               )
-            } finally {
-              dispose()
             }
-            break
+            markLiveResearchProviderFailed('failed')
+            return degradedProviderResponse(councilSingleFamily, 'failed', detail)
           }
-          case 'claude': {
-            responseText = await callClaudeWithEmptyContentRetry(
-              userPrompt,
-              stableGroupSystemForFamily ?? claudeSystem,
-              tokensForCall,
-              'claude',
-            )
-            break
-          }
-          case 'grok': {
-            if (grokContinueEligible) grokContinueInvokeStartedAt = Date.now()
-            responseText = await callGrok(
-              userPrompt,
-              stableGroupSystemForFamily ?? grokSystem,
-              tokensForCall,
-              grokContinueTimeoutMs,
-            )
-            if (grokContinueEligible && grokContinueInvokeStartedAt !== undefined) {
-              grokContinueAuditTiming = {
-                elapsedMs: Date.now() - grokContinueInvokeStartedAt,
-                timeoutMs: grokContinueTimeoutMs,
-              }
-            }
-            break
-          }
-          case 'gemini': {
-            const geminiResult = await completeGeminiCouncilMessage({
-              userPrompt,
-              systemPrompt: stableGroupSystemForFamily ?? geminiSystem,
-              maxOutputTokens: tokensForCall,
-              timeoutMs: providerBudgetMs,
-            })
-            if (!geminiResult.ok) {
-              if (geminiResult.degraded) {
-                responseText = geminiResult.note
-                geminiDegradedReason = geminiResult.reason
-                break
-              }
-              await safeAudit({
-                success: false,
-                flow: 'continue_single',
-                councilSingleFamily: 'gemini',
-                reason: 'gemini_provider_error',
-              })
-              markLiveResearchProviderFailed('failed')
-              return degradedProviderResponse('gemini', 'failed', geminiResult.error)
-            }
-            responseText = geminiResult.text.trim()
-            providerFinishReason = geminiResult.finishReason
-            if (!responseText) {
-              await safeAudit({
-                success: false,
-                flow: 'continue_single',
-                councilSingleFamily: 'gemini',
-                reason: 'gemini_empty',
-              })
-              markLiveResearchProviderFailed('failed')
-              return degradedProviderResponse('gemini', 'failed', 'Gemini returned empty content')
-            }
-            break
-          }
+          responseText = seatResult.content
+        } else switch (councilSingleFamily) {
           case 'kimi': {
             const kimiResult = await completeKimiChat({
               system: stableGroupSystemForFamily ?? kimiSystem,
@@ -3328,29 +3198,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
             }
             break
           }
-          case 'red_team': {
-            const redSystem = stableGroupSystemForFamily
-              ?? (isLightweightGreeting
-                ? greetingSystemPrompt('Red Team', 'adversarial review', 'red_team')
-                : appendOpportunityMandateToSystem(
-                  `You are Red Team in Ra'el's War Room — the protective one, watching for where a plan could fail. Personality: protective, direct, like family saying "hold up" before Ra'el walks into something — not a compliance officer. Flag unsupported certainty, invented locality assumptions, mission-overfitting, evidence inflation, weak-signal overstatement, contradictions, stale evidence, blind spots, and overconfidence, but say it the way someone who has his back would say it — never as a legal disclaimer or automated risk report. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${RED_TEAM_CALIBRATION_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
-                  'red_team',
-                ))
-            responseText = await callClaudeWithEmptyContentRetry(userPrompt, redSystem, tokensForCall, 'red_team')
-            break
-          }
-          case 'baby': {
-            const babySystem = isLightweightGreeting
-              ? greetingSystemPrompt('Baby AI', 'observational council witness', 'baby')
-              : `You are Baby AI — observational council witness in Ra'el's War Room. Note patterns, tone, and alignment risks. You may end with one short sentence suggesting whether a Chronicle memory save could be useful (recommendation only — never imply it was saved). ${COUNCIL_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`
-            const { signal, dispose } = withBudgetSignal()
-            try {
-              responseText = await callChatGPT(userPrompt, babySystem, maxTokens, signal)
-            } finally {
-              dispose()
-            }
-            break
-          }
+          // red_team/baby are handled above via LOCAL_ROUTED_CONTINUE_FAMILIES/callCouncilProvider
+          // (P0-2 fix) and can never reach this switch — only kimi and unknown families do.
           default:
             await safeAudit({
               success: false,
