@@ -9,7 +9,38 @@
  * TEST_COMMANDER_PASSWORD weren't set, auth.setup.ts writes an empty session and every test here
  * detects the resulting /login redirect and skips (not fails) with a clear message.
  */
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
+
+/**
+ * Polls the streaming-text element until either the AURORA final message appears or the
+ * timeout elapses, collecting every DISTINCT non-empty value observed along the way.
+ *
+ * This exists to fix a false-green streaming assertion: comparing exactly two snapshots taken
+ * ~1.5s apart with `>=` passes for "100 chars, then 100 chars again" (no streaming at all) and
+ * for "0 chars, then the full final response" (pop-in, not streaming) — neither proves real
+ * incremental delivery. Polling for distinct intermediate states and requiring real growth
+ * between them is the actual proof.
+ */
+async function collectStreamingSnapshots(
+  page: Page,
+  textEl: Locator,
+  auroraEl: Locator,
+  options: { timeoutMs: number; pollMs: number },
+): Promise<string[]> {
+  const snapshots: string[] = []
+  let last = ''
+  const deadline = Date.now() + options.timeoutMs
+  while (Date.now() < deadline) {
+    const text = (await textEl.innerText().catch(() => '')).trim()
+    if (text && text !== last) {
+      snapshots.push(text)
+      last = text
+    }
+    if (await auroraEl.isVisible().catch(() => false)) break
+    await page.waitForTimeout(options.pollMs)
+  }
+  return snapshots
+}
 
 const PROMPT = 'Council, give me a short status summary of War Room.'
 const FOLLOW_UP_PROMPT = 'Council, verify this is a fresh Council round and give me one sentence on current runtime health.'
@@ -40,15 +71,25 @@ test.describe('Nebula Council browser acceptance', () => {
     expect(ackMs, 'time to acknowledgment').toBeLessThan(8_000)
     await expect(shell).toContainText(/ASTRA|ORION|LUMEN|AURORA/i)
 
-    // Real incremental streaming, not a post-completion pop-in: the streamed text must grow
-    // across at least two distinct observations before AURORA's final message appears.
-    const firstSnapshot = await shell.innerText()
-    await page.waitForTimeout(1_500)
-    const secondSnapshot = await shell.innerText()
-    expect(secondSnapshot.length, 'round banner text should grow between snapshots (real streaming, not pop-in)')
-      .toBeGreaterThanOrEqual(firstSnapshot.length)
+    // Real incremental streaming proof: poll the streaming-text element until AURORA's final
+    // message appears, collecting every distinct intermediate state observed along the way.
+    const streamingText = page.getByTestId('council-live-round-text')
+    const auroraFinal = page.getByText(/AURORA/i).first()
+    const snapshots = await collectStreamingSnapshots(page, streamingText, auroraFinal, {
+      timeoutMs: 120_000,
+      pollMs: 300,
+    })
 
-    await expect(page.getByText(/AURORA/i).first()).toBeVisible({ timeout: 120_000 })
+    expect(snapshots.length, 'must observe at least 2 distinct non-empty intermediate text states before AURORA final (fails on both "100 chars/100 chars" no-growth and "0 chars/full response" pop-in)')
+      .toBeGreaterThanOrEqual(2)
+    const firstLen = snapshots[0]?.length ?? 0
+    const lastLen = snapshots[snapshots.length - 1]?.length ?? 0
+    expect(lastLen, 'later streaming snapshots must show real growth over the first one, not just a different-but-equal-length state')
+      .toBeGreaterThan(firstLen)
+
+    // Terminal completion must occur AFTER streaming was observed, and AURORA's final message
+    // must appear afterward — not before, and not simultaneously with the first snapshot.
+    await expect(auroraFinal).toBeVisible({ timeout: 120_000 })
     const firstRoundId = await shell.getAttribute('data-round-id')
     expect(firstRoundId, 'round banner should expose a real roundId').toBeTruthy()
 

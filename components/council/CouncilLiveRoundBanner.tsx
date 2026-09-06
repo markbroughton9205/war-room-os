@@ -31,12 +31,12 @@ export function CouncilLiveRoundBanner({
         {agents.length ? ` · ${agents.join(' · ')}` : ''}
       </div>
       {streamingText ? (
-        <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">
+        <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200" data-testid="council-live-round-text">
           {streamingText}
           <span className="ml-0.5 animate-pulse" aria-hidden>▍</span>
         </p>
       ) : (
-        <p className="mt-2 text-sm text-slate-400">ASTRA coordinating…</p>
+        <p className="mt-2 text-sm text-slate-400" data-testid="council-live-round-text">ASTRA coordinating…</p>
       )}
     </div>
   )
