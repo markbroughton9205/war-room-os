@@ -21,6 +21,8 @@
     "validate:council-round-isolation": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-round-isolation-validation.mjs",
     "validate:council-natural-presentation": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-natural-presentation-validation.mjs",
     "validate:council-browser-acceptance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-browser-acceptance-validation.mjs",
+    "validate:council-browser-live": "playwright test",
+    "test:council-browser-live": "playwright test",
     "validate:council-ollama-streaming-live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-ollama-streaming-live-proof.mjs",
     "validate:mission-runtime": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-mission-runtime-validation.mjs",
     "validate:ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ui/matrixStatusBus.validation.ts && node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ui/runtimeEventBridge.validation.ts",
@@ -101,6 +103,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/leaflet": "^1.9.22",
     "@types/node": "^20",
