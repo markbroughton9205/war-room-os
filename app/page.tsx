@@ -443,6 +443,9 @@ export type CouncilMessage = {
   councilStage?: import('@/lib/council/session-orchestration').CouncilMessageStage
   commanderTurnId?: string | null
   deliberationRoundId?: string | null
+  /** Logical decree identity, also stored on restored responses whose full progress snapshot
+   * is not persisted. Never infer this from the newest decree when restoring history. */
+  roundRequestId?: string | null
   shadowCouncilAssembly?: CouncilShadowSelectionReport
   councilProgress?: CouncilProgressRuntimeSnapshot
   streaming?: boolean
@@ -696,6 +699,9 @@ function mapWarRoomRowToCouncilMessage(
 ): CouncilMessage {
   const ts = row.created_at ? new Date(row.created_at).toLocaleTimeString() : '--:--'
   const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : undefined
+  const roundRequestId = typeof meta?.roundRequestId === 'string' && meta.roundRequestId.trim()
+    ? meta.roundRequestId.trim()
+    : null
   const persistedStage = meta ? stageFromPersistedMetadata(meta) : undefined
   if (row.role === 'user') {
     return {
@@ -707,6 +713,7 @@ function mapWarRoomRowToCouncilMessage(
       icon: '⚔',
       provider: '',
       messageType: 'decree',
+      roundRequestId,
       councilStage: persistedStage && persistedStage !== 'LEGACY' ? persistedStage : 'COMMANDER',
     }
   }
@@ -720,6 +727,7 @@ function mapWarRoomRowToCouncilMessage(
       icon: '⚙',
       provider: '',
       messageType: 'system',
+      roundRequestId,
     }
   }
   const fam = (row.family && row.family.trim()) || 'Council'
@@ -732,6 +740,7 @@ function mapWarRoomRowToCouncilMessage(
     icon: '•',
     provider: '',
     messageType: 'response',
+    roundRequestId,
     councilStage: persistedStage && persistedStage !== 'LEGACY' ? persistedStage : 'LEGACY',
   }
   return applyLiveCouncilRenderGate(base, opts)
@@ -1501,6 +1510,21 @@ function councilOperationProviderStatus(message: CouncilMessage): string | null 
 
 export function councilOperationGroupKey(message: CouncilMessage, messages: readonly CouncilMessage[]): string | null {
   if (message.projectOrchestrationPacket) return `project:${message.projectOrchestrationPacket.id}`
+  const isGroupableType = message.messageType === 'response' || message.messageType === 'system'
+  // Explicit round identity: the decree that started this round stamps `roundRequestId`, and the
+  // server echoes the same `councilLogicalRequestId` back on every response/system message it
+  // produces for that round (`councilProgress.logicalRequestId`). When a response carries this id,
+  // match it ONLY to the decree with the same id — never to "whichever decree is nearest" — so a
+  // late/superseded-round response can never visually attach to a newer decree header (GitHub #42).
+  const explicitRoundId = isGroupableType ? (message.councilProgress?.logicalRequestId ?? message.roundRequestId ?? null) : null
+  if (explicitRoundId) {
+    const owningDecree = messages.find(item => item.messageType === 'decree' && item.roundRequestId === explicitRoundId)
+    // No decree carries this id (e.g. pre-fix legacy data was stamped without one) — fail closed:
+    // keep the message in its own isolated group rather than guessing which decree it belongs to.
+    const turnKey = owningDecree ? `turn:${owningDecree.id}` : `orphan:${message.id}`
+    if (message.familyDeliberationTurn?.session_id) return `deliberation:${message.familyDeliberationTurn.session_id}:${turnKey}`
+    return turnKey
+  }
   const messageIndex = messages.findIndex(item => item.id === message.id)
   const priorMessages = messageIndex >= 0 ? messages.slice(0, messageIndex + 1) : messages
   const nearestDecree = [...priorMessages].reverse().find(item => item.messageType === 'decree')
@@ -1512,7 +1536,7 @@ export function councilOperationGroupKey(message: CouncilMessage, messages: read
   // Combining it with the turn key keeps deliberation exchanges scoped to their own round while
   // still distinguishing them from ordinary single-response turns within that same round.
   if (message.familyDeliberationTurn?.session_id) return `deliberation:${message.familyDeliberationTurn.session_id}:${turnKey}`
-  if (message.messageType !== 'response' && message.messageType !== 'system') return null
+  if (!isGroupableType) return null
   return turnKey
 }
 
@@ -6073,6 +6097,9 @@ function Home() {
   }
 
   const [loading, setLoading] = useState(false)
+  /** Bumps when a new decree round starts so the wait-limit timer resets on supersession
+   * even if `loading` stays true across the handoff. */
+  const [composerRoundToken, setComposerRoundToken] = useState(0)
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
   const [floorStream, setFloorStream] = useState<{ family: string; text: string; status: string } | null>(null)
   const [nebulaRoundShell, setNebulaRoundShell] = useState<{
@@ -7225,7 +7252,9 @@ function Home() {
 
   useEffect(() => {
     if (!loading) return
+    const roundAtStart = decreeRoundGenRef.current
     const timeoutId = window.setTimeout(() => {
+      if (decreeRoundGenRef.current !== roundAtStart) return
       abortControllerRef.current?.abort()
       abortControllerRef.current = null
       setTypingFamily(null)
@@ -7234,7 +7263,7 @@ function Home() {
       setLoading(false)
     }, 75_000)
     return () => window.clearTimeout(timeoutId)
-  }, [loading, councilDispatch])
+  }, [loading, composerRoundToken, councilDispatch])
 
   const mergeCouncilConversationMetadata = async (patch: Record<string, unknown>) => {
     if (!liveCouncilConvId || !persistenceAvailable) return
@@ -7320,6 +7349,7 @@ function Home() {
       transientProviderStatus?: boolean
       allowProviderFailureMessage?: boolean
       directInvocationMetadata?: Record<string, unknown>
+      roundRequestId?: string | null
     },
   ): Promise<string | null> => {
     if (
@@ -7360,6 +7390,7 @@ function Home() {
             metadata: {
               responseSuccessful: opts?.responseSuccessful === true,
               idempotencyKey,
+              ...(opts?.roundRequestId ? { roundRequestId: opts.roundRequestId } : {}),
               ...(opts?.providerRuntime ? { providerRuntime: opts.providerRuntime } : {}),
               ...(opts?.transientProviderStatus ? { transientProviderStatus: true } : {}),
               ...(opts?.directInvocationMetadata ? { directInvocation: opts.directInvocationMetadata } : {}),
@@ -9239,14 +9270,44 @@ function Home() {
     }
   }
 
-  const submitDecree = async (decree: string, mode?: CouncilMode) => {
+  /** Rotates the decree round and aborts the previous round's controller *before* the new decree
+   * becomes visible, so any in-flight previous-round async result is unambiguously stale (fails
+   * `isCurrentDecreeAsync()`/`nebulaRoundShell.roundId` checks) by the time it could resolve —
+   * closing the race that let a late response attach to a newer decree header (GitHub #42): without
+   * this, `submitDecree` only rotated the round *after* several `await`s in `sendRaelDecree` had
+   * already run with the new decree visible, leaving a window where a still-in-flight previous round
+   * could still pass every staleness check. Call this — and stamp its `roundRequestId` onto the
+   * visible decree via `appendVisibleRaelDecree` — before any such `await`. */
+  const beginDecreeRound = () => {
+    const myRound = ++decreeRoundGenRef.current
+    setComposerRoundToken(myRound)
+    const previousDecreeController = abortControllerRef.current
+    if (previousDecreeController && !previousDecreeController.signal.aborted) {
+      previousDecreeController.abort()
+    }
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+    const roundRequestId = createMessageId('council-logical-request')
+    return { myRound, controller, roundRequestId }
+  }
+
+  const submitDecree = async (
+    decree: string,
+    mode?: CouncilMode,
+    preEstablishedRound?: { myRound: number; controller: AbortController; roundRequestId: string },
+  ) => {
+    if (preEstablishedRound && (
+      preEstablishedRound.controller.signal.aborted
+      || preEstablishedRound.myRound !== decreeRoundGenRef.current
+    )) return
     const terraContext = terraCouncilContextRef.current
     if (mode !== 'continue' && terraContext) {
       decree = `${decree}\n\n[CURRENT TERRA CONTEXT — live globe selection; preserve provenance and do not infer missing facts]\n${terraContext}`
     }
     let decreeCompletedOk = false
     let decreeMatrixFailed = false
-    const myRound = ++decreeRoundGenRef.current
+    const myRound = preEstablishedRound?.myRound ?? ++decreeRoundGenRef.current
+    if (!preEstablishedRound) setComposerRoundToken(myRound)
     latestDecreeAttemptRoundRef.current = myRound
     orchRedTeamEarlyLatchRef.current = false
     lastAutonomousResearchFamilyRef.current = null
@@ -9260,13 +9321,20 @@ function Home() {
     // A new Commander decree supersedes whatever the previous decree's controller was still doing
     // — abort it so its in-flight HTTP/stream calls unwind instead of resolving later and racing
     // this decree's own state commits (see isCurrentDecreeAsync()/decreeRoundGenRef below, which
-    // reject any such late result even if the abort itself doesn't land in time).
-    const previousDecreeController = abortControllerRef.current
-    if (previousDecreeController && !previousDecreeController.signal.aborted) {
-      previousDecreeController.abort()
+    // reject any such late result even if the abort itself doesn't land in time). When
+    // `preEstablishedRound` is set, `beginDecreeRound` already did this before the decree became
+    // visible — reuse its controller rather than rotating a second time.
+    let controller: AbortController
+    if (preEstablishedRound) {
+      controller = preEstablishedRound.controller
+    } else {
+      const previousDecreeController = abortControllerRef.current
+      if (previousDecreeController && !previousDecreeController.signal.aborted) {
+        previousDecreeController.abort()
+      }
+      controller = new AbortController()
+      abortControllerRef.current = controller
     }
-    const controller = new AbortController()
-    abortControllerRef.current = controller
     const expectedCouncilSessionId = councilSnapRef.current.sessionId
     const expectedConversationId = liveCouncilConvIdRef.current
     const isCurrentDecreeAsync = () =>
@@ -9784,7 +9852,7 @@ function Home() {
       const orderForGather = applyHealthyRoster(
         diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder,
       )
-      const councilLogicalRequestId = createMessageId('council-logical-request')
+      const councilLogicalRequestId = preEstablishedRound?.roundRequestId ?? createMessageId('council-logical-request')
       decreeSubmitFaultAnchor = orderForGather[0] ?? directedOrder[0]
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
         allowBusinessTopicsFromIntent: councilIntentState.intent === 'business_ops',
@@ -9868,6 +9936,7 @@ function Home() {
           applyAttendanceLateGatherSkip: attendanceWave,
           transientProviderStatus: opts?.transientProviderStatus,
           providerRuntime: opts?.providerRuntime,
+          roundRequestId: councilLogicalRequestId,
         })
 
       let providerRuntimeStates: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
@@ -10045,7 +10114,11 @@ function Home() {
                   councilLogicalExpectedFamilies: orderForGather,
                   councilLogicalTurnIndex: orderForGather.indexOf(family),
                   councilLogicalTurnTotal: orderForGather.length,
-                  activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
+                  // `decree` (this round's own text) — never `conversationRuntimeSnapshot?.activeTopic`,
+                  // which is rebuilt asynchronously in a useEffect and is therefore always at least one
+                  // round stale by the time this request is built, letting a prior round's subject
+                  // outrank/leak into a fresh decree's prompt server-side (see execute.ts activeTopic).
+                  activeTopic: decree,
                   ...(councilFlowModeEffective === 'stable_group'
                     ? { stableGroupPriorReplies: [] }
                     : {}),
@@ -10246,7 +10319,9 @@ function Home() {
             councilLogicalExpectedFamilies: nebulaSeats,
             councilLogicalTurnIndex: 0,
             councilLogicalTurnTotal: nebulaSeats.length,
-            activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
+            // See the sibling call above: use `decree` (this round's own text), never the async,
+            // one-round-stale `conversationRuntimeSnapshot?.activeTopic`.
+            activeTopic: decree,
             councilDeliberationMode: 'family_to_family_v1',
             ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
           }, {
@@ -10356,7 +10431,7 @@ function Home() {
                   content: displayContent,
                   family: bubbleFamilyName,
                 },
-                { responseSuccessful: true, providerRuntime: runtimeByFamily[family] },
+                { responseSuccessful: true, providerRuntime: runtimeByFamily[family], roundRequestId: councilLogicalRequestId },
               )
             }
           }
@@ -10408,7 +10483,7 @@ function Home() {
               })
               void postLiveCouncilMessage(
                 { role: 'system', content: notice.content, family: 'SYSTEM' },
-                { allowProviderFailureMessage: true },
+                { allowProviderFailureMessage: true, roundRequestId: councilLogicalRequestId },
               )
             }
           }
@@ -10614,7 +10689,9 @@ function Home() {
               councilLogicalExpectedFamilies: orderForGather,
               councilLogicalTurnIndex: orderForGather.indexOf('chatgpt'),
               councilLogicalTurnTotal: orderForGather.length,
-              activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
+              // See the sibling calls above: use `decree` (this round's own text), never the async,
+              // one-round-stale `conversationRuntimeSnapshot?.activeTopic`.
+              activeTopic: decree,
               stableGroupPriorReplies: stableGroupPriorThisTurn,
               stableGroupFinalSynthesis: true,
               councilProviderRuntimeStates: providerRuntimeStates,
@@ -10857,6 +10934,7 @@ function Home() {
             {
               responseSuccessful: responseSuccessfulForRuntime(runtimeStates[line.family]),
               providerRuntime: runtimeStates[line.family],
+              roundRequestId: councilLogicalRequestId,
             },
           )
           const focusSnippet = compactDisplayWhitespace(line.content, 120)
@@ -11178,6 +11256,7 @@ function Home() {
     await sendLiveCouncilThroneMessage({
       rawInput: command,
       isBusy: () => loading,
+      allowSupersedeWhileBusy: true,
       clearDraft: () => setCommand(''),
       detectExpansion: d => {
         const expansionNeed = detectExpansionNeed(d)
@@ -11280,7 +11359,7 @@ function Home() {
     }
   }
 
-  const appendVisibleRaelDecree = (decree: string) => {
+  const appendVisibleRaelDecree = (decree: string, roundRequestId?: string | null) => {
     addMessages([{
       id: createMessageId('rael'),
       familyName: "RA'EL",
@@ -11289,12 +11368,13 @@ function Home() {
       color: '#FFD700',
       icon: '⚔',
       provider: '',
-      messageType: 'decree'
+      messageType: 'decree',
+      roundRequestId: roundRequestId ?? null,
     }])
 
     void postLiveCouncilMessage(
       { role: 'user', content: decree, family: "RA'EL" },
-      { responseSuccessful: true },
+      { responseSuccessful: true, roundRequestId },
     )
   }
 
@@ -11436,7 +11516,12 @@ function Home() {
      * `isRaelCouncilMessage` treats `messageType === 'decree'` or familyName containing RA'EL.
      * If external channels are ambiguous, prefer user text containing "Ra'el" — not wired here.
      */
-    appendVisibleRaelDecree(decree)
+    // Establish and abort/rotate the round BEFORE the decree becomes visible (see `beginDecreeRound`)
+    // — several `await`s below (continuation authority, recall, OS-sweep, submitDecree itself) yield
+    // to the event loop, and a previous round still in flight at that point must already be unable to
+    // pass its staleness checks by the time it resolves.
+    const decreeRound = beginDecreeRound()
+    appendVisibleRaelDecree(decree, decreeRound.roundRequestId)
     const activeSession = councilSessionList.find(s => s.id === liveCouncilConvId)
     if (liveCouncilConvId && shouldAutoTitle(activeSession?.title, Boolean((activeSession?.metadata as { council?: { titleLocked?: boolean } } | undefined)?.council?.titleLocked))) {
       const nextTitle = generateNeutralSessionTitle(decree)
@@ -11633,7 +11718,7 @@ function Home() {
       void runOpportunityScout()
     }
 
-    await submitDecree(decree, mode)
+    await submitDecree(decree, mode, decreeRound)
   }
 
   const handleProjectAction = (

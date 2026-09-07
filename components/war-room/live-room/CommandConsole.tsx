@@ -71,7 +71,9 @@ export const CommandConsole = memo(function CommandConsole({
         className="flex flex-col gap-1.5"
         onSubmit={event => {
           event.preventDefault()
-          if (!loading && command.trim()) {
+          // Loading/thinking is a status indicator only. A new decree must still submit so the
+          // Commander can supersede an in-flight Council round from this same composer.
+          if (command.trim()) {
             matrixChannelStatus('violet', 'Decree sent to Council…')
           }
           void onSubmit(event)
@@ -107,13 +109,13 @@ export const CommandConsole = memo(function CommandConsole({
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                if (!loading && command.trim()) void onSubmit()
+                if (command.trim()) void onSubmit()
               }
             }}
             placeholder="What's your command, Divine?"
-            disabled={loading}
             className="min-w-0 flex-1 self-stretch bg-transparent text-sm tracking-wide text-emerald-100 outline-none placeholder:text-emerald-700/40"
             aria-label="Council command"
+            aria-busy={loading}
             data-testid="council-command-input"
           />
         </div>
@@ -189,7 +191,7 @@ export const CommandConsole = memo(function CommandConsole({
 
         <button
           type="submit"
-          disabled={loading || !command.trim()}
+          disabled={!command.trim()}
           data-testid="council-execute"
           className="shrink-0 rounded border border-emerald-400/60 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-black disabled:opacity-40 sm:px-5 sm:py-2"
           style={{ background: loading ? '#166534' : '#34d399', boxShadow: loading ? undefined : '0 0 16px rgba(52,211,153,0.35)' }}

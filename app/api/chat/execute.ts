@@ -235,7 +235,7 @@ const COUNCIL_THREAD_MESSAGES = 16
 
 const COUNCIL_INSTRUCTION = `You are in a live War Room council group chat. CRITICAL RULE: Never generate dialogue or words for Ra'el. Never simulate his responses. Only Ra'el speaks for Ra'el. Answer the decree directly; do not automatically connect every answer to Commander mission, business goals, philosophy, or strategic objectives unless explicitly asked. Separate evidence from inference. Do not imply live/current awareness unless the prompt includes an intelligence packet or live-source evidence with freshness metadata. Default to concise, high-signal responses unless expanded analysis has been approved. Respond once for your family, then stop. Do not recursively continue, self-trigger follow-up chatter, or keep talking after completion. You may request permission to continue only for an unresolved contradiction, runtime/emergency condition, or a follow-up that would materially change the conclusion. Do not request continuation for greetings, casual chatter, repeated confirmations, filler, or low-value elaboration. Use emoji mood indicators when they fit. Do not use theatrical stage directions. Read his tone and match it. Be a real distinct presence with your own personality. Keep it natural and alive. Talk like family in a real conversation, not a formal report — no labeled sections, no headers, no corporate hedging. Don't default to opening with a greeting or agreement every time, and don't just restate what the others already said — bring your own angle. If another family already made a point worth building on, reference it naturally instead of repeating it.`
 
-const UNCERTAINTY_DAMPENING_INSTRUCTION = 'Runtime truth: missing telemetry means UNKNOWN/UNAVAILABLE or degraded confidence, not danger by default. Separate "risk exists" from "risk observed"; never claim source-backed, connected, executed, approved, or harmful activity without evidence in the prompt or canonical runtime snapshot.'
+const UNCERTAINTY_DAMPENING_INSTRUCTION = 'Runtime truth: missing telemetry means UNKNOWN/UNAVAILABLE or degraded confidence, not danger by default. Separate "risk exists" from "risk observed"; never claim source-backed, connected, executed, approved, or harmful activity without evidence in the prompt or canonical runtime snapshot. Qualitative system-state claims (stable, reliable, strong foundations, weak redundancy, performing well) are hypothesis/inference unless same-round telemetry, code, or runtime evidence supports them — never convert a generic model inference into a verified War Room fact.'
 const RED_TEAM_CALIBRATION_INSTRUCTION = 'Red Team calibration: distinguish confirmed failure, missing evidence, potential risk, no evidence of active harm, and advisory warning. Ban unsupported phrases unless direct evidence exists: compromised telemetry, runaway automation, silent bleeding, financial danger, no kill switch. Prefer telemetry gap, insufficient evidence, advisory risk, verification needed, degraded confidence.'
 
 const TONE_INSTRUCTIONS: Record<string, string> = {
@@ -593,7 +593,7 @@ function buildCouncilUserPrompt(args: {
       : '',
     '',
     `Continue the council with one response for your family only.${augmentBlock}`,
-    `Do not speak for Ra'el. Add new substance; avoid repeating the previous speaker verbatim. Stop after this response unless Ra'el explicitly grants another turn.`,
+    `Do not speak for Ra'el. Add new substance from your own role; do not repeat, paraphrase, or politely rewrite the previous speaker. LUMEN verifies or rejects claims; AURORA synthesizes survivors only. Stop after this response unless Ra'el explicitly grants another turn.`,
   ].join('\n')
 }
 
@@ -610,9 +610,13 @@ function coerceProviderRuntimeStates(
 
 export type ExecuteCouncilChatRequestOptions = {
   progressEventObserver?: CouncilProgressEventObserver | null
+  /** Includes response-stream cancellation, which need not abort the incoming Request. */
+  signal?: AbortSignal
 }
 
 export async function executeCouncilChatRequest(req: Request, options: ExecuteCouncilChatRequestOptions = {}) {
+  const signal = options.signal ? AbortSignal.any([req.signal, options.signal]) : req.signal
+  signal.throwIfAborted()
   const DIRECT_KEYS = {
     'claude': 'Claude',
     'chatgpt': 'ChatGPT',
@@ -630,6 +634,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   }
 
   const councilFlowMode: CouncilFlowMode = resolveCouncilFlowMode(body.councilFlowMode, body.councilMode)
+  signal.throwIfAborted()
   const stableGroupTurn = isStableGroupChatMode(councilFlowMode)
   const councilStabilityMode = isCouncilStabilityMode()
   const minimalCouncilPath = isMinimalCouncilSystemsPath(councilFlowMode)
@@ -682,6 +687,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   // function's ~20 individual return points. warRoomContextSnapshotId/contextAssemblyDurationMs
   // are assigned once, below, before any provider dispatch happens.
   const withTrace = <T extends Record<string, unknown>>(payload: T) => {
+    signal.throwIfAborted()
     try {
       chatTrajectorySession?.flushFromResponse(payload as Record<string, unknown>)
     } catch (err) {
@@ -863,6 +869,10 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     councilProgress = createCouncilProgressRuntimeTracker({
       eventObserver: options.progressEventObserver,
       requestIdSeed: councilTrace.councilTraceId,
+      logicalRequestId: councilLogicalRequestId,
+      logicalTurnIndex: councilLogicalTurnIndex,
+      logicalTurnTotal: councilLogicalTurnTotal,
+      logicalExpectedFamilies: councilLogicalExpectedFamilies,
       commanderTurnRef: conversationId ?? 'api-chat-family-deliberation',
       flowMode: 'stable_group',
       executionStrategy: 'server_sequential_streaming_future',
@@ -1162,11 +1172,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
 
   const gptSystem = nebulaSystemFor(
     'chatgpt',
-    `Operational notes: integrate independent findings; expose dissent; preserve uncertainty; do not invent evidence or treat your own synthesis as evidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    `Operational notes: integrate independent findings after distinct seat work; expose dissent; preserve uncertainty; synthesize only what survived verification; do not rewrite ORION or LUMEN or treat your own synthesis as evidence. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
   )
   const claudeSystem = nebulaSystemFor(
     'claude',
-    `Operational notes: inspect before change; define interfaces and data models; do not own business strategy or invent unsupported product assumptions. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    `Operational notes: inspect before change; define interfaces and data models; engineering/runtime architecture only — do not write a generic reliability essay or claim unverified War Room state as fact. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
   )
   const grokSystem = nebulaSystemFor(
     'grok',
@@ -1174,7 +1184,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   )
   const geminiSystem = nebulaSystemFor(
     'gemini',
-    `Operational notes: break conclusions into atomic claims; classify support; calibrate confidence to evidence; do not treat agreement as proof or perform broad discovery as your primary job. Do not claim tools you were not given. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
+    `Operational notes: break conclusions into atomic claims; classify support; calibrate confidence to evidence; do not treat agreement as proof, echo ORION, or perform broad discovery as your primary job. Reject unsupported operational claims. Do not claim tools you were not given. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
   )
   const kimiSystem = nebulaSystemFor(
     'kimi',
@@ -1317,6 +1327,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   })
 
   const safeAudit = async (meta: Record<string, unknown>) => {
+    if (signal.aborted) return
     try {
       await insertWarRoomAuditLog(sup.ok ? sup.client : null, {
         actor: 'system',
@@ -1667,6 +1678,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       maxTokensOverride?: number
     },
   ): Promise<ProviderResult> => {
+    signal.throwIfAborted()
     const familyName = displayFamilyName(family)
     if (family === 'bridge_architect') {
       return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE', failureLayer: 'REQUEST' }
@@ -1713,6 +1725,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     const streamGuard = createStreamingTruthGuard(raelDirectiveText, requestEvidenceLedger)
 
     const emitValidatedDelta = (delta: string) => {
+      if (signal.aborted) return
       opts?.onDelta?.(delta)
       if (!delta || !councilProgress) return
       councilProgress.record({
@@ -1766,6 +1779,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           maxTokens: callMaxTokens,
           timeoutMs: PROVIDER_TIMEOUT_MS,
         })
+        signal.throwIfAborted()
         if (!kimiResult.ok) {
           const kimiUnavailable = kimiResult.kind === 'key_missing'
           return {
@@ -1790,10 +1804,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         systemPrompt: systemFor(),
         userPrompt,
         maxTokens: callMaxTokens,
-        signal: new AbortController().signal,
+        signal,
         onDelta: emitDelta,
         timeoutKind: isLightweightGreeting ? 'social' : classifiedTurn.shouldResearch ? 'research' : 'council',
       })
+      signal.throwIfAborted()
       if (seatResult.ok) {
         return {
           family: familyName,
@@ -1817,6 +1832,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         backend: seatResult.backend,
       }
     } catch (error) {
+      signal.throwIfAborted()
       return {
         family: familyName,
         content: '',
@@ -1900,6 +1916,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         targetTurn?: DeliberationTurn | null
       },
     ) => {
+      signal.throwIfAborted()
       const startedAt = new Date().toISOString()
       const prompt = buildDeliberationPrompt({
         role,
@@ -1925,9 +1942,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         PROVIDER_TIMEOUT_MS,
       )
       let result = await invokeOnce()
+      signal.throwIfAborted()
       if ((result.status === 'FAILED' || result.status === 'TIMED_OUT') && result.backend?.backendType === 'LOCAL') {
         result = await invokeOnce()
       }
+      signal.throwIfAborted()
       const turn = appendDeliberationTurn(session, {
         family,
         role,
@@ -2139,6 +2158,10 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         councilProgress = createCouncilProgressRuntimeTracker({
           eventObserver: options.progressEventObserver,
           requestIdSeed: councilTrace.councilTraceId,
+          logicalRequestId: councilLogicalRequestId,
+          logicalTurnIndex: councilLogicalTurnIndex,
+          logicalTurnTotal: councilLogicalTurnTotal,
+          logicalExpectedFamilies: councilLogicalExpectedFamilies,
           commanderTurnRef: conversationId ?? 'api-chat-family-deliberation',
           flowMode: 'stable_group',
           executionStrategy: 'server_sequential_streaming_future',
@@ -2963,7 +2986,14 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         }
       }
 
-      const activeTopic = activeTopicFromBody || raelDirectiveText
+      // The current decree (`raelDirectiveText`, always fresh per-request) must always outrank the
+      // client-cached `activeTopicFromBody` — that value is derived from a React state snapshot that
+      // is rebuilt asynchronously *after* a round completes, so it is reliably one-or-more rounds
+      // stale by the time the NEXT decree's request is built. Treating it as authoritative here let a
+      // prior round's subject leak into and dominate a fresh decree's prompt (e.g. a "capital of
+      // Japan" decree answered with stale "War Room reliability" content) — never fall back to it
+      // over the decree that actually produced this request.
+      const activeTopic = raelDirectiveText || activeTopicFromBody
       // Drop prior replies that don't share any grounding with the current decree — otherwise a
       // stale unrelated thread (e.g. an old dev/platform discussion) can leak forward verbatim
       // into a new turn's prompt just because it was one of the last two family replies.
@@ -3014,6 +3044,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
               // `augmentBlock` carries only the live-research grounding at this point in the
               // stable-group branch (orchestration/diagnostic augments are skipped for minimalCouncilPath)
               researchBlock: augmentBlock || undefined,
+              finalSynthesis: finalSynth,
             })
           }
         } else {
@@ -3791,6 +3822,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       })
 
       if (stabilityFlags.memoryInjection && geminiDegradedReason === null) {
+        signal.throwIfAborted()
         await tryPersistMemoryProposalFromModelOutput({
           client: sup.ok ? sup.client : null,
           responseText,
@@ -4020,6 +4052,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       { status: 400 },
     )
   } catch (e) {
+    signal.throwIfAborted()
     await safeAudit({
       success: false,
       flow: 'council',

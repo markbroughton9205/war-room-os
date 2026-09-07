@@ -70,6 +70,10 @@ export function createCouncilStreamPostHandler(executeRequest: CouncilStreamExec
   let operationId: string | null = null
   let finalSent = false
   let finalProgress: CouncilProgressRuntimeSnapshot | null = null
+  const executionController = new AbortController()
+  const abortExecution = () => executionController.abort(req.signal.reason)
+  req.signal.addEventListener('abort', abortExecution, { once: true })
+  if (req.signal.aborted) abortExecution()
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -79,6 +83,7 @@ export function createCouncilStreamPostHandler(executeRequest: CouncilStreamExec
           controller.enqueue(encoder.encode(encodeCouncilStreamEnvelope(envelope)))
         } catch {
           closed = true
+          executionController.abort()
         }
       }
       const emitOpened = (requestId: string): void => {
@@ -134,7 +139,9 @@ export function createCouncilStreamPostHandler(executeRequest: CouncilStreamExec
 
       void (async () => {
         try {
+          executionController.signal.throwIfAborted()
           const response = await executeRequest(req, {
+            signal: executionController.signal,
             progressEventObserver: ({ event, snapshot }) => {
               finalProgress = cloneJson(snapshot)
               emitOpened(String(event.requestId))
@@ -150,18 +157,20 @@ export function createCouncilStreamPostHandler(executeRequest: CouncilStreamExec
               })
             },
           })
+          executionController.signal.throwIfAborted()
           let responseBody: unknown = {}
           try {
             responseBody = await response.json()
           } catch {
             responseBody = { error: `HTTP ${response.status}` }
           }
+          executionController.signal.throwIfAborted()
           const data: CouncilChatJson = isCouncilChatJson(responseBody) ? responseBody : { error: 'Invalid Council response.' }
           finalProgress = data.councilProgress ?? finalProgress
           // AGI Wave 1 — fire-and-forget experience capture; never awaited on the critical path
           // and never allowed to affect the SSE envelope below.
           void import('@/lib/agi-experience/captureFromChatResponse')
-            .then(mod => mod.captureExperienceFromChatJson(data as unknown as Record<string, unknown>))
+            .then(mod => executionController.signal.aborted ? undefined : mod.captureExperienceFromChatJson(data as unknown as Record<string, unknown>))
             .catch(() => null)
           const requestId = finalProgress?.requestId ?? operationId ?? transportId
           if (!opened) emitOpened(requestId)
@@ -195,11 +204,14 @@ export function createCouncilStreamPostHandler(executeRequest: CouncilStreamExec
           if (!opened) emitOpened(requestId)
           emitError(requestId, error)
           emitClosed(requestId, 'operation_state_uncertain')
+        } finally {
+          req.signal.removeEventListener('abort', abortExecution)
         }
       })()
     },
     cancel() {
       closed = true
+      executionController.abort()
     },
   })
 
