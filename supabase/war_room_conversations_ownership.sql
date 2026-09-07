@@ -26,11 +26,32 @@
 alter table public.war_room_conversations
   add column if not exists owner_user_id uuid references auth.users (id);
 
--- Backfill: every conversation that predates this column is assumed to belong to the
--- Commander (the only account that existed before invitations shipped). Replace the
--- placeholder below with the real Commander auth.users.id before running.
+-- Backfill: every conversation that predates this column (including archived/soft-deleted ones -
+-- deliberately not excluded, since an archived Commander conversation still belongs to the
+-- Commander) is assumed to belong to the Commander, the only account that existed before
+-- invitations shipped. Replace the placeholder below with the real Commander auth.users.id before
+-- running (verify via `select id from auth.users where email = ...` - do not guess it).
+--
+-- Wave 1 closure hardening: the `references auth.users(id)` foreign key above already turns an
+-- un-replaced placeholder into a loud, transaction-aborting error rather than silent data
+-- corruption - but a bare foreign-key-violation stack trace does not clearly explain WHY to
+-- whoever runs this. This explicit precondition check exists only to give that same safe failure
+-- a clear, actionable message instead, before the UPDATE (and its FK check) ever run:
+do $$
+declare
+  placeholder_id uuid := '00000000-0000-0000-0000-000000000000'::uuid;
+begin
+  if exists (select 1 from auth.users where id = placeholder_id) then
+    -- Vanishingly unlikely (a real user would have to collide with the literal all-zeros UUID),
+    -- but if it ever happened this migration would silently backfill to the WRONG account -
+    -- refuse rather than guess.
+    raise exception 'war_room_conversations_ownership: the placeholder UUID % unexpectedly exists in auth.users - this migration cannot safely determine whether that is the real Commander account. Resolve manually before re-running.', placeholder_id;
+  end if;
+  raise exception 'war_room_conversations_ownership: replace the placeholder Commander user id (%) in this file with the real value from `select id from auth.users where email = ...` before running - this exception is the intended default state of this migration and must never be edited away without doing that substitution.', placeholder_id;
+end $$;
+
 update public.war_room_conversations
-set owner_user_id = '00000000-0000-0000-0000-000000000000'::uuid  -- REPLACE with real Commander user id
+set owner_user_id = '00000000-0000-0000-0000-000000000000'::uuid  -- REPLACE with real Commander user id (and delete the `do $$ ... $$` guard block above once you have)
 where owner_user_id is null;
 
 -- Once every row is backfilled (verify with the SELECT below before uncommenting), make the
