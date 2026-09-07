@@ -152,6 +152,8 @@ import { createCouncilRound, terminalStatusFromHealth, transitionCouncilRound, t
 import { blackboardSummariesForPrompt, createRoundBlackboard, upsertCompletedFinding, type RoundBlackboard } from '@/lib/council/nebula/blackboard'
 import { presentAgentMessage } from '@/lib/council/nebula/presentation'
 import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
+import { addLocalBackendCompletionEvidence, createEvidenceLedger } from '@/lib/council/runtimeTruth/evidenceLedger'
+import { enforceOperationalTruth } from '@/lib/council/runtimeTruth/operationalClaimGuard'
 import { appendProviderIdentityToCouncilSystem } from '@/lib/council/providerIdentity'
 import {
   buildProviderTokenDiagnostics,
@@ -402,6 +404,19 @@ function validateProviderResults(
   const brevityRequested = opts?.decreeText ? detectsExplicitBrevityRequest(opts.decreeText) : false
   const violations: string[] = []
   const sanitized: ProviderResult[] = []
+  // Runtime-truth enforcement: a per-request, per-request-only ledger (never persisted, never
+  // read by a later request) built from THIS round's own real backend results. This is the
+  // narrowest shared boundary every seat result -- stable-group turn, Nebula seat, and AURORA's
+  // own synthesis -- passes through before it can be rendered or persisted, so hooking the
+  // operational-claim guard in here covers all of them from one place.
+  const evidenceLedger = createEvidenceLedger('validate-provider-results')
+  for (const result of results) {
+    addLocalBackendCompletionEvidence(evidenceLedger, {
+      backendType: result.backend?.backendType,
+      status: result.backend?.status === 'OK' ? 'succeeded' : null,
+      source: `invokeCouncilSeat backend result (${result.family})`,
+    })
+  }
   for (const result of results) {
     const content = result.content.trim()
     if (content.length < 5) {
@@ -438,6 +453,13 @@ function validateProviderResults(
           ),
           messageType: 'integrity_incomplete',
         })
+        continue
+      }
+    }
+    if (result.status === 'OK' && content.length >= 5) {
+      const truth = enforceOperationalTruth(content, evidenceLedger, opts?.decreeText ?? '')
+      if (truth.corrected) {
+        sanitized.push({ ...result, content: truth.text })
         continue
       }
     }
@@ -1863,6 +1885,23 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         startedAt,
         completedAt: new Date().toISOString(),
       })
+      // Runtime-truth enforcement for the family-deliberation path (family_to_family_v1 /
+      // stable-group synthesis): this turn's full_response never went through
+      // validateProviderResults() -- it is built directly by appendDeliberationTurn() and is what
+      // the client actually renders/persists as this seat's (or AURORA's, for council_synthesis)
+      // FINAL text. A fresh, turn-scoped ledger (this turn's own real backend outcome only, never
+      // a prior round's) mirrors the same check validateProviderResults() does for the
+      // non-deliberation path.
+      if (turn.full_response) {
+        const turnLedger = createEvidenceLedger(turn.turn_id)
+        addLocalBackendCompletionEvidence(turnLedger, {
+          backendType: turn.backend_type,
+          status: turn.completion_status === 'complete' ? 'succeeded' : null,
+          source: `deliberation turn backend result (${turn.provider_family}/${turn.turn_role})`,
+        })
+        const truth = enforceOperationalTruth(turn.full_response, turnLedger, raelDirectiveText)
+        if (truth.corrected) turn.full_response = truth.text
+      }
       progress.recordTurnCompleted(turn, {
         finalFamilyTurn:
           role === 'direct_response'

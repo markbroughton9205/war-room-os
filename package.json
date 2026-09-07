@@ -19,6 +19,7 @@
     "validate:council-live-group-execution": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-live-group-execution-validation.mjs",
     "validate:council-streaming-runtime": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-streaming-runtime-validation.mjs",
     "validate:council-round-isolation": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-round-isolation-validation.mjs",
+    "validate:runtime-truth": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-runtime-truth-validation.mjs",
     "validate:session-barrier": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-session-barrier-validation.mjs",
     "validate:council-natural-presentation": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-natural-presentation-validation.mjs",
     "validate:council-browser-acceptance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-browser-acceptance-validation.mjs",
