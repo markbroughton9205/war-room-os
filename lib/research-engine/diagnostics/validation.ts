@@ -4690,7 +4690,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })))
 
   await add('re_722_sec_edgar_success_normalizes_filing_hit', () => withEnv({ SEC_EDGAR_USER_AGENT_BASE: 'WarRoomResearchEngineValidation/1.0 (validation@example.com)' }, () => withAdapterFetch([
-    jsonResponse({ hits: { total: { value: 1 }, hits: [{ _id: 'x', _source: { cik: '320193', display_names: ['Apple Inc.'], file_type: '10-K', file_date: '2024-01-01', root_form: '10-K', adsh: '0000320193-24-000123' } }] } }),
+    jsonResponse({ hits: { total: { value: 1 }, hits: [{ _id: 'x', _source: { ciks: ['320193'], display_names: ['Apple Inc.'], file_type: '10-K', file_date: '2024-01-01', root_forms: ['10-K'], adsh: '0000320193-24-000123' } }] } }),
   ], async () => {
     const response = await secEdgarAdapter.run({ text: 'apple' })
     if (!response.ok || response.documents.length === 0) return `expected ok success, got ${JSON.stringify(response)}`

@@ -132,6 +132,7 @@ function testIntelligenceResilienceWhenTavilyDown(): CaseResult[] {
       { url: 'https://example.com/page', ok: true, contentSnippet: 'Real fetched content from a direct, non-commercial route.', statusCode: 200 },
     ],
     retrieval: {} as LiveResearchRouterResult['retrieval'],
+    researchEngine: { domain: 'GENERAL_CURRENT', attempted: false, providerIds: [], results: [], documents: [], ok: false },
   }
   const evidence = mapRouterResultToEvidence('mission-1', simulatedFailedTavily)
   const hasDirectEvidence = evidence.some(e => e.sourceType === 'direct_web' && e.retrievalStatus === 'complete')

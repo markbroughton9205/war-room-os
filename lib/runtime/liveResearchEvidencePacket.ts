@@ -10,7 +10,7 @@ import {
   type IntelligencePacket,
 } from '@/lib/intelligence/intelligencePacket'
 
-export type LiveResearchSourceKind = 'tavily' | 'public_rss' | 'weather_alerts' | 'grok_xai' | 'gemini' | 'direct_fetch'
+export type LiveResearchSourceKind = 'tavily' | 'public_rss' | 'weather_alerts' | 'grok_xai' | 'gemini' | 'direct_fetch' | 'research_engine_bridge'
 
 export type LiveResearchSourceRecord = {
   kind: LiveResearchSourceKind

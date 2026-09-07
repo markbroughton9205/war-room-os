@@ -580,6 +580,7 @@ const FAKE_ROUTER_RESULT: LiveResearchRouterResult = {
   grok: { ok: false, text: '', error: 'not used' },
   direct: [{ url: 'https://example.com/x', ok: true, contentSnippet: 'x', statusCode: 200 }],
   retrieval: {} as LiveResearchRouterResult['retrieval'],
+  researchEngine: { domain: 'GENERAL_CURRENT', attempted: false, providerIds: [], results: [], documents: [], ok: false },
 }
 
 /** A stub matching runLiveResearchRouter's signature that never touches the network — used to

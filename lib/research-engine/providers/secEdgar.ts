@@ -12,7 +12,7 @@ const PROVIDER = 'sec_edgar' as const
 const SEARCH_URL = 'https://efts.sec.gov/LATEST/search-index'
 const MAX_RESULTS = 20
 
-type EdgarHit = { _id?: string; _source?: { cik?: string; display_names?: string[]; file_type?: string; file_date?: string; root_form?: string; adsh?: string } }
+type EdgarHit = { _id?: string; _source?: { ciks?: string[]; display_names?: string[]; file_type?: string; file_date?: string; root_forms?: string[]; adsh?: string } }
 type EdgarSearchResponse = { hits?: { total?: { value?: number }; hits?: EdgarHit[] } }
 
 function userAgent(): string {
@@ -41,18 +41,19 @@ async function search(query: ResearchQuery) {
 
   const documents = data.hits!.hits!
     .slice(0, limit)
-    .filter(hit => hit._source?.adsh && hit._source?.cik)
+    .filter(hit => hit._source?.adsh && Array.isArray(hit._source?.ciks) && hit._source.ciks.length > 0)
     .map(hit => {
       const source = hit._source!
       const accession = source.adsh as string
       const accessionNoDashes = accession.replace(/-/g, '')
-      const cik = String(source.cik).replace(/^0+/, '') || '0'
-      const canonicalUrl = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik}&type=${encodeURIComponent(source.root_form ?? '')}`
+      const cik = String(source.ciks![0]).replace(/^0+/, '') || '0'
+      const rootForm = source.root_forms?.[0]
+      const canonicalUrl = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik}&type=${encodeURIComponent(rootForm ?? '')}`
       return makeDocument({
         id: `sec_edgar:${accession}`,
         provider: PROVIDER,
         providerRecordId: accession,
-        title: `${source.display_names?.[0] ?? `CIK ${cik}`} — ${source.root_form ?? 'filing'} (${accession})`,
+        title: `${source.display_names?.[0] ?? `CIK ${cik}`} — ${rootForm ?? 'filing'} (${accession})`,
         summary: null,
         contentSnippet: null,
         canonicalUrl,
@@ -65,7 +66,7 @@ async function search(query: ResearchQuery) {
         updatedAt: null,
         geography: 'US',
         language: 'en',
-        identifiers: { sec_accession_number: accession, sec_cik: cik, ...(source.root_form ? { sec_form_type: source.root_form } : {}) },
+        identifiers: { sec_accession_number: accession, sec_cik: cik, ...(rootForm ? { sec_form_type: rootForm } : {}) },
         subjects: [],
         license: null,
         accessStatus: 'open',
