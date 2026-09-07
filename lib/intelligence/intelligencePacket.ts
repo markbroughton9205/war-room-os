@@ -25,6 +25,29 @@ export type EvidenceConfidenceTier =
 
 export type EvidenceFreshness = 'live' | 'recent' | 'aging' | 'stale' | 'unknown'
 
+/**
+ * WHERE this evidence entered War Room from — distinct from `source_type` (which describes the
+ * *transport/genre* of a source: search/crawl/rss/weather/government_public_data/logistics/...).
+ * A `source_type: 'rss'` item is always `origin_type: 'LIVE_WEB'` today, but `origin_type` is what
+ * lets a future item with the *same* `source_type` be correctly told apart depending on where it
+ * actually came from (a stored/replayed RSS item vs. one fetched live this round, say) — the two
+ * taxonomies are orthogonal and must never be collapsed into one field (Build #4 readiness audit
+ * finding: no provenance-origin tag existed anywhere in the codebase before this).
+ *
+ * KIMI_WAVE and STORED_RESEARCH are declared for the schema's sake but must never be produced by
+ * current code — neither a Kimi Waves subsystem nor a stored-research retrieval path exists yet
+ * (Build #4A explicitly does not implement either); using either value here without a real backing
+ * system would be fabricated provenance.
+ */
+export type EvidenceOriginType =
+  | 'LIVE_WEB'
+  | 'TERRA'
+  | 'RUNTIME_TELEMETRY'
+  | 'MODEL_INFERENCE'
+  | 'COMMANDER_MEMORY'
+  | 'KIMI_WAVE'
+  | 'STORED_RESEARCH'
+
 export type IntelligenceEvidenceItem = {
   id: string
   source_id: string
@@ -45,6 +68,9 @@ export type IntelligenceEvidenceItem = {
   evidence_density: number
   related_evidence_links: string[]
   weak_signal: boolean
+  /** Optional so every existing producer/consumer of this type keeps compiling unchanged; new
+   * producers should always set it. See `EvidenceOriginType` above for the field's purpose. */
+  origin_type?: EvidenceOriginType
 }
 
 export type IntelligenceFinding = {

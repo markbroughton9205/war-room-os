@@ -112,6 +112,9 @@ export function normalizeSourceEvidence(
         evidence_density: evidenceDensity(content || title),
         related_evidence_links: [],
         weak_signal: signal.weakSignal,
+        // This function's only caller is the live research router (Tavily/RSS/weather/Grok) — every
+        // item it produces was fetched live from the open web this round, never replayed from storage.
+        origin_type: 'LIVE_WEB',
       })
     })
   }
