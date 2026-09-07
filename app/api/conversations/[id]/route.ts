@@ -3,7 +3,6 @@ import {
   httpStatusForSupabaseFailure,
   warRoomSupabaseFailurePayload,
 } from '@/lib/war-room/warRoomSupabaseError'
-import { requireConversationCaller } from '@/lib/war-room/conversationAuth'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,9 +14,6 @@ export async function GET(
   _req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const caller = await requireConversationCaller()
-  if (!caller.ok) return caller.response
-
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence(
@@ -31,14 +27,10 @@ export async function GET(
     return jsonWithPersistence({ error: 'id required' }, true, { status: 400 })
   }
 
-  // Not owned by the caller reads as "not found" (404 below), same as a nonexistent id - this
-  // deliberately does not distinguish "exists but isn't yours" from "doesn't exist" to avoid
-  // leaking existence of another account's conversation.
   const { data: conv, error: cErr } = await sup.client
     .from(TABLE_CONVERSATIONS)
     .select('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at')
     .eq('id', id)
-    .eq('owner_user_id', caller.userId)
     .maybeSingle()
 
   if (cErr) {
@@ -86,9 +78,6 @@ export async function PATCH(
   req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const caller = await requireConversationCaller()
-  if (!caller.ok) return caller.response
-
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ error: 'Supabase is not configured.' }, false, { status: 503 })
@@ -117,7 +106,6 @@ export async function PATCH(
         .from(TABLE_CONVERSATIONS)
         .select('metadata')
         .eq('id', id)
-        .eq('owner_user_id', caller.userId)
         .is('deleted_at', null)
         .maybeSingle()
       if (exErr) {
@@ -156,7 +144,6 @@ export async function PATCH(
     .from(TABLE_CONVERSATIONS)
     .update(updates)
     .eq('id', id)
-    .eq('owner_user_id', caller.userId)
     .is('deleted_at', null)
     .select('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at')
     .maybeSingle()
@@ -180,9 +167,6 @@ export async function DELETE(
   _req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const caller = await requireConversationCaller()
-  if (!caller.ok) return caller.response
-
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ error: 'Supabase is not configured.' }, false, { status: 503 })
@@ -197,7 +181,6 @@ export async function DELETE(
     .from(TABLE_CONVERSATIONS)
     .update({ deleted_at: new Date().toISOString(), state: 'archived' })
     .eq('id', id)
-    .eq('owner_user_id', caller.userId)
     .is('deleted_at', null)
     .select('id,deleted_at')
     .maybeSingle()
