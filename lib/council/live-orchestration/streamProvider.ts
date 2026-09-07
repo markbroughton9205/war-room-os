@@ -25,6 +25,9 @@ export type StreamedCouncilCall = {
   attempt: number
   firstDeltaAt?: number
   abortReason?: string
+  /** Normalized provider completion reason (see NormalizedProviderStreamResult.finishReason) —
+   * propagated as-is, never fabricated for providers/adapters that don't supply one. */
+  finishReason?: string | null
 }
 
 function sleep(ms: number): Promise<void> {
@@ -155,6 +158,7 @@ export async function streamCouncilFamily(input: {
           failureLayer: layer,
           attempt,
           firstDeltaAt: result.firstDeltaAt,
+          finishReason: result.finishReason,
         }
       }
       const retry = shouldRetryProviderAttempt({
@@ -179,6 +183,7 @@ export async function streamCouncilFamily(input: {
         attempt,
         firstDeltaAt: result.firstDeltaAt,
         abortReason,
+        finishReason: result.finishReason,
       }
     } finally {
       timeouts.dispose()

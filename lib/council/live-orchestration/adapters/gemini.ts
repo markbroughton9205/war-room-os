@@ -34,24 +34,29 @@ export async function streamGeminiCouncil(input: {
   }
   let text = ''
   let firstDeltaAt: number | undefined
+  // Gemini reports finishReason (e.g. 'STOP', 'MAX_TOKENS') on the chunk that actually terminates
+  // the candidate, not every chunk — keep the last non-null value seen rather than the first.
+  let finishReason: string | null = null
   try {
     await readSseResponse(res, ({ data }) => {
       if (!data) return
-      const parsed = JSON.parse(data) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
+      const parsed = JSON.parse(data) as { candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[] }
       const chunk = parsed.candidates?.[0]?.content?.parts?.map(part => part.text ?? '').join('') ?? ''
       if (chunk) {
         if (!firstDeltaAt) firstDeltaAt = Date.now() - started
         text += chunk
         input.onDelta(chunk)
       }
+      const chunkFinishReason = parsed.candidates?.[0]?.finishReason
+      if (typeof chunkFinishReason === 'string' && chunkFinishReason) finishReason = chunkFinishReason
     })
   } catch (error) {
     const aborted = error instanceof Error && error.name === 'AbortError'
     if (text.trim()) {
-      return { ok: false, text, partial: true, httpStatus: aborted ? 'timeout' : res.status, error: aborted ? 'stream aborted' : 'gemini_stream_error', firstDeltaAt }
+      return { ok: false, text, partial: true, httpStatus: aborted ? 'timeout' : res.status, error: aborted ? 'stream aborted' : 'gemini_stream_error', firstDeltaAt, finishReason }
     }
-    return { ok: false, text: '', partial: false, httpStatus: aborted ? 'timeout' : 'unavailable', error: aborted ? 'stream aborted' : 'gemini_stream_error', parserError: !aborted }
+    return { ok: false, text: '', partial: false, httpStatus: aborted ? 'timeout' : 'unavailable', error: aborted ? 'stream aborted' : 'gemini_stream_error', parserError: !aborted, finishReason }
   }
-  if (!text.trim()) return { ok: false, text: '', partial: false, httpStatus: res.status, error: 'empty response body', firstDeltaAt }
-  return { ok: true, text, partial: false, httpStatus: res.status, firstDeltaAt, completedAt: Date.now() - started }
+  if (!text.trim()) return { ok: false, text: '', partial: false, httpStatus: res.status, error: 'empty response body', firstDeltaAt, finishReason }
+  return { ok: true, text, partial: false, httpStatus: res.status, firstDeltaAt, completedAt: Date.now() - started, finishReason }
 }

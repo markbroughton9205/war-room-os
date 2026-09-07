@@ -86,6 +86,7 @@ export async function invokeExternalBackend(input: ModelBackendInvokeInput): Pro
     status: streamed.status,
     failureClass: streamed.failureLayer,
     fallbackReason: streamed.error,
+    finishReason: streamed.finishReason,
   }
   return { ok: streamed.ok, text: streamed.text, partial: streamed.partial, backend }
 }

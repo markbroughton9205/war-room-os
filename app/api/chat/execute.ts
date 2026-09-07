@@ -3157,6 +3157,13 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
             return degradedProviderResponse(councilSingleFamily, 'failed', detail)
           }
           responseText = seatResult.content
+          // Gemini Continue-mode truncation-detection repair: seatResult.backend now carries a
+          // real, normalized finishReason when the underlying adapter's API exposes one (see
+          // lib/council/live-orchestration/adapters/gemini.ts + streamContract.ts/types.ts) -
+          // propagated through the common invokeCouncilSeat routing rather than reintroducing a
+          // raw provider bypass. Only ever set from a real value; other providers leave it
+          // undefined, same as before this repair.
+          providerFinishReason = seatResult.backend?.finishReason ?? undefined
         } else switch (councilSingleFamily) {
           case 'kimi': {
             const kimiResult = await completeKimiChat({
