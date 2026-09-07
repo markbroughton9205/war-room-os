@@ -3,29 +3,46 @@ import type { MemoryFamilyPartition } from '@/lib/memory/types'
 import { isMemoryFamilyPartition } from '@/lib/memory/types'
 import { insertMemoryProposal } from '@/lib/memory/store'
 import { redactProposalContent, tryParseMemoryProposalLine, validateProposal } from '@/lib/memory/proposals'
-import { agentMayWriteMemoryScope } from '@/lib/council/nebula/memory'
-import { nebulaAgentForSeat } from '@/lib/council/nebula/identity'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 
 /**
  * When model output contains `MEMORY_PROPOSAL:{...}`, insert a pending row (never auto-approve).
  *
- * MEMORY-14 enforcement (audit finding: agentMayWriteMemoryScope was exported but never called
- * from this, the actual durable-proposal path): the model's own response text can self-report a
- * `family_partition` in its MEMORY_PROPOSAL JSON, and the live war_room_memory_proposals schema has
- * no separate scope/owner column to check it against - family_partition IS the only "who does this
- * belong to" field that exists. Before this fix, a self-reported partition that happened to be a
- * valid enum member (e.g. "Red Team") was accepted even if a DIFFERENT seat (e.g. ORION/claude)
- * was the one actually emitting the response - the model could claim to speak for another family.
- * `emittingSeat` is the real, caller-known identity of whichever seat generated `responseText`
- * (execute.ts always has this - it's the same seat used to compute `fallbackPartition` in the
- * first place), and is now checked BEFORE insertion: a self-reported partition that disagrees with
- * it is rejected outright, not silently corrected. Separately, agentMayWriteMemoryScope (the
- * pre-existing, never-invoked Nebula scope policy) is now actually called as defense-in-depth: this
- * durable multi-family-visible proposal store is treated as 'mission' scope, which
- * DEFAULT_ALLOWED_SCOPES grants to every Nebula agent today (so no currently-working agent is
- * newly blocked), while 'commander'/'global' remain categorically unwritable exactly as that
- * function already defined - no new scope rule is introduced here.
+ * MEMORY-14 reconciliation (2026-09-06): traced the full architecture per an explicit mission
+ * requirement not to assume the prior fix was complete. Findings, with evidence:
+ *   - lib/council/nebula/memory.ts's NebulaMemoryScope taxonomy (working/private/council/mission/
+ *     commander/global/constellation) and agentMayWriteMemoryScope()/agentMayAccessMemoryScope()
+ *     have NO real persistence layer anywhere in this codebase. createWorkingMemory() - the only
+ *     function that builds a NebulaMemoryRecord - has zero callers outside its own file (grep
+ *     confirmed). lib/council/constellation/planner.ts's `allowedMemoryScopes: ['working',
+ *     'constellation']` is a static config value nothing ever checks against. There is no table,
+ *     no insert call, no read call for Nebula-scoped memory anywhere.
+ *   - war_room_memory_proposals (supabase/war_room_production_init.sql) is a SEPARATE, legacy
+ *     family-attribution system: its `family_partition_check` constraint enumerates exactly the 8
+ *     MemoryFamilyPartition values ('ChatGPT Family', 'Claude Family', ... 'Baby AI Observer') -
+ *     there is no scope column, and none of NebulaMemoryScope's 7 values overlap with it at all.
+ *   - Conclusion (mission's branch E): this is NOT the Nebula-scoped-memory persistence layer, and
+ *     no real write path for Nebula-scoped memory exists anywhere to enforce
+ *     agentMayWriteMemoryScope against. The previous fix's `agentMayWriteMemoryScope(nebulaAgentId,
+ *     'mission')` call here was checking a scope with no relationship to anything real in this
+ *     table - a hard-coded, always-'mission', always-permitted (DEFAULT_ALLOWED_SCOPES grants
+ *     'mission' to all 8 agents) decorative check that could never reject anything and protected
+ *     nothing. Removed per the mission's explicit instruction not to invent a fake scope
+ *     assumption. Building a real Nebula-memory persistence/write boundary is new functionality,
+ *     not a repair of an existing gap - out of scope for a closure mission that forbids Wave 2.
+ *
+ * The genuinely real, valid fix from before is preserved and strengthened below: the model's own
+ * response text can self-report a `family_partition` in its MEMORY_PROPOSAL JSON, and
+ * family_partition IS the only "who does this belong to" field this table actually has. A
+ * self-reported partition that happened to be a valid enum member (e.g. "Red Team") was previously
+ * accepted even if a DIFFERENT seat (e.g. ORION/claude) was the one actually emitting the response.
+ * `emittingSeat` is the real, caller-known identity of whichever seat generated `responseText`; a
+ * self-report that disagrees with it is rejected outright, not silently corrected. Strengthened
+ * here with a second, independent check: when `emittingSeat` is supplied, its own
+ * councilSingleFamilyToMemoryPartition(emittingSeat) mapping must agree with the caller-supplied
+ * `fallbackPartition` too - if a caller ever passes a `fallbackPartition` inconsistent with the
+ * `emittingSeat` it also passed (a bug upstream, or identity unavailable/mismatched at this
+ * boundary), this fails closed rather than trusting `fallbackPartition` blindly.
  */
 export async function tryPersistMemoryProposalFromModelOutput(opts: {
   client: WarRoomSupabase | null
@@ -40,6 +57,14 @@ export async function tryPersistMemoryProposalFromModelOutput(opts: {
   if (!opts.client) {
     return { inserted: false, skipReason: 'no_db' }
   }
+
+  // Fail closed if the caller's own two identity signals disagree - this can only happen from a
+  // bug upstream (e.g. fallbackPartition computed from a different seat than emittingSeat), but an
+  // authorization boundary should never silently trust one arbitrarily over the other.
+  if (opts.emittingSeat && councilSingleFamilyToMemoryPartition(opts.emittingSeat) !== opts.fallbackPartition) {
+    return { inserted: false, skipReason: 'emitting_seat_fallback_partition_mismatch' }
+  }
+
   const parsed = tryParseMemoryProposalLine(opts.responseText)
   if (!parsed) {
     return { inserted: false, skipReason: 'no_line' }
@@ -55,11 +80,6 @@ export async function tryPersistMemoryProposalFromModelOutput(opts: {
     return { inserted: false, skipReason: 'unauthorized_scope_self_report' }
   }
   const family_partition = selfReportedPartition ?? opts.fallbackPartition
-
-  const nebulaAgentId = opts.emittingSeat ? nebulaAgentForSeat(opts.emittingSeat)?.id ?? null : null
-  if (nebulaAgentId && !agentMayWriteMemoryScope(nebulaAgentId, 'mission')) {
-    return { inserted: false, skipReason: 'scope_not_authorized' }
-  }
 
   const v = validateProposal({ ...parsed, content: redactedBody, family_partition })
   if (!v.ok) {
