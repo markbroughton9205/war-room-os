@@ -152,8 +152,8 @@ import { createCouncilRound, terminalStatusFromHealth, transitionCouncilRound, t
 import { blackboardSummariesForPrompt, createRoundBlackboard, upsertCompletedFinding, type RoundBlackboard } from '@/lib/council/nebula/blackboard'
 import { presentAgentMessage } from '@/lib/council/nebula/presentation'
 import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
-import { addLocalBackendCompletionEvidence, createEvidenceLedger } from '@/lib/council/runtimeTruth/evidenceLedger'
-import { enforceOperationalTruth } from '@/lib/council/runtimeTruth/operationalClaimGuard'
+import { addEvidence, addLocalBackendCompletionEvidence, createEvidenceLedger, type RoundEvidenceLedger } from '@/lib/council/runtimeTruth/evidenceLedger'
+import { createStreamingTruthGuard, enforceOperationalTruth } from '@/lib/council/runtimeTruth/operationalClaimGuard'
 import { appendProviderIdentityToCouncilSystem } from '@/lib/council/providerIdentity'
 import {
   buildProviderTokenDiagnostics,
@@ -396,6 +396,11 @@ function validateProviderResults(
     decreeText?: string
     suppressSyncWarnings?: boolean
     minimalCouncilPath?: boolean
+    /** Shared per-request runtime-truth ledger (see requestEvidenceLedger in
+     * executeCouncilChatRequest) -- falls back to a fresh, empty one so this function stays
+     * usable on its own, but callers within the same request should always pass the shared
+     * instance so evidence from other seats in this round is visible here too. */
+    evidenceLedger?: RoundEvidenceLedger
   },
 ): ProviderResult[] {
   if (opts?.integrityCheck === false || opts?.minimalCouncilPath) return results
@@ -404,12 +409,11 @@ function validateProviderResults(
   const brevityRequested = opts?.decreeText ? detectsExplicitBrevityRequest(opts.decreeText) : false
   const violations: string[] = []
   const sanitized: ProviderResult[] = []
-  // Runtime-truth enforcement: a per-request, per-request-only ledger (never persisted, never
-  // read by a later request) built from THIS round's own real backend results. This is the
-  // narrowest shared boundary every seat result -- stable-group turn, Nebula seat, and AURORA's
-  // own synthesis -- passes through before it can be rendered or persisted, so hooking the
-  // operational-claim guard in here covers all of them from one place.
-  const evidenceLedger = createEvidenceLedger('validate-provider-results')
+  // Runtime-truth enforcement: this is the narrowest shared boundary every seat result --
+  // stable-group turn, Nebula seat, and AURORA's own synthesis -- passes through before it can be
+  // rendered or persisted, so hooking the operational-claim guard in here covers all of them from
+  // one place.
+  const evidenceLedger = opts?.evidenceLedger ?? createEvidenceLedger('validate-provider-results')
   for (const result of results) {
     addLocalBackendCompletionEvidence(evidenceLedger, {
       backendType: result.backend?.backendType,
@@ -788,6 +792,14 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         : conversationalTurn
           ? 'Continue council dialogue on the active topic without a new decree. Respond once; challenge only if material.'
           : message
+
+  // Runtime-truth enforcement: ONE evidence ledger for this whole request/round, shared by every
+  // seat's streaming buffer, the final-turn validation, and validateProviderResults() -- so
+  // evidence one seat's real backend result produces (e.g. "Ollama responded") is visible to every
+  // other seat's claims later in the SAME round, while staying entirely local to this request:
+  // nothing here is persisted or read back by a later request, which is what keeps a later round
+  // from ever inheriting this one's evidence.
+  const requestEvidenceLedger = createEvidenceLedger(conversationId ?? 'request')
 
   chatTrajectorySession = createChatTrajectorySession({
     requestText: raelDirectiveText,
@@ -1691,7 +1703,16 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       return gptSystem
     }
 
-    const emitDelta = (delta: string) => {
+    // Stream-safe runtime-truth enforcement: raw deltas from the provider are buffered to
+    // sentence boundaries and validated (enforceOperationalTruth, same guard as the final-text
+    // path) BEFORE anything reaches emitValidatedDelta() below -- an unsupported operational claim
+    // is therefore never visible on the live stream even momentarily, not just corrected after the
+    // fact once the turn settles. One guard instance per seat call (own buffer), sharing the
+    // request-wide evidence ledger so evidence another seat already produced this round is usable
+    // here too.
+    const streamGuard = createStreamingTruthGuard(raelDirectiveText, requestEvidenceLedger)
+
+    const emitValidatedDelta = (delta: string) => {
       opts?.onDelta?.(delta)
       if (!delta || !councilProgress) return
       councilProgress.record({
@@ -1706,6 +1727,35 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           },
         },
       })
+    }
+
+    let sawFirstDelta = false
+    const emitDelta = (delta: string) => {
+      if (!delta) return
+      if (!sawFirstDelta) {
+        // Receiving any real token back is evidence a provider responded to this call -- seeded
+        // here (not only after the call resolves, when its actual LOCAL/EXTERNAL backend type
+        // becomes known) so a claim made later in this SAME streaming response is validated
+        // consistently with how the final, persisted text will be validated, rather than being
+        // incorrectly flagged live and then silently left alone once the turn settles. Deliberately
+        // does not assert backendType: 'LOCAL' here -- that isn't known yet mid-stream, and this
+        // must stay accurate under EXTERNAL routing too, not just this LOCAL_FIRST environment.
+        sawFirstDelta = true
+        const now = new Date().toISOString()
+        addEvidence(requestEvidenceLedger, {
+          toolOrAction: 'provider_stream_response',
+          actionType: 'health_check',
+          status: 'succeeded',
+          startedAt: now,
+          completedAt: now,
+          success: true,
+          resultSummary: `${family} provider responded with real streamed content.`,
+          resourceAffected: ['ollama', 'local model backend', 'local council backend', 'local runtime', 'the model backend', 'the provider'],
+          telemetrySource: `live stream token received (${family})`,
+        })
+      }
+      const released = streamGuard.push(delta)
+      if (released) emitValidatedDelta(released)
     }
 
     try {
@@ -1774,6 +1824,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         error: sanitizeCaughtProviderError(family, error),
         failureLayer: classifyProviderFailure({ message: error instanceof Error ? error.message : String(error) }),
       }
+    } finally {
+      // Whatever tail text never hit a sentence boundary (e.g. the response doesn't end in
+      // punctuation) still needs to reach the stream -- runs on every exit path, success or error.
+      const remaining = streamGuard.flush()
+      if (remaining) emitValidatedDelta(remaining)
     }
   }
 
@@ -1889,17 +1944,18 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       // stable-group synthesis): this turn's full_response never went through
       // validateProviderResults() -- it is built directly by appendDeliberationTurn() and is what
       // the client actually renders/persists as this seat's (or AURORA's, for council_synthesis)
-      // FINAL text. A fresh, turn-scoped ledger (this turn's own real backend outcome only, never
-      // a prior round's) mirrors the same check validateProviderResults() does for the
-      // non-deliberation path.
+      // FINAL text. Contributes this turn's own real backend outcome to the shared, request-scoped
+      // ledger (so a LATER seat's claim about "the local backend" benefits from it too) and
+      // validates against that same shared ledger -- this is also AURORA's own double-check: its
+      // council_synthesis turn runs through this identical code path, against a ledger that by
+      // then already reflects every earlier seat's real backend outcome, never a prior round's.
       if (turn.full_response) {
-        const turnLedger = createEvidenceLedger(turn.turn_id)
-        addLocalBackendCompletionEvidence(turnLedger, {
+        addLocalBackendCompletionEvidence(requestEvidenceLedger, {
           backendType: turn.backend_type,
           status: turn.completion_status === 'complete' ? 'succeeded' : null,
           source: `deliberation turn backend result (${turn.provider_family}/${turn.turn_role})`,
         })
-        const truth = enforceOperationalTruth(turn.full_response, turnLedger, raelDirectiveText)
+        const truth = enforceOperationalTruth(turn.full_response, requestEvidenceLedger, raelDirectiveText)
         if (truth.corrected) turn.full_response = truth.text
       }
       progress.recordTurnCompleted(turn, {
@@ -2478,6 +2534,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         integrityCheck: !skipProviderIntegrityCheck,
         minimalCouncilPath,
         decreeText: raelDirectiveText,
+        evidenceLedger: requestEvidenceLedger,
       })
       councilTrace.record('integrity_checked', {
         module: 'app/api/chat/route.ts:validateProviderResults',
@@ -3868,6 +3925,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           minimalCouncilPath,
           decreeText: raelDirectiveText,
           suppressSyncWarnings: suppressIntegritySyncWarnings,
+          evidenceLedger: requestEvidenceLedger,
         },
       )
       recordCouncilProgressSyntheticAudit(councilProgress, [councilSingleFamily], [{
