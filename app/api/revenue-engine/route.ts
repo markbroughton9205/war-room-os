@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { REVENUE_ENGINE_CATEGORIES, type RevenueEngineCategory, type RevenueOpportunityInput } from '@/lib/revenue-engine/model'
 import { createRevenueOpportunity, listRevenueEngineSnapshot } from '@/lib/revenue-engine/persistence'
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -26,10 +27,18 @@ function textValue(value: unknown): string | null {
 }
 
 export async function GET() {
+  // Wave 1 repair, audit finding P1-3: no auth check beyond the app-wide "any authenticated user"
+  // middleware gate, despite exposing revenue-opportunity data and letting any authenticated
+  // account create new opportunities below.
+  const commander = await requireCommanderSession('Revenue engine')
+  if (!commander.ok) return commander.response
   return NextResponse.json(await listRevenueEngineSnapshot())
 }
 
 export async function POST(req: Request) {
+  const commander = await requireCommanderSession('Revenue engine')
+  if (!commander.ok) return commander.response
+
   let body: unknown
   try {
     body = await req.json()

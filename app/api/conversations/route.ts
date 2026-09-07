@@ -3,12 +3,16 @@ import {
   httpStatusForSupabaseFailure,
   warRoomSupabaseFailurePayload,
 } from '@/lib/war-room/warRoomSupabaseError'
+import { requireConversationCaller } from '@/lib/war-room/conversationAuth'
 
 export const dynamic = 'force-dynamic'
 
 const TABLE_CONVERSATIONS = 'war_room_conversations'
 
 export async function GET(req: Request) {
+  const caller = await requireConversationCaller()
+  if (!caller.ok) return caller.response
+
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ conversations: [] }, false)
@@ -20,6 +24,7 @@ export async function GET(req: Request) {
   let query = sup.client
     .from(TABLE_CONVERSATIONS)
     .select('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at')
+    .eq('owner_user_id', caller.userId)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false })
     .limit(200)
@@ -43,6 +48,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const caller = await requireConversationCaller()
+  if (!caller.ok) return caller.response
+
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ error: 'Supabase is not configured.', hint: 'Set NEXT_PUBLIC_SUPABASE_URL and the server-only Supabase role secret.' }, false, { status: 503 })
@@ -60,7 +68,7 @@ export async function POST(req: Request) {
 
   const { data, error } = await sup.client
     .from(TABLE_CONVERSATIONS)
-    .insert({ title, metadata })
+    .insert({ title, metadata, owner_user_id: caller.userId })
     .select('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at')
     .single()
 

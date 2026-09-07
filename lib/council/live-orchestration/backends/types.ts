@@ -43,6 +43,10 @@ export type BackendMetadata = {
   /** Set only when routing policy actually fell back from one backend type to the other. */
   fallbackFrom?: BackendType
   fallbackReason?: string
+  /** Normalized provider completion reason (e.g. Gemini's 'STOP'/'MAX_TOKENS'), propagated as-is
+   * from NormalizedProviderStreamResult/StreamedCouncilCall when the underlying adapter's API
+   * exposes one. Never fabricated — providers that don't supply one leave this undefined. */
+  finishReason?: string | null
 }
 
 export type ModelBackendInvokeInput = {
