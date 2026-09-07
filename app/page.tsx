@@ -8657,6 +8657,7 @@ function Home() {
     opts?: {
       councilRevealSource?: 'autonomous' | 'decree'
       autonomousDecreeRoundAtFetch?: number
+      commanderDecreeRoundAtFetch?: number
       transientMessageIds?: string[]
       shadowCouncilAssembly?: CouncilShadowSelectionReport
       councilProgress?: CouncilProgressRuntimeSnapshot
@@ -8687,6 +8688,17 @@ function Home() {
       return false
     }
     const councilRevealSource = opts?.councilRevealSource ?? 'autonomous'
+    if (
+      councilRevealSource === 'decree'
+      && typeof opts?.commanderDecreeRoundAtFetch === 'number'
+      // Reuses the same round-generation comparator as the autonomous-reveal guard below — a
+      // Commander-decree reveal produced by round N must not become visible once round N+1 is
+      // current, exactly like an autonomous reveal must not.
+      && shouldSuppressStaleAutonomousReveal(opts.commanderDecreeRoundAtFetch, decreeRoundGenRef.current)
+    ) {
+      console.warn('[council-session] suppressed_stale_decree_reveal')
+      return false
+    }
     if (councilRevealSource === 'decree' && decreePacketFlushCompleteRef.current) {
       if (process.env.NODE_ENV === 'development') {
         console.debug("[Live Council] Suppressed visible late family reply after packet close.")
@@ -9220,6 +9232,14 @@ function Home() {
       return
     }
 
+    // A new Commander decree supersedes whatever the previous decree's controller was still doing
+    // — abort it so its in-flight HTTP/stream calls unwind instead of resolving later and racing
+    // this decree's own state commits (see isCurrentDecreeAsync()/decreeRoundGenRef below, which
+    // reject any such late result even if the abort itself doesn't land in time).
+    const previousDecreeController = abortControllerRef.current
+    if (previousDecreeController && !previousDecreeController.signal.aborted) {
+      previousDecreeController.abort()
+    }
     const controller = new AbortController()
     abortControllerRef.current = controller
     const expectedCouncilSessionId = councilSnapRef.current.sessionId
@@ -9924,6 +9944,12 @@ function Home() {
         const isDirectInvoke = Boolean(cmd.directInvocation && cmd.targetFamilies[0] === family)
         const transientDirectStatusMessageIds: string[] = []
         const postDirectUnavailable = async (rt: ProviderFamilyOutcomeStatus, detail?: string) => {
+          if (!isCurrentDecreeAsync()) {
+            // A direct-invocation status/error belonging to a superseded decree must not surface
+            // as a visible or persisted message once a newer decree is current.
+            console.warn('[council-session] suppressed_stale_direct_invocation_status')
+            return
+          }
           const line = replaceWithRuntimeTruthLine(
             family,
             providerOutcomeToVerifiedContext({ family, runtime: rt, runtimeDetail: detail }),
@@ -10018,7 +10044,14 @@ function Home() {
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
                 }, attendanceWave ? { ignoreContinuation: true, onTextDelta: delta => streamBuffer.push(delta) } : { onTextDelta: delta => streamBuffer.push(delta) })
 
-                if (chatRes.ok && chatData.councilProviderHttpStatus === 'timed_out') {
+                if (!isCurrentDecreeAsync()) {
+                  // A newer Commander decree started while this family's response was in flight —
+                  // drop it. It must not reveal, persist, or affect this (now superseded) round's
+                  // provider-runtime accounting.
+                  runtime = 'SKIPPED'
+                  runtimeDetail = 'superseded_by_newer_decree'
+                  textOut = null
+                } else if (chatRes.ok && chatData.councilProviderHttpStatus === 'timed_out') {
                   runtime = 'TIMED_OUT'
                   runtimeDetail = chatData.councilProviderHttpDetail
                   textOut = null
@@ -10217,6 +10250,14 @@ function Home() {
               }))
             },
           })
+          if (!isCurrentDecreeAsync()) {
+            // A newer Commander decree started while this deliberation was in flight. Discard the
+            // whole result — no partial seat reveal, no addMessages, no persistence, no round
+            // lifecycle mutation — and report "handled" so submitDecree does not fall through to
+            // the legacy per-family gather for a decree that is no longer current.
+            console.warn('[council-session] suppressed_stale_family_deliberation_gather')
+            return true
+          }
           if (!deliberationRes.ok || !deliberationData.familyDeliberation) return false
 
           const deliberation = deliberationData.familyDeliberation
@@ -10390,6 +10431,15 @@ function Home() {
           setFamilyDuty(Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])))
           return true
         } catch {
+          if (!isCurrentDecreeAsync()) {
+            // This failure (very likely the abort from a newer decree superseding this one, see
+            // the abortControllerRef handling in submitDecree) belongs to a round that is no
+            // longer current — resetting shared UI state here would clobber whatever the new,
+            // current round has already started rendering. Report "handled" so the caller does
+            // not fall through to the legacy gather path for a decree that is no longer current.
+            console.warn('[council-session] suppressed_stale_family_deliberation_error')
+            return true
+          }
           setNebulaRoundShell(null)
           setFloorStream(null)
           return false
@@ -10544,7 +10594,7 @@ function Home() {
               stableGroupFinalSynthesis: true,
               councilProviderRuntimeStates: providerRuntimeStates,
             })
-            const finalExtractedResponse = finalRes.ok
+            const finalExtractedResponse = finalRes.ok && isCurrentDecreeAsync()
               ? extractReadableCouncilResponse(finalData, 'chatgpt')
               : null
             if (finalExtractedResponse?.content) {
@@ -10571,6 +10621,16 @@ function Home() {
         }
       } else {
         await Promise.allSettled(gatherPromises)
+      }
+
+      if (!isCurrentDecreeAsync()) {
+        // A newer Commander decree became current while these gathers were resolving. Individual
+        // stale per-family results are already neutralized inside gatherFamily(), but stop here
+        // regardless so this superseded invocation performs no further transcript, persistence,
+        // or round-lifecycle mutations (e.g. the "all providers failed" notice below, which would
+        // otherwise misreport this decree's outcome into the now-current round).
+        console.warn('[council-session] suppressed_stale_decree_commit')
+        return
       }
 
       let cells: GatherCell[] = attendanceWave
@@ -10758,6 +10818,7 @@ function Home() {
             ?? linesToRelease.find(l => l.family === line.family)
           const visible = await revealOrchestrationTurn(line.family, line.content, inputText(), {
             councilRevealSource: 'decree',
+            commanderDecreeRoundAtFetch: myRound,
             transientMessageIds: sourceLine?.transientMessageIds,
             shadowCouncilAssembly: sourceLine?.shadowCouncilAssembly,
             councilProgress: sourceLine?.councilProgress,
