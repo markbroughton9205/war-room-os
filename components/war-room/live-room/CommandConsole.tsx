@@ -97,8 +97,6 @@ export const CommandConsole = memo(function CommandConsole({
             }
           }}
         >
-          <span className="hidden shrink-0 self-center text-[10px] font-bold tracking-widest text-emerald-400 sm:inline">RA&apos;EL@WARROOM:~$</span>
-          <span className="shrink-0 self-center text-[10px] font-bold tracking-widest text-emerald-400 sm:hidden">~$</span>
           <input
             ref={commandInputRef}
             data-command-surface-id="live-council-primary-decree"
@@ -112,9 +110,9 @@ export const CommandConsole = memo(function CommandConsole({
                 if (!loading && command.trim()) void onSubmit()
               }
             }}
-            placeholder="Enter command or decree…"
+            placeholder="What's your command, Divine?"
             disabled={loading}
-            className="min-w-0 flex-1 self-stretch bg-transparent text-sm tracking-wide text-emerald-100 outline-none placeholder:text-emerald-900/80"
+            className="min-w-0 flex-1 self-stretch bg-transparent text-sm tracking-wide text-emerald-100 outline-none placeholder:text-emerald-700/40"
             aria-label="Council command"
             data-testid="council-command-input"
           />
