@@ -210,8 +210,26 @@ function ActiveTerraContextPill() {
   )
 }
 
-export function GodsEyeCommandCenter({ council, councilComposer, intelOverlay, onTerraContextChange }: { council: ReactNode; councilComposer?: ReactNode; intelOverlay?: ReactNode; onTerraContextChange?: (context: string | null) => void }) {
-  const [chatMode, setChatMode] = useState<'minimized' | 'compact' | 'expanded'>('compact')
+export function GodsEyeCommandCenter({
+  council, councilComposer, intelOverlay, onTerraContextChange,
+  chatExpanded, onToggleChatExpanded,
+}: {
+  council: ReactNode; councilComposer?: ReactNode; intelOverlay?: ReactNode
+  onTerraContextChange?: (context: string | null) => void
+  /**
+   * Optional external control for the expanded/compact state, so a toolbar button rendered inside
+   * `council` (e.g. CouncilCommandControls' Expand button, which lives in app/page.tsx's
+   * isChatExpanded state) can actually drive this panel's layout instead of updating state nothing
+   * here reads. Falls back to fully local state when omitted, preserving old standalone behavior.
+   */
+  chatExpanded?: boolean
+  onToggleChatExpanded?: () => void
+}) {
+  const [minimized, setMinimized] = useState(false)
+  const [localExpanded, setLocalExpanded] = useState(false)
+  const expanded = chatExpanded ?? localExpanded
+  const toggleExpanded = onToggleChatExpanded ?? (() => setLocalExpanded(value => !value))
+  const chatMode: 'minimized' | 'compact' | 'expanded' = minimized ? 'minimized' : expanded ? 'expanded' : 'compact'
   const [intelOpen, setIntelOpen] = useState(false)
   return (
     <TerraActiveLocationProvider>
@@ -227,7 +245,7 @@ export function GodsEyeCommandCenter({ council, councilComposer, intelOverlay, o
           <div className={`pointer-events-auto flex min-h-0 flex-col overflow-hidden rounded-2xl border border-emerald-300/25 bg-[rgba(3,10,16,0.94)] shadow-[0_24px_80px_rgba(0,0,0,0.72)] backdrop-blur-2xl ${chatMode === 'minimized' ? 'h-12' : chatMode === 'expanded' ? 'h-full' : 'h-[min(34rem,62dvh)]'}`} data-testid="floating-council-chat">
             <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3">
               <div className="flex min-w-0 items-center gap-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-emerald-300/35 bg-emerald-400/10 text-xs text-emerald-200">⌁</span><div className="min-w-0"><p className="truncate text-[11px] font-bold tracking-wide text-white">Council</p><p className="flex items-center gap-1 text-[8px] uppercase tracking-[0.16em] text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> connected to Terra</p></div></div>
-              <div className="flex items-center gap-1"><button type="button" onClick={() => setChatMode(chatMode === 'expanded' ? 'compact' : 'expanded')} className="grid h-7 w-7 place-items-center rounded-full text-slate-300 hover:bg-white/10" aria-label={chatMode === 'expanded' ? 'Restore compact Council chat' : 'Expand Council chat'} title={chatMode === 'expanded' ? 'Restore compact view' : 'Expand chat'}>{chatMode === 'expanded' ? <IconCollapse /> : <IconExpand />}</button><button type="button" onClick={() => setChatMode(chatMode === 'minimized' ? 'compact' : 'minimized')} className="grid h-7 w-7 place-items-center rounded-full text-slate-300 hover:bg-white/10" aria-label={chatMode === 'minimized' ? 'Open Council chat' : 'Minimize Council chat'} title={chatMode === 'minimized' ? 'Open chat' : 'Minimize chat'}>{chatMode === 'minimized' ? <IconRestore /> : <IconMinimize />}</button></div>
+              <div className="flex items-center gap-1"><button type="button" onClick={() => { setMinimized(false); toggleExpanded() }} className="grid h-7 w-7 place-items-center rounded-full text-slate-300 hover:bg-white/10" aria-label={chatMode === 'expanded' ? 'Restore compact Council chat' : 'Expand Council chat'} title={chatMode === 'expanded' ? 'Restore compact view' : 'Expand chat'}>{chatMode === 'expanded' ? <IconCollapse /> : <IconExpand />}</button><button type="button" onClick={() => setMinimized(value => !value)} className="grid h-7 w-7 place-items-center rounded-full text-slate-300 hover:bg-white/10" aria-label={chatMode === 'minimized' ? 'Open Council chat' : 'Minimize Council chat'} title={chatMode === 'minimized' ? 'Open chat' : 'Minimize chat'}>{chatMode === 'minimized' ? <IconRestore /> : <IconMinimize />}</button></div>
             </div>
             {chatMode !== 'minimized' ? <><ActiveTerraContextPill /><div className="min-h-0 flex-1">{council}</div>{councilComposer ? <div className="shrink-0 border-t border-white/10">{councilComposer}</div> : null}</> : null}
           </div>

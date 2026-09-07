@@ -13063,6 +13063,8 @@ function Home() {
           ) : (
         <GodsEyeCommandCenter
           onTerraContextChange={context => { terraCouncilContextRef.current = context }}
+          chatExpanded={isChatExpanded}
+          onToggleChatExpanded={() => setIsChatExpanded(prev => !prev)}
           councilComposer={<CommandConsole
             command={command}
             onCommandChange={setCommand}

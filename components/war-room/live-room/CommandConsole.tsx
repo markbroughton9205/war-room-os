@@ -68,7 +68,7 @@ export const CommandConsole = memo(function CommandConsole({
       data-testid="command-console"
     >
       <form
-        className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2"
+        className="flex flex-col gap-1.5"
         onSubmit={event => {
           event.preventDefault()
           if (!loading && command.trim()) {
@@ -77,8 +77,16 @@ export const CommandConsole = memo(function CommandConsole({
           void onSubmit(event)
         }}
       >
+        {/*
+         * The input row is always full-width and on its own line — never squeezed onto one row
+         * with the mode select / attach / execute controls. Those controls used to share a row via
+         * `sm:flex-row`, a *viewport* breakpoint; but this composer commonly lives inside a narrow
+         * (~25rem) docked chat panel regardless of viewport width, so `sm:` fired on any normal
+         * desktop window and crushed the flexible input down to a sliver behind its fixed-width
+         * siblings. Stacking unconditionally on container width, not viewport width, fixes that.
+         */}
         <div
-          className="flex min-w-0 flex-1 cursor-text items-stretch gap-2 rounded border border-emerald-700/50 px-2.5 py-1.5 sm:px-3 sm:py-2"
+          className="flex min-w-0 items-stretch gap-2 rounded border border-emerald-700/50 px-2.5 py-1.5 sm:px-3 sm:py-2"
           style={{ background: 'rgba(0,20,8,0.55)', boxShadow: 'inset 0 0 20px rgba(0,255,102,0.04)' }}
           onMouseDown={e => {
             // Clicking anywhere in the composer surface (including padding around the input's
@@ -112,6 +120,7 @@ export const CommandConsole = memo(function CommandConsole({
           />
         </div>
 
+        <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
         {showFlowModeSelect ? (
           <label className="hidden shrink-0 items-center gap-2 text-[9px] uppercase tracking-widest text-slate-400 md:flex">
             Council Mode
@@ -189,6 +198,7 @@ export const CommandConsole = memo(function CommandConsole({
         >
           {loading ? 'Council thinking…' : 'Execute'}
         </button>
+        </div>
       </form>
     </footer>
   )
