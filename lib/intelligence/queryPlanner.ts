@@ -82,6 +82,10 @@ function resolveUseCasesForDecree(decree: string): { useCases: IntelligenceUseCa
     pushUnique(useCases, ['public_policy', 'contradiction_analysis'])
     tags.push('official_verification')
   }
+  if (has(text, /\b(freight|logistics|shipping|shipment|carrier|broker(?:age)?|supply\s*chain|trucking|dispatch|dispatcher|warehous(?:e|ing)|fleet)\b/i)) {
+    pushUnique(useCases, ['supply_chain', 'market_research'])
+    tags.push('supply_chain')
+  }
   if (has(text, /\b(reddit|twitter|x\.com|social|rumor|chatter|trend|signal|emerging)\b/i)) {
     pushUnique(useCases, ['weak_signal_detection', 'contradiction_analysis'])
     tags.push('weak_signal_requested')
@@ -106,6 +110,7 @@ function priorityForSource(source: IntelligenceSourceDefinition, useCases: Intel
   if (tags.includes('income_opportunity') && ['tavily', 'economic_indicators', 'x_twitter_discussions', 'subreddit_discussions'].includes(source.source_id)) score += 0.2
   if (tags.includes('local_awareness') && ['local_reporters', 'rss_feeds', 'weather_api', 'x_twitter_discussions'].includes(source.source_id)) score += 0.2
   if (tags.includes('environmental_risk') && ['government_public_data', 'weather_api', 'tavily', 'local_reporters'].includes(source.source_id)) score += 0.25
+  if (tags.includes('supply_chain') && ['logistics_api', 'tavily', 'government_public_data'].includes(source.source_id)) score += 0.25
   if (tags.includes('verification_required') && source.category === 'verified_structured') score += 0.15
   if (source.category === 'emerging_weak_signal' && useCases.includes('weak_signal_detection')) score += 0.12
   return Math.round(score * 100)
