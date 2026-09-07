@@ -159,6 +159,22 @@ export function detectResearchIntent(text: string, ctx?: ResearchIntentContext):
     return { shouldResearch: false, reasons: ['excluded_internal_council_status'], confidence: 0 }
   }
 
+  // LOCAL_RUNTIME / LOCAL_REPO_ARCHITECTURE: a question about War Room's own backend, local model,
+  // or codebase has no external-web correlate — PULSAR firing live web research against it just
+  // returns generic, unrelated public results (a Commander asking "is Ollama reachable?" or "what
+  // are War Room's engineering risks?" got news about a musician's death and road repairs; LUMEN
+  // correctly rejected it, but PULSAR should never have searched the public internet for a
+  // question that is entirely about this system's own state). `externalLiveOverride` above still
+  // lets an explicit external/current-events word win, and `RUNTIME_STATUS_ALLOWED` below still
+  // allows a genuine "is this provider having an outage" check through.
+  const localRuntimeOrRepoQuestion =
+    /\b(?:is\s+ollama|ollama\s+(?:reachable|running|responding|up|online)|local\s+(?:model|backend|ollama)|(?:this|our)\s+(?:repo|repository|codebase|runtime|backend))\b/i
+    .test(t)
+    || /\bwar\s*room(?:'s|s)?\s+(?:current\s+)?(?:engineering|architecture|codebase|repo|repository)\b/i.test(t)
+  if (localRuntimeOrRepoQuestion && !externalLiveOverride.test(t) && !RUNTIME_STATUS_ALLOWED.some(p => p.test(t))) {
+    return { shouldResearch: false, reasons: ['excluded_local_runtime_or_repo_question'], confidence: 0 }
+  }
+
   const mandatoryRetrieval = evaluateMandatoryLiveRetrieval(t)
 
   if (ctx?.attendanceFlow) {

@@ -86,6 +86,24 @@ const worldGoingOnWithWorld = detectResearchIntent("Council, what's going on wit
 const heyCouncilNoResearchFast = detectResearchIntent('Hey council', { intentKind: 'greeting' })
 const quickStatusPingNoResearch = detectResearchIntent('Quick status ping', { intentKind: 'natural' })
 
+// 15. Build #3.1 — PULSAR research relevance gating. A question that is entirely about War Room's
+// own local runtime/repo state has no external-web correlate; PULSAR firing live research against
+// it just returns generic, unrelated public results (confirmed live: "is Ollama reachable?" and
+// "War Room's engineering risks?" both returned real but irrelevant news headlines). "External
+// current" and "hybrid" questions must still route toward research.
+const localRuntimeOllamaNoResearch = detectResearchIntent('Is Ollama reachable right now?', { intentKind: 'natural' })
+const localRepoArchitectureNoResearch = detectResearchIntent("What are War Room's current engineering risks?", {
+  intentKind: 'natural',
+})
+const externalCurrentFreightTriggers = detectResearchIntent(
+  'What are the latest U.S. freight brokerage developments relevant to a small transportation company?',
+  { intentKind: 'natural' },
+)
+const hybridFreightComparisonTriggers = detectResearchIntent(
+  "How does War Room's freight research capability compare with current industry intelligence tools?",
+  { intentKind: 'natural' },
+)
+
 export function runResearchIntentValidation(): CaseResult[] {
   return [
     check(
@@ -203,6 +221,26 @@ export function runResearchIntentValidation(): CaseResult[] {
       'research_intent_14_quick_status_ping_no_research',
       !quickStatusPingNoResearch.shouldResearch,
       JSON.stringify(quickStatusPingNoResearch),
+    ),
+    check(
+      'research_intent_15a_local_runtime_ollama_question_no_research',
+      !localRuntimeOllamaNoResearch.shouldResearch,
+      JSON.stringify(localRuntimeOllamaNoResearch),
+    ),
+    check(
+      'research_intent_15b_local_repo_architecture_question_no_research',
+      !localRepoArchitectureNoResearch.shouldResearch,
+      JSON.stringify(localRepoArchitectureNoResearch),
+    ),
+    check(
+      'research_intent_15c_external_current_question_still_triggers_research',
+      externalCurrentFreightTriggers.shouldResearch,
+      JSON.stringify(externalCurrentFreightTriggers),
+    ),
+    check(
+      'research_intent_15d_hybrid_question_triggers_research',
+      hybridFreightComparisonTriggers.shouldResearch,
+      JSON.stringify(hybridFreightComparisonTriggers),
     ),
   ]
 }
