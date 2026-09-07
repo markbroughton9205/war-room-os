@@ -17,7 +17,7 @@
 
 import { findMatchingEvidence, type RoundEvidenceLedger } from './evidenceLedger'
 
-type ClaimCategory = 'restart' | 'health' | 'generic_action'
+type ClaimCategory = 'restart' | 'health' | 'generic_action' | 'qualitative_state'
 
 type ClaimPattern = {
   category: ClaimCategory
@@ -30,7 +30,7 @@ type ClaimPattern = {
  * below so a single edit here improves detection everywhere.
  */
 const STATE_PHRASES =
-  '(?:back\\s+online|back\\s+up\\s+and\\s+running|online\\s+again|healthy|stable|holding\\s+steady|operational|good\\s+to\\s+go|functioning\\s+normally|running\\s+correctly|in\\s+good\\s+shape|restored|recovered|synchroni[sz]ed|reconnected|reactivated|activated|enabled|restarted|back)'
+  '(?:back\\s+online|back\\s+up\\s+and\\s+running|online\\s+again|healthy|stable|holding\\s+steady|holding\\s+strong|operational|good\\s+to\\s+go|functioning\\s+normally|running\\s+correctly|in\\s+good\\s+shape|restored|recovered|synchroni[sz]ed|reconnected|reactivated|activated|enabled|restarted|back|reliable)'
 
 /** Adjective-only subset usable directly before a noun ("the ADJ radar") -- excludes multi-word
  * phrases like "holding steady" or "back online" that don't read as a bare attributive adjective. */
@@ -54,7 +54,7 @@ const CLAIM_PATTERNS: ClaimPattern[] = [
   {
     category: 'health',
     regex:
-      /\b(?:is|are|remains?|'s|'re)\s+(?:now\s+)?(?:healthy|stable|holding\s+steady|operational|good\s+to\s+go)\b|\bhealth\s+(?:confirmed|verified)\b|\bverification\s+(?:complete|successful)\b|\b(?:has\s+been|was)\s+verified\b|\bconfirmed\s+healthy\b|\bstatus:?\s*healthy\b/i,
+      /\b(?:is|are|remains?|'s|'re)\s+(?:now\s+)?(?:healthy|stable|holding\s+steady|holding\s+strong|operational|good\s+to\s+go|reliable)\b|\bhealth\s+(?:confirmed|verified)\b|\bverification\s+(?:complete|successful)\b|\b(?:has\s+been|was)\s+verified\b|\bconfirmed\s+healthy\b|\bstatus:?\s*healthy\b/i,
   },
   {
     category: 'generic_action',
@@ -85,11 +85,20 @@ const CLAIM_PATTERNS: ClaimPattern[] = [
     regex:
       /\b[A-Za-z]+'s\s+(?:health|status|state|condition)\s+(?:is|means|gives?\s+us|tells?\s+us|confirms?|shows?|looks?)\b|\b[A-Za-z]+'s\s+(?:healthy|stable|operational|restored|recovered)\s+(?:health|status|state|condition)?\b/i,
   },
+  {
+    // Qualitative operational/system-state assessments presented as fact without telemetry:
+    // "solid foundations", "data models are strong", "redundancy is weak", "performing well",
+    // "there's a gap in how we handle real-time updates". Hedged/hypothetical phrasing is
+    // left alone via ALREADY_HEDGED / FUTURE_OR_HEDGE_MARKER.
+    category: 'qualitative_state',
+    regex:
+      /\b(?:got|has|have|with)\s+(?:a\s+)?(?:solid|strong|weak|fragile)\s+foundations?\b|\b(?:solid|strong)\s+foundations?\b|\b(?:war\s+room|terra|architecture|system|runtime|data\s+models?|data\s+pipeline|redundancy|communication\s+channels?|reliability)\s+(?:is|are|'s|'re|looks?|remains?)\s+(?:now\s+)?(?:holding\s+strong|reliable|robust|fragile|unstable|solid|strong|weak|stable|performing\s+(?:well|poorly|strongly))\b|\b(?:is|are|'s|'re)\s+performing\s+(?:well|poorly|strongly)\b|\b(?:lack|absence|shortage)\s+of\s+(?:redundancy|failover|resilience)\b|\bthere(?:'s|\s+is)\s+a\s+gap\s+in\s+how\s+(?:we|the\s+system|war\s+room)\s+handle/i,
+  },
 ]
 
 /** A sentence already framed with honest uncertainty is left alone -- never re-flag it. */
 const ALREADY_HEDGED =
-  /\b(not\s+executed|unknown|unverified|unavailable|was\s+not|wasn'?t|did\s+not|didn'?t|no\s+evidence|cannot\s+confirm|unable\s+to\s+confirm|not\s+performed|not\s+verified|no\s+runtime\s+(?:proof|evidence)|commander[- ]reported|independently\s+verified)\b/i
+  /\b(not\s+executed|unknown|unverified|unavailable|was\s+not|wasn'?t|did\s+not|didn'?t|no\s+evidence|cannot\s+confirm|unable\s+to\s+confirm|not\s+performed|not\s+verified|no\s+runtime\s+(?:proof|evidence)|commander[- ]reported|independently\s+verified|hypothesis|inference|possible\s+weakness|requires\s+(?:telemetry|code|runtime)\s+evidence|hypothetically|not\s+independently\s+verified)\b/i
 
 /** A suggestion/plan/question about a future action is not a completion claim. Checked only
  * against the text *before* a given match (see below), not the whole sentence -- a presuppositional
@@ -195,6 +204,9 @@ function rewriteSentence(category: ClaimCategory, resource: string, commanderRep
   if (commanderReported) {
     const subject = category === 'restart' ? `${resource} restart` : `${resource} health/status`
     return `${subject} is Commander-reported, not independently verified by War Room this round.`
+  }
+  if (category === 'qualitative_state') {
+    return `${resource} assessment is not independently verified this round — treat it as inference/hypothesis, not a verified War Room fact. It requires telemetry, code, or runtime evidence.`
   }
   if (category === 'health') {
     return `${resource} health was not verified in this round.`

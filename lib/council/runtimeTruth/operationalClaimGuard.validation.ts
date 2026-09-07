@@ -15,12 +15,12 @@ export function runOperationalClaimGuardValidation(): RuntimeTruthValidationResu
   {
     const ledger = createEvidenceLedger('round-1')
     const text =
-      "PULSAR has the Signal Radar back online, and Terra is holding steady. LUMEN agrees the foundation is strong."
+      "PULSAR has the Signal Radar back online, and Terra is holding steady. LUMEN will wait for evidence before certifying anything."
     const out = enforceOperationalTruth(text, ledger, decree)
     const restartFixed = out.text.includes('Signal Radar restart was not executed in this round, so its current status is UNKNOWN.')
     const healthFixed = out.text.includes('Terra health was not verified in this round.')
     results.push(check('unsupported_claims_rewritten', out.corrected && restartFixed && healthFixed, out.text))
-    results.push(check('rest_of_message_preserved', out.text.includes('LUMEN agrees the foundation is strong.'), out.text))
+    results.push(check('rest_of_message_preserved', out.text.includes('LUMEN will wait for evidence before certifying anything.'), out.text))
   }
 
   // Case 2: real evidence present for the claimed resource -- must NOT be rewritten.
@@ -165,6 +165,39 @@ export function runOperationalClaimGuardValidation(): RuntimeTruthValidationResu
       output === deltas.join(''),
       JSON.stringify(output),
     ))
+  }
+
+  // Case 11: qualitative operational/system-state claims without same-round evidence.
+  {
+    const qualitativeCases: { text: string; decree: string; mustNotContain: RegExp }[] = [
+      { text: 'War Room is holding strong.', decree: 'Analyze War Room reliability.', mustNotContain: /holding strong/i },
+      { text: "It's got solid foundations.", decree: 'Analyze War Room reliability.', mustNotContain: /solid foundations/i },
+      { text: 'There is a lack of redundancy in our communication channels.', decree: 'Analyze War Room reliability.', mustNotContain: /lack of redundancy/i },
+      { text: 'Our data models are strong.', decree: 'Analyze War Room reliability.', mustNotContain: /data models are strong/i },
+      { text: "There's a gap in how we handle real-time updates.", decree: 'Analyze War Room reliability.', mustNotContain: /gap in how we handle/i },
+      { text: 'The architecture is stable.', decree: 'Analyze War Room reliability.', mustNotContain: /architecture is stable/i },
+      { text: 'The system is reliable.', decree: 'Analyze War Room reliability.', mustNotContain: /system is reliable/i },
+      { text: 'Redundancy is weak.', decree: 'Analyze War Room reliability.', mustNotContain: /Redundancy is weak/ },
+      { text: 'The data pipeline is strong.', decree: 'Analyze War Room reliability.', mustNotContain: /data pipeline is strong/i },
+      { text: 'Terra is performing well.', decree: 'Check Terra.', mustNotContain: /performing well/i },
+    ]
+    let allPass = true
+    const details: string[] = []
+    for (const c of qualitativeCases) {
+      const ledger = createEvidenceLedger('qualitative-round')
+      const out = enforceOperationalTruth(c.text, ledger, c.decree)
+      const framed = /not independently verified|was not verified|inference\/hypothesis/i.test(out.text)
+      const ok = out.corrected && !c.mustNotContain.test(out.text) && framed
+      if (!ok) allPass = false
+      details.push(`[${ok ? 'ok' : 'FAIL'}] "${c.text}" -> "${out.text}"`)
+    }
+    results.push(check('qualitative_system_claims_rewritten', allPass, details.join(' | ')))
+  }
+  {
+    const ledger = createEvidenceLedger('qualitative-hedged-round')
+    const text = 'A possible weakness, as a hypothesis and not independently verified, is a gap in real-time updates; this requires telemetry evidence.'
+    const out = enforceOperationalTruth(text, ledger, 'Analyze War Room reliability.')
+    results.push(check('already_hedged_qualitative_left_alone', !out.corrected && out.text === text, out.text))
   }
 
   return results
