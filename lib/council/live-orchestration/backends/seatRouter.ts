@@ -24,13 +24,16 @@ function withFallbackTag(
 
 async function invokeLocalThenExternal(input: ModelBackendInvokeInput): Promise<ModelBackendInvokeResult> {
   const local = await invokeLocalBackend(input)
+  input.signal.throwIfAborted()
   if (local.ok) return local
   const external = await invokeExternalBackend(input)
+  input.signal.throwIfAborted()
   return withFallbackTag(external, 'LOCAL', local.backend.fallbackReason ?? local.backend.failureClass)
 }
 
 async function invokeExternalThenLocal(input: ModelBackendInvokeInput): Promise<ModelBackendInvokeResult> {
   const external = await invokeExternalBackend(input)
+  input.signal.throwIfAborted()
   if (external.ok) return external
   const local = await invokeLocalBackend(input)
   return withFallbackTag(local, 'EXTERNAL', external.backend.fallbackReason ?? external.backend.failureClass)
@@ -74,6 +77,7 @@ function policyForMode(mode: CouncilRoutingMode, seat: ModelBackendInvokeInput['
  * sets COUNCIL_ROUTING_MODE.
  */
 export async function invokeCouncilSeat(input: ModelBackendInvokeInput): Promise<ModelBackendInvokeResult> {
+  input.signal.throwIfAborted()
   const mode: CouncilRoutingMode = input.routingModeOverride ?? resolveCouncilRoutingMode()
   const policy = policyForMode(mode, input.seat)
   return invokeForPolicy(policy, input)

@@ -1,6 +1,7 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { nebulaAgentForSeat, type NebulaAgentDefinition, type NebulaAgentId } from './identity'
 import { NEBULA_ROLE_CONTRACTS } from './roleContracts'
+import { antiEchoDirectiveFor } from '@/lib/council/seatDistinctness'
 import { assembleNebulaContext } from './contextAssembly'
 import { auroraDegradedRoundNotice, type NebulaRoundHealth } from './round'
 
@@ -37,12 +38,12 @@ export function buildNebulaInteractionRuleForSeat(
 
 export function buildNebulaStableGroupRole(agent: NebulaAgentDefinition): string {
   const contract = NEBULA_ROLE_CONTRACTS[agent.id]
-  return `You are ${agent.name} — ${agent.personality[0] ?? agent.role}: ${contract.optimizationTarget} Stay role-distinct. Do not present yourself as a frontier brand.`
+  return `You are ${agent.name} — ${agent.personality[0] ?? agent.role}: ${contract.optimizationTarget} ${antiEchoDirectiveFor(agent.id)} Stay role-distinct. Do not present yourself as a frontier brand.`
 }
 
 export function buildAuroraFinalSynthesisRole(health?: NebulaRoundHealth): string {
   const degraded = health ? auroraDegradedRoundNotice(health) : null
-  const base = "You are AURORA — final Council synthesis (calibrated integration): one short, natural paragraph weaving what participating Nebula agents actually said; answer Ra'el's requested task first; expose disagreement; preserve uncertainty; no new topics; do not present yourself as ChatGPT or OpenAI; do not treat your own synthesis as evidence."
+  const base = "You are AURORA — final Council synthesis (calibrated integration): one short, natural paragraph weaving what participating Nebula agents actually said after distinct seat work; answer Ra'el's requested task first; synthesize only what survived verification; do not rewrite ORION or LUMEN; expose disagreement; preserve uncertainty; no new topics; do not present yourself as ChatGPT or OpenAI; do not treat your own synthesis as evidence."
   return degraded ? `${base} ${degraded}` : base
 }
 

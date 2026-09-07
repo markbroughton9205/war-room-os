@@ -1,5 +1,6 @@
 import type { NebulaAgentId } from './identity'
 import { presentAgentMessage } from './presentation'
+import { compressSeatBrief } from '@/lib/council/seatDistinctness'
 
 export type BlackboardFindingStatus = 'queued' | 'started' | 'completed' | 'failed' | 'skipped'
 
@@ -80,7 +81,7 @@ export function upsertCompletedFinding(
 export function blackboardSummariesForPrompt(board: RoundBlackboard): string[] {
   return board.findings
     .filter(item => item.status === 'completed' && item.summary.trim())
-    .map(item => `${item.agentId.toUpperCase()}: ${item.summary}`)
+    .map(item => `${item.agentId.toUpperCase()}: ${compressSeatBrief(item.summary)}`)
 }
 
 export function chatMustNotRenderStructuredOutput(finding: BlackboardFinding): string {

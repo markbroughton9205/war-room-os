@@ -32,6 +32,7 @@ import { sanitizeCouncilFamilyResponse } from './providerResponseSanitizer'
 import { compressCouncilOutput, NO_RELIABLE_SYNTHESIS_MESSAGE, type CouncilCompressionMessage } from './compression'
 import { buildCommanderOperationFromMessage, type CouncilOperationMessageInput } from './unified-experience/adapter'
 import { issueFromPanelErrorBoundary } from '@/lib/native-builder/issueIngest'
+import { isNearEcho, tokenJaccardSimilarity } from '@/lib/council/seatDistinctness'
 
 type ValidationCase = {
   caseId: string
@@ -146,6 +147,34 @@ export async function runLivePersonaClusterValidation(): Promise<ValidationCase[
       PROVIDER_IDENTITY_PROFILES.grok.includes('no pretend searches')
       && PROVIDER_IDENTITY_PROFILES.grok.includes('telemetry gap')
       && PROVIDER_IDENTITY_PROFILES.kimi.includes('no pretend progress'),
+  }))
+  cases.push(await runCase({
+    caseId: 'lcp_persona_009_lumen_verifies_instead_of_echoing',
+    category: 'P. Persona and role instructions',
+    run: () => {
+      const lumenPrompt = readSource('lib/council/nebula/persona.ts') + readSource('lib/council/seatDistinctness.ts') + readSource('lib/council/providerIdentity.ts')
+      return lumenPrompt.includes('Agreement is not proof')
+        && lumenPrompt.includes('Do not echo, paraphrase, or agree with ORION')
+        && PROVIDER_IDENTITY_PROFILES.gemini.includes('never echo prior seats')
+        && rolePrompts.direct_response!.includes('classify support and reject unsupported claims')
+        && rolePrompts.council_synthesis!.includes('Do not rewrite a prior seat')
+    },
+  }))
+  cases.push(await runCase({
+    caseId: 'lcp_persona_010_similarity_regression_flags_echo_not_distinct_roles',
+    category: 'P. Persona and role instructions',
+    run: () => {
+      const orion = 'Two engineering risks: the council stream has no failover path, and the decree pairing store can attach a late token to the wrong round if abort is ignored.'
+      const lumenEcho = 'Two engineering risks: the council stream has no failover path, and the decree pairing store can attach a late token to the wrong round if abort is ignored.'
+      const lumenVerify = 'ORION named a failover gap and a pairing hazard. Neither is supported by same-round telemetry; both stay unsupported until we inspect the abort path and persistence records. I reject them as verified War Room facts.'
+      const aurora = 'Only the unverified pairing hazard survives as a hypothesis. No operational claim is certified. Next evidence needed is abort-path traces for the live composer.'
+      return isNearEcho(orion, lumenEcho)
+        && !isNearEcho(orion, lumenVerify)
+        && !isNearEcho(lumenVerify, aurora)
+        && tokenJaccardSimilarity(orion, lumenEcho) >= 0.9
+        && tokenJaccardSimilarity(orion, lumenVerify) < 0.62
+    },
+    details: ['Deterministic Jaccard echo detector; not a recursive Council loop.'],
   }))
 
   // S. Stability mode truthfulness
@@ -268,6 +297,7 @@ export async function runLivePersonaClusterValidation(): Promise<ValidationCase[
     'lib/council/family-deliberation/runtime.ts',
     'lib/council/stabilityMode.ts',
     'lib/council/stableGroupChat.ts',
+    'lib/council/seatDistinctness.ts',
     'lib/council/unified-experience/adapter.ts',
   ]
   const FORBIDDEN_IO_PATTERNS = [
@@ -301,6 +331,20 @@ export async function runLivePersonaClusterValidation(): Promise<ValidationCase[
       const source = readSource('components/war-room/live-room/CommandConsole.tsx')
       return source.includes('Council thinking…') && !source.includes('Council responding…') && !/'Working…'/.test(source)
     },
+  }))
+  cases.push(await runCase({
+    caseId: 'lcp_ui_001b_composer_allows_supersede_while_thinking',
+    category: 'U. UI copy and coupling',
+    run: () => {
+      const consoleSource = readSource('components/war-room/live-room/CommandConsole.tsx')
+      const pageSource = readSource('app/page.tsx')
+      const pipeline = readSource('lib/council/liveChatPipeline.ts')
+      return !consoleSource.includes('disabled={loading}')
+        && !consoleSource.includes('disabled={loading || !command.trim()}')
+        && pageSource.includes('allowSupersedeWhileBusy: true')
+        && pipeline.includes('allowSupersedeWhileBusy')
+    },
+    details: ['Thinking copy may remain, but the existing composer must stay usable for Commander supersession.'],
   }))
   cases.push(await runCase({
     caseId: 'lcp_ui_002_timeline_events_collapsed_after_briefing',

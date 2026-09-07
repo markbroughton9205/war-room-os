@@ -12,6 +12,11 @@ import {
 } from '@/lib/council/providerTokenDiagnostics'
 import { nebulaAgentForSeat } from '@/lib/council/nebula/identity'
 import { buildAuroraFinalSynthesisRole, buildNebulaStableGroupRole } from '@/lib/council/nebula/persona'
+import {
+  DISTINCTNESS_NUDGE,
+  formatPriorSeatBriefs,
+  priorSeatsWereNearEcho,
+} from '@/lib/council/seatDistinctness'
 
 export { STABLE_GROUP_PROMPT_TOKEN_CEILING }
 
@@ -70,12 +75,11 @@ export function formatProviderStatusBlock(
   return ['Provider status (basic):', ...lines].join('\n')
 }
 
-export function buildStableGroupPriorBlock(prior: StableGroupPriorReply[]): string {
-  if (!prior.length) return 'Prior family replies this turn: (none yet — you speak first after Ra\'el).'
-  return [
-    'Prior family replies this turn (build on these; do not repeat verbatim):',
-    ...prior.map(p => `${p.family}: ${p.content}`),
-  ].join('\n')
+export function buildStableGroupPriorBlock(prior: StableGroupPriorReply[], opts?: { synthesis?: boolean }): string {
+  return formatPriorSeatBriefs(
+    prior.map(p => ({ family: p.family, content: p.content })),
+    opts?.synthesis ? { maxChars: 160 } : undefined,
+  )
 }
 
 /**
@@ -129,9 +133,10 @@ export function buildStableGroupSystemPrompt(args: {
   return [
     role,
     identity,
-    "War Room stable group chat. Never speak for Ra'el. Never simulate his lines. Talk like family in a real conversation, not a report — no headers or labeled sections. Don't open the same way every time or lead with agreement by default; if a prior family reply already covered your point, build on it or say something new instead of repeating it.",
+    "War Room stable group chat. Never speak for Ra'el. Never simulate his lines. Talk like family in a real conversation, not a report — no headers or labeled sections. Don't open the same way every time or lead with agreement by default. LUMEN must verify or reject claims rather than agree. AURORA must synthesize what survived verification rather than rewrite the previous seat. If a prior family reply already covered your point, do your own role instead of repeating it.",
     'If live research evidence is included below, ground your answer in it and speak naturally about what it shows — do not label or cite it like a report. If no live research evidence is included, do not claim you searched or browsed the web; say so plainly or reason from what you already know.',
     'Never narrate an operational action (restarting a system, verifying a service is healthy, executing a task, fixing something) as having happened unless real tool output or runtime evidence for it is included above — if the Commander asks you to do or verify something and no such evidence is present, say plainly that it was not executed / its status is unknown rather than describing it as done.',
+    'Qualitative War Room/system-state claims (stable, reliable, strong foundations, weak redundancy, performing well, a gap in real-time updates) are hypothesis/inference unless same-round telemetry, code, or runtime evidence supports them. Frame unsupported ones as not independently verified.',
     SENTENCE_LIMIT,
     args.toneInstruction,
   ].join(' ')
@@ -146,11 +151,15 @@ export function buildStableGroupUserPrompt(args: {
   /** Live research grounding block (already includes its own success/partial/unavailable
    * framing) — Stable Group previously dropped this entirely, so no family ever saw it. */
   researchBlock?: string
+  finalSynthesis?: boolean
 }): string {
   const prior =
     args.turnPriorFromClient && args.turnPriorFromClient.length
       ? args.turnPriorFromClient
       : args.priorReplies
+  const closer = args.finalSynthesis
+    ? "AURORA final synthesis: write a NEW Commander takeaway. Do not paste, paraphrase, or lightly edit ORION or LUMEN. State what survived verification, what was rejected as unsupported, and what still needs telemetry/code/runtime evidence. If nothing was independently verified, say that plainly and stop."
+    : "Respond once for your family only, with at least 2-3 sentences of substance addressing the Commander's message directly from your own role — do not reply with only a greeting, acknowledgment, or restatement of a prior seat, then stop."
   return [
     'Commander message:',
     args.commanderMessage,
@@ -158,11 +167,12 @@ export function buildStableGroupUserPrompt(args: {
     'Active topic:',
     args.activeTopic.trim() || '(same as commander message)',
     '',
-    buildStableGroupPriorBlock(prior),
+    buildStableGroupPriorBlock(prior, { synthesis: args.finalSynthesis === true }),
     '',
     args.providerStatusBlock,
     args.researchBlock?.trim() ? `\n${args.researchBlock.trim()}` : '',
+    priorSeatsWereNearEcho(prior) || args.finalSynthesis ? `\n${DISTINCTNESS_NUDGE}` : '',
     '',
-    "Respond once for your family only, with at least 2-3 sentences of substance addressing the Commander's message directly — do not reply with only a greeting or acknowledgment, then stop.",
+    closer,
   ].join('\n')
 }

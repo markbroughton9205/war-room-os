@@ -3,6 +3,7 @@ import { displayNameForSeat, nebulaAgentForSeat } from '@/lib/council/nebula/ide
 import { auroraDegradedRoundNotice, projectRoundHealth, shouldSurfaceFailureInConversation, type NebulaRoundHealth } from '@/lib/council/nebula/round'
 import { presentAgentMessage } from '@/lib/council/nebula/presentation'
 import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
+import { compressSeatBrief } from '@/lib/council/seatDistinctness'
 import type { LiveResearchEvidencePacket } from '@/lib/runtime/liveResearchEvidencePacket'
 import type {
   DeliberationClaim,
@@ -278,32 +279,32 @@ function formatEvidenceBlock(references: DeliberationEvidenceReference[]): strin
 function formatPriorTurnsBlock(turns: DeliberationTurn[]): string {
   if (!turns.length) return 'Prior family messages: none.'
   return [
-    'Prior family messages already completed:',
+    'Prior family briefs already completed (critique/verify these — do not copy or rewrite them as your own analysis):',
     ...turns
-      .filter(turn => turn.output_message_id && turn.full_response.trim())
+      .filter(turn => turn.output_message_id && (turn.executive_position.trim() || turn.full_response.trim()))
       .map(turn => [
         `- message_id: ${turn.output_message_id}`,
         `  family: ${turn.provider_label}`,
         `  role: ${turn.turn_role}`,
-        `  content: ${turn.full_response}`,
+        `  brief: ${turn.executive_position.trim() || compressSeatBrief(turn.full_response)}`,
       ].join('\n')),
   ].join('\n')
 }
 
 function roleInstruction(role: DeliberationTurnRole): string {
   if (role === 'opening_position') {
-    return "Turn role: opening position. Give your read — your position, the reasoning behind it, real risks, and what you'd actually do next. Talk like you're in the room, not writing a memo. Do not cite message IDs or label sections (no \"confidence:\", no \"recommended action:\")."
+    return "Turn role: opening position. Give your read — your position, the reasoning behind it, real risks, and what you'd actually do next. Talk like you're in the room, not writing a memo. Do not cite message IDs or label sections (no \"confidence:\", no \"recommended action:\"). If you are ORION, stay in engineering/runtime architecture; do not claim unverified War Room state as fact."
   }
   if (role === 'direct_response') {
-    return "Turn role: direct response. Respond to what the prior family actually said, in your own words — agree, push back, or add to it. Do not cite it by message ID or label your reply with sections; just talk about the substance."
+    return "Turn role: direct response. Verify, push back, or extend what the prior family actually said, in your own words — do not simply agree or rewrite it. Do not cite it by message ID or label your reply with sections; just talk about the substance. If you are LUMEN, classify support and reject unsupported claims rather than echoing."
   }
   if (role === 'red_team_challenge') {
-    return "Turn role: PHOENIX challenge. Push back on the prior agent's position by name, not by message ID. Focus on assumptions, missing evidence, and failure modes — say it like you're the one in the room saying \"hold up,\" not filing a finding."
+    return "Turn role: PHOENIX challenge. Push back on the prior agent's position by name, not by message ID. Focus on assumptions, missing evidence, and failure modes — say it like you're the one in the room saying \"hold up,\" not filing a finding. Do not restate the prior analysis."
   }
   if (role === 'revision_or_stand_firm') {
     return "Turn role: revision or stand firm. Respond to the Red Team challenge directly, in your own words — either revise your position or stand firm, and say why. No message-ID citations or labeled sections."
   }
-  return 'Turn role: council synthesis. Synthesize only the completed exchange in plain language. Do not add new evidence. Give Ra’el the actual takeaway, like a person closing out the conversation, not a formal summary.'
+  return 'Turn role: council synthesis. Synthesize only the completed exchange in plain language. Do not add new evidence. Do not rewrite a prior seat as the final answer. Give Ra’el the actual takeaway from what survived verification, like a person closing out the conversation, not a formal summary.'
 }
 
 export function formatDeliberationTurnForChat(turn: DeliberationTurn, references: DeliberationEvidenceReference[]): string {

@@ -91,6 +91,7 @@ const CONTRACTS: Record<NebulaAgentId, NebulaRoleContract> = {
       'Invent evidence',
       'Silently erase dissent',
       'Treat its own synthesis as evidence',
+      'Rewrite ORION or LUMEN instead of synthesizing what survived verification',
     ],
     defaultQuestions: [
       'Which participating findings are actually available this round?',
@@ -275,6 +276,7 @@ const CONTRACTS: Record<NebulaAgentId, NebulaRoleContract> = {
       'Perform broad discovery as its primary function',
       'Make strategy decisions',
       'Erase uncertainty because several agents agree',
+      'Echo or rewrite a prior seat as if verification were agreement',
     ],
     defaultQuestions: [
       'What atomic claims is this conclusion actually making?',
@@ -400,6 +402,7 @@ const CONTRACTS: Record<NebulaAgentId, NebulaRoleContract> = {
       'Own business strategy',
       'Own final synthesis',
       'Invent unsupported product assumptions',
+      'Give a generic reliability essay that ignores architecture',
     ],
     defaultQuestions: [
       'What components actually have to exist for this to work?',

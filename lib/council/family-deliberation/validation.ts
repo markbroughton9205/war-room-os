@@ -303,8 +303,8 @@ export function runFamilyDeliberationValidation(): FamilyDeliberationValidationC
   )
 
   return [
-    caseResult('deliberation_01_family_b_receives_a_id_and_content', 'Family B receives Family A message ID and content.', 'valid', Boolean(b.input_message_ids.includes(a.output_message_id!) && promptForB.includes(a.output_message_id!) && promptForB.includes(a.full_response))),
-    caseResult('deliberation_02_red_team_receives_both_prior_messages', 'Red Team receives both prior family messages.', 'valid', Boolean(red.input_message_ids.includes(a.output_message_id!) && red.input_message_ids.includes(b.output_message_id!) && promptForRed.includes(a.full_response) && promptForRed.includes(b.full_response))),
+    caseResult('deliberation_01_family_b_receives_a_id_and_content', 'Family B receives Family A message ID and a brief, not the full prior essay.', 'valid', Boolean(b.input_message_ids.includes(a.output_message_id!) && promptForB.includes(a.output_message_id!) && promptForB.includes(a.executive_position) && !promptForB.includes('This is a full paragraph with usable reasoning'))),
+    caseResult('deliberation_02_red_team_receives_both_prior_messages', 'Red Team receives both prior family briefs and message IDs.', 'valid', Boolean(red.input_message_ids.includes(a.output_message_id!) && red.input_message_ids.includes(b.output_message_id!) && promptForRed.includes(a.executive_position) && promptForRed.includes(b.executive_position))),
     caseResult('deliberation_03_revision_receives_targeted_challenge', 'Revision receives the targeted challenge.', 'valid', Boolean(revision.input_message_ids.includes(red.output_message_id!) && revision.challenge_target_ids.includes(red.output_message_id!) && promptForRevision.includes(red.full_response))),
     caseResult('deliberation_04_original_and_revised_positions_stored', 'Original and revised positions are both stored separately.', 'valid', originalAndRevisionStored),
     caseResult('deliberation_05_independent_message_not_renderable_as_response', 'UI cannot label independent message as response without input provenance.', 'invalid', canDisplayAsResponse(independentB, independentA.output_message_id!)),
@@ -334,6 +334,7 @@ export function runFamilyDeliberationValidation(): FamilyDeliberationValidationC
     caseResult('deliberation_23_challenge_label_requires_valid_targets', 'A challenge label cannot render unless challenge targets are valid inputs.', 'invalid', canDisplayAsChallenge(invalidChallenge, [independentA.output_message_id!].filter(Boolean))),
     caseResult('deliberation_24_invalid_relationship_does_not_fabricate_debate', 'Invalid relationship metadata does not create output message content by itself.', 'valid', invalidChallenge.full_response.includes('bad challenge') && !canDisplayAsChallenge(invalidChallenge, [independentA.output_message_id!].filter(Boolean))),
     caseResult('deliberation_25_revision_provenance_branch_exercised', 'deliberation_06 reaches actual revision provenance comparison branch.', 'valid', invalidRevision.turn_role === 'revision_or_stand_firm' && Boolean(invalidRevision.revision_of_message_id) && !invalidRevision.input_message_ids.includes(independentA.output_message_id!)),
+    caseResult('deliberation_26_direct_response_forbids_echo', 'Direct-response prompt tells the next seat to verify rather than echo.', 'valid', promptForB.includes('do not simply agree or rewrite') && promptForB.includes('classify support and reject unsupported claims')),
   ]
 }
 

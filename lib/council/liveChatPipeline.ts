@@ -198,16 +198,35 @@ export type LiveCouncilExpansionPayload = {
   urgent: boolean
 }
 
+let lastThroneSubmit: { decree: string; at: number } | null = null
+const THRONE_DUPLICATE_WINDOW_MS = 400
+
 export async function sendLiveCouncilThroneMessage(args: {
   rawInput: string
   isBusy: () => boolean
+  /**
+   * Commander supersession: a new decree from the existing composer must abort/replace an
+   * in-flight round. When true, `isBusy` does not block send — it only reserved the old
+   * "wait until Council finishes" lock, which prevented the real UI from exercising cancellation.
+   */
+  allowSupersedeWhileBusy?: boolean
   clearDraft: () => void
   detectExpansion: (decree: string) => LiveCouncilExpansionPayload | null
   onExpansionQueued: (decree: string, expansion: LiveCouncilExpansionPayload) => void
   sendDecree: (decree: string) => Promise<void>
 }): Promise<void> {
   const decree = args.rawInput.trim()
-  if (!decree || args.isBusy()) return
+  if (!decree) return
+  if (args.isBusy() && args.allowSupersedeWhileBusy !== true) return
+  const now = Date.now()
+  if (
+    lastThroneSubmit
+    && lastThroneSubmit.decree === decree
+    && now - lastThroneSubmit.at < THRONE_DUPLICATE_WINDOW_MS
+  ) {
+    return
+  }
+  lastThroneSubmit = { decree, at: now }
   args.clearDraft()
   const expansion = args.detectExpansion(decree)
   if (expansion) {
