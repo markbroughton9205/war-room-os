@@ -76,8 +76,31 @@ const INTERNAL_COUNCIL_RUNTIME_STATUS =
 const EXTERNAL_LIVE_OVERRIDE =
   /\b(panama|visa|news|headlines|weather|markets?|election|bitcoin|freight|broughton|relocation)\b/i
 
+/**
+ * Mirrors researchIntent.ts's `localRuntimeOrRepoQuestion` (kept as a separate local constant
+ * rather than a shared import — same circular-dependency reason as `RELOCATION_CODE_OR_META_CONTEXT`
+ * above: researchIntent.ts already imports `evaluateMandatoryLiveRetrieval` from this file).
+ *
+ * Without this, a question like "Is the local Ollama runtime currently online and responding?"
+ * fell through to MANDATORY_PATTERNS below, whose broad `explicit_live_retrieval` pattern
+ * (/current|latest|right now/) matched "currently" and forced `required: true` — overriding
+ * detectResearchIntent's LOCAL_RUNTIME exclusion entirely, since execute.ts ORs this requirement in
+ * regardless of what detectResearchIntent decided. Confirmed live (Build #4A regression check): a
+ * self-referential local-runtime question triggered a real public-RSS research round before this
+ * fix. Build #3.1 added the LOCAL_RUNTIME/LOCAL_REPO_ARCHITECTURE exclusion only to
+ * researchIntent.ts, never to this second, independent "mandatory" gate — this closes that gap.
+ */
+const LOCAL_RUNTIME_OR_REPO_QUESTION =
+  /\b(?:is\s+ollama|ollama\s+(?:reachable|running|responding|up|online)|local\s+(?:model|backend|ollama)|(?:this|our)\s+(?:repo|repository|codebase|runtime|backend))\b/i
+const WAR_ROOM_OWN_ARCHITECTURE_QUESTION =
+  /\bwar\s*room(?:'s|s)?\s+(?:current\s+)?(?:engineering|architecture|codebase|repo|repository)\b/i
+
 export function evaluateMandatoryLiveRetrieval(decree: string): RetrievalRequirement {
-  if (INTERNAL_COUNCIL_RUNTIME_STATUS.test(decree) && !EXTERNAL_LIVE_OVERRIDE.test(decree)) {
+  const internalOrLocal =
+    INTERNAL_COUNCIL_RUNTIME_STATUS.test(decree)
+    || LOCAL_RUNTIME_OR_REPO_QUESTION.test(decree)
+    || WAR_ROOM_OWN_ARCHITECTURE_QUESTION.test(decree)
+  if (internalOrLocal && !EXTERNAL_LIVE_OVERRIDE.test(decree)) {
     return { required: false, reasons: [], confidence: 0 }
   }
   const reasons = MANDATORY_PATTERNS

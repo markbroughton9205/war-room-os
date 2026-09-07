@@ -10,9 +10,12 @@ import {
   type PublicNewsItem,
 } from '@/lib/research/publicRssFeeds'
 import { extractUsStateArea, fetchActiveWeatherAlerts, skippedWeatherAlertsLeg, type NwsAlertsLeg } from '@/lib/research/nwsAlerts'
+import { classifyResearchDomain, matchedDomains } from '@/lib/research/researchDomainRouter'
+import { runResearchEngineBridge, type ResearchEngineBridgeLeg } from '@/lib/research/researchEngineBridge'
 
 export type { PublicNewsItem } from '@/lib/research/publicRssFeeds'
 export type { NwsAlertsLeg } from '@/lib/research/nwsAlerts'
+export type { ResearchEngineBridgeLeg } from '@/lib/research/researchEngineBridge'
 
 export type LiveResearchRouterInput = {
   decreeText: string
@@ -60,6 +63,7 @@ export type LiveResearchRouterResult = {
   grok: GrokLeg
   direct: DirectFetchSnippet[]
   retrieval: RetrievalOrchestration
+  researchEngine: ResearchEngineBridgeLeg
 }
 
 const MAX_DIRECT = 2
@@ -291,7 +295,14 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     : Promise.resolve(skippedWeatherAlertsLeg())
   const directP = Promise.all(urls.map(u => fetchDirectSnippet(u)))
 
-  const [tRaw, publicRss, weatherAlerts, grok, direct] = await Promise.all([tavilyP, publicRssP, weatherAlertsP, grokP, directP])
+  const domain = classifyResearchDomain(input.decreeText)
+  const researchEngineP = runResearchEngineBridge({
+    queryText: searchQuery,
+    domain,
+    matchedDomains: domain === 'HYBRID' ? matchedDomains(input.decreeText) : [],
+  })
+
+  const [tRaw, publicRss, weatherAlerts, grok, direct, researchEngine] = await Promise.all([tavilyP, publicRssP, weatherAlertsP, grokP, directP, researchEngineP])
 
   const tavily: TavilyLeg = tRaw.ok
     ? { ok: true, results: tRaw.results, durationMs: tRaw.durationMs }
@@ -299,7 +310,7 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
   const retrieval = buildRetrievalOrchestration({
     decree: input.decreeText,
     generatedAt,
-    tavilyOk: (tavily.ok && tavily.results.length > 0) || publicRss.ok || (weatherAlerts.queried && weatherAlerts.ok),
+    tavilyOk: (tavily.ok && tavily.results.length > 0) || publicRss.ok || researchEngine.ok || (weatherAlerts.queried && weatherAlerts.ok),
     tavilyLatencyMs: Math.min(tavily.durationMs, publicRss.durationMs),
     tavilyError: tavily.ok || publicRss.ok ? undefined : [tavily.error, publicRss.error].filter(Boolean).join(' | '),
     grokOk: grok.ok,
@@ -320,5 +331,6 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     grok,
     direct,
     retrieval,
+    researchEngine,
   }
 }

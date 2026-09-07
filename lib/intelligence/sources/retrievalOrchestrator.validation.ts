@@ -58,6 +58,17 @@ const fictionalEmigratedNotRequired = evaluateMandatoryLiveRetrieval('our fictio
 const travelPlanningRegexNotRequired = evaluateMandatoryLiveRetrieval('test the travel planning regex')
 const relocationVariableNotRequired = evaluateMandatoryLiveRetrieval('update the relocation variable name')
 
+// Build #4A regression check (confirmed live): this exact question forced `required: true` via
+// `explicit_live_retrieval`'s "currently" match before the LOCAL_RUNTIME/LOCAL_REPO_ARCHITECTURE
+// exclusion was mirrored into this file — overriding detectResearchIntent's own correct exclusion
+// entirely, since execute.ts ORs the two decisions together.
+const ollamaRuntimeNotRequired = evaluateMandatoryLiveRetrieval('Is the local Ollama runtime currently online and responding?')
+const localBackendNotRequired = evaluateMandatoryLiveRetrieval('is our local backend responding right now')
+const warRoomArchitectureNotRequired = evaluateMandatoryLiveRetrieval('what is War Room\'s current engineering architecture')
+// The external-live-override escape hatch must still win when a local-sounding question also
+// carries an explicit external-current-events word (mirrors researchIntent.ts's own behavior).
+const localRuntimeWithNewsStillRequired = evaluateMandatoryLiveRetrieval('is our local runtime affected by the news headlines today')
+
 export function runRetrievalOrchestratorValidation(): CaseResult[] {
   return [
     check(
@@ -141,6 +152,26 @@ export function runRetrievalOrchestratorValidation(): CaseResult[] {
       'retrieval_orchestrator_09e_relocation_variable_name_not_required',
       !relocationVariableNotRequired.required,
       JSON.stringify(relocationVariableNotRequired),
+    ),
+    check(
+      'retrieval_orchestrator_10a_local_ollama_runtime_question_not_required',
+      !ollamaRuntimeNotRequired.required,
+      JSON.stringify(ollamaRuntimeNotRequired),
+    ),
+    check(
+      'retrieval_orchestrator_10b_local_backend_question_not_required',
+      !localBackendNotRequired.required,
+      JSON.stringify(localBackendNotRequired),
+    ),
+    check(
+      'retrieval_orchestrator_10c_war_room_architecture_question_not_required',
+      !warRoomArchitectureNotRequired.required,
+      JSON.stringify(warRoomArchitectureNotRequired),
+    ),
+    check(
+      'retrieval_orchestrator_10d_local_runtime_with_explicit_news_word_still_required',
+      localRuntimeWithNewsStillRequired.required,
+      JSON.stringify(localRuntimeWithNewsStillRequired),
     ),
   ]
 }

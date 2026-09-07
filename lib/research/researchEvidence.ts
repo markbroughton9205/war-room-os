@@ -29,6 +29,10 @@ async function synthesizeWithGemini(args: {
     .filter(d => d.ok && d.contentSnippet)
     .map(d => `URL: ${d.url}\nTEXT: ${d.contentSnippet.slice(0, 1200)}`)
     .join('\n---\n')
+  const bridgeLines = router.researchEngine.documents
+    .slice(0, 6)
+    .map(d => `TITLE: ${d.title}\nURL: ${d.canonicalUrl ?? d.sourceUrl ?? ''}\nPROVIDER: ${d.sourceName}\nSNIPPET: ${(d.summary ?? d.contentSnippet ?? '').slice(0, 900)}`)
+    .join('\n---\n')
   const rssLines = router.publicRss.results
     .slice(0, 6)
     .map(r => `TITLE: ${r.title}\nURL: ${r.url}\nPUBLISHED: ${r.publishedAt ?? 'unknown'}\nSOURCE: ${r.source}\nSNIPPET: ${r.snippet}`)
@@ -42,6 +46,9 @@ async function synthesizeWithGemini(args: {
   const bundle = [
     'TAVILY_RESULTS:',
     tLines || '(none)',
+    '',
+    'RESEARCH_ENGINE_BRIDGE_RESULTS:',
+    bridgeLines || '(none)',
     '',
     'PUBLIC_RSS_RESULTS:',
     rssLines || '(none)',
@@ -57,7 +64,7 @@ async function synthesizeWithGemini(args: {
 
   const system = `You are Gemini Family in War Room **secondary verification / synthesis** for live research.
 Rules:
-- Use ONLY facts supported by the pasted bundle (TAVILY_RESULTS, PUBLIC_RSS_RESULTS, DIRECT_FETCH, GROK_FRAMING). GROK_FRAMING is not web search output — treat it as hypothesis-level only.
+- Use ONLY facts supported by the pasted bundle (TAVILY_RESULTS, RESEARCH_ENGINE_BRIDGE_RESULTS, PUBLIC_RSS_RESULTS, DIRECT_FETCH, GROK_FRAMING). GROK_FRAMING is not web search output — treat it as hypothesis-level only.
 - Never invent URLs, publishers, dates, or quotes.
 - End your reply with exactly these three lines:
 CONTRADICTIONS: item1 || item2 || NONE
@@ -84,8 +91,15 @@ function fallbackFindings(router: LiveResearchRouterResult): string {
     const r = router.tavily.results[0]!
     bits.push(`Primary search hit: ${r.title} — ${r.snippet.slice(0, 420)}`)
   }
-  for (const r of router.publicRss.results.slice(0, 5)) {
-    bits.push(`Current public news (${r.source}, ${r.publishedAt ?? 'date unavailable'}): ${r.title} — ${r.snippet.slice(0, 360)} (${r.url})`)
+  const bridgeSucceeded = router.researchEngine.attempted && router.researchEngine.ok
+  for (const doc of router.researchEngine.documents.slice(0, 6)) {
+    const snippet = (doc.summary ?? doc.contentSnippet ?? '').slice(0, 360)
+    bits.push(`${doc.sourceName} (${doc.provider}, ${doc.publishedAt ?? 'date unavailable'}): ${doc.title} — ${snippet} (${doc.canonicalUrl ?? doc.sourceUrl ?? 'no url'})`)
+  }
+  if (!bridgeSucceeded) {
+    for (const r of router.publicRss.results.slice(0, 5)) {
+      bits.push(`Current public news (${r.source}, ${r.publishedAt ?? 'date unavailable'}): ${r.title} — ${r.snippet.slice(0, 360)} (${r.url})`)
+    }
   }
   for (const r of router.weatherAlerts.results.slice(0, 5)) {
     bits.push(`NWS weather alert (${r.source}, ${r.publishedAt ?? 'date unavailable'}): ${r.title} — ${r.snippet.slice(0, 360)}`)
@@ -100,6 +114,28 @@ function fallbackFindings(router: LiveResearchRouterResult): string {
 }
 
 function rawIntelligenceFromRouter(router: LiveResearchRouterResult): RawIntelligenceSourceRecord[] {
+  // Domain-relevant bridged research-engine sources are preferred over generic public RSS: when the
+  // bridge (e.g. arXiv for a science query, SEC EDGAR for a regulatory/logistics one) actually
+  // returned usable documents, generic RSS is dropped from this round's evidence rather than mixed
+  // in alongside a more relevant source — RSS remains the fallback for whenever the bridge has
+  // nothing (wrong domain, or the domain has no bridged provider, or the provider call failed).
+  const bridgeSucceeded = router.researchEngine.attempted && router.researchEngine.ok
+  const includePublicRss = router.publicRss.ok && !bridgeSucceeded
+
+  const bridgeRecords: RawIntelligenceSourceRecord[] = router.researchEngine.results.map(result => ({
+    source_id: result.providerId,
+    ok: result.ok,
+    queried_at: router.generatedAt,
+    findings: result.documents.map(doc => ({
+      title: doc.title,
+      url: doc.canonicalUrl ?? doc.sourceUrl ?? undefined,
+      content: doc.summary ?? doc.contentSnippet ?? doc.title,
+      observed_at: doc.publishedAt ?? router.generatedAt,
+    })),
+    error: result.error,
+    failure_behavior: 'skip',
+  }))
+
   const records: RawIntelligenceSourceRecord[] = [
     {
       source_id: 'tavily',
@@ -114,17 +150,20 @@ function rawIntelligenceFromRouter(router: LiveResearchRouterResult): RawIntelli
       error: router.tavily.error,
       failure_behavior: 'degrade',
     },
+    ...bridgeRecords,
     {
       source_id: 'public_news_rss',
-      ok: router.publicRss.ok,
+      ok: includePublicRss,
       queried_at: router.generatedAt,
-      findings: router.publicRss.results.map(result => ({
-        title: result.title,
-        url: result.url,
-        content: result.snippet,
-        observed_at: result.publishedAt ?? router.generatedAt,
-      })),
-      error: router.publicRss.error,
+      findings: includePublicRss
+        ? router.publicRss.results.map(result => ({
+            title: result.title,
+            url: result.url,
+            content: result.snippet,
+            observed_at: result.publishedAt ?? router.generatedAt,
+          }))
+        : [],
+      error: bridgeSucceeded ? 'skipped: a more relevant bridged research-engine source was used instead' : router.publicRss.error,
       failure_behavior: 'degrade',
     },
     {
@@ -207,6 +246,17 @@ export async function buildLiveResearchEvidencePacket(args: {
     note: 'Credential-free RSS/RDF fallback: Google News plus the trusted static feed list (BBC, NASA, Bloomberg, TechCrunch, ABC, AllAfrica, Al Jazeera, Le Monde, The Hindu, SCMP, DW, SMH)',
   })
 
+  if (router.researchEngine.attempted) {
+    sources.push({
+      kind: 'research_engine_bridge',
+      ok: router.researchEngine.ok,
+      queriedAt: router.generatedAt,
+      urls: router.researchEngine.documents.map(d => d.canonicalUrl ?? d.sourceUrl ?? '').filter(Boolean).slice(0, 8),
+      error: router.researchEngine.ok ? undefined : router.researchEngine.results.map(r => r.error).filter(Boolean).join(' | ') || undefined,
+      note: `domain=${router.researchEngine.domain}; providers=${router.researchEngine.providerIds.join(',')}`,
+    })
+  }
+
   if (router.weatherAlerts.queried) {
     sources.push({
       kind: 'weather_alerts',
@@ -242,7 +292,7 @@ export async function buildLiveResearchEvidencePacket(args: {
   let geminiOk = false
   const allowGemini =
     Boolean(process.env.GEMINI_API_KEY?.trim())
-    && (router.tavily.ok && router.tavily.results.length > 0 || router.publicRss.ok || weatherAlertsOk || router.direct.some(d => d.ok))
+    && (router.tavily.ok && router.tavily.results.length > 0 || router.publicRss.ok || weatherAlertsOk || router.direct.some(d => d.ok) || router.researchEngine.ok)
   if (allowGemini) {
     const syn = await synthesizeWithGemini({ decreeText, router })
     geminiOk = syn.ok && Boolean(syn.text)
@@ -268,6 +318,7 @@ export async function buildLiveResearchEvidencePacket(args: {
   const legScore =
     (router.tavily.ok ? 0.28 : 0)
     + (router.publicRss.ok ? 0.24 : 0)
+    + (router.researchEngine.ok ? 0.26 : 0)
     + (weatherAlertsOk ? 0.1 : 0)
     + (router.grok.ok ? 0.12 : 0)
     + (router.direct.some(d => d.ok) ? 0.22 : 0)
@@ -280,13 +331,14 @@ export async function buildLiveResearchEvidencePacket(args: {
   const usedLiveResearch =
     (router.tavily.ok && router.tavily.results.length > 0)
     || router.publicRss.ok
+    || router.researchEngine.ok
     || weatherAlertsOk
     || router.direct.some(d => d.ok)
     || router.grok.ok
     || geminiOk
 
   const freshness: LiveResearchEvidencePacket['freshness'] =
-    router.tavily.ok || router.publicRss.ok || weatherAlertsOk || router.direct.some(d => d.ok) ? 'recent' : router.grok.ok ? 'unknown' : 'stale'
+    router.tavily.ok || router.publicRss.ok || router.researchEngine.ok || weatherAlertsOk || router.direct.some(d => d.ok) ? 'recent' : router.grok.ok ? 'unknown' : 'stale'
 
   const intelligencePacket = hydrateLiveIntelligencePacket({
     decree: decreeText,
