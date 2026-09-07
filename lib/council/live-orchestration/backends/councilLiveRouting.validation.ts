@@ -84,12 +84,30 @@ function installMockFetch(responder: (url: string) => { ok: boolean; status: num
     calls.push(url)
     const outcome = responder(url)
     if (outcome === 'reject') throw new Error('mock: network error')
+    // A real fetch Response exposes BOTH .json()/.text() AND a real .body ReadableStream at the
+    // same time - they're different views onto the same bytes, not alternatives. This mock only
+    // provided the former, which silently broke any caller that reads .body directly (as Ollama's
+    // real NDJSON /api/generate streaming client does - see lib/native-builder/ollamaClient.ts's
+    // readOllamaGenerateStream, which returns `{ok:false, detail:'Ollama returned an empty stream
+    // body.'}` when res.body is missing, exactly the failure this was causing). Encoding the same
+    // JSON payload as a single-chunk stream fixes every caller shape, not just this one test's -
+    // for /api/generate mocks in this file, `body` is already shaped as one real NDJSON line
+    // (e.g. `{ response: 'mock local reply' }`), so it parses correctly as-is.
+    const encoder = new TextEncoder()
+    const bodyText = JSON.stringify(outcome.body)
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(bodyText))
+        controller.close()
+      },
+    })
     return {
       ok: outcome.ok,
       status: outcome.status,
       json: async () => outcome.body,
-      text: async () => JSON.stringify(outcome.body),
-    } as Response
+      text: async () => bodyText,
+      body: stream,
+    } as unknown as Response
   }) as typeof fetch
   return { restore: () => { globalThis.fetch = original }, calls }
 }
