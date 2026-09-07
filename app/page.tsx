@@ -10084,8 +10084,19 @@ function Home() {
           } else {
             const eid = cloudEngineIdForCouncilFamily(family)
             const row = eid ? engineMapRef.current.get(eid) : undefined
+            // A "not functional" cloud-engine row only means the *cloud* provider has no key —
+            // under LOCAL_FIRST/LOCAL_ONLY/HYBRID routing (councilRoutingLocalOnlyRef), the server's
+            // invokeCouncilSeat still serves this family via local Ollama regardless of cloud engine
+            // status, the same way the P0-2 fix already made the single-family "Continue" path do.
+            // Gating on cloud-engine status alone here silently skipped every family with no cloud
+            // keys configured — the legacy per-family loop (this branch, used whenever a decree is
+            // lightweight enough to skip family-to-family deliberation, e.g. a bare "hello") produced
+            // a completely empty, unexplained round in a local-only environment.
             const engineGateBlocksChat =
-              !attendanceWave && Boolean(row) && !isEngineFunctional(engineMapRef.current, eid)
+              !attendanceWave
+              && Boolean(row)
+              && !isEngineFunctional(engineMapRef.current, eid)
+              && !councilRoutingLocalOnlyRef.current
             if (engineGateBlocksChat) {
               const reason = unavailableReason(row)
               if (isDirectInvoke) {
