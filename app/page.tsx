@@ -839,6 +839,13 @@ type ExpansionPrompt = {
   extraCost: number
   reason: string
   urgent: boolean
+  /** True only when the resolved Council routing mode won't call a metered cloud provider for this
+   * decree (LOCAL_ONLY/LOCAL_FIRST/HYBRID — anything but EXTERNAL_ONLY). `extraCost` is a static
+   * mock cloud-pricing estimate (see MOCK_RATES_PER_MILLION) with no connection to actual routing,
+   * so presenting it as real spend when the seats are really resolving to local Ollama is
+   * misleading. Defaults to false (show the existing cost estimate) until routing status is known,
+   * so this only ever suppresses the dollar figure on positive evidence, never by assumption. */
+  isLocalOnlyExecution: boolean
 }
 
 type MemoryEntry = {
@@ -1444,7 +1451,7 @@ function totalUsageCost(rows: UsageEstimate[]) {
   return rows.reduce((total, row) => total + row.estimatedCost, 0)
 }
 
-function detectExpansionNeed(message: string): Omit<ExpansionPrompt, 'decree'> | null {
+function detectExpansionNeed(message: string): Omit<ExpansionPrompt, 'decree' | 'isLocalOnlyExecution'> | null {
   const text = message.toLowerCase()
 
   if (/\b(legal|lawsuit|medical|tax|financial risk|urgent|emergency|security breach|compliance)\b/.test(text)) {
@@ -5896,7 +5903,9 @@ function ExpansionPermissionPrompt({
         </div>
       )}
       <div className="text-xs tracking-widest" style={{ color: '#ddd' }}>
-        Council requests expanded analysis. Estimated extra usage: {formatCost(prompt.extraCost)}. Reason: {prompt.reason}. Continue?
+        {prompt.isLocalOnlyExecution
+          ? <>Council requests expanded analysis using local compute — no metered cost. Reason: {prompt.reason}. Continue?</>
+          : <>Council requests expanded analysis. Estimated extra usage: {formatCost(prompt.extraCost)}. Reason: {prompt.reason}. Continue?</>}
       </div>
       <div className="flex flex-wrap gap-2 mt-3">
         <button onClick={onApprove} className="text-xs px-3 py-1 rounded tracking-widest"
@@ -6216,6 +6225,9 @@ function Home() {
   const addSystemMessageRef = useRef<((content: string) => void) | null>(null)
   const submitDecreeRef = useRef<((decree: string, mode?: CouncilMode) => Promise<void>) | null>(null)
   const terraCouncilContextRef = useRef<string | null>(null)
+  /** See the backend-status fetch effect below — null/unset means unknown (treated as "not
+   * confirmed local-only", so the expanded-analysis cost estimate still shows by default). */
+  const councilRoutingLocalOnlyRef = useRef<boolean | null>(null)
   const loadMemoriesRef = useRef<(() => Promise<void>) | null>(null)
   const lastDecreeIntentRef = useRef<ClassifyRaElMessageResult | null>(null)
   const decreeRoundGenRef = useRef(0)
@@ -6338,6 +6350,19 @@ function Home() {
       .then(j => {
         const parsed = parseCouncilFlowMode((j as { defaultMode?: string } | null)?.defaultMode)
         if (parsed) setCouncilFlowMode(parsed)
+      })
+      .catch(() => undefined)
+  }, [])
+  // Whether the resolved Council routing mode will actually call a metered cloud provider —
+  // read once from the same canonical backend-status snapshot the Inspector uses, so the
+  // expanded-analysis approval gate can stop presenting a fabricated cloud dollar cost when the
+  // real seats resolve to local Ollama. Defaults to false (unknown -> keep showing the estimate).
+  useEffect(() => {
+    void fetch('/api/council/backend-status', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => {
+        const mode = (j as { routingModeResolved?: string } | null)?.routingModeResolved
+        if (mode) councilRoutingLocalOnlyRef.current = mode !== 'EXTERNAL_ONLY'
       })
       .catch(() => undefined)
   }, [])
@@ -11160,18 +11185,21 @@ function Home() {
         return { decree: d, ...expansionNeed }
       },
       onExpansionQueued: (decree, expansion) => {
+        const isLocalOnlyExecution = councilRoutingLocalOnlyRef.current === true
         matrixStatus('warning', 'Expanded analysis needs your approval')
         addRaelAction({
           action_id: `expanded-analysis-${decree.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80)}`,
           related_opportunity_id: null,
           title: 'Expanded analysis approval',
-          question: `Council requests expanded analysis. Estimated extra usage: ${formatCost(expansion.extraCost)}. Reason: ${expansion.reason}. Continue?`,
+          question: isLocalOnlyExecution
+            ? `Council requests expanded analysis using local compute — no metered cost. Reason: ${expansion.reason}. Continue?`
+            : `Council requests expanded analysis. Estimated extra usage: ${formatCost(expansion.extraCost)}. Reason: ${expansion.reason}. Continue?`,
           response_options: ['Approve', 'Decline', 'Summarize instead'],
           urgency: expansion.urgent ? 'high' : 'medium',
           expires_at: null,
           source_agent: 'Cost Guard',
         })
-        setExpansionPrompt({ decree, extraCost: expansion.extraCost, reason: expansion.reason, urgent: expansion.urgent })
+        setExpansionPrompt({ decree, extraCost: expansion.extraCost, reason: expansion.reason, urgent: expansion.urgent, isLocalOnlyExecution })
         setUsageRows(createUsageEstimate(decree, DEFAULT_OUTPUT_TOKEN_BUDGET))
         setCurrentDecreeCost(totalUsageCost(createUsageEstimate(decree, DEFAULT_OUTPUT_TOKEN_BUDGET)))
       },
