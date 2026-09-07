@@ -1924,6 +1924,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         evidenceReferences,
         priorTurns: session.turns,
         targetTurn: opts?.targetTurn,
+        identityId: nebulaAgentForSeat(family)?.id ?? null,
         contextBlock: [
           warRoomContextBlock,
           blackboardSummariesForPrompt(nebulaBlackboard).length

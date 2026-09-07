@@ -1,5 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
-import { displayNameForSeat, nebulaAgentForSeat } from '@/lib/council/nebula/identity'
+import { displayNameForSeat, nebulaAgentForSeat, type NebulaAgentId } from '@/lib/council/nebula/identity'
 import { auroraDegradedRoundNotice, projectRoundHealth, shouldSurfaceFailureInConversation, type NebulaRoundHealth } from '@/lib/council/nebula/round'
 import { presentAgentMessage } from '@/lib/council/nebula/presentation'
 import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
@@ -245,6 +245,11 @@ export function buildDeliberationPrompt(input: {
    * buildCouncilUserPrompt (app/api/chat/execute.ts), computed once per request. Optional,
    * defaults to '' so existing callers (this file's own validation suite) are unaffected. */
   contextBlock?: string
+  /** The seat's actual Nebula identity for this turn (see `nebulaAgentForSeat`) — used to pick the
+   * correct identity-specific reminder for whichever role this seat happens to fill this round.
+   * Optional so existing callers/fixtures that don't care about identity-specific reminders keep
+   * working unchanged; omitting it just drops the reminder sentence. */
+  identityId?: NebulaAgentId | null
 }): string {
   return [
     'War Room family-to-family deliberation.',
@@ -264,7 +269,7 @@ export function buildDeliberationPrompt(input: {
     '',
     input.targetTurn ? `Target prior message for challenge/revision: ${input.targetTurn.output_message_id ?? input.targetTurn.turn_id}` : '',
     '',
-    roleInstruction(input.role),
+    roleInstruction(input.role, input.identityId ?? null),
   ].filter(Boolean).join('\n')
 }
 
@@ -291,20 +296,45 @@ function formatPriorTurnsBlock(turns: DeliberationTurn[]): string {
   ].join('\n')
 }
 
-function roleInstruction(role: DeliberationTurnRole): string {
-  if (role === 'opening_position') {
-    return "Turn role: opening position. Give your read — your position, the reasoning behind it, real risks, and what you'd actually do next. Talk like you're in the room, not writing a memo. Do not cite message IDs or label sections (no \"confidence:\", no \"recommended action:\"). If you are ORION, stay in engineering/runtime architecture; do not claim unverified War Room state as fact."
-  }
-  if (role === 'direct_response') {
-    return "Turn role: direct response. Verify, push back, or extend what the prior family actually said, in your own words — do not simply agree or rewrite it. Do not cite it by message ID or label your reply with sections; just talk about the substance. If you are LUMEN, classify support and reject unsupported claims rather than echoing."
-  }
-  if (role === 'red_team_challenge') {
-    return "Turn role: PHOENIX challenge. Push back on the prior agent's position by name, not by message ID. Focus on assumptions, missing evidence, and failure modes — say it like you're the one in the room saying \"hold up,\" not filing a finding. Do not restate the prior analysis."
-  }
-  if (role === 'revision_or_stand_firm') {
-    return "Turn role: revision or stand firm. Respond to the Red Team challenge directly, in your own words — either revise your position or stand firm, and say why. No message-ID citations or labeled sections."
-  }
-  return 'Turn role: council synthesis. Synthesize only the completed exchange in plain language. Do not add new evidence. Do not rewrite a prior seat as the final answer. Give Ra’el the actual takeaway from what survived verification, like a person closing out the conversation, not a formal summary.'
+/**
+ * Per-identity behavioral reminder, appended to every role's instruction below — keyed by the
+ * seat's *actual* Nebula identity for this turn, never hardcoded to whichever identity usually
+ * speaks first. Deliberation rosters vary by intent (e.g. VERIFICATION seats lumen before pulsar;
+ * an explicitly-named directive can seat anyone in any order), so a turn's role (opening_position,
+ * direct_response, ...) and its speaker's identity are independent — baking one identity's
+ * reminder into a role that a *different* identity ends up filling is what let a seat displayed as
+ * PULSAR receive a "you are LUMEN" instruction and describe itself as LUMEN mid-response (GitHub
+ * follow-up: PULSAR/LUMEN identity-label mismatch). Look this up by the real seat identity instead.
+ */
+const IDENTITY_REMINDER: Partial<Record<NebulaAgentId, string>> = {
+  orion: 'You are ORION — stay in engineering/runtime architecture; do not claim unverified War Room state as fact.',
+  lumen: 'You are LUMEN — classify support and reject unsupported claims rather than echoing.',
+  pulsar: 'You are PULSAR — stay in evidence/research; cite what is actually available and flag what is missing rather than asserting it.',
+  phoenix: 'You are PHOENIX — stay adversarial; challenge assumptions and failure modes rather than restating the prior analysis.',
+  nova: 'You are NOVA — stay in strategy; options, sequencing, and trade-offs, not implementation detail.',
+  solara: 'You are SOLARA — stay in human/practical impact; what this means for people, not abstractions.',
+  aurora: 'You are AURORA — synthesize what survived verification; do not introduce new claims of your own.',
+  astra: 'You are ASTRA — coordinate the round; do not take a substantive position of your own.',
+}
+
+function roleInstruction(role: DeliberationTurnRole, identityId: NebulaAgentId | null): string {
+  const reminder = identityId ? IDENTITY_REMINDER[identityId] : undefined
+  const base = ((): string => {
+    if (role === 'opening_position') {
+      return "Turn role: opening position. Give your read — your position, the reasoning behind it, real risks, and what you'd actually do next. Talk like you're in the room, not writing a memo. Do not cite message IDs or label sections (no \"confidence:\", no \"recommended action:\")."
+    }
+    if (role === 'direct_response') {
+      return "Turn role: direct response. Verify, push back, or extend what the prior family actually said, in your own words — do not simply agree or rewrite it. Do not cite it by message ID or label your reply with sections; just talk about the substance."
+    }
+    if (role === 'red_team_challenge') {
+      return "Turn role: challenge. Push back on the prior agent's position by name, not by message ID. Focus on assumptions, missing evidence, and failure modes — say it like you're the one in the room saying \"hold up,\" not filing a finding. Do not restate the prior analysis."
+    }
+    if (role === 'revision_or_stand_firm') {
+      return "Turn role: revision or stand firm. Respond to the challenge directly, in your own words — either revise your position or stand firm, and say why. No message-ID citations or labeled sections."
+    }
+    return 'Turn role: council synthesis. Synthesize only the completed exchange in plain language. Do not add new evidence. Do not rewrite a prior seat as the final answer. Give Ra’el the actual takeaway from what survived verification, like a person closing out the conversation, not a formal summary.'
+  })()
+  return reminder ? `${base} ${reminder}` : base
 }
 
 export function formatDeliberationTurnForChat(turn: DeliberationTurn, references: DeliberationEvidenceReference[]): string {

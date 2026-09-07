@@ -153,10 +153,15 @@ export async function runLivePersonaClusterValidation(): Promise<ValidationCase[
     category: 'P. Persona and role instructions',
     run: () => {
       const lumenPrompt = readSource('lib/council/nebula/persona.ts') + readSource('lib/council/seatDistinctness.ts') + readSource('lib/council/providerIdentity.ts')
+      // identityId is passed explicitly here (not from the shared rolePrompts.direct_response,
+      // which builds with no identity so it stays role-generic) because the "classify support and
+      // reject unsupported claims" reminder is now keyed by the seat's actual identity, not baked
+      // into the direct_response role text unconditionally — see IDENTITY_REMINDER in runtime.ts.
+      const lumenDirectResponsePrompt = buildDeliberationPrompt({ ...baseDeliberationInput('direct_response'), identityId: 'lumen' })
       return lumenPrompt.includes('Agreement is not proof')
         && lumenPrompt.includes('Do not echo, paraphrase, or agree with ORION')
         && PROVIDER_IDENTITY_PROFILES.gemini.includes('never echo prior seats')
-        && rolePrompts.direct_response!.includes('classify support and reject unsupported claims')
+        && lumenDirectResponsePrompt.includes('classify support and reject unsupported claims')
         && rolePrompts.council_synthesis!.includes('Do not rewrite a prior seat')
     },
   }))

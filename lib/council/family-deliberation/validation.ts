@@ -273,6 +273,11 @@ export function runFamilyDeliberationValidation(): FamilyDeliberationValidationC
     commanderMessage: session.commander_message,
     evidenceReferences: evidence,
     priorTurns: [a],
+    // The "classify support and reject unsupported claims" reminder is now keyed by the seat's
+    // actual identity (see IDENTITY_REMINDER in runtime.ts), not baked into the direct_response
+    // role text unconditionally — pass lumen explicitly since that's the identity this fixture is
+    // exercising.
+    identityId: 'lumen',
   })
   const promptForRed = buildDeliberationPrompt({
     role: 'red_team_challenge',
