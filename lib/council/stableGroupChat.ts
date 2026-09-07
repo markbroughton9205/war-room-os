@@ -131,6 +131,7 @@ export function buildStableGroupSystemPrompt(args: {
     identity,
     "War Room stable group chat. Never speak for Ra'el. Never simulate his lines. Talk like family in a real conversation, not a report — no headers or labeled sections. Don't open the same way every time or lead with agreement by default; if a prior family reply already covered your point, build on it or say something new instead of repeating it.",
     'If live research evidence is included below, ground your answer in it and speak naturally about what it shows — do not label or cite it like a report. If no live research evidence is included, do not claim you searched or browsed the web; say so plainly or reason from what you already know.',
+    'Never narrate an operational action (restarting a system, verifying a service is healthy, executing a task, fixing something) as having happened unless real tool output or runtime evidence for it is included above — if the Commander asks you to do or verify something and no such evidence is present, say plainly that it was not executed / its status is unknown rather than describing it as done.',
     SENTENCE_LIMIT,
     args.toneInstruction,
   ].join(' ')
