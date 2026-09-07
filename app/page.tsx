@@ -309,6 +309,7 @@ import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialC
 import { compactFamilyRosterLine, type CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
 import { createPresentationBuffer } from '@/lib/council/live-orchestration/presentationBuffer'
 import { failureUiLabel } from '@/lib/council/live-orchestration/failureTaxonomy'
+import { consumeTerraContextForDecree } from '@/lib/council/terraContextConsumption'
 import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
 import { formatCouncilOsSweepMarkdown } from '@/lib/war-room-sweep/formatCouncilResponse'
 import type { SweepReport } from '@/lib/war-room-sweep/types'
@@ -9300,9 +9301,13 @@ function Home() {
       preEstablishedRound.controller.signal.aborted
       || preEstablishedRound.myRound !== decreeRoundGenRef.current
     )) return
-    const terraContext = terraCouncilContextRef.current
-    if (mode !== 'continue' && terraContext) {
-      decree = `${decree}\n\n[CURRENT TERRA CONTEXT — live globe selection; preserve provenance and do not infer missing facts]\n${terraContext}`
+    // One-turn scoped: capture and immediately clear the ref so this Terra selection attaches to
+    // THIS decree only — see consumeTerraContextForDecree for why (Build #4 readiness audit
+    // finding: the ref was read but never cleared, so a stale globe pin silently attached to every
+    // later decree). Read before any other logic in this function can return early.
+    const terraContextForThisRound = consumeTerraContextForDecree(terraCouncilContextRef, mode)
+    if (terraContextForThisRound) {
+      decree = `${decree}\n\n[CURRENT TERRA CONTEXT — live globe selection; preserve provenance and do not infer missing facts]\n${terraContextForThisRound}`
     }
     let decreeCompletedOk = false
     let decreeMatrixFailed = false
