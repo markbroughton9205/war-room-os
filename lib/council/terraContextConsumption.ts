@@ -7,19 +7,39 @@
  * This is a tiny, pure, framework-free module specifically so the one-turn-consumption behavior is
  * unit-testable without importing app/page.tsx (a large 'use client' component with browser-only
  * dependencies that a Node validation script cannot load).
+ *
+ * IMPORTANT — why this is a *signature comparison*, not a *clear on read*: `terraCouncilContextRef`
+ * is kept continuously live-mirrored by GodsEyeCommandCenter's TerraCouncilContextBridge, which
+ * re-composes and re-writes the full context string whenever ANY of its own dependencies changes —
+ * including layerCoverage, which is refreshed by an unrelated periodic background fetch completely
+ * independent of any decree submission. An earlier "read the ref, then set it to null" design was
+ * confirmed live to fail exactly here: clearing the ref after decree 1 consumed it did stop the
+ * leak for a few hundred milliseconds, but the very next layerCoverage-driven re-render of the
+ * bridge component re-wrote the same still-active selection straight back into the ref before
+ * decree 2 was ever submitted, so decree 2 saw it again. Comparing against the last-consumed value
+ * survives that: it doesn't matter how many times the mirror re-writes the *same* text between
+ * decrees, only whether the text actually changed since it was last attached to a decree.
  */
 
 export type TerraContextRefLike = { current: string | null }
 
 /**
- * Reads and clears the Terra context ref together, so the same value can never be read by two
- * decrees. `mode === 'continue'` is a synthetic follow-up turn, not a new Commander decree — it
- * neither attaches nor consumes Terra context, leaving the ref intact for whichever real decree
- * follows it.
+ * Reads the live-mirrored Terra context ref and returns it only if it differs from whatever was
+ * last attached to a decree — i.e. the underlying Terra selection (or its observed facts) has
+ * genuinely changed since the last time a decree consumed it. Returns null for: no active
+ * selection, an unchanged selection already attached to a prior decree, or a `continue` turn
+ * (a synthetic follow-up, not a new Commander decree — it must neither attach nor mark anything
+ * as consumed, leaving state untouched for whichever real decree follows it).
  */
-export function consumeTerraContextForDecree(ref: TerraContextRefLike, mode?: string): string | null {
+export function consumeTerraContextForDecree(
+  liveRef: TerraContextRefLike,
+  consumedSignatureRef: TerraContextRefLike,
+  mode?: string,
+): string | null {
   if (mode === 'continue') return null
-  const value = ref.current
-  ref.current = null
-  return value
+  const current = liveRef.current
+  if (current === null) return null
+  if (current === consumedSignatureRef.current) return null
+  consumedSignatureRef.current = current
+  return current
 }

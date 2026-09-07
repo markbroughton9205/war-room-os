@@ -64,6 +64,31 @@ export function runResearchDomainRouterValidation(): CaseResult[] {
     extractPrimaryQuerySentence(worldBriefExpanded),
   ))
 
+  // Build #4A closure regression: "regulat\b" (a bare word-boundary match) never matched inside
+  // "regulation" or "regulations" (the "t" and "i"/"o" are both word characters, so there's no
+  // boundary between them) — only the separately-listed "regulatory" alternative worked. The
+  // mission's own regulatory acceptance-test phrase uses "regulation", which fell through to
+  // TRANSPORTATION_LOGISTICS only instead of the required HYBRID (TRANSPORTATION_LOGISTICS +
+  // GOVERNMENT_REGULATORY) — confirmed live before this fix. `regulat\w*` covers every inflection.
+  const freightRegulationThisWeek = classifyResearchDomain('What changed in U.S. freight brokerage regulation this week?')
+  cases.push(check(
+    'domain_13_freight_regulation_word_form_classified_hybrid',
+    freightRegulationThisWeek === 'HYBRID',
+    freightRegulationThisWeek,
+  ))
+  const freightRegulationMatches = matchedDomains('What changed in U.S. freight brokerage regulation this week?')
+  cases.push(check(
+    'domain_14_freight_regulation_matches_both_required_domains',
+    freightRegulationMatches.includes('TRANSPORTATION_LOGISTICS') && freightRegulationMatches.includes('GOVERNMENT_REGULATORY'),
+    JSON.stringify(freightRegulationMatches),
+  ))
+  const bareRegulation = classifyResearchDomain('What are the new regulations this quarter?')
+  cases.push(check(
+    'domain_15_bare_plural_regulations_classified_government_regulatory',
+    bareRegulation === 'GOVERNMENT_REGULATORY',
+    bareRegulation,
+  ))
+
   return cases
 }
 

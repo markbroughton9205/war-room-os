@@ -6252,7 +6252,23 @@ function Home() {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const addSystemMessageRef = useRef<((content: string) => void) | null>(null)
   const submitDecreeRef = useRef<((decree: string, mode?: CouncilMode) => Promise<void>) | null>(null)
+  // terraCouncilContextRef is a continuously live-mirrored view of the current Terra selection —
+  // GodsEyeCommandCenter's TerraCouncilContextBridge re-writes it whenever ANY of its own
+  // dependencies changes, including layerCoverage, which an unrelated periodic background fetch
+  // refreshes independent of any decree submission. terraContextConsumedSignatureRef tracks what
+  // was last actually attached to a decree; consumeTerraContextForDecree compares the two instead
+  // of clearing the live ref, so it survives the background mirror re-writing the *same* text
+  // between decrees (confirmed live: a plain clear-on-read design still leaked a stale Terra pin
+  // into an unrelated "7 + 6" follow-up, because the mirror rewrote it back in before that second
+  // decree was submitted).
   const terraCouncilContextRef = useRef<string | null>(null)
+  const terraContextConsumedSignatureRef = useRef<string | null>(null)
+  // Stable identity (no deps) so GodsEyeCommandCenter's internal effect only re-fires when one of
+  // its own real dependencies changes, not on every one of this component's own re-renders — an
+  // inline arrow here previously got a new identity every render, causing extra needless re-fires.
+  const handleTerraContextChange = useCallback((context: string | null) => {
+    terraCouncilContextRef.current = context
+  }, [])
   /** See the backend-status fetch effect below — null/unset means unknown (treated as "not
    * confirmed local-only", so the expanded-analysis cost estimate still shows by default). */
   const councilRoutingLocalOnlyRef = useRef<boolean | null>(null)
@@ -9301,11 +9317,13 @@ function Home() {
       preEstablishedRound.controller.signal.aborted
       || preEstablishedRound.myRound !== decreeRoundGenRef.current
     )) return
-    // One-turn scoped: capture and immediately clear the ref so this Terra selection attaches to
-    // THIS decree only — see consumeTerraContextForDecree for why (Build #4 readiness audit
-    // finding: the ref was read but never cleared, so a stale globe pin silently attached to every
-    // later decree). Read before any other logic in this function can return early.
-    const terraContextForThisRound = consumeTerraContextForDecree(terraCouncilContextRef, mode)
+    // One-turn scoped: attaches this Terra selection to THIS decree only, and only if it hasn't
+    // already been attached to a prior decree — see consumeTerraContextForDecree for why a
+    // signature comparison, not a clear-on-read, is required (Build #4 readiness audit finding,
+    // then a real live-tested regression: the ref was read but never cleared/tracked at all
+    // originally, then a naive clear still leaked because a background mirror kept rewriting it).
+    // Read before any other logic in this function can return early.
+    const terraContextForThisRound = consumeTerraContextForDecree(terraCouncilContextRef, terraContextConsumedSignatureRef, mode)
     if (terraContextForThisRound) {
       decree = `${decree}\n\n[CURRENT TERRA CONTEXT — live globe selection; preserve provenance and do not infer missing facts]\n${terraContextForThisRound}`
     }
@@ -13191,7 +13209,7 @@ function Home() {
             </div>
           ) : (
         <GodsEyeCommandCenter
-          onTerraContextChange={context => { terraCouncilContextRef.current = context }}
+          onTerraContextChange={handleTerraContextChange}
           chatExpanded={isChatExpanded}
           onToggleChatExpanded={() => setIsChatExpanded(prev => !prev)}
           councilComposer={<CommandConsole

@@ -23,7 +23,7 @@ const DOMAIN_PATTERNS: Record<Exclude<ResearchDomain, 'GENERAL_CURRENT' | 'HYBRI
   TRANSPORTATION_LOGISTICS:
     /\b(freight|logistics|trucking|carrier|shipp(?:ing|er)|supply chain|warehous|cargo|intermodal|brokerage|fleet|haulage)\b/i,
   GOVERNMENT_REGULATORY:
-    /\b(regulat|compliance|federal register|agency rule|statute|legislation|govern(?:ment|ance)|policy mandate|sec filing|regulatory)\b/i,
+    /\b(regulat\w*|compliance|federal register|agency rule|statute|legislation|govern(?:ment|ance)|policy mandate|sec filing)\b/i,
   ECONOMIC_FINANCIAL:
     /\b(economy|economic|gdp|inflation|interest rate|market(?:s)?|stock|earnings|financ(?:e|ial)|investment|fiscal|monetary)\b/i,
   SCIENCE_ACADEMIC:

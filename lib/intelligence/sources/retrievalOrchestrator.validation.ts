@@ -69,6 +69,14 @@ const warRoomArchitectureNotRequired = evaluateMandatoryLiveRetrieval('what is W
 // carries an explicit external-current-events word (mirrors researchIntent.ts's own behavior).
 const localRuntimeWithNewsStillRequired = evaluateMandatoryLiveRetrieval('is our local runtime affected by the news headlines today')
 
+// Build #4A closure regression: confirmed live — this exact query fell through every
+// MANDATORY_PATTERNS entry (no reason recognized "regulation"), so councilGatherPhase ===
+// 'decree_soft' short-circuited execute.ts's research gate before detectResearchIntent's own
+// correct shouldResearch:true was ever consulted, and the Council fabricated a specific,
+// non-existent FMCSA regulatory change with zero live evidence.
+const freightRegulationRequired = evaluateMandatoryLiveRetrieval('What changed in U.S. freight brokerage regulation this week?')
+const bareRegulationsRequired = evaluateMandatoryLiveRetrieval('what are the new regulations this quarter')
+
 export function runRetrievalOrchestratorValidation(): CaseResult[] {
   return [
     check(
@@ -172,6 +180,16 @@ export function runRetrievalOrchestratorValidation(): CaseResult[] {
       'retrieval_orchestrator_10d_local_runtime_with_explicit_news_word_still_required',
       localRuntimeWithNewsStillRequired.required,
       JSON.stringify(localRuntimeWithNewsStillRequired),
+    ),
+    check(
+      'retrieval_orchestrator_11a_freight_regulation_query_required',
+      freightRegulationRequired.required && freightRegulationRequired.reasons.includes('politics'),
+      JSON.stringify(freightRegulationRequired),
+    ),
+    check(
+      'retrieval_orchestrator_11b_bare_regulations_query_required',
+      bareRegulationsRequired.required && bareRegulationsRequired.reasons.includes('politics'),
+      JSON.stringify(bareRegulationsRequired),
     ),
   ]
 }

@@ -46,7 +46,15 @@ const MANDATORY_PATTERNS: { reason: MandatoryRetrievalReason; pattern: RegExp }[
   { reason: 'explicit_live_retrieval', pattern: /\b(live|current|latest|today|right\s+now|as\s+of|use\s+sources?|retrieve|search)\b/i },
   { reason: 'current_events', pattern: /\b(news|headlines?|current\s+events?|what\s+happened|developing)\b/i },
   { reason: 'weather', pattern: /\b(weather|storm|rain|snow|heat|temperature|forecast|air\s+quality)\b/i },
-  { reason: 'politics', pattern: /\b(election|polling|congress|senate|white\s+house|governor|mayor|policy|legislation|bill)\b/i },
+  // regulat\w* covers regulation/regulations/regulatory/regulate/regulating — added after a live
+  // Build #4A regression: "What changed in U.S. freight brokerage regulation this week?" evaluated
+  // required:false here (no pattern recognized "regulation"), which let execute.ts's
+  // councilGatherPhase === 'decree_soft' guard skip research entirely before even consulting
+  // detectResearchIntent (which, called directly, already correctly returns shouldResearch:true
+  // for this exact text) — the Council then fabricated a specific, non-existent FMCSA rule change
+  // with zero live evidence. Mirrors lib/research/researchDomainRouter.ts's identical fix for the
+  // same underlying word-boundary gap.
+  { reason: 'politics', pattern: /\b(election|polling|congress|senate|white\s+house|governor|mayor|policy|legislation|bill|regulat\w*|agency\s+rule|rule\s+change)\b/i },
   { reason: 'crime_public_safety', pattern: /\b(crime|shooting|robbery|police|public\s+safety|incident|sirens?|fire|crash|accident)\b/i },
   { reason: 'business_economics', pattern: /\b(stock|market|earnings|inflation|jobs?|unemployment|business|company|closure|opening|economy|recession)\b/i },
   { reason: 'local_conditions', pattern: /\b(local|nearby|around\s+me|in\s+akron|cleveland|summit\s+county|neighborhood|traffic|road\s+closure)\b/i },
