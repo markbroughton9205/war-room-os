@@ -42,7 +42,16 @@ export function stripHiddenReasoning(raw: unknown, opts?: { trim?: boolean }): s
     text = text.replace(THINK_OPEN_UNCLOSED, '')
   }
   text = text.replace(/^\s*thinking:\s*/i, '')
-  text = stripLeadingChineseScratch(text)
+  if (opts?.trim !== false) {
+    // stripLeadingChineseScratch is a whole-text heuristic (it needs a real run of CJK
+    // characters to detect) and always returns a `.trim()`'d string internally regardless of
+    // the caller's intent. A tiny per-token streaming delta (e.g. " the", "War ") never
+    // contains a qualifying CJK run, so on every delta this reduced to an unconditional
+    // `.trim()` that ate exactly the leading/trailing space marking the word boundary —
+    // gluing consecutive words together in the live stream. Only run it when trimming the
+    // final/complete text (the default), never on a `{ trim: false }` streaming delta.
+    text = stripLeadingChineseScratch(text)
+  }
   text = text.replace(/\n{3,}/g, '\n\n')
   return opts?.trim === false ? text : text.trim()
 }
