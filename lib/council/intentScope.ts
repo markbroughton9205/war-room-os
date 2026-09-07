@@ -251,6 +251,12 @@ export function stripGreetingStrategicBoilerplate(text: string): { text: string;
     out.push(line)
   }
   const joined = out.join('\n').trim()
+  // Most greeting replies are a single line/paragraph, so one incidental steering-word
+  // mention (e.g. "ready for War Room business") strips the entire response to nothing —
+  // a genuine "hello" reply silently vanishing (see GitHub follow-up: empty-response bug)
+  // is worse than leaving an incidental mention in place, so keep the original text rather
+  // than erase it completely. Mirrors the identical safety net in stripForbiddenScopeLines.
+  if (!joined) return { text: text.trim().slice(0, 640), stripped: 0 }
   const cap = joined.slice(0, 640)
   return { text: cap, stripped: stripped + (joined.length > cap.length ? 1 : 0) }
 }
