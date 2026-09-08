@@ -7,6 +7,7 @@ import type { NebulaAgentId } from '@/lib/council/nebula/identity'
 import { evidenceReferencesFromLiveResearch } from '@/lib/council/family-deliberation/runtime'
 import { advanceSwarmPhase, createSwarmPhaseState, freezeMustPrecedeCrossReview, type SwarmPhaseState } from './phases'
 import { loadScoutGovernorLimits } from './governor'
+import { applyResearchProfile } from './researchProfiles'
 import { discoveryAgents, freezeAstraMissionReport } from './mission'
 import { planRoundScouts } from './scoutPlanner'
 import { appendLedgerEvidence, createPrivateSeatLedger, formatPrivateEvidenceBlock } from './ledgers'
@@ -16,6 +17,7 @@ import { executeScouts } from './scoutExecution'
 import { buildAuroraPrompt, buildCrossReviewPrompt, buildIndependentDiscoveryPrompt } from './prompts'
 import { buildConvergenceMap, challengeClaim, extractAtomicClaims, verifyClaimAgainstEvidence } from './verify'
 import { swarmPacketStub, type CouncilSwarmPersistence } from './persist'
+import { annotateEvidenceIndependence, clusterIndependentEvidence, summarizeIndependence } from '@/lib/intelligence/sourceIndependence'
 import type {
   AstraMissionPlan,
   AtomicClaim,
@@ -27,6 +29,7 @@ import type {
   RoundIdentity,
   ScoutGovernorLimits,
   ScoutMetadata,
+  ScoutPlan,
   ScoutSwarmPublicMeta,
   SeatAssignment,
 } from './types'
@@ -60,6 +63,8 @@ export type ScoutSwarmRoundResult = {
   auroraPrompt: string
   discoveryPrompts: Partial<Record<NebulaAgentId, string>>
   aborted: boolean
+  phaseTimedOut: boolean
+  degraded: boolean
 }
 
 export async function runIndependentScoutSwarm(input: {
@@ -68,7 +73,7 @@ export async function runIndependentScoutSwarm(input: {
   getCurrentRoundIdentity: () => RoundIdentity
   signal?: AbortSignal
   limits?: ScoutGovernorLimits
-  runLiveResearch?: (query: string) => Promise<LiveResearchEvidencePacket>
+  runLiveResearch?: (query: string, scout?: ScoutPlan) => Promise<LiveResearchEvidencePacket>
   persistPacket?: (packet: StoredResearchPacket) => Promise<StoredResearchWriteResult>
   priorEvidence?: IntelligenceEvidenceItem[]
   priorKimiStoredBlock?: string
@@ -76,7 +81,7 @@ export async function runIndependentScoutSwarm(input: {
   warRoomContext?: string
   liveResearchPacket?: LiveResearchEvidencePacket
 }): Promise<ScoutSwarmRoundResult> {
-  const limits = input.limits ?? loadScoutGovernorLimits()
+  const limits = input.limits ?? applyResearchProfile(loadScoutGovernorLimits(), input.plan.researchProfile)
   let phaseState = createSwarmPhaseState(input.plan.createdAt)
   const astraReport = freezeAstraMissionReport(input.plan)
   const reports: FrozenSeatReport[] = [astraReport]
@@ -90,11 +95,13 @@ export async function runIndependentScoutSwarm(input: {
   const executed = await executeScouts(planned.scouts, {
     signal: input.signal,
     perScoutTimeoutMs: limits.perScoutTimeoutMs,
+    phaseTimeoutMs: limits.phaseTimeoutMs,
     maxConcurrentWeb: limits.maxConcurrentWebCalls,
     getCurrentRoundIdentity: input.getCurrentRoundIdentity,
     runLiveResearch: input.runLiveResearch,
     runtimeGrounding: input.runtimeGrounding,
   })
+  const phaseTimedOut = executed.some(item => item.metadata.abortReason === 'timeout' || (item.metadata.timeout && item.metadata.aborted))
   const scouts = executed.map(item => item.metadata)
 
   const ledgers: PrivateSeatLedger[] = []
@@ -206,7 +213,9 @@ export async function runIndependentScoutSwarm(input: {
   const required = discoveryAgents(input.plan)
   const freezeComplete = allRequiredReportsFrozen(required, reports)
 
-  const allEvidence = ledgers.flatMap(item => item.evidence)
+  const allEvidenceRaw = ledgers.flatMap(item => item.evidence)
+  const { items: allEvidence, clusters } = clusterIndependentEvidence(annotateEvidenceIndependence(allEvidenceRaw))
+  const independence = summarizeIndependence(allEvidence, clusters)
   let claims: AtomicClaim[] = []
   let challenges: PhoenixChallengeResult[] = []
 
@@ -269,6 +278,7 @@ export async function runIndependentScoutSwarm(input: {
     convergence,
     evidenceReferences: evidenceRefs,
     priorEvidence: input.priorEvidence,
+    liveEvidence: allEvidence,
   })
   const auroraAssignment: SeatAssignment | null = input.plan.assignments.find(item => item.agentId === 'aurora') ?? null
   let auroraContent = ''
@@ -317,6 +327,10 @@ export async function runIndependentScoutSwarm(input: {
     })),
     convergence,
     isolation,
+    evidenceIndependence: independence,
+    claims,
+    degraded: phaseTimedOut || aborted,
+    phaseTimedOut,
   }
 
   if (input.persistPacket) {
@@ -352,11 +366,16 @@ export async function runIndependentScoutSwarm(input: {
       crossReviewStarted: phaseState.history.some(item => item.phase === 'CROSS_REVIEW'),
       evidenceCount: allEvidence.length,
       isolationPass: isolation.pass,
+      degraded: phaseTimedOut || aborted,
+      phaseTimedOut,
+      researchProfile: input.plan.researchProfile,
     },
     persistence,
     auroraPrompt,
     discoveryPrompts,
     aborted,
+    phaseTimedOut,
+    degraded: phaseTimedOut || aborted,
   }
 }
 

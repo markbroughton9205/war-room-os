@@ -1,8 +1,8 @@
 import { classifyAstraIntent } from '@/lib/council/nebula/roundFlow'
 import { classifyResearchDomain, matchedDomains } from '@/lib/research/researchDomainRouter'
 import type { NebulaAgentId } from '@/lib/council/nebula/identity'
+import { selectResearchProfile } from './researchProfiles'
 import {
-  GEOGRAPHIC_REGIONS,
   REPORT_KIND_BY_AGENT,
   SWARM_SEAT_BY_AGENT,
   type AstraMissionPlan,
@@ -174,12 +174,20 @@ export function decomposeAstraMission(input: {
     || domainLabel !== 'GENERAL_CURRENT'
   )
   const selected = selectSeats(decree)
+  const geographicScope: AstraMissionPlan['geographicScope'] = regions.length > 2 ? 'global' : regions.length ? 'regional' : /\b(u\.s\.|united states|federal)\b/i.test(decree) ? 'national' : 'none'
   const assignments = selected.map(agentId => assignmentFor(
     agentId,
     decree,
     regions,
     agentId === 'orion' && engineering ? false : liveResearchRequired,
   ))
+  const researchProfile = selectResearchProfile({
+    decree,
+    regionalScatter: regions,
+    geographicScope,
+    liveResearchRequired,
+    engineering,
+  })
 
   return {
     missionId: createMissionId(input.roundRequestId),
@@ -189,7 +197,7 @@ export function decomposeAstraMission(input: {
     createdAt,
     domains: domains.length ? domains : [domainLabel],
     freshnessRequirement: liveResearchRequired ? 'live' : engineering ? 'none' : 'any',
-    geographicScope: regions.length > 2 ? 'global' : regions.length ? 'regional' : /\b(u\.s\.|united states|federal)\b/i.test(decree) ? 'national' : 'none',
+    geographicScope,
     sourceClassesNeeded: liveResearchRequired
       ? ['government_public_data', 'news', 'industry', 'live_web']
       : engineering
@@ -208,11 +216,13 @@ export function decomposeAstraMission(input: {
     liveResearchRequired,
     kimiStoredRequired: liveResearchRequired,
     regionalScatter: regions,
+    researchProfile,
     astraProvidesSubstantiveAnswer: false,
     notes: [
       'ASTRA coordinates only and does not provide the substantive answer.',
       'Assignments do not include another seat\'s conclusion.',
       regions.length ? `Regional scatter: ${regions.join(', ')}` : 'No regional scatter — geographic breadth not required.',
+      `Research profile: ${researchProfile}.`,
       engineering && !engineeringExternalCurrent(decree)
         ? 'PULSAR live-web research is not assigned for this War Room engineering question.'
         : '',

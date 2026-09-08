@@ -16,6 +16,8 @@ export type CouncilSwarmPhase = (typeof COUNCIL_SWARM_PHASES)[number]
 
 export const SWARM_PHASE_ORDER: readonly CouncilSwarmPhase[] = COUNCIL_SWARM_PHASES
 
+export type ResearchProfileName = 'LIGHT_RESEARCH' | 'STANDARD_RESEARCH' | 'DEEP_RESEARCH' | 'GLOBAL_SCATTER'
+
 export type GeographicRegion =
   | 'NORTH_AMERICA'
   | 'LATIN_AMERICA'
@@ -205,6 +207,7 @@ export type AstraMissionPlan = {
   liveResearchRequired: boolean
   kimiStoredRequired: boolean
   regionalScatter: GeographicRegion[]
+  researchProfile: ResearchProfileName
   astraProvidesSubstantiveAnswer: false
   notes: string[]
 }
@@ -225,6 +228,8 @@ export type ScoutPlan = {
   languageAccess: 'native' | 'not_available'
   preferLocalTruth: boolean
   executeLive: boolean
+  queryLanguage?: string
+  preferredProviders?: string[]
 }
 
 export type ScoutGovernorLimits = {
@@ -260,6 +265,11 @@ export type ScoutMetadata = {
   staleDiscarded: boolean
   timeout: boolean
   languageAccess: 'native' | 'not_available'
+  abortReason?: ScoutAbortReason
+  fallbackUsed?: boolean
+  fallbackReason?: string | null
+  preferredProviders?: string[]
+  queryLanguage?: string
 }
 
 export type ScoutLedgerEntry = {
@@ -317,14 +327,20 @@ export type CrossReviewRevision = {
   surviving: boolean
 }
 
+export type AuthorityMatch = 'MATCH' | 'MISMATCH' | 'PARTIAL' | 'UNKNOWN'
+
 export type AtomicClaim = {
   claim_id: string
   claim_text: string
   seat: NebulaAgentId
   report_id: string
   supporting_evidence_ids: string[]
+  supporting_independence_keys: string[]
   contradicting_evidence_ids: string[]
+  contradicting_independence_keys: string[]
   verification_status: ClaimVerificationStatus
+  authority_match: AuthorityMatch
+  freshness_status: string
   notes: string
 }
 
@@ -338,6 +354,14 @@ export type PhoenixChallengeResult = {
   injectionRisk: boolean
   survived: boolean
   notes: string
+  duplicateSourceFamilies: boolean
+  circularReporting: boolean
+  missingPrimaryAuthority: boolean
+  wrongJurisdiction: boolean
+  staleEvidence: boolean
+  derivativeEvidence: boolean
+  sourceMismatch: boolean
+  publicationChronology: string
 }
 
 export type ConvergenceClaim = {
@@ -347,11 +371,18 @@ export type ConvergenceClaim = {
   independently_supported_by: NebulaAgentId[]
   independently_contradicted_by: NebulaAgentId[]
   independent_support_count: number
+  independent_contradiction_count: number
   independent_report_ids: string[]
   lumen_status: ClaimVerificationStatus | null
   phoenix_survived: boolean | null
+  phoenix_status: 'SURVIVED' | 'FAILED' | 'NOT_RUN'
   freshness: string
+  freshness_quality: string
   origin_distribution: Record<string, number>
+  source_family_diversity: number
+  regional_diversity: number
+  authority_quality: 'PRIMARY' | 'SECONDARY' | 'TERTIARY' | 'UNKNOWN' | 'MISMATCH'
+  primary_source_presence: boolean
   confidence: number | null
   unresolved_gaps: string[]
 }
@@ -380,9 +411,21 @@ export type ScoutSwarmPublicMeta = {
   crossReviewStarted: boolean
   evidenceCount: number
   isolationPass: boolean
+  degraded?: boolean
+  phaseTimedOut?: boolean
+  researchProfile?: ResearchProfileName
 }
 
 export type ScoutAbortReason = 'signal' | 'timeout' | 'superseded' | 'governor' | 'isolation'
+
+export type EvidenceIndependenceSummary = {
+  rawCount: number
+  canonicalUrlUnique: number
+  clusterCount: number
+  independentKeyCount: number
+  sourceFamilyDiversity: number
+  regionalDiversity: number
+}
 
 export type CouncilSwarmPersistence = {
   missionId: string
@@ -393,4 +436,8 @@ export type CouncilSwarmPersistence = {
   revisions: CrossReviewRevision[]
   convergence: ConvergenceMap | null
   isolation: IsolationAudit | null
+  evidenceIndependence?: EvidenceIndependenceSummary | null
+  claims?: AtomicClaim[]
+  degraded?: boolean
+  phaseTimedOut?: boolean
 }

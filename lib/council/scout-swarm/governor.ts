@@ -23,7 +23,7 @@ export function loadScoutGovernorLimits(): ScoutGovernorLimits {
     maxScoutsPerSeat: envInt('WAR_ROOM_SCOUT_MAX_PER_SEAT', DEFAULT_SCOUT_GOVERNOR_LIMITS.maxScoutsPerSeat, 1, 8),
     maxTotalScoutsPerRound: envInt('WAR_ROOM_SCOUT_MAX_PER_ROUND', DEFAULT_SCOUT_GOVERNOR_LIMITS.maxTotalScoutsPerRound, 1, 24),
     maxConcurrentModelCalls: envInt('WAR_ROOM_SCOUT_MAX_CONCURRENT_MODEL', DEFAULT_SCOUT_GOVERNOR_LIMITS.maxConcurrentModelCalls, 1, 2),
-    maxConcurrentWebCalls: envInt('WAR_ROOM_SCOUT_MAX_CONCURRENT_WEB', DEFAULT_SCOUT_GOVERNOR_LIMITS.maxConcurrentWebCalls, 1, 4),
+    maxConcurrentWebCalls: envInt('WAR_ROOM_SCOUT_MAX_CONCURRENT_WEB', DEFAULT_SCOUT_GOVERNOR_LIMITS.maxConcurrentWebCalls, 1, 8),
     perScoutTimeoutMs: envInt('WAR_ROOM_SCOUT_TIMEOUT_MS', DEFAULT_SCOUT_GOVERNOR_LIMITS.perScoutTimeoutMs, 5_000, 60_000),
     phaseTimeoutMs: envInt('WAR_ROOM_SCOUT_PHASE_TIMEOUT_MS', DEFAULT_SCOUT_GOVERNOR_LIMITS.phaseTimeoutMs, 30_000, 300_000),
     maxSpawnDepth: 1,
@@ -80,7 +80,7 @@ export async function mapWithConcurrency<T, R>(
   let next = 0
   const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length || 1)) }, async () => {
     while (next < items.length) {
-      if (signal?.aborted) throw new Error('aborted')
+      if (signal?.aborted) break
       const index = next
       next += 1
       results[index] = await fn(items[index]!, index)
