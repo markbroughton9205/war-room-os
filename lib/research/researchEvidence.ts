@@ -114,7 +114,7 @@ function fallbackFindings(router: LiveResearchRouterResult): string {
   return bits.join('\n\n')
 }
 
-function rawIntelligenceFromRouter(router: LiveResearchRouterResult): RawIntelligenceSourceRecord[] {
+export function rawIntelligenceFromRouter(router: LiveResearchRouterResult): RawIntelligenceSourceRecord[] {
   // Domain-relevant bridged research-engine sources are preferred over generic public RSS: when the
   // bridge (e.g. arXiv for a science query, SEC EDGAR for a regulatory/logistics one) actually
   // returned usable documents, generic RSS is dropped from this round's evidence rather than mixed

@@ -35,6 +35,8 @@ export type LiveResearchRouterInput = {
   queryLanguage?: string
   extraProviderIds?: ResearchProviderId[]
   skipGenericRssUnlessFallback?: boolean
+  /** Search retrieval path: skip Grok framing so the query stays retrieval-heavy. */
+  retrievalOnly?: boolean
 }
 
 export type RegionalRoutingMeta = {
@@ -146,7 +148,7 @@ export function extractPublicHttpUrls(text: string, max = MAX_DIRECT): string[] 
  * filtered to `categories` when given. Also see `nwsAlerts.ts` for the separate weather-alerts
  * leg, kept out of this RSS/RDF parser because its response is `application/geo+json`, not XML.
  */
-async function fetchPublicNewsRss(
+export async function fetchPublicNewsRss(
   searchQuery: string,
   categories: PublicNewsCategory[],
   options?: { region?: GeographicRegion; includeGenericGlobal?: boolean },
@@ -298,6 +300,9 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
   })
 
   const grokP = (async (): Promise<GrokLeg> => {
+    if (input.retrievalOnly) {
+      return { ok: false, text: '' }
+    }
     if (!process.env.XAI_API_KEY?.trim()) {
       return { ok: false, text: '', error: 'XAI_API_KEY missing' }
     }
