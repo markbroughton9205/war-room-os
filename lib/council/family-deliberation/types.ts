@@ -84,6 +84,7 @@ export type DeliberationSession = {
   completion_status: 'complete' | 'partial' | 'failed'
   provider_boundaries: string[]
   diagnostics: string[]
+  scout_swarm?: import('@/lib/council/scout-swarm/types').ScoutSwarmPublicMeta
 }
 
 export type DeliberationProviderResult = {

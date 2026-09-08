@@ -22,7 +22,7 @@ export async function retrieveStoredResearch(
       packet: withCurrentFreshness(packet, nowIso),
       score: relevanceScore(
         query,
-        `${packet.decree}\n${packet.verifiedSummary}\n${packet.evidence.map(item => item.claim).join('\n')}`,
+        `${packet.decree}\n${packet.verifiedSummary}\n${packet.evidence.map(item => item.claim).join('\n')}\n${(packet.councilSwarm?.reports ?? []).map(report => report.conclusion).join('\n')}`,
       ),
     }))
     .filter(hit => hit.score >= 0.22)

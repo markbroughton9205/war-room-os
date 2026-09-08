@@ -6,6 +6,7 @@ import type {
 } from '@/lib/intelligence/intelligencePacket'
 import type { OldVsNewComparison } from '@/lib/intelligence/comparison/oldVsNew'
 import type { ResearchDomain } from '@/lib/research/researchDomainRouter'
+import type { CouncilSwarmPersistence } from '@/lib/council/scout-swarm/types'
 
 export type StoredResearchPacket = {
   id: string
@@ -28,6 +29,8 @@ export type StoredResearchPacket = {
   unsupportedClaims: string[]
   gaps: string[]
   origin_type: 'STORED_RESEARCH'
+  /** Build #5 additive Council swarm packet. Absent on Build #4B-only records. */
+  councilSwarm?: CouncilSwarmPersistence
 }
 
 export type StoredResearchWriteResult = {

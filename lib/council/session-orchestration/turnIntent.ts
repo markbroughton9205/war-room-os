@@ -32,6 +32,12 @@ const FOLLOW_UP =
 const TRIVIAL_FACT =
   /^(?:what(?:'s|s|\s+is)\s+)?\d+\s*[+\-*/x×]\s*\d+\s*\??$/i
 
+const CLOSED_FORM_ARITHMETIC =
+  /(?:what(?:'s|s|\s+is)\s+)?\d+\s*(?:plus|\+|minus|-|times|x|×|\*|divided\s+by|\/)\s*\d+/i
+
+const CLOSED_FORM_CAPITAL =
+  /what(?:'s|s|\s+is)\s+the\s+capital\s+of\s+[a-z][a-z\s.'-]+/i
+
 const STRATEGIC =
   /\b(?:strategy|strategic|decision|trade[- ]?off|should\s+we|recommend|council\s+deliberat)/i
 
@@ -82,7 +88,7 @@ export function classifyCouncilTurn(text: string): ClassifiedCouncilTurn {
     }
   }
 
-  if (TRIVIAL_FACT.test(raw)) {
+  if (TRIVIAL_FACT.test(raw) || (CLOSED_FORM_ARITHMETIC.test(raw) && raw.length < 160) || (CLOSED_FORM_CAPITAL.test(raw) && raw.length < 180)) {
     return {
       intent: 'KNOWLEDGE_QUESTION',
       depth: 'FAST',
