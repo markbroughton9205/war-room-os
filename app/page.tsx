@@ -54,6 +54,7 @@ import {
   type DeliberationEvidenceReference,
   type DeliberationTurn,
 } from '@/lib/council/family-deliberation'
+import type { ScoutSwarmPublicMeta } from '@/lib/council/scout-swarm/types'
 import type { NebulaRoundHealth } from '@/lib/council/nebula/round'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 import { ArchiveViewer } from '@/components/war-room/council/ArchiveViewer'
@@ -438,6 +439,7 @@ export type CouncilMessage = {
   analystOperationsPacket?: AnalystOperationsPacket
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
+  scoutSwarm?: ScoutSwarmPublicMeta
   /** Nebula RoundHealth projection (Inspector/diagnostics) — never a substitute for the visible
    * conversation content; failures live here, not as raw SYSTEM report cards. */
   roundHealth?: NebulaRoundHealth
@@ -2065,6 +2067,11 @@ const MessageBubble = memo(function MessageBubble({
               <div>revision_of_message_id: {msg.familyDeliberationTurn.revision_of_message_id ?? 'none'}</div>
               <div>completion_status: {msg.familyDeliberationTurn.completion_status}</div>
               <div>confidence: {msg.familyDeliberationTurn.confidence == null ? 'unresolved' : `${Math.round(msg.familyDeliberationTurn.confidence * 100)}%`}</div>
+              {msg.scoutSwarm ? (
+                <div>
+                  SCOUTS {msg.scoutSwarm.scoutsActive ? 'ACTIVE' : 'DONE'} · {msg.scoutSwarm.totalScouts} · phase {msg.scoutSwarm.phase} · frozen {msg.scoutSwarm.independentReportsFrozen} · cross-review {msg.scoutSwarm.crossReviewStarted ? 'started' : 'pending'} · evidence {msg.scoutSwarm.evidenceCount}
+                </div>
+              ) : null}
               {msg.familyDeliberationEvidenceReferences?.length ? (
                 <div className="mt-2">
                   <div className="font-bold text-emerald-200">source references</div>
@@ -10453,6 +10460,9 @@ function Home() {
               roundHealth: turn.turn_id === shadowReadoutTurnId ? deliberationData.roundHealth : undefined,
               councilRound: turn.turn_id === shadowReadoutTurnId ? deliberationData.councilRound : undefined,
               councilProgress: deliberationData.councilProgress,
+              scoutSwarm: turn.turn_id === shadowReadoutTurnId
+                ? (deliberation.scout_swarm ?? deliberationData.scoutSwarm ?? undefined) || undefined
+                : undefined,
             })
 
             if (complete) {

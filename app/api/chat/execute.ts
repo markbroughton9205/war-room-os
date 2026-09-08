@@ -77,6 +77,7 @@ import {
 } from '@/lib/runtime/liveResearchEvidencePacket'
 import { buildFamilyIntelligenceFrame } from '@/lib/intelligence/familyFeedRouter'
 import { priorAwareClientCounts, runPriorAwareResearchTurn } from '@/lib/intelligence/researchTurn'
+import { persistStoredResearchPacket } from '@/lib/intelligence/storedResearch/store'
 import { buildGrokRssIntelligenceAugment } from '@/lib/intelligence/grokRssFallback'
 import { evaluateMandatoryLiveRetrieval } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
@@ -141,7 +142,7 @@ import {
   GREETING_META_BY_FAMILY,
   STABLE_GROUP_GREETING_META,
 } from '@/lib/council/greetingPrompt'
-import { displayNameForSeat, nebulaAgentForSeat, seatForDisplayIdentity } from '@/lib/council/nebula/identity'
+import { displayNameForSeat, nebulaAgentForSeat, seatForDisplayIdentity, type NebulaAgentId } from '@/lib/council/nebula/identity'
 import { buildNebulaRuntimeSystemPrompt } from '@/lib/council/nebula/persona'
 import {
   buildRuntimeStatusGroundingBlock,
@@ -206,6 +207,12 @@ import type {
   DeliberationTurn,
   DeliberationTurnRole,
 } from '@/lib/council/family-deliberation'
+import {
+  decomposeAstraMission,
+  runIndependentScoutSwarm,
+  shouldRunIndependentScoutSwarm,
+  SWARM_SEAT_BY_AGENT,
+} from '@/lib/council/scout-swarm'
 import {
   createActualSelectionSnapshot,
   normalizeShadowMissionInput,
@@ -825,6 +832,14 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
    * ignored.
    */
   const classifiedTurn = classifyCouncilTurn(raelDirectiveText)
+  const swarmEligible = familyDeliberationRequestedRaw && shouldRunIndependentScoutSwarm(raelDirectiveText, classifiedTurn)
+  const astraMission = swarmEligible
+    ? decomposeAstraMission({
+        decree: raelDirectiveText,
+        roundRequestId: councilLogicalRequestId || councilTrace.councilTraceId,
+        logicalRequestId: councilLogicalRequestId || councilTrace.councilTraceId,
+      })
+    : null
   const isRuntimeStatusCheck =
     classifiedTurn.intent === 'STATUS_CHECK' || isWarRoomRuntimeStatusDecree(raelDirectiveText)
   const isLightweightGreeting =
@@ -837,7 +852,13 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     roundId: councilLogicalRequestId || councilTrace.councilTraceId,
     commanderMessage: raelDirectiveText,
   })
-  const nebulaSelectedSeats = seatsForParticipatingAgents(nebulaRoundPlan.participatingAgentIds)
+  if (astraMission) {
+    nebulaRoundPlan.participatingAgentIds = [...astraMission.selectedPermanentSeats]
+    nebulaRoundPlan.verificationRequested = true
+  }
+  const nebulaSelectedSeats = astraMission
+    ? astraMission.selectedPermanentSeats.map(agentId => SWARM_SEAT_BY_AGENT[agentId])
+    : seatsForParticipatingAgents(nebulaRoundPlan.participatingAgentIds)
   let nebulaRound: CouncilRound = createCouncilRound({
     roundId: nebulaRoundPlan.roundId,
     requestId: councilTrace.councilTraceId,
@@ -866,7 +887,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       : selectedFloor.length
         ? selectedFloor
         : floorOrder.slice(0, 3)
-    ).filter((family): family is CouncilSingleFamily => family !== 'baby' && family !== 'bridge_architect')
+    ).filter((family): family is CouncilSingleFamily => family !== 'bridge_architect' && (family !== 'baby' || Boolean(astraMission)))
     councilProgress = createCouncilProgressRuntimeTracker({
       eventObserver: options.progressEventObserver,
       requestIdSeed: councilTrace.councilTraceId,
@@ -1933,20 +1954,25 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         challengeTargetIds?: string[]
         revisionOfMessageId?: string | null
         targetTurn?: DeliberationTurn | null
+        promptOverride?: string
+        sharePriors?: boolean
+        identityId?: NebulaAgentId | null
       },
     ) => {
       signal.throwIfAborted()
       const startedAt = new Date().toISOString()
-      const prompt = buildDeliberationPrompt({
+      const identityId = opts?.identityId ?? nebulaAgentForSeat(family)?.id ?? null
+      const sharePriors = opts?.sharePriors !== false
+      const prompt = opts?.promptOverride ?? buildDeliberationPrompt({
         role,
         commanderMessage: raelDirectiveText,
         evidenceReferences,
-        priorTurns: session.turns,
+        priorTurns: sharePriors ? session.turns : [],
         targetTurn: opts?.targetTurn,
-        identityId: nebulaAgentForSeat(family)?.id ?? null,
+        identityId,
         contextBlock: [
           warRoomContextBlock,
-          blackboardSummariesForPrompt(nebulaBlackboard).length
+          sharePriors && blackboardSummariesForPrompt(nebulaBlackboard).length
             ? `Shared round findings:\n${blackboardSummariesForPrompt(nebulaBlackboard).join('\n')}`
             : '',
         ].filter(Boolean).join('\n\n'),
@@ -2050,6 +2076,59 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
 
     const skipSocialDeepStages = classifiedTurn.intent === 'SOCIAL_CHECKIN' || (classifiedTurn.depth === 'FAST' && classifiedTurn.intent !== 'STATUS_CHECK')
     const localCouncilLive = localRoutingBypassesCloudFloorGate()
+    if (astraMission) {
+      let speakingOrder = 0
+      const swarm = await runIndependentScoutSwarm({
+        plan: astraMission,
+        signal,
+        getCurrentRoundIdentity: () => ({
+          missionId: astraMission.missionId,
+          roundRequestId: astraMission.roundRequestId,
+          logicalRequestId: astraMission.logicalRequestId,
+        }),
+        priorEvidence: liveResearchPacket?.intelligencePacket?.evidence,
+        priorKimiStoredBlock: liveResearchPacket ? buildLiveResearchGroundingBlock(liveResearchPacket) : undefined,
+        runtimeGrounding: warRoomContextBlock,
+        warRoomContext: warRoomContextBlock,
+        liveResearchPacket,
+        runLiveResearch: async queryText => {
+          const router = await runLiveResearchRouter({
+            decreeText: queryText,
+            supabase: sup.ok ? sup.client : null,
+            conversationId,
+          })
+          return buildLiveResearchEvidencePacket({
+            decreeText: queryText,
+            router,
+            intentConfidence: 0.8,
+          })
+        },
+        persistPacket: packet => persistStoredResearchPacket(packet, sup.ok ? sup.client : null),
+        invokeSeat: async args => {
+          speakingOrder += 1
+          const turn = await callTurn(args.family as CouncilSingleFamily, args.role, speakingOrder, {
+            promptOverride: args.prompt,
+            sharePriors: false,
+            identityId: args.agentId,
+            inputMessageIds: [session.commander_message_id],
+          })
+          return {
+            content: turn.full_response,
+            status: turn.completion_status,
+            failureReason: turn.failure_reason,
+          }
+        },
+      })
+      session.scout_swarm = swarm.publicMeta
+      if (!swarm.isolation.pass) {
+        session.diagnostics.push(`Isolation barrier failed closed: ${swarm.isolation.leaks.join('; ')}`)
+      }
+      session.diagnostics.push(
+        `Scout swarm ${swarm.publicMeta.phase}: ${swarm.publicMeta.totalScouts} scouts, ${swarm.publicMeta.independentReportsFrozen} frozen reports, isolation=${swarm.publicMeta.isolationPass ? 'pass' : 'fail'}.`,
+      )
+      progress.closeIfTerminal()
+      return session
+    }
     const primaryFamilies = (nebulaDeliberationFamilies.length
       ? nebulaDeliberationFamilies
       : resolveVisibleFloorOrder({
@@ -2274,6 +2353,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       return NextResponse.json(withTrace(attachShadowMetadata({
         results,
         familyDeliberation,
+        scoutSwarm: familyDeliberation.scout_swarm ?? null,
         roundHealth,
         councilRound: nebulaRound,
         councilSingleResponse: synthesis?.full_response ?? '',

@@ -36,6 +36,8 @@
     "validate:evidence-origin": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/intelligence/evidenceOrigin.validation.ts",
     "validate:build4b": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/intelligence/build4b.validation.ts",
     "validate:build4b:live": "node --env-file=.env.local --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/intelligence/build4b.live-acceptance.ts",
+    "validate:build5": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/scout-swarm/scoutSwarm.validation.ts",
+    "validate:build5:live": "node --env-file=.env.local --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/scout-swarm/scoutSwarm.live-acceptance.ts",
     "validate:research-domain-router": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/research/researchDomainRouter.validation.ts",
     "validate:research-engine-bridge": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/research/researchEngineBridge.validation.ts",
     "validate:approval-issuance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-approval-issuance-gate16.mjs",
