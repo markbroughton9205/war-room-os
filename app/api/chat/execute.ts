@@ -76,6 +76,7 @@ import {
   type LiveResearchClientUi,
 } from '@/lib/runtime/liveResearchEvidencePacket'
 import { buildFamilyIntelligenceFrame } from '@/lib/intelligence/familyFeedRouter'
+import { priorAwareClientCounts, runPriorAwareResearchTurn } from '@/lib/intelligence/researchTurn'
 import { buildGrokRssIntelligenceAugment } from '@/lib/intelligence/grokRssFallback'
 import { evaluateMandatoryLiveRetrieval } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import { applyCouncilRenderGate } from '@/lib/council/councilRenderGate'
@@ -1253,18 +1254,36 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     liveResearchUi = computeLiveResearchClientUi(undefined, true, { councilPhase: 'evidence' })
     const rs = Date.now()
     try {
-      const router = await runLiveResearchRouter({
-        decreeText: expandResearchQuery(raelDirectiveText, classifiedTurn.intent),
-        supabase: sup.ok ? sup.client : null,
-        conversationId,
-      })
-      const packet = await buildLiveResearchEvidencePacket({
+      const intentConfidence = Math.max(researchIntentEval.confidence, classifiedTurn.shouldResearch ? 0.7 : 0)
+      const turn = await runPriorAwareResearchTurn({
         decreeText: raelDirectiveText,
-        router,
-        intentConfidence: Math.max(researchIntentEval.confidence, classifiedTurn.shouldResearch ? 0.7 : 0),
+        liveQueryText: expandResearchQuery(raelDirectiveText, classifiedTurn.intent),
+        conversationId,
+        logicalRequestId: councilLogicalRequestId,
+        roundRequestId: councilLogicalRequestId,
+        intentConfidence,
+        supabase: sup.ok ? sup.client : null,
+        researchIntentSaysGo: true,
+        runLiveResearch: async queryText => {
+          const router = await runLiveResearchRouter({
+            decreeText: queryText,
+            supabase: sup.ok ? sup.client : null,
+            conversationId,
+          })
+          return buildLiveResearchEvidencePacket({
+            decreeText: raelDirectiveText,
+            router,
+            intentConfidence,
+          })
+        },
       })
+      const packet = turn.packet
+      const counts = priorAwareClientCounts(turn)
       liveResearchPacket = packet
-      liveResearchUi = computeLiveResearchClientUi(packet, true, { councilPhase: 'model_running' })
+      liveResearchUi = {
+        ...computeLiveResearchClientUi(packet, true, { councilPhase: 'model_running' }),
+        ...counts,
+      }
       liveResearchSummary = toLiveResearchClientSummary(packet)
       chatTrajectorySession?.markLiveResearch({
         tool_id: 'research',
@@ -2892,18 +2911,36 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           }
           const rs = Date.now()
           try {
-            const router = await runLiveResearchRouter({
+            const intentConfidence = researchIntentEval.confidence
+            const turn = await runPriorAwareResearchTurn({
               decreeText: raelDirectiveText,
-              supabase: sup.ok ? sup.client : null,
+              liveQueryText: raelDirectiveText,
               conversationId,
+              logicalRequestId: councilLogicalRequestId,
+              roundRequestId: councilLogicalRequestId,
+              intentConfidence,
+              supabase: sup.ok ? sup.client : null,
+              researchIntentSaysGo: true,
+              runLiveResearch: async queryText => {
+                const router = await runLiveResearchRouter({
+                  decreeText: queryText,
+                  supabase: sup.ok ? sup.client : null,
+                  conversationId,
+                })
+                return buildLiveResearchEvidencePacket({
+                  decreeText: raelDirectiveText,
+                  router,
+                  intentConfidence,
+                })
+              },
             })
-            const packet = await buildLiveResearchEvidencePacket({
-              decreeText: raelDirectiveText,
-              router,
-              intentConfidence: researchIntentEval.confidence,
-            })
+            const packet = turn.packet
+            const counts = priorAwareClientCounts(turn)
             liveResearchPacket = packet
-            liveResearchUi = computeLiveResearchClientUi(packet, true, { councilPhase: 'model_running' })
+            liveResearchUi = {
+              ...computeLiveResearchClientUi(packet, true, { councilPhase: 'model_running' }),
+              ...counts,
+            }
             liveResearchSummary = toLiveResearchClientSummary(packet)
             chatTrajectorySession?.markLiveResearch({
               tool_id: 'research',

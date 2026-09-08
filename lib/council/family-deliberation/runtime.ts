@@ -44,7 +44,7 @@ export function providerModelForFamily(family: CouncilOrchestrationFamily): stri
 export function evidenceReferencesFromLiveResearch(
   packet: LiveResearchEvidencePacket | undefined,
 ): DeliberationEvidenceReference[] {
-  if (!packet?.sources.length) return []
+  if (!packet) return []
   const refs: DeliberationEvidenceReference[] = []
   packet.sources.forEach((source, sourceIndex) => {
     const urls = source.urls?.filter(Boolean) ?? []
@@ -55,9 +55,21 @@ export function evidenceReferencesFromLiveResearch(
         label: `${source.kind} source ${urlIndex + 1}`,
         source_kind: source.kind,
         url,
+        origin_type: 'LIVE_WEB',
       })
     })
   })
+  const intel = packet.intelligencePacket?.evidence ?? []
+  for (const item of intel.slice(0, 12)) {
+    if (item.origin_type === 'LIVE_WEB' && item.url && refs.some(ref => ref.url === item.url)) continue
+    refs.push({
+      evidence_reference_id: `origin-${item.origin_type ?? 'unknown'}-${item.id}`,
+      label: `[${item.origin_type ?? 'unknown'}/${item.freshness}] ${item.source_label}: ${item.title}`,
+      source_kind: item.source_type,
+      url: item.url ?? null,
+      origin_type: item.origin_type,
+    })
+  }
   return refs
 }
 
@@ -277,7 +289,7 @@ function formatEvidenceBlock(references: DeliberationEvidenceReference[]): strin
   if (!references.length) return 'Evidence references: none. Label factual assertions as model judgment or unresolved.'
   return [
     'Evidence references:',
-    ...references.map(ref => `- ${ref.evidence_reference_id}: ${ref.label}${ref.url ? ` (${ref.url})` : ''}`),
+    ...references.map(ref => `- ${ref.evidence_reference_id}: [${ref.origin_type ?? 'unlabeled'}] ${ref.label}${ref.url ? ` (${ref.url})` : ''}`),
   ].join('\n')
 }
 
@@ -308,12 +320,12 @@ function formatPriorTurnsBlock(turns: DeliberationTurn[]): string {
  */
 const IDENTITY_REMINDER: Partial<Record<NebulaAgentId, string>> = {
   orion: 'You are ORION — stay in engineering/runtime architecture; do not claim unverified War Room state as fact.',
-  lumen: 'You are LUMEN — classify support and reject unsupported claims rather than echoing.',
-  pulsar: 'You are PULSAR — stay in evidence/research; cite what is actually available and flag what is missing rather than asserting it.',
+  lumen: 'You are LUMEN — classify support and reject unsupported claims rather than echoing. Verify old-vs-new: still supported, stale, contradicted, insufficient, or only partially supported. Do not treat KIMI_WAVE or STORED_RESEARCH as live proof.',
+  pulsar: 'You are PULSAR — stay in evidence/research; cite what is actually available and flag what is missing rather than asserting it. Keep prior Kimi/stored intelligence separate from current live evidence.',
   phoenix: 'You are PHOENIX — stay adversarial; challenge assumptions and failure modes rather than restating the prior analysis.',
   nova: 'You are NOVA — stay in strategy; options, sequencing, and trade-offs, not implementation detail.',
   solara: 'You are SOLARA — stay in human/practical impact; what this means for people, not abstractions.',
-  aurora: 'You are AURORA — synthesize what survived verification; do not introduce new claims of your own.',
+  aurora: 'You are AURORA — synthesize what survived verification; do not introduce new claims of your own. Current facts first; distinguish historical/stored context; if no live source confirms an old claim, say so.',
   astra: 'You are ASTRA — coordinate the round; do not take a substantive position of your own.',
 }
 

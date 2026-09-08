@@ -89,15 +89,15 @@ export const SEAT_ANTI_ECHO: Record<NebulaAgentId, string> = {
   orion:
     'Do engineering/runtime architecture work: components, interfaces, data models, operational hazards, tests. Do not write a generic reliability essay. Do not claim current War Room state as verified without same-round evidence.',
   lumen:
-    'Verify; do not write a second analysis. Classify prior claims as supported, unsupported, or unresolved from evidence actually in this round. Reject unsupported operational/system-state claims. Do not echo, paraphrase, or agree with ORION as a substitute for verification. Agreement is not proof.',
+    'Verify; do not write a second analysis. Classify prior claims as supported, unsupported, or unresolved from evidence actually in this round. Explicitly verify the old-vs-new comparison: still supported, stale, contradicted, insufficient, or only partially supported. Reject unsupported operational/system-state claims. Do not treat KIMI_WAVE or STORED_RESEARCH as live proof. Do not echo, paraphrase, or agree with ORION or PULSAR as a substitute for verification. Agreement is not proof.',
   aurora:
-    'Final synthesis only after distinct seat work. Weave what survived verification. Do not rewrite ORION or LUMEN. Do not restate rejected claims as facts. Preserve dissent and uncertainty.',
+    'Final synthesis only after distinct seat work. Current facts first. Distinguish historical/stored context from live evidence. Name meaningful change over time and unresolved gaps. Weave only what survived verification. Do not rewrite ORION, PULSAR, or LUMEN. Do not restate rejected or unverified old claims as current facts. If no live source confirms an old claim, say so. Preserve dissent and uncertainty.',
   phoenix:
     'Adversarial failure-mode challenge: attack assumptions, name counterexamples, bound likelihood/impact, propose recovery. Do not restate prior analysis.',
   nova:
     'Strategy and sequencing only: objective, options, phases, dependencies, what would change the plan. Do not repeat engineering analysis or act as final synthesizer.',
   pulsar:
-    'Evidence discovery and provenance: what was found, what was missing, contradictions. Do not deliver a verdict or rewrite another seat.',
+    'Evidence discovery and provenance: what was found, what was missing, contradictions. Distinguish PRIOR KIMI INTELLIGENCE, PRIOR WAR ROOM RESEARCH, CURRENT LIVE EVIDENCE, CURRENT RUNTIME/TERRA EVIDENCE, and MODEL INFERENCE. Never treat KIMI_WAVE or STORED_RESEARCH as live proof. Do not deliver a verdict or rewrite another seat.',
   solara:
     'Human/practical impact only. Do not take over engineering, verification, or final synthesis.',
   astra:

@@ -9,6 +9,7 @@ import {
   type IntelligenceClientMetadata,
   type IntelligencePacket,
 } from '@/lib/intelligence/intelligencePacket'
+import type { OldVsNewComparison } from '@/lib/intelligence/comparison/oldVsNew'
 
 export type LiveResearchSourceKind = 'tavily' | 'public_rss' | 'weather_alerts' | 'grok_xai' | 'gemini' | 'direct_fetch' | 'research_engine_bridge'
 
@@ -38,6 +39,8 @@ export type LiveResearchEvidencePacket = {
   researchErrorSummary?: string
   /** Phase 8A universal packet: shared intelligence, evidence classification, and Red Team hardening. */
   intelligencePacket?: IntelligencePacket
+  comparison?: OldVsNewComparison
+  honestyNotes?: string[]
 }
 
 export type LiveResearchClientUi = {
@@ -58,6 +61,10 @@ export type LiveResearchClientUi = {
     retrieval_failed: boolean
     synthesis_allowed: boolean
   }
+  priorResearchCount?: number
+  liveSourceCount?: number
+  changedClaimsCount?: number
+  staleClaimsCount?: number
 }
 
 export function emptyLiveResearchEvidencePacket(generatedAt: string, summary?: string): LiveResearchEvidencePacket {
@@ -92,6 +99,18 @@ export function buildLiveResearchGroundingBlock(packet: LiveResearchEvidencePack
   } else {
     lines.push('- sources: none')
   }
+  if (packet.honestyNotes?.length) {
+    lines.push(`- honesty: ${packet.honestyNotes.slice(0, 4).join(' || ')}`)
+  }
+  if (packet.comparison) {
+    const cmp = packet.comparison
+    lines.push(
+      `- oldVsNew: stillSupported=${cmp.stillSupportedCount} · updated=${cmp.updatedCount} · contradicted=${cmp.contradictedCount} · stale=${cmp.staleCount} · unverified=${cmp.unverifiedCount} · new=${cmp.newInformation.length}`,
+    )
+    for (const claim of cmp.priorClaims.slice(0, 5)) {
+      lines.push(`  - [${claim.status}/${claim.priorOrigin}] ${claim.priorClaim.slice(0, 220)}`)
+    }
+  }
   if (packet.findings.trim()) {
     lines.push(`- findings (may be incomplete; not legal/medical advice):\n${packet.findings.trim().slice(0, 3500)}`)
   } else {
@@ -107,7 +126,7 @@ export function buildLiveResearchGroundingBlock(packet: LiveResearchEvidencePack
     lines.push(`- pipelineNote: ${packet.researchErrorSummary}`)
   }
   lines.push(
-    '- Epistemic discipline: Answer the decree directly. Label claims as **verified current** only when directly supported by the sources above. Mark **inference**, **weak signal**, **speculation**, and **unknown** clearly. Never invent URLs, local facts, citations, article titles, or current conditions. Do not add Commander mission/business/strategy relevance unless asked.',
+    '- Epistemic discipline: Answer the decree directly. Label claims as **verified current** only when directly supported by LIVE_WEB sources above. KIMI_WAVE and STORED_RESEARCH are prior/historical intelligence — never current proof. Mark **inference**, **weak signal**, **speculation**, and **unknown** clearly. Never invent URLs, local facts, citations, article titles, or current conditions. Do not add Commander mission/business/strategy relevance unless asked. If no live source confirms an old claim, say so.',
   )
   return lines.join('\n')
 }

@@ -21,6 +21,7 @@ export type DeliberationEvidenceReference = {
   label: string
   source_kind: string
   url: string | null
+  origin_type?: string
 }
 
 export type DeliberationClaim = {

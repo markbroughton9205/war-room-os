@@ -89,6 +89,13 @@ export function runResearchDomainRouterValidation(): CaseResult[] {
     bareRegulation,
   ))
 
+  const lithium = classifyResearchDomain('What has changed in recent public research on lithium battery degradation compared with what War Room previously knew?')
+  cases.push(check(
+    'domain_16_lithium_battery_public_research_classified_science_academic',
+    lithium === 'SCIENCE_ACADEMIC',
+    lithium,
+  ))
+
   return cases
 }
 
