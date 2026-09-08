@@ -47,6 +47,27 @@ export type EvidenceOriginType =
   | 'KIMI_WAVE'
   | 'STORED_RESEARCH'
 
+export type SourceAuthorityClass =
+  | 'PRIMARY_GOVERNMENT'
+  | 'PRIMARY_REGULATOR'
+  | 'PRIMARY_COURT'
+  | 'PRIMARY_ACADEMIC'
+  | 'PRIMARY_CORPORATE'
+  | 'PRIMARY_DATA'
+  | 'SECONDARY_MAJOR_MEDIA'
+  | 'SECONDARY_LOCAL_MEDIA'
+  | 'SECONDARY_INDUSTRY'
+  | 'TERTIARY_SOCIAL'
+  | 'MODEL_INFERENCE'
+  | 'UNKNOWN'
+
+export type TranslationStatus =
+  | 'NOT_REQUIRED'
+  | 'UNTRANSLATED'
+  | 'TRANSLATED'
+  | 'TRANSLATION_UNCERTAIN'
+  | 'UNKNOWN'
+
 export type IntelligenceEvidenceItem = {
   id: string
   source_id: string
@@ -73,6 +94,26 @@ export type IntelligenceEvidenceItem = {
   /** Optional so every existing producer/consumer of this type keeps compiling unchanged; new
    * producers should always set it. See `EvidenceOriginType` above for the field's purpose. */
   origin_type?: EvidenceOriginType
+  /** Build #6 additive independence metadata. Unknown stays null; never fabricate. */
+  source_family?: string | null
+  publisher_family?: string | null
+  canonical_url?: string | null
+  content_hash?: string | null
+  semantic_cluster_id?: string | null
+  derivative_of?: string | null
+  cluster_head_id?: string | null
+  region?: string | null
+  country?: string | null
+  language?: string | null
+  original_language?: string | null
+  query_language?: string | null
+  translation_status?: TranslationStatus | null
+  source_authority_class?: SourceAuthorityClass | null
+  jurisdiction?: string | null
+  primary_source?: boolean | null
+  independence_key?: string | null
+  fallback_used?: boolean | null
+  fallback_reason?: string | null
 }
 
 export type IntelligenceFinding = {

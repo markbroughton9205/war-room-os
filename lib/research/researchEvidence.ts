@@ -6,6 +6,7 @@ import type { LiveResearchRouterResult } from '@/lib/research/researchRouter'
 import { hydrateLiveIntelligencePacket } from '@/lib/intelligence/sources/livePacketHydrator'
 import { buildRetrievalOrchestration } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import type { RawIntelligenceSourceRecord } from '@/lib/intelligence/sourceNormalizer'
+import { annotateEvidenceIndependence, clusterIndependentEvidence } from '@/lib/intelligence/sourceIndependence'
 
 function parseLineList(text: string, prefix: string): string[] {
   const line = text.split('\n').find(l => l.trim().toUpperCase().startsWith(prefix.toUpperCase()))
@@ -246,7 +247,11 @@ export async function buildLiveResearchEvidencePacket(args: {
     queriedAt: router.generatedAt,
     urls: router.publicRss.results.map(r => r.url).slice(0, 8),
     error: router.publicRss.error,
-    note: 'Credential-free RSS/RDF fallback: Google News plus the trusted static feed list (BBC, NASA, Bloomberg, TechCrunch, ABC, AllAfrica, Al Jazeera, Le Monde, The Hindu, SCMP, DW, SMH)',
+    note: router.regionalRouting?.genericRssUsedAsFallback
+      ? `Generic RSS fallback only. ${router.regionalRouting.fallbackReason ?? ''}`.trim()
+      : router.regionalRouting?.region
+        ? `Region-scoped RSS/Google News for ${router.regionalRouting.region} locale=${router.regionalRouting.googleNewsLocale}`
+        : 'Credential-free RSS/RDF fallback: Google News plus the trusted static feed list (BBC, NASA, Bloomberg, TechCrunch, ABC, AllAfrica, Al Jazeera, Le Monde, The Hindu, SCMP, DW, SMH)',
   })
 
   if (router.researchEngine.attempted) {
@@ -350,6 +355,25 @@ export async function buildLiveResearchEvidencePacket(args: {
     unsupportedClaims: unresolvedQuestions.filter(c => c.toUpperCase() !== 'NONE'),
     retrieval: router.retrieval,
   })
+  if (intelligencePacket) {
+    const routing = router.regionalRouting
+    const { items } = clusterIndependentEvidence(annotateEvidenceIndependence(intelligencePacket.evidence, {
+      region: routing?.region ?? null,
+      queryLanguage: routing?.queryLanguage ?? null,
+      fallbackUsed: routing?.genericRssUsedAsFallback ?? false,
+      fallbackReason: routing?.fallbackReason ?? null,
+    }))
+    intelligencePacket.evidence = items
+    if (routing?.fallbackReason && !intelligencePacket.gaps.includes(routing.fallbackReason)) {
+      intelligencePacket.gaps = [...intelligencePacket.gaps, routing.fallbackReason]
+    }
+    if (routing?.region && !routing.primaryOk) {
+      const miss = routing.primaryLiveAvailable
+        ? `${routing.region} primary/public sources were attempted (${routing.primaryAttempted.join(', ') || 'none'}) and returned no documents.`
+        : `${routing.region} has no successful regional-primary public endpoint this round.`
+      if (!intelligencePacket.gaps.includes(miss)) intelligencePacket.gaps = [...intelligencePacket.gaps, miss]
+    }
+  }
 
   return {
     usedLiveResearch,
