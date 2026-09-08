@@ -8,17 +8,9 @@ import type {
 /**
  * Foundation constructors for the non-LIVE_WEB evidence origins introduced in Build #4A.
  *
- * `normalizeSourceEvidence` (lib/intelligence/sourceNormalizer.ts) is the one live producer of
- * `IntelligenceEvidenceItem` today, and it only ever tags `origin_type: 'LIVE_WEB'` — that is the
- * only origin with a real evidence-shaped source feeding it right now. Terra globe context and
- * runtime/provider status exist in the live app, but today they travel as plain prompt text
- * (`app/page.tsx`'s `[CURRENT TERRA CONTEXT ...]` block) or as the separate, differently-shaped
- * `VerifiedRuntimeContext` (lib/council/runtimeTruth.ts) — neither is currently constructed as an
- * `IntelligenceEvidenceItem`. These factories exist so a future call site can adopt the origin
- * taxonomy correctly and consistently the moment it starts producing real evidence items for these
- * origins, without inventing its own field shape. They are not wired into a live path yet — doing so
- * without a genuine evidence-shaped source at the call site would be exactly the fabricated-origin
- * outcome Build #4A explicitly prohibits for KIMI_WAVE/STORED_RESEARCH.
+ * `normalizeSourceEvidence` is the live producer of LIVE_WEB items. Terra, runtime telemetry,
+ * and model inference have factories. KIMI_WAVE and STORED_RESEARCH are produced by
+ * lib/intelligence/kimiWaves and lib/intelligence/storedResearch — never by the live normalizer.
  */
 
 type BaseEvidenceArgs = {
@@ -30,6 +22,7 @@ type BaseEvidenceArgs = {
   content: string
   observed_at: string
   url?: string
+  published_at?: string
   confidence?: number
   confidence_tier?: EvidenceConfidenceTier
   freshness?: EvidenceFreshness
@@ -52,6 +45,7 @@ function baseEvidenceItem(
     claim: args.claim,
     content: args.content,
     observed_at: args.observed_at,
+    ...(args.published_at ? { published_at: args.published_at } : {}),
     confidence: args.confidence ?? 0,
     confidence_tier: args.confidence_tier ?? 'unsupported',
     corroboration_count: 0,
@@ -139,4 +133,14 @@ export function buildModelInferenceEvidenceItem(args: {
     'direct_fetch',
     'unverified',
   )
+}
+
+/** Preserved Kimi Wave markdown — historical/source intelligence, never live web. */
+export function buildKimiWaveEvidenceItem(args: BaseEvidenceArgs): IntelligenceEvidenceItem {
+  return baseEvidenceItem(args, 'KIMI_WAVE', 'direct_fetch', 'unverified')
+}
+
+/** Structured prior War Room research — replayed, never silently LIVE_WEB. */
+export function buildStoredResearchEvidenceItem(args: BaseEvidenceArgs): IntelligenceEvidenceItem {
+  return baseEvidenceItem(args, 'STORED_RESEARCH', 'direct_fetch', 'semi_verified')
 }

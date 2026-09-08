@@ -34,10 +34,9 @@ export type EvidenceFreshness = 'live' | 'recent' | 'aging' | 'stale' | 'unknown
  * taxonomies are orthogonal and must never be collapsed into one field (Build #4 readiness audit
  * finding: no provenance-origin tag existed anywhere in the codebase before this).
  *
- * KIMI_WAVE and STORED_RESEARCH are declared for the schema's sake but must never be produced by
- * current code — neither a Kimi Waves subsystem nor a stored-research retrieval path exists yet
- * (Build #4A explicitly does not implement either); using either value here without a real backing
- * system would be fabricated provenance.
+ * KIMI_WAVE is produced only by the Kimi Wave ingest layer (lib/intelligence/kimiWaves).
+ * STORED_RESEARCH is produced only by stored-research retrieval (lib/intelligence/storedResearch).
+ * Live providers must never emit those origins.
  */
 export type EvidenceOriginType =
   | 'LIVE_WEB'
@@ -58,7 +57,10 @@ export type IntelligenceEvidenceItem = {
   url?: string
   claim: string
   content: string
+  /** When War Room retrieved/observed this item. Distinct from `published_at`. */
   observed_at: string
+  /** Source publication time when the provider actually supplied one — never fabricated. */
+  published_at?: string
   confidence: number
   confidence_tier: EvidenceConfidenceTier
   corroboration_count: number
@@ -129,6 +131,10 @@ export type IntelligenceClientMetadata = {
   weakSignalDetected: boolean
   unsupportedClaims: number
   redTeamWarnings: number
+  priorResearchCount?: number
+  liveSourceCount?: number
+  changedClaimsCount?: number
+  staleClaimsCount?: number
   local?: LocalIntelligenceClientMetadata
   retrieval?: {
     required: boolean
@@ -209,12 +215,16 @@ export function buildIntelligencePacket(args: {
   timestamp?: string
   queryPlan?: IntelligenceQueryPlan
   rawSources: RawIntelligenceSourceRecord[]
+  extraEvidence?: IntelligenceEvidenceItem[]
   unsupportedClaims?: string[]
   retrieval?: RetrievalOrchestration
 }): IntelligencePacket {
   const timestamp = args.timestamp ?? new Date().toISOString()
   const queryPlan = args.queryPlan ?? planIntelligenceQuery(args.decree)
-  const normalized = normalizeSourceEvidence(args.rawSources, timestamp)
+  const normalized = [
+    ...normalizeSourceEvidence(args.rawSources, timestamp),
+    ...(args.extraEvidence ?? []),
+  ]
   const withContradictions = scanContradictions(normalized)
   const scored = scoreEvidenceItems(withContradictions)
   const confidenceSummary = classifyConfidenceSummary(scored)
@@ -278,6 +288,8 @@ export function toIntelligenceClientMetadata(packet: IntelligencePacket): Intell
     weakSignalDetected: packet.weak_signals.length > 0,
     unsupportedClaims: packet.unsupported_claims.length,
     redTeamWarnings: packet.red_team_verification.warnings.length,
+    priorResearchCount: packet.evidence.filter(item => item.origin_type === 'KIMI_WAVE' || item.origin_type === 'STORED_RESEARCH').length,
+    liveSourceCount: packet.evidence.filter(item => item.origin_type === 'LIVE_WEB').length,
     ...(packet.local_intelligence ? { local: toLocalIntelligenceClientMetadata(packet.local_intelligence) } : {}),
     ...(packet.retrieval
       ? {
@@ -297,6 +309,22 @@ export function toIntelligenceClientMetadata(packet: IntelligencePacket): Intell
   }
 }
 
+function evidenceByOrigin(packet: IntelligencePacket, origin: IntelligenceEvidenceItem['origin_type']): IntelligenceEvidenceItem[] {
+  return packet.evidence.filter(item => item.origin_type === origin)
+}
+
+function renderOriginSection(title: string, items: IntelligenceEvidenceItem[], emptyNote: string): string[] {
+  if (!items.length) return [`- ${title}: ${emptyNote}`]
+  const lines = [`- ${title}:`]
+  for (const item of items.slice(0, 5)) {
+    const published = item.published_at ? ` published_at=${item.published_at}` : ''
+    lines.push(
+      `  - [${item.origin_type}/${item.freshness}] ${item.source_label}: ${item.claim.slice(0, 280)} (retrieved=${item.observed_at}${published}${item.url ? `; ${item.url}` : ''})`,
+    )
+  }
+  return lines
+}
+
 export function buildIntelligenceGroundingBlock(packet: IntelligencePacket, family?: CouncilOrchestrationFamily): string {
   const roleLine = family
     ? `- familyLens: ${family} receives the SAME packet as the other families; only the analysis framing changes.`
@@ -309,6 +337,11 @@ export function buildIntelligenceGroundingBlock(packet: IntelligencePacket, fami
     `- weakSignals: ${packet.weak_signals.length} · contradictions: ${packet.contradictions.length} · unsupportedClaims: ${packet.unsupported_claims.length}`,
     roleLine,
   ]
+  lines.push(...renderOriginSection('PRIOR KIMI INTELLIGENCE', evidenceByOrigin(packet, 'KIMI_WAVE'), 'none this round — not live proof'))
+  lines.push(...renderOriginSection('PRIOR WAR ROOM RESEARCH', evidenceByOrigin(packet, 'STORED_RESEARCH'), 'none this round — not live proof'))
+  lines.push(...renderOriginSection('CURRENT LIVE EVIDENCE', evidenceByOrigin(packet, 'LIVE_WEB'), 'none this round'))
+  lines.push(...renderOriginSection('CURRENT RUNTIME/TERRA EVIDENCE', [...evidenceByOrigin(packet, 'TERRA'), ...evidenceByOrigin(packet, 'RUNTIME_TELEMETRY')], 'none this round'))
+  lines.push(...renderOriginSection('MODEL INFERENCE', evidenceByOrigin(packet, 'MODEL_INFERENCE'), 'none — do not treat model inference as retrieved evidence'))
   if (packet.findings.length) {
     lines.push('- findings:')
     for (const finding of packet.findings.slice(0, 6)) {
@@ -375,6 +408,7 @@ export function buildIntelligenceGroundingBlock(packet: IntelligencePacket, fami
   )
   lines.push(
     '- Do not answer current facts unless present in packet evidence.',
+    '- Origin discipline: KIMI_WAVE and STORED_RESEARCH are prior/historical intelligence. They are never live proof. Only LIVE_WEB (and current TERRA/RUNTIME_TELEMETRY) may support current facts. If no live source confirms an old claim, say so.',
   )
   return lines.join('\n')
 }

@@ -4,6 +4,7 @@ import type {
   EvidenceFreshness,
   IntelligenceEvidenceItem,
 } from '@/lib/intelligence/intelligencePacket'
+import { classifyEvidenceFreshness } from '@/lib/intelligence/freshnessPolicy'
 import {
   getIntelligenceSource,
   type IntelligenceSourceDefinition,
@@ -17,6 +18,7 @@ export type RawIntelligenceFinding = {
   url?: string
   content: unknown
   observed_at?: string
+  published_at?: string
   score?: number
 }
 
@@ -47,17 +49,13 @@ function fallbackSource(sourceId: string): IntelligenceSourceDefinition {
   }
 }
 
-function freshnessFromObservedAt(observedAt: string | undefined, nowIso: string): EvidenceFreshness {
-  if (!observedAt) return 'unknown'
-  const observed = Date.parse(observedAt)
-  const now = Date.parse(nowIso)
-  if (!Number.isFinite(observed) || !Number.isFinite(now)) return 'unknown'
-  const ageMs = Math.max(0, now - observed)
-  const hour = 60 * 60 * 1000
-  if (ageMs <= hour) return 'live'
-  if (ageMs <= 48 * hour) return 'recent'
-  if (ageMs <= 30 * 24 * hour) return 'aging'
-  return 'stale'
+function freshnessFromObservedAt(observedAt: string | undefined, nowIso: string, publishedAt?: string): EvidenceFreshness {
+  return classifyEvidenceFreshness({
+    originType: 'LIVE_WEB',
+    nowIso,
+    retrievedAt: observedAt,
+    publishedAt,
+  })
 }
 
 function evidenceDensity(text: unknown): number {
@@ -91,7 +89,8 @@ export function normalizeSourceEvidence(
       const content = compactDisplayWhitespace(finding.content)
       if (!content && !title) return
       const signal = detectWeakSignal({ source, title, content })
-      const freshness = freshnessFromObservedAt(finding.observed_at ?? record.queried_at, nowIso)
+      const retrievedAt = finding.observed_at ?? record.queried_at
+      const freshness = freshnessFromObservedAt(retrievedAt, nowIso, finding.published_at)
       items.push({
         id: `${record.source_id}-${index + 1}`,
         source_id: source.source_id,
@@ -102,7 +101,8 @@ export function normalizeSourceEvidence(
         ...(finding.url ? { url: finding.url } : {}),
         claim: claimFromFinding(finding),
         content,
-        observed_at: finding.observed_at ?? record.queried_at,
+        observed_at: retrievedAt,
+        ...(finding.published_at ? { published_at: finding.published_at } : {}),
         confidence: 0,
         confidence_tier: 'unsupported',
         corroboration_count: 0,

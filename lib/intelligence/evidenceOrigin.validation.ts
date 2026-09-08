@@ -4,6 +4,7 @@ import {
   buildModelInferenceEvidenceItem,
   buildRuntimeTelemetryEvidenceItem,
   buildTerraEvidenceItem,
+  buildKimiWaveEvidenceItem,
 } from './evidenceOrigin'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
@@ -90,6 +91,20 @@ export function runEvidenceOriginValidation(): CaseResult[] {
     [liveWebItem?.origin_type, terraItem.origin_type, runtimeItem.origin_type, modelInferenceItem.origin_type]
       .every(origin => origin !== 'KIMI_WAVE' && origin !== 'STORED_RESEARCH'),
     JSON.stringify({ origins: [liveWebItem?.origin_type, terraItem.origin_type, runtimeItem.origin_type, modelInferenceItem.origin_type] }),
+  ))
+
+  cases.push(check(
+    'origin_10_kimi_factory_tags_kimi_wave_not_live_web',
+    buildKimiWaveEvidenceItem({
+      id: 'kimi-1',
+      source_id: 'kimi-wave-1',
+      source_label: 'Kimi Wave 1',
+      title: 'PyPI',
+      claim: 'PyPI is a package index',
+      content: 'PyPI is a package index',
+      observed_at: '2026-08-08T00:00:00.000Z',
+    }).origin_type === 'KIMI_WAVE',
+    'kimi factory',
   ))
 
   return cases

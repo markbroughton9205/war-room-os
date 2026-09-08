@@ -9,6 +9,7 @@ export function hydrateLiveIntelligencePacket(args: {
   decree: string
   timestamp: string
   rawSources: RawIntelligenceSourceRecord[]
+  extraEvidence?: IntelligencePacket['evidence']
   unsupportedClaims?: string[]
   retrieval: RetrievalOrchestration
 }): IntelligencePacket {
@@ -16,6 +17,7 @@ export function hydrateLiveIntelligencePacket(args: {
     decree: args.decree,
     timestamp: args.timestamp,
     rawSources: args.rawSources,
+    extraEvidence: args.extraEvidence,
     unsupportedClaims: [
       ...(args.unsupportedClaims ?? []),
       ...args.retrieval.retrieval_gaps,
