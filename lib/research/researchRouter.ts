@@ -2,6 +2,7 @@ import { callXAIChat } from '@/lib/ai/providers/xai'
 import { buildRetrievalOrchestration, evaluateMandatoryLiveRetrieval, type RetrievalOrchestration } from '@/lib/intelligence/sources/retrievalOrchestrator'
 import { tavilyWarRoomSearch } from '@/lib/internet/warRoomSearchProviders'
 import type { WarRoomSupabase } from '@/lib/war-room/persistence'
+import type { GeographicRegion } from '@/lib/council/scout-swarm/types'
 import {
   fetchTrustedPublicNewsFeeds,
   parsePublicNewsRss,
@@ -12,6 +13,13 @@ import {
 import { extractUsStateArea, fetchActiveWeatherAlerts, skippedWeatherAlertsLeg, type NwsAlertsLeg } from '@/lib/research/nwsAlerts'
 import { classifyResearchDomain, matchedDomains } from '@/lib/research/researchDomainRouter'
 import { runResearchEngineBridge, type ResearchEngineBridgeLeg } from '@/lib/research/researchEngineBridge'
+import {
+  googleNewsLocaleForRegion,
+  primaryProviderIdsForRegion,
+  regionHasPrimaryPublicEndpoint,
+  secondaryRssCategoriesForRegion,
+} from '@/lib/research/sourceTerritories'
+import type { ResearchProviderId } from '@/lib/research-engine/core/types'
 
 export type { PublicNewsItem } from '@/lib/research/publicRssFeeds'
 export type { NwsAlertsLeg } from '@/lib/research/nwsAlerts'
@@ -23,6 +31,24 @@ export type LiveResearchRouterInput = {
   conversationId?: string | null
   /** Hard cap for entire router wall time. */
   budgetMs?: number
+  region?: GeographicRegion
+  queryLanguage?: string
+  extraProviderIds?: ResearchProviderId[]
+  skipGenericRssUnlessFallback?: boolean
+}
+
+export type RegionalRoutingMeta = {
+  region?: GeographicRegion
+  queryLanguage?: string
+  primaryAttempted: string[]
+  primaryOk: boolean
+  primaryLiveAvailable: boolean
+  secondaryAttempted: string[]
+  genericRssUsedAsFallback: boolean
+  genericRssWasSoleSource: boolean
+  fallbackReason?: string
+  nativeLanguageRetrieval: boolean
+  googleNewsLocale?: string
 }
 
 export type DirectFetchSnippet = {
@@ -64,6 +90,7 @@ export type LiveResearchRouterResult = {
   direct: DirectFetchSnippet[]
   retrieval: RetrievalOrchestration
   researchEngine: ResearchEngineBridgeLeg
+  regionalRouting?: RegionalRoutingMeta
 }
 
 const MAX_DIRECT = 2
@@ -119,9 +146,14 @@ export function extractPublicHttpUrls(text: string, max = MAX_DIRECT): string[] 
  * filtered to `categories` when given. Also see `nwsAlerts.ts` for the separate weather-alerts
  * leg, kept out of this RSS/RDF parser because its response is `application/geo+json`, not XML.
  */
-async function fetchPublicNewsRss(searchQuery: string, categories: PublicNewsCategory[]): Promise<PublicRssLeg> {
+async function fetchPublicNewsRss(
+  searchQuery: string,
+  categories: PublicNewsCategory[],
+  options?: { region?: GeographicRegion; includeGenericGlobal?: boolean },
+): Promise<PublicRssLeg> {
   const started = Date.now()
-  const googleNewsUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(searchQuery)}&hl=en-US&gl=US&ceid=US:en`
+  const locale = googleNewsLocaleForRegion(options?.region)
+  const googleNewsUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(searchQuery)}&hl=${locale.hl}&gl=${locale.gl}&ceid=${locale.ceid}`
 
   const [googleNews, trusted] = await Promise.all([
     fetch(googleNewsUrl, {
@@ -129,13 +161,17 @@ async function fetchPublicNewsRss(searchQuery: string, categories: PublicNewsCat
       headers: { 'user-agent': 'WarRoomLiveResearch/1.0', accept: 'application/rss+xml,application/xml,text/xml' },
     }).then(async res => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return { ok: true as const, items: parsePublicNewsRss(await res.text(), 'Google News') }
+      return { ok: true as const, items: parsePublicNewsRss(await res.text(), `Google News (${locale.gl})`) }
     }).catch(error => ({
       ok: false as const,
       items: [] as PublicNewsItem[],
       error: error instanceof Error ? error.message : String(error),
     })),
-    fetchTrustedPublicNewsFeeds({ categories }),
+    fetchTrustedPublicNewsFeeds({
+      categories,
+      region: options?.region,
+      includeGenericGlobal: options?.includeGenericGlobal ?? !options?.region,
+    }),
   ])
 
   const combined = [...googleNews.items, ...trusted.results]
@@ -233,6 +269,8 @@ function buildSearchQuery(decreeText: string): string {
  * Does not call Gemini (secondary synthesis lives in `researchEvidence.ts`).
  */
 export async function runLiveResearchRouter(input: LiveResearchRouterInput): Promise<LiveResearchRouterResult> {
+  void input.budgetMs
+  void input.skipGenericRssUnlessFallback
   const generatedAt = new Date().toISOString()
   const searchQuery = buildSearchQuery(input.decreeText)
   const urls = extractPublicHttpUrls(input.decreeText, MAX_DIRECT)
@@ -286,10 +324,22 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
   })()
 
   const mandatoryRetrieval = evaluateMandatoryLiveRetrieval(input.decreeText)
-  const categories = categoriesForQuery(mandatoryRetrieval.reasons, input.decreeText)
+  const region = input.region
+  const locale = googleNewsLocaleForRegion(region)
+  const queryLanguage = input.queryLanguage ?? locale.queryLanguage
+  const regionalCategories = region
+    ? [...new Set([...secondaryRssCategoriesForRegion(region), ...categoriesForQuery(mandatoryRetrieval.reasons, input.decreeText).filter(cat => cat !== 'world')])]
+    : categoriesForQuery(mandatoryRetrieval.reasons, input.decreeText)
   const wantsWeather = mandatoryRetrieval.reasons.includes('weather')
+  const extraProviderIds = [
+    ...(input.extraProviderIds ?? []),
+    ...(region ? primaryProviderIdsForRegion(region) : []),
+  ]
 
-  const publicRssP = fetchPublicNewsRss(searchQuery, categories)
+  const publicRssP = fetchPublicNewsRss(searchQuery, regionalCategories, {
+    region,
+    includeGenericGlobal: !region,
+  })
   const weatherAlertsP = wantsWeather
     ? fetchActiveWeatherAlerts({ areaState: extractUsStateArea(input.decreeText) })
     : Promise.resolve(skippedWeatherAlertsLeg())
@@ -300,9 +350,36 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     queryText: searchQuery,
     domain,
     matchedDomains: domain === 'HYBRID' ? matchedDomains(input.decreeText) : [],
+    extraProviderIds,
   })
 
-  const [tRaw, publicRss, weatherAlerts, grok, direct, researchEngine] = await Promise.all([tavilyP, publicRssP, weatherAlertsP, grokP, directP, researchEngineP])
+  const [tRaw, publicRssInitial, weatherAlerts, grok, direct, researchEngine] = await Promise.all([tavilyP, publicRssP, weatherAlertsP, grokP, directP, researchEngineP])
+
+  let publicRss = publicRssInitial
+  let genericRssUsedAsFallback = false
+  let fallbackReason: string | undefined
+  const primaryAttempted = researchEngine.providerIds
+  const primaryOk = researchEngine.ok
+  const primaryLiveAvailable = region ? regionHasPrimaryPublicEndpoint(region) : researchEngine.attempted
+
+  if (region && !primaryOk && !publicRss.ok) {
+    const generic = await fetchPublicNewsRss(searchQuery, ['world', 'news'], { includeGenericGlobal: true })
+    if (generic.ok) {
+      publicRss = generic
+      genericRssUsedAsFallback = true
+      fallbackReason = primaryLiveAvailable
+        ? 'Regional primary/public sources returned no documents; generic global RSS used as fallback only.'
+        : 'No supported regional-primary public endpoint succeeded; generic global RSS used as fallback. Do not claim regional-primary coverage.'
+    } else if (!primaryLiveAvailable) {
+      fallbackReason = 'No supported regional-primary public endpoint is live for this territory; generic RSS also empty.'
+    } else {
+      fallbackReason = 'Regional primary sources were attempted and failed; generic RSS also empty.'
+    }
+  } else if (region && !primaryOk && publicRss.ok) {
+    fallbackReason = primaryLiveAvailable
+      ? 'Regional primary/public adapters returned no documents; region-specific secondary RSS used.'
+      : 'No live regional-primary adapter succeeded; region-specific secondary sources used. Do not claim primary coverage.'
+  }
 
   const tavily: TavilyLeg = tRaw.ok
     ? { ok: true, results: tRaw.results, durationMs: tRaw.durationMs }
@@ -322,6 +399,14 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
   void input.supabase
   void input.conversationId
 
+  const genericRssWasSoleSource = Boolean(region) && genericRssUsedAsFallback && !primaryOk && !tavily.ok
+  const nativeLanguageRetrieval = Boolean(
+    region
+    && queryLanguage !== 'en'
+    && (researchEngine.documents.some(doc => (doc.language ?? '').toLowerCase().startsWith(queryLanguage))
+      || publicRss.results.some(item => /[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af\u0600-\u06ff]/.test(`${item.title} ${item.snippet}`))),
+  )
+
   return {
     generatedAt,
     searchQuery,
@@ -332,5 +417,18 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     direct,
     retrieval,
     researchEngine,
+    regionalRouting: {
+      region,
+      queryLanguage,
+      primaryAttempted,
+      primaryOk,
+      primaryLiveAvailable,
+      secondaryAttempted: region ? [`google_news:${locale.gl}`, ...regionalCategories] : ['trusted_rss', 'google_news:US'],
+      genericRssUsedAsFallback,
+      genericRssWasSoleSource,
+      fallbackReason,
+      nativeLanguageRetrieval,
+      googleNewsLocale: `${locale.hl}/${locale.gl}/${locale.ceid}`,
+    },
   }
 }

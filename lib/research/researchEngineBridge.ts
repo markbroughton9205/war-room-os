@@ -24,14 +24,11 @@ import { extractPrimaryQuerySentence, type ResearchDomain } from '@/lib/research
 const BRIDGED_PROVIDERS_BY_DOMAIN: Record<ResearchDomain, ResearchProviderId[]> = {
   SCIENCE_ACADEMIC: ['arxiv', 'crossref', 'ncbi'],
   ECONOMIC_FINANCIAL: ['sec_edgar', 'wikidata'],
-  GOVERNMENT_REGULATORY: ['sec_edgar', 'wikidata'],
-  // No credential-free, free-text-searchable research-engine provider currently covers freight/
-  // trucking/logistics industry news (FMCSA is the one transportation adapter in the library, and
-  // it requires a paid-style `FMCSA_WEB_KEY` plus only supports exact-USDOT-number lookups, not
-  // free-text industry queries) — SEC EDGAR full-text search is the closest genuine fit, since
-  // public freight/logistics companies' own filings discuss "freight brokerage"/"logistics" in
-  // their own words. This is an honest best-available mapping, not a fabricated logistics source.
-  TRANSPORTATION_LOGISTICS: ['sec_edgar'],
+  GOVERNMENT_REGULATORY: ['federal_register', 'sec_edgar', 'wikidata'],
+  // Federal Register is the actual US regulatory primary. SEC EDGAR remains available as
+  // PRIMARY_CORPORATE disclosure (not a substitute for a rule change). FMCSA still requires a
+  // paid-style key and exact-USDOT lookup, so it is not auto-bridged here.
+  TRANSPORTATION_LOGISTICS: ['federal_register', 'sec_edgar'],
   GENERAL_CURRENT: [],
   HYBRID: [],
 }
@@ -110,9 +107,13 @@ export async function runResearchEngineBridge(args: {
   queryText: string
   domain: ResearchDomain
   matchedDomains?: ResearchDomain[]
+  extraProviderIds?: ResearchProviderId[]
+  providerIdsOverride?: ResearchProviderId[]
 }): Promise<ResearchEngineBridgeLeg> {
-  const { queryText, domain, matchedDomains = [] } = args
-  const providerIds = providersForDomain(domain, matchedDomains)
+  const { queryText, domain, matchedDomains = [], extraProviderIds = [], providerIdsOverride } = args
+  const providerIds = providerIdsOverride?.length
+    ? [...new Set(providerIdsOverride)]
+    : [...new Set([...providersForDomain(domain, matchedDomains), ...extraProviderIds])].slice(0, 6)
 
   if (providerIds.length === 0) {
     return { domain, attempted: false, providerIds: [], results: [], documents: [], ok: false }

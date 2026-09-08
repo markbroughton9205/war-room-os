@@ -212,6 +212,7 @@ import {
   runIndependentScoutSwarm,
   shouldRunIndependentScoutSwarm,
   SWARM_SEAT_BY_AGENT,
+  type ScoutPlan,
 } from '@/lib/council/scout-swarm'
 import {
   createActualSelectionSnapshot,
@@ -2091,11 +2092,15 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         runtimeGrounding: warRoomContextBlock,
         warRoomContext: warRoomContextBlock,
         liveResearchPacket,
-        runLiveResearch: async queryText => {
+        runLiveResearch: async (queryText: string, scout?: ScoutPlan) => {
           const router = await runLiveResearchRouter({
             decreeText: queryText,
             supabase: sup.ok ? sup.client : null,
             conversationId,
+            region: scout?.region,
+            queryLanguage: scout?.queryLanguage,
+            extraProviderIds: scout?.preferredProviders as import('@/lib/research-engine/core/types').ResearchProviderId[] | undefined,
+            skipGenericRssUnlessFallback: Boolean(scout?.region),
           })
           return buildLiveResearchEvidencePacket({
             decreeText: queryText,

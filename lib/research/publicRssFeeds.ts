@@ -1,3 +1,5 @@
+import type { GeographicRegion } from '@/lib/council/scout-swarm/types'
+
 /**
  * Credential-free public news RSS/RDF fallback tier — used when Tavily/Grok are unavailable or
  * unauthenticated. Every URL below was live-fetch-tested (HTTP 200, real current-dated items)
@@ -48,6 +50,8 @@ export type TrustedRssFeedDescriptor = {
   categories: PublicNewsCategory[]
   reliability: PublicNewsReliability
   contentDensity?: 'thin' | 'normal'
+  regions?: GeographicRegion[]
+  genericGlobalFallback?: boolean
 }
 
 /**
@@ -59,18 +63,18 @@ export type TrustedRssFeedDescriptor = {
  * date-field fallback (pubDate → dc:date) differs, which is already handled per-item.
  */
 export const TRUSTED_RSS_FEEDS: TrustedRssFeedDescriptor[] = [
-  { name: 'BBC World News', url: 'http://feeds.bbci.co.uk/news/world/rss.xml', format: 'rss', categories: ['world', 'news'], reliability: 'HIGH' },
-  { name: 'NASA Breaking News', url: 'https://www.nasa.gov/rss/dyn/breaking_news.rss', format: 'rss', categories: ['technology', 'science'], reliability: 'HIGH' },
-  { name: 'Bloomberg Markets', url: 'https://feeds.bloomberg.com/markets/news.rss', format: 'rss', categories: ['markets', 'economy'], reliability: 'MEDIUM', contentDensity: 'thin' },
-  { name: 'TechCrunch', url: 'https://techcrunch.com/feed/', format: 'rss', categories: ['technology', 'startups'], reliability: 'MEDIUM' },
-  { name: 'ABC News', url: 'http://feeds.abcnews.com/abcnews/topstories', format: 'rss', categories: ['world', 'news'], reliability: 'HIGH' },
-  { name: 'AllAfrica', url: 'https://allafrica.com/tools/headlines/rdf/africa/headlines.rdf', format: 'rdf', categories: ['world', 'news', 'africa'], reliability: 'MEDIUM' },
-  { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', format: 'rss', categories: ['world', 'news'], reliability: 'HIGH' },
-  { name: 'Le Monde', url: 'https://www.lemonde.fr/rss/en_continu.xml', format: 'rss', categories: ['world', 'news', 'europe'], reliability: 'HIGH' },
-  { name: 'The Hindu', url: 'https://www.thehindu.com/news/feeder/default.rss', format: 'rss', categories: ['world', 'news', 'asia'], reliability: 'HIGH' },
-  { name: 'South China Morning Post', url: 'https://www.scmp.com/rss/2/feed', format: 'rss', categories: ['world', 'news', 'asia'], reliability: 'HIGH' },
-  { name: 'Deutsche Welle', url: 'https://rss.dw.com/rdf/rss-en-all', format: 'rdf', categories: ['world', 'news', 'europe'], reliability: 'HIGH' },
-  { name: 'Sydney Morning Herald', url: 'https://www.smh.com.au/rss/feed.xml', format: 'rss', categories: ['world', 'news'], reliability: 'HIGH' },
+  { name: 'BBC World News', url: 'http://feeds.bbci.co.uk/news/world/rss.xml', format: 'rss', categories: ['world', 'news'], reliability: 'HIGH', genericGlobalFallback: true },
+  { name: 'NASA Breaking News', url: 'https://www.nasa.gov/rss/dyn/breaking_news.rss', format: 'rss', categories: ['technology', 'science'], reliability: 'HIGH', genericGlobalFallback: true },
+  { name: 'Bloomberg Markets', url: 'https://feeds.bloomberg.com/markets/news.rss', format: 'rss', categories: ['markets', 'economy'], reliability: 'MEDIUM', contentDensity: 'thin', genericGlobalFallback: true },
+  { name: 'TechCrunch', url: 'https://techcrunch.com/feed/', format: 'rss', categories: ['technology', 'startups'], reliability: 'MEDIUM', genericGlobalFallback: true },
+  { name: 'ABC News', url: 'http://feeds.abcnews.com/abcnews/topstories', format: 'rss', categories: ['world', 'news'], reliability: 'HIGH', regions: ['NORTH_AMERICA'] },
+  { name: 'AllAfrica', url: 'https://allafrica.com/tools/headlines/rdf/africa/headlines.rdf', format: 'rdf', categories: ['world', 'news', 'africa'], reliability: 'MEDIUM', regions: ['AFRICA'] },
+  { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', format: 'rss', categories: ['world', 'news'], reliability: 'HIGH', regions: ['MIDDLE_EAST'], genericGlobalFallback: true },
+  { name: 'Le Monde', url: 'https://www.lemonde.fr/rss/en_continu.xml', format: 'rss', categories: ['world', 'news', 'europe'], reliability: 'HIGH', regions: ['EUROPE'] },
+  { name: 'The Hindu', url: 'https://www.thehindu.com/news/feeder/default.rss', format: 'rss', categories: ['world', 'news', 'asia'], reliability: 'HIGH', regions: ['SOUTH_ASIA'] },
+  { name: 'South China Morning Post', url: 'https://www.scmp.com/rss/2/feed', format: 'rss', categories: ['world', 'news', 'asia'], reliability: 'HIGH', regions: ['EAST_ASIA'] },
+  { name: 'Deutsche Welle', url: 'https://rss.dw.com/rdf/rss-en-all', format: 'rdf', categories: ['world', 'news', 'europe'], reliability: 'HIGH', regions: ['EUROPE'] },
+  { name: 'Sydney Morning Herald', url: 'https://www.smh.com.au/rss/feed.xml', format: 'rss', categories: ['world', 'news'], reliability: 'HIGH', regions: ['OCEANIA'], genericGlobalFallback: true },
 ]
 
 const RSS_TIMEOUT_MS = 10_000
@@ -185,12 +189,20 @@ export async function fetchTrustedPublicNewsFeeds(input: {
   categories?: PublicNewsCategory[]
   timeoutMs?: number
   maxCombinedResults?: number
+  region?: GeographicRegion
+  includeGenericGlobal?: boolean
 } = {}): Promise<TrustedRssFeedsResult> {
   const started = Date.now()
   const categorySet = input.categories?.length ? new Set(input.categories) : null
-  const feeds = categorySet
-    ? TRUSTED_RSS_FEEDS.filter(feed => feed.categories.some(c => categorySet.has(c)))
-    : TRUSTED_RSS_FEEDS
+  const feeds = TRUSTED_RSS_FEEDS.filter(feed => {
+    if (categorySet && !feed.categories.some(c => categorySet.has(c))) return false
+    if (!input.region) return true
+    const regional = Boolean(feed.regions?.includes(input.region))
+    const generic = Boolean(feed.genericGlobalFallback)
+    if (regional) return true
+    if (generic && input.includeGenericGlobal) return true
+    return false
+  })
 
   const settled = await Promise.all(feeds.map(async feed => {
     const retrievedAt = new Date().toISOString()

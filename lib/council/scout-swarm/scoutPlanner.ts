@@ -1,5 +1,7 @@
 import type { NebulaAgentId } from '@/lib/council/nebula/identity'
+import { googleNewsLocaleForRegion, primaryProviderIdsForRegion, regionHasPrimaryPublicEndpoint } from '@/lib/research/sourceTerritories'
 import { admitScout, createScoutGovernor, type ScoutGovernor } from './governor'
+import { applyResearchProfile } from './researchProfiles'
 import type {
   AstraMissionPlan,
   GeographicRegion,
@@ -49,7 +51,12 @@ function territoryQuery(assignment: SeatAssignment, scoutType: ScoutType, decree
     return `${tag}: Small broker/operator ${scoutType.toLowerCase()} impact of: ${base}`
   }
   if (isRegion(scoutType)) {
-    return `${tag}: ${base} current developments in ${regionLabel(scoutType)}`
+    const locale = googleNewsLocaleForRegion(scoutType)
+    const primaries = primaryProviderIdsForRegion(scoutType)
+    const honest = regionHasPrimaryPublicEndpoint(scoutType)
+      ? `primary public sources: ${primaries.join(', ')}`
+      : 'no supported regional-primary public endpoint; do not claim primary coverage'
+    return `${tag}: ${base} current developments in ${regionLabel(scoutType)} [${honest}; query_language=${locale.queryLanguage}]`
   }
   return `${tag}: ${base} [${assignment.sourceTerritory}]`
 }
@@ -100,7 +107,7 @@ export function planSeatScouts(input: {
       region: isRegion(scoutType) ? scoutType : undefined,
       sourceTerritory: territoryForScout(input.assignment, scoutType),
       spawnDepth: 1,
-      languageAccess: 'native',
+      languageAccess: isRegion(scoutType) && googleNewsLocaleForRegion(scoutType).queryLanguage !== 'en' ? 'native' : 'native',
       preferLocalTruth: input.assignment.agentId === 'orion',
       executeLive: input.assignment.liveResearch && input.assignment.agentId !== 'orion' && (
         index < 3
@@ -109,6 +116,8 @@ export function planSeatScouts(input: {
         || scoutType === 'DISPROVE'
         || scoutType === 'ALTERNATIVE_EXPLANATION'
       ),
+      queryLanguage: isRegion(scoutType) ? googleNewsLocaleForRegion(scoutType).queryLanguage : 'en',
+      preferredProviders: isRegion(scoutType) ? primaryProviderIdsForRegion(scoutType) : undefined,
     }
     const admitted = admitScout(input.governor, scout)
     if (admitted.ok) out.push(scout)
@@ -120,7 +129,7 @@ export function planRoundScouts(plan: AstraMissionPlan, limits?: ScoutGovernorLi
   governor: ScoutGovernor
   scouts: ScoutPlan[]
 } {
-  const governor = createScoutGovernor(limits)
+  const governor = createScoutGovernor(limits ?? applyResearchProfile(undefined, plan.researchProfile))
   const scouts: ScoutPlan[] = []
   for (const assignment of plan.assignments) {
     scouts.push(...planSeatScouts({ plan, assignment, governor }))
