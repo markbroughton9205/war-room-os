@@ -117,7 +117,13 @@ export async function runScoutSwarmLiveAcceptance(): Promise<CaseResult[]> {
   ))
   const regionalCaptures = []
   for (const scout of liveRegional.filter((item): item is typeof item & { region: typeof requiredRegions[number] } => Boolean(item.region && requiredRegions.includes(item.region as typeof requiredRegions[number])))) {
-    const router = await runLiveResearchRouter({ decreeText: scout.query, supabase: null, conversationId: null })
+    const router = await runLiveResearchRouter({
+      decreeText: scout.query,
+      supabase: null,
+      conversationId: null,
+      region: scout.region,
+      queryLanguage: scout.queryLanguage,
+    })
     const packet = await buildLiveResearchEvidencePacket({ decreeText: GLOBAL, router, intentConfidence: 0.8 })
     const live = (packet.intelligencePacket?.evidence ?? []).filter(item => item.origin_type === 'LIVE_WEB')
     regionalCaptures.push({
