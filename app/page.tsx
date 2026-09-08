@@ -49,6 +49,7 @@ import type { RouteCommandResult } from '@/lib/engine-control/router'
 import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
+import { SEARCH_HANDOFF_STORAGE_KEY, type SearchCouncilHandoffPayload } from '@/lib/war-room-search/types'
 import { postIncrementalCouncilChat } from '@/lib/council/incremental-transport/client'
 import {
   type DeliberationEvidenceReference,
@@ -6558,6 +6559,7 @@ function Home() {
   const [councilResearchPhase, setCouncilResearchPhase] = useState<ResearchStatus | null>(null)
   const [councilResearchFailed, setCouncilResearchFailed] = useState(false)
   const pendingCouncilResearchContextRef = useRef<CouncilStoryContext | null>(null)
+  const pendingSearchHandoffRef = useRef<SearchCouncilHandoffPayload | null>(null)
   const [commanderLocation, setCommanderLocation] = useState<CommanderLocationState>(DEFAULT_COMMANDER_LOCATION)
   const [horoscopeEnabled, setHoroscopeEnabled] = useState(false)
   const [astrologyMode, setAstrologyMode] = useState<AstrologyInterpretationMode>('spiritual')
@@ -9408,6 +9410,7 @@ function Home() {
     const keepLocalNebulaRound =
       classifiedTurnForSubmit.intent === 'STATUS_CHECK'
       || (councilFlowMode === 'stable_group' && !pendingCouncilResearchContextRef.current)
+      || Boolean(pendingSearchHandoffRef.current)
     if (
       mode !== 'continue'
       && teamResearchIntent.triggered
@@ -9509,7 +9512,11 @@ function Home() {
           setIncrementalCouncilCompletedInputs([])
         }
         const streamed = await postIncrementalCouncilChat({
-          body: { ...body, councilGatherPhase: 'decree_soft' },
+          body: {
+            ...body,
+            councilGatherPhase: 'decree_soft',
+            ...(pendingSearchHandoffRef.current ? { searchHandoff: pendingSearchHandoffRef.current } : {}),
+          },
           signal: merged.signal,
           fallback: 'final_snapshot_before_execution_only',
           callbacks: {
@@ -11288,12 +11295,34 @@ function Home() {
         }
         setLoading(false)
       }
+      pendingSearchHandoffRef.current = null
     }
   }
 
   useEffect(() => {
     submitDecreeRef.current = submitDecree
   })
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('searchAnalyze') !== '1') return
+    const raw = sessionStorage.getItem(SEARCH_HANDOFF_STORAGE_KEY)
+    if (!raw) return
+    try {
+      const payload = JSON.parse(raw) as SearchCouncilHandoffPayload
+      if (!payload?.query || !Array.isArray(payload.results)) return
+      sessionStorage.removeItem(SEARCH_HANDOFF_STORAGE_KEY)
+      pendingSearchHandoffRef.current = payload
+      setCommand(payload.query)
+      window.history.replaceState({}, '', '/')
+      window.setTimeout(() => {
+        void submitDecreeRef.current?.(payload.query)
+      }, 120)
+    } catch {
+      sessionStorage.removeItem(SEARCH_HANDOFF_STORAGE_KEY)
+    }
+  }, [])
 
   const handleDecree = async (event?: FormEvent) => {
     event?.preventDefault()
@@ -12929,6 +12958,9 @@ function Home() {
             style={{ border: '1px solid rgba(56,189,248,0.35)', color: '#38BDF8', background: 'rgba(0,0,0,0.28)' }}
           >
             Baby AI Private
+          </Link>
+          <Link href="/search" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#6EE7B7', background: 'rgba(0,0,0,0.28)' }}>
+            Search
           </Link>
           <Link href="/income-loot" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#6EE7B7', background: 'rgba(0,0,0,0.28)' }}>
             Revenue Command
