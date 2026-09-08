@@ -134,6 +134,7 @@ export function buildAuroraPrompt(input: {
   convergence: ConvergenceMap
   evidenceReferences: DeliberationEvidenceReference[]
   priorEvidence?: IntelligenceEvidenceItem[]
+  liveEvidence?: IntelligenceEvidenceItem[]
 }): string {
   return buildDeliberationPrompt({
     role: 'council_synthesis',
@@ -148,6 +149,7 @@ export function buildAuroraPrompt(input: {
       claims: input.claims,
       challenges: input.challenges,
       convergence: input.convergence,
+      evidence: input.liveEvidence ?? input.priorEvidence,
     }),
   })
 }

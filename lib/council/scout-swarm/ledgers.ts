@@ -63,7 +63,7 @@ export function formatPrivateEvidenceBlock(ledger: PrivateSeatLedger): string {
     `${ledger.agentId.toUpperCase()}_PRIVATE_LEDGER:`,
     ...ledger.evidence.slice(0, 12).map(item => {
       const origin = item.origin_type ?? 'unlabeled'
-      return `- ${item.id} [${origin}/${item.freshness}] ${item.source_label}: ${item.title}${item.url ? ` (${item.url})` : ''}`
+      return `- ${item.id} [${origin}/${item.freshness}${item.independence_key ? `/${item.independence_key}` : ''}] ${item.source_label}: ${item.title}${item.url ? ` (${item.url})` : ''}`
     }),
   ].join('\n')
 }
