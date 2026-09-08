@@ -86,6 +86,12 @@ export type CouncilChatRequestBody = {
   councilDeliberationMode?: 'family_to_family_v1'
   /** Phase 48-C3B2: advisory-only adaptive Council shadow diagnostics. */
   adaptiveCouncilShadowMode?: ShadowFeatureMode
+  /** War Room Search → Council evidence packet. Structured Build #6 items, not a transcript dump. */
+  searchHandoff?: {
+    query: string
+    resultIds?: string[]
+    results: unknown[]
+  }
 }
 
 export type CouncilChatJson = {

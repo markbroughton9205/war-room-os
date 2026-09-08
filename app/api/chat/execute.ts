@@ -60,6 +60,7 @@ import { formatCouncilOsSweepMarkdown } from '@/lib/war-room-sweep/formatCouncil
 import { runWarRoomOsSweep } from '@/lib/war-room-sweep/orchestrator'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { runLiveResearchRouter } from '@/lib/research/researchRouter'
+import { buildSearchHandoffEvidencePacket, isSearchHandoffBody } from '@/lib/war-room-search/councilHandoff'
 import { createChatTrajectorySession, type ChatTrajectorySession } from '@/lib/modular-intelligence/chatTrajectoryObserver'
 import { applyPilotToResearchDecision } from '@/lib/modular-intelligence/nativeRouterV1Pilot'
 import {
@@ -1230,6 +1231,12 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   let liveResearchSummary: LiveResearchClientSummary | undefined
   let liveResearchAttempted = false
   let liveResearchPacket: LiveResearchEvidencePacket | undefined
+  if (isSearchHandoffBody(body.searchHandoff)) {
+    liveResearchPacket = buildSearchHandoffEvidencePacket(body.searchHandoff)
+    liveResearchAttempted = true
+    liveResearchUi = computeLiveResearchClientUi(liveResearchPacket, true, { councilPhase: 'model_running' })
+    liveResearchSummary = toLiveResearchClientSummary(liveResearchPacket)
+  }
   let councilResponseCompletion: CouncilResponseCompletion | undefined
   type LiveResearchRosterStatus = 'pending' | 'responding' | 'complete' | 'failed' | 'timed_out' | 'partial' | 'truncated'
   let liveResearchTurnSurvey:
@@ -2986,7 +2993,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         if (!liveResearchWillRun) {
           chatTrajectorySession?.markNoToolReason('TOOL_NOT_REQUIRED')
         }
-        if (liveResearchWillRun) {
+        if (liveResearchWillRun && !liveResearchAttempted) {
           liveResearchAttempted = true
           liveResearchUi = computeLiveResearchClientUi(undefined, true, { councilPhase: 'evidence' })
           liveResearchTurnSurvey = {
