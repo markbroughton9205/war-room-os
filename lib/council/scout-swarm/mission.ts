@@ -88,9 +88,11 @@ function assignmentFor(
       ...base,
       objective: `Independently gather current evidence for: ${decree}. Do not conclude from another seat. Prefer primary/regulatory sources in your PRIMARY_SOURCE scouts and industry reporting separately.`,
       sourceTerritory: 'government_regulator',
-      scoutTypes: regions.length
-        ? ['PRIMARY_SOURCE', 'WEB_CURRENT', 'INDUSTRY', ...regions.slice(0, 3)]
-        : ['PRIMARY_SOURCE', 'WEB_CURRENT', 'INDUSTRY'],
+      scoutTypes: regions.length >= 3
+        ? ['PRIMARY_SOURCE', ...regions.slice(0, 3), 'WEB_CURRENT']
+        : regions.length
+          ? ['PRIMARY_SOURCE', 'WEB_CURRENT', 'INDUSTRY', ...regions.slice(0, 2)]
+          : ['PRIMARY_SOURCE', 'WEB_CURRENT', 'INDUSTRY'],
     }
   }
   if (agentId === 'orion') {

@@ -104,6 +104,7 @@ export function planSeatScouts(input: {
       preferLocalTruth: input.assignment.agentId === 'orion',
       executeLive: input.assignment.liveResearch && input.assignment.agentId !== 'orion' && (
         index < 3
+        || isRegion(scoutType)
         || scoutType === 'PRIMARY_VERIFY'
         || scoutType === 'DISPROVE'
         || scoutType === 'ALTERNATIVE_EXPLANATION'

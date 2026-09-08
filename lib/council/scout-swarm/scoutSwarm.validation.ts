@@ -138,6 +138,21 @@ export async function runScoutSwarmValidation(): Promise<CaseResult[]> {
   const globalMission = decomposeAstraMission({ decree: GLOBAL, roundRequestId: 'round-global', logicalRequestId: 'round-global', nowIso: NOW })
   cases.push(check('region_01_scatter_used', globalMission.regionalScatter.length >= 3, globalMission.regionalScatter.join(','), 'STRUCTURAL'))
   cases.push(check('region_02_not_every_region', globalMission.regionalScatter.length < 8, String(globalMission.regionalScatter.length), 'STRUCTURAL'))
+  const globalPlanned = planRoundScouts(globalMission, DEFAULT_SCOUT_GOVERNOR_LIMITS)
+  const requiredRegions = ['NORTH_AMERICA', 'EAST_ASIA', 'EUROPE'] as const
+  const liveRegional = globalPlanned.scouts.filter(item => item.region && item.executeLive)
+  cases.push(check(
+    'region_03_required_regions_admitted_and_live',
+    requiredRegions.every(region => liveRegional.some(item => item.region === region)),
+    liveRegional.map(item => `${item.region}:${item.executeLive}`).join(','),
+    'STRUCTURAL',
+  ))
+  cases.push(check(
+    'region_04_regional_queries_are_independent',
+    liveRegional.length >= 3 && new Set(liveRegional.map(item => item.query)).size === liveRegional.length,
+    liveRegional.map(item => item.query).join(' | '),
+    'STRUCTURAL',
+  ))
 
   const engMission = decomposeAstraMission({ decree: ENGINEERING, roundRequestId: 'round-eng', logicalRequestId: 'round-eng', nowIso: NOW })
   cases.push(check('eng_01_orion_local', engMission.assignments.find(item => item.agentId === 'orion')?.liveResearch === false, JSON.stringify(engMission.assignments.find(item => item.agentId === 'orion')), 'STRUCTURAL'))

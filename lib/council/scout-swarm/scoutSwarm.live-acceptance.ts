@@ -106,21 +106,36 @@ export async function runScoutSwarmLiveAcceptance(): Promise<CaseResult[]> {
     globalMission.regionalScatter.join(','),
     'STRUCTURAL',
   ))
-  const globalScout = planRoundScouts(globalMission).scouts.find(item => item.region === 'EAST_ASIA' && item.executeLive)
-    ?? planRoundScouts(globalMission).scouts.find(item => item.executeLive)
-  if (globalScout) {
-    const router = await runLiveResearchRouter({ decreeText: globalScout.query, supabase: null, conversationId: null })
+  const globalPlanned = planRoundScouts(globalMission)
+  const requiredRegions = ['NORTH_AMERICA', 'EAST_ASIA', 'EUROPE'] as const
+  const liveRegional = globalPlanned.scouts.filter(item => item.region && item.executeLive)
+  cases.push(check(
+    'live_global_02_required_regions_execute',
+    requiredRegions.every(region => liveRegional.some(item => item.region === region)),
+    liveRegional.map(item => `${item.region}:${item.query}`).join(' | '),
+    'STRUCTURAL',
+  ))
+  const regionalCaptures = []
+  for (const scout of liveRegional.filter((item): item is typeof item & { region: typeof requiredRegions[number] } => Boolean(item.region && requiredRegions.includes(item.region as typeof requiredRegions[number])))) {
+    const router = await runLiveResearchRouter({ decreeText: scout.query, supabase: null, conversationId: null })
     const packet = await buildLiveResearchEvidencePacket({ decreeText: GLOBAL, router, intentConfidence: 0.8 })
     const live = (packet.intelligencePacket?.evidence ?? []).filter(item => item.origin_type === 'LIVE_WEB')
-    cases.push(check(
-      'live_global_02_regional_sources',
-      live.length > 0,
-      JSON.stringify({ query: globalScout.query, region: globalScout.region, live: live.length, urls: live.map(item => item.url).slice(0, 3) }),
-      live.length > 0 ? 'REAL LIVE WEB' : 'NOT EXECUTED',
-    ))
-  } else {
-    cases.push(check('live_global_02_regional_sources', false, 'no executable regional scout', 'NOT EXECUTED'))
+    regionalCaptures.push({
+      region: scout.region,
+      query: scout.query,
+      live: live.length,
+      urls: live.map(item => item.url).filter((url) => Boolean(url)).slice(0, 3),
+      domains: [...new Set(live.map(item => {
+        try { return item.url ? new URL(item.url).hostname : '' } catch { return '' }
+      }).filter(Boolean))],
+    })
   }
+  cases.push(check(
+    'live_global_03_regional_sources',
+    regionalCaptures.length >= 3 && regionalCaptures.every(item => item.live > 0),
+    JSON.stringify(regionalCaptures),
+    regionalCaptures.some(item => item.live > 0) ? 'REAL LIVE WEB' : 'NOT EXECUTED',
+  ))
 
   const engClassified = classifyCouncilTurn(ENGINEERING)
   const engMission = decomposeAstraMission({
