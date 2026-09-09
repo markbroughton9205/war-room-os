@@ -73,7 +73,7 @@ export async function runLocalIndexValidation(): Promise<CaseResult[]> {
       JSON.stringify({ count: hits.length, snip: hits[0]?.snippet, url: hits[0]?.document.canonicalUrl }),
     ))
 
-    const leg = runWarRoomLocalSearch('semiconductor', { pageSize: 8, corpusRoot: tmp })
+    const leg = await runWarRoomLocalSearch('semiconductor', { pageSize: 8, corpusRoot: tmp })
     cases.push(check('norm_01_local_result', leg.ok && leg.results[0]?.publisher.includes('127.0.0.1') && leg.results[0]?.storageOrigin === 'WAR_ROOM_CORPUS', JSON.stringify(leg.results[0])))
     cases.push(check(
       'prov_01_discovery_preserved',
@@ -136,7 +136,7 @@ export async function runLocalIndexValidation(): Promise<CaseResult[]> {
     writeFileSync(badPath, 'not sqlite')
     process.env.WAR_ROOM_SOVEREIGN_SEARCH_DIR = badPath
     try {
-      const failedLeg = runWarRoomLocalSearch('semiconductor', { corpusRoot: badPath })
+      const failedLeg = await runWarRoomLocalSearch('semiconductor', { corpusRoot: badPath })
       cases.push(check('fail_01_local_degrades', !failedLeg.ok && failedLeg.warningCode === 'WAR_ROOM_LOCAL_UNAVAILABLE', JSON.stringify(failedLeg)))
       const aborted = await federatedSearch({ query: 'semiconductor policy' }, { signal: AbortSignal.abort() })
       cases.push(check(

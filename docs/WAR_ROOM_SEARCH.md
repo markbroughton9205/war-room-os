@@ -206,3 +206,36 @@ pnpm run validate:sovereign-search-stage3c
 ```
 
 Maximum approved ingest batch remains 25. Candidate-bridge failures must not take down federated discovery.
+
+### Stage 4A — hybrid lexical + semantic retrieval
+
+Stage 4A upgrades `WAR_ROOM_LOCAL` over documents already ingested through Stage 3. It is not a crawler, not a research engine, and not a Build #6 replacement.
+
+```
+query
+  → FTS lexical retrieval
+  + local semantic retrieval (when the operator-installed model is present)
+  → Reciprocal Rank Fusion
+  → normalized WAR_ROOM_LOCAL results
+  → existing Build #6 independence
+```
+
+Semantic retrieval uses a sovereign local ONNX embedder (`BAAI/bge-small-en-v1.5`, MIT). Model weights live under `.war-room/models/` (gitignored). Queries never download weights. If the model or vector index is missing/corrupt, FTS continues and search stays healthy.
+
+Verified inference backend on this Windows x64 Node runtime:
+
+- package: `@huggingface/transformers` 4.2.0
+- runtime: native `onnxruntime-node` 1.24.3 (not `onnxruntime-web`, not WASM)
+- execution provider: CPU (transformers.js Node default; DirectML/CUDA are not selected)
+- process modules after a live embed: `onnxruntime_binding.node` and `onnxruntime.dll`
+- no WASM fallback occurred
+
+pnpm may list `onnxruntime-node` under ignored builds. On Windows x64 that only skips optional CUDA EP downloads; CPU binaries are already bundled in the npm package and were loaded at runtime. Do not treat ignored install scripts as proof of WASM inference.
+
+```
+pnpm run sovereign-search:prepare-embeddings -- --download
+pnpm run sovereign-search:embed
+pnpm run validate:sovereign-search-stage4a
+```
+
+Chunks preserve document lineage. Ten chunks from one publisher remain one evidence source. Lexical and semantic scores stay separate; fusion is rank-based (RRF, k=60), not an uncalibrated weighted sum.

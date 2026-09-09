@@ -2,6 +2,7 @@ import { hostnameFromUrl } from '@/lib/intelligence/canonicalUrl'
 import { searchLocalCorpus } from '../crawler/localSearch'
 import { WAR_ROOM_STORAGE_ORIGIN } from '../crawler/types'
 import type { EvidenceDiscoveryProvider } from '@/lib/intelligence/intelligencePacket'
+import { searchLocalHybrid } from '../hybrid/retrieve'
 
 export const WAR_ROOM_LOCAL_WARNING_CODES = [
   'WAR_ROOM_LOCAL_DISABLED',
@@ -29,6 +30,11 @@ export type WarRoomLocalHit = {
   storageOrigin: typeof WAR_ROOM_STORAGE_ORIGIN
   robotsStatus: string
   providerRank: number | null
+  lexicalRank?: number | null
+  semanticRank?: number | null
+  fusionScore?: number | null
+  matchedChunkId?: string | null
+  semanticScore?: number | null
 }
 
 export type WarRoomLocalLeg = {
@@ -38,6 +44,8 @@ export type WarRoomLocalLeg = {
   error?: string
   warningCode?: WarRoomLocalWarningCode
   durationMs: number
+  semanticAvailable?: boolean
+  semanticReason?: string | null
 }
 
 export function emptyWarRoomLocalLeg(error?: string, warningCode?: WarRoomLocalWarningCode): WarRoomLocalLeg {
@@ -48,6 +56,8 @@ export function emptyWarRoomLocalLeg(error?: string, warningCode?: WarRoomLocalW
     error,
     warningCode,
     durationMs: 0,
+    semanticAvailable: false,
+    semanticReason: error ?? null,
   }
 }
 
@@ -55,58 +65,123 @@ export function warRoomLocalSearchDisabled(env: Record<string, string | undefine
   return /^(1|true|yes)$/i.test(env.WAR_ROOM_LOCAL_SEARCH_DISABLED ?? '')
 }
 
-export function runWarRoomLocalSearch(
+export async function runWarRoomLocalSearch(
   query: string,
   opts?: { pageSize?: number; corpusRoot?: string; env?: Record<string, string | undefined> },
-): WarRoomLocalLeg {
+): Promise<WarRoomLocalLeg> {
   const started = Date.now()
   const env = opts?.env ?? process.env
   if (warRoomLocalSearchDisabled(env)) {
     return { ...emptyWarRoomLocalLeg('WAR_ROOM_LOCAL_DISABLED', 'WAR_ROOM_LOCAL_DISABLED'), durationMs: Date.now() - started }
   }
   try {
-    const hits = searchLocalCorpus(query, { limit: opts?.pageSize ?? 8, corpusRoot: opts?.corpusRoot ?? env.WAR_ROOM_SOVEREIGN_SEARCH_DIR })
-    const results: WarRoomLocalHit[] = hits.map((hit, index) => {
-      const doc = hit.document
-      const publisher = doc.publisher || doc.domain || hostnameFromUrl(doc.canonicalUrl) || 'unknown'
-      return {
-        title: doc.title || publisher,
-        url: doc.originalUrl,
-        canonicalUrl: doc.canonicalUrl,
-        snippet: hit.snippet || doc.description || doc.contentText.slice(0, 280),
-        publisher,
-        domain: doc.domain,
-        publishedAt: doc.publishedAt,
-        observedAt: doc.lastCrawledAt,
-        language: doc.language,
-        contentHash: doc.contentHash,
-        firstSeenAt: doc.firstSeenAt,
-        lastCrawledAt: doc.lastCrawledAt,
-        discoveredVia: 'WAR_ROOM_LOCAL',
-        alsoDiscoveredVia: [
-          ...(doc.discoveredVia && doc.discoveredVia !== 'WAR_ROOM_LOCAL' ? [doc.discoveredVia] : []),
-          ...doc.alsoDiscoveredVia.filter(value => value !== 'WAR_ROOM_LOCAL'),
-        ],
-        storageOrigin: WAR_ROOM_STORAGE_ORIGIN,
-        robotsStatus: doc.robotsStatus,
-        providerRank: index + 1,
-      }
+    const hybrid = await searchLocalHybrid(query, {
+      limit: opts?.pageSize ?? 8,
+      corpusRoot: opts?.corpusRoot ?? env.WAR_ROOM_SOVEREIGN_SEARCH_DIR,
     })
+    const results = hybrid.hits.map(hit => mapHit(hit.document, {
+      snippet: hit.snippet,
+      providerRank: hit.fusionRank,
+      lexicalRank: hit.lexicalRank,
+      semanticRank: hit.semanticRank,
+      fusionScore: hit.fusionScore,
+      matchedChunkId: hit.matchedChunkId,
+      semanticScore: hit.semanticScore,
+    }))
     return {
       ok: true,
       configured: true,
       results,
       warningCode: results.length ? undefined : 'WAR_ROOM_LOCAL_EMPTY',
       durationMs: Date.now() - started,
+      semanticAvailable: hybrid.semanticAvailable,
+      semanticReason: hybrid.semanticReason,
     }
   } catch (error) {
-    return {
-      ok: false,
-      configured: true,
-      results: [],
-      error: error instanceof Error ? error.message : 'Local index unavailable.',
-      warningCode: 'WAR_ROOM_LOCAL_UNAVAILABLE',
-      durationMs: Date.now() - started,
+    try {
+      const hits = searchLocalCorpus(query, { limit: opts?.pageSize ?? 8, corpusRoot: opts?.corpusRoot ?? env.WAR_ROOM_SOVEREIGN_SEARCH_DIR })
+      const results = hits.map((hit, index) => mapHit(hit.document, {
+        snippet: hit.snippet || hit.document.description || hit.document.contentText.slice(0, 280),
+        providerRank: index + 1,
+      }))
+      return {
+        ok: true,
+        configured: true,
+        results,
+        warningCode: results.length ? undefined : 'WAR_ROOM_LOCAL_EMPTY',
+        durationMs: Date.now() - started,
+        semanticAvailable: false,
+        semanticReason: error instanceof Error ? error.message : 'SEMANTIC_UNAVAILABLE',
+      }
+    } catch (ftsError) {
+      return {
+        ok: false,
+        configured: true,
+        results: [],
+        error: ftsError instanceof Error ? ftsError.message : 'Local index unavailable.',
+        warningCode: 'WAR_ROOM_LOCAL_UNAVAILABLE',
+        durationMs: Date.now() - started,
+        semanticAvailable: false,
+        semanticReason: error instanceof Error ? error.message : 'SEMANTIC_UNAVAILABLE',
+      }
     }
+  }
+}
+
+function mapHit(
+  doc: {
+    originalUrl: string
+    canonicalUrl: string
+    publisher: string
+    domain: string
+    title: string | null
+    description: string | null
+    contentText: string
+    publishedAt: string | null
+    lastCrawledAt: string
+    language: string | null
+    contentHash: string
+    firstSeenAt: string
+    discoveredVia: EvidenceDiscoveryProvider | null
+    alsoDiscoveredVia: EvidenceDiscoveryProvider[]
+    robotsStatus: string
+  },
+  extra: {
+    snippet: string
+    providerRank: number | null
+    lexicalRank?: number | null
+    semanticRank?: number | null
+    fusionScore?: number | null
+    matchedChunkId?: string | null
+    semanticScore?: number | null
+  },
+): WarRoomLocalHit {
+  const publisher = doc.publisher || doc.domain || hostnameFromUrl(doc.canonicalUrl) || 'unknown'
+  return {
+    title: doc.title || publisher,
+    url: doc.originalUrl,
+    canonicalUrl: doc.canonicalUrl,
+    snippet: extra.snippet,
+    publisher,
+    domain: doc.domain,
+    publishedAt: doc.publishedAt,
+    observedAt: doc.lastCrawledAt,
+    language: doc.language,
+    contentHash: doc.contentHash,
+    firstSeenAt: doc.firstSeenAt,
+    lastCrawledAt: doc.lastCrawledAt,
+    discoveredVia: 'WAR_ROOM_LOCAL',
+    alsoDiscoveredVia: [
+      ...(doc.discoveredVia && doc.discoveredVia !== 'WAR_ROOM_LOCAL' ? [doc.discoveredVia] : []),
+      ...doc.alsoDiscoveredVia.filter(value => value !== 'WAR_ROOM_LOCAL'),
+    ],
+    storageOrigin: WAR_ROOM_STORAGE_ORIGIN,
+    robotsStatus: doc.robotsStatus,
+    providerRank: extra.providerRank,
+    lexicalRank: extra.lexicalRank ?? null,
+    semanticRank: extra.semanticRank ?? null,
+    fusionScore: extra.fusionScore ?? null,
+    matchedChunkId: extra.matchedChunkId ?? null,
+    semanticScore: extra.semanticScore ?? null,
   }
 }

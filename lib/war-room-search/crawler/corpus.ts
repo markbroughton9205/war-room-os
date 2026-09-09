@@ -308,6 +308,11 @@ export class SovereignCorpus {
     return Number(row.n)
   }
 
+  listDocuments(): CrawlDocumentRecord[] {
+    const rows = this.db.prepare('SELECT * FROM crawl_documents ORDER BY id').all() as DocumentRow[]
+    return rows.map(mapDocument)
+  }
+
   upsertDocument(input: Omit<CrawlDocumentRecord, 'id' | 'firstSeenAt' | 'documentPath'> & { firstSeenAt?: string }): CrawlDocumentRecord {
     const now = input.lastCrawledAt
     const existing = this.getByCanonicalUrl(input.canonicalUrl)
