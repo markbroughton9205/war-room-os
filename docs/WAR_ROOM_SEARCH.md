@@ -11,6 +11,7 @@ War Room Search (`lib/war-room-search`) is the existing federated retrieval path
 | **SearXNG** | `searxng` / `SEARXNG` | Self-hosted federated web discovery | `SEARXNG_BASE_URL` |
 | Public RSS | `public_news_rss` / `RSS` | Feed discovery | always attempted |
 | Research Engine | per-adapter / `RESEARCH_ENGINE` | Primary/public structured sources | per adapter |
+| **War Room Local** | `war_room_local` / `WAR_ROOM_LOCAL` | Sovereign corpus retrieval (Stage 3) | local SQLite index under `.war-room/sovereign-search/` |
 
 Missing or failed providers degrade independently. The research runtime continues.
 
@@ -70,14 +71,83 @@ Commander → War Room → SearXNG → upstream engines
 
 War Room does not forward Commander IP or identity headers to SearXNG. The query string is sent to the self-hosted instance, which may query upstream engines according to that instance's engine list.
 
-### Intentionally not in this stage
+### Intentionally not in Stage 2
 
-Stage 3+ is out of scope: no custom crawler, local FTS index, embeddings, semantic reranker, recrawl, or search-intelligence history.
+Stage 2 is external federated discovery only. Stage 3 owns the crawler/index. Stage 4+ (embeddings, BGE-M3, semantic rerank) and Stage 5 (autonomous recrawl) remain separate.
 
-### Validation
+### Validation (Stage 2)
 
 ```
 pnpm run validate:searxng
 pnpm run validate:searxng:live
 pnpm run validate:war-room-search
 ```
+
+## Stage 3 — War Room crawler + local searchable index
+
+**DISCOVERY OWNERSHIP ≠ CONTENT AUTHORSHIP.**
+
+War Room may store and retrieve a page. The publisher remains the original source.
+
+Example:
+
+- `discovered_via`: `WAR_ROOM_LOCAL` (this retrieval)
+- `storage_origin`: `WAR_ROOM_CORPUS`
+- `source_family` / publisher: `reuters.com`
+- If Google/SearXNG also found the same canonical URL: one Build #6 cluster head, not two independent sources
+
+Architecture:
+
+```
+Approved URL
+  → crawl policy / SSRF / robots
+  → bounded fetch (HTML or text/plain)
+  → extract
+  → canonicalize
+  → SHA-256 content hash
+  → SQLite metadata + FTS5
+  → documents JSON under .war-room/sovereign-search/documents/
+  → war_room_local federated search provider
+  → existing Build #6 independence / Council handoff
+```
+
+Crawls are **not** autonomous. Stage 3A accepts a Commander-approved or trusted-internal-test URL only. No recursive spider, no scheduler, no embeddings.
+
+### Storage
+
+Default directory (gitignored via `.war-room/`):
+
+```
+.war-room/sovereign-search/corpus.sqlite
+.war-room/sovereign-search/documents/{id}.json
+```
+
+Override: `WAR_ROOM_SOVEREIGN_SEARCH_DIR`
+
+Policy (placeholders only):
+
+```
+WAR_ROOM_CRAWL_ALLOWLIST=
+WAR_ROOM_CRAWL_DENYLIST=
+WAR_ROOM_CRAWL_DISABLED=
+WAR_ROOM_LOCAL_SEARCH_DISABLED=
+```
+
+User-Agent: `WarRoomBot/1.0`
+
+There is no public crawler-information URL yet, so the identity is the product token only. Do not emit a placeholder `+https://...` URI.
+
+robots.txt is a technical signal, not legal authorization. If robots.txt cannot be fetched, Stage 3 conservatively refuses the crawl (`ROBOTS_FETCH_ERROR`). A missing robots.txt is `ROBOTS_UNKNOWN` and does not block.
+
+### Commands
+
+```
+pnpm run crawl:approved-url -- --url=https://example.com --approved-by=commander
+pnpm run crawl:approved-url -- --url=http://127.0.0.1:PORT/allowed --approved-by=trusted_internal_test --allow-internal
+pnpm run validate:sovereign-crawler
+pnpm run validate:local-index
+pnpm run validate:sovereign-search-stage3
+pnpm run sovereign-search:reset
+```
+
+`sovereign-search:reset` deletes only `.war-room/sovereign-search/` (or a `WAR_ROOM_SOVEREIGN_SEARCH_DIR` that still stays under `.war-room/`).

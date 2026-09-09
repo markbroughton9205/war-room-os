@@ -24,11 +24,14 @@ export type RawIntelligenceFinding = {
   publisher?: string
   language?: string
   region?: string
-  discovered_via?: EvidenceDiscoveryProvider
+  discovered_via?: EvidenceDiscoveryProvider | null
   discovery_rank?: number
   also_discovered_via?: EvidenceDiscoveryProvider[]
   upstream_engines?: string[]
   category?: string
+  storage_origin?: 'WAR_ROOM_CORPUS' | null
+  content_hash?: string
+  origin_type?: IntelligenceEvidenceItem['origin_type']
 }
 
 export type RawIntelligenceSourceRecord = {
@@ -122,15 +125,16 @@ export function normalizeSourceEvidence(
         evidence_density: evidenceDensity(content || title),
         related_evidence_links: [],
         weak_signal: signal.weakSignal,
-        // This function's only caller is the live research router (Tavily/RSS/weather/Grok) — every
-        // item it produces was fetched live from the open web this round, never replayed from storage.
-        origin_type: 'LIVE_WEB',
+        // Live router findings default to LIVE_WEB. Local corpus replay may set STORED_RESEARCH.
+        origin_type: finding.origin_type ?? 'LIVE_WEB',
         ...(finding.language ? { original_language: finding.language, language: finding.language } : {}),
         ...(finding.region ? { region: finding.region } : {}),
         ...(finding.discovered_via ? { discovered_via: finding.discovered_via } : {}),
         ...(typeof finding.discovery_rank === 'number' ? { discovery_rank: finding.discovery_rank } : {}),
         ...(finding.also_discovered_via?.length ? { also_discovered_via: finding.also_discovered_via } : {}),
         ...(finding.upstream_engines?.length ? { upstream_engines: finding.upstream_engines } : {}),
+        ...(finding.storage_origin ? { storage_origin: finding.storage_origin } : {}),
+        ...(finding.content_hash ? { content_hash: finding.content_hash } : {}),
       })
     })
   }

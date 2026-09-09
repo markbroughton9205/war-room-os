@@ -72,6 +72,7 @@ export function formatSearchResult(args: {
     discoveredVia: item.discovered_via ?? null,
     alsoDiscoveredVia: item.also_discovered_via?.length ? item.also_discovered_via : null,
     upstreamEngines: item.upstream_engines?.length ? item.upstream_engines : null,
+    storageOrigin: item.storage_origin ?? null,
     evidence: item,
   }
 }

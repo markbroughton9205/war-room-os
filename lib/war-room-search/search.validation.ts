@@ -46,7 +46,7 @@ const REQUIRED_RESULT_FIELDS = [
   'publishedAt', 'observedAt', 'sourceType', 'originType', 'authorityClass',
   'region', 'language', 'primarySource', 'sourceFamily', 'clusterId',
   'independenceKey', 'freshness', 'score', 'contentHash', 'discoveredVia',
-  'alsoDiscoveredVia', 'upstreamEngines',
+  'alsoDiscoveredVia', 'upstreamEngines', 'storageOrigin',
 ] as const
 
 export async function runWarRoomSearchValidation(): Promise<CaseResult[]> {
@@ -256,7 +256,8 @@ export async function runWarRoomSearchValidation(): Promise<CaseResult[]> {
   cases.push(check(
     'google_01_source_summary_shape',
     typeof abortResult.sourceSummary.googleOk === 'boolean'
-    && typeof abortResult.sourceSummary.searxngOk === 'boolean',
+    && typeof abortResult.sourceSummary.searxngOk === 'boolean'
+    && typeof abortResult.sourceSummary.warRoomLocalOk === 'boolean',
     JSON.stringify(abortResult.sourceSummary),
   ))
   cases.push(check('search_does_not_auto_council', true, 'federatedSearch never imports scout swarm runtime'))

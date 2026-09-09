@@ -73,7 +73,7 @@ export type TranslationStatus =
  * source_family (who authored the evidence). Search engines are not independent
  * evidence sources.
  */
-export type EvidenceDiscoveryProvider = 'GOOGLE' | 'TAVILY' | 'RESEARCH_ENGINE' | 'RSS' | 'SEARXNG'
+export type EvidenceDiscoveryProvider = 'GOOGLE' | 'TAVILY' | 'RESEARCH_ENGINE' | 'RSS' | 'SEARXNG' | 'WAR_ROOM_LOCAL'
 
 export type IntelligenceEvidenceItem = {
   id: string
@@ -132,6 +132,11 @@ export type IntelligenceEvidenceItem = {
    * These are not independent evidence sources and are not publisher families.
    */
   upstream_engines?: string[] | null
+  /**
+   * Where War Room stored/retrieved the document. Distinct from publisher/source_family.
+   * Example: Reuters page in the local corpus → publisher=reuters.com, storage_origin=WAR_ROOM_CORPUS.
+   */
+  storage_origin?: 'WAR_ROOM_CORPUS' | null
 }
 
 export type IntelligenceFinding = {

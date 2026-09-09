@@ -5,6 +5,7 @@ import type { WarRoomSupabase } from '@/lib/war-room/persistence'
 import type { GeographicRegion } from '@/lib/council/scout-swarm/types'
 import type { GoogleWebSearchLeg } from '@/lib/war-room-search/providers/googleWebSearch'
 import { runSearxngSearch, type SearxngLeg } from '@/lib/war-room-search/providers/searxng'
+import type { WarRoomLocalLeg } from '@/lib/war-room-search/providers/warRoomLocal'
 import {
   fetchTrustedPublicNewsFeeds,
   parsePublicNewsRss,
@@ -91,6 +92,8 @@ export type LiveResearchRouterResult = {
   googleWebSearch?: GoogleWebSearchLeg
   /** Optional self-hosted SearXNG federation leg. Additive discovery only. */
   searxng?: SearxngLeg
+  /** Optional War Room local corpus retrieval. Storage origin, not a publisher. */
+  warRoomLocal?: WarRoomLocalLeg
   publicRss: PublicRssLeg
   /** NWS active-alerts leg — only actually queried when the decree reads as weather-related. */
   weatherAlerts: NwsAlertsLeg

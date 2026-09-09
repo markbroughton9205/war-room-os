@@ -102,6 +102,8 @@ export type SearchResult = {
   alsoDiscoveredVia: EvidenceDiscoveryProvider[] | null
   /** Upstream engines (e.g. SearXNG → brave) that surfaced this URL. Not publisher families. */
   upstreamEngines: string[] | null
+  /** Retrieval/storage origin. Never the original publisher. */
+  storageOrigin: 'WAR_ROOM_CORPUS' | null
   /** Full Build #6 evidence item for Council handoff. Never flattened to text-only. */
   evidence: IntelligenceEvidenceItem
 }
@@ -112,6 +114,8 @@ export type SearchSourceSummary = {
   googleWarning?: string
   searxngOk: boolean
   searxngWarning?: string
+  warRoomLocalOk: boolean
+  warRoomLocalWarning?: string
   researchEngineOk: boolean
   researchEngineProviders: string[]
   publicRssOk: boolean
@@ -127,6 +131,7 @@ export function emptySearchSourceSummary(overrides?: Partial<SearchSourceSummary
     tavilyOk: false,
     googleOk: false,
     searxngOk: false,
+    warRoomLocalOk: false,
     researchEngineOk: false,
     researchEngineProviders: [],
     publicRssOk: false,

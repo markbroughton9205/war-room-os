@@ -11,7 +11,7 @@ import {
 } from '@/lib/intelligence/intelligencePacket'
 import type { OldVsNewComparison } from '@/lib/intelligence/comparison/oldVsNew'
 
-export type LiveResearchSourceKind = 'tavily' | 'google_web_search' | 'searxng' | 'public_rss' | 'weather_alerts' | 'grok_xai' | 'gemini' | 'direct_fetch' | 'research_engine_bridge'
+export type LiveResearchSourceKind = 'tavily' | 'google_web_search' | 'searxng' | 'war_room_local' | 'public_rss' | 'weather_alerts' | 'grok_xai' | 'gemini' | 'direct_fetch' | 'research_engine_bridge'
 
 export type LiveResearchSourceRecord = {
   kind: LiveResearchSourceKind

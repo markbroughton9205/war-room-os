@@ -145,7 +145,7 @@ export function inferSourceFamily(item: {
   if (wire) return wire.family
   if (host) return host.replace(/^www\./, '')
   // Search engines discover pages; they are not publisher families.
-  if (item.source_id === 'google_web_search' || item.source_id === 'tavily' || item.source_id === 'searxng') return null
+  if (item.source_id === 'google_web_search' || item.source_id === 'tavily' || item.source_id === 'searxng' || item.source_id === 'war_room_local') return null
   if (item.source_id) return item.source_id
   return null
 }

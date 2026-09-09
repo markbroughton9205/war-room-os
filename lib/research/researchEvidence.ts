@@ -208,6 +208,30 @@ export function rawIntelligenceFromRouter(router: LiveResearchRouterResult): Raw
           failure_behavior: 'degrade' as const,
         }]
       : []),
+    ...(router.warRoomLocal
+      ? [{
+          source_id: 'war_room_local',
+          ok: router.warRoomLocal.ok && router.warRoomLocal.results.length > 0,
+          queried_at: router.generatedAt,
+          findings: router.warRoomLocal.results.map(result => ({
+            title: result.title,
+            url: result.url,
+            content: result.snippet,
+            observed_at: result.observedAt || router.generatedAt,
+            ...(result.publishedAt ? { published_at: result.publishedAt } : {}),
+            publisher: result.publisher,
+            ...(result.language ? { language: result.language } : {}),
+            discovered_via: 'WAR_ROOM_LOCAL' as const,
+            ...(result.alsoDiscoveredVia.length ? { also_discovered_via: result.alsoDiscoveredVia } : {}),
+            ...(typeof result.providerRank === 'number' ? { discovery_rank: result.providerRank } : {}),
+            storage_origin: result.storageOrigin,
+            content_hash: result.contentHash,
+            origin_type: 'STORED_RESEARCH' as const,
+          })),
+          error: router.warRoomLocal.error,
+          failure_behavior: 'degrade' as const,
+        }]
+      : []),
     ...bridgeRecords,
     {
       source_id: 'public_news_rss',
