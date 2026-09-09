@@ -96,6 +96,26 @@ export async function startCrawlFixture(): Promise<CrawlFixture> {
       res.end(MALFORMED)
       return
     }
+    if (pathName === '/empty') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<html><head><title></title></head><body></body></html>')
+      return
+    }
+    if (pathName === '/server-error') {
+      res.writeHead(500, { 'content-type': 'text/plain' })
+      res.end('upstream failed')
+      return
+    }
+    if (pathName === '/with-links') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(`<!doctype html><html><head><title>WRBATCHLINKHUB</title></head><body>
+        <p>Link hub page about hydrazine-free crawler batch isolation unique token WRBATCHLINKHUB.</p>
+        <a href="/allowed">allowed</a>
+        <a href="/blocked">blocked</a>
+        <a href="https://example.com">example</a>
+      </body></html>`)
+      return
+    }
     res.writeHead(404, { 'content-type': 'text/plain' })
     res.end('not found')
   })

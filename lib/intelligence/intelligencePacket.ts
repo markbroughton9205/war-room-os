@@ -73,7 +73,7 @@ export type TranslationStatus =
  * source_family (who authored the evidence). Search engines are not independent
  * evidence sources.
  */
-export type EvidenceDiscoveryProvider = 'GOOGLE' | 'TAVILY' | 'RESEARCH_ENGINE' | 'RSS' | 'SEARXNG' | 'WAR_ROOM_LOCAL'
+export type EvidenceDiscoveryProvider = 'GOOGLE' | 'TAVILY' | 'RESEARCH_ENGINE' | 'RSS' | 'SEARXNG' | 'WAR_ROOM_LOCAL' | 'COMMANDER'
 
 export type IntelligenceEvidenceItem = {
   id: string

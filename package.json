@@ -90,6 +90,8 @@
     "validate:local-index": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/localIndex.validation.ts",
     "validate:sovereign-search-stage3": "pnpm run validate:sovereign-crawler && pnpm run validate:local-index",
     "crawl:approved-url": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/crawlCli.ts",
+    "sovereign-search:crawl": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/crawlCli.ts",
+    "validate:sovereign-search-stage3b": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/batchCrawl.validation.ts",
     "sovereign-search:reset": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/resetCli.ts",
     "validate:world-learning": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/world-learning/contradictionDetection.validation.ts",
     "validate:agi-wave1": "pnpm run validate:context-assembler && pnpm run validate:model-router && pnpm run validate:next-action && pnpm run validate:prompt-intelligence && pnpm run validate:intent-prerouter",

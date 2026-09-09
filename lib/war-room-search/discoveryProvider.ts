@@ -1,6 +1,20 @@
 import { hostnameFromUrl } from '@/lib/intelligence/canonicalUrl'
 import type { EvidenceDiscoveryProvider, IntelligenceEvidenceItem } from '@/lib/intelligence/intelligencePacket'
 
+export const EVIDENCE_DISCOVERY_PROVIDERS = [
+  'GOOGLE',
+  'TAVILY',
+  'RESEARCH_ENGINE',
+  'RSS',
+  'SEARXNG',
+  'WAR_ROOM_LOCAL',
+  'COMMANDER',
+] as const satisfies readonly EvidenceDiscoveryProvider[]
+
+export function isEvidenceDiscoveryProvider(value: unknown): value is EvidenceDiscoveryProvider {
+  return typeof value === 'string' && (EVIDENCE_DISCOVERY_PROVIDERS as readonly string[]).includes(value)
+}
+
 const RESEARCH_ENGINE_SOURCE_IDS = new Set([
   'tavily',
   'google_web_search',

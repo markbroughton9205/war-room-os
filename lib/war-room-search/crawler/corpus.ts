@@ -173,6 +173,22 @@ export class SovereignCorpus {
     this.db.close()
   }
 
+  async withTransaction<T>(fn: () => Promise<T> | T): Promise<T> {
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      const result = await fn()
+      this.db.exec('COMMIT')
+      return result
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {
+        /* already rolled back or not in a transaction */
+      }
+      throw error
+    }
+  }
+
   getByCanonicalUrl(canonicalUrl: string): CrawlDocumentRecord | null {
     const row = this.db.prepare('SELECT * FROM crawl_documents WHERE canonical_url = ?').get(canonicalUrl) as DocumentRow | undefined
     return row ? mapDocument(row) : null
@@ -188,6 +204,11 @@ export class SovereignCorpus {
       ? this.db.prepare('SELECT * FROM crawl_documents WHERE content_hash = ? AND canonical_url != ? LIMIT 1').get(contentHash, exceptCanonicalUrl) as DocumentRow | undefined
       : this.db.prepare('SELECT * FROM crawl_documents WHERE content_hash = ? LIMIT 1').get(contentHash) as DocumentRow | undefined
     return row ? mapDocument(row) : null
+  }
+
+  countDocuments(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM crawl_documents').get() as { n: number | bigint }
+    return Number(row.n)
   }
 
   upsertDocument(input: Omit<CrawlDocumentRecord, 'id' | 'firstSeenAt' | 'documentPath'> & { firstSeenAt?: string }): CrawlDocumentRecord {

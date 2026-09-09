@@ -144,10 +144,40 @@ robots.txt is a technical signal, not legal authorization. If robots.txt cannot 
 ```
 pnpm run crawl:approved-url -- --url=https://example.com --approved-by=commander
 pnpm run crawl:approved-url -- --url=http://127.0.0.1:PORT/allowed --approved-by=trusted_internal_test --allow-internal
+pnpm run sovereign-search:crawl -- --approved-by=commander --input=work/sovereign-search/batch.example.json
 pnpm run validate:sovereign-crawler
 pnpm run validate:local-index
 pnpm run validate:sovereign-search-stage3
+pnpm run validate:sovereign-search-stage3b
 pnpm run sovereign-search:reset
 ```
 
 `sovereign-search:reset` deletes only `.war-room/sovereign-search/` (or a `WAR_ROOM_SOVEREIGN_SEARCH_DIR` that still stays under `.war-room/`).
+
+### Stage 3B — bounded Commander-approved batch ingest
+
+Stage 3B accepts an **explicit URL list**. It is not a spider: no discovered-link expansion, no domain crawl, no sitemap, no scheduler.
+
+Maximum batch size is a server-side constant (`MAX_SOVEREIGN_BATCH_URLS = 25`). Over-limit input is refused before any fetch.
+
+Each URL is independent:
+
+```
+INDEXED | BLOCKED_ROBOTS | BLOCKED_POLICY | DUPLICATE_URL | DUPLICATE_CONTENT
+| UNSUPPORTED_TYPE | FETCH_FAILED | EXTRACT_FAILED
+```
+
+One URL failure does not abort the batch unless SQLite/storage itself fails. Duplicate canonical URL updates last-seen metadata (Stage 3A semantics). Same content hash at a different canonical URL is `DUPLICATE_CONTENT` (alias/event provenance, not independent evidence).
+
+Operator JSON (local file only — not a URL):
+
+```json
+{
+  "urls": [
+    { "url": "https://example.com", "discoveredVia": "COMMANDER" },
+    { "url": "https://example.org", "discoveredVia": "SEARXNG" }
+  ]
+}
+```
+
+`discoveredVia` is optional trusted provenance (`SEARXNG`, `GOOGLE`, `TAVILY`, `RSS`, `COMMANDER`, …). Discovery-provider count is still not evidence independence.

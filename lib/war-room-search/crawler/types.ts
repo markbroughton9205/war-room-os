@@ -41,6 +41,21 @@ export const CRAWL_STATUSES = [
 
 export type CrawlStatus = (typeof CRAWL_STATUSES)[number]
 
+export const BATCH_ITEM_STATUSES = [
+  'INDEXED',
+  'BLOCKED_ROBOTS',
+  'BLOCKED_POLICY',
+  'DUPLICATE_URL',
+  'DUPLICATE_CONTENT',
+  'UNSUPPORTED_TYPE',
+  'FETCH_FAILED',
+  'EXTRACT_FAILED',
+] as const
+
+export type BatchItemStatus = (typeof BATCH_ITEM_STATUSES)[number]
+
+export const MAX_SOVEREIGN_BATCH_URLS = 25
+
 export type CrawlApprovalActor = 'commander' | 'trusted_internal_test'
 
 export type CrawlApproval = {
@@ -125,6 +140,47 @@ export type CrawlResult = {
   error: string | null
   durationMs: number
   events: CrawlEventRecord[]
+}
+
+export type BatchUrlInput = {
+  url: string
+  discoveredVia?: EvidenceDiscoveryProvider | null
+  alsoDiscoveredVia?: EvidenceDiscoveryProvider[]
+}
+
+export type BatchUrlResult = {
+  url: string
+  status: BatchItemStatus
+  ok: boolean
+  documentId: number | null
+  canonicalUrl: string | null
+  publisher: string | null
+  contentHash: string | null
+  discoveredVia: EvidenceDiscoveryProvider | null
+  robotsStatus: RobotsStatus | null
+  errorCategory: string | null
+  error: string | null
+  durationMs: number
+}
+
+export type BatchCrawlSummary = {
+  requested: number
+  processed: number
+  indexed: number
+  duplicateUrl: number
+  duplicateContent: number
+  blockedRobots: number
+  blockedPolicy: number
+  failed: number
+  durationMs: number
+}
+
+export type BatchCrawlResult = {
+  ok: boolean
+  error: string | null
+  errorCategory: string | null
+  items: BatchUrlResult[]
+  summary: BatchCrawlSummary
 }
 
 export type LocalSearchHit = {
