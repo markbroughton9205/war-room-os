@@ -263,3 +263,24 @@ pnpm run validate:sovereign-search-stage4b
 pnpm run validate:sovereign-search-stage4b:live
 ```
 
+### Stage 4C — semantic relevance gating and abstention
+
+Semantic nearest-neighbor search no longer promotes an unrelated closest vector as a local result. Admission uses retrieval profile `wr-retrieval-v4c.1`:
+
+- model `BAAI/bge-small-en-v1.5` revision `xenova-onnx-q8`
+- chunking `wr-chunk-v1`
+- RRF k=60
+- strategy `min_cosine`
+- threshold `0.61` (measured; not an arbitrary 0.5/0.55/0.6)
+
+If FTS has no hit and semantic candidates fail the gate, `WAR_ROOM_LOCAL` returns zero local results with `semanticAdmission.abstained=true`. That is healthy. Semantic infrastructure can remain `available` while a query abstains.
+
+FTS still ANDs tokens (max 8). `reserved DNS names and LIV Golf` can therefore have no lexical hit even when both topics exist in the corpus. Lexical query planning is a later build.
+
+Rejected semantic candidates do not enter RRF and do not become Council evidence.
+
+```
+pnpm run validate:sovereign-search-stage4c
+pnpm run validate:sovereign-search-stage4c:live
+```
+

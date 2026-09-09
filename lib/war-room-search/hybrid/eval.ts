@@ -13,7 +13,9 @@ export const EVAL_QUERY_TYPES = [
   'CONCEPTUAL',
   'ENTITY',
   'AMBIGUOUS',
+  'HARD_NEGATIVE',
   'NO_RELEVANT_DOCUMENT',
+  'MIXED_TOPIC',
 ] as const
 
 export type EvalQueryType = (typeof EVAL_QUERY_TYPES)[number]
@@ -60,6 +62,12 @@ export const EVAL_DOCUMENTS: EvalDocFixture[] = [
     publisher: 'iana.org',
     text: 'Example domains such as example.com are reserved for documentation and testing without operational use.',
   },
+  {
+    url: 'https://dw.com/en/liv-golf-fixture',
+    title: 'LIV Golf in financial turmoil',
+    publisher: 'dw.com',
+    text: 'LIV Golf is in financial turmoil after Saudi Arabia pulled back from the gulf-backed breakaway golf circuit and its remaining events faced cash trouble.',
+  },
 ]
 
 export const EVAL_QUERIES: EvalQuery[] = [
@@ -99,11 +107,67 @@ export const EVAL_QUERIES: EvalQuery[] = [
     notes: 'Ambiguous common token; expected relevant doc is still the export-controls article.',
   },
   {
+    id: 'paraphrase_liv',
+    query: 'cash trouble for a gulf-backed breakaway golf circuit',
+    type: 'PARAPHRASE',
+    expectedCanonicalUrls: ['https://dw.com/en/liv-golf-fixture'],
+    notes: 'Paraphrase of the LIV Golf fixture. Relevant because the fixture is about that circuit\'s cash trouble, not because the query contains the token golf.',
+  },
+  {
+    id: 'mixed_topic',
+    query: 'reserved DNS names and LIV Golf',
+    type: 'MIXED_TOPIC',
+    expectedCanonicalUrls: ['https://iana.org/domains/reserved', 'https://dw.com/en/liv-golf-fixture'],
+    notes: 'Two relevant fixtures. Stage 4 FTS ANDs tokens so this query may have no lexical hit; labels remain from fixture contents.',
+  },
+  {
     id: 'no_relevant',
     query: 'antarctic penguin census 1994',
     type: 'NO_RELEVANT_DOCUMENT',
     expectedCanonicalUrls: [],
-    notes: 'No fixture document is about penguins; do not treat any fixture as relevant.',
+    notes: 'No fixture document is about penguins, Antarctica, or a 1994 census.',
+  },
+  {
+    id: 'no_relevant_finance',
+    query: 'municipal bond yield curve inversion 1987',
+    type: 'NO_RELEVANT_DOCUMENT',
+    expectedCanonicalUrls: [],
+    notes: 'No fixture is about municipal bonds, yield curves, or 1987 finance.',
+  },
+  {
+    id: 'no_relevant_sports',
+    query: 'olympic curling medal count 2010',
+    type: 'NO_RELEVANT_DOCUMENT',
+    expectedCanonicalUrls: [],
+    notes: 'No fixture is about Olympic curling. LIV Golf is business reporting, not this sporting event.',
+  },
+  {
+    id: 'no_relevant_geo',
+    query: 'kalahari desert nomadic pastoral routes 1962',
+    type: 'NO_RELEVANT_DOCUMENT',
+    expectedCanonicalUrls: [],
+    notes: 'No fixture is about the Kalahari, nomadic pastoralism, or 1962 geography.',
+  },
+  {
+    id: 'hard_negative_industrial',
+    query: 'factory PLC industrial process controls for a chemical plant',
+    type: 'HARD_NEGATIVE',
+    expectedCanonicalUrls: [],
+    notes: 'Mentions controls but refers to industrial process hardware. The chip-export fixture is about semiconductor export controls, not PLC hardware.',
+  },
+  {
+    id: 'hard_negative_biology',
+    query: 'protein domains in eukaryotic genomes',
+    type: 'HARD_NEGATIVE',
+    expectedCanonicalUrls: [],
+    notes: 'Mentions domains in a biology sense. The IANA fixture is about reserved DNS domains, not protein domains.',
+  },
+  {
+    id: 'hard_negative_golf_equipment',
+    query: 'graphite golf club shafts for amateur players',
+    type: 'HARD_NEGATIVE',
+    expectedCanonicalUrls: [],
+    notes: 'Mentions golf equipment. The LIV fixture is business reporting about a breakaway circuit, not clubs or shafts.',
   },
 ]
 
@@ -148,6 +212,10 @@ export type ModeMetrics = {
   mrr: number
   scoredQueries: number
   noRelevantOk: boolean | null
+  trueNoHitRejectionRate: number | null
+  falsePositiveRateOnNegatives: number | null
+  falseNegativeRateOnPositives: number | null
+  admittedTop1Precision: number | null
 }
 
 function firstRelevantRank(canonicals: string[], expected: string[]): number | null {
@@ -167,15 +235,49 @@ export function meanReciprocalRank(ranks: Array<number | null>): number {
   return ranks.reduce<number>((sum, rank) => sum + (rank ? 1 / rank : 0), 0) / ranks.length
 }
 
+export function isPositiveEvalQuery(item: EvalQuery): boolean {
+  return item.expectedCanonicalUrls.length > 0
+}
+
+export type AdmissionMetrics = {
+  trueNoHitRejectionRate: number
+  falsePositiveRateOnNegatives: number
+  falseNegativeRateOnPositives: number
+  admittedTop1Precision: number | null
+  positiveCount: number
+  negativeCount: number
+}
+
+export function admissionMetricsFromDecisions(rows: Array<{
+  expectedCanonicalUrls: string[]
+  admittedUrls: string[]
+}>): AdmissionMetrics {
+  const positives = rows.filter(row => row.expectedCanonicalUrls.length > 0)
+  const negatives = rows.filter(row => row.expectedCanonicalUrls.length === 0)
+  const trueRejects = negatives.filter(row => row.admittedUrls.length === 0).length
+  const falsePositives = negatives.filter(row => row.admittedUrls.length > 0).length
+  const falseNegatives = positives.filter(row => !row.expectedCanonicalUrls.some(url => row.admittedUrls.includes(url))).length
+  const admittedPositives = positives.filter(row => row.admittedUrls.length > 0)
+  const precise = admittedPositives.filter(row => row.expectedCanonicalUrls.includes(row.admittedUrls[0]!)).length
+  return {
+    trueNoHitRejectionRate: negatives.length ? trueRejects / negatives.length : 0,
+    falsePositiveRateOnNegatives: negatives.length ? falsePositives / negatives.length : 0,
+    falseNegativeRateOnPositives: positives.length ? falseNegatives / positives.length : 0,
+    admittedTop1Precision: admittedPositives.length ? precise / admittedPositives.length : null,
+    positiveCount: positives.length,
+    negativeCount: negatives.length,
+  }
+}
+
 export async function evaluateRetrievalMode(opts: {
   corpus: SovereignCorpus
   embedder: Embedder
   store?: import('./vectors').SqliteVectorStore
   mode: HybridRetrievalMode
-}): Promise<{ metrics: ModeMetrics; rows: Array<{ id: string; query: string; type: EvalQueryType; top: string[]; rank: number | null }> }> {
-  const topical = EVAL_QUERIES.filter(item => item.type !== 'NO_RELEVANT_DOCUMENT')
+}): Promise<{ metrics: ModeMetrics; rows: Array<{ id: string; query: string; type: EvalQueryType; top: string[]; rank: number | null; admitted: boolean }> }> {
+  const topical = EVAL_QUERIES.filter(isPositiveEvalQuery)
   const ranks: Array<number | null> = []
-  const rows: Array<{ id: string; query: string; type: EvalQueryType; top: string[]; rank: number | null }> = []
+  const rows: Array<{ id: string; query: string; type: EvalQueryType; top: string[]; rank: number | null; admitted: boolean }> = []
   for (const item of topical) {
     const result = await searchLocalHybrid(item.query, {
       corpus: opts.corpus,
@@ -187,18 +289,41 @@ export async function evaluateRetrievalMode(opts: {
     const top = result.hits.map(hit => hit.document.canonicalUrl)
     const rank = firstRelevantRank(top, item.expectedCanonicalUrls)
     ranks.push(rank)
-    rows.push({ id: item.id, query: item.query, type: item.type, top, rank })
+    rows.push({ id: item.id, query: item.query, type: item.type, top, rank, admitted: top.length > 0 })
   }
 
-  const noRelevant = EVAL_QUERIES.find(item => item.type === 'NO_RELEVANT_DOCUMENT')!
-  const noHit = await searchLocalHybrid(noRelevant.query, {
-    corpus: opts.corpus,
-    embedder: opts.embedder,
-    store: opts.store,
-    retrievalMode: 'fts',
-    limit: 3,
-  })
-  const noRelevantOk = noHit.hits.length === 0
+  const negatives = EVAL_QUERIES.filter(item => !isPositiveEvalQuery(item))
+  const negativeDecisions: Array<{ expectedCanonicalUrls: string[]; admittedUrls: string[] }> = []
+  let noRelevantOk: boolean | null = null
+  for (const item of negatives) {
+    const result = await searchLocalHybrid(item.query, {
+      corpus: opts.corpus,
+      embedder: opts.embedder,
+      store: opts.store,
+      retrievalMode: opts.mode === 'fts' ? 'fts' : opts.mode,
+      limit: 8,
+    })
+    const admittedUrls = result.hits.map(hit => hit.document.canonicalUrl)
+    negativeDecisions.push({ expectedCanonicalUrls: [], admittedUrls })
+    if (item.id === 'no_relevant' && opts.mode === 'fts') noRelevantOk = admittedUrls.length === 0
+    rows.push({
+      id: item.id,
+      query: item.query,
+      type: item.type,
+      top: admittedUrls,
+      rank: null,
+      admitted: admittedUrls.length > 0,
+    })
+  }
+
+  const decisions = [
+    ...rows.filter(row => EVAL_QUERIES.find(item => item.id === row.id)?.expectedCanonicalUrls.length).map(row => ({
+      expectedCanonicalUrls: EVAL_QUERIES.find(item => item.id === row.id)!.expectedCanonicalUrls,
+      admittedUrls: row.top,
+    })),
+    ...negativeDecisions,
+  ]
+  const admission = admissionMetricsFromDecisions(decisions)
 
   return {
     metrics: {
@@ -209,6 +334,10 @@ export async function evaluateRetrievalMode(opts: {
       mrr: meanReciprocalRank(ranks),
       scoredQueries: ranks.length,
       noRelevantOk,
+      trueNoHitRejectionRate: admission.trueNoHitRejectionRate,
+      falsePositiveRateOnNegatives: admission.falsePositiveRateOnNegatives,
+      falseNegativeRateOnPositives: admission.falseNegativeRateOnPositives,
+      admittedTop1Precision: admission.admittedTop1Precision,
     },
     rows,
   }

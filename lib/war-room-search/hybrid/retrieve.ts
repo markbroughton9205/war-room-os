@@ -8,8 +8,11 @@ import {
   type HybridSearchHit,
   type HybridSearchResult,
   type LocalRetrievalMode,
+  type LocalSemanticAdmission,
 } from './types'
+import { admitSemanticCandidates } from './admission'
 import { getSharedQueryEmbedder } from './embedder'
+import { PRODUCTION_RETRIEVAL_PROFILE, type RetrievalProfile } from './retrievalProfile'
 import { reciprocalRankFusion } from './rrf'
 import { resolveHybridPaths } from './modelStore'
 import { SqliteVectorStore, searchVectors } from './vectors'
@@ -35,6 +38,25 @@ function lexicalHitsFromCorpus(corpus: SovereignCorpus, query: string, limit: nu
   return lexicalDocs
 }
 
+function emptyAdmission(profile: RetrievalProfile, extras?: Partial<LocalSemanticAdmission>): LocalSemanticAdmission {
+  return {
+    candidateScore: null,
+    secondScore: null,
+    margin: null,
+    threshold: profile.semanticThreshold,
+    marginThreshold: profile.semanticMarginThreshold,
+    admitted: false,
+    abstained: false,
+    strategy: profile.semanticAdmissionStrategy,
+    profileVersion: profile.profileVersion,
+    embeddingModel: profile.embeddingModel,
+    embeddingRevision: profile.embeddingRevision,
+    chunkingVersion: profile.chunkingVersion,
+    rrfK: profile.rrfK,
+    ...extras,
+  }
+}
+
 function ftsHits(lexicalDocs: Array<{ document: CrawlDocumentRecord; rank: number; score: number; snippet: string }>): HybridSearchHit[] {
   return lexicalDocs.map((row, index) => ({
     document: row.document,
@@ -58,12 +80,14 @@ export async function searchLocalHybrid(query: string, opts?: {
   embedder?: Embedder
   modelsDir?: string
   retrievalMode?: HybridRetrievalMode
+  profile?: RetrievalProfile
 }): Promise<HybridSearchResult> {
   const started = Date.now()
   const ownsCorpus = !opts?.corpus
   const ownsStore = !opts?.store
   const corpus = opts?.corpus ?? new SovereignCorpus(opts?.corpusRoot)
   const retrievalMode = opts?.retrievalMode ?? 'hybrid'
+  const profile = opts?.profile ?? PRODUCTION_RETRIEVAL_PROFILE
   const embedder = retrievalMode === 'fts'
     ? null
     : (opts?.embedder ?? getSharedQueryEmbedder({ modelsDir: opts?.modelsDir }))
@@ -74,7 +98,7 @@ export async function searchLocalHybrid(query: string, opts?: {
 
   const finish = (
     hits: HybridSearchHit[],
-    extra: Pick<HybridSearchResult, 'lexicalHits' | 'semanticHits' | 'semanticAvailable' | 'semanticReason' | 'usedFallback' | 'retrievalMode'> & Partial<Pick<HybridSearchResult, 'staleEmbeddingCount' | 'indexedDocumentCount' | 'indexedChunkCount' | 'semanticQueryMs' | 'dimensionMismatchCount'>>,
+    extra: Pick<HybridSearchResult, 'lexicalHits' | 'semanticHits' | 'semanticAvailable' | 'semanticReason' | 'usedFallback' | 'retrievalMode'> & Partial<Pick<HybridSearchResult, 'staleEmbeddingCount' | 'indexedDocumentCount' | 'indexedChunkCount' | 'semanticQueryMs' | 'dimensionMismatchCount' | 'semanticCandidates' | 'semanticAdmission'>>,
   ): HybridSearchResult => ({
     query,
     hits,
@@ -85,6 +109,8 @@ export async function searchLocalHybrid(query: string, opts?: {
     vectorIndexBytes,
     semanticQueryMs: extra.semanticQueryMs ?? null,
     dimensionMismatchCount: extra.dimensionMismatchCount ?? 0,
+    semanticCandidates: extra.semanticCandidates ?? 0,
+    semanticAdmission: extra.semanticAdmission ?? emptyAdmission(profile),
     ...extra,
   })
 
@@ -93,7 +119,7 @@ export async function searchLocalHybrid(query: string, opts?: {
 
     if (!embedder || !embedder.available) {
       const mode: LocalRetrievalMode = retrievalMode === 'fts' ? 'FTS_ONLY' : 'FTS_FALLBACK'
-        return finish(ftsHits(lexicalDocs), {
+      return finish(ftsHits(lexicalDocs), {
         lexicalHits: lexicalDocs.length,
         semanticHits: 0,
         semanticAvailable: false,
@@ -154,13 +180,30 @@ export async function searchLocalHybrid(query: string, opts?: {
         const current = bestChunkByDoc.get(hit.documentId)
         if (!current || hit.score > current.score) bestChunkByDoc.set(hit.documentId, hit)
       }
-      const semanticDocs = [...bestChunkByDoc.values()]
+      const semanticCandidates = [...bestChunkByDoc.values()]
         .sort((a, b) => b.score - a.score)
-        .map((hit, index) => ({ hit, rank: index + 1 }))
+        .map(hit => ({ hit, documentId: hit.documentId, score: hit.score }))
+      const decision = admitSemanticCandidates(semanticCandidates, profile)
+      const semanticDocs = decision.admitted.map((row, index) => ({ hit: row.hit, rank: index + 1 }))
+      const admission: LocalSemanticAdmission = {
+        candidateScore: decision.candidateScore,
+        secondScore: decision.secondScore,
+        margin: decision.margin,
+        threshold: decision.threshold,
+        marginThreshold: decision.marginThreshold,
+        admitted: decision.admitted.length > 0,
+        abstained: decision.abstained,
+        strategy: decision.strategy,
+        profileVersion: profile.profileVersion,
+        embeddingModel: profile.embeddingModel,
+        embeddingRevision: profile.embeddingRevision,
+        chunkingVersion: profile.chunkingVersion,
+        rrfK: profile.rrfK,
+      }
 
       const fused = reciprocalRankFusion({
         ...(retrievalMode === 'semantic' ? {} : { lexical: lexicalDocs.map(row => ({ id: String(row.document.id), rank: row.rank })) }),
-        semantic: semanticDocs.map(row => ({ id: String(row.hit.documentId), rank: row.rank })),
+        ...(semanticDocs.length ? { semantic: semanticDocs.map(row => ({ id: String(row.hit.documentId), rank: row.rank })) } : {}),
       })
 
       const lexicalById = new Map(lexicalDocs.map(row => [row.document.id, row]))
@@ -191,11 +234,18 @@ export async function searchLocalHybrid(query: string, opts?: {
         ? 'SEMANTIC_ONLY'
         : retrievalMode === 'fts'
           ? 'FTS_ONLY'
-          : 'HYBRID_RRF'
+          : semanticDocs.length && lexicalDocs.length
+            ? 'HYBRID_RRF'
+            : semanticDocs.length
+              ? 'HYBRID_RRF'
+              : lexicalDocs.length
+                ? 'FTS_ONLY'
+                : 'HYBRID_RRF'
 
       return finish(hits, {
         lexicalHits: lexicalDocs.length,
         semanticHits: semanticDocs.length,
+        semanticCandidates: semanticCandidates.length,
         semanticAvailable: true,
         semanticReason: null,
         usedFallback: 'none',
@@ -205,6 +255,7 @@ export async function searchLocalHybrid(query: string, opts?: {
         indexedChunkCount,
         semanticQueryMs,
         dimensionMismatchCount: vectorSearch.dimensionMismatchCount,
+        semanticAdmission: admission,
       })
     } catch (error) {
       return finish(ftsHits(lexicalDocs), {

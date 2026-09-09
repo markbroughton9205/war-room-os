@@ -117,11 +117,28 @@ export type HybridSearchHit = {
   snippet: string
 }
 
+export type LocalSemanticAdmission = {
+  candidateScore: number | null
+  secondScore: number | null
+  margin: number | null
+  threshold: number | null
+  marginThreshold: number | null
+  admitted: boolean
+  abstained: boolean
+  strategy: string | null
+  profileVersion: string | null
+  embeddingModel: string | null
+  embeddingRevision: string | null
+  chunkingVersion: string | null
+  rrfK: number | null
+}
+
 export type HybridSearchResult = {
   query: string
   hits: HybridSearchHit[]
   lexicalHits: number
   semanticHits: number
+  semanticCandidates: number
   semanticAvailable: boolean
   semanticReason: string | null
   usedFallback: 'none' | 'fts' | 'fts_vector_error'
@@ -133,6 +150,7 @@ export type HybridSearchResult = {
   vectorIndexBytes: number
   semanticQueryMs: number | null
   dimensionMismatchCount: number
+  semanticAdmission: LocalSemanticAdmission
 }
 
 export type IndexDocumentsResult = {

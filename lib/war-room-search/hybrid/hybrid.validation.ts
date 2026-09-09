@@ -19,6 +19,7 @@ import { createFakeEmbedder, createQueryEmbedder, createUnavailableEmbedder } fr
 import { indexCorpusDocuments } from './indexCorpus'
 import { resolveHybridPaths } from './modelStore'
 import { searchLocalHybrid } from './retrieve'
+import { UNGATED_RETRIEVAL_PROFILE } from './retrievalProfile'
 import { CHUNKING_VERSION } from './types'
 import { SqliteVectorStore } from './vectors'
 import type { CrawlDocumentRecord } from '../crawler/types'
@@ -155,7 +156,7 @@ export async function runHybridRetrievalValidation(): Promise<CaseResult[]> {
     ))
 
     const semanticQuery = 'limits on overseas sales of advanced processors'
-    const semantic = await searchLocalHybrid(semanticQuery, { corpus, store, embedder, limit: 8 })
+    const semantic = await searchLocalHybrid(semanticQuery, { corpus, store, embedder, limit: 8, profile: UNGATED_RETRIEVAL_PROFILE })
     cases.push(check(
       'h04_semantic_retrieval',
       semantic.semanticAvailable
@@ -172,7 +173,7 @@ export async function runHybridRetrievalValidation(): Promise<CaseResult[]> {
     ))
 
     const bothQuery = 'semiconductor export'
-    const both = await searchLocalHybrid(bothQuery, { corpus, store, embedder, limit: 8 })
+    const both = await searchLocalHybrid(bothQuery, { corpus, store, embedder, limit: 8, profile: UNGATED_RETRIEVAL_PROFILE })
     const fusedExport = both.hits.find(hit => hit.document.id === exportDoc.id)
     cases.push(check(
       'h06_hybrid_fusion',
@@ -181,14 +182,14 @@ export async function runHybridRetrievalValidation(): Promise<CaseResult[]> {
       JSON.stringify(fusedExport && { lex: fusedExport.lexicalRank, sem: fusedExport.semanticRank, fusion: fusedExport.fusionScore, chunk: fusedExport.matchedChunkId }),
     ))
 
-    const semanticOnly = await searchLocalHybrid(semanticQuery, { corpus, store, embedder, limit: 8 })
+    const semanticOnly = await searchLocalHybrid(semanticQuery, { corpus, store, embedder, limit: 8, profile: UNGATED_RETRIEVAL_PROFILE })
     const semanticExport = semanticOnly.hits.find(hit => hit.document.id === exportDoc.id)
     cases.push(check(
       'h07_semantic_only_relevant',
       Boolean(semanticExport && semanticExport.semanticRank === 1 && (semanticExport.lexicalRank == null || semanticOnly.lexicalHits === 0 || !semanticOnly.hits.some(hit => hit.document.id === exportDoc.id && hit.lexicalRank === 1 && hit.semanticRank == null))),
       JSON.stringify({ lexicalHits: semanticOnly.lexicalHits, semanticHits: semanticOnly.semanticHits, hit: semanticExport && { lex: semanticExport.lexicalRank, sem: semanticExport.semanticRank } }),
     ))
-    const lexicalOnly = await searchLocalHybrid('zxqplorbit', { corpus, store, embedder, limit: 8 })
+    const lexicalOnly = await searchLocalHybrid('zxqplorbit', { corpus, store, embedder, limit: 8, profile: UNGATED_RETRIEVAL_PROFILE })
     const lexicalHit = lexicalOnly.hits.find(hit => hit.document.id === lexicalDoc.id)
     cases.push(check(
       'h08_lexical_only_relevant',

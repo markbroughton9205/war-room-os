@@ -67,7 +67,11 @@ export async function runStage4bValidation(): Promise<CaseResult[]> {
     const docs = seedEvalCorpus(corpus)
     cases.push(check(
       'e01_evaluation_dataset_loads',
-      EVAL_QUERIES.length === 6 && docs.length === 4 && EVAL_QUERIES.every(item => item.query && item.type),
+      EVAL_QUERIES.some(item => item.id === 'exact_lexical')
+        && EVAL_QUERIES.some(item => item.id === 'paraphrase')
+        && EVAL_QUERIES.some(item => item.type === 'NO_RELEVANT_DOCUMENT')
+        && docs.length >= 4
+        && EVAL_QUERIES.every(item => item.query && item.type),
       JSON.stringify({ queries: EVAL_QUERIES.map(item => item.id), docs: docs.map(doc => doc.canonicalUrl) }),
     ))
 

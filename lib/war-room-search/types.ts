@@ -110,6 +110,22 @@ export type LocalSemanticHealth = {
   inferenceBackend: string | null
 }
 
+export type LocalSemanticAdmission = {
+  candidateScore: number | null
+  secondScore: number | null
+  margin: number | null
+  threshold: number | null
+  marginThreshold: number | null
+  admitted: boolean
+  abstained: boolean
+  strategy: string | null
+  profileVersion: string | null
+  embeddingModel: string | null
+  embeddingRevision: string | null
+  chunkingVersion: string | null
+  rrfK: number | null
+}
+
 export type SearchResult = {
   id: string
   title: string
@@ -160,6 +176,8 @@ export type SearchSourceSummary = {
   warRoomLocalWarning?: string
   /** Semantic capability is diagnostic only. Missing semantic never marks WAR_ROOM_LOCAL unhealthy. */
   localSemantic: LocalSemanticHealth | null
+  /** Relevance admission is not infrastructure health. Abstention can occur while status=available. */
+  localSemanticAdmission: LocalSemanticAdmission | null
   researchEngineOk: boolean
   researchEngineProviders: string[]
   publicRssOk: boolean
@@ -177,6 +195,7 @@ export function emptySearchSourceSummary(overrides?: Partial<SearchSourceSummary
     searxngOk: false,
     warRoomLocalOk: false,
     localSemantic: null,
+    localSemanticAdmission: null,
     researchEngineOk: false,
     researchEngineProviders: [],
     publicRssOk: false,

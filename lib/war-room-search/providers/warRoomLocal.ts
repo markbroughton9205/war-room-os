@@ -4,7 +4,7 @@ import { WAR_ROOM_STORAGE_ORIGIN } from '../crawler/types'
 import type { EvidenceDiscoveryProvider } from '@/lib/intelligence/intelligencePacket'
 import { searchLocalHybrid } from '../hybrid/retrieve'
 import { emptyLocalSemanticHealth, inspectLocalSemanticHealth } from '../hybrid/semanticHealth'
-import type { LocalRetrievalMode, LocalRetrievalSignals, LocalSemanticHealth } from '../types'
+import type { LocalRetrievalMode, LocalRetrievalSignals, LocalSemanticAdmission, LocalSemanticHealth } from '../types'
 
 export const WAR_ROOM_LOCAL_WARNING_CODES = [
   'WAR_ROOM_LOCAL_DISABLED',
@@ -51,6 +51,7 @@ export type WarRoomLocalLeg = {
   semanticAvailable?: boolean
   semanticReason?: string | null
   localSemantic?: LocalSemanticHealth | null
+  localSemanticAdmission?: LocalSemanticAdmission | null
   retrievalMode?: LocalRetrievalMode
 }
 
@@ -65,6 +66,7 @@ export function emptyWarRoomLocalLeg(error?: string, warningCode?: WarRoomLocalW
     semanticAvailable: false,
     semanticReason: error ?? null,
     localSemantic: emptyLocalSemanticHealth(error === 'WAR_ROOM_LOCAL_DISABLED' ? 'disabled' : 'error', error ?? null),
+    localSemanticAdmission: null,
     retrievalMode: 'FTS_FALLBACK',
   }
 }
@@ -112,6 +114,7 @@ export async function runWarRoomLocalSearch(
       semanticAvailable: hybrid.semanticAvailable,
       semanticReason: hybrid.semanticReason,
       localSemantic,
+      localSemanticAdmission: hybrid.semanticAdmission,
       retrievalMode: hybrid.retrievalMode,
     }
   } catch (error) {
@@ -133,6 +136,7 @@ export async function runWarRoomLocalSearch(
           corpusRoot: opts?.corpusRoot ?? env.WAR_ROOM_SOVEREIGN_SEARCH_DIR,
           env,
         }),
+        localSemanticAdmission: null,
         retrievalMode: 'FTS_FALLBACK',
       }
     } catch (ftsError) {
@@ -146,6 +150,7 @@ export async function runWarRoomLocalSearch(
         semanticAvailable: false,
         semanticReason: error instanceof Error ? error.message : 'SEMANTIC_UNAVAILABLE',
         localSemantic: emptyLocalSemanticHealth('error', error instanceof Error ? error.message : 'SEMANTIC_UNAVAILABLE'),
+        localSemanticAdmission: null,
         retrievalMode: 'FTS_FALLBACK',
       }
     }

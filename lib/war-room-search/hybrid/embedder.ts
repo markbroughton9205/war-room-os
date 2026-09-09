@@ -21,6 +21,9 @@ const CONCEPT_GROUPS: string[][] = [
   ['freight', 'trucking', 'brokerage', 'logistics', 'cargo', 'shipment', 'shipments'],
   ['hurricane', 'storm', 'rainfall', 'weather', 'flood'],
   ['zxqplorbit'],
+  ['liv', 'saudi', 'breakaway', 'gulf'],
+  ['plc', 'factory', 'chemical', 'hvac', 'valve'],
+  ['graphite', 'shaft', 'shafts', 'amateur'],
 ]
 
 type FeatureExtractor = (
@@ -91,7 +94,8 @@ export function createFakeEmbedder(overrides?: Partial<EmbeddingModelInfo>): Emb
         for (const token of tokens) {
           let hash = 2166136261
           for (let i = 0; i < token.length; i += 1) hash = Math.imul(hash ^ token.charCodeAt(i), 16777619)
-          const slot = 6 + (Math.abs(hash) % Math.max(1, info.dimensions - 6))
+          const offset = CONCEPT_GROUPS.length
+          const slot = offset + (Math.abs(hash) % Math.max(1, info.dimensions - offset))
           vector[slot] += 0.15
         }
         return l2Normalize(vector)
