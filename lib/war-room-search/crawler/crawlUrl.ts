@@ -42,7 +42,7 @@ function robotsUrlFor(target: string): string | null {
   }
 }
 
-async function checkRobots(args: {
+export async function checkRobots(args: {
   url: string
   approval: CrawlApproval
   fetchImpl?: FetchImpl

@@ -15,7 +15,12 @@ import {
   type IngestCandidateEventType,
   type IngestCandidateRecord,
   type IngestCandidateStatus,
+  type RecrawlOutcome,
+  type RecrawlRunRecord,
   type RobotsStatus,
+  type SourceAvailability,
+  type DocumentLifecycleMeta,
+  type DocumentVersionRecord,
 } from './types'
 import {
   buildLegacyStrictMatch,
@@ -137,6 +142,38 @@ CREATE TABLE IF NOT EXISTS ingest_candidate_events (
   detail TEXT,
   created_at TEXT NOT NULL,
   FOREIGN KEY(candidate_id) REFERENCES ingest_candidates(id)
+);
+
+CREATE TABLE IF NOT EXISTS document_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id INTEGER NOT NULL,
+  canonical_url TEXT NOT NULL,
+  previous_hash TEXT,
+  new_hash TEXT,
+  change_status TEXT NOT NULL,
+  http_status INTEGER,
+  robots_status TEXT,
+  observed_canonical_url TEXT,
+  canonical_changed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(document_id) REFERENCES crawl_documents(id)
+);
+
+CREATE INDEX IF NOT EXISTS document_versions_doc_idx ON document_versions(document_id, created_at);
+
+CREATE TABLE IF NOT EXISTS recrawl_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT NOT NULL,
+  requested INTEGER NOT NULL,
+  processed INTEGER NOT NULL,
+  changed INTEGER NOT NULL DEFAULT 0,
+  unchanged INTEGER NOT NULL DEFAULT 0,
+  blocked INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  not_found INTEGER NOT NULL DEFAULT 0,
+  gone INTEGER NOT NULL DEFAULT 0,
+  actor TEXT
 );
 `
 
@@ -638,5 +675,196 @@ export class SovereignCorpus {
       detail: row.detail,
       createdAt: row.created_at,
     }))
+  }
+
+  listEvents(documentId?: number | null): CrawlEventRecord[] {
+    const rows = documentId == null
+      ? this.db.prepare('SELECT * FROM crawl_events ORDER BY id').all()
+      : this.db.prepare('SELECT * FROM crawl_events WHERE document_id = ? ORDER BY id').all(documentId)
+    return (rows as Array<{
+      id: number
+      document_id: number | null
+      state: string
+      url: string
+      canonical_url: string | null
+      http_status: number | null
+      bytes_received: number | null
+      content_type: string | null
+      content_hash: string | null
+      robots_status: string | null
+      error_category: string | null
+      duration_ms: number
+      created_at: string
+    }>).map(row => ({
+      id: Number(row.id),
+      documentId: row.document_id == null ? null : Number(row.document_id),
+      state: row.state as CrawlEventState,
+      url: row.url,
+      canonicalUrl: row.canonical_url,
+      httpStatus: row.http_status == null ? null : Number(row.http_status),
+      bytesReceived: row.bytes_received == null ? null : Number(row.bytes_received),
+      contentType: row.content_type,
+      contentHash: row.content_hash,
+      robotsStatus: (row.robots_status as RobotsStatus | null) ?? null,
+      errorCategory: row.error_category,
+      durationMs: Number(row.duration_ms),
+      createdAt: row.created_at,
+    }))
+  }
+
+  getLifecycleMeta(documentId: number): DocumentLifecycleMeta {
+    const row = this.db.prepare('SELECT metadata_json FROM crawl_documents WHERE id = ?').get(documentId) as { metadata_json: string } | undefined
+    return parseLifecycleMeta(row?.metadata_json)
+  }
+
+  patchLifecycleMeta(documentId: number, patch: Partial<DocumentLifecycleMeta>): DocumentLifecycleMeta {
+    const current = this.getLifecycleMeta(documentId)
+    const next: DocumentLifecycleMeta = { ...current, ...patch }
+    this.db.prepare('UPDATE crawl_documents SET metadata_json = ? WHERE id = ?').run(JSON.stringify(next), documentId)
+    return next
+  }
+
+  insertDocumentVersion(input: Omit<DocumentVersionRecord, 'id'>): DocumentVersionRecord {
+    const result = this.db.prepare(`
+      INSERT INTO document_versions (
+        document_id, canonical_url, previous_hash, new_hash, change_status, http_status,
+        robots_status, observed_canonical_url, canonical_changed, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.documentId,
+      input.canonicalUrl,
+      input.previousHash,
+      input.newHash,
+      input.changeStatus,
+      input.httpStatus,
+      input.robotsStatus,
+      input.observedCanonicalUrl,
+      input.canonicalChanged ? 1 : 0,
+      input.createdAt,
+    )
+    return { ...input, id: Number(result.lastInsertRowid) }
+  }
+
+  listDocumentVersions(documentId: number): DocumentVersionRecord[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM document_versions WHERE document_id = ? ORDER BY id
+    `).all(documentId) as Array<{
+      id: number
+      document_id: number
+      canonical_url: string
+      previous_hash: string | null
+      new_hash: string | null
+      change_status: string
+      http_status: number | null
+      robots_status: string | null
+      observed_canonical_url: string | null
+      canonical_changed: number
+      created_at: string
+    }>
+    return rows.map(row => ({
+      id: Number(row.id),
+      documentId: Number(row.document_id),
+      canonicalUrl: row.canonical_url,
+      previousHash: row.previous_hash,
+      newHash: row.new_hash,
+      changeStatus: row.change_status as RecrawlOutcome,
+      httpStatus: row.http_status == null ? null : Number(row.http_status),
+      robotsStatus: (row.robots_status as RobotsStatus | null) ?? null,
+      observedCanonicalUrl: row.observed_canonical_url,
+      canonicalChanged: Number(row.canonical_changed) === 1,
+      createdAt: row.created_at,
+    }))
+  }
+
+  insertRecrawlRun(input: Omit<RecrawlRunRecord, 'id'>): RecrawlRunRecord {
+    const result = this.db.prepare(`
+      INSERT INTO recrawl_runs (
+        started_at, finished_at, requested, processed, changed, unchanged, blocked,
+        failed, not_found, gone, actor
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.startedAt,
+      input.finishedAt,
+      input.requested,
+      input.processed,
+      input.changed,
+      input.unchanged,
+      input.blocked,
+      input.failed,
+      input.notFound,
+      input.gone,
+      input.actor,
+    )
+    return { ...input, id: Number(result.lastInsertRowid) }
+  }
+
+  latestRecrawlRun(): RecrawlRunRecord | null {
+    const row = this.db.prepare('SELECT * FROM recrawl_runs ORDER BY id DESC LIMIT 1').get() as {
+      id: number
+      started_at: string
+      finished_at: string
+      requested: number
+      processed: number
+      changed: number
+      unchanged: number
+      blocked: number
+      failed: number
+      not_found: number
+      gone: number
+      actor: string | null
+    } | undefined
+    if (!row) return null
+    return {
+      id: Number(row.id),
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      requested: Number(row.requested),
+      processed: Number(row.processed),
+      changed: Number(row.changed),
+      unchanged: Number(row.unchanged),
+      blocked: Number(row.blocked),
+      failed: Number(row.failed),
+      notFound: Number(row.not_found),
+      gone: Number(row.gone),
+      actor: row.actor,
+    }
+  }
+}
+
+const DEFAULT_LIFECYCLE_META: DocumentLifecycleMeta = {
+  freshnessIntervalHours: null,
+  lastRecrawlAt: null,
+  lastRecrawlOutcome: null,
+  previousContentHash: null,
+  lastChangeAt: null,
+  sourceAvailability: 'AVAILABLE',
+  lastObservedCanonicalUrl: null,
+  canonicalChanged: false,
+  lastErrorCategory: null,
+}
+
+function parseLifecycleMeta(raw: string | null | undefined): DocumentLifecycleMeta {
+  if (!raw) return { ...DEFAULT_LIFECYCLE_META }
+  try {
+    const parsed = JSON.parse(raw) as Partial<DocumentLifecycleMeta>
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_LIFECYCLE_META }
+    const availability: SourceAvailability[] = ['AVAILABLE', 'NOT_FOUND', 'GONE', 'UNKNOWN']
+    return {
+      freshnessIntervalHours: typeof parsed.freshnessIntervalHours === 'number' && parsed.freshnessIntervalHours >= 1
+        ? parsed.freshnessIntervalHours
+        : null,
+      lastRecrawlAt: typeof parsed.lastRecrawlAt === 'string' ? parsed.lastRecrawlAt : null,
+      lastRecrawlOutcome: parsed.lastRecrawlOutcome ?? null,
+      previousContentHash: typeof parsed.previousContentHash === 'string' ? parsed.previousContentHash : null,
+      lastChangeAt: typeof parsed.lastChangeAt === 'string' ? parsed.lastChangeAt : null,
+      sourceAvailability: availability.includes(parsed.sourceAvailability as SourceAvailability)
+        ? parsed.sourceAvailability as SourceAvailability
+        : 'AVAILABLE',
+      lastObservedCanonicalUrl: typeof parsed.lastObservedCanonicalUrl === 'string' ? parsed.lastObservedCanonicalUrl : null,
+      canonicalChanged: Boolean(parsed.canonicalChanged),
+      lastErrorCategory: typeof parsed.lastErrorCategory === 'string' ? parsed.lastErrorCategory : null,
+    }
+  } catch {
+    return { ...DEFAULT_LIFECYCLE_META }
   }
 }

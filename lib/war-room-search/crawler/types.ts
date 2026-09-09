@@ -17,6 +17,14 @@ export const CRAWL_EVENT_STATES = [
   'DUPLICATE_URL',
   'DUPLICATE_CONTENT',
   'FAILED',
+  'FRESHNESS_EVALUATED',
+  'RECRAWL_STARTED',
+  'RECRAWL_UNCHANGED',
+  'RECRAWL_CHANGED',
+  'RECRAWL_BLOCKED',
+  'RECRAWL_FAILED',
+  'SOURCE_NOT_FOUND',
+  'SOURCE_GONE',
 ] as const
 
 export type CrawlEventState = (typeof CRAWL_EVENT_STATES)[number]
@@ -250,4 +258,128 @@ export type IngestCandidateEventRecord = {
   actor: IngestCandidateActor | null
   detail: string | null
   createdAt: string
+}
+
+export const FRESHNESS_STATES = [
+  'FRESH',
+  'DUE',
+  'STALE',
+  'UNKNOWN',
+] as const
+
+export type FreshnessState = (typeof FRESHNESS_STATES)[number]
+
+export const LIFECYCLE_STATUSES = [
+  'FRESH',
+  'DUE',
+  'STALE',
+  'UNKNOWN',
+  'RECRAWL_BLOCKED',
+  'RECRAWL_FAILED',
+] as const
+
+export type LifecycleStatus = (typeof LIFECYCLE_STATUSES)[number]
+
+export const SOURCE_AVAILABILITY_STATES = [
+  'AVAILABLE',
+  'NOT_FOUND',
+  'GONE',
+  'UNKNOWN',
+] as const
+
+export type SourceAvailability = (typeof SOURCE_AVAILABILITY_STATES)[number]
+
+export const RECRAWL_OUTCOMES = [
+  'UNCHANGED',
+  'CHANGED',
+  'BLOCKED',
+  'FAILED',
+  'NOT_FOUND',
+  'GONE',
+  'CANONICAL_CHANGED',
+] as const
+
+export type RecrawlOutcome = (typeof RECRAWL_OUTCOMES)[number]
+
+export const DEFAULT_FRESHNESS_INTERVAL_HOURS = 720
+export const DEFAULT_FRESHNESS_STALE_MULTIPLIER = 2
+export const MIN_FRESHNESS_INTERVAL_HOURS = 1
+export const MAX_RECRAWL_BATCH = MAX_SOVEREIGN_BATCH_URLS
+
+export type FreshnessPolicy = {
+  defaultIntervalHours: number
+  staleMultiplier: number
+  domainIntervalHours: Record<string, number>
+}
+
+export type DocumentLifecycleMeta = {
+  freshnessIntervalHours: number | null
+  lastRecrawlAt: string | null
+  lastRecrawlOutcome: RecrawlOutcome | null
+  previousContentHash: string | null
+  lastChangeAt: string | null
+  sourceAvailability: SourceAvailability
+  lastObservedCanonicalUrl: string | null
+  canonicalChanged: boolean
+  lastErrorCategory: string | null
+}
+
+export type DocumentVersionRecord = {
+  id: number
+  documentId: number
+  canonicalUrl: string
+  previousHash: string | null
+  newHash: string | null
+  changeStatus: RecrawlOutcome
+  httpStatus: number | null
+  robotsStatus: RobotsStatus | null
+  observedCanonicalUrl: string | null
+  canonicalChanged: boolean
+  createdAt: string
+}
+
+export type RecrawlRunRecord = {
+  id: number
+  startedAt: string
+  finishedAt: string
+  requested: number
+  processed: number
+  changed: number
+  unchanged: number
+  blocked: number
+  failed: number
+  notFound: number
+  gone: number
+  actor: string | null
+}
+
+export type CorpusLifecycleDiagnostics = {
+  documentCount: number
+  freshCount: number
+  dueCount: number
+  staleCount: number
+  unknownCount: number
+  blockedCount: number
+  failedCount: number
+  notFoundCount: number
+  goneCount: number
+  changedCount: number
+  unchangedCount: number
+  lastRecrawlRunAt: string | null
+  lastSuccessfulRecrawlAt: string | null
+}
+
+export type DocumentFreshness = {
+  documentId: number
+  canonicalUrl: string
+  domain: string
+  lastCrawledAt: string
+  intervalHours: number
+  dueAt: string | null
+  staleAt: string | null
+  freshness: FreshnessState
+  lifecycleStatus: LifecycleStatus
+  sourceAvailability: SourceAvailability
+  lastRecrawlOutcome: RecrawlOutcome | null
+  contentHash: string
 }

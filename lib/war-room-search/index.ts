@@ -13,6 +13,13 @@ export { crawlApprovedUrl } from './crawler/crawlUrl'
 export { crawlApprovedBatch, parseBatchInputJson } from './crawler/batchCrawl'
 export { searchLocalCorpus } from './crawler/localSearch'
 export { planLexicalQuery, LEXICAL_STOP_WORDS } from './crawler/lexicalPlan'
+export { recrawlStoredDocument, recrawlDueDocuments } from './crawler/recrawl'
+export {
+  evaluateDocumentFreshness,
+  listDocumentFreshness,
+  listDueDocuments,
+  corpusLifecycleDiagnostics,
+} from './crawler/freshness'
 export {
   proposeIngestCandidates,
   approveIngestCandidates,

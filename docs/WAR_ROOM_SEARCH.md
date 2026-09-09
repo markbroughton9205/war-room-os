@@ -73,7 +73,7 @@ War Room does not forward Commander IP or identity headers to SearXNG. The query
 
 ### Intentionally not in Stage 2
 
-Stage 2 is external federated discovery only. Stage 3 owns the crawler/index. Stage 4+ (embeddings, BGE-M3, semantic rerank) and Stage 5 (autonomous recrawl) remain separate.
+Stage 2 is external federated discovery only. Stage 3 owns the crawler/index. Stage 4 (hybrid retrieval + relevance control) is frozen. Stage 5A manages freshness of already-approved corpus URLs; it is not autonomous discovery.
 
 ### Validation (Stage 2)
 
@@ -254,7 +254,7 @@ query → WAR_ROOM_LOCAL → FTS + semantic → RRF → SearchResult.localRetrie
 
 Semantic unavailability is diagnostic (`sourceSummary.localSemantic`) and does not mark `WAR_ROOM_LOCAL` unhealthy while FTS still works.
 
-Stale vectors are counted, not regenerated. Automatic re-embedding remains Stage 5.
+Stale vectors are counted, not regenerated. Automatic re-embedding remains Stage 5B.
 
 Brute-force cosine is the intended Stage 4B method. Reconsider ANN storage only after about **50,000 chunks** or **256MB** of `vectors.sqlite`. Do not introduce a vector service in this stage.
 
@@ -297,5 +297,101 @@ Diagnostics: `lexicalPlan` (`planUsed`, `strictCandidateCount`, `relaxedCandidat
 ```
 pnpm run validate:sovereign-search-stage4d
 pnpm run validate:sovereign-search-stage4d:live
+```
+
+## SOVEREIGN SEARCH STAGE 4 — FREEZE
+
+**HYBRID RETRIEVAL + RELEVANCE CONTROL**
+
+STATUS: **PASS / LIVE-VALIDATED / COMMITTED**
+
+Frozen at `b819918819740b34c3bea0ccf9a0025cd9a64d32` (`feat(search): add lexical query planning and mixed-intent retrieval`).
+
+Stage 4 now includes:
+
+- **4A** local semantic retrieval + RRF
+- **4B** retrieval evaluation + diagnostics
+- **4C** semantic relevance gating + abstention
+- **4D** lexical query planning + mixed-intent retrieval
+
+Do not create Stage 4E unless a future measured retrieval defect requires it.
+
+Known non-blocking limitations:
+
+- lexical relaxation currently depends on explicit `and`/`or` grouping
+- 8-token lexical cap
+- semantic profile is model/corpus specific (`wr-retrieval-v4c.1`, cosine `0.61`)
+- no LLM query rewriting
+- current vector search remains brute-force at small corpus scale
+
+## Stage 5A — corpus freshness + controlled recrawl lifecycle
+
+Stage 5A manages freshness of URLs **already approved and ingested**. It is not autonomous source discovery, not automatic candidate approval, and not permission to expand the corpus without Commander authority.
+
+```
+existing approved document
+  → freshness evaluation
+  → recrawl due state
+  → controlled recrawl
+  → policy/robots/SSRF re-check
+  → fetch/extract/hash
+  → unchanged OR changed
+  → corpus version/update
+  → stale-vector marking
+  → retrieval continues safely
+```
+
+A document being in the corpus means War Room may evaluate whether **that already-approved URL** is stale. It does **not** mean follow its links, crawl its domain, discover new URLs, bypass robots/policy, or expand recursively. New URLs still require the Stage 3C candidate + Commander approval path.
+
+### Freshness model
+
+Time-based states: `FRESH`, `DUE`, `STALE`, `UNKNOWN`.
+
+Operator overlay: `RECRAWL_BLOCKED`, `RECRAWL_FAILED`.
+
+Source availability is recorded separately: `AVAILABLE`, `NOT_FOUND`, `GONE`.
+
+Due calculation uses **last successful crawl** (`last_crawled_at`) plus the configured interval. Search/FTS/semantic retrieval time is not crawl freshness.
+
+### Freshness policy
+
+Conservative defaults (operator-controlled, not LLM-inferred):
+
+- default interval: **720 hours (30 days)** via `WAR_ROOM_FRESHNESS_DEFAULT_INTERVAL_HOURS`
+- stale multiplier: **2** via `WAR_ROOM_FRESHNESS_STALE_MULTIPLIER` (STALE after 2× the interval)
+- optional per-domain overrides: `WAR_ROOM_FRESHNESS_DOMAIN_INTERVALS=iana.org:168,example.com:720`
+- optional per-document override stored in `crawl_documents.metadata_json.freshnessIntervalHours`
+
+Minimum interval is 1 hour. Stage 5A does not infer aggressive refresh rates from page contents.
+
+### Recrawl
+
+`recrawlStoredDocument` reuses Stage 3 policy, robots, SSRF, bounded fetch, extraction, canonicalization, and content hash. Every recrawl re-evaluates robots and current allowlist/denylist/crawl-disabled/SSRF. Previous permission does not permanently authorize future fetches.
+
+- **UNCHANGED**: hash matches; crawl metadata updates; no fake new evidence source
+- **CHANGED**: current document + FTS update atomically; previous/new hash lineage in `document_versions`; old embeddings become stale and are not served; **no automatic re-embedding** (Stage 5B)
+- **BLOCKED / FAILED / timeout / HTTP 5xx**: last known good document is preserved
+- **404 / 410**: recorded as `NOT_FOUND` / `GONE`; local evidence is not deleted
+- **canonical/redirect change**: hops are safety-checked; stored canonical identity is not rewritten automatically
+
+Hash lineage lives in `document_versions` (no Wayback-style HTML archive). Full previous bodies are not retained.
+
+### Operator control (no public endpoint, no daemon)
+
+There is no Stage 5A scheduler. Operator CLI only:
+
+```
+pnpm run sovereign-search:lifecycle -- --list-freshness
+pnpm run sovereign-search:lifecycle -- --list-due
+pnpm run sovereign-search:lifecycle -- --diagnostics
+pnpm run sovereign-search:lifecycle -- --recrawl=1 --approved-by=commander
+pnpm run sovereign-search:lifecycle -- --recrawl-due --limit=5 --approved-by=commander
+```
+
+Council may inspect freshness and recommend recrawl. Council cannot authorize recrawl. Batch recrawl is capped at 25 (`MAX_RECRAWL_BATCH`).
+
+```
+pnpm run validate:sovereign-search-stage5a
+pnpm run validate:sovereign-search-stage5a:live
 ```
 
