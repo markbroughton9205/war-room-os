@@ -12,4 +12,12 @@ export { stampDiscoveryProvenance, discoveryProviderFromSourceId } from './disco
 export { crawlApprovedUrl } from './crawler/crawlUrl'
 export { crawlApprovedBatch, parseBatchInputJson } from './crawler/batchCrawl'
 export { searchLocalCorpus } from './crawler/localSearch'
+export {
+  proposeIngestCandidates,
+  approveIngestCandidates,
+  rejectIngestCandidates,
+  ingestApprovedCandidates,
+  discoverIngestCandidates,
+  listIngestCandidates,
+} from './crawler/candidates'
 export { WAR_ROOM_LOCAL_SOURCE_ID, WAR_ROOM_STORAGE_ORIGIN, MAX_SOVEREIGN_BATCH_URLS } from './crawler/types'

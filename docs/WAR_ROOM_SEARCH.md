@@ -181,3 +181,28 @@ Operator JSON (local file only — not a URL):
 ```
 
 `discoveredVia` is optional trusted provenance (`SEARXNG`, `GOOGLE`, `TAVILY`, `RSS`, `COMMANDER`, …). Discovery-provider count is still not evidence independence.
+
+### Stage 3C — controlled discovery → approval → ingest
+
+Discovery does **not** authorize a crawl. Stage 3C stores pending ingest candidates from existing `SearchResult` rows, then waits for Commander approval before reusing Stage 3B batch ingest.
+
+```
+federated discovery
+  → pending ingest candidate (no page fetch)
+  → Commander approve / reject
+  → Stage 3B batch ingest (policy / robots / SSRF)
+  → SQLite / FTS / WAR_ROOM_LOCAL
+```
+
+Candidates live in the existing corpus database (`.war-room/sovereign-search/corpus.sqlite`, table `ingest_candidates`). Same canonical URL from multiple providers merges provenance onto one candidate. Council may recommend; only Commander or `trusted_internal_test` may approve or ingest. Unapproved candidates are not crawled. URLs already in the corpus return `ALREADY_INDEXED` and are not recrawled.
+
+```
+pnpm run sovereign-search:candidates -- --discover --query="example domain" --select-index=0,1
+pnpm run sovereign-search:candidates -- --list --status=PENDING
+pnpm run sovereign-search:candidates -- --approve=1 --approved-by=commander
+pnpm run sovereign-search:candidates -- --reject=2 --approved-by=commander
+pnpm run sovereign-search:candidates -- --ingest=1 --approved-by=commander
+pnpm run validate:sovereign-search-stage3c
+```
+
+Maximum approved ingest batch remains 25. Candidate-bridge failures must not take down federated discovery.

@@ -93,6 +93,8 @@
     "sovereign-search:crawl": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/crawlCli.ts",
     "validate:sovereign-search-stage3b": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/batchCrawl.validation.ts",
     "sovereign-search:reset": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/resetCli.ts",
+    "sovereign-search:candidates": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/candidatesCli.ts",
+    "validate:sovereign-search-stage3c": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/candidates.validation.ts",
     "validate:world-learning": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/world-learning/contradictionDetection.validation.ts",
     "validate:agi-wave1": "pnpm run validate:context-assembler && pnpm run validate:model-router && pnpm run validate:next-action && pnpm run validate:prompt-intelligence && pnpm run validate:intent-prerouter",
     "validate:agi-wave2": "pnpm run validate:agi-wave1 && pnpm run validate:search && pnpm run validate:world-learning",

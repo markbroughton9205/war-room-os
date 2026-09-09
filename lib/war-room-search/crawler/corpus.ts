@@ -5,10 +5,16 @@ import { resolveBaseRepoRoot } from '@/lib/repo/paths'
 import type { EvidenceDiscoveryProvider } from '@/lib/intelligence/intelligencePacket'
 import {
   WAR_ROOM_STORAGE_ORIGIN,
+  type CrawlApprovalActor,
   type CrawlDocumentRecord,
   type CrawlEventRecord,
   type CrawlEventState,
   type CrawlStatus,
+  type IngestCandidateActor,
+  type IngestCandidateEventRecord,
+  type IngestCandidateEventType,
+  type IngestCandidateRecord,
+  type IngestCandidateStatus,
   type RobotsStatus,
 } from './types'
 
@@ -87,6 +93,45 @@ CREATE VIRTUAL TABLE IF NOT EXISTS crawl_fts USING fts5(
   content_text,
   document_id UNINDEXED
 );
+
+CREATE TABLE IF NOT EXISTS ingest_candidates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  url TEXT NOT NULL,
+  canonical_candidate_url TEXT NOT NULL,
+  title TEXT,
+  snippet TEXT,
+  publisher TEXT,
+  domain TEXT,
+  discovered_via TEXT,
+  also_discovered_via_json TEXT NOT NULL DEFAULT '[]',
+  discovered_at TEXT NOT NULL,
+  query_context TEXT,
+  status TEXT NOT NULL,
+  approved_by TEXT,
+  approved_at TEXT,
+  rejected_by TEXT,
+  rejected_at TEXT,
+  ingest_status TEXT,
+  document_id INTEGER,
+  council_recommendation TEXT,
+  council_recommended_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(document_id) REFERENCES crawl_documents(id)
+);
+
+CREATE INDEX IF NOT EXISTS ingest_candidates_canonical_idx ON ingest_candidates(canonical_candidate_url);
+CREATE INDEX IF NOT EXISTS ingest_candidates_status_idx ON ingest_candidates(status);
+
+CREATE TABLE IF NOT EXISTS ingest_candidate_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  candidate_id INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  actor TEXT,
+  detail TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(candidate_id) REFERENCES ingest_candidates(id)
+);
 `
 
 type DocumentRow = {
@@ -114,6 +159,31 @@ type DocumentRow = {
   also_discovered_via_json: string
   bytes_received: number
   document_path: string | null
+}
+
+type CandidateRow = {
+  id: number
+  url: string
+  canonical_candidate_url: string
+  title: string | null
+  snippet: string | null
+  publisher: string | null
+  domain: string | null
+  discovered_via: string | null
+  also_discovered_via_json: string
+  discovered_at: string
+  query_context: string | null
+  status: string
+  approved_by: string | null
+  approved_at: string | null
+  rejected_by: string | null
+  rejected_at: string | null
+  ingest_status: string | null
+  document_id: number | null
+  council_recommendation: string | null
+  council_recommended_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 function parseAlso(raw: string | null | undefined): EvidenceDiscoveryProvider[] {
@@ -153,6 +223,33 @@ function mapDocument(row: DocumentRow): CrawlDocumentRecord {
     alsoDiscoveredVia: parseAlso(row.also_discovered_via_json),
     bytesReceived: Number(row.bytes_received),
     documentPath: row.document_path,
+  }
+}
+
+function mapCandidate(row: CandidateRow): IngestCandidateRecord {
+  return {
+    id: Number(row.id),
+    url: row.url,
+    canonicalCandidateUrl: row.canonical_candidate_url,
+    title: row.title,
+    snippet: row.snippet,
+    publisher: row.publisher,
+    domain: row.domain,
+    discoveredVia: (row.discovered_via as EvidenceDiscoveryProvider | null) ?? null,
+    alsoDiscoveredVia: parseAlso(row.also_discovered_via_json),
+    discoveredAt: row.discovered_at,
+    queryContext: row.query_context,
+    status: row.status as IngestCandidateStatus,
+    approvedBy: (row.approved_by as CrawlApprovalActor | null) ?? null,
+    approvedAt: row.approved_at,
+    rejectedBy: (row.rejected_by as CrawlApprovalActor | null) ?? null,
+    rejectedAt: row.rejected_at,
+    ingestStatus: row.ingest_status,
+    documentId: row.document_id == null ? null : Number(row.document_id),
+    councilRecommendation: row.council_recommendation,
+    councilRecommendedAt: row.council_recommended_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   }
 }
 
@@ -356,5 +453,108 @@ export class SovereignCorpus {
       contentText: record.contentText,
     }, null, 2), 'utf8')
     return filePath
+  }
+
+  getCandidateById(id: number): IngestCandidateRecord | null {
+    const row = this.db.prepare('SELECT * FROM ingest_candidates WHERE id = ?').get(id) as CandidateRow | undefined
+    return row ? mapCandidate(row) : null
+  }
+
+  getCandidateByCanonicalUrl(canonicalUrl: string): IngestCandidateRecord | null {
+    const row = this.db.prepare(`
+      SELECT * FROM ingest_candidates
+      WHERE canonical_candidate_url = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(canonicalUrl) as CandidateRow | undefined
+    return row ? mapCandidate(row) : null
+  }
+
+  listCandidates(status?: IngestCandidateStatus | null): IngestCandidateRecord[] {
+    const rows = status
+      ? this.db.prepare('SELECT * FROM ingest_candidates WHERE status = ? ORDER BY id').all(status) as CandidateRow[]
+      : this.db.prepare('SELECT * FROM ingest_candidates ORDER BY id').all() as CandidateRow[]
+    return rows.map(mapCandidate)
+  }
+
+  insertCandidate(input: Omit<IngestCandidateRecord, 'id'>): IngestCandidateRecord {
+    const result = this.db.prepare(`
+      INSERT INTO ingest_candidates (
+        url, canonical_candidate_url, title, snippet, publisher, domain, discovered_via,
+        also_discovered_via_json, discovered_at, query_context, status, approved_by, approved_at,
+        rejected_by, rejected_at, ingest_status, document_id, council_recommendation,
+        council_recommended_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.url, input.canonicalCandidateUrl, input.title, input.snippet, input.publisher, input.domain,
+      input.discoveredVia, JSON.stringify(input.alsoDiscoveredVia), input.discoveredAt, input.queryContext,
+      input.status, input.approvedBy, input.approvedAt, input.rejectedBy, input.rejectedAt, input.ingestStatus,
+      input.documentId, input.councilRecommendation, input.councilRecommendedAt, input.createdAt, input.updatedAt,
+    )
+    return this.getCandidateById(Number(result.lastInsertRowid))!
+  }
+
+  updateCandidate(id: number, patch: Partial<Omit<IngestCandidateRecord, 'id' | 'createdAt'>>): IngestCandidateRecord {
+    const current = this.getCandidateById(id)
+    if (!current) throw new Error(`Unknown ingest candidate ${id}`)
+    const next: IngestCandidateRecord = { ...current, ...patch, id, createdAt: current.createdAt }
+    this.db.prepare(`
+      UPDATE ingest_candidates SET
+        url = ?, canonical_candidate_url = ?, title = ?, snippet = ?, publisher = ?, domain = ?,
+        discovered_via = ?, also_discovered_via_json = ?, discovered_at = ?, query_context = ?,
+        status = ?, approved_by = ?, approved_at = ?, rejected_by = ?, rejected_at = ?,
+        ingest_status = ?, document_id = ?, council_recommendation = ?, council_recommended_at = ?,
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      next.url, next.canonicalCandidateUrl, next.title, next.snippet, next.publisher, next.domain,
+      next.discoveredVia, JSON.stringify(next.alsoDiscoveredVia), next.discoveredAt, next.queryContext,
+      next.status, next.approvedBy, next.approvedAt, next.rejectedBy, next.rejectedAt, next.ingestStatus,
+      next.documentId, next.councilRecommendation, next.councilRecommendedAt, next.updatedAt, id,
+    )
+    return this.getCandidateById(id)!
+  }
+
+  recordCandidateEvent(input: {
+    candidateId: number
+    eventType: IngestCandidateEventType
+    actor?: IngestCandidateActor | null
+    detail?: string | null
+    createdAt?: string
+  }): IngestCandidateEventRecord {
+    const createdAt = input.createdAt ?? new Date().toISOString()
+    const result = this.db.prepare(`
+      INSERT INTO ingest_candidate_events (candidate_id, event_type, actor, detail, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(input.candidateId, input.eventType, input.actor ?? null, input.detail ?? null, createdAt)
+    return {
+      id: Number(result.lastInsertRowid),
+      candidateId: input.candidateId,
+      eventType: input.eventType,
+      actor: input.actor ?? null,
+      detail: input.detail ?? null,
+      createdAt,
+    }
+  }
+
+  listCandidateEvents(candidateId: number): IngestCandidateEventRecord[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM ingest_candidate_events WHERE candidate_id = ? ORDER BY id
+    `).all(candidateId) as Array<{
+      id: number
+      candidate_id: number
+      event_type: string
+      actor: string | null
+      detail: string | null
+      created_at: string
+    }>
+    return rows.map(row => ({
+      id: Number(row.id),
+      candidateId: Number(row.candidate_id),
+      eventType: row.event_type as IngestCandidateEventType,
+      actor: (row.actor as IngestCandidateActor | null) ?? null,
+      detail: row.detail,
+      createdAt: row.created_at,
+    }))
   }
 }

@@ -188,3 +188,66 @@ export type LocalSearchHit = {
   rank: number
   snippet: string
 }
+
+export const INGEST_CANDIDATE_STATUSES = [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+  'INGESTED',
+  'FAILED',
+  'EXPIRED',
+  'ALREADY_INDEXED',
+] as const
+
+export type IngestCandidateStatus = (typeof INGEST_CANDIDATE_STATUSES)[number]
+
+export const INGEST_CANDIDATE_EVENT_TYPES = [
+  'CREATED',
+  'PROVENANCE_MERGED',
+  'APPROVED',
+  'REJECTED',
+  'RECOMMENDED',
+  'INGEST_STARTED',
+  'INGESTED',
+  'FAILED',
+  'ALREADY_INDEXED',
+  'EXPIRED',
+] as const
+
+export type IngestCandidateEventType = (typeof INGEST_CANDIDATE_EVENT_TYPES)[number]
+
+export type IngestCandidateActor = CrawlApprovalActor | 'council' | 'model'
+
+export type IngestCandidateRecord = {
+  id: number
+  url: string
+  canonicalCandidateUrl: string
+  title: string | null
+  snippet: string | null
+  publisher: string | null
+  domain: string | null
+  discoveredVia: EvidenceDiscoveryProvider | null
+  alsoDiscoveredVia: EvidenceDiscoveryProvider[]
+  discoveredAt: string
+  queryContext: string | null
+  status: IngestCandidateStatus
+  approvedBy: CrawlApprovalActor | null
+  approvedAt: string | null
+  rejectedBy: CrawlApprovalActor | null
+  rejectedAt: string | null
+  ingestStatus: string | null
+  documentId: number | null
+  councilRecommendation: string | null
+  councilRecommendedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type IngestCandidateEventRecord = {
+  id: number
+  candidateId: number
+  eventType: IngestCandidateEventType
+  actor: IngestCandidateActor | null
+  detail: string | null
+  createdAt: string
+}
