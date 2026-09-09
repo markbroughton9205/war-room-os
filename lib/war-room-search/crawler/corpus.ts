@@ -21,6 +21,12 @@ import {
   type SourceAvailability,
   type DocumentLifecycleMeta,
   type DocumentVersionRecord,
+  type MaintenanceLockRecord,
+  type MaintenanceLockStatus,
+  type MaintenanceRunRecord,
+  type MaintenanceRunStatus,
+  MAINTENANCE_LOCK_NAME,
+  DEFAULT_MAINTENANCE_LEASE_MS,
 } from './types'
 import {
   buildLegacyStrictMatch,
@@ -174,6 +180,39 @@ CREATE TABLE IF NOT EXISTS recrawl_runs (
   not_found INTEGER NOT NULL DEFAULT 0,
   gone INTEGER NOT NULL DEFAULT 0,
   actor TEXT
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_locks (
+  lock_name TEXT PRIMARY KEY,
+  run_id INTEGER,
+  owner_pid INTEGER,
+  acquired_at TEXT NOT NULL,
+  lease_expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL,
+  actor TEXT,
+  recrawl_enabled INTEGER NOT NULL DEFAULT 0,
+  reembed_enabled INTEGER NOT NULL DEFAULT 0,
+  requested INTEGER NOT NULL DEFAULT 0,
+  recrawled INTEGER NOT NULL DEFAULT 0,
+  changed INTEGER NOT NULL DEFAULT 0,
+  unchanged INTEGER NOT NULL DEFAULT 0,
+  blocked INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  not_found INTEGER NOT NULL DEFAULT 0,
+  gone INTEGER NOT NULL DEFAULT 0,
+  reembedded INTEGER NOT NULL DEFAULT 0,
+  reembed_failures INTEGER NOT NULL DEFAULT 0,
+  skipped_current INTEGER NOT NULL DEFAULT 0,
+  stale_vector_documents INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  recovered_expired_lock INTEGER NOT NULL DEFAULT 0,
+  lease_expires_at TEXT
 );
 `
 
@@ -829,6 +868,183 @@ export class SovereignCorpus {
       actor: row.actor,
     }
   }
+
+  insertMaintenanceRun(input: Omit<MaintenanceRunRecord, 'id'>): MaintenanceRunRecord {
+    const result = this.db.prepare(`
+      INSERT INTO maintenance_runs (
+        started_at, finished_at, status, actor, recrawl_enabled, reembed_enabled, requested,
+        recrawled, changed, unchanged, blocked, failed, not_found, gone, reembedded,
+        reembed_failures, skipped_current, stale_vector_documents, error, recovered_expired_lock,
+        lease_expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.startedAt,
+      input.finishedAt,
+      input.status,
+      input.actor,
+      input.recrawlEnabled ? 1 : 0,
+      input.reembedEnabled ? 1 : 0,
+      input.requested,
+      input.recrawled,
+      input.changed,
+      input.unchanged,
+      input.blocked,
+      input.failed,
+      input.notFound,
+      input.gone,
+      input.reembedded,
+      input.reembedFailures,
+      input.skippedCurrent,
+      input.staleVectorDocuments,
+      input.error,
+      input.recoveredExpiredLock ? 1 : 0,
+      input.leaseExpiresAt,
+    )
+    return { ...input, id: Number(result.lastInsertRowid) }
+  }
+
+  updateMaintenanceRun(id: number, patch: Partial<Omit<MaintenanceRunRecord, 'id'>>): MaintenanceRunRecord | null {
+    const current = this.getMaintenanceRun(id)
+    if (!current) return null
+    const next: MaintenanceRunRecord = { ...current, ...patch, id }
+    this.db.prepare(`
+      UPDATE maintenance_runs SET
+        started_at = ?, finished_at = ?, status = ?, actor = ?, recrawl_enabled = ?,
+        reembed_enabled = ?, requested = ?, recrawled = ?, changed = ?, unchanged = ?,
+        blocked = ?, failed = ?, not_found = ?, gone = ?, reembedded = ?, reembed_failures = ?,
+        skipped_current = ?, stale_vector_documents = ?, error = ?, recovered_expired_lock = ?,
+        lease_expires_at = ?
+      WHERE id = ?
+    `).run(
+      next.startedAt,
+      next.finishedAt,
+      next.status,
+      next.actor,
+      next.recrawlEnabled ? 1 : 0,
+      next.reembedEnabled ? 1 : 0,
+      next.requested,
+      next.recrawled,
+      next.changed,
+      next.unchanged,
+      next.blocked,
+      next.failed,
+      next.notFound,
+      next.gone,
+      next.reembedded,
+      next.reembedFailures,
+      next.skippedCurrent,
+      next.staleVectorDocuments,
+      next.error,
+      next.recoveredExpiredLock ? 1 : 0,
+      next.leaseExpiresAt,
+      id,
+    )
+    return next
+  }
+
+  getMaintenanceRun(id: number): MaintenanceRunRecord | null {
+    const row = this.db.prepare('SELECT * FROM maintenance_runs WHERE id = ?').get(id) as MaintenanceRunRow | undefined
+    return row ? mapMaintenanceRun(row) : null
+  }
+
+  latestMaintenanceRun(): MaintenanceRunRecord | null {
+    const row = this.db.prepare('SELECT * FROM maintenance_runs ORDER BY id DESC LIMIT 1').get() as MaintenanceRunRow | undefined
+    return row ? mapMaintenanceRun(row) : null
+  }
+
+  latestSuccessfulMaintenanceRun(): MaintenanceRunRecord | null {
+    const row = this.db.prepare(`
+      SELECT * FROM maintenance_runs WHERE status = 'COMPLETED' ORDER BY id DESC LIMIT 1
+    `).get() as MaintenanceRunRow | undefined
+    return row ? mapMaintenanceRun(row) : null
+  }
+
+  getMaintenanceLock(lockName = MAINTENANCE_LOCK_NAME): MaintenanceLockRecord | null {
+    const row = this.db.prepare('SELECT * FROM maintenance_locks WHERE lock_name = ?').get(lockName) as MaintenanceLockRow | undefined
+    return row ? mapMaintenanceLock(row) : null
+  }
+
+  inspectMaintenanceLock(lockName = MAINTENANCE_LOCK_NAME, now = new Date().toISOString()): {
+    status: MaintenanceLockStatus
+    lock: MaintenanceLockRecord | null
+    expiresAt: string | null
+  } {
+    const lock = this.getMaintenanceLock(lockName)
+    if (!lock) return { status: 'FREE', lock: null, expiresAt: null }
+    const expiresMs = Date.parse(lock.leaseExpiresAt)
+    const nowMs = Date.parse(now)
+    if (!Number.isFinite(expiresMs) || !Number.isFinite(nowMs) || nowMs >= expiresMs) {
+      return { status: 'EXPIRED', lock, expiresAt: lock.leaseExpiresAt }
+    }
+    return { status: 'HELD', lock, expiresAt: lock.leaseExpiresAt }
+  }
+
+  tryAcquireMaintenanceLock(input?: {
+    lockName?: string
+    now?: string
+    leaseMs?: number
+    runId?: number | null
+    ownerPid?: number | null
+  }): { acquired: boolean; recovered: boolean; status: MaintenanceLockStatus; lock: MaintenanceLockRecord | null } {
+    const lockName = input?.lockName ?? MAINTENANCE_LOCK_NAME
+    const now = input?.now ?? new Date().toISOString()
+    const leaseMs = input?.leaseMs ?? DEFAULT_MAINTENANCE_LEASE_MS
+    const leaseExpiresAt = new Date(Date.parse(now) + Math.max(1, leaseMs)).toISOString()
+    const ownerPid = input?.ownerPid ?? process.pid
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      const existing = this.getMaintenanceLock(lockName)
+      if (existing) {
+        const expiresMs = Date.parse(existing.leaseExpiresAt)
+        const nowMs = Date.parse(now)
+        const expired = !Number.isFinite(expiresMs) || !Number.isFinite(nowMs) || nowMs >= expiresMs
+        if (!expired) {
+          this.db.exec('COMMIT')
+          return { acquired: false, recovered: false, status: 'HELD', lock: existing }
+        }
+        this.db.prepare(`
+          UPDATE maintenance_locks SET run_id = ?, owner_pid = ?, acquired_at = ?, lease_expires_at = ?
+          WHERE lock_name = ?
+        `).run(input?.runId ?? null, ownerPid, now, leaseExpiresAt, lockName)
+        this.db.exec('COMMIT')
+        return {
+          acquired: true,
+          recovered: true,
+          status: 'EXPIRED',
+          lock: this.getMaintenanceLock(lockName),
+        }
+      }
+      this.db.prepare(`
+        INSERT INTO maintenance_locks (lock_name, run_id, owner_pid, acquired_at, lease_expires_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(lockName, input?.runId ?? null, ownerPid, now, leaseExpiresAt)
+      this.db.exec('COMMIT')
+      return { acquired: true, recovered: false, status: 'FREE', lock: this.getMaintenanceLock(lockName) }
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {
+        /* already rolled back */
+      }
+      throw error
+    }
+  }
+
+  attachMaintenanceLockRun(lockName: string, runId: number, now: string, leaseMs: number): void {
+    const leaseExpiresAt = new Date(Date.parse(now) + Math.max(1, leaseMs)).toISOString()
+    this.db.prepare(`
+      UPDATE maintenance_locks SET run_id = ?, lease_expires_at = ? WHERE lock_name = ?
+    `).run(runId, leaseExpiresAt, lockName)
+  }
+
+  renewMaintenanceLock(lockName: string, now: string, leaseMs: number): void {
+    const leaseExpiresAt = new Date(Date.parse(now) + Math.max(1, leaseMs)).toISOString()
+    this.db.prepare('UPDATE maintenance_locks SET lease_expires_at = ? WHERE lock_name = ?').run(leaseExpiresAt, lockName)
+  }
+
+  releaseMaintenanceLock(lockName = MAINTENANCE_LOCK_NAME): void {
+    this.db.prepare('DELETE FROM maintenance_locks WHERE lock_name = ?').run(lockName)
+  }
 }
 
 const DEFAULT_LIFECYCLE_META: DocumentLifecycleMeta = {
@@ -866,5 +1082,75 @@ function parseLifecycleMeta(raw: string | null | undefined): DocumentLifecycleMe
     }
   } catch {
     return { ...DEFAULT_LIFECYCLE_META }
+  }
+}
+
+type MaintenanceLockRow = {
+  lock_name: string
+  run_id: number | null
+  owner_pid: number | null
+  acquired_at: string
+  lease_expires_at: string
+}
+
+type MaintenanceRunRow = {
+  id: number
+  started_at: string
+  finished_at: string | null
+  status: string
+  actor: string | null
+  recrawl_enabled: number
+  reembed_enabled: number
+  requested: number
+  recrawled: number
+  changed: number
+  unchanged: number
+  blocked: number
+  failed: number
+  not_found: number
+  gone: number
+  reembedded: number
+  reembed_failures: number
+  skipped_current: number
+  stale_vector_documents: number
+  error: string | null
+  recovered_expired_lock: number
+  lease_expires_at: string | null
+}
+
+function mapMaintenanceLock(row: MaintenanceLockRow): MaintenanceLockRecord {
+  return {
+    lockName: row.lock_name,
+    runId: row.run_id == null ? null : Number(row.run_id),
+    ownerPid: row.owner_pid == null ? null : Number(row.owner_pid),
+    acquiredAt: row.acquired_at,
+    leaseExpiresAt: row.lease_expires_at,
+  }
+}
+
+function mapMaintenanceRun(row: MaintenanceRunRow): MaintenanceRunRecord {
+  return {
+    id: Number(row.id),
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    status: row.status as MaintenanceRunStatus,
+    actor: row.actor,
+    recrawlEnabled: Number(row.recrawl_enabled) === 1,
+    reembedEnabled: Number(row.reembed_enabled) === 1,
+    requested: Number(row.requested),
+    recrawled: Number(row.recrawled),
+    changed: Number(row.changed),
+    unchanged: Number(row.unchanged),
+    blocked: Number(row.blocked),
+    failed: Number(row.failed),
+    notFound: Number(row.not_found),
+    gone: Number(row.gone),
+    reembedded: Number(row.reembedded),
+    reembedFailures: Number(row.reembed_failures),
+    skippedCurrent: Number(row.skipped_current),
+    staleVectorDocuments: Number(row.stale_vector_documents),
+    error: row.error,
+    recoveredExpiredLock: Number(row.recovered_expired_lock) === 1,
+    leaseExpiresAt: row.lease_expires_at,
   }
 }

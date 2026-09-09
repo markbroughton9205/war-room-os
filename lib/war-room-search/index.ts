@@ -29,4 +29,4 @@ export {
   listIngestCandidates,
 } from './crawler/candidates'
 export { WAR_ROOM_LOCAL_SOURCE_ID, WAR_ROOM_STORAGE_ORIGIN, MAX_SOVEREIGN_BATCH_URLS } from './crawler/types'
-export { searchLocalHybrid, indexCorpusDocuments, createQueryEmbedder, inspectLocalSemanticHealth, getRetrievalProfile } from './hybrid'
+export { searchLocalHybrid, indexCorpusDocuments, createQueryEmbedder, inspectLocalSemanticHealth, getRetrievalProfile, runSovereignMaintenance, reembedStaleDocuments } from './hybrid'

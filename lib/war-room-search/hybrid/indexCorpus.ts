@@ -1,8 +1,55 @@
 import { SovereignCorpus } from '../crawler/corpus'
 import { chunkDocument } from './chunk'
-import type { Embedder, IndexDocumentsResult } from './types'
+import type { Embedder, IndexDocumentsResult, StoredEmbedding } from './types'
 import { CHUNKING_VERSION } from './types'
 import { SqliteVectorStore } from './vectors'
+import type { CrawlDocumentRecord } from '../crawler/types'
+
+export type IndexDocumentOutcome = 'indexed' | 'skipped_fresh'
+
+export async function indexDocumentVectors(opts: {
+  document: CrawlDocumentRecord
+  store: SqliteVectorStore
+  embedder: Embedder
+  createdAt?: string
+}): Promise<{ outcome: IndexDocumentOutcome; chunks: number; embedded: number }> {
+  if (!opts.embedder.available) {
+    throw new Error(opts.embedder.unavailableReason ?? 'SEMANTIC_UNAVAILABLE')
+  }
+  const createdAt = opts.createdAt ?? new Date().toISOString()
+  const produced = chunkDocument(opts.document, CHUNKING_VERSION)
+  const allFresh = produced.length > 0 && produced.every(chunk => {
+    const existing = opts.store.getEmbedding(chunk.chunkId)
+    return Boolean(
+      existing
+      && existing.embeddingModel === opts.embedder.info.modelId
+      && existing.embeddingRevision === opts.embedder.info.revision
+      && existing.chunkingVersion === CHUNKING_VERSION
+      && existing.contentHash === opts.document.contentHash
+      && existing.dimensions === opts.embedder.info.dimensions,
+    )
+  })
+  if (allFresh) {
+    return { outcome: 'skipped_fresh', chunks: produced.length, embedded: 0 }
+  }
+
+  const vectors = await opts.embedder.embed(produced.map(chunk => chunk.text), 'document')
+  if (vectors.length !== produced.length || vectors.some(vector => !vector)) {
+    throw new Error('REEMBED_INCOMPLETE')
+  }
+  const embeddings: StoredEmbedding[] = produced.map((chunk, index) => ({
+    chunkId: chunk.chunkId,
+    embeddingModel: opts.embedder.info.modelId,
+    embeddingRevision: opts.embedder.info.revision,
+    dimensions: opts.embedder.info.dimensions,
+    chunkingVersion: CHUNKING_VERSION,
+    contentHash: opts.document.contentHash,
+    vector: vectors[index]!,
+    createdAt,
+  }))
+  opts.store.replaceDocumentIndex(opts.document.id, produced, embeddings)
+  return { outcome: 'indexed', chunks: produced.length, embedded: embeddings.length }
+}
 
 export async function indexCorpusDocuments(opts: {
   corpusRoot?: string
@@ -25,38 +72,10 @@ export async function indexCorpusDocuments(opts: {
     let skippedFresh = 0
     const createdAt = new Date().toISOString()
     for (const document of documents) {
-      const produced = chunkDocument(document, CHUNKING_VERSION)
-      store.upsertChunks(produced, createdAt)
-      chunks += produced.length
-      const pending = produced.filter(chunk => {
-        const existing = store.getEmbedding(chunk.chunkId)
-        return !(
-          existing
-          && existing.embeddingModel === opts.embedder.info.modelId
-          && existing.embeddingRevision === opts.embedder.info.revision
-          && existing.chunkingVersion === CHUNKING_VERSION
-          && existing.contentHash === document.contentHash
-          && existing.dimensions === opts.embedder.info.dimensions
-        )
-      })
-      skippedFresh += produced.length - pending.length
-      if (!pending.length) continue
-      const vectors = await opts.embedder.embed(pending.map(chunk => chunk.text), 'document')
-      for (const [index, chunk] of pending.entries()) {
-        const vector = vectors[index]
-        if (!vector) continue
-        store.upsertEmbedding({
-          chunkId: chunk.chunkId,
-          embeddingModel: opts.embedder.info.modelId,
-          embeddingRevision: opts.embedder.info.revision,
-          dimensions: opts.embedder.info.dimensions,
-          chunkingVersion: CHUNKING_VERSION,
-          contentHash: document.contentHash,
-          vector,
-          createdAt,
-        })
-        embedded += 1
-      }
+      const result = await indexDocumentVectors({ document, store, embedder: opts.embedder, createdAt })
+      chunks += result.chunks
+      embedded += result.embedded
+      if (result.outcome === 'skipped_fresh') skippedFresh += result.chunks
     }
     const hashes = new Map(documents.map(doc => [doc.id, doc.contentHash]))
     return {

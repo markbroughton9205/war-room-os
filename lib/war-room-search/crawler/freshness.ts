@@ -1,4 +1,6 @@
 import { SovereignCorpus } from './corpus'
+import { resolveHybridPaths } from '../hybrid/modelStore'
+import { SqliteVectorStore } from '../hybrid/vectors'
 import {
   DEFAULT_FRESHNESS_INTERVAL_HOURS,
   DEFAULT_FRESHNESS_STALE_MULTIPLIER,
@@ -171,6 +173,21 @@ export function corpusLifecycleDiagnostics(corpus: SovereignCorpus, opts?: {
     return n + versions.filter(version => version.changeStatus === 'UNCHANGED').length
   }, 0)
 
+  const latestMaintenance = corpus.latestMaintenanceRun()
+  const latestSuccessfulMaintenance = corpus.latestSuccessfulMaintenanceRun()
+  const lock = corpus.inspectMaintenanceLock(undefined, opts?.now)
+  const hashes = new Map(corpus.listDocuments().map(doc => [doc.id, doc.contentHash]))
+  let staleVectorDocumentCount = 0
+  const paths = resolveHybridPaths({ corpusRoot: corpus.paths.rootDir })
+  const opened = SqliteVectorStore.tryOpen(paths.vectorDbPath)
+  if (opened !== 'missing' && opened !== 'corrupt') {
+    try {
+      staleVectorDocumentCount = opened.listStaleDocumentIds(hashes).length
+    } finally {
+      opened.close()
+    }
+  }
+
   return {
     documentCount: rows.length,
     freshCount: rows.filter(row => row.freshness === 'FRESH').length,
@@ -185,5 +202,14 @@ export function corpusLifecycleDiagnostics(corpus: SovereignCorpus, opts?: {
     unchangedCount,
     lastRecrawlRunAt: latest?.finishedAt ?? null,
     lastSuccessfulRecrawlAt,
+    staleVectorDocumentCount,
+    lastMaintenanceRunAt: latestMaintenance?.finishedAt ?? latestMaintenance?.startedAt ?? null,
+    lastSuccessfulMaintenanceRunAt: latestSuccessfulMaintenance?.finishedAt ?? null,
+    lastMaintenanceStatus: latestMaintenance?.status ?? null,
+    documentsRecrawled: latestMaintenance?.recrawled ?? 0,
+    documentsReembedded: latestMaintenance?.reembedded ?? 0,
+    reembedFailures: latestMaintenance?.reembedFailures ?? 0,
+    maintenanceLockStatus: lock.status,
+    maintenanceLockExpiresAt: lock.expiresAt,
   }
 }

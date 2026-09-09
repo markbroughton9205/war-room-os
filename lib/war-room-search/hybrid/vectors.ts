@@ -167,6 +167,60 @@ export class SqliteVectorStore {
     )
   }
 
+  withTransaction<T>(fn: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      const result = fn()
+      this.db.exec('COMMIT')
+      return result
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {
+        /* already rolled back */
+      }
+      throw error
+    }
+  }
+
+  deleteDocumentIndex(documentId: number): void {
+    this.db.prepare(`
+      DELETE FROM chunk_embeddings WHERE chunk_id IN (
+        SELECT chunk_id FROM document_chunks WHERE document_id = ?
+      )
+    `).run(documentId)
+    this.db.prepare('DELETE FROM document_chunks WHERE document_id = ?').run(documentId)
+  }
+
+  replaceDocumentIndex(documentId: number, chunks: DocumentChunk[], embeddings: StoredEmbedding[]): void {
+    this.withTransaction(() => {
+      this.deleteDocumentIndex(documentId)
+      this.upsertChunks(chunks)
+      for (const row of embeddings) this.upsertEmbedding(row)
+    })
+  }
+
+  listEmbeddingsForDocument(documentId: number): StoredEmbedding[] {
+    const rows = this.db.prepare(`
+      SELECT e.*
+      FROM chunk_embeddings e
+      JOIN document_chunks c ON c.chunk_id = e.chunk_id
+      WHERE c.document_id = ?
+      ORDER BY c.chunk_ordinal
+    `).all(documentId) as EmbeddingRow[]
+    return rows.map(mapEmbedding)
+  }
+
+  listStaleDocumentIds(documentHashes: Map<number, string>): number[] {
+    const stale = this.listStaleEmbeddings(documentHashes)
+    const ids = new Set<number>()
+    for (const row of stale) {
+      const chunk = this.getChunk(row.chunkId)
+      if (chunk) ids.add(chunk.documentId)
+    }
+    return [...ids].sort((a, b) => a - b)
+  }
+
   listFreshEmbeddings(input: {
     embeddingModel: string
     embeddingRevision: string

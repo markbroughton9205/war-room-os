@@ -73,7 +73,7 @@ War Room does not forward Commander IP or identity headers to SearXNG. The query
 
 ### Intentionally not in Stage 2
 
-Stage 2 is external federated discovery only. Stage 3 owns the crawler/index. Stage 4 (hybrid retrieval + relevance control) is frozen. Stage 5A manages freshness of already-approved corpus URLs; it is not autonomous discovery.
+Stage 2 is external federated discovery only. Stage 3 owns the crawler/index. Stage 4 (hybrid retrieval + relevance control) is frozen. Stage 5 manages freshness, controlled recrawl, and controlled re-index of already-approved corpus URLs; it is not autonomous discovery.
 
 ### Validation (Stage 2)
 
@@ -254,7 +254,7 @@ query → WAR_ROOM_LOCAL → FTS + semantic → RRF → SearchResult.localRetrie
 
 Semantic unavailability is diagnostic (`sourceSummary.localSemantic`) and does not mark `WAR_ROOM_LOCAL` unhealthy while FTS still works.
 
-Stale vectors are counted, not regenerated. Automatic re-embedding remains Stage 5B.
+Stale vectors are counted and withheld from retrieval. Controlled re-index of stale vectors is part of Stage 5 maintenance of already-approved documents; it is not autonomous discovery.
 
 Brute-force cosine is the intended Stage 4B method. Reconsider ANN storage only after about **50,000 chunks** or **256MB** of `vectors.sqlite`. Do not introduce a vector service in this stage.
 
@@ -324,9 +324,9 @@ Known non-blocking limitations:
 - no LLM query rewriting
 - current vector search remains brute-force at small corpus scale
 
-## Stage 5A — corpus freshness + controlled recrawl lifecycle
+## Stage 5 — durable sovereign search intelligence
 
-Stage 5A manages freshness of URLs **already approved and ingested**. It is not autonomous source discovery, not automatic candidate approval, and not permission to expand the corpus without Commander authority.
+Stage 5 manages freshness, controlled recrawl, and controlled re-index of URLs **already approved and ingested**. It is not autonomous source discovery, not automatic candidate approval, and not permission to expand the corpus without Commander authority. This is roadmap item #11, not a new stage.
 
 ```
 existing approved document
@@ -362,23 +362,29 @@ Conservative defaults (operator-controlled, not LLM-inferred):
 - optional per-domain overrides: `WAR_ROOM_FRESHNESS_DOMAIN_INTERVALS=iana.org:168,example.com:720`
 - optional per-document override stored in `crawl_documents.metadata_json.freshnessIntervalHours`
 
-Minimum interval is 1 hour. Stage 5A does not infer aggressive refresh rates from page contents.
+Minimum interval is 1 hour. Stage 5 does not infer aggressive refresh rates from page contents.
 
 ### Recrawl
 
 `recrawlStoredDocument` reuses Stage 3 policy, robots, SSRF, bounded fetch, extraction, canonicalization, and content hash. Every recrawl re-evaluates robots and current allowlist/denylist/crawl-disabled/SSRF. Previous permission does not permanently authorize future fetches.
 
 - **UNCHANGED**: hash matches; crawl metadata updates; no fake new evidence source
-- **CHANGED**: current document + FTS update atomically; previous/new hash lineage in `document_versions`; old embeddings become stale and are not served; **no automatic re-embedding** (Stage 5B)
+- **CHANGED**: current document + FTS update atomically; previous/new hash lineage in `document_versions`; old embeddings become stale and are not served; controlled re-index is operator-enabled during maintenance and is not implied by recrawl alone
 - **BLOCKED / FAILED / timeout / HTTP 5xx**: last known good document is preserved
 - **404 / 410**: recorded as `NOT_FOUND` / `GONE`; local evidence is not deleted
 - **canonical/redirect change**: hops are safety-checked; stored canonical identity is not rewritten automatically
 
 Hash lineage lives in `document_versions` (no Wayback-style HTML archive). Full previous bodies are not retained.
 
-### Operator control (no public endpoint, no daemon)
+### Controlled re-index of stale vectors
 
-There is no Stage 5A scheduler. Operator CLI only:
+When corpus `content_hash` != stored vector `content_hash`, those vectors are stale and are not served. Stage 5 reuses Stage 4 chunking (`wr-chunk-v1`), local BGE (`BAAI/bge-small-en-v1.5` / `xenova-onnx-q8`), and `vectors.sqlite`. Replacement vectors are prepared first, then swapped in one SQLite transaction. Usable current vectors are not deleted until the replacement is ready. If re-index fails, FTS remains, stale vectors stay withheld, and semantic retrieval is not marked healthy for that document.
+
+Council may recommend maintenance. Council cannot authorize recrawl or re-index.
+
+### Operator maintenance (no public endpoint, no in-process daemon)
+
+There is no Stage 5 in-process scheduler and no `setInterval` loop. The durable loop is an operator-triggered command. A host scheduler (Windows Task Scheduler, systemd timer, or crontab) may invoke that same command later; War Room does not install those tasks.
 
 ```
 pnpm run sovereign-search:lifecycle -- --list-freshness
@@ -386,12 +392,25 @@ pnpm run sovereign-search:lifecycle -- --list-due
 pnpm run sovereign-search:lifecycle -- --diagnostics
 pnpm run sovereign-search:lifecycle -- --recrawl=1 --approved-by=commander
 pnpm run sovereign-search:lifecycle -- --recrawl-due --limit=5 --approved-by=commander
+pnpm run sovereign-search:maintain -- --approved-by=commander --recrawl-due --reembed-stale --limit=5
+pnpm run sovereign-search:maintain -- --diagnostics
 ```
 
-Council may inspect freshness and recommend recrawl. Council cannot authorize recrawl. Batch recrawl is capped at 25 (`MAX_RECRAWL_BATCH`).
+Overlapping maintenance runs are refused via a SQLite lock/lease (`sovereign-search-maintenance`). An expired lease is recoverable on the next invocation; work is not silently duplicated mid-document. Search/FTS stay available during maintenance. Semantic retrieval continues to serve only vectors whose content hash matches the current corpus document.
+
+Batch recrawl and re-index are capped at 25 (`MAX_MAINTENANCE_BATCH`). If the local ONNX model is missing, re-index reports unavailable and does not download weights.
+
+Example host schedule (operator-installed, not applied by War Room):
+
+```
+# Windows Task Scheduler: daily 03:15 local, working directory = repo root
+pnpm run sovereign-search:maintain -- --approved-by=commander --recrawl-due --reembed-stale --limit=5
+```
 
 ```
 pnpm run validate:sovereign-search-stage5a
 pnpm run validate:sovereign-search-stage5a:live
+pnpm run validate:sovereign-search-stage5
+pnpm run validate:sovereign-search-stage5:live
 ```
 

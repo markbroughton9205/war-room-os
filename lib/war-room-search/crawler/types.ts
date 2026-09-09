@@ -25,6 +25,13 @@ export const CRAWL_EVENT_STATES = [
   'RECRAWL_FAILED',
   'SOURCE_NOT_FOUND',
   'SOURCE_GONE',
+  'MAINTENANCE_STARTED',
+  'MAINTENANCE_SKIPPED_LOCKED',
+  'MAINTENANCE_COMPLETED',
+  'MAINTENANCE_FAILED',
+  'REEMBED_STARTED',
+  'REEMBED_COMPLETED',
+  'REEMBED_FAILED',
 ] as const
 
 export type CrawlEventState = (typeof CRAWL_EVENT_STATES)[number]
@@ -305,6 +312,9 @@ export const DEFAULT_FRESHNESS_INTERVAL_HOURS = 720
 export const DEFAULT_FRESHNESS_STALE_MULTIPLIER = 2
 export const MIN_FRESHNESS_INTERVAL_HOURS = 1
 export const MAX_RECRAWL_BATCH = MAX_SOVEREIGN_BATCH_URLS
+export const MAX_MAINTENANCE_BATCH = MAX_SOVEREIGN_BATCH_URLS
+export const MAINTENANCE_LOCK_NAME = 'sovereign-search-maintenance'
+export const DEFAULT_MAINTENANCE_LEASE_MS = 15 * 60 * 1000
 
 export type FreshnessPolicy = {
   defaultIntervalHours: number
@@ -353,6 +363,56 @@ export type RecrawlRunRecord = {
   actor: string | null
 }
 
+export const MAINTENANCE_RUN_STATUSES = [
+  'RUNNING',
+  'COMPLETED',
+  'FAILED',
+  'SKIPPED_LOCKED',
+] as const
+
+export type MaintenanceRunStatus = (typeof MAINTENANCE_RUN_STATUSES)[number]
+
+export const MAINTENANCE_LOCK_STATUSES = [
+  'FREE',
+  'HELD',
+  'EXPIRED',
+] as const
+
+export type MaintenanceLockStatus = (typeof MAINTENANCE_LOCK_STATUSES)[number]
+
+export type MaintenanceLockRecord = {
+  lockName: string
+  runId: number | null
+  ownerPid: number | null
+  acquiredAt: string
+  leaseExpiresAt: string
+}
+
+export type MaintenanceRunRecord = {
+  id: number
+  startedAt: string
+  finishedAt: string | null
+  status: MaintenanceRunStatus
+  actor: string | null
+  recrawlEnabled: boolean
+  reembedEnabled: boolean
+  requested: number
+  recrawled: number
+  changed: number
+  unchanged: number
+  blocked: number
+  failed: number
+  notFound: number
+  gone: number
+  reembedded: number
+  reembedFailures: number
+  skippedCurrent: number
+  staleVectorDocuments: number
+  error: string | null
+  recoveredExpiredLock: boolean
+  leaseExpiresAt: string | null
+}
+
 export type CorpusLifecycleDiagnostics = {
   documentCount: number
   freshCount: number
@@ -367,6 +427,15 @@ export type CorpusLifecycleDiagnostics = {
   unchangedCount: number
   lastRecrawlRunAt: string | null
   lastSuccessfulRecrawlAt: string | null
+  staleVectorDocumentCount: number
+  lastMaintenanceRunAt: string | null
+  lastSuccessfulMaintenanceRunAt: string | null
+  lastMaintenanceStatus: MaintenanceRunStatus | null
+  documentsRecrawled: number
+  documentsReembedded: number
+  reembedFailures: number
+  maintenanceLockStatus: MaintenanceLockStatus
+  maintenanceLockExpiresAt: string | null
 }
 
 export type DocumentFreshness = {
