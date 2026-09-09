@@ -38,6 +38,7 @@ import {
   type WarRoomLocalLeg,
 } from './providers/warRoomLocal'
 import { rankSearchResults } from './rankResults'
+import { attachLocalRetrievalSignals } from './formatSearchResult'
 import { isSearchRequestEmpty, normalizeSearchRequest } from './searchQuery'
 import { emptySearchSourceSummary, type FederatedSearchResponse, type SearchRequest, type SearchSourceSummary } from './types'
 
@@ -389,7 +390,8 @@ export async function federatedSearch(
   intelligencePacket.evidence = items
 
   const ranked = rankSearchResults(request.query, items, request)
-  const visible = ranked.slice(0, request.limit)
+  const withLocalSignals = attachLocalRetrievalSignals(ranked, warRoomLocal.results)
+  const visible = withLocalSignals.slice(0, request.limit)
 
   const warnings: string[] = []
   if (!tavily.ok && tavily.error) warnings.push(`Web search unavailable: ${tavily.error}`)
@@ -418,6 +420,7 @@ export async function federatedSearch(
     searxngWarning: searxng.ok ? undefined : searxng.warningCode ?? searxng.error,
     warRoomLocalOk: warRoomLocal.ok && warRoomLocal.results.length > 0,
     warRoomLocalWarning: warRoomLocal.ok ? undefined : warRoomLocal.warningCode ?? warRoomLocal.error,
+    localSemantic: warRoomLocal.localSemantic ?? null,
     researchEngineOk: researchEngine.ok,
     researchEngineProviders: researchEngine.providerIds,
     publicRssOk: publicRss.ok,

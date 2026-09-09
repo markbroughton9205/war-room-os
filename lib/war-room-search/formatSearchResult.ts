@@ -1,6 +1,6 @@
 import { hostnameFromUrl } from '@/lib/intelligence/canonicalUrl'
 import type { IntelligenceEvidenceItem, SourceAuthorityClass } from '@/lib/intelligence/intelligencePacket'
-import type { SearchAlsoReportedBy, SearchBadge, SearchRankBreakdown, SearchResult } from './types'
+import type { SearchAlsoReportedBy, SearchBadge, SearchRankBreakdown, SearchResult, LocalRetrievalSignals } from './types'
 
 const EMPTY_BREAKDOWN: SearchRankBreakdown = {
   relevance: 0,
@@ -35,13 +35,33 @@ export function snippetFromEvidence(item: IntelligenceEvidenceItem): string {
   return (item.title ?? '').slice(0, 420)
 }
 
+export function attachLocalRetrievalSignals(
+  results: SearchResult[],
+  localHits: Array<{ canonicalUrl: string; url?: string; localRetrievalSignals?: LocalRetrievalSignals | null }>,
+): SearchResult[] {
+  const byCanonical = new Map<string, LocalRetrievalSignals>()
+  for (const hit of localHits) {
+    const signals = hit.localRetrievalSignals
+    if (!signals) continue
+    const keys = [hit.canonicalUrl, hit.url].filter((value): value is string => Boolean(value))
+    for (const key of keys) byCanonical.set(key, signals)
+  }
+  if (!byCanonical.size) return results
+  return results.map(result => {
+    const key = [result.canonicalUrl, result.url].find(value => value && byCanonical.has(value))
+    if (!key) return result
+    return { ...result, localRetrievalSignals: byCanonical.get(key) ?? result.localRetrievalSignals }
+  })
+}
+
 export function formatSearchResult(args: {
   item: IntelligenceEvidenceItem
   score: number
   rankBreakdown: SearchRankBreakdown
   alsoReportedBy?: SearchAlsoReportedBy | null
+  localRetrievalSignals?: LocalRetrievalSignals | null
 }): SearchResult {
-  const { item, score, rankBreakdown, alsoReportedBy = null } = args
+  const { item, score, rankBreakdown, alsoReportedBy = null, localRetrievalSignals = null } = args
   const url = item.url?.trim() || null
   return {
     id: item.id,
@@ -66,6 +86,7 @@ export function formatSearchResult(args: {
     score,
     badges: badgesForEvidence(item),
     rankBreakdown: rankBreakdown ?? EMPTY_BREAKDOWN,
+    localRetrievalSignals,
     alsoReportedBy,
     contentHash: item.content_hash ?? null,
     jurisdiction: item.jurisdiction ?? null,

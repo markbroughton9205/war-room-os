@@ -70,6 +70,46 @@ export type SearchRankBreakdown = {
   duplicatePenalty: number
 }
 
+/** Provider-local retrieval diagnostics. Not on the federated authority/freshness scale. */
+export type LocalRetrievalMode = 'FTS_ONLY' | 'SEMANTIC_ONLY' | 'HYBRID_RRF' | 'FTS_FALLBACK'
+
+export type LocalRetrievalSignals = {
+  lexicalRank: number | null
+  lexicalScore: number | null
+  semanticRank: number | null
+  semanticScore: number | null
+  fusionRank: number | null
+  fusionScore: number | null
+  matchedChunkId: string | null
+  mode: LocalRetrievalMode
+}
+
+export type LocalSemanticStatus =
+  | 'available'
+  | 'modelMissing'
+  | 'indexMissing'
+  | 'stale'
+  | 'corrupt'
+  | 'disabled'
+  | 'error'
+
+export type LocalSemanticHealth = {
+  status: LocalSemanticStatus
+  reason: string | null
+  modelId: string | null
+  revision: string | null
+  dimensions: number | null
+  chunkVersion: string | null
+  indexedDocumentCount: number | null
+  indexedChunkCount: number | null
+  staleEmbeddingCount: number | null
+  vectorIndexBytes: number | null
+  semanticQueryMs: number | null
+  bruteForceWarning: boolean
+  annReconsider: boolean
+  inferenceBackend: string | null
+}
+
 export type SearchResult = {
   id: string
   title: string
@@ -93,6 +133,8 @@ export type SearchResult = {
   score: number
   badges: SearchBadge[]
   rankBreakdown: SearchRankBreakdown
+  /** Local FTS/semantic/RRF diagnostics. Null for non-local results. Never mixed into rankBreakdown. */
+  localRetrievalSignals: LocalRetrievalSignals | null
   alsoReportedBy: SearchAlsoReportedBy | null
   contentHash: string | null
   jurisdiction: string | null
@@ -116,6 +158,8 @@ export type SearchSourceSummary = {
   searxngWarning?: string
   warRoomLocalOk: boolean
   warRoomLocalWarning?: string
+  /** Semantic capability is diagnostic only. Missing semantic never marks WAR_ROOM_LOCAL unhealthy. */
+  localSemantic: LocalSemanticHealth | null
   researchEngineOk: boolean
   researchEngineProviders: string[]
   publicRssOk: boolean
@@ -132,6 +176,7 @@ export function emptySearchSourceSummary(overrides?: Partial<SearchSourceSummary
     googleOk: false,
     searxngOk: false,
     warRoomLocalOk: false,
+    localSemantic: null,
     researchEngineOk: false,
     researchEngineProviders: [],
     publicRssOk: false,

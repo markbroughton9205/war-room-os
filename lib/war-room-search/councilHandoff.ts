@@ -151,6 +151,7 @@ export function buildSearchHandoffEvidencePacket(payload: SearchCouncilHandoffPa
       'discovered_via names the search service that found the page; it is not the publisher or an independent evidence source.',
       'SearXNG is a federated discovery provider. Upstream engines (brave, duckduckgo, …) and other discovery providers that found the same URL are provenance, not extra independent evidence.',
       'War Room local corpus retrieval is a storage/availability path. storage_origin=WAR_ROOM_CORPUS does not make War Room the publisher.',
+      'Hybrid FTS, semantic embeddings, and RRF are local retrieval diagnostics. They are not publishers or independent evidence sources.',
     ],
   }
 }

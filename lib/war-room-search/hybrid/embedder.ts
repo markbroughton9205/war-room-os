@@ -41,6 +41,31 @@ function tokenize(text: string): string[] {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter(token => token.length > 1)
 }
 
+export function textsForEmbedding(texts: string[], kind: 'query' | 'document'): string[] {
+  if (kind === 'query') return texts.map(text => `${LOCAL_QUERY_PREFIX}${text}`)
+  return texts
+}
+
+let sharedQueryEmbedder: Embedder | null = null
+let sharedQueryEmbedderKey = ''
+
+export function getSharedQueryEmbedder(opts?: { modelsDir?: string }): Embedder {
+  const key = opts?.modelsDir?.trim() || ''
+  if (sharedQueryEmbedder && sharedQueryEmbedderKey === key) return sharedQueryEmbedder
+  sharedQueryEmbedder = createQueryEmbedder({ allowDownload: false, modelsDir: opts?.modelsDir })
+  sharedQueryEmbedderKey = key
+  return sharedQueryEmbedder
+}
+
+export function resetSharedQueryEmbedder(): void {
+  sharedQueryEmbedder = null
+  sharedQueryEmbedderKey = ''
+}
+
+export function sharedQueryEmbedderInstanceCount(): number {
+  return sharedQueryEmbedder ? 1 : 0
+}
+
 export function createFakeEmbedder(overrides?: Partial<EmbeddingModelInfo>): Embedder {
   const info: EmbeddingModelInfo = {
     modelId: FAKE_EMBEDDING_MODEL_ID,
@@ -126,7 +151,7 @@ export function createLocalOnnxEmbedder(opts: { modelsDir: string; allowRemote: 
         throw new Error('SEMANTIC_UNAVAILABLE')
       }
       const run = await (pipelinePromise ??= loadOnnxPipeline(opts.modelsDir))
-      const prefixed = kind === 'query' ? texts.map(text => `${LOCAL_QUERY_PREFIX}${text}`) : texts
+      const prefixed = textsForEmbedding(texts, kind)
       const output = await run(prefixed, { pooling: 'mean', normalize: true })
       const dims = output.dims
       if (dims.length === 1) return [Float32Array.from(output.data)]

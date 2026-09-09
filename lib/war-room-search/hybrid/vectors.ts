@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { DocumentChunk, StoredEmbedding } from './types'
@@ -213,6 +213,33 @@ export class SqliteVectorStore {
     const row = this.db.prepare('SELECT COUNT(*) AS n FROM chunk_embeddings').get() as { n: number | bigint }
     return Number(row.n)
   }
+
+  countChunks(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM document_chunks').get() as { n: number | bigint }
+    return Number(row.n)
+  }
+
+  countIndexedDocuments(): number {
+    const row = this.db.prepare('SELECT COUNT(DISTINCT document_id) AS n FROM document_chunks').get() as { n: number | bigint }
+    return Number(row.n)
+  }
+
+  countRevisionMismatches(embeddingModel: string, embeddingRevision: string): number {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS n FROM chunk_embeddings
+      WHERE embedding_model != ? OR embedding_revision != ?
+    `).get(embeddingModel, embeddingRevision) as { n: number | bigint }
+    return Number(row.n)
+  }
+
+  static tryOpen(dbPath: string): SqliteVectorStore | 'missing' | 'corrupt' {
+    if (!existsSync(dbPath)) return 'missing'
+    try {
+      return new SqliteVectorStore(dbPath)
+    } catch {
+      return 'corrupt'
+    }
+  }
 }
 
 function mapEmbedding(row: EmbeddingRow): StoredEmbedding {
@@ -241,16 +268,25 @@ export function searchVectors(args: {
   query: Float32Array
   embeddings: Array<StoredEmbedding & { documentId: number; publisher: string; canonicalUrl: string }>
   limit: number
-}): VectorHit[] {
-  return args.embeddings
-    .map(row => ({
+}): { hits: VectorHit[]; dimensionMismatchCount: number } {
+  let dimensionMismatchCount = 0
+  const scored: VectorHit[] = []
+  for (const row of args.embeddings) {
+    if (row.vector.length !== args.query.length || row.dimensions !== args.query.length) {
+      dimensionMismatchCount += 1
+      continue
+    }
+    scored.push({
       chunkId: row.chunkId,
       documentId: row.documentId,
       canonicalUrl: row.canonicalUrl,
       publisher: row.publisher,
       contentHash: row.contentHash,
       score: cosineSimilarity(args.query, row.vector),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, Math.max(1, args.limit))
+    })
+  }
+  return {
+    dimensionMismatchCount,
+    hits: scored.sort((a, b) => b.score - a.score).slice(0, Math.max(1, args.limit)),
+  }
 }

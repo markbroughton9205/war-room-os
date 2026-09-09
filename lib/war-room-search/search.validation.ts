@@ -46,7 +46,7 @@ const REQUIRED_RESULT_FIELDS = [
   'publishedAt', 'observedAt', 'sourceType', 'originType', 'authorityClass',
   'region', 'language', 'primarySource', 'sourceFamily', 'clusterId',
   'independenceKey', 'freshness', 'score', 'contentHash', 'discoveredVia',
-  'alsoDiscoveredVia', 'upstreamEngines', 'storageOrigin',
+  'alsoDiscoveredVia', 'upstreamEngines', 'storageOrigin', 'localRetrievalSignals',
 ] as const
 
 export async function runWarRoomSearchValidation(): Promise<CaseResult[]> {

@@ -19,6 +19,50 @@ export const FAKE_EMBEDDING_REVISION = 'test-v1'
 export const FAKE_EMBEDDING_DIMENSIONS = 16
 
 export type EmbeddingBackend = 'local_onnx' | 'fake' | 'unavailable'
+export type HybridRetrievalMode = 'fts' | 'semantic' | 'hybrid'
+export type LocalRetrievalMode = 'FTS_ONLY' | 'SEMANTIC_ONLY' | 'HYBRID_RRF' | 'FTS_FALLBACK'
+export type LocalSemanticStatus =
+  | 'available'
+  | 'modelMissing'
+  | 'indexMissing'
+  | 'stale'
+  | 'corrupt'
+  | 'disabled'
+  | 'error'
+
+export const BRUTE_FORCE_CHUNK_WARN = 10_000
+export const BRUTE_FORCE_INDEX_BYTES_WARN = 64 * 1024 * 1024
+export const ANN_RECONSIDER_CHUNKS = 50_000
+export const ANN_RECONSIDER_INDEX_BYTES = 256 * 1024 * 1024
+export const SEMANTIC_QUERY_MS_WARN = 500
+
+export type LocalRetrievalSignals = {
+  lexicalRank: number | null
+  lexicalScore: number | null
+  semanticRank: number | null
+  semanticScore: number | null
+  fusionRank: number | null
+  fusionScore: number | null
+  matchedChunkId: string | null
+  mode: LocalRetrievalMode
+}
+
+export type LocalSemanticHealth = {
+  status: LocalSemanticStatus
+  reason: string | null
+  modelId: string | null
+  revision: string | null
+  dimensions: number | null
+  chunkVersion: string | null
+  indexedDocumentCount: number | null
+  indexedChunkCount: number | null
+  staleEmbeddingCount: number | null
+  vectorIndexBytes: number | null
+  semanticQueryMs: number | null
+  bruteForceWarning: boolean
+  annReconsider: boolean
+  inferenceBackend: string | null
+}
 
 export type EmbeddingModelInfo = {
   modelId: string
@@ -82,6 +126,13 @@ export type HybridSearchResult = {
   semanticReason: string | null
   usedFallback: 'none' | 'fts' | 'fts_vector_error'
   durationMs: number
+  retrievalMode: LocalRetrievalMode
+  staleEmbeddingCount: number
+  indexedDocumentCount: number
+  indexedChunkCount: number
+  vectorIndexBytes: number
+  semanticQueryMs: number | null
+  dimensionMismatchCount: number
 }
 
 export type IndexDocumentsResult = {

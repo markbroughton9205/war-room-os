@@ -3,6 +3,8 @@ import { searchLocalCorpus } from '../crawler/localSearch'
 import { WAR_ROOM_STORAGE_ORIGIN } from '../crawler/types'
 import type { EvidenceDiscoveryProvider } from '@/lib/intelligence/intelligencePacket'
 import { searchLocalHybrid } from '../hybrid/retrieve'
+import { emptyLocalSemanticHealth, inspectLocalSemanticHealth } from '../hybrid/semanticHealth'
+import type { LocalRetrievalMode, LocalRetrievalSignals, LocalSemanticHealth } from '../types'
 
 export const WAR_ROOM_LOCAL_WARNING_CODES = [
   'WAR_ROOM_LOCAL_DISABLED',
@@ -35,6 +37,8 @@ export type WarRoomLocalHit = {
   fusionScore?: number | null
   matchedChunkId?: string | null
   semanticScore?: number | null
+  lexicalScore?: number | null
+  localRetrievalSignals?: LocalRetrievalSignals | null
 }
 
 export type WarRoomLocalLeg = {
@@ -46,6 +50,8 @@ export type WarRoomLocalLeg = {
   durationMs: number
   semanticAvailable?: boolean
   semanticReason?: string | null
+  localSemantic?: LocalSemanticHealth | null
+  retrievalMode?: LocalRetrievalMode
 }
 
 export function emptyWarRoomLocalLeg(error?: string, warningCode?: WarRoomLocalWarningCode): WarRoomLocalLeg {
@@ -58,6 +64,8 @@ export function emptyWarRoomLocalLeg(error?: string, warningCode?: WarRoomLocalW
     durationMs: 0,
     semanticAvailable: false,
     semanticReason: error ?? null,
+    localSemantic: emptyLocalSemanticHealth(error === 'WAR_ROOM_LOCAL_DISABLED' ? 'disabled' : 'error', error ?? null),
+    retrievalMode: 'FTS_FALLBACK',
   }
 }
 
@@ -87,7 +95,14 @@ export async function runWarRoomLocalSearch(
       fusionScore: hit.fusionScore,
       matchedChunkId: hit.matchedChunkId,
       semanticScore: hit.semanticScore,
+      lexicalScore: hit.lexicalScore,
+      mode: hybrid.retrievalMode,
     }))
+    const localSemantic = inspectLocalSemanticHealth({
+      corpusRoot: opts?.corpusRoot ?? env.WAR_ROOM_SOVEREIGN_SEARCH_DIR,
+      env,
+      queryResult: hybrid,
+    })
     return {
       ok: true,
       configured: true,
@@ -96,6 +111,8 @@ export async function runWarRoomLocalSearch(
       durationMs: Date.now() - started,
       semanticAvailable: hybrid.semanticAvailable,
       semanticReason: hybrid.semanticReason,
+      localSemantic,
+      retrievalMode: hybrid.retrievalMode,
     }
   } catch (error) {
     try {
@@ -112,6 +129,11 @@ export async function runWarRoomLocalSearch(
         durationMs: Date.now() - started,
         semanticAvailable: false,
         semanticReason: error instanceof Error ? error.message : 'SEMANTIC_UNAVAILABLE',
+        localSemantic: inspectLocalSemanticHealth({
+          corpusRoot: opts?.corpusRoot ?? env.WAR_ROOM_SOVEREIGN_SEARCH_DIR,
+          env,
+        }),
+        retrievalMode: 'FTS_FALLBACK',
       }
     } catch (ftsError) {
       return {
@@ -123,6 +145,8 @@ export async function runWarRoomLocalSearch(
         durationMs: Date.now() - started,
         semanticAvailable: false,
         semanticReason: error instanceof Error ? error.message : 'SEMANTIC_UNAVAILABLE',
+        localSemantic: emptyLocalSemanticHealth('error', error instanceof Error ? error.message : 'SEMANTIC_UNAVAILABLE'),
+        retrievalMode: 'FTS_FALLBACK',
       }
     }
   }
@@ -154,6 +178,8 @@ function mapHit(
     fusionScore?: number | null
     matchedChunkId?: string | null
     semanticScore?: number | null
+    lexicalScore?: number | null
+    mode?: LocalRetrievalMode
   },
 ): WarRoomLocalHit {
   const publisher = doc.publisher || doc.domain || hostnameFromUrl(doc.canonicalUrl) || 'unknown'
@@ -183,5 +209,16 @@ function mapHit(
     fusionScore: extra.fusionScore ?? null,
     matchedChunkId: extra.matchedChunkId ?? null,
     semanticScore: extra.semanticScore ?? null,
+    lexicalScore: extra.lexicalScore ?? null,
+    localRetrievalSignals: {
+      lexicalRank: extra.lexicalRank ?? null,
+      lexicalScore: extra.lexicalScore ?? null,
+      semanticRank: extra.semanticRank ?? null,
+      semanticScore: extra.semanticScore ?? null,
+      fusionRank: extra.providerRank,
+      fusionScore: extra.fusionScore ?? null,
+      matchedChunkId: extra.matchedChunkId ?? null,
+      mode: extra.mode ?? (extra.semanticRank == null ? 'FTS_FALLBACK' : 'HYBRID_RRF'),
+    },
   }
 }

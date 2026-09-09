@@ -97,6 +97,8 @@
     "validate:sovereign-search-stage3c": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/crawler/candidates.validation.ts",
     "validate:sovereign-search-stage4a": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/hybrid/hybrid.validation.ts",
     "validate:sovereign-search-stage4a:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/hybrid/hybrid.live-acceptance.ts",
+    "validate:sovereign-search-stage4b": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/hybrid/stage4b.validation.ts",
+    "validate:sovereign-search-stage4b:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/hybrid/stage4b.live-acceptance.ts",
     "sovereign-search:prepare-embeddings": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/hybrid/prepareCli.ts",
     "sovereign-search:embed": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/war-room-search/hybrid/indexCli.ts",
     "validate:world-learning": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/world-learning/contradictionDetection.validation.ts",

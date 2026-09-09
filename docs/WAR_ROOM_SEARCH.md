@@ -239,3 +239,27 @@ pnpm run validate:sovereign-search-stage4a
 ```
 
 Chunks preserve document lineage. Ten chunks from one publisher remain one evidence source. Lexical and semantic scores stay separate; fusion is rank-based (RRF, k=60), not an uncalibrated weighted sum.
+
+### Stage 4B — hybrid evaluation, diagnostics, and guardrails
+
+Stage 4B does not add another retrieval system. It measures and observes the Stage 4A path:
+
+```
+query → WAR_ROOM_LOCAL → FTS + semantic → RRF → SearchResult.localRetrievalSignals
+                                          ↘ existing federated rankBreakdown (authority/freshness/relevance)
+                                          → Build #6 clustering → Council evidence
+```
+
+`localRetrievalSignals` (lexical/semantic/RRF) stay off the federated score scale. Cosine similarity is never compared directly to BM25 or authority.
+
+Semantic unavailability is diagnostic (`sourceSummary.localSemantic`) and does not mark `WAR_ROOM_LOCAL` unhealthy while FTS still works.
+
+Stale vectors are counted, not regenerated. Automatic re-embedding remains Stage 5.
+
+Brute-force cosine is the intended Stage 4B method. Reconsider ANN storage only after about **50,000 chunks** or **256MB** of `vectors.sqlite`. Do not introduce a vector service in this stage.
+
+```
+pnpm run validate:sovereign-search-stage4b
+pnpm run validate:sovereign-search-stage4b:live
+```
+
