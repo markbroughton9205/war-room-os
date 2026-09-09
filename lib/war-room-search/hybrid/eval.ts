@@ -12,6 +12,7 @@ export const EVAL_QUERY_TYPES = [
   'PARAPHRASE',
   'CONCEPTUAL',
   'ENTITY',
+  'PHRASE',
   'AMBIGUOUS',
   'HARD_NEGATIVE',
   'NO_RELEVANT_DOCUMENT',
@@ -60,7 +61,7 @@ export const EVAL_DOCUMENTS: EvalDocFixture[] = [
     url: 'https://iana.org/domains/reserved',
     title: 'IANA-managed Reserved Domains',
     publisher: 'iana.org',
-    text: 'Example domains such as example.com are reserved for documentation and testing without operational use.',
+    text: 'IANA manages reserved DNS names. Example domains such as example.com are reserved for documentation and testing without operational use.',
   },
   {
     url: 'https://dw.com/en/liv-golf-fixture',
@@ -118,7 +119,49 @@ export const EVAL_QUERIES: EvalQuery[] = [
     query: 'reserved DNS names and LIV Golf',
     type: 'MIXED_TOPIC',
     expectedCanonicalUrls: ['https://iana.org/domains/reserved', 'https://dw.com/en/liv-golf-fixture'],
-    notes: 'Two relevant fixtures. Stage 4 FTS ANDs tokens so this query may have no lexical hit; labels remain from fixture contents.',
+    notes: 'Two relevant fixtures. Relaxed lexical planning should retrieve both topical portions without requiring every token in one document.',
+  },
+  {
+    id: 'subset_reserved_domains',
+    query: 'reserved domains',
+    type: 'EXACT_LEXICAL',
+    expectedCanonicalUrls: ['https://iana.org/domains/reserved'],
+    notes: 'Meaningful subset of the IANA reserved-DNS fixture.',
+  },
+  {
+    id: 'phrase_liv_golf',
+    query: 'LIV Golf',
+    type: 'PHRASE',
+    expectedCanonicalUrls: ['https://dw.com/en/liv-golf-fixture'],
+    notes: 'Adjacent entity phrase present in the LIV fixture title and body.',
+  },
+  {
+    id: 'punctuation_rfc_like',
+    query: 'reserved DNS names.',
+    type: 'EXACT_LEXICAL',
+    expectedCanonicalUrls: ['https://iana.org/domains/reserved'],
+    notes: 'Trailing punctuation must not break FTS MATCH.',
+  },
+  {
+    id: 'malformed_fts_syntax',
+    query: 'NEAR(penguin, census) OR * AND ("foo"',
+    type: 'NO_RELEVANT_DOCUMENT',
+    expectedCanonicalUrls: [],
+    notes: 'FTS operator-looking input must be escaped and must not throw or inject MATCH syntax.',
+  },
+  {
+    id: 'common_word_only',
+    query: 'the and of in to for',
+    type: 'NO_RELEVANT_DOCUMENT',
+    expectedCanonicalUrls: [],
+    notes: 'Connector-only query has no content tokens after stop-word removal.',
+  },
+  {
+    id: 'connector_heavy',
+    query: 'the controls and system',
+    type: 'AMBIGUOUS',
+    expectedCanonicalUrls: [],
+    notes: 'Connector-heavy query must not flood the corpus from a single generic token. Not labeled relevant.',
   },
   {
     id: 'no_relevant',
@@ -216,6 +259,7 @@ export type ModeMetrics = {
   falsePositiveRateOnNegatives: number | null
   falseNegativeRateOnPositives: number | null
   admittedTop1Precision: number | null
+  mixedTopicCoverage: number | null
 }
 
 function firstRelevantRank(canonicals: string[], expected: string[]): number | null {
@@ -237,6 +281,11 @@ export function meanReciprocalRank(ranks: Array<number | null>): number {
 
 export function isPositiveEvalQuery(item: EvalQuery): boolean {
   return item.expectedCanonicalUrls.length > 0
+}
+
+export function mixedTopicCoverage(retrieved: string[], expected: string[]): number {
+  if (!expected.length) return 0
+  return expected.filter(url => retrieved.includes(url)).length / expected.length
 }
 
 export type AdmissionMetrics = {
@@ -324,6 +373,11 @@ export async function evaluateRetrievalMode(opts: {
     ...negativeDecisions,
   ]
   const admission = admissionMetricsFromDecisions(decisions)
+  const mixedRows = rows.filter(row => row.type === 'MIXED_TOPIC')
+  const mixedCoverageValues = mixedRows.map(row => {
+    const expected = EVAL_QUERIES.find(item => item.id === row.id)?.expectedCanonicalUrls ?? []
+    return mixedTopicCoverage(row.top, expected)
+  })
 
   return {
     metrics: {
@@ -338,6 +392,59 @@ export async function evaluateRetrievalMode(opts: {
       falsePositiveRateOnNegatives: admission.falsePositiveRateOnNegatives,
       falseNegativeRateOnPositives: admission.falseNegativeRateOnPositives,
       admittedTop1Precision: admission.admittedTop1Precision,
+      mixedTopicCoverage: mixedCoverageValues.length
+        ? mixedCoverageValues.reduce((sum, value) => sum + value, 0) / mixedCoverageValues.length
+        : null,
+    },
+    rows,
+  }
+}
+
+export async function evaluateLegacyStrictFts(opts: {
+  corpus: SovereignCorpus
+}): Promise<{ metrics: ModeMetrics; rows: Array<{ id: string; query: string; type: EvalQueryType; top: string[]; rank: number | null; admitted: boolean }> }> {
+  const topical = EVAL_QUERIES.filter(isPositiveEvalQuery)
+  const ranks: Array<number | null> = []
+  const rows: Array<{ id: string; query: string; type: EvalQueryType; top: string[]; rank: number | null; admitted: boolean }> = []
+  for (const item of topical) {
+    const hits = opts.corpus.searchFtsLegacyStrict(item.query, 8)
+    const top = hits
+      .map(hit => opts.corpus.getById(hit.documentId)?.canonicalUrl)
+      .filter((url): url is string => Boolean(url))
+    const rank = firstRelevantRank(top, item.expectedCanonicalUrls)
+    ranks.push(rank)
+    rows.push({ id: item.id, query: item.query, type: item.type, top, rank, admitted: top.length > 0 })
+  }
+  const negatives = EVAL_QUERIES.filter(item => !isPositiveEvalQuery(item))
+  for (const item of negatives) {
+    const hits = opts.corpus.searchFtsLegacyStrict(item.query, 8)
+    const top = hits
+      .map(hit => opts.corpus.getById(hit.documentId)?.canonicalUrl)
+      .filter((url): url is string => Boolean(url))
+    rows.push({ id: item.id, query: item.query, type: item.type, top, rank: null, admitted: top.length > 0 })
+  }
+  const mixedRows = rows.filter(row => row.type === 'MIXED_TOPIC')
+  const mixedCoverageValues = mixedRows.map(row => {
+    const expected = EVAL_QUERIES.find(item => item.id === row.id)?.expectedCanonicalUrls ?? []
+    return mixedTopicCoverage(row.top, expected)
+  })
+  const penguin = rows.find(row => row.id === 'no_relevant')
+  return {
+    metrics: {
+      mode: 'fts',
+      recallAt1: recallAtK(ranks, 1),
+      recallAt3: recallAtK(ranks, 3),
+      recallAt5: recallAtK(ranks, 5),
+      mrr: meanReciprocalRank(ranks),
+      scoredQueries: ranks.length,
+      noRelevantOk: penguin ? penguin.admitted === false : null,
+      trueNoHitRejectionRate: null,
+      falsePositiveRateOnNegatives: null,
+      falseNegativeRateOnPositives: null,
+      admittedTop1Precision: null,
+      mixedTopicCoverage: mixedCoverageValues.length
+        ? mixedCoverageValues.reduce((sum, value) => sum + value, 0) / mixedCoverageValues.length
+        : null,
     },
     rows,
   }

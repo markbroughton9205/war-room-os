@@ -17,6 +17,12 @@ import {
   type IngestCandidateStatus,
   type RobotsStatus,
 } from './types'
+import {
+  buildLegacyStrictMatch,
+  lexicalPlanFromBuilt,
+  planLexicalQuery,
+  type LocalLexicalPlan,
+} from './lexicalPlan'
 
 export const DEFAULT_CORPUS_RELATIVE = ['.war-room', 'sovereign-search'] as const
 
@@ -400,26 +406,97 @@ export class SovereignCorpus {
     }
   }
 
+  searchFtsMatch(match: string, limit = 8): Array<{ documentId: number; snippet: string; rank: number }> {
+    const expression = match.trim()
+    if (!expression) return []
+    try {
+      const rows = this.db.prepare(`
+        SELECT document_id AS documentId,
+               snippet(crawl_fts, 2, '[', ']', '...', 12) AS snippet,
+               rank AS rank
+        FROM crawl_fts
+        WHERE crawl_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `).all(expression, Math.max(1, Math.min(20, limit))) as Array<{ documentId: string; snippet: string; rank: number }>
+      const seen = new Set<number>()
+      const unique: Array<{ documentId: number; snippet: string; rank: number }> = []
+      for (const row of rows) {
+        const documentId = Number(row.documentId)
+        if (!Number.isFinite(documentId) || seen.has(documentId)) continue
+        seen.add(documentId)
+        unique.push({
+          documentId,
+          snippet: String(row.snippet ?? ''),
+          rank: typeof row.rank === 'number' ? row.rank : 0,
+        })
+      }
+      return unique
+    } catch {
+      return []
+    }
+  }
+
+  searchFtsLegacyStrict(query: string, limit = 8): Array<{ documentId: number; snippet: string; rank: number }> {
+    const match = buildLegacyStrictMatch(query)
+    return match ? this.searchFtsMatch(match, limit) : []
+  }
+
+  searchFtsWithPlan(query: string, limit = 8): {
+    rows: Array<{ documentId: number; snippet: string; rank: number }>
+    plan: LocalLexicalPlan
+  } {
+    const built = planLexicalQuery(query)
+    if (!built.strictMatch) {
+      return { rows: [], plan: lexicalPlanFromBuilt(built, { planUsed: 'NONE' }) }
+    }
+    const strictStarted = Date.now()
+    const strictRows = this.searchFtsMatch(built.strictMatch, limit)
+    const strictFtsMs = Date.now() - strictStarted
+    if (strictRows.length >= 1) {
+      return {
+        rows: strictRows,
+        plan: lexicalPlanFromBuilt(built, {
+          planUsed: 'STRICT',
+          relaxationApplied: false,
+          strictCandidateCount: strictRows.length,
+          relaxedCandidateCount: 0,
+          strictFtsMs,
+          relaxedFtsMs: 0,
+        }),
+      }
+    }
+    if (!built.canRelax || !built.relaxedMatch) {
+      return {
+        rows: [],
+        plan: lexicalPlanFromBuilt(built, {
+          planUsed: 'STRICT',
+          relaxationApplied: false,
+          strictCandidateCount: 0,
+          relaxedCandidateCount: 0,
+          strictFtsMs,
+          relaxedFtsMs: 0,
+        }),
+      }
+    }
+    const relaxedStarted = Date.now()
+    const relaxedRows = this.searchFtsMatch(built.relaxedMatch, limit)
+    const relaxedFtsMs = Date.now() - relaxedStarted
+    return {
+      rows: relaxedRows,
+      plan: lexicalPlanFromBuilt(built, {
+        planUsed: 'RELAXED',
+        relaxationApplied: true,
+        strictCandidateCount: 0,
+        relaxedCandidateCount: relaxedRows.length,
+        strictFtsMs,
+        relaxedFtsMs,
+      }),
+    }
+  }
+
   searchFts(query: string, limit = 8): Array<{ documentId: number; snippet: string; rank: number }> {
-    const trimmed = query.trim().replace(/["']/g, ' ').replace(/\s+/g, ' ')
-    if (!trimmed) return []
-    const tokens = trimmed.split(' ').filter(token => token.length > 1).slice(0, 8)
-    if (!tokens.length) return []
-    const match = tokens.map(token => `"${token.replace(/"/g, '')}"`).join(' AND ')
-    const rows = this.db.prepare(`
-      SELECT document_id AS documentId,
-             snippet(crawl_fts, 2, '[', ']', '...', 12) AS snippet,
-             rank AS rank
-      FROM crawl_fts
-      WHERE crawl_fts MATCH ?
-      ORDER BY rank
-      LIMIT ?
-    `).all(match, Math.max(1, Math.min(20, limit))) as Array<{ documentId: string; snippet: string; rank: number }>
-    return rows.map(row => ({
-      documentId: Number(row.documentId),
-      snippet: String(row.snippet ?? ''),
-      rank: typeof row.rank === 'number' ? row.rank : 0,
-    }))
+    return this.searchFtsWithPlan(query, limit).rows
   }
 
   private indexFts(id: number, title: string | null, description: string | null, contentText: string): void {

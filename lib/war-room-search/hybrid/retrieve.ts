@@ -16,26 +16,33 @@ import { PRODUCTION_RETRIEVAL_PROFILE, type RetrievalProfile } from './retrieval
 import { reciprocalRankFusion } from './rrf'
 import { resolveHybridPaths } from './modelStore'
 import { SqliteVectorStore, searchVectors } from './vectors'
+import { emptyLexicalPlan, type LocalLexicalPlan } from '../crawler/lexicalPlan'
 
 function ftsSnippet(document: CrawlDocumentRecord, fallback: string | null): string {
   return fallback || document.description || document.contentText.slice(0, 280)
 }
 
-function lexicalHitsFromCorpus(corpus: SovereignCorpus, query: string, limit: number) {
-  const lexicalRows = corpus.searchFts(query, limit)
+function lexicalHitsFromCorpus(corpus: SovereignCorpus, query: string, limit: number): {
+  lexicalDocs: Array<{ document: CrawlDocumentRecord; rank: number; score: number; snippet: string }>
+  plan: LocalLexicalPlan
+} {
+  const planned = corpus.searchFtsWithPlan(query, limit)
   const lexicalDocs: Array<{ document: CrawlDocumentRecord; rank: number; score: number; snippet: string }> = []
-  for (let index = 0; index < lexicalRows.length; index += 1) {
-    const row = lexicalRows[index]!
+  const seen = new Set<number>()
+  for (let index = 0; index < planned.rows.length; index += 1) {
+    const row = planned.rows[index]!
+    if (seen.has(row.documentId)) continue
+    seen.add(row.documentId)
     const document = corpus.getById(row.documentId)
     if (!document) continue
     lexicalDocs.push({
       document,
-      rank: index + 1,
+      rank: lexicalDocs.length + 1,
       score: typeof row.rank === 'number' ? row.rank : 0,
       snippet: ftsSnippet(document, row.snippet),
     })
   }
-  return lexicalDocs
+  return { lexicalDocs, plan: planned.plan }
 }
 
 function emptyAdmission(profile: RetrievalProfile, extras?: Partial<LocalSemanticAdmission>): LocalSemanticAdmission {
@@ -98,7 +105,7 @@ export async function searchLocalHybrid(query: string, opts?: {
 
   const finish = (
     hits: HybridSearchHit[],
-    extra: Pick<HybridSearchResult, 'lexicalHits' | 'semanticHits' | 'semanticAvailable' | 'semanticReason' | 'usedFallback' | 'retrievalMode'> & Partial<Pick<HybridSearchResult, 'staleEmbeddingCount' | 'indexedDocumentCount' | 'indexedChunkCount' | 'semanticQueryMs' | 'dimensionMismatchCount' | 'semanticCandidates' | 'semanticAdmission'>>,
+    extra: Pick<HybridSearchResult, 'lexicalHits' | 'semanticHits' | 'semanticAvailable' | 'semanticReason' | 'usedFallback' | 'retrievalMode'> & Partial<Pick<HybridSearchResult, 'staleEmbeddingCount' | 'indexedDocumentCount' | 'indexedChunkCount' | 'semanticQueryMs' | 'dimensionMismatchCount' | 'semanticCandidates' | 'semanticAdmission' | 'lexicalPlan'>>,
   ): HybridSearchResult => ({
     query,
     hits,
@@ -111,11 +118,16 @@ export async function searchLocalHybrid(query: string, opts?: {
     dimensionMismatchCount: extra.dimensionMismatchCount ?? 0,
     semanticCandidates: extra.semanticCandidates ?? 0,
     semanticAdmission: extra.semanticAdmission ?? emptyAdmission(profile),
+    lexicalPlan: extra.lexicalPlan ?? emptyLexicalPlan(),
     ...extra,
   })
 
   try {
-    const lexicalDocs = retrievalMode === 'semantic' ? [] : lexicalHitsFromCorpus(corpus, query, limit)
+    const lexical = retrievalMode === 'semantic'
+      ? { lexicalDocs: [] as Array<{ document: CrawlDocumentRecord; rank: number; score: number; snippet: string }>, plan: emptyLexicalPlan() }
+      : lexicalHitsFromCorpus(corpus, query, limit)
+    const lexicalDocs = lexical.lexicalDocs
+    const lexicalPlan = lexical.plan
 
     if (!embedder || !embedder.available) {
       const mode: LocalRetrievalMode = retrievalMode === 'fts' ? 'FTS_ONLY' : 'FTS_FALLBACK'
@@ -126,6 +138,7 @@ export async function searchLocalHybrid(query: string, opts?: {
         semanticReason: embedder?.unavailableReason ?? (retrievalMode === 'fts' ? 'FTS_ONLY' : 'SEMANTIC_UNAVAILABLE'),
         usedFallback: retrievalMode === 'fts' ? 'none' : 'fts',
         retrievalMode: mode,
+        lexicalPlan,
       })
     }
 
@@ -142,6 +155,7 @@ export async function searchLocalHybrid(query: string, opts?: {
             semanticReason: 'VECTOR_INDEX_MISSING',
             usedFallback: 'fts',
             retrievalMode: 'FTS_FALLBACK',
+            lexicalPlan,
           })
         }
         if (opened === 'corrupt') {
@@ -152,6 +166,7 @@ export async function searchLocalHybrid(query: string, opts?: {
             semanticReason: 'VECTOR_INDEX_CORRUPT',
             usedFallback: 'fts_vector_error',
             retrievalMode: 'FTS_FALLBACK',
+            lexicalPlan,
           })
         }
         store = opened
@@ -256,6 +271,7 @@ export async function searchLocalHybrid(query: string, opts?: {
         semanticQueryMs,
         dimensionMismatchCount: vectorSearch.dimensionMismatchCount,
         semanticAdmission: admission,
+        lexicalPlan,
       })
     } catch (error) {
       return finish(ftsHits(lexicalDocs), {
@@ -265,6 +281,7 @@ export async function searchLocalHybrid(query: string, opts?: {
         semanticReason: error instanceof Error ? error.message : 'VECTOR_INDEX_UNAVAILABLE',
         usedFallback: 'fts_vector_error',
         retrievalMode: 'FTS_FALLBACK',
+        lexicalPlan,
       })
     }
   } finally {

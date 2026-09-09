@@ -5,6 +5,7 @@ import type { EvidenceDiscoveryProvider } from '@/lib/intelligence/intelligenceP
 import { searchLocalHybrid } from '../hybrid/retrieve'
 import { emptyLocalSemanticHealth, inspectLocalSemanticHealth } from '../hybrid/semanticHealth'
 import type { LocalRetrievalMode, LocalRetrievalSignals, LocalSemanticAdmission, LocalSemanticHealth } from '../types'
+import type { LocalLexicalPlan } from '../crawler/lexicalPlan'
 
 export const WAR_ROOM_LOCAL_WARNING_CODES = [
   'WAR_ROOM_LOCAL_DISABLED',
@@ -52,6 +53,7 @@ export type WarRoomLocalLeg = {
   semanticReason?: string | null
   localSemantic?: LocalSemanticHealth | null
   localSemanticAdmission?: LocalSemanticAdmission | null
+  localLexicalPlan?: LocalLexicalPlan | null
   retrievalMode?: LocalRetrievalMode
 }
 
@@ -67,6 +69,7 @@ export function emptyWarRoomLocalLeg(error?: string, warningCode?: WarRoomLocalW
     semanticReason: error ?? null,
     localSemantic: emptyLocalSemanticHealth(error === 'WAR_ROOM_LOCAL_DISABLED' ? 'disabled' : 'error', error ?? null),
     localSemanticAdmission: null,
+    localLexicalPlan: null,
     retrievalMode: 'FTS_FALLBACK',
   }
 }
@@ -115,6 +118,7 @@ export async function runWarRoomLocalSearch(
       semanticReason: hybrid.semanticReason,
       localSemantic,
       localSemanticAdmission: hybrid.semanticAdmission,
+      localLexicalPlan: hybrid.lexicalPlan,
       retrievalMode: hybrid.retrievalMode,
     }
   } catch (error) {
@@ -137,6 +141,7 @@ export async function runWarRoomLocalSearch(
           env,
         }),
         localSemanticAdmission: null,
+        localLexicalPlan: null,
         retrievalMode: 'FTS_FALLBACK',
       }
     } catch (ftsError) {
@@ -151,6 +156,7 @@ export async function runWarRoomLocalSearch(
         semanticReason: error instanceof Error ? error.message : 'SEMANTIC_UNAVAILABLE',
         localSemantic: emptyLocalSemanticHealth('error', error instanceof Error ? error.message : 'SEMANTIC_UNAVAILABLE'),
         localSemanticAdmission: null,
+        localLexicalPlan: null,
         retrievalMode: 'FTS_FALLBACK',
       }
     }

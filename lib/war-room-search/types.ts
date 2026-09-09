@@ -7,6 +7,8 @@ import type {
   SourceAuthorityClass,
 } from '@/lib/intelligence/intelligencePacket'
 import type { IntelligenceSourceType } from '@/lib/intelligence/sourceRegistry'
+import type { LocalLexicalPlan } from './crawler/lexicalPlan'
+export type { LocalLexicalPlan }
 
 export const SEARCH_REGIONS = [
   'ALL',
@@ -178,6 +180,8 @@ export type SearchSourceSummary = {
   localSemantic: LocalSemanticHealth | null
   /** Relevance admission is not infrastructure health. Abstention can occur while status=available. */
   localSemanticAdmission: LocalSemanticAdmission | null
+  /** Lexical query-plan diagnostics. Plan names are not publishers or evidence sources. */
+  localLexicalPlan: LocalLexicalPlan | null
   researchEngineOk: boolean
   researchEngineProviders: string[]
   publicRssOk: boolean
@@ -196,6 +200,7 @@ export function emptySearchSourceSummary(overrides?: Partial<SearchSourceSummary
     warRoomLocalOk: false,
     localSemantic: null,
     localSemanticAdmission: null,
+    localLexicalPlan: null,
     researchEngineOk: false,
     researchEngineProviders: [],
     publicRssOk: false,

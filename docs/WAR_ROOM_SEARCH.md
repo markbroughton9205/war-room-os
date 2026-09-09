@@ -275,12 +275,27 @@ Semantic nearest-neighbor search no longer promotes an unrelated closest vector 
 
 If FTS has no hit and semantic candidates fail the gate, `WAR_ROOM_LOCAL` returns zero local results with `semanticAdmission.abstained=true`. That is healthy. Semantic infrastructure can remain `available` while a query abstains.
 
-FTS still ANDs tokens (max 8). `reserved DNS names and LIV Golf` can therefore have no lexical hit even when both topics exist in the corpus. Lexical query planning is a later build.
+Stage 4D adds deterministic lexical query planning in front of SQLite FTS5. User text is never sent raw into `MATCH`. Strict AND is tried first. If that returns nothing, a bounded relaxed plan may OR connector-split groups that each have at least two content tokens. Stop words removed from planning: `and`, `or`, `the`, `for`, `of`, `in`, `to`. Plan names (`STRICT` / `RELAXED`) are retrieval diagnostics only — not publishers, not evidence sources.
 
 Rejected semantic candidates do not enter RRF and do not become Council evidence.
 
 ```
 pnpm run validate:sovereign-search-stage4c
 pnpm run validate:sovereign-search-stage4c:live
+pnpm run validate:sovereign-search-stage4d
+pnpm run validate:sovereign-search-stage4d:live
+```
+
+### Stage 4D — lexical query planning and mixed-intent retrieval
+
+SQLite FTS no longer requires every query token to appear in one document before mixed-topic retrieval can succeed. Example: `reserved DNS names and LIV Golf` is planned as `(reserved AND DNS AND names) OR (LIV AND Golf)` after the connector `and` is removed. Exact queries such as `RFC 2606` still use the strict plan when it already returns hits.
+
+Lexical BM25 and semantic cosine remain separate scales. RRF still fuses the two lists. Semantic abstention stays on retrieval profile `wr-retrieval-v4c.1` at cosine `0.61`.
+
+Diagnostics: `lexicalPlan` (`planUsed`, `strictCandidateCount`, `relaxedCandidateCount`, `termsUsed`, `phrasesUsed`, `relaxationApplied`). No raw SQL is exposed.
+
+```
+pnpm run validate:sovereign-search-stage4d
+pnpm run validate:sovereign-search-stage4d:live
 ```
 

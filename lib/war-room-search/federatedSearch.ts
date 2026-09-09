@@ -422,6 +422,7 @@ export async function federatedSearch(
     warRoomLocalWarning: warRoomLocal.ok ? undefined : warRoomLocal.warningCode ?? warRoomLocal.error,
     localSemantic: warRoomLocal.localSemantic ?? null,
     localSemanticAdmission: warRoomLocal.localSemanticAdmission ?? null,
+    localLexicalPlan: warRoomLocal.localLexicalPlan ?? null,
     researchEngineOk: researchEngine.ok,
     researchEngineProviders: researchEngine.providerIds,
     publicRssOk: publicRss.ok,

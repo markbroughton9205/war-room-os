@@ -1,4 +1,5 @@
 import type { CrawlDocumentRecord } from '../crawler/types'
+import type { LocalLexicalPlan } from '../crawler/lexicalPlan'
 
 export const CHUNKING_VERSION = 'wr-chunk-v1'
 export const TARGET_CHUNK_CHARS = 720
@@ -151,6 +152,7 @@ export type HybridSearchResult = {
   semanticQueryMs: number | null
   dimensionMismatchCount: number
   semanticAdmission: LocalSemanticAdmission
+  lexicalPlan: LocalLexicalPlan
 }
 
 export type IndexDocumentsResult = {
