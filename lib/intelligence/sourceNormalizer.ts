@@ -1,6 +1,7 @@
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 import { detectWeakSignal } from '@/lib/intelligence/signalDetection'
 import type {
+  EvidenceDiscoveryProvider,
   EvidenceFreshness,
   IntelligenceEvidenceItem,
 } from '@/lib/intelligence/intelligencePacket'
@@ -20,6 +21,14 @@ export type RawIntelligenceFinding = {
   observed_at?: string
   published_at?: string
   score?: number
+  publisher?: string
+  language?: string
+  region?: string
+  discovered_via?: EvidenceDiscoveryProvider
+  discovery_rank?: number
+  also_discovered_via?: EvidenceDiscoveryProvider[]
+  upstream_engines?: string[]
+  category?: string
 }
 
 export type RawIntelligenceSourceRecord = {
@@ -91,11 +100,12 @@ export function normalizeSourceEvidence(
       const signal = detectWeakSignal({ source, title, content })
       const retrievedAt = finding.observed_at ?? record.queried_at
       const freshness = freshnessFromObservedAt(retrievedAt, nowIso, finding.published_at)
+      const publisher = toDisplayText(finding.publisher)
       items.push({
         id: `${record.source_id}-${index + 1}`,
         source_id: source.source_id,
         source_type: source.source_type as IntelligenceSourceType,
-        source_label: source.label,
+        source_label: publisher || source.label,
         verified_level: source.verified_level as SourceVerifiedLevel,
         title,
         ...(finding.url ? { url: finding.url } : {}),
@@ -115,6 +125,12 @@ export function normalizeSourceEvidence(
         // This function's only caller is the live research router (Tavily/RSS/weather/Grok) — every
         // item it produces was fetched live from the open web this round, never replayed from storage.
         origin_type: 'LIVE_WEB',
+        ...(finding.language ? { original_language: finding.language, language: finding.language } : {}),
+        ...(finding.region ? { region: finding.region } : {}),
+        ...(finding.discovered_via ? { discovered_via: finding.discovered_via } : {}),
+        ...(typeof finding.discovery_rank === 'number' ? { discovery_rank: finding.discovery_rank } : {}),
+        ...(finding.also_discovered_via?.length ? { also_discovered_via: finding.also_discovered_via } : {}),
+        ...(finding.upstream_engines?.length ? { upstream_engines: finding.upstream_engines } : {}),
       })
     })
   }

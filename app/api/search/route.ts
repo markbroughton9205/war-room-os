@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import { searchAcrossCategories } from '@/lib/search/query'
 import type { SearchCategory } from '@/lib/search/types'
 import { federatedSearch } from '@/lib/war-room-search/federatedSearch'
+import { clientIpFromRequestHeaders } from '@/lib/war-room-search/providers/googleWebSearch'
 import { isSearchRequestEmpty } from '@/lib/war-room-search/searchQuery'
-import type { SearchRequest, SearchRequestOptions } from '@/lib/war-room-search/types'
+import { emptySearchSourceSummary, type SearchRequest, type SearchRequestOptions } from '@/lib/war-room-search/types'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -55,7 +56,10 @@ export async function POST(req: Request) {
   const request: SearchRequest = { query, options }
 
   try {
-    const result = await federatedSearch(request, { signal: req.signal })
+    const result = await federatedSearch(request, {
+      signal: req.signal,
+      userIp: clientIpFromRequestHeaders(req.headers),
+    })
     if (result.aborted && result.resultCount === 0) {
       return NextResponse.json(result, { status: 499 })
     }
@@ -70,15 +74,7 @@ export async function POST(req: Request) {
         rawCount: 0,
         deduplicatedCount: 0,
         results: [],
-        sourceSummary: {
-          tavilyOk: false,
-          researchEngineOk: false,
-          researchEngineProviders: [],
-          publicRssOk: false,
-          primaryAttempted: [],
-          primaryOk: false,
-          genericRssUsedAsFallback: false,
-        },
+        sourceSummary: emptySearchSourceSummary(),
         fallbackUsed: false,
         warnings: ['Search aborted.'],
         aborted: true,
@@ -93,17 +89,9 @@ export async function POST(req: Request) {
       rawCount: 0,
       deduplicatedCount: 0,
       results: [],
-      sourceSummary: {
-        tavilyOk: false,
-        researchEngineOk: false,
-        researchEngineProviders: [],
-        publicRssOk: false,
-        primaryAttempted: [],
-        primaryOk: false,
-        genericRssUsedAsFallback: false,
-      },
+      sourceSummary: emptySearchSourceSummary(),
       fallbackUsed: false,
-      warnings: [message.replace(/(?:sk-|Bearer\s+)[A-Za-z0-9._-]+/gi, '[redacted]')],
+      warnings: [message.replace(/(?:sk-|Bearer\s+|AIza)[A-Za-z0-9._-]+/gi, '[redacted]')],
       aborted: false,
       timedOut: false,
       profile: 'STANDARD_RESEARCH',

@@ -1,4 +1,4 @@
-import type { IntelligenceEvidenceItem, SourceAuthorityClass } from '@/lib/intelligence/intelligencePacket'
+import type { EvidenceDiscoveryProvider, IntelligenceEvidenceItem, SourceAuthorityClass } from '@/lib/intelligence/intelligencePacket'
 import { hostnameFromUrl } from '@/lib/intelligence/canonicalUrl'
 import type { SearchAlsoReportedBy, SearchRankBreakdown, SearchResult, SearchSort, SearchSourceTypeFilter } from './types'
 import type { NormalizedSearchRequest } from './searchQuery'
@@ -17,6 +17,12 @@ function queryTokens(query: string): string[] {
     .filter(token => token.length > 2 && !STOP.has(token))
 }
 
+function discoveryRankHint(item: IntelligenceEvidenceItem): number {
+  const rank = item.discovery_rank
+  if (typeof rank !== 'number' || !Number.isFinite(rank) || rank < 1) return 0
+  return Math.max(0, (11 - Math.min(rank, 10)) / 10) * 0.05
+}
+
 function relevanceToQuery(query: string, item: IntelligenceEvidenceItem): number {
   const tokens = queryTokens(query)
   if (!tokens.length) return 0.2
@@ -27,7 +33,8 @@ function relevanceToQuery(query: string, item: IntelligenceEvidenceItem): number
   }
   const title = (item.title ?? '').toLowerCase()
   const titleHits = tokens.filter(token => title.includes(token)).length
-  return Math.min(1, hits / tokens.length * 0.72 + titleHits / tokens.length * 0.28)
+  const lexical = hits / tokens.length * 0.72 + titleHits / tokens.length * 0.28
+  return Math.min(1, lexical + discoveryRankHint(item))
 }
 
 function authorityScore(authority: SourceAuthorityClass | null | undefined): number {
@@ -137,9 +144,21 @@ export function collapseToClusterHeads(items: IntelligenceEvidenceItem[]): {
   const heads: IntelligenceEvidenceItem[] = []
   const alsoReportedBy = new Map<string, SearchAlsoReportedBy>()
   for (const members of byCluster.values()) {
-    const head = members.find(item => item.id === item.cluster_head_id) ?? members[0]!
+    const rawHead = members.find(item => item.id === item.cluster_head_id) ?? members[0]!
+    const others = members.filter(item => item.id !== rawHead.id)
+    const discovered = [...new Set(
+      members
+        .map(item => item.discovered_via)
+        .filter((value): value is EvidenceDiscoveryProvider => Boolean(value)),
+    )]
+    const alsoDiscovered = discovered.filter(value => value !== rawHead.discovered_via)
+    const upstreamEngines = [...new Set(members.flatMap(item => item.upstream_engines ?? []))]
+    const head: IntelligenceEvidenceItem = {
+      ...rawHead,
+      also_discovered_via: alsoDiscovered.length ? alsoDiscovered : rawHead.also_discovered_via ?? null,
+      upstream_engines: upstreamEngines.length ? upstreamEngines : rawHead.upstream_engines ?? null,
+    }
     heads.push(head)
-    const others = members.filter(item => item.id !== head.id)
     if (others.length) {
       const publishers = [...new Set(others.map(item => item.source_label || hostnameFromUrl(item.url) || item.source_family || 'source').filter(Boolean))]
       alsoReportedBy.set(head.id, { count: others.length, publishers: publishers.slice(0, 6) })

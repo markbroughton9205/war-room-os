@@ -15,6 +15,10 @@ phases, and `RESEARCH_ENGINE_RUNBOOK.md` for how to add the rest.
 These docs use the following terms precisely and do not use them
 interchangeably:
 
+- **War Room Search discovery provider** — Tavily, Google Web Search, or
+  SearXNG in `lib/war-room-search`. These find pages for the existing search /
+  live-research orchestrator. They are not Research Engine adapters. See
+  `docs/WAR_ROOM_SEARCH.md`.
 - **Registered provider ID** — a `ResearchProviderId` with a descriptor in
   `config/providerEnv.ts::RESEARCH_PROVIDER_ENV`. All 29 spec providers are
   registered; registration alone makes configuration status visible but

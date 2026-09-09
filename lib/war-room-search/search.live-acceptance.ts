@@ -102,7 +102,18 @@ export async function runWarRoomSearchLiveAcceptance(): Promise<CaseResult[]> {
   const east = await search(EAST, { limit: 16, region: 'EAST_ASIA' })
   cases.push(check('live_east_01_region_attempted', east.sourceSummary.region === 'EAST_ASIA' && east.sourceSummary.primaryAttempted.length > 0, JSON.stringify(east.sourceSummary), 'REAL LIVE WEB'))
   cases.push(check('live_east_02_honest_fallback', typeof east.sourceSummary.genericRssUsedAsFallback === 'boolean', String(east.fallbackUsed), 'REAL LIVE WEB'))
-  cases.push(check('live_east_03_results_or_honest_empty', east.resultCount > 0 || east.warnings.length > 0, `count=${east.resultCount} warnings=${east.warnings.join(' | ')}`, 'REAL LIVE WEB'))
+  cases.push(check(
+    'live_east_03_results_or_honest_empty',
+    east.resultCount > 0 || east.warnings.length > 0,
+    `count=${east.resultCount} warnings=${east.warnings.join(' | ')}`,
+    'REAL LIVE WEB',
+  ))
+  cases.push(check(
+    'live_google_01_status_honest',
+    typeof east.sourceSummary.googleOk === 'boolean',
+    JSON.stringify({ googleOk: semi.sourceSummary.googleOk, warning: semi.sourceSummary.googleWarning }),
+    'REAL LIVE WEB',
+  ))
 
   const japan = await search(JAPAN, { limit: 8 })
   cases.push(check(

@@ -26,6 +26,10 @@ async function synthesizeWithGemini(args: {
     .slice(0, 5)
     .map(r => `TITLE: ${r.title}\nURL: ${r.url}\nSNIPPET: ${r.snippet}`)
     .join('\n---\n')
+  const sLines = (router.searxng?.results ?? [])
+    .slice(0, 5)
+    .map(r => `TITLE: ${r.title}\nURL: ${r.url}\nENGINES: ${r.upstreamEngines.join(', ') || 'searxng'}\nSNIPPET: ${r.snippet}`)
+    .join('\n---\n')
   const dLines = router.direct
     .filter(d => d.ok && d.contentSnippet)
     .map(d => `URL: ${d.url}\nTEXT: ${d.contentSnippet.slice(0, 1200)}`)
@@ -48,6 +52,9 @@ async function synthesizeWithGemini(args: {
     'TAVILY_RESULTS:',
     tLines || '(none)',
     '',
+    'SEARXNG_RESULTS:',
+    sLines || '(none)',
+    '',
     'RESEARCH_ENGINE_BRIDGE_RESULTS:',
     bridgeLines || '(none)',
     '',
@@ -65,7 +72,7 @@ async function synthesizeWithGemini(args: {
 
   const system = `You are Gemini Family in War Room **secondary verification / synthesis** for live research.
 Rules:
-- Use ONLY facts supported by the pasted bundle (TAVILY_RESULTS, RESEARCH_ENGINE_BRIDGE_RESULTS, PUBLIC_RSS_RESULTS, DIRECT_FETCH, GROK_FRAMING). GROK_FRAMING is not web search output — treat it as hypothesis-level only.
+- Use ONLY facts supported by the pasted bundle (TAVILY_RESULTS, SEARXNG_RESULTS, RESEARCH_ENGINE_BRIDGE_RESULTS, PUBLIC_RSS_RESULTS, DIRECT_FETCH, GROK_FRAMING). GROK_FRAMING is not web search output — treat it as hypothesis-level only.
 - Never invent URLs, publishers, dates, or quotes.
 - End your reply with exactly these three lines:
 CONTRADICTIONS: item1 || item2 || NONE
@@ -91,6 +98,10 @@ function fallbackFindings(router: LiveResearchRouterResult): string {
   if (router.tavily.ok && router.tavily.results[0]) {
     const r = router.tavily.results[0]!
     bits.push(`Primary search hit: ${r.title} — ${r.snippet.slice(0, 420)}`)
+  }
+  if (router.searxng?.ok && router.searxng.results[0]) {
+    const r = router.searxng.results[0]!
+    bits.push(`SearXNG discovery hit (${r.upstreamEngines.join(', ') || 'federated'}): ${r.title} — ${r.snippet.slice(0, 420)}`)
   }
   const bridgeSucceeded = router.researchEngine.attempted && router.researchEngine.ok
   for (const doc of router.researchEngine.documents.slice(0, 6)) {
@@ -133,6 +144,7 @@ export function rawIntelligenceFromRouter(router: LiveResearchRouterResult): Raw
       content: doc.summary ?? doc.contentSnippet ?? doc.title,
       observed_at: doc.retrievedAt || router.generatedAt,
       ...(doc.publishedAt ? { published_at: doc.publishedAt } : {}),
+      discovered_via: 'RESEARCH_ENGINE' as const,
     })),
     error: result.error,
     failure_behavior: 'skip',
@@ -148,10 +160,54 @@ export function rawIntelligenceFromRouter(router: LiveResearchRouterResult): Raw
         url: result.url,
         content: result.snippet,
         observed_at: router.generatedAt,
+        discovered_via: 'TAVILY' as const,
       })),
       error: router.tavily.error,
       failure_behavior: 'degrade',
     },
+    ...(router.googleWebSearch
+      ? [{
+          source_id: 'google_web_search',
+          ok: router.googleWebSearch.ok && router.googleWebSearch.results.length > 0,
+          queried_at: router.generatedAt,
+          findings: router.googleWebSearch.results.map(result => ({
+            title: result.title,
+            url: result.url,
+            content: result.snippet,
+            observed_at: router.generatedAt,
+            ...(result.publishedAt ? { published_at: result.publishedAt } : {}),
+            publisher: result.displayUrl ?? undefined,
+            ...(result.language ? { language: result.language } : {}),
+            ...(result.region ? { region: result.region } : {}),
+            discovered_via: 'GOOGLE' as const,
+            ...(typeof result.providerRank === 'number' ? { discovery_rank: result.providerRank } : {}),
+          })),
+          error: router.googleWebSearch.error,
+          failure_behavior: 'degrade' as const,
+        }]
+      : []),
+    ...(router.searxng
+      ? [{
+          source_id: 'searxng',
+          ok: router.searxng.ok && router.searxng.results.length > 0,
+          queried_at: router.generatedAt,
+          findings: router.searxng.results.map(result => ({
+            title: result.title,
+            url: result.url,
+            content: result.snippet,
+            observed_at: router.generatedAt,
+            ...(result.publishedAt ? { published_at: result.publishedAt } : {}),
+            publisher: result.sourceDomain ?? undefined,
+            ...(result.language ? { language: result.language } : {}),
+            discovered_via: 'SEARXNG' as const,
+            ...(typeof result.providerRank === 'number' ? { discovery_rank: result.providerRank } : {}),
+            ...(result.upstreamEngines.length ? { upstream_engines: result.upstreamEngines } : {}),
+            ...(result.category ? { category: result.category } : {}),
+          })),
+          error: router.searxng.error,
+          failure_behavior: 'degrade' as const,
+        }]
+      : []),
     ...bridgeRecords,
     {
       source_id: 'public_news_rss',
@@ -164,6 +220,7 @@ export function rawIntelligenceFromRouter(router: LiveResearchRouterResult): Raw
             content: result.snippet,
             observed_at: router.generatedAt,
             ...(result.publishedAt ? { published_at: result.publishedAt } : {}),
+            discovered_via: 'RSS' as const,
           }))
         : [],
       error: bridgeSucceeded ? 'skipped: a more relevant bridged research-engine source was used instead' : router.publicRss.error,

@@ -48,6 +48,10 @@ export function evidenceFromSearchResults(results: SearchResult[]): Intelligence
         primary_source: result.primarySource,
         independence_key: result.independenceKey,
         jurisdiction: result.jurisdiction,
+        discovered_via: result.discoveredVia,
+        also_discovered_via: result.alsoDiscoveredVia,
+        discovery_rank: result.evidence.discovery_rank,
+        upstream_engines: result.upstreamEngines,
       } satisfies IntelligenceEvidenceItem
     })
     .filter((item): item is IntelligenceEvidenceItem => Boolean(item))
@@ -85,10 +89,18 @@ export function buildSearchHandoffEvidencePacket(payload: SearchCouncilHandoffPa
     urls: urls.slice(0, 12),
     note: 'war_room_search_handoff',
   }]
-  const tavilyUrls = results.filter(result => result.evidence.source_id === 'tavily').map(result => result.url).filter((url): url is string => Boolean(url))
-  const rssUrls = results.filter(result => result.evidence.source_id === 'public_news_rss').map(result => result.url).filter((url): url is string => Boolean(url))
+  const tavilyUrls = results.filter(result => result.discoveredVia === 'TAVILY' || result.evidence.source_id === 'tavily').map(result => result.url).filter((url): url is string => Boolean(url))
+  const googleUrls = results.filter(result => result.discoveredVia === 'GOOGLE' || result.evidence.source_id === 'google_web_search').map(result => result.url).filter((url): url is string => Boolean(url))
+  const searxngUrls = results.filter(result => result.discoveredVia === 'SEARXNG' || result.evidence.source_id === 'searxng').map(result => result.url).filter((url): url is string => Boolean(url))
+  const rssUrls = results.filter(result => result.discoveredVia === 'RSS' || result.evidence.source_id === 'public_news_rss').map(result => result.url).filter((url): url is string => Boolean(url))
   if (tavilyUrls.length) {
     sources.push({ kind: 'tavily', ok: true, queriedAt: generatedAt, urls: tavilyUrls.slice(0, 8), note: 'war_room_search_handoff' })
+  }
+  if (googleUrls.length) {
+    sources.push({ kind: 'google_web_search', ok: true, queriedAt: generatedAt, urls: googleUrls.slice(0, 8), note: 'war_room_search_handoff_discovery_only' })
+  }
+  if (searxngUrls.length) {
+    sources.push({ kind: 'searxng', ok: true, queriedAt: generatedAt, urls: searxngUrls.slice(0, 8), note: 'war_room_search_handoff_discovery_only' })
   }
   if (rssUrls.length) {
     sources.push({ kind: 'public_rss', ok: true, queriedAt: generatedAt, urls: rssUrls.slice(0, 8), note: 'war_room_search_handoff' })
@@ -130,7 +142,9 @@ export function buildSearchHandoffEvidencePacket(payload: SearchCouncilHandoffPa
     intelligencePacket,
     honestyNotes: [
       'Evidence originated from War Room Search retrieval, not a new parallel research engine.',
-      'Preserve origin_type, canonical_url, content_hash, source_family, cluster identity, and independence_key.',
+      'Preserve origin_type, canonical_url, content_hash, source_family, cluster identity, independence_key, and discovered_via.',
+      'discovered_via names the search service that found the page; it is not the publisher or an independent evidence source.',
+      'SearXNG is a federated discovery provider. Upstream engines (brave, duckduckgo, …) and other discovery providers that found the same URL are provenance, not extra independent evidence.',
     ],
   }
 }

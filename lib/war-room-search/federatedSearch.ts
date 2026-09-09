@@ -19,11 +19,24 @@ import {
   secondaryRssCategoriesForRegion,
 } from '@/lib/research/sourceTerritories'
 import type { PublicNewsCategory } from '@/lib/research/publicRssFeeds'
+import { stampDiscoveryProvenance } from './discoveryProvider'
+import {
+  dateRestrictFromSearchRange,
+  emptyGoogleWebSearchLeg,
+  runGoogleWebSearch,
+  type GoogleWebSearchLeg,
+} from './providers/googleWebSearch'
+import {
+  emptySearxngLeg,
+  runSearxngSearch,
+  searxngTimeRangeFromDate,
+  type SearxngLeg,
+} from './providers/searxng'
 import { rankSearchResults } from './rankResults'
 import { isSearchRequestEmpty, normalizeSearchRequest } from './searchQuery'
-import type { FederatedSearchResponse, SearchRequest, SearchSourceSummary } from './types'
+import { emptySearchSourceSummary, type FederatedSearchResponse, type SearchRequest, type SearchSourceSummary } from './types'
 
-const SECRET_VALUE = /(?:sk-|Bearer\s+)[A-Za-z0-9._-]+/g
+const SECRET_VALUE = /(?:sk-|Bearer\s+|AIza)[A-Za-z0-9._-]+/g
 
 function categoriesForSearch(query: string): PublicNewsCategory[] {
   const cats = new Set<PublicNewsCategory>(['world', 'news'])
@@ -48,6 +61,14 @@ function emptyRss(): PublicRssLeg {
 
 function emptyTavily(): TavilyLeg {
   return { ok: false, results: [], durationMs: 0, error: 'not_started' }
+}
+
+function emptyGoogle(): GoogleWebSearchLeg {
+  return emptyGoogleWebSearchLeg('not_started', 'GOOGLE_UNAVAILABLE')
+}
+
+function emptySearxng(): SearxngLeg {
+  return emptySearxngLeg('not_started', 'SEARXNG_NOT_CONFIGURED')
 }
 
 async function runTavilyLeg(query: string): Promise<TavilyLeg> {
@@ -86,15 +107,7 @@ function abortedResponse(query: string, started: number, warnings: string[]): Fe
     rawCount: 0,
     deduplicatedCount: 0,
     results: [],
-    sourceSummary: {
-      tavilyOk: false,
-      researchEngineOk: false,
-      researchEngineProviders: [],
-      publicRssOk: false,
-      primaryAttempted: [],
-      primaryOk: false,
-      genericRssUsedAsFallback: false,
-    },
+    sourceSummary: emptySearchSourceSummary(),
     fallbackUsed: false,
     warnings: sanitizeWarnings(warnings),
     aborted: true,
@@ -105,7 +118,7 @@ function abortedResponse(query: string, started: number, warnings: string[]): Fe
 
 export async function federatedSearch(
   input: SearchRequest,
-  opts?: { signal?: AbortSignal },
+  opts?: { signal?: AbortSignal; userIp?: string | null },
 ): Promise<FederatedSearchResponse> {
   const started = Date.now()
   const request = normalizeSearchRequest(input)
@@ -117,15 +130,7 @@ export async function federatedSearch(
       rawCount: 0,
       deduplicatedCount: 0,
       results: [],
-      sourceSummary: {
-        tavilyOk: false,
-        researchEngineOk: false,
-        researchEngineProviders: [],
-        publicRssOk: false,
-        primaryAttempted: [],
-        primaryOk: false,
-        genericRssUsedAsFallback: false,
-      },
+      sourceSummary: emptySearchSourceSummary(),
       fallbackUsed: false,
       warnings: ['Query is required.'],
       aborted: false,
@@ -148,6 +153,8 @@ export async function federatedSearch(
   const wantsWeather = evaluateMandatoryLiveRetrieval(request.query).reasons.includes('weather')
 
   let tavily: TavilyLeg = emptyTavily()
+  let google: GoogleWebSearchLeg = emptyGoogle()
+  let searxng: SearxngLeg = emptySearxng()
   let publicRss: PublicRssLeg = emptyRss()
   const emptyEngine = (): ResearchEngineBridgeLeg => ({
     domain,
@@ -161,10 +168,44 @@ export async function federatedSearch(
 
   // Retrieval-heavy only — Grok framing, Gemini synthesis, and Council seats are not invoked.
   const tavilyBox: { value?: TavilyLeg } = {}
+  const googleBox: { value?: GoogleWebSearchLeg } = {}
+  const searxngBox: { value?: SearxngLeg } = {}
   const rssBox: { value?: PublicRssLeg } = {}
   const engineBox: { value?: ResearchEngineBridgeLeg } = {}
 
   const tavilyP = runTavilyLeg(request.query).then(value => { tavilyBox.value = value; return value })
+  const googleP = runGoogleWebSearch(request.query, {
+    pageSize: request.limit,
+    safeSearch: request.safeSearch,
+    languageCode: queryLanguage,
+    regionCode: locale.gl,
+    dateRestrict: dateRestrictFromSearchRange(request.dateRange?.from, request.dateRange?.to),
+    userIp: opts?.userIp ?? null,
+    signal,
+  }).then(value => { googleBox.value = value; return value }, error => {
+    const failed = emptyGoogleWebSearchLeg(
+      'GOOGLE_UNAVAILABLE',
+      /timeout|abort/i.test(error instanceof Error ? error.message : String(error)) ? 'GOOGLE_TIMEOUT' : 'GOOGLE_UNAVAILABLE',
+    )
+    failed.configured = true
+    googleBox.value = failed
+    return failed
+  })
+  const searxngP = runSearxngSearch(request.query, {
+    pageSize: request.limit,
+    safeSearch: request.safeSearch,
+    language: queryLanguage,
+    timeRange: searxngTimeRangeFromDate(request.dateRange?.from),
+    signal,
+  }).then(value => { searxngBox.value = value; return value }, error => {
+    const failed = emptySearxngLeg(
+      'SEARXNG_UNREACHABLE',
+      /timeout|abort/i.test(error instanceof Error ? error.message : String(error)) ? 'SEARXNG_TIMEOUT' : 'SEARXNG_UNREACHABLE',
+    )
+    failed.configured = true
+    searxngBox.value = failed
+    return failed
+  })
   const engineP = runResearchEngineBridge({
     queryText: request.query,
     domain,
@@ -208,20 +249,26 @@ export async function federatedSearch(
     : new Promise<'aborted'>(() => undefined)
 
   const settled = await Promise.race([
-    Promise.allSettled([tavilyP, engineP, rssP, weatherP]).then(() => 'complete' as const),
+    Promise.allSettled([tavilyP, googleP, searxngP, engineP, rssP, weatherP]).then(() => 'complete' as const),
     timeout,
     abortWatch,
   ])
 
   if (settled === 'aborted') {
     aborted = true
-    if (!tavilyBox.value && !engineBox.value && !rssBox.value) {
+    if (!tavilyBox.value && !googleBox.value && !searxngBox.value && !engineBox.value && !rssBox.value) {
       return abortedResponse(request.query, started, ['Search aborted; no stale results published.'])
     }
   }
   if (settled === 'timeout') timedOut = true
 
   tavily = tavilyBox.value ?? emptyTavily()
+  google = googleBox.value ?? (timedOut
+    ? { ...emptyGoogle(), error: 'GOOGLE_TIMEOUT', warningCode: 'GOOGLE_TIMEOUT' }
+    : emptyGoogle())
+  searxng = searxngBox.value ?? (timedOut
+    ? { ...emptySearxng(), error: 'SEARXNG_TIMEOUT', warningCode: 'SEARXNG_TIMEOUT', configured: true }
+    : emptySearxng())
   publicRss = rssBox.value ?? emptyRss()
   researchEngine = engineBox.value ?? emptyEngine()
   const weatherAlerts = settled === 'complete'
@@ -255,7 +302,7 @@ export async function federatedSearch(
       : 'No live regional-primary adapter succeeded; region-specific secondary sources used. Do not claim primary coverage.'
   }
 
-  if (signal?.aborted && !tavily.ok && !researchEngine.ok && !publicRss.ok) {
+  if (signal?.aborted && !tavily.ok && !google.ok && !searxng.ok && !researchEngine.ok && !publicRss.ok) {
     return abortedResponse(request.query, started, ['Search aborted; no stale results published.'])
   }
 
@@ -263,6 +310,8 @@ export async function federatedSearch(
     generatedAt,
     searchQuery: request.query,
     tavily,
+    googleWebSearch: google,
+    searxng,
     publicRss,
     weatherAlerts,
     grok: { ok: false, text: '' },
@@ -270,9 +319,9 @@ export async function federatedSearch(
     retrieval: buildRetrievalOrchestration({
       decree: request.query,
       generatedAt,
-      tavilyOk: (tavily.ok && tavily.results.length > 0) || publicRss.ok || researchEngine.ok,
-      tavilyLatencyMs: Math.min(tavily.durationMs || request.timeoutMs, publicRss.durationMs || request.timeoutMs),
-      tavilyError: tavily.ok || publicRss.ok ? undefined : [tavily.error, publicRss.error].filter(Boolean).join(' | '),
+      tavilyOk: (tavily.ok && tavily.results.length > 0) || (google.ok && google.results.length > 0) || (searxng.ok && searxng.results.length > 0) || publicRss.ok || researchEngine.ok,
+      tavilyLatencyMs: Math.min(tavily.durationMs || request.timeoutMs, google.durationMs || request.timeoutMs, searxng.durationMs || request.timeoutMs, publicRss.durationMs || request.timeoutMs),
+      tavilyError: tavily.ok || google.ok || searxng.ok || publicRss.ok ? undefined : [tavily.error, google.error, searxng.error, publicRss.error].filter(Boolean).join(' | '),
       grokOk: false,
       grokError: undefined,
       directOk: false,
@@ -286,7 +335,7 @@ export async function federatedSearch(
       primaryLiveAvailable,
       secondaryAttempted: request.region ? [`google_news:${locale.gl}`, ...regionalCategories] : ['trusted_rss', 'google_news:US'],
       genericRssUsedAsFallback,
-      genericRssWasSoleSource: Boolean(request.region) && genericRssUsedAsFallback && !primaryOk && !tavily.ok,
+      genericRssWasSoleSource: Boolean(request.region) && genericRssUsedAsFallback && !primaryOk && !tavily.ok && !google.ok && !searxng.ok,
       fallbackReason,
       nativeLanguageRetrieval: Boolean(
         request.region
@@ -305,7 +354,7 @@ export async function federatedSearch(
     unsupportedClaims: [],
     retrieval: router.retrieval,
   })
-  const { items } = clusterIndependentEvidence(annotateEvidenceIndependence(intelligencePacket.evidence, {
+  const { items } = clusterIndependentEvidence(annotateEvidenceIndependence(stampDiscoveryProvenance(intelligencePacket.evidence), {
     region: request.region ?? null,
     queryLanguage,
     fallbackUsed: genericRssUsedAsFallback,
@@ -318,6 +367,10 @@ export async function federatedSearch(
 
   const warnings: string[] = []
   if (!tavily.ok && tavily.error) warnings.push(`Web search unavailable: ${tavily.error}`)
+  if (!google.ok && google.warningCode) warnings.push(google.warningCode)
+  else if (!google.ok && google.error) warnings.push(google.error)
+  if (!searxng.ok && searxng.configured && searxng.warningCode) warnings.push(searxng.warningCode)
+  else if (!searxng.ok && searxng.configured && searxng.error) warnings.push(searxng.error)
   if (researchEngine.attempted && !researchEngine.ok) {
     const engineErrors = researchEngine.results.map(r => r.error).filter(Boolean)
     if (engineErrors.length) warnings.push(`Primary adapters: ${engineErrors.slice(0, 3).join(' | ')}`)
@@ -329,8 +382,12 @@ export async function federatedSearch(
   if (aborted) warnings.push('Search aborted after partial retrieval.')
   if (!visible.length) warnings.push('No live results matched this query.')
 
-  const sourceSummary: SearchSourceSummary = {
+  const sourceSummary: SearchSourceSummary = emptySearchSourceSummary({
     tavilyOk: tavily.ok && tavily.results.length > 0,
+    googleOk: google.ok && google.results.length > 0,
+    googleWarning: google.ok ? undefined : google.warningCode ?? google.error,
+    searxngOk: searxng.ok && searxng.results.length > 0,
+    searxngWarning: searxng.ok ? undefined : searxng.warningCode ?? searxng.error,
     researchEngineOk: researchEngine.ok,
     researchEngineProviders: researchEngine.providerIds,
     publicRssOk: publicRss.ok,
@@ -339,7 +396,7 @@ export async function federatedSearch(
     primaryOk,
     genericRssUsedAsFallback,
     fallbackReason,
-  }
+  })
 
   return {
     query: request.query,

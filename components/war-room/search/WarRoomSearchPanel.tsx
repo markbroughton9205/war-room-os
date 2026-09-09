@@ -305,6 +305,19 @@ function SearchResultRow({ result }: { result: SearchResult }) {
         {result.alsoReportedBy ? (
           <span className="text-slate-500">Also reported by {result.alsoReportedBy.count} other source{result.alsoReportedBy.count === 1 ? '' : 's'}</span>
         ) : null}
+        {result.discoveredVia === 'GOOGLE' ? (
+          <span className="font-medium normal-case tracking-normal text-slate-600" data-testid="war-room-search-discovered-via">Found via Google</span>
+        ) : null}
+        {result.discoveredVia === 'SEARXNG' ? (
+          <span className="font-medium normal-case tracking-normal text-slate-600" data-testid="war-room-search-discovered-via-searxng">
+            Found via SearXNG{result.upstreamEngines?.length ? ` (${result.upstreamEngines.slice(0, 4).join(', ')})` : ''}
+          </span>
+        ) : null}
+        {result.alsoDiscoveredVia?.length ? (
+          <span className="font-medium normal-case tracking-normal text-slate-600">
+            Also discovered via {result.alsoDiscoveredVia.join(', ')}
+          </span>
+        ) : null}
       </div>
     </li>
   )

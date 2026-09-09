@@ -1,5 +1,6 @@
 import type { GeographicRegion } from '@/lib/council/scout-swarm/types'
 import type {
+  EvidenceDiscoveryProvider,
   EvidenceFreshness,
   EvidenceOriginType,
   IntelligenceEvidenceItem,
@@ -95,12 +96,22 @@ export type SearchResult = {
   alsoReportedBy: SearchAlsoReportedBy | null
   contentHash: string | null
   jurisdiction: string | null
+  /** Which search service found the page — not the publisher. */
+  discoveredVia: EvidenceDiscoveryProvider | null
+  /** Other discovery services that also surfaced this canonical URL. Not independent evidence. */
+  alsoDiscoveredVia: EvidenceDiscoveryProvider[] | null
+  /** Upstream engines (e.g. SearXNG → brave) that surfaced this URL. Not publisher families. */
+  upstreamEngines: string[] | null
   /** Full Build #6 evidence item for Council handoff. Never flattened to text-only. */
   evidence: IntelligenceEvidenceItem
 }
 
 export type SearchSourceSummary = {
   tavilyOk: boolean
+  googleOk: boolean
+  googleWarning?: string
+  searxngOk: boolean
+  searxngWarning?: string
   researchEngineOk: boolean
   researchEngineProviders: string[]
   publicRssOk: boolean
@@ -109,6 +120,21 @@ export type SearchSourceSummary = {
   primaryOk: boolean
   genericRssUsedAsFallback: boolean
   fallbackReason?: string
+}
+
+export function emptySearchSourceSummary(overrides?: Partial<SearchSourceSummary>): SearchSourceSummary {
+  return {
+    tavilyOk: false,
+    googleOk: false,
+    searxngOk: false,
+    researchEngineOk: false,
+    researchEngineProviders: [],
+    publicRssOk: false,
+    primaryAttempted: [],
+    primaryOk: false,
+    genericRssUsedAsFallback: false,
+    ...overrides,
+  }
 }
 
 export type FederatedSearchResponse = {

@@ -1,0 +1,44 @@
+# Local-only War Room Stage 2B SearXNG overlay.
+# Relies on official defaults from searxng/searxng settings.yml.
+# JSON format is required by the War Room adapter (GET /search?format=json).
+# Engines kept conservative: no paid credentials, no CAPTCHA-prone defaults.
+
+use_default_settings:
+  engines:
+    keep_only:
+      - duckduckgo
+      - brave
+      - wikipedia
+      - wikidata
+
+general:
+  instance_name: "War Room SearXNG (local)"
+  enable_metrics: false
+  donation_url: false
+  contact_url: false
+  privacypolicy_url: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+server:
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: GET
+  port: 8080
+  bind_address: "0.0.0.0"
+  base_url: "http://127.0.0.1:8080/"
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Download-Options: noopen
+    X-Robots-Tag: noindex, nofollow
+    Referrer-Policy: no-referrer
+
+valkey:
+  url: valkey://valkey:6379/0

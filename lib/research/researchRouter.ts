@@ -3,6 +3,8 @@ import { buildRetrievalOrchestration, evaluateMandatoryLiveRetrieval, type Retri
 import { tavilyWarRoomSearch } from '@/lib/internet/warRoomSearchProviders'
 import type { WarRoomSupabase } from '@/lib/war-room/persistence'
 import type { GeographicRegion } from '@/lib/council/scout-swarm/types'
+import type { GoogleWebSearchLeg } from '@/lib/war-room-search/providers/googleWebSearch'
+import { runSearxngSearch, type SearxngLeg } from '@/lib/war-room-search/providers/searxng'
 import {
   fetchTrustedPublicNewsFeeds,
   parsePublicNewsRss,
@@ -85,6 +87,10 @@ export type LiveResearchRouterResult = {
   generatedAt: string
   searchQuery: string
   tavily: TavilyLeg
+  /** Optional Google Web Search discovery leg. Absent in Council live-research unless Search populated it. */
+  googleWebSearch?: GoogleWebSearchLeg
+  /** Optional self-hosted SearXNG federation leg. Additive discovery only. */
+  searxng?: SearxngLeg
   publicRss: PublicRssLeg
   /** NWS active-alerts leg — only actually queried when the decree reads as weather-related. */
   weatherAlerts: NwsAlertsLeg
@@ -357,8 +363,12 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     matchedDomains: domain === 'HYBRID' ? matchedDomains(input.decreeText) : [],
     extraProviderIds,
   })
+  const searxngP = runSearxngSearch(searchQuery, {
+    pageSize: 8,
+    language: queryLanguage,
+  })
 
-  const [tRaw, publicRssInitial, weatherAlerts, grok, direct, researchEngine] = await Promise.all([tavilyP, publicRssP, weatherAlertsP, grokP, directP, researchEngineP])
+  const [tRaw, publicRssInitial, weatherAlerts, grok, direct, researchEngine, searxng] = await Promise.all([tavilyP, publicRssP, weatherAlertsP, grokP, directP, researchEngineP, searxngP])
 
   let publicRss = publicRssInitial
   let genericRssUsedAsFallback = false
@@ -392,9 +402,9 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
   const retrieval = buildRetrievalOrchestration({
     decree: input.decreeText,
     generatedAt,
-    tavilyOk: (tavily.ok && tavily.results.length > 0) || publicRss.ok || researchEngine.ok || (weatherAlerts.queried && weatherAlerts.ok),
-    tavilyLatencyMs: Math.min(tavily.durationMs, publicRss.durationMs),
-    tavilyError: tavily.ok || publicRss.ok ? undefined : [tavily.error, publicRss.error].filter(Boolean).join(' | '),
+    tavilyOk: (tavily.ok && tavily.results.length > 0) || publicRss.ok || researchEngine.ok || (searxng.ok && searxng.results.length > 0) || (weatherAlerts.queried && weatherAlerts.ok),
+    tavilyLatencyMs: Math.min(tavily.durationMs, publicRss.durationMs, searxng.durationMs || tavily.durationMs),
+    tavilyError: tavily.ok || publicRss.ok || searxng.ok ? undefined : [tavily.error, publicRss.error, searxng.error].filter(Boolean).join(' | '),
     grokOk: grok.ok,
     grokError: grok.error,
     directOk: direct.some(item => item.ok),
@@ -404,7 +414,7 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
   void input.supabase
   void input.conversationId
 
-  const genericRssWasSoleSource = Boolean(region) && genericRssUsedAsFallback && !primaryOk && !tavily.ok
+  const genericRssWasSoleSource = Boolean(region) && genericRssUsedAsFallback && !primaryOk && !tavily.ok && !searxng.ok
   const nativeLanguageRetrieval = Boolean(
     region
     && queryLanguage !== 'en'
@@ -416,6 +426,7 @@ export async function runLiveResearchRouter(input: LiveResearchRouterInput): Pro
     generatedAt,
     searchQuery,
     tavily,
+    searxng,
     publicRss,
     weatherAlerts,
     grok,

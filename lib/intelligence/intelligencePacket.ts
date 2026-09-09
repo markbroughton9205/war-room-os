@@ -68,6 +68,13 @@ export type TranslationStatus =
   | 'TRANSLATION_UNCERTAIN'
   | 'UNKNOWN'
 
+/**
+ * Which search/discovery service found this page. Distinct from publisher /
+ * source_family (who authored the evidence). Search engines are not independent
+ * evidence sources.
+ */
+export type EvidenceDiscoveryProvider = 'GOOGLE' | 'TAVILY' | 'RESEARCH_ENGINE' | 'RSS' | 'SEARXNG'
+
 export type IntelligenceEvidenceItem = {
   id: string
   source_id: string
@@ -114,6 +121,17 @@ export type IntelligenceEvidenceItem = {
   independence_key?: string | null
   fallback_used?: boolean | null
   fallback_reason?: string | null
+  /** Discovery service that found the page — not the publisher. */
+  discovered_via?: EvidenceDiscoveryProvider | null
+  /** Other discovery services that also surfaced the same canonical URL. Not independent evidence. */
+  also_discovered_via?: EvidenceDiscoveryProvider[] | null
+  /** Provider-native 1-based rank when supplied. Never War Room's final rank. */
+  discovery_rank?: number | null
+  /**
+   * Upstream engines that surfaced this URL through a federated discovery provider (e.g. SearXNG).
+   * These are not independent evidence sources and are not publisher families.
+   */
+  upstream_engines?: string[] | null
 }
 
 export type IntelligenceFinding = {

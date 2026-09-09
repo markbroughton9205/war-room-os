@@ -19,6 +19,12 @@ the runtime environment this was built in — it will differ per-deploy based
 on which Vercel env vars the Commander has actually set. "Implemented" is a
 property of the code, not the environment.
 
+**War Room Search discovery providers** (Tavily, Google Web Search, SearXNG)
+are not Research Engine adapters. They live in `lib/war-room-search` and are
+documented in `docs/WAR_ROOM_SEARCH.md`. SearXNG is an additive self-hosted
+federation layer: it does not replace this matrix and does not create
+independent evidence merely by returning the same URL from multiple engines.
+
 **READY** = implemented, and its required env is present in this environment.
 **DEGRADED** = implemented, but a live call returned a non-2xx / partial result during testing.
 **BLOCKED** = a required credential/endpoint/permission problem prevents implementation.

@@ -69,6 +69,9 @@ export function formatSearchResult(args: {
     alsoReportedBy,
     contentHash: item.content_hash ?? null,
     jurisdiction: item.jurisdiction ?? null,
+    discoveredVia: item.discovered_via ?? null,
+    alsoDiscoveredVia: item.also_discovered_via?.length ? item.also_discovered_via : null,
+    upstreamEngines: item.upstream_engines?.length ? item.upstream_engines : null,
     evidence: item,
   }
 }

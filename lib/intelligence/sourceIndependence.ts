@@ -144,6 +144,8 @@ export function inferSourceFamily(item: {
   const wire = WIRE_FAMILIES.find(entry => entry.pattern.test(blob))
   if (wire) return wire.family
   if (host) return host.replace(/^www\./, '')
+  // Search engines discover pages; they are not publisher families.
+  if (item.source_id === 'google_web_search' || item.source_id === 'tavily' || item.source_id === 'searxng') return null
   if (item.source_id) return item.source_id
   return null
 }
@@ -216,7 +218,7 @@ export function annotateEvidenceIndependence(
     const publisher_family = inferPublisherFamily(item)
     const source_authority_class = item.source_authority_class ?? classifySourceAuthority(item)
     const jurisdiction = item.jurisdiction ?? inferJurisdiction({ ...item, region: context.region ?? item.region ?? null })
-    const original_language = item.original_language ?? detectLanguageFromText(`${item.title} ${item.content}`)
+    const original_language = item.original_language ?? item.language ?? detectLanguageFromText(`${item.title} ${item.content}`)
     const query_language = item.query_language ?? context.queryLanguage ?? null
     const translation_status = item.translation_status ?? translationStatusFor({
       originalLanguage: original_language,
