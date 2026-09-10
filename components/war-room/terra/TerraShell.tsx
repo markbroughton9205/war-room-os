@@ -65,6 +65,14 @@ import { TerraCoverageBadge } from './TerraCoverageBadge'
 import { TerraTrafficLayer } from './TerraTrafficLayer'
 import { TERRA_TRAFFIC_LAYER_DEFS } from './terraTrafficLayerDefs'
 import { TerraCameraHoverCard } from './TerraCameraHoverCard'
+import { TerraLiveIntelPanel } from './TerraLiveIntelPanel'
+import {
+  composeTerraLiveIntel,
+  listMaritimeLiveProviderStatuses,
+  liveFreshnessFromFeed,
+  normalizeLiveGeoFromFeature,
+  type TerraLiveFreshness,
+} from '@/lib/terra/liveGeoIntelligence'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -841,6 +849,72 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     () => summarizeTerraVesselFeatures(maritime.features, clock.time.currentTime),
     [maritime.features, clock.time.currentTime],
   )
+  const liveIntelSnapshot = useMemo(() => {
+    const features = Object.values(layerFeatures).flat()
+    const fromCache = maritime.features[0]?.provenance.fromCache === true
+    let digitrafficFreshness: TerraLiveFreshness = liveFreshnessFromFeed({
+      enabled: maritimeEnabled && maritimeBoundingBoxQuery !== null,
+      feedState: maritime.state,
+      fromCache,
+    })
+    if (maritimeCoverageState === 'NO_COVERAGE') digitrafficFreshness = 'UNAVAILABLE'
+    if (maritimeCoverageState === 'DELAYED_DATA') digitrafficFreshness = 'DELAYED'
+    if (maritimeCoverageState === 'SOURCE_OFFLINE' || maritimeCoverageState === 'RATE_LIMITED') digitrafficFreshness = 'UNAVAILABLE'
+    if (maritimeCoverageState === 'LIVE_DATA_PRESENT') digitrafficFreshness = fromCache ? 'CACHED' : 'LIVE'
+    const quake = layerFeatures.usgs_earthquake_feed ?? []
+    const quakeFreshness: TerraLiveFreshness = quake.length
+      ? (quake[0]?.provenance.fromCache ? 'CACHED' : 'LIVE')
+      : 'UNAVAILABLE'
+    return composeTerraLiveIntel({
+      now: clock.time.currentTime,
+      features,
+      timeWindow: selectedWindow,
+      freshnessDefaults: {
+        implemented: true,
+        configuredForLive: true,
+        fetchOk: true,
+        delayedFeed: false,
+        now: clock.time.currentTime,
+      },
+      providerStatuses: [
+        ...listMaritimeLiveProviderStatuses({
+          digitrafficObjectCount: maritime.features.length,
+          digitrafficFreshness,
+        }),
+        {
+          id: 'usgs_earthquake_feed',
+          displayName: 'USGS Real-Time Earthquake Feeds',
+          layer: 'intelligence_events',
+          implemented: true,
+          configurationState: 'ENABLED',
+          freshness: quakeFreshness,
+          reason: quake.length ? 'USGS significant-earthquake feed' : 'No projectable earthquake features loaded yet',
+          objectCount: quake.length,
+        },
+        {
+          id: 'settlement_intelligence',
+          displayName: 'Settlement Intelligence',
+          layer: 'settlement_events',
+          implemented: true,
+          configurationState: 'ENABLED',
+          freshness: 'UNAVAILABLE',
+          reason: 'Settlement records have no projectable coordinates; coordinates are never invented.',
+          objectCount: 0,
+        },
+      ],
+    })
+  }, [layerFeatures, maritime.features, maritime.state, maritimeEnabled, maritimeBoundingBoxQuery, maritimeCoverageState, clock.time.currentTime, selectedWindow])
+  const selectedLiveObject = useMemo(() => {
+    if (!selectedFeature) return null
+    return liveIntelSnapshot.objects.find(object => object.id === selectedFeature.id)
+      ?? normalizeLiveGeoFromFeature(selectedFeature, {
+        implemented: true,
+        configuredForLive: true,
+        fetchOk: true,
+        delayedFeed: false,
+        now: clock.time.currentTime,
+      })
+  }, [selectedFeature, liveIntelSnapshot.objects, clock.time.currentTime])
   useEffect(() => {
     // Gated on maritimeBoundingBoxQuery !== null — the exact same condition the aircraft summary
     // effect above uses (never just the maritimeEnabled toggle). This matters beyond consistency:
@@ -1148,7 +1222,8 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       </div>
 
       {commandCenter ? (
-        <div className="pointer-events-none absolute bottom-12 left-3 z-30">
+        <div className="pointer-events-none absolute bottom-12 left-3 z-30 flex w-[min(22rem,42%)] flex-col gap-2">
+          <TerraLiveIntelPanel snapshot={liveIntelSnapshot} selected={selectedLiveObject} compact />
           <TerraProviderCapabilityDock
             localDetailActive={isLocalScale}
             buildingsActive={globeStatus.phase === 'ready' && globeStatus.hasOsmBuildings}
@@ -1161,6 +1236,9 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
 
       {/* Left rail — layer controls + Earth Knowledge placeholder. */}
       {!commandCenter && <div className="pointer-events-none absolute bottom-36 left-0 top-20 flex w-72 flex-col gap-2 overflow-y-auto overscroll-contain p-4">
+        <div className="pointer-events-auto">
+          <TerraLiveIntelPanel snapshot={liveIntelSnapshot} selected={selectedLiveObject} />
+        </div>
         <div className="pointer-events-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
           <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Layer Controls</p>
           <ul className="space-y-1 text-[11px] text-slate-400">
@@ -1411,6 +1489,9 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
               <FeatureDetailFields feature={selectedFeature} />
               <CoordinateOriginFields feature={selectedFeature} />
               <Row label="Provider" value={selectedFeature.provenance.provider} />
+              {selectedLiveObject ? <Row label="Freshness" value={selectedLiveObject.freshness} /> : null}
+              {selectedLiveObject?.evidenceId ? <Row label="Evidence" value={selectedLiveObject.evidenceId} mono /> : null}
+              {selectedLiveObject?.sourceFamily ? <Row label="Source family" value={selectedLiveObject.sourceFamily} /> : null}
             </dl>
             {selectedFeature.rawReference.canonicalUrl && (
               <a href={selectedFeature.rawReference.canonicalUrl} target="_blank" rel="noreferrer" className="mt-2 block truncate text-[10.5px] text-cyan-400 hover:underline">
