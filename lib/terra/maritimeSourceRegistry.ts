@@ -20,7 +20,7 @@
  */
 import type { ResearchProviderId } from '@/lib/research-engine/core/types'
 import type { TerraDegreeRectangle } from './aircraftBoundingBox'
-import { DIGITRAFFIC_MARINE_COVERAGE_BBOX } from './maritimeBoundingBox'
+import { BARENTSWATCH_AIS_COVERAGE_BBOX, DIGITRAFFIC_MARINE_COVERAGE_BBOX } from './maritimeBoundingBox'
 
 export const MARITIME_SOURCE_CLASSES = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7'] as const
 export type MaritimeSourceClass = (typeof MARITIME_SOURCE_CLASSES)[number]
@@ -98,14 +98,14 @@ export const MARITIME_SOURCE_REGISTRY: MaritimeSourceRecord[] = [
     researchProviderId: 'barentswatch_ais',
     protocol: 'REST',
     coverageDescription: 'Norwegian waters, including satellite-AIS-augmented coverage within Norwegian zones.',
-    coverageBoundingBox: null,
+    coverageBoundingBox: BARENTSWATCH_AIS_COVERAGE_BBOX,
     expectedLatency: 'Live position + 14-day historic, per official docs.',
     authenticationRequired: true,
     rightsState: 'NLOD (Norwegian Licence for Open Government Data).',
     commercialState: 'none',
     configurationState: 'ACCOUNT_REQUIRED',
     evidenceStatus: 'verified_via_official_docs_this_build',
-    evidenceNote: 'developer.barentswatch.no read this build: requires a free developer-portal account and an OAuth2 client-credentials grant via id.barentswatch.no before any AIS call — no anonymous path.',
+    evidenceNote: 'Adapter implemented. OAuth2 client-credentials required (BARENTSWATCH_CLIENT_ID, BARENTSWATCH_CLIENT_SECRET). Runtime is NEEDS_CREDENTIALS until those env names are set. No anonymous path. NLOD.',
   },
   {
     id: 'aisstream',
@@ -121,7 +121,7 @@ export const MARITIME_SOURCE_REGISTRY: MaritimeSourceRecord[] = [
     commercialState: 'none',
     configurationState: 'CREDENTIAL_REQUIRED',
     evidenceStatus: 'verified_via_official_docs_this_build',
-    evidenceNote: 'aisstream.io/documentation read this build: free API key required to open the socket; 3-connection cap documented; ToS commercial-use ambiguity confirmed still open. Per mission doctrine this never becomes Maritime\'s sole/primary source even once a key exists.',
+    evidenceNote: 'Adapter implemented as a server-side WebSocket snapshot collector. AISSTREAM_API_KEY required; browser keys are forbidden. Runtime NEEDS_CREDENTIALS until the operator supplies the key. Commercial-use ToS remains unanswered — never Terra\'s sole AIS source.',
   },
   {
     id: 'aishub_marine',
@@ -137,7 +137,7 @@ export const MARITIME_SOURCE_REGISTRY: MaritimeSourceRecord[] = [
     commercialState: 'none',
     configurationState: 'EARNED_BY_FEEDING',
     evidenceStatus: 'verified_via_official_docs_this_build',
-    evidenceNote: 'aishub.net/join-us read this build: access requires operating a real AIS receiver (e.g. AIS-catcher — see the ais_catcher_own_sensor entry below) and sustaining ≥10 vessels at ≥90% uptime. Not purchasable; not activatable by this build alone.',
+    evidenceNote: 'Adapter implemented against data.aishub.net/ws.php. Access is earned by contributing a real AIS feed; AISHUB_USERNAME required. Runtime NEEDS_CREDENTIALS until configured. Contributor-only aggregate, not a purchased commercial license.',
   },
   {
     id: 'noaa_access_ais',
@@ -153,13 +153,13 @@ export const MARITIME_SOURCE_REGISTRY: MaritimeSourceRecord[] = [
     commercialState: 'none',
     configurationState: 'HISTORICAL_ONLY',
     evidenceStatus: 'verified_via_official_docs_this_build',
-    evidenceNote: 'marinecadastre.gov/accessais and coast.noaa.gov read this build: distributed as large annual/monthly CSV/zip archives, no queryable live REST/WebSocket "current position" endpoint exists.',
+    evidenceNote: 'Adapter implemented as HISTORICAL/BATCH only. marinecadastre.gov/accessais publishes annual/monthly bulk archives — no queryable live current-position endpoint. Status is always HISTORICAL, never LIVE.',
   },
   {
     id: 'ais_catcher_own_sensor',
     displayName: 'AIS-catcher / local SDR receiver (own sensor)',
     sourceClass: 'C1',
-    researchProviderId: null,
+    researchProviderId: 'ais_catcher_own_sensor',
     protocol: 'local_receiver',
     coverageDescription: 'Whatever the Commander\'s own receiver/antenna siting can reach — terrestrial AIS is line-of-sight, commonly cited in the ~40-50 nm range under favorable conditions, never treated as a universal constant.',
     coverageBoundingBox: null,
@@ -168,8 +168,8 @@ export const MARITIME_SOURCE_REGISTRY: MaritimeSourceRecord[] = [
     rightsState: 'License-clean by construction — Terra-operated hardware, no third-party terms.',
     commercialState: 'none',
     configurationState: 'HARDWARE_REQUIRED',
-    evidenceStatus: 'research_corpus_unverified',
-    evidenceNote: 'No hardware fielded this phase — this entry exists solely to reserve the architectural boundary (see lib/terra/maritimeOwnSensorBridge.ts) so a future real AIS-catcher/SDR feed plugs into the same normalized vessel model instead of a second system. Never fabricated as active.',
+    evidenceStatus: 'verified_via_official_docs_this_build',
+    evidenceNote: 'Ingest adapter implemented: AIS-catcher/SDR posts decoded observations to POST /api/terra/own-sensor/ais. No receiver configured → NEEDS_LOCAL_SENSOR, never UNAVAILABLE. Hardware is not required for Terra to function.',
   },
   {
     id: 'commercial_satellite_ais',

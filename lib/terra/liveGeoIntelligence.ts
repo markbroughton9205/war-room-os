@@ -6,20 +6,36 @@
  * TerraGeoFeature / evidence / settlement records into one bounded, secret-stripped live-intel
  * object with truthful freshness.
  *
- * LIVE is never inferred from adapter registration. Registered-but-not-implemented providers
- * (BarentsWatch, AISStream, AISHub, NOAA AccessAIS) stay NOT_CONFIGURED.
+ * LIVE is never inferred from adapter registration. Credential/hardware/historical
+ * blockers stay as precise states (NEEDS_CREDENTIALS, NEEDS_LOCAL_SENSOR, HISTORICAL,
+ * NOT_IMPLEMENTED) — never a catch-all NOT_CONFIGURED, and never UNAVAILABLE for
+ * NO_COVERAGE or EMPTY.
  */
 import type { IntelligenceEvidenceItem } from '@/lib/intelligence/intelligencePacket'
 import type { SettlementRecord } from '@/lib/settlement-intelligence/types'
-import { MARITIME_SOURCE_REGISTRY, type MaritimeSourceRecord } from './maritimeSourceRegistry'
 import { isTerraVesselStale } from './vesselStaleness'
 import type { TerraGeoFeature, TerraIntelligenceEvent, TerraIntelligenceEventKind, TerraTimeWindow } from './types'
+import {
+  aggregateVesselLayerFreshness,
+  layerReason,
+  listMaritimeLiveProviderStatuses as listMaritimeStatusesFromRegistry,
+  maritimeProviderLiveStatus as maritimeStatusFromRecord,
+} from './maritimeProviderStatus'
 
 export const TERRA_LIVE_FRESHNESS_STATES = [
   'LIVE',
   'DELAYED',
   'CACHED',
   'STALE',
+  'EMPTY',
+  'NO_COVERAGE',
+  'READY',
+  'NEEDS_CREDENTIALS',
+  'NEEDS_LOCAL_SENSOR',
+  'NEEDS_COMMERCIAL_ACCOUNT',
+  'HISTORICAL',
+  'NOT_IMPLEMENTED',
+  'DISABLED',
   'UNAVAILABLE',
   'NOT_CONFIGURED',
 ] as const
@@ -74,6 +90,8 @@ export type TerraLiveGeoObject = {
   confidence: number | null
   sourceUrl: string | null
   coordinateOrigin: string | null
+  /** Stable identity for vessel merge (MMSI). Never used for Build #6 news/evidence independence. */
+  identityKey: string | null
 }
 
 export type TerraLiveProviderStatus = {
@@ -139,10 +157,11 @@ export function liveLayerForKind(kind: TerraIntelligenceEventKind): TerraLiveLay
 }
 
 export function resolveTerraLiveFreshness(input: TerraLiveFreshnessInput): TerraLiveFreshness {
-  if (!input.implemented || !input.configuredForLive) return 'NOT_CONFIGURED'
+  if (!input.implemented) return 'NOT_IMPLEMENTED'
+  if (!input.configuredForLive) return 'NEEDS_CREDENTIALS'
   if (!input.fetchOk && input.delayedFeed) return 'DELAYED'
   if (!input.fetchOk) return 'UNAVAILABLE'
-  if (input.isHistorical) return 'STALE'
+  if (input.isHistorical) return 'HISTORICAL'
   if (input.observedAt && isTerraVesselStale(input.observedAt, input.now, input.staleAfterMs ?? 24 * 60 * 60 * 1000)) {
     return 'STALE'
   }
@@ -155,46 +174,37 @@ export function liveFreshnessFromFeed(input: {
   feedState: 'loading' | 'live' | 'empty' | 'error' | 'stale'
   fromCache?: boolean
   allHistorical?: boolean
+  noCoverage?: boolean
 }): TerraLiveFreshness {
-  if (!input.enabled) return 'UNAVAILABLE'
-  if (input.feedState === 'loading') return 'UNAVAILABLE'
+  if (input.noCoverage) return 'NO_COVERAGE'
+  if (!input.enabled) return 'READY'
+  if (input.feedState === 'loading') return 'READY'
   if (input.feedState === 'error') return 'UNAVAILABLE'
   if (input.feedState === 'stale') return 'DELAYED'
-  if (input.allHistorical) return 'STALE'
+  if (input.allHistorical) return 'HISTORICAL'
+  if (input.feedState === 'empty') return 'EMPTY'
   if (input.fromCache) return 'CACHED'
-  if (input.feedState === 'empty' || input.feedState === 'live') return input.fromCache ? 'CACHED' : 'LIVE'
+  if (input.feedState === 'live') return 'LIVE'
   return 'UNAVAILABLE'
 }
 
-export function maritimeProviderLiveStatus(record: MaritimeSourceRecord, objectCount = 0, fetchFreshness?: TerraLiveFreshness): TerraLiveProviderStatus {
-  const configuredForLive = record.configurationState === 'ENABLED'
-  const implemented = Boolean(record.researchProviderId) && configuredForLive
-  const freshness = configuredForLive && implemented
-    ? (fetchFreshness ?? 'UNAVAILABLE')
-    : 'NOT_CONFIGURED'
-  return {
-    id: record.id,
-    displayName: record.displayName,
-    layer: 'vessels',
-    implemented,
-    configurationState: record.configurationState,
-    freshness,
-    reason: configuredForLive
-      ? (fetchFreshness ? `Enabled source (${record.configurationState})` : 'Enabled source — no live fetch this snapshot')
-      : `${record.configurationState}: ${record.evidenceNote}`,
-    objectCount: configuredForLive ? objectCount : 0,
-  }
+export function maritimeProviderLiveStatus(
+  record: Parameters<typeof maritimeStatusFromRecord>[0],
+  objectCount = 0,
+  fetchFreshness?: TerraLiveFreshness,
+): TerraLiveProviderStatus {
+  return maritimeStatusFromRecord(record, { objectCount, fetchFreshness })
 }
 
 export function listMaritimeLiveProviderStatuses(opts?: {
   digitrafficObjectCount?: number
   digitrafficFreshness?: TerraLiveFreshness
 }): TerraLiveProviderStatus[] {
-  return MARITIME_SOURCE_REGISTRY.map(record => {
-    if (record.id === 'digitraffic_marine') {
-      return maritimeProviderLiveStatus(record, opts?.digitrafficObjectCount ?? 0, opts?.digitrafficFreshness)
-    }
-    return maritimeProviderLiveStatus(record, 0)
+  return listMaritimeStatusesFromRegistry({
+    digitraffic_marine: {
+      objectCount: opts?.digitrafficObjectCount ?? 0,
+      fetchFreshness: opts?.digitrafficFreshness,
+    },
   })
 }
 
@@ -204,6 +214,12 @@ function asString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+export function vesselIdentityKey(kind: string, mmsi: unknown): string | null {
+  if (kind !== 'vessel_position') return null
+  const value = typeof mmsi === 'string' ? mmsi.trim() : typeof mmsi === 'number' && Number.isFinite(mmsi) ? String(mmsi) : ''
+  return value ? `mmsi:${value}` : null
 }
 
 function pointFromEvent(event: TerraIntelligenceEvent): { latitude: number; longitude: number; origin: string } | null {
@@ -274,6 +290,7 @@ export function normalizeLiveGeoFromEvent(
     confidence: event.evidence?.source === 'intelligence_confidence_tier' ? null : asNumber(event.properties.confidence),
     sourceUrl: event.provenance.sourceUrl ?? event.rawReference.canonicalUrl,
     coordinateOrigin: point.origin,
+    identityKey: vesselIdentityKey(event.kind, event.properties.mmsi),
   }
 }
 
@@ -321,6 +338,7 @@ export function normalizeLiveGeoFromFeature(
     confidence: asNumber(feature.properties.confidence),
     sourceUrl: feature.provenance.sourceUrl ?? feature.rawReference.canonicalUrl,
     coordinateOrigin: feature.coordinateOrigin,
+    identityKey: vesselIdentityKey(feature.kind, feature.properties.mmsi),
   }
 }
 
@@ -363,6 +381,7 @@ export function normalizeLiveGeoFromEvidence(
     confidence: Number.isFinite(item.confidence) ? item.confidence : null,
     sourceUrl: item.canonical_url ?? item.url ?? null,
     coordinateOrigin: 'source_embedded',
+    identityKey: null,
   }
 }
 
@@ -398,12 +417,20 @@ export function normalizeLiveGeoFromSettlement(record: SettlementRecord): TerraL
     confidence: null,
     sourceUrl: record.officialUrl ?? record.aggregatorUrl,
     coordinateOrigin: 'source_embedded',
+    identityKey: null,
   }
 }
 
 export function liveGeoDedupeKey(object: TerraLiveGeoObject): string {
+  if (object.layer === 'vessels' && object.identityKey) return `vessels:${object.identityKey}`
   if (object.evidenceId) return `${object.layer}:${object.evidenceId}`
   return `${object.layer}:${object.provider}:${object.id}`
+}
+
+function observationTimeMs(object: TerraLiveGeoObject): number {
+  const raw = object.observedAt ?? object.receivedAt
+  const ms = Date.parse(raw)
+  return Number.isFinite(ms) ? ms : 0
 }
 
 export function collapseLiveGeoDuplicates(objects: TerraLiveGeoObject[]): TerraLiveGeoObject[] {
@@ -415,22 +442,25 @@ export function collapseLiveGeoDuplicates(objects: TerraLiveGeoObject[]): TerraL
       byKey.set(key, object)
       continue
     }
+    const newer = observationTimeMs(object) > observationTimeMs(existing) ? object : existing
+    const older = newer === object ? existing : object
     const also = new Set([
       ...existing.discoveryProvenance.alsoDiscoveredVia,
       ...object.discoveryProvenance.alsoDiscoveredVia,
     ])
-    if (object.discoveryProvenance.discoveredVia && object.discoveryProvenance.discoveredVia !== existing.discoveryProvenance.discoveredVia) {
-      also.add(object.discoveryProvenance.discoveredVia)
+    if (older.discoveryProvenance.discoveredVia && older.discoveryProvenance.discoveredVia !== newer.discoveryProvenance.discoveredVia) {
+      also.add(older.discoveryProvenance.discoveredVia)
     }
+    if (object.provider !== existing.provider) also.add(object.provider === newer.provider ? existing.provider : object.provider)
     const engines = [...new Set([
       ...existing.discoveryProvenance.upstreamEngines,
       ...object.discoveryProvenance.upstreamEngines,
     ])]
     byKey.set(key, {
-      ...existing,
+      ...newer,
       discoveryProvenance: {
-        ...existing.discoveryProvenance,
-        alsoDiscoveredVia: [...also],
+        ...newer.discoveryProvenance,
+        alsoDiscoveredVia: [...also].filter(value => value && value !== newer.discoveryProvenance.discoveredVia),
         upstreamEngines: engines,
       },
     })
@@ -494,15 +524,6 @@ export type ComposeTerraLiveIntelInput = {
   providerStatuses?: TerraLiveProviderStatus[]
 }
 
-function layerReason(freshness: TerraLiveFreshness, count: number): string {
-  if (freshness === 'NOT_CONFIGURED') return 'Provider registered but not implemented or not configured for live use'
-  if (freshness === 'UNAVAILABLE') return 'Provider fetch failed or returned no projectable geography'
-  if (freshness === 'STALE') return 'Source timestamps are older than the live threshold'
-  if (freshness === 'DELAYED') return 'Prior data retained after a failed refresh'
-  if (freshness === 'CACHED') return 'Serving a still-valid cached provider response'
-  return count === 0 ? 'Live fetch succeeded with no projectable objects' : 'Live provider data'
-}
-
 export function composeTerraLiveIntel(input: ComposeTerraLiveIntelInput): TerraLiveIntelSnapshot {
   const layers = new Set(input.layers?.length ? input.layers : TERRA_LIVE_LAYER_IDS)
   const cap = Math.max(1, Math.min(input.cap ?? TERRA_LIVE_INTEL_BROWSER_CAP, TERRA_LIVE_INTEL_BROWSER_CAP))
@@ -557,13 +578,15 @@ export function composeTerraLiveIntel(input: ComposeTerraLiveIntelInput): TerraL
     const sample = objects.find(object => object.layer === id)
     const enabled = layers.has(id)
     let freshness: TerraLiveFreshness = 'UNAVAILABLE'
-    if (!enabled) freshness = 'UNAVAILABLE'
+    if (!enabled) freshness = 'DISABLED'
     else if (id === 'settlement_events' && count === 0) freshness = 'UNAVAILABLE'
-    else if (sample) freshness = sample.freshness
     else if (id === 'vessels') {
-      const marine = (input.providerStatuses ?? listMaritimeLiveProviderStatuses()).find(p => p.id === 'digitraffic_marine')
-      freshness = marine?.freshness ?? 'UNAVAILABLE'
+      freshness = aggregateVesselLayerFreshness(input.providerStatuses ?? listMaritimeLiveProviderStatuses({
+        digitrafficObjectCount: count,
+        digitrafficFreshness: sample?.freshness,
+      }), true)
     }
+    else if (sample) freshness = sample.freshness
     return { id, freshness, objectCount: count, reason: enabled ? layerReason(freshness, count) : 'Layer not requested' }
   })
 

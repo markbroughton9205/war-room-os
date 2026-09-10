@@ -57,6 +57,7 @@ function vessel(): TerraLiveGeoObject {
     confidence: 0.9,
     sourceUrl: 'https://meri.digitraffic.fi/api/ais/v1/vessels/230685000',
     coordinateOrigin: 'source_embedded',
+    identityKey: 'mmsi:230685000',
   }
 }
 
@@ -129,7 +130,7 @@ export async function runAstraLiveMissionValidation(): Promise<CaseResult[]> {
   const failed = running ? markAstraMissionFailed(running, 'Controlled Council execution failure', NOW) : null
   cases.push(check('14_10_failure_does_not_corrupt_lineage', failed?.status === 'failed' && failed.terraSeed?.lineage.objectId === '230685000' && failed.constellationSpawned === false && failed.failedAt === NOW, failed?.error ?? 'missing'))
   cases.push(check('14_11_no_secrets', created ? !astraMissionContainsSecrets(astraMissionPublicView(created)) : false, 'clean'))
-  cases.push(check('14_12_unconfigured_ais_cannot_seed', buildTerraCouncilHandoffPayload({ object: { ...vessel(), provider: 'aisstream' } }) === null, 'blocked'))
+  cases.push(check('14_12_unconfigured_ais_cannot_seed', buildTerraCouncilHandoffPayload({ object: { ...vessel(), provider: 'aisstream', freshness: 'NEEDS_CREDENTIALS' } }) === null, 'blocked'))
   cases.push(check(
     '14_13_orchestration_only',
     Boolean(created && !created.plan?.selectedPermanentSeats.includes('astra' as never)),
@@ -306,7 +307,7 @@ export async function runAstraLiveMissionValidation(): Promise<CaseResult[]> {
   cases.push(check(
     '14_44_13_bridge_module_intact',
     sourceContains('lib/terra/councilHandoff.ts', /Roadmap #13/)
-      && sourceContains('lib/terra/councilHandoff.ts', /digitraffic_marine|UNCONFIGURED_AIS_PROVIDERS/),
+      && sourceContains('lib/terra/councilHandoff.ts', /BLOCKED_HANDOFF_FRESHNESS|NEEDS_CREDENTIALS/),
     '#13 regression source',
   ))
   cases.push(check(

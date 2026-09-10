@@ -69,10 +69,10 @@ import { TerraLiveIntelPanel } from './TerraLiveIntelPanel'
 import {
   composeTerraLiveIntel,
   listMaritimeLiveProviderStatuses,
-  liveFreshnessFromFeed,
   normalizeLiveGeoFromFeature,
   type TerraLiveFreshness,
 } from '@/lib/terra/liveGeoIntelligence'
+import { resolveDigitrafficCameraFreshness } from '@/lib/terra/maritimeProviderStatus'
 import {
   TERRA_HANDOFF_STORAGE_KEY,
   buildTerraCouncilHandoffPayload,
@@ -819,7 +819,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   // digitraffic_marine's coverage is a specific, bounded region (Finnish waters), not a genuine
   // global feed like OpenSky — a camera view outside that region must produce NO_COVERAGE, never
   // "0 vessels observed" (see lib/terra/maritimeCoverage.ts).
-  const [maritimeEnabled, setMaritimeEnabled] = useState(() => presentation === 'command-center')
+  const [maritimeEnabled, setMaritimeEnabled] = useState(true)
   const maritimeHasCoverage = useMemo(() => terraCameraViewHasMaritimeCoverage(cameraViewRectangle.rectangle), [cameraViewRectangle.rectangle])
   const maritimeBoundingBoxQuery = useMemo(() => {
     if (!maritimeEnabled) return null
@@ -858,15 +858,13 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   const liveIntelSnapshot = useMemo(() => {
     const features = Object.values(layerFeatures).flat()
     const fromCache = maritime.features[0]?.provenance.fromCache === true
-    let digitrafficFreshness: TerraLiveFreshness = liveFreshnessFromFeed({
-      enabled: maritimeEnabled && maritimeBoundingBoxQuery !== null,
+    const digitrafficFreshness: TerraLiveFreshness = resolveDigitrafficCameraFreshness({
+      layerEnabled: maritimeEnabled,
+      coverageState: maritimeCoverageState,
       feedState: maritime.state,
       fromCache,
+      boundingBoxQuery: maritimeBoundingBoxQuery,
     })
-    if (maritimeCoverageState === 'NO_COVERAGE') digitrafficFreshness = 'UNAVAILABLE'
-    if (maritimeCoverageState === 'DELAYED_DATA') digitrafficFreshness = 'DELAYED'
-    if (maritimeCoverageState === 'SOURCE_OFFLINE' || maritimeCoverageState === 'RATE_LIMITED') digitrafficFreshness = 'UNAVAILABLE'
-    if (maritimeCoverageState === 'LIVE_DATA_PRESENT') digitrafficFreshness = fromCache ? 'CACHED' : 'LIVE'
     const quake = layerFeatures.usgs_earthquake_feed ?? []
     const quakeFreshness: TerraLiveFreshness = quake.length
       ? (quake[0]?.provenance.fromCache ? 'CACHED' : 'LIVE')

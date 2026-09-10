@@ -55,6 +55,7 @@ function vessel(): TerraLiveGeoObject {
     confidence: 0.9,
     sourceUrl: 'https://meri.digitraffic.fi/api/ais/v1/vessels/230685000',
     coordinateOrigin: 'source_embedded',
+    identityKey: 'mmsi:230685000',
   }
 }
 

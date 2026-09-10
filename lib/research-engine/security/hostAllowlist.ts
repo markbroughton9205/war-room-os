@@ -267,15 +267,15 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   nhc_current_storms: ['www.nhc.noaa.gov'],
   nasa_eonet: ['eonet.gsfc.nasa.gov'],
   tsunami_gov: ['www.tsunami.gov'],
-  // Terra Phase 3 — Maritime Source Federation. digitraffic_marine is the only one of these five
-  // an adapter actually calls this phase; the other four are registered against their real
-  // official host (independently verified this build) so the allowlist stays truthful even before
-  // an adapter exists — never a placeholder/example.com host.
+  // Terra maritime federation. Digitraffic is keyless live AIS. BarentsWatch/AISStream/AISHub
+  // adapters exist but stay NEEDS_CREDENTIALS until operator env is set. NOAA is historical-only.
+  // Own-sensor ingest is local (empty outbound allowlist — this adapter never fetches a host).
   digitraffic_marine: ['meri.digitraffic.fi'],
   barentswatch_ais: ['live.ais.barentswatch.no', 'id.barentswatch.no'],
   aisstream: ['stream.aisstream.io'],
   aishub_marine: ['data.aishub.net'],
   noaa_access_ais: ['hub.marinecadastre.gov', 'coast.noaa.gov'],
+  ais_catcher_own_sensor: [],
   // God's Eye Traffic & Camera Intelligence phase — both hosts independently verified live this
   // build (real HTTP 200 responses fetched during development). Note: the actual camera JPEG
   // bytes for digitraffic_road_cameras are hosted at weathercam.digitraffic.fi, but that host is

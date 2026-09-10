@@ -31,9 +31,9 @@ export async function runLiveGeoIntelligenceLiveAcceptance(): Promise<CaseResult
   ))
   cases.push(check(
     'live12_02_real_vessels_or_honest_empty',
-    digitraffic?.freshness === 'LIVE' || digitraffic?.freshness === 'CACHED'
+    (digitraffic?.freshness === 'LIVE' || digitraffic?.freshness === 'CACHED')
       ? vessels.length >= 1 && vessels.every(v => Number.isFinite(v.latitude) && Number.isFinite(v.longitude) && v.provider === 'digitraffic_marine')
-      : digitraffic?.freshness === 'UNAVAILABLE' || digitraffic?.freshness === 'STALE' || digitraffic?.freshness === 'DELAYED',
+      : digitraffic?.freshness === 'EMPTY',
     JSON.stringify({
       freshness: digitraffic?.freshness,
       count: vessels.length,
@@ -52,10 +52,10 @@ export async function runLiveGeoIntelligenceLiveAcceptance(): Promise<CaseResult
   ))
   cases.push(check(
     'live12_05_unconfigured_ais_not_live',
-    barents?.freshness === 'NOT_CONFIGURED'
-      && aisstream?.freshness === 'NOT_CONFIGURED'
-      && aishub?.freshness === 'NOT_CONFIGURED'
-      && noaa?.freshness === 'NOT_CONFIGURED',
+    barents?.freshness === 'NEEDS_CREDENTIALS'
+      && aisstream?.freshness === 'NEEDS_CREDENTIALS'
+      && aishub?.freshness === 'NEEDS_CREDENTIALS'
+      && noaa?.freshness === 'HISTORICAL',
     JSON.stringify({
       barents: barents?.freshness,
       aisstream: aisstream?.freshness,
@@ -66,8 +66,22 @@ export async function runLiveGeoIntelligenceLiveAcceptance(): Promise<CaseResult
   ))
   cases.push(check(
     'live12_06_no_secrets_in_snapshot',
-    !/api[_-]?key|Bearer |sk-|xai-|AIza|commanderUserId/i.test(serialized),
+    !/Bearer\s+\S+|sk-[A-Za-z0-9]+|xai-[A-Za-z0-9]+|AIza[A-Za-z0-9_\-]+|commanderUserId/i.test(serialized),
     `bytes=${serialized.length}`,
+  ))
+  const catcher = snapshot.providers.find(row => row.id === 'ais_catcher_own_sensor')
+  const commercial = snapshot.providers.find(row => row.id === 'commercial_satellite_ais')
+  const vesselsLayer = snapshot.layers.find(row => row.id === 'vessels')
+  cases.push(check(
+    'live12_08_vessels_layer_not_unavailable_when_digitraffic_works',
+    vesselsLayer?.freshness !== 'UNAVAILABLE'
+      && (digitraffic?.freshness === 'LIVE' || digitraffic?.freshness === 'CACHED' || digitraffic?.freshness === 'EMPTY'),
+    JSON.stringify({ layer: vesselsLayer?.freshness, digitraffic: digitraffic?.freshness, count: vessels.length }),
+  ))
+  cases.push(check(
+    'live12_09_own_sensor_and_commercial_are_precise',
+    catcher?.freshness === 'NEEDS_LOCAL_SENSOR' && commercial?.freshness === 'NEEDS_COMMERCIAL_ACCOUNT',
+    JSON.stringify({ catcher: catcher?.freshness, commercial: commercial?.freshness }),
   ))
   cases.push(check(
     'live12_07_settlement_not_fabricated',

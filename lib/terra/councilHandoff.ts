@@ -56,26 +56,28 @@ export type TerraCouncilHandoffPayload = {
   observedFacts: string
 }
 
-const UNCONFIGURED_AIS_PROVIDERS = new Set([
-  'barentswatch_ais',
-  'aisstream',
-  'aishub_marine',
-  'noaa_access_ais',
+const BLOCKED_HANDOFF_FRESHNESS = new Set<TerraLiveFreshness>([
+  'NEEDS_CREDENTIALS',
+  'NEEDS_LOCAL_SENSOR',
+  'NEEDS_COMMERCIAL_ACCOUNT',
+  'NOT_IMPLEMENTED',
+  'NOT_CONFIGURED',
+  'DISABLED',
+  'UNAVAILABLE',
 ])
 
 function freshnessToEvidence(freshness: TerraLiveFreshness): EvidenceFreshness {
   if (freshness === 'LIVE') return 'live'
   if (freshness === 'CACHED') return 'recent'
   if (freshness === 'DELAYED') return 'aging'
-  if (freshness === 'STALE') return 'stale'
+  if (freshness === 'STALE' || freshness === 'HISTORICAL') return 'stale'
   return 'unknown'
 }
 
 export function canSendTerraObjectToCouncil(object: TerraLiveGeoObject | null | undefined): boolean {
   if (!object) return false
   if (!isValidLiveCoordinate(object.latitude, object.longitude)) return false
-  if (UNCONFIGURED_AIS_PROVIDERS.has(object.provider)) return false
-  if (object.freshness === 'NOT_CONFIGURED') return false
+  if (BLOCKED_HANDOFF_FRESHNESS.has(object.freshness)) return false
   return true
 }
 
@@ -157,7 +159,6 @@ export function evidenceFromTerraHandoff(payload: TerraCouncilHandoffPayload): I
   const lineage = payload.lineage
   if (!lineage || payload.action !== TERRA_HANDOFF_ACTION) return null
   if (!isValidLiveCoordinate(lineage.latitude, lineage.longitude)) return null
-  if (UNCONFIGURED_AIS_PROVIDERS.has(lineage.provider)) return null
   const content = [
     payload.observedFacts,
     'TERRA LINEAGE',

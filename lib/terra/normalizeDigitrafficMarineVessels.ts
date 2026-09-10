@@ -41,7 +41,7 @@ export function normalizeDigitrafficMarineVessels(documents: ResearchDocument[])
       id: doc.providerRecordId ?? doc.id,
       domain: 'other',
       kind: 'vessel_position',
-      providerId: 'digitraffic_marine',
+      providerId: doc.provider,
       layerClass: 'observed',
       title: doc.title,
       summary: doc.summary,

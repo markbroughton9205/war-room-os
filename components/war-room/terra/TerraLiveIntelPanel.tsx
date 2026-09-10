@@ -1,13 +1,23 @@
 'use client'
 
 import type { TerraLiveFreshness, TerraLiveIntelSnapshot, TerraLiveGeoObject, TerraLiveLayerId } from '@/lib/terra/liveGeoIntelligence'
+import { TERRA_PROVIDER_STATUS_LABELS } from '@/lib/terra/maritimeProviderStatus'
 
 const FRESHNESS_CLASS: Record<TerraLiveFreshness, string> = {
   LIVE: 'text-emerald-400',
   DELAYED: 'text-amber-300',
   CACHED: 'text-cyan-300',
   STALE: 'text-amber-500',
-  UNAVAILABLE: 'text-slate-500',
+  EMPTY: 'text-slate-300',
+  NO_COVERAGE: 'text-amber-200',
+  READY: 'text-cyan-200',
+  NEEDS_CREDENTIALS: 'text-amber-300',
+  NEEDS_LOCAL_SENSOR: 'text-amber-300',
+  NEEDS_COMMERCIAL_ACCOUNT: 'text-amber-300',
+  HISTORICAL: 'text-amber-500',
+  NOT_IMPLEMENTED: 'text-slate-500',
+  DISABLED: 'text-slate-500',
+  UNAVAILABLE: 'text-rose-400',
   NOT_CONFIGURED: 'text-slate-500',
 }
 
@@ -42,8 +52,11 @@ export function TerraLiveIntelPanel({
         {snapshot.layers.map(layer => (
           <li key={layer.id} className="flex items-center justify-between gap-2">
             <span className="text-slate-300">{LAYER_LABEL[layer.id]}</span>
-            <span className={`font-mono text-[10px] font-bold uppercase tracking-widest ${FRESHNESS_CLASS[layer.freshness]}`}>
-              {layer.freshness}{layer.objectCount ? ` · ${layer.objectCount}` : ''}
+            <span
+              className={`font-mono text-[10px] font-bold uppercase tracking-widest ${FRESHNESS_CLASS[layer.freshness]}`}
+              title={layer.reason}
+            >
+              {TERRA_PROVIDER_STATUS_LABELS[layer.freshness]}{layer.objectCount ? ` · ${layer.objectCount}` : ''}
             </span>
           </li>
         ))}
@@ -54,7 +67,12 @@ export function TerraLiveIntelPanel({
           {snapshot.providers.map(provider => (
             <li key={provider.id} className="flex items-center justify-between gap-2">
               <span className="truncate" title={provider.reason}>{provider.displayName}</span>
-              <span className={`shrink-0 font-mono uppercase ${FRESHNESS_CLASS[provider.freshness]}`}>{provider.freshness}</span>
+              <span
+                className={`shrink-0 font-mono uppercase ${FRESHNESS_CLASS[provider.freshness]}`}
+                title={provider.reason}
+              >
+                {TERRA_PROVIDER_STATUS_LABELS[provider.freshness]}
+              </span>
             </li>
           ))}
         </ul>
@@ -65,8 +83,11 @@ export function TerraLiveIntelPanel({
           <div className="flex justify-between gap-2"><dt>Type</dt><dd className="text-cyan-200">{selected.type}</dd></div>
           <div className="flex justify-between gap-2"><dt>Time</dt><dd className="font-mono text-slate-200">{selected.observedAt ?? 'not reported'}</dd></div>
           <div className="flex justify-between gap-2"><dt>Source</dt><dd className="truncate text-slate-200">{selected.provider}</dd></div>
-          <div className="flex justify-between gap-2"><dt>Freshness</dt><dd className={FRESHNESS_CLASS[selected.freshness]}>{selected.freshness}</dd></div>
+          <div className="flex justify-between gap-2"><dt>Freshness</dt><dd className={FRESHNESS_CLASS[selected.freshness]}>{TERRA_PROVIDER_STATUS_LABELS[selected.freshness]}</dd></div>
           <div className="flex justify-between gap-2"><dt>Evidence</dt><dd className="truncate font-mono text-slate-200">{selected.evidenceId ?? 'none'}</dd></div>
+          {selected.discoveryProvenance.alsoDiscoveredVia.length > 0 ? (
+            <div className="flex justify-between gap-2"><dt>Also via</dt><dd className="truncate text-slate-200">{selected.discoveryProvenance.alsoDiscoveredVia.join(', ')}</dd></div>
+          ) : null}
           {selected.sourceUrl ? (
             <a href={selected.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate text-cyan-400 hover:underline">
               Open source

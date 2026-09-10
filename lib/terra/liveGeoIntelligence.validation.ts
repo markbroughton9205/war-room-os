@@ -161,7 +161,7 @@ function run(): CaseResult[] {
       isHistorical: true,
       observedAt: '2026-08-01T00:00:00.000Z',
       fetchOk: true,
-    }) === 'STALE'
+    }) === 'HISTORICAL'
       && resolveTerraLiveFreshness({
         ...LIVE_DEFAULTS,
         fromCache: false,
@@ -170,7 +170,7 @@ function run(): CaseResult[] {
         fetchOk: true,
         staleAfterMs: 10 * 60 * 1000,
       }) === 'STALE',
-    'historical and aged observations are STALE',
+    'historical archives are HISTORICAL; aged live observations are STALE',
   ))
 
   results.push(check(
@@ -259,6 +259,7 @@ function run(): CaseResult[] {
     (() => {
       const events = Array.from({ length: 40 }, (_, index) => vesselEvent({
         id: `v-${String(index).padStart(3, '0')}`,
+        properties: { mmsi: String(230000000 + index), country: 'FI' },
         rawReference: { documentId: `doc-${index}`, providerRecordId: String(index), canonicalUrl: null },
       }))
       const snapshot = composeTerraLiveIntel({ now: NOW, events, cap: 10, perLayerCap: 10, freshnessDefaults: LIVE_DEFAULTS })
@@ -289,14 +290,110 @@ function run(): CaseResult[] {
   const aisstream = getMaritimeSourceRecord('aisstream')!
   const aishub = getMaritimeSourceRecord('aishub_marine')!
   const noaa = getMaritimeSourceRecord('noaa_access_ais')!
+
+  results.push(check(
+    '21_empty_digitraffic_is_not_unavailable',
+    (() => {
+      const snapshot = composeTerraLiveIntel({
+        now: NOW,
+        events: [],
+        freshnessDefaults: LIVE_DEFAULTS,
+        providerStatuses: [
+          { id: 'digitraffic_marine', displayName: 'Digitraffic', layer: 'vessels', implemented: true, configurationState: 'ENABLED', freshness: 'EMPTY', reason: 'zero vessels', objectCount: 0 },
+          { id: 'barentswatch_ais', displayName: 'BarentsWatch', layer: 'vessels', implemented: true, configurationState: 'CREDENTIAL_REQUIRED', freshness: 'NEEDS_CREDENTIALS', reason: 'no key', objectCount: 0 },
+        ],
+      })
+      return snapshot.layers.find(layer => layer.id === 'vessels')?.freshness === 'EMPTY'
+        && snapshot.providers.find(p => p.id === 'digitraffic_marine')?.freshness === 'EMPTY'
+    })(),
+    'successful zero-vessel fetch is EMPTY, not UNAVAILABLE',
+  ))
+
+  results.push(check(
+    '22_layer_stays_live_if_one_provider_works',
+    (() => {
+      const snapshot = composeTerraLiveIntel({
+        now: NOW,
+        events: [vesselEvent()],
+        freshnessDefaults: LIVE_DEFAULTS,
+        providerStatuses: [
+          { id: 'digitraffic_marine', displayName: 'Digitraffic', layer: 'vessels', implemented: true, configurationState: 'ENABLED', freshness: 'LIVE', reason: 'ok', objectCount: 1 },
+          { id: 'barentswatch_ais', displayName: 'BarentsWatch', layer: 'vessels', implemented: true, configurationState: 'CREDENTIAL_REQUIRED', freshness: 'NEEDS_CREDENTIALS', reason: 'no key', objectCount: 0 },
+          { id: 'aisstream', displayName: 'AISStream', layer: 'vessels', implemented: true, configurationState: 'CREDENTIAL_REQUIRED', freshness: 'NEEDS_CREDENTIALS', reason: 'no key', objectCount: 0 },
+        ],
+      })
+      return snapshot.layers.find(layer => layer.id === 'vessels')?.freshness === 'LIVE'
+    })(),
+    'Digitraffic LIVE keeps the vessels layer LIVE',
+  ))
+
+  results.push(check(
+    '23_no_coverage_is_not_unavailable',
+    (() => {
+      const snapshot = composeTerraLiveIntel({
+        now: NOW,
+        events: [],
+        freshnessDefaults: LIVE_DEFAULTS,
+        providerStatuses: [
+          { id: 'digitraffic_marine', displayName: 'Digitraffic', layer: 'vessels', implemented: true, configurationState: 'ENABLED', freshness: 'NO_COVERAGE', reason: 'outside Finland', objectCount: 0 },
+          { id: 'aisstream', displayName: 'AISStream', layer: 'vessels', implemented: true, configurationState: 'CREDENTIAL_REQUIRED', freshness: 'NEEDS_CREDENTIALS', reason: 'no key', objectCount: 0 },
+        ],
+      })
+      return snapshot.layers.find(layer => layer.id === 'vessels')?.freshness === 'NO_COVERAGE'
+        && snapshot.providers.find(p => p.id === 'digitraffic_marine')?.freshness === 'NO_COVERAGE'
+    })(),
+    'camera outside coverage is NO_COVERAGE, not UNAVAILABLE',
+  ))
+
+  results.push(check(
+    '24_mmsi_multi_provider_dedupe_keeps_provenance',
+    (() => {
+      const digitraffic = normalizeLiveGeoFromEvent(vesselEvent(), LIVE_DEFAULTS)!
+      const barents = normalizeLiveGeoFromEvent(vesselEvent({
+        id: 'bw-230123456',
+        providerId: 'barentswatch_ais',
+        rawReference: { documentId: 'barentswatch_ais:230123456', providerRecordId: '230123456', canonicalUrl: null },
+      }), LIVE_DEFAULTS)!
+      const collapsed = collapseLiveGeoDuplicates([digitraffic, barents])
+      return collapsed.length === 1
+        && collapsed[0]!.identityKey === 'mmsi:230123456'
+        && (collapsed[0]!.discoveryProvenance.alsoDiscoveredVia.includes('barentswatch_ais') || collapsed[0]!.discoveryProvenance.alsoDiscoveredVia.includes('digitraffic_marine') || collapsed[0]!.provider === 'digitraffic_marine')
+    })(),
+    'same MMSI from two AIS providers collapses and retains provenance',
+  ))
+
+  results.push(check(
+    '25_noaa_historical_never_live',
+    maritimeProviderLiveStatus(noaa).freshness === 'HISTORICAL'
+      && resolveTerraLiveFreshness({ ...LIVE_DEFAULTS, fromCache: false, isHistorical: true, observedAt: NOW, fetchOk: true }) === 'HISTORICAL',
+    'historical NOAA archive is never LIVE',
+  ))
+
+  results.push(check(
+    '26_missing_credential_and_local_sensor_states',
+    maritimeProviderLiveStatus(barents).freshness === 'NEEDS_CREDENTIALS'
+      && maritimeProviderLiveStatus(getMaritimeSourceRecord('ais_catcher_own_sensor')!).freshness === 'NEEDS_LOCAL_SENSOR'
+      && maritimeProviderLiveStatus(getMaritimeSourceRecord('commercial_satellite_ais')!).freshness === 'NEEDS_COMMERCIAL_ACCOUNT',
+    'precise blocker states',
+  ))
+
+  results.push(check(
+    '27_provider_reason_contains_no_secrets',
+    (() => {
+      const reason = maritimeProviderLiveStatus(aisstream).reason
+      return /AISSTREAM_API_KEY/.test(reason) && !/sk-|xai-|Bearer /.test(reason)
+    })(),
+    'reason names the env var without values',
+  ))
+
   results.push(check(
     '18_unconfigured_provider_not_reported_live',
-    maritimeProviderLiveStatus(barents).freshness === 'NOT_CONFIGURED'
-      && maritimeProviderLiveStatus(aisstream).freshness === 'NOT_CONFIGURED'
-      && maritimeProviderLiveStatus(aishub).freshness === 'NOT_CONFIGURED'
-      && maritimeProviderLiveStatus(noaa).freshness === 'NOT_CONFIGURED'
+    maritimeProviderLiveStatus(barents).freshness === 'NEEDS_CREDENTIALS'
+      && maritimeProviderLiveStatus(aisstream).freshness === 'NEEDS_CREDENTIALS'
+      && maritimeProviderLiveStatus(aishub).freshness === 'NEEDS_CREDENTIALS'
+      && maritimeProviderLiveStatus(noaa).freshness === 'HISTORICAL'
       && listMaritimeLiveProviderStatuses().every(row => row.freshness !== 'LIVE' || row.id === 'digitraffic_marine'),
-    'registered-but-not-enabled AIS providers stay NOT_CONFIGURED',
+    'credential/historical AIS providers stay precise, never LIVE',
   ))
 
   results.push(check(
@@ -424,8 +521,8 @@ function run(): CaseResult[] {
       delayedFeed: false,
       observedAt: NOW,
       now: NOW,
-    }) === 'NOT_CONFIGURED',
-    'adapter existence without implementation is not LIVE',
+    }) === 'NOT_IMPLEMENTED',
+    'adapter existence without implementation is NOT_IMPLEMENTED, not LIVE',
   ))
 
   return results

@@ -38,8 +38,21 @@ function snapUp(value: number): number {
   return Math.ceil(value / BBOX_GRID_DEG) * BBOX_GRID_DEG
 }
 
-function rectanglesIntersect(a: TerraDegreeRectangle, b: TerraDegreeRectangle): boolean {
+export function rectanglesIntersect(a: TerraDegreeRectangle, b: TerraDegreeRectangle): boolean {
   return a.west < b.east && a.east > b.west && a.south < b.north && a.north > b.south
+}
+
+export const BARENTSWATCH_AIS_COVERAGE_BBOX: TerraDegreeRectangle = { west: 4.0, south: 57.8, east: 31.5, north: 71.5 }
+
+const BBOX_QUERY_PATTERN = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/
+
+export function parseTerraMaritimeBboxQuery(text: string | null | undefined): TerraDegreeRectangle | null {
+  if (!text?.trim()) return null
+  const match = BBOX_QUERY_PATTERN.exec(text.trim())
+  if (!match) return null
+  const [south, west, north, east] = match.slice(1).map(Number)
+  if (![south, west, north, east].every(Number.isFinite) || east <= west || north <= south) return null
+  return { south, west, north, east }
 }
 
 /** True only when the given camera rectangle genuinely overlaps a known Maritime source's real

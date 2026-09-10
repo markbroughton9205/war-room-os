@@ -4,6 +4,11 @@ import type { ResearchProviderId } from '@/lib/research-engine/core/types'
 import type { ResearchProviderAdapter } from '@/lib/research-engine/providers/adapter'
 import { githubAdapter } from '@/lib/research-engine/providers/github'
 import { digitrafficMarineAdapter } from '@/lib/research-engine/providers/digitraffic_marine'
+import { barentswatchAisAdapter } from '@/lib/research-engine/providers/barentswatch_ais'
+import { aisstreamAdapter } from '@/lib/research-engine/providers/aisstream'
+import { aishubMarineAdapter } from '@/lib/research-engine/providers/aishub_marine'
+import { noaaAccessAisAdapter } from '@/lib/research-engine/providers/noaa_access_ais'
+import { aisCatcherOwnSensorAdapter } from '@/lib/research-engine/providers/ais_catcher_own_sensor'
 import { digitrafficRoadCamerasAdapter } from '@/lib/research-engine/providers/digitraffic_road_cameras'
 import { drivebcEventsAdapter } from '@/lib/research-engine/providers/drivebc_events'
 import { webtrisAdapter } from '@/lib/research-engine/providers/webtris'
@@ -407,6 +412,11 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   ocha_fts: ochaFtsAdapter,
   opensky: openskyAdapter,
   digitraffic_marine: digitrafficMarineAdapter,
+  barentswatch_ais: barentswatchAisAdapter,
+  aisstream: aisstreamAdapter,
+  aishub_marine: aishubMarineAdapter,
+  noaa_access_ais: noaaAccessAisAdapter,
+  ais_catcher_own_sensor: aisCatcherOwnSensorAdapter,
   digitraffic_road_cameras: digitrafficRoadCamerasAdapter,
   drivebc_events: drivebcEventsAdapter,
   webtris: webtrisAdapter,

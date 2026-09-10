@@ -41,6 +41,7 @@ function vesselObject(overrides: Partial<TerraLiveGeoObject> = {}): TerraLiveGeo
     confidence: 0.9,
     sourceUrl: 'https://meri.digitraffic.fi/api/ais/v1/vessels/230123456',
     coordinateOrigin: 'source_embedded',
+    identityKey: 'mmsi:230123456',
     ...overrides,
   }
 }
@@ -93,11 +94,11 @@ export function runTerraCouncilHandoffValidation(): CaseResult[] {
   ))
   cases.push(check(
     '13_07_unconfigured_ais_never_handoff',
-    canSendTerraObjectToCouncil(vesselObject({ provider: 'barentswatch_ais', freshness: 'NOT_CONFIGURED' })) === false
-      && canSendTerraObjectToCouncil(vesselObject({ provider: 'aisstream', freshness: 'LIVE' })) === false
-      && canSendTerraObjectToCouncil(vesselObject({ provider: 'aishub_marine' })) === false
-      && canSendTerraObjectToCouncil(vesselObject({ provider: 'noaa_access_ais' })) === false,
-    'registered-not-implemented stay blocked',
+    canSendTerraObjectToCouncil(vesselObject({ provider: 'barentswatch_ais', freshness: 'NEEDS_CREDENTIALS' })) === false
+      && canSendTerraObjectToCouncil(vesselObject({ provider: 'aisstream', freshness: 'NEEDS_CREDENTIALS' })) === false
+      && canSendTerraObjectToCouncil(vesselObject({ provider: 'aishub_marine', freshness: 'NEEDS_CREDENTIALS' })) === false
+      && canSendTerraObjectToCouncil(vesselObject({ freshness: 'HISTORICAL', provider: 'noaa_access_ais' })) === true,
+    'credential blockers stay blocked; historical objects may hand off with honest freshness',
   ))
   cases.push(check(
     '13_08_invalid_body_rejected',

@@ -1,27 +1,12 @@
 /**
- * Architectural boundary for a future own AIS receiver (AIS-catcher / local SDR) — mission
- * requirement: reserve the plumbing so a real receiver plugs into the SAME normalized vessel
- * pipeline every other Maritime source uses, instead of a second system being built later. No
- * hardware is fielded this phase, and nothing here fabricates a receiver observation — every
- * function is either a pure decode of a real ITU-R M.1371 field shape or is unreachable until a
- * real bridge process exists.
+ * Own-sensor AIS observation contract (AIS-catcher / local SDR).
  *
- * Intended real shape, once a Commander fields a receiver (see
- * lib/terra/maritimeSourceRegistry.ts's ais_catcher_own_sensor entry, configurationState
- * 'HARDWARE_REQUIRED'):
+ * Real ingest path:
+ *   AIS antenna → SDR / AIS-catcher → POST /api/terra/own-sensor/ais
+ *   → maritimeOwnSensorStore → ais_catcher_own_sensor adapter → Terra
  *
- *   AIS-catcher / local SDR
- *       -> a small local bridge process (not built this phase) that decodes raw NMEA/AIVDM
- *          sentences and posts them, already decoded, to a new War Room-internal endpoint
- *       -> that endpoint validates the shape below and republishes it through the exact same
- *          lib/terra/normalizeDigitrafficMarineVessels.ts-style normalizer (or a thin sibling
- *          reusing its sentinel-filtering rules) into TerraIntelligenceEvent — never a parallel
- *          "own sensor" event kind, Terra layer, or rendering path.
- *
- * `TerraOwnSensorAisObservation` intentionally mirrors the exact field set
- * lib/research-engine/providers/digitraffic_marine.ts already normalizes (mmsi/lat/lon/sog/cog/
- * heading/navStat), not a superset, so a real bridge's output needs no bespoke mapping layer when
- * it eventually exists.
+ * Hardware is not required for Terra to function. Absence of a receiver is
+ * NEEDS_LOCAL_SENSOR, never a provider outage.
  */
 
 export type TerraOwnSensorAisObservation = {
@@ -43,6 +28,6 @@ export type TerraOwnSensorAisObservation = {
  * receiver-polling logic without another Terra layer/component needing to change: it would start
  * returning real TerraOwnSensorAisObservation records from that same call.
  */
-export function pollOwnSensorAisObservations(): { status: 'not_configured'; observations: [] } {
+export function pollOwnSensorAisObservations(): { status: 'not_configured' | 'live'; observations: TerraOwnSensorAisObservation[] } {
   return { status: 'not_configured', observations: [] }
 }

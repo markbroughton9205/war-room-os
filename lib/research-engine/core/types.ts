@@ -277,6 +277,7 @@ export type ResearchProviderId =
   | 'aisstream'
   | 'aishub_marine'
   | 'noaa_access_ais'
+  | 'ais_catcher_own_sensor'
   // God's Eye Traffic & Camera Intelligence phase — both real adapters, keyless, zero-cost (see
   // lib/terra/roadTrafficSourceRegistry.ts for the full reconciled candidate list; the other
   // Kimi Phase 1 candidates are documented there without a ResearchProviderId, since they have no

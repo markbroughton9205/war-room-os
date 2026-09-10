@@ -432,7 +432,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const add = async (id: string, fn: () => boolean | string | Promise<boolean | string>) => results.push(await test(id, fn))
 
   await add('re_01_all_31_providers_registered', () =>
-    RESEARCH_PROVIDER_ENV.length === 276 || `expected 276 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 277 || `expected 277 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_02_missing_required_env_not_configured', () => {
     const emptyEnv = { NODE_ENV: 'test' } as NodeJS.ProcessEnv
@@ -1029,6 +1029,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       nasa_eonet: ['list', 'geoSearch'],
       tsunami_gov: ['list'],
       digitraffic_marine: ['geoSearch'],
+      barentswatch_ais: ['geoSearch'],
+      aisstream: ['geoSearch'],
+      aishub_marine: ['geoSearch'],
+      noaa_access_ais: ['list'],
+      ais_catcher_own_sensor: ['geoSearch'],
       digitraffic_road_cameras: ['geoSearch'],
       drivebc_events: ['geoSearch'],
       webtris: ['geoSearch'],
@@ -1814,13 +1819,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const UNAUTHORIZED_BATCH_1_IDS = ['world_bank_data_catalog', 'world_bank_finances', 'world_bank_climate'] as const
 
   await add('re_100_registered_provider_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 276 || `expected 276 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 277 || `expected 277 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_101_implemented_count_derives_to_24_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 268 && implementedAdapters === 268)
-      || `expected 268 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 273 && implementedAdapters === 273)
+      || `expected 273 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -3112,16 +3117,16 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_229_final_provider_descriptor_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 276 || `expected 276 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 277 || `expected 277 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_230_final_implemented_count_is_24', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 268 || `expected 268 implemented adapters, found ${count}`
+    return count === 273 || `expected 273 implemented adapters, found ${count}`
   })
 
   await add('re_231_final_unimplemented_count_is_7', () => {
     const count = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return count === 8 || `expected 8 unimplemented providers, found ${count}`
+    return count === 4 || `expected 4 unimplemented providers, found ${count}`
   })
 
   // --- Repair pass: H1 (IPv4-mapped IPv6 SSRF bypass) fix regression + M5 SSRF matrix expansion ---
@@ -4194,8 +4199,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const totalCount = RESEARCH_PROVIDER_ENV.length
     const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return (descriptor?.implemented === true && totalCount === 276 && implementedCount === 268 && blockedCount === 8)
-      || `expected fmcsa implemented plus a 268/8 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+    return (descriptor?.implemented === true && totalCount === 277 && implementedCount === 273 && blockedCount === 4)
+      || `expected fmcsa implemented plus a 273/4 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
   })
 
   await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {
@@ -4206,10 +4211,10 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_653_remaining_four_blocked_providers_are_exactly_as_specified', () => {
-    // Terra Phase 3 adds four honest Maritime Source Federation registry-only entries
-    // (ACCOUNT_REQUIRED/CREDENTIAL_REQUIRED/TERMS_DEPENDENT/HISTORICAL_ONLY — see
-    // lib/terra/maritimeSourceRegistry.ts) alongside the four pre-existing blocked providers.
-    const expected = ['uspto', 'world_bank_climate', 'world_bank_data_catalog', 'world_bank_finances', 'barentswatch_ais', 'aisstream', 'aishub_marine', 'noaa_access_ais'].sort()
+    // Remaining blocked set is the four providers that still have no adapter (USPTO + three
+    // World Bank endpoints). Maritime AIS adapters are implemented; missing credentials/hardware
+    // are runtime states, not unimplemented registry rows.
+    const expected = ['uspto', 'world_bank_climate', 'world_bank_data_catalog', 'world_bank_finances'].sort()
     const actual = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).map(d => d.id).sort()
     const equal = expected.length === actual.length && expected.every((id, i) => id === actual[i])
     return equal || `expected the remaining blocked set ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
