@@ -2,6 +2,28 @@
 
 Goal: an **always-accessible URL** for the app, not a full CI walkthrough. This project is **Next.js 16** (App Router) with server routes (`app/api/**`), so it behaves like a **Node** app at runtime, not a static-only export.
 
+## ASTRA DATABASE PRE-DEPLOYMENT BLOCKER
+
+Roadmap #14 prepared ASTRA live-mission persistence. The table
+`war_room_astra_missions` is **not currently applied**.
+
+Migration file (do not skip before production):
+
+`supabase/war_room_phase58a_astra_live_missions.sql`
+
+Local/dev closeout used `local_filesystem_fallback` at
+`.war-room/astra-missions/`. That fallback is not a production store.
+
+**REQUIRED BEFORE PRODUCTION DEPLOYMENT:** apply and validate that SQL
+against the intended non-prod database first, then production, according to
+normal deployment governance. Then reload PostgREST with
+`select pg_notify('pgrst', 'reload schema');`.
+
+Do not treat a successful app build as proof that this table exists. See
+[`docs/architecture/ASTRA_LIVE_MISSION_ORCHESTRATION.md`](architecture/ASTRA_LIVE_MISSION_ORCHESTRATION.md)
+and [`docs/MASTER_OS_ROADMAP.md`](MASTER_OS_ROADMAP.md).
+
+
 ## Vercel (typical default)
 
 1. Connect the Git repository and import the project.

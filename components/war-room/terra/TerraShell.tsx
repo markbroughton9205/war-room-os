@@ -78,6 +78,7 @@ import {
   buildTerraCouncilHandoffPayload,
   canSendTerraObjectToCouncil,
 } from '@/lib/terra/councilHandoff'
+import { observedVesselFromSelection } from '@/lib/astra/observedVessel'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -922,6 +923,96 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   }, [selectedFeature, liveIntelSnapshot.objects, clock.time.currentTime])
   const canSendSelectedToCouncil = canSendTerraObjectToCouncil(selectedLiveObject)
   const [commanderQuestion, setCommanderQuestion] = useState('')
+  const [astraMission, setAstraMission] = useState<{
+    id: string
+    status: string
+    error?: string | null
+    outcomeSummary?: string | null
+    councilConversationId?: string | null
+    terraObjectId?: string | null
+    terraProvider?: string | null
+    terraEvidenceId?: string | null
+  } | null>(null)
+  const [astraBusy, setAstraBusy] = useState(false)
+  const canCreateAstraMission = canSendSelectedToCouncil && commanderQuestion.trim().length >= 8 && !astraBusy
+  const canRunAstraMission = Boolean(astraMission?.id) && astraMission?.status === 'planned' && !astraBusy
+  const applyAstraMissionPayload = useCallback((mission: {
+    id: string
+    status: string
+    error?: string | null
+    outcomeSummary?: string | null
+    councilConversationId?: string | null
+    terraObjectId?: string | null
+    terraProvider?: string | null
+    terraEvidenceId?: string | null
+  }) => {
+    setAstraMission({
+      id: mission.id,
+      status: mission.status,
+      error: mission.error ?? null,
+      outcomeSummary: mission.outcomeSummary,
+      councilConversationId: mission.councilConversationId,
+      terraObjectId: mission.terraObjectId,
+      terraProvider: mission.terraProvider,
+      terraEvidenceId: mission.terraEvidenceId,
+    })
+  }, [])
+  const createAstraMission = useCallback(async () => {
+    const objective = commanderQuestion.trim()
+    if (!canCreateAstraMission || !objective || !selectedLiveObject) return
+    setAstraBusy(true)
+    try {
+      const terraSeed = buildTerraCouncilHandoffPayload({ object: selectedLiveObject, feature: selectedFeature, commanderPrompt: objective })
+      const observedVessel = observedVesselFromSelection({ object: selectedLiveObject, feature: selectedFeature })
+      const response = await fetch('/api/astra/missions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ objective, terraSeed, observedVessel }),
+      })
+      const body = await response.json().catch(() => ({})) as { mission?: {
+        id: string
+        status: string
+        outcomeSummary?: string | null
+        councilConversationId?: string | null
+        error?: string | null
+        terraObjectId?: string | null
+        terraProvider?: string | null
+        terraEvidenceId?: string | null
+      }; error?: string }
+      if (!response.ok || !body.mission) {
+        setAstraMission({ id: '', status: 'failed', error: typeof body.error === 'string' ? body.error : 'ASTRA mission was not created.' })
+        return
+      }
+      applyAstraMissionPayload(body.mission)
+    } finally {
+      setAstraBusy(false)
+    }
+  }, [applyAstraMissionPayload, canCreateAstraMission, commanderQuestion, selectedFeature, selectedLiveObject])
+  const runAstraMission = useCallback(async () => {
+    if (!canRunAstraMission || !astraMission?.id) return
+    setAstraBusy(true)
+    setAstraMission(prev => prev ? { ...prev, status: 'running', error: null } : prev)
+    try {
+      const response = await fetch(`/api/astra/missions/${astraMission.id}/execute`, { method: 'POST' })
+      const body = await response.json().catch(() => ({})) as { mission?: {
+        id: string
+        status: string
+        error?: string | null
+        outcomeSummary?: string | null
+        councilConversationId?: string | null
+        terraObjectId?: string | null
+        terraProvider?: string | null
+        terraEvidenceId?: string | null
+      }; error?: string }
+      if (body.mission) {
+        applyAstraMissionPayload(body.mission)
+      } else {
+        setAstraMission(prev => prev ? { ...prev, status: 'failed', error: typeof body.error === 'string' ? body.error : 'ASTRA execute failed.' } : prev)
+      }
+    } finally {
+      setAstraBusy(false)
+    }
+  }, [applyAstraMissionPayload, astraMission?.id, canRunAstraMission])
   const sendSelectedObjectToCouncil = useCallback(() => {
     if (!selectedLiveObject) return
     const payload = buildTerraCouncilHandoffPayload({
@@ -1536,6 +1627,34 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           >
             Send selected object to Council
           </button>
+          <button
+            type="button"
+            onClick={() => { void createAstraMission() }}
+            disabled={!canCreateAstraMission}
+            className="mt-2 w-full rounded border border-cyan-400/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-cyan-300 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-600"
+          >
+            Create ASTRA mission
+          </button>
+          <button
+            type="button"
+            onClick={() => { void runAstraMission() }}
+            disabled={!canRunAstraMission}
+            className="mt-1 w-full rounded border border-cyan-400/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-cyan-300 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-600"
+          >
+            Run ASTRA mission
+          </button>
+          {astraMission ? (
+            <p className="mt-1 text-[10px] text-slate-400">
+              {astraMission.id ? `${astraMission.status} · ${astraMission.id}` : astraMission.error}
+              {astraMission.terraObjectId ? ` · terra ${astraMission.terraObjectId}` : ''}
+              {astraMission.terraProvider ? ` · ${astraMission.terraProvider}` : ''}
+              {astraMission.terraEvidenceId ? ` · ${astraMission.terraEvidenceId}` : ''}
+              {astraMission.councilConversationId ? ` · council ${astraMission.councilConversationId}` : ''}
+              {astraMission.error ? ` · ${astraMission.error}` : ''}
+            </p>
+          ) : (
+            <p className="mt-1 text-[10px] text-slate-500">Selection is not create. Create is not execute. Homepage God&apos;s Eye does not get these ASTRA controls.</p>
+          )}
         </div>
 
         {selectedFeature ? (
