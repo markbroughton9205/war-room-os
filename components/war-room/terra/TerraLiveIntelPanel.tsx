@@ -22,10 +22,18 @@ export function TerraLiveIntelPanel({
   snapshot,
   selected,
   compact,
+  onSendSelectedToCouncil,
+  canSendToCouncil,
+  commanderQuestion,
+  onCommanderQuestionChange,
 }: {
   snapshot: TerraLiveIntelSnapshot
   selected: TerraLiveGeoObject | null
   compact?: boolean
+  onSendSelectedToCouncil?: () => void
+  canSendToCouncil?: boolean
+  commanderQuestion?: string
+  onCommanderQuestionChange?: (value: string) => void
 }) {
   return (
     <div className={`pointer-events-auto rounded border border-cyan-400/25 bg-black/75 backdrop-blur-sm ${compact ? 'p-2' : 'p-3'}`}>
@@ -68,6 +76,30 @@ export function TerraLiveIntelPanel({
       ) : (
         <p className="mt-2 text-[10px] text-slate-500">Select a vessel or event for provenance.</p>
       )}
+      {onSendSelectedToCouncil ? (
+        <>
+          {onCommanderQuestionChange ? (
+            <label className="mt-2 block text-[9px] font-bold uppercase tracking-widest text-slate-500">
+              Commander question
+              <textarea
+                value={commanderQuestion ?? ''}
+                onChange={event => onCommanderQuestionChange(event.target.value)}
+                rows={compact ? 3 : 4}
+                placeholder="Analyze this vessel's current observed activity using only the supplied Terra intelligence. Clearly separate observed AIS facts from inference and uncertainty."
+                className="mt-1 w-full resize-y rounded border border-white/15 bg-black/40 px-2 py-1 text-[11px] font-normal normal-case tracking-normal text-slate-200 placeholder:text-slate-600"
+              />
+            </label>
+          ) : null}
+          <button
+            type="button"
+            onClick={onSendSelectedToCouncil}
+            disabled={!canSendToCouncil}
+            className="mt-2 w-full rounded border border-emerald-400/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-300 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-600"
+          >
+            Send selected object to Council
+          </button>
+        </>
+      ) : null}
     </div>
   )
 }

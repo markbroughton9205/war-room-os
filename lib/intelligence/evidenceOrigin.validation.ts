@@ -86,6 +86,25 @@ export function runEvidenceOriginValidation(): CaseResult[] {
     JSON.stringify({ origin_type: terraItem.origin_type }),
   ))
 
+  const terraWithProvenance = buildTerraEvidenceItem({
+    terraContextText: 'FINNMAID at 60.15, 24.95',
+    observedAt: now,
+    id: 'digitraffic_marine:230123456',
+    source_id: 'digitraffic_marine',
+    source_label: 'Terra · digitraffic_marine',
+    title: 'FINNMAID',
+    url: 'https://meri.digitraffic.fi/api/ais/v1/vessels/230123456',
+    source_family: 'digitraffic_marine',
+    canonical_url: 'https://meri.digitraffic.fi/api/ais/v1/vessels/230123456',
+  })
+  cases.push(check(
+    'origin_08b_terra_provenance_fields_stay_terra_origin',
+    terraWithProvenance.origin_type === 'TERRA'
+      && terraWithProvenance.source_id === 'digitraffic_marine'
+      && terraWithProvenance.canonical_url === 'https://meri.digitraffic.fi/api/ais/v1/vessels/230123456',
+    JSON.stringify({ origin: terraWithProvenance.origin_type, source_id: terraWithProvenance.source_id }),
+  ))
+
   cases.push(check(
     'origin_09_no_item_fabricates_kimi_wave_or_stored_research',
     [liveWebItem?.origin_type, terraItem.origin_type, runtimeItem.origin_type, modelInferenceItem.origin_type]

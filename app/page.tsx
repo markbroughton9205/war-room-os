@@ -50,6 +50,7 @@ import type { StandingPermissionMode } from '@/lib/permissions/standingPermissio
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
 import { SEARCH_HANDOFF_STORAGE_KEY, type SearchCouncilHandoffPayload } from '@/lib/war-room-search/types'
+import { TERRA_HANDOFF_STORAGE_KEY, isTerraHandoffBody, type TerraCouncilHandoffPayload } from '@/lib/terra/councilHandoff'
 import { postIncrementalCouncilChat } from '@/lib/council/incremental-transport/client'
 import {
   type DeliberationEvidenceReference,
@@ -6560,6 +6561,7 @@ function Home() {
   const [councilResearchFailed, setCouncilResearchFailed] = useState(false)
   const pendingCouncilResearchContextRef = useRef<CouncilStoryContext | null>(null)
   const pendingSearchHandoffRef = useRef<SearchCouncilHandoffPayload | null>(null)
+  const pendingTerraHandoffRef = useRef<TerraCouncilHandoffPayload | null>(null)
   const [commanderLocation, setCommanderLocation] = useState<CommanderLocationState>(DEFAULT_COMMANDER_LOCATION)
   const [horoscopeEnabled, setHoroscopeEnabled] = useState(false)
   const [astrologyMode, setAstrologyMode] = useState<AstrologyInterpretationMode>('spiritual')
@@ -9411,6 +9413,7 @@ function Home() {
       classifiedTurnForSubmit.intent === 'STATUS_CHECK'
       || (councilFlowMode === 'stable_group' && !pendingCouncilResearchContextRef.current)
       || Boolean(pendingSearchHandoffRef.current)
+      || Boolean(pendingTerraHandoffRef.current)
     if (
       mode !== 'continue'
       && teamResearchIntent.triggered
@@ -9516,6 +9519,7 @@ function Home() {
             ...body,
             councilGatherPhase: 'decree_soft',
             ...(pendingSearchHandoffRef.current ? { searchHandoff: pendingSearchHandoffRef.current } : {}),
+            ...(pendingTerraHandoffRef.current ? { terraHandoff: pendingTerraHandoffRef.current } : {}),
           },
           signal: merged.signal,
           fallback: 'final_snapshot_before_execution_only',
@@ -11296,6 +11300,7 @@ function Home() {
         setLoading(false)
       }
       pendingSearchHandoffRef.current = null
+      pendingTerraHandoffRef.current = null
     }
   }
 
@@ -11321,6 +11326,27 @@ function Home() {
       }, 120)
     } catch {
       sessionStorage.removeItem(SEARCH_HANDOFF_STORAGE_KEY)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('terraAnalyze') !== '1') return
+    const raw = sessionStorage.getItem(TERRA_HANDOFF_STORAGE_KEY)
+    if (!raw) return
+    try {
+      const payload = JSON.parse(raw) as unknown
+      if (!isTerraHandoffBody(payload)) return
+      sessionStorage.removeItem(TERRA_HANDOFF_STORAGE_KEY)
+      pendingTerraHandoffRef.current = payload
+      setCommand(payload.commanderPrompt)
+      window.history.replaceState({}, '', '/')
+      window.setTimeout(() => {
+        void submitDecreeRef.current?.(payload.commanderPrompt)
+      }, 120)
+    } catch {
+      sessionStorage.removeItem(TERRA_HANDOFF_STORAGE_KEY)
     }
   }, [])
 

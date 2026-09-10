@@ -64,23 +64,43 @@ export function buildTerraEvidenceItem(args: {
   terraContextText: string
   observedAt: string
   id?: string
+  source_id?: string
+  source_label?: string
+  title?: string
+  url?: string
+  source_family?: string | null
+  region?: string | null
+  country?: string | null
+  jurisdiction?: string | null
+  canonical_url?: string | null
+  freshness?: EvidenceFreshness
 }): IntelligenceEvidenceItem {
-  return baseEvidenceItem(
+  const item = baseEvidenceItem(
     {
       id: args.id ?? `terra-${args.observedAt}`,
-      source_id: 'terra-globe-selection',
-      source_label: 'Terra globe selection',
-      title: 'Commander Terra context',
+      source_id: args.source_id ?? 'terra-globe-selection',
+      source_label: args.source_label ?? 'Terra globe selection',
+      title: args.title ?? 'Commander Terra context',
+      ...(args.url ? { url: args.url } : {}),
       claim: args.terraContextText,
       content: args.terraContextText,
       observed_at: args.observedAt,
       confidence_tier: 'verified',
-      freshness: 'live',
+      freshness: args.freshness ?? 'live',
     },
     'TERRA',
     'direct_fetch',
     'verified',
   )
+  return {
+    ...item,
+    origin_type: 'TERRA',
+    ...(args.source_family != null ? { source_family: args.source_family } : {}),
+    ...(args.region != null ? { region: args.region } : {}),
+    ...(args.country != null ? { country: args.country } : {}),
+    ...(args.jurisdiction != null ? { jurisdiction: args.jurisdiction } : {}),
+    ...(args.canonical_url != null ? { canonical_url: args.canonical_url } : {}),
+  }
 }
 
 /** A verified local backend/runtime status fact (e.g. "Ollama responded normally this round"). */

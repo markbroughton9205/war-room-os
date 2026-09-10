@@ -92,6 +92,13 @@ export type CouncilChatRequestBody = {
     resultIds?: string[]
     results: unknown[]
   }
+  /** Terra selected object → Council evidence packet. Structured TERRA-origin lineage, not a globe dump. */
+  terraHandoff?: {
+    action: 'send_selected_object'
+    commanderPrompt: string
+    lineage: unknown
+    observedFacts: string
+  }
 }
 
 export type CouncilChatJson = {

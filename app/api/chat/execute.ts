@@ -61,6 +61,7 @@ import { runWarRoomOsSweep } from '@/lib/war-room-sweep/orchestrator'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
 import { runLiveResearchRouter } from '@/lib/research/researchRouter'
 import { buildSearchHandoffEvidencePacket, isSearchHandoffBody } from '@/lib/war-room-search/councilHandoff'
+import { buildTerraHandoffEvidencePacket, isTerraHandoffBody } from '@/lib/terra/councilHandoff'
 import { createChatTrajectorySession, type ChatTrajectorySession } from '@/lib/modular-intelligence/chatTrajectoryObserver'
 import { applyPilotToResearchDecision } from '@/lib/modular-intelligence/nativeRouterV1Pilot'
 import {
@@ -1233,6 +1234,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   let liveResearchPacket: LiveResearchEvidencePacket | undefined
   if (isSearchHandoffBody(body.searchHandoff)) {
     liveResearchPacket = buildSearchHandoffEvidencePacket(body.searchHandoff)
+    liveResearchAttempted = true
+    liveResearchUi = computeLiveResearchClientUi(liveResearchPacket, true, { councilPhase: 'model_running' })
+    liveResearchSummary = toLiveResearchClientSummary(liveResearchPacket)
+  } else if (isTerraHandoffBody(body.terraHandoff)) {
+    liveResearchPacket = buildTerraHandoffEvidencePacket(body.terraHandoff)
     liveResearchAttempted = true
     liveResearchUi = computeLiveResearchClientUi(liveResearchPacket, true, { councilPhase: 'model_running' })
     liveResearchSummary = toLiveResearchClientSummary(liveResearchPacket)

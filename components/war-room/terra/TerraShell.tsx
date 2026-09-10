@@ -13,8 +13,8 @@
  * deliberate Commander action.
  *
  * Earth Knowledge's active-location surface is wired to the existing Research Engine/Nominatim
- * boundary. Remaining Council and Commander annotation surfaces stay honestly-labeled
- * placeholders in the dedicated workspace, matching this repo's "no fake dashboards" standard.
+ * boundary. The Live Council Dock sends a Commander-selected object into the existing Council
+ * pipeline. Commander annotation stays an honestly-labeled placeholder.
  *
  * Selection state (a clicked coordinate or a clicked feature marker) is local component state
  * only — never written to war_room_audit_logs or anywhere else. Camera movement and exploratory
@@ -73,6 +73,11 @@ import {
   normalizeLiveGeoFromFeature,
   type TerraLiveFreshness,
 } from '@/lib/terra/liveGeoIntelligence'
+import {
+  TERRA_HANDOFF_STORAGE_KEY,
+  buildTerraCouncilHandoffPayload,
+  canSendTerraObjectToCouncil,
+} from '@/lib/terra/councilHandoff'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -915,6 +920,23 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         now: clock.time.currentTime,
       })
   }, [selectedFeature, liveIntelSnapshot.objects, clock.time.currentTime])
+  const canSendSelectedToCouncil = canSendTerraObjectToCouncil(selectedLiveObject)
+  const [commanderQuestion, setCommanderQuestion] = useState('')
+  const sendSelectedObjectToCouncil = useCallback(() => {
+    if (!selectedLiveObject) return
+    const payload = buildTerraCouncilHandoffPayload({
+      object: selectedLiveObject,
+      feature: selectedFeature,
+      commanderPrompt: commanderQuestion,
+    })
+    if (!payload) return
+    try {
+      sessionStorage.setItem(TERRA_HANDOFF_STORAGE_KEY, JSON.stringify(payload))
+    } catch {
+      return
+    }
+    window.location.href = '/?terraAnalyze=1'
+  }, [selectedLiveObject, selectedFeature, commanderQuestion])
   useEffect(() => {
     // Gated on maritimeBoundingBoxQuery !== null — the exact same condition the aircraft summary
     // effect above uses (never just the maritimeEnabled toggle). This matters beyond consistency:
@@ -1223,7 +1245,15 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
 
       {commandCenter ? (
         <div className="pointer-events-none absolute bottom-12 left-3 z-30 flex w-[min(22rem,42%)] flex-col gap-2">
-          <TerraLiveIntelPanel snapshot={liveIntelSnapshot} selected={selectedLiveObject} compact />
+          <TerraLiveIntelPanel
+            snapshot={liveIntelSnapshot}
+            selected={selectedLiveObject}
+            compact
+            onSendSelectedToCouncil={sendSelectedObjectToCouncil}
+            canSendToCouncil={canSendSelectedToCouncil}
+            commanderQuestion={commanderQuestion}
+            onCommanderQuestionChange={setCommanderQuestion}
+          />
           <TerraProviderCapabilityDock
             localDetailActive={isLocalScale}
             buildingsActive={globeStatus.phase === 'ready' && globeStatus.hasOsmBuildings}
@@ -1237,7 +1267,14 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       {/* Left rail — layer controls + Earth Knowledge placeholder. */}
       {!commandCenter && <div className="pointer-events-none absolute bottom-36 left-0 top-20 flex w-72 flex-col gap-2 overflow-y-auto overscroll-contain p-4">
         <div className="pointer-events-auto">
-          <TerraLiveIntelPanel snapshot={liveIntelSnapshot} selected={selectedLiveObject} />
+          <TerraLiveIntelPanel
+            snapshot={liveIntelSnapshot}
+            selected={selectedLiveObject}
+            onSendSelectedToCouncil={sendSelectedObjectToCouncil}
+            canSendToCouncil={canSendSelectedToCouncil}
+            commanderQuestion={commanderQuestion}
+            onCommanderQuestionChange={setCommanderQuestion}
+          />
         </div>
         <div className="pointer-events-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
           <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Layer Controls</p>
@@ -1469,11 +1506,36 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
 
       {/* Right rail — Live Council dock + selected-feature / provenance panel. */}
       {!commandCenter && <div className="pointer-events-none absolute right-0 top-20 flex w-72 flex-col gap-2 p-4">
-        <div className="pointer-events-auto">
-          <PlaceholderPanel
-            title="Live Council Dock"
-            note="Not wired yet. Will reuse the existing Council/provider adapters — no second Council or provider system planned or built here (later phase)."
-          />
+        <div className="pointer-events-auto rounded border border-emerald-400/25 bg-black/70 p-3 backdrop-blur-sm">
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-emerald-400/80">Live Council Dock</p>
+          <p className="text-[11px] leading-snug text-slate-500">
+            Sends the selected Terra object into the existing Council pipeline. No second Council.
+          </p>
+          {selectedLiveObject ? (
+            <p className="mt-2 truncate text-[11px] text-slate-200" title={selectedLiveObject.title}>
+              Selected: {selectedLiveObject.title} · {selectedLiveObject.provider} · {selectedLiveObject.freshness}
+            </p>
+          ) : (
+            <p className="mt-2 text-[11px] text-slate-500">Select a vessel or event, then send it with an explicit Commander action.</p>
+          )}
+          <label className="mt-2 block text-[9px] font-bold uppercase tracking-widest text-slate-500">
+            Commander question
+            <textarea
+              value={commanderQuestion}
+              onChange={event => setCommanderQuestion(event.target.value)}
+              rows={4}
+              placeholder="Analyze this vessel's current observed activity using only the supplied Terra intelligence. Clearly separate observed AIS facts from inference and uncertainty."
+              className="mt-1 w-full resize-y rounded border border-white/15 bg-black/40 px-2 py-1 text-[11px] font-normal normal-case tracking-normal text-slate-200 placeholder:text-slate-600"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={sendSelectedObjectToCouncil}
+            disabled={!canSendSelectedToCouncil}
+            className="mt-2 w-full rounded border border-emerald-400/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-300 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-600"
+          >
+            Send selected object to Council
+          </button>
         </div>
 
         {selectedFeature ? (
@@ -1498,6 +1560,14 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
                 {selectedFeature.rawReference.canonicalUrl}
               </a>
             )}
+            <button
+              type="button"
+              onClick={sendSelectedObjectToCouncil}
+              disabled={!canSendSelectedToCouncil}
+              className="mt-2 w-full rounded border border-emerald-400/40 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-300 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-600"
+            >
+              Send selected object to Council
+            </button>
           </div>
         ) : (
           <div className="pointer-events-auto">
