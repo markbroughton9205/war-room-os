@@ -15,7 +15,8 @@ completion list (`docs/SWARM_ROADMAP_COMPLETION_REPORT.md`).
 | 14 | ASTRA Live Mission Orchestration | PASS / LIVE-VALIDATED / COMMITTED / CLOSED |
 | 15 | Distinct B-Parameter Council Reasoning | PASS / LIVE-VALIDATED / COMMITTED / CLOSED (`44011e9`) |
 | 16 | Real Council Deliberation Pipeline | PASS / LIVE-VALIDATED / COMMITTED / CLOSED (`9d78a96`) — PRIMARY→PHOENIX→REVISION/STAND_FIRM→AURORA→COMPLETE/DEGRADED/FAILED; do not begin #17 until inventory reviewed |
-| 17 | Council Session Intelligence | PASS / LIVE-VALIDATED / RESTART-VALIDATED / COMMITTED / CLOSED (`b7f93eb`) — durable Round 1 → process restart → DB-only structured restore; conversation metadata rounds[] bounded (40) and rebuildable; message `councilDeliberationRound` is authority |
+| 17 | Council Session Intelligence | PASS / LIVE-VALIDATED / RESTART-VALIDATED / COMMITTED / CLOSED (`b7f93eb`; restart-proof docs `11c6b59`) — durable Round 1 → process restart → DB-only structured restore; conversation metadata rounds[] bounded (40) and rebuildable; message `councilDeliberationRound` is authority |
+| 18 | Production Supervisor Activation | NOT STARTED — inventory only (existing `ops/production-supervisor` + 524 hardening `6338ea4`; watchdog not registered; production undeployed) |
 
 Terra side (not a new roadmap number): **Automatic urban streets/buildings** — PASS / LIVE-VALIDATED / COMMITTED (`9571af1`). See [`docs/terra/AUTOMATIC_URBAN_DETAIL.md`](terra/AUTOMATIC_URBAN_DETAIL.md).
 
