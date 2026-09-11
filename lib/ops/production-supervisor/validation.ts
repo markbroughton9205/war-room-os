@@ -354,5 +354,73 @@ export function runProductionSupervisorValidation(): SupervisorCase[] {
     'idempotent start',
   ))
 
+  cases.push(check(
+    '18_29_unrelated_non_node_not_killed',
+    decideKillTarget({
+      processName: 'python.exe',
+      commandLine: 'python.exe -m http.server 3000',
+    }) === 'refuse_unrelated' &&
+      decideKillTarget({
+        processName: 'httpd.exe',
+        commandLine: 'httpd.exe -p 3000',
+      }) === 'refuse_unrelated',
+    'refuse non-node',
+  ))
+
+  cases.push(check(
+    '18_30_free_port_means_start_path',
+    /\$portOpen = Test-PortOpen/.test(start) &&
+      /Starting War Room on 127\.0\.0\.1:\$productionPort/.test(start) &&
+      /if \(\$portOpen\)/.test(start),
+    'free port → start; occupied → probe',
+  ))
+
+  cases.push(check(
+    '18_31_hung_origin_is_unhealthy',
+    classifyApplicationHealth({
+      httpResponding: false,
+      hungOrigin: true,
+      database: 'ok',
+      ollama: 'ok',
+    }) === 'APPLICATION_UNHEALTHY' &&
+      /\$hungOrigin = \$portListening -and \(-not \$appResult\.ok\)/.test(healthPs),
+    'TCP-only ≠ healthy',
+  ))
+
+  cases.push(check(
+    '18_32_ollama_degraded_does_not_force_restart',
+    classifyApplicationHealth({
+      httpResponding: true,
+      hungOrigin: false,
+      database: 'ok',
+      ollama: 'unreachable',
+    }) === 'DEPENDENCY_DEGRADED' &&
+      /does not restart Ollama|NOTE: Ollama not reachable/i.test(watchdog) &&
+      /DEPENDENCY_DEGRADED|Do not\*\* restart web shell|do not restart web shell/i.test(readme),
+    'ollama alone ≠ web restart',
+  ))
+
+  cases.push(check(
+    '18_33_lib_ops_is_validation_only',
+    existsSync(join(process.cwd(), 'lib/ops/production-supervisor/validation.ts')) &&
+      !existsSync(join(process.cwd(), 'lib/ops/production-supervisor/watchdog.ts')) &&
+      !existsSync(join(process.cwd(), 'lib/ops/production-supervisor/start.ts')) &&
+      !existsSync(join(process.cwd(), 'lib/ops/production-supervisor/process-manager.ts')),
+    'TS validation helpers only; no runtime supervisor modules',
+  ))
+
+  cases.push(check(
+    '18_34_runbook_operator_sections',
+    /NORMAL START|HEALTH CHECK|REGISTER WATCHDOG|ROLLBACK|524 TROUBLESHOOTING/i.test(readme),
+    'operator runbook sections present',
+  ))
+
+  cases.push(check(
+    '18_35_health_always_200_when_app_answers',
+    /status: 200/.test(healthRoute) &&
+      /status:\s*depsDegraded \? 'degraded' : 'ok'|status = depsDegraded \? 'degraded' : 'ok'/.test(healthRoute),
+    'HTTP 200 for ok and degraded; non-200 only when route unreachable',
+  ))
+
   return cases
 }

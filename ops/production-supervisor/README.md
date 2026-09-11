@@ -139,3 +139,84 @@ Structural/decision tests only — does not mutate production `:3000`.
 - #19 conversation ownership
 - Council / Terra / model provider changes
 - Automatic deploy or autonomous updates
+
+## Operator runbook
+
+### NORMAL START
+Login Startup shortcut `War Room OS.lnk` runs
+`war-room-production\.war-room\Start-WarRoom.ps1`.
+If `:3000` is free → `next start --hostname 127.0.0.1 --port 3000`.
+If healthy production already present → no-op.
+
+### HEALTH CHECK
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\markb\Documents\Codex\war-room-production\.war-room\Test-WarRoomHealth.ps1"
+curl.exe -s --max-time 5 http://127.0.0.1:3000/api/health
+```
+
+### PRODUCTION PORT / DEV PORT
+- Production: `127.0.0.1:3000` only (`war-room-production`, `next start`)
+- Development: `127.0.0.1:3001` only (`war-room-os`, `pnpm run dev` → `next dev --port 3001`)
+
+### CHECK CURRENT PROCESS
+```powershell
+netstat -ano | findstr ":3000 "
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+  Where-Object { $_.CommandLine -match 'war-room|next (start|dev)' } |
+  Select-Object ProcessId, CommandLine
+```
+
+### MANUAL SAFE START
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\markb\Documents\Codex\war-room-production\.war-room\Start-WarRoom.ps1"
+```
+Idempotent. Do not bind `:3000` from `war-room-os`.
+
+### WATCHDOG STATUS
+```powershell
+Get-ScheduledTask -TaskName WarRoomProductionWatchdog -ErrorAction SilentlyContinue |
+  Select-Object TaskName, State
+```
+If missing → **NOT REGISTERED**.
+
+### REGISTER WATCHDOG (Administrator only — Commander authorization required)
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\markb\Documents\Codex\war-room-production\.war-room\Install-WarRoomWatchdogTask.ps1"
+```
+
+### UNREGISTER / DISABLE WATCHDOG (Administrator)
+```powershell
+Unregister-ScheduledTask -TaskName WarRoomProductionWatchdog -Confirm:$false
+# or:
+Disable-ScheduledTask -TaskName WarRoomProductionWatchdog
+```
+
+### LOG LOCATION
+Under `C:\Users\markb\Documents\Codex\war-room-production\.war-room\logs\`:
+- `war-room-production.log`
+- `watchdog.log`
+- `watchdog-state.json`
+
+### ROLLBACK
+1. Unregister/disable `WarRoomProductionWatchdog` if registered
+2. Keep Startup shortcut (still starts via `Start-WarRoom.ps1`)
+3. Restore prior runtime script hashes from last known-good sync if needed
+4. Redeploy prior production build if application regresses
+
+### CLOUDFLARE BOUNDARY
+Supervisor never restarts `cloudflared`.
+- localhost unhealthy + public 502 → **ORIGIN DOWN**
+- localhost healthy + public fail → **TUNNEL/CLOUDFLARE issue** (separate)
+
+### OLLAMA BOUNDARY
+Independent failure domain. `/api/health` may report `ollama=unreachable` /
+`status=degraded` while web shell stays APPLICATION_HEALTHY. Watchdog does
+**not** restart War Room solely for Ollama down. Never kill Ollama from #18.
+
+### 524 TROUBLESHOOTING
+1. `Test-WarRoomHealth.ps1` — check `hungOrigin`, `devOccupyingPort`, `wrongCheckoutOccupyingPort`
+2. Prefer HTTP `/api/health` over TCP-only
+3. If next DEV owns `:3000` → clear War Room tree only, then start production
+4. If unrelated process owns `:3000` → do **not** kill; exit 3 / investigate
+5. Confirm cloudflared still targets `http://127.0.0.1:3000` and is Running
+6. Confirm public 502 with empty `:3000` is origin failure, not tunnel daemon death
