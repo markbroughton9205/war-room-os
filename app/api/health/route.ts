@@ -27,6 +27,14 @@ async function cheapGet(url: string, ms = CHEAP_PROBE_MS): Promise<Reachability>
 /**
  * Lightweight public liveness probe for origin / Cloudflare / watchdog use.
  * Must stay sub-second: no Council, Terra, research, Overpass, or heavy DB work.
+ *
+ * Semantics (#18):
+ * - HTTP 200 + status "ok"       → APPLICATION_HEALTHY (app answers; deps ok/skipped)
+ * - HTTP 200 + status "degraded" → DEPENDENCY_DEGRADED (app answers; a cheap dep failed)
+ * - No HTTP / hang / non-response → APPLICATION_UNHEALTHY (detected by external probes)
+ *
+ * Dependency degradation must NOT itself hang this endpoint and must NOT cause
+ * the production supervisor to restart the web shell.
  */
 export async function GET() {
   const started = Date.now()
@@ -49,8 +57,13 @@ export async function GET() {
     cheapGet(`${ollamaBase}/api/tags`),
   ])
 
+  const depsDegraded = database === 'unreachable' || ollama === 'unreachable'
+  const status = depsDegraded ? 'degraded' : 'ok'
+
   const body = {
-    status: 'ok' as const,
+    status,
+    application: 'healthy' as const,
+    dependencyState: depsDegraded ? 'degraded' as const : 'ok' as const,
     version: {
       gitSha: localBuild?.gitSha ?? null,
       gitShort: localBuild?.gitShort ?? envShort,

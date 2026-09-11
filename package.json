@@ -23,6 +23,7 @@
     "validate:council-session-intelligence:live": "node --env-file=.env.local --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-session-intelligence-live.mjs",
     "validate:council-session-intelligence:restart-seed": "node --env-file=.env.local --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-session-intelligence-restart-proof.mjs seed",
     "validate:council-session-intelligence:restart-verify": "node --env-file=.env.local --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-session-intelligence-restart-proof.mjs verify",
+    "validate:production-supervisor": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-production-supervisor-validation.mjs",
     "validate:council-reasoning-parameters": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-reasoning-parameters-validation.mjs",
     "validate:council-reasoning-parameters:live": "node --env-file=.env.local --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-reasoning-parameters-live.mjs",
     "validate:council-live-group-execution": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-live-group-execution-validation.mjs",

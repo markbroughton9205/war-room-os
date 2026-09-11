@@ -63,10 +63,24 @@ function Save-WatchdogState {
     ConvertTo-Json | Set-Content -LiteralPath $stateLogPath
 }
 
+function Test-IsWarRoomNodeCommand {
+  param([string]$CommandLine)
+  if (-not $CommandLine) { return $false }
+  return (
+    $CommandLine -match '\bnext\s+dev\b' -or
+    $CommandLine -match 'pnpm\.mjs run\s+dev' -or
+    $CommandLine -match 'next\s+start' -or
+    $CommandLine -match 'start-server\.js' -or
+    $CommandLine -match '\\.next\\dev\\' -or
+    $CommandLine -match 'war-room-os' -or
+    $CommandLine -match 'war-room-production'
+  )
+}
+
 function Stop-PortOccupants {
   param([int]$Port = 3000)
-  # Only terminate node.exe processes bound to the production port (or their next-dev parents).
-  # Never touches cloudflared / ollama.
+  # Stop ONLY proven War Room node.exe trees on the production port.
+  # Never kills unrelated Node apps, cloudflared, or Ollama.
   $pids = @()
   try {
     $lines = netstat -ano | Select-String -Pattern "LISTENING" | Select-String -Pattern ":$Port\s"
@@ -81,34 +95,37 @@ function Stop-PortOccupants {
 
   $toStop = New-Object System.Collections.Generic.HashSet[int]
   foreach ($pidValue in ($pids | Select-Object -Unique)) {
-    [void]$toStop.Add($pidValue)
     $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction SilentlyContinue
+    if (-not $proc -or $proc.Name -ne 'node.exe') {
+      Write-WatchdogLog "REFUSING to stop non-War-Room listener pid=$pidValue (name=$($proc.Name))"
+      continue
+    }
+    if (-not (Test-IsWarRoomNodeCommand -CommandLine "$($proc.CommandLine)")) {
+      Write-WatchdogLog "REFUSING to stop non-War-Room listener pid=$pidValue"
+      continue
+    }
+    [void]$toStop.Add($pidValue)
+
     while ($proc -and $proc.ParentProcessId -and $proc.Name -eq 'node.exe') {
       $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.ParentProcessId)" -ErrorAction SilentlyContinue
       if (-not $parent -or $parent.Name -ne 'node.exe') { break }
-      if ($parent.CommandLine -and (
-          $parent.CommandLine -match '\bnext\s+dev\b' -or
-          $parent.CommandLine -match 'pnpm\.mjs run\s+dev' -or
-          $parent.CommandLine -match 'next\s+start' -or
-          $parent.CommandLine -match 'start-server\.js'
-        )) {
-        [void]$toStop.Add([int]$parent.ProcessId)
-        $proc = $parent
-        continue
-      }
-      break
+      if (-not (Test-IsWarRoomNodeCommand -CommandLine "$($parent.CommandLine)")) { break }
+      [void]$toStop.Add([int]$parent.ProcessId)
+      $proc = $parent
     }
   }
 
   foreach ($pidValue in $toStop) {
     try {
-      Write-WatchdogLog "STOPPING hung/wrong occupant pid=$pidValue on port $Port"
+      Write-WatchdogLog "STOPPING hung/wrong War Room occupant pid=$pidValue on port $Port"
       Stop-Process -Id $pidValue -Force -ErrorAction Stop
     } catch {
       Write-WatchdogLog "WARN: could not stop pid=$pidValue ($($_.Exception.Message))"
     }
   }
-  Start-Sleep -Seconds 2
+  if ($toStop.Count -gt 0) {
+    Start-Sleep -Seconds 2
+  }
 }
 
 $state = Get-WatchdogState
@@ -129,7 +146,7 @@ if (-not $health.ollamaReachable) {
   Write-WatchdogLog "NOTE: Ollama not reachable right now (War Room process/port otherwise healthy=$($health.processRunning -and $health.portListening -and $health.applicationResponding)). Local Council routing will fall back per COUNCIL_ROUTING_MODE until Ollama comes up on its own Startup entry."
 }
 
-$healthy = $health.processRunning -and $health.portListening -and $health.applicationResponding -and (-not $health.devOccupyingPort) -and (-not $health.hungOrigin)
+$healthy = $health.processRunning -and $health.portListening -and $health.applicationResponding -and (-not $health.devOccupyingPort) -and (-not $health.hungOrigin) -and (-not $health.wrongCheckoutOccupyingPort)
 
 if ($healthy) {
   # Healthy. Reset the backoff window on a confirmed-healthy observation so a single blip a long
@@ -142,15 +159,15 @@ if ($healthy) {
 }
 
 if ($state.restartCount -ge $maxRestartsPerWindow) {
-  Write-WatchdogLog "BACKOFF: War Room appears down (processRunning=$($health.processRunning) portListening=$($health.portListening) applicationResponding=$($health.applicationResponding) hungOrigin=$($health.hungOrigin) devOccupyingPort=$($health.devOccupyingPort)) but $($state.restartCount) restarts already attempted in the last $windowMinutes min. Skipping this cycle rather than restart-looping. Manual investigation needed."
+  Write-WatchdogLog "BACKOFF: War Room appears down (processRunning=$($health.processRunning) portListening=$($health.portListening) applicationResponding=$($health.applicationResponding) hungOrigin=$($health.hungOrigin) devOccupyingPort=$($health.devOccupyingPort) wrongCheckoutOccupyingPort=$($health.wrongCheckoutOccupyingPort) canonicalProductionCheckout=$($health.canonicalProductionCheckout)) but $($state.restartCount) restarts already attempted in the last $windowMinutes min. Skipping this cycle rather than restart-looping. Manual investigation needed."
   exit 1
 }
 
 $state.restartCount += 1
 Save-WatchdogState -State $state
-Write-WatchdogLog "RESTARTING: War Room unhealthy (processRunning=$($health.processRunning) portListening=$($health.portListening) applicationResponding=$($health.applicationResponding) hungOrigin=$($health.hungOrigin) devOccupyingPort=$($health.devOccupyingPort)). Attempt $($state.restartCount)/$maxRestartsPerWindow in this $windowMinutes-min window."
+Write-WatchdogLog "RESTARTING: War Room unhealthy (processRunning=$($health.processRunning) portListening=$($health.portListening) applicationResponding=$($health.applicationResponding) hungOrigin=$($health.hungOrigin) devOccupyingPort=$($health.devOccupyingPort) wrongCheckoutOccupyingPort=$($health.wrongCheckoutOccupyingPort) canonicalProductionCheckout=$($health.canonicalProductionCheckout)). Attempt $($state.restartCount)/$maxRestartsPerWindow in this $windowMinutes-min window."
 
-if ($health.hungOrigin -or $health.devOccupyingPort -or ($health.portListening -and -not $health.processRunning) -or ($health.portListening -and -not $health.applicationResponding)) {
+if ($health.hungOrigin -or $health.devOccupyingPort -or $health.wrongCheckoutOccupyingPort -or ($health.portListening -and -not $health.processRunning) -or ($health.portListening -and -not $health.applicationResponding)) {
   Stop-PortOccupants -Port 3000
 }
 

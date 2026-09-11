@@ -139,11 +139,68 @@ function Test-OllamaReachable {
   }
 }
 
+function Test-WrongCheckoutOccupyingPort {
+  param([int]$Port)
+  # Detect next start / start-server whose command line points at war-room-os (dev checkout)
+  # while bound to the production port. Also treats next DEV as wrong for :3000.
+  try {
+    $portPids = Get-NodeProcessesOnPort -Port $Port
+    if ($portPids.Count -eq 0) { return $false }
+    foreach ($pidValue in $portPids) {
+      $p = Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction SilentlyContinue
+      if (-not $p) { continue }
+      $cmd = "$($p.CommandLine)"
+      if ($cmd -match '\bnext\s+dev\b' -or $cmd -match '\\.next\\dev\\') { return $true }
+      if ($cmd -match 'war-room-os' -and $cmd -notmatch 'war-room-production') { return $true }
+      if ($p.ParentProcessId) {
+        $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)" -ErrorAction SilentlyContinue
+        if ($parent -and $parent.CommandLine) {
+          $pcmd = "$($parent.CommandLine)"
+          if ($pcmd -match '\bnext\s+dev\b') { return $true }
+          if ($pcmd -match 'war-room-os' -and $pcmd -notmatch 'war-room-production') { return $true }
+        }
+      }
+    }
+    return $false
+  } catch {
+    return $false
+  }
+}
+
+function Test-CanonicalProductionCheckoutPresent {
+  param([int]$Port)
+  try {
+    $procs = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue
+    $portPids = Get-NodeProcessesOnPort -Port $Port
+    foreach ($p in $procs) {
+      if (-not $p.CommandLine) { continue }
+      $cmd = $p.CommandLine
+      $isDev = ($cmd -match '\bnext\s+dev\b') -or ($cmd -match 'pnpm\.mjs run\s+dev') -or ($cmd -match '\\.next\\dev\\')
+      if ($isDev) { continue }
+      $isProdStart = ($cmd -match 'next\s+start') -and ($cmd -match "--port\s+$Port\b")
+      $isStartServer = ($cmd -match 'start-server\.js') -and ($portPids -contains [int]$p.ProcessId)
+      if (-not ($isProdStart -or $isStartServer)) { continue }
+      if ($cmd -match 'war-room-production') { return $true }
+      if ($isStartServer -and $p.ParentProcessId) {
+        $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)" -ErrorAction SilentlyContinue
+        if ($parent -and $parent.CommandLine -and ($parent.CommandLine -match 'war-room-production')) {
+          return $true
+        }
+      }
+    }
+    return $false
+  } catch {
+    return $false
+  }
+}
+
 $processRunning = Test-ProcessRunning -Port $Port
 $portListening = Test-PortListening -Port $Port
 $appResult = Test-ApplicationResponding -Port $Port
 $ollamaResult = Test-OllamaReachable -BaseUrl $OllamaBaseUrl
 $devOccupyingPort = Test-DevOccupyingPort -Port $Port
+$wrongCheckoutOccupyingPort = Test-WrongCheckoutOccupyingPort -Port $Port
+$canonicalProductionCheckout = Test-CanonicalProductionCheckoutPresent -Port $Port
 $hungOrigin = $portListening -and (-not $appResult.ok)
 
 $result = [ordered]@{
@@ -155,10 +212,12 @@ $result = [ordered]@{
   applicationHttpStatus = $appResult.status
   hungOrigin = $hungOrigin
   devOccupyingPort = $devOccupyingPort
+  wrongCheckoutOccupyingPort = $wrongCheckoutOccupyingPort
+  canonicalProductionCheckout = $canonicalProductionCheckout
   ollamaReachable = $ollamaResult.ok
   ollamaModelCount = $ollamaResult.modelCount
   councilReady = 'UNKNOWN_REQUIRES_AUTHENTICATED_SESSION'
-  note = 'councilReady is intentionally never inferred from portListening/applicationResponding alone - this script has no Commander session and does not weaken auth to get one. Check the Inspector/backend-status route from an authenticated browser for that answer. hungOrigin=true means TCP accepts but HTTP never returns (Cloudflare 524 class).'
+  note = 'councilReady is intentionally never inferred from portListening/applicationResponding alone - this script has no Commander session and does not weaken auth to get one. Check the Inspector/backend-status route from an authenticated browser for that answer. hungOrigin=true means TCP accepts but HTTP never returns (Cloudflare 524 class). wrongCheckoutOccupyingPort=true means war-room-os or next DEV owns the production port. Ollama unreachable is DEPENDENCY_DEGRADED only — it does not make the web shell unhealthy.'
 }
 
 $result | ConvertTo-Json

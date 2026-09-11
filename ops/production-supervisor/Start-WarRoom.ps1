@@ -150,7 +150,8 @@ function Test-HealthyProduction {
     [bool]$Health.processRunning -and
     [bool]$Health.applicationResponding -and
     -not [bool]$Health.devOccupyingPort -and
-    -not [bool]$Health.hungOrigin
+    -not [bool]$Health.hungOrigin -and
+    -not [bool]$Health.wrongCheckoutOccupyingPort
   )
 }
 
@@ -164,8 +165,9 @@ if ($portOpen) {
   }
 
   Write-StartLog ("Port $productionPort occupied but unhealthy " +
-    "(devOccupyingPort=$($health.devOccupyingPort) hungOrigin=$($health.hungOrigin) " +
-    "processRunning=$($health.processRunning) applicationResponding=$($health.applicationResponding) " +
+    "(devOccupyingPort=$($health.devOccupyingPort) wrongCheckoutOccupyingPort=$($health.wrongCheckoutOccupyingPort) " +
+    "hungOrigin=$($health.hungOrigin) processRunning=$($health.processRunning) " +
+    "applicationResponding=$($health.applicationResponding) " +
     "httpResponding=$(Test-HttpResponding -Port $productionPort)). Clearing incorrect War Room occupants.")
   Stop-IncorrectWarRoomOccupants -Port $productionPort
 
@@ -175,7 +177,8 @@ if ($portOpen) {
       Write-StartLog "Port $productionPort became healthy after clear; startup skipped."
       exit 0
     }
-    Write-StartLog "Port $productionPort still occupied after War Room occupant clear; refusing to bind. Manual investigation required."
+    Write-StartLog ("Port $productionPort still occupied after War Room occupant clear " +
+      "(likely unrelated process). Refusing to bind. Manual investigation required.")
     exit 3
   }
 }

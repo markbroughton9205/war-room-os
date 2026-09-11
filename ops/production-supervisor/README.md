@@ -1,63 +1,141 @@
-# Production supervisor — canonical tracked copy
+# Production supervisor — canonical tracked copy (#18)
 
-This directory is the reviewed, version-controlled source of truth for the scripts that
-implement production crash/reboot supervision (audit finding P0-1 / 2026-09-11 Cloudflare 524).
-The **executing** copy lives in `war-room-production\.war-room\` (a git-untracked directory in
-both `war-room-os` and `war-room-production` — see each repo's `.gitignore`), because Windows
-Task Scheduler and `Start-WarRoom.ps1` both resolve paths relative to that specific checkout,
-not this one.
+This directory is the **only** reviewed, version-controlled source of truth for
+War Room production crash/reboot supervision (audit finding P0-1 /
+2026-09-11 Cloudflare 524). There is **no Supervisor2**, no second health
+system, and no second watchdog.
 
-**When you edit one of these scripts, edit both copies** (here, for review/history, and in
-`war-room-production\.war-room\`, for actual execution) or copy this version over the production
-one after review. There is no automation that syncs them for you.
+## Canonical chain
 
-## Port contract (Nebula Genesis)
+```
+Windows login Startup shortcut "War Room OS.lnk"
+  → powershell -File war-room-production\.war-room\Start-WarRoom.ps1
+    → (if needed) next start --hostname 127.0.0.1 --port 3000
+      → HTTP truth via GET /api/health (preferred) or GET /
+
+Windows Scheduled Task WarRoomProductionWatchdog  [NOT REGISTERED until Commander authorizes]
+  → AtStartup + every 2 minutes
+    → war-room-production\.war-room\Watchdog-WarRoom.ps1
+      → Test-WarRoomHealth.ps1
+        → healthy? no-op
+        → unhealthy? bounded recovery (max 5 / 30 min) → Start-WarRoom.ps1 detached
+```
+
+## Source vs runtime copies
+
+| Role | Path |
+|------|------|
+| **Authoritative source** | `war-room-os/ops/production-supervisor/*` (this directory) |
+| **Executing runtime copies** | `war-room-production\.war-room\*` |
+
+Runtime copies are **deployment/runtime only**. Never edit them as the source
+of truth. Sync is **one-way and intentional**:
+
+```
+tracked source (ops/production-supervisor)
+  → validated (pnpm run validate:production-supervisor)
+  → intentionally copied to war-room-production\.war-room
+  → runtime
+```
+
+There is **no bidirectional automatic sync**. Use
+`ops/production-supervisor/Sync-ProductionSupervisor.ps1` after
+Commander authorization (dry-run default; pass `-Apply` to write).
+
+## Port contract (Nebula Genesis) — FROZEN
 
 | Role | Checkout | Command | Port |
 |------|----------|---------|------|
 | **Production** | `war-room-production` | `next start --hostname 127.0.0.1 --port 3000` | **3000** (Cloudflare Tunnel origin) |
 | **Development** | `war-room-os` | `pnpm dev` → `next dev --port 3001` | **3001** |
 
-**DEV PORT ≠ 3000.** Development must never bind production port 3000 on Nebula Genesis.
-A hung `next DEV` on :3000 previously accepted TCP, returned no HTTP, and caused Cloudflare 524
-while `Start-WarRoom.ps1` skipped startup because the port looked “active.”
+A development Next process must **never** occupy `:3000`.
 
-## Health contract
+## Health semantics
 
-`port open` is **not** healthy. Healthy means:
+`port open` is **not** healthy.
 
-1. Something listens on `127.0.0.1:3000`
-2. An HTTP probe succeeds (`GET /api/health` preferred; `GET /` 307-to-login also counts)
-3. Process is production `next start` from `war-room-production` (not `next DEV` / `pnpm DEV` / wrong checkout)
+| State | Meaning | Supervisor action |
+|-------|---------|-------------------|
+| **APPLICATION_HEALTHY** | HTTP answers (`/api/health` preferred; `/` 307-to-login counts). Production process present. Not DEV / not wrong checkout / not hung. | No restart |
+| **DEPENDENCY_DEGRADED** | App HTTP answers; cheap dep probe failed (Supabase auth health and/or Ollama). `/api/health` returns HTTP **200** with `status: "degraded"`. | **Do not** restart web shell |
+| **APPLICATION_UNHEALTHY** | No HTTP, hung origin (TCP accept, no HTTP), next DEV on :3000, wrong checkout, or missing production process | Bounded recovery |
 
-If unhealthy and the listener is an incorrect War Room Node tree (`next DEV`, hung origin, wrong
-checkout), `Start-WarRoom.ps1` / `Watchdog-WarRoom.ps1` stop **only that tree**, then start
-production. They never touch cloudflared, Ollama, or unrelated Node processes.
+`/api/health` is public, middleware-bypassed, bounded (≤400ms/dep), non-secret,
+and independent of Council / ASTRA / Terra / Overpass / Research Engine / model
+inference. Council may be slow or fail while origin health stays green.
+
+## Process ownership / kill safety
+
+Only `node.exe` processes whose **command line** proves War Room ownership
+(`next dev`, `next start`, `start-server.js`, `war-room-os`, `war-room-production`)
+may be stopped. Unrelated Node listeners on `:3000` → **refuse**, fail loudly
+(`Start-WarRoom.ps1` exit 3). **Never** stop `cloudflared` or `Ollama`.
+
+Wrong-checkout detection: command-line / parent evidence for `next DEV` on
+`:3000` or `war-room-os` paths without `war-room-production`.
 
 ## Files
 
-- `Start-WarRoom.ps1` — production entrypoint. HTTP-health gated; clears incorrect War Room
-  occupants on :3000; then `next start`.
-- `Test-WarRoomHealth.ps1` — read-only probe: `processRunning`, `portListening`,
-  `applicationResponding`, `hungOrigin`, `devOccupyingPort`, `ollamaReachable`. `councilReady`
-  stays unknown without an authenticated session.
-- `Watchdog-WarRoom.ps1` — crash/reboot decision: max 5 restarts per rolling 30 minutes,
-  logs to `.war-room\logs\watchdog.log`, clears hung/`next DEV` occupants, invokes
-  `Start-WarRoom.ps1` detached.
-- `Install-WarRoomWatchdogTask.ps1` — registers the watchdog as a Windows Scheduled Task
-  (SYSTEM, AtStartup + every 2 minutes). **Requires elevated Administrator PowerShell.**
+- `Start-WarRoom.ps1` — production entrypoint; HTTP-gated; clears incorrect War Room occupants only
+- `Test-WarRoomHealth.ps1` — read-only JSON probe (`processRunning`, `portListening`, `applicationResponding`, `hungOrigin`, `devOccupyingPort`, `wrongCheckoutOccupyingPort`, `canonicalProductionCheckout`, `ollamaReachable`; `councilReady` always UNKNOWN without auth)
+- `Watchdog-WarRoom.ps1` — max **5** restarts / **30** minutes; ownership-gated kill; never touches cloudflared/Ollama
+- `Install-WarRoomWatchdogTask.ps1` — registers `WarRoomProductionWatchdog` (Admin only) — **do not run until authorized**
+- `Sync-ProductionSupervisor.ps1` — one-way source → runtime copy helper (dry-run default; pass `-Apply` to write)
+
+## Logging (no secrets)
+
+| Log | Path (under `war-room-production`) |
+|-----|-------------------------------------|
+| Production start | `.war-room\logs\war-room-production.log` |
+| Watchdog decisions | `.war-room\logs\watchdog.log` |
+| Restart window state | `.war-room\logs\watchdog-state.json` |
+
+Logs record start/stop, PID, checkout path, port, health flags, wrong-process
+refusals, restart reason/count, backoff ceiling, and start failures.
+
+## Startup ownership model
+
+**Current (observed):**
+
+1. Login Startup shortcut `War Room OS.lnk` → `war-room-production\.war-room\Start-WarRoom.ps1` (idempotent)
+2. Separate `Ollama.lnk` Startup entry (independent failure domain)
+3. Scheduled Task `WarRoomProductionWatchdog` — **prepared, not registered**
+
+**Recommended canonical model:** keep the Startup shortcut for interactive login
+start; register the Scheduled Task for AtStartup + crash recovery. Both paths
+call the same idempotent `Start-WarRoom.ps1` (healthy production → no-op; only
+one production listener survives). Do **not** remove the Startup shortcut until
+the task is registered and proven.
 
 ## Watchdog registration (Commander / Admin only)
 
-Registration is **not** performed by agents. After supervisor scripts are synced to
+**DO NOT register in agent passes.** After scripts are synced to
 `war-room-production\.war-room\`, run once in an **Administrator** PowerShell:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\markb\Documents\Codex\war-room-production\.war-room\Install-WarRoomWatchdogTask.ps1"
 ```
 
-Safe to re-run — updates the existing task in place. Inspect without elevation:
+Inspect without elevation:
 
 ```powershell
 Get-ScheduledTask -TaskName WarRoomProductionWatchdog | Select-Object TaskName, State
 ```
+
+## Validation
+
+```powershell
+pnpm run validate:production-supervisor
+```
+
+Structural/decision tests only — does not mutate production `:3000`.
+
+## Boundaries (#18 does NOT own)
+
+- Cloudflare Tunnel restart/replacement
+- Ollama restart
+- Desktop / Tauri
+- #19 conversation ownership
+- Council / Terra / model provider changes
+- Automatic deploy or autonomous updates
