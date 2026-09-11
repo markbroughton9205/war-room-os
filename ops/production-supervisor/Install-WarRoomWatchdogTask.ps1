@@ -33,8 +33,10 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
   -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$watchdogScript`""
 
 $startupTrigger = New-ScheduledTaskTrigger -AtStartup
+# Leave repetition duration unset for indefinite repeats. TimeSpan MaxValue serializes
+# to an out-of-range ISO duration that Task Scheduler rejects (HRESULT 0x80041318).
 $repeatingTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
-  -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration ([TimeSpan]::MaxValue)
+  -RepetitionInterval (New-TimeSpan -Minutes 2)
 
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 

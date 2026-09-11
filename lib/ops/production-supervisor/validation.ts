@@ -2,8 +2,9 @@
  * #18 Production Supervisor — deterministic structural / decision validation.
  * Does NOT touch live :3000, cloudflared, Ollama, or Scheduled Tasks.
  */
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
 
 export type SupervisorCase = { name: string; pass: boolean; detail: string }
 
@@ -93,6 +94,92 @@ export function classifyApplicationHealth(input: {
   const depBad =
     input.database === 'unreachable' || input.ollama === 'unreachable'
   return depBad ? 'DEPENDENCY_DEGRADED' : 'APPLICATION_HEALTHY'
+}
+
+/**
+ * Build the same repetition shape as Install-WarRoomWatchdogTask.ps1 (no MaxValue)
+ * and assert Windows Task Scheduler serialization is in-range — without Register-ScheduledTask.
+ */
+export function probeWatchdogRepetitionSerialization(): {
+  ok: boolean
+  interval: string
+  duration: string
+  outOfRangeDuration: boolean
+  detail: string
+} {
+  const script = `
+$ErrorActionPreference = 'Stop'
+$trig = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)
+$interval = [string]$trig.Repetition.Interval
+$duration = if ($null -eq $trig.Repetition.Duration) { '' } else { [string]$trig.Repetition.Duration }
+$bad = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration ([TimeSpan]::MaxValue)
+$badDuration = [string]$bad.Repetition.Duration
+$startup = New-ScheduledTaskTrigger -AtStartup
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -File C:\\probe\\.war-room\\Watchdog-WarRoom.ps1'
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew
+$defn = New-ScheduledTask -Action $action -Trigger @($startup, $trig) -Principal $principal -Settings $settings
+$result = @{
+  interval = $interval
+  duration = $duration
+  badDuration = $badDuration
+  triggerCount = $defn.Triggers.Count
+  principal = [string]$defn.Principal.UserId
+  bootTrigger = ($defn.Triggers[0].CimClass.CimClassName -eq 'MSFT_TaskBootTrigger')
+  actionArg = [string]$defn.Actions.Arguments
+}
+$result | ConvertTo-Json -Compress
+`.trim()
+
+  const tmpDir = process.env.TEMP || process.env.TMP || process.cwd()
+  const tmpPath = join(tmpDir, `wr-watchdog-repetition-probe-${process.pid}.ps1`)
+  try {
+    writeFileSync(tmpPath, script, 'utf8')
+    const raw = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', tmpPath],
+      { encoding: 'utf8', windowsHide: true, timeout: 30_000 },
+    ).trim()
+    const parsed = JSON.parse(raw) as {
+      interval: string
+      duration: string
+      badDuration: string
+      triggerCount: number
+      principal: string
+      bootTrigger: boolean
+      actionArg: string
+    }
+    const outOfRangeDuration = /P99999999/.test(parsed.badDuration)
+    const ok =
+      parsed.interval === 'PT2M' &&
+      parsed.duration === '' &&
+      outOfRangeDuration &&
+      parsed.triggerCount === 2 &&
+      parsed.principal === 'SYSTEM' &&
+      parsed.bootTrigger === true &&
+      /\.war-room\\Watchdog-WarRoom\.ps1/.test(parsed.actionArg)
+    return {
+      ok,
+      interval: parsed.interval,
+      duration: parsed.duration,
+      outOfRangeDuration,
+      detail: `interval=${parsed.interval} duration=[${parsed.duration}] badMax=${parsed.badDuration} triggers=${parsed.triggerCount} principal=${parsed.principal} boot=${parsed.bootTrigger}`,
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      interval: '',
+      duration: '',
+      outOfRangeDuration: false,
+      detail: `probe failed: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  } finally {
+    try {
+      unlinkSync(tmpPath)
+    } catch {
+      /* ignore cleanup failures */
+    }
+  }
 }
 
 export function runProductionSupervisorValidation(): SupervisorCase[] {
@@ -420,6 +507,65 @@ export function runProductionSupervisorValidation(): SupervisorCase[] {
     /status: 200/.test(healthRoute) &&
       /status:\s*depsDegraded \? 'degraded' : 'ok'|status = depsDegraded \? 'degraded' : 'ok'/.test(healthRoute),
     'HTTP 200 for ok and degraded; non-200 only when route unreachable',
+  ))
+
+  // Watchdog installer repetition contract (fix for 0x80041318 / TimeSpan.MaxValue)
+  cases.push(check(
+    '18_36_install_no_timespan_maxvalue',
+    !/-RepetitionDuration/.test(install) && !/\[TimeSpan\]::MaxValue/.test(install),
+    'no -RepetitionDuration / no [TimeSpan]::MaxValue (indefinite by omission)',
+  ))
+
+  cases.push(check(
+    '18_37_install_repetition_interval_two_minutes',
+    /RepetitionInterval\s*\(\s*New-TimeSpan\s+-Minutes\s+2\s*\)/.test(install),
+    'RepetitionInterval New-TimeSpan -Minutes 2',
+  ))
+
+  cases.push(check(
+    '18_38_install_system_principal_unchanged',
+    /New-ScheduledTaskPrincipal\s+-UserId\s+'SYSTEM'/.test(install) &&
+      /LogonType\s+ServiceAccount/.test(install) &&
+      /RunLevel\s+Highest/.test(install),
+    'SYSTEM ServiceAccount Highest',
+  ))
+
+  cases.push(check(
+    '18_39_install_atstartup_trigger_unchanged',
+    /New-ScheduledTaskTrigger\s+-AtStartup/.test(install) &&
+      /Trigger\s+@\(\$startupTrigger,\s*\$repeatingTrigger\)/.test(install),
+    'AtStartup + repeating trigger pair',
+  ))
+
+  cases.push(check(
+    '18_40_install_action_runtime_watchdog_path',
+    /\$watchdogScript\s*=\s*Join-Path\s+\$repoPath\s+'\.war-room\\Watchdog-WarRoom\.ps1'/.test(install) &&
+      /-File\s+`"\$watchdogScript`"/.test(install),
+    'runtime .war-room\\Watchdog-WarRoom.ps1',
+  ))
+
+  cases.push(check(
+    '18_41_install_idempotent_no_duplicate_task',
+    /Register-ScheduledTask[\s\S]*-Force/.test(install) &&
+      (install.match(/Register-ScheduledTask/g) ?? []).length === 1 &&
+      /re-running this script updates the existing task in place rather than duplicating it/i.test(install),
+    'single Register-ScheduledTask -Force (update in place)',
+  ))
+
+  const repetitionProbe = probeWatchdogRepetitionSerialization()
+  cases.push(check(
+    '18_42_repetition_serialization_windows_valid',
+    repetitionProbe.ok &&
+      repetitionProbe.interval === 'PT2M' &&
+      repetitionProbe.duration === '' &&
+      repetitionProbe.outOfRangeDuration,
+    repetitionProbe.detail,
+  ))
+
+  cases.push(check(
+    '18_43_omitted_duration_means_indefinite',
+    repetitionProbe.ok && repetitionProbe.duration === '',
+    'empty Repetition.Duration = indefinite (not P99999999…)',
   ))
 
   return cases
