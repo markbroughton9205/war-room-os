@@ -215,6 +215,15 @@ import type {
   DeliberationTurnRole,
 } from '@/lib/council/family-deliberation'
 import {
+  buildContinuationPromptBlock,
+  buildDurableRoundSnapshot,
+  mergeRoundIntoIntelligence,
+  readSessionIntelligenceFromMetadata,
+  type CouncilSessionIntelligenceV1,
+  type DurableDeliberationRound,
+} from '@/lib/council/session-intelligence'
+import { persistDeliberationRoundToConversation } from '@/lib/council/session-intelligence/persist'
+import {
   decomposeAstraMission,
   runIndependentScoutSwarm,
   shouldRunIndependentScoutSwarm,
@@ -749,6 +758,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   // (Supabase unavailable, assembly error) must never block or alter the Commander's response —
   // it degrades to an empty context block, exactly like a request with no conversationId.
   let warRoomContextBlock = ''
+  let priorSessionIntelligence: CouncilSessionIntelligenceV1 | null = null
+  let sessionIntelligencePersistError: string | null = null
   let warRoomContextSnapshotId: string | null = null
   const contextAssemblyStartedAt = Date.now()
   let contextAssemblyDurationMs = 0
@@ -1003,6 +1014,31 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       warRoomContextSnapshotId = assembled.snapshot?.id ?? null
     } catch (error) {
       console.error('[context-assembler] assembly failed, proceeding without injected context:', error instanceof Error ? error.message : error)
+    }
+
+    // #17: load durable prior-round intelligence for same-conversation continuation.
+    if (familyDeliberationRequested && !isLightweightGreeting) {
+      try {
+        const sup = tryWarRoomSupabase()
+        if (sup.ok) {
+          const { data: convRow } = await sup.client
+            .from('war_room_conversations')
+            .select('metadata')
+            .eq('id', conversationId)
+            .is('deleted_at', null)
+            .maybeSingle()
+          priorSessionIntelligence = readSessionIntelligenceFromMetadata(convRow?.metadata)
+          const continuationBlock = buildContinuationPromptBlock(priorSessionIntelligence)
+          if (continuationBlock) {
+            warRoomContextBlock = [warRoomContextBlock, continuationBlock].filter(Boolean).join('\n\n')
+          }
+        }
+      } catch (error) {
+        console.error(
+          '[session-intelligence] prior load failed:',
+          error instanceof Error ? error.message : error,
+        )
+      }
     }
   }
   contextAssemblyDurationMs = Date.now() - contextAssemblyStartedAt
@@ -2409,6 +2445,56 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       })
       const familyDeliberation = await runFamilyToFamilyDeliberation(councilProgress)
       const { results, roundHealth } = deriveFamilyDeliberationRoundOutcome(familyDeliberation)
+      let persistedSessionIntelligence: CouncilSessionIntelligenceV1 | null = null
+      let durableRound: DurableDeliberationRound | null = null
+      if (conversationId) {
+        try {
+          durableRound = buildDurableRoundSnapshot({
+            conversationId,
+            session: familyDeliberation,
+            priorIntelligence: priorSessionIntelligence,
+          })
+          const persistResult = await persistDeliberationRoundToConversation({
+            conversationId,
+            session: familyDeliberation,
+          })
+          durableRound = persistResult.durableRound ?? durableRound
+          persistedSessionIntelligence = persistResult.intelligence
+            ?? (durableRound ? mergeRoundIntoIntelligence(priorSessionIntelligence, familyDeliberation, conversationId) : null)
+          if (!persistResult.ok) {
+            sessionIntelligencePersistError = persistResult.error ?? 'persist_failed'
+            console.error('[session-intelligence] durable round persist failed:', sessionIntelligencePersistError)
+          } else if (persistResult.authoritativeMessageId) {
+            console.info('[session-intelligence] authoritative message written:', persistResult.authoritativeMessageId)
+          }
+        } catch (error) {
+          sessionIntelligencePersistError = error instanceof Error ? error.message : String(error)
+          console.error('[session-intelligence] durable round persist threw:', sessionIntelligencePersistError)
+          if (!durableRound && conversationId) {
+            try {
+              durableRound = buildDurableRoundSnapshot({
+                conversationId,
+                session: familyDeliberation,
+                priorIntelligence: priorSessionIntelligence,
+              })
+            } catch {
+              durableRound = null
+            }
+          }
+        }
+      } else {
+        // Ephemeral conversation — still expose in-memory round for client dual-write when a
+        // conversationId is later attached; build from session ids alone.
+        try {
+          durableRound = buildDurableRoundSnapshot({
+            conversationId: familyDeliberation.session_id,
+            session: familyDeliberation,
+            priorIntelligence: null,
+          })
+        } catch {
+          durableRound = null
+        }
+      }
       nebulaRound.roundHealth = roundHealth
       nebulaRound.findings = nebulaBlackboard.findings
       nebulaRound.synthesis = familyDeliberation.turns.find(turn => turn.turn_id === familyDeliberation.synthesis_turn_id)?.full_response ?? null
@@ -2482,6 +2568,10 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         hardStop: false,
         mode: 'family_to_family_deliberation',
         showContinue: false,
+        sessionIntelligence: persistedSessionIntelligence,
+        sessionIntelligencePersistError,
+        durableRound,
+        priorRoundId: priorSessionIntelligence?.latestRoundId ?? null,
         ...liveResearchJson(),
       }, createActualSelectionSnapshot({
         executionMode: 'family_to_family_deliberation',

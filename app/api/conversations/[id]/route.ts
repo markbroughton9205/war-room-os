@@ -128,7 +128,60 @@ export async function PATCH(
       void _dropCouncil
       const mergedTop: Record<string, unknown> = { ...prev, ...incomingRest }
       if (incomingCouncil !== undefined && typeof incomingCouncil === 'object' && !Array.isArray(incomingCouncil)) {
-        mergedTop.council = { ...prevCouncil, ...(incomingCouncil as Record<string, unknown>) }
+        const nextCouncil = { ...prevCouncil, ...(incomingCouncil as Record<string, unknown>) }
+        // #17: append-merge sessionIntelligence.rounds by roundId (never overwrite Round 1 with Round 2).
+        const incomingSi = (incomingCouncil as Record<string, unknown>).sessionIntelligence
+        const prevSi = prevCouncil.sessionIntelligence
+        if (
+          incomingSi
+          && typeof incomingSi === 'object'
+          && !Array.isArray(incomingSi)
+          && prevSi
+          && typeof prevSi === 'object'
+          && !Array.isArray(prevSi)
+        ) {
+          const prevRounds = Array.isArray((prevSi as { rounds?: unknown }).rounds)
+            ? ([...(prevSi as { rounds: Record<string, unknown>[] }).rounds])
+            : []
+          const incomingRounds = Array.isArray((incomingSi as { rounds?: unknown }).rounds)
+            ? ((incomingSi as { rounds: Record<string, unknown>[] }).rounds)
+            : []
+          const byId = new Map<string, Record<string, unknown>>()
+          for (const round of prevRounds) {
+            const id = typeof round.roundId === 'string' ? round.roundId : ''
+            if (id) byId.set(id, round)
+          }
+          for (const round of incomingRounds) {
+            const id = typeof round.roundId === 'string' ? round.roundId : ''
+            if (!id) continue
+            // Same roundId: prefer incoming (idempotent rewrite of that round only).
+            byId.set(id, round)
+          }
+          const mergedRounds = Array.from(byId.values())
+          nextCouncil.sessionIntelligence = {
+            ...(prevSi as Record<string, unknown>),
+            ...(incomingSi as Record<string, unknown>),
+            rounds: mergedRounds,
+            roundCount: mergedRounds.length,
+            latestRoundId:
+              typeof (incomingSi as { latestRoundId?: unknown }).latestRoundId === 'string'
+                ? (incomingSi as { latestRoundId: string }).latestRoundId
+                : mergedRounds.length
+                  ? (mergedRounds[mergedRounds.length - 1] as { roundId?: string }).roundId ?? null
+                  : null,
+            revision:
+              Math.max(
+                typeof (prevSi as { revision?: unknown }).revision === 'number'
+                  ? (prevSi as { revision: number }).revision
+                  : 0,
+                typeof (incomingSi as { revision?: unknown }).revision === 'number'
+                  ? (incomingSi as { revision: number }).revision
+                  : 0,
+              ) + 1,
+            updatedAt: new Date().toISOString(),
+          }
+        }
+        mergedTop.council = nextCouncil
       }
       updates.metadata = mergedTop
     } else {

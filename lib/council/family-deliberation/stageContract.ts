@@ -65,7 +65,7 @@ export type DeliberationPipelineProvenance = {
   stages_executed: DeliberationStageRecord[]
   outcome: DeliberationPipelineOutcome
   opening_position_policy: 'dormant_compatibility'
-  continuation_policy: 'deferred_to_17'
+  continuation_policy: 'session_intelligence_v1'
   authoritative_turn_ids: string[]
   challenge_linkage: Array<{ challenge_turn_id: string; target_turn_ids: string[] }>
   revision_linkage: Array<{
@@ -89,7 +89,7 @@ export const OPENING_POSITION_POLICY =
   'dormant_compatibility' as const
 
 export const CONTINUATION_POLICY =
-  'deferred_to_17' as const
+  'session_intelligence_v1' as const
 
 export function progressCodeForStage(
   stage: DeliberationStageId,

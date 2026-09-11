@@ -110,6 +110,14 @@ import { presentAgentMessage } from '@/lib/council/nebula/presentation'
 import type { CouncilRound } from '@/lib/council/nebula/roundState'
 import { CouncilLiveRoundBanner } from '@/components/council/CouncilLiveRoundBanner'
 import { CouncilRoundInspector } from '@/components/council/CouncilRoundInspector'
+import { SessionIntelligencePanel } from '@/components/council/SessionIntelligencePanel'
+import {
+  hydrateSessionIntelligenceFromConversation,
+  messageMetadataFromTurn,
+  rebuildIntelligenceFromMessages,
+  type CouncilSessionIntelligenceV1,
+  type DurableDeliberationRound,
+} from '@/lib/council/session-intelligence'
 import { extractProposedCouncilActions } from '@/lib/council/extractCouncilActions'
 import { classifyRaElMessage, type ClassifyRaElMessageResult } from '@/lib/council/conversationIntent'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
@@ -6321,6 +6329,7 @@ function Home() {
   const [councilSessionSearch, setCouncilSessionSearch] = useState('')
   const [councilSessionNavOpen, setCouncilSessionNavOpen] = useState(true)
   const [councilInspectorOpen, setCouncilInspectorOpen] = useState(false)
+  const [sessionIntelligence, setSessionIntelligence] = useState<CouncilSessionIntelligenceV1 | null>(null)
   const [liveCouncilLoadState, setLiveCouncilLoadState] = useState<'restoring' | 'ready' | 'session_only' | 'error'>('restoring')
   const [liveRoomWorkspace, setLiveRoomWorkspace] = useState<'council' | 'expanded_intel'>('council')
   /**
@@ -7010,6 +7019,15 @@ function Home() {
           sessionStorage.setItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY, '1')
         }
         const rows = Array.isArray(tj.messages) ? tj.messages : []
+        const mountHydratedSi = rebuildIntelligenceFromMessages({
+          conversationId: id,
+          messages: rows,
+          fallbackMetadata: tj.conversation?.metadata,
+        }) ?? hydrateSessionIntelligenceFromConversation({
+          conversationId: id,
+          metadata: tj.conversation?.metadata,
+        })
+        setSessionIntelligence(mountHydratedSi?.intelligence ?? null)
         if (rows.length > 0) {
           // Same decree/promptIntent context applyCouncilThreadHygiene derives for live
           // rendering — without it, applyLiveCouncilRenderGate has no basis to relax integrity
@@ -7377,6 +7395,8 @@ function Home() {
       allowProviderFailureMessage?: boolean
       directInvocationMetadata?: Record<string, unknown>
       roundRequestId?: string | null
+      /** #17 turn/round intelligence metadata dual-written onto war_room_messages.metadata */
+      messageIntelligence?: Record<string, unknown> | null
     },
   ): Promise<string | null> => {
     if (
@@ -7421,6 +7441,7 @@ function Home() {
               ...(opts?.providerRuntime ? { providerRuntime: opts.providerRuntime } : {}),
               ...(opts?.transientProviderStatus ? { transientProviderStatus: true } : {}),
               ...(opts?.directInvocationMetadata ? { directInvocation: opts.directInvocationMetadata } : {}),
+              ...(opts?.messageIntelligence ? opts.messageIntelligence : {}),
             },
           }),
         })
@@ -10412,6 +10433,13 @@ function Home() {
           if (!deliberationRes.ok || !deliberationData.familyDeliberation) return false
 
           const deliberation = deliberationData.familyDeliberation
+          const responseSi = (deliberationData as { sessionIntelligence?: CouncilSessionIntelligenceV1 | null }).sessionIntelligence
+          const durableRoundFromServer =
+            (deliberationData as { durableRound?: DurableDeliberationRound | null }).durableRound
+            ?? null
+          if (responseSi && responseSi.version === '17.session-intelligence.v1') {
+            setSessionIntelligence(responseSi)
+          }
           const turns = [...deliberation.turns].sort((a, b) => a.speaking_order - b.speaking_order)
           const messagesToAdd: CouncilMessage[] = []
           const readableMessageCountBeforeFallback = () =>
@@ -10485,7 +10513,19 @@ function Home() {
                   content: displayContent,
                   family: bubbleFamilyName,
                 },
-                { responseSuccessful: true, providerRuntime: runtimeByFamily[family], roundRequestId: councilLogicalRequestId },
+                {
+                  responseSuccessful: true,
+                  providerRuntime: runtimeByFamily[family],
+                  roundRequestId: councilLogicalRequestId,
+                  messageIntelligence: messageMetadataFromTurn({
+                    conversationId: liveCouncilConvId ?? deliberation.session_id,
+                    roundId: turn.round_id,
+                    turn,
+                    pipelineOutcome: deliberation.pipeline?.outcome ?? null,
+                    councilStage: stageFromDeliberationRole(turn.turn_role),
+                    durableRound: turn.turn_id === shadowReadoutTurnId ? durableRoundFromServer : null,
+                  }) as Record<string, unknown>,
+                },
               )
             }
           }
@@ -10537,7 +10577,17 @@ function Home() {
               })
               void postLiveCouncilMessage(
                 { role: 'system', content: notice.content, family: 'SYSTEM' },
-                { allowProviderFailureMessage: true, roundRequestId: councilLogicalRequestId },
+                {
+                  allowProviderFailureMessage: true,
+                  roundRequestId: councilLogicalRequestId,
+                  messageIntelligence: durableRoundFromServer
+                    ? {
+                        roundId: durableRoundFromServer.roundId,
+                        pipelineOutcome: durableRoundFromServer.outcome,
+                        councilDeliberationRound: durableRoundFromServer,
+                      }
+                    : undefined,
+                },
               )
             }
           }
@@ -11964,6 +12014,7 @@ function Home() {
   const startFreshCouncilSession = async (reason: 'new' | 'archive') => {
     resetCouncilTemporaryRuntime()
     setSessionLifecycle(reason === 'archive' ? 'archived' : 'active')
+    setSessionIntelligence(null)
     const nextSessionId = newSessionId()
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(COUNCIL_SESSION_STORAGE_KEY)
@@ -12022,12 +12073,23 @@ function Home() {
     setLiveCouncilConvId(id)
     liveCouncilConvIdRef.current = id
     councilDispatch({ type: 'SET_MESSAGES', payload: [] })
+    setSessionIntelligence(null)
     const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
     if (!tr.ok) return
     const tj = await tr.json() as {
       messages?: { id: string; role: string; content: string; family?: string | null; created_at: string; metadata?: Record<string, unknown> }[]
+      conversation?: { metadata?: Record<string, unknown> }
     }
     const rows = Array.isArray(tj.messages) ? tj.messages : []
+    const hydratedSi = rebuildIntelligenceFromMessages({
+      conversationId: id,
+      messages: rows,
+      fallbackMetadata: tj.conversation?.metadata,
+    }) ?? hydrateSessionIntelligenceFromConversation({
+      conversationId: id,
+      metadata: tj.conversation?.metadata,
+    })
+    setSessionIntelligence(hydratedSi?.intelligence ?? null)
     const latestRow = [...rows].reverse().find(row => row.role === 'user')
     const rowsDecreeText = latestRow ? latestRow.content.trim() : ''
     const rowsPromptIntent = rowsDecreeText ? detectPromptIntent(rowsDecreeText) : undefined
@@ -13161,6 +13223,33 @@ function Home() {
                     onOpenPanel={id => setDockPanelId(id)}
                   />
                   <SynthesisCard synthesis={conversationRuntimeSnapshot?.latestSynthesis} />
+                  <SessionIntelligencePanel intelligence={sessionIntelligence} />
+                  {sessionIntelligence && sessionIntelligence.roundCount > 0 ? (
+                    <div className="mt-2 rounded border border-cyan-900/50 bg-slate-950/50 px-2 py-2">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-cyan-300">
+                        Continue Council Session
+                      </p>
+                      <p className="mb-2 text-[11px] text-slate-400">
+                        Same conversation · new round · prior session intelligence attaches automatically.
+                      </p>
+                      <button
+                        type="button"
+                        className="rounded border border-cyan-700/60 px-2 py-1 text-[11px] text-cyan-200 hover:bg-cyan-950/40"
+                        data-testid="continue-council-session"
+                        onClick={() => {
+                          setCouncilInspectorOpen(false)
+                          addSystemMessage(
+                            'CONTINUE COUNCIL SESSION ready. Enter a follow-up decree — Round N+1 will reuse this conversation and attach prior session intelligence.',
+                            { force: true },
+                          )
+                          const el = document.querySelector<HTMLTextAreaElement>('[data-testid="council-decree-input"], textarea')
+                          el?.focus()
+                        }}
+                      >
+                        Continue Council Session
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               )}
             />

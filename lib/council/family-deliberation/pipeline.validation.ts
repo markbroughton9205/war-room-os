@@ -312,8 +312,8 @@ export function runDeliberationPipelineValidation(): PipelineValidationCase[] {
   cases.push(check('16_25_kimi_runtime_capability_zero', kimiCapability === 0, String(kimiCapability)))
   cases.push(check('16_26_astra_orchestration_only', isOrchestrationOnly('astra'), 'astra'))
   cases.push(check(
-    '16_27_no_17_session_intelligence',
-    CONTINUATION_POLICY === 'deferred_to_17'
+    '16_27_continuation_policy_session_intelligence',
+    CONTINUATION_POLICY === 'session_intelligence_v1'
       && OPENING_POSITION_POLICY === 'dormant_compatibility'
       && !('crossSessionMemory' in (session.pipeline ?? {})),
     CONTINUATION_POLICY,

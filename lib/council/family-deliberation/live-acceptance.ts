@@ -201,7 +201,7 @@ export async function runDeliberationPipelineLiveAcceptance(): Promise<{
       kimiRuntimeCapability: 0,
       astraOrchestrationOnly: isOrchestrationOnly('astra'),
       astraSpoke,
-      noSessionIntelligence: success.familyDeliberation?.pipeline?.continuation_policy === 'deferred_to_17',
+      sessionIntelligencePolicy: success.familyDeliberation?.pipeline?.continuation_policy ?? null,
       openingPositionPolicy: success.familyDeliberation?.pipeline?.opening_position_policy ?? null,
     },
   }
@@ -231,7 +231,11 @@ export async function runDeliberationPipelineLiveAcceptance(): Promise<{
   results.push(check('live_16_10_no_hidden_cot', !hidden, hidden ? 'hidden present' : 'clean'))
   results.push(check('live_16_11_evidence_ids', (success.familyDeliberation?.evidence_references.length ?? 0) >= 0, String(success.familyDeliberation?.evidence_references.length ?? 0)))
   results.push(check('live_16_12_astra_not_substantive_seat', !astraSpoke, astraSpoke ? 'spoke' : 'orchestration-only'))
-  results.push(check('live_16_13_no_17_creep', success.familyDeliberation?.pipeline?.continuation_policy === 'deferred_to_17', String(success.familyDeliberation?.pipeline?.continuation_policy)))
+  results.push(check(
+    'live_16_13_continuation_policy_honest',
+    success.familyDeliberation?.pipeline?.continuation_policy === 'session_intelligence_v1',
+    String(success.familyDeliberation?.pipeline?.continuation_policy),
+  ))
   results.push(check('live_16_13b_family_not_scout', !scoutSwarmPresent, scoutSwarmPresent ? 'scout present' : 'family path'))
 
   results.push(check('live_16_14_failure_http_ok', failure.ok, `${failure.httpStatus}`))
