@@ -217,7 +217,7 @@ $result = [ordered]@{
   ollamaReachable = $ollamaResult.ok
   ollamaModelCount = $ollamaResult.modelCount
   councilReady = 'UNKNOWN_REQUIRES_AUTHENTICATED_SESSION'
-  note = 'councilReady is intentionally never inferred from portListening/applicationResponding alone - this script has no Commander session and does not weaken auth to get one. Check the Inspector/backend-status route from an authenticated browser for that answer. hungOrigin=true means TCP accepts but HTTP never returns (Cloudflare 524 class). wrongCheckoutOccupyingPort=true means war-room-os or next DEV owns the production port. Ollama unreachable is DEPENDENCY_DEGRADED only — it does not make the web shell unhealthy.'
+  note = 'councilReady is intentionally never inferred from portListening/applicationResponding alone - this script has no Commander session and does not weaken auth to get one. Check the Inspector/backend-status route from an authenticated browser for that answer. hungOrigin=true means TCP accepts but HTTP never returns (Cloudflare 524 class). wrongCheckoutOccupyingPort=true means war-room-os or next DEV owns the production port. Ollama unreachable is DEPENDENCY_DEGRADED only - it does not make the web shell unhealthy.'
 }
 
 $result | ConvertTo-Json

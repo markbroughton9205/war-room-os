@@ -568,5 +568,15 @@ export function runProductionSupervisorValidation(): SupervisorCase[] {
     'empty Repetition.Duration = indefinite (not P99999999…)',
   ))
 
+  // Health JSON is consumed by Watchdog via ConvertFrom-Json. Non-ASCII punctuation in the
+  // ConvertTo-Json payload (e.g. em-dash) can mojibake into a literal quote and break parse.
+  const healthNoteMatch = healthPs.match(/\bnote\s*=\s*'([^']*)'/)
+  const healthNote = healthNoteMatch?.[1] ?? ''
+  cases.push(check(
+    '18_44_health_json_note_is_ascii',
+    healthNote.length > 0 && /^[\x20-\x7E]*$/.test(healthNote),
+    healthNote.length ? `note_len=${healthNote.length} ascii_ok` : 'note field missing',
+  ))
+
   return cases
 }
