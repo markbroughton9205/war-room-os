@@ -3,6 +3,7 @@ import { councilFamilyExecutionId } from '@/lib/council/request-state/types'
 import type { CouncilProgressRuntimeTracker } from '@/lib/council/progress-events/runtime'
 import type { CouncilFamilyOutcome, CouncilProviderReadiness } from '@/lib/council/request-state/types'
 import type { DeliberationCompletionStatus, DeliberationTurn, DeliberationTurnRole } from './types'
+import { progressCodeForStage, type DeliberationStageProgressCode } from './stageContract'
 
 // Red Team is intentionally a real, provider-executing selected family in
 // family_to_family_v1 deliberation mode -- it receives its own opening
@@ -52,6 +53,7 @@ export type DeliberationProgressRecorder = {
   recordTurnStarted(family: CouncilOrchestrationFamily, role: DeliberationTurnRole, priorTurns: DeliberationTurn[]): void
   recordTurnCompleted(turn: DeliberationTurn, opts?: { finalFamilyTurn?: boolean }): void
   recordFamilyNotReached(family: CouncilOrchestrationFamily, reason: string): void
+  recordStageProgress(code: DeliberationStageProgressCode, detail?: string): void
   closeIfTerminal(): ReturnType<CouncilProgressRuntimeTracker['closeIfTerminal']>
 }
 
@@ -92,6 +94,22 @@ export function createDeliberationProgressRecorder(
 
   return {
     recordTurnStarted(family, role, priorTurns) {
+      const stageCode = progressCodeForStage(role, 'started')
+      if (stageCode) {
+        tracker.record({
+          eventType: 'diagnostic_recorded',
+          source: 'server_orchestrator',
+          family,
+          payload: {
+            diagnostic: {
+              category: 'validation',
+              code: stageCode,
+              safeMessage: `Deliberation stage ${stageCode}`,
+              providerFamily: family,
+            },
+          },
+        })
+      }
       if (!LIFECYCLE_FAMILY_TURNS.has(role) || terminalFamilies.has(family)) return
       if (!startedFamilies.has(family)) {
         tracker.record({ eventType: 'family_queued', source: 'server_orchestrator', family })
@@ -112,6 +130,22 @@ export function createDeliberationProgressRecorder(
       recordPriorDelivery(family, priorTurns)
     },
     recordTurnCompleted(turn, opts) {
+      const stageCode = progressCodeForStage(turn.turn_role, 'completed')
+      if (stageCode) {
+        tracker.record({
+          eventType: 'diagnostic_recorded',
+          source: 'server_orchestrator',
+          family: turn.provider_family,
+          payload: {
+            diagnostic: {
+              category: 'validation',
+              code: stageCode,
+              safeMessage: `Deliberation stage ${stageCode} (${turn.completion_status})`,
+              providerFamily: turn.provider_family,
+            },
+          },
+        })
+      }
       if (!LIFECYCLE_FAMILY_TURNS.has(turn.turn_role) || terminalFamilies.has(turn.provider_family)) return
       if (turn.completion_status === 'complete' && !opts?.finalFamilyTurn) return
       const terminal = terminalEventFor(turn.completion_status)
@@ -141,6 +175,19 @@ export function createDeliberationProgressRecorder(
         },
       })
       terminalFamilies.add(family)
+    },
+    recordStageProgress(code, detail) {
+      tracker.record({
+        eventType: 'diagnostic_recorded',
+        source: 'server_orchestrator',
+        payload: {
+          diagnostic: {
+            category: 'validation',
+            code,
+            safeMessage: detail?.trim() || `Deliberation ${code}`,
+          },
+        },
+      })
     },
     closeIfTerminal() {
       return tracker.closeIfTerminal()

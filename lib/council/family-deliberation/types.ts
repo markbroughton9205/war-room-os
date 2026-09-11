@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import type { DeliberationPipelineProvenance } from './stageContract'
 
 export type DeliberationTurnRole =
   | 'opening_position'
@@ -61,6 +62,12 @@ export type DeliberationTurn = {
   confidence: number | null
   recommended_action: string
   revision_status: 'not_revision' | 'revised' | 'stood_firm' | 'invalid_revision'
+  /** Structured revision decision when stage is revision_or_stand_firm. */
+  revision_decision?: 'REVISE' | 'STAND_FIRM' | null
+  challenge_addressed?: 'yes' | 'no' | 'partial' | null
+  revision_decision_source?: 'structured' | 'heuristic' | 'none' | null
+  evidence_ids_used?: string[]
+  unsupported_claim_warnings?: string[]
   agent_identity?: string | null
   backend_type?: 'LOCAL' | 'EXTERNAL' | null
   backend_provider?: string | null
@@ -84,6 +91,8 @@ export type DeliberationSession = {
   completion_status: 'complete' | 'partial' | 'failed'
   provider_boundaries: string[]
   diagnostics: string[]
+  /** #16 deliberation pipeline provenance — persisted via existing conversation payload. */
+  pipeline?: DeliberationPipelineProvenance
   scout_swarm?: import('@/lib/council/scout-swarm/types').ScoutSwarmPublicMeta
 }
 

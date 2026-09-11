@@ -149,7 +149,8 @@ export async function runCouncilReasoningParameterLiveAcceptance(): Promise<{
   const fallbackUsed = summaries.filter(item => item.fallbackFrom)
   const dishonest = summaries.filter(item => item.providerIndependenceHonest === false)
   const coverageSummaries = coverageRound.summaries
-  const coveragePhoenix = coverageSummaries.find(item => item.nebulaId === 'phoenix' || item.seat === 'red_team' || item.stage === 'red_team_challenge')
+  const coveragePhoenix = coverageSummaries.find(item => item.stage === 'red_team_challenge')
+    ?? coverageSummaries.find(item => item.nebulaId === 'phoenix' || item.seat === 'red_team')
   const coveragePulsar = speaking(coverageSummaries, 'evidence')
   const coverageNova = speaking(coverageSummaries, 'strategy')
   const coverageOrion = speaking(coverageSummaries, 'engineering')
@@ -201,7 +202,7 @@ export async function runCouncilReasoningParameterLiveAcceptance(): Promise<{
     },
     constellationSpawned: false,
     astraProvidesSubstantiveAnswer: false,
-    revisionTruth: 'LIVE DEFAULT FAMILY REVISION = NOT PART OF THIS PATH',
+    revisionTruth: 'LIVE DEFAULT FAMILY REVISION = PART OF #16 PATH (revision_or_stand_firm after PHOENIX)',
     solaraTruth: {
       familyToFamilySeatsSolara: false,
       scoutSwarmMapsSolaraToBaby: true,
@@ -242,8 +243,8 @@ export async function runCouncilReasoningParameterLiveAcceptance(): Promise<{
     'live_15_08_revision_stage_optional_existing_path',
     true,
     revisions.length
-      ? `${revisions.length} revision turns`
-      : 'LIVE DEFAULT FAMILY REVISION = NOT PART OF THIS PATH; scout-swarm/cross-review owns that stage',
+      ? `${revisions.length} revision turns (#16 path)`
+      : 'revision absent this round (social/fast skip or no phoenix targets)',
   ))
   results.push(check(
     'live_15_09_fallback_truth',

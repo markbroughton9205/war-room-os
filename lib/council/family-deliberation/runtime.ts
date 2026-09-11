@@ -13,6 +13,12 @@ import type {
   DeliberationTurn,
   DeliberationTurnRole,
 } from './types'
+import {
+  parseRevisionDecision,
+  revisionStatusFromDecision,
+  formatRevisionStageInstruction,
+} from './revisionDecision'
+import { derivePipelineOutcome } from './pipeline'
 
 const SCHEMA_VERSION = '48c3a.family-deliberation.v1' as const
 
@@ -119,7 +125,6 @@ export function summarizeExecutivePosition(text: string): string {
 }
 
 export function inferClaims(text: string, evidenceReferenceIds: string[]): DeliberationClaim[] {
-  void evidenceReferenceIds
   const cleaned = text.replace(/\s+/g, ' ').trim()
   if (!cleaned) return []
   const sentences = cleaned
@@ -127,12 +132,21 @@ export function inferClaims(text: string, evidenceReferenceIds: string[]): Delib
     .map(sentence => sentence.trim())
     .filter(Boolean)
     .slice(0, 3)
-  return sentences.map((sentence, index) => ({
-    claim_id: `claim-${index + 1}`,
-    text: sentence,
-    label: 'model_judgment',
-    evidence_reference_ids: [],
-  }))
+  return sentences.map((sentence, index) => {
+    const mentioned = evidenceReferenceIds.filter(id => sentence.includes(id))
+    const label =
+      mentioned.length > 0
+        ? 'evidence_backed'
+        : /\b(unknown|unresolved|unclear|cannot (?:confirm|verify)|insufficient)\b/i.test(sentence)
+          ? 'unresolved'
+          : 'model_judgment'
+    return {
+      claim_id: `claim-${index + 1}`,
+      text: sentence,
+      label,
+      evidence_reference_ids: mentioned,
+    }
+  })
 }
 
 export function appendDeliberationTurn(
@@ -151,14 +165,27 @@ export function appendDeliberationTurn(
   },
 ): DeliberationTurn {
   const turnId = createDeliberationId(`turn-${input.role}-${input.family}`)
-  const complete = input.providerResult.status === 'complete' && input.providerResult.content.trim().length > 0
+  const parsedRevision = input.role === 'revision_or_stand_firm'
+    ? parseRevisionDecision(input.providerResult.content)
+    : null
+  const visibleRaw = parsedRevision?.response?.trim()
+    ? parsedRevision.response
+    : input.providerResult.content
+  const complete = input.providerResult.status === 'complete' && visibleRaw.trim().length > 0
   const outputMessageId = complete ? outputMessageIdForTurn(turnId) : null
   const revisionStatus =
     input.role !== 'revision_or_stand_firm'
       ? 'not_revision'
-      : input.revisionOfMessageId && input.providerResult.content.trim()
-        ? inferRevisionStatus(input.providerResult.content)
+      : input.revisionOfMessageId && visibleRaw.trim()
+        ? revisionStatusFromDecision(
+          parsedRevision?.decision ?? null,
+          Boolean(parsedRevision?.structuredValid),
+          Boolean(visibleRaw.trim()),
+        )
         : 'invalid_revision'
+  const evidenceIdsUsed = parsedRevision?.evidenceRefs?.length
+    ? parsedRevision.evidenceRefs
+    : [...(input.evidenceReferenceIds ?? [])]
   const turn: DeliberationTurn = {
     turn_id: turnId,
     session_id: session.session_id,
@@ -180,19 +207,24 @@ export function appendDeliberationTurn(
     started_at: input.startedAt,
     completed_at: input.completedAt ?? new Date().toISOString(),
     failure_reason: input.providerResult.failureReason ?? null,
-    executive_position: input.providerResult.content.trim() ? summarizeExecutivePosition(stripHiddenReasoning(input.providerResult.content)) : '',
-    full_response: input.providerResult.content.trim() ? presentAgentMessage({
+    executive_position: visibleRaw.trim() ? summarizeExecutivePosition(stripHiddenReasoning(visibleRaw)) : '',
+    full_response: visibleRaw.trim() ? presentAgentMessage({
       agentId: displayNameForSeat(input.family) ? nebulaAgentForSeat(input.family)?.id ?? null : null,
       speaker: displayNameForSeat(input.family),
-      raw: input.providerResult.content,
+      raw: visibleRaw,
     }).prose : '',
-    claims: complete ? inferClaims(input.providerResult.content, input.evidenceReferenceIds ?? []) : [],
+    claims: complete ? inferClaims(visibleRaw, evidenceIdsUsed) : [],
     direct_agreements: [],
     direct_disagreements: [],
     risks_or_limitations: [],
     confidence: complete ? 0.64 : null,
     recommended_action: complete ? 'Review this position inside the Council exchange before acting.' : 'No action; provider contribution unresolved.',
     revision_status: revisionStatus,
+    revision_decision: parsedRevision?.decision ?? null,
+    challenge_addressed: parsedRevision?.challengeAddressed ?? null,
+    revision_decision_source: parsedRevision?.decisionSource ?? null,
+    evidence_ids_used: evidenceIdsUsed,
+    unsupported_claim_warnings: parsedRevision?.unsupportedClaimWarnings ?? [],
     agent_identity: displayNameForSeat(input.family),
     backend_type: input.providerResult.backendType ?? null,
     backend_provider: input.providerResult.backendProvider ?? null,
@@ -206,12 +238,6 @@ export function appendDeliberationTurn(
   }
   session.completion_status = deriveSessionCompletionStatus(session)
   return turn
-}
-
-function inferRevisionStatus(text: string): 'revised' | 'stood_firm' {
-  return /\b(?:stand firm|standing firm|hold my position|same position|do not revise)\b/i.test(text)
-    ? 'stood_firm'
-    : 'revised'
 }
 
 export function canDisplayAsResponse(turn: DeliberationTurn, priorOutputMessageId: string): boolean {
@@ -239,10 +265,18 @@ export function canSynthesize(session: DeliberationSession, requiredRoles: Delib
 }
 
 export function deriveSessionCompletionStatus(session: DeliberationSession): DeliberationSession['completion_status'] {
+  if (session.pipeline?.outcome) {
+    if (session.pipeline.outcome === 'COMPLETE') return 'complete'
+    if (session.pipeline.outcome === 'DEGRADED') return 'partial'
+    return 'failed'
+  }
+  const outcome = derivePipelineOutcome(session)
+  if (outcome === 'COMPLETE') return 'complete'
+  if (outcome === 'DEGRADED') return 'partial'
   const synthesis = session.synthesis_turn_id
     ? session.turns.find(turn => turn.turn_id === session.synthesis_turn_id)
     : null
-  if (synthesis?.completion_status === 'complete') return 'complete'
+  if (synthesis?.completion_status === 'complete') return 'partial'
   if (session.turns.some(turn => turn.completion_status === 'complete')) return 'partial'
   return 'failed'
 }
@@ -333,18 +367,19 @@ function roleInstruction(role: DeliberationTurnRole, identityId: NebulaAgentId |
   const reminder = identityId ? IDENTITY_REMINDER[identityId] : undefined
   const base = ((): string => {
     if (role === 'opening_position') {
-      return "Turn role: opening position. Give your read — your position, the reasoning behind it, real risks, and what you'd actually do next. Talk like you're in the room, not writing a memo. Do not cite message IDs or label sections (no \"confidence:\", no \"recommended action:\")."
+      // Compatibility stage only — default #16 pipeline uses direct_response for primaries.
+      return "Turn role: opening position (compatibility). Give your read — your position, the reasoning behind it, real risks, and what you'd actually do next. Talk like you're in the room, not writing a memo. Do not cite message IDs or label sections (no \"confidence:\", no \"recommended action:\")."
     }
     if (role === 'direct_response') {
-      return "Turn role: direct response. Verify, push back, or extend what the prior family actually said, in your own words — do not simply agree or rewrite it. Do not cite it by message ID or label your reply with sections; just talk about the substance."
+      return "Turn role: direct response (primary council contribution). Give your seat's distinct position from the shared evidence. Verify, push back, or extend prior material in your own words — do not simply agree or rewrite it. Do not cite it by message ID or label your reply with sections; just talk about the substance. Prefer evidence reference ids when making factual claims."
     }
     if (role === 'red_team_challenge') {
-      return "Turn role: challenge. Push back on the prior agent's position by name, not by message ID. Focus on assumptions, missing evidence, and failure modes — say it like you're the one in the room saying \"hold up,\" not filing a finding. Do not restate the prior analysis."
+      return "Turn role: challenge. Push back on the prior seats' observable claims by name, not by message ID. Evaluate unsupported claims, evidence gaps, contradictions, overconfidence, hidden assumptions, strategic/risk weaknesses, and failure modes. Do not inspect or demand hidden reasoning. Do not restate the prior analysis."
     }
     if (role === 'revision_or_stand_firm') {
-      return "Turn role: revision or stand firm. Respond to the challenge directly, in your own words — either revise your position or stand firm, and say why. No message-ID citations or labeled sections."
+      return formatRevisionStageInstruction()
     }
-    return 'Turn role: council synthesis. Synthesize only the completed exchange in plain language. Do not add new evidence. Do not rewrite a prior seat as the final answer. Give Ra’el the actual takeaway from what survived verification, like a person closing out the conversation, not a formal summary.'
+    return 'Turn role: council synthesis. Synthesize only the completed exchange in plain language using authoritative latest contributions, the PHOENIX challenge, and revision/stand-firm outcomes. Do not invent missing participants. If the round is DEGRADED/PARTIAL, say so. Do not add new evidence. Do not rewrite a prior seat as the final answer. Give Ra’el the actual takeaway from what survived verification.'
   })()
   return reminder ? `${base} ${reminder}` : base
 }

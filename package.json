@@ -17,6 +17,8 @@
     "validate:council-general-local-activation": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-general-local-activation-validation.mjs",
     "validate:council-nebula": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-nebula-validation.mjs",
     "validate:family-deliberation": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-family-deliberation-validation.mjs",
+    "validate:council-deliberation-pipeline": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-deliberation-pipeline-validation.mjs",
+    "validate:council-deliberation-pipeline:live": "node --env-file=.env.local --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-deliberation-pipeline-live.mjs",
     "validate:council-reasoning-parameters": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-reasoning-parameters-validation.mjs",
     "validate:council-reasoning-parameters:live": "node --env-file=.env.local --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-reasoning-parameters-live.mjs",
     "validate:council-live-group-execution": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-live-group-execution-validation.mjs",
