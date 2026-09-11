@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { gunzipSync } from 'node:zlib'
 import type { ResearchProviderId } from '@/lib/research-engine/core/types'
 import { assertAllowedProviderUrl, isAllowedHost } from '@/lib/research-engine/security/hostAllowlist'
 import { redactSecretsFromText, redactUrlForLogging } from '@/lib/research-engine/security/redact'
@@ -47,6 +48,34 @@ function backoffWithJitter(attempt: number): number {
   return Math.min(base + jitter, 8_000)
 }
 
+/**
+ * Digitraffic (and some other CloudFront origins) reject requests that omit Accept-Encoding: gzip
+ * with HTTP 406. Caller-supplied header bags used to replace the runtime defaults, which dropped
+ * compression negotiation and mapped a healthy feed to UNAVAILABLE. Always advertise gzip unless
+ * the caller already set Accept-Encoding. Undici usually decompresses; gunzip is a fallback when
+ * the raw body still starts with gzip magic bytes.
+ */
+export function mergeProviderFetchHeaders(headers?: Record<string, string>): Record<string, string> {
+  const merged = { ...(headers ?? {}) }
+  const hasAcceptEncoding = Object.keys(merged).some(key => key.toLowerCase() === 'accept-encoding')
+  if (!hasAcceptEncoding) merged['Accept-Encoding'] = 'gzip'
+  return merged
+}
+
+function decodePossiblyGzippedBody(bytes: Uint8Array): string {
+  const gzipped = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b
+  const payload = gzipped
+    ? (() => {
+        try {
+          return gunzipSync(bytes)
+        } catch {
+          return bytes
+        }
+      })()
+    : bytes
+  return new TextDecoder('utf-8', { fatal: false }).decode(payload)
+}
+
 function retryDelayFromRetryAfter(header: string | null): number | null {
   if (!header) return null
   const seconds = Number(header)
@@ -59,8 +88,9 @@ function retryDelayFromRetryAfter(header: string | null): number | null {
 async function readBodyWithCap(response: Response, maxBytes: number): Promise<{ text: string; truncated: boolean }> {
   const reader = response.body?.getReader()
   if (!reader) {
-    const text = await response.text()
-    return { text: text.slice(0, maxBytes), truncated: text.length > maxBytes }
+    const buffer = new Uint8Array(await response.arrayBuffer())
+    const truncated = buffer.byteLength > maxBytes
+    return { text: decodePossiblyGzippedBody(truncated ? buffer.slice(0, maxBytes) : buffer), truncated }
   }
   const chunks: Uint8Array[] = []
   let received = 0
@@ -86,7 +116,7 @@ async function readBodyWithCap(response: Response, maxBytes: number): Promise<{ 
     merged.set(chunk, offset)
     offset += chunk.byteLength
   }
-  return { text: new TextDecoder('utf-8', { fatal: false }).decode(merged), truncated }
+  return { text: decodePossiblyGzippedBody(merged), truncated }
 }
 
 /**
@@ -105,6 +135,7 @@ export async function safeProviderFetch(provider: ResearchProviderId, url: strin
 
   let currentUrl = assertAllowedProviderUrl(provider, url).toString()
   let attempts = 0
+  let requestHeaders = mergeProviderFetchHeaders(options.headers)
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     attempts += 1
@@ -118,7 +149,7 @@ export async function safeProviderFetch(provider: ResearchProviderId, url: strin
       for (;;) {
         response = await providerFetch(hopUrl, {
           method: options.method ?? 'GET',
-          headers: options.headers,
+          headers: requestHeaders,
           body: options.body,
           redirect: 'manual',
           signal: controller.signal,
@@ -137,10 +168,10 @@ export async function safeProviderFetch(provider: ResearchProviderId, url: strin
           }
           if (nextUrl.hostname !== originalHost) {
             // Cross-host redirect: never forward the original Authorization header onward.
-            const strippedHeaders = { ...(options.headers ?? {}) }
+            const strippedHeaders = { ...requestHeaders }
             delete strippedHeaders.Authorization
             delete strippedHeaders.authorization
-            options = { ...options, headers: strippedHeaders }
+            requestHeaders = strippedHeaders
           }
           hopUrl = nextUrl.toString()
           continue

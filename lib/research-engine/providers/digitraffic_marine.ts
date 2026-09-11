@@ -117,7 +117,7 @@ async function search(query: ResearchQuery) {
   const cached = cacheGet<ReturnType<typeof okResponse>>(cacheKey)
   if (cached) return { ok: true as const, response: { ...cached, fromCache: true } }
 
-  const headers = { 'Digitraffic-User': DIGITRAFFIC_USER_HEADER }
+  const headers = { 'Digitraffic-User': DIGITRAFFIC_USER_HEADER, Accept: 'application/json' }
   const [locationsResult, vesselsResult] = await Promise.all([
     safeProviderFetch(PROVIDER, `${BASE_URL}/locations`, { timeoutMs: 15_000, headers }),
     safeProviderFetch(PROVIDER, `${BASE_URL}/vessels`, { timeoutMs: 15_000, headers }),

@@ -587,7 +587,11 @@ export function composeTerraLiveIntel(input: ComposeTerraLiveIntelInput): TerraL
       }), true)
     }
     else if (sample) freshness = sample.freshness
-    return { id, freshness, objectCount: count, reason: enabled ? layerReason(freshness, count) : 'Layer not requested' }
+    return { id, freshness, objectCount: count, reason: !enabled
+      ? 'Layer not requested'
+      : id === 'settlement_events' && freshness === 'UNAVAILABLE'
+        ? 'Settlement records have no projectable coordinates; coordinates are never invented.'
+        : layerReason(freshness, count) }
   })
 
   const providers = stripLiveIntelSecrets(input.providerStatuses ?? listMaritimeLiveProviderStatuses({

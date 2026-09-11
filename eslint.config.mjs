@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     // from node_modules/cesium/Build/Cesium — third-party, gitignored, no
     // first-party source.
     "public/cesium/**",
+    // Local proof/backup trees (work/build*, calibration dumps). Not production source.
+    "work/**",
   ]),
 ]);
 

@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { RESEARCH_PROVIDER_ENV, providerConfigStatus, isProviderEnvSatisfied } from '@/lib/research-engine/config/providerEnv'
@@ -553,6 +554,26 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const decision = routeResearchQuery({ text: 'x', maxResults: 9999 })
     return decision.maxResults <= 50 || `maxResults ceiling not enforced: ${decision.maxResults}`
   })
+
+  await add('re_20a_custom_headers_still_advertise_gzip', async () => withCountingFetch([
+    jsonResponse({ ok: true }),
+  ], async calls => {
+    await safeProviderFetch('github', 'https://api.github.com/search/repositories?q=test', {
+      headers: { 'Digitraffic-User': 'war-room-os-terra-maritime' },
+      maxRetries: 0,
+      timeoutMs: 5000,
+    })
+    const headers = (calls.inits[0]?.headers ?? {}) as Record<string, string>
+    return (headers['Accept-Encoding'] === 'gzip' && headers['Digitraffic-User'] === 'war-room-os-terra-maritime')
+      || `headers=${JSON.stringify(headers)}`
+  }))
+
+  await add('re_20b_gzip_magic_bytes_are_decoded', async () => withCountingFetch([
+    new Response(gzipSync(Buffer.from('{"ok":true}')), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  ], async () => {
+    const result = await safeProviderFetch('github', 'https://api.github.com/search/repositories?q=test', { maxRetries: 0, timeoutMs: 5000 })
+    return (result.ok && result.text.includes('"ok":true')) || `text=${result.text.slice(0, 80)}`
+  }))
 
   await add('re_20_safe_fetch_retries_429_then_succeeds', async () => {
     __resetProviderGateForTests()

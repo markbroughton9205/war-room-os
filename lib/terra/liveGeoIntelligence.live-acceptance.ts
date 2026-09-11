@@ -83,6 +83,33 @@ export async function runLiveGeoIntelligenceLiveAcceptance(): Promise<CaseResult
     catcher?.freshness === 'NEEDS_LOCAL_SENSOR' && commercial?.freshness === 'NEEDS_COMMERCIAL_ACCOUNT',
     JSON.stringify({ catcher: catcher?.freshness, commercial: commercial?.freshness }),
   ))
+  const pacific = await fetchTerraLiveIntel({
+    requestedBy: 'trusted_internal_test',
+    bbox: '10.0,-160.0,11.0,-159.0',
+    layers: ['vessels'],
+  })
+  const pacificDigitraffic = pacific.providers.find(row => row.id === 'digitraffic_marine')
+  const pacificLayer = pacific.layers.find(row => row.id === 'vessels')
+  cases.push(check(
+    'live12_10_pacific_is_no_coverage_not_unavailable',
+    pacificDigitraffic?.freshness === 'NO_COVERAGE'
+      && pacificLayer?.freshness !== 'UNAVAILABLE'
+      && pacific.objects.filter(object => object.layer === 'vessels').length === 0,
+    JSON.stringify({ provider: pacificDigitraffic?.freshness, layer: pacificLayer?.freshness, count: pacific.objects.length }),
+  ))
+  const inland = await fetchTerraLiveIntel({
+    requestedBy: 'trusted_internal_test',
+    bbox: '64.2,25.4,64.3,25.5',
+    layers: ['vessels'],
+  })
+  const inlandDigitraffic = inland.providers.find(row => row.id === 'digitraffic_marine')
+  cases.push(check(
+    'live12_11_inland_empty_or_live_never_unavailable',
+    inlandDigitraffic?.freshness === 'EMPTY'
+      || inlandDigitraffic?.freshness === 'LIVE'
+      || inlandDigitraffic?.freshness === 'CACHED',
+    JSON.stringify({ freshness: inlandDigitraffic?.freshness, count: inland.objects.length, error: inland.providers.find(row => row.id === 'digitraffic_marine')?.reason }),
+  ))
   cases.push(check(
     'live12_07_settlement_not_fabricated',
     snapshot.objects.every(object => object.layer !== 'settlement_events')
