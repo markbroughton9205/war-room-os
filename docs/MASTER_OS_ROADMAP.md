@@ -16,9 +16,12 @@ completion list (`docs/SWARM_ROADMAP_COMPLETION_REPORT.md`).
 | 15 | Distinct B-Parameter Council Reasoning | PASS / LIVE-VALIDATED / COMMITTED / CLOSED (`44011e9`) |
 | 16 | Real Council Deliberation Pipeline | PASS / LIVE-VALIDATED / COMMITTED / CLOSED (`9d78a96`) — PRIMARY→PHOENIX→REVISION/STAND_FIRM→AURORA→COMPLETE/DEGRADED/FAILED; do not begin #17 until inventory reviewed |
 | 17 | Council Session Intelligence | PASS / LIVE-VALIDATED / RESTART-VALIDATED / COMMITTED / CLOSED (`b7f93eb`; restart-proof docs `11c6b59`) — durable Round 1 → process restart → DB-only structured restore; conversation metadata rounds[] bounded (40) and rebuildable; message `councilDeliberationRound` is authority |
-| 18 | Production Supervisor Activation | IMPLEMENTED / VALIDATED / COMMITTED / READY FOR ACTIVATION — NOT DEPLOYED; watchdog NOT registered; live recovery NOT proven; NOT CLOSED |
+| 18 | Production Supervisor Activation | PASS / LIVE-VALIDATED / RECOVERY-VALIDATED / ACTIVATED / CLOSED — application build `1f46753`; watchdog installer fix `d5b8965`; final supervisor tip `1787aba`; live proof: watchdog SYSTEM/Ready; controlled crash auto-recovered (~57s); wrong DEV on :3000 safely replaced; cloudflared untouched; Ollama untouched; no restart storm; public `/api/health` 200 |
+| 19 | Conversation Ownership Migration | NEXT — INVENTORY ONLY; do not implement until #18 closeout reviewed; no Conversation2; no second message table |
 
 Terra side (not a new roadmap number): **Automatic urban streets/buildings** — PASS / LIVE-VALIDATED / COMMITTED (`9571af1`). See [`docs/terra/AUTOMATIC_URBAN_DETAIL.md`](terra/AUTOMATIC_URBAN_DETAIL.md).
+
+**#18 DEV OOM boundary (separate defect — not supervisor):** DEV `:3001` twice OOMed (~33 min, ~15 GB JS heap, exit 134). Remains DOWN BY CHOICE. Do not restart DEV, raise heap, or add `NODE_OPTIONS` as part of #18/#19. Investigate separately (`work/build18/DEV_OOM_INVENTORY.md`).
 
 ## ASTRA DATABASE PRE-DEPLOYMENT BLOCKER
 

@@ -304,10 +304,15 @@ export function runProductionSupervisorValidation(): SupervisorCase[] {
   cases.push(check(
     '18_15_roadmap_18_status_row',
     /Production Supervisor Activation/.test(roadmap18) &&
-      (/READY FOR ACTIVATION|IN PROGRESS|IMPLEMENTED/.test(roadmap18)) &&
-      /NOT CLOSED/.test(roadmap18) &&
-      !/\bCLOSED\b/.test(roadmap18.replace(/NOT CLOSED/g, '')),
-    'roadmap row READY FOR ACTIVATION and NOT CLOSED until live activation',
+      /LIVE-VALIDATED/.test(roadmap18) &&
+      /RECOVERY-VALIDATED/.test(roadmap18) &&
+      /ACTIVATED/.test(roadmap18) &&
+      /\bCLOSED\b/.test(roadmap18) &&
+      !/NOT CLOSED/.test(roadmap18) &&
+      /1f46753/.test(roadmap18) &&
+      /d5b8965/.test(roadmap18) &&
+      /1787aba/.test(roadmap18),
+    'roadmap row CLOSED after live activation with tip SHAs',
   ))
 
   // Decision-function dry runs (no live processes)
