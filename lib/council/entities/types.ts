@@ -11,7 +11,7 @@ export type CouncilProviderBrain =
   | 'ChatGPT'
   | 'Gemini'
   | 'Grok'
-  | 'Kimi'
+  | 'NOVA'
   | 'RedTeam'
 
 export type CouncilEntityStatus =
@@ -60,11 +60,13 @@ export type CouncilProviderFamilyAlias =
   | 'Gemini Family'
   | 'Grok Family'
   | 'Kimi Family'
+  | 'Nova Council'
   | 'Red Team'
   | 'claude'
   | 'chatgpt'
   | 'gemini'
   | 'grok'
   | 'kimi'
+  | 'nova'
   | 'red_team'
   | 'red team'

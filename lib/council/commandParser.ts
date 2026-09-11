@@ -7,6 +7,10 @@ import {
   type CouncilResponseLimits,
 } from '@/lib/council/councilCommandTypes'
 import { detectDirectInvocation } from '@/lib/council/directInvocation'
+import {
+  detectUninstalledKimiMoonshotCommand,
+  KIMI_MOONSHOT_NOT_INSTALLED_MESSAGE,
+} from '@/lib/council/seatCanonical'
 import { resolveEconomicOpsRouting } from '@/lib/economic/routing'
 
 /** Full orchestration id list for command filtering (order-agnostic). */
@@ -15,7 +19,7 @@ export const ALL_ORCHESTRATION_FAMILIES: CouncilOrchestrationFamily[] = [
   'claude',
   'grok',
   'gemini',
-  'kimi',
+  'nova',
   'red_team',
   'bridge_architect',
   'baby',
@@ -28,7 +32,7 @@ const FAMILY_SYNONYMS: { id: CouncilOrchestrationFamily; patterns: RegExp[] }[] 
   { id: 'gemini', patterns: [/\bgemini\b/i, /\bgoogle\s*(ai)?\b/i] },
   { id: 'red_team', patterns: [/\bred\s*team\b/i, /\bredteam\b/i] },
   { id: 'baby', patterns: [/\bbaby\b/i, /\bobserver\b/i] },
-  { id: 'kimi', patterns: [/\bkimi\b/i, /\bmoonshot\b/i] },
+  { id: 'nova', patterns: [/\bnova\b/i] },
   { id: 'bridge_architect', patterns: [/\bbridge\b/i, /\bbridge\s*architect\b/i] },
 ]
 
@@ -37,7 +41,7 @@ function normalizeInput(input: string) {
 }
 
 function parseFamilyOnlyPhrase(t: string): CouncilOrchestrationFamily[] | null {
-  const m = t.match(/\b(chatgpt|openai|gpt|claude|anthropic|grok|xai|gemini|google|red\s*team|redteam|baby|observer|kimi|moonshot|bridge(?:\s*architect)?)\s+only\b/)
+  const m = t.match(/\b(chatgpt|openai|gpt|claude|anthropic|grok|xai|gemini|google|red\s*team|redteam|baby|observer|nova|bridge(?:\s*architect)?)\s+only\b/)
   if (!m) return null
   const g = m[1]!.toLowerCase().replace(/\s+/g, ' ')
   if (g.includes('red')) return ['red_team']
@@ -46,13 +50,13 @@ function parseFamilyOnlyPhrase(t: string): CouncilOrchestrationFamily[] | null {
   if (g.includes('grok') || g === 'xai') return ['grok']
   if (g.includes('gemini') || g.includes('google')) return ['gemini']
   if (g.includes('baby') || g.includes('observer')) return ['baby']
-  if (g.includes('kimi') || g.includes('moonshot')) return ['kimi']
+  if (g.includes('nova')) return ['nova']
   if (g.includes('bridge')) return ['bridge_architect']
   return null
 }
 
 function parseContinuationTarget(t: string): CouncilOrchestrationFamily[] | null {
-  const m = t.match(/^\s*continue\s+(chatgpt|chat\s*gpt|openai|claude|anthropic|grok|xai|gemini|google|red\s*team|redteam|baby|observer|kimi|moonshot|bridge(?:\s*architect)?)\b/i)
+  const m = t.match(/^\s*continue\s+(chatgpt|chat\s*gpt|openai|claude|anthropic|grok|xai|gemini|google|red\s*team|redteam|baby|observer|nova|bridge(?:\s*architect)?)\b/i)
   if (!m) return null
   const g = m[1]!.toLowerCase().replace(/\s+/g, ' ')
   if (g.includes('red')) return ['red_team']
@@ -61,14 +65,14 @@ function parseContinuationTarget(t: string): CouncilOrchestrationFamily[] | null
   if (g.includes('grok') || g === 'xai') return ['grok']
   if (g.includes('gemini') || g.includes('google')) return ['gemini']
   if (g.includes('baby') || g.includes('observer')) return ['baby']
-  if (g.includes('kimi') || g.includes('moonshot')) return ['kimi']
+  if (g.includes('nova')) return ['nova']
   if (g.includes('bridge')) return ['bridge_architect']
   return null
 }
 
 function parseExceptFamilies(t: string): CouncilOrchestrationFamily[] {
   const out: CouncilOrchestrationFamily[] = []
-  const re = /\bexcept\s+(chatgpt|openai|claude|anthropic|grok|xai|gemini|google|red\s*team|baby|kimi|moonshot|bridge(?:\s*architect)?)\b/gi
+  const re = /\bexcept\s+(chatgpt|openai|claude|anthropic|grok|xai|gemini|google|red\s*team|baby|nova|bridge(?:\s*architect)?)\b/gi
   let m: RegExpExecArray | null
   while ((m = re.exec(t)) !== null) {
     const g = m[1]!.toLowerCase()
@@ -78,7 +82,7 @@ function parseExceptFamilies(t: string): CouncilOrchestrationFamily[] {
     else if (g.includes('grok') || g === 'xai') out.push('grok')
     else if (g.includes('gemini') || g.includes('google')) out.push('gemini')
     else if (g.includes('baby')) out.push('baby')
-    else if (g.includes('kimi') || g.includes('moonshot')) out.push('kimi')
+    else if (g.includes('nova')) out.push('nova')
     else if (g.includes('bridge')) out.push('bridge_architect')
   }
   return [...new Set(out)]
@@ -115,6 +119,13 @@ export function parseCouncilCommand(input: string): CouncilCommand {
   const raw = typeof input === 'string' ? input : ''
   const t = normalizeInput(raw)
   if (!t) return { ...DEFAULT_COUNCIL_COMMAND }
+
+  if (detectUninstalledKimiMoonshotCommand(raw)) {
+    return {
+      ...DEFAULT_COUNCIL_COMMAND,
+      uninstalledProviderNotice: KIMI_MOONSHOT_NOT_INSTALLED_MESSAGE,
+    }
+  }
 
   const mode = detectMode(t)
   const excludedFamilies = parseExceptFamilies(t)
@@ -161,6 +172,7 @@ export function parseCouncilCommand(input: string): CouncilCommand {
       excludedFamilies,
       directInvocation: true,
       directInvocationRemainder: direct.remainder,
+      uninstalledProviderNotice: null,
       executionPermission,
       responseLimits: mergeLimits(DEFAULT_COUNCIL_COMMAND, 2, 4000),
     }
@@ -175,6 +187,7 @@ export function parseCouncilCommand(input: string): CouncilCommand {
       excludedFamilies,
       directInvocation: true,
       directInvocationRemainder: 'permissioned continuation',
+      uninstalledProviderNotice: null,
       executionPermission,
       responseLimits: mergeLimits(DEFAULT_COUNCIL_COMMAND, 1, 4000),
     }
@@ -188,6 +201,7 @@ export function parseCouncilCommand(input: string): CouncilCommand {
     excludedFamilies,
     directInvocation: false,
     directInvocationRemainder: '',
+    uninstalledProviderNotice: null,
     executionPermission,
     responseLimits,
   }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { createRoiReview, listOutcomeSnapshot, type RoiReviewInput } from '@/lib/outcomes'
-import { BABY_AI_AGENTS, type BabyAgentKey } from '@/lib/baby-ai/model'
+import { BABY_AI_AGENTS, canonicalBabyAgentKey, type BabyAgentKey } from '@/lib/baby-ai/model'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -23,7 +23,8 @@ function reviewerValue(value: unknown): RoiReviewInput['reviewer'] {
   const raw = textValue(value)
   if (!raw) return 'commander'
   if (raw === 'commander' || raw === 'system') return raw
-  return BABY_AI_AGENTS.some(agent => agent.key === raw) ? raw as BabyAgentKey : 'commander'
+  const canonical = canonicalBabyAgentKey(raw)
+  return BABY_AI_AGENTS.some(agent => agent.key === canonical) ? canonical : 'commander'
 }
 
 function priorityChange(value: unknown): RoiReviewInput['recommendedPriorityChange'] {

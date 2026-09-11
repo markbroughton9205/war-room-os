@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
 
 export const COUNCIL_ROSTER_MEMBERSHIP_STATES = [
   'CONFIGURED',
@@ -50,14 +51,9 @@ export function parseRosterOverride(raw: string | undefined | null): string | nu
 }
 
 export function familyUiLabel(family: CouncilOrchestrationFamily): string {
-  if (family === 'chatgpt') return 'ChatGPT'
-  if (family === 'claude') return 'Claude'
-  if (family === 'grok') return 'Grok'
-  if (family === 'gemini') return 'Gemini'
-  if (family === 'red_team') return 'Red Team'
-  if (family === 'kimi') return 'Kimi'
   if (family === 'baby') return 'Baby'
-  return family
+  if (family === 'bridge_architect') return 'Bridge Architect'
+  return displayNameForSeat(family, family)
 }
 
 function entryFromPolicy(input: {
@@ -190,7 +186,7 @@ export function rosterToFloorFlags(snapshot: CouncilRosterSnapshot): {
 } {
   const configured: Partial<Record<CouncilOrchestrationFamily, boolean>> = {}
   const eligible: Partial<Record<CouncilOrchestrationFamily, boolean>> = {}
-  for (const family of ['chatgpt', 'claude', 'grok', 'gemini', 'red_team', 'kimi', 'baby'] as CouncilOrchestrationFamily[]) {
+  for (const family of ['chatgpt', 'claude', 'grok', 'gemini', 'red_team', 'nova', 'baby'] as CouncilOrchestrationFamily[]) {
     configured[family] = Boolean(snapshot.families[family]?.configured)
     eligible[family] = Boolean(snapshot.families[family]?.floorEligible)
   }

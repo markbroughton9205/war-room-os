@@ -4,6 +4,7 @@ export const MEMORY_FAMILY_PARTITIONS = [
   'Claude Family',
   'Grok Family',
   'Gemini Family',
+  'Nova Council',
   'Kimi Family',
   'Red Team',
   'Bridge Architect',

@@ -6,24 +6,26 @@ import {
 import { logCouncilPacketMetrics } from '@/lib/council/packetSizeLog'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { toDisplayText } from '@/lib/council/toDisplayText'
-import { KIMI_DEFAULT_MODEL, MOONSHOT_API_BASE } from '@/lib/providers/kimi'
+import { detectUninstalledKimiMoonshotCommand, KIMI_MOONSHOT_NOT_INSTALLED_MESSAGE } from '@/lib/council/seatCanonical'
 
 const DIRECT_PROVIDERS = new Set<DirectProviderFamily>([
   'chatgpt',
   'claude',
   'grok',
   'gemini',
-  'kimi',
   'red_team',
   'baby',
 ])
 
 const DEFAULT_PROMPT = 'Reply with OK only.'
 
-function parseProvider(raw: unknown): DirectProviderFamily | null {
+function parseProvider(raw: unknown): DirectProviderFamily | 'not_installed' | null {
   if (typeof raw !== 'string') return null
-  const key = raw.trim().toLowerCase() as DirectProviderFamily
-  return DIRECT_PROVIDERS.has(key) ? key : null
+  const key = raw.trim().toLowerCase()
+  if (key === 'kimi' || key === 'moonshot' || detectUninstalledKimiMoonshotCommand(key)) {
+    return 'not_installed'
+  }
+  return DIRECT_PROVIDERS.has(key as DirectProviderFamily) ? key as DirectProviderFamily : null
 }
 
 async function runDirectTest(provider: DirectProviderFamily, prompt: string, fullRetry: boolean) {
@@ -56,29 +58,6 @@ async function runDirectTest(provider: DirectProviderFamily, prompt: string, ful
     fallbackUsed,
   })
 
-  const kimiDiagnostics =
-    provider === 'kimi'
-      ? {
-          hasKimiApiKey: result.kimiDiagnostics?.hasKimiApiKey ?? Boolean(process.env.KIMI_API_KEY?.trim()),
-          hasMoonshotApiKey: result.kimiDiagnostics?.hasMoonshotApiKey ?? Boolean(process.env.MOONSHOT_API_KEY?.trim()),
-          selectedEnvKeyName: result.kimiDiagnostics?.selectedEnvKeyName ?? null,
-          baseUrl: result.kimiDiagnostics?.baseUrl ?? MOONSHOT_API_BASE,
-          model: result.kimiDiagnostics?.model ?? KIMI_DEFAULT_MODEL,
-          upstreamStatus: result.kimiDiagnostics?.upstreamStatus ?? null,
-          sanitizedUpstreamErrorMessage: result.kimiDiagnostics?.sanitizedUpstreamErrorMessage ?? null,
-        }
-      : null
-
-  if (provider === 'kimi') {
-    console.info('[providers/direct-test][kimi]', {
-      success: result.ok,
-      transportStatus: result.transportStatus,
-      errorKind: result.kimiErrorKind ?? null,
-      error: result.ok ? null : result.error ?? 'provider call failed',
-      diagnostics: kimiDiagnostics,
-    })
-  }
-
   return {
     provider,
     transportStatus: result.transportStatus,
@@ -89,29 +68,27 @@ async function runDirectTest(provider: DirectProviderFamily, prompt: string, ful
     error: result.ok ? null : result.error ?? 'provider call failed',
     fallbackUsed,
     fullRetryEnabled: fullRetry,
-    ...(provider === 'kimi'
-      ? {
-          kimiDiagnostics: {
-            hasKimiApiKey: kimiDiagnostics?.hasKimiApiKey ?? false,
-            hasMoonshotApiKey: kimiDiagnostics?.hasMoonshotApiKey ?? false,
-            selectedEnvKeyName: kimiDiagnostics?.selectedEnvKeyName ?? null,
-            baseUrl: kimiDiagnostics?.baseUrl ?? MOONSHOT_API_BASE,
-            model: kimiDiagnostics?.model ?? KIMI_DEFAULT_MODEL,
-            upstreamStatus: kimiDiagnostics?.upstreamStatus ?? null,
-            sanitizedUpstreamErrorMessage: kimiDiagnostics?.sanitizedUpstreamErrorMessage ?? null,
-          },
-          kimiErrorKind: result.kimiErrorKind ?? null,
-        }
-      : {}),
   }
+}
+
+function notInstalledResponse() {
+  return NextResponse.json(
+    {
+      success: false,
+      error: KIMI_MOONSHOT_NOT_INSTALLED_MESSAGE,
+      provider: null,
+    },
+    { status: 404 },
+  )
 }
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
   const provider = parseProvider(url.searchParams.get('provider'))
+  if (provider === 'not_installed') return notInstalledResponse()
   if (!provider) {
     return NextResponse.json(
-      { error: 'provider query required (chatgpt|claude|grok|gemini|kimi|red_team|baby)' },
+      { error: 'provider query required (chatgpt|claude|grok|gemini|red_team|baby)' },
       { status: 400 },
     )
   }
@@ -130,9 +107,10 @@ export async function POST(req: Request) {
   }
 
   const provider = parseProvider(body.provider)
+  if (provider === 'not_installed') return notInstalledResponse()
   if (!provider) {
     return NextResponse.json(
-      { error: 'provider required (chatgpt|claude|grok|gemini|kimi|red_team|baby)' },
+      { error: 'provider required (chatgpt|claude|grok|gemini|red_team|baby)' },
       { status: 400 },
     )
   }

@@ -429,7 +429,8 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
     ['persisted "Claude Family" resolves to claude', familyIdFromLabel('Claude Family') === 'claude'],
     ['persisted "Grok Family" resolves to grok', familyIdFromLabel('Grok Family') === 'grok'],
     ['persisted "Gemini Family" resolves to gemini', familyIdFromLabel('Gemini Family') === 'gemini'],
-    ['persisted "Kimi Family" resolves to kimi', familyIdFromLabel('Kimi Family') === 'kimi'],
+    ['persisted "Kimi Family" legacy alias resolves to nova', familyIdFromLabel('Kimi Family') === 'nova'],
+    ['persisted "Nova Council" resolves to nova', familyIdFromLabel('Nova Council') === 'nova'],
     ['persisted "Red Team" (no suffix) still resolves to red_team', familyIdFromLabel('Red Team') === 'red_team'],
     ['uppercase "CHATGPT FAMILY" variant resolves to chatgpt', familyIdFromLabel('CHATGPT FAMILY') === 'chatgpt'],
     [

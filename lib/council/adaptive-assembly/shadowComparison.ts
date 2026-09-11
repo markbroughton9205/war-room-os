@@ -18,7 +18,7 @@ const KNOWN_FAMILIES = new Set<CouncilOrchestrationFamily>([
   'gemini',
   'red_team',
   'baby',
-  'kimi',
+  'nova',
   'bridge_architect',
 ])
 

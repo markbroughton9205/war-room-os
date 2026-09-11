@@ -3,10 +3,9 @@ import type { CouncilFailureLayer } from '../types'
 import type { StreamDeltaHandler } from '../streamContract'
 
 /**
- * Seat/backend decoupling. `CouncilOrchestrationFamily` (grok, claude, gemini, chatgpt,
- * red_team, baby, kimi, bridge_architect) remains the Council's seat identity — name, role
- * brief, persona prompt, deliberation function are all unchanged. What becomes swappable is
- * only which backend actually answers for the seat on a given call.
+ * Seat/backend decoupling. `CouncilOrchestrationFamily` (chatgpt, claude, grok, gemini,
+ * nova, red_team, baby, bridge_architect) is the Council seat identity. Historical persisted
+ * `kimi` rows may still be read via migrateLegacyPersistedSeat; that is not a live provider.
  */
 
 export type BackendType = 'LOCAL' | 'EXTERNAL'

@@ -97,7 +97,7 @@ export function runCouncilStreamingRuntimeValidation(): StreamingRuntimeCheck[] 
 function executeBypassesCloudFloorForLocalRouting(): boolean {
   const source = readFileSync(join(process.cwd(), 'app/api/chat/execute.ts'), 'utf8')
   return source.includes('localRoutingBypassesCloudFloorGate')
-    && /!familyIsFloorEligible\(family\) && family !== 'kimi' && !localRoutingBypassesCloudFloorGate\(\)/.test(source)
+    && /!familyIsFloorEligible\(family\) && !localRoutingBypassesCloudFloorGate\(\)/.test(source)
     && source.includes('Agent eligibility comes from the ASTRA/Nebula plan')
 }
 

@@ -4,10 +4,9 @@ import type { PromptIntent, TargetAgentProfile } from './types'
 
 /**
  * Claude Code and Codex are build-executor agents, resolved from the engineering registry.
- * Kimi has no engineering-registry entry (it is a Council LLM member, not a wired coding
- * executor) — its profile comes from the Council capability registry instead. This routing must
- * never be reversed: Kimi is never looked up in the engineering registry, and Claude Code/Codex
- * are never looked up in the Council registry.
+ * GIVE_KIMI_RESEARCH_PROMPT is a historical research-prompt packager id. It does not mean a Kimi
+ * model/provider is installed. The composed prompt targets the NOVA Council strategy seat
+ * (local Ollama). Kimi/Moonshot is not a War Room capability.
  */
 export function resolveTargetAgentProfile(intent: PromptIntent, genericTargetLabel?: string): TargetAgentProfile {
   if (intent === 'GIVE_CLAUDE_NEXT_PROMPT') {
@@ -39,15 +38,15 @@ export function resolveTargetAgentProfile(intent: PromptIntent, genericTargetLab
   }
 
   if (intent === 'GIVE_KIMI_RESEARCH_PROMPT') {
-    const profile = getFamilyCapabilityProfile('kimi')
+    const profile = getFamilyCapabilityProfile('nova')
     if (profile) {
       return {
-        agentId: 'kimi',
+        agentId: 'nova',
         displayName: profile.displayName,
         source: 'council_capability_registry',
         role: profile.researchEligible ? 'research_eligible_council_member' : 'council_member',
         availability: profile.availability,
-        notes: `Council capability profile v${profile.profileVersion} (${profile.profileStatus}).`,
+        notes: `Historical research-prompt packager. Kimi/Moonshot is not installed. Composed against NOVA Council profile v${profile.profileVersion} (${profile.profileStatus}).`,
       }
     }
   }

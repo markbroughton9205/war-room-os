@@ -52,7 +52,7 @@ function familyMatches(resultFamily: string, targetFamily?: CouncilOrchestration
   if (target === 'redteam') return family.includes('redteam') || family === 'redteam'
   if (target === 'grok') return family.includes('grok')
   if (target === 'gemini') return family.includes('gemini')
-  if (target === 'kimi') return family.includes('kimi')
+  if (target === 'nova') return family.includes('nova') || family.includes('kimi') || family.includes('moonshot')
   return family.includes(target)
 }
 

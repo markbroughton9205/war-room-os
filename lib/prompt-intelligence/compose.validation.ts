@@ -47,7 +47,7 @@ function testCodexRoutesThroughEngineeringRegistry(): CaseResult[] {
 function testKimiRoutesThroughCouncilRegistryNeverEngineering(): CaseResult[] {
   const result = composePrompt(baseInput('GIVE_KIMI_RESEARCH_PROMPT'))
   return [
-    check('kimi_target_agent_id_is_kimi', result.targetAgent.agentId === 'kimi', result.targetAgent.agentId),
+    check('nova_target_agent_id_is_nova', result.targetAgent.agentId === 'nova', result.targetAgent.agentId),
     check('kimi_source_is_council_registry_not_engineering', result.targetAgent.source === 'council_capability_registry', result.targetAgent.source),
   ]
 }

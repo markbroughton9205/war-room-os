@@ -8,7 +8,7 @@ export const FAMILY_SOFT_CHAR_CAPS: Partial<Record<CouncilOrchestrationFamily, n
   gemini: 11_000,
   red_team: 8500,
   baby: 4000,
-  kimi: 8000,
+  nova: 8000,
   bridge_architect: 8000,
 }
 
@@ -20,7 +20,7 @@ export const FAMILY_ROLE_LOCK: Partial<Record<CouncilOrchestrationFamily, 'synth
   gemini: 'synthesis',
   red_team: 'verification',
   baby: 'observer',
-  kimi: 'architecture',
+  nova: 'architecture',
   bridge_architect: 'local',
 }
 

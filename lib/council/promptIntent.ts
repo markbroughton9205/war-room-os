@@ -30,7 +30,7 @@ const THANKS_ONLY =
   /^\s*(thanks|thank you|thx|ty|appreciate it|much appreciated|cheers)\b[!?.\s]*$/i
 
 const DIRECT_FAMILY =
-  /\b(?:@)?(?:chatgpt|claude|grok|gemini|kimi|baby|red\s*team|bridge\s*architect)\b/i
+  /\b(?:@)?(?:chatgpt|claude|grok|gemini|nova|baby|red\s*team|bridge\s*architect)\b/i
 
 const ANALYSIS_MARKERS =
   /\b(?:analyze|analysis|compare|evaluate|assess|break\s*down|what\s+do\s+you\s+think|your\s+take|perspective|recommend|trade-?offs?|implications?)\b/i

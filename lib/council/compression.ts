@@ -293,7 +293,7 @@ function normalizeOrchestrationFamily(familyName: unknown): CouncilOrchestration
     gemini: 'gemini',
     red_team: 'red_team',
     baby: 'baby',
-    kimi: 'kimi',
+    nova: 'nova',
     bridge_architect: 'bridge_architect',
   }
   return map[key] ?? null

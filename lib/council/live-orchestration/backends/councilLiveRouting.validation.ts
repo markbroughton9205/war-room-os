@@ -56,7 +56,6 @@ const ALL_CLOUD_KEYS = {
   ANTHROPIC_API_KEY: undefined,
   XAI_API_KEY: undefined,
   GEMINI_API_KEY: undefined,
-  MOONSHOT_API_KEY: undefined,
 }
 
 const SEAT_ENV_VAR: Partial<Record<CouncilOrchestrationFamily, string>> = {

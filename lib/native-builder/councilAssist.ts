@@ -47,7 +47,7 @@ export const COUNCIL_ASSIST_COMPOSITIONS: readonly NativeCouncilAssistCompositio
 const REVIEW_ROSTERS: Record<'architecture_review' | 'security_review' | 'research_review', DirectProviderFamily[]> = {
   architecture_review: ['claude', 'chatgpt'],
   security_review: ['red_team', 'claude'],
-  research_review: ['grok', 'kimi'],
+  research_review: ['grok', 'claude'],
 }
 
 const REVIEW_FRAMING: Record<'architecture_review' | 'security_review' | 'research_review', string> = {

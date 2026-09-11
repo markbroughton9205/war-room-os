@@ -44,7 +44,6 @@ const ALL_CLOUD_KEYS = {
   ANTHROPIC_API_KEY: undefined,
   XAI_API_KEY: undefined,
   GEMINI_API_KEY: undefined,
-  MOONSHOT_API_KEY: undefined,
 }
 
 const GENERAL_MODEL_ID = 'huihui_ai/qwen3-abliterated:14b'

@@ -24,7 +24,7 @@ export const FAMILY_SPECIALIZATIONS: FamilySpecialization[] = [
   { family: 'claude', role: 'architecture', label: 'Architecture & precision', taskAffinity: ['architecture', 'truth', 'engineering', 'risk'] },
   { family: 'grok', role: 'signals', label: 'Signals & framing', taskAffinity: ['signal', 'contradiction', 'intel', 'market'] },
   { family: 'gemini', role: 'synthesis', label: 'Synthesis & long context', taskAffinity: ['synthesis', 'research', 'compare', 'summary'] },
-  { family: 'kimi', role: 'decomposition', label: 'Task decomposition', taskAffinity: ['decompose', 'sequence', 'tasks', 'workflow'] },
+  { family: 'nova', role: 'decomposition', label: 'Task decomposition', taskAffinity: ['decompose', 'sequence', 'tasks', 'workflow'] },
   { family: 'red_team', role: 'red_team', label: 'Adversarial review', taskAffinity: ['challenge', 'red_team', 'contradiction', 'risk'] },
   { family: 'bridge_architect', role: 'bridge', label: 'Systems bridge', taskAffinity: ['bridge', 'integration', 'systems'] },
   { family: 'baby', role: 'observer', label: 'Observer', taskAffinity: ['observe', 'learn'] },

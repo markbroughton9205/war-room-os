@@ -2,6 +2,7 @@ import { loadCouncilThreadFromStore, snapshotThreadForClient } from '@/lib/cogni
 import type { DeliberationStepKind } from '@/lib/orchestration/deliberation'
 import { runDeliberationStep } from '@/lib/orchestration/deliberation'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { canonicalizeCouncilSeat } from '@/lib/council/seatCanonical'
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
 
 export const dynamic = 'force-dynamic'
@@ -21,7 +22,7 @@ function isDeliberationKind(value: string): value is DeliberationStepKind {
 }
 
 function isFamily(value: string): value is CouncilOrchestrationFamily {
-  return ['chatgpt', 'claude', 'grok', 'gemini', 'red_team', 'baby', 'kimi', 'bridge_architect'].includes(value)
+  return canonicalizeCouncilSeat(value) !== null
 }
 
 export async function GET(req: Request) {

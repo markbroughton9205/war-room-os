@@ -31,7 +31,7 @@ export type CanonicalSubsystemStatus = {
 }
 
 export type CanonicalProviderFamilyStatus = {
-  family: 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'kimi' | 'redteam'
+  family: 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'redteam'
   providerId: string
   label: string
   configured: boolean
@@ -86,7 +86,6 @@ const FAMILY_PROVIDER: Record<CanonicalProviderFamilyStatus['family'], { provide
   chatgpt: { providerId: 'openai', label: 'OpenAI · ChatGPT' },
   grok: { providerId: 'xai', label: 'xAI · Grok' },
   gemini: { providerId: 'google', label: 'Google · Gemini' },
-  kimi: { providerId: 'moonshot', label: 'Moonshot · Kimi' },
   redteam: { providerId: 'anthropic', label: 'War Room · Red Team (Claude-backed)' },
 }
 

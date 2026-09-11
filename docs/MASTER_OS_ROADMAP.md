@@ -10,11 +10,13 @@ completion list (`docs/SWARM_ROADMAP_COMPLETION_REPORT.md`).
 
 | # | Item | Status |
 |---|---|---|
-| 12 | Live Globe Intel Activation | PASS / LIVE-VALIDATED / COMMITTED / CLOSED (`fe74bfe`) |
+| 12 | Live Globe Intel Activation | PASS / LIVE-VALIDATED / COMMITTED / CLOSED (`fe74bfe`); maritime/provider defect repair CLOSED (`e9a8372`, hygiene `8d8b76b`) |
 | 13 | Terra ↔ Council Intelligence Bridge | PASS / LIVE-VALIDATED / COMMITTED / CLOSED (`ad888b7`) |
 | 14 | ASTRA Live Mission Orchestration | PASS / LIVE-VALIDATED / COMMITTED / CLOSED |
-| 15 | Distinct B-Parameter Council Reasoning | IN PROGRESS — do not commit; do not begin #16 |
+| 15 | Distinct B-Parameter Council Reasoning | IMPLEMENTED / LIVE-VALIDATED / UNCOMMITTED — review next; do not begin #16 |
 | 16 | Real Council Deliberation Pipeline | NOT STARTED |
+
+Terra side (not a new roadmap number): **Automatic urban streets/buildings** — PASS / LIVE-VALIDATED / COMMITTED (`9571af1`). See [`docs/terra/AUTOMATIC_URBAN_DETAIL.md`](terra/AUTOMATIC_URBAN_DETAIL.md).
 
 ## ASTRA DATABASE PRE-DEPLOYMENT BLOCKER
 

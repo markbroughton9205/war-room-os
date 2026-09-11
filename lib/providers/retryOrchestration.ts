@@ -23,7 +23,7 @@ export type ProviderCallOutcome = {
   /** Sanitized operator/council facing text */
   displayText: string
   integrity: ResponseIntegrityResult
-  providerId: ProviderRuntimeId
+  providerId: ProviderRuntimeId | 'local'
   family: CouncilOrchestrationFamily
   retryCount: number
   fallbackUsed: boolean
@@ -42,14 +42,13 @@ export type ProviderCallOutcome = {
 
 export type GeminiRetryStrategy = 'simplified' | 'no_compression' | 'short_context'
 
-const FAMILY_TO_PROVIDER: Record<CouncilOrchestrationFamily, ProviderRuntimeId> = {
+const FAMILY_TO_PROVIDER: Partial<Record<CouncilOrchestrationFamily, ProviderRuntimeId>> = {
   chatgpt: 'openai',
   claude: 'anthropic',
   grok: 'xai',
   gemini: 'google',
   red_team: 'anthropic',
   baby: 'openai',
-  kimi: 'moonshot',
   bridge_architect: 'openai',
 }
 
@@ -69,7 +68,7 @@ const FAMILY_DISPLAY_LABEL: Record<CouncilOrchestrationFamily, string> = {
   gemini: 'Gemini',
   red_team: 'Red Team',
   baby: 'Baby',
-  kimi: 'Kimi',
+  nova: 'NOVA',
   bridge_architect: 'Bridge Architect',
 }
 
@@ -87,8 +86,6 @@ function providerConfigured(id: ProviderRuntimeId): boolean {
       return Boolean(process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim())
     case 'xai':
       return Boolean(process.env.XAI_API_KEY?.trim())
-    case 'moonshot':
-      return Boolean(process.env.KIMI_API_KEY?.trim() || process.env.MOONSHOT_API_KEY?.trim())
     default:
       return false
   }
@@ -140,9 +137,9 @@ export async function orchestrateProviderResponse(args: {
   auditClient?: WarRoomSupabase | null
   finishReason?: string | null
 }): Promise<ProviderCallOutcome> {
-  const providerId = FAMILY_TO_PROVIDER[args.family]
   const promptChars = args.prompt.trim().length
   let text = args.rawText.trim()
+  const providerId = FAMILY_TO_PROVIDER[args.family]
 
   if (shouldPassthroughCouncilProviderText()) {
     const integrity: ResponseIntegrityResult = text
@@ -164,7 +161,27 @@ export async function orchestrateProviderResponse(args: {
       text,
       displayText: text,
       integrity,
-      providerId,
+      providerId: providerId ?? 'local',
+      family: args.family,
+      retryCount: 0,
+      fallbackUsed: false,
+      fallbackProvider: null,
+      diagnostics: {
+        promptChars,
+        completionChars: text.length,
+        truncationDetected: false,
+        retryStrategies: [],
+      },
+    }
+  }
+
+  if (!providerId) {
+    const integrity = validateProviderResponseIntegrity(text, councilExpectation(args.family))
+    return {
+      text,
+      displayText: text,
+      integrity,
+      providerId: 'local',
       family: args.family,
       retryCount: 0,
       fallbackUsed: false,
@@ -288,7 +305,7 @@ export async function orchestrateProviderResponse(args: {
     const chain = FALLBACK_CHAIN[args.family] ?? ['chatgpt', 'claude']
     for (const fallbackFamily of chain) {
       const fallbackId = FAMILY_TO_PROVIDER[fallbackFamily]
-      if (!providerConfigured(fallbackId)) continue
+      if (!fallbackId || !providerConfigured(fallbackId)) continue
       try {
         const fallbackText = (
           await args.invoke({
@@ -397,6 +414,6 @@ export async function orchestrateProviderResponse(args: {
   }
 }
 
-export function mapFamilyToProviderId(family: CouncilOrchestrationFamily): ProviderRuntimeId {
-  return FAMILY_TO_PROVIDER[family]
+export function mapFamilyToProviderId(family: CouncilOrchestrationFamily): ProviderRuntimeId | 'local' {
+  return FAMILY_TO_PROVIDER[family] ?? 'local'
 }

@@ -210,7 +210,7 @@ export async function GET() {
     {
       generatedAt: new Date().toISOString(),
       routingFoundation: 'AVAILABLE',
-      // True: app/api/chat/execute.ts calls invokeCouncilSeat() for every non-kimi seat. This is
+      // True: app/api/chat/execute.ts calls invokeCouncilSeat() for every Council seat, including NOVA. This is
       // NOT a claim that local models are active — see routingModeResolved/localServingLiveSeats.
       liveRoutingWired: true,
       routingModeResolved: resolvedMode,

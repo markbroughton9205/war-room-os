@@ -210,7 +210,7 @@ const FAMILY_LANES: Record<BabyAgentKey, string> = {
   'chatgpt-family-baby': 'Synthesis and orchestration',
   'claude-family-baby': 'Architecture and structural analysis',
   'grok-family-baby': 'Realtime signal framing with truth labels',
-  'kimi-family-baby': 'Decomposition and planning',
+  'nova-family-baby': 'Decomposition and planning',
   'red-team-baby': 'Contradiction and risk analysis',
   'bridge-architect-baby': 'Cloud-only coordination observations',
   'analyst-baby': 'Research summary and evidence grading',
@@ -590,7 +590,7 @@ function buildRecommendations(agents: PersistedBabyAgent[], radar: BabyOpportuni
     id: proposal.id,
     agentKey: proposal.agentKey as BabyAgentKey,
     agentName: proposal.agentName,
-    kind: proposal.agentKey === 'red-team-baby' ? 'flag_contradiction' : proposal.agentKey === 'kimi-family-baby' ? 'propose_task' : 'recommend_priority',
+    kind: proposal.agentKey === 'red-team-baby' ? 'flag_contradiction' : proposal.agentKey === 'nova-family-baby' ? 'propose_task' : 'recommend_priority',
     title: proposal.title,
     rationale: proposal.summary,
     priority: proposal.agentKey === 'red-team-baby' || proposal.agentKey === 'income-operations-baby' ? 'high' : 'medium',
@@ -824,7 +824,7 @@ function buildFamilyContributions(agents: PersistedBabyAgent[], memory: BabyMemo
       'income-operations-baby': topRadar
         ? `Ranked "${topRadar.title}" for review with opportunity score ${topRadar.opportunityScore}; flagged repeatability, monetizable system shape, and low-ROI distraction risk for Commander review.`
         : 'No persisted income opportunity rows available; income claims remain unavailable and low-evidence distractions should be rejected.',
-      'kimi-family-baby': `Decomposed continuity into active projects, unfinished approvals, and reviewable next proposals.`,
+      'nova-family-baby': `Decomposed continuity into active projects, unfinished approvals, and reviewable next proposals.`,
       'bridge-architect-baby': `Observed system coordination through persistence, economic store, and learning snapshots without local bridge connectors.`,
     }
 

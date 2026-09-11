@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-War Room is a solo-built Next.js 16 (App Router) + React 19 + TypeScript agentic orchestration platform. It coordinates multiple LLM providers (Claude, GPT, Grok, Gemini, Kimi/Moonshot — see `lib/council*`) as a "Council," backed by Supabase, with self-audit/self-repair tooling and autonomous income-generation features under human ("Commander") approval gates. See `docs/war-room-constitution.md` for the full operating philosophy.
+War Room is a solo-built Next.js 16 (App Router) + React 19 + TypeScript agentic orchestration platform. It coordinates multiple LLM providers (Claude, GPT, Grok, Gemini, plus local NOVA via Ollama — see `lib/council*`) as a "Council," backed by Supabase, with self-audit/self-repair tooling and autonomous income-generation features under human ("Commander") approval gates. Kimi/Moonshot is not installed and is not a War Room capability (KIMI_WAVE is research corpus only). See `docs/war-room-constitution.md` for the full operating philosophy.
 
 ## Commands
 
@@ -29,7 +29,7 @@ War Room is a solo-built Next.js 16 (App Router) + React 19 + TypeScript agentic
 
 - `SUPABASE_SERVICE_ROLE_KEY` must stay server-only — never prefix it (or any secret) with `NEXT_PUBLIC_`. It's used server-side by `/api/tools/memory`.
 - `SUPABASE_FILES_BUCKET` must exactly match the actual Supabase Storage bucket name, including spaces/capitalization (currently `War Room Files`).
-- `.env.example` is out of date vs. actual usage — real `.env.local` also includes `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`, `MOONSHOT_API_KEY`, `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, and more.
+- `.env.example` is out of date vs. actual usage — real `.env.local` also includes `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`, `FIRECRAWL_API_KEY`, `TAVILY_API_KEY`, and more. War Room does not require `KIMI_API_KEY` or `MOONSHOT_API_KEY`; Kimi/Moonshot is not a War Room capability.
 - Payment operations must route through secure provider integrations, require explicit War Room approval, and must never store raw routing/account numbers.
 
 ## Approval-gated workflow

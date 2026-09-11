@@ -87,13 +87,6 @@ const EXPECTED_PROVIDER_ENV: Array<{
   { family: 'Claude', envKeys: ['ANTHROPIC_API_KEY'], unavailableReason: 'ANTHROPIC_API_KEY not configured' },
   { family: 'Grok', envKeys: ['XAI_API_KEY'], unavailableReason: 'XAI_API_KEY not configured' },
   { family: 'Gemini', envKeys: ['GEMINI_API_KEY'], unavailableReason: 'GEMINI_API_KEY not configured' },
-  {
-    family: 'Kimi',
-    envKeys: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
-    unavailableReason: 'unavailable in this request',
-    configuredContext: 'funding paused',
-    causeVerifiedAtRuntime: false,
-  },
 ]
 
 export const COUNCIL_RUNTIME_DIAGNOSTIC_CLASSIFICATION: CouncilRuntimeDiagnosticClassification = {
@@ -223,7 +216,7 @@ function summarizeUnavailableProviders(
   const presentFamilies = new Set(results.map(result => result.family.toLowerCase()))
   const fromConfig = EXPECTED_PROVIDER_ENV
     .filter(provider => !presentFamilies.has(provider.family.toLowerCase()))
-    .filter(provider => provider.family === 'Kimi' || !provider.envKeys.some(key => Boolean(env[key]?.trim())))
+    .filter(provider => !provider.envKeys.some(key => Boolean(env[key]?.trim())))
     .map(provider => ({
       family: provider.family,
       status: 'unavailable' as const,

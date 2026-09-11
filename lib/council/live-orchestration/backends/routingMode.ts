@@ -35,7 +35,7 @@ const DEFAULT_HYBRID_SEAT_POLICY: Record<CouncilOrchestrationFamily, SeatBackend
   claude: 'LOCAL_FIRST',
   chatgpt: 'LOCAL_FIRST',
   baby: 'LOCAL_FIRST',
-  kimi: 'LOCAL_FIRST',
+  nova: 'LOCAL_FIRST',
   bridge_architect: 'LOCAL_FIRST',
   red_team: 'LOCAL_ONLY',
   grok: 'EXTERNAL_FIRST',

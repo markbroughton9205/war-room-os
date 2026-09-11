@@ -13,7 +13,7 @@ import {
   type OutcomeRecommendation,
   type OutcomeResultStatus,
 } from '@/lib/outcomes'
-import { BABY_AI_AGENTS, type BabyAgentKey } from '@/lib/baby-ai/model'
+import { BABY_AI_AGENTS, canonicalBabyAgentKey, type BabyAgentKey } from '@/lib/baby-ai/model'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -57,7 +57,9 @@ function approvalStatusValue(value: unknown): OutcomeApprovalStatus | null {
 
 function familyValue(value: unknown): BabyAgentKey | null {
   const raw = textValue(value)
-  return raw && BABY_AI_AGENTS.some(agent => agent.key === raw) ? raw as BabyAgentKey : null
+  if (!raw) return null
+  const canonical = canonicalBabyAgentKey(raw)
+  return BABY_AI_AGENTS.some(agent => agent.key === canonical) ? canonical : null
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

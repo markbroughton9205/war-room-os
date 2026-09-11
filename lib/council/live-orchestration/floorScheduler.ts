@@ -20,12 +20,14 @@ export function resolveVisibleFloorOrder(input: {
   configured: Partial<Record<CouncilOrchestrationFamily, boolean>>
   eligible?: Partial<Record<CouncilOrchestrationFamily, boolean>>
   includeRedTeam?: boolean
+  includeNova?: boolean
+  /** @deprecated Read-migrated to includeNova. */
   includeKimi?: boolean
 }): CouncilOrchestrationFamily[] {
   const order = [...DEFAULT_VISIBLE_FLOOR_ORDER]
-  if (input.includeKimi) {
+  if (input.includeNova ?? input.includeKimi) {
     const redIdx = order.indexOf('red_team')
-    order.splice(redIdx >= 0 ? redIdx : order.length, 0, 'kimi')
+    order.splice(redIdx >= 0 ? redIdx : order.length, 0, 'nova')
   }
   return order.filter(family => {
     if (family === 'red_team' && input.includeRedTeam === false) return false

@@ -125,7 +125,7 @@ function checkFullFailureGetsOneCompactNoticeNotRawReports(): LiveGroupExecution
 }
 
 function checkAllPermanentAgentIdentitiesResolvable(): LiveGroupExecutionValidationResult {
-  const seats: CouncilOrchestrationFamily[] = ['chatgpt', 'claude', 'grok', 'gemini', 'kimi', 'red_team']
+  const seats: CouncilOrchestrationFamily[] = ['chatgpt', 'claude', 'grok', 'gemini', 'nova', 'red_team']
   const labels = seats.map(seat => familyDisplayName(seat))
   const allNebula = labels.every(label => NEBULA_AGENT_IDS.some(id => id.toUpperCase() === label))
   return {

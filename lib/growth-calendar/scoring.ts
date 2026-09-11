@@ -22,9 +22,9 @@ const EVENT_BASE: Record<GrowthCalendarEventType, Partial<GrowthCalendarScore> &
   family_personal_recovery: { family: 'red-team-baby', duration: 90, window: 'Today, after high-stress or context-heavy work', incomePotential: 20, urgencyScore: 70, compoundingValue: 72, energyCost: 10, familyImpact: 94 },
   war_room_maintenance: { family: 'bridge-architect-baby', duration: 60, window: 'This week, before new build approvals', incomePotential: 44, urgencyScore: 58, compoundingValue: 76, energyCost: 42, familyImpact: 68 },
   council_review: { family: 'chatgpt-family-baby', duration: 45, window: 'Start of day or before approving new work', incomePotential: 56, urgencyScore: 68, compoundingValue: 74, energyCost: 34, familyImpact: 72 },
-  outcome_review: { family: 'kimi-family-baby', duration: 45, window: 'End of day or weekly closeout', incomePotential: 52, urgencyScore: 60, compoundingValue: 80, energyCost: 32, familyImpact: 74 },
+  outcome_review: { family: 'nova-family-baby', duration: 45, window: 'End of day or weekly closeout', incomePotential: 52, urgencyScore: 60, compoundingValue: 80, energyCost: 32, familyImpact: 74 },
   strategic_planning: { family: 'chatgpt-family-baby', duration: 75, window: 'Weekly planning block before tactical work', incomePotential: 64, urgencyScore: 56, compoundingValue: 86, energyCost: 48, familyImpact: 72 },
-  deep_work_block: { family: 'kimi-family-baby', duration: 120, window: 'Highest-energy uninterrupted window', incomePotential: 66, urgencyScore: 62, compoundingValue: 86, energyCost: 76, familyImpact: 54 },
+  deep_work_block: { family: 'nova-family-baby', duration: 120, window: 'Highest-energy uninterrupted window', incomePotential: 66, urgencyScore: 62, compoundingValue: 86, energyCost: 76, familyImpact: 54 },
 }
 
 function clampScore(value: number): number {
@@ -144,7 +144,7 @@ export function buildGrowthCalendarReviews(
       eventId: outcomePrompt.id,
       reviewType: 'outcome_prompt',
       summary: `Outcome review prompt: record whether "${outcomePrompt.title}" produced useful leverage before repeating it.`,
-      assignedFamily: 'kimi-family-baby',
+      assignedFamily: 'nova-family-baby',
       approvalRequired: true,
       canExecute: false,
       createdAt: now.toISOString(),

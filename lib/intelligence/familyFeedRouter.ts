@@ -19,7 +19,7 @@ const FAMILY_FRAMING: Partial<Record<CouncilOrchestrationFamily, string>> = {
   gemini: 'Pattern lane: cross-source patterns, event clustering, historical/contextual relationships, and ecosystem mapping.',
   red_team: 'Risk lane: contradictions, unsupported claims, manipulation risk, source weakness, public safety concerns, and narrative inflation.',
   baby: 'Observe pattern drift, tone, unresolved loops, and whether the packet suggests a memory proposal.',
-  kimi: 'Decompose the packet into task sequence, dependencies, and retrieval gaps.',
+  nova: 'Decompose the packet into task sequence, dependencies, and retrieval gaps.',
   bridge_architect: 'Map packet implications across systems, interfaces, handoffs, and integration risk.',
 }
 

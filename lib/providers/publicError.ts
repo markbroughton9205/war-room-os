@@ -5,7 +5,7 @@ export type CouncilProviderPublicFamily =
   | 'claude'
   | 'grok'
   | 'gemini'
-  | 'kimi'
+  | 'nova'
   | 'red_team'
   | 'baby'
   | 'bridge_architect'

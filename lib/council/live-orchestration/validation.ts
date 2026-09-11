@@ -40,7 +40,7 @@ export function runLiveCouncilOrchestrationValidation(): CaseResult[] {
   const checkInMem = decideMemoryCandidatePrompt({ commanderText: 'Council check in', anySuccess: true, intentTier: 'coordination' })
   const durableMem = decideMemoryCandidatePrompt({ commanderText: 'From now on, use X for Y.', anySuccess: true, intentTier: 'coordination' })
   const floor = resolveVisibleFloorOrder({
-    configured: { chatgpt: true, claude: true, grok: true, gemini: true, red_team: true, kimi: false },
+    configured: { chatgpt: true, claude: true, grok: true, gemini: true, red_team: true, nova: false },
     includeRedTeam: true,
   })
   const participants = floor.map((family, index) => ({

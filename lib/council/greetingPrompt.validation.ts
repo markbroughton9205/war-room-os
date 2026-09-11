@@ -83,9 +83,9 @@ const instructsBriefStatusOnly = stableGreetingUserPrompt.includes('brief greeti
 // supplied by the caller (i.e., the caller/execute.ts is responsible for passing the real state;
 // this asserts the pure function faithfully reflects whatever state it's given, verbatim, rather
 // than normalizing every case to "connected").
-const knownStateEchoedTruthfully = buildGreetingSystemPrompt('Kimi Family', 'task decomposition', 'DEGRADED')
+const knownStateEchoedTruthfully = buildGreetingSystemPrompt('NOVA', 'task decomposition', 'DEGRADED')
   .includes('Your reported runtime status this session is "DEGRADED"')
-const unknownStateNotClaimedConnected = !buildGreetingSystemPrompt('Kimi Family', 'task decomposition', undefined)
+const unknownStateNotClaimedConnected = !buildGreetingSystemPrompt('NOVA', 'task decomposition', undefined)
   .toLowerCase()
   .includes('connected')
 

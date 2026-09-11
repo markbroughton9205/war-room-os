@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { completeKimiChat, isKimiConfigured } from '@/lib/providers/kimi'
 import { envHasUsableProviderSecret } from '@/lib/providers/secretPresence'
 import { sanitizeCaughtProviderError, sanitizeProviderPublicError } from '@/lib/providers/publicError'
 import { councilSingleFamilyToMemoryPartition, tryPersistMemoryProposalFromModelOutput } from '@/lib/memory/ingestFromModel'
@@ -145,6 +144,7 @@ import {
   STABLE_GROUP_GREETING_META,
 } from '@/lib/council/greetingPrompt'
 import { displayNameForSeat, nebulaAgentForSeat, seatForDisplayIdentity, type NebulaAgentId } from '@/lib/council/nebula/identity'
+import { canonicalizeCouncilSeat, detectUninstalledKimiMoonshotCommand, KIMI_MOONSHOT_NOT_INSTALLED_MESSAGE } from '@/lib/council/seatCanonical'
 import { buildNebulaRuntimeSystemPrompt } from '@/lib/council/nebula/persona'
 import {
   buildRuntimeStatusGroundingBlock,
@@ -264,7 +264,7 @@ export type CouncilSingleFamily =
   | 'gemini'
   | 'red_team'
   | 'baby'
-  | 'kimi'
+  | 'nova'
   | 'bridge_architect'
 
 type ProviderResultStatus = 'OK' | 'FAILED' | 'TIMED_OUT' | 'UNAVAILABLE'
@@ -336,7 +336,7 @@ function familyFromDirectValue(value: string): CouncilSingleFamily | null {
   if (value === 'ChatGPT') return 'chatgpt'
   if (value === 'Grok') return 'grok'
   if (value === 'Gemini') return 'gemini'
-  if (value === 'Kimi') return 'kimi'
+  if (value === 'NOVA' || value === 'Nova') return 'nova'
   if (value === 'RedTeam') return 'red_team'
   return null
 }
@@ -348,7 +348,7 @@ function isCouncilSingleFamily(value: unknown): value is CouncilSingleFamily {
     || value === 'gemini'
     || value === 'red_team'
     || value === 'baby'
-    || value === 'kimi'
+    || value === 'nova'
     || value === 'bridge_architect'
 }
 
@@ -356,7 +356,8 @@ function coerceCouncilFamilyList(value: unknown): CouncilSingleFamily[] {
   if (!Array.isArray(value)) return []
   const out: CouncilSingleFamily[] = []
   for (const item of value) {
-    if (isCouncilSingleFamily(item) && !out.includes(item)) out.push(item)
+    const canonical = canonicalizeCouncilSeat(item)
+    if (canonical && isCouncilSingleFamily(canonical) && !out.includes(canonical)) out.push(canonical)
   }
   return out
 }
@@ -633,7 +634,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     'chatgpt': 'ChatGPT',
     'grok': 'Grok',
     'gemini': 'Gemini',
-    'kimi': 'Kimi',
+    'nova': 'NOVA',
     'red team': 'RedTeam',
   } as const
 
@@ -665,7 +666,10 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   const threadHistory = body.threadHistory
   const mode = body.mode as string | undefined
   const toneMode = typeof body.toneMode === 'string' ? body.toneMode : 'casual'
-  const councilSingleFamily = body.councilSingleFamily as CouncilSingleFamily | undefined
+  const parsedSingleFamily = canonicalizeCouncilSeat(body.councilSingleFamily)
+  const councilSingleFamily = parsedSingleFamily && isCouncilSingleFamily(parsedSingleFamily)
+    ? parsedSingleFamily
+    : undefined
   const orchestrationAugment = typeof body.orchestrationAugment === 'string' ? body.orchestrationAugment : ''
   const conversationId =
     typeof body.conversationId === 'string' && /^[0-9a-f-]{36}$/i.test(body.conversationId.trim())
@@ -809,6 +813,21 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         : conversationalTurn
           ? 'Continue council dialogue on the active topic without a new decree. Respond once; challenge only if material.'
           : message
+
+  if (
+    detectUninstalledKimiMoonshotCommand(message)
+    || detectUninstalledKimiMoonshotCommand(raelDirectiveText)
+    || detectUninstalledKimiMoonshotCommand(body.councilSingleFamily)
+    || Boolean(councilCommand.uninstalledProviderNotice)
+  ) {
+    const notice = councilCommand.uninstalledProviderNotice || KIMI_MOONSHOT_NOT_INSTALLED_MESSAGE
+    return NextResponse.json(withTrace({
+      results: [{ family: 'SYSTEM', content: notice, status: 'OK' }],
+      hardStop: true,
+      mode: 'provider_not_installed',
+      councilSingleResponse: notice,
+    }))
+  }
 
   // Runtime-truth enforcement: ONE evidence ledger for this whole request/round, shared by every
   // seat's streaming buffer, the final-turn validation, and validateProviderResults() -- so
@@ -1211,8 +1230,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     'gemini',
     `Operational notes: break conclusions into atomic claims; classify support; calibrate confidence to evidence; do not treat agreement as proof, echo ORION, or perform broad discovery as your primary job. Reject unsupported operational claims. Do not claim tools you were not given. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
   )
-  const kimiSystem = nebulaSystemFor(
-    'kimi',
+  const novaSystem = nebulaSystemFor(
+    'nova',
     `Operational notes: define objective and constraints; generate options; expose assumptions; sequence phases; name information that would change the plan. Do not act as final synthesizer or verify research claims. ${COUNCIL_INSTRUCTION} ${UNCERTAINTY_DAMPENING_INSTRUCTION} ${toneInstruction} ${responseDepth} Use Ra'el profile only when directly relevant to the decree: ${profile}`,
   )
   const redTeamSystem = nebulaSystemFor(
@@ -1737,10 +1756,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     if (family === 'bridge_architect') {
       return { family: familyName, content: `${familyName} Family is currently unavailable.`, status: 'UNAVAILABLE', failureLayer: 'REQUEST' }
     }
-    if (family === 'kimi' && !isKimiConfigured()) {
-      return { family: familyName, content: 'Kimi not configured', status: 'UNAVAILABLE', failureLayer: 'AUTH' }
-    }
-    if (!familyIsFloorEligible(family) && family !== 'kimi' && !localRoutingBypassesCloudFloorGate()) {
+    if (!familyIsFloorEligible(family) && !localRoutingBypassesCloudFloorGate()) {
       const row = liveCouncilRoster.families[family]
       const layer =
         row?.unavailableReason === 'UNAVAILABLE_BILLING'
@@ -1752,8 +1768,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     }
     // The "is this family's external provider configured" check that used to live here
     // (familyIsStreamConfigured) now happens inside invokeCouncilSeat() -> invokeExternalBackend(),
-    // which performs the identical check before ever reaching streamCouncilFamily. See the
-    // non-kimi branch below.
+    // which performs the identical check before ever reaching streamCouncilFamily.
 
     const callMaxTokens = opts?.maxTokensOverride ?? maxTokens
 
@@ -1763,7 +1778,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       if (family === 'claude') return claudeSystem
       if (family === 'grok') return grokSystem
       if (family === 'gemini') return geminiSystem
-      if (family === 'kimi') return kimiSystem
+      if (family === 'nova') return novaSystem
       if (family === 'red_team') return redTeamSystem
       if (family === 'baby') return babySystem
       return gptSystem
@@ -1826,27 +1841,6 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     }
 
     try {
-      if (family === 'kimi') {
-        const kimiResult = await completeKimiChat({
-          system: opts?.systemPromptOverride ?? kimiSystem,
-          messages: [{ role: 'user', content: userPrompt }],
-          maxTokens: callMaxTokens,
-          timeoutMs: PROVIDER_TIMEOUT_MS,
-        })
-        signal.throwIfAborted()
-        if (!kimiResult.ok) {
-          const kimiUnavailable = kimiResult.kind === 'key_missing'
-          return {
-            family: familyName,
-            content: kimiUnavailable ? 'Kimi not configured' : '',
-            status: kimiUnavailable ? 'UNAVAILABLE' : 'FAILED',
-            error: kimiResult.error,
-            failureLayer: kimiUnavailable ? 'AUTH' : 'PROVIDER',
-          }
-        }
-        return { family: familyName, content: kimiResult.data.text.trim(), status: 'OK' }
-      }
-
       // Council Seat Router entry point. Under COUNCIL_ROUTING_MODE=LOCAL_FIRST (production's
       // actual current setting), invokeCouncilSeat() tries the local Ollama/Nebula backend first
       // and falls back to invokeExternalBackend() (a pass-through to the same streamCouncilFamily()
@@ -2553,7 +2547,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         configured: liveCouncilFloor.configured,
         eligible: liveCouncilFloor.eligible,
         includeRedTeam: false,
-      }).filter((family): family is CouncilSingleFamily => family !== 'red_team' && family !== 'kimi' && family !== 'baby')
+      }).filter((family): family is CouncilSingleFamily => family !== 'red_team' && family !== 'nova' && family !== 'baby')
       councilTrace.record('providers_selected', {
         module: 'app/api/chat/route.ts:parallel_provider_selection',
         inputSummary: {
@@ -2802,8 +2796,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       }
 
       if (
-        councilSingleFamily !== 'kimi'
-        && councilSingleFamily !== 'bridge_architect'
+        councilSingleFamily !== 'bridge_architect'
         && !familyIsFloorEligible(councilSingleFamily)
         && !localRoutingBypassesCloudFloorGate()
       ) {
@@ -2878,38 +2871,6 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           }),
           { status: 400 },
         )
-      }
-      if (councilSingleFamily === 'kimi' && !isKimiConfigured()) {
-        const result: ProviderResult = {
-          family: 'Kimi',
-          content: 'Kimi not configured',
-          status: 'UNAVAILABLE',
-        }
-        councilProgress.record({
-          eventType: 'family_not_reached',
-          source: 'server_orchestrator',
-          family: 'kimi',
-          payload: {
-            outcome: 'not_reached',
-            readiness: 'unavailable',
-            providerLabel: 'Kimi',
-            reason: 'Kimi provider key is not configured.',
-          },
-        })
-        recordCouncilProgressSyntheticAudit(councilProgress, ['kimi'], [result])
-        await safeAudit({
-          success: false,
-          flow: 'continue_single',
-          councilSingleFamily: 'kimi',
-          reason: 'kimi_not_configured',
-        })
-        return NextResponse.json(withTrace({
-          councilSingleResponse: 'Kimi not configured',
-          councilSingleFamily: 'kimi',
-          results: [{ family: 'Kimi', content: 'Kimi not configured', status: 'UNAVAILABLE' }],
-          showContinue: true,
-          ...stabilityMeta,
-        }))
       }
 
       const providerBudgetMs =
@@ -3321,7 +3282,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         stateChange: 'Single-family provider call started.',
       })
       recordCouncilProgressProviderStart(councilProgress, [councilSingleFamily])
-      const LOCAL_ROUTED_CONTINUE_FAMILIES = new Set(['chatgpt', 'claude', 'grok', 'gemini', 'red_team', 'baby'])
+      const LOCAL_ROUTED_CONTINUE_FAMILIES = new Set(['chatgpt', 'claude', 'grok', 'gemini', 'red_team', 'baby', 'nova'])
       try {
         if (LOCAL_ROUTED_CONTINUE_FAMILIES.has(councilSingleFamily)) {
           // Migrated off the raw per-provider direct-fetch helpers this file used to call here
@@ -3427,57 +3388,16 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           // raw provider bypass. Only ever set from a real value; other providers leave it
           // undefined, same as before this repair.
           providerFinishReason = seatResult.backend?.finishReason ?? undefined
-        } else switch (councilSingleFamily) {
-          case 'kimi': {
-            const kimiResult = await completeKimiChat({
-              system: stableGroupSystemForFamily ?? kimiSystem,
-              messages: [{ role: 'user', content: userPrompt }],
-              maxTokens: tokensForCall,
-              timeoutMs: providerBudgetMs,
-            })
-            if (!kimiResult.ok) {
-          const kimiUnavailable = kimiResult.kind === 'key_missing'
-              await safeAudit({
-                success: false,
-                flow: 'continue_single',
-                councilSingleFamily: 'kimi',
-            reason: kimiUnavailable ? 'kimi_not_configured' : 'kimi_provider_error',
-              })
-          if (kimiUnavailable) {
-                return NextResponse.json(withTrace({
-                  councilSingleResponse: 'Kimi not configured',
-                  councilSingleFamily: 'kimi',
-                  results: [{ family: 'Kimi', content: 'Kimi not configured', status: 'UNAVAILABLE' }],
-                  showContinue: true,
-                  ...stabilityMeta,
-                }))
-              }
-              markLiveResearchProviderFailed('failed')
-              return degradedProviderResponse('kimi', 'failed', kimiResult.error)
-            }
-            responseText = kimiResult.data.text.trim()
-            if (!responseText) {
-              await safeAudit({
-                success: false,
-                flow: 'continue_single',
-                councilSingleFamily: 'kimi',
-                reason: 'kimi_empty',
-              })
-              markLiveResearchProviderFailed('failed')
-              return degradedProviderResponse('kimi', 'failed', 'Kimi returned empty content')
-            }
-            break
-          }
-          // red_team/baby are handled above via LOCAL_ROUTED_CONTINUE_FAMILIES/callCouncilProvider
-          // (P0-2 fix) and can never reach this switch — only kimi and unknown families do.
-          default:
-            await safeAudit({
-              success: false,
-              flow: 'continue_single',
-              reason: 'unknown_councilSingleFamily',
-              councilSingleFamily: String(councilSingleFamily),
-            })
-            return NextResponse.json(withTrace({ error: 'Unknown councilSingleFamily', ...liveResearchJson() }), { status: 400 })
+        } else {
+          // red_team/baby/nova are handled above via LOCAL_ROUTED_CONTINUE_FAMILIES/callCouncilProvider
+          // (P0-2 fix) and can never reach this branch — only unknown families do.
+          await safeAudit({
+            success: false,
+            flow: 'continue_single',
+            reason: 'unknown_councilSingleFamily',
+            councilSingleFamily: String(councilSingleFamily),
+          })
+          return NextResponse.json(withTrace({ error: 'Unknown councilSingleFamily', ...liveResearchJson() }), { status: 400 })
         }
       } catch (providerErr) {
         const msg = providerErr instanceof Error ? providerErr.message : String(providerErr)
@@ -4047,8 +3967,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
             ? grokSystem
             : councilSingleFamily === 'gemini'
               ? geminiSystem
-              : councilSingleFamily === 'kimi'
-                ? kimiSystem
+              : councilSingleFamily === 'nova'
+                ? novaSystem
                 : councilSingleFamily === 'red_team'
                   ? redTeamSystem
                   : gptSystem)

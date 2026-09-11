@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
 import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import {
   COUNCIL_REQUEST_STATE_SCHEMA_VERSION,
@@ -452,13 +453,7 @@ export function buildSyntheticIntegrityAuditPayload(input: {
 }
 
 function familyDisplayName(family: CouncilOrchestrationFamily): string {
-  if (family === 'chatgpt') return 'ChatGPT'
-  if (family === 'claude') return 'Claude'
-  if (family === 'grok') return 'Grok'
-  if (family === 'gemini') return 'Gemini'
-  if (family === 'kimi') return 'Kimi'
-  if (family === 'red_team') return 'RED TEAM'
   if (family === 'baby') return 'Baby AI'
   if (family === 'bridge_architect') return 'Bridge Architect'
-  return family
+  return displayNameForSeat(family, family)
 }

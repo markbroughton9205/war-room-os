@@ -10,7 +10,7 @@ export const PROVIDER_IDENTITY_PROFILES: Record<StableGroupFamily, string> = {
     "PULSAR: evidence discovery—primary sources, contradictory signals, missing evidence, provenance packets; no pretend searches—say telemetry gap if evidence isn't in the prompt.",
   gemini:
     'LUMEN: claim verification—atomic claims, support classification, calibration; reject unsupported operational claims; agreement is not proof; never echo prior seats.',
-  kimi:
+  nova:
     'NOVA: strategy and sequencing—objective, options, assumptions, phases, dependencies, information that would change the plan; not final synthesis; no pretend progress.',
   red_team:
     'PHOENIX: adversarial review—failure modes, likelihood, impact, mitigations, strongest counterexample, recovery; no skepticism theater.',

@@ -22,8 +22,8 @@ export const AGENT_FAMILY_CAPABILITIES: Record<AgentFamily, AgentRouteProfile> =
     role: 'Realtime research and signal detection.',
     capabilities: ['research', 'realtime_research', 'signal_detection'],
   },
-  kimi: {
-    label: 'Kimi Family',
+  nova: {
+    label: 'NOVA',
     role: 'Task sequencing and execution planning.',
     capabilities: ['task_sequencing', 'decompose', 'execute'],
   },
@@ -56,10 +56,10 @@ export const AGENT_FAMILY_CAPABILITIES: Record<AgentFamily, AgentRouteProfile> =
 
 export const CAPABILITY_ROUTES: Record<Capability, AgentFamily[]> = {
   research: ['grok', 'opportunity_scout', 'chatgpt'],
-  decompose: ['claude', 'kimi'],
+  decompose: ['claude', 'nova'],
   synthesize: ['chatgpt', 'baby_ai'],
   criticize: ['red_team', 'claude'],
-  execute: ['kimi', 'codex_local'],
+  execute: ['nova', 'codex_local'],
   remember: ['baby_ai'],
   notify: ['chatgpt'],
   deploy: ['codex_local'],
@@ -75,7 +75,7 @@ export const CAPABILITY_ROUTES: Record<Capability, AgentFamily[]> = {
   architecture: ['claude'],
   realtime_research: ['grok'],
   signal_detection: ['grok'],
-  task_sequencing: ['kimi'],
+  task_sequencing: ['nova'],
   risk_check: ['red_team'],
   pattern_learning: ['baby_ai'],
   patch_planning: ['codex_local'],

@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { canonicalizeCouncilSeat } from '@/lib/council/seatCanonical'
 import type { CouncilCapability } from './capabilities'
 import {
   costTierFromFamilies,
@@ -49,16 +50,14 @@ const FAMILY_ORDER: CouncilOrchestrationFamily[] = [
   'claude',
   'grok',
   'gemini',
-  'kimi',
+  'nova',
   'red_team',
   'bridge_architect',
   'baby',
 ]
 
 function familyFromValue(value: unknown): CouncilOrchestrationFamily | null {
-  return typeof value === 'string' && FAMILY_ORDER.includes(value as CouncilOrchestrationFamily)
-    ? value as CouncilOrchestrationFamily
-    : null
+  return canonicalizeCouncilSeat(value)
 }
 
 function profileCapabilityScore(profile: FamilyCapabilityProfile, required: readonly CouncilCapability[], optional: readonly CouncilCapability[]): number {

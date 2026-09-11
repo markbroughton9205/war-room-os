@@ -28,7 +28,7 @@ export type AgentFamily =
   | 'chatgpt'
   | 'claude'
   | 'grok'
-  | 'kimi'
+  | 'nova'
   | 'red_team'
   | 'baby_ai'
   | 'codex_local'

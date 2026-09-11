@@ -17,7 +17,6 @@ export type BrainProviderFamily =
   | 'anthropic'
   | 'google'
   | 'xai'
-  | 'moonshot'
   | 'local'
   | 'static'
 

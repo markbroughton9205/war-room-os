@@ -146,7 +146,7 @@ export async function runLivePersonaClusterValidation(): Promise<ValidationCase[
     run: () =>
       PROVIDER_IDENTITY_PROFILES.grok.includes('no pretend searches')
       && PROVIDER_IDENTITY_PROFILES.grok.includes('telemetry gap')
-      && PROVIDER_IDENTITY_PROFILES.kimi.includes('no pretend progress'),
+      && PROVIDER_IDENTITY_PROFILES.nova.includes('no pretend progress'),
   }))
   cases.push(await runCase({
     caseId: 'lcp_persona_009_lumen_verifies_instead_of_echoing',

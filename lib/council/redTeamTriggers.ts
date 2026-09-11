@@ -30,7 +30,7 @@ function normalizeWhitespace(s: string) {
 export function stripAssistantFamilyPrefix(content: string): string {
   const t = content.trim()
   const m = t.match(
-    /^(?:chatgpt|claude|grok|gemini|kimi|red team|baby ai|bridge architect)\s+family\s*:\s*/i,
+    /^(?:chatgpt|claude|grok|gemini|nova|kimi|red team|baby ai|bridge architect)\s+family\s*:\s*/i,
   )
   if (m) return t.slice(m[0].length).trim()
   const m2 = t.match(/^red\s+team\s*:\s*/i)
@@ -77,7 +77,8 @@ const FAMILY_NAME_TO_ORCH: Record<string, CouncilOrchestrationFamily | null> = {
   'claude family': 'claude',
   'grok family': 'grok',
   'gemini family': 'gemini',
-  'kimi family': 'kimi',
+  'kimi family': 'nova',
+  'nova family': 'nova',
   'red team': 'red_team',
   'baby ai': 'baby',
   'bridge architect': 'bridge_architect',

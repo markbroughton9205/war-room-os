@@ -179,7 +179,6 @@ export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[
       && providerDisplayName('anthropic') === 'Anthropic'
       && providerDisplayName('google') === 'Google'
       && providerDisplayName('xai') === 'xAI'
-      && providerDisplayName('moonshot') === 'Moonshot'
       && providerDisplayName('made-up-id') === 'made-up-id',
       'known ids map to display names; unknown ids pass through unchanged',
     ),

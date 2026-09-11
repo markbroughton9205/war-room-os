@@ -151,7 +151,7 @@ function checkIdentityModelSeparation(): NebulaValidationResult {
 function checkDisplayNameHelpers(): NebulaValidationResult {
   const mapped: Array<[keyof typeof NEBULA_IDENTITY_BY_SEAT, string]> = [
     ['chatgpt', 'AURORA'],
-    ['kimi', 'NOVA'],
+    ['nova', 'NOVA'],
     ['grok', 'PULSAR'],
     ['red_team', 'PHOENIX'],
     ['claude', 'ORION'],
@@ -163,6 +163,9 @@ function checkDisplayNameHelpers(): NebulaValidationResult {
     && seatForDisplayIdentity('ChatGPT Family') === 'chatgpt'
     && seatForDisplayIdentity('Phoenix Council') === 'red_team'
     && seatForDisplayIdentity('Red Team') === 'red_team'
+    && seatForDisplayIdentity('NOVA') === 'nova'
+    && seatForDisplayIdentity('kimi') === 'nova'
+    && seatForDisplayIdentity('Kimi Family') === 'nova'
   return {
     name: 'display_helpers_resolve_nebula_and_legacy_aliases',
     pass: offenders.length === 0 && reverseOk,
@@ -189,15 +192,17 @@ function checkGreetingAndIdentityPrompts(): NebulaValidationResult {
 
 function checkFrontierProvidersPreservedAsBackends(): NebulaValidationResult {
   const providers = COUNCIL_ROSTER.filter(entry => NEBULA_IDENTITY_BY_SEAT[entry.id]).map(entry => entry.provider)
+  const novaProvider = COUNCIL_ROSTER.find(entry => entry.id === 'nova')?.provider ?? ''
   const preserved = providers.some(p => /OpenAI/i.test(p))
     && providers.some(p => /Anthropic/i.test(p))
     && providers.some(p => /xAI/i.test(p))
     && providers.some(p => /Google/i.test(p))
-    && providers.some(p => /Moonshot/i.test(p))
+    && /local/i.test(novaProvider)
+    && !/moonshot|kimi/i.test(novaProvider)
   return {
     name: 'frontier_providers_preserved_as_backends',
     pass: preserved,
-    detail: preserved ? providers.join(' | ') : 'missing expected backend provider labels',
+    detail: preserved ? `${providers.join(' | ')}; nova=${novaProvider}` : 'missing expected backend provider labels or NOVA still branded as Moonshot/Kimi',
   }
 }
 

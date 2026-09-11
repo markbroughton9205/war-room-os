@@ -5,12 +5,8 @@
  *   3. multi-family Council review as ADVISORY evidence only (never the executing path)
  *
  * Council opinions reuse lib/council/providerDirectCall.ts's real, key-gated adapters — but via
- * dependency injection (an `invoke` callback), not a static import: providerDirectCall.ts pulls
- * in lib/providers/kimi.ts, which imports the `server-only` sentinel package. That package is
- * resolved by Next's bundler, not a real npm dependency, so a static import breaks any plain-node
- * validation script that transitively touches it (the same reason lib/providers/retryOrchestration.ts
- * takes its `invoke` as a parameter instead of importing a provider-call module directly — this
- * follows that existing, proven pattern rather than inventing a new one).
+ * dependency injection (an `invoke` callback), not a static import. That keeps this module
+ * loadable from plain-node validation scripts without pulling Next `server-only` provider adapters.
  * invokeDirectCouncilProvider's shared system prompt and 120-token cap make it unsuitable for a
  * full structured patch response, so council families return a short diagnosis + risk opinion
  * (plannedChanges: []) and never execute; only a deterministic or local-model proposal (the ones
@@ -260,7 +256,7 @@ export async function requestLocalModelProposal(
  * invokeDirectCouncilProvider — kept as a local type-only mirror so this file never statically
  * imports that module (see the file-header note on the server-only resolution issue). Callers
  * (runtime.ts, API routes) pass the real invokeDirectCouncilProvider in at the call site. */
-export type NativeCouncilFamily = 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'kimi' | 'red_team' | 'baby'
+export type NativeCouncilFamily = 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'nova' | 'red_team' | 'baby'
 export type NativeCouncilInvokeFn = (
   family: NativeCouncilFamily,
   prompt: string,
@@ -283,7 +279,7 @@ const COUNCIL_ROLE_FRAMING: Partial<Record<NativeCouncilFamily, string>> = {
   claude: 'Focus on architecture and dependency impact.',
   gemini: 'Give a broad code/context review.',
   grok: 'Look for contradictions or an alternate root cause the others might miss.',
-  kimi: 'Decompose this into the smallest ordered task list.',
+  nova: 'Decompose this into the smallest ordered task list.',
   red_team: 'Assess patch risk and regression exposure only — do not propose the fix.',
 }
 

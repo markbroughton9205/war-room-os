@@ -11,7 +11,7 @@ export const EXTERNAL_PROVIDER_BY_SEAT: Record<CouncilOrchestrationFamily, strin
   red_team: 'anthropic',
   grok: 'xai',
   gemini: 'google',
-  kimi: 'moonshot',
+  nova: 'unknown',
   bridge_architect: 'unknown',
 }
 
@@ -20,7 +20,6 @@ const PROVIDER_DISPLAY_NAME: Record<string, string> = {
   anthropic: 'Anthropic',
   google: 'Google',
   xai: 'xAI',
-  moonshot: 'Moonshot',
   ollama: 'Ollama',
   unknown: 'unconfigured',
 }

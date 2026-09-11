@@ -165,9 +165,9 @@ async function testAutoIterateCarriesForwardFamilyAndNotesUnavailability(): Prom
   // Now request coderProvider explicitly on the iteration call itself — this environment still
   // can't resolve it, so the honest fallback note must appear in the attempt's evidenceSummary,
   // proving the code path that would otherwise silently swallow the unavailability is exercised.
-  const secondAttempt = await strategy.autoIterate?.(created.id, { maxAttempts: 2, coderProvider: { enabled: true, family: 'kimi' } })
+  const secondAttempt = await strategy.autoIterate?.(created.id, { maxAttempts: 2, coderProvider: { enabled: true, family: 'gemini' } })
   results.push(check('provider_18_fallback_note_present_in_evidence', (secondAttempt?.iterationAttempts.at(-1)?.evidenceSummary ?? '').includes('not available in this environment'), secondAttempt?.iterationAttempts.at(-1)?.evidenceSummary ?? 'missing'))
-  results.push(check('provider_19_fallback_note_names_requested_family', (secondAttempt?.iterationAttempts.at(-1)?.evidenceSummary ?? '').includes('"kimi"'), secondAttempt?.iterationAttempts.at(-1)?.evidenceSummary ?? 'missing'))
+  results.push(check('provider_19_fallback_note_names_requested_family', (secondAttempt?.iterationAttempts.at(-1)?.evidenceSummary ?? '').includes('"gemini"'), secondAttempt?.iterationAttempts.at(-1)?.evidenceSummary ?? 'missing'))
 
   await resetNativeBuilderState()
   return results

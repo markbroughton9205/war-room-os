@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { canonicalizeCouncilSeat } from '@/lib/council/seatCanonical'
 
 /**
  * Ra’el / user directive discipline for Live Council.
@@ -39,6 +40,11 @@ export type CouncilCommand = {
   directInvocation: boolean
   /** Text after the provider name for direct invocations (e.g. "status" from "grok status"). */
   directInvocationRemainder: string
+  /**
+   * Set when Commander invoked Kimi/Moonshot as a current command.
+   * Those providers are not installed; do not route to NOVA.
+   */
+  uninstalledProviderNotice: string | null
   executionPermission: CouncilExecutionPermission
   responseLimits: CouncilResponseLimits
 }
@@ -51,6 +57,7 @@ export const DEFAULT_COUNCIL_COMMAND: CouncilCommand = {
   excludedFamilies: [],
   directInvocation: false,
   directInvocationRemainder: '',
+  uninstalledProviderNotice: null,
   executionPermission: 'open',
   responseLimits: {
     maxResponsesPerFamily: 4,
@@ -75,24 +82,12 @@ function isDisciplineMode(v: unknown): v is CouncilDisciplineMode {
   return typeof v === 'string' && (MODES as string[]).includes(v)
 }
 
-const FAMILY_IDS: CouncilOrchestrationFamily[] = [
-  'chatgpt',
-  'claude',
-  'grok',
-  'gemini',
-  'red_team',
-  'baby',
-  'kimi',
-  'bridge_architect',
-]
-
 function coerceFamilyArray(v: unknown): CouncilOrchestrationFamily[] {
   if (!Array.isArray(v)) return []
   const out: CouncilOrchestrationFamily[] = []
   for (const x of v) {
-    if (typeof x === 'string' && (FAMILY_IDS as string[]).includes(x)) {
-      out.push(x as CouncilOrchestrationFamily)
-    }
+    const canonical = canonicalizeCouncilSeat(x)
+    if (canonical && !out.includes(canonical)) out.push(canonical)
   }
   return out
 }
@@ -113,6 +108,10 @@ export function coerceCouncilCommand(raw: unknown): CouncilCommand {
     directInvocation: o.directInvocation === true,
     directInvocationRemainder:
       typeof o.directInvocationRemainder === 'string' ? o.directInvocationRemainder : '',
+    uninstalledProviderNotice:
+      typeof o.uninstalledProviderNotice === 'string' && o.uninstalledProviderNotice.trim()
+        ? o.uninstalledProviderNotice.trim()
+        : null,
     executionPermission: o.executionPermission === 'limited' ? 'limited' : 'open',
     responseLimits: {
       maxResponsesPerFamily: Number.isFinite(maxR) && maxR >= 1 ? Math.floor(maxR) : DEFAULT_COUNCIL_COMMAND.responseLimits.maxResponsesPerFamily,

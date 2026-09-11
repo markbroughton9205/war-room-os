@@ -146,7 +146,7 @@ export function forbiddenTopicPatterns(scope: ActiveScope): RegExp[] {
 const STRATEGIC_PIVOT = /\b(pivot|reframe|instead\s+let's|ignore\s+the\s+above|new\s+strategy|okr|kpi|roadmap\s+reset)\b/gi
 
 const CROSS_TALK_LINE =
-  /^\s*(?:@)?(chatgpt|claude|grok|gemini|red\s*team|baby|kimi|bridge)(?:\s+family)?\b[^:]{0,80}:/i
+  /^\s*(?:@)?(chatgpt|claude|grok|gemini|red\s*team|baby|nova|bridge)(?:\s+family)?\b[^:]{0,80}:/i
 
 const DIRECT_OTHER = /\b(claude|chatgpt|grok|gemini),?\s+you\b|\bhey\s+(claude|chatgpt|grok|gemini)\b/gi
 

@@ -148,7 +148,7 @@ function contributionFor(agent: BabyAgent, idea: string, targetModule: string): 
       lane: 'Architecture / implementation risk',
       contribution: 'Check module boundaries, persistence shape, validation blast radius, and approval gates before implementation.',
     },
-    'kimi-family-baby': {
+    'nova-family-baby': {
       lane: 'Task breakdown / sequencing',
       contribution: 'Sequence work as inspect, model, API, UI, validation, commit, and deployment verification.',
     },
@@ -233,7 +233,7 @@ function cursorPrompt(packet: Omit<FeatureBuildPacket, 'cursorReadyImplementatio
 function reviewTypeFor(agentKey: BabyAgentKey): FeatureBuilderReview['reviewType'] {
   if (agentKey === 'chatgpt-family-baby') return 'synthesis'
   if (agentKey === 'claude-family-baby') return 'architecture'
-  if (agentKey === 'kimi-family-baby') return 'decomposition'
+  if (agentKey === 'nova-family-baby') return 'decomposition'
   if (agentKey === 'red-team-baby') return 'risk'
   if (agentKey === 'analyst-baby') return 'market'
   if (agentKey === 'income-operations-baby') return 'monetization'

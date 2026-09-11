@@ -354,7 +354,7 @@ function requiredCases(): LiveCouncilOperationValidationCase[] {
     validation('c4b_064_control_mixed_system_exact', 'CoNtRoL resolves exactly to system identity', familyIdFromLabel('CoNtRoL') === 'system' && controlMixed.events.some(item => item.familyId === 'system')),
     validation('c4b_065_control_not_chatgpt', 'Control cannot resolve to ChatGPT', familyIdFromLabel('Control') !== 'chatgpt' && !controlMixed.events.some(item => item.familyId === 'chatgpt')),
     validation('c4b_066_control_not_claude', 'Control cannot resolve to Claude', familyIdFromLabel('Control') !== 'claude' && !controlMixed.events.some(item => item.familyId === 'claude')),
-    validation('c4b_067_control_not_any_family', 'Control cannot resolve to any Council family identity', !(['chatgpt', 'claude', 'grok', 'gemini', 'kimi', 'red_team', 'baby', 'bridge_architect'] as string[]).includes(familyIdFromLabel('Control'))),
+    validation('c4b_067_control_not_any_family', 'Control cannot resolve to any Council family identity', !(['chatgpt', 'claude', 'grok', 'gemini', 'nova', 'kimi', 'red_team', 'baby', 'bridge_architect'] as string[]).includes(familyIdFromLabel('Control'))),
     validation('c4b_068_control_no_family_label', 'Control cannot appear as familyId or familyLabel', controlMixed.events.every(item => String(item.familyId) !== 'control' && item.familyLabel !== 'Control') && controlMixed.events.some(item => item.familyId === 'system' && item.familyLabel === 'System Status')),
     validation('c4b_069_system_identity_positive_assertion', 'system identity is positively asserted for control labels', controlUpper.events.some(item => item.familyId === 'system' && item.roleLabel === 'Runtime State')),
     validation('c4b_070_control_runtime_event_visible_system', 'control/approval runtime events remain visible as system events', control.events.length === 1 && control.events[0]?.familyId === 'system' && control.events[0]?.type === 'system_state_inspected'),
@@ -520,7 +520,7 @@ function generatedCoverageCases(): LiveCouncilOperationValidationCase[] {
     ['stopped', 'family_stopped_by_commander', 'family_skipped'],
     ['not_reached', 'family_not_reached', 'family_unavailable'],
   ]
-  const familyCases = (['chatgpt', 'claude', 'grok', 'gemini', 'kimi', 'red_team', 'baby', 'bridge_architect'] as CouncilOrchestrationFamily[]).flatMap((family, familyIndex) =>
+  const familyCases = (['chatgpt', 'claude', 'grok', 'gemini', 'nova', 'red_team', 'baby', 'bridge_architect'] as CouncilOrchestrationFamily[]).flatMap((family, familyIndex) =>
     statusCases.map(([label, eventType, expectedType], statusIndex) => {
       const op = buildCommanderOperationFromProgressSnapshot(progress([event(statusIndex + 1, eventType, family)]))
       return validation(

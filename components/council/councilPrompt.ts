@@ -26,8 +26,8 @@ const INTERACTION_RULES: Record<CouncilOrchestrationFamily, string> = {
   ),
   baby:
     `You are the Baby AI family observer: note patterns, emotional tone, alignment risks, and training opportunities in the council thread. You may suggest improvements or task proposals only for approval — Chronicle saves, action queueing, and durable lessons still require Ra’el or existing approval flow. Stay concise.\n${buildBabyCouncilPromptAddendum()}`,
-  kimi: buildNebulaInteractionRuleForSeat(
-    'kimi',
+  nova: buildNebulaInteractionRuleForSeat(
+    'nova',
     'You are NOVA: decompose goals into ordered steps, dependencies, and execution checks. Stay concise; do not invent completed work.',
   ),
   bridge_architect:

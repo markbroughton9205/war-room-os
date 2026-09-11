@@ -25,7 +25,7 @@ export async function runCouncilTraceTestRouteValidation(): Promise<CouncilTrace
     await commanderStatusAvailabilityRequiresAuthorization(),
     await commanderRunInvokesExistingChatPath(),
     diagnosticClassificationIsCommanderOnlyObservational(),
-    traceSummarySeparatesKimiConfiguredContextFromRuntimeCause(),
+    traceSummaryDoesNotAdvertiseKimiProvider(),
     traceSummaryRejectsSecretLikeArtifacts(),
     diagnosticDoesNotGrantActionMemoryOrProviderAuthority(),
   ]
@@ -186,7 +186,7 @@ function diagnosticClassificationIsCommanderOnlyObservational(): CouncilTraceTes
   )
 }
 
-function traceSummarySeparatesKimiConfiguredContextFromRuntimeCause(): CouncilTraceTestRouteValidationResult {
+function traceSummaryDoesNotAdvertiseKimiProvider(): CouncilTraceTestRouteValidationResult {
   const response = buildCouncilTraceTestRunResponse({
     results: [{ family: 'ChatGPT', status: 'OK', content: 'ready' }],
     councilTrace: sampleTrace(),
@@ -196,16 +196,12 @@ function traceSummarySeparatesKimiConfiguredContextFromRuntimeCause(): CouncilTr
     XAI_API_KEY: 'configured',
     GEMINI_API_KEY: 'configured',
   })
-  const kimi = response.summary.unavailableProviders.find(provider => provider.family === 'Kimi')
-  const ok =
-    kimi?.reason === 'unavailable in this request'
-    && kimi.configuredContext === 'funding paused'
-    && kimi.causeVerifiedAtRuntime === false
+  const kimi = response.summary.unavailableProviders.find(provider => /kimi|moonshot/i.test(provider.family))
   return validation(
-    'trace_summary_separates_kimi_configured_context_from_runtime_cause',
-    ok,
-    'Kimi is unavailable in request; funding pause is configured context, not runtime-observed cause',
-    JSON.stringify(kimi),
+    'trace_summary_does_not_advertise_kimi_provider',
+    !kimi,
+    'Kimi/Moonshot must not appear as a current unavailable provider row',
+    JSON.stringify(response.summary.unavailableProviders.map(provider => provider.family)),
   )
 }
 

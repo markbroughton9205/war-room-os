@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { BABY_AI_AGENTS, type BabyAgentKey } from '@/lib/baby-ai/model'
+import { BABY_AI_AGENTS, canonicalBabyAgentKey, type BabyAgentKey } from '@/lib/baby-ai/model'
 import { buildBabyDailyBriefing } from '@/lib/baby-ai/operationalIntelligence'
 import { listFeatureBuilderSnapshot } from '@/lib/feature-builder/persistence'
 import { getOutcomeLedgerSnapshot } from '@/lib/learning/outcomeLedger'
@@ -76,8 +76,8 @@ function source(value: unknown): GrowthCalendarSource {
 }
 
 function family(value: unknown): BabyAgentKey {
-  const raw = text(value)
-  return BABY_AI_AGENTS.some(agent => agent.key === raw) ? raw as BabyAgentKey : 'chatgpt-family-baby'
+  const raw = canonicalBabyAgentKey(text(value))
+  return BABY_AI_AGENTS.some(agent => agent.key === raw) ? raw : 'chatgpt-family-baby'
 }
 
 function mapRecommendation(row: Row): GrowthCalendarRecommendation {
@@ -317,7 +317,7 @@ async function buildIntegratedRecommendations(generatedAt: string): Promise<{
       source: 'outcome_ledger',
       sourceId: 'learning-outcome-ledger',
       description: outcomeLedger.guardrail,
-      assignedFamily: 'kimi-family-baby',
+      assignedFamily: 'nova-family-baby',
       reason: `${outcomeLedger.summary.totalEntries} learning entries exist; review outcomes before repeating or expanding time blocks.`,
       recommendedDurationMinutes: 45,
       recommendedTimeWindow: 'Weekly closeout or after completed planned events',

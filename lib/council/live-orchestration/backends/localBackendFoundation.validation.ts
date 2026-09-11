@@ -89,7 +89,7 @@ export async function runCouncilLocalBackendFoundationValidation(): Promise<Case
   const results: CaseResult[] = []
 
   // 1. Seat identity remains stable — every original seat is still mapped, none renamed/dropped.
-  const seats: CouncilOrchestrationFamily[] = ['grok', 'claude', 'gemini', 'chatgpt', 'red_team', 'baby', 'kimi', 'bridge_architect']
+  const seats: CouncilOrchestrationFamily[] = ['grok', 'claude', 'gemini', 'chatgpt', 'red_team', 'baby', 'nova', 'bridge_architect']
   const mappedSeats = Object.keys(SEAT_LOCAL_ROLE_SLOT)
   results.push(
     check(

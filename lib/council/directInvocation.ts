@@ -25,7 +25,7 @@ const INVOCATION_TABLE: InvocationEntry[] = [
   { family: 'claude', aliases: ['claude', 'anthropic'] },
   { family: 'grok', aliases: ['grok', 'xai'] },
   { family: 'gemini', aliases: ['gemini', 'google ai', 'google'] },
-  { family: 'kimi', aliases: ['kimi', 'moonshot'] },
+  { family: 'nova', aliases: ['nova'] },
   { family: 'baby', aliases: ['baby ai', 'baby', 'observer'] },
 ]
 

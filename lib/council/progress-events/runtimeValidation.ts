@@ -314,8 +314,8 @@ function sequentialRuntimeCases(): CouncilProgressValidationCase[] {
   terminalFamily(timeout, 'grok', 'TIMED_OUT')
   const timeoutSnapshot = timeout.snapshot()
 
-  const noDispatch = makeSequentialTracker('kimi')
-  terminalFamily(noDispatch, 'kimi', 'UNAVAILABLE')
+  const noDispatch = makeSequentialTracker('nova')
+  terminalFamily(noDispatch, 'nova', 'UNAVAILABLE')
   const noDispatchSnapshot = noDispatch.snapshot()
 
   const policySkip = makeSequentialTracker('gemini')

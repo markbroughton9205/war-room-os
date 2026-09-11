@@ -294,7 +294,7 @@ function structuralCases(): CaseResult[] {
   const source = executeTsSource()
   const { claude, redTeam } = claudeAndRedTeamCaseBodies(source)
 
-  const otherCaseNames = ['chatgpt', 'grok', 'gemini', 'kimi', 'baby']
+  const otherCaseNames = ['chatgpt', 'grok', 'gemini', 'nova', 'baby']
   const otherCasesUseRetryHelper = otherCaseNames.some(name => {
     const match = source.match(new RegExp(`case '${name}': \\{([\\s\\S]*?)\\n {10}\\}\\n {10}case `))
     return (match?.[1] ?? '').includes('callClaudeWithEmptyContentRetry')

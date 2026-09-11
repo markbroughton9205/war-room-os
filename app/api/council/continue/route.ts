@@ -2,6 +2,7 @@ import { applyRollingContextCompression } from '@/lib/context-compression/rollin
 import { buildCouncilMemoryBridge } from '@/lib/council-memory/bridge'
 import { loadCouncilThreadFromStore, publishAndPersistBusEvent } from '@/lib/cognitive-bus/persistence'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { canonicalizeCouncilSeat } from '@/lib/council/seatCanonical'
 import {
   applyContinuationPlanToRuntime,
   createConversationRuntime,
@@ -28,12 +29,12 @@ const FAMILIES: CouncilOrchestrationFamily[] = [
   'gemini',
   'red_team',
   'baby',
-  'kimi',
+  'nova',
   'bridge_architect',
 ]
 
 function isFamily(value: string): value is CouncilOrchestrationFamily {
-  return FAMILIES.includes(value as CouncilOrchestrationFamily)
+  return canonicalizeCouncilSeat(value) !== null
 }
 
 function coerceMessages(raw: unknown): { familyName: string; content: string; messageType: string }[] {

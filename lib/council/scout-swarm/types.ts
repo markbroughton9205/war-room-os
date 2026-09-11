@@ -141,7 +141,7 @@ export const SWARM_SEAT_BY_AGENT: Readonly<Record<Exclude<NebulaAgentId, 'astra'
   orion: 'claude',
   pulsar: 'grok',
   lumen: 'gemini',
-  nova: 'kimi',
+  nova: 'nova',
   phoenix: 'red_team',
   solara: 'baby',
 }
@@ -151,7 +151,7 @@ export const SWARM_AGENT_BY_SEAT: Readonly<Partial<Record<CouncilOrchestrationFa
   claude: 'orion',
   grok: 'pulsar',
   gemini: 'lumen',
-  kimi: 'nova',
+  nova: 'nova',
   red_team: 'phoenix',
   baby: 'solara',
 }

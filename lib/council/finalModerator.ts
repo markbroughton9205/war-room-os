@@ -27,11 +27,11 @@ const PACKET_ORDER: CouncilOrchestrationFamily[] = [
   'gemini',
   'red_team',
   'baby',
-  'kimi',
+  'nova',
   'bridge_architect',
 ]
 
-const CROSS_CRITIQUE = /\b(chatgpt|claude|grok|gemini|red\s*team|baby|kimi|bridge)\b[^.!?\n]{0,120}\b(wrong|incorrect|flawed|useless|fails?|bad\s+take|nonsense)\b/i
+const CROSS_CRITIQUE = /\b(chatgpt|claude|grok|gemini|red\s*team|baby|nova|bridge)\b[^.!?\n]{0,120}\b(wrong|incorrect|flawed|useless|fails?|bad\s+take|nonsense)\b/i
 
 /** Clamp autonomous “keep going” voice to permission-style phrasing only (heuristic strip). */
 const AGGRESSIVE_CONTINUATION = new RegExp(

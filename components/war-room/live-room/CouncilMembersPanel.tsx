@@ -49,7 +49,7 @@ const MEMBER_ORDER: { id: string; label: string; rosterId?: string }[] = [
   { id: 'claude', label: displayNameForSeat('claude', 'ORION'), rosterId: 'claude' },
   { id: 'gemini', label: displayNameForSeat('gemini', 'LUMEN'), rosterId: 'gemini' },
   { id: 'grok', label: displayNameForSeat('grok', 'PULSAR'), rosterId: 'grok' },
-  { id: 'kimi', label: displayNameForSeat('kimi', 'NOVA'), rosterId: 'kimi' },
+  { id: 'nova', label: displayNameForSeat('nova', 'NOVA'), rosterId: 'nova' },
   { id: 'red_team', label: displayNameForSeat('red_team', 'PHOENIX'), rosterId: 'red_team' },
 ]
 

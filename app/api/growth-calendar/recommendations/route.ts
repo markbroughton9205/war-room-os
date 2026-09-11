@@ -8,7 +8,7 @@ import {
   type GrowthCalendarRecommendationInput,
   type GrowthCalendarSource,
 } from '@/lib/growth-calendar'
-import { BABY_AI_AGENTS, type BabyAgentKey } from '@/lib/baby-ai/model'
+import { BABY_AI_AGENTS, canonicalBabyAgentKey, type BabyAgentKey } from '@/lib/baby-ai/model'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -41,7 +41,9 @@ function source(value: unknown): GrowthCalendarSource {
 
 function family(value: unknown): BabyAgentKey | null {
   const raw = textValue(value)
-  return raw && BABY_AI_AGENTS.some(agent => agent.key === raw) ? raw as BabyAgentKey : null
+  if (!raw) return null
+  const canonical = canonicalBabyAgentKey(raw)
+  return BABY_AI_AGENTS.some(agent => agent.key === canonical) ? canonical : null
 }
 
 function scoreObject(value: unknown): GrowthCalendarRecommendationInput['scores'] {

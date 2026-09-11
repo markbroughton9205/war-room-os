@@ -31,7 +31,7 @@ export const GREETING_META_BY_FAMILY: Record<CouncilOrchestrationFamily, Greetin
   claude: { label: 'ORION', roleShort: 'architecture and operational viability' },
   grok: { label: 'PULSAR', roleShort: 'evidence discovery and signals' },
   gemini: { label: 'LUMEN', roleShort: 'claim verification and calibration' },
-  kimi: { label: 'NOVA', roleShort: 'strategy, options, and sequencing' },
+  nova: { label: 'NOVA', roleShort: 'strategy, options, and sequencing' },
   red_team: { label: 'PHOENIX', roleShort: 'adversarial review and recovery' },
   baby: { label: 'Baby AI', roleShort: 'observational council witness' },
   // Always short-circuited to "currently unavailable" in execute.ts's callCouncilProvider

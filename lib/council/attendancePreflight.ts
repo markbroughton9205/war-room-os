@@ -22,7 +22,7 @@ function cloudEngineIdForFamily(family: CouncilOrchestrationFamily): EngineId | 
   if (family === 'claude' || family === 'red_team') return 'claude'
   if (family === 'grok') return 'grok'
   if (family === 'gemini') return 'gemini'
-  if (family === 'kimi') return 'kimi'
+  if (family === 'nova') return null
   return null
 }
 

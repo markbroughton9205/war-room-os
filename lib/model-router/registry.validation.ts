@@ -39,7 +39,8 @@ function testDispatchabilityMatchesDirectProviderFamilyUnion(): CaseResult[] {
 
 function testGetModelTargetLookup(): CaseResult[] {
   return [
-    check('get_model_target_finds_kimi', getModelTarget('kimi')?.providerFamily === 'kimi', String(getModelTarget('kimi'))),
+    check('get_model_target_finds_nova', getModelTarget('nova')?.providerFamily === 'nova', String(getModelTarget('nova'))),
+    check('get_model_target_kimi_is_not_a_current_alias', getModelTarget('kimi') === null, String(getModelTarget('kimi'))),
     check('get_model_target_returns_null_for_unknown', getModelTarget('not_a_family') === null, String(getModelTarget('not_a_family'))),
   ]
 }

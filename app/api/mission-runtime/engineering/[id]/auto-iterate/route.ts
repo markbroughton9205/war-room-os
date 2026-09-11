@@ -24,7 +24,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     maxAttempts?: number
     paused?: boolean
     workspaceId?: string
-    coderProvider?: { enabled: boolean; family?: 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'kimi' }
+    coderProvider?: { enabled: boolean; family?: 'chatgpt' | 'claude' | 'grok' | 'gemini' }
   } = {}
   try {
     const raw = await req.json()

@@ -38,7 +38,7 @@ const ROLE_BY_FAMILY: Record<StableGroupFamily, string> = {
   claude: buildNebulaStableGroupRole(nebulaAgentForSeat('claude')!),
   grok: buildNebulaStableGroupRole(nebulaAgentForSeat('grok')!),
   gemini: buildNebulaStableGroupRole(nebulaAgentForSeat('gemini')!),
-  kimi: buildNebulaStableGroupRole(nebulaAgentForSeat('kimi')!),
+  nova: buildNebulaStableGroupRole(nebulaAgentForSeat('nova')!),
   red_team: buildNebulaStableGroupRole(nebulaAgentForSeat('red_team')!),
 }
 

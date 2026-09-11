@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { RepoGitContext, RepoSearchHit } from '@/lib/mission-runtime/engineeringReadSurface'
 
-type CoderFamily = 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'kimi'
+type CoderFamily = 'chatgpt' | 'claude' | 'grok' | 'gemini'
 
 type RuntimeMissionLite = {
   id: string
@@ -547,7 +547,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
               onChange={e => setCoderFamily(e.target.value as CoderFamily)}
               disabled={!coderEnabled}
             >
-              {(['claude', 'chatgpt', 'grok', 'gemini', 'kimi'] as CoderFamily[]).map(f => (
+              {(['claude', 'chatgpt', 'grok', 'gemini'] as CoderFamily[]).map(f => (
                 <option key={f} value={f}>
                   {f}
                   {providerStatus[f] === false ? ' (not configured)' : ''}

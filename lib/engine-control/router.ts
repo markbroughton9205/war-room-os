@@ -6,6 +6,7 @@
 
 import type { CouncilFamilyName } from '@/lib/ai/router'
 import { routeDecreeByKeywords } from '@/lib/ai/router'
+import { detectUninstalledKimiMoonshotCommand, KIMI_MOONSHOT_NOT_INSTALLED_MESSAGE } from '@/lib/council/seatCanonical'
 
 import { ENGINE_REGISTRY_BY_ID } from './registry'
 import { engineProviderDisplayLabel } from './provider-display'
@@ -52,7 +53,7 @@ function familyToPreferredEngine(family: CouncilFamilyName): EngineId {
   const map: Record<CouncilFamilyName, EngineId> = {
     Claude: 'claude',
     ChatGPT: 'chatgpt',
-    Kimi: 'chatgpt',
+    NOVA: 'chatgpt',
     Grok: 'grok',
     Gemini: 'gemini',
     'Red Team': 'claude',
@@ -100,6 +101,20 @@ function fallbackEngine(): EngineStatus {
 
 export function routeCommand(input: RouteCommandInput): RouteCommandResult {
   const tools = input.tools ?? DEFAULT_TOOLS
+  if (detectUninstalledKimiMoonshotCommand(input.command)) {
+    const selected = engineById(input.engines, 'chatgpt') ?? input.engines[0] ?? fallbackEngine()
+    return {
+      requestedCommand: input.command,
+      selectedFamily: 'ChatGPT',
+      selectedEngine: selected.id,
+      selectedProvider: engineProviderDisplayLabel(selected.id, selected.providerType),
+      capabilityMatch: false,
+      approvalRequired: true,
+      canExecute: false,
+      recommendedNextStep: KIMI_MOONSHOT_NOT_INSTALLED_MESSAGE,
+      reason: KIMI_MOONSHOT_NOT_INSTALLED_MESSAGE,
+    }
+  }
   const decree = routeDecreeByKeywords(input.command.trim() || 'general')
   const commandClass = classifyCommand(input.command)
   const preferredId = familyToPreferredEngine(decree.selectedFamily)

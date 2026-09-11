@@ -10,7 +10,7 @@
 export type CouncilFamilyName =
   | 'Claude'
   | 'ChatGPT'
-  | 'Kimi'
+  | 'NOVA'
   | 'Grok'
   /** Council / engine-control id `gemini`; must match `CouncilOrchestrationFamily` routing in UI + `/api/chat`. */
   | 'Gemini'
@@ -46,10 +46,10 @@ const RULES: Rule[] = [
     describeHit: (n) => `Matched council keyword “${n}” → Red Team (Internal).`,
   },
   {
-    needles: ['kimi', 'moonshot'],
-    selectedFamily: 'Kimi',
-    provider: 'Moonshot',
-    describeHit: (n) => `Matched council keyword “${n}” → Kimi (Moonshot).`,
+    needles: ['nova'],
+    selectedFamily: 'NOVA',
+    provider: 'Local',
+    describeHit: (n) => `Matched council keyword “${n}” → NOVA (Local Ollama).`,
   },
   {
     needles: ['grok', 'xai', 'x.ai'],

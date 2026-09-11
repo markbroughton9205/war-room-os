@@ -1,11 +1,5 @@
 import { completeGeminiCouncilMessage } from '@/lib/ai/providers/geminiCouncil'
 import { callXAIChat } from '@/lib/ai/providers/xai'
-import {
-  completeKimiChat,
-  isKimiConfigured,
-  type KimiDiagnostics,
-  type KimiErrorKind,
-} from '@/lib/providers/kimi'
 import { compactDisplayWhitespace, toDisplayText } from '@/lib/council/toDisplayText'
 import { sanitizeProviderPublicError } from '@/lib/providers/publicError'
 import { envHasUsableProviderSecret } from '@/lib/providers/secretPresence'
@@ -24,7 +18,7 @@ export type DirectProviderFamily =
   | 'claude'
   | 'grok'
   | 'gemini'
-  | 'kimi'
+  | 'nova'
   | 'red_team'
   | 'baby'
 
@@ -33,8 +27,6 @@ export type DirectProviderCallResult = {
   text: string
   transportStatus: number | 'timeout' | 'unavailable'
   error?: string
-  kimiErrorKind?: KimiErrorKind
-  kimiDiagnostics?: KimiDiagnostics
 }
 
 function sanitizeProviderError(message: string, family?: DirectProviderFamily): string {
@@ -142,39 +134,6 @@ async function callGrokDirect(prompt: string, system: string, timeoutMs: number,
   return { ok: true, text: compactDisplayWhitespace(result.text), transportStatus: 200 }
 }
 
-async function callKimiDirect(prompt: string, system: string, timeoutMs: number, maxTokens: number): Promise<DirectProviderCallResult> {
-  if (!isKimiConfigured()) {
-    return { ok: false, text: '', transportStatus: 'unavailable', error: 'Kimi key missing', kimiErrorKind: 'key_missing' }
-  }
-  const result = await completeKimiChat({
-    system,
-    messages: [{ role: 'user', content: prompt }],
-    maxTokens,
-    timeoutMs,
-  })
-  if (!result.ok) {
-    const err = result.error || 'Kimi unavailable'
-    const timedOut = /\b(timeout|timed out|abort)\b/i.test(err)
-    return {
-      ok: false,
-      text: '',
-      transportStatus: timedOut ? 'timeout' : 'unavailable',
-      error: sanitizeProviderError(err),
-      kimiErrorKind: result.kind,
-      kimiDiagnostics: result.diagnostics,
-    }
-  }
-  if (!result.data.text?.trim()) {
-    return { ok: false, text: '', transportStatus: 'unavailable', error: 'empty response body' }
-  }
-  return {
-    ok: true,
-    text: compactDisplayWhitespace(result.data.text),
-    transportStatus: 200,
-    kimiDiagnostics: result.diagnostics,
-  }
-}
-
 async function callGeminiDirect(prompt: string, system: string, maxTokens: number, timeoutMs: number): Promise<DirectProviderCallResult> {
   if (!process.env.GEMINI_API_KEY) {
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'GEMINI_API_KEY not configured' }
@@ -246,8 +205,8 @@ export async function invokeDirectCouncilProvider(
     if (family === 'gemini') {
       return await callGeminiDirect(userPrompt, system, maxTokens, timeoutMs)
     }
-    if (family === 'kimi') {
-      return await callKimiDirect(userPrompt, system, timeoutMs, maxTokens)
+    if (family === 'nova') {
+      return { ok: false, text: '', transportStatus: 'unavailable', error: 'NOVA is served by local Council routing, not a hosted coder adapter' }
     }
     return { ok: false, text: '', transportStatus: 'unavailable', error: 'unknown provider' }
   } catch (error) {
@@ -278,16 +237,17 @@ export async function invokeDirectCouncilProvider(
 // engineeringStrategy.ts's create()/autoIterate() for the concrete usage.
 // ---------------------------------------------------------------------------
 
-export const ALL_PROVIDER_FAMILIES: DirectProviderFamily[] = ['claude', 'chatgpt', 'grok', 'gemini', 'kimi', 'red_team', 'baby']
+export const ALL_PROVIDER_FAMILIES: DirectProviderFamily[] = ['claude', 'chatgpt', 'grok', 'gemini', 'nova', 'red_team', 'baby']
 
 /** The Coder Agent's own default priority order when a caller asks for fallback without
  * specifying one. Deliberately excludes 'baby' and 'red_team' — those are Council-domain framing
- * variants of chatgpt/claude, not independent hosted-coder-capable families. */
-export const DEFAULT_CODER_FALLBACK_ORDER: DirectProviderFamily[] = ['claude', 'chatgpt', 'grok', 'gemini', 'kimi']
+ * variants of chatgpt/claude, not independent hosted-coder-capable families. NOVA is local Council,
+ * not a hosted coder family. */
+export const DEFAULT_CODER_FALLBACK_ORDER: DirectProviderFamily[] = ['claude', 'chatgpt', 'grok', 'gemini']
 
 /** Honest, synchronous, no-network-call configuration check — mirrors exactly the same
- * per-family key/config checks callOpenAi/callAnthropic/callGrokDirect/callGeminiDirect/
- * callKimiDirect already perform at call time, exposed here so callers can decide BEFORE
+ * per-family key/config checks callOpenAi/callAnthropic/callGrokDirect/callGeminiDirect
+ * already perform at call time, exposed here so callers can decide BEFORE
  * spending a network round trip (or fabricating an attempt) whether a family is usable. */
 export function isProviderFamilyConfigured(family: DirectProviderFamily): boolean {
   switch (family) {
@@ -301,8 +261,6 @@ export function isProviderFamilyConfigured(family: DirectProviderFamily): boolea
       return envHasUsableProviderSecret('XAI_API_KEY')
     case 'gemini':
       return envHasUsableProviderSecret('GEMINI_API_KEY')
-    case 'kimi':
-      return isKimiConfigured()
     default:
       return false
   }

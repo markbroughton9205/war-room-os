@@ -37,7 +37,7 @@ export function providerModelForFamily(family: CouncilOrchestrationFamily): stri
   if (family === 'claude' || family === 'red_team') return 'anthropic:claude-sonnet-5'
   if (family === 'grok') return 'xai:grok'
   if (family === 'gemini') return 'google:gemini'
-  if (family === 'kimi') return 'moonshot:kimi'
+  if (family === 'nova') return null
   return null
 }
 
@@ -321,7 +321,7 @@ function formatPriorTurnsBlock(turns: DeliberationTurn[]): string {
 const IDENTITY_REMINDER: Partial<Record<NebulaAgentId, string>> = {
   orion: 'You are ORION — stay in engineering/runtime architecture; do not claim unverified War Room state as fact.',
   lumen: 'You are LUMEN — classify support and reject unsupported claims rather than echoing. Verify old-vs-new: still supported, stale, contradicted, insufficient, or only partially supported. Do not treat KIMI_WAVE or STORED_RESEARCH as live proof.',
-  pulsar: 'You are PULSAR — stay in evidence/research; cite what is actually available and flag what is missing rather than asserting it. Keep prior Kimi/stored intelligence separate from current live evidence.',
+  pulsar: 'You are PULSAR — stay in evidence/research; cite what is actually available and flag what is missing rather than asserting it. Keep prior KIMI_WAVE / stored research intelligence separate from current live evidence.',
   phoenix: 'You are PHOENIX — stay adversarial; challenge assumptions and failure modes rather than restating the prior analysis.',
   nova: 'You are NOVA — stay in strategy; options, sequencing, and trade-offs, not implementation detail.',
   solara: 'You are SOLARA — stay in human/practical impact; what this means for people, not abstractions.',

@@ -10,7 +10,7 @@ type PromptArtifact = { id: string; intent: string; target_agent_id: string; pro
 const PROMPT_INTENTS: Array<{ label: string; intent: string }> = [
   { label: 'Give Claude the next prompt', intent: 'GIVE_CLAUDE_NEXT_PROMPT' },
   { label: 'Give Codex the build prompt', intent: 'GIVE_CODEX_BUILD_PROMPT' },
-  { label: 'Give Kimi the research prompt', intent: 'GIVE_KIMI_RESEARCH_PROMPT' },
+  { label: 'Package KIMI_WAVE research prompt (corpus; not a provider)', intent: 'GIVE_KIMI_RESEARCH_PROMPT' },
 ]
 
 /**

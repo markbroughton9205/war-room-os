@@ -12,7 +12,7 @@ const CORE_PERSISTABLE_FAMILY_IDS = new Set<CouncilOrchestrationFamily>([
   'grok',
   'gemini',
   'red_team',
-  'kimi',
+  'nova',
 ])
 
 const PERSISTABLE_FAMILY_LABELS = new Set([
@@ -31,6 +31,10 @@ const PERSISTABLE_FAMILY_LABELS = new Set([
   'GROK FAMILY',
   'GEMINI',
   'GEMINI FAMILY',
+  'NOVA',
+  'NOVA COUNCIL',
+  'NOVA FAMILY',
+  // Legacy persisted labels only — Kimi is not a current Council capability.
   'KIMI',
   'KIMI FAMILY',
   'RED TEAM',
@@ -105,7 +109,6 @@ function isPersistableFamilySender(sender: string): boolean {
   if (PERSISTABLE_FAMILY_LABELS.has(u)) return true
   const id = rosterIdForSender(sender)
   if (!id) return false
-  if (id === 'kimi') return false
   if (id === 'bridge_architect' || id === 'baby') return false
   return CORE_PERSISTABLE_FAMILY_IDS.has(id)
 }

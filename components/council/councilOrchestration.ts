@@ -88,11 +88,11 @@ export function pickNextOrchestrationFamily(params: {
 
 export function orchestrationFamilyToTypingFamily(
   f: CouncilOrchestrationFamily,
-): 'CHATGPT FAMILY' | 'CLAUDE FAMILY' | 'GROK FAMILY' | 'GEMINI FAMILY' | 'KIMI FAMILY' | 'BRIDGE ARCHITECT' {
+): 'CHATGPT FAMILY' | 'CLAUDE FAMILY' | 'GROK FAMILY' | 'GEMINI FAMILY' | 'NOVA FAMILY' | 'BRIDGE ARCHITECT' {
   if (f === 'gemini') return 'GEMINI FAMILY'
   if (f === 'claude' || f === 'red_team') return 'CLAUDE FAMILY'
   if (f === 'grok') return 'GROK FAMILY'
-  if (f === 'kimi') return 'KIMI FAMILY'
+  if (f === 'nova') return 'NOVA FAMILY'
   if (f === 'bridge_architect') return 'BRIDGE ARCHITECT'
   return 'CHATGPT FAMILY'
 }

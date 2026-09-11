@@ -68,13 +68,13 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
     defaultDuty: 'standing_by',
   },
   {
-    id: 'kimi',
+    id: 'nova',
     label: 'Nova Council',
     role: 'Strategy / options / sequencing / planning',
-    provider: 'Moonshot',
+    provider: 'Local',
     optional: false,
-    engineId: 'kimi',
-    localAgentId: 'kimi-family-baby',
+    engineId: null,
+    localAgentId: 'nova-family-baby',
     defaultDuty: 'standing_by',
   },
   {
@@ -137,8 +137,8 @@ export function detectCouncilPlanningMode(decree: string): boolean {
   return COUNCIL_PLANNING_KEYWORDS.test(decree)
 }
 
-export function decreeRequestsKimi(decree: string): boolean {
-  return /\b(decompose|break\s*down|sequenc|kimi|moonshot)\b/i.test(decree)
+export function decreeRequestsNova(decree: string): boolean {
+  return /\b(decompose|break\s*down|sequenc|nova)\b/i.test(decree)
 }
 
 export function decreeRequestsArchitecture(decree: string): boolean {
@@ -154,15 +154,33 @@ export function decreeMentionsBaby(decree: string): boolean {
 }
 
 export type CouncilParticipationToggles = {
-  includeKimi: boolean
+  includeNova: boolean
   includeRedTeam: boolean
   includeBaby: boolean
   includeBridgeArchitect: boolean
 }
 
-export function participationFromDecree(decree: string, toggles: CouncilParticipationToggles): CouncilOrchestrationFamily[] {
+type ParticipationToggleRead = Partial<CouncilParticipationToggles> & {
+  includeKimi?: boolean
+}
+
+export function resolveIncludeNova(toggles: ParticipationToggleRead): boolean {
+  return Boolean(toggles.includeNova ?? toggles.includeKimi)
+}
+
+export function migrateParticipationToggles(raw: unknown): CouncilParticipationToggles {
+  const o = raw && typeof raw === 'object' ? raw as ParticipationToggleRead : {}
+  return {
+    includeNova: resolveIncludeNova(o),
+    includeRedTeam: Boolean(o.includeRedTeam),
+    includeBaby: Boolean(o.includeBaby),
+    includeBridgeArchitect: Boolean(o.includeBridgeArchitect),
+  }
+}
+
+export function participationFromDecree(decree: string, toggles: ParticipationToggleRead): CouncilOrchestrationFamily[] {
   const extra: CouncilOrchestrationFamily[] = []
-  if (toggles.includeKimi || decreeRequestsKimi(decree)) extra.push('kimi')
+  if (resolveIncludeNova(toggles) || decreeRequestsNova(decree)) extra.push('nova')
   if (toggles.includeRedTeam || decreeRequestsRisk(decree)) extra.push('red_team')
   if (toggles.includeBaby || decreeMentionsBaby(decree)) extra.push('baby')
   if (toggles.includeBridgeArchitect || decreeRequestsArchitecture(decree)) extra.push('bridge_architect')

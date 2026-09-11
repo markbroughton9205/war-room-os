@@ -21,7 +21,7 @@ export type CouncilOrchestrationFamily =
   | 'gemini'
   | 'red_team'
   | 'baby'
-  | 'kimi'
+  | 'nova'
   | 'bridge_architect'
 
 export type CouncilMemoryRecallPreview = {

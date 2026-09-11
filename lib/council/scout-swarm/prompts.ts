@@ -32,7 +32,7 @@ export function buildIndependentDiscoveryPrompt(input: {
     input.assignment.objective,
     '',
     formatPrivateEvidenceBlock(input.ledger),
-    input.priorKimiStoredBlock ? `\nPrior Kimi/stored intelligence (not live proof):\n${input.priorKimiStoredBlock}` : '',
+    input.priorKimiStoredBlock ? `\nPrior KIMI_WAVE / stored research intelligence (research corpus only; not a live Kimi provider):\n${input.priorKimiStoredBlock}` : '',
     input.runtimeBlock ? `\nLocal runtime/repo truth:\n${input.runtimeBlock}` : '',
   ].filter(Boolean).join('\n')
 

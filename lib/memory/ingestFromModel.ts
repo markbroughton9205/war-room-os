@@ -109,8 +109,10 @@ export function councilSingleFamilyToMemoryPartition(family: string): MemoryFami
       return 'Grok Family'
     case 'gemini':
       return 'Gemini Family'
+    case 'nova':
+      return 'Nova Council'
     case 'kimi':
-      return 'Kimi Family'
+      return 'Nova Council'
     case 'red_team':
       return 'Red Team'
     case 'bridge_architect':

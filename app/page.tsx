@@ -98,6 +98,7 @@ import {
   engineRowMap,
   isEngineFunctional,
   participationFromDecree,
+  migrateParticipationToggles,
   unavailableReason,
   type CouncilDutyState,
   type CouncilParticipationToggles,
@@ -635,7 +636,7 @@ function cloudEngineIdForCouncilFamily(f: CouncilOrchestrationFamily): EngineId 
   if (f === 'claude' || f === 'red_team') return 'claude'
   if (f === 'grok') return 'grok'
   if (f === 'gemini') return 'gemini'
-  if (f === 'kimi') return 'kimi'
+  if (f === 'nova') return null
   return null
 }
 
@@ -647,7 +648,7 @@ function familyFromContinuationDirective(text: string): CouncilOrchestrationFami
   if (/\bgemini\b|\bgoogle\b/.test(t)) return 'gemini'
   if (/\bred\s*team\b|\bredteam\b/.test(t)) return 'red_team'
   if (/\bbaby\b|\bobserver\b/.test(t)) return 'baby'
-  if (/\bkimi\b|\bmoonshot\b/.test(t)) return 'kimi'
+  if (/\bnova\b/.test(t)) return 'nova'
   if (/\bbridge(?:\s*architect)?\b/.test(t)) return 'bridge_architect'
   return null
 }
@@ -823,8 +824,8 @@ function buildRecallPreview(args: {
 }
 
 type ToneMode = 'casual' | 'build' | 'business' | 'debate' | 'reflection'
-type TypingFamily = 'CHATGPT FAMILY' | 'CLAUDE FAMILY' | 'GROK FAMILY' | 'GEMINI FAMILY' | 'KIMI FAMILY' | 'BRIDGE ARCHITECT'
-type UsageFamily = 'Claude Family' | 'ChatGPT Family' | 'Kimi Family' | 'Grok Family' | 'Gemini Family'
+type TypingFamily = 'CHATGPT FAMILY' | 'CLAUDE FAMILY' | 'GROK FAMILY' | 'GEMINI FAMILY' | 'NOVA FAMILY' | 'BRIDGE ARCHITECT'
+type UsageFamily = 'Claude Family' | 'ChatGPT Family' | 'Nova Council' | 'Grok Family' | 'Gemini Family'
 type CouncilMode = 'continue' | 'expanded' | 'summarize'
 type ContinuationDecision = 'allow' | 'summarize' | 'hold' | 'deny'
 
@@ -914,7 +915,7 @@ type RaelActionStatus = 'pending' | 'answered' | 'expired'
 type RaelActionUrgency = 'low' | 'medium' | 'high'
 type RepoScanStatus = 'idle' | 'scanning' | 'indexed' | 'error'
 type ProviderConnectionStatus = 'online' | 'standby' | 'error' | 'not_connected'
-type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'kimi' | 'redteam'
+type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'redteam'
 
 type RaelActionItem = {
   action_id: string
@@ -1086,7 +1087,7 @@ const FAMILY_META: Record<TypingFamily, { color: string; icon: string }> = {
   'CHATGPT FAMILY': { color: '#34D399', icon: '🧠' },
   'CLAUDE FAMILY': { color: '#A78BFA', icon: '🔮' },
   'GEMINI FAMILY': { color: '#38BDF8', icon: '◇' },
-  'KIMI FAMILY': { color: '#60A5FA', icon: '◎' },
+  'NOVA FAMILY': { color: '#60A5FA', icon: '◎' },
   'BRIDGE ARCHITECT': { color: '#C084FC', icon: '⎈' },
 }
 
@@ -1156,7 +1157,6 @@ const INITIAL_PROVIDER_HEALTH: ProviderHealthState = {
     chatgpt: 'not_connected',
     grok: 'not_connected',
     gemini: 'not_connected',
-    kimi: 'not_connected',
     redteam: 'standby',
   },
   labels: {
@@ -1164,7 +1164,6 @@ const INITIAL_PROVIDER_HEALTH: ProviderHealthState = {
     chatgpt: 'OpenAI · ChatGPT · checking',
     grok: 'xAI · Grok · checking',
     gemini: 'Google · Gemini · not connected',
-    kimi: 'Moonshot · Kimi · checking',
     redteam: 'War Room · Red Team · standby',
   },
 }
@@ -1297,7 +1296,7 @@ const INITIAL_DEPLOY_STATUS: DeployStatusResponse = {
 const BASE_USAGE_ROWS: UsageEstimate[] = [
   { familyName: 'Claude Family', provider: 'Anthropic', model: 'claude-sonnet-4-20250514', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
   { familyName: 'ChatGPT Family', provider: 'OpenAI', model: 'gpt-4o', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
-  { familyName: 'Kimi Family', provider: 'Moonshot', model: 'not configured', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: false },
+  { familyName: 'Nova Council', provider: 'Local', model: 'shared local Ollama brain', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
   { familyName: 'Grok Family', provider: 'xAI', model: 'grok', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
   { familyName: 'Gemini Family', provider: 'Google', model: 'gemini (engine probe)', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
 ]
@@ -1316,8 +1315,8 @@ const FAMILY_NODE_GROUPS: FamilyNodeGroup[] = [
     nodes: ['Architecture', 'Governance', 'Security', 'Logic', 'Documentation'].map(name => ({ name, status: 'idle', task: 'standing by' })),
   },
   {
-    familyName: 'Kimi Family',
-    presenceKey: 'KIMI FAMILY',
+    familyName: 'Nova Council',
+    presenceKey: 'NOVA FAMILY',
     color: '#60A5FA',
     nodes: ['Task Tree', 'Dependency', 'Parallelization', 'Operations', 'Sequencing'].map(name => ({ name, status: 'idle', task: 'standing by' })),
   },
@@ -1343,7 +1342,7 @@ const FAMILY_NODE_GROUPS: FamilyNodeGroup[] = [
 const MOCK_RATES_PER_MILLION: Record<UsageFamily, { input: number; output: number }> = {
   'Claude Family': { input: 3, output: 15 },
   'ChatGPT Family': { input: 2.5, output: 10 },
-  'Kimi Family': { input: 0, output: 0 },
+  'Nova Council': { input: 0, output: 0 },
   'Grok Family': { input: 0, output: 0 },
   'Gemini Family': { input: 2, output: 8 },
 }
@@ -6252,7 +6251,7 @@ function Home() {
     'CLAUDE FAMILY': { status: 'idle', label: 'standby' },
     'GROK FAMILY': { status: 'idle', label: 'standby' },
     'GEMINI FAMILY': { status: 'idle', label: 'standby' },
-    'KIMI FAMILY': { status: 'idle', label: 'standby' },
+    'NOVA FAMILY': { status: 'idle', label: 'standby' },
     'BRIDGE ARCHITECT': { status: 'idle', label: 'standby' },
   })
   const [, setToolRequestActive] = useState(false)
@@ -6348,7 +6347,7 @@ function Home() {
   const [recoveredRedTeamHold, setRecoveredRedTeamHold] = useState<RedTeamHoldUnresolvedPayload | null>(null)
   const [incomeOperationsMode, setIncomeOperationsMode] = useState(false)
   const [participationToggles, setParticipationToggles] = useState<CouncilParticipationToggles>({
-    includeKimi: false,
+    includeNova: false,
     includeRedTeam: false,
     includeBaby: false,
     includeBridgeArchitect: false,
@@ -6996,7 +6995,7 @@ function Home() {
         } | undefined
         if (cmeta?.incomeOperationsMode !== undefined) setIncomeOperationsMode(Boolean(cmeta.incomeOperationsMode))
         if (cmeta?.participation && typeof cmeta.participation === 'object') {
-          setParticipationToggles(p => ({ ...p, ...cmeta.participation }))
+          setParticipationToggles(p => ({ ...p, ...migrateParticipationToggles(cmeta.participation) }))
         }
         if (cmeta?.duty && typeof cmeta.duty === 'object') {
           setFamilyDuty(prev => ({ ...prev, ...cmeta.duty }))
@@ -7761,7 +7760,7 @@ function Home() {
       setPresence('CLAUDE FAMILY', 'idle', 'standby')
       setPresence('GROK FAMILY', 'idle', 'standby')
       setPresence('GEMINI FAMILY', 'idle', 'standby')
-      setPresence('KIMI FAMILY', 'idle', 'standby')
+      setPresence('NOVA FAMILY', 'idle', 'standby')
       setPresence('BRIDGE ARCHITECT', 'idle', 'standby')
       setLoading(false)
     }, TOOL_REQUEST_TIMEOUT_MS)
@@ -7777,7 +7776,7 @@ function Home() {
     setPresence('CLAUDE FAMILY', 'idle', 'standby')
     setPresence('GROK FAMILY', 'idle', 'standby')
     setPresence('GEMINI FAMILY', 'idle', 'standby')
-    setPresence('KIMI FAMILY', 'idle', 'standby')
+    setPresence('NOVA FAMILY', 'idle', 'standby')
     setPresence('BRIDGE ARCHITECT', 'idle', 'standby')
     endToolRequest()
     setLoading(false)
@@ -8649,7 +8648,7 @@ function Home() {
     if (f === 'claude' || f === 'red_team') return 'Claude Family'
     if (f === 'grok') return 'Grok Family'
     if (f === 'gemini') return 'Gemini Family'
-    if (f === 'kimi') return 'Kimi Family'
+    if (f === 'nova') return 'Nova Council'
     return null
   }
 
@@ -8678,11 +8677,11 @@ function Home() {
         streamingLabel: `${nebulaName} streaming...`,
       }
     }
-    if (f === 'kimi') {
+    if (f === 'nova') {
       return {
         presenceKey: pk,
         bubbleFamilyName: nebulaName,
-        provider: 'Moonshot · kimi',
+        provider: 'Local · Ollama',
         thinkingLabel: `${nebulaName} decomposing...`,
         streamingLabel: `${nebulaName} streaming...`,
       }
@@ -10114,7 +10113,7 @@ function Home() {
         let councilProgressForMessage: CouncilProgressRuntimeSnapshot | undefined
 
         try {
-          if (family === 'kimi' || family === 'bridge_architect') {
+          if (family === 'bridge_architect') {
             runtime = 'SKIPPED'
             runtimeDetail = 'cloud_provider_unavailable'
             if (isDirectInvoke) await postDirectUnavailable('SKIPPED', runtimeDetail)
@@ -11769,10 +11768,15 @@ function Home() {
       })
     }
 
-    const parsedCmd = resolveActiveCommand({ latestDecreeText: decree }).command
+      const parsedCmd = resolveActiveCommand({ latestDecreeText: decree }).command
     activeCouncilCommandRef.current = parsedCmd
     setCouncilUiCommand(parsedCmd)
     lastRaelDirectiveContentRef.current = decree
+
+    if (parsedCmd.uninstalledProviderNotice) {
+      addSystemMessage(parsedCmd.uninstalledProviderNotice, { force: true })
+      return
+    }
 
     const intent = classifyRaElMessage(decree)
     lastDecreeIntentRef.current = intent
@@ -12216,7 +12220,7 @@ function Home() {
         Income Operations (Grok/Gemini/ChatGPT first)
       </label>
       <div className="mt-2 flex flex-wrap gap-2 text-[10px]" style={{ color: '#888' }}>
-        <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeKimi} onChange={() => toggleParticipation('includeKimi')} />Kimi</label>
+        <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeNova} onChange={() => toggleParticipation('includeNova')} />NOVA</label>
         <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeRedTeam} onChange={() => toggleParticipation('includeRedTeam')} />Red Team</label>
         <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeBaby} onChange={() => toggleParticipation('includeBaby')} />Baby</label>
         <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeBridgeArchitect} onChange={() => toggleParticipation('includeBridgeArchitect')} />Bridge Architect</label>
@@ -12304,7 +12308,7 @@ function Home() {
       setOperatorTab('command')
     }
   }, [operatorTab, uiMode])
-  const providerStripKeys: ProviderFamilyKey[] = ['claude', 'chatgpt', 'grok', 'gemini', 'kimi', 'redteam']
+  const providerStripKeys: ProviderFamilyKey[] = ['claude', 'chatgpt', 'grok', 'gemini', 'redteam']
   const providerStatusStyles: Record<ProviderConnectionStatus, { color: string; dot: string; shadow: string }> = {
     online: { color: '#9AE6B4', dot: '#00ff41', shadow: '0 0 8px #00ff41' },
     standby: { color: '#FFD700', dot: '#FFD700', shadow: '0 0 8px rgba(255,215,0,0.7)' },

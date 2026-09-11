@@ -21,7 +21,7 @@ const DIRECT_REINTERPRET_LINE =
   /\b(?:council\s+(?:now\s+)?routed|routing\s+(?:the\s+)?council|switching\s+to\s+(?:analysis|attendance))\b/i
 
 const DIRECT_COMPARATIVE_FAMILY =
-  /\b(?:chatgpt|claude|grok|gemini|red\s*team|kimi|baby|bridge)\s+(?:family|patterns?|approach|perspective|take)\b/i
+  /\b(?:chatgpt|claude|grok|gemini|red\s*team|nova|baby|bridge)\s+(?:family|patterns?|approach|perspective|take)\b/i
 
 function stripDirectInvocationReinterpretation(text: string): string {
   return text

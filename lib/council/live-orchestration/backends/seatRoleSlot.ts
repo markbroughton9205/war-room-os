@@ -19,8 +19,8 @@ export const SEAT_LOCAL_ROLE_SLOT: Record<CouncilOrchestrationFamily, LocalRoleS
   chatgpt: 'GENERAL',
   // PHOENIX (red_team) stays on GENERAL — must never require dolphin-mistral-venice:24b.
   red_team: 'GENERAL',
-  // NOVA (kimi) shares Genesis GENERAL. Do not assign the uninstalled 30b coder as a Nebula brain.
-  kimi: 'GENERAL',
+  // NOVA shares Genesis GENERAL. Do not assign an uninstalled coder weight as a Nebula brain.
+  nova: 'GENERAL',
   // Bridge Architect is not a permanent Nebula identity. Leave CODING for that optional seat.
   bridge_architect: 'CODING',
 }

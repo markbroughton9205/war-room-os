@@ -17,7 +17,7 @@ const REQUIRED_FAMILIES: readonly CouncilOrchestrationFamily[] = [
   'claude',
   'grok',
   'gemini',
-  'kimi',
+  'nova',
   'red_team',
   'baby',
   'bridge_architect',
@@ -145,8 +145,8 @@ export const FAMILY_CAPABILITY_PROFILES = Object.freeze([
     maximumRecommendedMissionRisk: 'medium',
   }),
   profile({
-    familyId: 'kimi',
-    displayName: 'Kimi',
+    familyId: 'nova',
+    displayName: 'NOVA',
     configuredCapabilities: [
       'general_reasoning',
       'task_decomposition',

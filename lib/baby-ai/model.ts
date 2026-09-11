@@ -2,11 +2,14 @@ export type BabyAgentKey =
   | 'chatgpt-family-baby'
   | 'claude-family-baby'
   | 'grok-family-baby'
-  | 'kimi-family-baby'
+  | 'nova-family-baby'
   | 'red-team-baby'
   | 'bridge-architect-baby'
   | 'analyst-baby'
   | 'income-operations-baby'
+
+/** Historical Baby key only. Maps to `nova-family-baby` on read. Not a live Kimi/Moonshot agent. */
+export type LegacyBabyAgentKey = 'kimi-family-baby'
 
 export type BabyGrowthLevel = 'seed' | 'observing' | 'learning' | 'useful' | 'specialist' | 'senior'
 
@@ -140,10 +143,10 @@ export const BABY_AI_AGENTS: BabyAgent[] = [
     ],
   },
   {
-    key: 'kimi-family-baby',
-    displayName: 'Kimi Family Baby',
-    familyIdentity: 'Kimi Family',
-    cloudProvider: 'Moonshot cloud',
+    key: 'nova-family-baby',
+    displayName: 'Nova Family Baby',
+    familyIdentity: 'Nova Council',
+    cloudProvider: 'Local Ollama',
     role: 'Task decomposition, dependency mapping, and sequence checks.',
     memoryScope: ['completed projects', 'workflow outcomes', 'Commander corrections'],
     growthLevel: 'seed',
@@ -235,8 +238,18 @@ function skill(key: string, label: string, description: string, progress: number
   return { key, label, description, progress }
 }
 
+export function canonicalBabyAgentKey(key: string): BabyAgentKey {
+  if (key === 'kimi-family-baby') return 'nova-family-baby'
+  return key as BabyAgentKey
+}
+
+export function isLegacyKimiFamilyBabyKey(key: string): boolean {
+  return key === 'kimi-family-baby'
+}
+
 export function getBabyAgent(key: BabyAgentKey): BabyAgent | null {
-  return BABY_AI_AGENTS.find(agent => agent.key === key) ?? null
+  const canonical = canonicalBabyAgentKey(key)
+  return BABY_AI_AGENTS.find(agent => agent.key === canonical) ?? null
 }
 
 export function growthLevelIndex(level: BabyGrowthLevel): number {

@@ -71,7 +71,7 @@ export type EngineeringMissionRequest = {
    * strategy). Defaults to disabled; the deterministic/local-model proposal path works without it. */
   singleAgentProvider?: {
     enabled: boolean
-    family?: 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'kimi'
+    family?: 'chatgpt' | 'claude' | 'grok' | 'gemini'
   }
   /** Hosted-model coder proposal source (General-Purpose Coder Proposal Generation phase) — a
    * distinct concept from singleAgentProvider above: that one produces a short advisory opinion
@@ -80,7 +80,7 @@ export type EngineeringMissionRequest = {
    * matches. Defaults to disabled; the deterministic/local-model proposal path works without it. */
   coderProvider?: {
     enabled: boolean
-    family?: 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'kimi'
+    family?: 'chatgpt' | 'claude' | 'grok' | 'gemini'
   }
 }
 
@@ -192,7 +192,7 @@ export interface MissionExecutionStrategy<TRequest> {
    * this environment resolves via policy-based fallback (see
    * lib/council/providerDirectCall.ts's resolveConfiguredProviderFamily) — never a fabricated
    * call to an unconfigured provider. */
-  autoIterate?(missionId: string, opts?: { maxAttempts?: number; paused?: boolean; coderProvider?: { enabled: boolean; family?: 'chatgpt' | 'claude' | 'grok' | 'gemini' | 'kimi' } }): Promise<RuntimeMission>
+  autoIterate?(missionId: string, opts?: { maxAttempts?: number; paused?: boolean; coderProvider?: { enabled: boolean; family?: 'chatgpt' | 'claude' | 'grok' | 'gemini' } }): Promise<RuntimeMission>
 }
 
 // ---------------------------------------------------------------------------

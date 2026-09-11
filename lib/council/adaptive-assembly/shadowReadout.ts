@@ -70,7 +70,7 @@ const FAMILY_LABELS: Record<CouncilOrchestrationFamily, string> = {
   gemini: 'LUMEN',
   red_team: 'PHOENIX',
   baby: 'Baby AI Observer',
-  kimi: 'NOVA',
+  nova: 'NOVA',
   bridge_architect: 'Bridge Architect',
 }
 

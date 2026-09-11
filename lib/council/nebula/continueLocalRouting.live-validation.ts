@@ -35,7 +35,7 @@ export type ContinueLocalRoutingLiveResult = { name: string; pass: boolean; deta
 const THINK_TAG = /<think>|<\/think>/i
 const SCHEMA_LEAK = /failureModes|evidencePackets|decisionOrSynthesis|evidenceIds/
 
-const CLOUD_KEY_ENV_NAMES = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY', 'GEMINI_API_KEY', 'MOONSHOT_API_KEY']
+const CLOUD_KEY_ENV_NAMES = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY', 'GEMINI_API_KEY']
 
 async function withCloudKeysStripped<T>(fn: () => Promise<T>): Promise<T> {
   const saved: Record<string, string | undefined> = {}

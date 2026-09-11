@@ -1,7 +1,7 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCommand } from '@/lib/council/councilCommandTypes'
 import { filterOrchestrationOrderByCommand } from '@/lib/council/commandParser'
-import { decreeRequestsKimi } from '@/lib/council/familyRoster'
+import { decreeRequestsNova, resolveIncludeNova } from '@/lib/council/familyRoster'
 import type { CouncilParticipationToggles } from '@/lib/council/familyRoster'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 import { COUNCIL_ROSTER } from '@/lib/council/familyRoster'
@@ -37,8 +37,8 @@ export function buildAttendanceDirectedOrder(args: {
   participationToggles: CouncilParticipationToggles
 }): CouncilOrchestrationFamily[] {
   const merged: CouncilOrchestrationFamily[] = [...ATTENDANCE_REQUIRED_CORE]
-  if (args.participationToggles.includeKimi || decreeRequestsKimi(args.decree)) {
-    if (!merged.includes('kimi')) merged.push('kimi')
+  if (resolveIncludeNova(args.participationToggles) || decreeRequestsNova(args.decree)) {
+    if (!merged.includes('nova')) merged.push('nova')
   }
   return filterOrchestrationOrderByCommand(merged, args.cmd, args.decree)
 }

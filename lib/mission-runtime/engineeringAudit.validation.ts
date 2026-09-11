@@ -83,12 +83,12 @@ function testBuildCouncilAssistAuditMetadata(): CaseResult[] {
     ...session,
     results: [
       { family: 'grok', ok: true, text: 'assessment text', recordedAt: new Date().toISOString() },
-      { family: 'kimi', ok: false, text: '', error: 'Kimi key missing', recordedAt: new Date().toISOString() },
+      { family: 'gemini', ok: false, text: '', error: 'Gemini key missing', recordedAt: new Date().toISOString() },
     ],
   }
   const mixedMeta = buildCouncilAssistAuditMetadata('repair-2', mixedSession)
   results.push(check('audit_06_mixed_ok_families_correct', JSON.stringify(mixedMeta.okFamilies) === JSON.stringify(['grok']), JSON.stringify(mixedMeta.okFamilies)))
-  results.push(check('audit_07_mixed_failed_families_correct', JSON.stringify(mixedMeta.failedFamilies) === JSON.stringify(['kimi']), JSON.stringify(mixedMeta.failedFamilies)))
+  results.push(check('audit_07_mixed_failed_families_correct', JSON.stringify(mixedMeta.failedFamilies) === JSON.stringify(['gemini']), JSON.stringify(mixedMeta.failedFamilies)))
 
   return results
 }
@@ -99,9 +99,9 @@ function testBuildProviderResolutionAuditMetadata(): CaseResult[] {
   const notRequested = buildProviderResolutionAuditMetadata('repair-3', undefined, null)
   results.push(check('audit_08_not_requested_is_not_degraded', notRequested.requested === false && notRequested.degradedToDeterministic === false, JSON.stringify(notRequested)))
 
-  const requestedButUnresolved = buildProviderResolutionAuditMetadata('repair-4', { enabled: true, family: 'kimi' }, null)
+  const requestedButUnresolved = buildProviderResolutionAuditMetadata('repair-4', { enabled: true, family: 'gemini' }, null)
   results.push(check('audit_09_requested_unresolved_is_degraded', requestedButUnresolved.requested === true && requestedButUnresolved.degradedToDeterministic === true, JSON.stringify(requestedButUnresolved)))
-  results.push(check('audit_10_requested_family_recorded', requestedButUnresolved.requestedFamily === 'kimi', String(requestedButUnresolved.requestedFamily)))
+  results.push(check('audit_10_requested_family_recorded', requestedButUnresolved.requestedFamily === 'gemini', String(requestedButUnresolved.requestedFamily)))
 
   const requestedAndResolved = buildProviderResolutionAuditMetadata('repair-5', { enabled: true, family: 'claude' }, 'claude')
   results.push(check('audit_11_requested_and_resolved_not_degraded', requestedAndResolved.degradedToDeterministic === false, JSON.stringify(requestedAndResolved)))

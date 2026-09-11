@@ -14,7 +14,7 @@ const PROVIDER_BY_FAMILY: Record<CouncilOrchestrationFamily, string> = {
   gemini: 'google',
   red_team: 'internal',
   baby: 'war_room_native',
-  kimi: 'moonshot',
+  nova: 'local',
   bridge_architect: 'local_bridge',
 }
 

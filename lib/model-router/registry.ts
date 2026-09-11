@@ -1,5 +1,6 @@
 import { FAMILY_CAPABILITY_PROFILES } from '@/lib/council/adaptive-assembly/registry'
 import { ALL_PROVIDER_FAMILIES, type DirectProviderFamily } from '@/lib/council/providerDirectCall'
+import { canonicalizeCouncilSeat } from '@/lib/council/seatCanonical'
 import type { ModelTarget } from './types'
 
 const DIRECT_DISPATCHABLE = new Set<string>(ALL_PROVIDER_FAMILIES)
@@ -24,7 +25,8 @@ export function listModelTargets(): ModelTarget[] {
 }
 
 export function getModelTarget(familyId: string): ModelTarget | null {
-  return listModelTargets().find(t => t.providerFamily === familyId) ?? null
+  const canonical = canonicalizeCouncilSeat(familyId) ?? familyId
+  return listModelTargets().find(t => t.providerFamily === canonical) ?? null
 }
 
 /**

@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { BABY_AI_AGENTS, type BabyAgentKey } from '@/lib/baby-ai/model'
+import { BABY_AI_AGENTS, canonicalBabyAgentKey, type BabyAgentKey } from '@/lib/baby-ai/model'
 import { buildBabyDailyBriefing } from '@/lib/baby-ai/operationalIntelligence'
 import { listFeatureBuilderSnapshot } from '@/lib/feature-builder/persistence'
 import { listGrowthCalendarSnapshot } from '@/lib/growth-calendar'
@@ -91,8 +91,8 @@ function approvalStatus(value: unknown): OutcomeApprovalStatus {
 }
 
 function family(value: unknown): BabyAgentKey | null {
-  const raw = text(value)
-  return BABY_AI_AGENTS.some(agent => agent.key === raw) ? raw as BabyAgentKey : null
+  const raw = canonicalBabyAgentKey(text(value))
+  return BABY_AI_AGENTS.some(agent => agent.key === raw) ? raw : null
 }
 
 function reviewer(value: unknown): RoiReview['reviewer'] {

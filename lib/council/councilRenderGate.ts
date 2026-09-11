@@ -84,7 +84,7 @@ export function parseCouncilMessageFamily(familyName: unknown): CouncilOrchestra
     gemini: 'gemini',
     red_team: 'red_team',
     baby: 'baby',
-    kimi: 'kimi',
+    nova: 'nova',
     bridge_architect: 'bridge_architect',
   }
   return map[key] ?? null

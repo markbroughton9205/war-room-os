@@ -11,7 +11,7 @@ const CORE_FAMILIES: CouncilOrchestrationFamily[] = [
   'gemini',
   'red_team',
   'baby',
-  'kimi',
+  'nova',
   'bridge_architect',
 ]
 
@@ -101,7 +101,8 @@ export function mergeProviderStatesFromMessages(
     gemini: 'gemini',
     red_team: 'red_team',
     baby: 'baby',
-    kimi: 'kimi',
+    kimi: 'nova',
+    nova: 'nova',
     bridge_architect: 'bridge_architect',
   }
 

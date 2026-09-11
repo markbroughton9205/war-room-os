@@ -155,8 +155,8 @@ export const NEBULA_AGENTS: readonly NebulaAgentDefinition[] = [
     capabilities: ['task_decomposition', 'execution_sequencing', 'long_range_planning'],
     prohibitedMisrepresentation: ['Must never present itself as Kimi or Moonshot AI'],
     backendPreference: sharedGenesisBacking(
-      'kimi',
-      'NOVA does not receive a dedicated coder weight. External fallback uses the kimi seat\'s configured provider (Moonshot).',
+      'nova',
+      'NOVA does not receive a dedicated coder weight. Actual serving uses the shared local Ollama GENERAL brain. Kimi/Moonshot is not installed, not configured, and not a War Room capability.',
     ),
     memoryScope: ['execution_planning'],
     status: 'active',
@@ -371,7 +371,7 @@ export const NEBULA_IDENTITY_BY_SEAT: Readonly<Partial<Record<CouncilOrchestrati
     claude: 'orion',
     grok: 'pulsar',
     gemini: 'lumen',
-    kimi: 'nova',
+    nova: 'nova',
     red_team: 'phoenix',
   })
 
@@ -404,8 +404,9 @@ const LEGACY_SEAT_ALIASES: Readonly<Record<string, CouncilOrchestrationFamily>> 
   claude: 'claude',
   grok: 'grok',
   gemini: 'gemini',
-  kimi: 'kimi',
-  moonshot: 'kimi',
+  kimi: 'nova',
+  moonshot: 'nova',
+  nova: 'nova',
   'red team': 'red_team',
   red_team: 'red_team',
   redteam: 'red_team',
@@ -432,9 +433,10 @@ export function seatForDisplayIdentity(raw: unknown): CouncilOrchestrationFamily
   if (typeof raw !== 'string' || !raw.trim()) return null
   const key = normalizeDisplayIdentityKey(raw)
   if (!key) return null
-  if (key === 'chatgpt' || key === 'claude' || key === 'grok' || key === 'gemini' || key === 'kimi' || key === 'red_team' || key === 'baby' || key === 'bridge_architect') {
+  if (key === 'chatgpt' || key === 'claude' || key === 'grok' || key === 'gemini' || key === 'nova' || key === 'red_team' || key === 'baby' || key === 'bridge_architect') {
     return key
   }
+  if (key === 'kimi' || key === 'moonshot') return 'nova'
   for (const agent of NEBULA_AGENTS) {
     if (agent.id === key || agent.name.toLowerCase() === key || normalizeDisplayIdentityKey(agent.label) === key) {
       return agent.backendPreference.seatId
