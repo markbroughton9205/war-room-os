@@ -46,7 +46,7 @@ export type TerraTrafficLayerDef = {
 
 export type TerraTrafficLayerSelection =
   | { kind: 'feature'; layerId: string; featureId: string }
-  | { kind: 'none' | 'miss' | 'ground' }
+  | { kind: 'none' | 'miss' | 'ground' | 'urban-building' }
 
 export function TerraTrafficLayer({
   def,

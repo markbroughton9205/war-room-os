@@ -27,13 +27,15 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
 import { featureIdFromTerraEntityId } from '@/lib/terra/cesiumEntityId'
+import { findUrbanBuildingAt, resolveTerraUrbanBuildingFromPick } from '@/lib/terra/urbanDetail/pick'
+import type { TerraUrbanBuilding, TerraUrbanSelection } from '@/lib/terra/urbanDetail/types'
 import type { TerraClickPoint } from '@/lib/terra/types'
 
 export type TerraImageryTier = 'nasa_gibs_with_osm_fallback'
 
 export type TerraGlobeStatus =
   | { phase: 'loading' }
-  | { phase: 'ready'; imageryTier: TerraImageryTier; hasIonToken: boolean; hasOsmBuildings: boolean }
+  | { phase: 'ready'; imageryTier: TerraImageryTier; hasIonToken: boolean; hasOsmBuildings: boolean; hasRealTerrain: boolean }
   | { phase: 'error'; message: string }
 
 type TerraGlobeProps = {
@@ -47,8 +49,12 @@ type TerraGlobeProps = {
    * the scene's primitives itself. God's Eye multi-scale phase. */
   onBuildingsTilesetReady?: (tileset: import('cesium').Cesium3DTileset | null) => void
   /** A left-click that hit a Terra-managed entity (see lib/terra/cesiumEntityId.ts) — the
-   * feature's raw id, not a bare coordinate. */
+   * feature's raw id, not a bare coordinate. Intelligence markers always win over urban buildings. */
   onEntityClick?: (featureId: string) => void
+  /** A left-click on an OSM-derived urban building primitive (sovereign extrusion). */
+  onUrbanBuildingClick?: (building: TerraUrbanBuilding) => void
+  /** A left-click on Cesium OSM Buildings 3D Tiles (ion fallback) — only known feature properties. */
+  onOsmBuildingsFeatureClick?: (selection: TerraUrbanSelection) => void
   /** A left-click that did NOT hit a Terra entity — either a real ground coordinate or a
    * confirmed miss (clicked past the globe's edge). Never fires for entity clicks. */
   onGroundClick?: (point: TerraClickPoint) => void
@@ -64,7 +70,65 @@ const HOVER_POSITION_THROTTLE_MS = 80
 
 const OSM_ATTRIBUTION_URL = 'https://tile.openstreetmap.org/'
 
-export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetReady, onEntityClick, onGroundClick, onEntityHover }: TerraGlobeProps) {
+function readNumberProperty(feature: { getProperty: (name: string) => unknown }, names: string[]): number | null {
+  for (const name of names) {
+    const value = feature.getProperty(name)
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  return null
+}
+
+function readStringProperty(feature: { getProperty: (name: string) => unknown }, names: string[]): string | null {
+  for (const name of names) {
+    const value = feature.getProperty(name)
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
+function selectionFromOsmBuildingsFeature(
+  picked: unknown,
+  longitude: number,
+  latitude: number,
+): TerraUrbanSelection | null {
+  if (!picked || typeof picked !== 'object' || typeof (picked as { getProperty?: unknown }).getProperty !== 'function') return null
+  const feature = picked as { getProperty: (name: string) => unknown }
+  const sourceHeight = readNumberProperty(feature, ['height'])
+  const estimatedHeight = readNumberProperty(feature, ['cesium#estimatedHeight'])
+  const height = sourceHeight ?? estimatedHeight
+  const levels = readNumberProperty(feature, ['building:levels', 'levels'])
+  const osmNumericId = readNumberProperty(feature, ['elementId', 'osm_id', 'id'])
+  const elementType = readStringProperty(feature, ['elementType', 'osm_type'])
+  return {
+    osmId: osmNumericId !== null ? String(osmNumericId) : 'cesium-osm-buildings',
+    osmType: elementType === 'relation' || elementType === 'way' ? elementType : 'cesium_osm_buildings',
+    buildingType: readStringProperty(feature, ['building']),
+    name: readStringProperty(feature, ['name', 'name:en']),
+    address: null,
+    levels,
+    heightMeters: height,
+    heightSource: sourceHeight !== null ? 'SOURCE' : estimatedHeight !== null ? 'INFERRED' : null,
+    heightMethod: sourceHeight !== null ? 'height_tag' : estimatedHeight !== null ? 'type_default' : null,
+    footprint: null,
+    longitude,
+    latitude,
+  }
+}
+
+export function TerraGlobe({
+  onStatusChange,
+  onViewerReady,
+  onBuildingsTilesetReady,
+  onEntityClick,
+  onUrbanBuildingClick,
+  onOsmBuildingsFeatureClick,
+  onGroundClick,
+  onEntityHover,
+}: TerraGlobeProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<TerraGlobeStatus>({ phase: 'loading' })
 
@@ -72,17 +136,21 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetRe
   // not re-run on every parent render) — these refs let the click handler it installs always see
   // the latest callback identity without that effect depending on them.
   const onEntityClickRef = useRef(onEntityClick)
+  const onUrbanBuildingClickRef = useRef(onUrbanBuildingClick)
+  const onOsmBuildingsFeatureClickRef = useRef(onOsmBuildingsFeatureClick)
   const onGroundClickRef = useRef(onGroundClick)
   const onViewerReadyRef = useRef(onViewerReady)
   const onBuildingsTilesetReadyRef = useRef(onBuildingsTilesetReady)
   const onEntityHoverRef = useRef(onEntityHover)
   useEffect(() => {
     onEntityClickRef.current = onEntityClick
+    onUrbanBuildingClickRef.current = onUrbanBuildingClick
+    onOsmBuildingsFeatureClickRef.current = onOsmBuildingsFeatureClick
     onGroundClickRef.current = onGroundClick
     onViewerReadyRef.current = onViewerReady
     onBuildingsTilesetReadyRef.current = onBuildingsTilesetReady
     onEntityHoverRef.current = onEntityHover
-  }, [onEntityClick, onGroundClick, onViewerReady, onBuildingsTilesetReady, onEntityHover])
+  }, [onEntityClick, onUrbanBuildingClick, onOsmBuildingsFeatureClick, onGroundClick, onViewerReady, onBuildingsTilesetReady, onEntityHover])
 
   useEffect(() => {
     onStatusChange?.(status)
@@ -157,6 +225,8 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetRe
         if (viewer.scene.moon) viewer.scene.moon.show = true
         viewer.scene.highDynamicRange = true
         viewer.scene.fog.enabled = true
+        // Translucent urban extrusions otherwise lose LEFT_CLICK to the globe (no depth write).
+        viewer.scene.pickTranslucentDepth = true
         viewer.targetFrameRate = 60
 
         viewer.camera.flyHome(0)
@@ -201,11 +271,24 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetRe
 
         const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
         handler.setInputAction((click: { position: import('cesium').Cartesian2 }) => {
-          const picked = viewer.scene.pick(click.position)
-          if (Cesium.defined(picked) && picked.id instanceof Cesium.Entity) {
-            const featureId = featureIdFromTerraEntityId(picked.id.id)
-            if (featureId) {
-              onEntityClickRef.current?.(featureId)
+          const pickedList = viewer.scene.drillPick(click.position, 12)
+          const picked = pickedList[0]
+
+          for (const candidate of pickedList) {
+            if (Cesium.defined(candidate) && candidate.id instanceof Cesium.Entity) {
+              const featureId = featureIdFromTerraEntityId(candidate.id.id)
+              if (featureId) {
+                onEntityClickRef.current?.(featureId)
+                return
+              }
+            }
+          }
+
+          for (const candidate of pickedList) {
+            if (!Cesium.defined(candidate)) continue
+            const building = resolveTerraUrbanBuildingFromPick(candidate.id)
+            if (building) {
+              onUrbanBuildingClickRef.current?.(building)
               return
             }
           }
@@ -214,11 +297,32 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetRe
             ? (viewer.scene.pickPosition(click.position) ?? viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid))
             : viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid)
 
+          if (Cesium.defined(picked) && typeof picked.getProperty === 'function' && cartesian) {
+            const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
+            const selection = selectionFromOsmBuildingsFeature(
+              picked,
+              Cesium.Math.toDegrees(cartographic.longitude),
+              Cesium.Math.toDegrees(cartographic.latitude),
+            )
+            if (selection) {
+              onOsmBuildingsFeatureClickRef.current?.(selection)
+              return
+            }
+          }
+
           if (!cartesian) {
             onGroundClickRef.current?.({ ok: false }) // click missed the globe entirely (e.g. clicked past the limb into space)
             return
           }
           const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
+          const urbanBuilding = findUrbanBuildingAt(
+            Cesium.Math.toDegrees(cartographic.longitude),
+            Cesium.Math.toDegrees(cartographic.latitude),
+          )
+          if (urbanBuilding) {
+            onUrbanBuildingClickRef.current?.(urbanBuilding)
+            return
+          }
           onGroundClickRef.current?.({
             ok: true,
             longitude: Cesium.Math.toDegrees(cartographic.longitude),
@@ -260,6 +364,7 @@ export function TerraGlobe({ onStatusChange, onViewerReady, onBuildingsTilesetRe
           imageryTier: 'nasa_gibs_with_osm_fallback',
           hasIonToken,
           hasOsmBuildings: osmBuildingsTileset !== null,
+          hasRealTerrain,
         })
       } catch (error) {
         if (cancelled) return

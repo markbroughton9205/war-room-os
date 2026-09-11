@@ -66,6 +66,10 @@ import { TerraTrafficLayer } from './TerraTrafficLayer'
 import { TERRA_TRAFFIC_LAYER_DEFS } from './terraTrafficLayerDefs'
 import { TerraCameraHoverCard } from './TerraCameraHoverCard'
 import { TerraLiveIntelPanel } from './TerraLiveIntelPanel'
+import { TerraUrbanDetail, type TerraUrbanDetailStatus } from './TerraUrbanDetail'
+import type { TerraUrbanSelection } from '@/lib/terra/urbanDetail/types'
+import { TERRA_TERRAIN_REQUIRES_PROVIDER } from '@/lib/terra/urbanDetail/types'
+import { urbanBuildingToSelection } from '@/lib/terra/urbanDetail/pick'
 import {
   composeTerraLiveIntel,
   listMaritimeLiveProviderStatuses,
@@ -96,6 +100,7 @@ type Selection =
   | { kind: 'miss' }
   | { kind: 'ground'; point: Extract<TerraClickPoint, { ok: true }> }
   | { kind: 'feature'; layerId: string; featureId: string }
+  | { kind: 'urban-building'; building: TerraUrbanSelection }
 
 function StatusLine({ status, aerialImageryActive }: { status: TerraGlobeStatus; aerialImageryActive: boolean }) {
   if (status.phase === 'loading') {
@@ -111,9 +116,9 @@ function StatusLine({ status, aerialImageryActive }: { status: TerraGlobeStatus;
         ? <span className="text-cyan-400"> · ion World Imagery close-range</span>
         : <span className="text-amber-400"> · high-res aerial unavailable{status.hasIonToken ? '' : ' (Cesium ion account token required)'}</span>}
       <span className="text-slate-500"> · OSM map-detail available</span>
-      {status.hasIonToken
+      {status.hasRealTerrain
         ? <span className="text-cyan-400"> · Terrain active</span>
-        : <span className="text-amber-400"> · Terrain fallback (Cesium ion account token required for premium terrain)</span>}
+        : <span className="text-amber-400"> · Terrain unavailable ({TERRA_TERRAIN_REQUIRES_PROVIDER})</span>}
       {status.hasIonToken && status.hasOsmBuildings
         ? <span className="text-cyan-400"> · 3D Buildings active</span>
         : <span className="text-amber-400"> · 3D Buildings unavailable{status.hasIonToken ? '' : ' (Cesium ion account token required)'}</span>}
@@ -698,15 +703,34 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   // `mapDetailMode` is the Commander's explicit escape hatch to the OSM raster base.
   const [aerialImageryAvailable, setAerialImageryAvailable] = useState(false)
   const [mapDetailMode, setMapDetailMode] = useState(false)
+  const [urbanDetailEnabled, setUrbanDetailEnabled] = useState(true)
+  const [urbanStatus, setUrbanStatus] = useState<TerraUrbanDetailStatus>({
+    enabled: true,
+    pending: false,
+    lod: null,
+    roads: 'UNAVAILABLE',
+    buildings: 'UNAVAILABLE',
+    labels: 'UNAVAILABLE',
+    terrain: 'UNAVAILABLE',
+    source: null,
+    buildingCount: 0,
+    roadCount: 0,
+    houseCount: 0,
+    fromCache: false,
+    truncated: false,
+    error: null,
+    loadMs: null,
+    networkFetches: 0,
+    rateLimited: false,
+  })
   const highResAerialUnavailable = terraHighResAerialUnavailable(aerialImageryAvailable, cameraScale.level)
+  const sovereignUrbanBuildingsActive = urbanStatus.buildings === 'LIVE' || urbanStatus.buildings === 'CACHED' || urbanStatus.buildings === 'DEGRADED' || urbanStatus.buildings === 'STALE'
+  const ionBuildingsFallbackActive = isLocalScale && urbanDetailEnabled && !urbanStatus.pending && !sovereignUrbanBuildingsActive && globeStatus.phase === 'ready' && globeStatus.hasOsmBuildings
 
-  // Cesium OSM Buildings' own internal LOD (maximumScreenSpaceError) already limits detail at any
-  // given screen size, but `.show` is still gated on our own scale signal so the tileset never
-  // requests a single tile while the Commander is at global/regional altitude.
   useEffect(() => {
     if (!buildingsTileset) return
-    applyTerraBuildingsVisibility(buildingsTileset, isLocalScale)
-  }, [buildingsTileset, isLocalScale])
+    applyTerraBuildingsVisibility(buildingsTileset, ionBuildingsFallbackActive)
+  }, [buildingsTileset, ionBuildingsFallbackActive])
 
   const [selectedWindowId, setSelectedWindowId] = useState('all')
   const selectedWindow: TerraTimeWindow = useMemo(() => TERRA_TIME_WINDOW_PRESETS.find(p => p.id === selectedWindowId)?.window ?? null, [selectedWindowId])
@@ -1166,6 +1190,16 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     }
   }, [activateCoordinate, layerFeatures, setSelectedEvent, flyToEventFeature])
 
+  const handleUrbanBuildingClick = useCallback((building: Parameters<typeof urbanBuildingToSelection>[0]) => {
+    setSelection({ kind: 'urban-building', building: urbanBuildingToSelection(building) })
+    setSelectedEvent(null)
+  }, [setSelectedEvent])
+
+  const handleOsmBuildingsFeatureClick = useCallback((building: TerraUrbanSelection) => {
+    setSelection({ kind: 'urban-building', building })
+    setSelectedEvent(null)
+  }, [setSelectedEvent])
+
   const handleResolvedLocation = useCallback((target: TerraLocationTarget) => {
     reverseRequestRef.current.controller?.abort()
     reverseRequestRef.current = { sequence: reverseRequestRef.current.sequence + 1, controller: null }
@@ -1214,13 +1248,21 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
 
   return (
     <div className={`relative w-full overflow-hidden bg-black text-white ${commandCenter ? 'h-full min-h-0' : 'h-screen'}`}>
-      <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onBuildingsTilesetReady={setBuildingsTileset} onEntityClick={handleEntityClick} onGroundClick={handleGroundClick} onEntityHover={handleEntityHover} />
+      <TerraGlobe onStatusChange={setGlobeStatus} onViewerReady={setViewer} onBuildingsTilesetReady={setBuildingsTileset} onEntityClick={handleEntityClick} onUrbanBuildingClick={handleUrbanBuildingClick} onOsmBuildingsFeatureClick={handleOsmBuildingsFeatureClick} onGroundClick={handleGroundClick} onEntityHover={handleEntityHover} />
       <TerraEarthImagery
         viewer={viewer}
         selectedTime={clock.time.currentTime}
         hasIonToken={globeStatus.phase === 'ready' && globeStatus.hasIonToken}
         mapDetailMode={mapDetailMode}
         onAerialImageryAvailabilityChange={setAerialImageryAvailable}
+      />
+      <TerraUrbanDetail
+        viewer={viewer}
+        scaleLevel={cameraScale.level}
+        rectangle={cameraViewRectangle.rectangle}
+        enabled={urbanDetailEnabled}
+        hasWorldTerrain={globeStatus.phase === 'ready' && globeStatus.hasRealTerrain}
+        onStatusChange={setUrbanStatus}
       />
       <TerraFeatureLayer layerId="nearby_landmarks" viewer={viewer} enabled={nearbyLandmarksQuery !== null} features={nearbyLandmarks.features} selectedId={nearbySelectedId} cluster />
       {/* Live-aviation phase: rendered unconditionally in both presentations (mission section 15
@@ -1345,7 +1387,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           />
           <TerraProviderCapabilityDock
             localDetailActive={isLocalScale}
-            buildingsActive={globeStatus.phase === 'ready' && globeStatus.hasOsmBuildings}
+            buildingsActive={sovereignUrbanBuildingsActive || ionBuildingsFallbackActive}
             aerialImageryActive={aerialImageryAvailable}
             mapDetailMode={mapDetailMode}
             onToggleMapDetail={() => setMapDetailMode(v => !v)}
@@ -1381,18 +1423,44 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
               <span>{aerialImageryAvailable ? 'active · close-range' : 'unavailable'}</span>
             </li>
             <li className="flex items-center justify-between">
-              <span>Map detail (OSM)</span>
+              <span>Urban geography</span>
+              <button type="button" onClick={() => setUrbanDetailEnabled(v => !v)} className={urbanDetailEnabled ? 'font-bold text-cyan-300' : 'text-slate-400 hover:text-slate-200'}>
+                {urbanDetailEnabled ? 'auto' : 'off'}
+              </button>
+            </li>
+            <li className="flex items-center justify-between">
+              <span>Map detail (OSM raster)</span>
               <button type="button" onClick={() => setMapDetailMode(v => !v)} className={mapDetailMode ? 'font-bold text-cyan-300' : 'text-slate-400 hover:text-slate-200'}>
                 {mapDetailMode ? 'on' : 'off'}
               </button>
             </li>
-            <li className={`flex items-center justify-between ${globeStatus.phase === 'ready' && globeStatus.hasIonToken ? '' : 'opacity-40'}`}>
-              <span>Terrain (Cesium World Terrain)</span>
-              <span>{globeStatus.phase === 'ready' && globeStatus.hasIonToken ? 'active' : 'fallback'}</span>
+            <li className={`flex items-center justify-between ${globeStatus.phase === 'ready' && globeStatus.hasRealTerrain ? '' : 'opacity-40'}`}>
+              <span>Terrain</span>
+              <span>{globeStatus.phase === 'ready' && globeStatus.hasRealTerrain ? 'active' : 'unavailable'}</span>
             </li>
             <li className={`flex items-center justify-between ${globeStatus.phase === 'ready' && globeStatus.hasOsmBuildings ? '' : 'opacity-40'}`}>
-              <span>3D Buildings (Cesium OSM Buildings)</span>
-              <span>{globeStatus.phase === 'ready' && globeStatus.hasOsmBuildings ? (isLocalScale ? 'active' : 'ready · zoom in') : 'unavailable'}</span>
+              <span>3D Buildings (Cesium OSM Buildings fallback)</span>
+              <span>{ionBuildingsFallbackActive ? 'active' : globeStatus.phase === 'ready' && globeStatus.hasOsmBuildings ? 'standby' : 'unavailable'}</span>
+            </li>
+            <li>
+              <details className="rounded border border-white/10 bg-black/40 p-2 text-[10px] text-slate-500">
+              <summary className="cursor-pointer text-[9px] font-bold uppercase tracking-widest text-slate-400">Urban diagnostics</summary>
+              <ul className="mt-1 space-y-0.5 font-mono">
+                <li>terrain {urbanStatus.terrain}{urbanStatus.terrain === 'UNAVAILABLE' ? ` · ${TERRA_TERRAIN_REQUIRES_PROVIDER}` : ''}</li>
+                <li>roads {urbanStatus.roads} · {urbanStatus.roadCount}</li>
+                <li>buildings {urbanStatus.buildings} · {urbanStatus.buildingCount}</li>
+                <li>houses {urbanStatus.houseCount}</li>
+                <li>labels {urbanStatus.labels}</li>
+                <li>lod {urbanStatus.lod ?? 'off'}</li>
+                <li>network fetches {urbanStatus.networkFetches}</li>
+                {urbanStatus.source ? <li>source {urbanStatus.source}</li> : null}
+                {urbanStatus.loadMs !== null ? <li>load {urbanStatus.loadMs}ms</li> : null}
+                {urbanStatus.fromCache ? <li>cache hit</li> : null}
+                {urbanStatus.rateLimited ? <li>rate limited</li> : null}
+                {urbanStatus.truncated ? <li>truncated</li> : null}
+                {urbanStatus.error ? <li className="text-amber-400">{urbanStatus.error}</li> : null}
+              </ul>
+            </details>
             </li>
             <li className={`flex items-center justify-between ${nearbyLandmarksQuery !== null ? '' : 'opacity-40'}`}>
               <span>Nearby Landmarks & POIs</span>
@@ -1570,6 +1638,24 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           </div>
         </div>
 
+        {selection.kind === 'urban-building' && (
+          <div className="pointer-events-auto rounded border border-amber-400/30 bg-black/70 p-3 backdrop-blur-sm">
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80">Urban building</p>
+              <button type="button" onClick={() => setSelection({ kind: 'none' })} className="text-[10px] text-slate-500 hover:text-slate-300">
+                dismiss
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-200">{selection.building.name ?? selection.building.buildingType ?? 'building'}</p>
+            <ul className="mt-1 space-y-0.5 font-mono text-[10px] text-slate-400">
+              <li>osm {selection.building.osmType} {selection.building.osmId}</li>
+              {selection.building.address ? <li>addr {selection.building.address}</li> : null}
+              {selection.building.levels !== null ? <li>levels {selection.building.levels}</li> : null}
+              {selection.building.heightMeters !== null ? <li>height {selection.building.heightMeters} m · {selection.building.heightSource ?? 'unknown'}</li> : null}
+              <li>{selection.building.latitude.toFixed(5)}, {selection.building.longitude.toFixed(5)}</li>
+            </ul>
+          </div>
+        )}
         {selection.kind === 'ground' && (
           <div className="pointer-events-auto rounded border border-cyan-400/30 bg-black/70 p-3 backdrop-blur-sm">
             <div className="mb-1 flex items-center justify-between">
