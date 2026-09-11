@@ -28,6 +28,7 @@ function isPublicPath(pathname: string): boolean {
 // no session cookie to present. Same low-sensitivity category as
 // PUBLIC_API_PREFIXES's /api/debug/* below, not the secret-or-session pattern.
 const PUBLIC_API_PATHS = new Set([
+  '/api/health',
   '/api/signals/rss/poll',
   '/api/grok/chat',
   '/api/payments/deposits',

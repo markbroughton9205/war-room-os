@@ -8,6 +8,7 @@
 # an existing listener on port 3000 before doing anything, so calling it when War Room is already
 # up is a documented no-op (see that script). This script adds:
 #   - a real health check (PROCESS_RUNNING, not just "did something answer on the port")
+#   - hung-origin / next-dev-on-production-port detection (2026-09-11 Cloudflare 524 incident)
 #   - bounded backoff so a persistently-crashing app doesn't spin in a tight restart loop forever
 #   - a durable, append-only log of every restart decision and why it was made
 #
@@ -62,6 +63,54 @@ function Save-WatchdogState {
     ConvertTo-Json | Set-Content -LiteralPath $stateLogPath
 }
 
+function Stop-PortOccupants {
+  param([int]$Port = 3000)
+  # Only terminate node.exe processes bound to the production port (or their next-dev parents).
+  # Never touches cloudflared / ollama.
+  $pids = @()
+  try {
+    $lines = netstat -ano | Select-String -Pattern "LISTENING" | Select-String -Pattern ":$Port\s"
+    foreach ($line in $lines) {
+      $parts = ($line.ToString() -split '\s+') | Where-Object { $_ }
+      if ($parts.Count -ge 5) {
+        $pidValue = [int]$parts[-1]
+        if ($pidValue -gt 0) { $pids += $pidValue }
+      }
+    }
+  } catch { }
+
+  $toStop = New-Object System.Collections.Generic.HashSet[int]
+  foreach ($pidValue in ($pids | Select-Object -Unique)) {
+    [void]$toStop.Add($pidValue)
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction SilentlyContinue
+    while ($proc -and $proc.ParentProcessId -and $proc.Name -eq 'node.exe') {
+      $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.ParentProcessId)" -ErrorAction SilentlyContinue
+      if (-not $parent -or $parent.Name -ne 'node.exe') { break }
+      if ($parent.CommandLine -and (
+          $parent.CommandLine -match '\bnext\s+dev\b' -or
+          $parent.CommandLine -match 'pnpm\.mjs run\s+dev' -or
+          $parent.CommandLine -match 'next\s+start' -or
+          $parent.CommandLine -match 'start-server\.js'
+        )) {
+        [void]$toStop.Add([int]$parent.ProcessId)
+        $proc = $parent
+        continue
+      }
+      break
+    }
+  }
+
+  foreach ($pidValue in $toStop) {
+    try {
+      Write-WatchdogLog "STOPPING hung/wrong occupant pid=$pidValue on port $Port"
+      Stop-Process -Id $pidValue -Force -ErrorAction Stop
+    } catch {
+      Write-WatchdogLog "WARN: could not stop pid=$pidValue ($($_.Exception.Message))"
+    }
+  }
+  Start-Sleep -Seconds 2
+}
+
 $state = Get-WatchdogState
 if (((Get-Date) - $state.windowStartedAt).TotalMinutes -gt $windowMinutes) {
   $state = @{ restartCount = 0; windowStartedAt = (Get-Date) }
@@ -77,10 +126,12 @@ $health = & powershell -NoProfile -ExecutionPolicy Bypass -File $healthScriptPat
 # an operator reading this log can tell "War Room is up but Ollama isn't warm yet" apart from
 # "War Room itself is down," which a bare port check could not previously distinguish.
 if (-not $health.ollamaReachable) {
-  Write-WatchdogLog "NOTE: Ollama not reachable right now (War Room process/port otherwise healthy=$($health.processRunning -and $health.portListening)). Local Council routing will fall back per COUNCIL_ROUTING_MODE until Ollama comes up on its own Startup entry."
+  Write-WatchdogLog "NOTE: Ollama not reachable right now (War Room process/port otherwise healthy=$($health.processRunning -and $health.portListening -and $health.applicationResponding)). Local Council routing will fall back per COUNCIL_ROUTING_MODE until Ollama comes up on its own Startup entry."
 }
 
-if ($health.processRunning -and $health.portListening) {
+$healthy = $health.processRunning -and $health.portListening -and $health.applicationResponding -and (-not $health.devOccupyingPort) -and (-not $health.hungOrigin)
+
+if ($healthy) {
   # Healthy. Reset the backoff window on a confirmed-healthy observation so a single blip a long
   # time ago doesn't count against a currently-stable process, but don't log anything - this task
   # runs every 2 minutes and a "still fine" heartbeat every 2 minutes forever is log noise, not
@@ -91,13 +142,17 @@ if ($health.processRunning -and $health.portListening) {
 }
 
 if ($state.restartCount -ge $maxRestartsPerWindow) {
-  Write-WatchdogLog "BACKOFF: War Room appears down (processRunning=$($health.processRunning) portListening=$($health.portListening)) but $($state.restartCount) restarts already attempted in the last $windowMinutes min. Skipping this cycle rather than restart-looping. Manual investigation needed."
+  Write-WatchdogLog "BACKOFF: War Room appears down (processRunning=$($health.processRunning) portListening=$($health.portListening) applicationResponding=$($health.applicationResponding) hungOrigin=$($health.hungOrigin) devOccupyingPort=$($health.devOccupyingPort)) but $($state.restartCount) restarts already attempted in the last $windowMinutes min. Skipping this cycle rather than restart-looping. Manual investigation needed."
   exit 1
 }
 
 $state.restartCount += 1
 Save-WatchdogState -State $state
-Write-WatchdogLog "RESTARTING: War Room down (processRunning=$($health.processRunning) portListening=$($health.portListening) applicationResponding=$($health.applicationResponding)). Attempt $($state.restartCount)/$maxRestartsPerWindow in this $windowMinutes-min window. Invoking Start-WarRoom.ps1."
+Write-WatchdogLog "RESTARTING: War Room unhealthy (processRunning=$($health.processRunning) portListening=$($health.portListening) applicationResponding=$($health.applicationResponding) hungOrigin=$($health.hungOrigin) devOccupyingPort=$($health.devOccupyingPort)). Attempt $($state.restartCount)/$maxRestartsPerWindow in this $windowMinutes-min window."
+
+if ($health.hungOrigin -or $health.devOccupyingPort -or ($health.portListening -and -not $health.processRunning) -or ($health.portListening -and -not $health.applicationResponding)) {
+  Stop-PortOccupants -Port 3000
+}
 
 try {
   # Start-WarRoom.ps1 blocks for the life of the `next start` process (it's the actual server
