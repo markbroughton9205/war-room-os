@@ -34,6 +34,7 @@ import {
   unregisterActiveProcess,
 } from './processRegistry'
 import type { NativeValidationOperation, NativeValidationResult } from './types'
+import { assertShellArgvGoverned } from '@/lib/permissions/equivalentActionGuard'
 
 const execFileAsync = promisify(execFile)
 const MAX_BUFFER = 10 * 1024 * 1024
@@ -208,6 +209,20 @@ async function resolveOperationArgv(
   }
 }
 
+/** #22 Phase 1 — reject argv that is an equivalent of a forbidden dangerous action (e.g. git push). */
+export function assertResolvedArgvNotDangerousEquivalent(cmd: string, args: readonly string[]): string | null {
+  const gate = assertShellArgvGoverned({
+    cmd,
+    args,
+    mode: 'commander',
+    safetyLock: true,
+    body: {},
+    commanderSessionOk: false,
+  })
+  if (gate.outcome !== 'ALLOW') return gate.reason
+  return null
+}
+
 function toResult(op: NativeValidationOperation, captured: { stdout: string; stderr: string; exitCode: number | null }, startedAt: number): NativeValidationResult {
   return {
     operation: op,
@@ -228,6 +243,10 @@ export async function runValidationOperation(op: NativeValidationOperation): Pro
   if (!resolved.ok) {
     return toResult(op, { stdout: '', stderr: resolved.error, exitCode: 1 }, startedAt)
   }
+  const bypass = assertResolvedArgvNotDangerousEquivalent(resolved.argv.cmd, resolved.argv.args)
+  if (bypass) {
+    return toResult(op, { stdout: '', stderr: bypass, exitCode: 1 }, startedAt)
+  }
   const captured = await runExecFile(resolved.argv.cmd, resolved.argv.args, { cwd: repoRoot, timeoutMs: resolved.argv.timeoutMs })
   return toResult(op, captured, startedAt)
 }
@@ -243,6 +262,10 @@ export async function runValidationOperationStreaming(
   const resolved = await resolveOperationArgv(op)
   if (!resolved.ok) {
     return toResult(op, { stdout: '', stderr: resolved.error, exitCode: 1 }, startedAt)
+  }
+  const bypass = assertResolvedArgvNotDangerousEquivalent(resolved.argv.cmd, resolved.argv.args)
+  if (bypass) {
+    return toResult(op, { stdout: '', stderr: bypass, exitCode: 1 }, startedAt)
   }
   streaming.onOutput?.({ operationId: op.id, stream: 'system', text: `[run] ${resolved.argv.cmd} ${resolved.argv.args.join(' ')}` })
   if (streaming.repairId) appendCommandOutput(streaming.repairId, op.id, 'system', `[run] ${resolved.argv.cmd} ${resolved.argv.args.join(' ')}`)

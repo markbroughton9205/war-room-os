@@ -1,11 +1,24 @@
 import { isStandingPermissionMode, type StandingPermissionMode } from '@/lib/permissions/standingPermissions'
-import { insertWarRoomAuditLog } from '@/lib/war-room/auditLog'
+import { evaluateGovernedAction } from '@/lib/permissions/policyDecision'
+import { assertLiveActionsAllowed } from '@/lib/security/actionRoutePolicy'
+import { requireCommanderSession } from '@/lib/security/commanderSession'
+import { buildGovernedAuditMetadata, insertGovernedAuditLog } from '@/lib/war-room/governedAudit'
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { upsertWarRoomPermissionsState } from '@/lib/war-room/permissionsState'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * #22 Phase 1 — policy_change is COMMANDER_ONLY.
+ * Session cookie alone is insufficient; Commander identity + live-actions gate required.
+ */
 export async function POST(req: Request) {
+  const liveGate = assertLiveActionsAllowed()
+  if (liveGate) return liveGate
+
+  const session = await requireCommanderSession('Standing permissions update')
+  if (!session.ok) return session.response
+
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     const headers = new Headers()
@@ -19,11 +32,44 @@ export async function POST(req: Request) {
     )
   }
 
-  let body: { mode?: string; safetyLock?: boolean }
+  let body: { mode?: string; safetyLock?: boolean; approval_granted?: boolean }
   try {
     body = await req.json()
   } catch {
     return jsonWithPersistence({ ok: false, error: 'Invalid JSON body.' }, true, { status: 400 })
+  }
+
+  const decision = evaluateGovernedAction({
+    mode: 'commander',
+    safetyLock: true,
+    actionKind: 'policy_change',
+    body: body as Record<string, unknown>,
+    commanderSessionOk: true,
+    requestingActorId: session.userId,
+    approvingActorId: 'commander',
+    technicalReach: 'WRITE_BOUNDED',
+  })
+
+  if (decision.outcome !== 'ALLOW') {
+    await insertGovernedAuditLog(sup.client, {
+      actor: 'user',
+      category: 'permissions',
+      message: 'Standing permissions update denied by governance.',
+      metadata: buildGovernedAuditMetadata({
+        decision,
+        requestedBy: session.userId,
+        actorAgent: 'commander',
+        tool: 'api/permissions/update',
+        target: 'war_room_permissions_state',
+        ownerUserId: session.userId,
+        approvedBy: 'commander',
+      }),
+    })
+    return jsonWithPersistence(
+      { ok: false, error: decision.reason, reasonCode: decision.reasonCode, policyDecision: decision.outcome },
+      true,
+      { status: decision.httpStatus },
+    )
   }
 
   const patch: { mode?: StandingPermissionMode; safetyLock?: boolean } = {}
@@ -46,11 +92,22 @@ export async function POST(req: Request) {
 
   const next = await upsertWarRoomPermissionsState(sup.client, patch)
 
-  await insertWarRoomAuditLog(sup.client, {
+  await insertGovernedAuditLog(sup.client, {
     actor: 'user',
     category: 'permissions',
-    message: 'Standing permissions updated.',
-    metadata: {
+    message: 'Standing permissions updated under Commander governance.',
+    metadata: buildGovernedAuditMetadata({
+      decision,
+      requestedBy: session.userId,
+      actorAgent: 'commander',
+      tool: 'api/permissions/update',
+      target: 'war_room_permissions_state',
+      ownerUserId: session.userId,
+      approvedBy: 'commander',
+      approvedAt: new Date().toISOString(),
+      executionResult: 'executed',
+    }),
+    extra: {
       mode: next.mode,
       safetyLock: next.safetyLock,
       patch,

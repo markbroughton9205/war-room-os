@@ -1,10 +1,64 @@
 import { NextResponse } from 'next/server'
 import { orchestrateIncomeWorkerScout } from '@/lib/income-workers/scoutOrchestrator'
+import { assertAutoOrApproval } from '@/lib/permissions/policy'
+import { evaluateGovernedAction } from '@/lib/permissions/policyDecision'
+import { buildGovernedAuditMetadata, insertGovernedAuditLog } from '@/lib/war-room/governedAudit'
+import { fetchWarRoomPermissionsState } from '@/lib/war-room/permissionsState'
+import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 
 export const runtime = 'nodejs'
 
-export async function POST() {
+/**
+ * #22 Phase 1 — income scout external federation is internet_research-gated.
+ * Standing auto-allow applies in operator/commander modes; manual requires approval_granted.
+ */
+export async function POST(req: Request) {
   const started = Date.now()
+  const sup = tryWarRoomSupabase()
+
+  let body: Record<string, unknown> = {}
+  try {
+    const raw = await req.json()
+    if (raw !== null && typeof raw === 'object') body = raw as Record<string, unknown>
+  } catch {
+    body = {}
+  }
+
+  const state = await fetchWarRoomPermissionsState(sup.ok ? sup.client : null)
+  const gate = assertAutoOrApproval({
+    mode: state.mode,
+    safetyLock: state.safetyLock,
+    actionKind: 'internet_research',
+    body,
+  })
+  if (!gate.ok) {
+    const decision = evaluateGovernedAction({
+      mode: state.mode,
+      safetyLock: state.safetyLock,
+      actionKind: 'internet_research',
+      body,
+    })
+    if (sup.ok) {
+      await insertGovernedAuditLog(sup.client, {
+        actor: 'user',
+        category: 'action',
+        message: 'Income scout blocked by standing policy.',
+        metadata: buildGovernedAuditMetadata({
+          decision,
+          tool: 'api/income/scout',
+          target: 'opportunity-scout',
+        }),
+      })
+    }
+    return NextResponse.json({
+      tool: 'opportunity-scout',
+      status: 'denied',
+      message: gate.error,
+      reasonCode: decision.reasonCode,
+      policyDecision: decision.outcome,
+    }, { status: gate.status })
+  }
+
   try {
     const result = await orchestrateIncomeWorkerScout('opportunity-scout')
     const providerUsed = result.providerUsed
@@ -48,6 +102,10 @@ export async function POST() {
       rejected: result.rejected,
       executionState: result.executionState,
       diagnostics: result.diagnostics,
+      governance: {
+        actionKind: 'internet_research',
+        viaAutoPolicy: gate.viaAutoPolicy,
+      },
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Opportunity Scout federation scan failed.'

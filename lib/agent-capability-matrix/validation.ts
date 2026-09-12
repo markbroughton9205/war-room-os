@@ -82,7 +82,7 @@ export function runAgentCapabilityMatrixValidation(): CaseResult[] {
       r.action === 'DEPLOY' &&
       r.agentRole !== 'COMMANDER' &&
       r.currentVsTarget === 'CURRENT_RUNTIME' &&
-      (r.policyAuthority === 'BOUNDED_ALLOWED' || r.policyAuthority === 'READ_ALLOWED' || r.policyAuthority === 'POLICY_AUTO_ALLOWED' || r.approvalRequirement === 'NO_APPROVAL' || r.approvalRequirement === 'POLICY_AUTO_ALLOWED'),
+      (r.policyAuthority === 'BOUNDED_ALLOWED' || r.policyAuthority === 'READ_ALLOWED' || r.approvalRequirement === 'NO_APPROVAL' || r.approvalRequirement === 'POLICY_AUTO_ALLOWED'),
   )
   // Allow discover-only status reads with COMMANDER_ONLY / DENIED / STRUCTURALLY_FORBIDDEN — filter true grants
   const badDeploy = implicitDeploy.filter(r => r.policyAuthority !== 'DENIED' && r.policyAuthority !== 'COMMANDER_ONLY' && r.policyAuthority !== 'NOT_APPLICABLE')

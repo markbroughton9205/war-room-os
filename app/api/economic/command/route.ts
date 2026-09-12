@@ -13,6 +13,10 @@ import { createTelemetryEvent } from '@/lib/economic/telemetry'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
 import { buildDecreeFallbackCandidate, type NormalizedScoutCandidate } from '@/lib/economic/scout/normalizeScoutResults'
 import type { EconomicFamily, EconomicOperationalDomainId, EconomicOpportunity } from '@/lib/economic/types'
+import { assertAutoOrApproval } from '@/lib/permissions/policy'
+import { fetchWarRoomPermissionsState } from '@/lib/war-room/permissionsState'
+import { buildGovernedAuditMetadata, insertGovernedAuditLog } from '@/lib/war-room/governedAudit'
+import { evaluateGovernedAction } from '@/lib/permissions/policyDecision'
 
 export const dynamic = 'force-dynamic'
 
@@ -211,6 +215,34 @@ export async function POST(req: Request) {
     body = await req.json()
   } catch {
     return jsonWithPersistence({ error: 'Invalid JSON body.' }, true, { status: 400 })
+  }
+
+  const standingBody = (body !== null && typeof body === 'object' ? body : {}) as Record<string, unknown>
+  const state = await fetchWarRoomPermissionsState(sup.client)
+  const gate = assertAutoOrApproval({
+    mode: state.mode,
+    safetyLock: state.safetyLock,
+    actionKind: 'internet_research',
+    body: standingBody,
+  })
+  if (!gate.ok) {
+    const decision = evaluateGovernedAction({
+      mode: state.mode,
+      safetyLock: state.safetyLock,
+      actionKind: 'internet_research',
+      body: standingBody,
+    })
+    await insertGovernedAuditLog(sup.client, {
+      actor: 'user',
+      category: 'action',
+      message: 'Economic command blocked by standing policy.',
+      metadata: buildGovernedAuditMetadata({
+        decision,
+        tool: 'api/economic/command',
+        target: 'economic_scout',
+      }),
+    })
+    return jsonWithPersistence({ error: gate.error, reasonCode: decision.reasonCode }, true, { status: gate.status })
   }
 
   const payload = body as {

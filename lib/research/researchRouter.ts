@@ -23,6 +23,7 @@ import {
   secondaryRssCategoriesForRegion,
 } from '@/lib/research/sourceTerritories'
 import type { ResearchProviderId } from '@/lib/research-engine/core/types'
+import { evaluateCouncilAutoResearch } from '@/lib/permissions/councilAutoResearchAuthority'
 
 export type { PublicNewsItem } from '@/lib/research/publicRssFeeds'
 export type { NwsAlertsLeg } from '@/lib/research/nwsAlerts'
@@ -40,6 +41,17 @@ export type LiveResearchRouterInput = {
   skipGenericRssUnlessFallback?: boolean
   /** Search retrieval path: skip Grok framing so the query stays retrieval-heavy. */
   retrievalOnly?: boolean
+  /**
+   * #22 Phase 1 Gate B — Commander session context for SESSION_BOUNDED auto-research.
+   * Defaults to true for existing Council/ASTRA execute callers. Set false for unauthenticated probes.
+   */
+  commanderSessionContext?: boolean
+  /** Must remain false for auto-research — crawl expansion uses CrawlApproval. */
+  crawlExpansion?: boolean
+  /** Must remain false — external mutation is not auto-research. */
+  externalMutation?: boolean
+  /** Must remain false — financial spend is not auto-research. */
+  financialSpend?: boolean
 }
 
 export type RegionalRoutingMeta = {
@@ -280,6 +292,19 @@ function buildSearchQuery(decreeText: string): string {
  * Does not call Gemini (secondary synthesis lives in `researchEvidence.ts`).
  */
 export async function runLiveResearchRouter(input: LiveResearchRouterInput): Promise<LiveResearchRouterResult> {
+  const researchGate = evaluateCouncilAutoResearch({
+    capability: 'SEARCH',
+    commanderSessionContext: input.commanderSessionContext !== false,
+    crawlExpansion: input.crawlExpansion === true,
+    externalMutation: input.externalMutation === true,
+    financialSpend: input.financialSpend === true,
+  })
+  if (researchGate.outcome !== 'ALLOW') {
+    throw new Error(
+      `Council auto-research denied (${researchGate.reasonCode}): ${researchGate.reason}`,
+    )
+  }
+
   void input.budgetMs
   void input.skipGenericRssUnlessFallback
   const generatedAt = new Date().toISOString()

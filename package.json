@@ -66,6 +66,7 @@
     "validate:terra-council-bridge": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/terra/councilHandoff.validation.ts",
     "validate:astra-live-mission": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/astra/liveMission.validation.ts",
     "validate:agent-capability-matrix": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agent-capability-matrix/validation.ts",
+    "validate:ascension-phase1": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/permissions/ascensionPhase1.validation.ts",
     "validate:astra-live-mission:live": "node --env-file=.env.local --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/astra/liveMission.live-acceptance.ts",
     "validate:phase46-regressions": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase46-regressions.mjs",
     "validate:phase48-c4d": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-phase48-c4d-validation.mjs",
