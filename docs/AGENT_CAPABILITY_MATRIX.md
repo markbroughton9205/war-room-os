@@ -9,7 +9,7 @@
 
 **Canonical code:** `lib/agent-capability-matrix/`
 **Validate:** `node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agent-capability-matrix/validation.ts`
-(also registered as `pnpm run validate:agent-capability-matrix` — if pnpm deps-status fails on `ERR_PNPM_IGNORED_BUILDS`, use the node command; **62/62 PASS** on #21 closeout)
+(also registered as `pnpm run validate:agent-capability-matrix` — if pnpm deps-status fails on `ERR_PNPM_IGNORED_BUILDS`, use the node command; **63/63 PASS** on #21 closeout)
 
 ---
 
