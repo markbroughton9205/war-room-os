@@ -133,6 +133,18 @@ export type SovereignRuntimeTruth = {
   WORLD_LEARNING_AGENT_OPERATIONAL: boolean
   WORLD_LEARNING_CORPUS_HANDOFF: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
   AUTONOMOUS_CORPUS_PERSISTENCE: false
+  CROSS_AGENT_INTEGRATION: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  RESEARCH_TO_WORLD_LEARNING: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  WORLD_LEARNING_TO_DATA_CORPUS: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  DURABLE_CORPUS_CANDIDATE_HANDOFF: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  TERRA_TO_NAVIGATION: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  NAVIGATION_TO_COUNCIL: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  OPERATIONS_TO_SECURITY: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  SECURITY_TO_ENGINEERING_RECOMMENDATION: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  COUNCIL_TO_VALIDATOR: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  ASTRA_BOUNDED_MULTI_AGENT_ORCHESTRATION: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  ASTRA_PHASE58A: 'NOT_APPLIED'
+  PRODUCTION_CORPUS_PERSISTENCE: false
   MODEL_TRAINING: 'NOT_IMPLEMENTED'
   ASCENSION_AUTONOMY: 'OFF' | 'ON'
   ROADMAP_22: 'ACTIVE'
@@ -192,6 +204,7 @@ export const LOCAL_DATA_OWNERSHIP_INVENTORY: readonly {
   { dataset: 'search_corpus_index', class: 'LOCAL', notes: 'Sovereign Search local index files when present.' },
   { dataset: 'terra_cache', class: 'HYBRID', notes: 'Live providers remote; fixtures/cache local.' },
   { dataset: 'astra_fallback', class: 'HYBRID', notes: 'Filesystem fallback + Supabase when configured; phase58a NOT APPLIED.' },
+  { dataset: 'corpus_candidate_handoffs', class: 'LOCAL', notes: 'Phase 14 durable candidate-handoff SQLite under AppData. Not production corpus. Not WR-CORPUS.' },
   { dataset: 'audit_records', class: 'HYBRID', notes: 'Governed audit may persist remotely when Supabase present.' },
   { dataset: 'local_model_state', class: 'LOCAL', notes: 'Ollama process + models on host.' },
   { dataset: 'desktop_local_session', class: 'LOCAL', notes: 'Phase 11C local Commander session (cookie/bearer); distinct from remote Supabase session.' },
@@ -204,6 +217,8 @@ export const COMMANDER_CONTROL_SURFACE_SLOTS = Object.freeze([
   'Provider availability',
   'Ascension status',
   'Agent enable/disable',
+  'Workflow / handoff status',
+  'Corpus-candidate review',
   'Audit',
   'Approvals',
 ] as const)

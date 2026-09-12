@@ -60,6 +60,8 @@ export type RunBoundedSecurityRedTeamInput = {
   conversationOwnerUserId?: string | null
   enforceOwnership?: boolean
   researchHandoff?: { summary?: string } | null
+  /** Operations observation — advisory only. Cannot grant shell or remediation. */
+  operationsHandoff?: { summary?: string; grantShell?: boolean } | null
   worktree?: string | null
   supabase?: WarRoomSupabase | null
   nowIso?: string
@@ -340,6 +342,19 @@ export async function runBoundedSecurityRedTeamAgent(
     limitations.push(
       `Research handoff noted (advisory): ${input.researchHandoff.summary.slice(0, 160)}`,
     )
+  }
+
+  if (input.operationsHandoff?.summary) {
+    limitations.push(
+      `Operations handoff noted (observation-only): ${input.operationsHandoff.summary.slice(0, 160)}`,
+    )
+  }
+  if (input.operationsHandoff?.grantShell) {
+    denials.push({
+      capability_or_action: 'SHELL',
+      reason_code: 'AUTHORITY_DENIED',
+      reason: 'Operations handoff cannot grant Security a shell. Evaluation only.',
+    })
   }
 
   const scope = createSecurityRedTeamScope({

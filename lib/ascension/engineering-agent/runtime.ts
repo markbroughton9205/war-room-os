@@ -63,6 +63,14 @@ export type RunBoundedEngineeringInput = {
   conversationId?: string | null
   /** Optional Research Agent result — informs only; never expands authority. */
   researchHandoff?: { summary?: string; finding_refs?: string[] } | null
+  /** Security recommendation — advisory only. Cannot grant commit/push/deploy. */
+  securityHandoff?: {
+    summary?: string
+    finding_refs?: string[]
+    grantCommit?: boolean
+    grantPush?: boolean
+    grantDeploy?: boolean
+  } | null
   /** Optional Terra context — read-only; never authorizes mutation. */
   terraContextProvided?: boolean
   /** Council/ASTRA attempted scope expansion — denied. */
@@ -388,6 +396,24 @@ export async function runBoundedEngineeringAgent(
     )
     if (input.researchHandoff.summary) {
       warnings.push(`Research handoff noted: ${input.researchHandoff.summary.slice(0, 200)}`)
+    }
+  }
+
+  if (input.securityHandoff) {
+    limitations.push(
+      'Security Red Team handoff is advisory only — SECURITY FINDING != ENGINEERING AUTHORIZATION.',
+    )
+    if (input.securityHandoff.summary) {
+      warnings.push(`Security handoff noted: ${input.securityHandoff.summary.slice(0, 200)}`)
+    }
+    if (input.securityHandoff.grantCommit) {
+      denials.push(denialFromDecision('GIT_COMMIT', denyEngineeringAgentAction('GIT_COMMIT')))
+    }
+    if (input.securityHandoff.grantPush) {
+      denials.push(denialFromDecision('GIT_PUSH', denyEngineeringAgentAction('GIT_PUSH')))
+    }
+    if (input.securityHandoff.grantDeploy) {
+      denials.push(denialFromDecision('PRODUCTION_DEPLOY', denyEngineeringAgentAction('PRODUCTION_DEPLOY')))
     }
   }
 

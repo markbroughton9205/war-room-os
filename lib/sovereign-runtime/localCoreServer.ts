@@ -27,6 +27,7 @@ import { discoverLocalModels, runLocalModelInference } from './local-model'
 import { tryHandleLocalOwnershipHttp } from './local-ownership/httpCore'
 import { tryHandleNavigationAgentHttp } from '@/lib/ascension/navigation-agent/httpCore'
 import { tryHandleWorldLearningAgentHttp } from '@/lib/ascension/world-learning-agent/httpCore'
+import { tryHandleCrossAgentIntegrationHttp } from '@/lib/ascension/integration/httpCore'
 import {
   LOCAL_SESSION_COOKIE,
   extractBearerOrCookieToken,
@@ -165,6 +166,14 @@ export async function startLocalCoreServer(opts: LocalCoreServerOptions = {}): P
 
     if (
       tryHandleWorldLearningAgentHttp(req, res, url, {
+        dataDirOverride: opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
+      })
+    ) {
+      return
+    }
+
+    if (
+      tryHandleCrossAgentIntegrationHttp(req, res, url, {
         dataDirOverride: opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
       })
     ) {
