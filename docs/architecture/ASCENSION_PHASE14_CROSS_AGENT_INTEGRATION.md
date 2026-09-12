@@ -5,8 +5,8 @@
 **Ascension autonomy:** OFF  
 **ASTRA phase58a:** NOT_APPLIED  
 **Production corpus persistence:** FALSE  
-**#22:** ACTIVE  
-**#23:** NOT_STARTED  
+**#22:** CLOSED  
+**#23:** PENDING / NOT_STARTED  
 
 ## Architecture (preserved)
 

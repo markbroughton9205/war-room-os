@@ -524,7 +524,7 @@ export async function runWorldLearningAgentPhase13Validation(): Promise<{
     ),
   )
   results.push(check('102_phone_not_implemented', truth.PHONE_APP === 'NOT_IMPLEMENTED' && !fs.existsSync(path.join(repoRoot, 'apps', 'phone')), truth.PHONE_APP))
-  results.push(check('103_22_active', truth.ROADMAP_22 === 'ACTIVE', truth.ROADMAP_22))
+  results.push(check('103_22_closed', truth.ROADMAP_22 === 'CLOSED', truth.ROADMAP_22))
   results.push(check('104_23_not_started', truth.ROADMAP_23 === 'NOT_STARTED' && ROADMAP_23_STATUS === 'NOT_STARTED' && MODEL_TRAINING_STATUS === 'NOT_IMPLEMENTED', truth.ROADMAP_23))
 
   results.push(

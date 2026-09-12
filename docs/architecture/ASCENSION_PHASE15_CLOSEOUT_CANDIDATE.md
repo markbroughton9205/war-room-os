@@ -1,52 +1,38 @@
-# #22 Phase 15 — Final system hardening / recovery / closeout candidate
+# #22 Phase 15 — Final system hardening / closeout (accepted)
 
-**Status:** CLOSEOUT CANDIDATE  
-**#22:** ACTIVE (Commander close not applied in this phase)  
-**#23:** NOT_STARTED  
+**Status:** COMPLETE  
+**#22:** CLOSED  
+**#23:** PENDING / NOT_STARTED  
+**Ascension:** COMPLETE  
 **Operational Ascension agents:** 9  
 **Ascension autonomy:** OFF  
 **ASTRA phase58a:** NOT_APPLIED  
 **Production corpus persistence:** FALSE  
 **#19_LIVE_MIGRATION:** CONFIRMED  
 
-This phase adds **no agents**, **no #23 systems**, and **does not apply** `supabase/war_room_phase58a_astra_live_missions.sql`.
+Internal Phase 15 is implementation history **under #22**. It is not a new master-roadmap item.
 
-## Question
+## Commander acceptance
 
-Can installed War Room OS on Nebula Genesis operate as one sovereign, governed local system (nine bounded agents, local identity/data/model, cross-agent workflows, durable candidate handoffs, truthful degradation) without warroomos.com, Cloudflare, Supabase, external AI, or public internet for locally available capabilities?
+The Phase 15 closeout candidate at `6dccbfa5501f80de68a27b0e667a6a2c6ce6148d` was reviewed and accepted. Canonical `#22` is **CLOSED**. `#23` remains **PENDING / NOT_STARTED**. Do not start WR-CORPUS, WR-TOKENIZER, WRIM, Ra'el, or model training.
 
-Answer is determined by `pnpm run validate:ascension-phase15` plus the regression suite. Phase 15 validator: **157/157 PASS**. `#22` stays **ACTIVE** until the Commander accepts this candidate. Isolated proofs used a test profile; the real AppData Commander profile was **BOOTSTRAPPED=FALSE** at closeout time (operator first-run checkpoint — identity was not fabricated).
+## Accepted #22 truth
 
-## CURRENT vs TARGET vs #23 FUTURE
+- Nine bounded, invocation-driven, governed agents: RESEARCH, ENGINEERING, SECURITY_RED_TEAM, OPERATIONS, TERRA_INTELLIGENCE, COUNCIL_VALIDATOR, DATA_CORPUS, NAVIGATION, WORLD_LEARNING
+- `CROSS_AGENT_INTEGRATION` = IMPLEMENTED
+- `DURABLE_CORPUS_CANDIDATE_HANDOFF` = IMPLEMENTED
+- `PRODUCTION_CORPUS_PERSISTENCE` = FALSE
+- Sovereign Windows app INSTALLED + LIVE; local Core/UI/Commander/ownership/conversations/model router IMPLEMENTED
+- Qwen = `THIRD_PARTY_MODEL_RUNNING_LOCALLY` (not WRIM, not Ra'el, not native War Room intelligence)
+- `REAL_LOCAL_COMMANDER_PROFILE` = FIRST_RUN_PENDING; `BOOTSTRAPPED` = FALSE — operator setup checkpoint; does **not** reopen #22; do not auto-create identity
+- ASTRA: `NOT_APPLIED`; durability = local filesystem fallback; DB-backed missions = FALSE; local sovereign closeout sufficient = YES
+- `CODE_SIGNING` = NOT_CONFIGURED; Smart App Control unchanged; `UNSIGNED_DISTRIBUTION_RISK` = PRESENT (optional distribution hardening; does not reopen #22)
+- Phone / MOBILE_GNSS / LIVE_TRAFFIC unimplemented; WR-CORPUS / WR-TOKENIZER / WRIM / Ra'el / training belong to `#23`
 
-See `docs/MASTER_OS_ROADMAP.md` § CURRENT / TARGET / #23 FUTURE.
+## #19 truth
 
-## #19 truth (documentation-only contradiction)
-
-Phase 14 reported “#19 structural preserved; live DB proof still blocked by historical ownership SQL apply.”
-
-That sentence came from a **stale runner NOTE** in `scripts/run-conversation-ownership-validation.mjs` that always printed “SQL has not been applied.” The `#19` validator is structural (it never probes production). Live SCHEMA→BACKFILL→ENFORCE + A/B + zero-null is documented as CLOSED in:
-
-- `docs/MASTER_OS_ROADMAP.md` (#19 LIVE-MIGRATED / CROSS-USER-VALIDATED / CLOSED, commit `1e1c218`)
-- `docs/WR_CONVERSATION_OWNERSHIP_MIGRATION.md`
-- SQL: `supabase/war_room_conversations_ownership.sql` + `_backfill.sql` + `_enforce.sql`
-
-**Factual state:** `#19_LIVE_MIGRATION = CONFIRMED`  
-This session does **not** re-query production and does **not** re-apply ownership SQL.
-
-## ASTRA durability decision
-
-- `CURRENT_MISSION_DURABILITY` = `local_filesystem_fallback`
-- `LOCAL_SOVEREIGN_CLOSEOUT_SUFFICIENT` = YES
-- Evidence: filesystem mission store + AppData corpus-candidate SQLite + Phase 14 ASTRA bridge; phase58a packet `apply_now: false` and `phase22_closeout_requires_apply: false`
-- Do **not** claim database-backed ASTRA missions
-
-## Narrow hardening in this phase
-
-- Repair stale #19 “SQL unapplied” runner note
-- Local export v2 includes corpus-candidate **metadata + evidence references** (never hashes, session tokens, API keys, service-role keys, or hidden CoT)
-- Deterministic Phase 15 closeout validator (`lib/sovereign-runtime/phase15.validation.ts`)
+`#19` = CLOSED. `#19_LIVE_MIGRATION` = CONFIRMED. Do not reapply ownership SQL. Do not restore the stale “SQL has not been applied” runner note.
 
 ## Out of scope (must remain)
 
-PHONE_APP, MOBILE_GNSS, LIVE_TRAFFIC, WR-CORPUS, WR-TOKENIZER, WRIM, Ra'el, model training, code signing, Smart App Control changes, phase58a apply, #23.
+PHONE_APP, MOBILE_GNSS, LIVE_TRAFFIC, WR-CORPUS, WR-TOKENIZER, WRIM, Ra'el, model training, code signing, Smart App Control changes, phase58a apply, `#23`.

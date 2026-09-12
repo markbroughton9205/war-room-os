@@ -346,7 +346,7 @@ export async function runPhase11bLocalModelValidation(opts?: {
     ),
   )
   results.push(check('53_gate16_14_14', truth.GATE16_PREBUILD === 'PASS_14_OF_14', truth.GATE16_PREBUILD))
-  results.push(check('54_17_structural', fs.existsSync(path.join(repoRoot, 'docs')) && truth.ROADMAP_22 === 'ACTIVE', '#17 closed historically'))
+  results.push(check('54_17_structural', fs.existsSync(path.join(repoRoot, 'docs')) && truth.ROADMAP_22 === 'CLOSED', '#17 closed historically'))
   results.push(check('55_19_structural', truth.SUPABASE_REQUIRED_FOR_REMOTE_DATA === true, '#19 remote ownership preserved'))
   results.push(check('56_phase11a_module', fs.existsSync(path.join(repoRoot, 'lib', 'sovereign-runtime', 'phase11a.validation.ts')), 'ok'))
   results.push(check('57_phase10_module', fs.existsSync(path.join(repoRoot, 'lib', 'sovereign-runtime', 'validation.ts')), 'ok'))
@@ -368,7 +368,7 @@ export async function runPhase11bLocalModelValidation(opts?: {
   results.push(check('61_typescript_structural', true, 'tsc separately'))
   results.push(check('62_desktop_security', DESKTOP_SECURITY_POLICY.sandbox === true || /sandbox:\s*true/.test(mainSrc), 'ok'))
   results.push(check('63_desktop_build', fs.existsSync(path.join(repoRoot, 'desktop', 'scripts', 'build-check.cjs')), 'ok'))
-  results.push(check('64_22_active', truth.ROADMAP_22 === 'ACTIVE', 'ACTIVE'))
+  results.push(check('64_22_closed', truth.ROADMAP_22 === 'CLOSED', 'CLOSED'))
   results.push(check('65_23_not_started', truth.ROADMAP_23 === 'NOT_STARTED' && truth.NATIVE_WRIM === 'NOT_IMPLEMENTED', 'NOT_STARTED'))
 
   // Extra truth + red team

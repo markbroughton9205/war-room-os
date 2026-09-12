@@ -4,8 +4,8 @@
 **Operational Ascension agents:** 7 (unchanged — no new agent)  
 **Ascension autonomy:** OFF  
 **FUTURE_NAVIGATION_AGENT:** fulfilled by NAVIGATION_AGENT in Phase 12 (this document is the foundation only)  
-**#22:** ACTIVE  
-**#23:** NOT STARTED  
+**#22:** CLOSED  
+**#23:** PENDING / NOT_STARTED  
 
 ## Architecture (preserve)
 

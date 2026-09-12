@@ -1,6 +1,6 @@
 # Ascension Phase 11C — Sovereign Offline Commander Identity + Local Ownership
 
-**Roadmap:** #22 ACTIVE · **#23:** NOT STARTED  
+**Roadmap:** #22 CLOSED · **#23:** PENDING / NOT_STARTED  
 **Depends on:** Phase 11B local model path (`644947ea…`)
 
 ## Acceptance

@@ -384,7 +384,7 @@ export async function runCrossAgentPhase14Validation(): Promise<{
     results.push(check('108_wr_tokenizer_ns', WR_TOKENIZER_STATUS === 'NOT_STARTED', WR_TOKENIZER_STATUS))
     results.push(check('109_wrim_ni', truth.NATIVE_WRIM === 'NOT_IMPLEMENTED' && WRIM_STATUS === 'NOT_IMPLEMENTED', truth.NATIVE_WRIM))
     results.push(check('110_rael_ni', RAEL_STATUS === 'NOT_IMPLEMENTED', RAEL_STATUS))
-    results.push(check('111_22_active', truth.ROADMAP_22 === 'ACTIVE' && ROADMAP_22_STATUS === 'ACTIVE', truth.ROADMAP_22))
+    results.push(check('111_22_closed', truth.ROADMAP_22 === 'CLOSED' && ROADMAP_22_STATUS === 'CLOSED', truth.ROADMAP_22))
     results.push(check('112_23_not_started', truth.ROADMAP_23 === 'NOT_STARTED' && ROADMAP_23_STATUS === 'NOT_STARTED' && MODEL_TRAINING_STATUS === 'NOT_IMPLEMENTED' && PRODUCTION_CORPUS_PERSISTENCE === false, truth.ROADMAP_23))
 
     results.push(check('113_integration_implemented', CROSS_AGENT_INTEGRATION_STATUS === 'IMPLEMENTED' && truth.CROSS_AGENT_INTEGRATION === 'IMPLEMENTED', CROSS_AGENT_INTEGRATION_STATUS))

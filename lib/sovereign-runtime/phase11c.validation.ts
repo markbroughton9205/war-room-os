@@ -75,7 +75,7 @@ export async function runPhase11cLocalOwnershipValidation(opts?: {
   )
   results.push(check('85_phone', truth.PHONE_APP === 'NOT_IMPLEMENTED', 'ok'))
   results.push(check('86_wrim', truth.NATIVE_WRIM === 'NOT_IMPLEMENTED', 'ok'))
-  results.push(check('87_22', truth.ROADMAP_22 === 'ACTIVE', 'ACTIVE'))
+  results.push(check('87_22', truth.ROADMAP_22 === 'CLOSED', 'CLOSED'))
   results.push(check('88_23', truth.ROADMAP_23 === 'NOT_STARTED', 'NOT_STARTED'))
   results.push(check('truth_supabase_local_access', truth.SUPABASE_REQUIRED_FOR_LOCAL_COMMANDER_ACCESS === false, 'false'))
   results.push(check('truth_supabase_remote', truth.SUPABASE_REQUIRED_FOR_REMOTE_DATA === true, 'true'))

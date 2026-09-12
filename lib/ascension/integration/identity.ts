@@ -6,7 +6,9 @@ export const CROSS_AGENT_INTEGRATION_RUNTIME_VERSION = 'ascension-phase14-v1' as
 
 export const PHASE_15_HARDENING_VERSION = 'ascension-phase15-v1' as const
 
-export const PHASE_15_STATUS = 'CLOSEOUT_CANDIDATE' as const
+export const PHASE_15_STATUS = 'COMPLETE' as const
+
+export const ASCENSION_STATUS = 'COMPLETE' as const
 
 /** Historical live SCHEMA→BACKFILL→ENFORCE + A/B closeout. Structural validators do not re-probe production. */
 export const ROADMAP_19_LIVE_MIGRATION = 'CONFIRMED' as const
@@ -21,7 +23,7 @@ export const PRODUCTION_CORPUS_PERSISTENCE = false as const
 
 export const ASTRA_PHASE58A_STATUS = 'NOT_APPLIED' as const
 
-export const ROADMAP_22_STATUS = 'ACTIVE' as const
+export const ROADMAP_22_STATUS = 'CLOSED' as const
 
 export const ROADMAP_23_STATUS = 'NOT_STARTED' as const
 

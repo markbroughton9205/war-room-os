@@ -1,6 +1,6 @@
 # Ascension Phase 11B — Complete Local Model Path
 
-**Roadmap:** #22 ACTIVE · **#23:** NOT STARTED  
+**Roadmap:** #22 CLOSED · **#23:** PENDING / NOT_STARTED  
 **Phase:** 11B COMPLETE (local commit only; no push / deploy)
 
 ## Architecture

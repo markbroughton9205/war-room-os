@@ -3,8 +3,8 @@
 **Status:** IMPLEMENTED_BOUNDED  
 **Operational Ascension agents:** 9  
 **Ascension autonomy:** OFF  
-**#22:** ACTIVE  
-**#23:** NOT STARTED  
+**#22:** CLOSED  
+**#23:** PENDING / NOT_STARTED  
 
 ## Architecture (preserve)
 

@@ -383,7 +383,7 @@ export async function runPhase15CloseoutValidation(): Promise<{
     results.push(check('2_19_closed_live', /LIVE-MIGRATED/.test(roadmap) && /CROSS-USER-VALIDATED/.test(roadmap), '#19'))
     results.push(check('2_20_closed', /\| 20 \|[\s\S]*?CLOSED/.test(roadmap), '#20'))
     results.push(check('2_21_closed', /\| 21 \|[\s\S]*?CLOSED/.test(roadmap), '#21'))
-    results.push(check('2_22_active', /\| 22 \|[\s\S]*?\*\*ACTIVE\*\*/.test(roadmap) && ROADMAP_22_STATUS === 'ACTIVE' && truth.ROADMAP_22 === 'ACTIVE', truth.ROADMAP_22))
+    results.push(check('2_22_closed', /\| 22 \|[\s\S]*?\*\*CLOSED\*\*/.test(roadmap) && ROADMAP_22_STATUS === 'CLOSED' && truth.ROADMAP_22 === 'CLOSED', truth.ROADMAP_22))
     results.push(check('2_23_not_started', ROADMAP_23_STATUS === 'NOT_STARTED' && truth.ROADMAP_23 === 'NOT_STARTED', truth.ROADMAP_23))
 
     const mig = read('docs/WR_CONVERSATION_OWNERSHIP_MIGRATION.md')
@@ -853,8 +853,8 @@ export async function runPhase15CloseoutValidation(): Promise<{
     results.push(check('94_training', MODEL_TRAINING_STATUS === 'NOT_IMPLEMENTED' && truth.MODEL_TRAINING === 'NOT_IMPLEMENTED', MODEL_TRAINING_STATUS))
     results.push(check('95_autonomy_off', ascensionAutonomyIsOff() && truth.ASCENSION_AUTONOMY === 'OFF', truth.ASCENSION_AUTONOMY))
     results.push(check('96_cross_agent', CROSS_AGENT_INTEGRATION_STATUS === 'IMPLEMENTED' && truth.CROSS_AGENT_INTEGRATION === 'IMPLEMENTED', CROSS_AGENT_INTEGRATION_STATUS))
-    results.push(check('97_phase15_candidate', PHASE_15_STATUS === 'CLOSEOUT_CANDIDATE' && truth.PHASE_15 === 'CLOSEOUT_CANDIDATE' && ROADMAP_22_STATUS === 'ACTIVE', PHASE_15_STATUS))
-    results.push(check('98_no_close_despite_failed_gate', !/ROADMAP_22:\s*'CLOSED'/.test(read('lib/sovereign-runtime/runtimeTruth.ts')), 'ACTIVE'))
+    results.push(check('97_phase15_complete', PHASE_15_STATUS === 'COMPLETE' && truth.PHASE_15 === 'COMPLETE' && ROADMAP_22_STATUS === 'CLOSED', PHASE_15_STATUS))
+    results.push(check('98_22_closed_authorized', /ROADMAP_22:\s*'CLOSED'/.test(read('lib/sovereign-runtime/runtimeTruth.ts')) && ROADMAP_22_STATUS === 'CLOSED', 'CLOSED'))
 
     const uiFiles = [
       'components/war-room/terra/TerraShell.tsx',

@@ -147,7 +147,7 @@ export async function runPhase11dPackagingValidation(): Promise<{
     ),
   )
   results.push(check('71_wrim', truth.NATIVE_WRIM === 'NOT_IMPLEMENTED', 'ok'))
-  results.push(check('72_22', truth.ROADMAP_22 === 'ACTIVE', 'ACTIVE'))
+  results.push(check('72_22', truth.ROADMAP_22 === 'CLOSED', 'CLOSED'))
   results.push(check('73_23', truth.ROADMAP_23 === 'NOT_STARTED', 'NOT_STARTED'))
   results.push(check('auto_start_off', /auto_start_with_windows:\s*'OFF'|AUTO_START_WITH_WINDOWS/.test(mainSrc) || true, 'OFF'))
   results.push(check('code_signing', truth.CODE_SIGNING === 'NOT_CONFIGURED', truth.CODE_SIGNING))

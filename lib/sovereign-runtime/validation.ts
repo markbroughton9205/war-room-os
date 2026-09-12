@@ -251,7 +251,7 @@ export async function runSovereignRuntimePhase10Validation(): Promise<{
     results.push(check('data_ownership_inventory', LOCAL_DATA_OWNERSHIP_INVENTORY.length >= 6, String(LOCAL_DATA_OWNERSHIP_INVENTORY.length)))
     results.push(check('inventory_present', WEBSITE_DEPENDENCE_INVENTORY.length >= 10, String(WEBSITE_DEPENDENCE_INVENTORY.length)))
     results.push(check('gate16_tracked', truth.GATE16_PREBUILD === 'PASS_14_OF_14', truth.GATE16_PREBUILD))
-    results.push(check('22_active', truth.ROADMAP_22 === 'ACTIVE', 'ACTIVE'))
+    results.push(check('22_closed', truth.ROADMAP_22 === 'CLOSED', 'CLOSED'))
     results.push(check('electron_secure_prefs', /nodeIntegration:\s*false/.test(mainSrc) && /contextIsolation:\s*true/.test(mainSrc), 'ok'))
     results.push(check('discover_ready', (await discoverLocalCore({
       fetchHealth: async url => {
