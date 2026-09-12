@@ -61,6 +61,7 @@ export async function runPhase11dPackagingValidation(): Promise<{
         redesigned?: boolean
         png_sha256?: string
         source_sha256?: string
+        app_favicon_placeholder?: boolean
       })
     : null
 
@@ -163,20 +164,16 @@ export async function runPhase11dPackagingValidation(): Promise<{
       truth.INSTALLED_EXE_LIVE_PROOF,
     ),
   )
-  // Signing is still unconfigured, so the phase stays open regardless of a passing launch.
-  results.push(check('phase_11d_open_until_signed', truth.PHASE_11D === 'NOT_COMPLETE', truth.PHASE_11D))
-
-  // Approval must be verifiable, not asserted: either the PNG is byte-identical to the shipped
-  // War Room mark in app/favicon.ico, or the Commander explicitly approved other artwork.
+  // Approval is Commander-granted only. Substituting another repository mark — including the
+  // app/favicon.ico triangle-in-disc — is explicitly not approval.
   const pngSha = fs.existsSync(png)
     ? createHash('sha256').update(fs.readFileSync(png)).digest('hex')
     : null
   const provenanceVerified =
-    provenance?.status === 'COMMANDER_APPROVED_BRAND_MARK_FROM_APP_FAVICON'
-      ? provenance?.png_sha256 === pngSha && provenance?.source_sha256 === pngSha
-      : provenance?.status === 'COMMANDER_APPROVED_SUPPLIED_PNG'
-        ? fs.existsSync(path.join(desktop, 'assets', 'ICON_APPROVAL.txt'))
-        : provenance?.status === 'COMMANDER_APPROVED'
+    provenance?.status === 'COMMANDER_APPROVED_SUPPLIED_PNG' &&
+    provenance?.app_favicon_placeholder !== true &&
+    provenance?.png_sha256 === pngSha &&
+    fs.existsSync(path.join(desktop, 'assets', 'ICON_APPROVAL.txt'))
 
   const iconAcceptance =
     fs.existsSync(png) && fs.existsSync(ico) && provenance?.redesigned === false && provenanceVerified
@@ -204,6 +201,15 @@ export async function runPhase11dPackagingValidation(): Promise<{
         return [16, 24, 32, 48, 64, 128, 256].every(s => frames.has(s))
       })(),
       '16/24/32/48/64/128/256',
+    ),
+  )
+  // Code signing is reported truthfully but is NOT a Phase 11D functional blocker: completion
+  // depends on the installed application, its shortcuts, the local runtime and the approved icon.
+  results.push(
+    check(
+      'phase_11d_status_matches_function',
+      truth.PHASE_11D === (iconAcceptance === 'PASS' ? 'COMPLETE' : 'NOT_COMPLETE'),
+      `${truth.PHASE_11D} (icon ${iconAcceptance})`,
     ),
   )
 

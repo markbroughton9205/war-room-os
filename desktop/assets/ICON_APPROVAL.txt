@@ -1,0 +1,32 @@
+WAR ROOM OS — COMMANDER ICON APPROVAL
+=====================================
+
+Approved artwork for the installable Windows application (Roadmap #22, Phase 11D).
+
+Source supplied by the Commander : Windows Desktop\War-Room-OS-Icon.png
+Installed in repository as       : desktop/assets/war-room-os-icon.png
+Copied                           : byte-for-byte, no edit, no re-render, no redesign
+SHA-256                          : 63d2a9d378732c3cad1ed3298a6b9df2ccd9eced80f936d79b1b7519467b0447
+Dimensions                       : 1254 x 1254, 32-bit ARGB, transparent surround
+Opaque content bounds            : (80,100) - (1154,1190)
+
+Approved design, as specified by the Commander:
+  - dark cinematic rounded-square design
+  - Earth / planetary background
+  - metallic W emblem
+  - blue luminous accents
+  - WAR ROOM OS text
+  - SEE - ANALYZE - PLAN - BUILD
+
+Explicitly NOT approved, and never to be substituted:
+  - the app/favicon.ico triangle-in-disc mark
+  - any other repository logo
+  - the generic Electron icon
+  - any placeholder
+
+Known artifact in the supplied file: a Windows shortcut-arrow overlay badge is baked into the
+lower-left of the artwork (around x=138, y=1072 at full size). It was left in place because the
+artwork must not be edited. To remove it, supply a re-exported PNG without the overlay at the same
+Desktop path and re-run `npm --prefix desktop run icon:ico`, then rebuild the installer.
+
+Derived Windows ICO: desktop/assets/war-room-os.ico at 16/24/32/48/64/128/256.

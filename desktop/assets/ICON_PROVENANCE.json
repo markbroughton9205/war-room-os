@@ -11,14 +11,13 @@
     256
   ],
   "redesigned": false,
-  "status": "COMMANDER_APPROVED_BRAND_MARK_FROM_APP_FAVICON",
+  "status": "COMMANDER_APPROVED_SUPPLIED_PNG",
   "ico_generated": true,
-  "png_bytes": 7821,
-  "png_sha256": "3d7d267e05f2c13b9914805dffff2ce73e1f07f5b2c19aa5296b8e07dfe0d5bb",
-  "ico_bytes": 11854,
-  "source": "app/favicon.ico",
-  "source_frame": "256x256",
-  "source_sha256": "3d7d267e05f2c13b9914805dffff2ce73e1f07f5b2c19aa5296b8e07dfe0d5bb",
-  "note": "Icon source is the 256x256 frame of the shipped War Room mark in app/favicon.ico, copied byte-for-byte. Artwork not redesigned; provenance re-verifiable by hash.",
-  "updated_at": "2026-09-12T16:41:07.614Z"
+  "png_bytes": 2140555,
+  "png_sha256": "63d2a9d378732c3cad1ed3298a6b9df2ccd9eced80f936d79b1b7519467b0447",
+  "ico_bytes": 180208,
+  "source": "desktop/assets/war-room-os-icon.png",
+  "app_favicon_placeholder": false,
+  "note": "Commander-supplied artwork approved via desktop/assets/ICON_APPROVAL.txt. Artwork not redesigned.",
+  "updated_at": "2026-09-12T17:48:09.597Z"
 }

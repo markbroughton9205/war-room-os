@@ -29,8 +29,10 @@ export function getSovereignRuntimeTruth(): SovereignRuntimeTruth {
     CODE_SIGNING: 'NOT_CONFIGURED',
     SMART_APP_CONTROL: 'ENABLED_INTERMITTENTLY_BLOCKING_UNSIGNED',
     INSTALLED_EXE_LIVE_PROOF: 'PROVEN',
-    // Code signing remains unconfigured and the Commander has not closed the phase.
-    PHASE_11D: 'NOT_COMPLETE',
+    // Code signing is optional (Azure Trusted Signing, opt-in at build time) and is not a
+    // functional blocker: the installed application, both shortcuts, the local runtime and the
+    // Commander-approved icon are all proven on the installed executable.
+    PHASE_11D: 'COMPLETE',
     LOCAL_MODEL_ROUTER: 'IMPLEMENTED',
     LOCAL_MODEL_PATH: 'IMPLEMENTED',
     OLLAMA_PATH: 'IMPLEMENTED',

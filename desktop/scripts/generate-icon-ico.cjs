@@ -2,12 +2,12 @@
  * Phase 11D — Convert the Commander-approved PNG → multi-size Windows ICO.
  * Source MUST be desktop/assets/war-room-os-icon.png. The artwork is never redesigned.
  *
- * The canonical War Room OS mark already ships in the application itself: app/favicon.ico
- * carries a 256x256 PNG frame. This script can extract that frame byte-for-byte as the
- * desktop icon source, which makes approval verifiable rather than self-asserted — the
- * provenance hash must equal the hash of the frame inside app/favicon.ico.
+ * Approval is Commander-granted only. Substituting another mark from this repository —
+ * including the app/favicon.ico mark — is explicitly NOT approval, and the icon gate fails
+ * while such a placeholder is in place.
  *
- * To approve different artwork, replace the PNG and add desktop/assets/ICON_APPROVAL.txt.
+ * To approve artwork: place the PNG at desktop/assets/war-room-os-icon.png and add
+ * desktop/assets/ICON_APPROVAL.txt describing it.
  *
  * Uses Windows PowerShell + System.Drawing when available. Does not invent artwork.
  */
@@ -49,23 +49,8 @@ function largestIcoFrame(icoFile) {
   return null
 }
 
-/** Sync the desktop icon source from the shipped application mark. */
-function syncBrandMark() {
-  if (!fs.existsSync(appFavicon)) return null
-  const frame = largestIcoFrame(appFavicon)
-  if (!frame || frame.width < 128) return null
-  fs.mkdirSync(path.dirname(pngPath), { recursive: true })
-  fs.writeFileSync(pngPath, frame.bytes)
-  return frame
-}
-
-const brandFrame = largestIcoFrame(fs.existsSync(appFavicon) ? appFavicon : pngPath)
-if (process.argv.includes('--sync-brand-mark') || !fs.existsSync(pngPath)) {
-  const synced = syncBrandMark()
-  if (synced) {
-    console.error(`[icon] source PNG synced from app/favicon.ico ${synced.width}x${synced.height} frame`)
-  }
-}
+// Used only to DETECT the app-favicon placeholder, never to install it as the icon source.
+const brandFrame = fs.existsSync(appFavicon) ? largestIcoFrame(appFavicon) : null
 
 function writeProvenance(extra) {
   const body = {
@@ -164,21 +149,21 @@ if (result.status !== 0 || !fs.existsSync(icoPath)) {
 }
 
 /**
- * Approval is derived, never assumed:
- *  - byte-identical to the shipped app/favicon.ico mark → approved, and independently verifiable
- *  - different artwork plus an explicit ICON_APPROVAL.txt → approved by the Commander
- *  - anything else → interim, and the Phase 11D icon gate stays FAIL
+ * Approval is Commander-granted only:
+ *  - Commander-supplied PNG plus desktop/assets/ICON_APPROVAL.txt → approved
+ *  - byte-identical to the app/favicon.ico mark → explicitly NOT approval, flagged as placeholder
+ *  - anything else → pending, and the Phase 11D icon gate stays FAIL
  */
 const pngBuf = fs.readFileSync(pngPath)
 const pngHash = sha256(pngBuf)
 const brandHash = brandFrame ? sha256(brandFrame.bytes) : null
-const matchesBrandMark = Boolean(brandHash && brandHash === pngHash)
-const commanderApproved = fs.existsSync(approvalPath)
+const isAppFaviconPlaceholder = Boolean(brandHash && brandHash === pngHash)
+const commanderApproved = fs.existsSync(approvalPath) && !isAppFaviconPlaceholder
 
-const status = matchesBrandMark
-  ? 'COMMANDER_APPROVED_BRAND_MARK_FROM_APP_FAVICON'
-  : commanderApproved
-    ? 'COMMANDER_APPROVED_SUPPLIED_PNG'
+const status = commanderApproved
+  ? 'COMMANDER_APPROVED_SUPPLIED_PNG'
+  : isAppFaviconPlaceholder
+    ? 'NOT_APPROVED_PLACEHOLDER_APP_FAVICON_MARK'
     : 'INTERIM_PENDING_COMMANDER_PNG'
 
 const prov = writeProvenance({
@@ -187,14 +172,13 @@ const prov = writeProvenance({
   png_bytes: pngBuf.length,
   png_sha256: pngHash,
   ico_bytes: fs.statSync(icoPath).size,
-  source: matchesBrandMark ? 'app/favicon.ico' : commanderApproved ? 'desktop/assets/war-room-os-icon.png' : 'unverified',
-  source_frame: matchesBrandMark ? `${brandFrame.width}x${brandFrame.height}` : null,
-  source_sha256: brandHash,
+  source: commanderApproved ? 'desktop/assets/war-room-os-icon.png' : 'unapproved',
+  app_favicon_placeholder: isAppFaviconPlaceholder,
   redesigned: false,
-  note: matchesBrandMark
-    ? 'Icon source is the 256x256 frame of the shipped War Room mark in app/favicon.ico, copied byte-for-byte. Artwork not redesigned; provenance re-verifiable by hash.'
-    : commanderApproved
-      ? 'Commander-supplied artwork approved via desktop/assets/ICON_APPROVAL.txt. Artwork not redesigned.'
-      : 'PNG is neither the shipped app mark nor Commander-approved. Replace desktop/assets/war-room-os-icon.png (or run with --sync-brand-mark) — the Phase 11D icon gate stays FAIL until then.',
+  note: commanderApproved
+    ? 'Commander-supplied artwork approved via desktop/assets/ICON_APPROVAL.txt. Artwork not redesigned.'
+    : isAppFaviconPlaceholder
+      ? 'PNG is the app/favicon.ico mark, which is NOT the Commander-approved War Room OS icon. Place the approved artwork at desktop/assets/war-room-os-icon.png with ICON_APPROVAL.txt. Icon gate stays FAIL.'
+      : 'PNG is not Commander-approved. Place the approved artwork at desktop/assets/war-room-os-icon.png with ICON_APPROVAL.txt. Icon gate stays FAIL.',
 })
 console.log(JSON.stringify({ ok: true, ...prov }, null, 2))

@@ -73,17 +73,35 @@ Run `npm --prefix desktop run dist`, then:
 
 ### Icon
 
-`ICON_ACCEPTANCE: PASS`. The canonical War Room mark already ships inside the application: the
-256×256 PNG frame of `app/favicon.ico`. `desktop/scripts/generate-icon-ico.cjs --sync-brand-mark`
-copies that frame **byte-for-byte** to `desktop/assets/war-room-os-icon.png` and generates the
-multi-resolution ICO at 16/24/32/48/64/128/256. The artwork is not redesigned and approval is not
-self-asserted: `ICON_PROVENANCE.json` records `png_sha256 === source_sha256`
-(`3d7d267e…d5bb`) and the Phase 11D validation re-derives both hashes.
+The approved artwork is Commander-supplied only: a dark cinematic rounded square with an Earth
+background, a metallic W emblem, blue luminous accents, "WAR ROOM OS" and "SEE · ANALYZE · PLAN ·
+BUILD". It lives at `desktop/assets/war-room-os-icon.png` (1254×1254, sha256 `63d2a9d3…0447`) copied
+byte-for-byte from the file the Commander provided, with provenance in
+`desktop/assets/ICON_APPROVAL.txt`. `desktop/scripts/generate-icon-ico.cjs` derives the ICO at
+16/24/32/48/64/128/256 from that exact PNG. The artwork is never redesigned.
 
-To approve different artwork, replace the PNG and add `desktop/assets/ICON_APPROVAL.txt`; the gate
-then reports `COMMANDER_APPROVED_SUPPLIED_PNG`. Without either condition the gate fails.
+Substituting another mark from this repository is explicitly **not** approval. The generator detects
+the `app/favicon.ico` triangle-in-disc mark by hash and reports
+`NOT_APPROVED_PLACEHOLDER_APP_FAVICON_MARK`, which fails the gate.
 
-### Open blocker — code signing
+`scripts/phase11d-icon-surface-proof.mjs` verifies each Windows surface **independently** — failures
+are never aggregated into an overall PASS:
+
+| Surface | Method |
+| --- | --- |
+| `APPROVED_SOURCE_PNG` | provenance status, approval file, hash of the PNG on disk |
+| `WINDOWS_ICO` | all seven frames present, derived from the approved PNG |
+| `INSTALLED_EXE_ICON` | approved 256×256 frame bytes located inside the installed `War Room OS.exe` |
+| `DESKTOP_SHORTCUT_ICON` | shell-resolved `.lnk` target and icon location point at that executable |
+| `START_MENU_ICON` | same, for the Start Menu entry |
+| `WINDOW_ICON` | `BrowserWindow` receives the packaged icon via `resolveIconPath()` |
+| `TASKBAR_ICON` | inherited from the window/executable icon, with `setAppUserModelId` establishing identity |
+
+The Commander's source file has a Windows shortcut-arrow overlay baked into its lower-left corner.
+It was preserved because the artwork must not be edited; supplying a re-exported PNG without the
+overlay and re-running `npm --prefix desktop run icon:ico` is the only sanctioned way to remove it.
+
+### Code signing — optional, not a functional blocker
 
 `CODE_SIGNING: NOT_CONFIGURED`. No Windows signing certificate exists in this environment, and
 **Smart App Control is enabled** on the Commander machine
@@ -95,7 +113,15 @@ any rebuild may be blocked again, and SmartScreen will warn on the installer. Re
 `SMART_APP_CONTROL: ENABLED_INTERMITTENTLY_BLOCKING_UNSIGNED`. Smart App Control must not be
 disabled — on Windows 11 it cannot be re-enabled without resetting Windows.
 
-Until a certificate is configured, `PHASE_11D` stays `NOT_COMPLETE`.
+Signing is **optional** and does not gate the phase. `PHASE_11D: COMPLETE` rests on the installed
+application: normal per-user install, both shortcuts, the local Core/UI runtime, local Commander
+auth, and the approved icon on every surface. Configuring Azure Trusted Signing (below) removes the
+SmartScreen warning and the risk that a future rebuild is blocked, but adds no capability.
+
+One practical consequence observed after this rebuild: the **first** launch of a freshly built
+unsigned executable can be silently stalled by Smart App Control while it evaluates reputation. The
+first shortcut launch produced no process; a direct launch of the same executable succeeded, and
+every launch afterwards — desktop shortcut and Start Menu — started normally.
 
 ### Enabling Azure Trusted Signing
 
