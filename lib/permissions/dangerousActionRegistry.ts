@@ -106,6 +106,18 @@ export const DANGEROUS_KIND_ALIASES: Readonly<Record<string, CanonicalDangerousK
   GRANT_PERMISSION: 'policy_change',
   CHANGE_POLICY: 'policy_change',
   CHANGE_APPROVAL: 'policy_change',
+  INTERNET_BULK_INGEST: 'external_account',
+  PERSISTENT_RECRAWL: 'external_account',
+  MODEL_TRAINING: 'shell_mutating',
+  TOKENIZER_TRAINING: 'shell_mutating',
+  WEIGHT_UPDATE: 'shell_mutating',
+  WRIM_BUILD: 'shell_mutating',
+  RAEL_TRAINING: 'shell_mutating',
+  SQL_ARBITRARY_EXECUTE: 'delete_data',
+  AUTO_DELETE: 'delete_data',
+  MASS_REINDEX: 'shell_mutating',
+  CHANGE_EMBEDDING_MODEL: 'policy_change',
+  CHANGE_SEMANTIC_THRESHOLD: 'policy_change',
 })
 
 export function resolveCanonicalDangerousKind(kindOrAlias: string): CanonicalDangerousKind | null {

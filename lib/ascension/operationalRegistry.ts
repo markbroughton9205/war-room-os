@@ -38,6 +38,12 @@ import {
   COUNCIL_VALIDATOR_ROLE,
   COUNCIL_VALIDATOR_RUNTIME_VERSION,
 } from '@/lib/ascension/council-validator/identity'
+import {
+  isDataCorpusAgentRuntimeAvailable,
+  DATA_CORPUS_AGENT_AUTONOMOUS_EXECUTION_ENABLED,
+  DATA_CORPUS_AGENT_ROLE,
+  DATA_CORPUS_AGENT_RUNTIME_VERSION,
+} from '@/lib/ascension/data-corpus-agent/identity'
 
 export type OperationalAscensionAgentRecord = {
   agent_role:
@@ -47,6 +53,7 @@ export type OperationalAscensionAgentRecord = {
     | typeof OPERATIONS_AGENT_ROLE
     | typeof TERRA_INTELLIGENCE_AGENT_ROLE
     | typeof COUNCIL_VALIDATOR_ROLE
+    | typeof DATA_CORPUS_AGENT_ROLE
   runtime_status: 'IMPLEMENTED_BOUNDED'
   runtime_version: string
   invocation_driven: true
@@ -103,6 +110,14 @@ export const OPERATIONAL_ASCENSION_AGENTS: readonly OperationalAscensionAgentRec
     autonomous: false,
     available: isCouncilValidatorRuntimeAvailable(),
   },
+  {
+    agent_role: DATA_CORPUS_AGENT_ROLE,
+    runtime_status: 'IMPLEMENTED_BOUNDED',
+    runtime_version: DATA_CORPUS_AGENT_RUNTIME_VERSION,
+    invocation_driven: true,
+    autonomous: false,
+    available: isDataCorpusAgentRuntimeAvailable(),
+  },
 ])
 
 export function operationalAscensionAgentCount(): number {
@@ -119,13 +134,13 @@ export function ascensionAutonomyIsOff(): boolean {
     SECURITY_RED_TEAM_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
     OPERATIONS_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
     TERRA_INTELLIGENCE_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
-    COUNCIL_VALIDATOR_AUTONOMOUS_EXECUTION_ENABLED === false
+    COUNCIL_VALIDATOR_AUTONOMOUS_EXECUTION_ENABLED === false &&
+    DATA_CORPUS_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false
   )
 }
 
 /** Remaining #21 TARGET agents — must stay unimplemented. */
 export const TARGET_ASCENSION_AGENTS_UNIMPLEMENTED = Object.freeze([
-  'DATA_CORPUS_AGENT',
   'FUTURE_NAVIGATION_AGENT',
   'FUTURE_WORLD_LEARNING_AGENT',
 ] as const)

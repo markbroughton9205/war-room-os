@@ -427,7 +427,7 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     evidence: 'No ASTRA payment/transfer path',
   }),
 
-  // —— DATA / CORPUS ——
+  // —— DATA / CORPUS (#22 Phase 8) ——
   row({
     id: 'corpus.read',
     agentRole: 'DATA_CORPUS_AGENT',
@@ -437,22 +437,24 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     policyAuthority: 'READ_ALLOWED',
     riskTier: 'TIER_0_READ_OBSERVE',
     approvalRequirement: 'POLICY_AUTO_ALLOWED',
-    runtimeStatus: 'IMPLEMENTED',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'lib/war-room-search hybrid local index query',
+    evidence:
+      '#22 Phase 8: bounded DATA_CORPUS_AGENT reads existing corpus/index/evidence metadata; reuses war-room-search hybrid local index + Stage 5 freshness vocabulary',
   }),
   row({
     id: 'corpus.crawl.write',
     agentRole: 'DATA_CORPUS_AGENT',
     domain: 'CRAWLER',
     action: 'WRITE',
-    technicalReach: 'WRITE_BOUNDED',
-    policyAuthority: 'APPROVAL_REQUIRED',
+    technicalReach: 'NO_REACH',
+    policyAuthority: 'DENIED',
     riskTier: 'TIER_2_PERSISTENT_INTERNAL_MUTATION',
     approvalRequirement: 'COMMANDER_EXPLICIT_APPROVAL',
-    runtimeStatus: 'IMPLEMENTED',
+    runtimeStatus: 'STRUCTURALLY_FORBIDDEN',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'Approved crawl mutates local corpus only',
+    evidence:
+      'DATA_CORPUS_AGENT has no crawl authority; approved crawler path remains separate governed system — agent may inspect only',
   }),
   row({
     id: 'corpus.sql.alter',

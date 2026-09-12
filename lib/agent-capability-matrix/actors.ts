@@ -112,7 +112,24 @@ export const ACTOR_INVENTORY: readonly ActorInventoryItem[] = Object.freeze([
       'lib/council/family-deliberation',
     ],
     notes:
-      '#22 Phase 7 bounded Council output validator. Validates claims vs evidence/policy/runtime truth. VALIDATED!=AUTHORIZED. Not a Council member. Ascension autonomy OFF. Operational count=6.',
+      '#22 Phase 7 bounded Council output validator. Validates claims vs evidence/policy/runtime truth. VALIDATED!=AUTHORIZED. Not a Council member. Ascension autonomy OFF.',
+  },
+  {
+    id: 'data_corpus_agent',
+    name: 'DATA_CORPUS_AGENT',
+    class: 'EXECUTOR',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    canInvokeTools: true,
+    canSpawnWork: false,
+    canMutateState: false,
+    evidencePaths: [
+      'lib/ascension/data-corpus-agent',
+      'app/api/ascension/data-corpus-agent/run',
+      'lib/war-room-search/hybrid',
+      'lib/war-room-search/crawler',
+    ],
+    notes:
+      '#22 Phase 8 bounded corpus curator. Quality/dedupe/provenance/WR-CORPUS recommendations only. No crawl/train/#23. Ascension autonomy OFF. Operational count=7.',
   },
   {
     id: 'commander',
