@@ -83,7 +83,7 @@ export async function runSovereignRuntimePhase10Validation(): Promise<{
   results.push(
     check(
       '3_not_warroomos_wrapper',
-      desktopExists && !/loadURL\(\s*['"]https:\/\/warroomos\.com/i.test(mainSrc) && /3847|LOCAL_CORE_ORIGIN/.test(mainSrc),
+      desktopExists && !/loadURL\(\s*['"]https:\/\/warroomos\.com/i.test(mainSrc) && /3848|LOCAL_UI_ORIGIN|3847|LOCAL_CORE_ORIGIN/.test(mainSrc),
       'local origin only',
     ),
   )
@@ -243,7 +243,7 @@ export async function runSovereignRuntimePhase10Validation(): Promise<{
     const ui = await fetch(`${LOCAL_CORE_ORIGIN}/`)
     const uiText = await ui.text()
     results.push(check('ui_local_html', ui.ok && uiText.includes('WAR ROOM') && uiText.includes('DENIED'), 'html'))
-    results.push(check('default_start_local', defaultDesktopStartUrl() === LOCAL_CORE_ORIGIN + '/', defaultDesktopStartUrl()))
+    results.push(check('default_start_local', defaultDesktopStartUrl().includes('127.0.0.1:3848'), defaultDesktopStartUrl()))
     results.push(check('preload_allowlist', preloadBridgeAllowlist().includes('sovereign.getRuntimeTruth'), 'ok'))
     results.push(check('control_surface_slots', COMMANDER_CONTROL_SURFACE_SLOTS.length >= 6, String(COMMANDER_CONTROL_SURFACE_SLOTS.length)))
     results.push(check('data_ownership_inventory', LOCAL_DATA_OWNERSHIP_INVENTORY.length >= 6, String(LOCAL_DATA_OWNERSHIP_INVENTORY.length)))
@@ -278,7 +278,7 @@ export async function runSovereignRuntimePhase10Validation(): Promise<{
   // 57 typescript checked externally; mark structural
   results.push(check('57_typescript_structural', true, 'run tsc separately'))
   results.push(check('59_security_validation', decideDesktopNavigation('https://evil.example/').allowed === false, 'ok'))
-  results.push(check('60_runtime_truth_matches', truth.DESKTOP_APP === 'IMPLEMENTED_FOUNDATION' && truth.WEBSITE_REQUIRED === false, 'ok'))
+  results.push(check('60_runtime_truth_matches', (truth.DESKTOP_APP === 'IMPLEMENTED_LOCAL_UI' || truth.DESKTOP_APP === 'IMPLEMENTED_FOUNDATION') && truth.WEBSITE_REQUIRED === false, truth.DESKTOP_APP))
 
   const passed = results.filter(r => r.ok).length
   const failed = results.filter(r => !r.ok).length

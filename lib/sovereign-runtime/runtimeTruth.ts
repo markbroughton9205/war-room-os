@@ -1,10 +1,11 @@
 /**
- * #22 Phase 10 — Runtime truth + offline capability reporting.
+ * #22 Phase 10/11A — Runtime truth + offline capability reporting.
  */
 import {
   DESKTOP_APP_VERSION,
   LOCAL_CORE_HOST,
   LOCAL_CORE_PORT,
+  LOCAL_UI_PORT,
   SOVEREIGN_RUNTIME_VERSION,
   type BuildIdentity,
   type OfflineCapabilityReport,
@@ -19,12 +20,19 @@ import {
 export function getSovereignRuntimeTruth(): SovereignRuntimeTruth {
   return {
     WAR_ROOM_CORE: 'IMPLEMENTED_LOCAL',
-    DESKTOP_APP: 'IMPLEMENTED_FOUNDATION',
+    DESKTOP_APP: 'IMPLEMENTED_LOCAL_UI',
+    FULL_WAR_ROOM_UI_LOCAL: 'IMPLEMENTED',
     WEBSITE_REQUIRED: false,
+    WEBSITE_REQUIRED_FOR_UI: false,
     PUBLIC_DOMAIN_REQUIRED_FOR_LOCAL_USE: false,
+    PUBLIC_DNS_REQUIRED_FOR_UI: false,
     CLOUDFLARE_REQUIRED_FOR_LOCAL_USE: false,
+    CLOUDFLARE_REQUIRED_FOR_UI: false,
     INTERNET_REQUIRED_FOR_LOCAL_CORE: false,
+    INTERNET_REQUIRED_FOR_LOCAL_UI: false,
     EXTERNAL_AI_REQUIRED_FOR_CORE: false,
+    LOCAL_MODEL_PATH: 'PARTIAL',
+    PRIVILEGED_OFFLINE_OWNERSHIP: 'NOT_IMPLEMENTED',
     PHONE_APP: 'NOT_IMPLEMENTED',
     NATIVE_WRIM: 'NOT_IMPLEMENTED',
     FUTURE_NAVIGATION_AGENT: TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_NAVIGATION_AGENT')
@@ -35,6 +43,7 @@ export function getSovereignRuntimeTruth(): SovereignRuntimeTruth {
     ROADMAP_23: 'NOT_STARTED',
     OPERATIONAL_ASCENSION_AGENTS: operationalAscensionAgentCount(),
     GATE16_PREBUILD: 'PASS_14_OF_14',
+    RUNTIME_SURFACE: 'DESKTOP_LOCAL',
   }
 }
 
@@ -112,5 +121,13 @@ export function localCoreEndpoint(): { host: typeof LOCAL_CORE_HOST; port: typeo
     host: LOCAL_CORE_HOST,
     port: LOCAL_CORE_PORT,
     origin: `http://${LOCAL_CORE_HOST}:${LOCAL_CORE_PORT}`,
+  }
+}
+
+export function localUiEndpoint(): { host: typeof LOCAL_CORE_HOST; port: typeof LOCAL_UI_PORT; origin: string } {
+  return {
+    host: LOCAL_CORE_HOST,
+    port: LOCAL_UI_PORT,
+    origin: `http://${LOCAL_CORE_HOST}:${LOCAL_UI_PORT}`,
   }
 }

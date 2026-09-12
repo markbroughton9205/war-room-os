@@ -2,13 +2,15 @@
  * #22 Phase 10 — Sovereign local runtime constants + truth contracts.
  * WEBSITE != WAR ROOM. Cloudflare = OPTIONAL_REMOTE_CONNECTIVITY.
  */
-export const SOVEREIGN_RUNTIME_VERSION = 'ascension-phase10-v1' as const
-export const DESKTOP_APP_VERSION = '0.1.0-foundation' as const
+export const SOVEREIGN_RUNTIME_VERSION = 'ascension-phase11a-v1' as const
+export const DESKTOP_APP_VERSION = '0.2.0-local-ui' as const
 
-/** Dedicated local-app port — must not collide with prod :3000 or DEV :3001. */
+/** Dedicated local-app ports — must not collide with prod :3000 or DEV :3001. */
 export const LOCAL_CORE_PORT = 3847 as const
+export const LOCAL_UI_PORT = 3848 as const
 export const LOCAL_CORE_HOST = '127.0.0.1' as const
 export const LOCAL_CORE_ORIGIN = `http://${LOCAL_CORE_HOST}:${LOCAL_CORE_PORT}` as const
+export const LOCAL_UI_ORIGIN = `http://${LOCAL_CORE_HOST}:${LOCAL_UI_PORT}` as const
 
 export const PUBLIC_DOMAIN = 'warroomos.com' as const
 export const FORBIDDEN_DESKTOP_NAV_HOSTS = Object.freeze([
@@ -28,22 +30,57 @@ export const CORE_BOOT_STATES = [
 ] as const
 export type CoreBootState = (typeof CORE_BOOT_STATES)[number]
 
+export const UI_BOOT_STATES = [
+  'UI_UNKNOWN',
+  'UI_STARTING',
+  'UI_READY',
+  'UI_DEGRADED',
+  'UI_FAILED',
+  'UI_PORT_CONFLICT',
+] as const
+export type UiBootState = (typeof UI_BOOT_STATES)[number]
+
+export const DESKTOP_LIFECYCLE_STATES = [
+  'CORE_STARTING',
+  'UI_STARTING',
+  'READY',
+  'DEGRADED',
+  'PORT_CONFLICT',
+  'CORE_FAILED',
+  'UI_FAILED',
+] as const
+export type DesktopLifecycleState = (typeof DESKTOP_LIFECYCLE_STATES)[number]
+
 export const CONNECTIVITY_PRIORITY = Object.freeze([
   'LOCAL_CORE',
   'FUTURE_LAN_PRIVATE',
   'OPTIONAL_REMOTE_PUBLIC',
 ] as const)
 
+export const RUNTIME_SURFACE_MODES = Object.freeze([
+  'WEB_REMOTE',
+  'DESKTOP_LOCAL',
+  'PHONE_REMOTE_PRIVATE',
+] as const)
+export type RuntimeSurfaceMode = (typeof RUNTIME_SURFACE_MODES)[number]
+
 export type DataOwnershipClass = 'LOCAL' | 'REMOTE' | 'HYBRID' | 'UNAVAILABLE_OFFLINE'
 
 export type SovereignRuntimeTruth = {
   WAR_ROOM_CORE: 'IMPLEMENTED_LOCAL'
-  DESKTOP_APP: 'IMPLEMENTED_FOUNDATION'
+  DESKTOP_APP: 'IMPLEMENTED_LOCAL_UI' | 'IMPLEMENTED_FOUNDATION'
+  FULL_WAR_ROOM_UI_LOCAL: 'IMPLEMENTED' | 'NOT_YET_PACKAGED'
   WEBSITE_REQUIRED: false
+  WEBSITE_REQUIRED_FOR_UI: false
   PUBLIC_DOMAIN_REQUIRED_FOR_LOCAL_USE: false
+  PUBLIC_DNS_REQUIRED_FOR_UI: false
   CLOUDFLARE_REQUIRED_FOR_LOCAL_USE: false
+  CLOUDFLARE_REQUIRED_FOR_UI: false
   INTERNET_REQUIRED_FOR_LOCAL_CORE: false
+  INTERNET_REQUIRED_FOR_LOCAL_UI: false
   EXTERNAL_AI_REQUIRED_FOR_CORE: false
+  LOCAL_MODEL_PATH: 'PARTIAL'
+  PRIVILEGED_OFFLINE_OWNERSHIP: 'NOT_IMPLEMENTED'
   PHONE_APP: 'NOT_IMPLEMENTED'
   NATIVE_WRIM: 'NOT_IMPLEMENTED'
   FUTURE_NAVIGATION_AGENT: 'TARGET_UNIMPLEMENTED' | 'UNEXPECTED'
@@ -52,6 +89,7 @@ export type SovereignRuntimeTruth = {
   ROADMAP_23: 'NOT_STARTED'
   OPERATIONAL_ASCENSION_AGENTS: number
   GATE16_PREBUILD: 'PASS_14_OF_14'
+  RUNTIME_SURFACE: 'DESKTOP_LOCAL'
 }
 
 export type OfflineCapabilityReport = {

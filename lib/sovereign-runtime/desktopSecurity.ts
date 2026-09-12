@@ -7,6 +7,8 @@ import {
   LOCAL_CORE_HOST,
   LOCAL_CORE_ORIGIN,
   LOCAL_CORE_PORT,
+  LOCAL_UI_ORIGIN,
+  LOCAL_UI_PORT,
   PUBLIC_DOMAIN,
 } from './constants'
 
@@ -33,8 +35,8 @@ export function decideDesktopNavigation(rawUrl: string): NavigationDecision {
   const host = url.hostname.toLowerCase()
   if (host === LOCAL_CORE_HOST || host === 'localhost') {
     const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80
-    // Allow local core and known local Next ports for optional full UI — never public domain
-    if (port === LOCAL_CORE_PORT || port === 3001 || port === 3000) {
+    // Allow local core, local Next UI, and known local Next ports for optional full UI — never public domain
+    if (port === LOCAL_CORE_PORT || port === LOCAL_UI_PORT || port === 3001 || port === 3000) {
       return { allowed: true, reason: `Loopback local UI/core port ${port}.` }
     }
     return { allowed: false, reason: `Loopback port ${port} not in allowlist.`, openExternal: false }
@@ -109,7 +111,7 @@ export function desktopLoadsPublicDomain(url: string): boolean {
 }
 
 export function defaultDesktopStartUrl(): string {
-  return LOCAL_CORE_ORIGIN + '/'
+  return LOCAL_UI_ORIGIN + '/'
 }
 
-export { DESKTOP_SECURITY_POLICY, LOCAL_CORE_ORIGIN }
+export { DESKTOP_SECURITY_POLICY, LOCAL_CORE_ORIGIN, LOCAL_UI_ORIGIN }
