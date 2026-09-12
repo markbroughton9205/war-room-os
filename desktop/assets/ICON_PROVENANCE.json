@@ -13,11 +13,11 @@
   "redesigned": false,
   "status": "COMMANDER_APPROVED_SUPPLIED_PNG",
   "ico_generated": true,
-  "png_bytes": 2140555,
-  "png_sha256": "63d2a9d378732c3cad1ed3298a6b9df2ccd9eced80f936d79b1b7519467b0447",
-  "ico_bytes": 180208,
+  "png_bytes": 1668743,
+  "png_sha256": "843af44466fa2dfd6ab48d70244b3af7e399910fce11bd580917389ae6fb6f0b",
+  "ico_bytes": 159377,
   "source": "desktop/assets/war-room-os-icon.png",
   "app_favicon_placeholder": false,
   "note": "Commander-supplied artwork approved via desktop/assets/ICON_APPROVAL.txt. Artwork not redesigned.",
-  "updated_at": "2026-09-12T17:48:09.597Z"
+  "updated_at": "2026-09-12T18:12:41.753Z"
 }

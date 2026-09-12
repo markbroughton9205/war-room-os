@@ -3,12 +3,12 @@ WAR ROOM OS — COMMANDER ICON APPROVAL
 
 Approved artwork for the installable Windows application (Roadmap #22, Phase 11D).
 
-Source supplied by the Commander : Windows Desktop\War-Room-OS-Icon.png
+Source supplied by the Commander : Windows Desktop\WAR-ROOM-OS-ICON.PNG
 Installed in repository as       : desktop/assets/war-room-os-icon.png
 Copied                           : byte-for-byte, no edit, no re-render, no redesign
-SHA-256                          : 63d2a9d378732c3cad1ed3298a6b9df2ccd9eced80f936d79b1b7519467b0447
-Dimensions                       : 1254 x 1254, 32-bit ARGB, transparent surround
-Opaque content bounds            : (80,100) - (1154,1190)
+SHA-256                          : 843af44466fa2dfd6ab48d70244b3af7e399910fce11bd580917389ae6fb6f0b
+Bytes                            : 1668743
+Dimensions                       : 1254 x 1254, opaque black surround
 
 Approved design, as specified by the Commander:
   - dark cinematic rounded-square design
@@ -24,9 +24,10 @@ Explicitly NOT approved, and never to be substituted:
   - the generic Electron icon
   - any placeholder
 
-Known artifact in the supplied file: a Windows shortcut-arrow overlay badge is baked into the
-lower-left of the artwork (around x=138, y=1072 at full size). It was left in place because the
-artwork must not be edited. To remove it, supply a re-exported PNG without the overlay at the same
-Desktop path and re-run `npm --prefix desktop run icon:ico`, then rebuild the installer.
+Revision history:
+  - An earlier supplied file (sha256 63d2a9d3...b0447, 2140555 bytes) carried a Windows
+    shortcut-arrow overlay badge baked into its lower-left corner. It was shipped unedited because
+    the artwork must not be modified, then replaced by the Commander with this clean, arrow-free
+    export. Neither the triangle-in-disc mark nor the arrow-badged file is approved artwork.
 
 Derived Windows ICO: desktop/assets/war-room-os.ico at 16/24/32/48/64/128/256.
