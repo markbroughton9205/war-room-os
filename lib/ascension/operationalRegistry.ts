@@ -1,5 +1,5 @@
 /**
- * #22 Phase 3 — Shared Ascension operational registry.
+ * #22 Phase 3+ — Shared Ascension operational registry.
  * Exactly the agents that are IMPLEMENTED_BOUNDED and available.
  */
 import { ASCENSION_AUTONOMY_GUARD } from '@/lib/council/ascension/types'
@@ -15,9 +15,18 @@ import {
   ENGINEERING_AGENT_RUNTIME_VERSION,
   isEngineeringAgentRuntimeAvailable,
 } from '@/lib/ascension/engineering-agent/identity'
+import {
+  isSecurityRedTeamAgentRuntimeAvailable,
+  SECURITY_RED_TEAM_AGENT_AUTONOMOUS_EXECUTION_ENABLED,
+  SECURITY_RED_TEAM_AGENT_ROLE,
+  SECURITY_RED_TEAM_AGENT_RUNTIME_VERSION,
+} from '@/lib/ascension/security-red-team-agent/identity'
 
 export type OperationalAscensionAgentRecord = {
-  agent_role: typeof RESEARCH_AGENT_ROLE | typeof ENGINEERING_AGENT_ROLE
+  agent_role:
+    | typeof RESEARCH_AGENT_ROLE
+    | typeof ENGINEERING_AGENT_ROLE
+    | typeof SECURITY_RED_TEAM_AGENT_ROLE
   runtime_status: 'IMPLEMENTED_BOUNDED'
   runtime_version: string
   invocation_driven: true
@@ -42,6 +51,14 @@ export const OPERATIONAL_ASCENSION_AGENTS: readonly OperationalAscensionAgentRec
     autonomous: false,
     available: isEngineeringAgentRuntimeAvailable(),
   },
+  {
+    agent_role: SECURITY_RED_TEAM_AGENT_ROLE,
+    runtime_status: 'IMPLEMENTED_BOUNDED',
+    runtime_version: SECURITY_RED_TEAM_AGENT_RUNTIME_VERSION,
+    invocation_driven: true,
+    autonomous: false,
+    available: isSecurityRedTeamAgentRuntimeAvailable(),
+  },
 ])
 
 export function operationalAscensionAgentCount(): number {
@@ -54,7 +71,8 @@ export function ascensionAutonomyIsOff(): boolean {
     ASCENSION_AUTONOMY_GUARD.productionEditEnabled === false &&
     ASCENSION_AUTONOMY_GUARD.unvalidatedPromotionEnabled === false &&
     RESEARCH_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
-    ENGINEERING_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false
+    ENGINEERING_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
+    SECURITY_RED_TEAM_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false
   )
 }
 
@@ -62,7 +80,6 @@ export function ascensionAutonomyIsOff(): boolean {
 export const TARGET_ASCENSION_AGENTS_UNIMPLEMENTED = Object.freeze([
   'TERRA_INTELLIGENCE_AGENT',
   'OPERATIONS_AGENT',
-  'SECURITY_RED_TEAM_AGENT',
   'COUNCIL_VALIDATOR',
   'DATA_CORPUS_AGENT',
   'FUTURE_NAVIGATION_AGENT',

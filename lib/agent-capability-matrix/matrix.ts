@@ -284,9 +284,10 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     policyAuthority: 'READ_ALLOWED',
     riskTier: 'TIER_0_READ_OBSERVE',
     approvalRequirement: 'NO_APPROVAL',
-    runtimeStatus: 'IMPLEMENTED',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'PHOENIX reasoner + red-sentinel scan; advisory/challenge only',
+    evidence:
+      'lib/ascension/security-red-team-agent — safe deterministic probes; findings only; no destructive executor',
   }),
   row({
     id: 'sec.delete',

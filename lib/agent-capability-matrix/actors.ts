@@ -43,7 +43,24 @@ export const ACTOR_INVENTORY: readonly ActorInventoryItem[] = Object.freeze([
       'lib/native-builder/patchPolicy.ts',
     ],
     notes:
-      '#22 Phase 3 bounded software worker. Isolated worktree writes + allowlisted validation only. No commit/push/deploy. Ascension autonomy OFF. Operational count=2.',
+      '#22 Phase 3 bounded software worker. Isolated worktree writes + allowlisted validation only. No commit/push/deploy. Ascension autonomy OFF.',
+  },
+  {
+    id: 'security_red_team_agent',
+    name: 'SECURITY_RED_TEAM_AGENT',
+    class: 'EXECUTOR',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    canInvokeTools: true,
+    canSpawnWork: false,
+    canMutateState: false,
+    evidencePaths: [
+      'lib/ascension/security-red-team-agent',
+      'app/api/ascension/security-red-team-agent/run',
+      'lib/permissions',
+      'lib/war-room/governedAudit.ts',
+    ],
+    notes:
+      '#22 Phase 4 bounded security evaluator. Safe probes + findings only. No exploit/deploy/remediation execution. Ascension autonomy OFF. Operational count=3.',
   },
   {
     id: 'commander',

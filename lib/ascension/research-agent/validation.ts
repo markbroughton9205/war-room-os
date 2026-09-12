@@ -204,7 +204,7 @@ export function runAscensionPhase2Validation(): CaseResult[] {
     r => r.runtimeStatus === 'IMPLEMENTED' || r.runtimeStatus === 'IMPLEMENTED_BOUNDED',
   )
   results.push(check('46_target_agents_unimplemented', targetImplemented.length === 0, targetImplemented.map(r => r.id).join(',') || 'none'))
-  results.push(check('46b_target_roles_list', TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.length >= 7, `${TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.length}`))
+  results.push(check('46b_target_roles_list', TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.length >= 6, `${TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.length}`))
 
   results.push(check('47_ascension_autonomy_off', ascensionAutonomyIsOff() && !RESEARCH_AGENT_AUTONOMOUS_EXECUTION_ENABLED, 'ok'))
   results.push(check('48_operational_count_includes_research', operationalAscensionAgentCount() >= 1 && OPERATIONAL_ASCENSION_AGENTS.some(a => a.agent_role === 'RESEARCH_AGENT'), `${operationalAscensionAgentCount()}`))

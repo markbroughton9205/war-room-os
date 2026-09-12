@@ -74,6 +74,13 @@ export const DANGEROUS_KIND_ALIASES: Readonly<Record<string, CanonicalDangerousK
   APPROVAL_CHANGE: 'policy_change',
   SECRET_CHANGE: 'secrets_change',
   ENVIRONMENT_CHANGE: 'secrets_change',
+  CREDENTIAL_EXFILTRATION: 'secrets_change',
+  SQL_MUTATION: 'delete_data',
+  DATABASE_DESTRUCTIVE_WRITE: 'delete_data',
+  SCHEMA_CHANGE: 'delete_data',
+  MALWARE_PERSISTENCE: 'shell_mutating',
+  HOST_PRIVILEGE_ESCALATION: 'shell_mutating',
+  EXTERNAL_EXPLOITATION: 'external_account',
 })
 
 export function resolveCanonicalDangerousKind(kindOrAlias: string): CanonicalDangerousKind | null {

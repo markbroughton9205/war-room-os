@@ -387,8 +387,10 @@ export async function runEngineeringAgentPhase3Validation(): Promise<{
     results.push(check('67_research_agent_operational', isResearchAgentRuntimeAvailable(), RESEARCH_AGENT_ROLE))
     results.push(
       check(
-        '68_exactly_2_operational',
-        operationalAscensionAgentCount() === 2 && OPERATIONAL_ASCENSION_AGENTS.length === 2,
+        '68_research_and_engineering_operational',
+        OPERATIONAL_ASCENSION_AGENTS.some(a => a.agent_role === 'RESEARCH_AGENT') &&
+          OPERATIONAL_ASCENSION_AGENTS.some(a => a.agent_role === 'ENGINEERING_AGENT') &&
+          operationalAscensionAgentCount() >= 2,
         String(operationalAscensionAgentCount()),
       ),
     )
@@ -397,7 +399,7 @@ export async function runEngineeringAgentPhase3Validation(): Promise<{
         '69_remaining_targets_unimplemented',
         !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('ENGINEERING_AGENT' as never) &&
           TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('OPERATIONS_AGENT') &&
-          TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('SECURITY_RED_TEAM_AGENT'),
+          !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('SECURITY_RED_TEAM_AGENT' as never),
         TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.join(','),
       ),
     )
