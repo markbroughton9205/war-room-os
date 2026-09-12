@@ -141,11 +141,11 @@ export async function runPhase11aLocalUiValidation(opts?: {
   results.push(
     check(
       '26_privileged_truth',
-      truth.PRIVILEGED_OFFLINE_OWNERSHIP === 'NOT_IMPLEMENTED',
+      truth.PRIVILEGED_OFFLINE_OWNERSHIP === 'IMPLEMENTED',
       truth.PRIVILEGED_OFFLINE_OWNERSHIP,
     ),
   )
-  results.push(check('27_no_fake_offline_ownership', truth.PRIVILEGED_OFFLINE_OWNERSHIP === 'NOT_IMPLEMENTED', 'ok'))
+  results.push(check('27_offline_ownership_implemented', truth.LOCAL_COMMANDER_IDENTITY === 'IMPLEMENTED', 'ok'))
 
   // Failure simulations (config) — full UI packaging truth independent of public site
   const domain = buildLocalHealth('CORE_READY', simulateDomainUnavailable())

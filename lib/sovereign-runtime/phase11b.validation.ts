@@ -334,7 +334,7 @@ export async function runPhase11bLocalModelValidation(opts?: {
   results.push(check('47_website_optional', truth.WEBSITE_REQUIRED === false, 'false'))
   results.push(check('48_cloudflare_optional', truth.CLOUDFLARE_REQUIRED_FOR_LOCAL_USE === false, 'false'))
   results.push(check('49_dns_optional', truth.PUBLIC_DNS_REQUIRED_FOR_UI === false, 'false'))
-  results.push(check('50_offline_ownership_ni', truth.PRIVILEGED_OFFLINE_OWNERSHIP === 'NOT_IMPLEMENTED', 'NOT_IMPLEMENTED'))
+  results.push(check('50_offline_ownership', truth.PRIVILEGED_OFFLINE_OWNERSHIP === 'IMPLEMENTED', truth.PRIVILEGED_OFFLINE_OWNERSHIP))
   results.push(check('51_phone_ni', truth.PHONE_APP === 'NOT_IMPLEMENTED', 'ok'))
   results.push(
     check(
@@ -346,7 +346,7 @@ export async function runPhase11bLocalModelValidation(opts?: {
   )
   results.push(check('53_gate16_14_14', truth.GATE16_PREBUILD === 'PASS_14_OF_14', truth.GATE16_PREBUILD))
   results.push(check('54_17_structural', fs.existsSync(path.join(repoRoot, 'docs')) && truth.ROADMAP_22 === 'ACTIVE', '#17 closed historically'))
-  results.push(check('55_19_structural', truth.PRIVILEGED_OFFLINE_OWNERSHIP === 'NOT_IMPLEMENTED', '#19 ownership separate; offline ownership NI'))
+  results.push(check('55_19_structural', truth.SUPABASE_REQUIRED_FOR_REMOTE_DATA === true, '#19 remote ownership preserved'))
   results.push(check('56_phase11a_module', fs.existsSync(path.join(repoRoot, 'lib', 'sovereign-runtime', 'phase11a.validation.ts')), 'ok'))
   results.push(check('57_phase10_module', fs.existsSync(path.join(repoRoot, 'lib', 'sovereign-runtime', 'validation.ts')), 'ok'))
   results.push(check('58_phase9_module', fs.existsSync(path.join(repoRoot, 'lib', 'terra', 'navigation')), 'ok'))

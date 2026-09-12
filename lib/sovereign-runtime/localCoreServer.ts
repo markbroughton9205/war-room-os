@@ -24,17 +24,26 @@ import { isLoopbackRequestHost, mintLocalDesktopSession, assertServiceRoleIsNotC
 import { WEBSITE_DEPENDENCE_INVENTORY } from './dependenceInventory'
 import { decideDesktopNavigation, defaultDesktopStartUrl } from './desktopSecurity'
 import { discoverLocalModels, runLocalModelInference } from './local-model'
+import { tryHandleLocalOwnershipHttp } from './local-ownership/httpCore'
+import {
+  LOCAL_SESSION_COOKIE,
+  extractBearerOrCookieToken,
+  getLocalOwnershipStore,
+} from './local-ownership'
 
 export type LocalCoreServerOptions = {
   host?: string
   port?: number
   rendererDir?: string
   gitSha?: string | null
+  /** Isolated AppData override for tests (WAR_ROOM_LOCAL_DATA_DIR). */
+  localDataDir?: string | null
   simulate?: {
     internet?: 'ONLINE' | 'OFFLINE' | 'UNKNOWN'
     publicWebsiteReachable?: boolean
     cloudflareReachable?: boolean
     ollamaReachable?: boolean | null
+    supabaseReachable?: boolean | null
   }
 }
 
@@ -133,6 +142,14 @@ export async function startLocalCoreServer(opts: LocalCoreServerOptions = {}): P
     if (denyNonLoopback(req, res)) return
     const url = new URL(req.url || '/', `http://${LOCAL_CORE_HOST}:${port}`)
 
+    if (
+      tryHandleLocalOwnershipHttp(req, res, url, {
+        dataDirOverride: opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
+      })
+    ) {
+      return
+    }
+
     if (url.pathname === '/api/local/health') {
       return json(res, 200, { ok: true, health: buildLocalHealth(boot.snapshot(), opts) })
     }
@@ -189,12 +206,29 @@ export async function startLocalCoreServer(opts: LocalCoreServerOptions = {}): P
               return
             }
           }
+          const store = getLocalOwnershipStore(opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null)
+          const token = extractBearerOrCookieToken({
+            authorization: typeof req.headers.authorization === 'string' ? req.headers.authorization : null,
+            cookieHeader: typeof req.headers.cookie === 'string' ? req.headers.cookie : null,
+            cookieName: LOCAL_SESSION_COOKIE,
+          })
+          const auth = store.verifySessionToken(token)
+          const wantsOwnerContext =
+            Boolean(body.conversation_id) ||
+            Boolean(body.owner_user_id) ||
+            Boolean(body.resource_owner_user_id)
+          if (wantsOwnerContext && !auth) {
+            json(res, 401, { ok: false, error: 'Local Commander session required for owned inference context.' })
+            return
+          }
+          // Session owner is authoritative — client cannot forge owner IDs.
+          const ownerId = auth?.identity.id ?? null
           const result = await runLocalModelInference({
             prompt: typeof body.prompt === 'string' ? body.prompt : '',
             system: typeof body.system === 'string' ? body.system : undefined,
             model: typeof body.model === 'string' ? body.model : null,
-            ownerUserId: typeof body.owner_user_id === 'string' ? body.owner_user_id : null,
-            resourceOwnerUserId: typeof body.resource_owner_user_id === 'string' ? body.resource_owner_user_id : null,
+            ownerUserId: ownerId,
+            resourceOwnerUserId: ownerId,
             conversationId: typeof body.conversation_id === 'string' ? body.conversation_id : null,
             attemptToolAuthorization: body.attempt_tool_authorization === true,
             attemptDeployAuthorization: body.attempt_deploy_authorization === true,

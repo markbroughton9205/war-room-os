@@ -82,6 +82,8 @@
     "validate:ascension-phase11a:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11a.validation.ts --live",
     "validate:ascension-phase11b": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11b.validation.ts",
     "validate:ascension-phase11b:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11b.validation.ts --live",
+    "validate:ascension-phase11c": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11c.validation.ts",
+    "validate:ascension-phase11c:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11c.validation.ts --live",
     "validate:sovereign-local-proof": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-sovereign-local-proof.mjs",
     "sovereign:local-core": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-war-room-local-core.mjs",
     "sovereign:local-ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-war-room-local-ui.mjs",

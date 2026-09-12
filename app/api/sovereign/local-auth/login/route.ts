@@ -1,0 +1,52 @@
+import { NextResponse } from 'next/server'
+import { headers } from 'next/headers'
+import {
+  LOCAL_SESSION_COOKIE,
+  assertLocalMutationOrigin,
+  assertLocalOnlyRequest,
+  getLocalOwnershipStore,
+} from '@/lib/sovereign-runtime/local-ownership'
+
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
+function cookie(token: string) {
+  return `${LOCAL_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${12 * 60 * 60}`
+}
+
+/** Offline local Commander login — no Supabase. */
+export async function POST(req: Request) {
+  const h = await headers()
+  const host = h.get('host')
+  const only = assertLocalOnlyRequest({ host, origin: h.get('origin') })
+  if (!only.ok) return NextResponse.json({ ok: false, error: only.reason, code: only.code }, { status: 403 })
+  const origin = assertLocalMutationOrigin({
+    method: 'POST',
+    origin: h.get('origin'),
+    referer: h.get('referer'),
+    host,
+  })
+  if (!origin.ok) return NextResponse.json({ ok: false, error: origin.reason, code: origin.code }, { status: 403 })
+
+  const store = getLocalOwnershipStore(process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null)
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await req.json()) as Record<string, unknown>
+  } catch {
+    return NextResponse.json({ ok: false, error: 'Invalid JSON.' }, { status: 400 })
+  }
+
+  const login = store.login(typeof body.password === 'string' ? body.password : '')
+  if (!login.ok) {
+    return NextResponse.json(login, { status: login.code === 'THROTTLED' ? 429 : 401 })
+  }
+
+  const res = NextResponse.json({
+    ok: true,
+    identity: login.auth.identity,
+    session_id: login.auth.session.session_id,
+    auth_mode: 'LOCAL_COMMANDER_SESSION',
+  })
+  res.headers.set('set-cookie', cookie(login.auth.token))
+  return res
+}

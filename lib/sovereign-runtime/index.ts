@@ -9,6 +9,7 @@ export * from './session'
 export * from './desktopSecurity'
 export * from './uiAudit'
 export * from './local-model'
+export * from './local-ownership'
 export {
   startLocalCoreServer,
   buildLocalHealth,

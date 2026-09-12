@@ -8,6 +8,12 @@ import {
   verifyAuthCleanupMarkerFromRequest,
   verifyRecoveryMarkerFromRequest,
 } from '@/lib/auth/recovery'
+import { isLoopbackRequestHost } from '@/lib/sovereign-runtime/session'
+import {
+  LOCAL_SESSION_COOKIE,
+  extractBearerOrCookieToken,
+  getLocalOwnershipStore,
+} from '@/lib/sovereign-runtime/local-ownership'
 
 const PUBLIC_PATHS = ['/login', '/signup', '/forgot-password', '/auth/callback', '/auth/cleanup']
 
@@ -37,7 +43,7 @@ const PUBLIC_API_PATHS = new Set([
   '/api/tools/research',
 ])
 
-const PUBLIC_API_PREFIXES = ['/api/debug/']
+const PUBLIC_API_PREFIXES = ['/api/debug/', '/api/sovereign/local-auth/']
 
 function isExemptApiRequest(pathname: string, method: string): boolean {
   // GET now requires a session (log reads are Commander-only); POST keeps its
@@ -51,11 +57,40 @@ function isExemptApiRequest(pathname: string, method: string): boolean {
   return PUBLIC_API_PREFIXES.some(prefix => pathname.startsWith(prefix))
 }
 
+function hasValidLocalCommanderSession(request: NextRequest): boolean {
+  if (!isLoopbackRequestHost(request.headers.get('host'))) return false
+  try {
+    const token = extractBearerOrCookieToken({
+      authorization: request.headers.get('authorization'),
+      cookieHeader: request.headers.get('cookie'),
+      cookieName: LOCAL_SESSION_COOKIE,
+    })
+    const store = getLocalOwnershipStore(process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null)
+    return Boolean(store.verifySessionToken(token))
+  } catch {
+    return false
+  }
+}
+
+async function tryGetSupabaseUser(supabase: ReturnType<typeof createServerClient>) {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    return user
+  } catch {
+    return null
+  }
+}
+
 /**
  * Refreshes the Supabase session cookie on every request and redirects
  * unauthenticated visitors to /login. Must return the same response object
  * threaded through supabase's cookie handlers — swapping it for a fresh
  * NextResponse drops the refreshed session cookie.
+ *
+ * Phase 11C: on loopback, a valid LOCAL Commander session may proceed without Supabase.
+ * LOCAL_COMMANDER_SESSION != REMOTE_SUPABASE_SESSION.
  */
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
   let supabaseResponse = NextResponse.next({ request })
@@ -79,10 +114,9 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     },
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await tryGetSupabaseUser(supabase)
   const { pathname } = request.nextUrl
+  const localOk = !user && hasValidLocalCommanderSession(request)
 
   if (user) {
     const cleanupMarkerCookie = request.cookies.get(AUTH_CLEANUP_MARKER_COOKIE)?.value
@@ -179,7 +213,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     }
   }
 
-  if (!user) {
+  if (!user && !localOk) {
     if (pathname.startsWith('/api/')) {
       if (!isExemptApiRequest(pathname, request.method)) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

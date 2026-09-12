@@ -2,7 +2,7 @@
  * #22 Phase 10 — Sovereign local runtime constants + truth contracts.
  * WEBSITE != WAR ROOM. Cloudflare = OPTIONAL_REMOTE_CONNECTIVITY.
  */
-export const SOVEREIGN_RUNTIME_VERSION = 'ascension-phase11b-v1' as const
+export const SOVEREIGN_RUNTIME_VERSION = 'ascension-phase11c-v1' as const
 export const DESKTOP_APP_VERSION = '0.2.0-local-ui' as const
 
 /** Dedicated local-app ports — must not collide with prod :3000 or DEV :3001. */
@@ -85,7 +85,20 @@ export type SovereignRuntimeTruth = {
   INTERNET_REQUIRED_FOR_LOCAL_UI: false
   EXTERNAL_AI_REQUIRED_FOR_CORE: false
   LOCAL_MODEL_REQUIRED_FOR_CORE_START: false
-  PRIVILEGED_OFFLINE_OWNERSHIP: 'NOT_IMPLEMENTED'
+  PRIVILEGED_OFFLINE_OWNERSHIP: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  LOCAL_COMMANDER_IDENTITY: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  LOCAL_COMMANDER_AUTH: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  LOCAL_SESSION: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  LOCAL_OWNERSHIP: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  LOCAL_CONVERSATIONS: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  LOCAL_MESSAGE_PERSISTENCE: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  OFFLINE_LOCAL_CHAT: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  LOCAL_CONVERSATIONS_OFFLINE: 'IMPLEMENTED' | 'NOT_IMPLEMENTED'
+  SUPABASE_REQUIRED_FOR_LOCAL_COMMANDER_ACCESS: false | true
+  SUPABASE_REQUIRED_FOR_REMOTE_DATA: true
+  LOCAL_REMOTE_IDENTITY_LINK: 'IMPLEMENTED_FOUNDATION' | 'NOT_IMPLEMENTED'
+  AUTOMATIC_SYNC: 'NOT_IMPLEMENTED'
+  LOCAL_COMMANDER_RECOVERY: 'NOT_IMPLEMENTED'
   PHONE_APP: 'NOT_IMPLEMENTED'
   NATIVE_WRIM: 'NOT_IMPLEMENTED'
   FUTURE_NAVIGATION_AGENT: 'TARGET_UNIMPLEMENTED' | 'UNEXPECTED'
@@ -140,14 +153,16 @@ export const LOCAL_DATA_OWNERSHIP_INVENTORY: readonly {
   class: DataOwnershipClass
   notes: string
 }[] = Object.freeze([
-  { dataset: 'conversations', class: 'HYBRID', notes: 'Supabase-backed; #19 ownership. Offline without session = UNAVAILABLE_OFFLINE for privileged reads.' },
+  { dataset: 'conversations', class: 'HYBRID', notes: 'Remote: Supabase #19. Local: Phase 11C COMMANDER_LOCAL SQLite under AppData. No auto-merge.' },
+  { dataset: 'local_commander_identity', class: 'LOCAL', notes: 'scrypt-hashed credentials in AppData; not Supabase UUID.' },
+  { dataset: 'local_conversations', class: 'LOCAL', notes: 'Phase 11C offline owned conversations/messages.' },
   { dataset: 'ascension_agent_code', class: 'LOCAL', notes: 'Repo modules under lib/ascension/*.' },
   { dataset: 'search_corpus_index', class: 'LOCAL', notes: 'Sovereign Search local index files when present.' },
   { dataset: 'terra_cache', class: 'HYBRID', notes: 'Live providers remote; fixtures/cache local.' },
   { dataset: 'astra_fallback', class: 'HYBRID', notes: 'Filesystem fallback + Supabase when configured; phase58a NOT APPLIED.' },
   { dataset: 'audit_records', class: 'HYBRID', notes: 'Governed audit may persist remotely when Supabase present.' },
   { dataset: 'local_model_state', class: 'LOCAL', notes: 'Ollama process + models on host.' },
-  { dataset: 'desktop_local_session', class: 'LOCAL', notes: 'Phase 10 loopback session token — not a substitute for Supabase Commander auth.' },
+  { dataset: 'desktop_local_session', class: 'LOCAL', notes: 'Phase 11C local Commander session (cookie/bearer); distinct from remote Supabase session.' },
 ] as const)
 
 export const COMMANDER_CONTROL_SURFACE_SLOTS = Object.freeze([
