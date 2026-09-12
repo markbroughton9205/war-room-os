@@ -209,14 +209,18 @@ function checkPrebuildGateScript(): ApprovalIssuanceValidationResult {
     env: { ...process.env, VERCEL_ENV: 'production', WAR_ROOM_COMMANDER_USER_ID: 'not-a-uuid' },
     encoding: 'utf8',
   })
-  const passed = productionValid.status === 0 &&
+  // Accept prebuild that starts with the commander-identity gate (may chain && copy-cesium-assets, etc.).
+  const prebuildWired =
+    /"prebuild"\s*:\s*"[^"]*node scripts\/validate-commander-identity\.cjs/.test(packageJson)
+  const passed =
+    productionValid.status === 0 &&
     productionInvalid.status !== 0 &&
-    packageJson.includes('"prebuild": "node scripts/validate-commander-identity.cjs"')
+    prebuildWired
   return {
     caseId: 'gate16_prebuild_gate_configured',
     description: 'Production prebuild gate executes against real UUID inputs.',
-    expected: 'valid UUID exits 0; malformed UUID exits nonzero; package prebuild is wired',
-    observed: `validExit=${productionValid.status}; invalidExit=${productionInvalid.status}; packageScript=${packageJson.includes('"prebuild": "node scripts/validate-commander-identity.cjs"')}`,
+    expected: 'valid UUID exits 0; malformed UUID exits nonzero; package prebuild wires validate-commander-identity.cjs',
+    observed: `validExit=${productionValid.status}; invalidExit=${productionInvalid.status}; packageScript=${prebuildWired}`,
     result: passed ? 'PASS' : 'FAIL',
     notes: [
       trimSpawnOutput(productionValid.stdout) || trimSpawnOutput(productionValid.stderr) || productionValid.error?.message,

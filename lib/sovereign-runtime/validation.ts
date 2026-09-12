@@ -248,7 +248,7 @@ export async function runSovereignRuntimePhase10Validation(): Promise<{
     results.push(check('control_surface_slots', COMMANDER_CONTROL_SURFACE_SLOTS.length >= 6, String(COMMANDER_CONTROL_SURFACE_SLOTS.length)))
     results.push(check('data_ownership_inventory', LOCAL_DATA_OWNERSHIP_INVENTORY.length >= 6, String(LOCAL_DATA_OWNERSHIP_INVENTORY.length)))
     results.push(check('inventory_present', WEBSITE_DEPENDENCE_INVENTORY.length >= 10, String(WEBSITE_DEPENDENCE_INVENTORY.length)))
-    results.push(check('gate16_tracked', truth.GATE16_PREBUILD === 'REQUIRES_PRE_22_CLOSEOUT_REPAIR', truth.GATE16_PREBUILD))
+    results.push(check('gate16_tracked', truth.GATE16_PREBUILD === 'PASS_14_OF_14', truth.GATE16_PREBUILD))
     results.push(check('22_active', truth.ROADMAP_22 === 'ACTIVE', 'ACTIVE'))
     results.push(check('electron_secure_prefs', /nodeIntegration:\s*false/.test(mainSrc) && /contextIsolation:\s*true/.test(mainSrc), 'ok'))
     results.push(check('discover_ready', (await discoverLocalCore({
@@ -292,7 +292,7 @@ async function main() {
     console.log(`${r.ok ? 'PASS' : 'FAIL'} ${r.id} — ${r.detail}`)
   }
   console.log(`\nResult: ${passed} passed, ${failed} failed (total ${results.length})`)
-  console.log('Inherited #16 gate16_prebuild_gate_configured: REQUIRES PRE-#22-CLOSEOUT REPAIR (not caused by Phase 10)')
+  console.log('Inherited #16 gate16_prebuild_gate_configured: PASS 14/14 (prebuild chain includes validate-commander-identity.cjs)')
   if (failed > 0) process.exitCode = 1
 }
 

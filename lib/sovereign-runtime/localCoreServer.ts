@@ -113,7 +113,7 @@ export function buildLocalHealth(boot: CoreBootState, opts: LocalCoreServerOptio
       'WEBSITE != WAR ROOM',
       'Cloudflare = OPTIONAL_REMOTE_CONNECTIVITY',
       'No silent fallback to warroomos.com',
-      'GATE16_PREBUILD requires pre-#22-closeout repair',
+      'GATE16_PREBUILD = PASS 14/14 (commander-identity gate still first in prebuild chain)',
     ],
   }
 }

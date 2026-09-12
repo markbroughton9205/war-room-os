@@ -6,7 +6,7 @@
 **Operational Ascension agents:** 7 (unchanged)  
 **Ascension autonomy:** OFF  
 **#22:** ACTIVE · **#23:** NOT STARTED  
-**Inherited #16:** `gate16_prebuild_gate_configured` — REQUIRES PRE-#22-CLOSEOUT REPAIR  
+**Inherited #16:** `gate16_prebuild_gate_configured` — **PASS 14/14** (validation accepts prebuild chain that starts with `validate-commander-identity.cjs`, including Cesium asset copy).  
 
 ## Architectural truth
 

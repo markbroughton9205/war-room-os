@@ -51,7 +51,7 @@ export type SovereignRuntimeTruth = {
   ROADMAP_22: 'ACTIVE'
   ROADMAP_23: 'NOT_STARTED'
   OPERATIONAL_ASCENSION_AGENTS: number
-  GATE16_PREBUILD: 'REQUIRES_PRE_22_CLOSEOUT_REPAIR'
+  GATE16_PREBUILD: 'PASS_14_OF_14'
 }
 
 export type OfflineCapabilityReport = {
