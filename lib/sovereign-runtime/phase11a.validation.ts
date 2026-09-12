@@ -213,14 +213,15 @@ export async function runPhase11aLocalUiValidation(opts?: {
       'NOT_IMPLEMENTED',
     ),
   )
-  results.push(check('61_agents_7', operationalAscensionAgentCount() === 7 && OPERATIONAL_ASCENSION_AGENTS.length === 7, String(operationalAscensionAgentCount())))
+  results.push(check('61_agents_8', operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8, String(operationalAscensionAgentCount())))
   results.push(check('62_autonomy_off', ascensionAutonomyIsOff() && truth.ASCENSION_AUTONOMY === 'OFF', 'OFF'))
   results.push(
     check(
-      '63_nav_target',
-      TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_NAVIGATION_AGENT') &&
-        truth.FUTURE_NAVIGATION_AGENT === 'TARGET_UNIMPLEMENTED',
-      'TARGET',
+      '63_nav_implemented',
+      !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_NAVIGATION_AGENT') &&
+        truth.FUTURE_NAVIGATION_AGENT === 'IMPLEMENTED_BOUNDED' &&
+        truth.NAVIGATION_AGENT === 'IMPLEMENTED',
+      truth.FUTURE_NAVIGATION_AGENT,
     ),
   )
   results.push(check('64_phone_ni', truth.PHONE_APP === 'NOT_IMPLEMENTED', 'ok'))

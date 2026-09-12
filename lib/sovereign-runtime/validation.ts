@@ -211,12 +211,14 @@ export async function runSovereignRuntimePhase10Validation(): Promise<{
     results.push(check('43_phone_not_implemented', truth.PHONE_APP === 'NOT_IMPLEMENTED', truth.PHONE_APP))
     results.push(check('44_23_not_started', truth.ROADMAP_23 === 'NOT_STARTED', 'NOT_STARTED'))
     results.push(check('45_autonomy_off', truth.ASCENSION_AUTONOMY === 'OFF' && ascensionAutonomyIsOff(), 'OFF'))
-    results.push(check('46_agents_7', operationalAscensionAgentCount() === 7 && OPERATIONAL_ASCENSION_AGENTS.length === 7, String(operationalAscensionAgentCount())))
+    results.push(check('46_agents_8', operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8, String(operationalAscensionAgentCount())))
     results.push(
       check(
-        '47_nav_agent_target',
-        TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_NAVIGATION_AGENT') && truth.FUTURE_NAVIGATION_AGENT === 'TARGET_UNIMPLEMENTED',
-        'TARGET',
+        '47_nav_agent_implemented',
+        !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_NAVIGATION_AGENT') &&
+          truth.FUTURE_NAVIGATION_AGENT === 'IMPLEMENTED_BOUNDED' &&
+          truth.NAVIGATION_AGENT === 'IMPLEMENTED',
+        truth.FUTURE_NAVIGATION_AGENT,
       ),
     )
     results.push(check('48_no_new_council', !fs.existsSync(path.join(repoRoot, 'lib', 'council2')), 'ok'))

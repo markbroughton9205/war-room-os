@@ -329,7 +329,7 @@ export async function runPhase11bLocalModelValidation(opts?: {
 
   // Ascension / roadmap
   results.push(check('44_ascension_autonomy_off', ascensionAutonomyIsOff() && truth.ASCENSION_AUTONOMY === 'OFF', 'OFF'))
-  results.push(check('45_agents_7', operationalAscensionAgentCount() === 7 && OPERATIONAL_ASCENSION_AGENTS.length === 7, String(operationalAscensionAgentCount())))
+  results.push(check('45_agents_8', operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8, String(operationalAscensionAgentCount())))
   results.push(check('46_local_desktop_ui', truth.FULL_WAR_ROOM_UI_LOCAL === 'IMPLEMENTED' && truth.DESKTOP_APP === 'IMPLEMENTED_LOCAL_UI', 'ok'))
   results.push(check('47_website_optional', truth.WEBSITE_REQUIRED === false, 'false'))
   results.push(check('48_cloudflare_optional', truth.CLOUDFLARE_REQUIRED_FOR_LOCAL_USE === false, 'false'))
@@ -339,8 +339,9 @@ export async function runPhase11bLocalModelValidation(opts?: {
   results.push(
     check(
       '52_nav_agent_target',
-      TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_NAVIGATION_AGENT') &&
-        truth.FUTURE_NAVIGATION_AGENT === 'TARGET_UNIMPLEMENTED',
+      !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_NAVIGATION_AGENT') &&
+        truth.FUTURE_NAVIGATION_AGENT === 'IMPLEMENTED_BOUNDED' &&
+        truth.NAVIGATION_AGENT === 'IMPLEMENTED',
       'TARGET',
     ),
   )

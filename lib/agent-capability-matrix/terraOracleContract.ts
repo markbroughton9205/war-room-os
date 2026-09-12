@@ -41,7 +41,7 @@ export const TERRA_ORACLE_DEFINITION = Object.freeze({
     'human sites',
     'infrastructure',
     'traffic — contract IMPLEMENTED; live segment speeds NOT_IMPLEMENTED',
-    'navigation foundation — IMPLEMENTED_BOUNDED (#22 Phase 9); FUTURE_NAVIGATION_AGENT / mobile GNSS still TARGET / NOT_SUPPORTED',
+    'navigation foundation — IMPLEMENTED_BOUNDED (#22 Phase 9); NAVIGATION_AGENT IMPLEMENTED_BOUNDED (#22 Phase 12); mobile GNSS still NOT_SUPPORTED',
     'environmental events',
     'source metadata',
     'freshness',

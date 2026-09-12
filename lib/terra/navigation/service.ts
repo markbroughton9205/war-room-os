@@ -73,7 +73,7 @@ const BOUNDARY_NOTES = Object.freeze([
   'GPS INPUT != USER SURVEILLANCE AUTHORITY',
   'ROUTE AVAILABLE != ACTION AUTHORIZED',
   'MISSION != MOVEMENT AUTHORIZATION',
-  'FUTURE_NAVIGATION_AGENT remains TARGET',
+  'NAVIGATION_AGENT is bounded reasoning over this foundation — not a second engine',
   '#23 NOT STARTED',
 ] as const)
 
@@ -188,7 +188,7 @@ export async function runNavigationFoundation(
           traffic_live: result.runtime_truth.LIVE_TRAFFIC,
           device_control: 'DENIED',
           background_tracking: 'DENIED',
-          future_navigation_agent: 'TARGET_UNIMPLEMENTED',
+          future_navigation_agent: 'IMPLEMENTED_BOUNDED',
           roadmap_23: 'NOT_STARTED',
           // no precise coordinates
           origin_present: true,
@@ -222,7 +222,7 @@ export async function runNavigationFoundation(
     denials.push({
       capability_or_action: 'AGENT_SPAWN',
       reason_code: 'POLICY_DENIED',
-      reason: 'FUTURE_NAVIGATION_AGENT remains TARGET — spawn denied in Phase 9.',
+      reason: 'Spawning another navigation agent is denied. NAVIGATION_AGENT is the single canonical agent.',
     })
   }
   if (input.attemptStart23) {

@@ -18,7 +18,7 @@ export const ROADMAP_22_INPUT_CONTRACT = Object.freeze({
     'COUNCIL_VALIDATOR',
     'ASTRA_ORCHESTRATOR',
     'DATA_CORPUS_AGENT',
-    'FUTURE_NAVIGATION_AGENT (deferred)',
+    'NAVIGATION_AGENT (Phase 12 IMPLEMENTED_BOUNDED)',
     'FUTURE_WORLD_LEARNING_AGENT (deferred)',
   ] as const,
 

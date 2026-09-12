@@ -1,6 +1,6 @@
 /**
  * #22 Phase 9 — Terra Navigation Foundation public exports.
- * FUTURE_NAVIGATION_AGENT remains TARGET / unimplemented.
+ * FUTURE_NAVIGATION_AGENT is fulfilled by NAVIGATION_AGENT (#22 Phase 12).
  */
 export * from './types'
 export * from './geometry'

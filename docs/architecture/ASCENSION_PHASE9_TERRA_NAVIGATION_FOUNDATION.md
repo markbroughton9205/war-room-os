@@ -3,7 +3,7 @@
 **Status:** IMPLEMENTED_BOUNDED (foundation only)  
 **Operational Ascension agents:** 7 (unchanged — no new agent)  
 **Ascension autonomy:** OFF  
-**FUTURE_NAVIGATION_AGENT:** TARGET / UNIMPLEMENTED  
+**FUTURE_NAVIGATION_AGENT:** fulfilled by NAVIGATION_AGENT in Phase 12 (this document is the foundation only)  
 **#22:** ACTIVE  
 **#23:** NOT STARTED  
 
@@ -13,7 +13,7 @@
 | --- | --- |
 | TERRA | World-state oracle + Earth surface |
 | TERRA NAVIGATION FOUNDATION | Location / road graph / routing / traffic contract / navigation capability |
-| FUTURE_NAVIGATION_AGENT | Later bounded worker — **not built in this phase** |
+| FUTURE_NAVIGATION_AGENT | Bounded worker — implemented in Phase 12 as NAVIGATION_AGENT |
 
 Critical separations:
 
@@ -64,7 +64,7 @@ Critical separations:
 | MOBILE_GNSS | NOT_SUPPORTED |
 | BACKGROUND_TRACKING | DENIED |
 | DEVICE_CONTROL | DENIED |
-| FUTURE_NAVIGATION_AGENT | TARGET_UNIMPLEMENTED |
+| FUTURE_NAVIGATION_AGENT | IMPLEMENTED_BOUNDED (Phase 12 NAVIGATION_AGENT) |
 
 ## APIs (Commander session)
 

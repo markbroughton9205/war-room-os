@@ -261,13 +261,13 @@ export async function runTerraNavigationPhase9Validation(): Promise<{
   results.push(
     check(
       '58_future_nav_target',
-      TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_NAVIGATION_AGENT') &&
-        live.runtime_truth.FUTURE_NAVIGATION_AGENT === 'TARGET_UNIMPLEMENTED',
+      TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_WORLD_LEARNING_AGENT') &&
+        live.runtime_truth.FUTURE_NAVIGATION_AGENT === 'IMPLEMENTED_BOUNDED',
       'ok',
     ),
   )
   results.push(check('59_autonomy_off', ascensionAutonomyIsOff(), 'OFF'))
-  results.push(check('60_agent_count_7', operationalAscensionAgentCount() === 7 && OPERATIONAL_ASCENSION_AGENTS.length === 7, String(operationalAscensionAgentCount())))
+  results.push(check('60_agent_count_8', operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8, String(operationalAscensionAgentCount())))
   results.push(check('61_22_active', navigationRoadmapTruth().roadmap_22 === 'ACTIVE', 'ACTIVE'))
   results.push(check('62_23_not_started', navigationRoadmapTruth().roadmap_23 === 'NOT_STARTED', 'NOT_STARTED'))
 

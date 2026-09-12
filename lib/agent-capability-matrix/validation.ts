@@ -213,6 +213,7 @@ export function runAgentCapabilityMatrixValidation(): CaseResult[] {
     'COUNCIL_VALIDATOR',
     'ASTRA_ORCHESTRATOR',
     'DATA_CORPUS_AGENT',
+    'NAVIGATION_AGENT',
     'FUTURE_NAVIGATION_AGENT',
     'FUTURE_WORLD_LEARNING_AGENT',
   ] as const) {

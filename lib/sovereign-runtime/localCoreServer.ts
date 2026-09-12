@@ -25,6 +25,7 @@ import { WEBSITE_DEPENDENCE_INVENTORY } from './dependenceInventory'
 import { decideDesktopNavigation, defaultDesktopStartUrl } from './desktopSecurity'
 import { discoverLocalModels, runLocalModelInference } from './local-model'
 import { tryHandleLocalOwnershipHttp } from './local-ownership/httpCore'
+import { tryHandleNavigationAgentHttp } from '@/lib/ascension/navigation-agent/httpCore'
 import {
   LOCAL_SESSION_COOKIE,
   extractBearerOrCookieToken,
@@ -147,6 +148,14 @@ export async function startLocalCoreServer(opts: LocalCoreServerOptions = {}): P
 
     if (
       tryHandleLocalOwnershipHttp(req, res, url, {
+        dataDirOverride: opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
+      })
+    ) {
+      return
+    }
+
+    if (
+      tryHandleNavigationAgentHttp(req, res, url, {
         dataDirOverride: opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
       })
     ) {

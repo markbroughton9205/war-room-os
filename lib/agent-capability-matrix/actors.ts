@@ -129,7 +129,23 @@ export const ACTOR_INVENTORY: readonly ActorInventoryItem[] = Object.freeze([
       'lib/war-room-search/crawler',
     ],
     notes:
-      '#22 Phase 8 bounded corpus curator. Quality/dedupe/provenance/WR-CORPUS recommendations only. No crawl/train/#23. Ascension autonomy OFF. Operational count=7.',
+      '#22 Phase 8 bounded corpus curator. Quality/dedupe/provenance/WR-CORPUS recommendations only. No crawl/train/#23. Ascension autonomy OFF.',
+  },
+  {
+    id: 'navigation_agent',
+    name: 'NAVIGATION_AGENT',
+    class: 'EXECUTOR',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    canInvokeTools: true,
+    canSpawnWork: false,
+    canMutateState: false,
+    evidencePaths: [
+      'lib/ascension/navigation-agent',
+      'app/api/ascension/navigation-agent/run',
+      'lib/terra/navigation',
+    ],
+    notes:
+      '#22 Phase 12 bounded navigation reasoning agent over Phase 9 Terra Navigation Foundation. No device control, GNSS, live traffic, or auto-execute. Ascension autonomy OFF. Operational count=8.',
   },
   {
     id: 'commander',
