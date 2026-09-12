@@ -1,7 +1,8 @@
 # #19 Conversation Ownership Migration — Deployment & Rollback
 
-**Status:** PRE-DEPLOYMENT / NOT APPLIED / NOT LIVE-PROVEN  
-**Do not** apply SQL or deploy app until Commander approves backfill strategy.
+**Status:** PASS / LIVE-MIGRATED / CROSS-USER-VALIDATED / CLOSED  
+**Implementation commit:** `1e1c218688d88cc9ca3bffb4377285eee2ec1995`  
+Live SCHEMA → BACKFILL (AUTH_USER_A) → ENFORCE applied. Do not re-run blind backfill.
 
 ## Security contract
 
