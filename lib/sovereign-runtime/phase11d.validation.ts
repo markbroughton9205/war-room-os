@@ -136,7 +136,7 @@ export async function runPhase11dPackagingValidation(): Promise<{
   results.push(check('65_search', CHUNKING_VERSION === 'wr-chunk-v1' && LOCAL_EMBEDDING_MODEL_ID === 'BAAI/bge-small-en-v1.5', 'ok'))
   results.push(check('66_phase58a', truth.NATIVE_WRIM === 'NOT_IMPLEMENTED', 'ok'))
   results.push(check('67_autonomy', ascensionAutonomyIsOff() && truth.ASCENSION_AUTONOMY === 'OFF', 'OFF'))
-  results.push(check('68_agents', operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8, '8'))
+  results.push(check('68_agents', operationalAscensionAgentCount() === 9 && OPERATIONAL_ASCENSION_AGENTS.length === 9, '9'))
   results.push(check('69_phone', truth.PHONE_APP === 'NOT_IMPLEMENTED', 'ok'))
   results.push(
     check(

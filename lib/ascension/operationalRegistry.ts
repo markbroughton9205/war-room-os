@@ -50,6 +50,12 @@ import {
   NAVIGATION_AGENT_ROLE,
   NAVIGATION_AGENT_RUNTIME_VERSION,
 } from '@/lib/ascension/navigation-agent/identity'
+import {
+  isWorldLearningAgentRuntimeAvailable,
+  WORLD_LEARNING_AGENT_AUTONOMOUS_EXECUTION_ENABLED,
+  WORLD_LEARNING_AGENT_ROLE,
+  WORLD_LEARNING_AGENT_RUNTIME_VERSION,
+} from '@/lib/ascension/world-learning-agent/identity'
 
 export type OperationalAscensionAgentRecord = {
   agent_role:
@@ -61,6 +67,7 @@ export type OperationalAscensionAgentRecord = {
     | typeof COUNCIL_VALIDATOR_ROLE
     | typeof DATA_CORPUS_AGENT_ROLE
     | typeof NAVIGATION_AGENT_ROLE
+    | typeof WORLD_LEARNING_AGENT_ROLE
   runtime_status: 'IMPLEMENTED_BOUNDED'
   runtime_version: string
   invocation_driven: true
@@ -133,6 +140,14 @@ export const OPERATIONAL_ASCENSION_AGENTS: readonly OperationalAscensionAgentRec
     autonomous: false,
     available: isNavigationAgentRuntimeAvailable(),
   },
+  {
+    agent_role: WORLD_LEARNING_AGENT_ROLE,
+    runtime_status: 'IMPLEMENTED_BOUNDED',
+    runtime_version: WORLD_LEARNING_AGENT_RUNTIME_VERSION,
+    invocation_driven: true,
+    autonomous: false,
+    available: isWorldLearningAgentRuntimeAvailable(),
+  },
 ])
 
 export function operationalAscensionAgentCount(): number {
@@ -151,11 +166,10 @@ export function ascensionAutonomyIsOff(): boolean {
     TERRA_INTELLIGENCE_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
     COUNCIL_VALIDATOR_AUTONOMOUS_EXECUTION_ENABLED === false &&
     DATA_CORPUS_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
-    NAVIGATION_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false
+    NAVIGATION_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
+    WORLD_LEARNING_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false
   )
 }
 
-/** Remaining #21 TARGET agents — must stay unimplemented. */
-export const TARGET_ASCENSION_AGENTS_UNIMPLEMENTED: readonly string[] = Object.freeze([
-  'FUTURE_WORLD_LEARNING_AGENT',
-])
+/** Remaining #21 TARGET agents — World Learning is now implemented as WORLD_LEARNING_AGENT. */
+export const TARGET_ASCENSION_AGENTS_UNIMPLEMENTED: readonly string[] = Object.freeze([])

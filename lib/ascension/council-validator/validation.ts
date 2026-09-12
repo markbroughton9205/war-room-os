@@ -373,7 +373,7 @@ export async function runCouncilValidatorPhase7Validation(): Promise<{
       '72_remaining_targets_unimplemented',
       !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('COUNCIL_VALIDATOR' as never) &&
         !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('DATA_CORPUS_AGENT' as never) &&
-        TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_WORLD_LEARNING_AGENT'),
+        !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_WORLD_LEARNING_AGENT'),
       TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.join(','),
     ),
   )

@@ -19,7 +19,7 @@ export const ROADMAP_22_INPUT_CONTRACT = Object.freeze({
     'ASTRA_ORCHESTRATOR',
     'DATA_CORPUS_AGENT',
     'NAVIGATION_AGENT (Phase 12 IMPLEMENTED_BOUNDED)',
-    'FUTURE_WORLD_LEARNING_AGENT (deferred)',
+    'WORLD_LEARNING_AGENT (Phase 13 IMPLEMENTED_BOUNDED)',
   ] as const,
 
   toolsTheyMayReach: {

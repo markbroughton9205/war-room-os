@@ -329,7 +329,7 @@ export async function runPhase11bLocalModelValidation(opts?: {
 
   // Ascension / roadmap
   results.push(check('44_ascension_autonomy_off', ascensionAutonomyIsOff() && truth.ASCENSION_AUTONOMY === 'OFF', 'OFF'))
-  results.push(check('45_agents_8', operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8, String(operationalAscensionAgentCount())))
+  results.push(check('45_agents_9', operationalAscensionAgentCount() === 9 && OPERATIONAL_ASCENSION_AGENTS.length === 9, String(operationalAscensionAgentCount())))
   results.push(check('46_local_desktop_ui', truth.FULL_WAR_ROOM_UI_LOCAL === 'IMPLEMENTED' && truth.DESKTOP_APP === 'IMPLEMENTED_LOCAL_UI', 'ok'))
   results.push(check('47_website_optional', truth.WEBSITE_REQUIRED === false, 'false'))
   results.push(check('48_cloudflare_optional', truth.CLOUDFLARE_REQUIRED_FOR_LOCAL_USE === false, 'false'))

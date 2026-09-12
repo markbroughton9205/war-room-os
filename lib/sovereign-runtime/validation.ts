@@ -211,7 +211,7 @@ export async function runSovereignRuntimePhase10Validation(): Promise<{
     results.push(check('43_phone_not_implemented', truth.PHONE_APP === 'NOT_IMPLEMENTED', truth.PHONE_APP))
     results.push(check('44_23_not_started', truth.ROADMAP_23 === 'NOT_STARTED', 'NOT_STARTED'))
     results.push(check('45_autonomy_off', truth.ASCENSION_AUTONOMY === 'OFF' && ascensionAutonomyIsOff(), 'OFF'))
-    results.push(check('46_agents_8', operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8, String(operationalAscensionAgentCount())))
+    results.push(check('46_agents_9', operationalAscensionAgentCount() === 9 && OPERATIONAL_ASCENSION_AGENTS.length === 9, String(operationalAscensionAgentCount())))
     results.push(
       check(
         '47_nav_agent_implemented',

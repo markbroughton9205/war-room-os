@@ -215,6 +215,7 @@ export function runAgentCapabilityMatrixValidation(): CaseResult[] {
     'DATA_CORPUS_AGENT',
     'NAVIGATION_AGENT',
     'FUTURE_NAVIGATION_AGENT',
+    'WORLD_LEARNING_AGENT',
     'FUTURE_WORLD_LEARNING_AGENT',
   ] as const) {
     results.push(check(`matrix_covers_${role}`, CANONICAL_CAPABILITY_MATRIX.some(r => r.agentRole === role), role))

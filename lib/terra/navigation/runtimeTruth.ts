@@ -35,7 +35,7 @@ export function navigationRoadmapTruth() {
       : 'IMPLEMENTED_BOUNDED',
     future_world_learning_agent: TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_WORLD_LEARNING_AGENT')
       ? 'TARGET_UNIMPLEMENTED'
-      : 'UNEXPECTED',
+      : 'IMPLEMENTED_BOUNDED',
     operational_ascension_agents: operationalAscensionAgentCount(),
     ascension_autonomy: ascensionAutonomyIsOff() ? 'OFF' : 'ON',
     roadmap_22: 'ACTIVE',

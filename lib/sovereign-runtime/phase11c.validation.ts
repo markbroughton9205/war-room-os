@@ -63,7 +63,7 @@ export async function runPhase11cLocalOwnershipValidation(opts?: {
   results.push(check('76_search_unchanged', CHUNKING_VERSION === 'wr-chunk-v1' && LOCAL_EMBEDDING_MODEL_ID === 'BAAI/bge-small-en-v1.5', CHUNKING_VERSION))
   results.push(check('81_phase58a', truth.NATIVE_WRIM === 'NOT_IMPLEMENTED', 'NOT_APPLIED'))
   results.push(check('82_autonomy_off', ascensionAutonomyIsOff() && truth.ASCENSION_AUTONOMY === 'OFF', 'OFF'))
-  results.push(check('83_agents_8', operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8, String(operationalAscensionAgentCount())))
+  results.push(check('83_agents_9', operationalAscensionAgentCount() === 9 && OPERATIONAL_ASCENSION_AGENTS.length === 9, String(operationalAscensionAgentCount())))
   results.push(
     check(
       '84_nav_implemented',

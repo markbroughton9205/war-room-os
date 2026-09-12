@@ -66,8 +66,8 @@ export async function runNavigationAgentPhase12Validation(): Promise<{
   results.push(check('3_no_terra2', !fs.existsSync(path.join(repoRoot, 'lib', 'terra2')), 'ok'))
   results.push(
     check(
-      '4_operational_count_8',
-      operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8,
+      '4_operational_count_9',
+      operationalAscensionAgentCount() === 9 && OPERATIONAL_ASCENSION_AGENTS.length === 9,
       String(operationalAscensionAgentCount()),
     ),
   )
@@ -335,8 +335,8 @@ export async function runNavigationAgentPhase12Validation(): Promise<{
   )
   results.push(
     check(
-      'remaining_world_learning',
-      TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_WORLD_LEARNING_AGENT') &&
+      'remaining_world_learning_implemented',
+      !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_WORLD_LEARNING_AGENT') &&
         !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_NAVIGATION_AGENT') &&
         OPERATIONAL_ASCENSION_AGENTS.filter(a => a.agent_role === 'NAVIGATION_AGENT').length === 1,
       TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.join(','),

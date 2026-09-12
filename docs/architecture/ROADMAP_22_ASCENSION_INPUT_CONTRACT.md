@@ -56,7 +56,7 @@ Also preserve: no-self-escalation · Commander Tier-4 authority · ASTRA phase58
 - ASTRA_ORCHESTRATOR (existing; extend carefully)
 - DATA_CORPUS_AGENT
 - FUTURE_NAVIGATION_AGENT (implemented in #22 Phase 12 as NAVIGATION_AGENT)
-- FUTURE_WORLD_LEARNING_AGENT (deferred)
+- WORLD_LEARNING_AGENT (implemented in #22 Phase 13; #21 FUTURE_WORLD_LEARNING_AGENT placeholder fulfilled)
 
 ---
 

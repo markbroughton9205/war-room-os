@@ -86,6 +86,7 @@
     "validate:ascension-phase11c:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11c.validation.ts --live",
     "validate:ascension-phase11d": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11d.validation.ts",
     "validate:ascension-phase12": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ascension/navigation-agent/validation.ts",
+    "validate:ascension-phase13": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ascension/world-learning-agent/validation.ts",
     "prepare:desktop-runtime": "node scripts/prepare-desktop-runtime.mjs",
     "desktop:dist": "npm --prefix desktop run dist",
     "validate:sovereign-local-proof": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-sovereign-local-proof.mjs",

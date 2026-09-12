@@ -213,7 +213,7 @@ export async function runPhase11aLocalUiValidation(opts?: {
       'NOT_IMPLEMENTED',
     ),
   )
-  results.push(check('61_agents_8', operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8, String(operationalAscensionAgentCount())))
+  results.push(check('61_agents_9', operationalAscensionAgentCount() === 9 && OPERATIONAL_ASCENSION_AGENTS.length === 9, String(operationalAscensionAgentCount())))
   results.push(check('62_autonomy_off', ascensionAutonomyIsOff() && truth.ASCENSION_AUTONOMY === 'OFF', 'OFF'))
   results.push(
     check(

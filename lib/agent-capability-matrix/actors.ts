@@ -145,7 +145,25 @@ export const ACTOR_INVENTORY: readonly ActorInventoryItem[] = Object.freeze([
       'lib/terra/navigation',
     ],
     notes:
-      '#22 Phase 12 bounded navigation reasoning agent over Phase 9 Terra Navigation Foundation. No device control, GNSS, live traffic, or auto-execute. Ascension autonomy OFF. Operational count=8.',
+      '#22 Phase 12 bounded navigation reasoning agent over Phase 9 Terra Navigation Foundation. No device control, GNSS, live traffic, or auto-execute. Ascension autonomy OFF. Operational count includes NAVIGATION_AGENT.',
+  },
+  {
+    id: 'world_learning_agent',
+    name: 'WORLD_LEARNING_AGENT',
+    class: 'EXECUTOR',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    canInvokeTools: true,
+    canSpawnWork: false,
+    canMutateState: false,
+    evidencePaths: [
+      'lib/ascension/world-learning-agent',
+      'app/api/ascension/world-learning-agent/run',
+      'lib/world-learning',
+      'lib/ascension/research-agent',
+      'lib/ascension/data-corpus-agent',
+    ],
+    notes:
+      '#22 Phase 13 bounded world-knowledge acquisition. Reuses Research/Search/Terra/Corpus/Validator. Candidates only. No training/#23/WRIM/Ra\'el. Ascension autonomy OFF. Operational count=9.',
   },
   {
     id: 'commander',

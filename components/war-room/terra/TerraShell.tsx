@@ -67,6 +67,7 @@ import { TERRA_TRAFFIC_LAYER_DEFS } from './terraTrafficLayerDefs'
 import { TerraCameraHoverCard } from './TerraCameraHoverCard'
 import { TerraLiveIntelPanel } from './TerraLiveIntelPanel'
 import { NavigationAgentPanel } from './NavigationAgentPanel'
+import { WorldLearningAgentPanel } from './WorldLearningAgentPanel'
 import { TerraUrbanDetail, type TerraUrbanDetailStatus } from './TerraUrbanDetail'
 import type { TerraUrbanSelection } from '@/lib/terra/urbanDetail/types'
 import { TERRA_TERRAIN_REQUIRES_PROVIDER } from '@/lib/terra/urbanDetail/types'
@@ -1387,6 +1388,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
             onCommanderQuestionChange={setCommanderQuestion}
           />
           <NavigationAgentPanel compact />
+          <WorldLearningAgentPanel compact />
           <TerraProviderCapabilityDock
             localDetailActive={isLocalScale}
             buildingsActive={sovereignUrbanBuildingsActive || ionBuildingsFallbackActive}
@@ -1411,6 +1413,9 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         </div>
         <div className="pointer-events-auto">
           <NavigationAgentPanel />
+        </div>
+        <div className="pointer-events-auto">
+          <WorldLearningAgentPanel />
         </div>
         <div className="pointer-events-auto rounded border border-white/10 bg-black/60 p-3 backdrop-blur-sm">
           <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Layer Controls</p>

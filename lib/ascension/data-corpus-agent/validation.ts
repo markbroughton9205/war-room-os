@@ -253,7 +253,7 @@ export async function runDataCorpusAgentPhase8Validation(): Promise<{
   results.push(
     check(
       '65_runtime_truth',
-      operationalAscensionAgentCount() === 8 &&
+      operationalAscensionAgentCount() === 9 &&
         OPERATIONAL_ASCENSION_AGENTS.some(a => a.agent_role === 'DATA_CORPUS_AGENT'),
       String(operationalAscensionAgentCount()),
     ),
@@ -273,8 +273,8 @@ export async function runDataCorpusAgentPhase8Validation(): Promise<{
   results.push(check('72_council_validator_operational', isCouncilValidatorRuntimeAvailable(), 'ok'))
   results.push(
     check(
-      '73_exactly_8_operational',
-      operationalAscensionAgentCount() === 8 && OPERATIONAL_ASCENSION_AGENTS.length === 8,
+      '73_exactly_9_operational',
+      operationalAscensionAgentCount() === 9 && OPERATIONAL_ASCENSION_AGENTS.length === 9,
       String(operationalAscensionAgentCount()),
     ),
   )
@@ -283,8 +283,8 @@ export async function runDataCorpusAgentPhase8Validation(): Promise<{
       '74_remaining_targets',
       !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('DATA_CORPUS_AGENT' as never) &&
         !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_NAVIGATION_AGENT') &&
-        TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_WORLD_LEARNING_AGENT') &&
-        TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.length === 1,
+        !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('FUTURE_WORLD_LEARNING_AGENT') &&
+        TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.length === 0,
       TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.join(','),
     ),
   )
