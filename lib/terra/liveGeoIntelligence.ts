@@ -37,6 +37,7 @@ export const TERRA_LIVE_FRESHNESS_STATES = [
   'NOT_IMPLEMENTED',
   'DISABLED',
   'UNAVAILABLE',
+  'AUTH_FAILED',
   'NOT_CONFIGURED',
 ] as const
 export type TerraLiveFreshness = (typeof TERRA_LIVE_FRESHNESS_STATES)[number]
@@ -103,6 +104,8 @@ export type TerraLiveProviderStatus = {
   freshness: TerraLiveFreshness
   reason: string
   objectCount: number
+  /** Client-safe boolean only — never the credential value. */
+  credentialsPresent?: boolean
 }
 
 export type TerraLiveLayerStatus = {

@@ -155,7 +155,7 @@ export function analyzeTerraWorldState(input: AnalyzeTerraInput): {
   }))
 
   let providerOk = providers.filter(p => p.freshness === 'LIVE' || p.freshness === 'CACHED' || p.freshness === 'READY').length
-  let providerFailures = providers.filter(p => p.freshness === 'UNAVAILABLE').length
+  let providerFailures = providers.filter(p => p.freshness === 'UNAVAILABLE' || p.freshness === 'AUTH_FAILED').length
 
   if (input.simulateProviderFailure) {
     providerFailures += 1

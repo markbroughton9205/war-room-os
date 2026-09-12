@@ -64,6 +64,7 @@ const BLOCKED_HANDOFF_FRESHNESS = new Set<TerraLiveFreshness>([
   'NOT_CONFIGURED',
   'DISABLED',
   'UNAVAILABLE',
+  'AUTH_FAILED',
 ])
 
 function freshnessToEvidence(freshness: TerraLiveFreshness): EvidenceFreshness {

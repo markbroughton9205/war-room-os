@@ -23,6 +23,7 @@ export const TERRA_PROVIDER_STATUS_LABELS: Record<TerraLiveFreshness, string> = 
   NOT_IMPLEMENTED: 'NOT IMPLEMENTED',
   DISABLED: 'DISABLED',
   UNAVAILABLE: 'UNAVAILABLE',
+  AUTH_FAILED: 'AUTH FAILED',
   NOT_CONFIGURED: 'NOT CONFIGURED',
 }
 
@@ -119,6 +120,8 @@ export function maritimeProviderReason(record: MaritimeSourceRecord, freshness: 
       return 'Intentionally disabled by operator or access terms.'
     case 'UNAVAILABLE':
       return 'Implemented provider failed at runtime.'
+    case 'AUTH_FAILED':
+      return 'AUTH FAILED: provider rejected the configured credentials. Values are not shown.'
     case 'NOT_CONFIGURED':
       return 'Provider is registered but is not configured for live use.'
   }
@@ -139,6 +142,7 @@ export function maritimeProviderLiveStatus(
     freshness,
     reason: maritimeProviderReason(record, freshness),
     objectCount: runtime?.objectCount ?? 0,
+    credentialsPresent: runtime?.credentialsPresent,
   }
 }
 
@@ -159,6 +163,9 @@ export function aggregateVesselLayerFreshness(
   if (maritime.some(provider => provider.freshness === 'DELAYED' && provider.objectCount > 0)) return 'DELAYED'
   if (maritime.some(provider => provider.freshness === 'LIVE' || provider.freshness === 'CACHED')) return 'LIVE'
   if (maritime.some(provider => provider.freshness === 'EMPTY')) return 'EMPTY'
+  if (maritime.some(provider => provider.freshness === 'AUTH_FAILED') && !maritime.some(provider => USABLE_LAYER_STATES.has(provider.freshness) || provider.freshness === 'EMPTY' || provider.freshness === 'NO_COVERAGE' || provider.freshness === 'READY' || provider.freshness === 'UNAVAILABLE')) {
+    return 'AUTH_FAILED'
+  }
   if (maritime.some(provider => provider.freshness === 'UNAVAILABLE') && !maritime.some(provider => USABLE_LAYER_STATES.has(provider.freshness) || provider.freshness === 'EMPTY' || provider.freshness === 'NO_COVERAGE' || provider.freshness === 'READY')) {
     return 'UNAVAILABLE'
   }
@@ -195,6 +202,7 @@ export function layerReason(freshness: TerraLiveFreshness, count: number): strin
   if (freshness === 'NEEDS_COMMERCIAL_ACCOUNT') return 'No commercial satellite-AIS account is configured.'
   if (freshness === 'NOT_IMPLEMENTED') return 'No implemented adapter can serve the vessels layer.'
   if (freshness === 'NOT_CONFIGURED') return 'Provider registered but not implemented or not configured for live use.'
+  if (freshness === 'AUTH_FAILED') return 'A covering AIS provider rejected the configured credentials.'
   if (freshness === 'UNAVAILABLE') return 'Every attempted live vessel provider failed at runtime.'
   if (freshness === 'NO_COVERAGE') return 'No live AIS coverage for the current camera view.'
   if (freshness === 'EMPTY') return 'Live fetch succeeded with no vessels in view.'

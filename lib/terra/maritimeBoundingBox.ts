@@ -13,9 +13,10 @@
  * The coverage-envelope gate is the architectural difference from aircraft: OpenSky is a genuine
  * global feed (any span up to MAX_BBOX_SPAN_DEG is meaningful), but digitraffic_marine's coverage
  * is a specific, bounded, honestly-documented region. A camera view that never touches that region
- * (e.g. the open Pacific) must produce `null` here — the caller (TerraShell.tsx) reads that as
- * NO_COVERAGE, never as "zero vessels observed" (mission-critical distinction — see
- * lib/terra/maritimeCoverage.ts).
+ * or BarentsWatch's Norwegian/Arctic envelope (e.g. the open Pacific) must produce `null` here
+ * for the Digitraffic query — the caller (TerraShell.tsx) reads Digitraffic-null as NO_COVERAGE
+ * for that adapter, never as "zero vessels observed". Live-intel uses a separate camera bbox
+ * that is not gated on Finnish waters so BarentsWatch / AISStream can run in Norway.
  */
 import type { TerraDegreeRectangle } from './aircraftBoundingBox'
 
@@ -62,15 +63,14 @@ export function terraCameraViewHasMaritimeCoverage(rectangle: TerraDegreeRectang
   if (!rectangle) return false
   if (![rectangle.west, rectangle.south, rectangle.east, rectangle.north].every(Number.isFinite)) return false
   return rectanglesIntersect(rectangle, DIGITRAFFIC_MARINE_COVERAGE_BBOX)
+    || rectanglesIntersect(rectangle, BARENTSWATCH_AIS_COVERAGE_BBOX)
 }
 
-export function buildTerraMaritimeBoundingBoxQuery(rectangle: TerraDegreeRectangle | null, coverageBbox: TerraDegreeRectangle = DIGITRAFFIC_MARINE_COVERAGE_BBOX): string | null {
-  if (!rectangle) return null
+function formatSnappedBboxQuery(rectangle: TerraDegreeRectangle): string | null {
   const { west, south, east, north } = rectangle
   if (![west, south, east, north].every(Number.isFinite)) return null
   if (east <= west || north <= south) return null
   if (east - west > MAX_BBOX_SPAN_DEG || north - south > MAX_BBOX_SPAN_DEG) return null
-  if (!rectanglesIntersect(rectangle, coverageBbox)) return null
 
   const clampedSouth = Math.max(-90, Math.min(90, south))
   const clampedNorth = Math.max(-90, Math.min(90, north))
@@ -83,4 +83,16 @@ export function buildTerraMaritimeBoundingBoxQuery(rectangle: TerraDegreeRectang
   const lamax = snapUp(clampedNorth).toFixed(1)
   const lomax = snapUp(clampedEast).toFixed(1)
   return `${lamin},${lomin},${lamax},${lomax}`
+}
+
+export function buildTerraMaritimeBoundingBoxQuery(rectangle: TerraDegreeRectangle | null, coverageBbox: TerraDegreeRectangle = DIGITRAFFIC_MARINE_COVERAGE_BBOX): string | null {
+  if (!rectangle) return null
+  if (!rectanglesIntersect(rectangle, coverageBbox)) return null
+  return formatSnappedBboxQuery(rectangle)
+}
+
+/** Camera bbox for live-intel (AISStream / BarentsWatch). Not gated on Digitraffic Finland. */
+export function buildTerraLiveIntelBoundingBoxQuery(rectangle: TerraDegreeRectangle | null): string | null {
+  if (!rectangle) return null
+  return formatSnappedBboxQuery(rectangle)
 }

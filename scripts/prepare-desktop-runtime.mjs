@@ -199,6 +199,11 @@ if (bundle.status !== 0) {
   throw new Error('Core esbuild bundle failed')
 }
 
+fs.writeFileSync(
+  path.join(runtimeRoot, 'windowsUserEnv.cjs'),
+  fs.readFileSync(path.join(repoRoot, 'desktop', 'src', 'windowsUserEnv.cjs'), 'utf8'),
+)
+
 // Boot script is written at BUILD time: the installed resources directory may be read-only.
 const uiServerJs = path.join(uiRoot, 'server.js')
 mustExist(uiServerJs, 'runtime/ui/server.js (Next standalone entry)')
@@ -209,6 +214,7 @@ fs.writeFileSync(
     '// Packaged Next standalone entry. Spawned with a RELATIVE argv path because',
     '// Electron in ELECTRON_RUN_AS_NODE mode mis-parses absolute Windows paths containing spaces.',
     "const path = require('node:path')",
+    "try { require('./windowsUserEnv.cjs').applyWindowsUserEnvironmentToProcess() } catch { /* overlay is best-effort */ }",
     "const serverPath = path.join(__dirname, 'ui', 'server.js')",
     'process.chdir(path.dirname(serverPath))',
     'require(serverPath)',
@@ -227,6 +233,7 @@ fs.writeFileSync(
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
+const { mergeWindowsUserEnvironment, applyWindowsUserEnvironmentToProcess } = require('./windowsUserEnv.cjs')
 
 function findServer(root) {
   const p = path.join(root, 'ui', 'server.js')
@@ -234,6 +241,7 @@ function findServer(root) {
 }
 
 function startUi(opts) {
+  try { applyWindowsUserEnvironmentToProcess() } catch { /* overlay is best-effort */ }
   const runtimeRoot = opts.runtimeRoot
   const electronExec = opts.electronExec
   if (!fs.existsSync(path.join(runtimeRoot, 'boot-ui.cjs'))) {
@@ -245,7 +253,7 @@ function startUi(opts) {
   const child = spawn(electronExec, ['boot-ui.cjs'], {
     cwd: runtimeRoot,
     env: {
-      ...process.env,
+      ...mergeWindowsUserEnvironment(process.env).env,
       ELECTRON_RUN_AS_NODE: '1',
       PORT: '3848',
       HOSTNAME: '127.0.0.1',
@@ -271,8 +279,11 @@ fs.writeFileSync(
  */
 const path = require('node:path')
 const { spawn } = require('node:child_process')
+const { applyWindowsUserEnvironmentToProcess, mergeWindowsUserEnvironment } = require('./windowsUserEnv.cjs')
+try { applyWindowsUserEnvironmentToProcess() } catch { /* overlay is best-effort */ }
 
 async function startCoreInProcess(opts) {
+  try { applyWindowsUserEnvironmentToProcess() } catch { /* overlay is best-effort */ }
   const bundlePath = path.join(opts.runtimeRoot, 'core', 'server.cjs')
   const mod = require(bundlePath)
   if (typeof mod.startPackagedCore !== 'function') {
@@ -285,11 +296,12 @@ async function startCoreInProcess(opts) {
 }
 
 function startCoreChild(opts) {
+  try { applyWindowsUserEnvironmentToProcess() } catch { /* overlay is best-effort */ }
   const entryRel = path.join('core', 'server.cjs')
   const child = spawn(opts.electronExec, [entryRel, '--serve'], {
     cwd: opts.runtimeRoot,
     env: {
-      ...process.env,
+      ...mergeWindowsUserEnvironment(process.env).env,
       ELECTRON_RUN_AS_NODE: '1',
       WAR_ROOM_RUNTIME_SURFACE: 'DESKTOP_LOCAL',
       WAR_ROOM_PACKAGED: '1',

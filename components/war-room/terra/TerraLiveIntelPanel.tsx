@@ -18,6 +18,7 @@ const FRESHNESS_CLASS: Record<TerraLiveFreshness, string> = {
   NOT_IMPLEMENTED: 'text-slate-500',
   DISABLED: 'text-slate-500',
   UNAVAILABLE: 'text-rose-400',
+  AUTH_FAILED: 'text-rose-400',
   NOT_CONFIGURED: 'text-slate-500',
 }
 
@@ -32,6 +33,7 @@ export function TerraLiveIntelPanel({
   snapshot,
   selected,
   compact,
+  fetchError,
   onSendSelectedToCouncil,
   canSendToCouncil,
   commanderQuestion,
@@ -40,6 +42,7 @@ export function TerraLiveIntelPanel({
   snapshot: TerraLiveIntelSnapshot
   selected: TerraLiveGeoObject | null
   compact?: boolean
+  fetchError?: string | null
   onSendSelectedToCouncil?: () => void
   canSendToCouncil?: boolean
   commanderQuestion?: string
@@ -48,6 +51,7 @@ export function TerraLiveIntelPanel({
   return (
     <div className={`pointer-events-auto rounded border border-cyan-400/25 bg-black/75 backdrop-blur-sm ${compact ? 'p-2' : 'p-3'}`}>
       <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300">Live globe intel</p>
+      {fetchError ? <p className="mb-1 text-[10px] text-rose-300">{fetchError}</p> : null}
       <ul className="space-y-1 text-[11px]">
         {snapshot.layers.map(layer => (
           <li key={layer.id} className="flex items-center justify-between gap-2">
@@ -72,6 +76,7 @@ export function TerraLiveIntelPanel({
                 title={provider.reason}
               >
                 {TERRA_PROVIDER_STATUS_LABELS[provider.freshness]}
+                {typeof provider.credentialsPresent === 'boolean' ? ` · CREDENTIALS ${provider.credentialsPresent ? 'YES' : 'NO'}` : ''}
               </span>
             </li>
           ))}

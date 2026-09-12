@@ -10,6 +10,7 @@ const { spawn } = require('node:child_process')
 const net = require('node:net')
 const fs = require('node:fs')
 const os = require('node:os')
+const { applyWindowsUserEnvironmentToProcess, presenceSummary } = require('./windowsUserEnv.cjs')
 
 const LOCAL_UI_ORIGIN = process.env.WAR_ROOM_LOCAL_UI_ORIGIN || 'http://127.0.0.1:3848'
 const LOCAL_CORE_ORIGIN = process.env.WAR_ROOM_LOCAL_CORE_ORIGIN || 'http://127.0.0.1:3847'
@@ -367,6 +368,10 @@ process.on('unhandledRejection', err => {
 })
 
 appendLog(`boot pid=${process.pid} packaged=${isPackaged()} exec=${process.execPath}`)
+if (process.platform === 'win32') {
+  const overlayNames = applyWindowsUserEnvironmentToProcess()
+  appendLog(`windowsUserEnv overlay names=${overlayNames.length} ${presenceSummary()}`)
+}
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {

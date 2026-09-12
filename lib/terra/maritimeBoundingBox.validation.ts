@@ -4,7 +4,7 @@
  *   node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/terra/maritimeBoundingBox.validation.ts
  */
 import { pathToFileURL } from 'node:url'
-import { buildTerraMaritimeBoundingBoxQuery, terraCameraViewHasMaritimeCoverage, DIGITRAFFIC_MARINE_COVERAGE_BBOX } from './maritimeBoundingBox'
+import { buildTerraLiveIntelBoundingBoxQuery, buildTerraMaritimeBoundingBoxQuery, terraCameraViewHasMaritimeCoverage, DIGITRAFFIC_MARINE_COVERAGE_BBOX } from './maritimeBoundingBox'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 
@@ -70,6 +70,14 @@ function run(): CaseResult[] {
     results.push(check('custom_coverage_envelope_is_honored', query !== null, String(query)))
     const outsideDefault = terraCameraViewHasMaritimeCoverage(insideCustom)
     results.push(check('default_envelope_check_still_uses_digitraffic_bbox', outsideDefault === false, JSON.stringify(DIGITRAFFIC_MARINE_COVERAGE_BBOX)))
+  }
+
+  {
+    const oslofjord = { west: 10.0, south: 59.5, east: 11.0, north: 60.2 }
+    results.push(check('oslofjord_digitraffic_query_stays_null', buildTerraMaritimeBoundingBoxQuery(oslofjord) === null, 'digitraffic Finland gate'))
+    results.push(check('oslofjord_has_barentswatch_coverage', terraCameraViewHasMaritimeCoverage(oslofjord) === true, 'BarentsWatch envelope'))
+    const liveQuery = buildTerraLiveIntelBoundingBoxQuery(oslofjord)
+    results.push(check('oslofjord_live_intel_bbox_present', liveQuery !== null && BBOX_PATTERN.test(liveQuery), String(liveQuery)))
   }
 
   return results

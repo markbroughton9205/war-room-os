@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url'
+import { isProviderEnvSatisfied, providerEnvDescriptor } from '@/lib/research-engine/config/providerEnv'
 import { fetchTerraLiveIntel } from './fetchLiveIntel'
 import { listMaritimeLiveProviderStatuses, stripLiveIntelSecrets } from './liveGeoIntelligence'
 
@@ -23,21 +24,25 @@ export async function runLiveGeoIntelligenceLiveAcceptance(): Promise<CaseResult
   const aishub = snapshot.providers.find(row => row.id === 'aishub_marine')
   const noaa = snapshot.providers.find(row => row.id === 'noaa_access_ais')
   const serialized = JSON.stringify(stripLiveIntelSecrets(snapshot))
+  const barentsEnv = providerEnvDescriptor('barentswatch_ais')
+  const aisstreamEnv = providerEnvDescriptor('aisstream')
+  const aishubEnv = providerEnvDescriptor('aishub_marine')
 
   cases.push(check(
     'live12_01_digitraffic_layer_present',
     Boolean(digitraffic && digitraffic.implemented && digitraffic.configurationState === 'ENABLED'),
     JSON.stringify({ digitraffic }),
   ))
+  const digitrafficVessels = vessels.filter(object => object.provider === 'digitraffic_marine')
   cases.push(check(
     'live12_02_real_vessels_or_honest_empty',
     (digitraffic?.freshness === 'LIVE' || digitraffic?.freshness === 'CACHED')
-      ? vessels.length >= 1 && vessels.every(v => Number.isFinite(v.latitude) && Number.isFinite(v.longitude) && v.provider === 'digitraffic_marine')
-      : digitraffic?.freshness === 'EMPTY',
+      ? digitrafficVessels.length >= 1 && digitrafficVessels.every(v => Number.isFinite(v.latitude) && Number.isFinite(v.longitude) && v.provider === 'digitraffic_marine')
+      : digitraffic?.freshness === 'EMPTY' || digitraffic?.freshness === 'NO_COVERAGE',
     JSON.stringify({
       freshness: digitraffic?.freshness,
-      count: vessels.length,
-      sample: vessels[0] ? { id: vessels[0].id, lat: vessels[0].latitude, lon: vessels[0].longitude, observedAt: vessels[0].observedAt, freshness: vessels[0].freshness } : null,
+      count: digitrafficVessels.length,
+      sample: digitrafficVessels[0] ? { id: digitrafficVessels[0].id, lat: digitrafficVessels[0].latitude, lon: digitrafficVessels[0].longitude, observedAt: digitrafficVessels[0].observedAt, freshness: digitrafficVessels[0].freshness } : null,
     }),
   ))
   cases.push(check(
@@ -50,17 +55,21 @@ export async function runLiveGeoIntelligenceLiveAcceptance(): Promise<CaseResult
     intel.length === 0 || intel.every(item => item.layer === 'intelligence_events' && Number.isFinite(item.latitude)),
     JSON.stringify({ intelCount: intel.length, sample: intel[0] ? { id: intel[0].id, provider: intel[0].provider, freshness: intel[0].freshness } : null }),
   ))
+  const barentsConfigured = Boolean(barentsEnv && isProviderEnvSatisfied(barentsEnv))
+  const aisstreamConfigured = Boolean(aisstreamEnv && isProviderEnvSatisfied(aisstreamEnv))
+  const aishubConfigured = Boolean(aishubEnv && isProviderEnvSatisfied(aishubEnv))
   cases.push(check(
     'live12_05_unconfigured_ais_not_live',
-    barents?.freshness === 'NEEDS_CREDENTIALS'
-      && aisstream?.freshness === 'NEEDS_CREDENTIALS'
-      && aishub?.freshness === 'NEEDS_CREDENTIALS'
-      && noaa?.freshness === 'HISTORICAL',
+    noaa?.freshness === 'HISTORICAL'
+      && (barentsConfigured ? barents?.freshness !== 'NEEDS_CREDENTIALS' : barents?.freshness === 'NEEDS_CREDENTIALS')
+      && (aisstreamConfigured ? aisstream?.freshness !== 'NEEDS_CREDENTIALS' : aisstream?.freshness === 'NEEDS_CREDENTIALS')
+      && (aishubConfigured ? aishub?.freshness !== 'NEEDS_CREDENTIALS' : aishub?.freshness === 'NEEDS_CREDENTIALS'),
     JSON.stringify({
       barents: barents?.freshness,
       aisstream: aisstream?.freshness,
       aishub: aishub?.freshness,
       noaa: noaa?.freshness,
+      configured: { barents: barentsConfigured, aisstream: aisstreamConfigured, aishub: aishubConfigured },
       registry: listMaritimeLiveProviderStatuses().map(row => ({ id: row.id, freshness: row.freshness })),
     }),
   ))

@@ -26,6 +26,7 @@ import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
 import type { TerraGlobeStatus } from './TerraGlobe'
 import { useTerraLayer } from './useTerraLayer'
+import { useTerraLiveIntel } from './useTerraLiveIntel'
 import { useTerraClock } from './useTerraClock'
 import { useTerraCinematicOrbit } from './useTerraCinematicOrbit'
 import { useTerraCameraScale } from './useTerraCameraScale'
@@ -57,7 +58,7 @@ import { useTerraVesselTrails } from './useTerraVesselTrails'
 import { buildTerraAircraftBoundingBoxQuery } from '@/lib/terra/aircraftBoundingBox'
 import { terraCameraRectSignature } from '@/lib/terra/cameraRectSignature'
 import { summarizeTerraAircraftFeatures } from '@/lib/terra/aircraftRegionalSummary'
-import { buildTerraMaritimeBoundingBoxQuery, terraCameraViewHasMaritimeCoverage } from '@/lib/terra/maritimeBoundingBox'
+import { buildTerraLiveIntelBoundingBoxQuery, buildTerraMaritimeBoundingBoxQuery, terraCameraViewHasMaritimeCoverage } from '@/lib/terra/maritimeBoundingBox'
 import { summarizeTerraVesselFeatures } from '@/lib/terra/vesselRegionalSummary'
 import { resolveTerraMaritimeCoverageState, TERRA_MARITIME_COVERAGE_LABELS, type TerraMaritimeCoverageState } from '@/lib/terra/maritimeCoverage'
 import type { TerraCoverageTruthState } from '@/lib/terra/coverageTruth'
@@ -853,6 +854,11 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     if (cameraScale.level === 'global') return null
     return buildTerraMaritimeBoundingBoxQuery(cameraViewRectangle.rectangle)
   }, [maritimeEnabled, cameraScale.level, cameraViewRectangle.rectangle])
+  const liveIntelBoundingBoxQuery = useMemo(() => {
+    if (!maritimeEnabled) return null
+    if (cameraScale.level === 'global') return null
+    return buildTerraLiveIntelBoundingBoxQuery(cameraViewRectangle.rectangle)
+  }, [maritimeEnabled, cameraScale.level, cameraViewRectangle.rectangle])
   const maritimeAutoRefreshAllowed = shouldAutoRefreshTerraLayer(clock.time.mode)
   // 60s — matched to (never faster than) the Research Engine's own live-feed cache TTL for
   // digitraffic_marine and this repo's no-layer-faster-than-60s floor; see layerCatalog.ts's
@@ -882,7 +888,12 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     () => summarizeTerraVesselFeatures(maritime.features, clock.time.currentTime),
     [maritime.features, clock.time.currentTime],
   )
-  const liveIntelSnapshot = useMemo(() => {
+  const remoteLiveIntel = useTerraLiveIntel({
+    bbox: liveIntelBoundingBoxQuery,
+    enabled: maritimeEnabled,
+    refreshMs: 60_000,
+  })
+  const localLiveIntelSnapshot = useMemo(() => {
     const features = Object.values(layerFeatures).flat()
     const fromCache = maritime.features[0]?.provenance.fromCache === true
     const digitrafficFreshness: TerraLiveFreshness = resolveDigitrafficCameraFreshness({
@@ -935,6 +946,19 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       ],
     })
   }, [layerFeatures, maritime.features, maritime.state, maritimeEnabled, maritimeBoundingBoxQuery, maritimeCoverageState, clock.time.currentTime, selectedWindow])
+  const liveIntelSnapshot = useMemo(() => {
+    if (remoteLiveIntel.snapshot) return remoteLiveIntel.snapshot
+    if (!remoteLiveIntel.error) return localLiveIntelSnapshot
+    const credentialedAis = new Set(['aisstream', 'barentswatch_ais', 'aishub_marine'])
+    return {
+      ...localLiveIntelSnapshot,
+      providers: localLiveIntelSnapshot.providers.map(provider => (
+        credentialedAis.has(provider.id)
+          ? { ...provider, freshness: 'UNAVAILABLE' as const, reason: remoteLiveIntel.error ?? provider.reason }
+          : provider
+      )),
+    }
+  }, [remoteLiveIntel.snapshot, remoteLiveIntel.error, localLiveIntelSnapshot])
   const selectedLiveObject = useMemo(() => {
     if (!selectedFeature) return null
     return liveIntelSnapshot.objects.find(object => object.id === selectedFeature.id)
@@ -1383,6 +1407,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
             snapshot={liveIntelSnapshot}
             selected={selectedLiveObject}
             compact
+            fetchError={remoteLiveIntel.error}
             onSendSelectedToCouncil={sendSelectedObjectToCouncil}
             canSendToCouncil={canSendSelectedToCouncil}
             commanderQuestion={commanderQuestion}
@@ -1407,6 +1432,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           <TerraLiveIntelPanel
             snapshot={liveIntelSnapshot}
             selected={selectedLiveObject}
+            fetchError={remoteLiveIntel.error}
             onSendSelectedToCouncil={sendSelectedObjectToCouncil}
             canSendToCouncil={canSendSelectedToCouncil}
             commanderQuestion={commanderQuestion}

@@ -70,9 +70,12 @@ async function loadProviderEvents(providerId: ResearchProviderId, queryText: str
   }
 }
 
-function freshnessFromFetch(result: { ok: boolean; fromCache: boolean; notConfigured: boolean; events: TerraIntelligenceEvent[]; historical: boolean }, fallback: TerraLiveFreshness): TerraLiveFreshness {
+function freshnessFromFetch(result: { ok: boolean; fromCache: boolean; notConfigured: boolean; events: TerraIntelligenceEvent[]; historical: boolean; error?: string | null }, fallback: TerraLiveFreshness): TerraLiveFreshness {
   if (result.notConfigured) return fallback
-  if (!result.ok) return 'UNAVAILABLE'
+  if (!result.ok) {
+    if (/token request failed|unauthorized|401|403/i.test(result.error ?? '')) return 'AUTH_FAILED'
+    return 'UNAVAILABLE'
+  }
   if (result.historical) return 'HISTORICAL'
   if (result.events.length === 0) return 'EMPTY'
   if (result.fromCache) return 'CACHED'

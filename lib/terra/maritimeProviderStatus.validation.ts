@@ -118,6 +118,18 @@ function run(): CaseResult[] {
     /AISSTREAM_API_KEY/.test(aisstream.reason) && !/sk-|xai-|Bearer /.test(aisstream.reason),
     aisstream.reason,
   ))
+  const authFailed = maritimeProviderLiveStatus(getMaritimeSourceRecord('barentswatch_ais')!, {
+    credentialsPresent: true,
+    fetchFreshness: 'AUTH_FAILED',
+    objectCount: 0,
+  })
+  results.push(check(
+    'auth_failed_is_not_live_and_hides_values',
+    authFailed.freshness === 'AUTH_FAILED'
+      && /AUTH FAILED/.test(authFailed.reason)
+      && !/sk-|xai-|Bearer |client_secret/i.test(authFailed.reason),
+    authFailed.freshness,
+  ))
   return results
 }
 

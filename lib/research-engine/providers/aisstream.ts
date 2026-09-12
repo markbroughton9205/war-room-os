@@ -19,12 +19,14 @@ import { makeMaritimeVesselDocument, observationInBbox, parseMaritimeBbox } from
 const PROVIDER = 'aisstream' as const
 const WS_URL = 'wss://stream.aisstream.io/v0/stream'
 const MAX_RESULTS = 150
-const SNAPSHOT_MS = 4_000
+const SNAPSHOT_MS = 8_000
 const MAX_ATTEMPTS = 3
 const MAX_MESSAGES = 400
 
 type AisStreamEnvelope = {
   MessageType?: string
+  error?: string
+  Error?: string
   MetaData?: {
     MMSI?: number
     ShipName?: string
@@ -61,14 +63,25 @@ function decodeFrame(data: unknown): AisStreamEnvelope | null {
       ? data
       : data instanceof ArrayBuffer
         ? new TextDecoder().decode(data)
-        : Buffer.isBuffer(data)
-          ? data.toString('utf8')
+        : Buffer.isBuffer(data) || ArrayBuffer.isView(data)
+          ? new TextDecoder().decode(data as ArrayBufferView)
           : null
     if (!text) return null
     return JSON.parse(text) as AisStreamEnvelope
   } catch {
     return null
   }
+}
+
+async function decodeSocketData(data: unknown): Promise<AisStreamEnvelope | null> {
+  if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    try {
+      return decodeFrame(await data.text())
+    } catch {
+      return null
+    }
+  }
+  return decodeFrame(data)
 }
 
 function collectSnapshot(bbox: { lamin: number; lomin: number; lamax: number; lomax: number }, apiKey: string): Promise<ReturnType<typeof makeMaritimeVesselDocument>[]> {
@@ -83,6 +96,7 @@ function collectSnapshot(bbox: { lamin: number; lomin: number; lamax: number; lo
     let settled = false
     let messageCount = 0
     const socket = new WebSocketImpl(WS_URL)
+    try { (socket as WebSocket).binaryType = 'arraybuffer' } catch { /* runtime may not expose binaryType */ }
     const timer = setTimeout(() => finish(), SNAPSHOT_MS)
 
     function finish(error?: Error) {
@@ -107,10 +121,19 @@ function collectSnapshot(bbox: { lamin: number; lomin: number; lamax: number; lo
         finish()
         return
       }
-      const envelope = decodeFrame(event.data)
-      if (!envelope || envelope.MessageType !== 'PositionReport') return
-      const report = envelope.Message?.PositionReport
-      const meta = envelope.MetaData
+      void decodeSocketData(event.data).then(envelope => {
+        if (settled) return
+        if (!envelope) return
+        if (envelope.error || envelope.Error) {
+          finish(new Error(String(envelope.error || envelope.Error)))
+          return
+        }
+        const report = envelope.Message?.PositionReport
+        const meta = envelope.MetaData
+        const looksLikePosition = envelope.MessageType === 'PositionReport'
+          || Boolean(report)
+          || (typeof meta?.latitude === 'number' && typeof meta?.longitude === 'number')
+        if (!looksLikePosition) return
       const mmsi = report?.UserID ?? meta?.MMSI
       const latitude = report?.Latitude ?? meta?.Latitude ?? meta?.latitude
       const longitude = report?.Longitude ?? meta?.Longitude ?? meta?.longitude
@@ -132,6 +155,7 @@ function collectSnapshot(bbox: { lamin: number; lomin: number; lamax: number; lo
         license: 'AISStream Terms of Service',
       }))
       if (byMmsi.size >= MAX_RESULTS) finish()
+      })
     })
     socket.addEventListener('error', () => finish(new Error('AISStream WebSocket error')))
     socket.addEventListener('close', () => finish())
