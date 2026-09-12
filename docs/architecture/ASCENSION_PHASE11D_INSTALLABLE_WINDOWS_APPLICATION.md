@@ -75,10 +75,10 @@ Run `npm --prefix desktop run dist`, then:
 
 The approved artwork is Commander-supplied only: a dark cinematic rounded square with an Earth
 background, a metallic W emblem, blue luminous accents, "WAR ROOM OS" and "SEE · ANALYZE · PLAN ·
-BUILD". It lives at `desktop/assets/war-room-os-icon.png` (1254×1254, sha256 `63d2a9d3…0447`) copied
-byte-for-byte from the file the Commander provided, with provenance in
-`desktop/assets/ICON_APPROVAL.txt`. `desktop/scripts/generate-icon-ico.cjs` derives the ICO at
-16/24/32/48/64/128/256 from that exact PNG. The artwork is never redesigned.
+BUILD". It lives at `desktop/assets/war-room-os-icon.png` (1254×1254, 1,668,743 bytes, sha256
+`843af444…6f0b`) copied byte-for-byte from the Commander's clean, arrow-free export, with
+provenance in `desktop/assets/ICON_APPROVAL.txt`. `desktop/scripts/generate-icon-ico.cjs` derives
+the ICO at 16/24/32/48/64/128/256 from that exact PNG. The artwork is never redesigned.
 
 Substituting another mark from this repository is explicitly **not** approval. The generator detects
 the `app/favicon.ico` triangle-in-disc mark by hash and reports
@@ -97,9 +97,11 @@ are never aggregated into an overall PASS:
 | `WINDOW_ICON` | `BrowserWindow` receives the packaged icon via `resolveIconPath()` |
 | `TASKBAR_ICON` | inherited from the window/executable icon, with `setAppUserModelId` establishing identity |
 
-The Commander's source file has a Windows shortcut-arrow overlay baked into its lower-left corner.
-It was preserved because the artwork must not be edited; supplying a re-exported PNG without the
-overlay and re-running `npm --prefix desktop run icon:ico` is the only sanctioned way to remove it.
+An earlier supplied PNG (sha256 `63d2a9d3…0447`, 2,140,555 bytes) carried a Windows shortcut-arrow
+overlay baked into its lower-left corner and was shipped unedited. The Commander then replaced it
+with a clean re-export. That clean file is the only approved artwork: `CLEAN ARROW-FREE ICON = LIVE`
+on the installed EXE, desktop shortcut, Start Menu, window, and taskbar (commit `701f60a`). The
+triangle-in-disc mark and the arrow-badged PNG are both not approved.
 
 ### Code signing — optional, not a functional blocker
 
