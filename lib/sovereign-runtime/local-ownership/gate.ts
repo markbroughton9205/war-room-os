@@ -2,7 +2,7 @@
  * #22 Phase 11C — Loopback / origin / CSRF gates for local-only auth routes.
  */
 import { LOCAL_CORE_ORIGIN, LOCAL_UI_ORIGIN, PUBLIC_DOMAIN } from '@/lib/sovereign-runtime/constants'
-import { isLoopbackRequestHost } from '@/lib/sovereign-runtime/session'
+import { isLoopbackRequestHost } from '@/lib/sovereign-runtime/loopback'
 
 export function isSovereignLocalHost(host: string | null | undefined): boolean {
   return isLoopbackRequestHost(host)

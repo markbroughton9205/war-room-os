@@ -5,6 +5,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { evaluateGovernedAction } from '@/lib/permissions/policyDecision'
 
+export { isLoopbackRequestHost } from '@/lib/sovereign-runtime/loopback'
+
 export type LocalDesktopSession = {
   session_id: string
   created_at: string
@@ -74,8 +76,3 @@ export function hashSessionToken(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('hex')
 }
 
-export function isLoopbackRequestHost(host: string | null | undefined): boolean {
-  if (!host) return false
-  const h = host.split(':')[0]!.toLowerCase()
-  return h === '127.0.0.1' || h === 'localhost' || h === '::1'
-}

@@ -1,14 +1,78 @@
 {
   "name": "war-room-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "War Room sovereign desktop foundation (Electron). Loads local core only — never warroomos.com.",
+  "description": "Sovereign AI Operations Headquarters",
+  "author": "War Room OS",
   "main": "src/main.cjs",
+  "productName": "War Room OS",
   "scripts": {
     "start": "electron .",
-    "build:check": "node scripts/build-check.cjs"
+    "build:check": "node scripts/build-check.cjs",
+    "icon:ico": "node scripts/generate-icon-ico.cjs",
+    "prepare:runtime": "node ../scripts/prepare-desktop-runtime.mjs",
+    "dist": "npm run icon:ico && node scripts/build-installer.cjs",
+    "dist:dir": "electron-builder --win dir --x64"
+  },
+  "build": {
+    "appId": "com.warroomos.desktop",
+    "productName": "War Room OS",
+    "copyright": "Copyright © War Room OS",
+    "directories": {
+      "output": "dist-release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "assets/war-room-os.ico",
+      "assets/war-room-os-icon.png",
+      "assets/ICON_PROVENANCE.json"
+    ],
+    "extraResources": [
+      {
+        "from": "runtime",
+        "to": "runtime",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "assets/war-room-os.ico",
+        "to": "assets/war-room-os.ico"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/war-room-os.ico",
+      "artifactName": "War Room OS Setup.${ext}",
+      "signAndEditExecutable": true,
+      "signExecutable": false,
+      "verifyUpdateCodeSignature": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "War Room OS",
+      "installerIcon": "assets/war-room-os.ico",
+      "uninstallerIcon": "assets/war-room-os.ico",
+      "installerHeaderIcon": "assets/war-room-os.ico",
+      "deleteAppDataOnUninstall": false,
+      "uninstallDisplayName": "War Room OS",
+      "include": "build/installer.nsh"
+    },
+    "publish": null
   },
   "devDependencies": {
-    "electron": "^37.2.0"
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.0"
   }
 }

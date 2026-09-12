@@ -8,6 +8,8 @@ import { localRegistryEntryForSlot, type LocalModelRegistryEntry } from './local
 import { SEAT_LOCAL_ROLE_SLOT } from './seatRoleSlot'
 import type { BackendMetadata, ModelBackendInvokeInput, ModelBackendInvokeResult } from './types'
 
+export { safeOllamaBaseUrl } from '@/lib/native-builder/ollamaUrlSafety'
+
 function ollamaHost(): string {
   return (process.env.OLLAMA_BASE_URL?.trim() || 'http://localhost:11434').replace(/\/+$/, '')
 }
@@ -147,20 +149,4 @@ export function localCandidateHealthFromProbe(
     name => name === entry.modelId || name.startsWith(`${entry.modelId.split(':')[0]}:`),
   )
   return installed ? 'READY' : 'MODEL_NOT_INSTALLED'
-}
-
-/**
- * Explicit safe serialization for a local runtime URL headed for an API response: parses the URL
- * and reconstructs it from only protocol+hostname+port, so any embedded userinfo (a credential-
- * bearing OLLAMA_BASE_URL, e.g. `http://user:secret@host:11434`) is structurally dropped rather
- * than pattern-matched-and-stripped. Falls back to a static label on an unparseable value so this
- * never throws.
- */
-export function safeOllamaBaseUrl(rawUrl: string): string {
-  try {
-    const parsed = new URL(rawUrl)
-    return `${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}`
-  } catch {
-    return 'ollama'
-  }
 }

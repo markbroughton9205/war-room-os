@@ -57,8 +57,11 @@ export type LocalCoreHandle = {
 }
 
 function resolveDefaultRendererDir(): string {
-  // desktop/renderer relative to repo root when running from scripts
-  const here = path.dirname(fileURLToPath(import.meta.url))
+  // Packaged CJS uses __dirname; ESM/dev uses import.meta.url when available.
+  const here =
+    typeof __dirname !== 'undefined'
+      ? __dirname
+      : path.dirname(fileURLToPath((import.meta as { url?: string }).url || 'file:///'))
   return path.resolve(here, '..', '..', 'desktop', 'renderer')
 }
 
@@ -247,7 +250,7 @@ export async function startLocalCoreServer(opts: LocalCoreServerOptions = {}): P
     }
 
     // Static local UI assets
-    let rel = url.pathname === '/' ? '/index.html' : url.pathname
+    const rel = url.pathname === '/' ? '/index.html' : url.pathname
     if (rel.includes('..')) {
       json(res, 400, { ok: false, error: 'Path traversal denied.' })
       return

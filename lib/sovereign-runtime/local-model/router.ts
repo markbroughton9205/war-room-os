@@ -5,7 +5,7 @@
  * Electron renderer must NOT call Ollama directly — only through this path / Core / Next API.
  */
 import { probeOllama, requestOllamaStreamingCompletion } from '@/lib/native-builder/ollamaClient'
-import { safeOllamaBaseUrl } from '@/lib/council/live-orchestration/backends/localBackend'
+import { safeOllamaBaseUrl } from '@/lib/native-builder/ollamaUrlSafety'
 import { LOCAL_MODEL_REGISTRY } from '@/lib/council/live-orchestration/backends/localModelRegistry'
 import { assertLocalSessionOwnerMatch } from '@/lib/sovereign-runtime/session'
 import { assertEndpointAllowedForLocalModel, classifyLocalModelEndpoint } from './endpointGuard'

@@ -2,8 +2,8 @@
  * #22 Phase 10 — Sovereign local runtime constants + truth contracts.
  * WEBSITE != WAR ROOM. Cloudflare = OPTIONAL_REMOTE_CONNECTIVITY.
  */
-export const SOVEREIGN_RUNTIME_VERSION = 'ascension-phase11c-v1' as const
-export const DESKTOP_APP_VERSION = '0.2.0-local-ui' as const
+export const SOVEREIGN_RUNTIME_VERSION = 'ascension-phase11d-v1' as const
+export const DESKTOP_APP_VERSION = '0.2.0-installable' as const
 
 /** Dedicated local-app ports — must not collide with prod :3000 or DEV :3001. */
 export const LOCAL_CORE_PORT = 3847 as const
@@ -70,6 +70,30 @@ export type SovereignRuntimeTruth = {
   WAR_ROOM_CORE: 'IMPLEMENTED_LOCAL'
   DESKTOP_APP: 'IMPLEMENTED_LOCAL_UI' | 'IMPLEMENTED_FOUNDATION'
   FULL_WAR_ROOM_UI_LOCAL: 'IMPLEMENTED' | 'NOT_YET_PACKAGED'
+  WINDOWS_INSTALLABLE_APPLICATION:
+    | 'IMPLEMENTED'
+    | 'NOT_YET_FULLY_PROVEN'
+    | 'PACKAGING_CONFIGURED'
+    // Installer builds and installs; the installed payload boots Core + UI from installed
+    // files only. The installed .exe itself cannot start while unsigned on a machine with
+    // Windows Smart App Control enabled.
+    | 'INSTALLED_PAYLOAD_PROVEN_EXE_LAUNCH_BLOCKED'
+  DESKTOP_SHORTCUT: 'CONFIGURED' | 'NOT_YET_PROVEN' | 'PROVEN' | 'CREATED_BY_INSTALLER'
+  START_MENU_ENTRY: 'CONFIGURED' | 'NOT_YET_PROVEN' | 'PROVEN' | 'CREATED_BY_INSTALLER'
+  APP_ICON: 'COMMANDER_APPROVED' | 'INTERIM_PENDING_COMMANDER_PNG' | 'MISSING'
+  CODE_SIGNING: 'NOT_CONFIGURED' | 'CONFIGURED'
+  /**
+   * Windows Smart App Control is enabled on the Commander machine and has blocked an unsigned
+   * build of this application before. Launch of an unsigned binary is therefore not guaranteed
+   * until code signing is configured, even when a given build currently launches.
+   */
+  SMART_APP_CONTROL:
+    | 'BLOCKING_UNSIGNED_INSTALLED_EXE'
+    | 'ENABLED_INTERMITTENTLY_BLOCKING_UNSIGNED'
+    | 'NOT_BLOCKING'
+    | 'UNKNOWN'
+  INSTALLED_EXE_LIVE_PROOF: 'BLOCKED' | 'PROVEN' | 'NOT_ATTEMPTED'
+  PHASE_11D: 'NOT_COMPLETE' | 'COMPLETE'
   LOCAL_MODEL_ROUTER: 'IMPLEMENTED'
   LOCAL_MODEL_PATH: 'IMPLEMENTED' | 'PARTIAL'
   OLLAMA_PATH: 'IMPLEMENTED'

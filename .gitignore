@@ -3,6 +3,9 @@
 # dependencies
 /node_modules
 /desktop/node_modules
+/desktop/runtime
+/desktop/dist
+/desktop/dist-*
 /.pnp
 .pnp.*
 .yarn/*

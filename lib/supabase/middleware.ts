@@ -8,12 +8,7 @@ import {
   verifyAuthCleanupMarkerFromRequest,
   verifyRecoveryMarkerFromRequest,
 } from '@/lib/auth/recovery'
-import { isLoopbackRequestHost } from '@/lib/sovereign-runtime/session'
-import {
-  LOCAL_SESSION_COOKIE,
-  extractBearerOrCookieToken,
-  getLocalOwnershipStore,
-} from '@/lib/sovereign-runtime/local-ownership'
+import { hasPresentedLocalCommanderSession } from '@/lib/sovereign-runtime/local-ownership/edgeSession'
 
 const PUBLIC_PATHS = ['/login', '/signup', '/forgot-password', '/auth/callback', '/auth/cleanup']
 
@@ -58,18 +53,12 @@ function isExemptApiRequest(pathname: string, method: string): boolean {
 }
 
 function hasValidLocalCommanderSession(request: NextRequest): boolean {
-  if (!isLoopbackRequestHost(request.headers.get('host'))) return false
-  try {
-    const token = extractBearerOrCookieToken({
-      authorization: request.headers.get('authorization'),
-      cookieHeader: request.headers.get('cookie'),
-      cookieName: LOCAL_SESSION_COOKIE,
-    })
-    const store = getLocalOwnershipStore(process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null)
-    return Boolean(store.verifySessionToken(token))
-  } catch {
-    return false
-  }
+  // Edge-safe presentation check only — SQLite verify stays in Node API routes.
+  return hasPresentedLocalCommanderSession({
+    host: request.headers.get('host'),
+    authorization: request.headers.get('authorization'),
+    cookieHeader: request.headers.get('cookie'),
+  })
 }
 
 async function tryGetSupabaseUser(supabase: ReturnType<typeof createServerClient>) {

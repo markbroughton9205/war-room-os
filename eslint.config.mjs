@@ -18,7 +18,17 @@ const eslintConfig = defineConfig([
     "public/cesium/**",
     // Local proof/backup trees (work/build*, calibration dumps). Not production source.
     "work/**",
+    // Phase 11D packaged desktop runtime + installer output: generated copies of built
+    // artifacts (scripts/prepare-desktop-runtime.mjs, electron-builder). Gitignored.
+    "desktop/runtime/**",
+    "desktop/dist*/**",
   ]),
+  {
+    // Electron main/preload and desktop build scripts are genuinely CommonJS: the Electron
+    // main process loads `.cjs` via require, so ESM import syntax is not an option here.
+    files: ["desktop/**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
 ]);
 
 export default eslintConfig;
