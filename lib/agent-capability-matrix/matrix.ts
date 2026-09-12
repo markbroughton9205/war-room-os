@@ -179,7 +179,7 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     evidence: 'TARGET only — must remain Commander-only even if technical reach is later added',
   }),
 
-  // —— TERRA INTELLIGENCE AGENT (future definition) ——
+  // —— TERRA INTELLIGENCE AGENT (#22 Phase 6) ——
   row({
     id: 'terra.query',
     agentRole: 'TERRA_INTELLIGENCE_AGENT',
@@ -189,9 +189,9 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     policyAuthority: 'READ_ALLOWED',
     riskTier: 'TIER_0_READ_OBSERVE',
     approvalRequirement: 'SESSION_APPROVAL',
-    runtimeStatus: 'PLANNED',
-    currentVsTarget: 'TARGET_ASCENSION',
-    evidence: 'TARGET: query Terra feeds; CURRENT Terra APIs are Commander-session tools, not a dedicated agent',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    currentVsTarget: 'CURRENT_RUNTIME',
+    evidence: '#22 Phase 6: bounded Terra query/read via TERRA_INTELLIGENCE_AGENT; reuses liveGeoIntelligence + maritime providers',
   }),
   row({
     id: 'terra.analyze',
@@ -202,9 +202,9 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     policyAuthority: 'BOUNDED_ALLOWED',
     riskTier: 'TIER_0_READ_OBSERVE',
     approvalRequirement: 'NO_APPROVAL',
-    runtimeStatus: 'PLANNED',
-    currentVsTarget: 'TARGET_ASCENSION',
-    evidence: 'TARGET: assemble/compare freshness; submit evidence to Council — not authorize action',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    currentVsTarget: 'CURRENT_RUNTIME',
+    evidence: '#22 Phase 6: normalize/correlate/freshness/coverage analysis; return findings to Council — not authorize action',
   }),
   row({
     id: 'terra.mission.launch',
@@ -216,7 +216,7 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     riskTier: 'TIER_2_PERSISTENT_INTERNAL_MUTATION',
     approvalRequirement: 'COMMANDER_EXPLICIT_APPROVAL',
     runtimeStatus: 'STRUCTURALLY_FORBIDDEN',
-    currentVsTarget: 'TARGET_ASCENSION',
+    currentVsTarget: 'CURRENT_RUNTIME',
     evidence: 'Terra Intelligence Agent must NOT auto-launch missions; ASTRA+Commander only',
   }),
   row({

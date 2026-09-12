@@ -95,6 +95,13 @@ export const DANGEROUS_KIND_ALIASES: Readonly<Record<string, CanonicalDangerousK
   OLLAMA_CONFIG_CHANGE: 'shell_mutating',
   FILESYSTEM_DESTRUCTIVE_WRITE: 'delete_data',
   FINANCIAL_ACTION: 'financial',
+  AUTHORIZE_ACTION: 'policy_change',
+  CREATE_GOVERNED_APPROVAL: 'policy_change',
+  SOURCE_APPROVAL: 'policy_change',
+  DEVICE_CONTROL: 'shell_mutating',
+  NAVIGATION_CONTROL: 'shell_mutating',
+  VEHICLE_CONTROL: 'shell_mutating',
+  MISSION_EXECUTION: 'agent_spawn',
 })
 
 export function resolveCanonicalDangerousKind(kindOrAlias: string): CanonicalDangerousKind | null {

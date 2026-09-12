@@ -78,7 +78,24 @@ export const ACTOR_INVENTORY: readonly ActorInventoryItem[] = Object.freeze([
       'ops/production-supervisor',
     ],
     notes:
-      '#22 Phase 5 bounded operational observer. Read-only health/process/port/watchdog diagnostics. No restart/deploy/kill. Ascension autonomy OFF. Operational count=4.',
+      '#22 Phase 5 bounded operational observer. Read-only health/process/port/watchdog diagnostics. No restart/deploy/kill. Ascension autonomy OFF.',
+  },
+  {
+    id: 'terra_intelligence_agent',
+    name: 'TERRA_INTELLIGENCE_AGENT',
+    class: 'EXECUTOR',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    canInvokeTools: true,
+    canSpawnWork: false,
+    canMutateState: false,
+    evidencePaths: [
+      'lib/ascension/terra-intelligence-agent',
+      'app/api/ascension/terra-intelligence-agent/run',
+      'lib/terra/liveGeoIntelligence.ts',
+      'lib/terra/councilHandoff.ts',
+    ],
+    notes:
+      '#22 Phase 6 bounded Terra world-state analyst. Query/normalize/correlate Terra evidence only. No action authority. GPS/traffic NOT_IMPLEMENTED. Ascension autonomy OFF. Operational count=5.',
   },
   {
     id: 'commander',

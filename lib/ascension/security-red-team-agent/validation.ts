@@ -194,7 +194,7 @@ export async function runSecurityRedTeamPhase4Validation(): Promise<{
     check(
       '66_other_targets_unimplemented',
       !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('SECURITY_RED_TEAM_AGENT' as never) &&
-        TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('TERRA_INTELLIGENCE_AGENT') &&
+        !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('TERRA_INTELLIGENCE_AGENT' as never) &&
         TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('COUNCIL_VALIDATOR'),
       TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.join(','),
     ),

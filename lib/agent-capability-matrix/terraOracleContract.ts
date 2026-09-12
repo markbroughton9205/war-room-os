@@ -113,7 +113,7 @@ export function proposeTerraEvidenceContractExample(): TerraOracleEvidenceContra
   }
 }
 
-/** Future Terra Intelligence Agent boundaries (definition only). */
+/** #22 Phase 6 Terra Intelligence Agent boundaries (IMPLEMENTED_BOUNDED). */
 export const TERRA_INTELLIGENCE_AGENT_BOUNDARY = Object.freeze({
   may: [
     'query Terra',
@@ -133,4 +133,6 @@ export const TERRA_INTELLIGENCE_AGENT_BOUNDARY = Object.freeze({
     'take destructive action',
   ] as const,
   requiresForHighImpact: 'ASTRA + policy + Commander authorization',
+  runtimeStatus: 'IMPLEMENTED_BOUNDED' as const,
+  runtimeVersion: 'ascension-phase6-v1' as const,
 })

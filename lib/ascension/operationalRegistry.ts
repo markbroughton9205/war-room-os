@@ -26,6 +26,12 @@ import {
   OPERATIONS_AGENT_ROLE,
   OPERATIONS_AGENT_RUNTIME_VERSION,
 } from '@/lib/ascension/operations-agent/identity'
+import {
+  isTerraIntelligenceAgentRuntimeAvailable,
+  TERRA_INTELLIGENCE_AGENT_AUTONOMOUS_EXECUTION_ENABLED,
+  TERRA_INTELLIGENCE_AGENT_ROLE,
+  TERRA_INTELLIGENCE_AGENT_RUNTIME_VERSION,
+} from '@/lib/ascension/terra-intelligence-agent/identity'
 
 export type OperationalAscensionAgentRecord = {
   agent_role:
@@ -33,6 +39,7 @@ export type OperationalAscensionAgentRecord = {
     | typeof ENGINEERING_AGENT_ROLE
     | typeof SECURITY_RED_TEAM_AGENT_ROLE
     | typeof OPERATIONS_AGENT_ROLE
+    | typeof TERRA_INTELLIGENCE_AGENT_ROLE
   runtime_status: 'IMPLEMENTED_BOUNDED'
   runtime_version: string
   invocation_driven: true
@@ -73,6 +80,14 @@ export const OPERATIONAL_ASCENSION_AGENTS: readonly OperationalAscensionAgentRec
     autonomous: false,
     available: isOperationsAgentRuntimeAvailable(),
   },
+  {
+    agent_role: TERRA_INTELLIGENCE_AGENT_ROLE,
+    runtime_status: 'IMPLEMENTED_BOUNDED',
+    runtime_version: TERRA_INTELLIGENCE_AGENT_RUNTIME_VERSION,
+    invocation_driven: true,
+    autonomous: false,
+    available: isTerraIntelligenceAgentRuntimeAvailable(),
+  },
 ])
 
 export function operationalAscensionAgentCount(): number {
@@ -87,13 +102,13 @@ export function ascensionAutonomyIsOff(): boolean {
     RESEARCH_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
     ENGINEERING_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
     SECURITY_RED_TEAM_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
-    OPERATIONS_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false
+    OPERATIONS_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false &&
+    TERRA_INTELLIGENCE_AGENT_AUTONOMOUS_EXECUTION_ENABLED === false
   )
 }
 
 /** Remaining #21 TARGET agents — must stay unimplemented. */
 export const TARGET_ASCENSION_AGENTS_UNIMPLEMENTED = Object.freeze([
-  'TERRA_INTELLIGENCE_AGENT',
   'COUNCIL_VALIDATOR',
   'DATA_CORPUS_AGENT',
   'FUTURE_NAVIGATION_AGENT',
