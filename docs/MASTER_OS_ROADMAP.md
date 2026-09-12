@@ -29,17 +29,17 @@ Terra side (not a new roadmap number): **Automatic urban streets/buildings** —
 
 ## CURRENT / TARGET / #23 FUTURE
 
-### CURRENT (#22 CLOSED · #23 ACTIVE — WR-CORPUS + WR-TOKENIZER-0 + WRIM lineage reconciled)
+### CURRENT (#22 CLOSED · #23 ACTIVE — WR-CORPUS + WR-TOKENIZER-0 + WRIM lineage reconciled + WRIM-1 rebuild designed)
 
 Sovereign local War Room OS: nine bounded Ascension agents, Local Commander identity, AppData ownership/conversations, local model path (third-party Qwen via Ollama — not WRIM/Ra'el), installed Windows app, cross-agent workflows, durable corpus-candidate handoffs, canonical WR-CORPUS v1 migrated from recovered WRM-001 / WR-CORPUS-1-HARDENED, WR-TOKENIZER-0 recovered and reconciled (`KEEP_AND_EXTEND_LATER`; training still NOT_STARTED), historical WRIM lineage reconciled (`B_REBUILD_WRIM_1_FROM_WRIM_0`; production WRIM still NOT_IMPLEMENTED), truthful degradation, filesystem ASTRA missions. `#19` conversation ownership is LIVE-MIGRATED / CROSS-USER-VALIDATED / CLOSED. ASTRA phase58a is NOT_APPLIED. Production corpus persistence is FALSE. Ascension autonomy is OFF. Phone / MOBILE_GNSS / LIVE_TRAFFIC remain unimplemented. Code signing is NOT_CONFIGURED (unsigned distribution risk recorded; not a functional #22 issue). Real Local Commander AppData profile remains **FIRST_RUN_PENDING / BOOTSTRAPPED=FALSE** — an operator setup checkpoint, not a reopen of #22.
 
 ### TARGET (next Commander authorization only)
 
-WR-TOKENIZER-0 remains canonical (`KEEP_AND_EXTEND_LATER`). Tokenizer **training** remains NOT_STARTED. WRIM continuation is **B_REBUILD_WRIM_1_FROM_WRIM_0** after a future Commander training-design authorization. Do not train yet. Do not create Ra'el. Do not relabel Qwen as native War Room intelligence.
+WR-TOKENIZER-0 remains canonical (`KEEP_AND_EXTEND_LATER`). Tokenizer **training** remains NOT_STARTED. WRIM-1 Nebula rebuild training design is COMPLETE. PyTorch/CUDA environment + WRIM-0 Stage 0 equivalence is **READY / STAGE0_VERIFIED**. Next authorized pass is Stage 1 (10 diagnostic optimizer steps) only after Commander authorization. Do not train yet. Do not create Ra'el. Do not relabel Qwen as native War Room intelligence.
 
-### #23 STATUS (ACTIVE — WR-CORPUS + WR-TOKENIZER-0 + WRIM reconciliation)
+### #23 STATUS (ACTIVE — WR-CORPUS + WR-TOKENIZER-0 + WRIM reconciliation + rebuild design + Stage 0)
 
-WR-CORPUS is implemented (`wr-corpus-v1`). WR-TOKENIZER-0 is the canonical reconciled historical tokenizer (`CURRENT_WR_TOKENIZER = WR-TOKENIZER-0`, recommendation `KEEP_AND_EXTEND_LATER`). `WRIM_RECONCILIATION = COMPLETE`. Historical WRIM-0 is a trained research artifact; historical WRIM-1 is REJECTED_COLLAPSED. Production WRIM, Ra'el, and model training remain not implemented / not running. Continuation recommendation: `B_REBUILD_WRIM_1_FROM_WRIM_0`. Dense baseline required before sparse experts.
+WR-CORPUS is implemented (`wr-corpus-v1`). WR-TOKENIZER-0 is the canonical reconciled historical tokenizer. `WRIM_RECONCILIATION = COMPLETE`. `WRIM_REBUILD_DESIGN = COMPLETE`. `WRIM_ENVIRONMENT = READY`. `WRIM_PYTORCH_PORT = STAGE0_VERIFIED`. Official planned run ID `WRIM1-RUN-000003` is not started. Production WRIM, Ra'el, and model training remain not implemented / not running. Next authorized pass: `READY_FOR_STAGE1_AUTHORIZATION`.
 
 ## #22 CLOSEOUT RECORD
 
@@ -57,7 +57,7 @@ WR-CORPUS is implemented (`wr-corpus-v1`). WR-TOKENIZER-0 is the canonical recon
 - `ASTRA_PHASE58A` = NOT_APPLIED; `ASTRA_MISSION_DURABILITY` = LOCAL_FILESYSTEM_FALLBACK; `DB_BACKED_ASTRA_MISSIONS` = FALSE; `LOCAL_SOVEREIGN_CLOSEOUT_SUFFICIENT` = YES
 - `CODE_SIGNING` = NOT_CONFIGURED; `SMART_APP_CONTROL` = ENABLED_INTERMITTENTLY_BLOCKING_UNSIGNED; `UNSIGNED_DISTRIBUTION_RISK` = PRESENT
 - `PHONE_APP` = NOT_IMPLEMENTED; `MOBILE_GNSS` = NOT_SUPPORTED; `LIVE_TRAFFIC` = NOT_IMPLEMENTED
-- `WR_CORPUS` = IMPLEMENTED (`wr-corpus-v1`); `CURRENT_WR_TOKENIZER` = WR-TOKENIZER-0 (`KEEP_AND_EXTEND_LATER`); tokenizer training = NOT_STARTED; `WRIM_RECONCILIATION` = COMPLETE (`B_REBUILD_WRIM_1_FROM_WRIM_0`); `CURRENT_PRODUCTION_WRIM` / `RAEL` / `MODEL_TRAINING` = NOT_IMPLEMENTED / NOT_RUNNING
+- `WR_CORPUS` = IMPLEMENTED (`wr-corpus-v1`); `CURRENT_WR_TOKENIZER` = WR-TOKENIZER-0 (`KEEP_AND_EXTEND_LATER`); tokenizer training = NOT_STARTED; `WRIM_RECONCILIATION` = COMPLETE; `WRIM_REBUILD_DESIGN` = COMPLETE (`READY_FOR_NEBULA_ENVIRONMENT_SETUP`); `CURRENT_PRODUCTION_WRIM` / `RAEL` / `MODEL_TRAINING` = NOT_IMPLEMENTED / NOT_RUNNING
 - `#19` = CLOSED; `#19_LIVE_MIGRATION` = CONFIRMED
 - Closeout candidate SHA: `6dccbfa5501f80de68a27b0e667a6a2c6ce6148d`
 - Internal Phase 15 is implementation history under `#22`, not a new master-roadmap item

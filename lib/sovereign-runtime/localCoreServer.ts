@@ -31,6 +31,8 @@ import { tryHandleCrossAgentIntegrationHttp } from '@/lib/ascension/integration/
 import { tryHandleWrCorpusHttp } from '@/lib/wr-corpus/httpCore'
 import { tryHandleWrTokenizerHttp } from '@/lib/wr-tokenizer/httpCore'
 import { tryHandleWrimReconciliationHttp } from '@/lib/wrim-reconciliation/httpCore'
+import { tryHandleWrimRebuildDesignHttp } from '@/lib/wrim-rebuild-design/httpCore'
+import { tryHandleWrimEnvironmentHttp } from '@/lib/wrim-environment/httpCore'
 import {
   LOCAL_SESSION_COOKIE,
   extractBearerOrCookieToken,
@@ -201,6 +203,22 @@ export async function startLocalCoreServer(opts: LocalCoreServerOptions = {}): P
 
     if (
       tryHandleWrimReconciliationHttp(req, res, url, {
+        dataDirOverride: opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
+      })
+    ) {
+      return
+    }
+
+    if (
+      tryHandleWrimRebuildDesignHttp(req, res, url, {
+        dataDirOverride: opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
+      })
+    ) {
+      return
+    }
+
+    if (
+      tryHandleWrimEnvironmentHttp(req, res, url, {
         dataDirOverride: opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
       })
     ) {

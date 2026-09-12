@@ -2,6 +2,8 @@ import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoun
 import { WrCorpusPanel } from '@/components/war-room/wr-corpus/WrCorpusPanel'
 import { WrTokenizerPanel } from '@/components/war-room/wr-tokenizer/WrTokenizerPanel'
 import { WrimReconciliationPanel } from '@/components/war-room/wrim/WrimReconciliationPanel'
+import { WrimRebuildDesignPanel } from '@/components/war-room/wrim/WrimRebuildDesignPanel'
+import { WrimEnvironmentPanel } from '@/components/war-room/wrim/WrimEnvironmentPanel'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,6 +19,12 @@ export default function WrCorpusPage() {
           </div>
           <div className="mt-6">
             <WrimReconciliationPanel />
+          </div>
+          <div className="mt-6">
+            <WrimRebuildDesignPanel />
+          </div>
+          <div className="mt-6">
+            <WrimEnvironmentPanel />
           </div>
         </PanelErrorBoundary>
       </div>
