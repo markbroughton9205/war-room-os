@@ -171,9 +171,11 @@ export function runAgentCapabilityMatrixValidation(): CaseResult[] {
   const selfApprove = CANONICAL_CAPABILITY_MATRIX.find(r => r.id === 'sec.approve.self')
   results.push(check('self_approve_denied', selfApprove?.policyAuthority === 'DENIED', selfApprove?.policyAuthority ?? 'missing'))
 
-  // CURRENT vs TARGET discipline: target rows must not claim IMPLEMENTED as current powers incorrectly
+  // CURRENT vs TARGET discipline: target rows must not claim IMPLEMENTED / IMPLEMENTED_BOUNDED
   const targetClaimingImplementedAsCurrent = CANONICAL_CAPABILITY_MATRIX.filter(
-    r => r.currentVsTarget === 'TARGET_ASCENSION' && r.runtimeStatus === 'IMPLEMENTED',
+    r =>
+      r.currentVsTarget === 'TARGET_ASCENSION' &&
+      (r.runtimeStatus === 'IMPLEMENTED' || r.runtimeStatus === 'IMPLEMENTED_BOUNDED'),
   )
   results.push(
     check(

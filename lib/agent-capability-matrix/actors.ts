@@ -18,6 +18,17 @@ export type ActorInventoryItem = {
 
 export const ACTOR_INVENTORY: readonly ActorInventoryItem[] = Object.freeze([
   {
+    id: 'research_agent',
+    name: 'RESEARCH_AGENT',
+    class: 'EXECUTOR',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    canInvokeTools: true,
+    canSpawnWork: false,
+    canMutateState: false,
+    evidencePaths: ['lib/ascension/research-agent', 'app/api/ascension/research-agent/run'],
+    notes: '#22 Phase 2 bounded read-only discovery worker. Invocation-driven. Ascension autonomy OFF. Count=1.',
+  },
+  {
     id: 'commander',
     name: 'COMMANDER',
     class: 'HUMAN',

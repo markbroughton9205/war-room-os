@@ -199,7 +199,16 @@ export function runAscensionPhase1Validation(): CaseResult[] {
   results.push(check('audit_metadata_required_fields', governedAuditHasRequiredFields(meta), meta.reasonCode))
 
   // 26 CURRENT vs TARGET intact
-  results.push(check('target_rows_not_implemented', matrixTargetAscension().every(r => r.runtimeStatus !== 'IMPLEMENTED'), 'ok'))
+  const targetClaimingImplementedAsCurrent = matrixTargetAscension().filter(
+    r => r.runtimeStatus === 'IMPLEMENTED' || r.runtimeStatus === 'IMPLEMENTED_BOUNDED',
+  )
+  results.push(
+    check(
+      'target_rows_not_implemented',
+      targetClaimingImplementedAsCurrent.length === 0,
+      targetClaimingImplementedAsCurrent.map(r => r.id).join(',') || 'none',
+    ),
+  )
 
   // Ascension remains off + no new agents
   results.push(check('ascension_autonomy_off', ASCENSION_AUTONOMY_GUARD.selfModificationEnabled === false, 'selfModificationEnabled'))

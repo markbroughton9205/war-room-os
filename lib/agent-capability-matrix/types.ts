@@ -141,6 +141,7 @@ export type ActorClass = (typeof ACTOR_CLASSES)[number]
 
 export const RUNTIME_STATUSES = [
   'IMPLEMENTED',
+  'IMPLEMENTED_BOUNDED',
   'REGISTERED_ONLY',
   'PLANNED',
   'DEFERRED',
