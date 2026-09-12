@@ -23,6 +23,7 @@ import {
   type LocalResourceOrigin,
   type LocalSessionRecord,
 } from './types'
+import { CorpusCandidateStore } from '@/lib/ascension/integration/candidateStore'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS local_identity (
@@ -650,12 +651,26 @@ export class LocalOwnershipStore {
   exportOwnedData(ownerId: string): {
     ok: true
     export: {
-      version: 1
+      version: 2
       exported_at: string
       owner_local_identity_id: string
       conversations: LocalConversationRecord[]
       messages: LocalMessageRecord[]
       audit: LocalAuditRecord[]
+      corpus_candidates: Array<{
+        candidate_id: string
+        evidence_ids: string[]
+        provenance: Record<string, unknown>
+        review_state: string
+        recommended_disposition: string
+        freshness: string
+        confidence: number
+        novelty_classification: string
+        conflict_state: string
+        source_agent: string
+        created_at: string
+        updated_at: string
+      }>
       excluded: string[]
     }
   } | { ok: false; reason: string } {
@@ -667,15 +682,50 @@ export class LocalOwnershipStore {
       const m = this.listMessages(ownerId, c.id)
       if (m) messages.push(...m)
     }
+    let corpus_candidates: Array<{
+      candidate_id: string
+      evidence_ids: string[]
+      provenance: Record<string, unknown>
+      review_state: string
+      recommended_disposition: string
+      freshness: string
+      confidence: number
+      novelty_classification: string
+      conflict_state: string
+      source_agent: string
+      created_at: string
+      updated_at: string
+    }> = []
+    try {
+      const candStore = new CorpusCandidateStore(this.paths.root)
+      corpus_candidates = candStore.listByOwner(ownerId).map(c => ({
+        candidate_id: c.candidate_id,
+        evidence_ids: c.evidence_ids,
+        provenance: c.provenance,
+        review_state: c.review_state,
+        recommended_disposition: c.recommended_disposition,
+        freshness: c.freshness,
+        confidence: c.confidence,
+        novelty_classification: c.novelty_classification,
+        conflict_state: c.conflict_state,
+        source_agent: c.source_agent,
+        created_at: c.created_at,
+        updated_at: c.updated_at,
+      }))
+      candStore.close()
+    } catch {
+      corpus_candidates = []
+    }
     return {
       ok: true,
       export: {
-        version: 1,
+        version: 2,
         exported_at: nowIso(),
         owner_local_identity_id: ownerId,
         conversations,
         messages,
         audit: this.listAudit(100).filter(a => a.actor_local_identity_id === ownerId),
+        corpus_candidates,
         excluded: [
           'password_hash',
           'password_salt',
@@ -683,6 +733,9 @@ export class LocalOwnershipStore {
           'provider_api_keys',
           'service_role_keys',
           'environment_secrets',
+          'hidden_cot',
+          'credential_hashes',
+          'session_secrets',
         ],
       },
     }

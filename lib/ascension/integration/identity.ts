@@ -4,6 +4,15 @@
  */
 export const CROSS_AGENT_INTEGRATION_RUNTIME_VERSION = 'ascension-phase14-v1' as const
 
+export const PHASE_15_HARDENING_VERSION = 'ascension-phase15-v1' as const
+
+export const PHASE_15_STATUS = 'CLOSEOUT_CANDIDATE' as const
+
+/** Historical live SCHEMA→BACKFILL→ENFORCE + A/B closeout. Structural validators do not re-probe production. */
+export const ROADMAP_19_LIVE_MIGRATION = 'CONFIRMED' as const
+
+export const LOCAL_SOVEREIGN_CLOSEOUT_SUFFICIENT = true as const
+
 export const CROSS_AGENT_INTEGRATION_STATUS = 'IMPLEMENTED' as const
 
 export const CROSS_AGENT_INTEGRATION_AUTONOMOUS_EXECUTION_ENABLED = false as const

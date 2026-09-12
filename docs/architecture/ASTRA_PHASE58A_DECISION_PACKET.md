@@ -54,4 +54,4 @@ Prepared migration (do not apply in this phase):
 - Durable corpus-candidate handoffs use local SQLite (AppData), independent of phase58a
 - Local Commander workflows must not require Supabase
 
-This packet is informational. No SQL is executed by Phase 14.
+This packet is informational. No SQL is executed by Phase 14 or Phase 15.

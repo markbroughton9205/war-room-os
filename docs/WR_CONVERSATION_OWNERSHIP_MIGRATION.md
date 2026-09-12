@@ -1,8 +1,11 @@
 # #19 Conversation Ownership Migration — Deployment & Rollback
 
 **Status:** PASS / LIVE-MIGRATED / CROSS-USER-VALIDATED / CLOSED  
+**#19_LIVE_MIGRATION:** CONFIRMED  
 **Implementation commit:** `1e1c218688d88cc9ca3bffb4377285eee2ec1995`  
 Live SCHEMA → BACKFILL (AUTH_USER_A) → ENFORCE applied. Do not re-run blind backfill.
+
+The structural runner (`scripts/run-conversation-ownership-validation.mjs`) does **not** re-probe production. A stale “SQL has not been applied” note was documentation-only and is repaired. Historical live A/B + zero-null evidence remains the closeout record; this file is not a live query.
 
 ## Security contract
 

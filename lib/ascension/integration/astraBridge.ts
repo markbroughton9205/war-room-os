@@ -30,6 +30,7 @@ export type AstraMissionDurabilityReport = {
   db_backed_claimed: false
   filesystem_fallback_available: true
   phase22_closeout_requires_58a: false
+  LOCAL_SOVEREIGN_CLOSEOUT_SUFFICIENT: true
   packet_apply_now: false
 }
 
@@ -42,6 +43,7 @@ export function reportAstraMissionDurability(
     db_backed_claimed: false,
     filesystem_fallback_available: true,
     phase22_closeout_requires_58a: false,
+    LOCAL_SOVEREIGN_CLOSEOUT_SUFFICIENT: true,
     packet_apply_now: astraPhase58aDecisionPacket().apply_now,
   }
 }

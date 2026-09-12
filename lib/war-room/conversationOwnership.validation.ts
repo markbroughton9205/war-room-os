@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { requireConversationCaller } from './conversationAuth'
 import {
@@ -9,7 +9,8 @@ import {
 
 /**
  * #19 conversation ownership validation (structural + deterministic logic).
- * Live USER A/B and live SQL apply are deployment gates — not run here.
+ * Historical live SCHEMA→BACKFILL→ENFORCE + A/B is CONFIRMED in closeout docs.
+ * This runner does not re-probe production and must not be read as “SQL unapplied.”
  */
 
 type CaseResult = { name: string; pass: boolean; detail: string }
@@ -311,6 +312,25 @@ export async function runConversationOwnershipValidation(): Promise<CaseResult[]
       && /readSessionIntelligenceFromMetadata/.test(chatExecute)
       && /ownerUserId/.test(persist),
     'same-owner #17 path still wired with owner scoping',
+  ))
+
+  const migrationDoc = readRepoFile('docs/WR_CONVERSATION_OWNERSHIP_MIGRATION.md')
+  const roadmapDoc = readRepoFile('docs/MASTER_OS_ROADMAP.md')
+  const runnerNote = readRepoFile('scripts/run-conversation-ownership-validation.mjs')
+  results.push(check(
+    'historical_live_migration_docs',
+    /LIVE-MIGRATED/.test(migrationDoc)
+      && /CROSS-USER-VALIDATED/.test(migrationDoc)
+      && /LIVE-MIGRATED/.test(roadmapDoc)
+      && existsSync(fileURLToPath(new URL('../../supabase/war_room_conversations_ownership.sql', import.meta.url)))
+      && existsSync(fileURLToPath(new URL('../../supabase/war_room_conversations_ownership_backfill.sql', import.meta.url)))
+      && existsSync(fileURLToPath(new URL('../../supabase/war_room_conversations_ownership_enforce.sql', import.meta.url))),
+    '#19_LIVE_MIGRATION=CONFIRMED (docs + SQL artifacts; this runner does not re-query production)',
+  ))
+  results.push(check(
+    'runner_note_not_stale_unapplied',
+    !/BLOCKED BY MIGRATION/.test(runnerNote),
+    'structural runner must not claim SQL is unapplied',
   ))
 
   return results
