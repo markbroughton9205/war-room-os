@@ -1,8 +1,10 @@
 # #22 Phase 2 — Bounded RESEARCH_AGENT Runtime
 
 **Status:** ACTIVE (#22 not closed)  
-**Operational Ascension agents:** 1 (`RESEARCH_AGENT`)  
+**Operational Ascension agents:** 2 (shared registry — RESEARCH_AGENT + ENGINEERING_AGENT)  
 **Ascension autonomy:** OFF  
+**This agent:** RESEARCH_AGENT remains IMPLEMENTED_BOUNDED / invocation-driven
+  
 
 ## Runtime truth
 

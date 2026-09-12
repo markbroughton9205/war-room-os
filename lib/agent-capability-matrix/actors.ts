@@ -26,7 +26,24 @@ export const ACTOR_INVENTORY: readonly ActorInventoryItem[] = Object.freeze([
     canSpawnWork: false,
     canMutateState: false,
     evidencePaths: ['lib/ascension/research-agent', 'app/api/ascension/research-agent/run'],
-    notes: '#22 Phase 2 bounded read-only discovery worker. Invocation-driven. Ascension autonomy OFF. Count=1.',
+    notes: '#22 Phase 2 bounded read-only discovery worker. Invocation-driven. Ascension autonomy OFF.',
+  },
+  {
+    id: 'engineering_agent',
+    name: 'ENGINEERING_AGENT',
+    class: 'EXECUTOR',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    canInvokeTools: true,
+    canSpawnWork: false,
+    canMutateState: true,
+    evidencePaths: [
+      'lib/ascension/engineering-agent',
+      'app/api/ascension/engineering-agent/run',
+      'lib/native-builder/validationRunner.ts',
+      'lib/native-builder/patchPolicy.ts',
+    ],
+    notes:
+      '#22 Phase 3 bounded software worker. Isolated worktree writes + allowlisted validation only. No commit/push/deploy. Ascension autonomy OFF. Operational count=2.',
   },
   {
     id: 'commander',

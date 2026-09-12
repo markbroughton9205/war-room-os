@@ -93,9 +93,10 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     policyAuthority: 'READ_ALLOWED',
     riskTier: 'TIER_0_READ_OBSERVE',
     approvalRequirement: 'POLICY_AUTO_ALLOWED',
-    runtimeStatus: 'IMPLEMENTED',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'lib/repo/status.ts; app/api/tools/repo; repo_scan_readonly standing kind',
+    evidence:
+      'lib/ascension/engineering-agent + lib/repo/status.ts; REPOSITORY_READ capability; repo_scan_readonly standing kind',
   }),
   row({
     id: 'eng.repo.write',
@@ -106,9 +107,10 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     policyAuthority: 'BOUNDED_ALLOWED',
     riskTier: 'TIER_2_PERSISTENT_INTERNAL_MUTATION',
     approvalRequirement: 'ONE_ACTION_APPROVAL',
-    runtimeStatus: 'IMPLEMENTED',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'native-builder patchApplier + patchPolicy denylist; assertAutoOrApproval file_modification',
+    evidence:
+      'lib/ascension/engineering-agent/worktree.ts path containment; native-builder patchPolicy denylist patterns; isolated worktree required',
   }),
   row({
     id: 'eng.shell.execute',
@@ -119,9 +121,10 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     policyAuthority: 'BOUNDED_ALLOWED',
     riskTier: 'TIER_1_REVERSIBLE_LOCAL_SANDBOX',
     approvalRequirement: 'ONE_ACTION_APPROVAL',
-    runtimeStatus: 'IMPLEMENTED',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'validationRunner fixed argv only (tsc/eslint/build); no free-form shell',
+    evidence:
+      'lib/ascension/engineering-agent/commands.ts allowlist + package-script semantic deny; validationRunner fixed argv reuse',
   }),
   row({
     id: 'eng.git.commit',

@@ -43,12 +43,21 @@ export function isCanonicalDangerousKind(actionKind: string): boolean {
 export const DANGEROUS_KIND_ALIASES: Readonly<Record<string, CanonicalDangerousKind>> = Object.freeze({
   GIT_COMMIT: 'commit',
   GIT_PUSH: 'push',
+  GIT_FORCE_PUSH: 'push',
+  GIT_REBASE: 'shell_mutating',
+  GIT_RESET_HARD: 'shell_mutating',
+  GIT_CLEAN: 'shell_mutating',
   PRODUCTION_DEPLOY: 'deploy',
   PRODUCTION_RESTART: 'deploy',
   PROCESS_TERMINATE: 'shell_mutating',
+  ARBITRARY_SHELL: 'shell_mutating',
+  ARBITRARY_POWERSHELL: 'shell_mutating',
+  SHELL_EXECUTE: 'shell_mutating',
+  POWERSHELL_EXECUTE: 'shell_mutating',
   FILESYSTEM_DELETE: 'delete_data',
   FILESYSTEM_WRITE_SENSITIVE: 'file_modification',
   DATABASE_WRITE: 'delete_data',
+  DATABASE_ARBITRARY_WRITE: 'delete_data',
   DATABASE_SCHEMA_CHANGE: 'delete_data',
   SQL_EXECUTE: 'delete_data',
   EXTERNAL_MUTATION: 'external_account',
@@ -64,6 +73,7 @@ export const DANGEROUS_KIND_ALIASES: Readonly<Record<string, CanonicalDangerousK
   POLICY_CHANGE: 'policy_change',
   APPROVAL_CHANGE: 'policy_change',
   SECRET_CHANGE: 'secrets_change',
+  ENVIRONMENT_CHANGE: 'secrets_change',
 })
 
 export function resolveCanonicalDangerousKind(kindOrAlias: string): CanonicalDangerousKind | null {
