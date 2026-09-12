@@ -282,9 +282,13 @@ export async function getAstraLiveMission(id: string): Promise<AstraLiveMission 
 export async function createAstraCouncilConversation(mission: AstraLiveMission): Promise<string | null> {
   const sup = tryWarRoomSupabase()
   if (!sup.ok) return null
+  // #19: user-associated ASTRA conversations must carry initiating owner. No silent ownerless fallback.
+  const ownerUserId = typeof mission.commanderUserId === 'string' ? mission.commanderUserId.trim() : ''
+  if (!ownerUserId) return null
   const lineage = mission.terraSeed?.lineage
   const insert: Record<string, unknown> = {
     title: `ASTRA: ${mission.objective.slice(0, 72)}`,
+    owner_user_id: ownerUserId,
     metadata: {
       astra: {
         missionId: mission.id,
@@ -297,18 +301,12 @@ export async function createAstraCouncilConversation(mission: AstraLiveMission):
       },
     },
   }
-  if (mission.commanderUserId) insert.owner_user_id = mission.commanderUserId
   const { data, error } = await sup.client
     .from('war_room_conversations')
     .insert(insert)
     .select('id')
     .single()
   if (!error && typeof data?.id === 'string') return data.id
-  if (insert.owner_user_id) {
-    delete insert.owner_user_id
-    const retry = await sup.client.from('war_room_conversations').insert(insert).select('id').single()
-    if (!retry.error && typeof retry.data?.id === 'string') return retry.data.id
-  }
   return null
 }
 

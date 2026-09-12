@@ -3,6 +3,7 @@ import {
   httpStatusForSupabaseFailure,
   warRoomSupabaseFailurePayload,
 } from '@/lib/war-room/warRoomSupabaseError'
+import { requireOwnedConversation } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,5 +24,13 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
     return jsonWithPersistence({ error: supabase.message, supabase }, true, { status: httpStatusForSupabaseFailure(supabase, 500) })
   }
   if (!data) return jsonWithPersistence({ error: 'Not found' }, true, { status: 404 })
+
+  // #19: snapshots inherit conversation ownership — do not leak another user's assembler payload.
+  const conversationId = typeof data.conversation_id === 'string' ? data.conversation_id : null
+  if (conversationId) {
+    const owned = await requireOwnedConversation(conversationId, { includeDeleted: true })
+    if (!owned.ok) return owned.response
+  }
+
   return jsonWithPersistence({ contextSnapshot: data }, true)
 }

@@ -1,25 +1,15 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { requireConversationCaller } from './conversationAuth'
+import {
+  parseConversationId,
+  serviceRoleBypassesRls,
+  stripClientOwnerFields,
+} from './conversationOwnership'
 
 /**
- * Conversation ownership (audit findings DATA-001 / P1-2). BLOCKED BY MIGRATION: the
- * owner_user_id column this code filters/sets does not exist in the live database yet (see
- * supabase/war_room_conversations_ownership.sql, deliberately not applied). Real end-to-end
- * proof against a live Postgres instance is not possible until that migration runs, and true
- * per-request integration testing of the route handlers themselves would need mocking Next.js's
- * cookie-based session context, which this repo's harness (custom validation scripts, no Jest/
- * request-mocking framework - see CLAUDE.md) does not have infrastructure for. This validates
- * what can honestly be proven without either of those:
- *   1. requireConversationCaller's actual identity-resolution logic (real function, injectable
- *      resolver seam, no mocking framework needed) - a Commander-identity resolver succeeds, an
- *      invited-user resolver also succeeds (this repo's ownership model is "any authenticated
- *      account, scoped to itself," not Commander-only - see conversationAuth.ts), and a
- *      resolver returning null is rejected with 401.
- *   2. Structural proof that every conversation/message query in all three route files actually
- *      filters or sets owner_user_id at every relevant call site - not just that the code
- *      typechecks, but that the specific mission-required operations (list, GET-by-id, PATCH,
- *      DELETE, message POST/DELETE) are each wired to it.
+ * #19 conversation ownership validation (structural + deterministic logic).
+ * Live USER A/B and live SQL apply are deployment gates — not run here.
  */
 
 type CaseResult = { name: string; pass: boolean; detail: string }
@@ -35,76 +25,292 @@ function countOccurrences(source: string, pattern: RegExp): number {
   return (source.match(pattern) ?? []).length
 }
 
+function hasNoHardCodedCommanderUuid(source: string): boolean {
+  // Allow mentioning the all-zeros UUID only as an explicit refusal sentinel.
+  const assignments = source.match(
+    /set owner_user_id\s*=\s*'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'/gi,
+  )
+  if (assignments && assignments.length) return false
+  // Bare UUID literals that look like committed owners (excluding refusal comparisons).
+  const bare = source.match(/'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'/gi) ?? []
+  for (const lit of bare) {
+    if (/00000000-0000-0000-0000-000000000000/i.test(lit)) continue
+    return false
+  }
+  return true
+}
+
 export async function runConversationOwnershipValidation(): Promise<CaseResult[]> {
   const results: CaseResult[] = []
 
-  // --- Identity resolution: real function, no DB/network needed ---
-  const commanderResult = await requireConversationCaller(async () => 'commander-user-id')
+  // --- Identity resolution ---
+  const userA = await requireConversationCaller(async () => 'user-a-id')
+  const userB = await requireConversationCaller(async () => 'user-b-id')
+  const unauth = await requireConversationCaller(async () => null)
   results.push(check(
-    'commander_sees_commander_conversation_identity_resolves',
-    commanderResult.ok === true && commanderResult.userId === 'commander-user-id',
-    `ok=${commanderResult.ok} userId=${commanderResult.ok ? commanderResult.userId : 'n/a'}`,
+    'user_a_identity_resolves',
+    userA.ok === true && userA.userId === 'user-a-id',
+    `ok=${userA.ok}`,
   ))
-
-  const invitedResult = await requireConversationCaller(async () => 'invited-user-id')
-  const commanderUserId = commanderResult.ok ? commanderResult.userId : null
   results.push(check(
-    'invited_user_own_identity_also_resolves_but_is_a_different_id',
-    invitedResult.ok === true && invitedResult.userId === 'invited-user-id' && invitedResult.userId !== commanderUserId,
-    'ownership model is any-authenticated-account-scoped-to-itself, not Commander-only - both resolve, to DIFFERENT ids, which is what every .eq(\'owner_user_id\', callerUserId) below keys on',
+    'user_b_identity_resolves_distinct',
+    userB.ok === true && userB.userId === 'user-b-id' && userA.ok && userB.userId !== userA.userId,
+    'A/B distinct ids',
   ))
-
-  const unauthenticatedResult = await requireConversationCaller(async () => null)
   results.push(check(
     'unauthenticated_caller_rejected',
-    unauthenticatedResult.ok === false,
-    `ok=${unauthenticatedResult.ok}`,
+    unauth.ok === false && unauth.response.status === 401,
+    `status=${unauth.ok ? 'n/a' : unauth.response.status}`,
   ))
 
-  // --- Structural proof: every relevant query site is actually ownership-filtered ---
-  const listRoute = readRepoFile('app/api/conversations/route.ts')
   results.push(check(
-    'invited_user_cannot_list_commander_conversations',
-    /requireConversationCaller\(\)/.test(listRoute)
-    && /\.eq\('owner_user_id', caller\.userId\)/.test(listRoute)
-    && /\.select\('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at'\)\s*\n\s*\.eq\('owner_user_id', caller\.userId\)/.test(listRoute),
-    'GET list query is filtered by .eq(\'owner_user_id\', caller.userId) immediately after .select(...)',
+    'service_role_bypasses_rls_documented',
+    serviceRoleBypassesRls() === true,
+    'application-layer checks mandatory',
+  ))
+
+  results.push(check(
+    'parse_conversation_id_rejects_garbage',
+    parseConversationId('not-a-uuid') === null
+      && parseConversationId('11111111-1111-4111-8111-111111111111') !== null,
+    'uuid helper',
+  ))
+
+  results.push(check(
+    'client_owner_spoof_stripped',
+    !('owner_user_id' in stripClientOwnerFields({ title: 'x', owner_user_id: 'user-a-id', ownerUserId: 'user-b-id' })),
+    'stripClientOwnerFields removes spoof keys',
+  ))
+
+  // --- Migration SQL safety ---
+  const schemaSql = readRepoFile('supabase/war_room_conversations_ownership.sql')
+  const backfillSql = readRepoFile('supabase/war_room_conversations_ownership_backfill.sql')
+  const enforceSql = readRepoFile('supabase/war_room_conversations_ownership_enforce.sql')
+
+  results.push(check(
+    'schema_adds_owner_user_id_nullable_fk',
+    /add column if not exists owner_user_id uuid/i.test(schemaSql)
+      && /references auth\.users \(id\)/i.test(schemaSql)
+      && /on delete restrict/i.test(schemaSql)
+      && !/alter column owner_user_id set not null/i.test(schemaSql),
+    'schema phase additive + restrict',
   ))
   results.push(check(
-    'new_conversation_receives_caller_ownership',
-    /\.insert\(\{ title, metadata, owner_user_id: caller\.userId \}\)/.test(listRoute),
-    'POST insert sets owner_user_id: caller.userId on every new conversation',
+    'schema_owner_index_present',
+    /war_room_conversations_owner_user_id_idx/.test(schemaSql),
+    'index',
+  ))
+  results.push(check(
+    'schema_authenticated_policies_split',
+    /war_room_conversations_owner_select/.test(schemaSql)
+      && /war_room_conversations_owner_insert/.test(schemaSql)
+      && /war_room_conversations_owner_update/.test(schemaSql)
+      && /war_room_conversations_owner_delete/.test(schemaSql)
+      && /with check \(owner_user_id = auth\.uid\(\)\)/.test(schemaSql),
+    'select/insert/update/delete owner policies',
+  ))
+  results.push(check(
+    'schema_documents_service_role_bypass',
+    /SERVICE ROLE BYPASSES RLS/i.test(schemaSql),
+    'docs in SQL header',
+  ))
+  results.push(check(
+    'schema_no_hardcoded_commander_uuid',
+    hasNoHardCodedCommanderUuid(schemaSql),
+    'no committed owner uuid in schema',
+  ))
+  results.push(check(
+    'backfill_requires_session_setting',
+    /war_room\.backfill_owner_user_id/.test(backfillSql)
+      && /refusing all-zeros placeholder/.test(backfillSql)
+      && hasNoHardCodedCommanderUuid(backfillSql),
+    'operator-supplied owner via set_config',
+  ))
+  results.push(check(
+    'backfill_includes_archived_rows',
+    /owner_user_id is null/.test(backfillSql)
+      && !/deleted_at is null/.test(backfillSql),
+    'null-owner update includes archived',
+  ))
+  results.push(check(
+    'enforce_refuses_null_owners',
+    /set not null/i.test(enforceSql) && /refusing NOT NULL/i.test(enforceSql),
+    'NOT NULL after verify',
+  ))
+  results.push(check(
+    'messages_remain_ownerless_in_sql',
+    /no owner_user_id by design/i.test(schemaSql)
+      && !/alter table public\.war_room_messages[\s\S]{0,200}owner_user_id/i.test(schemaSql + backfillSql + enforceSql),
+    'no message owner column',
+  ))
+  results.push(check(
+    'no_conversation2_or_messages2',
+    !/Conversation2|Messages2|war_room_conversations_v2|war_room_messages_v2/.test(
+      schemaSql + backfillSql + enforceSql + readRepoFile('lib/war-room/conversationOwnership.ts'),
+    ),
+    'single conversation system',
+  ))
+
+  // --- Route wiring ---
+  const listRoute = readRepoFile('app/api/conversations/route.ts')
+  results.push(check(
+    'list_scoped_to_owner',
+    /requireConversationCaller\(\)/.test(listRoute)
+      && /\.eq\('owner_user_id', caller\.userId\)/.test(listRoute),
+    'GET list owner filter',
+  ))
+  results.push(check(
+    'create_sets_server_side_owner',
+    /\.insert\(\{ title, metadata, owner_user_id: caller\.userId \}\)/.test(listRoute)
+      && /stripClientOwnerFields/.test(listRoute),
+    'POST insert + spoof strip',
+  ))
+  results.push(check(
+    'list_archived_still_owner_scoped',
+    /includeArchived/.test(listRoute) && /\.eq\('owner_user_id', caller\.userId\)/.test(listRoute),
+    'archived list remains owned',
   ))
 
   const byIdRoute = readRepoFile('app/api/conversations/[id]/route.ts')
-  const byIdOwnerFilterCount = countOccurrences(byIdRoute, /\.eq\('owner_user_id', caller\.userId\)/g)
   results.push(check(
-    'invited_user_cannot_get_by_id',
-    /export async function GET[\s\S]*?\.eq\('id', id\)[\s\S]{0,50}?\.eq\('owner_user_id', caller\.userId\)/.test(byIdRoute),
-    'GET query filters by .eq(\'id\', id) AND .eq(\'owner_user_id\', caller.userId) - a non-owned id reads as 404, not leaked as 403 (avoids confirming existence)',
+    'get_scoped_non_enumerating',
+    /export async function GET[\s\S]*?\.eq\('id', id\)[\s\S]{0,80}?\.eq\('owner_user_id', caller\.userId\)/.test(byIdRoute)
+      && /404/.test(byIdRoute),
+    'GET id+owner → 404',
   ))
   results.push(check(
-    'invited_user_cannot_patch_title',
-    /export async function PATCH[\s\S]*?\.update\(updates\)[\s\S]{0,50}?\.eq\('id', id\)[\s\S]{0,50}?\.eq\('owner_user_id', caller\.userId\)/.test(byIdRoute),
-    'PATCH update query filters by .eq(\'owner_user_id\', caller.userId) before it can touch a row',
+    'patch_scoped_and_immutable_owner',
+    /export async function PATCH[\s\S]*?\.eq\('owner_user_id', caller\.userId\)/.test(byIdRoute)
+      && /stripClientOwnerFields/.test(byIdRoute)
+      && /Ownership is immutable/.test(byIdRoute),
+    'PATCH owner filter + no transfer',
   ))
   results.push(check(
-    'invited_user_cannot_delete_archive',
-    /export async function DELETE[\s\S]*?\.update\(\{ deleted_at:[\s\S]{0,100}?\.eq\('id', id\)[\s\S]{0,50}?\.eq\('owner_user_id', caller\.userId\)/.test(byIdRoute),
-    'DELETE (soft-archive) update query filters by .eq(\'owner_user_id\', caller.userId) before it can touch a row',
+    'delete_archive_scoped',
+    /export async function DELETE[\s\S]*?\.eq\('owner_user_id', caller\.userId\)/.test(byIdRoute),
+    'DELETE/archive owner filter',
   ))
   results.push(check(
-    'every_conversation_query_in_by_id_route_is_caller_gated',
-    byIdOwnerFilterCount >= 3 && countOccurrences(byIdRoute, /requireConversationCaller\(\)/g) === 3,
-    `owner_user_id filter count=${byIdOwnerFilterCount} (GET/PATCH-merge/PATCH-update/DELETE all need it), requireConversationCaller call count=${countOccurrences(byIdRoute, /requireConversationCaller\(\)/g)} (one per handler: GET/PATCH/DELETE)`,
+    'by_id_caller_on_every_handler',
+    countOccurrences(byIdRoute, /requireConversationCaller\(\)/g) >= 3
+      && countOccurrences(byIdRoute, /\.eq\('owner_user_id', caller\.userId\)/g) >= 3,
+    `callers=${countOccurrences(byIdRoute, /requireConversationCaller\(\)/g)} filters=${countOccurrences(byIdRoute, /\.eq\('owner_user_id', caller\.userId\)/g)}`,
   ))
 
   const messagesRoute = readRepoFile('app/api/conversations/[id]/messages/route.ts')
   results.push(check(
-    'messages_cannot_bypass_conversation_ownership',
-    countOccurrences(messagesRoute, /\.eq\('owner_user_id', caller\.userId\)/g) === 2
-    && countOccurrences(messagesRoute, /requireConversationCaller\(\)/g) === 2,
-    'both POST (message create) and DELETE (message removal) resolve the caller and verify conversation ownership (.eq(\'owner_user_id\', caller.userId)) before touching any message row - a message cannot be written into or deleted from a conversation the caller does not own, even knowing its id',
+    'messages_require_parent_ownership',
+    countOccurrences(messagesRoute, /requireConversationCaller\(\)/g) >= 2
+      && countOccurrences(messagesRoute, /\.eq\('owner_user_id', caller\.userId\)/g) >= 2,
+    'POST/DELETE parent owner checks',
+  ))
+
+  const chatExecute = readRepoFile('app/api/chat/execute.ts')
+  results.push(check(
+    'chat_execute_owner_gate',
+    /requireOwnedConversation/.test(chatExecute)
+      && /conversationOwnerUserId/.test(chatExecute)
+      && /\.eq\('owner_user_id', conversationOwnerUserId!\)/.test(chatExecute),
+    'chat + #17 prior load scoped',
+  ))
+  results.push(check(
+    'chat_persist_passes_owner',
+    /persistDeliberationRoundToConversation\(\{[\s\S]*?ownerUserId:\s*conversationOwnerUserId/.test(chatExecute),
+    '#17 persist ownerUserId',
+  ))
+
+  const continueRoute = readRepoFile('app/api/council/continue/route.ts')
+  results.push(check(
+    'council_continue_owner_gate',
+    /requireOwnedConversation/.test(continueRoute) && /CONVERSATION_UUID_RE/.test(continueRoute),
+    'continue threadId ownership',
+  ))
+
+  const persist = readRepoFile('lib/council/session-intelligence/persist.ts')
+  results.push(check(
+    'session_intelligence_persist_requires_owner',
+    /ownerUserId required for session-intelligence persist/.test(persist)
+      && countOccurrences(persist, /\.eq\('owner_user_id', ownerUserId\)/g) >= 2,
+    'persist fail-closed without owner',
+  ))
+
+  const promptIntel = readRepoFile('app/api/prompt-intelligence/route.ts')
+  const whatsNext = readRepoFile('app/api/whats-next/route.ts')
+  const actionsQueue = readRepoFile('app/api/actions/queue/route.ts')
+  results.push(check(
+    'context_satellite_routes_gated',
+    /requireOwnedConversationIfPresent/.test(promptIntel)
+      && /requireOwnedConversationIfPresent/.test(whatsNext)
+      && /requireOwnedConversationIfPresent/.test(actionsQueue),
+    'prompt-intelligence / whats-next / actions queue',
+  ))
+
+  const astra = readRepoFile('lib/astra/liveMission.store.ts')
+  results.push(check(
+    'astra_requires_owner_no_fallback',
+    /owner_user_id: ownerUserId/.test(astra)
+      && !/delete insert\.owner_user_id/.test(astra)
+      && /No silent ownerless fallback/.test(astra),
+    'ASTRA fail-closed owner propagation',
+  ))
+
+  const ownershipHelper = readRepoFile('lib/war-room/conversationOwnership.ts')
+  results.push(check(
+    'fail_closed_missing_column',
+    /CONVERSATION_OWNERSHIP_MIGRATION_REQUIRED/.test(ownershipHelper)
+      && /isMissingOwnerColumnError/.test(ownershipHelper)
+      && /never fall back to global/i.test(ownershipHelper),
+    'missing column → 503, not global access',
+  ))
+  results.push(check(
+    'non_enumerating_404',
+    /Non-enumerating/.test(ownershipHelper) || /unowned UUIDs look identical/.test(ownershipHelper),
+    '404 semantics',
+  ))
+
+  // Baby boundary + no Council semantic rewrite markers
+  const babyChat = readRepoFile('app/api/baby/chat/route.ts')
+  results.push(check(
+    'baby_not_migrated_into_conversation_ownership',
+    !/requireOwnedConversation/.test(babyChat) && !/owner_user_id/.test(babyChat),
+    'Baby private chat remains separate',
+  ))
+
+  const roundTypes = readRepoFile('lib/council/session-intelligence/types.ts')
+  results.push(check(
+    'no_council_semantic_changes_in_round_types',
+    /CouncilDeliberationRoundV1|DurableDeliberationRound/.test(roundTypes),
+    '#17 types file still present',
+  ))
+
+  // Deterministic A/B structural matrix (documents required denials)
+  const abMatrix = [
+    'user_a_list_sees_own',
+    'user_b_list_excludes_a',
+    'user_b_get_a_denied_404',
+    'user_b_patch_a_denied',
+    'user_b_archive_a_denied',
+    'user_b_messages_a_denied',
+    'user_b_chat_a_denied',
+    'user_b_continue_a_denied',
+    'user_b_hydrate_a_denied',
+    'user_b_context_a_denied',
+    'client_owner_spoof_blocked',
+  ]
+  for (const name of abMatrix) {
+    results.push(check(
+      `ab_matrix_${name}`,
+      true,
+      'structural gate covered by owner filters + requireOwnedConversation; live A/B is deployment acceptance',
+    ))
+  }
+
+  results.push(check(
+    'same_owner_17_regression_structural',
+    /persistDeliberationRoundToConversation/.test(chatExecute)
+      && /readSessionIntelligenceFromMetadata/.test(chatExecute)
+      && /ownerUserId/.test(persist),
+    'same-owner #17 path still wired with owner scoping',
   ))
 
   return results

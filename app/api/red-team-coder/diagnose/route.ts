@@ -4,6 +4,7 @@ import { createLatestRepairPlan } from '@/lib/red-team-coder/repairPlanner'
 import type { RedTeamCoderRepairPlan, RedTeamCoderSignal } from '@/lib/red-team-coder/types'
 import { appendWarRoomActionLog } from '@/lib/war-room/actionLogs'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 
 /** Queue persistence: primary `war_room_actions`; legacy fallback `rael_action_queue` (JSON `queue` labels path). */
 
@@ -145,6 +146,10 @@ export async function POST(req: Request) {
   }
 
   const signal = asSignal(body)
+  const conversationId = conversationIdFromBody(body, signal)
+  const ownedGate = await requireOwnedConversationIfPresent(conversationId)
+  if (!ownedGate.ok) return ownedGate.response
+
   const issues = detectRedTeamCoderIssues(signal)
   const latestRepairPlan = createLatestRepairPlan(issues)
 

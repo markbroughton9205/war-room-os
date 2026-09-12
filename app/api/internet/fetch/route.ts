@@ -2,6 +2,7 @@ import { insertInternetLog } from '@/lib/internet/warRoomInternetLog'
 import { redactInternetQuery } from '@/lib/internet/redact'
 import { safeUrlFetch } from '@/lib/internet/safeUrlFetch'
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +15,9 @@ export async function POST(req: Request) {
   } catch {
     return jsonWithPersistence({ error: 'Invalid JSON body.' }, sup.ok, { status: 400 })
   }
+
+  const ownedGate = await requireOwnedConversationIfPresent(body.conversationId)
+  if (!ownedGate.ok) return ownedGate.response
 
   const url = typeof body.url === 'string' ? body.url.trim() : ''
   if (!url) {

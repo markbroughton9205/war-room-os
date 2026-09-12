@@ -12,6 +12,7 @@ import {
   tryAcquireWorkerSlot,
 } from '@/lib/workers/limits'
 import { observeWarRoomApiTool } from '@/lib/modular-intelligence/warRoomToolTrajectoryObserve'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -28,7 +29,9 @@ export async function POST(req: Request) {
     return jsonWithPersistence({ error: 'Invalid JSON body.' }, sup.ok, { status: 400 })
   }
 
-  const body = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const body = (raw !== null && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const ownedGate = await requireOwnedConversationIfPresent(body.conversationId)
+  if (!ownedGate.ok) return ownedGate.response
 
   const state = await fetchWarRoomPermissionsState(sup.ok ? sup.client : null)
   const gate = assertAutoOrApproval({

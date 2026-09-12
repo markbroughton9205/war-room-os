@@ -7,6 +7,7 @@ import {
   httpStatusForSupabaseFailure,
   warRoomSupabaseFailurePayload,
 } from '@/lib/war-room/warRoomSupabaseError'
+import { requireConversationCaller } from '@/lib/war-room/conversationAuth'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,6 +19,9 @@ export async function POST(
   req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const caller = await requireConversationCaller()
+  if (!caller.ok) return caller.response
+
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ error: 'Supabase is not configured.' }, false, { status: 503 })
@@ -45,10 +49,12 @@ export async function POST(
     return jsonWithPersistence({ error: 'content is required' }, true, { status: 400 })
   }
 
+  // Not owned by the caller reads as "conversation not found" — non-enumerating.
   const { data: conv, error: cErr } = await sup.client
     .from(TABLE_CONVERSATIONS)
     .select('id')
     .eq('id', conversationId)
+    .eq('owner_user_id', caller.userId)
     .is('deleted_at', null)
     .maybeSingle()
 
@@ -114,10 +120,12 @@ export async function POST(
         updated_at: new Date().toISOString(),
       })
       .eq('id', conversationId)
+      .eq('owner_user_id', caller.userId)
     const { data: existingMeta } = await sup.client
       .from(TABLE_CONVERSATIONS)
       .select('metadata')
       .eq('id', conversationId)
+      .eq('owner_user_id', caller.userId)
       .maybeSingle()
     const prev = existingMeta?.metadata && typeof existingMeta.metadata === 'object' && !Array.isArray(existingMeta.metadata)
       ? (existingMeta.metadata as Record<string, unknown>)
@@ -129,6 +137,7 @@ export async function POST(
       .from(TABLE_CONVERSATIONS)
       .update({ metadata: { ...prev, council: { ...prevCouncil, lastPreview: preview } } })
       .eq('id', conversationId)
+      .eq('owner_user_id', caller.userId)
   }
 
   if (error) {
@@ -147,6 +156,9 @@ export async function DELETE(
   req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const caller = await requireConversationCaller()
+  if (!caller.ok) return caller.response
+
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ error: 'Supabase is not configured.' }, false, { status: 503 })
@@ -155,6 +167,25 @@ export async function DELETE(
   const { id: conversationId } = await context.params
   if (!conversationId) {
     return jsonWithPersistence({ error: 'id required' }, true, { status: 400 })
+  }
+
+  const { data: ownedConv, error: ownErr } = await sup.client
+    .from(TABLE_CONVERSATIONS)
+    .select('id')
+    .eq('id', conversationId)
+    .eq('owner_user_id', caller.userId)
+    .is('deleted_at', null)
+    .maybeSingle()
+  if (ownErr) {
+    const supabase = warRoomSupabaseFailurePayload(TABLE_CONVERSATIONS, ownErr, { operation: 'select' })
+    return jsonWithPersistence(
+      { error: supabase.message, supabase },
+      true,
+      { status: httpStatusForSupabaseFailure(supabase, 500) },
+    )
+  }
+  if (!ownedConv) {
+    return jsonWithPersistence({ error: 'Conversation not found' }, true, { status: 404 })
   }
 
   let body: { ids?: unknown; scope?: unknown } = {}

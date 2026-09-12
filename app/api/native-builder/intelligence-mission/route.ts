@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { assertLiveResearchApproved, runGlobalIntelligenceMission } from '@/lib/native-builder/intelligenceMission'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { fetchWarRoomPermissionsState } from '@/lib/war-room/permissionsState'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -37,6 +38,9 @@ export async function POST(req: Request) {
   if (!gate.ok) {
     return NextResponse.json({ error: gate.reason, blocked: true }, { status: gate.status })
   }
+
+  const ownedGate = await requireOwnedConversationIfPresent(body.conversationId)
+  if (!ownedGate.ok) return ownedGate.response
 
   const result = await runGlobalIntelligenceMission({
     decreeText: body.decreeText,

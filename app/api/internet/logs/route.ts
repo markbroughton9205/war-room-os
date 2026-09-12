@@ -1,17 +1,20 @@
 import { jsonWithPersistence, jsonWithPersistenceSafe, tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: Request) {
   try {
+    const url = new URL(req.url)
+    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 80))
+    const conversationId = url.searchParams.get('conversation_id')
+    const ownedGate = await requireOwnedConversationIfPresent(conversationId)
+    if (!ownedGate.ok) return ownedGate.response
+
     const sup = tryWarRoomSupabase()
     if (!sup.ok) {
       return jsonWithPersistence({ logs: [] }, false)
     }
-
-    const url = new URL(req.url)
-    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 80))
-    const conversationId = url.searchParams.get('conversation_id')
 
     let q = sup.client
       .from('war_room_internet_logs')

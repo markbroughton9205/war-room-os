@@ -5,6 +5,7 @@ import { composePrompt } from '@/lib/prompt-intelligence/compose'
 import { persistPromptArtifact } from '@/lib/prompt-intelligence/persist'
 import type { PromptIntent } from '@/lib/prompt-intelligence/types'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 import { listOpenKnowledgeGaps, listUnresolvedContradictionsWithClaimText } from '@/lib/world-learning/knowledgeGaps'
 
 export const dynamic = 'force-dynamic'
@@ -31,6 +32,8 @@ export async function POST(req: Request) {
   if (!intent) return NextResponse.json({ error: `intent must be one of: ${INTENTS.join(', ')}` }, { status: 400 })
 
   const conversationId = typeof body.conversationId === 'string' ? body.conversationId : null
+  const ownedGate = await requireOwnedConversationIfPresent(conversationId)
+  if (!ownedGate.ok) return ownedGate.response
 
   const store = createSupabaseContextAssemblerStore()
   let projectId = typeof body.projectId === 'string' ? body.projectId : null

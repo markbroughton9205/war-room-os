@@ -18,6 +18,7 @@ import { rebuildConversationRuntime } from '@/lib/conversation-runtime/sync'
 import { mergeProviderStatesFromMessages } from '@/lib/provider-state/store'
 import { runDeliberationStep } from '@/lib/orchestration/deliberation'
 import { jsonWithPersistence, tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { CONVERSATION_UUID_RE, requireOwnedConversation } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -70,6 +71,12 @@ export async function POST(req: Request) {
 
   if (!sessionId) {
     return jsonWithPersistence({ ok: false, error: 'sessionId required' }, sup.ok, { status: 400 })
+  }
+
+  // #19: when threadId is a conversation UUID, prove ownership before service-role load/persist.
+  if (threadId && CONVERSATION_UUID_RE.test(threadId)) {
+    const owned = await requireOwnedConversation(threadId, { includeDeleted: false })
+    if (!owned.ok) return owned.response
   }
 
   let runtime = createConversationRuntime(sessionId, threadId || null)

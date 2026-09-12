@@ -5,6 +5,7 @@ import { federatedSearch } from '@/lib/war-room-search/federatedSearch'
 import { clientIpFromRequestHeaders } from '@/lib/war-room-search/providers/googleWebSearch'
 import { isSearchRequestEmpty } from '@/lib/war-room-search/searchQuery'
 import { emptySearchSourceSummary, type SearchRequest, type SearchRequestOptions } from '@/lib/war-room-search/types'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -25,6 +26,8 @@ export async function GET(req: Request) {
 
   const projectId = url.searchParams.get('projectId')
   const conversationId = url.searchParams.get('conversationId')
+  const ownedGate = await requireOwnedConversationIfPresent(conversationId)
+  if (!ownedGate.ok) return ownedGate.response
   const includeInactive = url.searchParams.get('includeInactive') === '1'
   const limit = Number(url.searchParams.get('limit') ?? '20')
 

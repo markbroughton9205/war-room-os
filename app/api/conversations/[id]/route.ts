@@ -3,6 +3,8 @@ import {
   httpStatusForSupabaseFailure,
   warRoomSupabaseFailurePayload,
 } from '@/lib/war-room/warRoomSupabaseError'
+import { requireConversationCaller } from '@/lib/war-room/conversationAuth'
+import { stripClientOwnerFields } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +16,9 @@ export async function GET(
   _req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const caller = await requireConversationCaller()
+  if (!caller.ok) return caller.response
+
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence(
@@ -27,10 +32,12 @@ export async function GET(
     return jsonWithPersistence({ error: 'id required' }, true, { status: 400 })
   }
 
+  // Unowned UUIDs return 404 (non-enumerating) — identical to missing ids.
   const { data: conv, error: cErr } = await sup.client
     .from(TABLE_CONVERSATIONS)
     .select('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at')
     .eq('id', id)
+    .eq('owner_user_id', caller.userId)
     .maybeSingle()
 
   if (cErr) {
@@ -78,6 +85,9 @@ export async function PATCH(
   req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const caller = await requireConversationCaller()
+  if (!caller.ok) return caller.response
+
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ error: 'Supabase is not configured.' }, false, { status: 503 })
@@ -88,11 +98,16 @@ export async function PATCH(
     return jsonWithPersistence({ error: 'id required' }, true, { status: 400 })
   }
 
-  let body: { title?: string; state?: string; metadata?: Record<string, unknown>; mergeMetadata?: boolean }
+  let body: { title?: string; state?: string; metadata?: Record<string, unknown>; mergeMetadata?: boolean; owner_user_id?: unknown; ownerUserId?: unknown }
   try {
     body = await req.json()
   } catch {
     return jsonWithPersistence({ error: 'Invalid JSON body.' }, true, { status: 400 })
+  }
+
+  // Ownership is immutable on normal product routes — strip client spoof fields.
+  if ('owner_user_id' in body || 'ownerUserId' in body) {
+    body = stripClientOwnerFields(body as Record<string, unknown>) as typeof body
   }
 
   const updates: Record<string, unknown> = {}
@@ -106,6 +121,7 @@ export async function PATCH(
         .from(TABLE_CONVERSATIONS)
         .select('metadata')
         .eq('id', id)
+        .eq('owner_user_id', caller.userId)
         .is('deleted_at', null)
         .maybeSingle()
       if (exErr) {
@@ -197,6 +213,7 @@ export async function PATCH(
     .from(TABLE_CONVERSATIONS)
     .update(updates)
     .eq('id', id)
+    .eq('owner_user_id', caller.userId)
     .is('deleted_at', null)
     .select('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at')
     .maybeSingle()
@@ -220,6 +237,9 @@ export async function DELETE(
   _req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const caller = await requireConversationCaller()
+  if (!caller.ok) return caller.response
+
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ error: 'Supabase is not configured.' }, false, { status: 503 })
@@ -234,6 +254,7 @@ export async function DELETE(
     .from(TABLE_CONVERSATIONS)
     .update({ deleted_at: new Date().toISOString(), state: 'archived' })
     .eq('id', id)
+    .eq('owner_user_id', caller.userId)
     .is('deleted_at', null)
     .select('id,deleted_at')
     .maybeSingle()

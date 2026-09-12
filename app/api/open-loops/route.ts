@@ -3,6 +3,7 @@ import {
   httpStatusForSupabaseFailure,
   warRoomSupabaseFailurePayload,
 } from '@/lib/war-room/warRoomSupabaseError'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,13 +12,16 @@ const COLUMNS =
   'id,project_id,conversation_id,title,description,status,priority,source,owner_type,blocked_by,next_action,metadata,created_at,updated_at,resolved_at'
 
 export async function GET(req: Request) {
-  const sup = tryWarRoomSupabase()
-  if (!sup.ok) return jsonWithPersistence({ openLoops: [] }, false)
-
   const url = new URL(req.url)
   const projectId = url.searchParams.get('projectId')
   const conversationId = url.searchParams.get('conversationId')
   const status = url.searchParams.get('status')
+
+  const ownedGate = await requireOwnedConversationIfPresent(conversationId)
+  if (!ownedGate.ok) return ownedGate.response
+
+  const sup = tryWarRoomSupabase()
+  if (!sup.ok) return jsonWithPersistence({ openLoops: [] }, false)
 
   let query = sup.client.from(TABLE_OPEN_LOOPS).select(COLUMNS).order('priority', { ascending: false }).order('updated_at', { ascending: true })
   if (projectId) query = query.eq('project_id', projectId)
@@ -55,13 +59,17 @@ export async function POST(req: Request) {
   const title = typeof body.title === 'string' ? body.title.trim() : ''
   if (!title) return jsonWithPersistence({ error: 'title is required' }, true, { status: 400 })
 
+  const conversationId = typeof body.conversationId === 'string' ? body.conversationId : null
+  const ownedGate = await requireOwnedConversationIfPresent(conversationId)
+  if (!ownedGate.ok) return ownedGate.response
+
   const { data, error } = await sup.client
     .from(TABLE_OPEN_LOOPS)
     .insert({
       title,
       description: typeof body.description === 'string' ? body.description : null,
       project_id: typeof body.projectId === 'string' ? body.projectId : null,
-      conversation_id: typeof body.conversationId === 'string' ? body.conversationId : null,
+      conversation_id: conversationId,
       priority: typeof body.priority === 'number' ? body.priority : 0,
       source: typeof body.source === 'string' ? body.source : 'commander_stated',
       owner_type: typeof body.ownerType === 'string' ? body.ownerType : 'commander',

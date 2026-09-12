@@ -4,6 +4,7 @@ import { resolveNextAction } from '@/lib/next-action/resolve'
 import type { NextActionInput } from '@/lib/next-action/types'
 import { getPendingPromptArtifacts } from '@/lib/prompt-intelligence/persist'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,6 +17,9 @@ export async function GET(req: Request) {
   const url = new URL(req.url)
   const conversationId = url.searchParams.get('conversationId')
   let projectId = url.searchParams.get('projectId')
+
+  const ownedGate = await requireOwnedConversationIfPresent(conversationId)
+  if (!ownedGate.ok) return ownedGate.response
 
   const store = createSupabaseContextAssemblerStore()
   if (!projectId && conversationId) {

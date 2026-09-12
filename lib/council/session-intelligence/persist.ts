@@ -107,6 +107,8 @@ export async function persistDeliberationRoundToConversation(input: {
   session: DeliberationSession
   messageIdByTurnId?: Record<string, string>
   interrupted?: boolean
+  /** Required for #19 defense-in-depth when caller already proved ownership. */
+  ownerUserId?: string
 }): Promise<{
   ok: boolean
   intelligence: CouncilSessionIntelligenceV1 | null
@@ -118,6 +120,16 @@ export async function persistDeliberationRoundToConversation(input: {
   if (!conversationId) {
     return { ok: false, intelligence: null, durableRound: null, authoritativeMessageId: null, error: 'conversationId required' }
   }
+  if (!input.ownerUserId?.trim()) {
+    return {
+      ok: false,
+      intelligence: null,
+      durableRound: null,
+      authoritativeMessageId: null,
+      error: 'ownerUserId required for session-intelligence persist',
+    }
+  }
+  const ownerUserId = input.ownerUserId.trim()
 
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
@@ -134,6 +146,7 @@ export async function persistDeliberationRoundToConversation(input: {
     .from(TABLE_CONVERSATIONS)
     .select('metadata')
     .eq('id', conversationId)
+    .eq('owner_user_id', ownerUserId)
     .is('deleted_at', null)
     .maybeSingle()
 
@@ -162,6 +175,7 @@ export async function persistDeliberationRoundToConversation(input: {
     .from(TABLE_CONVERSATIONS)
     .update({ metadata: mergedMetadata, updated_at: new Date().toISOString() })
     .eq('id', conversationId)
+    .eq('owner_user_id', ownerUserId)
     .is('deleted_at', null)
     .select('metadata')
     .maybeSingle()
@@ -183,6 +197,7 @@ export async function persistDeliberationRoundToConversation(input: {
       .from(TABLE_CONVERSATIONS)
       .update({ metadata: repairedMeta, updated_at: new Date().toISOString() })
       .eq('id', conversationId)
+      .eq('owner_user_id', ownerUserId)
       .is('deleted_at', null)
     if (retryErr) {
       return { ok: false, intelligence: repaired, durableRound: round, authoritativeMessageId: null, error: retryErr.message }

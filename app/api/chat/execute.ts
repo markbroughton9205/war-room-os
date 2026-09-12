@@ -689,6 +689,16 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     typeof body.conversationId === 'string' && /^[0-9a-f-]{36}$/i.test(body.conversationId.trim())
       ? body.conversationId.trim()
       : null
+
+  // #19: service-role bypasses RLS — prove ownership before any context/#17/persist work.
+  let conversationOwnerUserId: string | null = null
+  if (conversationId) {
+    const { requireOwnedConversation } = await import('@/lib/war-room/conversationOwnership')
+    const owned = await requireOwnedConversation(conversationId, { includeDeleted: false })
+    if (!owned.ok) return owned.response
+    conversationOwnerUserId = owned.userId
+  }
+
   const liveCouncilRoster = resolveLiveCouncilRoster()
   const liveCouncilFloor = rosterToFloorFlags(liveCouncilRoster)
   const councilLogicalRequestId =
@@ -1025,6 +1035,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
             .from('war_room_conversations')
             .select('metadata')
             .eq('id', conversationId)
+            .eq('owner_user_id', conversationOwnerUserId!)
             .is('deleted_at', null)
             .maybeSingle()
           priorSessionIntelligence = readSessionIntelligenceFromMetadata(convRow?.metadata)
@@ -2457,6 +2468,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           const persistResult = await persistDeliberationRoundToConversation({
             conversationId,
             session: familyDeliberation,
+            ownerUserId: conversationOwnerUserId ?? undefined,
           })
           durableRound = persistResult.durableRound ?? durableRound
           persistedSessionIntelligence = persistResult.intelligence

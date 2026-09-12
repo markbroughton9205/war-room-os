@@ -6,6 +6,7 @@ import {
   httpStatusForSupabaseFailure,
   warRoomSupabaseFailurePayload,
 } from '@/lib/war-room/warRoomSupabaseError'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 
 import {
   isWarRoomActionQueueSessionOnlyFallbackEnabled,
@@ -49,13 +50,15 @@ function auditQueueSentinelMisleadingSuccessFireAndForget(
 }
 
 export async function GET(req: Request) {
+  const url = new URL(req.url)
+  const conversationId = url.searchParams.get('conversationId')
+  const ownedGate = await requireOwnedConversationIfPresent(conversationId)
+  if (!ownedGate.ok) return ownedGate.response
+
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ actions: [], persisted: false }, false)
   }
-
-  const url = new URL(req.url)
-  const conversationId = url.searchParams.get('conversationId')
 
   let q = sup.client
     .from(TABLE_ACTIONS)
@@ -140,44 +143,9 @@ export async function POST(req: Request) {
   const conversationId = typeof body.conversationId === 'string' ? body.conversationId : null
 
   if (conversationId) {
-    const { data: c, error: cErr } = await sup.client
-      .from(TABLE_CONVERSATIONS)
-      .select('id')
-      .eq('id', conversationId)
-      .is('deleted_at', null)
-      .maybeSingle()
-    if (cErr) {
-      const supabase = warRoomSupabaseFailurePayload(TABLE_CONVERSATIONS, cErr, { operation: 'select' })
-      auditQueueFailureFireAndForget(sup.client, 'war_room_actions queue POST conversation lookup failed', {
-        supabase,
-      })
-      auditQueueSentinelMisleadingSuccessFireAndForget(sup.client, 'POST (conversation lookup)', { supabase })
-      const statusCode = httpStatusForSupabaseFailure(supabase, 500)
-      if (sessionFallback && statusCode >= 500) {
-        return jsonWithPersistence(
-          {
-            error: supabase.message,
-            persisted: false,
-            queued: false,
-            supabase,
-            sessionOnlyFallbackEnv: WAR_ROOM_ACTION_QUEUE_SESSION_ONLY_FALLBACK_ENV,
-          },
-          true,
-          { status: 503 },
-        )
-      }
-      return jsonWithPersistence(
-        { error: supabase.message, supabase, persisted: false, queued: false },
-        true,
-        { status: statusCode },
-      )
-    }
-    if (!c) {
-      return jsonWithPersistence(
-        { error: 'conversationId not found', persisted: false, queued: false },
-        true,
-        { status: 400 },
-      )
+    const owned = await requireOwnedConversationIfPresent(conversationId)
+    if (!owned.ok) {
+      return owned.response
     }
   }
 

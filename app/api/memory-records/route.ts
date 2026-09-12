@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { writeDirectiveWithSupersession } from '@/lib/memory-records/persist'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
+import { requireOwnedConversationIfPresent } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,12 +41,16 @@ export async function POST(req: Request) {
   const content = typeof body.content === 'string' ? body.content.trim() : ''
   if (!content) return NextResponse.json({ error: 'content is required' }, { status: 400 })
 
+  const conversationId = typeof body.conversationId === 'string' ? body.conversationId : null
+  const ownedGate = await requireOwnedConversationIfPresent(conversationId)
+  if (!ownedGate.ok) return ownedGate.response
+
   const result = await writeDirectiveWithSupersession({
     content,
     memoryType: typeof body.memoryType === 'string' ? body.memoryType : 'architecture_decision',
     scope: typeof body.scope === 'string' ? body.scope : 'global_war_room',
     projectId: typeof body.projectId === 'string' ? body.projectId : null,
-    conversationId: typeof body.conversationId === 'string' ? body.conversationId : null,
+    conversationId,
     importanceTier: typeof body.importanceTier === 'string' ? body.importanceTier : undefined,
     sourceType: 'manual_entry',
   })

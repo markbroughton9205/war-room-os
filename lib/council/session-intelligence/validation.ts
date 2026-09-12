@@ -304,8 +304,17 @@ export function runCouncilSessionIntelligenceValidation(): SessionIntelligenceCa
   cases.push(check('17_33_no_council2', noCouncil2, 'no Council2'))
 
   const ownershipSql = readRepo('supabase/war_room_conversations_ownership.sql')
-  const routeStillOpen = !readRepo('app/api/conversations/route.ts').includes("owner_user_id: caller.userId")
-  cases.push(check('17_34_no_19_migration', ownershipSql.includes('placeholder') && routeStillOpen, 'ownership not absorbed'))
+  const listRoute = readRepo('app/api/conversations/route.ts')
+  const persistSrc = readRepo('lib/council/session-intelligence/persist.ts')
+  // #19 may (and should) gate access; #17 must not be redesigned into a second conversation system.
+  cases.push(check(
+    '17_34_no_19_migration',
+    /owner_user_id/.test(ownershipSql)
+      && /owner_user_id: caller\.userId/.test(listRoute)
+      && /ownerUserId required for session-intelligence persist/.test(persistSrc)
+      && !/Conversation2|Council2|war_room_conversations_v2/.test(persistSrc + listRoute),
+    'ownership gates allowed; #17 semantics remain on existing tables',
+  ))
 
   const noNewTable = !readRepo('lib/council/session-intelligence/persist.ts').includes('create table')
     && readRepo('lib/council/session-intelligence/persist.ts').includes('war_room_conversations')
