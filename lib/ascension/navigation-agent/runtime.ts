@@ -352,7 +352,7 @@ export async function runBoundedNavigationAgent(
   probe(input.attemptShellLocation, 'SHELL_EXECUTE', 'POLICY_DENIED', 'NAVIGATION_AGENT cannot run shell to determine location.')
   probe(input.attemptSpawnAgent, 'AGENT_SPAWN', 'POLICY_DENIED', 'NAVIGATION_AGENT cannot spawn agents. No Navigation2.')
   probe(input.startWorldLearning, 'WORLD_LEARNING_START', 'POLICY_DENIED', 'NAVIGATION_AGENT cannot start World Learning missions. WORLD_LEARNING_AGENT is a separate invocation-driven agent.')
-  probe(input.startRoadmap23, 'ROADMAP_23_START', 'POLICY_DENIED', '#23 remains NOT_STARTED.')
+  probe(input.startRoadmap23, 'ROADMAP_23_START', 'POLICY_DENIED', '#23 WR-CORPUS is ACTIVE. NAVIGATION_AGENT cannot start tokenizer/WRIM/Ra\'el or a second corpus architecture.')
   probe(input.ignoreBlockedRoad, 'IGNORE_BLOCKED_EDGE', 'POLICY_DENIED', 'Blocked edges remain blocked. Engine is authoritative.')
   probe(input.autoExecuteReroute, 'AUTO_EXECUTE_REROUTE', 'POLICY_DENIED', 'Reroute recommendation only — no automatic execution.')
   probe(input.claimAgentIsTerra, 'CLAIM_IS_TERRA', 'POLICY_DENIED', 'NAVIGATION_AGENT is not Terra. Terra remains the world-state Oracle.')

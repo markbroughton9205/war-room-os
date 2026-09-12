@@ -332,7 +332,7 @@ export async function runBoundedDataCorpusAgent(
     denials.push({
       capability_or_action: 'ROADMAP_23',
       reason_code: 'POLICY_DENIED',
-      reason: '#23 remains NOT STARTED. Candidate classification is recommendation only.',
+      reason: '#23 WR-CORPUS is ACTIVE. Candidate classification remains recommendation only; promotion is Commander-governed. Tokenizer/WRIM/Ra\'el remain not started.',
     })
   }
 

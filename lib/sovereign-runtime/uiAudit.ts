@@ -29,6 +29,7 @@ export const CANONICAL_WAR_ROOM_UI_ROUTES = Object.freeze([
   { path: '/native-builder', evidence: 'app/native-builder/page.tsx', role: 'builder' },
   { path: '/sovereign-model-lab', evidence: 'app/sovereign-model-lab/page.tsx', role: 'model_lab' },
   { path: '/workspace', evidence: 'app/workspace/page.tsx', role: 'workspace' },
+  { path: '/wr-corpus', evidence: 'app/wr-corpus/page.tsx', role: 'wr_corpus' },
 ] as const)
 
 export const CANONICAL_UI_AUDIT: readonly UiAuditItem[] = Object.freeze([

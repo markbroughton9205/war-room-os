@@ -269,7 +269,7 @@ export async function runBoundedWorldLearningAgent(
         'DATA_CORPUS_AGENT remains canonical curation',
         'NO PRODUCTION CORPUS PERSIST',
         'NO MODEL TRAINING',
-        '#23 NOT STARTED',
+        '#23 WR-CORPUS ACTIVE; tokenizer/WRIM/Rael not production',
       ],
       unavailable_capabilities: unavailable,
       audit_id: auditId,
@@ -425,8 +425,8 @@ export async function runBoundedWorldLearningAgent(
     [input.executeHarmfulAction, 'OPERATIONAL_EXECUTION', 'Research authority does not grant operational execution.'],
     [input.applyCorpusWithoutReview, 'APPLY_CORPUS_WITHOUT_REVIEW', 'Corpus apply remains review-gated via DATA_CORPUS_AGENT.'],
     [input.persistProductionCorpus, 'PRODUCTION_CORPUS_PERSIST', 'Autonomous production-corpus persistence is false.'],
-    [input.startWrCorpus, 'WR_CORPUS_START', 'WR-CORPUS remains #23 NOT_STARTED.'],
-    [input.startWrTokenizer, 'WR_TOKENIZER_START', 'WR-TOKENIZER remains #23 NOT_STARTED.'],
+    [input.startWrCorpus, 'WR_CORPUS_START', 'WR_CORPUS already implemented. Cannot start a second corpus architecture.'],
+    [input.startWrTokenizer, 'WR_TOKENIZER_START', 'CURRENT_WR_TOKENIZER_LANE remains NOT_STARTED. Historical WR-TOKENIZER-0 is frozen lineage.'],
     [input.trainWrim, 'WRIM_TRAIN', 'WRIM training is NOT_IMPLEMENTED / #23.'],
     [input.createRael, 'RAEL_CREATE', 'Ra\'el is NOT_IMPLEMENTED / #23.'],
     [input.spawnLearningAgent, 'AGENT_SPAWN', 'WORLD_LEARNING_AGENT cannot spawn agents.'],
@@ -436,7 +436,7 @@ export async function runBoundedWorldLearningAgent(
     [input.attemptFinance, 'FINANCIAL_SPEND', 'WORLD_LEARNING_AGENT has no finance authority.'],
     [input.autoLaunchFollowUps, 'UNLIMITED_FOLLOW_UP', 'Follow-up research may be recommended, never auto-launched without bound.'],
     [input.recursiveMission, 'RECURSIVE_MISSION', 'Self-assigned recursive missions are forbidden.'],
-    [input.startRoadmap23, 'ROADMAP_23_START', '#23 remains NOT_STARTED.'],
+    [input.startRoadmap23, 'ROADMAP_23_START', '#23 WR-CORPUS is ACTIVE. This agent cannot start tokenizer/WRIM/Ra\'el or a second corpus architecture.'],
     [input.markModelSpeculationAsFact, 'MARK_MODEL_AS_EVIDENCE', 'Model output is reasoning, not primary evidence.'],
     [Boolean(input.attemptedAction), input.attemptedAction || 'DENIED_ACTION', `Attempted action denied: ${input.attemptedAction}`],
   ]
@@ -658,7 +658,7 @@ export async function runBoundedWorldLearningAgent(
     `Local model is ${local_model_used ? 'assistive reasoning' : 'unused'}; never primary evidence.`,
     `Conflicts preserved: ${claims.filter(c => c.status === 'DISPUTED').length}.`,
     `Knowledge gaps: ${knowledge_gaps.length}. Follow-ups recommended, not auto-launched.`,
-    `#23 NOT_STARTED. WRIM/Ra'el/training remain unimplemented.`,
+    `#23 WR-CORPUS ACTIVE. CURRENT_WR_TOKENIZER_LANE NOT_STARTED. WRIM/Ra'el/training remain unimplemented.`,
   ]
 
   return finish(status, scope, summaryParts.join(' '))

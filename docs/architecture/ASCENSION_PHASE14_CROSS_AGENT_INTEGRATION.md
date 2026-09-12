@@ -6,7 +6,7 @@
 **ASTRA phase58a:** NOT_APPLIED  
 **Production corpus persistence:** FALSE  
 **#22:** CLOSED  
-**#23:** PENDING / NOT_STARTED  
+**#23:** WR-CORPUS ACTIVE — candidate promotion remains explicit; tokenizer/WRIM/Ra'el not started  
 
 ## Architecture (preserved)
 

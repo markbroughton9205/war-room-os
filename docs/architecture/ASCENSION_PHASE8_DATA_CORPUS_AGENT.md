@@ -3,7 +3,8 @@
 **Status:** IMPLEMENTED_BOUNDED  
 **Operational Ascension agents:** 7  
 **Ascension autonomy:** OFF  
-**Crawl / training / #23:** DENIED / NOT STARTED  
+**Crawl / training:** DENIED  
+**#23:** WR-CORPUS ACTIVE (promotion remains Commander-governed; tokenizer/WRIM/Ra'el not started)  
 
 ## Identity
 

@@ -394,7 +394,7 @@ export async function runWorldLearningAgentPhase13Validation(): Promise<{
   results.push(check('56_no_sql', gov.denials.some(d => d.capability_or_action === 'SQL_EXECUTE'), 'ok'))
   results.push(check('57_no_model_training', gov.model_training === 'NOT_IMPLEMENTED' && gov.denials.some(d => d.capability_or_action === 'WRIM_TRAIN'), gov.model_training))
   results.push(check('58_no_weight_mutation', WORLD_LEARNING_AGENT_DENIED_ALIASES.includes('WEIGHT_MUTATION'), 'ok'))
-  results.push(check('59_no_wr_corpus', gov.wr_corpus === 'NOT_STARTED' && WR_CORPUS_STATUS === 'NOT_STARTED', gov.wr_corpus))
+  results.push(check('59_wr_corpus_implemented_second_arch_denied', gov.wr_corpus === 'IMPLEMENTED' && WR_CORPUS_STATUS === 'IMPLEMENTED' && gov.denials.some(d => d.capability_or_action === 'WR_CORPUS_START'), gov.wr_corpus))
   results.push(check('60_no_wr_tokenizer', gov.wr_tokenizer === 'NOT_STARTED' && WR_TOKENIZER_STATUS === 'NOT_STARTED', gov.wr_tokenizer))
   results.push(check('61_no_wrim', gov.wrim === 'NOT_IMPLEMENTED' && WRIM_STATUS === 'NOT_IMPLEMENTED', gov.wrim))
   results.push(check('62_no_rael', gov.rael === 'NOT_IMPLEMENTED' && RAEL_STATUS === 'NOT_IMPLEMENTED', gov.rael))
@@ -525,7 +525,7 @@ export async function runWorldLearningAgentPhase13Validation(): Promise<{
   )
   results.push(check('102_phone_not_implemented', truth.PHONE_APP === 'NOT_IMPLEMENTED' && !fs.existsSync(path.join(repoRoot, 'apps', 'phone')), truth.PHONE_APP))
   results.push(check('103_22_closed', truth.ROADMAP_22 === 'CLOSED', truth.ROADMAP_22))
-  results.push(check('104_23_not_started', truth.ROADMAP_23 === 'NOT_STARTED' && ROADMAP_23_STATUS === 'NOT_STARTED' && MODEL_TRAINING_STATUS === 'NOT_IMPLEMENTED', truth.ROADMAP_23))
+  results.push(check('104_23_active', truth.ROADMAP_23 === 'ACTIVE' && ROADMAP_23_STATUS === 'ACTIVE' && MODEL_TRAINING_STATUS === 'NOT_IMPLEMENTED', truth.ROADMAP_23))
 
   results.push(
     check(

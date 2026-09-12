@@ -63,7 +63,7 @@ export function WorldLearningAgentPanel({ compact }: { compact?: boolean }) {
     <div className={`pointer-events-auto rounded border border-emerald-400/25 bg-black/75 backdrop-blur-sm ${compact ? 'p-2' : 'p-3'}`}>
       <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300">World Learning Agent</p>
       <p className="mb-2 text-[10px] text-slate-400">
-        Bounded world-knowledge acquisition. Candidates only · no training · #23 NOT_STARTED.
+        Bounded world-knowledge acquisition. Candidates only · no training · WR-CORPUS promotion governed.
       </p>
       <label className="mb-2 block text-[10px] text-slate-300">
         Task

@@ -269,7 +269,7 @@ export async function runTerraNavigationPhase9Validation(): Promise<{
   results.push(check('59_autonomy_off', ascensionAutonomyIsOff(), 'OFF'))
   results.push(check('60_agent_count_9', operationalAscensionAgentCount() === 9 && OPERATIONAL_ASCENSION_AGENTS.length === 9, String(operationalAscensionAgentCount())))
   results.push(check('61_22_closed', navigationRoadmapTruth().roadmap_22 === 'CLOSED', 'CLOSED'))
-  results.push(check('62_23_not_started', navigationRoadmapTruth().roadmap_23 === 'NOT_STARTED', 'NOT_STARTED'))
+  results.push(check('62_23_active', navigationRoadmapTruth().roadmap_23 === 'ACTIVE', 'ACTIVE'))
 
   results.push(check('owner_helper', assertNavigationOwnerScopeMatch('a', 'a').ok && !assertNavigationOwnerScopeMatch('a', 'b').ok, 'ok'))
   results.push(check('capability_truth', getNavigationCapabilityTruth().ROUTING === 'IMPLEMENTED_BOUNDED', 'ok'))

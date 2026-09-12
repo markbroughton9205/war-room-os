@@ -18,6 +18,7 @@ import {
   type LocalModelProviderType,
   type LocalModelRuntimeState,
 } from './types'
+import { ROADMAP_23_STATUS } from '@/lib/wr-corpus/identity'
 
 export const LOCAL_MODEL_ROUTER_ID = 'sovereign-local-model-router-v1' as const
 
@@ -200,14 +201,14 @@ function policyDenials(input: LocalModelInferRequest): LocalModelInferResult['de
     denials.push({
       capability_or_action: 'WRIM_CLAIM',
       reason_code: 'THIRD_PARTY_LOCAL_NOT_WRIM',
-      reason: 'Qwen/Ollama is THIRD_PARTY_MODEL_RUNNING_LOCALLY — WRIM NOT_IMPLEMENTED / #23 NOT_STARTED.',
+      reason: 'Qwen/Ollama is THIRD_PARTY_MODEL_RUNNING_LOCALLY — CURRENT_PRODUCTION_WRIM NOT_IMPLEMENTED. Historical WRIM-0 is lineage only.',
     })
   }
   if (input.claimIsRael) {
     denials.push({
       capability_or_action: 'RAEL_CLAIM',
       reason_code: 'THIRD_PARTY_LOCAL_NOT_RAEL',
-      reason: 'Local third-party model is not Ra\'el. #23 NOT_STARTED.',
+      reason: 'Local third-party model is not Ra\'el. RAEL remains NOT_IMPLEMENTED.',
     })
   }
   return denials
@@ -364,7 +365,7 @@ export async function runLocalModelInference(
       intelligence_class: 'THIRD_PARTY_MODEL_RUNNING_LOCALLY',
       wrim: 'NOT_IMPLEMENTED',
       rael: 'NOT_IMPLEMENTED',
-      roadmap_23: 'NOT_STARTED',
+      roadmap_23: ROADMAP_23_STATUS,
     }
   }
 
@@ -395,7 +396,7 @@ export async function runLocalModelInference(
     intelligence_class: 'THIRD_PARTY_MODEL_RUNNING_LOCALLY',
     wrim: 'NOT_IMPLEMENTED',
     rael: 'NOT_IMPLEMENTED',
-    roadmap_23: 'NOT_STARTED',
+    roadmap_23: ROADMAP_23_STATUS,
   }
 }
 
@@ -436,7 +437,7 @@ function failResult(args: {
     intelligence_class: 'THIRD_PARTY_MODEL_RUNNING_LOCALLY',
     wrim: 'NOT_IMPLEMENTED',
     rael: 'NOT_IMPLEMENTED',
-    roadmap_23: 'NOT_STARTED',
+    roadmap_23: ROADMAP_23_STATUS,
   }
 }
 

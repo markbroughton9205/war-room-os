@@ -133,7 +133,7 @@ export type DataCorpusResult = {
   search_stage4_unchanged: true
   embedding_model_unchanged: true
   chunk_version_unchanged: true
-  roadmap_23_status: 'NOT_STARTED'
+  roadmap_23_status: 'ACTIVE' | 'NOT_STARTED'
   crawl_authority: 'DENIED'
   training_authority: 'DENIED'
 }
@@ -145,7 +145,7 @@ export const DATA_CORPUS_BOUNDARY_NOTES = Object.freeze([
   'CURATION != TRAINING',
   'INDEXING != MODEL LEARNING',
   'DEDUPLICATION FINDING != DELETION AUTHORIZATION',
-  'WR_CORPUS_CANDIDATE != #23 STARTED',
+  'WR_CORPUS_CANDIDATE != AUTO-PROMOTED; promotion remains Commander-governed',
   'TERRA LIVE OBSERVATION != TRAINING DATA APPROVED',
   'PRIVATE SESSION DATA != SHARED CORPUS',
   'NO CRAWL AUTHORITY',

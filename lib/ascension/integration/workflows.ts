@@ -49,7 +49,7 @@ import type {
 } from './types'
 import {
   ASTRA_PHASE58A_STATUS,
-  ROADMAP_23_STATUS,
+  WR_CORPUS_STATUS,
 } from './identity'
 
 export type IntegrationWorkflowInput = {
@@ -95,7 +95,7 @@ export type IntegrationWorkflowResult = {
   summary: string
   live_discovery: 'AVAILABLE' | 'UNAVAILABLE'
   production_corpus_persisted: false
-  wr_corpus: 'NOT_STARTED'
+  wr_corpus: typeof WR_CORPUS_STATUS
   model_training: 'NOT_IMPLEMENTED'
   astra_phase58a: 'NOT_APPLIED'
   autonomy: 'OFF'
@@ -153,7 +153,7 @@ function emptyResult(
     summary: '',
     live_discovery: input.internetAvailable === false || input.liveSearchAllowed === false ? 'UNAVAILABLE' : 'UNAVAILABLE',
     production_corpus_persisted: false,
-    wr_corpus: ROADMAP_23_STATUS,
+    wr_corpus: WR_CORPUS_STATUS,
     model_training: 'NOT_IMPLEMENTED',
     astra_phase58a: ASTRA_PHASE58A_STATUS,
     autonomy: 'OFF',
@@ -277,7 +277,10 @@ export async function runKnowledgePipeline(
   if (input.startWrCorpus) {
     return emptyResult('KNOWLEDGE_PIPELINE', input, {
       status: 'DENIED',
-      failure: integrationFailure('FORBIDDEN_ACTION', 'WR-CORPUS remains NOT_STARTED.'),
+      failure: integrationFailure(
+        'FORBIDDEN_ACTION',
+        'WR_CORPUS already implemented. Cannot start a second corpus architecture.',
+      ),
     })
   }
   if (input.applyPhase58a) {
@@ -420,7 +423,7 @@ export async function runKnowledgePipeline(
     sourceAgents: ['RESEARCH_AGENT', 'WORLD_LEARNING_AGENT'],
     runtimeTruth: {
       production_corpus_persisted: false,
-      wr_corpus: 'NOT_STARTED',
+      wr_corpus: WR_CORPUS_STATUS,
     },
   })
   if (h2) {

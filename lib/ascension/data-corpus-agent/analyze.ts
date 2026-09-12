@@ -286,7 +286,7 @@ export function analyzeCorpus(input: AnalyzeCorpusInput): AnalyzeCorpusOutput {
     `Embedding model frozen: ${LOCAL_EMBEDDING_MODEL_ID}`,
     `Chunk version frozen: ${CHUNKING_VERSION}`,
     'No new crawler / corpus system created.',
-    '#23 NOT STARTED — WR-CORPUS suitability is recommendation only.',
+    '#23 WR-CORPUS ACTIVE — WR-CORPUS suitability is recommendation only; promotion is Commander-governed.',
     'Deduplication finding != deletion authorization.',
   ]
   const unavailable: string[] = []
@@ -299,7 +299,7 @@ export function analyzeCorpus(input: AnalyzeCorpusInput): AnalyzeCorpusOutput {
   const writes_performed: DataCorpusWriteRecord[] = []
 
   if (input.startRoadmap23) {
-    limitations.push('Attempt to start #23 denied — ROADMAP_23 remains NOT_STARTED.')
+    limitations.push('Attempt to start tokenizer/WRIM/Ra\'el via this agent denied — WR-CORPUS already implemented; those lanes remain NOT_STARTED.')
   }
 
   const records = (input.records?.length

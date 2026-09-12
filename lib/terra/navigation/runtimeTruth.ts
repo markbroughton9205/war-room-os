@@ -39,6 +39,6 @@ export function navigationRoadmapTruth() {
     operational_ascension_agents: operationalAscensionAgentCount(),
     ascension_autonomy: ascensionAutonomyIsOff() ? 'OFF' : 'ON',
     roadmap_22: 'CLOSED',
-    roadmap_23: 'NOT_STARTED',
+    roadmap_23: 'ACTIVE',
   }
 }

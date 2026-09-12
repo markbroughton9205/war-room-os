@@ -369,7 +369,7 @@ export async function runPhase11bLocalModelValidation(opts?: {
   results.push(check('62_desktop_security', DESKTOP_SECURITY_POLICY.sandbox === true || /sandbox:\s*true/.test(mainSrc), 'ok'))
   results.push(check('63_desktop_build', fs.existsSync(path.join(repoRoot, 'desktop', 'scripts', 'build-check.cjs')), 'ok'))
   results.push(check('64_22_closed', truth.ROADMAP_22 === 'CLOSED', 'CLOSED'))
-  results.push(check('65_23_not_started', truth.ROADMAP_23 === 'NOT_STARTED' && truth.NATIVE_WRIM === 'NOT_IMPLEMENTED', 'NOT_STARTED'))
+  results.push(check('65_23_active', truth.ROADMAP_23 === 'ACTIVE' && truth.NATIVE_WRIM === 'NOT_IMPLEMENTED', 'ACTIVE'))
 
   // Extra truth + red team
   results.push(check('router_implemented', truth.LOCAL_MODEL_ROUTER === 'IMPLEMENTED', truth.LOCAL_MODEL_ROUTER))

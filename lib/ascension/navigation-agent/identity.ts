@@ -11,7 +11,7 @@ export const NAVIGATION_AGENT_POLICY_PROFILE = 'BOUNDED_NAVIGATION_REASONING' as
 
 export const NAVIGATION_AGENT_AUTONOMOUS_EXECUTION_ENABLED = false as const
 
-export const ROADMAP_23_STATUS = 'NOT_STARTED' as const
+export { ROADMAP_23_STATUS } from '@/lib/wr-corpus/identity'
 
 export function isNavigationAgentRuntimeAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.ASCENSION_NAVIGATION_AGENT_ENABLED !== 'false'

@@ -268,7 +268,7 @@ export async function runNavigationAgentPhase12Validation(): Promise<{
   results.push(check('81_phone_ni', truth.PHONE_APP === 'NOT_IMPLEMENTED', truth.PHONE_APP))
   results.push(check('82_wrim_ni', truth.NATIVE_WRIM === 'NOT_IMPLEMENTED', truth.NATIVE_WRIM))
   results.push(check('83_22_closed', truth.ROADMAP_22 === 'CLOSED', truth.ROADMAP_22))
-  results.push(check('84_23_not_started', truth.ROADMAP_23 === 'NOT_STARTED' && ROADMAP_23_STATUS === 'NOT_STARTED', truth.ROADMAP_23))
+  results.push(check('84_23_active', truth.ROADMAP_23 === 'ACTIVE' && ROADMAP_23_STATUS === 'ACTIVE', truth.ROADMAP_23))
 
   const gnss = await runBoundedNavigationAgent({
     taskType: 'PLAN_ROUTE',

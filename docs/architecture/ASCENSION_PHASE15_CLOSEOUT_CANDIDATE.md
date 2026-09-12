@@ -2,7 +2,8 @@
 
 **Status:** COMPLETE  
 **#22:** CLOSED  
-**#23:** PENDING / NOT_STARTED  
+**#23 at closeout:** PENDING / NOT_STARTED  
+**Subsequent #23:** WR-CORPUS ACTIVE — see `docs/architecture/WR_CORPUS_V1.md`. Tokenizer / WRIM / Ra'el remain not started.  
 **Ascension:** COMPLETE  
 **Operational Ascension agents:** 9  
 **Ascension autonomy:** OFF  
@@ -14,7 +15,7 @@ Internal Phase 15 is implementation history **under #22**. It is not a new maste
 
 ## Commander acceptance
 
-The Phase 15 closeout candidate at `6dccbfa5501f80de68a27b0e667a6a2c6ce6148d` was reviewed and accepted. Canonical `#22` is **CLOSED**. `#23` remains **PENDING / NOT_STARTED**. Do not start WR-CORPUS, WR-TOKENIZER, WRIM, Ra'el, or model training.
+The Phase 15 closeout candidate at `6dccbfa5501f80de68a27b0e667a6a2c6ce6148d` was reviewed and accepted. Canonical `#22` is **CLOSED**. Subsequent Commander authorization started `#23` WR-CORPUS migrate-existing only. Do not start WR-TOKENIZER training, WRIM training, or Ra'el.
 
 ## Accepted #22 truth
 

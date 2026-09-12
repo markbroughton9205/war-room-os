@@ -151,7 +151,7 @@ export type SovereignRuntimeTruth = {
   ROADMAP_19_LIVE_MIGRATION: 'CONFIRMED'
   LOCAL_SOVEREIGN_CLOSEOUT_SUFFICIENT: true
   ROADMAP_22: 'CLOSED'
-  ROADMAP_23: 'NOT_STARTED'
+  ROADMAP_23: 'NOT_STARTED' | 'ACTIVE'
   OPERATIONAL_ASCENSION_AGENTS: number
   GATE16_PREBUILD: 'PASS_14_OF_14'
   RUNTIME_SURFACE: 'DESKTOP_LOCAL'
@@ -207,7 +207,8 @@ export const LOCAL_DATA_OWNERSHIP_INVENTORY: readonly {
   { dataset: 'search_corpus_index', class: 'LOCAL', notes: 'Sovereign Search local index files when present.' },
   { dataset: 'terra_cache', class: 'HYBRID', notes: 'Live providers remote; fixtures/cache local.' },
   { dataset: 'astra_fallback', class: 'HYBRID', notes: 'Filesystem fallback + Supabase when configured; phase58a NOT APPLIED.' },
-  { dataset: 'corpus_candidate_handoffs', class: 'LOCAL', notes: 'Phase 14 durable candidate-handoff SQLite under AppData. Not production corpus. Not WR-CORPUS.' },
+  { dataset: 'corpus_candidate_handoffs', class: 'LOCAL', notes: 'Phase 14 durable candidate-handoff SQLite under AppData. Not production corpus. Promotion into WR-CORPUS is explicit/governed.' },
+  { dataset: 'wr_corpus', class: 'LOCAL', notes: 'Canonical WR-CORPUS v1 under AppData data/wr-corpus. Immutable recovered artifacts + SQLite index. Not git. Not install-dir.' },
   { dataset: 'audit_records', class: 'HYBRID', notes: 'Governed audit may persist remotely when Supabase present.' },
   { dataset: 'local_model_state', class: 'LOCAL', notes: 'Ollama process + models on host.' },
   { dataset: 'desktop_local_session', class: 'LOCAL', notes: 'Phase 11C local Commander session (cookie/bearer); distinct from remote Supabase session.' },

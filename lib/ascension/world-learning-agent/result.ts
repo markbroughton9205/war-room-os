@@ -199,7 +199,7 @@ export type WorldLearningAgentResult = {
   autonomous_corpus_persistence: false
   production_corpus_persisted: false
   model_training: 'NOT_IMPLEMENTED'
-  wr_corpus: 'NOT_STARTED'
+  wr_corpus: 'IMPLEMENTED' | 'NOT_STARTED'
   wr_tokenizer: 'NOT_STARTED'
   wrim: 'NOT_IMPLEMENTED'
   rael: 'NOT_IMPLEMENTED'
@@ -215,7 +215,7 @@ export type WorldLearningAgentResult = {
   conversation_id: string | null
   identity: WorldLearningAgentIdentity
   boundary_notes: readonly string[]
-  roadmap_23_status: 'NOT_STARTED'
+  roadmap_23_status: 'ACTIVE' | 'NOT_STARTED'
 }
 
 export const WORLD_LEARNING_AGENT_BOUNDARY_NOTES = Object.freeze([
@@ -239,5 +239,5 @@ export const WORLD_LEARNING_AGENT_BOUNDARY_NOTES = Object.freeze([
   'NO ORPHAN CLAIMS',
   'NO AI-SAYS-SO PROVENANCE',
   'ASCENSION AUTONOMY OFF',
-  '#23 NOT STARTED',
+  '#23 WR-CORPUS ACTIVE; tokenizer/WRIM/Rael not production',
 ] as const)

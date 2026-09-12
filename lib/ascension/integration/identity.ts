@@ -25,16 +25,13 @@ export const ASTRA_PHASE58A_STATUS = 'NOT_APPLIED' as const
 
 export const ROADMAP_22_STATUS = 'CLOSED' as const
 
-export const ROADMAP_23_STATUS = 'NOT_STARTED' as const
-
-export const MODEL_TRAINING_STATUS = 'NOT_IMPLEMENTED' as const
-
-export const WR_CORPUS_STATUS = 'NOT_STARTED' as const
-
-export const WR_TOKENIZER_STATUS = 'NOT_STARTED' as const
-
-export const WRIM_STATUS = 'NOT_IMPLEMENTED' as const
-
-export const RAEL_STATUS = 'NOT_IMPLEMENTED' as const
+export {
+  ROADMAP_23_STATUS,
+  WR_CORPUS_STATUS,
+  WR_TOKENIZER_STATUS,
+  WRIM_STATUS,
+  RAEL_STATUS,
+  MODEL_TRAINING_STATUS,
+} from '@/lib/wr-corpus/identity'
 
 export const PHONE_APP_STATUS = 'NOT_IMPLEMENTED' as const

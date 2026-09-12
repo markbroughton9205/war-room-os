@@ -10,8 +10,8 @@ export const DATA_CORPUS_AGENT_POLICY_PROFILE = 'BOUNDED_CORPUS_CURATION' as con
 
 export const DATA_CORPUS_AGENT_AUTONOMOUS_EXECUTION_ENABLED = false as const
 
-/** #23 remains NOT STARTED — curation ≠ training. */
-export const ROADMAP_23_STATUS = 'NOT_STARTED' as const
+/** #23 WR-CORPUS is ACTIVE. Curation ≠ training. Tokenizer/WRIM/Ra'el remain not started. */
+export { ROADMAP_23_STATUS } from '@/lib/wr-corpus/identity'
 
 export function isDataCorpusAgentRuntimeAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.ASCENSION_DATA_CORPUS_AGENT_ENABLED !== 'false'

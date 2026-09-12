@@ -18,7 +18,7 @@ const WORKFLOWS = [
 export function CrossAgentIntegrationPanel({ compact }: { compact?: boolean }) {
   const [kind, setKind] = useState<(typeof WORKFLOWS)[number]>('KNOWLEDGE_PIPELINE')
   const [busy, setBusy] = useState(false)
-  const [summary, setSummary] = useState<string>('Governed handoffs. ASTRA remains orchestrator. Autonomy OFF. #23 NOT_STARTED.')
+  const [summary, setSummary] = useState<string>('Governed handoffs. ASTRA remains orchestrator. Autonomy OFF. #23 WR-CORPUS ACTIVE; tokenizer/WRIM not started.')
   const [status, setStatus] = useState<string>('IDLE')
 
   async function run() {

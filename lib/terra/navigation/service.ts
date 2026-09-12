@@ -74,7 +74,7 @@ const BOUNDARY_NOTES = Object.freeze([
   'ROUTE AVAILABLE != ACTION AUTHORIZED',
   'MISSION != MOVEMENT AUTHORIZATION',
   'NAVIGATION_AGENT is bounded reasoning over this foundation — not a second engine',
-  '#23 NOT STARTED',
+  '#23 WR-CORPUS ACTIVE; tokenizer/WRIM/Rael not production',
 ] as const)
 
 export type RunNavigationFoundationInput = {
@@ -189,7 +189,7 @@ export async function runNavigationFoundation(
           device_control: 'DENIED',
           background_tracking: 'DENIED',
           future_navigation_agent: 'IMPLEMENTED_BOUNDED',
-          roadmap_23: 'NOT_STARTED',
+          roadmap_23: navigationRoadmapTruth().roadmap_23,
           // no precise coordinates
           origin_present: true,
           destination_present: true,
@@ -229,7 +229,7 @@ export async function runNavigationFoundation(
     denials.push({
       capability_or_action: 'ROADMAP_23',
       reason_code: 'POLICY_DENIED',
-      reason: '#23 remains NOT STARTED.',
+      reason: '#23 WR-CORPUS is ACTIVE. Terra Navigation cannot start tokenizer/WRIM/Ra\'el or a second corpus architecture.',
     })
   }
   if (input.councilAuthorizeAction) {

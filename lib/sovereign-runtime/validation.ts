@@ -209,7 +209,7 @@ export async function runSovereignRuntimePhase10Validation(): Promise<{
     results.push(check('41_web_supported', WEBSITE_DEPENDENCE_INVENTORY.some(i => i.id === 'public_domain_warroomos' && i.classification === 'OPTIONAL_REMOTE'), 'optional'))
     results.push(check('42_web_not_architecturally_required', truth.WEBSITE_REQUIRED === false, 'false'))
     results.push(check('43_phone_not_implemented', truth.PHONE_APP === 'NOT_IMPLEMENTED', truth.PHONE_APP))
-    results.push(check('44_23_not_started', truth.ROADMAP_23 === 'NOT_STARTED', 'NOT_STARTED'))
+    results.push(check('44_23_active', truth.ROADMAP_23 === 'ACTIVE', 'ACTIVE'))
     results.push(check('45_autonomy_off', truth.ASCENSION_AUTONOMY === 'OFF' && ascensionAutonomyIsOff(), 'OFF'))
     results.push(check('46_agents_9', operationalAscensionAgentCount() === 9 && OPERATIONAL_ASCENSION_AGENTS.length === 9, String(operationalAscensionAgentCount())))
     results.push(

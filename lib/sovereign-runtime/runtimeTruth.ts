@@ -94,7 +94,7 @@ export function getSovereignRuntimeTruth(): SovereignRuntimeTruth {
     ROADMAP_19_LIVE_MIGRATION: 'CONFIRMED',
     LOCAL_SOVEREIGN_CLOSEOUT_SUFFICIENT: true,
     ROADMAP_22: 'CLOSED',
-    ROADMAP_23: 'NOT_STARTED',
+    ROADMAP_23: 'ACTIVE',
     OPERATIONAL_ASCENSION_AGENTS: operationalAscensionAgentCount(),
     GATE16_PREBUILD: 'PASS_14_OF_14',
     RUNTIME_SURFACE: 'DESKTOP_LOCAL',

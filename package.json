@@ -89,6 +89,8 @@
     "validate:ascension-phase13": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ascension/world-learning-agent/validation.ts",
     "validate:ascension-phase14": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ascension/integration/validation.ts",
     "validate:ascension-phase15": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase15.validation.ts",
+    "validate:wr-corpus": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wr-corpus/wrCorpus.validation.ts",
+    "migrate:wr-corpus": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-wr-corpus-migration.mjs",
     "prepare:desktop-runtime": "node scripts/prepare-desktop-runtime.mjs",
     "desktop:dist": "npm --prefix desktop run dist",
     "validate:sovereign-local-proof": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-sovereign-local-proof.mjs",

@@ -189,7 +189,7 @@ export async function runCrossAgentPhase14Validation(): Promise<{
     results.push(check('18_candidate_provenance_survives', provenanceOk, 'evidence_ids'))
     results.push(check('19_review_state_survives', reviewOk, 'review_state'))
     results.push(check('20_no_production_corpus_write', knowledge.production_corpus_persisted === false && knowledge.runtime_notes.production_corpus_write === false, String(knowledge.runtime_notes.production_corpus_write)))
-    results.push(check('21_no_wr_corpus', knowledge.wr_corpus === 'NOT_STARTED' && WR_CORPUS_STATUS === 'NOT_STARTED', knowledge.wr_corpus))
+    results.push(check('21_wr_corpus_implemented', knowledge.wr_corpus === 'IMPLEMENTED' && WR_CORPUS_STATUS === 'IMPLEMENTED', knowledge.wr_corpus))
 
     const world = await runWorldStatePipeline({
       ownerUserId: owner,
@@ -380,12 +380,12 @@ export async function runCrossAgentPhase14Validation(): Promise<{
     results.push(check('104_typescript_surface', fs.existsSync(path.join(repoRoot, 'lib', 'ascension', 'integration', 'index.ts')), 'index'))
     results.push(check('105_desktop_security_policy', truth.CODE_SIGNING === 'NOT_CONFIGURED' || truth.CODE_SIGNING === 'CONFIGURED', String(truth.CODE_SIGNING)))
     results.push(check('106_phone_ni', truth.PHONE_APP === 'NOT_IMPLEMENTED' && PHONE_APP_STATUS === 'NOT_IMPLEMENTED' && !fs.existsSync(path.join(repoRoot, 'apps', 'phone')), truth.PHONE_APP))
-    results.push(check('107_wr_corpus_ns', WR_CORPUS_STATUS === 'NOT_STARTED', WR_CORPUS_STATUS))
+    results.push(check('107_wr_corpus_implemented', WR_CORPUS_STATUS === 'IMPLEMENTED', WR_CORPUS_STATUS))
     results.push(check('108_wr_tokenizer_ns', WR_TOKENIZER_STATUS === 'NOT_STARTED', WR_TOKENIZER_STATUS))
     results.push(check('109_wrim_ni', truth.NATIVE_WRIM === 'NOT_IMPLEMENTED' && WRIM_STATUS === 'NOT_IMPLEMENTED', truth.NATIVE_WRIM))
     results.push(check('110_rael_ni', RAEL_STATUS === 'NOT_IMPLEMENTED', RAEL_STATUS))
     results.push(check('111_22_closed', truth.ROADMAP_22 === 'CLOSED' && ROADMAP_22_STATUS === 'CLOSED', truth.ROADMAP_22))
-    results.push(check('112_23_not_started', truth.ROADMAP_23 === 'NOT_STARTED' && ROADMAP_23_STATUS === 'NOT_STARTED' && MODEL_TRAINING_STATUS === 'NOT_IMPLEMENTED' && PRODUCTION_CORPUS_PERSISTENCE === false, truth.ROADMAP_23))
+    results.push(check('112_23_active', truth.ROADMAP_23 === 'ACTIVE' && ROADMAP_23_STATUS === 'ACTIVE' && MODEL_TRAINING_STATUS === 'NOT_IMPLEMENTED' && PRODUCTION_CORPUS_PERSISTENCE === false, truth.ROADMAP_23))
 
     results.push(check('113_integration_implemented', CROSS_AGENT_INTEGRATION_STATUS === 'IMPLEMENTED' && truth.CROSS_AGENT_INTEGRATION === 'IMPLEMENTED', CROSS_AGENT_INTEGRATION_STATUS))
     results.push(check('114_null_owner_denied', !createCanonicalHandoff({ sourceActor: 'RESEARCH_AGENT', targetActor: 'WORLD_LEARNING_AGENT', ownerUserId: '', taskType: 'RESEARCH_EVIDENCE' }).ok, 'owner required'))

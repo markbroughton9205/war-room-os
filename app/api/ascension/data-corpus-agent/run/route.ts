@@ -6,6 +6,7 @@ import {
   dataCorpusResultForCouncil,
 } from '@/lib/ascension/data-corpus-agent'
 import { operationalAscensionAgentCount } from '@/lib/ascension/operationalRegistry'
+import { ROADMAP_23_STATUS } from '@/lib/wr-corpus/identity'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -111,7 +112,7 @@ export async function POST(req: Request) {
       corpus_curation: true,
       crawl_authority: 'DENIED',
       training_authority: 'DENIED',
-      roadmap_23: 'NOT_STARTED',
+      roadmap_23: ROADMAP_23_STATUS,
       invocation_driven: true,
       ascension_autonomy: 'OFF',
       operational_ascension_agents: operationalAscensionAgentCount(),

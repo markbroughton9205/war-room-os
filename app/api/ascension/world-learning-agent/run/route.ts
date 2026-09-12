@@ -6,6 +6,7 @@ import {
   worldLearningAgentResultForCouncil,
 } from '@/lib/ascension/world-learning-agent'
 import { operationalAscensionAgentCount } from '@/lib/ascension/operationalRegistry'
+import { WR_CORPUS_STATUS } from '@/lib/wr-corpus/identity'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
       corpus_handoff: 'IMPLEMENTED',
       autonomous_corpus_persistence: false,
       model_training: 'NOT_IMPLEMENTED',
-      wr_corpus: 'NOT_STARTED',
+      wr_corpus: WR_CORPUS_STATUS,
       wr_tokenizer: 'NOT_STARTED',
       wrim: 'NOT_IMPLEMENTED',
       rael: 'NOT_IMPLEMENTED',

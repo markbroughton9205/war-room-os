@@ -97,7 +97,7 @@ export type NavigationAgentResult = {
   boundary_notes: readonly string[]
   plan_summary: string
   foundation_session_id: string | null
-  roadmap_23_status: 'NOT_STARTED'
+  roadmap_23_status: 'ACTIVE' | 'NOT_STARTED'
 }
 
 export const NAVIGATION_AGENT_BOUNDARY_NOTES = Object.freeze([
@@ -116,5 +116,5 @@ export const NAVIGATION_AGENT_BOUNDARY_NOTES = Object.freeze([
   'LIVE_TRAFFIC = NOT_IMPLEMENTED',
   'PHONE_APP = NOT_IMPLEMENTED',
   'ASCENSION AUTONOMY OFF',
-  '#23 NOT STARTED',
+  '#23 WR-CORPUS ACTIVE; tokenizer/WRIM/Rael not production',
 ] as const)

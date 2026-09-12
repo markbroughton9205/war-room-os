@@ -2,6 +2,8 @@
  * #22 Phase 11B — Local model types + runtime-truth states.
  * THIRD_PARTY_MODEL_RUNNING_LOCALLY != WRIM != RA'EL
  */
+import { ROADMAP_23_STATUS } from '@/lib/wr-corpus/identity'
+
 export const LOCAL_MODEL_PROVIDER_TYPES = ['OLLAMA', 'LM_STUDIO', 'LOCAL_OPENAI_COMPATIBLE'] as const
 export type LocalModelProviderType = (typeof LOCAL_MODEL_PROVIDER_TYPES)[number]
 
@@ -85,7 +87,7 @@ export type LocalModelInferResult = {
   intelligence_class: 'THIRD_PARTY_MODEL_RUNNING_LOCALLY'
   wrim: 'NOT_IMPLEMENTED'
   rael: 'NOT_IMPLEMENTED'
-  roadmap_23: 'NOT_STARTED'
+  roadmap_23: typeof ROADMAP_23_STATUS
 }
 
 export type LocalCouncilModeReport = {

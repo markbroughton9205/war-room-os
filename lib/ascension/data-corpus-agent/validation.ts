@@ -182,9 +182,9 @@ export async function runDataCorpusAgentPhase8Validation(): Promise<{
   )
   results.push(
     check(
-      '47_candidate_not_start_23',
-      live.roadmap_23_status === 'NOT_STARTED' &&
-        ROADMAP_23_STATUS === 'NOT_STARTED' &&
+      '47_candidate_not_auto_promote_23',
+      live.roadmap_23_status === 'ACTIVE' &&
+        ROADMAP_23_STATUS === 'ACTIVE' &&
         live.denials.some(d => d.capability_or_action === 'ROADMAP_23'),
       live.roadmap_23_status,
     ),
@@ -288,7 +288,7 @@ export async function runDataCorpusAgentPhase8Validation(): Promise<{
       TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.join(','),
     ),
   )
-  results.push(check('75_roadmap_23_not_started', ROADMAP_23_STATUS === 'NOT_STARTED', ROADMAP_23_STATUS))
+  results.push(check('75_roadmap_23_active', ROADMAP_23_STATUS === 'ACTIVE', ROADMAP_23_STATUS))
 
   // Red team
   for (const action of [

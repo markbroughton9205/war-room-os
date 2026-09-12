@@ -384,7 +384,7 @@ export async function runPhase15CloseoutValidation(): Promise<{
     results.push(check('2_20_closed', /\| 20 \|[\s\S]*?CLOSED/.test(roadmap), '#20'))
     results.push(check('2_21_closed', /\| 21 \|[\s\S]*?CLOSED/.test(roadmap), '#21'))
     results.push(check('2_22_closed', /\| 22 \|[\s\S]*?\*\*CLOSED\*\*/.test(roadmap) && ROADMAP_22_STATUS === 'CLOSED' && truth.ROADMAP_22 === 'CLOSED', truth.ROADMAP_22))
-    results.push(check('2_23_not_started', ROADMAP_23_STATUS === 'NOT_STARTED' && truth.ROADMAP_23 === 'NOT_STARTED', truth.ROADMAP_23))
+    results.push(check('2_23_active', ROADMAP_23_STATUS === 'ACTIVE' && truth.ROADMAP_23 === 'ACTIVE', truth.ROADMAP_23))
 
     const mig = read('docs/WR_CONVERSATION_OWNERSHIP_MIGRATION.md')
     const runner = read('scripts/run-conversation-ownership-validation.mjs')
@@ -846,7 +846,7 @@ export async function runPhase15CloseoutValidation(): Promise<{
     results.push(check('87_phone', truth.PHONE_APP === 'NOT_IMPLEMENTED' && PHONE_APP_STATUS === 'NOT_IMPLEMENTED', 'NOT_IMPLEMENTED'))
     results.push(check('88_gnss', /MOBILE_GNSS NOT_SUPPORTED/.test(roadmap) || /NOT_SUPPORTED/.test(read('lib/ascension/navigation-agent/result.ts')), 'NOT_SUPPORTED'))
     results.push(check('89_live_traffic', /LIVE_TRAFFIC NOT_IMPLEMENTED/.test(roadmap), 'NOT_IMPLEMENTED'))
-    results.push(check('90_wr_corpus', WR_CORPUS_STATUS === 'NOT_STARTED' && truth.PRODUCTION_CORPUS_PERSISTENCE === false, WR_CORPUS_STATUS))
+    results.push(check('90_wr_corpus', WR_CORPUS_STATUS === 'IMPLEMENTED' && truth.PRODUCTION_CORPUS_PERSISTENCE === false, WR_CORPUS_STATUS))
     results.push(check('91_wr_tokenizer', WR_TOKENIZER_STATUS === 'NOT_STARTED', WR_TOKENIZER_STATUS))
     results.push(check('92_wrim', WRIM_STATUS === 'NOT_IMPLEMENTED' && truth.NATIVE_WRIM === 'NOT_IMPLEMENTED', WRIM_STATUS))
     results.push(check('93_rael', RAEL_STATUS === 'NOT_IMPLEMENTED', RAEL_STATUS))

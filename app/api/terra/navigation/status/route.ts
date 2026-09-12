@@ -1,3 +1,4 @@
+import { ROADMAP_23_STATUS } from '@/lib/wr-corpus/identity'
 import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { getNavigationCapabilityTruth, navigationRoadmapTruth } from '@/lib/terra/navigation/runtimeTruth'
 import { trafficProviderTruthSummary } from '@/lib/terra/navigation/guidance'
@@ -16,6 +17,6 @@ export async function GET() {
     roadmap_truth: navigationRoadmapTruth(),
     traffic_truth: trafficProviderTruthSummary(),
     future_navigation_agent: 'TARGET_UNIMPLEMENTED',
-    roadmap_23: 'NOT_STARTED',
+    roadmap_23: ROADMAP_23_STATUS,
   })
 }

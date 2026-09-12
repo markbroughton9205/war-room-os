@@ -12,14 +12,15 @@ export const WORLD_LEARNING_AGENT_POLICY_PROFILE = 'BOUNDED_WORLD_KNOWLEDGE_ACQU
 
 export const WORLD_LEARNING_AGENT_AUTONOMOUS_EXECUTION_ENABLED = false as const
 
-export const ROADMAP_23_STATUS = 'NOT_STARTED' as const
-
-export const WR_CORPUS_STATUS = 'NOT_STARTED' as const
-export const WR_TOKENIZER_STATUS = 'NOT_STARTED' as const
-export const WRIM_STATUS = 'NOT_IMPLEMENTED' as const
-export const RAEL_STATUS = 'NOT_IMPLEMENTED' as const
-export const MODEL_TRAINING_STATUS = 'NOT_IMPLEMENTED' as const
-export const AUTONOMOUS_CORPUS_PERSISTENCE = false as const
+export {
+  ROADMAP_23_STATUS,
+  WR_CORPUS_STATUS,
+  WR_TOKENIZER_STATUS,
+  WRIM_STATUS,
+  RAEL_STATUS,
+  MODEL_TRAINING_STATUS,
+  AUTONOMOUS_CORPUS_PERSISTENCE,
+} from '@/lib/wr-corpus/identity'
 
 export function isWorldLearningAgentRuntimeAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.ASCENSION_WORLD_LEARNING_AGENT_ENABLED !== 'false'

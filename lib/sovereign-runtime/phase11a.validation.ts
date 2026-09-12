@@ -227,7 +227,7 @@ export async function runPhase11aLocalUiValidation(opts?: {
   results.push(check('64_phone_ni', truth.PHONE_APP === 'NOT_IMPLEMENTED', 'ok'))
   results.push(check('65_wrim_ni', truth.NATIVE_WRIM === 'NOT_IMPLEMENTED', 'ok'))
   results.push(check('66_22_closed', truth.ROADMAP_22 === 'CLOSED', 'CLOSED'))
-  results.push(check('67_23_ns', truth.ROADMAP_23 === 'NOT_STARTED', 'NOT_STARTED'))
+  results.push(check('67_23_active', truth.ROADMAP_23 === 'ACTIVE', 'ACTIVE'))
   results.push(check('68_typescript_structural', true, 'tsc separately'))
   results.push(check('69_desktop_security', /sandbox:\s*true/.test(mainSrc), 'ok'))
   results.push(check('70_desktop_build_check', fs.existsSync(path.join(repoRoot, 'desktop', 'scripts', 'build-check.cjs')), 'ok'))

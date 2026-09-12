@@ -13,6 +13,7 @@ import {
 import { isWorldLearningAgentRuntimeAvailable } from '@/lib/ascension/world-learning-agent/identity'
 import { runBoundedWorldLearningAgent } from '@/lib/ascension/world-learning-agent/runtime'
 import { operationalAscensionAgentCount } from '@/lib/ascension/operationalRegistry'
+import { WR_CORPUS_STATUS } from '@/lib/wr-corpus/identity'
 
 function json(res: http.ServerResponse, status: number, body: unknown) {
   const payload = JSON.stringify(body)
@@ -119,7 +120,7 @@ export function tryHandleWorldLearningAgentHttp(
         corpus_handoff: 'IMPLEMENTED',
         autonomous_corpus_persistence: false,
         model_training: 'NOT_IMPLEMENTED',
-        wr_corpus: 'NOT_STARTED',
+        wr_corpus: WR_CORPUS_STATUS,
         wrim: 'NOT_IMPLEMENTED',
         rael: 'NOT_IMPLEMENTED',
         renderer_search_privilege: false,

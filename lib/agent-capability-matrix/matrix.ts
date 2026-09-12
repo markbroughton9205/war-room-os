@@ -537,7 +537,7 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     approvalRequirement: 'COMMANDER_EXPLICIT_APPROVAL',
     runtimeStatus: 'STRUCTURALLY_FORBIDDEN',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'No autonomous production-corpus persistence; DATA_CORPUS_AGENT remains canonical curator; #23 NOT_STARTED',
+    evidence: 'No autonomous production-corpus persistence; DATA_CORPUS_AGENT remains canonical curator; WR-CORPUS promotion is Commander-governed; tokenizer/WRIM/Rael not production',
   }),
   row({
     id: 'worldlearn.self.expand',
