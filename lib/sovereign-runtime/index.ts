@@ -1,5 +1,5 @@
 /**
- * #22 Phase 10/11A — Sovereign runtime public exports.
+ * #22 Phase 10/11A/11B — Sovereign runtime public exports.
  */
 export * from './constants'
 export * from './dependenceInventory'
@@ -8,6 +8,7 @@ export * from './boot'
 export * from './session'
 export * from './desktopSecurity'
 export * from './uiAudit'
+export * from './local-model'
 export {
   startLocalCoreServer,
   buildLocalHealth,

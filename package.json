@@ -80,6 +80,8 @@
     "validate:sovereign-desktop": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/validation.ts && node desktop/scripts/build-check.cjs",
     "validate:ascension-phase11a": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11a.validation.ts",
     "validate:ascension-phase11a:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11a.validation.ts --live",
+    "validate:ascension-phase11b": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11b.validation.ts",
+    "validate:ascension-phase11b:live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/sovereign-runtime/phase11b.validation.ts --live",
     "validate:sovereign-local-proof": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-sovereign-local-proof.mjs",
     "sovereign:local-core": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-war-room-local-core.mjs",
     "sovereign:local-ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-war-room-local-ui.mjs",

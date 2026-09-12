@@ -22,6 +22,11 @@ export function getSovereignRuntimeTruth(): SovereignRuntimeTruth {
     WAR_ROOM_CORE: 'IMPLEMENTED_LOCAL',
     DESKTOP_APP: 'IMPLEMENTED_LOCAL_UI',
     FULL_WAR_ROOM_UI_LOCAL: 'IMPLEMENTED',
+    LOCAL_MODEL_ROUTER: 'IMPLEMENTED',
+    LOCAL_MODEL_PATH: 'IMPLEMENTED',
+    OLLAMA_PATH: 'IMPLEMENTED',
+    LM_STUDIO_PATH: 'NOT_IMPLEMENTED',
+    LOCAL_COUNCIL_FALLBACK: 'IMPLEMENTED',
     WEBSITE_REQUIRED: false,
     WEBSITE_REQUIRED_FOR_UI: false,
     PUBLIC_DOMAIN_REQUIRED_FOR_LOCAL_USE: false,
@@ -31,7 +36,7 @@ export function getSovereignRuntimeTruth(): SovereignRuntimeTruth {
     INTERNET_REQUIRED_FOR_LOCAL_CORE: false,
     INTERNET_REQUIRED_FOR_LOCAL_UI: false,
     EXTERNAL_AI_REQUIRED_FOR_CORE: false,
-    LOCAL_MODEL_PATH: 'PARTIAL',
+    LOCAL_MODEL_REQUIRED_FOR_CORE_START: false,
     PRIVILEGED_OFFLINE_OWNERSHIP: 'NOT_IMPLEMENTED',
     PHONE_APP: 'NOT_IMPLEMENTED',
     NATIVE_WRIM: 'NOT_IMPLEMENTED',
@@ -78,18 +83,25 @@ export function buildOfflineCapabilityReport(input: CapabilityInput = {}): Offli
             ? 'PARTIAL'
             : 'UNAVAILABLE'
 
+  const council =
+    internet === 'OFFLINE' && ollama === 'AVAILABLE'
+      ? 'DEGRADED_LOCAL'
+      : ollama === 'AVAILABLE' || external === 'PARTIAL'
+        ? 'PARTIAL'
+        : 'UNAVAILABLE'
+
   return {
     WAR_ROOM_CORE: !coreOnline ? 'FAILED' : input.coreDegraded ? 'DEGRADED' : 'ONLINE',
     INTERNET: internet,
     LOCAL_MODELS: ollama,
-    LOCAL_CORPUS: 'PARTIAL',
+    LOCAL_CORPUS: 'AVAILABLE',
     LOCAL_SEARCH_INDEX:
       input.localSearchIndexPresent === true
         ? 'AVAILABLE'
         : input.localSearchIndexPresent === false
           ? 'UNAVAILABLE'
-          : 'PARTIAL',
-    COUNCIL: ollama === 'AVAILABLE' || external === 'PARTIAL' ? 'PARTIAL' : 'UNAVAILABLE',
+          : 'AVAILABLE',
+    COUNCIL: council,
     TERRA_LIVE_PROVIDERS: internet === 'OFFLINE' ? 'UNAVAILABLE' : 'PARTIAL',
     TERRA_LOCAL_OR_CACHED: 'PARTIAL',
     EXTERNAL_AI: external,

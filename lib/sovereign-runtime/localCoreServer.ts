@@ -23,6 +23,7 @@ import {
 import { isLoopbackRequestHost, mintLocalDesktopSession, assertServiceRoleIsNotCommander } from './session'
 import { WEBSITE_DEPENDENCE_INVENTORY } from './dependenceInventory'
 import { decideDesktopNavigation, defaultDesktopStartUrl } from './desktopSecurity'
+import { discoverLocalModels, runLocalModelInference } from './local-model'
 
 export type LocalCoreServerOptions = {
   host?: string
@@ -136,17 +137,23 @@ export async function startLocalCoreServer(opts: LocalCoreServerOptions = {}): P
       return json(res, 200, { ok: true, health: buildLocalHealth(boot.snapshot(), opts) })
     }
     if (url.pathname === '/api/local/status') {
-      return json(res, 200, {
-        ok: true,
-        runtime_truth: getSovereignRuntimeTruth(),
-        health: buildLocalHealth(boot.snapshot(), opts),
-        session: mintLocalDesktopSession(),
-        service_role_probe: assertServiceRoleIsNotCommander(),
-        dependence_inventory_count: WEBSITE_DEPENDENCE_INVENTORY.length,
-        commander_control_surface_slots: COMMANDER_CONTROL_SURFACE_SLOTS,
-        default_start_url: defaultDesktopStartUrl(),
-        navigation_sample: decideDesktopNavigation('https://warroomos.com/'),
-      })
+      return void (async () => {
+        const models = await discoverLocalModels().catch(err => ({
+          error: err instanceof Error ? err.message : String(err),
+        }))
+        json(res, 200, {
+          ok: true,
+          runtime_truth: getSovereignRuntimeTruth(),
+          health: buildLocalHealth(boot.snapshot(), opts),
+          session: mintLocalDesktopSession(),
+          service_role_probe: assertServiceRoleIsNotCommander(),
+          dependence_inventory_count: WEBSITE_DEPENDENCE_INVENTORY.length,
+          commander_control_surface_slots: COMMANDER_CONTROL_SURFACE_SLOTS,
+          default_start_url: defaultDesktopStartUrl(),
+          navigation_sample: decideDesktopNavigation('https://warroomos.com/'),
+          local_models: models,
+        })
+      })()
     }
     if (url.pathname === '/api/local/capabilities') {
       return json(res, 200, {
@@ -157,6 +164,52 @@ export async function startLocalCoreServer(opts: LocalCoreServerOptions = {}): P
     }
     if (url.pathname === '/api/local/shutdown-plan') {
       return json(res, 200, { ok: true, plan: desktopShutdownPlan(true) })
+    }
+    if (url.pathname === '/api/local/models/status' && req.method === 'GET') {
+      return void (async () => {
+        try {
+          const discovery = await discoverLocalModels()
+          json(res, 200, { ok: true, ...discovery })
+        } catch (err) {
+          json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) })
+        }
+      })()
+    }
+    if (url.pathname === '/api/local/models/infer' && req.method === 'POST') {
+      return void (async () => {
+        try {
+          const chunks: Buffer[] = []
+          for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+          let body: Record<string, unknown> = {}
+          if (chunks.length) {
+            try {
+              body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+            } catch {
+              json(res, 400, { ok: false, error: 'Invalid JSON body.' })
+              return
+            }
+          }
+          const result = await runLocalModelInference({
+            prompt: typeof body.prompt === 'string' ? body.prompt : '',
+            system: typeof body.system === 'string' ? body.system : undefined,
+            model: typeof body.model === 'string' ? body.model : null,
+            ownerUserId: typeof body.owner_user_id === 'string' ? body.owner_user_id : null,
+            resourceOwnerUserId: typeof body.resource_owner_user_id === 'string' ? body.resource_owner_user_id : null,
+            conversationId: typeof body.conversation_id === 'string' ? body.conversation_id : null,
+            attemptToolAuthorization: body.attempt_tool_authorization === true,
+            attemptDeployAuthorization: body.attempt_deploy_authorization === true,
+            attemptPushAuthorization: body.attempt_push_authorization === true,
+            attemptFinanceAuthorization: body.attempt_finance_authorization === true,
+            attemptAgentSpawn: body.attempt_agent_spawn === true,
+            attemptApproveGovernance: body.attempt_approve_governance === true,
+            claimIsWrim: body.claim_is_wrim === true,
+            claimIsRael: body.claim_is_rael === true,
+          })
+          json(res, result.ok ? 200 : 422, { ok: result.ok, result })
+        } catch (err) {
+          json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) })
+        }
+      })()
     }
 
     // Static local UI assets

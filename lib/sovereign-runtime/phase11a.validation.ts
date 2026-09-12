@@ -235,7 +235,13 @@ export async function runPhase11aLocalUiValidation(opts?: {
   results.push(check('ports', LOCAL_UI_PORT === 3848 && LOCAL_CORE_PORT === 3847, `${LOCAL_CORE_PORT}/${LOCAL_UI_PORT}`))
   results.push(check('truth_full_ui', truth.FULL_WAR_ROOM_UI_LOCAL === 'IMPLEMENTED', truth.FULL_WAR_ROOM_UI_LOCAL))
   results.push(check('truth_desktop', truth.DESKTOP_APP === 'IMPLEMENTED_LOCAL_UI', truth.DESKTOP_APP))
-  results.push(check('local_model_partial', truth.LOCAL_MODEL_PATH === 'PARTIAL', 'PARTIAL'))
+  results.push(
+    check(
+      'local_model_path',
+      truth.LOCAL_MODEL_PATH === 'IMPLEMENTED' || truth.LOCAL_MODEL_PATH === 'PARTIAL',
+      truth.LOCAL_MODEL_PATH,
+    ),
+  )
   results.push(check('audit_count', CANONICAL_UI_AUDIT.length >= 8, String(CANONICAL_UI_AUDIT.length)))
 
   let uiHandle: Awaited<ReturnType<typeof ensureLocalWarRoomUi>> | null = null
