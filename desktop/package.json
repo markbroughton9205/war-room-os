@@ -1,0 +1,14 @@
+{
+  "name": "war-room-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "War Room sovereign desktop foundation (Electron). Loads local core only — never warroomos.com.",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build:check": "node scripts/build-check.cjs"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0"
+  }
+}

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>War Room — Local Core</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <p class="brand">WAR ROOM</p>
+      <h1>Local Core</h1>
+      <p class="sub">Nebula Genesis · sovereign desktop foundation · website optional</p>
+    </header>
+    <section id="status" class="panel">
+      <h2>Runtime</h2>
+      <pre id="runtime">Connecting to local core…</pre>
+    </section>
+    <section class="panel">
+      <h2>Commander control surface (foundation slots)</h2>
+      <ul id="slots"></ul>
+    </section>
+    <section class="panel warn">
+      <p>Public website fallback: <strong>DENIED</strong></p>
+      <p>This UI is served from <code>127.0.0.1</code> local assets — not warroomos.com.</p>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

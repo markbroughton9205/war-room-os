@@ -1,0 +1,42 @@
+:root {
+  --bg: #0b0f14;
+  --fg: #e8eef7;
+  --muted: #8b9bb0;
+  --panel: #121821;
+  --accent: #3d8bfd;
+  --warn: #c9a227;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", "IBM Plex Sans", system-ui, sans-serif;
+  background: radial-gradient(1200px 600px at 10% -10%, #152033 0%, var(--bg) 55%);
+  color: var(--fg);
+  min-height: 100vh;
+}
+.shell { max-width: 880px; margin: 0 auto; padding: 2.5rem 1.5rem 3rem; }
+.brand {
+  letter-spacing: 0.28em;
+  font-size: 0.75rem;
+  color: var(--accent);
+  margin: 0 0 0.5rem;
+}
+h1 { margin: 0 0 0.35rem; font-weight: 600; font-size: 2rem; }
+.sub { color: var(--muted); margin: 0 0 1.75rem; }
+.panel {
+  background: color-mix(in srgb, var(--panel) 92%, black);
+  border: 1px solid #1f2a3a;
+  border-radius: 10px;
+  padding: 1rem 1.15rem;
+  margin-bottom: 1rem;
+}
+.panel.warn { border-color: color-mix(in srgb, var(--warn) 45%, #1f2a3a); }
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.82rem;
+  color: #c9d7ea;
+  margin: 0;
+}
+ul { margin: 0.35rem 0 0; padding-left: 1.1rem; color: var(--muted); }
+code { color: #9ec1ff; }
