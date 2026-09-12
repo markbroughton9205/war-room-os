@@ -92,6 +92,8 @@
     "validate:wr-corpus": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wr-corpus/wrCorpus.validation.ts",
     "migrate:wr-corpus": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-wr-corpus-migration.mjs",
     "validate:wr-tokenizer": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wr-tokenizer/wrTokenizer.validation.ts",
+    "validate:wrim-reconciliation": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wrim-reconciliation/wrimReconciliation.validation.ts",
+    "reconcile:wrim": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-wrim-reconciliation.mjs",
     "import:wr-tokenizer": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-wr-tokenizer-import.mjs",
     "prepare:desktop-runtime": "node scripts/prepare-desktop-runtime.mjs",
     "desktop:dist": "npm --prefix desktop run dist",
