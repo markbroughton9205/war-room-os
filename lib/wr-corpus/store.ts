@@ -221,6 +221,31 @@ export class WrCorpusStore {
     return row ? hydrateRecord(row) : null
   }
 
+  listRecordTexts(corpusVersion: string, activeOnly = true): Array<{
+    record_id: string
+    text: string
+    source_type: string | null
+    title: string | null
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT record_id, text, source_type, title FROM corpus_records
+         WHERE corpus_version = ? ${activeOnly ? 'AND active = 1' : ''}`,
+      )
+      .all(corpusVersion) as Array<{
+      record_id: string
+      text: string
+      source_type: string | null
+      title: string | null
+    }>
+    return rows.map(row => ({
+      record_id: String(row.record_id),
+      text: String(row.text ?? ''),
+      source_type: row.source_type ? String(row.source_type) : null,
+      title: row.title ? String(row.title) : null,
+    }))
+  }
+
   countRecords(corpusVersion?: string, activeOnly = true): number {
     if (corpusVersion) {
       const row = this.db

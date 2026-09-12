@@ -63,7 +63,7 @@ export function WrCorpusPanel() {
   return (
     <section className="space-y-4 rounded border border-emerald-800 bg-zinc-950 p-4 text-sm text-emerald-100">
       <p className="text-xs uppercase tracking-widest text-emerald-400">
-        WR-CORPUS v1 · #23 ACTIVE · tokenizer/WRIM/Ra&apos;el not production
+        WR-CORPUS v1 · #23 ACTIVE · WR-TOKENIZER-0 reconciled · no Train button
       </p>
       {error ? <p className="text-red-400">{error}</p> : null}
       <div className="grid gap-2 md:grid-cols-2">
@@ -84,8 +84,8 @@ export function WrCorpusPanel() {
         storage: {status?.root ?? '(not migrated yet)'} · footprint {status?.artifactBytes ?? 0} bytes
       </p>
       <p className="text-xs text-amber-200">
-        HISTORICAL WR-TOKENIZER-0 and HISTORICAL WRIM-0 are lineage only — not active production intelligence. Qwen remains
-        third-party local RAG. Promotion from the candidate review queue requires explicit Commander approval.
+        HISTORICAL WR-TOKENIZER-0 is TRAINED+VALIDATED and now the canonical reconciled tokenizer (KEEP_AND_EXTEND_LATER).
+        Tokenizer training is still NOT_STARTED. HISTORICAL WRIM-0 remains lineage only. Qwen remains third-party local RAG.
       </p>
       <p className="text-xs text-amber-300">
         ACTIVE_CORPUS_DELETE removes live retrieval and writes a tombstone. HISTORICAL_RECOVERY_SOURCE_PRESERVED: the Mac

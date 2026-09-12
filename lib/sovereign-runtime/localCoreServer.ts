@@ -29,6 +29,7 @@ import { tryHandleNavigationAgentHttp } from '@/lib/ascension/navigation-agent/h
 import { tryHandleWorldLearningAgentHttp } from '@/lib/ascension/world-learning-agent/httpCore'
 import { tryHandleCrossAgentIntegrationHttp } from '@/lib/ascension/integration/httpCore'
 import { tryHandleWrCorpusHttp } from '@/lib/wr-corpus/httpCore'
+import { tryHandleWrTokenizerHttp } from '@/lib/wr-tokenizer/httpCore'
 import {
   LOCAL_SESSION_COOKIE,
   extractBearerOrCookieToken,
@@ -183,6 +184,14 @@ export async function startLocalCoreServer(opts: LocalCoreServerOptions = {}): P
 
     if (
       tryHandleWrCorpusHttp(req, res, url, {
+        dataDirOverride: opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
+      })
+    ) {
+      return
+    }
+
+    if (
+      tryHandleWrTokenizerHttp(req, res, url, {
         dataDirOverride: opts.localDataDir ?? process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
       })
     ) {

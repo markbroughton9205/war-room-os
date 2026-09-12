@@ -149,7 +149,7 @@ export async function runWrCorpusValidation(): Promise<{ passed: number; failed:
   results.push(check('17_no_checkpoint_tree', forbiddenHits.length === 0, forbiddenHits.slice(0, 3).join('|')))
   results.push(check('18_bytes_bounded', migrated.bytesCopied < 80 * 1024 * 1024, String(migrated.bytesCopied)))
   results.push(check('19_historical_tokenizer', HISTORICAL_WR_TOKENIZER_0_STATUS === 'TRAINED_VALIDATED' && HISTORICAL_WR_TOKENIZER_0_SHA256.startsWith('47ed32ce'), HISTORICAL_WR_TOKENIZER_0_STATUS))
-  results.push(check('20_tokenizer_not_retrained', CURRENT_WR_TOKENIZER_LANE === 'NOT_STARTED' && WR_TOKENIZER_STATUS === 'NOT_STARTED', CURRENT_WR_TOKENIZER_LANE))
+  results.push(check('20_tokenizer_not_retrained', WR_TOKENIZER_STATUS === 'NOT_STARTED', WR_TOKENIZER_STATUS))
   results.push(check('21_historical_wrim0', HISTORICAL_WRIM_0_STATUS === 'TRAINED_RESEARCH_ARTIFACT', HISTORICAL_WRIM_0_STATUS))
   results.push(check('22_wrim1_not_promoted', String(v1?.historical_model_lineage.wrim1_run_000001 ?? '').includes('COLLAPSED'), String(v1?.historical_model_lineage.wrim1_run_000001)))
   results.push(check('23_recovery_test_only', v1?.historical_model_lineage.recovery_experiments === 'TEST_ONLY', String(v1?.historical_model_lineage.recovery_experiments)))
@@ -157,7 +157,7 @@ export async function runWrCorpusValidation(): Promise<{ passed: number; failed:
   results.push(check('25_prod_wrim', CURRENT_PRODUCTION_WRIM === 'NOT_IMPLEMENTED', CURRENT_PRODUCTION_WRIM))
   results.push(check('26_rael', RAEL_STATUS === 'NOT_IMPLEMENTED', RAEL_STATUS))
   results.push(check('27_training_not_running', CURRENT_MODEL_TRAINING_STATUS === 'NOT_RUNNING', CURRENT_MODEL_TRAINING_STATUS))
-  results.push(check('28_tokenizer_lane', CURRENT_WR_TOKENIZER_LANE === 'NOT_STARTED', CURRENT_WR_TOKENIZER_LANE))
+  results.push(check('28_tokenizer_lane', CURRENT_WR_TOKENIZER_LANE === 'RECONCILED', CURRENT_WR_TOKENIZER_LANE))
 
   const pd = mapHistoricalRights({ licenseId: 'PUBLIC_DOMAIN', licenseName: 'Public Domain', permitsTrainingUse: true, accessStatus: 'public_domain' })
   const unk = mapHistoricalRights({ unknown: true })

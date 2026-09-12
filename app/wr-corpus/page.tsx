@@ -1,5 +1,6 @@
 import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoundary'
 import { WrCorpusPanel } from '@/components/war-room/wr-corpus/WrCorpusPanel'
+import { WrTokenizerPanel } from '@/components/war-room/wr-tokenizer/WrTokenizerPanel'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,6 +11,9 @@ export default function WrCorpusPage() {
         <h1 className="mb-4 text-lg font-bold uppercase tracking-widest text-emerald-300">WR-CORPUS</h1>
         <PanelErrorBoundary label="WR-CORPUS" note="No tokenizer or WRIM training was executed by this failure.">
           <WrCorpusPanel />
+          <div className="mt-6">
+            <WrTokenizerPanel />
+          </div>
         </PanelErrorBoundary>
       </div>
     </main>

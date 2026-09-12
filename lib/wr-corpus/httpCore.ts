@@ -18,6 +18,7 @@ import { exportWrCorpusMetadata } from './export'
 import { tryForbiddenWrCorpusAction, type ForbiddenWrCorpusAction } from './redTeam'
 import { WR_CORPUS_STATUS, ROADMAP_23_STATUS, wrCorpusTruthNotes } from './identity'
 import { WrCorpusPolicyError } from './hashes'
+import { wrTokenizerStatusPayload } from '@/lib/wr-tokenizer/status'
 
 function json(res: http.ServerResponse, status: number, body: unknown) {
   const payload = JSON.stringify(body)
@@ -76,6 +77,7 @@ export function tryHandleWrCorpusHttp(
       roadmap_23: ROADMAP_23_STATUS,
       notes: wrCorpusTruthNotes(),
       candidate_review_queue: listCandidateReviewQueue(ownerUserId, dataDir),
+      tokenizer: wrTokenizerStatusPayload(dataDir),
       ...listed,
     })
         return

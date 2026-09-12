@@ -3,7 +3,8 @@
 **Roadmap:** #22 CLOSED · **#23:** ACTIVE (WR-CORPUS implemented)  
 **Architecture ID:** `WR_CORPUS`  
 **Runtime version:** `wr-corpus-v1`  
-**Not started / not implemented:** current WR-TOKENIZER lane, production WRIM, Ra'el, model training
+**Not started / not implemented:** tokenizer training, production WRIM, Ra'el, model training  
+**Tokenizer:** WR-TOKENIZER-0 reconciled (`KEEP_AND_EXTEND_LATER`) — see `docs/architecture/WR_TOKENIZER_RECONCILIATION.md`
 
 This is the single canonical corpus architecture. Do not create Corpus2, WRCorpus2, TrainingCorpus2, or RaelCorpus.
 
@@ -51,7 +52,7 @@ Active-layer delete supports `DELETE_AND_ALLOW_RELEARN` and `DELETE_AND_BLOCK_RE
 
 ## Historical lineage (not production)
 
-- HISTORICAL WR-TOKENIZER-0: TRAINED_VALIDATED (SHA `47ed32ce…`)
+- HISTORICAL WR-TOKENIZER-0: TRAINED_VALIDATED (SHA `47ed32ce…`); canonical reconciled tokenizer (`KEEP_AND_EXTEND_LATER`); training still NOT_STARTED
 - HISTORICAL WRIM-0: TRAINED_RESEARCH_ARTIFACT
 - WRIM1-RUN-000001: collapsed, promotion rejected
 - WRIM1-RUN-000002: partial training failed, not promoted

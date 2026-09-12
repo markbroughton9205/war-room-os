@@ -426,7 +426,7 @@ export async function runBoundedWorldLearningAgent(
     [input.applyCorpusWithoutReview, 'APPLY_CORPUS_WITHOUT_REVIEW', 'Corpus apply remains review-gated via DATA_CORPUS_AGENT.'],
     [input.persistProductionCorpus, 'PRODUCTION_CORPUS_PERSIST', 'Autonomous production-corpus persistence is false.'],
     [input.startWrCorpus, 'WR_CORPUS_START', 'WR_CORPUS already implemented. Cannot start a second corpus architecture.'],
-    [input.startWrTokenizer, 'WR_TOKENIZER_START', 'CURRENT_WR_TOKENIZER_LANE remains NOT_STARTED. Historical WR-TOKENIZER-0 is frozen lineage.'],
+    [input.startWrTokenizer, 'WR_TOKENIZER_START', 'Tokenizer TRAINING remains NOT_STARTED. WR-TOKENIZER-0 is frozen reconciled lineage. Retrain denied.'],
     [input.trainWrim, 'WRIM_TRAIN', 'WRIM training is NOT_IMPLEMENTED / #23.'],
     [input.createRael, 'RAEL_CREATE', 'Ra\'el is NOT_IMPLEMENTED / #23.'],
     [input.spawnLearningAgent, 'AGENT_SPAWN', 'WORLD_LEARNING_AGENT cannot spawn agents.'],
@@ -658,7 +658,7 @@ export async function runBoundedWorldLearningAgent(
     `Local model is ${local_model_used ? 'assistive reasoning' : 'unused'}; never primary evidence.`,
     `Conflicts preserved: ${claims.filter(c => c.status === 'DISPUTED').length}.`,
     `Knowledge gaps: ${knowledge_gaps.length}. Follow-ups recommended, not auto-launched.`,
-    `#23 WR-CORPUS ACTIVE. CURRENT_WR_TOKENIZER_LANE NOT_STARTED. WRIM/Ra'el/training remain unimplemented.`,
+    `#23 WR-CORPUS IMPLEMENTED. WR-TOKENIZER-0 reconciled (KEEP_AND_EXTEND_LATER). Tokenizer training NOT_STARTED. WRIM/Ra'el remain unimplemented.`,
   ]
 
   return finish(status, scope, summaryParts.join(' '))

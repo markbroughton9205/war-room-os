@@ -10,9 +10,12 @@ export const ROADMAP_23_STATUS = 'ACTIVE' as const
 
 export const WR_CORPUS_STATUS = 'IMPLEMENTED' as const
 
-/** Current #23 tokenizer lane — not the historical Mac artifact. */
+/** Tokenizer TRAINING lane — still not started. Distinct from reconciled historical artifact. */
 export const WR_TOKENIZER_STATUS = 'NOT_STARTED' as const
-export const CURRENT_WR_TOKENIZER_LANE = 'NOT_STARTED' as const
+export const CURRENT_WR_TOKENIZER_LANE = 'RECONCILED' as const
+export const CURRENT_WR_TOKENIZER = 'WR-TOKENIZER-0' as const
+export const WR_TOKENIZER_RECONCILIATION = 'COMPLETE' as const
+export const WR_TOKENIZER_RECOMMENDATION = 'KEEP_AND_EXTEND_LATER' as const
 export const HISTORICAL_WR_TOKENIZER_0_STATUS = 'TRAINED_VALIDATED' as const
 export const HISTORICAL_WR_TOKENIZER_0_SHA256 =
   '47ed32ce61974e2c3b297fad8a7fba1a6e57b37403f81658abdd9769ac99f2e7' as const
@@ -73,7 +76,11 @@ export const FORBIDDEN_COPY_SEGMENTS = Object.freeze([
 export function wrCorpusTruthNotes(): string[] {
   return [
     'HISTORICAL_WR_TOKENIZER_0 = TRAINED_VALIDATED',
-    'CURRENT_WR_TOKENIZER_LANE = NOT_STARTED',
+    'CURRENT_WR_TOKENIZER = WR-TOKENIZER-0',
+    'WR_TOKENIZER_RECONCILIATION = COMPLETE',
+    'WR_TOKENIZER_RECOMMENDATION = KEEP_AND_EXTEND_LATER',
+    'WR_TOKENIZER training = NOT_STARTED',
+    'CURRENT_WR_TOKENIZER_LANE = RECONCILED',
     'HISTORICAL_WRIM_0 = TRAINED_RESEARCH_ARTIFACT',
     'CURRENT_PRODUCTION_WRIM = NOT_IMPLEMENTED',
     'RAEL = NOT_IMPLEMENTED',
