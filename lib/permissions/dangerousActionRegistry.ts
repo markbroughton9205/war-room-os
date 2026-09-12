@@ -102,6 +102,10 @@ export const DANGEROUS_KIND_ALIASES: Readonly<Record<string, CanonicalDangerousK
   NAVIGATION_CONTROL: 'shell_mutating',
   VEHICLE_CONTROL: 'shell_mutating',
   MISSION_EXECUTION: 'agent_spawn',
+  APPROVE_ACTION: 'policy_change',
+  GRANT_PERMISSION: 'policy_change',
+  CHANGE_POLICY: 'policy_change',
+  CHANGE_APPROVAL: 'policy_change',
 })
 
 export function resolveCanonicalDangerousKind(kindOrAlias: string): CanonicalDangerousKind | null {

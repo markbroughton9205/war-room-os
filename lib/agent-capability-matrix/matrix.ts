@@ -318,7 +318,7 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     evidence: 'No-self-escalation: agents cannot approve their own approvals',
   }),
 
-  // —— COUNCIL VALIDATOR ——
+  // —— COUNCIL VALIDATOR (#22 Phase 7) ——
   row({
     id: 'council.validate',
     agentRole: 'COUNCIL_VALIDATOR',
@@ -328,9 +328,10 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     policyAuthority: 'BOUNDED_ALLOWED',
     riskTier: 'TIER_0_READ_OBSERVE',
     approvalRequirement: 'NO_APPROVAL',
-    runtimeStatus: 'IMPLEMENTED',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'PHOENIX/LUMEN challenge+verify roles; session intelligence evidence refs',
+    evidence:
+      '#22 Phase 7: bounded COUNCIL_VALIDATOR validates Council conclusions vs evidence/policy/runtime truth; PHOENIX challenge remains #16 deliberation — not this agent',
   }),
   row({
     id: 'council.authorize.execute',
@@ -343,7 +344,7 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     approvalRequirement: 'COMMANDER_EXPLICIT_APPROVAL',
     runtimeStatus: 'STRUCTURALLY_FORBIDDEN',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'Council recommendation != authorization; Council cannot authorize itself',
+    evidence: 'VALIDATION PASS != EXECUTION AUTHORIZATION; Council/validator cannot authorize itself',
   }),
   row({
     id: 'council.push',

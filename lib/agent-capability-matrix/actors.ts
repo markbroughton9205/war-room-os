@@ -95,7 +95,24 @@ export const ACTOR_INVENTORY: readonly ActorInventoryItem[] = Object.freeze([
       'lib/terra/councilHandoff.ts',
     ],
     notes:
-      '#22 Phase 6 bounded Terra world-state analyst. Query/normalize/correlate Terra evidence only. No action authority. GPS/traffic NOT_IMPLEMENTED. Ascension autonomy OFF. Operational count=5.',
+      '#22 Phase 6 bounded Terra world-state analyst. Query/normalize/correlate Terra evidence only. No action authority. GPS/traffic NOT_IMPLEMENTED. Ascension autonomy OFF.',
+  },
+  {
+    id: 'council_validator',
+    name: 'COUNCIL_VALIDATOR',
+    class: 'EXECUTOR',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    canInvokeTools: true,
+    canSpawnWork: false,
+    canMutateState: false,
+    evidencePaths: [
+      'lib/ascension/council-validator',
+      'app/api/ascension/council-validator/run',
+      'lib/council/session-intelligence',
+      'lib/council/family-deliberation',
+    ],
+    notes:
+      '#22 Phase 7 bounded Council output validator. Validates claims vs evidence/policy/runtime truth. VALIDATED!=AUTHORIZED. Not a Council member. Ascension autonomy OFF. Operational count=6.',
   },
   {
     id: 'commander',

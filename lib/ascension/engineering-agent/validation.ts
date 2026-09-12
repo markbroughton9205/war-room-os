@@ -399,7 +399,8 @@ export async function runEngineeringAgentPhase3Validation(): Promise<{
         '69_remaining_targets_unimplemented',
         !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('ENGINEERING_AGENT' as never) &&
           !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('OPERATIONS_AGENT' as never) &&
-          TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('COUNCIL_VALIDATOR'),
+          !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('COUNCIL_VALIDATOR' as never) &&
+          TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('DATA_CORPUS_AGENT'),
         TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.join(','),
       ),
     )
