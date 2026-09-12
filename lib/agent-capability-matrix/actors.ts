@@ -60,7 +60,25 @@ export const ACTOR_INVENTORY: readonly ActorInventoryItem[] = Object.freeze([
       'lib/war-room/governedAudit.ts',
     ],
     notes:
-      '#22 Phase 4 bounded security evaluator. Safe probes + findings only. No exploit/deploy/remediation execution. Ascension autonomy OFF. Operational count=3.',
+      '#22 Phase 4 bounded security evaluator. Safe probes + findings only. No exploit/deploy/remediation execution. Ascension autonomy OFF.',
+  },
+  {
+    id: 'operations_agent',
+    name: 'OPERATIONS_AGENT',
+    class: 'EXECUTOR',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
+    canInvokeTools: true,
+    canSpawnWork: false,
+    canMutateState: false,
+    evidencePaths: [
+      'lib/ascension/operations-agent',
+      'app/api/ascension/operations-agent/run',
+      'app/api/health/route.ts',
+      'lib/deploy/status.ts',
+      'ops/production-supervisor',
+    ],
+    notes:
+      '#22 Phase 5 bounded operational observer. Read-only health/process/port/watchdog diagnostics. No restart/deploy/kill. Ascension autonomy OFF. Operational count=4.',
   },
   {
     id: 'commander',

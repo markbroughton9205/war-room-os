@@ -184,17 +184,18 @@ export async function runSecurityRedTeamPhase4Validation(): Promise<{
   results.push(check('64_engineering_operational', isEngineeringAgentRuntimeAvailable(), 'ok'))
   results.push(
     check(
-      '65_exactly_3_operational',
-      operationalAscensionAgentCount() === 3 && OPERATIONAL_ASCENSION_AGENTS.length === 3,
+      '65_at_least_3_operational_includes_security',
+      operationalAscensionAgentCount() >= 3 &&
+        OPERATIONAL_ASCENSION_AGENTS.some(a => a.agent_role === 'SECURITY_RED_TEAM_AGENT'),
       String(operationalAscensionAgentCount()),
     ),
   )
   results.push(
     check(
       '66_other_targets_unimplemented',
-      TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('OPERATIONS_AGENT') &&
+      !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('SECURITY_RED_TEAM_AGENT' as never) &&
         TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('TERRA_INTELLIGENCE_AGENT') &&
-        !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('SECURITY_RED_TEAM_AGENT' as never),
+        TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('COUNCIL_VALIDATOR'),
       TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.join(','),
     ),
   )

@@ -74,6 +74,7 @@ export const DANGEROUS_KIND_ALIASES: Readonly<Record<string, CanonicalDangerousK
   APPROVAL_CHANGE: 'policy_change',
   SECRET_CHANGE: 'secrets_change',
   ENVIRONMENT_CHANGE: 'secrets_change',
+  ENV_CHANGE: 'secrets_change',
   CREDENTIAL_EXFILTRATION: 'secrets_change',
   SQL_MUTATION: 'delete_data',
   DATABASE_DESTRUCTIVE_WRITE: 'delete_data',
@@ -81,6 +82,19 @@ export const DANGEROUS_KIND_ALIASES: Readonly<Record<string, CanonicalDangerousK
   MALWARE_PERSISTENCE: 'shell_mutating',
   HOST_PRIVILEGE_ESCALATION: 'shell_mutating',
   EXTERNAL_EXPLOITATION: 'external_account',
+  PROCESS_RESTART: 'shell_mutating',
+  SERVICE_STOP: 'shell_mutating',
+  SERVICE_START: 'shell_mutating',
+  SERVICE_RESTART: 'shell_mutating',
+  PRODUCTION_ROLLBACK: 'deploy',
+  DEV_RESTART: 'shell_mutating',
+  WATCHDOG_CHANGE: 'shell_mutating',
+  TASK_SCHEDULER_CHANGE: 'shell_mutating',
+  CLOUDFLARE_CHANGE: 'deploy',
+  DNS_CHANGE: 'deploy',
+  OLLAMA_CONFIG_CHANGE: 'shell_mutating',
+  FILESYSTEM_DESTRUCTIVE_WRITE: 'delete_data',
+  FINANCIAL_ACTION: 'financial',
 })
 
 export function resolveCanonicalDangerousKind(kindOrAlias: string): CanonicalDangerousKind | null {

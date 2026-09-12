@@ -243,9 +243,10 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     policyAuthority: 'READ_ALLOWED',
     riskTier: 'TIER_0_READ_OBSERVE',
     approvalRequirement: 'SESSION_APPROVAL',
-    runtimeStatus: 'IMPLEMENTED',
+    runtimeStatus: 'IMPLEMENTED_BOUNDED',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'lib/ops/production-supervisor validation; deploy/status probes',
+    evidence:
+      'lib/ascension/operations-agent — read-only diagnostics; lib/ops/production-supervisor validation; deploy/status probes',
   }),
   row({
     id: 'ops.prod.restart',
@@ -256,9 +257,10 @@ export const CANONICAL_CAPABILITY_MATRIX: readonly CapabilityMatrixEntry[] = Obj
     policyAuthority: 'COMMANDER_ONLY',
     riskTier: 'TIER_4_PRODUCTION_DESTRUCTIVE_FINANCIAL_LEGAL',
     approvalRequirement: 'COMMANDER_EXPLICIT_APPROVAL',
-    runtimeStatus: 'IMPLEMENTED',
+    runtimeStatus: 'STRUCTURALLY_FORBIDDEN',
     currentVsTarget: 'CURRENT_RUNTIME',
-    evidence: 'ops/production-supervisor ownership-gated; agents must not restart production autonomously',
+    evidence:
+      'OPERATIONS_AGENT Phase 5 observation-only; ops/production-supervisor ownership-gated for humans; agents must not restart production autonomously',
   }),
   row({
     id: 'ops.deploy',

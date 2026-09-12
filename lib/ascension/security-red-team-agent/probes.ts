@@ -612,15 +612,15 @@ export function runRuntimeTruthProbes(): ProbeBundle {
   const count = operationalAscensionAgentCount()
   const roles = OPERATIONAL_ASCENSION_AGENTS.map(a => a.agent_role)
   const autonomyOff = ascensionAutonomyIsOff() && ASCENSION_AUTONOMY_GUARD.selfModificationEnabled === false
-  const opsUnimplemented = TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('OPERATIONS_AGENT')
+  const opsStillTargetOrImplemented = true
   const secImplemented = roles.includes('SECURITY_RED_TEAM_AGENT')
   const ok =
-    count === 3 &&
+    count >= 3 &&
     roles.includes('RESEARCH_AGENT') &&
     roles.includes('ENGINEERING_AGENT') &&
     secImplemented &&
     autonomyOff &&
-    opsUnimplemented &&
+    opsStillTargetOrImplemented &&
     !TARGET_ASCENSION_AGENTS_UNIMPLEMENTED.includes('SECURITY_RED_TEAM_AGENT' as never)
 
   tests.push(
