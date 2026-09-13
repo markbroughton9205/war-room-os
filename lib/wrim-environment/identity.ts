@@ -1,6 +1,6 @@
 /**
  * #23 Nebula PyTorch/CUDA environment + Stage 0/1 + Stage 2 stability + STAGE3A confirmation.
- * STAGE3A Commander review complete. Training OFF. STAGE3B not authorized. No Ra'el. No promotion.
+ * STAGE3A Commander review complete. Candidate selection complete. Training OFF. STAGE3B not authorized. No Ra'el. No promotion.
  */
 export const WRIM_ENVIRONMENT_RUNTIME_VERSION = 'wrim-environment-v1' as const
 export const WRIM_REBUILD_DESIGN = 'COMPLETE' as const
@@ -47,6 +47,9 @@ export const STAGE3A_REVIEW_STATUS = 'COMPLETE' as const
 export const STAGE3A_CANDIDATE_STATE = 'EVALUATION_CANDIDATE' as const
 export const STAGE3A_CLASSIFICATION = 'B. REVIEW_REQUIRED_CONTINUOUS_DRIFT' as const
 export const STAGE3A_HEALTHY_FOR_CONTINUATION = false as const
+export const STAGE3A_CANDIDATE_SELECTION_STATUS = 'COMPLETE' as const
+export const PREFERRED_STAGE3A_EVALUATION_CANDIDATE = 'STEP50_A0.5' as const
+export const STAGE3A_PREFERRED_KIND = 'TEST_ONLY_MERGE' as const
 export const CONTROLLED_STABILITY_EXPERIMENT_ID = 'WRIM1-NEBULA-CTRL-STAB-000001' as const
 export const PHASE0_STATUS = 'REVIEWED_ACCEPTED' as const
 export const PHASE1_STATUS = 'PHASE1_GREEDY_DETERMINISM_PASS' as const
@@ -54,7 +57,7 @@ export const PHASE2_EXPERIMENT_ID = 'WRIM1-NEBULA-STABILITY-GRID-000001' as cons
 export const PHASE2_STATUS = 'PHASE2_GRID_COMPLETE' as const
 export const CONTROLLED_STABILITY_CLASSIFICATION = 'TEST_ONLY / CONTROLLED_EXPERIMENT / PHASE2_GRID_COMPLETE / INCONCLUSIVE / PHASE3A_COMPLETE / MULTIPLE_FINDINGS' as const
 export const PHASE3A_STATUS = 'PHASE3A_COMPLETE' as const
-export const NEXT_AUTHORIZED_PASS = 'STAGE3A_REVIEW_COMPLETE' as const
+export const NEXT_AUTHORIZED_PASS = 'STAGE3A_CANDIDATE_SELECTION_COMPLETE' as const
 
 export const SMOKE_ARGMAX_ID = 126 as const
 export const SMOKE_ENTROPY = 6.033060550689697 as const

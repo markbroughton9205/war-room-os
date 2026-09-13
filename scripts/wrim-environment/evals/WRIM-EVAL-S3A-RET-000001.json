@@ -1,0 +1,705 @@
+{
+  "suite_id": "WRIM-EVAL-S3A-RET-000001",
+  "suite_version": "1.0.0",
+  "created_at": "2026-09-13T16:00:00+00:00",
+  "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+  "evaluation_only": true,
+  "training_use": "FORBIDDEN",
+  "replaces_cap_eval_0": false,
+  "n_items": 24,
+  "items": [
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-prose-01",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "The mill-pond at Zevorra had iced at the edges, and a single reed stuck through the skin of ice. Lira kept her gloves in her pocket and watched the reed lean, then right itself. She told herself she would wait until the reed leaned once more before",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entropy",
+        "max_token_run"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Invented mill-pond continuation.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-prose-02",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "\"Leave the spindle,\" said Orren, still marking the Ulnara night-ledger. \"I did not bring a spindle,\" Tamsin said, and then, almost to the page,",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entropy"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Invented dialogue turn.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-prose-03",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "On the Mirketh sill sat a cracked thimble, a coil of grey thread, and a chip of green glass. Dust had gathered in the thimble's seam. The glass chip, unlike the thread, did not",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entropy",
+        "max_token_run"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Invented still life.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-fact-01",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "In the Sablecroft primer, a sealed spool is labeled quiet when it holds no dye and is stored on its side. The primer then states that the first handling rule for a quiet spool is to",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Authored workshop definition.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-fact-02",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "The Pellwick stencil tally uses a fixed rule: eight quiet spools fill one tray, and trays are counted only in whole numbers. If a clerk has twenty-four spools, the number of complete trays is",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "3",
+          "three"
+        ],
+        "arithmetic": "24/8=3"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Local arithmetic in the prompt.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-fact-03",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "To close the Mirketh spindle-house, the posted order is: bank the small kiln, latch the pond door, then hang the tin hook on the inner peg. After the kiln is banked, the next required action is to",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "latch",
+          "pond door",
+          "door"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Ordered process stated in the prompt.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-code-01",
+      "category": "CODE",
+      "prompt_text": "def tally_spindles(n):\n    # return n trays if n is a whole number of eights, else 0\n    ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "return"
+        ],
+        "forbid_substrings": [
+          "TOOL=",
+          "<|tool",
+          "function_call"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "code_has_return",
+        "no_tool_markup",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Tiny Python body. Unique function name.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-code-02",
+      "category": "CODE",
+      "prompt_text": "pairs = [(2, 3), (4, 5), (8, 1)]\nclosed = [\n    x * y for (x, y) in pairs if x < 6\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "]"
+        ],
+        "forbid_substrings": [
+          "```",
+          "TOOL="
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "code_closes_bracket",
+        "no_tool_markup",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Close a truncated list comprehension.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-code-03",
+      "category": "CODE",
+      "prompt_text": "spindle_id = ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "TOOL=",
+          "<|tool",
+          "function_call"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "no_tool_markup",
+        "not_empty",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "One-line assignment using bound vocab.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-struct-01",
+      "category": "STRUCTURED_OUTPUT",
+      "prompt_text": "Fill only this object shape and stop. Keys must be pond_id and reed_count. JSON=",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "json_type": "object",
+        "required_keys": [
+          "pond_id",
+          "reed_count"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_required_keys",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Retention-set JSON object. Distinct from the expanded structured suite.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-struct-02",
+      "category": "STRUCTURED_OUTPUT",
+      "prompt_text": "Write two unlabeled assignments using equals, not JSON. pond_id =",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "="
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Retention-set equals assignment, not the key: value suite.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-struct-03",
+      "category": "STRUCTURED_OUTPUT",
+      "prompt_text": "Give a two-field tally as pond_id then a space then reed_count, with no commas.\n",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "not_empty",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Retention-set space-separated pair.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-inst-01",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "Answer with a single English color word and then stop. The color of a clear noon sky is usually",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "mode": "exactly_one_word",
+        "accepted_words": [
+          "blue",
+          "Blue",
+          "BLUE"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "exactly_one_word",
+        "accepted_word",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "One-word color constraint. Not a compass item.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-inst-02",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "Copy this mill stamp once, then halt: PELLWICK-TIN-STAMP",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "span": "PELLWICK-TIN-STAMP"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "contains_exact_span",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Copy a unique stamp. Distinct marker from Stage3.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-inst-03",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "Print these three mill notes separated by slashes only: quiet / sealed / upright",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "span": "quiet"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "contains_exact_span",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Slash-separated tokens, not comma CSV.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-long-01",
+      "category": "LONG_FORM_CONTINUITY",
+      "prompt_text": "Keep telling the same mill-pond story without changing the place-name. Lira waited at Zevorra mill-pond after the reed froze in the ice. The reed kept leaning and righting. She counted the small cracks and decided that if a lamp appeared on the far bank she would",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Zevorra"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "entropy",
+        "max_token_run",
+        "unique_ratio_256"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "256-token narrative continuity.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-long-02",
+      "category": "LONG_FORM_CONTINUITY",
+      "prompt_text": "Continue this spindle-house notice in plain sentences. The Sablecroft primer requires quiet spools to lie on their side. Eight spools fill one tray. Clerks must not unwind a sealed spool at the pond. The next paragraph of the notice explains why the spools stay sealed during",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "entropy",
+        "max_token_run",
+        "unique_ratio_256"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "256-token factual paragraph.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-long-03",
+      "category": "LONG_FORM_CONTINUITY",
+      "prompt_text": "Keep adding helper comments and tiny functions about quiet trays. Stay in Python source.\n\ndef tray_ok(n):\n    return n > 0\n\n# next helper should mention Mirketh\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "TOOL=",
+          "<|tool"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "no_tool_markup",
+        "fingerprint",
+        "max_token_run"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "256-token code-like continuation. Distinct function names from Stage3.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-rep-01",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "Describe the evening close of the Mirketh spindle-house as several different sentences. Mention the small kiln, the pond door, and the tin hook once each, then invent new duties. After the tin hook is hung, the clerk still has to",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "max_token_run",
+        "unique_ratio_256",
+        "entropy"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Watch one-token loops. Distinct from Stage3 closing-order stem.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-rep-02",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "Name distinct mill tools in ordinary sentences without repeating the same tool word over and over. The first tool is a tin hook. The second is a grey thread. After those, the clerk should mention",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "max_token_run",
+        "unique_ratio_256"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Avoid copy-loop of a single noun.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-rep-03",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "Count upward in words from one to eight inside a short notice, then continue in new sentences about the Pellwick stencil. one two three",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "max_token_run",
+        "unique_ratio_256"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Avoid stalling on a single numeral.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-spec-01",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "The tin hook hung from the inner peg and tapped the pond door once. In the morning someone would take it down and",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "special_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8",
+        "special_loop",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Ordinary prose special-token rate.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-spec-02",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "Mention a mill stamp that uses parentheses (like this) and a question at the end of a plain sentence about Ulnara.",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "special_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8",
+        "special_loop",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Delimiter-ish stem without copying Stage3 punctuation prompt.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-RET-000001",
+      "suite_version": "1.0.0",
+      "item_id": "ret-spec-03",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "End the mill notice after one short clause about the tin hook, then stop.",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "special_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "eos_ok_once": true
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "EOS may appear as end, not as a run.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    }
+  ]
+}

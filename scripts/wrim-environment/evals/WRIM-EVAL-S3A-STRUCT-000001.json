@@ -1,0 +1,443 @@
+{
+  "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+  "suite_version": "1.0.0",
+  "created_at": "2026-09-13T16:00:00+00:00",
+  "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+  "evaluation_only": true,
+  "training_use": "FORBIDDEN",
+  "replaces_cap_eval_0": false,
+  "n_items": 15,
+  "items": [
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-json-01",
+      "category": "JSON",
+      "prompt_text": "Emit one object. Required names: mill_id (text) and spool_count (number). Begin now: {",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "json_type": "object",
+        "required_keys": [
+          "mill_id",
+          "spool_count"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_required_keys",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Object with two required keys. Wording distinct from Stage3 JSON stems.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-json-02",
+      "category": "JSON",
+      "prompt_text": "Emit a bracket list holding three mill-tool names as strings, then stop. Begin: [",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "json_type": "array",
+        "min_len": 3,
+        "max_len": 3,
+        "element_type": "str"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_array_len_3",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Array of three strings.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-json-03",
+      "category": "JSON",
+      "prompt_text": "Emit an object whose ready field is true or false and whose note field is null. Begin: {",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "json_type": "object",
+        "required_keys": [
+          "ready",
+          "note"
+        ],
+        "ready_type": "bool",
+        "note_is_null": true
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_bool_null",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Boolean and null tokens.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-kv-01",
+      "category": "KEY_VALUE",
+      "prompt_text": "Write colon lines, not braces. Copy this pattern with any values:\nmill_id: Z1\nspool_count: 8\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "mill_id",
+          "spool_count"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "key_value_lines",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Two key: value lines.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-kv-02",
+      "category": "KEY_VALUE",
+      "prompt_text": "Finish a colon line and stop. Do not open a brace.\ntray_id:",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "tray_id"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "key_value_lines",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Single key continuation.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-kv-03",
+      "category": "KEY_VALUE",
+      "prompt_text": "Colon format only. First line must start ready: and the value must be true or false.\nready:",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "ready"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "key_value_lines",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Boolean-like key/value.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-list-01",
+      "category": "LIST",
+      "prompt_text": "Stack exactly three mill tools as separate lines, each starting with a dash.\n- ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_lines": 3
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "list_lines",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Bullet-like list.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-list-02",
+      "category": "LIST",
+      "prompt_text": "Stack three quiet-spool steps as separate numbered lines.\n1. ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_lines": 3
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "list_lines",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Numbered list.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-list-03",
+      "category": "LIST",
+      "prompt_text": "Add two more mill tools under this stack, one per line:\nhook\nthread\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_lines": 2
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "list_lines",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "List continuation.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-csv-01",
+      "category": "CSV",
+      "prompt_text": "One comma-separated data row in order mill_id then spool_count then ready. No extra words.\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_fields": 3
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "csv_row",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "One CSV row.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-csv-02",
+      "category": "CSV",
+      "prompt_text": "Finish this comma row and stop: Z1,8,",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_fields": 1,
+        "prefix": "Z1,8,"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "csv_row",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "CSV prefix completion.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-csv-03",
+      "category": "CSV",
+      "prompt_text": "After this header print one matching data row:\nmill_id,spool_count\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_fields": 2
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "csv_row",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Header plus row.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-schema-01",
+      "category": "SCHEMA_ADHERENCE",
+      "prompt_text": "Satisfy types mill_id=text, spool_count=number, ready=true/false in one object. Begin: {",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "mill_id",
+          "spool_count",
+          "ready"
+        ],
+        "ready_type": "bool",
+        "spool_type": "number"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "schema_object",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Three-key schema.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-schema-02",
+      "category": "SCHEMA_ADHERENCE",
+      "prompt_text": "Nest a flag. Copy this skeleton if needed: {\"bin\":{\"inner_flag\":true}} then stop.\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "json_type": "object",
+        "required_keys": [
+          "bin"
+        ],
+        "nested_key": "inner_flag"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_nested_outer",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Nested schema. Uses bin not outer to avoid Stage3 nested stem.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-STRUCT-000001",
+      "suite_version": "1.0.0",
+      "item_id": "struct-schema-03",
+      "category": "SCHEMA_ADHERENCE",
+      "prompt_text": "Repair this broken object and emit only the finished object: {\"mill_id\": \"Z1\", \"spool_count\":",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "json_type": "object",
+        "required_keys": [
+          "mill_id",
+          "spool_count"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse_prefix_repair",
+        "json_required_keys",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Prefix-repair schema.",
+      "authorship": "Authored synthetic STAGE3A post-review evaluation stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not used for training.",
+      "created_at": "2026-09-13T16:00:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true
+    }
+  ]
+}

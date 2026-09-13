@@ -22,6 +22,7 @@ export type WrimEnvironmentPaths = {
     stage3TrainDeniedPath: string
     stage3aReportPath: string
     stage3aReviewReportPath: string
+    stage3aSelectionReportPath: string
     checkpointTestOnlyDir: string
     stage2CheckpointDir: string
     controlledStabilityCheckpointDir: string
@@ -55,6 +56,7 @@ export function resolveWrimEnvironmentPaths(dataDirOverride?: string | null): Wr
     stage3TrainDeniedPath: path.join(root, 'stage3-train-denied.json'),
     stage3aReportPath: path.join(root, 'stage3a-report.json'),
     stage3aReviewReportPath: path.join(root, 'stage3a-review.json'),
+    stage3aSelectionReportPath: path.join(root, 'stage3a-candidate-selection.json'),
     checkpointTestOnlyDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-NEBULA-DIAG-000001'),
     stage2CheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-NEBULA-STAB-000001'),
     controlledStabilityCheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'controlled-stability'),

@@ -328,13 +328,44 @@ def score_item(item: dict[str, Any], gen_primary: dict[str, Any], gen32: dict[st
         if "json_array_len_3" in item["scoring_functions"]:
             scores["json_array_len_3"] = bool(valid and isinstance(parsed, list) and len(parsed) == 3 and all(isinstance(x, str) for x in parsed))
         if "json_nested_outer" in item["scoring_functions"]:
-            ok = valid and isinstance(parsed, dict) and isinstance(parsed.get("outer"), dict) and payload.get("nested_key") in parsed.get("outer", {})
+            parent_key = (payload.get("required_keys") or ["outer"])[0]
+            nested = parsed.get(parent_key) if valid and isinstance(parsed, dict) else None
+            ok = isinstance(nested, dict) and payload.get("nested_key") in nested
             scores["json_nested_outer"] = bool(ok)
         if "json_bool_null" in item["scoring_functions"]:
             ok = valid and isinstance(parsed, dict) and isinstance(parsed.get("ready"), bool) and parsed.get("note") is None
             scores["json_bool_null"] = bool(ok)
         if "json_parse_optional" in item["scoring_functions"]:
             scores["json_valid_optional"] = valid
+        if "schema_object" in item["scoring_functions"]:
+            ok = valid and isinstance(parsed, dict) and all(k in parsed for k in (payload.get("required_keys") or []))
+            if ok and payload.get("ready_type") == "bool":
+                ok = isinstance(parsed.get("ready"), bool)
+            if ok and payload.get("spool_type") == "number":
+                ok = isinstance(parsed.get("spool_count"), (int, float)) and not isinstance(parsed.get("spool_count"), bool)
+            scores["schema_object"] = bool(ok)
+    if "key_value_lines" in item["scoring_functions"]:
+        lines = [ln.strip() for ln in text.replace("\r", "").split("\n") if ln.strip()]
+        keys = [k.lower() for k in (payload.get("required_keys") or [])]
+        found = set()
+        for ln in lines:
+            if ":" not in ln:
+                continue
+            left, right = ln.split(":", 1)
+            left = left.strip().lower()
+            right = right.strip()
+            if right and (not keys or left in keys):
+                found.add(left if left else "_")
+        scores["key_value_lines"] = (set(keys).issubset(found) if keys else bool(found))
+    if "list_lines" in item["scoring_functions"]:
+        lines = [ln.strip() for ln in text.replace("\r", "").split("\n") if ln.strip()]
+        min_lines = int(payload.get("min_lines") or 3)
+        scores["list_lines"] = len(lines) >= min_lines
+    if "csv_row" in item["scoring_functions"]:
+        blob = (payload.get("prefix") or "") + text
+        row = blob.replace("\r", "").strip().split("\n")[-1]
+        nfields = len([p for p in row.split(",") if p.strip() != ""])
+        scores["csv_row"] = nfields >= int(payload.get("min_fields") or 2)
     if "exactly_one_word" in item["scoring_functions"]:
         words = re.findall(r"[A-Za-z0-9_\-]+", text)
         scores["exactly_one_word"] = len(words) == 1
