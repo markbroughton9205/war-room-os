@@ -357,7 +357,6 @@ export async function runCouncilLocalContinuityValidation(): Promise<CaseResult[
   results.push(check(
     'CASE 6 network failure is NETWORK_ERROR not NOT_CONFIGURED',
     netSnap.families.chatgpt?.cloudState === 'NETWORK_ERROR'
-      && netSnap.families.chatgpt?.cloudState !== 'NOT_CONFIGURED'
       && netSnap.operationalState === 'DEGRADED_PARTIAL',
     netSnap.families.chatgpt?.uiDetail ?? '',
   ))
@@ -365,8 +364,7 @@ export async function runCouncilLocalContinuityValidation(): Promise<CaseResult[
   results.push(check(
     'CASE 7 network egress independent of research providers',
     classifyNetworkEgress('reachable') === 'AVAILABLE'
-      && classifyResearchProviders({ tavilyConfigured: false, firecrawlConfigured: false, xaiConfigured: false }) === 'CONFIG_NEEDED'
-      && classifyNetworkEgress('reachable') !== 'UNAVAILABLE',
+      && classifyResearchProviders({ tavilyConfigured: false, firecrawlConfigured: false, xaiConfigured: false }) === 'CONFIG_NEEDED',
     'egress vs search config',
   ))
 
