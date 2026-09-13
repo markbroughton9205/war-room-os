@@ -82,6 +82,7 @@ async function withProjectsRoot<T>(fn: (projectsRoot: string) => Promise<T>): Pr
 function testCommandPolicy(): CaseResult[] {
   return [
     check('policy_safe_pnpm_install', classifyArgv('pnpm', ['install']).policyClass === 'SAFE_LOCAL', classifyArgv('pnpm', ['install']).reason),
+    check('policy_dev_server_denied', classifyArgv('pnpm', ['run', 'dev']).policyClass === 'DENIED', classifyArgv('pnpm', ['run', 'dev']).reason),
     check('policy_safe_git_status', classifyArgv('git', ['status']).policyClass === 'SAFE_LOCAL', classifyArgv('git', ['status']).reason),
     check('policy_commit_requires_approval', classifyArgv('git', ['commit', '-m', 'x']).policyClass === 'REQUIRES_APPROVAL', classifyArgv('git', ['commit', '-m', 'x']).reason),
     check('policy_push_requires_approval', classifyArgv('git', ['push']).policyClass === 'REQUIRES_APPROVAL', classifyArgv('git', ['push']).approvalKind === 'push' ? 'push' : 'wrong kind'),

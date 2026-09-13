@@ -7,6 +7,12 @@ import { classifyArgv } from './commandPolicy'
 import { terminalRepoDiff, terminalRepoStatus } from './terminalExecutor'
 import type { NativeValidationOperation } from './types'
 import { isFoundryRole, type FoundryRole } from './foundryRoles'
+import {
+  DEV_SERVER_REQUIREMENT_PASS,
+  isDevPackageScript,
+  isDevServerLaunch,
+  isUnnecessaryDevScriptPackageMutation,
+} from './foundryDevRuntime'
 
 export const FOUNDRY_ACTION_TYPES = [
   'READ_FILE',
@@ -109,6 +115,7 @@ function parseOne(type: FoundryActionType, row: Record<string, unknown>): { ok: 
       const cmd = asString(row.cmd)
       const args = Array.isArray(row.args) ? row.args.map(String) : []
       if (!cmd) return { ok: false, error: 'START_PROCESS requires cmd and args array.' }
+      if (isDevServerLaunch(cmd, args)) return { ok: true, action: { type, cmd, args, label: asString(row.label) || undefined } }
       const policy = classifyArgv(cmd, args)
       if (policy.policyClass !== 'SAFE_LOCAL') return { ok: false, error: policy.reason }
       return { ok: true, action: { type, cmd, args, label: asString(row.label) || undefined } }
@@ -129,7 +136,21 @@ function parseOne(type: FoundryActionType, row: Record<string, unknown>): { ok: 
   }
 }
 
+function skippedDevRuntime(type: FoundryActionType): FoundryActionResult {
+  return {
+    ok: true,
+    type,
+    detail: DEV_SERVER_REQUIREMENT_PASS,
+    result: { skipped: true, packageJsonUnchanged: true, devRuntimeRequired: false, requirement: 'PASS' },
+  }
+}
+
 export async function executeFoundryAction(action: FoundryAction, ctx: { repairId: string }): Promise<FoundryActionResult> {
+  if (isUnnecessaryDevScriptPackageMutation(action)) return skippedDevRuntime(action.type)
+  if (action.type === 'START_PROCESS' && isDevServerLaunch(action.cmd, action.args)) return skippedDevRuntime(action.type)
+  if ((action.type === 'RUN_COMMAND' || action.type === 'RUN_VALIDATION') && isDevPackageScript(action.operation)) {
+    return skippedDevRuntime(action.type)
+  }
   switch (action.type) {
     case 'READ_FILE': {
       const result = await executeEngineerTool({ tool: 'file.read', input: { path: action.path } }, ctx)

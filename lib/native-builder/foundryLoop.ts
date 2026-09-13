@@ -33,7 +33,8 @@ Rules:
 - DELETE_FILE is rejected unless commanderConfirmed is true.
 - Never git commit, push, or deploy.
 - After source files exist, include RUN_VALIDATION {"operation":{"id":"node_test"}}.
-- COMPLETE_MISSION only after tests passed.`
+- COMPLETE_MISSION only after tests passed.
+- DEV_TOOLING_PRESENT is not DEV_RUNTIME_REQUIRED. A package.json "dev" / "next dev" / port 3001 script may exist. Do not patch package.json to remove it. Do not start next/pnpm/npm/yarn dev. Installed War Room Foundry runs on 127.0.0.1:3848 with relative /api paths.`
 
 function failureSig(results: NativeValidationResult[]): string {
   return results.filter(r => !r.ok).map(r => `${r.operation.id}:${r.exitCode}:${(r.stderr || r.stdout).slice(0, 200)}`).join('|') || 'ok'
@@ -221,7 +222,10 @@ If you cannot finish, ASK_SPECIALIST.`
       }
       const executed = await runAction(repairId, sessionId, role, action)
       lastObservation = executed.detail
-      if (action.type === 'RUN_VALIDATION' || action.type === 'RUN_COMMAND') {
+      const skipped = Boolean(
+        executed.result && typeof executed.result === 'object' && 'skipped' in executed.result && (executed.result as { skipped?: boolean }).skipped,
+      )
+      if ((action.type === 'RUN_VALIDATION' || action.type === 'RUN_COMMAND') && !skipped) {
         testsPassed = executed.ok
         const latest = await getRepair(repairId)
         const sig = failureSig(latest?.validationResults ?? [])
@@ -295,15 +299,20 @@ async function runAction(repairId: string, sessionId: string | undefined, role: 
   const record = await getRepair(repairId)
   if (record?.codingMission) {
     const current = record.codingMission
+    const skipped =
+      Boolean(executed.result && typeof executed.result === 'object' && 'skipped' in executed.result && (executed.result as { skipped?: boolean }).skipped)
     const filesChanged =
-      executed.ok && (action.type === 'CREATE_FILE' || action.type === 'PATCH_FILE')
+      executed.ok &&
+      !skipped &&
+      (action.type === 'CREATE_FILE' || action.type === 'PATCH_FILE')
         ? [...new Set([...current.filesChanged, action.path])]
         : current.filesChanged
     const commandsExecuted =
-      action.type === 'RUN_VALIDATION' || action.type === 'RUN_COMMAND'
+      !skipped && (action.type === 'RUN_VALIDATION' || action.type === 'RUN_COMMAND')
         ? [...current.commandsExecuted, action.type]
         : current.commandsExecuted
     const validationResults =
+      !skipped &&
       (action.type === 'RUN_VALIDATION' || action.type === 'RUN_COMMAND') && executed.result && typeof executed.result === 'object' && 'operation' in executed.result
         ? [...(record.validationResults ?? []), executed.result as NativeValidationResult]
         : record.validationResults

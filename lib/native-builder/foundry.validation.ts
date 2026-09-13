@@ -16,6 +16,8 @@ import { parseDirectRoleMention, selectSpecialists } from '@/lib/native-builder/
 import { pickLocalCoderModel, resolveLocalCoder, extractJsonObject } from '@/lib/native-builder/localCoder'
 import { createFoundrySession, getFoundrySession, appendFoundryChat, listFoundrySessions } from '@/lib/native-builder/foundrySessions'
 import { classifyArgv } from '@/lib/native-builder/commandPolicy'
+import { validatePatchPolicy } from '@/lib/native-builder/patchPolicy'
+import { classifyDevRuntime, isDevServerLaunch, isUnnecessaryDevScriptPackageMutation } from '@/lib/native-builder/foundryDevRuntime'
 import type { NativeCodingMissionState } from '@/lib/native-builder/types'
 
 const execFileAsync = promisify(execFile)
@@ -63,6 +65,63 @@ function unitTests(): CaseResult[] {
     check('action_04_start_process_denied', !parsedRm.ok, parsedRm.ok ? 'accepted rm' : parsedRm.error),
     check('coder_01_prefers_qwen_coder', pickLocalCoderModel(['huihui_ai/qwen3-abliterated:14b', 'qwen2.5-coder:14b'], 'BUILDER') === 'qwen2.5-coder:14b', 'ok'),
     check('coder_02_json_extract', extractJsonObject('noise ```json\n{"a":1}\n```')?.a === 1, 'ok'),
+  ]
+}
+
+function devRuntimeUnitTests(): CaseResult[] {
+  const pkgPatch = parseFoundryActions({
+    role: 'BUILDER',
+    summary: 'remove the next dev script so Commander testing does not use a development server',
+    actions: [{
+      type: 'PATCH_FILE',
+      path: 'package.json',
+      matchText: '"dev": "next dev --port 3001"',
+      replacementText: '',
+      reason: 'dev script conflicts with no development server',
+    }],
+  })
+  const verdict = classifyDevRuntime({
+    productionRouteOn3848: true,
+    relativeFoundryApis: true,
+    installedSpawnsNextDev: false,
+    installedSpawnsPort3001: false,
+    missionRequiresPort3001: false,
+  })
+  const warRoomPkg = validatePatchPolicy({
+    issueId: 'foundry-dev-runtime',
+    sourceKind: 'deterministic',
+    proposerId: 'test',
+    diagnosis: 'x',
+    confidence: 'high',
+    relevantFiles: ['package.json'],
+    plannedChanges: [{
+      file: 'package.json',
+      reason: 'x',
+      operation: 'replace_range',
+      patch: { operation: 'replace_range', file: 'package.json', expectedOriginalHash: 'x', matchText: 'a', replacementText: 'b' },
+    }],
+    validations: [],
+    risks: [],
+    rollbackPlan: 'none',
+    generatedAt: new Date().toISOString(),
+  }, 'war_room_repair')
+  return [
+    check('dev_01_tooling_not_runtime', verdict.requirement === 'PASS' && verdict.runtimeRequired === false, verdict.detail),
+    check(
+      'dev_02_skips_package_json_dev_patch',
+      pkgPatch.ok && isUnnecessaryDevScriptPackageMutation(pkgPatch.actions[0]),
+      pkgPatch.ok ? pkgPatch.actions[0].type : pkgPatch.error,
+    ),
+    check('dev_03_denies_pnpm_run_dev', classifyArgv('pnpm', ['run', 'dev']).policyClass === 'DENIED', classifyArgv('pnpm', ['run', 'dev']).reason),
+    check('dev_04_denies_next_dev', classifyArgv('next', ['dev', '--port', '3001']).policyClass === 'DENIED', classifyArgv('next', ['dev', '--port', '3001']).reason),
+    check('dev_05_still_allows_pnpm_install', classifyArgv('pnpm', ['install']).policyClass === 'SAFE_LOCAL', classifyArgv('pnpm', ['install']).reason),
+    check(
+      'dev_06_path_denylist_unchanged',
+      !warRoomPkg.ok && warRoomPkg.violations.some(v => v.rule === 'path_denylist'),
+      JSON.stringify(warRoomPkg.violations),
+    ),
+    check('dev_07_not_dev_server_launch', isDevServerLaunch('node', ['server.mjs']) === false, 'ok'),
+    check('dev_08_is_dev_server_launch', isDevServerLaunch('pnpm', ['dev']) === true, 'ok'),
   ]
 }
 
@@ -206,6 +265,7 @@ async function run(): Promise<void> {
     for (const r of batch) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name} ${r.detail}`)
   }
   add(unitTests())
+  add(devRuntimeUnitTests())
   add(await testCloudOffStatus())
   add(await testSessions())
   add(await testExistingAndPersistence())

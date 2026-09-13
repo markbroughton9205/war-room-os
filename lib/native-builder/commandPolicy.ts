@@ -61,6 +61,17 @@ export function classifyArgv(cmd: string, args: readonly string[]): ClassifiedCo
   if ((base === 'pnpm' || base === 'npm' || base === 'yarn') && args[0] === 'install') {
     return { policyClass: 'SAFE_LOCAL', reason: 'Workspace-local dependency install.' }
   }
+  const tokens = args.map(a => a.toLowerCase())
+  const launchesDevServer =
+    (base === 'next' && tokens.includes('dev')) ||
+    (base === 'npx' && tokens.includes('next') && tokens.includes('dev')) ||
+    ((base === 'pnpm' || base === 'npm' || base === 'yarn') && (tokens[0] === 'dev' || (tokens[0] === 'run' && tokens[1] === 'dev')))
+  if (launchesDevServer) {
+    return {
+      policyClass: 'DENIED',
+      reason: 'A package.json dev script may exist as tooling. Foundry must not launch next/pnpm/npm/yarn dev or port 3001. Installed War Room uses production UI :3848.',
+    }
+  }
   if (base === 'pnpm' || base === 'npm' || base === 'yarn' || base === 'node' || base === 'npx') {
     return { policyClass: 'SAFE_LOCAL', reason: 'Workspace-local Node toolchain command.' }
   }
