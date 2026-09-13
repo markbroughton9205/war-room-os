@@ -1,0 +1,1108 @@
+{
+  "suite_id": "WRIM-EVAL-S3-000001",
+  "suite_version": "1.0.0",
+  "status": "AUTHORED_FROZEN",
+  "kind": "VERSIONED_EVALUATION_SUITE",
+  "classification": [
+    "VERSIONED_EVALUATION_SUITE",
+    "STAGE3_PRETRAINING_BASELINE"
+  ],
+  "n_items": 35,
+  "n_categories": 7,
+  "items_per_category": 5,
+  "categories": [
+    "LITERARY_PROSE",
+    "FACTUAL_PROSE",
+    "CODE",
+    "JSON_STRUCTURED_OUTPUT",
+    "INSTRUCTION_FOLLOWING",
+    "LONG_FORM_CONTINUITY",
+    "SPECIAL_TOKEN_STABILITY"
+  ],
+  "generation_mode": "greedy_argmax",
+  "do_not_collapse_to_one_score": true,
+  "historical_32_binary": "COMPATIBILITY_ONLY",
+  "items": [
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-lit-01",
+      "category": "LITERARY_PROSE",
+      "axis": "A",
+      "prompt_text": "The lantern on Kelvarre quay had gone out, and the tide slapped the pilings as if counting. Mara stood with both hands in her coat and watched a single rope lift, then fall. She told herself she would wait one more minute before",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "greedy_256_descriptive",
+        "fingerprint",
+        "entropy",
+        "max_token_run",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "Outdoor quay continuation. No gold continuation.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "5d628c227ca8ad13a47f27f55f54f6e2bfe77e1b641f742bfc817bd9a772e75b"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-lit-02",
+      "category": "LITERARY_PROSE",
+      "axis": "A",
+      "prompt_text": "He kept the unsent letter in the inner pocket, where the paper had gone soft at the fold. Each time he reached for a coin he felt the crease and remembered the sentence he had not finished: I am still",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "greedy_256_descriptive",
+        "fingerprint",
+        "entropy",
+        "max_token_run",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "Interior psychological beat. No gold continuation.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "67179f4f832edd7f3ec28d48de49f0fb9e09b1ba05f9078d93eb268eac82514b"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-lit-03",
+      "category": "LITERARY_PROSE",
+      "axis": "A",
+      "prompt_text": "\"You can leave the crate,\" said Nessa, without looking up from the ledger. \"I did not ask for the crate,\" Tomas answered, and then, more quietly,",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "greedy_256_descriptive",
+        "fingerprint",
+        "entropy",
+        "max_token_run",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "Dialogue turn. No gold continuation.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "26d79dbe02bab6e20fc07c69928592154398992d287b042508e20692ad5f8509"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-lit-04",
+      "category": "LITERARY_PROSE",
+      "axis": "A",
+      "prompt_text": "By late afternoon the kiln yard at Noxhollow had gone blue at the edges. The last cart rattled out, and the brick stacks held the day's heat. When the bell finally rang, it meant only that",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "greedy_256_descriptive",
+        "fingerprint",
+        "entropy",
+        "max_token_run",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "Time-of-day transition. No gold continuation.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "7fd11396df26809e9bf23e0984f37e8b1b2bbd5cad797fdd904de7b927a28e2e"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-lit-05",
+      "category": "LITERARY_PROSE",
+      "axis": "A",
+      "prompt_text": "On the windowsill sat a cracked saucer, a coil of green twine, and a pebble with a pale ring around it. Dust had settled in the saucer's hairline fracture. The pebble, unlike the twine, did not",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "greedy_256_descriptive",
+        "fingerprint",
+        "entropy",
+        "max_token_run",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "Object still life. No gold continuation.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "d21017cfac5ced85e5ad88208bc504d76df607de4ef4140766fcf9bf687e2426"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-fact-01",
+      "category": "FACTUAL_PROSE",
+      "axis": "B",
+      "prompt_text": "In the Quindle assay primer, a sealed vial is labeled inert when it contains no reactive reagent and is stored upright. The primer then states that the first handling rule for an inert vial is to",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "greedy_256_descriptive",
+        "fingerprint",
+        "entropy",
+        "max_token_run"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Authored workshop definition, not an internet fact lookup.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "6cd21f38fff7913dcfb3fd52c5b36abcad7adb828b3790ff906250812f18d023"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-fact-02",
+      "category": "FACTUAL_PROSE",
+      "axis": "B",
+      "prompt_text": "The Kelvarre crate tally uses a fixed rule: twelve sealed vials fill one crate, and crates are counted only in whole numbers. If a clerk has thirty-six vials, the number of complete crates is",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "3",
+          "three"
+        ],
+        "unit": "crates",
+        "arithmetic": "36/12=3"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Local arithmetic in the prompt. Constraint is not a gold literary continuation.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "619dcf117a58cac46cbfd369ffe189b863252a4200d1b11c276ed3528bf3903c"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-fact-03",
+      "category": "FACTUAL_PROSE",
+      "axis": "B",
+      "prompt_text": "Because the Noxhollow kiln vent was blocked, smoke gathered under the roof beams. The immediate physical result of that blockage, according to the yard notice, was that",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "greedy_256_descriptive",
+        "fingerprint",
+        "entropy"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Cause-then-effect in an authored setting.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "80c45dc0034de6e7ceb7e105a4d38fec647c7268f7c32352737c3a38a97d73a8"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-fact-04",
+      "category": "FACTUAL_PROSE",
+      "axis": "B",
+      "prompt_text": "The Harbor Ledger of Kelvarre lists the assay office as a stone building on the north quay, not as a government of a living country. The ledger's next line after the address is expected to name",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Invented institution. No live geography required.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "1e1d648fcc4b2e6d79c6ed18e25dd2400d6676e480af55686074754f3669fed6"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-fact-05",
+      "category": "FACTUAL_PROSE",
+      "axis": "B",
+      "prompt_text": "To close the Quindle workshop for the night, the posted order is: bank the kiln, latch the quay door, then hang the brass tag on the inner hook. After the kiln is banked, the next required action is to",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "latch",
+          "quay door",
+          "door"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Ordered process stated in the prompt.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "452c10a4e6521f0271acbb568295fd7814d509d9dcdd5a36a53f0945848e465b"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-code-01",
+      "category": "CODE",
+      "axis": "B",
+      "prompt_text": "def tally_quayside(n):\n    # return n crates if n is a whole number of dozens, else 0\n    ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "return"
+        ],
+        "forbid_substrings": [
+          "TOOL=",
+          "<|tool",
+          "function_call"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "code_has_return",
+        "no_tool_markup",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Tiny Python body completion. Unique function name.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "448800794badb5d2d5bb04bcfaef44863fd8e326f80d58f923ce8ce85ede51d9"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-code-02",
+      "category": "CODE",
+      "axis": "B",
+      "prompt_text": "pairs = [(1, 2), (3, 4), (5, 6)]\nclosed = [\n    x + y for (x, y) in pairs if x < 4\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "]"
+        ],
+        "forbid_substrings": [
+          "```",
+          "TOOL="
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "code_closes_bracket",
+        "no_tool_markup",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Close a truncated list comprehension.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "27b75924c3be0ae8a83ed534c7e19466403fa697008e737a8f7d6dd0a61c4a06"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-code-03",
+      "category": "CODE",
+      "axis": "B",
+      "prompt_text": "# mark the crate as sealed then increment the count\nsealed = True\ncount = count",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "+",
+          "+=",
+          "= count +"
+        ],
+        "forbid_substrings": [
+          "TOOL="
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any",
+        "no_tool_markup",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Comment-then-code increment.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "2b4351f3c7356b967f0ae3346c2899602f2ea778e83edda46bdf50e14e0c9939"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-code-04",
+      "category": "CODE",
+      "axis": "B",
+      "prompt_text": "quay_id = ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "TOOL=",
+          "<|",
+          "function_call"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "no_tool_markup",
+        "fingerprint",
+        "not_empty"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "One-line assignment using bound vocab.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "1410ae90bc5e9ce161569b948e9980da2bd69d152e602d57a027154300cbb127"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-code-05",
+      "category": "CODE",
+      "axis": "B",
+      "prompt_text": "print(\"kelvarre-ok\")\n# continue in source text only; do not emit tool markup\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "TOOL=",
+          "<|tool",
+          "function_call",
+          "<|assistant"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "no_tool_markup",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "TOOL_USE refusal / stay in source.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "71cd492fa375f112576b97aac16f00e9a65979b6ba488f1014526c506f072451"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-json-01",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "axis": "D",
+      "prompt_text": "Return only a JSON object with exactly these keys: quay_id, crate_count. quay_id is a string. crate_count is a number. JSON=",
+      "reference_type": "SCHEMA",
+      "reference_payload": {
+        "json_type": "object",
+        "required_keys": [
+          "quay_id",
+          "crate_count"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_required_keys",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Object with two required keys. No gold object.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "3962b6a14dcd0e5ad26b4bcd0eda688f79da364aaecbce8b6e84bf090cd307ba"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-json-02",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "axis": "D",
+      "prompt_text": "Return only a JSON array of exactly three strings naming quay tools. JSON=",
+      "reference_type": "SCHEMA",
+      "reference_payload": {
+        "json_type": "array",
+        "min_len": 3,
+        "max_len": 3,
+        "element_type": "str"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_array_len_3",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Array of three strings.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "292b511b8d31602ab64179e09f0a7cbad57b0db8b710c25cb825a7b05216272e"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-json-03",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "axis": "D",
+      "prompt_text": "Return only a JSON object {\"outer\": {\"inner_flag\": true}}. You may copy that shape. JSON=",
+      "reference_type": "SCHEMA",
+      "reference_payload": {
+        "json_type": "object",
+        "required_keys": [
+          "outer"
+        ],
+        "nested_key": "inner_flag"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_nested_outer",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "One-level nested object.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "b2fb59f7bdfd643c8e3136129bec5fe996600f0efda1d6c1f9f6231b6d156366"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-json-04",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "axis": "D",
+      "prompt_text": "Return only a JSON object with keys ready and note. ready must be a boolean. note must be null. JSON=",
+      "reference_type": "SCHEMA",
+      "reference_payload": {
+        "json_type": "object",
+        "required_keys": [
+          "ready",
+          "note"
+        ],
+        "ready_type": "bool",
+        "note_is_null": true
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_bool_null",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Boolean and null tokens.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "ff5aad6b146278653b9b1faac4e21402ada461018053d47b34e3089ba69f2833"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-json-05",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "axis": "D",
+      "prompt_text": "Complete this truncated JSON object and return only valid JSON: {\"quay_id\": \"K1\", \"crate_count\":",
+      "reference_type": "SCHEMA",
+      "reference_payload": {
+        "json_type": "object",
+        "required_keys": [
+          "quay_id",
+          "crate_count"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse_prefix_repair",
+        "json_required_keys",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Repair-from-prefix. Combine prompt+continuation for parse.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "bc908f51ad283162eb839eaa999290003df9ecb5dcf0d7284b10a1599cf46890"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-inst-01",
+      "category": "INSTRUCTION_FOLLOWING",
+      "axis": "B",
+      "prompt_text": "Reply with exactly one word and nothing else. The compass direction opposite west is",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "mode": "exactly_one_word",
+        "accepted_words": [
+          "east",
+          "East",
+          "EAST"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "exactly_one_word",
+        "accepted_word",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Deterministic one-word constraint.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "08c32843f14fea4c88ff1af03ced280f95f4d0da9790cde9cf1405d8a06d45ff"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-inst-02",
+      "category": "INSTRUCTION_FOLLOWING",
+      "axis": "B",
+      "prompt_text": "Repeat the quoted marker exactly, then stop. Marker: \"KELVARRE-QUAY-MARKER\"",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "mode": "repeat_span",
+        "span": "KELVARRE-QUAY-MARKER"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "contains_exact_span",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Repeat a unique quoted span.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "b879da8effac880cc23e4a2014c9ab1382d286471bbce713dd80f9516ed931c8"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-inst-03",
+      "category": "INSTRUCTION_FOLLOWING",
+      "axis": "B",
+      "prompt_text": "Output exactly three comma-separated tokens and nothing else: alpha, bravo, charlie",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "mode": "three_csv",
+        "tokens": [
+          "alpha",
+          "bravo",
+          "charlie"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "three_csv",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Three comma-separated tokens.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "3479245cb931705f6cc41e7b7d9237b4dced01a2abb56a55cd9f35178917d121"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-inst-04",
+      "category": "INSTRUCTION_FOLLOWING",
+      "axis": "B",
+      "prompt_text": "Continue in lowercase English only, with no digits. the crate on kelvarre quay is",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "mode": "lowercase_no_digits"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "lowercase_no_digits",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Register constraint.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "eff41e3827fbdb01c4f76e872be696ec4a6ae28e4b477f020d9dcf9afff5a39c"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-inst-05",
+      "category": "INSTRUCTION_FOLLOWING",
+      "axis": "B",
+      "prompt_text": "Write one ordinary sentence about a brass tag. Do not emit chat markup or special control words.",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "mode": "no_markup",
+        "forbid_substrings": [
+          "<|",
+          "TOOL=",
+          "```",
+          "<assistant"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "scoring_functions": [
+        "greedy_32",
+        "no_tool_markup",
+        "special_rate_0_8",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "No special-token / chat-template emission.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "2124d4e939ffbc334e164e4183aa5cee4e10d9aa228ee7cb5842405fe4b1fde0"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-long-01",
+      "category": "LONG_FORM_CONTINUITY",
+      "axis": "C",
+      "prompt_text": "Keep telling the same quay-night story without changing the place-name. Mara waited on Kelvarre quay after the lantern failed. The rope kept lifting and falling. She counted the slaps of water and decided that if a lamp appeared on the far slip she would",
+      "reference_type": "NONE",
+      "reference_payload": {
+        "track_entity": "Kelvarre"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "entropy",
+        "max_token_run",
+        "unique_ratio_256",
+        "special_rate_0_8",
+        "period_probability"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "256-token narrative continuity. No gold continuation.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "d11563273439e89fe84094f351f2bee090693546fcdc09049d95cb34ac7937cf"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-long-02",
+      "category": "LONG_FORM_CONTINUITY",
+      "axis": "C",
+      "prompt_text": "Continue this workshop notice in plain sentences. The Quindle assay primer requires inert vials to stand upright. Twelve vials fill one crate. Clerks must not open a sealed vial on the quay. The next paragraph of the notice explains why the vials stay sealed during",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "entropy",
+        "max_token_run",
+        "unique_ratio_256",
+        "period_probability"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "256-token factual paragraph.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "785c3db8655e993e0a08d5fa8aecfd0f44ed969608b99063eaab72b9b6d3f077"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-long-03",
+      "category": "LONG_FORM_CONTINUITY",
+      "axis": "C",
+      "prompt_text": "Continue this Python module in source text. Do not start a new markdown fence.\n\ndef tally_quayside(n):\n    if n % 12 != 0:\n        return 0\n    return n // 12\n\n# additional helper for sealed crates\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "TOOL=",
+          "<|tool"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "no_tool_markup",
+        "fingerprint",
+        "max_token_run",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "256-token code-like indent continuation.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "91a2bfb506472b6d585dd193cf9425f97b670364bc7672160ff9274192f77034"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-long-04",
+      "category": "LONG_FORM_CONTINUITY",
+      "axis": "C",
+      "prompt_text": "Continue the closing-order as prose, not as a repeating loop of one word. First bank the kiln. Then latch the quay door. Then hang the brass tag. After those three actions the night clerk must still",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "max_token_run",
+        "unique_ratio_256",
+        "entropy"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "256-token ordered prose; watch one-token loops.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "acfedb237666b88d254b5a9298f681faf05677f9a46a1f1607ccf9480edf7cb7"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-long-05",
+      "category": "LONG_FORM_CONTINUITY",
+      "axis": "C",
+      "prompt_text": "Begin as if completing a JSON object, then if the JSON fails continue in prose about the same crate. {\"quay_id\": \"K1\", \"note\":",
+      "reference_type": "NONE",
+      "reference_payload": {
+        "also_try_json_parse": true
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "json_parse_optional",
+        "fingerprint",
+        "max_token_run",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "256-token JSON-ish then recover.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "7098bd3666b6e5b5f854b043c210e24a1316e0283426f4eb6176658f57244cfc"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-spec-01",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "axis": "A+C",
+      "prompt_text": "The brass tag hung from the inner hook and tapped the door once. In the morning someone would take it down and",
+      "reference_type": "NONE",
+      "reference_payload": {
+        "special_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8",
+        "special_loop",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "Ordinary prose special-token rate vs frozen parent.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "ad0733d0a4ba8c55b70160dfdc8bb860575462c7505046758625f3052897cded"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-spec-02",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "axis": "A+C",
+      "prompt_text": "Copy the punctuation only as prose, not as control tokens: quotes \"like this\", braces {and}, and a trailing question?",
+      "reference_type": "NONE",
+      "reference_payload": {
+        "special_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8",
+        "special_loop",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "Delimiter-heavy stem.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "a369c37280169844f3ddeb288a3a711699239e124e6d69adfb722b85ac6e4e37"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-spec-03",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "axis": "A+C",
+      "prompt_text": "The crate stencil read 12 then 36 then 108. A clerk adding those three numbers in order would write",
+      "reference_type": "NONE",
+      "reference_payload": {
+        "special_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8",
+        "special_loop",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "Digit-heavy stem; watch pad/unk loops.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "8ecdd8c14d690fc8e844911b2b3a11a4557e0a3ad0e6f73ec8d4152b8a851093"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-spec-04",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "axis": "A+C",
+      "prompt_text": "Go.",
+      "reference_type": "NONE",
+      "reference_payload": {
+        "special_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "short_stem": true
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8",
+        "special_loop",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits",
+        "no_special_loop"
+      ],
+      "notes": "Short stem. Must not dump special IDs 0-8 as content.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "7708db6bbe044d6376419709cf13f3ba5ba1fbed7f8d2511ddbd0557d509d14b"
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3-000001",
+      "suite_version": "1.0.0",
+      "item_id": "s3-spec-05",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "axis": "A+C",
+      "prompt_text": "End the quay notice after one short clause about the brass tag, then stop.",
+      "reference_type": "NONE",
+      "reference_payload": {
+        "special_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "eos_ok_once": true
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8",
+        "eos_run",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "EOS may appear as end, not as a run.",
+      "authorship": "Authored synthetic Stage 3 pretraining evaluation stems. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0.",
+      "created_at": "2026-09-13T12:28:00+00:00",
+      "content_hash": "6289178956dc21ea63f0c9a88016efb13ae2ec85aa985d3884859f4c143b885b"
+    }
+  ],
+  "suite_hash": "934ff60bcd179ec643257fbfaa30f2a3a7621b175fc7d3c3d0efc30d946d5ac4"
+}

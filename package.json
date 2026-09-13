@@ -108,6 +108,8 @@
     "phase3a:wrim-interpolation": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-wrim-phase3a-interpolation.mjs",
     "validate:wrim-controlled-stability": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wrim-environment/wrimControlledStability.validation.ts",
     "validate:wrim-stage3-design": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wrim-environment/wrimStage3Design.validation.ts",
+    "validate:wrim-stage3-eval-baseline": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/wrim-environment/wrimStage3EvalBaseline.validation.ts",
+    "phase3eval:wrim-s3-baseline": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-wrim-stage3-eval-baseline.mjs",
     "import:wr-tokenizer": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-wr-tokenizer-import.mjs",
     "prepare:desktop-runtime": "node scripts/prepare-desktop-runtime.mjs",
     "desktop:dist": "npm --prefix desktop run dist",

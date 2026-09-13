@@ -16,7 +16,8 @@ export type WrimEnvironmentPaths = {
   phase0ReportPath: string
   phase1HarnessPath: string
   phase2ReportPath: string
-  phase3aReportPath: string
+    phase3aReportPath: string
+    stage3EvalBaselinePath: string
   checkpointTestOnlyDir: string
   stage2CheckpointDir: string
   controlledStabilityCheckpointDir: string
@@ -43,6 +44,7 @@ export function resolveWrimEnvironmentPaths(dataDirOverride?: string | null): Wr
     phase1HarnessPath: path.join(root, 'harness-determinism.json'),
     phase2ReportPath: path.join(root, 'phase2-report.json'),
     phase3aReportPath: path.join(root, 'phase3a-report.json'),
+    stage3EvalBaselinePath: path.join(root, 'wrim-eval-s3-000001-wrim0-baseline.json'),
     checkpointTestOnlyDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-NEBULA-DIAG-000001'),
     stage2CheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-NEBULA-STAB-000001'),
     controlledStabilityCheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'controlled-stability'),

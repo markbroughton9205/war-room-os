@@ -1,0 +1,220 @@
+{
+  "ok": true,
+  "n_items": 35,
+  "n_haystacks": 10355,
+  "blocking_item_ids": [],
+  "per_item": [
+    {
+      "item_id": "s3-lit-01",
+      "category": "LITERARY_PROSE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-lit-02",
+      "category": "LITERARY_PROSE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-lit-03",
+      "category": "LITERARY_PROSE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-lit-04",
+      "category": "LITERARY_PROSE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-lit-05",
+      "category": "LITERARY_PROSE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-fact-01",
+      "category": "FACTUAL_PROSE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-fact-02",
+      "category": "FACTUAL_PROSE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-fact-03",
+      "category": "FACTUAL_PROSE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-fact-04",
+      "category": "FACTUAL_PROSE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-fact-05",
+      "category": "FACTUAL_PROSE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-code-01",
+      "category": "CODE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-code-02",
+      "category": "CODE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-code-03",
+      "category": "CODE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-code-04",
+      "category": "CODE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-code-05",
+      "category": "CODE",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-json-01",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-json-02",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-json-03",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-json-04",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-json-05",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-inst-01",
+      "category": "INSTRUCTION_FOLLOWING",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-inst-02",
+      "category": "INSTRUCTION_FOLLOWING",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-inst-03",
+      "category": "INSTRUCTION_FOLLOWING",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-inst-04",
+      "category": "INSTRUCTION_FOLLOWING",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-inst-05",
+      "category": "INSTRUCTION_FOLLOWING",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-long-01",
+      "category": "LONG_FORM_CONTINUITY",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-long-02",
+      "category": "LONG_FORM_CONTINUITY",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-long-03",
+      "category": "LONG_FORM_CONTINUITY",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-long-04",
+      "category": "LONG_FORM_CONTINUITY",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-long-05",
+      "category": "LONG_FORM_CONTINUITY",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-spec-01",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-spec-02",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-spec-03",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-spec-04",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "blocking": false,
+      "top_hits": []
+    },
+    {
+      "item_id": "s3-spec-05",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "blocking": false,
+      "top_hits": []
+    }
+  ],
+  "note": "Incidental short common phrases are not blocking unless exact/80% contiguous 13-gram coverage of a span >= 20 chars.",
+  "stage3_streams": "NOT_MATERIALIZED; corpus0/1 train+val cover the future mix."
+}

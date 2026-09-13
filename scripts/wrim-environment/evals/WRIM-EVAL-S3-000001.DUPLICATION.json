@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "blocking_pairs": [],
+  "flagged_pairs": [],
+  "per_category": {
+    "LITERARY_PROSE": {
+      "n": 5,
+      "mean_pairwise_char13_jaccard": 0.000513
+    },
+    "FACTUAL_PROSE": {
+      "n": 5,
+      "mean_pairwise_char13_jaccard": 0.00027
+    },
+    "CODE": {
+      "n": 5,
+      "mean_pairwise_char13_jaccard": 0.0
+    },
+    "JSON_STRUCTURED_OUTPUT": {
+      "n": 5,
+      "mean_pairwise_char13_jaccard": 0.043725
+    },
+    "INSTRUCTION_FOLLOWING": {
+      "n": 5,
+      "mean_pairwise_char13_jaccard": 0.003623
+    },
+    "LONG_FORM_CONTINUITY": {
+      "n": 5,
+      "mean_pairwise_char13_jaccard": 0.000458
+    },
+    "SPECIAL_TOKEN_STABILITY": {
+      "n": 5,
+      "mean_pairwise_char13_jaccard": 0.0
+    }
+  },
+  "poor_category_diversity": []
+}

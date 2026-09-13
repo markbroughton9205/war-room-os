@@ -27,12 +27,14 @@ import {
   STAGE3_BLIND_1500_REJECTED,
   STAGE3_DESIGN_DECISION,
   STAGE3_EVAL_SUITE_STATUS,
+  STAGE3_EXECUTION_READINESS as DESIGN_EXECUTION_READINESS,
   STAGE3_LOGIT_ENSEMBLE,
   STAGE3_PEAK_LR,
   STAGE3_REHEARSAL_POLICY,
   STAGE3_RUN_ID as DESIGN_RUN_ID,
   STAGE3_TOOL_USE_SHARE,
   STAGE3A_STEPS,
+  STAGE3B_LR_FORMULA,
 } from './stage3Design'
 import { tryForbiddenEnvAction } from './redTeam'
 
@@ -53,9 +55,9 @@ export async function runStage3DesignValidation(): Promise<{ passed: number; fai
     || fs.existsSync(path.join(repoRoot, 'scripts/run-wrim-stage3.mjs'))
 
   results.push(check('1_run_id', STAGE3_RUN_ID === 'WRIM1-RUN-000003' && DESIGN_RUN_ID === STAGE3_RUN_ID, STAGE3_RUN_ID))
-  results.push(check('2_decision', STAGE3_DESIGN_STATUS === 'READY_FOR_STAGE3_COMMANDER_REVIEW' && STAGE3_DESIGN_DECISION === STAGE3_DESIGN_STATUS, STAGE3_DESIGN_STATUS))
+  results.push(check('2_decision', STAGE3_DESIGN_STATUS === 'ACCEPTED_FOR_PREPARATION' && STAGE3_DESIGN_DECISION === STAGE3_DESIGN_STATUS, STAGE3_DESIGN_STATUS))
   results.push(check('3_auth_no', STAGE3_AUTHORIZATION === 'NO' && READY_FOR_STAGE3_TRAINING_AUTHORIZATION === false, STAGE3_AUTHORIZATION))
-  results.push(check('4_execution_no', STAGE3_EXECUTION_READINESS === false, String(STAGE3_EXECUTION_READINESS)))
+  results.push(check('4_execution_review_ready', STAGE3_EXECUTION_READINESS === true && DESIGN_EXECUTION_READINESS === true && STAGE3_AUTHORIZATION === 'NO', String(STAGE3_EXECUTION_READINESS)))
   results.push(check('5_training_off', TRAINING_AUTHORIZATION === 'OFF' && CURRENT_WRIM_TRAINING === 'NOT_RUNNING', TRAINING_AUTHORIZATION))
   results.push(check('6_no_trainer', hasTrainer === false, 'no Stage 3 trainer in this pass'))
   results.push(check('7_parent', PARENT_SHA256.startsWith('d1affa599ff967313b') && designMd.includes(PARENT_SHA256), 'WRIM-0'))
@@ -65,8 +67,8 @@ export async function runStage3DesignValidation(): Promise<{ passed: number; fai
   results.push(check('11_balanced_not_proven', designMd.includes('**not** proven superior'), 'BALANCED not proven'))
   results.push(check('12_staged', STAGE3A_STEPS === 50 && designMd.includes('STAGE3A') && designMd.includes('STAGE3B') && STAGE3_BLIND_1500_REJECTED === true, 'staged not blind 1500'))
   results.push(check('13_1500_rejected', designMd.includes('**not** supported by Phase 2'), '1500 rejected'))
-  results.push(check('14_suite_designed', suite.status === 'DESIGNED_NOT_AUTHORED' && STAGE3_EVAL_SUITE_STATUS === 'DESIGNED_NOT_AUTHORED' && suite.prompts_authored === false, String(suite.status)))
-  results.push(check('15_suite_size', suite.target_item_count === 35 && suite.wrim0_baseline_frozen === false, String(suite.target_item_count)))
+  results.push(check('14_suite_authored', suite.status === 'AUTHORED_FROZEN' && STAGE3_EVAL_SUITE_STATUS === 'AUTHORED_FROZEN' && suite.prompts_authored === true, String(suite.status)))
+  results.push(check('15_suite_size', suite.target_item_count === 35 && suite.wrim0_baseline_frozen === true, String(suite.target_item_count)))
   results.push(check('16_binary_compat', designMd.includes('COMPATIBILITY_ONLY'), 'historical binary compatibility'))
   results.push(check('17_no_logit', STAGE3_LOGIT_ENSEMBLE === false && designMd.includes('No logit ensembling'), 'no logit ensemble'))
   results.push(check('18_tool_use', STAGE3_TOOL_USE_SHARE === 0 && designMd.includes('TOOL_USE 0%'), '0%'))
@@ -76,8 +78,10 @@ export async function runStage3DesignValidation(): Promise<{ passed: number; fai
   results.push(check('22_rael', RAEL_STATUS === 'NOT_IMPLEMENTED', RAEL_STATUS))
   results.push(check('23_22_closed', ROADMAP_22_STATUS === 'CLOSED', ROADMAP_22_STATUS))
   results.push(check('24_23_active', ROADMAP_23_STATUS === 'ACTIVE', ROADMAP_23_STATUS))
-  results.push(check('25_next_pass', NEXT_AUTHORIZED_PASS === 'STAGE3_COMMANDER_REVIEW', NEXT_AUTHORIZED_PASS))
+  results.push(check('25_next_pass', NEXT_AUTHORIZED_PASS === 'STAGE3_EXECUTION_REVIEW', NEXT_AUTHORIZED_PASS))
   results.push(check('26_no_delete', designMd.includes('Delete nothing now'), 'retention plan only'))
+  results.push(check('27_stage3b_lr_formula', STAGE3B_LR_FORMULA === 'REQUIRED_BEFORE_STAGE3B_AUTHORIZATION' && designMd.includes('STAGE3B_LR_FORMULA') && designMd.includes('REQUIRED_BEFORE_STAGE3B_AUTHORIZATION'), STAGE3B_LR_FORMULA))
+  results.push(check('28_training_still_off', TRAINING_AUTHORIZATION === 'OFF' && designMd.includes('remains **OFF**') && designMd.includes('STAGE3_AUTHORIZATION = NO'), TRAINING_AUTHORIZATION))
 
   const passed = results.filter(r => r.ok).length
   const failed = results.filter(r => r.ok === false).length

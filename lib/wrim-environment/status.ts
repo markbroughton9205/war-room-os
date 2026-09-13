@@ -23,6 +23,11 @@ import {
   STAGE3_RUN_ID,
   TRAINING_AUTHORIZATION,
 } from './identity'
+import {
+  STAGE3_EVAL_SUITE_ID,
+  STAGE3_EVAL_SUITE_STATUS,
+  STAGE3B_LR_FORMULA,
+} from './stage3Design'
 import { resolveWrimEnvironmentPaths } from './paths'
 import fs from 'node:fs'
 
@@ -74,6 +79,9 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
     stage3_design_status: STAGE3_DESIGN_STATUS,
     stage3_authorization: STAGE3_AUTHORIZATION,
     stage3_execution_readiness: STAGE3_EXECUTION_READINESS,
+    stage3_eval_suite_id: STAGE3_EVAL_SUITE_ID,
+    stage3_eval_suite_status: STAGE3_EVAL_SUITE_STATUS,
+    stage3b_lr_formula: STAGE3B_LR_FORMULA,
     controlled_stability_decision: experiment?.decision ?? null,
     ready_for_stage3_design: experiment?.READY_FOR_STAGE3_DESIGN ?? 'NO',
     ready_for_stage3_training_authorization: false,

@@ -1,7 +1,8 @@
 {
   "suite_id": "WRIM-EVAL-S3-000001",
-  "status": "DESIGNED_NOT_AUTHORED",
+  "status": "AUTHORED_FROZEN",
   "kind": "EVAL_ONLY",
+  "canonical_suite": "scripts/wrim-environment/evals/WRIM-EVAL-S3-000001.json",
   "build_now": false,
   "target_item_count": 35,
   "items_per_category": 5,
@@ -100,7 +101,7 @@
       ]
     }
   ],
-  "prompts_authored": false,
-  "wrim0_baseline_frozen": false,
-  "note": "Author stems in a later authorized pass. Do not train before prompts exist and WRIM-0 baseline is hashed."
+  "prompts_authored": true,
+  "wrim0_baseline_frozen": true,
+  "note": "Canonical stems live in evals/WRIM-EVAL-S3-000001.json. Do not edit frozen prompts; mint a new suite version instead. Training remains unauthorized."
 }

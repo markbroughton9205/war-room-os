@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "suite_id": "WRIM-EVAL-S3-000001",
+  "suite_version": "1.0.0",
+  "suite_hash": "934ff60bcd179ec643257fbfaa30f2a3a7621b175fc7d3c3d0efc30d946d5ac4",
+  "baseline_artifact_name": "wrim-eval-s3-000001-wrim0-baseline.json",
+  "baseline_sha256": "7c1cc9fe7d4208d93cd3cdb6b25783daea8947ae26622e706d4a0032f934ed5f",
+  "optimizer_steps": 0
+}

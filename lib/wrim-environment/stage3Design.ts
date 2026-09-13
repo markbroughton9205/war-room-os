@@ -1,14 +1,16 @@
 /**
  * WRIM1-RUN-000003 Stage 3 design constants.
- * DESIGN / REVIEW ONLY. Does not train. Does not authorize execution.
+ * Evaluation suite is authored and WRIM-0 baseline is frozen.
+ * Does not train. Does not authorize STAGE3A/STAGE3B execution.
  */
 export const STAGE3_RUN_ID = 'WRIM1-RUN-000003' as const
 export const STAGE3_DESIGN_ID = 'WRIM1-NEBULA-STAGE3-DESIGN-000001' as const
-export const STAGE3_DESIGN_DECISION = 'READY_FOR_STAGE3_COMMANDER_REVIEW' as const
-export const STAGE3_EXECUTION_READINESS = false as const
+export const STAGE3_DESIGN_DECISION = 'ACCEPTED_FOR_PREPARATION' as const
+export const STAGE3_EXECUTION_READINESS = true as const
 export const STAGE3_AUTHORIZATION = 'NO' as const
 export const STAGE3_EVAL_SUITE_ID = 'WRIM-EVAL-S3-000001' as const
-export const STAGE3_EVAL_SUITE_STATUS = 'DESIGNED_NOT_AUTHORED' as const
+export const STAGE3_EVAL_SUITE_STATUS = 'AUTHORED_FROZEN' as const
+export const STAGE3B_LR_FORMULA = 'REQUIRED_BEFORE_STAGE3B_AUTHORIZATION' as const
 
 export const STAGE3_PARENT_ID = 'WRIM-0' as const
 export const STAGE3_PARENT_SHA256 =

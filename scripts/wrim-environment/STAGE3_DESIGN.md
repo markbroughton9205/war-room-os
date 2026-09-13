@@ -1,9 +1,9 @@
 # WRIM1-RUN-000003 — Stage 3 design
 
-Status: **READY_FOR_STAGE3_COMMANDER_REVIEW**
+Status: **ACCEPTED_FOR_PREPARATION**
 Stage 3 authorization: **NO**
 Training authorization: **OFF**
-Execution readiness: **NO**
+Execution readiness: **YES (Commander execution review only; training still unauthorized)**
 
 This file is design only. It does not train, interpolate, promote, replace Qwen, implement Ra'el, push, or deploy.
 
@@ -55,6 +55,10 @@ Only if STAGE3A is `HEALTHY_FOR_CONTINUATION`.
 
 Do **not** re-raise LR to 2e-5. Phase 3A showed 50 steps already produce interpolatable displacement. Re-peaking would ignore that.
 
+`STAGE3B_LR_FORMULA = REQUIRED_BEFORE_STAGE3B_AUTHORIZATION`
+
+The phrase "continue from ~2e-6 toward 2e-7" is **not** an executable schedule. Before STAGE3B can ever be authorized, the design must state an exact mathematical formula, exact starting LR, exact ending LR, and exact step indexing. That formula is **not** invented in the evaluation-suite pass.
+
 | Field | Value |
 |---|---|
 | Start | STAGE3A step-50 weights + AdamW moments |
@@ -69,8 +73,9 @@ A later 1500-step (or re-peaked) run requires **new** Commander authorization af
 ## Expanded evaluation suite
 
 Suite ID: `WRIM-EVAL-S3-000001`
-Status: **DESIGNED_NOT_AUTHORED** (stems not written in this pass)
-Size: 7 categories × 5 items = **35**, plus compatibility overlays (CAP-EVAL-0 six stems; DIAGNOSTIC-0 `d0-json`). Total with overlays in-range of 35–50.
+Status: **AUTHORED_FROZEN**
+Canonical file: `scripts/wrim-environment/evals/WRIM-EVAL-S3-000001.json`
+Size: 7 categories × 5 items = **35**. CAP-EVAL-0 and DIAGNOSTIC-0 `d0-json` remain compatibility overlays only.
 
 Axes are separate. Do not reduce to one scalar.
 
@@ -81,18 +86,15 @@ Axes are separate. Do not reduce to one scalar.
 
 Historical 32-token binary on CAP-EVAL-0: **COMPATIBILITY_ONLY**.
 
-Item specs live in `WRIM-EVAL-S3-000001.design.json`. Prompts must not be genesis slices (`UNMAPPED_NO_STEM_OVERLAP` for literary).
+Item specs live in `evals/WRIM-EVAL-S3-000001.json`. Prompts must not be genesis slices (`UNMAPPED_NO_STEM_OVERLAP` for literary). Do not edit frozen prompts because a candidate scores poorly; mint a new suite version instead.
 
-## WRIM-0 baseline (required before any Stage 3 training)
+## WRIM-0 baseline
 
-After stems are authored and hashed:
+Frozen sibling artifact (does not overwrite CAP-EVAL-0 NLL SHA `43c57b52610cbdaf7a6edf4791b05e2d360936b3341a0b6ca1838d940dd27dfe`):
 
-1. Load parent WRIM-0 only. Zero optimizer steps.
-2. Run the full suite (32 and 256), val0, val1, special-token rates, fingerprints, structured parse flags.
-3. Freeze NLL of WRIM-0 greedy continuations as the new anchor set (do not rewrite CAP-EVAL-0 frozen NLL SHA `43c57b52610cbdaf7a6edf4791b05e2d360936b3341a0b6ca1838d940dd27dfe`; add a sibling artifact).
-4. Hash the baseline JSON. Stage 3 candidates compare only to that frozen file.
+`%LOCALAPPDATA%\War Room OS\data\wrim-environment\wrim-eval-s3-000001-wrim0-baseline.json`
 
-Cannot run in this pass: suite texts do not exist.
+Load parent WRIM-0 only. Zero optimizer steps. Candidates compare only to that hashed file. Do not modify it in place.
 
 ## Primary vs secondary metrics
 
@@ -162,9 +164,11 @@ Estimated reclaimable: **~29.5–32 GB**. Delete nothing now.
 
 ## Preconditions before execution can even be requested
 
-1. Commander accepts this design.
-2. Author and hash `WRIM-EVAL-S3-000001` stems (implementation pass, not this file).
-3. Freeze WRIM-0 expanded-suite baseline.
-4. Separate Commander authorization: `TRAINING_AUTHORIZATION=STAGE3A_ONLY` (not this pass).
+1. Commander accepted this design for preparation. **DONE.**
+2. Author and hash `WRIM-EVAL-S3-000001`. **DONE** (`AUTHORED_FROZEN`).
+3. Freeze WRIM-0 expanded-suite baseline. **DONE.**
+4. Separate Commander authorization is still required: `TRAINING_AUTHORIZATION` remains **OFF** until `STAGE3A_ONLY` is granted. This pass does not grant it.
 
-Until then: `STAGE3_EXECUTION_READINESS = NO`.
+`STAGE3_EXECUTION_READINESS = YES` means technically ready for Commander **execution review**.
+It does **not** authorize training.
+`STAGE3_AUTHORIZATION = NO`.

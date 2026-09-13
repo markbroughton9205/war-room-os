@@ -1,6 +1,6 @@
 /**
- * #23 Nebula PyTorch/CUDA environment + Stage 0/1 + Stage 2 stability.
- * Official training remains OFF. No Train button. Stage 3 is design-only. No Ra'el. No promotion.
+ * #23 Nebula PyTorch/CUDA environment + Stage 0/1 + Stage 2 stability + Stage 3 eval freeze.
+ * Official training remains OFF. No Train button. No Ra'el. No promotion.
  */
 export const WRIM_ENVIRONMENT_RUNTIME_VERSION = 'wrim-environment-v1' as const
 export const WRIM_REBUILD_DESIGN = 'COMPLETE' as const
@@ -35,8 +35,8 @@ export const STAGE2_STATUS = 'STAGE2_STOPPED_BY_SENTINEL' as const
 export const STAGE2_CLASSIFICATION = 'TEST_ONLY / STOPPED_BY_SENTINEL / REJECTED_FOR_STAGE3' as const
 export const READY_FOR_STAGE3_TRAINING_AUTHORIZATION = false as const
 export const STAGE3_RUN_ID = 'WRIM1-RUN-000003' as const
-export const STAGE3_DESIGN_STATUS = 'READY_FOR_STAGE3_COMMANDER_REVIEW' as const
-export const STAGE3_EXECUTION_READINESS = false as const
+export const STAGE3_DESIGN_STATUS = 'ACCEPTED_FOR_PREPARATION' as const
+export const STAGE3_EXECUTION_READINESS = true as const
 export const STAGE3_AUTHORIZATION = 'NO' as const
 export const CONTROLLED_STABILITY_EXPERIMENT_ID = 'WRIM1-NEBULA-CTRL-STAB-000001' as const
 export const PHASE0_STATUS = 'REVIEWED_ACCEPTED' as const
@@ -45,7 +45,7 @@ export const PHASE2_EXPERIMENT_ID = 'WRIM1-NEBULA-STABILITY-GRID-000001' as cons
 export const PHASE2_STATUS = 'PHASE2_GRID_COMPLETE' as const
 export const CONTROLLED_STABILITY_CLASSIFICATION = 'TEST_ONLY / CONTROLLED_EXPERIMENT / PHASE2_GRID_COMPLETE / INCONCLUSIVE / PHASE3A_COMPLETE / MULTIPLE_FINDINGS' as const
 export const PHASE3A_STATUS = 'PHASE3A_COMPLETE' as const
-export const NEXT_AUTHORIZED_PASS = 'STAGE3_COMMANDER_REVIEW' as const
+export const NEXT_AUTHORIZED_PASS = 'STAGE3_EXECUTION_REVIEW' as const
 
 export const SMOKE_ARGMAX_ID = 126 as const
 export const SMOKE_ENTROPY = 6.033060550689697 as const
