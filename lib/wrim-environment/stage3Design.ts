@@ -10,7 +10,15 @@ export const STAGE3_EXECUTION_READINESS = true as const
 export const STAGE3_AUTHORIZATION = 'NO' as const
 export const STAGE3_EVAL_SUITE_ID = 'WRIM-EVAL-S3-000001' as const
 export const STAGE3_EVAL_SUITE_STATUS = 'AUTHORED_FROZEN' as const
-export const STAGE3B_LR_FORMULA = 'REQUIRED_BEFORE_STAGE3B_AUTHORIZATION' as const
+export const STAGE3B_LR_FORMULA = 'FROZEN_FOR_REVIEW' as const
+export const STAGE3_EVAL_SUITE_SHA256 =
+  '934ff60bcd179ec643257fbfaa30f2a3a7621b175fc7d3c3d0efc30d946d5ac4' as const
+export const STAGE3_WRIM0_BASELINE_SHA256 =
+  '7c1cc9fe7d4208d93cd3cdb6b25783daea8947ae26622e706d4a0032f934ed5f' as const
+export const STAGE3A_EXECUTION_READINESS = true as const
+export const STAGE3B_EXECUTION_READINESS = false as const
+export const STAGE3B_START_LR = 2e-6 as const
+export const STAGE3B_MIN_LR = 2e-7 as const
 
 export const STAGE3_PARENT_ID = 'WRIM-0' as const
 export const STAGE3_PARENT_SHA256 =

@@ -1,11 +1,14 @@
 # WRIM1-RUN-000003 — Stage 3 design
 
 Status: **ACCEPTED_FOR_PREPARATION**
+Stage 3 execution review: **PASS**
+Trainer: **IMPLEMENTED_VALIDATED_ZERO_STEP**
 Stage 3 authorization: **NO**
 Training authorization: **OFF**
-Execution readiness: **YES (Commander execution review only; training still unauthorized)**
+STAGE3A execution readiness: **YES** (Commander authorization still required)
+STAGE3B execution readiness: **NO**
 
-This file is design only. It does not train, interpolate, promote, replace Qwen, implement Ra'el, push, or deploy.
+This file is design plus a zero-step runtime. It does not execute STAGE3A/STAGE3B, promote, replace Qwen, implement Ra'el, push, or deploy.
 
 Preserve Phase 2 = **G. INCONCLUSIVE** and Phase 3A = **E. MULTIPLE_FINDINGS**.
 
@@ -28,7 +31,7 @@ Preferred pattern: **STAGE3A confirmation, then STAGE3B continuation only if hea
 
 ## STAGE3A — confirmation (required first)
 
-Exact Phase 2 NATURAL / 2e-5 recipe, one official seed, expanded eval (once authored).
+Exact Phase 2 NATURAL / 2e-5 recipe, one official seed, expanded frozen eval. Peak LR remains peak 2e-5.
 
 | Field | Value |
 |---|---|
@@ -38,7 +41,7 @@ Exact Phase 2 NATURAL / 2e-5 recipe, one official seed, expanded eval (once auth
 | Precision | FP32, TF32 OFF |
 | Batch | micro 8, accum 1, effective 8, seq 512, 4096 tokens/step |
 | Optimizer | fresh AdamW, fused=False, betas (0.9, 0.95), eps 1e-8, wd 0.1, clip 1.0 |
-| LR | peak 2e-5, warmup 25, cosine over **50** steps, min_lr 2e-6 |
+| LR | **exact 1-indexed schedule** (not prose): warmup `lr(step)=2e-5*step/25` for `1<=step<=25` (step 25 = `2e-5`); cosine `progress=(step-25)/25`; `lr=2e-6+0.5*(2e-5-2e-6)*(1+cos(pi*progress))` for `25<step<=50` (step 50 = `2e-6`) |
 | Steps / tokens | 50 / 204,800 |
 | Packing | contiguous_unit, BOS=1, EOS=2, per_token_shuffle=false |
 | Corpus | WR-CORPUS-0 30%, WR-CORPUS-1 70%, TOOL_USE 0%, no WR-CORPUS-ACTIVE, no 18% code cap, no adaptive replay |
@@ -55,14 +58,20 @@ Only if STAGE3A is `HEALTHY_FOR_CONTINUATION`.
 
 Do **not** re-raise LR to 2e-5. Phase 3A showed 50 steps already produce interpolatable displacement. Re-peaking would ignore that.
 
-`STAGE3B_LR_FORMULA = REQUIRED_BEFORE_STAGE3B_AUTHORIZATION`
+`STAGE3B_LR_FORMULA = FROZEN_FOR_REVIEW`
 
-The phrase "continue from ~2e-6 toward 2e-7" is **not** an executable schedule. Before STAGE3B can ever be authorized, the design must state an exact mathematical formula, exact starting LR, exact ending LR, and exact step indexing. That formula is **not** invented in the evaluation-suite pass.
+STAGE3B remains **not authorized**. Exact continuation, 1-indexed global steps `51<=s<=250`:
+
+`progress = (s - 50) / 200`
+
+`lr(s) = 2e-7 + 0.5 * (2e-6 - 2e-7) * (1 + cos(pi * progress))`
+
+No warmup. No LR reset. No return to peak. Conceptual boundary at step 50 = `2e-6`. Step 250 = `2e-7`. Do **not** execute STAGE3B.
 
 | Field | Value |
 |---|---|
 | Start | STAGE3A step-50 weights + AdamW moments |
-| LR | continue from STAGE3A terminal (~2e-6); cosine 2e-6 → 2e-7 over 200 steps |
+| LR | cosine continuation `2e-6 → 2e-7` over 200 global steps 51–250 using the frozen formula above |
 | Steps / tokens | 200 / 819,200 |
 | Cumulative if both complete | 250 steps / 1,024,000 tokens |
 | Eval | every 50 continuation steps (global 100, 150, 250) |
@@ -75,6 +84,9 @@ A later 1500-step (or re-peaked) run requires **new** Commander authorization af
 Suite ID: `WRIM-EVAL-S3-000001`
 Status: **AUTHORED_FROZEN**
 Canonical file: `scripts/wrim-environment/evals/WRIM-EVAL-S3-000001.json`
+Suite SHA: `934ff60bcd179ec643257fbfaa30f2a3a7621b175fc7d3c3d0efc30d946d5ac4`
+WRIM-0 baseline SHA: `7c1cc9fe7d4208d93cd3cdb6b25783daea8947ae26622e706d4a0032f934ed5f`
+Do not recreate or modify the frozen suite. Do not rewrite either SHA.
 Size: 7 categories × 5 items = **35**. CAP-EVAL-0 and DIAGNOSTIC-0 `d0-json` remain compatibility overlays only.
 
 Axes are separate. Do not reduce to one scalar.
@@ -167,8 +179,10 @@ Estimated reclaimable: **~29.5–32 GB**. Delete nothing now.
 1. Commander accepted this design for preparation. **DONE.**
 2. Author and hash `WRIM-EVAL-S3-000001`. **DONE** (`AUTHORED_FROZEN`).
 3. Freeze WRIM-0 expanded-suite baseline. **DONE.**
-4. Separate Commander authorization is still required: `TRAINING_AUTHORIZATION` remains **OFF** until `STAGE3A_ONLY` is granted. This pass does not grant it.
+4. Separate Commander authorization is still required: `TRAINING_AUTHORIZATION` remains **OFF** until STAGE3A is explicitly granted. This pass does not grant it.
 
-`STAGE3_EXECUTION_READINESS = YES` means technically ready for Commander **execution review**.
+`STAGE3A_EXECUTION_READINESS = YES` means the trainer/runtime passed a zero-step dry-run.
 It does **not** authorize training.
+`STAGE3B_EXECUTION_READINESS = NO`.
 `STAGE3_AUTHORIZATION = NO`.
+Next pass: `STAGE3A_COMMANDER_AUTHORIZATION_REVIEW`.

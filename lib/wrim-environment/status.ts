@@ -20,7 +20,11 @@ import {
   STAGE3_AUTHORIZATION,
   STAGE3_DESIGN_STATUS,
   STAGE3_EXECUTION_READINESS,
+  STAGE3_EXECUTION_REVIEW,
   STAGE3_RUN_ID,
+  STAGE3_TRAINER_STATUS,
+  STAGE3A_EXECUTION_READINESS,
+  STAGE3B_EXECUTION_READINESS,
   TRAINING_AUTHORIZATION,
 } from './identity'
 import {
@@ -79,6 +83,10 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
     stage3_design_status: STAGE3_DESIGN_STATUS,
     stage3_authorization: STAGE3_AUTHORIZATION,
     stage3_execution_readiness: STAGE3_EXECUTION_READINESS,
+    stage3_execution_review: STAGE3_EXECUTION_REVIEW,
+    stage3_trainer_status: STAGE3_TRAINER_STATUS,
+    stage3a_execution_readiness: STAGE3A_EXECUTION_READINESS,
+    stage3b_execution_readiness: STAGE3B_EXECUTION_READINESS,
     stage3_eval_suite_id: STAGE3_EVAL_SUITE_ID,
     stage3_eval_suite_status: STAGE3_EVAL_SUITE_STATUS,
     stage3b_lr_formula: STAGE3B_LR_FORMULA,

@@ -53,8 +53,9 @@ export function WrimEnvironmentPanel() {
         <p>controlled stability: {status?.controlled_stability_experiment_id ?? 'WRIM1-NEBULA-CTRL-STAB-000001'} · phase2 {String((status as { phase2_experiment_id?: string } | null)?.phase2_experiment_id ?? 'WRIM1-NEBULA-STABILITY-GRID-000001')} · decision {String(status?.controlled_stability_decision ?? 'pending')} · Stage 3 design {String(status?.ready_for_stage3_design ?? 'NO')}</p>
         <p>training authorization: {status?.training_authorization ?? 'OFF'} · train button: {String(status?.train_button ?? false)}</p>
         <p>phase 3A: {status?.phase3a_status ?? 'PHASE3A_COMPLETE'} · Stage 3 design: {String((status as { stage3_design_status?: string } | null)?.stage3_design_status ?? 'ACCEPTED_FOR_PREPARATION')} · Stage 3 authorization: {String((status as { stage3_authorization?: string } | null)?.stage3_authorization ?? 'NO')}</p>
-        <p>execution readiness: {String((status as { stage3_execution_readiness?: boolean } | null)?.stage3_execution_readiness ?? false)} · suite: {String((status as { stage3_eval_suite_status?: string } | null)?.stage3_eval_suite_status ?? 'AUTHORED_FROZEN')}</p>
-        <p>next pass: {status?.next_authorized_pass ?? 'STAGE3_EXECUTION_REVIEW'} (Stage 3 not authorized; training OFF; no Train button)</p>
+        <p>execution review: {String((status as { stage3_execution_review?: string } | null)?.stage3_execution_review ?? 'PASS')} · trainer: {String((status as { stage3_trainer_status?: string } | null)?.stage3_trainer_status ?? 'IMPLEMENTED_VALIDATED_ZERO_STEP')}</p>
+        <p>STAGE3A readiness: {String((status as { stage3a_execution_readiness?: boolean } | null)?.stage3a_execution_readiness ?? false)} · STAGE3B readiness: {String((status as { stage3b_execution_readiness?: boolean } | null)?.stage3b_execution_readiness ?? false)} · suite: {String((status as { stage3_eval_suite_status?: string } | null)?.stage3_eval_suite_status ?? 'AUTHORED_FROZEN')}</p>
+        <p>next pass: {status?.next_authorized_pass ?? 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW'} (Stage 3 not authorized; training OFF; no Train button)</p>
       </article>
       <button type="button" className="rounded border border-cyan-600 px-3 py-1 text-xs" onClick={() => void refresh()}>
         Refresh environment status

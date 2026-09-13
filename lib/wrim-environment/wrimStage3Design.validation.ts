@@ -18,6 +18,8 @@ import {
   STAGE3_AUTHORIZATION,
   STAGE3_DESIGN_STATUS,
   STAGE3_EXECUTION_READINESS,
+  STAGE3A_EXECUTION_READINESS,
+  STAGE3B_EXECUTION_READINESS,
   STAGE3_RUN_ID,
   TOKENIZER_SHA256,
   TRAINING_AUTHORIZATION,
@@ -27,7 +29,6 @@ import {
   STAGE3_BLIND_1500_REJECTED,
   STAGE3_DESIGN_DECISION,
   STAGE3_EVAL_SUITE_STATUS,
-  STAGE3_EXECUTION_READINESS as DESIGN_EXECUTION_READINESS,
   STAGE3_LOGIT_ENSEMBLE,
   STAGE3_PEAK_LR,
   STAGE3_REHEARSAL_POLICY,
@@ -35,6 +36,8 @@ import {
   STAGE3_TOOL_USE_SHARE,
   STAGE3A_STEPS,
   STAGE3B_LR_FORMULA,
+  STAGE3A_EXECUTION_READINESS as DESIGN_STAGE3A_READY,
+  STAGE3B_EXECUTION_READINESS as DESIGN_STAGE3B_READY,
 } from './stage3Design'
 import { tryForbiddenEnvAction } from './redTeam'
 
@@ -57,9 +60,10 @@ export async function runStage3DesignValidation(): Promise<{ passed: number; fai
   results.push(check('1_run_id', STAGE3_RUN_ID === 'WRIM1-RUN-000003' && DESIGN_RUN_ID === STAGE3_RUN_ID, STAGE3_RUN_ID))
   results.push(check('2_decision', STAGE3_DESIGN_STATUS === 'ACCEPTED_FOR_PREPARATION' && STAGE3_DESIGN_DECISION === STAGE3_DESIGN_STATUS, STAGE3_DESIGN_STATUS))
   results.push(check('3_auth_no', STAGE3_AUTHORIZATION === 'NO' && READY_FOR_STAGE3_TRAINING_AUTHORIZATION === false, STAGE3_AUTHORIZATION))
-  results.push(check('4_execution_review_ready', STAGE3_EXECUTION_READINESS === true && DESIGN_EXECUTION_READINESS === true && STAGE3_AUTHORIZATION === 'NO', String(STAGE3_EXECUTION_READINESS)))
+  results.push(check('4_execution_review_ready', STAGE3_EXECUTION_READINESS === true && STAGE3A_EXECUTION_READINESS === true && STAGE3B_EXECUTION_READINESS === false && DESIGN_STAGE3A_READY === true && DESIGN_STAGE3B_READY === false && STAGE3_AUTHORIZATION === 'NO', String(STAGE3A_EXECUTION_READINESS)))
   results.push(check('5_training_off', TRAINING_AUTHORIZATION === 'OFF' && CURRENT_WRIM_TRAINING === 'NOT_RUNNING', TRAINING_AUTHORIZATION))
-  results.push(check('6_no_trainer', hasTrainer === false, 'no Stage 3 trainer in this pass'))
+  const trainPy = hasTrainer ? fs.readFileSync(path.join(repoRoot, 'scripts/wrim-environment/stage3_train.py'), 'utf8') : ''
+  results.push(check('6_trainer_gated', hasTrainer === true && trainPy.includes('TRAINING_DENIED') && trainPy.includes('authorization_gate') && STAGE3_AUTHORIZATION === 'NO', 'trainer implemented, gated'))
   results.push(check('7_parent', PARENT_SHA256.startsWith('d1affa599ff967313b') && designMd.includes(PARENT_SHA256), 'WRIM-0'))
   results.push(check('8_tokenizer', TOKENIZER_SHA256.startsWith('47ed32ce61974e2c3b') && designMd.includes(TOKENIZER_SHA256), 'WR-TOKENIZER-0'))
   results.push(check('9_lr', STAGE3_PEAK_LR === 2e-5 && designMd.includes('peak 2e-5') && designMd.includes('2e-5'), '2e-5'))
@@ -78,9 +82,9 @@ export async function runStage3DesignValidation(): Promise<{ passed: number; fai
   results.push(check('22_rael', RAEL_STATUS === 'NOT_IMPLEMENTED', RAEL_STATUS))
   results.push(check('23_22_closed', ROADMAP_22_STATUS === 'CLOSED', ROADMAP_22_STATUS))
   results.push(check('24_23_active', ROADMAP_23_STATUS === 'ACTIVE', ROADMAP_23_STATUS))
-  results.push(check('25_next_pass', NEXT_AUTHORIZED_PASS === 'STAGE3_EXECUTION_REVIEW', NEXT_AUTHORIZED_PASS))
+  results.push(check('25_next_pass', NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW', NEXT_AUTHORIZED_PASS))
   results.push(check('26_no_delete', designMd.includes('Delete nothing now'), 'retention plan only'))
-  results.push(check('27_stage3b_lr_formula', STAGE3B_LR_FORMULA === 'REQUIRED_BEFORE_STAGE3B_AUTHORIZATION' && designMd.includes('STAGE3B_LR_FORMULA') && designMd.includes('REQUIRED_BEFORE_STAGE3B_AUTHORIZATION'), STAGE3B_LR_FORMULA))
+  results.push(check('27_stage3b_lr_formula', STAGE3B_LR_FORMULA === 'FROZEN_FOR_REVIEW' && designMd.includes('STAGE3B_LR_FORMULA') && designMd.includes('FROZEN_FOR_REVIEW'), STAGE3B_LR_FORMULA))
   results.push(check('28_training_still_off', TRAINING_AUTHORIZATION === 'OFF' && designMd.includes('remains **OFF**') && designMd.includes('STAGE3_AUTHORIZATION = NO'), TRAINING_AUTHORIZATION))
 
   const passed = results.filter(r => r.ok).length

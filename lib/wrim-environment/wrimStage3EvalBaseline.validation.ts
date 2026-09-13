@@ -165,8 +165,6 @@ export async function runStage3EvalBaselineValidation(): Promise<{ passed: numbe
     suite_version: suite.suite_version,
     items,
   }))
-  const hasTrainer = fs.existsSync(path.join(repoRoot, 'scripts/wrim-environment/stage3_train.py'))
-    || fs.existsSync(path.join(repoRoot, 'scripts/run-wrim-stage3.mjs'))
   const baselinePresent = fs.existsSync(baselinePath)
   const baseline = baselinePresent
     ? (JSON.parse(fs.readFileSync(baselinePath, 'utf8')) as Record<string, unknown>)
@@ -212,9 +210,9 @@ export async function runStage3EvalBaselineValidation(): Promise<{ passed: numbe
     String(baseline?.optimizer_steps),
   ))
   results.push(check(
-    '17_no_trainer',
-    hasTrainer === false && !evalPy.includes('AdamW') && !itemsPy.includes('AdamW') && evalPy.includes('ZERO optimizer'),
-    'no Stage 3 trainer / no AdamW in eval freeze',
+    '17_eval_baseline_no_adamw',
+    !evalPy.includes('AdamW') && !itemsPy.includes('AdamW') && evalPy.includes('ZERO optimizer'),
+    'eval freeze still zero-optimizer',
   ))
   results.push(check(
     '18_auth_off',
@@ -253,14 +251,14 @@ export async function runStage3EvalBaselineValidation(): Promise<{ passed: numbe
       && design.target_item_count === 35
       && STAGE3_EXECUTION_READINESS === true
       && DESIGN_EXECUTION_READINESS === true
-      && NEXT_AUTHORIZED_PASS === 'STAGE3_EXECUTION_REVIEW'
+      && NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW'
       && status.train_button === false,
     NEXT_AUTHORIZED_PASS,
   ))
   results.push(check(
     '26_stage3b_lr_formula',
-    STAGE3B_LR_FORMULA === 'REQUIRED_BEFORE_STAGE3B_AUTHORIZATION'
-      && designMd.includes('REQUIRED_BEFORE_STAGE3B_AUTHORIZATION'),
+    STAGE3B_LR_FORMULA === 'FROZEN_FOR_REVIEW'
+      && designMd.includes('FROZEN_FOR_REVIEW'),
     STAGE3B_LR_FORMULA,
   ))
   results.push(check('27_no_stage3_start', tryForbiddenEnvAction('START_STAGE_3').denied && FORBIDDEN_ENV_ACTIONS.includes('START_STAGE_3'), 'denied'))
