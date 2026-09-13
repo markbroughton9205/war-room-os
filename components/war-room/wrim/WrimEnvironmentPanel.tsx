@@ -16,6 +16,9 @@ type EnvStatus = {
   stage1_run_id?: string
   stage2?: string
   stage2_run_id?: string
+  controlled_stability_experiment_id?: string
+  controlled_stability_decision?: string | null
+  ready_for_stage3_design?: string
 }
 
 export function WrimEnvironmentPanel() {
@@ -46,8 +49,9 @@ export function WrimEnvironmentPanel() {
         <p>WRIM-0 Stage 0 equivalence: {status?.WRIM_PYTORCH_PORT ?? '…'}</p>
         <p>Stage 1: {status?.stage1 ?? '…'} · run {status?.stage1_run_id ?? 'WRIM1-NEBULA-DIAG-000001'}</p>
         <p>Stage 2: {status?.stage2 ?? '…'} · run {status?.stage2_run_id ?? 'WRIM1-NEBULA-STAB-000001'} · TEST_ONLY · not a promotion candidate</p>
+        <p>controlled stability: {status?.controlled_stability_experiment_id ?? 'WRIM1-NEBULA-CTRL-STAB-000001'} · phase2 {String((status as { phase2_experiment_id?: string } | null)?.phase2_experiment_id ?? 'WRIM1-NEBULA-STABILITY-GRID-000001')} · decision {String(status?.controlled_stability_decision ?? 'pending')} · Stage 3 design {String(status?.ready_for_stage3_design ?? 'NO')}</p>
         <p>training authorization: {status?.training_authorization ?? 'OFF'} · train button: {String(status?.train_button ?? false)}</p>
-        <p>next pass: {status?.next_authorized_pass ?? 'STAGE2_STOPPED_BY_SENTINEL_REVIEW'} (Stage 3 not authorized)</p>
+        <p>next pass: {status?.next_authorized_pass ?? 'PHASE2_PRIMARY_GRID'} (Stage 3 not authorized; interpolation not authorized)</p>
       </article>
       <button type="button" className="rounded border border-cyan-600 px-3 py-1 text-xs" onClick={() => void refresh()}>
         Refresh environment status

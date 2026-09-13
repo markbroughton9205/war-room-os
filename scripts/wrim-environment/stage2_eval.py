@@ -1,6 +1,7 @@
 """Stage 2 local stability evaluation. DIAGNOSTIC-0 + EVAL-RETENTION. Not promotion."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -51,11 +52,13 @@ def greedy_generate(model: WRIM0Model, tokenizer: Tokenizer, prompt: str, device
     entropy = None
     p_period = None
     argmax_id = None
+    argmax_prob = None
     if first_logits is not None:
         finite = bool(torch.isfinite(first_logits).all().item())
         entropy = entropy_from_logits(first_logits)
         argmax_id = int(torch.argmax(first_logits).item())
         probs = torch.softmax(first_logits.float(), dim=-1)
+        argmax_prob = float(probs[argmax_id].item())
         if PERIOD_ID < probs.numel():
             p_period = float(probs[PERIOD_ID].item())
     max_run = 1
@@ -89,6 +92,7 @@ def greedy_generate(model: WRIM0Model, tokenizer: Tokenizer, prompt: str, device
         "finite": finite,
         "entropy": entropy,
         "argmax_id": argmax_id,
+        "argmax_prob": argmax_prob,
         "p_period": p_period,
         "unique_ratio": round(uniq, 4) if uniq is not None else None,
         "max_run": max_run,
@@ -184,7 +188,21 @@ def evaluate_stability(
         ok = score_retention(g, it.get("expected") or {})
         if ok:
             ret_pass += 1
-        ret_detail.append({"evalId": it.get("evalId"), "pass": ok, "unique_ratio": g["unique_ratio"], "collapsed": g["collapsed"], "continuation": (g["continuation"] or "")[:160]})
+        ret_detail.append(
+            {
+                "evalId": it.get("evalId"),
+                "pass": ok,
+                "unique_ratio": g["unique_ratio"],
+                "collapsed": g["collapsed"],
+                "entropy": g.get("entropy"),
+                "max_run": g.get("max_run"),
+                "argmax_id": g.get("argmax_id"),
+                "argmax_prob": g.get("argmax_prob"),
+                "p_period": g.get("p_period"),
+                "continuation_fingerprint": hashlib.sha256((g.get("continuation") or "").encode("utf-8")).hexdigest()[:16],
+                "continuation": (g["continuation"] or "")[:160],
+            }
+        )
 
     sky = next((x for x in gens if x["id"] == "d0-prose-sky"), None)
     return {

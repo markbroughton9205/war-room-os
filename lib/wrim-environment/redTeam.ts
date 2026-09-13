@@ -14,7 +14,7 @@ const MESSAGES: Record<ForbiddenEnvAction, string> = {
   TEST_ONE_OPTIMIZER_STEP: 'Optimizer steps are not authorized outside the bounded Stage 1 CLI diagnostic. Denied.',
   CONVERT_AND_OVERWRITE_MAC: 'Historical WRIM-0 checkpoint is read-only. Overwrite denied.',
   USE_COLLAPSED_WRIM1: 'Collapsed WRIM-1 weights are not a parent. Denied.',
-  ENABLE_TRAIN_BUTTON: 'No Train button. TRAINING_AUTHORIZATION=OFF.',
+  ENABLE_TRAIN_BUTTON: 'No Train button. TRAINING_AUTHORIZATION=PHASE2_GRID_ONLY applies to the CLI Phase 2 grid only.',
   START_STAGE_1: 'HTTP Stage 1 is denied. Authorized diagnostic is CLI WRIM1-NEBULA-DIAG-000001 only. No Train button.',
   START_STAGE_2: 'HTTP Stage 2 is denied. WRIM1-NEBULA-STAB-000001 already ran and STOPPED at the retention sentinel. Do not continue.',
   START_STAGE_3: 'WRIM1-RUN-000003 is not authorized. READY_FOR_STAGE3_TRAINING_AUTHORIZATION=NO.',

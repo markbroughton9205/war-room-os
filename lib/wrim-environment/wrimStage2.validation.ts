@@ -178,8 +178,8 @@ export async function runWrimStage2Validation(): Promise<{ passed: number; faile
   results.push(check('46_autonomy_off', ascensionAutonomyIsOff(), 'OFF'))
   results.push(check('47_22_closed', ROADMAP_22_STATUS === 'CLOSED' && CORPUS_22 === 'CLOSED', ROADMAP_22_STATUS))
   results.push(check('48_23_active', ROADMAP_23_STATUS === 'ACTIVE' && CORPUS_23 === 'ACTIVE', ROADMAP_23_STATUS))
-  results.push(check('49_nothing_pushed', tryForbiddenEnvAction('PUSH_CHANGES').denied && TRAINING_AUTHORIZATION === 'OFF' && CURRENT_WRIM_TRAINING === 'NOT_RUNNING', 'no push'))
-  results.push(check('50_nothing_deployed', NEXT_AUTHORIZED_PASS === 'STAGE2_STOPPED_BY_SENTINEL_REVIEW' && FORBIDDEN_ENV_ACTIONS.includes('START_STAGE_3'), 'no deploy; Stage 3 denied'))
+  results.push(check('49_nothing_pushed', tryForbiddenEnvAction('PUSH_CHANGES').denied && CURRENT_WRIM_TRAINING === 'NOT_RUNNING', 'no push'))
+  results.push(check('50_nothing_deployed', (NEXT_AUTHORIZED_PASS === 'PHASE2_PRIMARY_GRID' || NEXT_AUTHORIZED_PASS === 'PHASE2_GRID_REVIEW') && FORBIDDEN_ENV_ACTIONS.includes('START_STAGE_3'), 'no deploy; Stage 3 denied'))
 
   const passed = results.filter(r => r.ok).length
   const failed = results.filter(r => r.ok === false).length
