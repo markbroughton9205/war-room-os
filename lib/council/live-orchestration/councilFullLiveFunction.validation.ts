@@ -21,18 +21,12 @@ import {
 } from '@/lib/intelligence/sourceIndependence'
 import { buildStoredResearchEvidenceItem } from '@/lib/intelligence/evidenceOrigin'
 import { retrieveStoredResearch, storedPacketToEvidence } from '@/lib/intelligence/storedResearch/retrieve'
-import { nebulaAgentForSeat } from '@/lib/council/nebula/identity'
+import { nebulaAgentForSeat, displayNameForSeat, PRIMARY_COUNCIL_ENTITY_IDS } from '@/lib/council/nebula/identity'
 import { NEBULA_ROLE_CONTRACTS } from '@/lib/council/nebula/roleContracts'
 import { NEBULA_SHARED_LOCAL_MODEL_ID } from '@/lib/council/nebula/modelProfile'
 import { buildNebulaIdentityLine } from '@/lib/council/nebula/persona'
 import { createExecutionRecord } from '@/lib/council/nebula/execution'
 import { containsHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
-import {
-  COUNCIL_ROSTER_CLASSIFICATION,
-  coreCouncilIsExactlyFour,
-  novaIsAuxiliaryNotCoreSubstitute,
-  phoenixIsRedTeamAdversarialRole,
-} from '@/lib/council/nebula/rosterClassification'
 import { runSearxngSearch, SEARXNG_PROVIDER_ID } from '@/lib/war-room-search/providers/searxng'
 import { inspectLocalSemanticHealth } from '@/lib/war-room-search/hybrid/semanticHealth'
 import { crawlApprovedUrl } from '@/lib/war-room-search/crawler/crawlUrl'
@@ -299,22 +293,22 @@ export async function runCouncilFullLiveFunctionValidation(): Promise<CaseResult
 
     results.push(check(
       'roster_core_is_exactly_four',
-      coreCouncilIsExactlyFour()
-        && COUNCIL_ROSTER_CLASSIFICATION.aurora === 'FULL_COUNCIL_MEMBER'
-        && COUNCIL_ROSTER_CLASSIFICATION.orion === 'FULL_COUNCIL_MEMBER'
-        && COUNCIL_ROSTER_CLASSIFICATION.pulsar === 'FULL_COUNCIL_MEMBER'
-        && COUNCIL_ROSTER_CLASSIFICATION.lumen === 'FULL_COUNCIL_MEMBER',
-      'AURORA ORION PULSAR LUMEN = FULL_COUNCIL_MEMBER; core not expanded',
+      PRIMARY_COUNCIL_ENTITY_IDS.join(',') === 'aurora,orion,pulsar,lumen'
+        && displayNameForSeat('chatgpt') === 'AURORA'
+        && displayNameForSeat('claude') === 'ORION'
+        && displayNameForSeat('grok') === 'PULSAR'
+        && displayNameForSeat('gemini') === 'LUMEN',
+      'AURORA ORION PULSAR LUMEN = core four from committed Nebula registry',
     ))
     results.push(check(
       'nova_auxiliary_not_core_substitute',
-      novaIsAuxiliaryNotCoreSubstitute(),
-      `NOVA=${COUNCIL_ROSTER_CLASSIFICATION.nova}`,
+      displayNameForSeat('nova') === 'NOVA' && !(PRIMARY_COUNCIL_ENTITY_IDS as readonly string[]).includes('nova'),
+      'NOVA is a durable seat, not a core-four substitute',
     ))
     results.push(check(
       'phoenix_red_team_adversarial_not_core',
-      phoenixIsRedTeamAdversarialRole(),
-      `PHOENIX=${COUNCIL_ROSTER_CLASSIFICATION.phoenix}`,
+      displayNameForSeat('red_team') === 'PHOENIX' && !(PRIMARY_COUNCIL_ENTITY_IDS as readonly string[]).includes('phoenix'),
+      'PHOENIX occupies red_team; not a core synthesizer',
     ))
     results.push(check(
       'world_learning_access_present_not_search2',
