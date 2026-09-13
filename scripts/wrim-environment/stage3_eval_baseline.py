@@ -380,6 +380,36 @@ def score_item(item: dict[str, Any], gen_primary: dict[str, Any], gen32: dict[st
         scores["three_csv"] = parts[:3] == want and len(parts) >= 3
     if "lowercase_no_digits" in item["scoring_functions"]:
         scores["lowercase_no_digits"] = bool(text) and text == text.lower() and not re.search(r"\d", text)
+    if "required_terms" in item["scoring_functions"]:
+        terms = [str(t).lower() for t in (payload.get("required_terms") or [])]
+        scores["required_terms"] = all(t in low for t in terms) if terms else True
+    if "forbidden_terms" in item["scoring_functions"]:
+        terms = [str(t).lower() for t in (payload.get("forbidden_terms") or [])]
+        scores["forbidden_terms"] = not any(t in low for t in terms)
+    if "ordered_terms" in item["scoring_functions"]:
+        pos = 0
+        ok = True
+        for term in [str(t).lower() for t in (payload.get("ordered_terms") or [])]:
+            i = low.find(term, pos)
+            if i < 0:
+                ok = False
+                break
+            pos = i + len(term)
+        scores["ordered_terms"] = ok
+    if "max_words" in item["scoring_functions"]:
+        words = re.findall(r"[A-Za-z0-9_\-]+", text)
+        scores["max_words"] = len(words) <= int(payload.get("max_words") or 0)
+        extra_req = [str(t).lower() for t in (payload.get("required_terms") or [])]
+        if extra_req:
+            scores["required_terms"] = all(t in low for t in extra_req)
+    if "entity_track" in item["scoring_functions"]:
+        ent = str(payload.get("track_entity") or "")
+        scores["entity_track"] = (not ent) or (ent.lower() in low)
+    if "special_rate_0_8" in item["scoring_functions"]:
+        ids = list(gen_primary.get("new_ids") or [])
+        special = [t for t in ids if t in SPECIAL_IDS]
+        rate = float(len(special) / max(1, len(ids)))
+        scores["special_rate_ok"] = rate <= 0.08
     scores["primary_collapsed"] = bool(gen_primary.get("collapsed"))
     scores["primary_special_loop"] = bool(gen_primary.get("special_loop"))
     return scores

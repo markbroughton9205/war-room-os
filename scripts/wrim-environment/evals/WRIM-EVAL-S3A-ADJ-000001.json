@@ -1,0 +1,2571 @@
+{
+  "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+  "suite_version": "1.0.0",
+  "created_at": "2026-09-13T18:20:00+00:00",
+  "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+  "evaluation_only": true,
+  "training_use": "FORBIDDEN",
+  "replaces_cap_eval_0": false,
+  "n_items": 80,
+  "categories": [
+    "GENERAL_PROSE",
+    "FACTUAL_CONTINUATION",
+    "CODE",
+    "JSON_STRUCTURED_OUTPUT",
+    "INSTRUCTION_FOLLOWING",
+    "LONG_FORM_CONTINUATION",
+    "REPETITION_RESISTANCE",
+    "SPECIAL_TOKEN_STABILITY",
+    "SEMANTIC_COHERENCE",
+    "MIXED_REASONING"
+  ],
+  "items": [
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-prose-01",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "Fog sat on Tharnwick fen until the reed-cutters could not see the far bank. Brin kept one boot in the mud and listened for the bell. When the bell finally moved, it meant that",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Tharnwick"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entropy"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Fen opening.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-prose-02",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "The Orrisfen loft smelled of damp wool. Cal kept an unsent note under a cracked bowl and told himself he would finish the line that began, I still owe",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Interior beat.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-prose-03",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "\"The kiln is yours for an hour,\" said Wex, not looking up. \"I did not ask for the kiln,\" Hest answered, and then added,",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Dialogue.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-prose-04",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "By dusk the Caldren yard had gone copper. The last barrow left ruts that filled with water. When the gate-chain dropped, it only meant",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Caldren"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Time of day.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-prose-05",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "On the Brindlecroft sill: a split spoon, a coil of brown twine, and a white stone with a hole through it. The stone, unlike the twine, did not",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Still life.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-prose-06",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "Rain walked sideways across Hestle pond. A boy counted rings in the water and decided that if a third ring appeared he would",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Hestle"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Pond rain.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-prose-07",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "Vorrin kept the night-ledger on his knee because the table listed. He dipped the pen, crossed out a name, and wrote instead",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Ledger.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-prose-08",
+      "category": "GENERAL_PROSE",
+      "prompt_text": "Nobody used the Wexhollow footbridge after the third plank went soft. Travelers took the long way around the kiln, unless they were",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Wexhollow"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Footbridge.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-fact-01",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "In the Tharnwick fen primer, a bundled reed is labeled dry when it holds no standing water and is stacked on edge. The first handling rule for a dry bundle is to",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Primer rule.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-fact-02",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "Orrisfen tray math is fixed: ten dry bundles fill one tray. If a clerk has forty bundles, the number of complete trays is",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "4",
+          "four"
+        ],
+        "arithmetic": "40/10=4"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Local arithmetic.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-fact-03",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "Because the Caldren vent was blocked, heat stayed under the roof tiles. The posted yard notice says the immediate result of that blockage was that",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Cause-effect.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-fact-04",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "To close Brindlecroft for the night: bank the Vorrin kiln, latch the fen gate, then hang the iron pin on the inner peg. After the kiln is banked, the next required action is to",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "latch",
+          "fen gate",
+          "gate"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Ordered close.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-fact-05",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "The Wexhollow ledger lists the assay shed as a timber stall on the south bank, not as a living country. The next ledger line after the stall address is expected to name",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "TOOL=",
+          "<|"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Invented stall.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-fact-06",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "Hestle pond depth marks are painted at one cubit, two cubits, and three cubits. A mark between two and three cubits is read as",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Depth marks.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-fact-07",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "A sealed Vorrin tin is quiet if it holds no dye. Quiet tins must lie on their side. A tin standing upright on the fen gate is therefore",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Quiet tin.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-fact-08",
+      "category": "FACTUAL_CONTINUATION",
+      "prompt_text": "Tharnwick clerks count only whole trays. Partial trays are written as remainder bundles, never as a fraction. Twenty-five bundles at ten per tray should be recorded as",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "2",
+          "two",
+          "5",
+          "five"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Remainder.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-code-01",
+      "category": "CODE",
+      "prompt_text": "def tally_tharnwick(n):\n    # return n trays if n is a whole number of tens, else 0\n    ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "return"
+        ],
+        "forbid_substrings": [
+          "TOOL=",
+          "<|tool"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "code_has_return",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Unique function.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-code-02",
+      "category": "CODE",
+      "prompt_text": "pairs = [(2, 5), (4, 1), (9, 0)]\nclosed = [\n    a * b for (a, b) in pairs if a < 6\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "]"
+        ],
+        "forbid_substrings": [
+          "```",
+          "TOOL="
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "code_closes_bracket",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Close list.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-code-03",
+      "category": "CODE",
+      "prompt_text": "fen_id = ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "TOOL=",
+          "<|"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "not_empty",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Assignment.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-code-04",
+      "category": "CODE",
+      "prompt_text": "count = count",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "+",
+          "+=",
+          "= count +"
+        ],
+        "forbid_substrings": [
+          "TOOL="
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Increment.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-code-05",
+      "category": "CODE",
+      "prompt_text": "# stay in source; do not open a fence\nready = False\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "```",
+          "TOOL=",
+          "<|tool"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "No fence.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-code-06",
+      "category": "CODE",
+      "prompt_text": "def pond_ok(depth):\n    if depth < 1:\n        return False\n    ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "return"
+        ],
+        "forbid_substrings": [
+          "TOOL="
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "code_has_return",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Branch.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-code-07",
+      "category": "CODE",
+      "prompt_text": "names = [\"brin\", \"wex\"]\nnames.append(\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          ")",
+          "]"
+        ],
+        "forbid_substrings": [
+          "TOOL="
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "code_closes_bracket",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Append call.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-code-08",
+      "category": "CODE",
+      "prompt_text": "print(\"tharnwick-ok\")\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "TOOL=",
+          "<|assistant",
+          "function_call"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "no_tool_markup",
+        "not_empty"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Print then source.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-json-01",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "prompt_text": "Emit one object. Required names: fen_id (text) and bundle_count (number). Begin: {",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "fen_id",
+          "bundle_count"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_required_keys"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Two-key object.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-json-02",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "prompt_text": "Emit a bracket list of exactly three fen-tool names as strings. Begin: [",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "json_type": "array"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_array_len_3"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Array of 3.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-json-03",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "prompt_text": "Write one fen object. The ready field must be a boolean and the note field must be JSON null. Start: {",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "ready",
+          "note"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_bool_null"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Bool and null.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-json-04",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "prompt_text": "Repair this object and emit only the finished object: {\"fen_id\": \"T1\", \"bundle_count\":",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "fen_id",
+          "bundle_count"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse_prefix_repair",
+        "json_required_keys"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Prefix repair.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-json-05",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "prompt_text": "Nest a flag. Skeleton if needed: {\"bin\":{\"inner_flag\":true}} then stop.\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "bin"
+        ],
+        "nested_key": "inner_flag"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_nested_outer"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Nested.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-kv-06",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "prompt_text": "Colon lines, not braces. Pattern:\nfen_id: T1\nbundle_count: 10\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "fen_id",
+          "bundle_count"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "key_value_lines"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "KV lines.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-list-07",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "prompt_text": "Stack exactly three fen tools as separate dashed lines.\n- ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_lines": 3
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "list_lines"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Bullet list.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-csv-08",
+      "category": "JSON_STRUCTURED_OUTPUT",
+      "prompt_text": "One comma row in order fen_id then bundle_count then ready. No extra words.\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_fields": 3
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "csv_row"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "CSV row.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-inst-01",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "Answer with a single English number-word and stop. How many tens are in forty? ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "accepted_words": [
+          "four",
+          "Four",
+          "FOUR"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "exactly_one_word",
+        "accepted_word"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "One word four.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-inst-02",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "Copy this fen stamp once, then halt: THARNWICK-FEN-STAMP",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "span": "THARNWICK-FEN-STAMP"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "contains_exact_span"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Exact stamp.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-inst-03",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "Print these three fen notes separated by slashes only: dry / stacked / sealed",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "span": "dry"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "contains_exact_span"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Slash notes.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-inst-04",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "Write lowercase English only, with no digits. the iron pin on the inner peg is",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "mode": "lowercase_no_digits"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "lowercase_no_digits"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Register.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-inst-05",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "One ordinary sentence about a reed bundle. Do not emit chat markup.",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "<|",
+          "TOOL=",
+          "```"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "No markup.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-inst-06",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "Include the word cubit and forbid the word Alice. The Hestle depth mark is painted in",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_terms": [
+          "cubit"
+        ],
+        "forbidden_terms": [
+          "Alice",
+          "alice"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "required_terms",
+        "forbidden_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Required/forbidden.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-inst-07",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "Output the two steps in this order: first bank, then latch. Do not reverse them. After dusk the clerk must",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "ordered_terms": [
+          "bank",
+          "latch"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "ordered_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Order.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-inst-08",
+      "category": "INSTRUCTION_FOLLOWING",
+      "prompt_text": "Reply in at most four English words. Name the stall material in Wexhollow: timber",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "max_words": 4,
+        "required_terms": [
+          "timber"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "max_words",
+        "required_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Length bound.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-long-01",
+      "category": "LONG_FORM_CONTINUATION",
+      "prompt_text": "Keep the same fen. Brin waited at Tharnwick fen after the fog hid the far bank. The reed-cutters had gone. She counted the slow bells and decided that if a lamp showed on the south stall she would",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Tharnwick"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256,
+        512
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "entropy",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "256 fen story. 512 on this item.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-long-02",
+      "category": "LONG_FORM_CONTINUATION",
+      "prompt_text": "Continue this fen notice in plain sentences. Dry bundles stand on edge. Ten bundles fill one tray. Clerks must not open a quiet tin at Hestle pond. The next paragraph explains why quiet tins stay closed during",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256,
+        512
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "entropy"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "256 notice. 512 on this item.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-long-03",
+      "category": "LONG_FORM_CONTINUATION",
+      "prompt_text": "Stay in Python source about trays.\n\ndef tray_ok(n):\n    return n > 0\n\n# next helper should mention Caldren\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "TOOL=",
+          "<|tool"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Code long.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-long-04",
+      "category": "LONG_FORM_CONTINUATION",
+      "prompt_text": "Keep telling the Orrisfen loft story without changing the place-name. Cal sat under the cracked bowl with the unsent note. Rain tapped the wool. He told himself that before he slept he would",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Orrisfen"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Loft long.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-long-05",
+      "category": "LONG_FORM_CONTINUATION",
+      "prompt_text": "Continue the Wexhollow footbridge as several sentences. The third plank went soft. Travelers took the kiln road. A night clerk still had to post a warning that",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Wexhollow"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Bridge long.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-long-06",
+      "category": "LONG_FORM_CONTINUATION",
+      "prompt_text": "Keep the Vorrin kiln in view. Heat stayed under the tiles because the vent was blocked. The yard notice went on to describe how a clerk should",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Vorrin"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Kiln long.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-long-07",
+      "category": "LONG_FORM_CONTINUATION",
+      "prompt_text": "Write a long fen inventory in ordinary prose. Mention bundles, trays, and the iron pin at least once, then invent further duties at Brindlecroft. After the pin is hung,",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_terms": [
+          "pin"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "required_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Inventory long.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-long-08",
+      "category": "LONG_FORM_CONTINUATION",
+      "prompt_text": "Continue as if completing a small object, then recover in prose about the same tray. {\"fen_id\": \"T1\", \"note\":",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "also_try_json_parse": true
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "json_parse_optional"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "JSON then prose.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-rep-01",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "Describe the Brindlecroft close in several different sentences. Mention the Vorrin kiln, the fen gate, and the iron pin once each, then invent new duties. After the pin is hung, the clerk still has to",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256,
+        512
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint",
+        "entropy"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Avoid one-word loop. 512 on this item.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-rep-02",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "Name distinct fen tools in ordinary sentences without repeating the same tool word over and over. The first tool is an iron pin. The second is brown twine. After those, the clerk should mention",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256,
+        512
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Avoid noun loop. 512.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-rep-03",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "Count upward in words from one to eight inside a short notice, then continue in new sentences about Tharnwick fen. one two three",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Avoid numeral stall.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-rep-04",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "Do not repeat the word fog as a loop. After the fog lifted at Hestle pond, the reed-cutters could finally",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbidden_terms": []
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "forbidden_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Fog once then new content.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-rep-05",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "Write five distinct duties for the night clerk, each in its own sentence, none of which is only the word latch. First duty:",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Five duties.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-rep-06",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "Continue without copying the previous three words again and again. The south stall on the timber bank still needed",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "No copy loop.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-rep-07",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "List new weather details about Orrisfen loft, not a single dripping sound repeated. The wool smelled damp because",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Weather variety.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-rep-08",
+      "category": "REPETITION_RESISTANCE",
+      "prompt_text": "Advance the Caldren yard story by changing the action each sentence. A barrow left ruts. Water filled them. Next,",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Action change.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-spec-01",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "The iron pin hung from the inner peg and tapped the fen gate once. In the morning someone would take it down and",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "special_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Ordinary prose.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-spec-02",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "Mention a fen stamp that uses parentheses (like this) and end with a plain question about Wexhollow.",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "special_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Delimiters.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-spec-03",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "The tray stencil read 10 then 40 then 80. A clerk adding those three numbers in order would write",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Digits.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-spec-04",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "Proceed with ordinary fen prose.",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "short_stem": true
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Short stem.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-spec-05",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "End the fen notice after one short clause about the iron pin, then stop.",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "eos_ok_once": true
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "EOS once.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-spec-06",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "Copy punctuation as prose only: quotes \"so\", braces {not control}, and a mark?",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Punctuation prose.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-spec-07",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "Stay in ordinary English about Tharnwick fen. Do not dump pad tokens as content. The reed-cutters",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "<|"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "No pad dump.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-spec-08",
+      "category": "SPECIAL_TOKEN_STABILITY",
+      "prompt_text": "A clerk wrote T1 then 10 then ready. Continue as source text, not as a control-token run.",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "special_rate_0_8"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "IDs as prose.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-coh-01",
+      "category": "SEMANTIC_COHERENCE",
+      "prompt_text": "Brin is still at Tharnwick fen, not in a city. Continue without moving her to a seaport or a palace. She waited because",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Tharnwick",
+        "forbidden_terms": [
+          "palace",
+          "seaport",
+          "London"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "entity_track",
+        "forbidden_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Place lock.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-coh-02",
+      "category": "SEMANTIC_COHERENCE",
+      "prompt_text": "The quiet tin holds no dye and must lie on its side. Continue without standing it upright. A clerk who finds it upright should",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbidden_terms": []
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "forbidden_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Tin constraint in prose.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-coh-03",
+      "category": "SEMANTIC_COHERENCE",
+      "prompt_text": "Keep Cal in the Orrisfen loft with the unsent note. Do not turn the note into a legal contract. He unfolded it and",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Orrisfen"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Object lock.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-coh-04",
+      "category": "SEMANTIC_COHERENCE",
+      "prompt_text": "Ten bundles fill one tray in this notice. Do not change the filling number to twelve. The clerk stacking the twenty-first bundle therefore",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbidden_terms": [
+          "twelve",
+          "12"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "forbidden_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Number lock.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-coh-05",
+      "category": "SEMANTIC_COHERENCE",
+      "prompt_text": "Hestle pond has cubit marks, not miles. Continue the depth notice without introducing miles or oceans. The water sat near",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Hestle",
+        "forbidden_terms": [
+          "mile",
+          "ocean",
+          "sea"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "forbidden_terms",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Scale lock.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-coh-06",
+      "category": "SEMANTIC_COHERENCE",
+      "prompt_text": "Wex did not look up from the kiln hour. Continue the dialogue without making Wex suddenly a queen. Hest said",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbidden_terms": [
+          "Queen",
+          "Alice"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "forbidden_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Role lock.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-coh-07",
+      "category": "SEMANTIC_COHERENCE",
+      "prompt_text": "The third plank of the Wexhollow footbridge is soft. Continue without claiming the bridge is new and sound. Travelers",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Wexhollow"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Condition lock.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-coh-08",
+      "category": "SEMANTIC_COHERENCE",
+      "prompt_text": "The iron pin hangs on the inner peg after close. Continue without moving the pin to a harbor crane. At dawn a clerk",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbidden_terms": [
+          "crane",
+          "harbor"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 256,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_256",
+        "forbidden_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Tool lock.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-mix-01",
+      "category": "MIXED_REASONING",
+      "prompt_text": "Ten bundles per tray. A clerk has seventy bundles. How many complete trays, as a number-word or digit? ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "7",
+          "seven"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "70/10.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": true
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-mix-02",
+      "category": "MIXED_REASONING",
+      "prompt_text": "Order: bank, latch, hang. After latching, the next required word in the close is hang. The clerk then",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "ordered_terms": [
+          "hang"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "ordered_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Third step.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-mix-03",
+      "category": "MIXED_REASONING",
+      "prompt_text": "If a tin is upright it is not stored as quiet. This tin is upright, so it is",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "If-then.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-mix-04",
+      "category": "MIXED_REASONING",
+      "prompt_text": "Marks at 1, 2, and 3 cubits. A reading of two cubits is the middle mark. The middle mark is",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "2",
+          "two"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Middle mark.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-mix-05",
+      "category": "MIXED_REASONING",
+      "prompt_text": "Rewrite in lowercase with no digits: THE PIN IS HUNG. Result:",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "mode": "lowercase_no_digits"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "lowercase_no_digits"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Transform.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-mix-06",
+      "category": "MIXED_REASONING",
+      "prompt_text": "Forbidden word: Alice. Required word: fen. Continue: the clerk walked back to the",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_terms": [
+          "fen"
+        ],
+        "forbidden_terms": [
+          "Alice"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "required_terms",
+        "forbidden_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Mix constraints.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-mix-07",
+      "category": "MIXED_REASONING",
+      "prompt_text": "A stall is timber, not stone. Do not call it stone. The Wexhollow stall is built of",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_terms": [
+          "timber"
+        ],
+        "forbidden_terms": [
+          "stone"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "required_terms",
+        "forbidden_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Material.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    },
+    {
+      "suite_id": "WRIM-EVAL-S3A-ADJ-000001",
+      "suite_version": "1.0.0",
+      "item_id": "adj-mix-08",
+      "category": "MIXED_REASONING",
+      "prompt_text": "Forty bundles at ten per tray leave zero remainder. Record complete trays only. The record should show",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "4",
+          "four"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "40/10 remainder 0.",
+      "authorship": "Authored synthetic STAGE3A adjudication stems. Evaluation-only. Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Forbidden for training.",
+      "created_at": "2026-09-13T18:20:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": true,
+      "head_to_head": false
+    }
+  ]
+}

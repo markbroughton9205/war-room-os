@@ -9,7 +9,6 @@ import {
   CURRENT_PRODUCTION_WRIM,
   CURRENT_WRIM_TRAINING,
   NEXT_AUTHORIZED_PASS,
-  PREFERRED_STAGE3A_EVALUATION_CANDIDATE,
   QWEN_INTELLIGENCE_CLASS,
   RAEL_STATUS,
   ROADMAP_22_STATUS,
@@ -18,7 +17,6 @@ import {
   STAGE3A_CANDIDATE_SELECTION_STATUS,
   STAGE3A_CLASSIFICATION,
   STAGE3A_HEALTHY_FOR_CONTINUATION,
-  STAGE3A_PREFERRED_KIND,
   STAGE3B_EXECUTION_READINESS,
   TRAINING_AUTHORIZATION,
 } from './identity'
@@ -55,9 +53,9 @@ export async function runStage3ASelectionValidation(): Promise<{ passed: number;
   results.push(check('6_sets_frozen', fs.existsSync(retPath) && fs.existsSync(structPath) && freeze.retention_n === 24 && freeze.structured_n === 15 && freeze.training_use === 'FORBIDDEN' && freeze.replaces_cap_eval_0 === false, '24+15 frozen'))
   results.push(check('7_step25_interp', Array.isArray(report?.step25_interpolation) && (report.step25_interpolation as unknown[]).length === 7 && fs.existsSync(step25Interp), '7 alphas'))
   results.push(check('8_step50_reused', Array.isArray(report?.step50_interpolation) && (report.step50_interpolation as unknown[]).length === 7, '7 reused'))
-  results.push(check('9_preferred', PREFERRED_STAGE3A_EVALUATION_CANDIDATE === 'STEP50_A0.5' && preferred.candidate_id === 'STEP50_A0.5' && preferred.promotion === false && STAGE3A_PREFERRED_KIND === 'TEST_ONLY_MERGE', PREFERRED_STAGE3A_EVALUATION_CANDIDATE))
+  results.push(check('9_preferred', preferred.candidate_id === 'STEP50_A0.5' && preferred.promotion === false, String(preferred.candidate_id)))
   results.push(check('10_raw50', selection.raw_step50_remains_unsuitable === true && STAGE3A_CLASSIFICATION === 'B. REVIEW_REQUIRED_CONTINUOUS_DRIFT' && STAGE3A_HEALTHY_FOR_CONTINUATION === false && selection.healthy_enough_for_future_stage3b_review === false, 'raw step50 unsuitable'))
-  results.push(check('11_status', STAGE3A_CANDIDATE_SELECTION_STATUS === 'COMPLETE' && NEXT_AUTHORIZED_PASS === 'STAGE3A_CANDIDATE_SELECTION_COMPLETE', NEXT_AUTHORIZED_PASS))
+  results.push(check('11_status', STAGE3A_CANDIDATE_SELECTION_STATUS === 'COMPLETE' && (NEXT_AUTHORIZED_PASS === 'STAGE3A_CANDIDATE_SELECTION_COMPLETE' || NEXT_AUTHORIZED_PASS === 'STAGE3A_CANDIDATE_ADJUDICATION_COMPLETE'), NEXT_AUTHORIZED_PASS))
   results.push(check('12_no_promote', report?.promotion_candidate === false && report?.interpolation_auto_promoted === false && CURRENT_PRODUCTION_WRIM === 'NOT_IMPLEMENTED', 'not promoted'))
   results.push(check('13_qwen_rael', QWEN_INTELLIGENCE_CLASS === 'THIRD_PARTY_MODEL_RUNNING_LOCALLY' && RAEL_STATUS === 'NOT_IMPLEMENTED', RAEL_STATUS))
   results.push(check('14_roadmap', ROADMAP_22_STATUS === 'CLOSED' && ROADMAP_23_STATUS === 'ACTIVE', ROADMAP_23_STATUS))
