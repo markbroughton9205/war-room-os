@@ -25,7 +25,7 @@ export type CouncilRosterClass = (typeof COUNCIL_ROSTER_CLASS)[number]
 
 export const CORE_COUNCIL_ENTITY_IDS = PRIMARY_COUNCIL_ENTITY_IDS
 
-function isPrimaryCouncilEntityId(id: NebulaAgentId): id is PrimaryCouncilEntityId {
+export function isPrimaryCouncilEntityId(id: NebulaAgentId): id is PrimaryCouncilEntityId {
   switch (id) {
     case 'aurora':
     case 'orion':

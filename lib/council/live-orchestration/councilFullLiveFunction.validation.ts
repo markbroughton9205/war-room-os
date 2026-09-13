@@ -89,7 +89,7 @@ function provenanceLabel(item: IntelligenceEvidenceItem): 'LIVE' | 'CACHED' | 'S
   if (item.origin_type === 'TERRA') return item.freshness === 'stale' ? 'HISTORICAL' : 'LIVE'
   if (item.origin_type === 'LIVE_WEB') {
     if (item.freshness === 'stale') return 'HISTORICAL'
-    if (item.storage_origin === 'WAR_ROOM_CORPUS' || item.storage_origin === 'WAR_ROOM_LOCAL') return 'CACHED'
+    if (item.storage_origin === 'WAR_ROOM_CORPUS') return 'CACHED'
     return 'LIVE'
   }
   return 'UNKNOWN'

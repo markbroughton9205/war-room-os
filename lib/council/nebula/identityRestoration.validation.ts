@@ -16,6 +16,7 @@ import { identitiesAreNotProviders, projectCouncilEntityView } from '@/lib/counc
 import { NEBULA_ROLE_CONTRACTS } from '@/lib/council/nebula/roleContracts'
 import { identitySurvivesBackendChange, createExecutionRecord } from '@/lib/council/nebula/execution'
 import { NEBULA_SHARED_LOCAL_MODEL_ID } from '@/lib/council/nebula/modelProfile'
+import { isPrimaryCouncilEntityId } from '@/lib/council/nebula/rosterClassification'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 
@@ -65,7 +66,7 @@ export function runCouncilIdentityRestorationValidation(): CaseResult[] {
   results.push(check(
     'NOVA is a canonical fifth member, not a substitute for the four',
     CANONICAL_COUNCIL_MEMBER_IDS.includes('nova')
-      && !PRIMARY_COUNCIL_ENTITY_IDS.includes('nova')
+      && !isPrimaryCouncilEntityId('nova')
       && NEBULA_AGENTS_BY_ID.nova.name === 'NOVA'
       && NEBULA_AGENTS_BY_ID.nova.role.toLowerCase().includes('strategy'),
     `nova role=${NEBULA_AGENTS_BY_ID.nova.role}`,
