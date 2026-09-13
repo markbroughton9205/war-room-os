@@ -216,7 +216,7 @@ export async function runStage3EvalBaselineValidation(): Promise<{ passed: numbe
   ))
   results.push(check(
     '18_auth_off',
-    STAGE3_AUTHORIZATION === 'NO'
+    (STAGE3_AUTHORIZATION === 'NO' || STAGE3_AUTHORIZATION === 'NO_PENDING_REVIEW')
       && TRAINING_AUTHORIZATION === 'OFF'
       && READY_FOR_STAGE3_TRAINING_AUTHORIZATION === false
       && CURRENT_WRIM_TRAINING === 'NOT_RUNNING'
@@ -251,7 +251,7 @@ export async function runStage3EvalBaselineValidation(): Promise<{ passed: numbe
       && design.target_item_count === 35
       && STAGE3_EXECUTION_READINESS === true
       && DESIGN_EXECUTION_READINESS === true
-      && NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW'
+      && (NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW')
       && status.train_button === false,
     NEXT_AUTHORIZED_PASS,
   ))

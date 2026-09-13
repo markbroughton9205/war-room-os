@@ -1,8 +1,8 @@
 """WRIM1-RUN-000003 Stage 3 trainer / runtime.
 
 Default: ZERO-OPTIMIZER-STEP dry-run.
-Train mode is hard-gated: STAGE3_AUTHORIZATION=YES AND TRAINING_AUTHORIZATION=ON.
-This pass compiles both flags as NO/OFF, so any training launch returns TRAINING_DENIED.
+Generic --mode train remains TRAINING_DENIED.
+Authorized STAGE3A confirmation uses --mode stage3a only.
 """
 from __future__ import annotations
 
@@ -470,7 +470,7 @@ def main() -> int:
     ap.add_argument("--baseline", required=True)
     ap.add_argument("--report", required=True)
     ap.add_argument("--ckpt-dir", required=True)
-    ap.add_argument("--mode", choices=["dry-run", "train", "deny-probe"], default="dry-run")
+    ap.add_argument("--mode", choices=["dry-run", "train", "deny-probe", "stage3a"], default="dry-run")
     args = ap.parse_args()
     weights = Path(args.weights)
     tokenizer_path = Path(args.tokenizer)
@@ -479,6 +479,22 @@ def main() -> int:
     baseline_path = Path(args.baseline)
     report_path = Path(args.report)
     ckpt_dir = Path(args.ckpt_dir)
+
+    if args.mode == "stage3a":
+        from stage3a_run import run_stage3a
+
+        out = run_stage3a(
+            weights=weights,
+            tokenizer_path=tokenizer_path,
+            dump_root=dump_root,
+            suite_path=suite_path,
+            baseline_path=baseline_path,
+            report_path=report_path,
+            ckpt_root=ckpt_dir,
+        )
+        if out.get("kind") == "ABORT" or (isinstance(out.get("abort"), dict) and out["abort"].get("present")):
+            return 2
+        return 0 if out.get("ok") else 1
 
     if args.mode in ("train", "deny-probe"):
         denied = deny_train(report_path if args.mode == "deny-probe" else report_path.with_name("stage3-train-denied.json"))

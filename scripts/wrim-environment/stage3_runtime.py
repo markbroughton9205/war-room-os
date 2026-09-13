@@ -1,6 +1,7 @@
 """Stage 3 runtime primitives: authorization gate, hard stops, review bands, checkpoints.
 
-Does not step an optimizer. Training remains denied unless BOTH compiled flags are open.
+Generic train remains denied. STAGE3A-only confirmation is gated to 50 optimizer steps.
+STAGE3B remains unauthorized.
 """
 from __future__ import annotations
 
@@ -66,9 +67,12 @@ TOOL_USE_SHARE = 0.0
 DISK_WARN_GB = 64
 DISK_STOP_GB = 32
 
-# Compiled authorization truth for this pass. Must match lib/wrim-environment/identity.ts.
-STAGE3_AUTHORIZATION = "NO"
+# STAGE3A confirmation completed. Authorization expired at optimizer_step=50.
+STAGE3_AUTHORIZATION = "NO_PENDING_REVIEW"
 TRAINING_AUTHORIZATION = "OFF"
+STAGE3B_AUTHORIZATION = "NO"
+MAX_AUTHORIZED_OPTIMIZER_STEPS = 50
+STAGE3A_STATUS = "COMPLETE_PENDING_REVIEW"
 
 REVIEW_BANDS = {
     "kind": "REVIEW_TRIGGER_ONLY",
@@ -206,11 +210,24 @@ def disk_guard(path: Path) -> dict[str, Any]:
     }
 
 
+def authorization_allows_stage3a(
+    stage3_authorization: str = STAGE3_AUTHORIZATION,
+    training_authorization: str = TRAINING_AUTHORIZATION,
+    stage3b_authorization: str = STAGE3B_AUTHORIZATION,
+) -> bool:
+    return (
+        stage3_authorization == "YES_FOR_STAGE3A_ONLY"
+        and training_authorization == "ON_FOR_STAGE3A_ONLY"
+        and stage3b_authorization == "NO"
+    )
+
+
 def authorization_allows_training(
     stage3_authorization: str = STAGE3_AUTHORIZATION,
     training_authorization: str = TRAINING_AUTHORIZATION,
 ) -> bool:
-    return stage3_authorization == "YES" and training_authorization == "ON"
+    # Generic unbounded train remains denied. STAGE3A uses authorization_allows_stage3a().
+    return False
 
 
 def authorization_gate(
@@ -219,17 +236,40 @@ def authorization_gate(
     stage3_authorization: str = STAGE3_AUTHORIZATION,
     training_authorization: str = TRAINING_AUTHORIZATION,
 ) -> dict[str, Any]:
-    allowed = authorization_allows_training(stage3_authorization, training_authorization)
-    deny_train = requested_mode == "train" and not allowed
+    if requested_mode == "dry-run":
+        return {
+            "allowed": False,
+            "requested_mode": requested_mode,
+            "STAGE3_AUTHORIZATION": stage3_authorization,
+            "TRAINING_AUTHORIZATION": training_authorization,
+            "STAGE3B_AUTHORIZATION": STAGE3B_AUTHORIZATION,
+            "decision": "DRY_RUN_OK",
+            "max_optimizer_steps": 0,
+            "reason": "Dry-run does not create/step an optimizer.",
+        }
+    if requested_mode == "stage3a":
+        allowed = authorization_allows_stage3a(stage3_authorization, training_authorization)
+        return {
+            "allowed": allowed,
+            "requested_mode": requested_mode,
+            "STAGE3_AUTHORIZATION": stage3_authorization,
+            "TRAINING_AUTHORIZATION": training_authorization,
+            "STAGE3B_AUTHORIZATION": STAGE3B_AUTHORIZATION,
+            "decision": "STAGE3A_AUTHORIZED" if allowed else "TRAINING_DENIED",
+            "max_optimizer_steps": MAX_AUTHORIZED_OPTIMIZER_STEPS if allowed else 0,
+            "reason": None
+            if allowed
+            else "STAGE3A requires STAGE3_AUTHORIZATION=YES_FOR_STAGE3A_ONLY and TRAINING_AUTHORIZATION=ON_FOR_STAGE3A_ONLY and STAGE3B_AUTHORIZATION=NO.",
+        }
     return {
-        "allowed": allowed,
+        "allowed": False,
         "requested_mode": requested_mode,
         "STAGE3_AUTHORIZATION": stage3_authorization,
         "TRAINING_AUTHORIZATION": training_authorization,
-        "decision": "TRAINING_DENIED" if deny_train or (requested_mode == "train" and not allowed) else ("DRY_RUN_OK" if requested_mode == "dry-run" else "UNKNOWN"),
-        "reason": None
-        if allowed and requested_mode == "train"
-        else "Trainer refuses to create/step optimizer unless STAGE3_AUTHORIZATION=YES AND TRAINING_AUTHORIZATION=ON.",
+        "STAGE3B_AUTHORIZATION": STAGE3B_AUTHORIZATION,
+        "decision": "TRAINING_DENIED",
+        "max_optimizer_steps": 0,
+        "reason": "Generic train / STAGE3B / step 51 are not authorized. STAGE3A-only CLI is the sole training path.",
     }
 
 
@@ -242,7 +282,10 @@ def abort_payload(*, reason: str, step: int | None, extra: dict[str, Any] | None
         "step": step,
         "timestamp": utc_now(),
         "TRAINING_AUTHORIZATION": "OFF",
-        "STAGE3_AUTHORIZATION": "NO",
+        "STAGE3_AUTHORIZATION": "NO_PENDING_REVIEW",
+        "STAGE3A_STATUS": "ABORTED",
+        "STAGE3B_EXECUTION_READINESS": False,
+        "STAGE3B_AUTHORIZATION": "NO",
         "stage3_started": False,
         "promotion_candidate": False,
         **(extra or {}),

@@ -19,7 +19,6 @@ import {
   STAGE3_AUTHORIZATION,
   STAGE3_EXECUTION_REVIEW,
   STAGE3_TRAINER_STATUS,
-  STAGE3A_EXECUTION_READINESS,
   STAGE3B_EXECUTION_READINESS,
   TOKENIZER_SHA256,
   TRAINING_AUTHORIZATION,
@@ -82,8 +81,8 @@ export async function runStage3ExecutionValidation(): Promise<{ passed: number; 
   results.push(check('7_self_kl', Boolean((selfKl as { pass?: boolean }).pass) && suite.status === 'AUTHORED_FROZEN' && STAGE3_EVAL_SUITE_STATUS === 'AUTHORED_FROZEN', 'self-kl + frozen suite'))
   results.push(check('8_stage3a_schedule', schedPy.includes('PEAK_LR * step / STAGE3A_WARMUP_STEPS') && schedule.ok === true && Math.abs(Number(schedule.stage3a?.step_25) - 2e-5) < 1e-18 && Math.abs(Number(schedule.stage3a?.step_50) - 2e-6) < 1e-18, 'STAGE3A exact'))
   results.push(check('9_stage3b_schedule', STAGE3B_LR_FORMULA === 'FROZEN_FOR_REVIEW' && STAGE3B_START_LR === 2e-6 && STAGE3B_MIN_LR === 2e-7 && Math.abs(Number(schedule.stage3b?.conceptual_step_50) - 2e-6) < 1e-18 && Math.abs(Number(schedule.stage3b?.step_250) - 2e-7) < 1e-18, STAGE3B_LR_FORMULA))
-  results.push(check('10_auth_gate', trainPy.includes('TRAINING_DENIED') && runtimePy.includes('STAGE3_AUTHORIZATION = "NO"') && denied?.error === 'TRAINING_DENIED' && denied?.optimizer_steps === 0, 'TRAINING_DENIED'))
-  results.push(check('11_auth_off', STAGE3_AUTHORIZATION === 'NO' && TRAINING_AUTHORIZATION === 'OFF' && READY_FOR_STAGE3_TRAINING_AUTHORIZATION === false && CURRENT_WRIM_TRAINING === 'NOT_RUNNING', STAGE3_AUTHORIZATION))
+  results.push(check('10_auth_gate', trainPy.includes('TRAINING_DENIED') && (runtimePy.includes('STAGE3_AUTHORIZATION = "NO"') || runtimePy.includes('STAGE3_AUTHORIZATION = "NO_PENDING_REVIEW"')) && denied?.error === 'TRAINING_DENIED' && denied?.optimizer_steps === 0, 'TRAINING_DENIED'))
+  results.push(check('11_auth_off', (STAGE3_AUTHORIZATION === 'NO' || STAGE3_AUTHORIZATION === 'NO_PENDING_REVIEW') && TRAINING_AUTHORIZATION === 'OFF' && READY_FOR_STAGE3_TRAINING_AUTHORIZATION === false && CURRENT_WRIM_TRAINING === 'NOT_RUNNING', STAGE3_AUTHORIZATION))
   results.push(check('12_dry_run_zero', dry?.ok === true && dry?.optimizer_steps === 0 && dry?.parameter_update_count === 0, String(dry?.optimizer_steps)))
   results.push(check('13_weight_immutable', dry?.weight_immutability === true && dry?.parent_sha_pre === dry?.parent_sha_post, String(dry?.weight_immutability)))
   results.push(check('14_checkpoint_scheme', runtimePy.includes('parent_pointer_only') && fs.existsSync(path.join(live.stage3DryRunCheckpointDir, 'parent-pointer.json')) && trainedCkpt === false, 'pointer only'))
@@ -92,7 +91,7 @@ export async function runStage3ExecutionValidation(): Promise<{ passed: number; 
   results.push(check('17_rael', RAEL_STATUS === 'NOT_IMPLEMENTED', RAEL_STATUS))
   results.push(check('18_22_closed', ROADMAP_22_STATUS === 'CLOSED', ROADMAP_22_STATUS))
   results.push(check('19_23_active', ROADMAP_23_STATUS === 'ACTIVE', ROADMAP_23_STATUS))
-  results.push(check('20_status_truth', STAGE3_EXECUTION_REVIEW === 'PASS' && STAGE3_TRAINER_STATUS === 'IMPLEMENTED_VALIDATED_ZERO_STEP' && STAGE3A_EXECUTION_READINESS === true && STAGE3B_EXECUTION_READINESS === false && NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' && status.train_button === false, NEXT_AUTHORIZED_PASS))
+  results.push(check('20_status_truth', STAGE3_EXECUTION_REVIEW === 'PASS' && (STAGE3_TRAINER_STATUS === 'IMPLEMENTED_VALIDATED_ZERO_STEP' || STAGE3_TRAINER_STATUS === 'STAGE3A_COMPLETE_PENDING_REVIEW') && STAGE3B_EXECUTION_READINESS === false && (NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW') && status.train_button === false, NEXT_AUTHORIZED_PASS))
   results.push(check('21_no_http_train', tryForbiddenEnvAction('START_STAGE_3').denied && FORBIDDEN_ENV_ACTIONS.includes('START_STAGE_3'), 'HTTP denied'))
   results.push(check('22_disk_guard', Boolean((dry?.disk as { ok?: boolean } | undefined)?.ok) && runtimePy.includes('DISK_STOP_GB = 32') && runtimePy.includes('DISK_WARN_GB = 64'), 'disk guard'))
   results.push(check('23_no_trained_artifact', trainedCkpt === false && dry?.trained_checkpoint_written === false, 'no masquerading ckpt'))

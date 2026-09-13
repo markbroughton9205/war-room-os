@@ -20,11 +20,13 @@ export type WrimEnvironmentPaths = {
     stage3EvalBaselinePath: string
     stage3DryRunReportPath: string
     stage3TrainDeniedPath: string
+    stage3aReportPath: string
     checkpointTestOnlyDir: string
     stage2CheckpointDir: string
     controlledStabilityCheckpointDir: string
     phase2GridCheckpointDir: string
     stage3DryRunCheckpointDir: string
+    stage3aCheckpointDir: string
   manifestPath: string
   venvPython: string
   venvRoot: string
@@ -50,11 +52,13 @@ export function resolveWrimEnvironmentPaths(dataDirOverride?: string | null): Wr
     stage3EvalBaselinePath: path.join(root, 'wrim-eval-s3-000001-wrim0-baseline.json'),
     stage3DryRunReportPath: path.join(root, 'stage3-dry-run.json'),
     stage3TrainDeniedPath: path.join(root, 'stage3-train-denied.json'),
+    stage3aReportPath: path.join(root, 'stage3a-report.json'),
     checkpointTestOnlyDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-NEBULA-DIAG-000001'),
     stage2CheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-NEBULA-STAB-000001'),
     controlledStabilityCheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'controlled-stability'),
     phase2GridCheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'stability-grid-000001'),
     stage3DryRunCheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-RUN-000003', 'dry-run'),
+    stage3aCheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-RUN-000003', 'STAGE3A'),
     manifestPath: path.join(root, 'environment-manifest.json'),
     venvRoot,
     venvPython: path.join(venvRoot, 'Scripts', 'python.exe'),
