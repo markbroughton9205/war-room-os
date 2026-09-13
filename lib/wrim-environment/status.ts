@@ -6,6 +6,11 @@ import {
   RAEL_STATUS,
   ROADMAP_22_STATUS,
   ROADMAP_23_STATUS,
+  STAGE1_AUTHORIZED,
+  STAGE1_RUN_ID,
+  STAGE1_STATUS,
+  STAGE2_RUN_ID,
+  STAGE2_STATUS,
   TRAINING_AUTHORIZATION,
 } from './identity'
 import { resolveWrimEnvironmentPaths } from './paths'
@@ -15,9 +20,17 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
   const paths = resolveWrimEnvironmentPaths(dataDirOverride)
   const truth = getSovereignRuntimeTruth()
   let report: Record<string, unknown> | null = null
+  let stage1: Record<string, unknown> | null = null
+  let stage2: Record<string, unknown> | null = null
   let manifest: Record<string, unknown> | null = null
   if (fs.existsSync(paths.reportPath)) {
     report = JSON.parse(fs.readFileSync(paths.reportPath, 'utf8')) as Record<string, unknown>
+  }
+  if (fs.existsSync(paths.stage1ReportPath)) {
+    stage1 = JSON.parse(fs.readFileSync(paths.stage1ReportPath, 'utf8')) as Record<string, unknown>
+  }
+  if (fs.existsSync(paths.stage2ReportPath)) {
+    stage2 = JSON.parse(fs.readFileSync(paths.stage2ReportPath, 'utf8')) as Record<string, unknown>
   }
   if (fs.existsSync(paths.manifestPath)) {
     manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8')) as Record<string, unknown>
@@ -33,6 +46,10 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
     gpu: cuda.name ?? null,
     precision,
     stage0: report?.WRIM_PYTORCH_PORT ?? 'UNKNOWN',
+    stage1: (stage1?.WRIM_STAGE1 as string | undefined) ?? STAGE1_STATUS,
+    stage1_run_id: STAGE1_RUN_ID,
+    stage2: (stage2?.WRIM_STAGE2 as string | undefined) ?? STAGE2_STATUS,
+    stage2_run_id: STAGE2_RUN_ID,
     train_button: false,
     training_authorization: TRAINING_AUTHORIZATION,
     current_training: CURRENT_WRIM_TRAINING,
@@ -40,11 +57,14 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
     rael: RAEL_STATUS,
     qwen: 'THIRD_PARTY_MODEL_RUNNING_LOCALLY',
     next_authorized_pass: NEXT_AUTHORIZED_PASS,
-    stage1_authorized: false,
+    stage1_authorized: STAGE1_AUTHORIZED,
+    stopped: true,
     roadmap_22: ROADMAP_22_STATUS,
     roadmap_23: ROADMAP_23_STATUS,
     autonomy: truth.ASCENSION_AUTONOMY,
     report_present: Boolean(report),
+    stage1_report_present: Boolean(stage1),
+    stage2_report_present: Boolean(stage2),
     manifest_present: Boolean(manifest),
   }
 }

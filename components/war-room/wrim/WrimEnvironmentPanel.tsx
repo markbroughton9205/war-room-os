@@ -12,6 +12,10 @@ type EnvStatus = {
   training_authorization?: string
   train_button?: boolean
   next_authorized_pass?: string
+  stage1?: string
+  stage1_run_id?: string
+  stage2?: string
+  stage2_run_id?: string
 }
 
 export function WrimEnvironmentPanel() {
@@ -32,7 +36,7 @@ export function WrimEnvironmentPanel() {
 
   return (
     <section className="space-y-3 rounded border border-cyan-800 bg-zinc-950 p-4 text-sm text-cyan-100">
-      <p className="text-xs uppercase tracking-widest text-cyan-400">WRIM PyTorch environment · Stage 0 · no training</p>
+      <p className="text-xs uppercase tracking-widest text-cyan-400">WRIM PyTorch environment · Stage 0 verified · Stage 1 diagnostic · Stage 2 sentinel-stopped · no Train button</p>
       {error ? <p className="text-red-400">{error}</p> : null}
       <article className="grid gap-1 text-xs">
         <p>environment: {status?.WRIM_ENVIRONMENT ?? '…'} · port: {status?.WRIM_PYTORCH_PORT ?? '…'}</p>
@@ -40,8 +44,10 @@ export function WrimEnvironmentPanel() {
         <p>GPU: {status?.gpu ?? 'n/a'}</p>
         <p>precision: FP32 {precision.FP32 ?? '…'} · TF32 {precision.TF32 ?? '…'} · FP16 {precision.FP16 ?? '…'} · BF16 {precision.BF16 ?? '…'}</p>
         <p>WRIM-0 Stage 0 equivalence: {status?.WRIM_PYTORCH_PORT ?? '…'}</p>
+        <p>Stage 1: {status?.stage1 ?? '…'} · run {status?.stage1_run_id ?? 'WRIM1-NEBULA-DIAG-000001'}</p>
+        <p>Stage 2: {status?.stage2 ?? '…'} · run {status?.stage2_run_id ?? 'WRIM1-NEBULA-STAB-000001'} · TEST_ONLY · not a promotion candidate</p>
         <p>training authorization: {status?.training_authorization ?? 'OFF'} · train button: {String(status?.train_button ?? false)}</p>
-        <p>next pass: {status?.next_authorized_pass ?? 'READY_FOR_STAGE1_AUTHORIZATION'} (not started)</p>
+        <p>next pass: {status?.next_authorized_pass ?? 'STAGE2_STOPPED_BY_SENTINEL_REVIEW'} (Stage 3 not authorized)</p>
       </article>
       <button type="button" className="rounded border border-cyan-600 px-3 py-1 text-xs" onClick={() => void refresh()}>
         Refresh environment status

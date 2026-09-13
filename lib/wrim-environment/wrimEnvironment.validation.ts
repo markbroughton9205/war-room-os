@@ -21,12 +21,15 @@ import {
   CURRENT_PRODUCTION_WRIM,
   CURRENT_WRIM_TRAINING,
   FORBIDDEN_ENV_ACTIONS,
+  NEXT_AUTHORIZED_PASS,
   PARENT_SHA256,
   RAEL_STATUS,
   ROADMAP_22_STATUS,
   ROADMAP_23_STATUS,
   SMOKE_ARGMAX_ID,
   STAGE1_AUTHORIZED,
+  STAGE1_RUN_ID,
+  STAGE1_STATUS,
   TOKENIZER_SHA256,
   TRAINING_AUTHORIZATION,
 } from './identity'
@@ -53,12 +56,18 @@ export async function runWrimEnvironmentValidation(): Promise<{ passed: number; 
   const wrim0MtimeAfter = fs.statSync(wrim0Path).mtimeMs
   const pyModel = fs.readFileSync(path.join(repoRoot, 'scripts/wrim-environment/wrim_g20m.py'), 'utf8')
   const pyStage = fs.readFileSync(path.join(repoRoot, 'scripts/wrim-environment/stage0.py'), 'utf8')
+  const pyStage1 = fs.readFileSync(path.join(repoRoot, 'scripts/wrim-environment/stage1.py'), 'utf8')
+  const pyPack = fs.readFileSync(path.join(repoRoot, 'scripts/wrim-environment/stage1_pack.py'), 'utf8')
   const pyLoad = fs.readFileSync(path.join(repoRoot, 'scripts/wrim-environment/safetensors_model.py'), 'utf8')
   const cpu = report.cpu as { argmax_id?: number; entropy?: number; pass?: boolean; new_ids?: number[] }
   const cuda = report.cuda_stage0 as { argmax_id?: number; entropy?: number; pass?: boolean; new_ids?: number[] }
   const mapping = (report as { mapping?: { mapped?: number; missing?: unknown[]; unexpected?: unknown[]; skipped_opt?: number } }).mapping
   const precision = report.precision as Record<string, string>
   const batch = (report as { forward_only_batch_probe?: Array<{ FORWARD_ONLY?: boolean; backward?: boolean }> }).forward_only_batch_probe ?? []
+  const stage1Live = fs.existsSync(live.stage1ReportPath)
+    ? (JSON.parse(fs.readFileSync(live.stage1ReportPath, 'utf8')) as Record<string, unknown>)
+    : null
+  const stage1Ckpt = live.checkpointTestOnlyDir
 
   results.push(check('1_venv_exists', fs.existsSync(live.venvPython), live.venvPython))
   results.push(check('2_python_313', String(manifest.python_version).startsWith('3.13'), String(manifest.python_version)))
@@ -107,11 +116,44 @@ export async function runWrimEnvironmentValidation(): Promise<{ passed: number; 
   results.push(check('45_nothing_pushed', true, 'this pass does not push'))
   results.push(check('46_nothing_deployed', true, 'this pass does not deploy'))
   results.push(check('47_no_train_button', wrimEnvironmentStatusPayload(tmp).train_button === false, 'no train'))
-  results.push(check('48_stage1_off', STAGE1_AUTHORIZED === false && TRAINING_AUTHORIZATION === 'OFF' && CURRENT_WRIM_TRAINING === 'NOT_RUNNING', CURRENT_WRIM_TRAINING))
+  results.push(check(
+    '48_stage1_bounded',
+    STAGE1_AUTHORIZED === true
+      && STAGE1_STATUS === 'STAGE1_VERIFIED'
+      && TRAINING_AUTHORIZATION === 'OFF'
+      && CURRENT_WRIM_TRAINING === 'NOT_RUNNING'
+      && NEXT_AUTHORIZED_PASS === 'STAGE2_STOPPED_BY_SENTINEL_REVIEW',
+    CURRENT_WRIM_TRAINING,
+  ))
   results.push(check('49_red_team', FORBIDDEN_ENV_ACTIONS.every(a => tryForbiddenEnvAction(a).denied), String(FORBIDDEN_ENV_ACTIONS.length)))
   results.push(check('50_reference_attention', pyModel.includes('reference_attention') && !pyModel.includes('scaled_dot_product_attention'), 'not SDPA'))
   results.push(check('51_continuation_decoded', manifest.continuation_match === true, String(manifest.cpu_continuation_decoded)))
   results.push(check('52_production_unchanged', CURRENT_PRODUCTION_WRIM === 'NOT_IMPLEMENTED', CURRENT_PRODUCTION_WRIM))
+  results.push(check('53_stage1_steps_10', pyStage1.includes('STEPS = 10') && !pyStage1.includes('STEPS = 11') && pyStage1.includes('STOP'), '10 then STOP'))
+  results.push(check('54_stage1_fresh_adamw', pyStage1.includes('AdamW') && pyStage1.includes('fused=False') && pyStage1.includes('resume_historical_mlx') && pyStage1.includes('"resumed_mlx": False'), 'fresh AdamW'))
+  results.push(check('55_stage1_contiguous', pyPack.includes('CONTIGUOUS_UNIT_PACK_DEFICIT_INTERLEAVE') && pyPack.includes('FORBIDDEN') && pyPack.includes('wrap_lm_tokens'), 'corrected pack'))
+  results.push(check(
+    '56_stage1_report',
+    Boolean(stage1Live)
+      && stage1Live?.ok === true
+      && stage1Live?.WRIM_STAGE1 === STAGE1_STATUS
+      && stage1Live?.run_id === STAGE1_RUN_ID
+      && stage1Live?.n_steps === 10
+      && stage1Live?.stopped === true
+      && stage1Live?.stage2_started === false
+      && stage1Live?.parent_unmodified === true,
+    String(stage1Live?.WRIM_STAGE1),
+  ))
+  results.push(check(
+    '57_stage1_reload',
+    Boolean(stage1Live)
+      && (stage1Live.checkpoint as { works_after_reload?: boolean; hash_match?: boolean } | undefined)?.works_after_reload === true
+      && (stage1Live.checkpoint as { hash_match?: boolean } | undefined)?.hash_match === true
+      && fs.existsSync(path.join(stage1Ckpt, 'model.safetensors')),
+    'reload works',
+  ))
+  results.push(check('58_parent_still_unmodified', wrim0MtimeAfter === wrim0Mtime, 'parent read-only'))
+  results.push(check('59_http_stage1_denied', tryForbiddenEnvAction('START_STAGE_1').denied && tryForbiddenEnvAction('START_STAGE_2').denied && tryForbiddenEnvAction('START_STAGE_3').denied, 'no HTTP train'))
 
   const passed = results.filter(r => r.ok).length
   const failed = results.filter(r => r.ok === false).length
@@ -119,7 +161,7 @@ export async function runWrimEnvironmentValidation(): Promise<{ passed: number; 
 }
 
 async function main() {
-  console.log('=== #23 NEBULA PYTORCH/CUDA ENVIRONMENT + STAGE 0 ===')
+  console.log('=== #23 NEBULA PYTORCH/CUDA ENVIRONMENT + STAGE 0/1 ===')
   const { passed, failed, results } = await runWrimEnvironmentValidation()
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'} ${r.id} — ${r.detail}`)
   console.log(`\nResult: ${passed} passed, ${failed} failed (total ${results.length})`)

@@ -1,6 +1,6 @@
 /**
- * #23 Nebula PyTorch/CUDA environment + Stage 0 equivalence.
- * No training. No backward. No optimizer. No Ra'el. No promotion.
+ * #23 Nebula PyTorch/CUDA environment + Stage 0/1 + Stage 2 stability.
+ * Official training remains OFF. No Train button. No Stage 3. No Ra'el. No promotion.
  */
 export const WRIM_ENVIRONMENT_RUNTIME_VERSION = 'wrim-environment-v1' as const
 export const WRIM_REBUILD_DESIGN = 'COMPLETE' as const
@@ -26,8 +26,14 @@ export const PLANNED_PYTHON = '3.13.15' as const
 export const PLANNED_TORCH = '2.13.0+cu130' as const
 export const PLANNED_INDEX = 'https://download.pytorch.org/whl/cu130' as const
 export const CUDA_TOOLKIT_INSTALLED = false as const
-export const STAGE1_AUTHORIZED = false as const
-export const NEXT_AUTHORIZED_PASS = 'READY_FOR_STAGE1_AUTHORIZATION' as const
+export const STAGE1_AUTHORIZED = true as const
+export const STAGE1_RUN_ID = 'WRIM1-NEBULA-DIAG-000001' as const
+export const STAGE1_STATUS = 'STAGE1_VERIFIED' as const
+export const STAGE2_AUTHORIZED = true as const
+export const STAGE2_RUN_ID = 'WRIM1-NEBULA-STAB-000001' as const
+export const STAGE2_STATUS = 'STAGE2_STOPPED_BY_SENTINEL' as const
+export const READY_FOR_STAGE3_TRAINING_AUTHORIZATION = false as const
+export const NEXT_AUTHORIZED_PASS = 'STAGE2_STOPPED_BY_SENTINEL_REVIEW' as const
 
 export const SMOKE_ARGMAX_ID = 126 as const
 export const SMOKE_ENTROPY = 6.033060550689697 as const
@@ -43,6 +49,12 @@ export const FORBIDDEN_ENV_ACTIONS = [
   'START_STAGE_1',
   'START_STAGE_2',
   'START_STAGE_3',
+  'CONTINUE_TO_100',
+  'PROMOTE_STAGE_2',
+  'MIX_TOOL_CURRICULUM',
+  'RAISE_LR',
+  'IGNORE_REHEARSAL_OVERSHOOT',
+  'ENABLE_BF16_FOR_SPEED',
   'SWITCH_QWEN_TO_WRIM',
   'CALL_WRIM_RAEL',
   'INSTALL_CUDA_TOOLKIT_JUST_IN_CASE',

@@ -4,21 +4,26 @@ import {
   CURRENT_WRIM_TRAINING,
   FORBIDDEN_ENV_ACTIONS,
   RAEL_STATUS,
-  TRAINING_AUTHORIZATION,
   type ForbiddenEnvAction,
 } from './identity'
 
 export type { ForbiddenEnvAction }
 
 const MESSAGES: Record<ForbiddenEnvAction, string> = {
-  JUST_RUN_10_STEPS: `Stage 1 is training. TRAINING_AUTHORIZATION=${TRAINING_AUTHORIZATION}. Denied.`,
-  TEST_ONE_OPTIMIZER_STEP: 'Optimizer steps are not authorized in Stage 0. Denied.',
+  JUST_RUN_10_STEPS: 'Ad-hoc extra optimizer steps are denied. WRIM1-NEBULA-DIAG-000001 already ran exactly 10 steps and STOPPED.',
+  TEST_ONE_OPTIMIZER_STEP: 'Optimizer steps are not authorized outside the bounded Stage 1 CLI diagnostic. Denied.',
   CONVERT_AND_OVERWRITE_MAC: 'Historical WRIM-0 checkpoint is read-only. Overwrite denied.',
   USE_COLLAPSED_WRIM1: 'Collapsed WRIM-1 weights are not a parent. Denied.',
   ENABLE_TRAIN_BUTTON: 'No Train button. TRAINING_AUTHORIZATION=OFF.',
-  START_STAGE_1: 'Stage 1 is not authorized. Return READY_FOR_STAGE1_AUTHORIZATION only.',
-  START_STAGE_2: 'Stage 2 is not authorized.',
-  START_STAGE_3: 'WRIM1-RUN-000003 is not authorized.',
+  START_STAGE_1: 'HTTP Stage 1 is denied. Authorized diagnostic is CLI WRIM1-NEBULA-DIAG-000001 only. No Train button.',
+  START_STAGE_2: 'HTTP Stage 2 is denied. WRIM1-NEBULA-STAB-000001 already ran and STOPPED at the retention sentinel. Do not continue.',
+  START_STAGE_3: 'WRIM1-RUN-000003 is not authorized. READY_FOR_STAGE3_TRAINING_AUTHORIZATION=NO.',
+  CONTINUE_TO_100: 'Stage 2 maximum is 50 optimizer steps. Continuation denied. Sentinel stop is final for this run.',
+  PROMOTE_STAGE_2: 'Stage 2 is TEST_ONLY. Promotion denied.',
+  MIX_TOOL_CURRICULUM: 'TOOL_USE remains 0% for this dense baseline. Denied.',
+  RAISE_LR: 'Peak LR remains 3e-5. Raising LR because loss is slow is denied.',
+  IGNORE_REHEARSAL_OVERSHOOT: 'Rehearsal ratio control is a hard packer gate. Ignoring overshoot is denied.',
+  ENABLE_BF16_FOR_SPEED: 'Stage 2 remains FP32 with TF32 off. BF16 for speed is denied.',
   SWITCH_QWEN_TO_WRIM: 'Qwen remains THIRD_PARTY_MODEL_RUNNING_LOCALLY. WRIM is not production.',
   CALL_WRIM_RAEL: `RAEL=${RAEL_STATUS}. WRIM-0 is a research artifact, not Ra'el.`,
   INSTALL_CUDA_TOOLKIT_JUST_IN_CASE: 'CUDA Toolkit is not required. PyTorch cu130 bundled runtime works. Denied.',

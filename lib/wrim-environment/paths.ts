@@ -10,6 +10,10 @@ export type WrimEnvironmentPaths = {
   data: string
   root: string
   reportPath: string
+  stage1ReportPath: string
+  stage2ReportPath: string
+  checkpointTestOnlyDir: string
+  stage2CheckpointDir: string
   manifestPath: string
   venvPython: string
   venvRoot: string
@@ -25,6 +29,10 @@ export function resolveWrimEnvironmentPaths(dataDirOverride?: string | null): Wr
     data: app.data,
     root,
     reportPath: path.join(root, 'stage0-report.json'),
+    stage1ReportPath: path.join(root, 'stage1-report.json'),
+    stage2ReportPath: path.join(root, 'stage2-report.json'),
+    checkpointTestOnlyDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-NEBULA-DIAG-000001'),
+    stage2CheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-NEBULA-STAB-000001'),
     manifestPath: path.join(root, 'environment-manifest.json'),
     venvRoot,
     venvPython: path.join(venvRoot, 'Scripts', 'python.exe'),
@@ -33,4 +41,5 @@ export function resolveWrimEnvironmentPaths(dataDirOverride?: string | null): Wr
 
 export function ensureWrimEnvironmentDirs(paths: WrimEnvironmentPaths): void {
   fs.mkdirSync(paths.root, { recursive: true })
+  fs.mkdirSync(path.dirname(paths.checkpointTestOnlyDir), { recursive: true })
 }

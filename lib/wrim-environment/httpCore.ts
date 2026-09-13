@@ -62,6 +62,17 @@ export function tryHandleWrimEnvironmentHttp(
         json(res, 403, tryForbiddenEnvAction('START_STAGE_1'))
         return
       }
+      if (
+        url.pathname === '/api/local/wrim-environment/stage2' ||
+        url.pathname === '/api/local/wrim-environment/continue'
+      ) {
+        json(res, 403, tryForbiddenEnvAction('START_STAGE_2'))
+        return
+      }
+      if (url.pathname === '/api/local/wrim-environment/stage3') {
+        json(res, 403, tryForbiddenEnvAction('START_STAGE_3'))
+        return
+      }
       if ((req.method || 'GET') !== 'POST') {
         json(res, 405, { ok: false, error: 'POST required.' })
         return

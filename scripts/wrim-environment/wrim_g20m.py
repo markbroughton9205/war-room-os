@@ -1,8 +1,11 @@
-"""WRIM-G-20M-v1-option-A PyTorch port. Inference-only. No optimizer. No training.
+"""WRIM-G-20M-v1-option-A PyTorch port.
 
 Semantics match recovered MLX wrim0_architecture.py and isolated numpy smoke:
 pre-RMSNorm decoder, SwiGLU, RoPE traditional=False rotate-half, tied embeddings,
 reference attention (explicit scores + causal mask + softmax). Not PyTorch SDPA.
+
+Stage 0 uses freeze_inference(). Stage 1 uses enable_training() for a bounded
+diagnostic run. This module does not launch training by itself.
 """
 from __future__ import annotations
 
@@ -27,7 +30,7 @@ class RMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = RMSNORM_EPS):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(dim), requires_grad=False)
+        self.weight = nn.Parameter(torch.ones(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Historical numpy: var = mean(x*x); x * rsqrt(var+eps) * w
@@ -139,6 +142,11 @@ class WRIM0Model(nn.Module):
         self.eval()
         for p in self.parameters():
             p.requires_grad_(False)
+
+    def enable_training(self) -> None:
+        self.train()
+        for p in self.parameters():
+            p.requires_grad_(True)
 
 
 def expected_torch_keys() -> list[str]:
