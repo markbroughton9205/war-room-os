@@ -88,10 +88,11 @@ export const LiveRoomNavPanel = memo(function LiveRoomNavPanel({
           Search
         </Link>
         <Link
-          href="/war-room/code-operator"
-          className="mt-2 block w-full rounded border border-emerald-900/50 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-widest text-emerald-300 transition hover:bg-emerald-950/20"
+          href="/war-room/engineering"
+          className="mt-2 block w-full rounded border border-emerald-500/50 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-widest text-emerald-300 transition hover:bg-emerald-950/20"
+          data-testid="nav-foundry"
         >
-          Code Operator
+          Foundry
         </Link>
       </nav>
 

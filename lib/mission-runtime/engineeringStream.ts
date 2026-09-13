@@ -73,6 +73,9 @@ export function missionProgressFingerprint(mission: RuntimeMission): string {
     providerOpinionCount: mission.providerOpinions.length,
     councilAssistSessionCount: mission.councilAssistSessions.length,
     updatedAt: mission.updatedAt,
+    engineerStep: mission.engineer?.currentStep ?? null,
+    engineerAttempt: mission.engineer?.attempt ?? null,
+    progressEventCount: mission.engineer?.progressEvents.length ?? 0,
   })
 }
 

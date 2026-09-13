@@ -116,7 +116,7 @@ async function walkFiles(dir: string, root: string, out: string[], budget: { rem
     }
     if (!entry.isFile()) continue
     if (DENYLISTED_FILE_PATTERNS.some(pattern => pattern.test(entry.name))) continue
-    if (!/\.(ts|tsx|js|jsx|mjs|json|md)$/i.test(entry.name)) continue
+    if (!/\.(ts|tsx|js|jsx|mjs|cjs|json|md|html|htm|css|py|rs|cs|yml|yaml|toml|txt|svg)$/i.test(entry.name) && entry.name !== '.gitignore') continue
     out.push(abs)
     budget.remaining -= 1
   }

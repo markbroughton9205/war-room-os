@@ -68,7 +68,7 @@ function tokensPerSecond(evalCount: unknown, evalDurationNs: unknown): number | 
   return Math.round((evalCount / (evalDurationNs / 1e9)) * 10) / 10
 }
 
-function generateBody(args: { model: string; prompt: string; system?: string; stream: boolean }) {
+function generateBody(args: { model: string; prompt: string; system?: string; stream: boolean; format?: 'json' }) {
   return {
     model: args.model,
     prompt: args.prompt,
@@ -76,6 +76,7 @@ function generateBody(args: { model: string; prompt: string; system?: string; st
     stream: args.stream,
     think: false,
     keep_alive: -1,
+    ...(args.format ? { format: args.format } : {}),
   }
 }
 
@@ -85,6 +86,9 @@ export async function requestOllamaCompletion(args: {
   model: string
   prompt: string
   system?: string
+  timeoutMs?: number
+  signal?: AbortSignal
+  format?: 'json'
 }): Promise<OllamaCompletionResult> {
   const streamed = await requestOllamaStreamingCompletion(args)
   return streamed
@@ -116,10 +120,12 @@ export async function requestOllamaStreamingCompletion(args: {
   system?: string
   onDelta?: (delta: string) => void
   signal?: AbortSignal
+  timeoutMs?: number
+  format?: 'json'
 }): Promise<OllamaCompletionResult> {
   const url = baseUrl()
   const started = Date.now()
-  const { signal, cleanup } = mergeSignals(args.signal, GENERATE_TIMEOUT_MS)
+  const { signal, cleanup } = mergeSignals(args.signal, args.timeoutMs ?? GENERATE_TIMEOUT_MS)
   try {
     const res = await fetch(`${url}/api/generate`, {
       method: 'POST',
@@ -143,7 +149,7 @@ export async function requestOllamaStreamingCompletion(args: {
 }
 
 async function requestOllamaStreamingCompletionCompat(
-  args: { model: string; prompt: string; system?: string; onDelta?: (delta: string) => void },
+  args: { model: string; prompt: string; system?: string; onDelta?: (delta: string) => void; format?: 'json' },
   signal: AbortSignal,
   started: number,
 ): Promise<OllamaCompletionResult> {
@@ -157,6 +163,7 @@ async function requestOllamaStreamingCompletionCompat(
         prompt: args.prompt,
         system: args.system,
         stream: true,
+        ...(args.format ? { format: args.format } : {}),
       }),
     })
     if (!res.ok) {

@@ -409,6 +409,40 @@ export async function planRepair(repairId: string, opts: PlanRepairOptions = {})
   )
 }
 
+/**
+ * Adopt a Core-built executable proposal (deterministic scaffold / Engineer tool patch set)
+ * into the existing repair state machine. Still walks inspecting → planning → awaiting approval.
+ * Never jumps to applying_patch.
+ */
+export async function adoptPreparedProposal(repairId: string, proposal: NativeRepairProposal): Promise<NativeRepairRecord> {
+  const record = await requireRepair(repairId)
+  const policyResult = validatePatchPolicy(proposal)
+  let current = record
+  const allowed = NATIVE_REPAIR_TRANSITIONS[current.state]
+  if (allowed.includes('inspecting_repository')) {
+    current = await persist(transition(current, 'inspecting_repository', 'Prepared proposal attached after workspace inspection.'), 'inspecting repository')
+  }
+  if (NATIVE_REPAIR_TRANSITIONS[current.state].includes('planning')) {
+    current = await persist(transition(current, 'planning', 'Adopting Engineering Core prepared proposal.'), 'planning repair')
+  }
+  const withProposal: NativeRepairRecord = {
+    ...current,
+    proposals: [...current.proposals, proposal],
+    selectedProposal: proposal,
+    policyResult,
+  }
+  if (!policyResult.ok) {
+    return persist(
+      transition(withProposal, 'blocked', `Prepared proposal failed patch policy: ${policyResult.violations.map(v => v.rule).join(', ')}`),
+      'planning blocked',
+    )
+  }
+  return persist(
+    transition(withProposal, 'awaiting_local_execution_approval', `Prepared proposal from ${proposal.proposerId}.`),
+    'plan ready, awaiting Commander approval',
+  )
+}
+
 // ---------------------------------------------------------------------------
 // 3. Approval -> apply -> validate -> verify
 // ---------------------------------------------------------------------------

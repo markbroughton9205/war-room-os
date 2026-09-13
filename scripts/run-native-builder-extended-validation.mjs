@@ -13,6 +13,7 @@ const SUITES = [
   'lib/native-builder/hostedCoderProposal.validation.ts',
   'lib/native-builder/systemHealthAndIntelligence.validation.ts',
   'lib/native-builder/codeOperatorGaps.validation.ts',
+  'lib/native-builder/engineer.validation.ts',
 ]
 
 let failed = false

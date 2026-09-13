@@ -92,7 +92,7 @@ export function verifyIssueResolved(
  * originally sourced (commander_report, system_health, etc. can all be proven by one). The
  * generic checks (typecheck/eslint/build) only count as direct for issues of their own class. */
 function isDirectRecheckFor(issue: NativeIssueRecord, result: NativeValidationResult): boolean {
-  if (result.operation.id === 'validation_script') return true
+  if (result.operation.id === 'validation_script' || result.operation.id === 'node_test' || result.operation.id === 'http_probe') return true
   switch (issue.source) {
     case 'typescript':
       return result.operation.id === 'typecheck'

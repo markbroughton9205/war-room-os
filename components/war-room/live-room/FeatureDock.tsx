@@ -1,6 +1,7 @@
 'use client'
 
 import { memo, useState } from 'react'
+import Link from 'next/link'
 
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 
@@ -110,6 +111,25 @@ export const FeatureDock = memo(function FeatureDock({
           </button>
         )
       })}
+      <Link
+        href="/war-room/engineering"
+        data-testid="nav-foundry"
+        aria-label="Foundry"
+        className="group relative flex shrink-0 flex-col items-center"
+      >
+        <span className="pointer-events-none absolute -top-7 z-10 whitespace-nowrap rounded bg-black/95 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-emerald-200 opacity-0 group-hover:opacity-100">
+          Foundry
+        </span>
+        <span
+          className="relative flex h-9 w-9 items-center justify-center rounded-xl text-[9px] font-bold uppercase tracking-widest text-emerald-200 transition-transform sm:h-10 sm:w-10"
+          style={{
+            border: '1px solid rgba(52,211,153,0.7)',
+            background: 'rgba(0,255,102,0.12)',
+          }}
+        >
+          FY
+        </span>
+      </Link>
     </nav>
   )
 })

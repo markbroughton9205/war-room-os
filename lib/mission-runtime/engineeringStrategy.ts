@@ -32,11 +32,14 @@ import type {
   NativeIterationPolicy,
 } from '@/lib/native-builder/types'
 import { requestCouncilAssist } from '@/lib/native-builder/councilAssist'
+import { runCodingMission, stopCodingMission } from '@/lib/native-builder/engineerLoop'
+import { attachMissionToSession, createFoundrySession } from '@/lib/native-builder/foundrySessions'
 import {
   invokeDirectCouncilProvider,
   resolveConfiguredProviderFamily,
   type DirectProviderFamily,
 } from '@/lib/council/providerDirectCall'
+import { getActiveWorkspaceId } from '@/lib/repo/workspaceContext'
 import { logWarRoomRepoAudit } from '@/lib/war-room/repoAudit'
 import { buildCouncilAssistAuditMetadata, buildProviderResolutionAuditMetadata } from './engineeringAudit'
 import {
@@ -146,6 +149,7 @@ function project(issue: NativeIssueRecord, repair: NativeRepairRecord): RuntimeM
     verification: repair.verification,
     diff: repair.diffEvidence,
     commitPreparation: repair.commitPreparation,
+    engineer: repair.codingMission,
     auditable: true,
     raw: { issue, repair },
   }
@@ -192,6 +196,55 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
         `native-builder merged this into an existing open issue (fingerprint ${issue.fingerprint}) without opening a new repair — call get() with the existing repair id instead of create() again for the same issue.`,
       )
     }
+
+    if (request.executionMode === 'bounded_coding') {
+      const commanderRequest = request.naturalLanguage?.trim() || `${request.title}: ${request.description}`
+      const session = request.sessionId
+        ? { id: request.sessionId }
+        : await createFoundrySession({
+            title: request.title,
+            workspaceId: getActiveWorkspaceId(),
+            projectName: request.subsystem,
+          })
+      if (request.sessionId) await attachMissionToSession(request.sessionId, repair.id)
+      else await attachMissionToSession(session.id, repair.id)
+      const withCoding: NativeRepairRecord = {
+        ...repair,
+        iterationPolicy: { maxAttempts: 8, attemptsUsed: 0, paused: false },
+        codingMission: {
+          mode: 'bounded_coding',
+          workspaceId: getActiveWorkspaceId(),
+          commanderRequest,
+          objective: request.title,
+          acceptanceCriteria: [request.description],
+          plan: [],
+          currentStep: 'ANALYZING',
+          attempt: 0,
+          maxAttempts: 8,
+          filesRead: request.targetFiles ?? [],
+          filesChanged: [],
+          commandsExecuted: [],
+          testsExecuted: [],
+          progressEvents: [{ at: new Date().toISOString(), step: 'ANALYZING', detail: 'Mission created.' }],
+          visualVerification: 'VISUAL_VERIFICATION_NOT_AVAILABLE',
+          sessionId: session.id,
+          foundryMode: 'FOUNDRY_LOCAL_MODE',
+        },
+      }
+      await saveRepair(withCoding)
+      if (request.autoRun) {
+        if (request.waitForCompletion) {
+          const finished = await runCodingMission(repair.id)
+          const latestIssue = await getIssue(finished.issueId)
+          if (!latestIssue) throw new Error(`No issue found for repair ${repair.id}.`)
+          return project(latestIssue, finished)
+        }
+        void runCodingMission(repair.id)
+        return project(issue, withCoding)
+      }
+      return project(issue, withCoding)
+    }
+
     const { hostedCoder, resolvedFamily } = resolveHostedCoderConfig(request.coderProvider)
     const planned = await planRepair(repair.id, {
       targetFiles: request.targetFiles,
@@ -249,7 +302,10 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
    * is audit-logged by runtime.ts's persist(), including exactly which process trees were killed.
    */
   async cancel(missionId, reason) {
-    const repair = await cancelMissionExecution(missionId, reason)
+    const existing = await getRepair(missionId)
+    const repair = existing?.codingMission
+      ? await stopCodingMission(missionId, reason)
+      : await cancelMissionExecution(missionId, reason)
     const issue = await getIssue(repair.issueId)
     if (!issue) throw new Error(`No issue found for repair ${missionId} after cancelMissionExecution.`)
     return project(issue, repair)

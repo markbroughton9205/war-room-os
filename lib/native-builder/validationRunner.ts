@@ -22,6 +22,7 @@ import { promisify } from 'node:util'
 import { access } from 'node:fs/promises'
 import { constants as FsConstants } from 'node:fs'
 import { resolveRepoRoot } from '@/lib/repo/paths'
+import { classifyCommandCwd } from './commandPolicy'
 import { getRepoStatus } from '@/lib/repo/status'
 import { previewDiff } from '@/lib/repo/diff'
 import { resolveRepoRelativePath } from './repositoryInspector'
@@ -89,7 +90,7 @@ function runSpawnedStreaming(
   cmd: string,
   args: string[],
   opts: { cwd: string; timeoutMs: number; operationId: string; streaming?: StreamingRunOptions },
-): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+): Promise<{ stdout: string; stderr: string; exitCode: number | null; timedOut?: boolean }> {
   return new Promise(resolve => {
     const emit = (stream: 'stdout' | 'stderr' | 'system', text: string) => {
       const safe = redactSecretsFromOutput(text)
@@ -110,21 +111,22 @@ function runSpawnedStreaming(
     let stdout = ''
     let stderr = ''
     let finished = false
-    const finish = (exitCode: number | null) => {
+    const finish = (exitCode: number | null, timedOut = false) => {
       if (finished) return
       finished = true
       clearTimeout(timer)
       if (opts.streaming?.repairId) unregisterActiveProcess(opts.streaming.repairId, child)
-      resolve({ stdout, stderr, exitCode })
+      resolve({ stdout, stderr, exitCode, timedOut })
     }
 
     const timer = setTimeout(() => {
       emit('system', `[timeout] exceeded ${opts.timeoutMs}ms — killing process tree.`)
+      stderr = (stderr + `\n[timeout] exceeded ${opts.timeoutMs}ms`).slice(-CAPTURE_LIMIT)
       if (opts.streaming?.repairId) {
-        void killProcessesForRepair(opts.streaming.repairId).then(() => finish(null))
+        void killProcessesForRepair(opts.streaming.repairId).then(() => finish(null, true))
       } else {
         child.kill('SIGKILL')
-        finish(null)
+        finish(null, true)
       }
     }, opts.timeoutMs)
 
@@ -194,6 +196,27 @@ async function resolveOperationArgv(
     case 'git_diff_check':
       return { ok: true, argv: { cmd: 'git', args: ['diff', '--check'], timeoutMs: DEFAULT_TIMEOUT_MS } }
 
+    case 'node_test':
+      return { ok: true, argv: { cmd: 'node', args: ['--test'], timeoutMs: DEFAULT_TIMEOUT_MS } }
+
+    case 'package_install': {
+      const pm = op.targets?.[0] === 'npm' ? 'npm' : op.targets?.[0] === 'yarn' ? 'yarn' : 'pnpm'
+      return { ok: true, argv: { cmd: pm, args: ['install'], timeoutMs: BUILD_TIMEOUT_MS } }
+    }
+
+    case 'package_script': {
+      const script = op.targets?.[0]
+      const allowed = new Set(['test', 'build', 'lint', 'typecheck', 'start'])
+      if (!script || !allowed.has(script)) {
+        return { ok: false, error: 'package_script requires an allowlisted script (test, build, lint, typecheck, start).' }
+      }
+      const pm = op.targets?.[1] === 'pnpm' ? 'pnpm' : op.targets?.[1] === 'yarn' ? 'yarn' : 'npm'
+      return { ok: true, argv: { cmd: pm, args: ['run', script], timeoutMs: BUILD_TIMEOUT_MS } }
+    }
+
+    case 'http_probe':
+      return { ok: false, error: 'http_probe is handled by the dedicated localhost probe, not argv spawn.' }
+
     case 'validation_script': {
       const script = op.targets?.[0]
       if (!script) return { ok: false, error: 'validation_script requires exactly one target script path.' }
@@ -223,7 +246,7 @@ export function assertResolvedArgvNotDangerousEquivalent(cmd: string, args: read
   return null
 }
 
-function toResult(op: NativeValidationOperation, captured: { stdout: string; stderr: string; exitCode: number | null }, startedAt: number): NativeValidationResult {
+function toResult(op: NativeValidationOperation, captured: { stdout: string; stderr: string; exitCode: number | null; timedOut?: boolean }, startedAt: number): NativeValidationResult {
   return {
     operation: op,
     ok: captured.exitCode === 0,
@@ -232,6 +255,52 @@ function toResult(op: NativeValidationOperation, captured: { stdout: string; std
     stderr: redactSecretsFromOutput(captured.stderr).slice(0, CAPTURE_LIMIT),
     durationMs: Date.now() - startedAt,
     ranAt: new Date().toISOString(),
+    timedOut: captured.timedOut === true,
+  }
+}
+
+function isLoopbackUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost')
+  } catch {
+    return false
+  }
+}
+
+async function runHttpProbe(op: NativeValidationOperation, startedAt: number): Promise<NativeValidationResult> {
+  const target = op.targets?.[0] ?? 'http://127.0.0.1:18765/'
+  if (!isLoopbackUrl(target)) {
+    return toResult(op, { stdout: '', stderr: 'http_probe only allows http://127.0.0.1 or http://localhost.', exitCode: 1 }, startedAt)
+  }
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 4000)
+    const res = await fetch(target, { signal: controller.signal })
+    clearTimeout(timeout)
+    const body = await res.text().catch(() => '')
+    const ok = res.status >= 200 && res.status < 300
+    return toResult(
+      op,
+      {
+        stdout: redactSecretsFromOutput(`HTTP ${res.status} ${body.slice(0, 500)}`),
+        stderr: ok ? '' : `Unexpected status ${res.status}`,
+        exitCode: ok ? 0 : 1,
+      },
+      startedAt,
+    )
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === 'AbortError' || /aborted/i.test(error.message))
+    return toResult(
+      op,
+      {
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+        exitCode: 1,
+        timedOut,
+      },
+      startedAt,
+    )
   }
 }
 
@@ -239,6 +308,11 @@ function toResult(op: NativeValidationOperation, captured: { stdout: string; std
 export async function runValidationOperation(op: NativeValidationOperation): Promise<NativeValidationResult> {
   const repoRoot = resolveRepoRoot()
   const startedAt = Date.now()
+  const cwdPolicy = classifyCommandCwd(repoRoot, repoRoot)
+  if (cwdPolicy.policyClass !== 'SAFE_LOCAL') {
+    return toResult(op, { stdout: '', stderr: cwdPolicy.reason, exitCode: 1 }, startedAt)
+  }
+  if (op.id === 'http_probe') return runHttpProbe(op, startedAt)
   const resolved = await resolveOperationArgv(op)
   if (!resolved.ok) {
     return toResult(op, { stdout: '', stderr: resolved.error, exitCode: 1 }, startedAt)
@@ -259,6 +333,11 @@ export async function runValidationOperationStreaming(
 ): Promise<NativeValidationResult> {
   const repoRoot = resolveRepoRoot()
   const startedAt = Date.now()
+  const cwdPolicy = classifyCommandCwd(repoRoot, repoRoot)
+  if (cwdPolicy.policyClass !== 'SAFE_LOCAL') {
+    return toResult(op, { stdout: '', stderr: cwdPolicy.reason, exitCode: 1 }, startedAt)
+  }
+  if (op.id === 'http_probe') return runHttpProbe(op, startedAt)
   const resolved = await resolveOperationArgv(op)
   if (!resolved.ok) {
     return toResult(op, { stdout: '', stderr: resolved.error, exitCode: 1 }, startedAt)

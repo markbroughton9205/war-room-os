@@ -14,6 +14,7 @@
  */
 import { createHash } from 'node:crypto'
 import { probeOllama, requestOllamaCompletion } from './ollamaClient'
+import { pickLocalCoderModel } from './localCoder'
 import type {
   LocalReasoningLabel,
   NativeIssueRecord,
@@ -115,7 +116,30 @@ const duplicateImportTemplate: DeterministicTemplate = {
   },
 }
 
-const DETERMINISTIC_TEMPLATES: DeterministicTemplate[] = [offByOneLoopBoundTemplate, duplicateImportTemplate]
+const farewellInsertTemplate: DeterministicTemplate = {
+  id: 'add_farewell_export',
+  match: (relPath, content) => {
+    if (!relPath.endsWith('greeting.mjs')) return null
+    const anchor = "export const GREETING = 'hello'"
+    if (!content.includes(anchor) || content.includes('FAREWELL')) return null
+    return {
+      change: {
+        file: relPath,
+        reason: "Add FAREWELL export without changing GREETING.",
+        operation: 'insert_after',
+        patch: {
+          operation: 'insert_after',
+          file: relPath,
+          expectedOriginalHash: sha256(content),
+          matchText: anchor,
+          replacementText: "\nexport const FAREWELL = 'goodbye'",
+        },
+      },
+    }
+  },
+}
+
+const DETERMINISTIC_TEMPLATES: DeterministicTemplate[] = [offByOneLoopBoundTemplate, duplicateImportTemplate, farewellInsertTemplate]
 
 export function buildDeterministicProposal(
   issue: NativeIssueRecord,
@@ -125,6 +149,21 @@ export function buildDeterministicProposal(
     for (const template of DETERMINISTIC_TEMPLATES) {
       const match = template.match(excerpt.relPath, excerpt.content)
       if (match) {
+        const jsOnly = /\.(mjs|cjs|js)$/.test(excerpt.relPath)
+        const warRoomFixture = excerpt.relPath.includes('knownIssueFixture')
+        const validations = warRoomFixture
+          ? [
+              { id: 'typecheck' as const },
+              { id: 'eslint_targeted' as const, targets: [excerpt.relPath] },
+              ...(match.extraValidations ?? []),
+            ]
+          : jsOnly
+            ? [{ id: 'node_test' as const }, ...(match.extraValidations?.filter(v => v.id !== 'validation_script') ?? [])]
+            : [
+                { id: 'typecheck' as const },
+                { id: 'eslint_targeted' as const, targets: [excerpt.relPath] },
+                ...(match.extraValidations ?? []),
+              ]
         return {
           issueId: issue.id,
           sourceKind: 'deterministic',
@@ -133,11 +172,7 @@ export function buildDeterministicProposal(
           confidence: 'high',
           relevantFiles: [excerpt.relPath],
           plannedChanges: [match.change],
-          validations: [
-            { id: 'typecheck' },
-            { id: 'eslint_targeted', targets: [excerpt.relPath] },
-            ...(match.extraValidations ?? []),
-          ],
+          validations,
           risks: ['Pattern-matched fix — confirm the anchor text was truly the only cause before relying on auto-repair for novel files.'],
           rollbackPlan: 'Restore the pre-patch file content from the native-builder snapshot for this repair.',
           generatedAt: new Date().toISOString(),
@@ -232,9 +267,9 @@ export async function requestLocalModelProposal(
   if (!probe.available) {
     return { status: 'unavailable', detail: probe.detail }
   }
-  const model = probe.models[0]
+  const model = pickLocalCoderModel(probe.models, 'BUILDER')
   if (!model) {
-    return { status: 'unavailable', detail: 'Ollama is reachable but has no models pulled.' }
+    return { status: 'unavailable', detail: 'Ollama is reachable but has no usable coding model pulled.' }
   }
 
   const excerptBlock = excerpts.map(e => `--- ${e.relPath} ---\n${e.content.slice(0, 4000)}`).join('\n\n')

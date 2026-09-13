@@ -86,6 +86,27 @@ export type KillResult = { killed: number; label: string }
 
 /** Kills every tracked process (and its tree) for this repair. Idempotent; returns what it did so
  * the caller can put a truthful note in the audit trail. */
+export type ListedProcess = { pid: number | undefined; label: string; startedAt: number; repairId: string }
+
+export function listProcessesForRepair(repairId: string): ListedProcess[] {
+  const set = activeByRepair.get(repairId)
+  if (!set?.size) return []
+  return [...set].map(tracked => ({
+    pid: tracked.child.pid,
+    label: tracked.label,
+    startedAt: tracked.startedAt,
+    repairId,
+  }))
+}
+
+export function listAllOwnedProcesses(): ListedProcess[] {
+  const out: ListedProcess[] = []
+  for (const repairId of activeByRepair.keys()) {
+    out.push(...listProcessesForRepair(repairId))
+  }
+  return out
+}
+
 export async function killProcessesForRepair(repairId: string): Promise<KillResult[]> {
   const set = activeByRepair.get(repairId)
   if (!set?.size) return []

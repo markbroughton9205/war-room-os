@@ -47,6 +47,14 @@ type RuntimeMissionLite = {
     basis: { proposerId: string; sourceKind: string; validationsPassed: string[]; diffHash?: string }
     generatedAt: string
   }
+  engineer?: {
+    currentStep?: string
+    attempt?: number
+    maxAttempts?: number
+    plan?: string[]
+    validationOutcome?: string
+    progressEvents?: { at: string; step: string; detail: string }[]
+  }
   raw: {
     issue: { title: string; severity: string; source: string; evidence: string[] }
     repair: {
@@ -58,7 +66,7 @@ type RuntimeMissionLite = {
   }
 }
 
-const ACTIVE_STATES = new Set(['applying', 'validating', 'inspecting'])
+const ACTIVE_STATES = new Set(['created', 'inspecting', 'applying', 'validating', 'proposed'])
 const CANCELLABLE_STATES = new Set(['created', 'inspecting', 'awaiting_approval', 'applying', 'validating', 'blocked'])
 /** Client-side mirror of the server ring buffer bound (commandOutput.ts) — the server already
  * bounds what it keeps; this just stops an unbounded array from accumulating in React state. */
@@ -103,6 +111,12 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
   const router = useRouter()
   const searchParams = useSearchParams()
   const missionIdFromUrl = searchParams.get('mission')
+  const workspaceId = searchParams.get('workspace')
+
+  const withWs = useCallback((url: string) => {
+    if (!workspaceId) return url
+    return `${url}${url.includes('?') ? '&' : '?'}workspaceId=${encodeURIComponent(workspaceId)}`
+  }, [workspaceId])
 
   const [repoStatus, setRepoStatus] = useState<RepoGitContext | null>(null)
   const [files, setFiles] = useState<string[]>([])
@@ -134,21 +148,21 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
   // Initial repo status + file tree.
   useEffect(() => {
     void (async () => {
-      const status = await getJson<RepoGitContext>('/api/mission-runtime/engineering/repo/status')
+      const status = await getJson<RepoGitContext>(withWs('/api/mission-runtime/engineering/repo/status'))
       if (status.ok && status.data) setRepoStatus(status.data)
-      const listing = await getJson<{ files: string[] }>('/api/mission-runtime/engineering/repo/files?pathPrefix=lib')
+      const listing = await getJson<{ files: string[] }>(withWs('/api/mission-runtime/engineering/repo/files'))
       if (listing.ok && listing.data) setFiles(listing.data.files)
       const providers = await getJson<{ providers: { family: string; configured: boolean }[] }>('/api/mission-runtime/engineering/providers')
       if (providers.ok && providers.data) {
         setProviderStatus(Object.fromEntries(providers.data.providers.map(p => [p.family, p.configured])))
       }
     })()
-  }, [])
+  }, [withWs])
 
   const loadMission = useCallback(async (id: string) => {
-    const result = await getJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${id}`)
+    const result = await getJson<{ mission: RuntimeMissionLite }>(withWs(`/api/mission-runtime/engineering/${id}`))
     if (result.ok && result.data) setMission(result.data.mission)
-  }, [])
+  }, [withWs])
 
   // Reconstruct from the URL's mission id — authoritative persistence, not browser-only state.
   // Deferred via setTimeout (same pattern as NativeBuilderPanel.tsx's own refresh effect) so the
@@ -200,7 +214,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
       }
     }
 
-    const source = new EventSource(`/api/mission-runtime/engineering/${activeMissionId}/stream`)
+    const source = new EventSource(withWs(`/api/mission-runtime/engineering/${activeMissionId}/stream`))
     let fellBack = false
     const startFallbackPolling = () => {
       if (fellBack) return
@@ -246,7 +260,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
       source.close()
       if (pollRef.current) window.clearInterval(pollRef.current)
     }
-  }, [activeMissionId, loadMission])
+  }, [activeMissionId, loadMission, withWs])
 
   // Typewriter reveal for the diagnosis text — cosmetic only. `revealedDiagnosisChars` is a
   // rendering-buffer counter, never the source of truth: mission.raw.repair.selectedProposal
@@ -297,14 +311,14 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
     setSelectedFile(relPath)
     setFileError(null)
     setFileContent(null)
-    const result = await getJson<{ content: string }>(`/api/mission-runtime/engineering/repo/read?path=${encodeURIComponent(relPath)}`)
+    const result = await getJson<{ content: string }>(withWs(`/api/mission-runtime/engineering/repo/read?path=${encodeURIComponent(relPath)}`))
     if (result.ok && result.data) setFileContent(result.data.content)
     else setFileError(result.error ?? 'Failed to read file.')
   }, [])
 
   const runSearch = useCallback(async () => {
     if (!searchQuery.trim()) return
-    const result = await getJson<{ hits: RepoSearchHit[] }>(`/api/mission-runtime/engineering/repo/search?q=${encodeURIComponent(searchQuery)}`)
+    const result = await getJson<{ hits: RepoSearchHit[] }>(withWs(`/api/mission-runtime/engineering/repo/search?q=${encodeURIComponent(searchQuery)}`))
     if (result.ok && result.data) setSearchHits(result.data.hits)
   }, [searchQuery])
 
@@ -336,11 +350,12 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
         severity: 'medium',
         targetFiles: [subsystem],
         coderProvider: { enabled: coderEnabled, family: coderFamily },
+        workspaceId,
       })
       if (!result.ok) throw new Error(result.error)
       if (result.data) {
         setMission(result.data.mission)
-        router.replace(`${basePath}?mission=${result.data.mission.id}`)
+        router.replace(`${basePath}?${new URLSearchParams({ ...(workspaceId ? { workspace: workspaceId } : {}), mission: result.data.mission.id }).toString()}`)
         setTab('output')
       }
     })
@@ -349,7 +364,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
   const approve = () =>
     mission &&
     void runAction('approve', async () => {
-      const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/approve`, { approval_granted: true })
+      const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/approve`, { approval_granted: true, workspaceId })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
     })
@@ -360,6 +375,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
       const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/decision`, {
         accepted,
         approval_granted: true,
+        workspaceId,
       })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
@@ -368,7 +384,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
   const rollback = () =>
     mission &&
     void runAction('rollback', async () => {
-      const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/rollback`, { approval_granted: true })
+      const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/rollback`, { approval_granted: true, workspaceId })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
     })
@@ -381,6 +397,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
     void runAction('cancel', async () => {
       const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/cancel`, {
         reason: 'Cancelled by Commander from the Builder workspace.',
+        workspaceId,
       })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
@@ -391,6 +408,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
     void runAction('council-assist', async () => {
       const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/council-assist`, {
         composition,
+        workspaceId,
       })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
@@ -402,6 +420,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
       const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/replan`, {
         targetFiles: mission.proposalSummary.relevantFiles,
         coderProvider: { enabled: coderEnabled, family: coderFamily },
+        workspaceId,
       })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
@@ -418,6 +437,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
     void runAction('auto-iterate', async () => {
       const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/auto-iterate`, {
         coderProvider: { enabled: coderEnabled, family: coderFamily },
+        workspaceId,
       })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
@@ -429,6 +449,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
       const result = await postJson<{ mission: RuntimeMissionLite }>(`/api/mission-runtime/engineering/${mission.id}/auto-iterate`, {
         paused: !mission.iterationPolicy.paused,
         coderProvider: { enabled: coderEnabled, family: coderFamily },
+        workspaceId,
       })
       if (!result.ok) throw new Error(result.error)
       if (result.data) setMission(result.data.mission)
@@ -570,7 +591,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
             <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Mission</p>
             <p className="text-white">{mission.title}</p>
             <p className="text-slate-500">
-              Status: <span className="font-bold text-amber-300">{mission.status}</span> · repairId: {mission.nativeBuilder.repairId.slice(0, 8)}…
+              Status: <span className="font-bold text-amber-300">{mission.engineer?.currentStep ?? mission.status}</span> · repairId: {mission.nativeBuilder.repairId.slice(0, 8)}…
               {liveStreaming ? <span className="ml-2 animate-pulse text-emerald-400">● LIVE</span> : null}
             </p>
 
@@ -717,7 +738,7 @@ export function BuilderWorkspace({ basePath = '/builder' }: { basePath?: string 
                   {mission.commitPreparation ? (
                     <div className="mt-2 rounded border border-cyan-500/20 bg-black/30 p-2">
                       <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-cyan-300">
-                        Prepared commit (never executed — stage &amp; commit manually)
+                        Prepared commit (Commander approval required — never executed autonomously)
                       </p>
                       <pre className="whitespace-pre-wrap rounded border border-white/10 bg-black/40 p-2 text-[10px] text-emerald-200">
                         {mission.commitPreparation.commitMessage}

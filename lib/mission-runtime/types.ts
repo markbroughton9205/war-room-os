@@ -82,6 +82,12 @@ export type EngineeringMissionRequest = {
     enabled: boolean
     family?: 'chatgpt' | 'claude' | 'grok' | 'gemini'
   }
+  naturalLanguage?: string
+  /** bounded_coding: mission start authorizes in-workspace local-dev. Default gated_repair. */
+  executionMode?: 'gated_repair' | 'bounded_coding'
+  autoRun?: boolean
+  waitForCompletion?: boolean
+  sessionId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +126,7 @@ export const RUNTIME_MISSION_CAPABILITIES = [
   'provider_coder_proposal',
   'council_assist',
   'bounded_auto_iteration',
+  'bounded_coding_loop',
   'patch_apply_gated',
   'validation_run',
   'rollback_gated',
@@ -137,6 +144,7 @@ export const ENGINEERING_MISSION_CAPABILITIES: readonly RuntimeMissionCapability
   'provider_coder_proposal',
   'council_assist',
   'bounded_auto_iteration',
+  'bounded_coding_loop',
   'patch_apply_gated',
   'validation_run',
   'rollback_gated',
@@ -297,6 +305,8 @@ export type RuntimeMission = {
   /** Prepared commit message + ordered staging plan, generated at review/resolve time. Pure data —
    * the commitCapable: false invariant above is unchanged; nothing here executes git. */
   commitPreparation?: NativeCommitPreparation
+  /** Engineer overlay — present when this mission is a bounded coding run. */
+  engineer?: NativeRepairRecord['codingMission']
   /** True once verification/commander-review land here — never true from a mere apply. */
   auditable: true
   raw: {

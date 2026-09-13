@@ -26,6 +26,7 @@ import {
   openExistingRepositoryWorkspace,
   WorkspaceValidationError,
   listWorkspaces,
+  getProjectsRoot,
 } from '@/lib/native-builder/workspaceRegistry'
 import { listIssues, listRepairs, saveIssue } from '@/lib/native-builder/storage'
 import type { NativeIssueRecord } from '@/lib/native-builder/types'
@@ -51,7 +52,7 @@ function makeIssue(title: string): NativeIssueRecord {
 }
 
 async function makeTempGitRepo(label: string): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), `war-room-workspace-${label}-`))
+  const dir = await mkdtemp(path.join(getProjectsRoot(), `war-room-workspace-${label}-`))
   await execFileAsync('git', ['init', '--quiet'], { cwd: dir })
   return dir
 }
@@ -65,7 +66,11 @@ interface CheckResult {
 export async function runWorkspacePhaseBValidation(): Promise<{ ok: boolean; results: CheckResult[] }> {
   const results: CheckResult[] = []
   const check = (id: string, ok: boolean, detail?: string) => results.push({ id, ok, detail })
+  const previousProjectsRoot = process.env.WAR_ROOM_PROJECTS_ROOT
+  const projectsRoot = await mkdtemp(path.join(tmpdir(), 'war-room-projects-'))
+  process.env.WAR_ROOM_PROJECTS_ROOT = projectsRoot
 
+  try {
   // 1. Backwards compatibility: no active workspace context => resolveRepoRoot() unchanged.
   const baseline = resolveRepoRoot()
   check('wb_01_no_override_unchanged', resolveRepoRoot() === baseline, `resolveRepoRoot()=${resolveRepoRoot()}`)
@@ -85,7 +90,7 @@ export async function runWorkspacePhaseBValidation(): Promise<{ ok: boolean; res
     check('wb_03_nonexistent_path_rejected', e instanceof WorkspaceValidationError)
   }
 
-  const nonGitDir = await mkdtemp(path.join(tmpdir(), 'war-room-workspace-nongit-'))
+  const nonGitDir = await mkdtemp(path.join(getProjectsRoot(), 'war-room-workspace-nongit-'))
   try {
     await openExistingRepositoryWorkspace(nonGitDir)
     check('wb_04_non_git_dir_rejected', false, 'did not throw')
@@ -155,6 +160,11 @@ export async function runWorkspacePhaseBValidation(): Promise<{ ok: boolean; res
 
   await rm(repoA, { recursive: true, force: true })
   await rm(repoB, { recursive: true, force: true })
+  await rm(projectsRoot, { recursive: true, force: true })
+  } finally {
+    if (previousProjectsRoot === undefined) delete process.env.WAR_ROOM_PROJECTS_ROOT
+    else process.env.WAR_ROOM_PROJECTS_ROOT = previousProjectsRoot
+  }
 
   const ok = results.every(r => r.ok)
   return { ok, results }

@@ -4,11 +4,21 @@
  * violation; it also re-checks independently (defense in depth — never trust a caller alone).
  */
 import path from 'node:path'
-import { resolveRepoRoot } from '@/lib/repo/paths'
+import { resolveBaseRepoRoot, resolveRepoRoot } from '@/lib/repo/paths'
 import type { NativeRepairProposal, PatchPolicyResult, PatchPolicyViolation, StructuredPatch } from './types'
+
+export type PatchPolicyProfile = 'war_room_repair' | 'external_coding'
 
 export const MAX_CHANGED_FILES = 5
 export const MAX_CHANGED_LINES = 150
+export const EXTERNAL_MAX_CHANGED_FILES = 40
+export const EXTERNAL_MAX_CHANGED_LINES = 8000
+
+export function resolvePatchPolicyProfile(): PatchPolicyProfile {
+  const root = path.resolve(resolveRepoRoot())
+  const base = path.resolve(resolveBaseRepoRoot())
+  return root === base ? 'war_room_repair' : 'external_coding'
+}
 /** Conservative fixed line-budget charge for a delete_file patch (policy reads nothing from disk,
  * so the real line count is unknowable here — see validateOnePatch). */
 export const DELETE_FILE_LINE_COST = 50
@@ -37,7 +47,12 @@ const BLOCKED_PATH_PATTERNS: RegExp[] = [
   /credential/i,
 ]
 
-const ALLOWED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.md'])
+const WAR_ROOM_ALLOWED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.md'])
+const EXTERNAL_ALLOWED_EXTENSIONS = new Set([
+  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.md', '.json', '.css', '.html', '.htm',
+  '.py', '.rs', '.cs', '.toml', '.yml', '.yaml', '.txt', '.gitignore', '.svg',
+])
+const EXTERNAL_UNBLOCKED_BASENAMES = new Set(['package.json'])
 
 function normalizeRepoRelative(file: string): { rel: string; ok: boolean } {
   const root = path.resolve(resolveRepoRoot())
@@ -56,19 +71,27 @@ function countChangedLines(patch: StructuredPatch): number {
   return removed + added
 }
 
-function validateOnePatch(patch: StructuredPatch, violations: PatchPolicyViolation[]): { rel: string; lines: number } | null {
+function validateOnePatch(
+  patch: StructuredPatch,
+  violations: PatchPolicyViolation[],
+  profile: PatchPolicyProfile,
+): { rel: string; lines: number } | null {
   const { rel, ok } = normalizeRepoRelative(patch.file)
   if (!ok) {
     violations.push({ rule: 'workspace_containment', file: patch.file, detail: 'Path resolves outside the repository root.' })
     return null
   }
-  if (BLOCKED_PATH_PATTERNS.some(pattern => pattern.test(rel))) {
+  const basename = rel.split('/').pop() ?? rel
+  const skipPackageJsonBlock = profile === 'external_coding' && EXTERNAL_UNBLOCKED_BASENAMES.has(basename)
+  if (!skipPackageJsonBlock && BLOCKED_PATH_PATTERNS.some(pattern => pattern.test(rel))) {
     violations.push({ rule: 'path_denylist', file: rel, detail: 'Path matches a blocked pattern (secrets, lockfiles, deploy config, schema, auth/billing/permissions code).' })
     return null
   }
   const ext = path.extname(rel).toLowerCase()
-  if (!ALLOWED_EXTENSIONS.has(ext)) {
-    violations.push({ rule: 'file_type_denylist', file: rel, detail: `File extension "${ext || '(none)'}" is not in the allowed set (${[...ALLOWED_EXTENSIONS].join(', ')}).` })
+  const allowed = profile === 'external_coding' ? EXTERNAL_ALLOWED_EXTENSIONS : WAR_ROOM_ALLOWED_EXTENSIONS
+  const gitignoreOk = profile === 'external_coding' && basename === '.gitignore'
+  if (!gitignoreOk && !allowed.has(ext)) {
+    violations.push({ rule: 'file_type_denylist', file: rel, detail: `File extension "${ext || '(none)'}" is not in the allowed set (${[...allowed].join(', ')}).` })
     return null
   }
 
@@ -127,7 +150,10 @@ function validateOnePatch(patch: StructuredPatch, violations: PatchPolicyViolati
  * Full policy evaluation for a proposal. Purely structural — reads nothing from disk (that's
  * patchApplier's job when it re-verifies expectedOriginalHash at apply time).
  */
-export function validatePatchPolicy(proposal: NativeRepairProposal): PatchPolicyResult {
+export function validatePatchPolicy(proposal: NativeRepairProposal, profile?: PatchPolicyProfile): PatchPolicyResult {
+  const active = profile ?? resolvePatchPolicyProfile()
+  const maxFiles = active === 'external_coding' ? EXTERNAL_MAX_CHANGED_FILES : MAX_CHANGED_FILES
+  const maxLines = active === 'external_coding' ? EXTERNAL_MAX_CHANGED_LINES : MAX_CHANGED_LINES
   const violations: PatchPolicyViolation[] = []
   const seenFiles = new Set<string>()
   let changedLineCount = 0
@@ -137,23 +163,23 @@ export function validatePatchPolicy(proposal: NativeRepairProposal): PatchPolicy
   }
 
   for (const change of proposal.plannedChanges) {
-    const result = validateOnePatch(change.patch, violations)
+    const result = validateOnePatch(change.patch, violations, active)
     if (result) {
       seenFiles.add(result.rel)
       changedLineCount += result.lines
     }
   }
 
-  if (seenFiles.size > MAX_CHANGED_FILES) {
+  if (seenFiles.size > maxFiles) {
     violations.push({
       rule: 'max_files_exceeded',
-      detail: `Patch touches ${seenFiles.size} files; limit is ${MAX_CHANGED_FILES}.`,
+      detail: `Patch touches ${seenFiles.size} files; limit is ${maxFiles}.`,
     })
   }
-  if (changedLineCount > MAX_CHANGED_LINES) {
+  if (changedLineCount > maxLines) {
     violations.push({
       rule: 'max_lines_exceeded',
-      detail: `Patch changes ~${changedLineCount} lines; limit is ${MAX_CHANGED_LINES}.`,
+      detail: `Patch changes ~${changedLineCount} lines; limit is ${maxLines}.`,
     })
   }
 

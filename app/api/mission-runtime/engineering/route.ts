@@ -33,14 +33,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
   }
 
-  if (!body.title || !body.description || !body.subsystem) {
-    return NextResponse.json({ error: 'title, description, and subsystem are required.' }, { status: 400 })
+  if (!body.title || !body.description) {
+    return NextResponse.json({ error: 'title and description are required.' }, { status: 400 })
+  }
+
+  const request: EngineeringMissionRequest = {
+    title: body.title,
+    description: body.description,
+    subsystem: body.subsystem || 'project',
+    severity: body.severity,
+    targetFiles: body.targetFiles,
+    singleAgentProvider: body.singleAgentProvider,
+    coderProvider: body.coderProvider,
+    naturalLanguage: body.naturalLanguage,
+    executionMode: body.executionMode,
+    autoRun: body.autoRun,
+    waitForCompletion: body.waitForCompletion,
+    sessionId: body.sessionId,
   }
 
   const result = await runInResolvedWorkspace(body.workspaceId, async () => {
     const strategy = getMissionExecutionStrategy('engineering')
     try {
-      const mission = await strategy.create(body as EngineeringMissionRequest)
+      const mission = await strategy.create(request)
       return NextResponse.json({ mission })
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 })

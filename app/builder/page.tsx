@@ -1,17 +1,14 @@
-import { BuilderWorkspace } from '@/components/war-room/builder/BuilderWorkspace'
+import { FoundryShell } from '@/components/war-room/foundry/FoundryShell'
 
 export const dynamic = 'force-dynamic'
 
-export default function BuilderPage() {
+export default function BuilderAliasPage() {
   return (
-    <main className="min-h-screen bg-black p-4">
+    <main className="min-h-screen bg-black p-4 text-white">
       <div className="mx-auto max-w-[1600px]">
-        <h1 className="mb-3 text-lg font-bold uppercase tracking-widest text-emerald-300">War Room Builder</h1>
-        <p className="mb-4 text-[11px] text-slate-500">
-          Standalone Engineering Core client — thin client only. All coding/execution truth lives in
-          native-builder via the Mission Runtime Engineering strategy.
-        </p>
-        <BuilderWorkspace />
+        <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-emerald-500">Compatibility alias</p>
+        <h1 className="mb-3 text-lg font-bold uppercase tracking-widest text-emerald-300">The Foundry</h1>
+        <FoundryShell basePath="/builder" />
       </div>
     </main>
   )

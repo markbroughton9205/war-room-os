@@ -4,7 +4,8 @@
  * and the whole proposal is applied transactionally: if any file in the batch fails, everything
  * already written in this run is reverted before returning.
  */
-import { access, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { constants as FsConstants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import type { NativeRepairProposal, StructuredPatch } from './types'
@@ -65,6 +66,7 @@ async function applyOnePatch(repairId: string, patch: StructuredPatch): Promise<
       return { file: patch.file, ok: false, detail: 'create_file refused: file already exists.' }
     }
     await snapshotFileBeforePatch(repairId, patch.file, null, false)
+    await mkdir(path.dirname(abs), { recursive: true })
     await writeFile(abs, patch.newFileContent ?? '', 'utf8')
     return { file: patch.file, ok: true, detail: 'File created.' }
   }

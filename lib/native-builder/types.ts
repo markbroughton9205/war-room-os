@@ -111,19 +111,19 @@ export const NATIVE_REPAIR_TRANSITIONS: Record<NativeRepairState, readonly Nativ
   // for this issue class never ran, so the Commander sees that caveat before deciding, instead of
   // it being silently folded into the same review state as a fully-proven fix.
   validating: ['verification_failed', 'partially_verified', 'awaiting_commander_review', 'blocked', 'cancelled'],
-  verification_failed: ['rolled_back', 'planning', 'escalation_recommended', 'blocked'],
+  verification_failed: ['rolled_back', 'planning', 'escalation_recommended', 'blocked', 'cancelled'],
   // Directly actionable (not funneled through awaiting_commander_review) so the Commander can
   // accept-with-the-caveat-shown or reject in one step — the UI still displays the
   // 'partially_verified' label distinctly before that decision is made.
-  partially_verified: ['resolved', 'awaiting_commander_review', 'planning', 'rolled_back', 'blocked'],
-  awaiting_commander_review: ['resolved', 'rolled_back', 'blocked'],
+  partially_verified: ['resolved', 'awaiting_commander_review', 'planning', 'rolled_back', 'blocked', 'cancelled'],
+  awaiting_commander_review: ['resolved', 'rolled_back', 'blocked', 'cancelled'],
   // Not a dead end: Phase 11's Commander actions list "rollback" alongside "accept repair", and
   // the end-to-end proof explicitly demonstrates rollback *after* acceptance — Commander
   // approval is not an irrevocable act, it's the acceptance of the applied state at that moment.
   resolved: ['rolled_back'],
   rolled_back: ['planning', 'escalation_recommended'],
-  blocked: ['collecting_evidence', 'planning', 'escalation_recommended'],
-  escalation_recommended: ['planning', 'blocked'],
+  blocked: ['collecting_evidence', 'planning', 'escalation_recommended', 'cancelled'],
+  escalation_recommended: ['planning', 'blocked', 'cancelled'],
   cancelled: [],
 }
 
@@ -177,6 +177,10 @@ export type NativeValidationOperationId =
   | 'build'
   | 'validation_script'
   | 'git_diff_check'
+  | 'node_test'
+  | 'package_install'
+  | 'package_script'
+  | 'http_probe'
 
 export type NativeValidationOperation = {
   id: NativeValidationOperationId
@@ -252,6 +256,7 @@ export type NativeValidationResult = {
   stderr: string
   durationMs: number
   ranAt: string
+  timedOut?: boolean
 }
 
 export type NativeVerificationStatus = 'resolved' | 'partially_verified' | 'verification_blocked'
@@ -431,10 +436,64 @@ export type NativeRepairRecord = {
   iterationAttempts?: NativeIterationAttempt[]
   /** Optional, backwards-compatible (absent on records written before this field existed;
    * isRepairRecord does not require it). Prepared commit message + staging plan, written when the
-   * repair reaches review/resolved. Never executed — commitCapable: false invariant stands. */
+   * repair reaches review/resolved. Autonomous git commit remains disabled; Commander-gated
+   * commit lives in gitGovernance.ts, not this field. */
   commitPreparation?: NativeCommitPreparation
+  /** Optional Engineer coding-mission overlay. Absent on every pre-Engineer repair record. */
+  codingMission?: NativeCodingMissionState
   createdAt: string
   updatedAt: string
+}
+
+export type NativeCodingExecutionMode = 'gated_repair' | 'bounded_coding'
+
+export type NativeEngineerProgressStep =
+  | 'ANALYZING'
+  | 'PLANNING'
+  | 'EDITING'
+  | 'RUNNING'
+  | 'TESTING'
+  | 'REPAIRING'
+  | 'WAITING_FOR_APPROVAL'
+  | 'DONE'
+  | 'BLOCKED'
+  | 'CANCELLED'
+  | 'PAUSED_PROVIDER_UNAVAILABLE'
+
+export type NativeEngineerProgressEvent = {
+  at: string
+  step: NativeEngineerProgressStep
+  detail: string
+}
+
+export type NativeValidationOutcomeKind = 'IMPLEMENTED' | 'VALIDATED' | 'PARTIALLY_VALIDATED' | 'BLOCKED_BY_ENVIRONMENT'
+
+export type NativeCodingMissionState = {
+  mode: NativeCodingExecutionMode
+  workspaceId?: string
+  commanderRequest: string
+  objective: string
+  acceptanceCriteria: string[]
+  plan: string[]
+  currentStep: NativeEngineerProgressStep
+  attempt: number
+  maxAttempts: number
+  filesRead: string[]
+  filesChanged: string[]
+  commandsExecuted: string[]
+  testsExecuted: string[]
+  validationOutcome?: NativeValidationOutcomeKind
+  blockingReason?: string
+  progressEvents: NativeEngineerProgressEvent[]
+  visualVerification: 'VISUAL_VERIFICATION_NOT_AVAILABLE' | 'VERIFIED'
+  foundryMode?: 'FOUNDRY_LOCAL_MODE' | 'FOUNDRY_HOSTED_MODE'
+  localCoderStatus?: 'LOCAL_CODER_READY' | 'LOCAL_CODER_UNAVAILABLE'
+  hostedCoderStatus?: 'HOSTED_CODER_READY' | 'HOSTED_CODER_UNAVAILABLE'
+  sessionId?: string
+  activeRole?: string
+  activityLog?: { at: string; role: string; detail: string }[]
+  chatLog?: { at: string; speaker: string; text: string }[]
+  terminalHistory?: { at: string; command: string; ok: boolean; stdout: string; stderr: string }[]
 }
 
 // ---------------------------------------------------------------------------
@@ -456,12 +515,21 @@ export const NATIVE_TERMINAL_OPERATION_IDS = [
   'repo_status',
   'repo_diff',
   'git_diff_check',
+  'git_status',
+  'git_log',
+  'git_branch',
   'typecheck',
   'eslint_targeted',
   'validation_script',
   'test_script',
+  'node_test',
+  'package_install',
+  'package_script',
+  'http_probe',
   'build',
   'dev_server_status',
+  'process_status',
+  'process_stop',
   'terminate_builder_process',
 ] as const
 export type NativeTerminalOperationId = (typeof NATIVE_TERMINAL_OPERATION_IDS)[number]
