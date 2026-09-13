@@ -72,7 +72,7 @@ export async function runControlledStabilityValidation(): Promise<{ passed: numb
   results.push(check('17_dense', pyModel.includes('reference_attention') && !pyModel.toLowerCase().includes('sparse expert'), 'dense'))
   results.push(check('18_22_closed', ROADMAP_22_STATUS === 'CLOSED' && CORPUS_22 === 'CLOSED', ROADMAP_22_STATUS))
   results.push(check('19_23_active', ROADMAP_23_STATUS === 'ACTIVE' && CORPUS_23 === 'ACTIVE', ROADMAP_23_STATUS))
-  results.push(check('20_next_pass', NEXT_AUTHORIZED_PASS === 'PHASE2_PRIMARY_GRID' || NEXT_AUTHORIZED_PASS === 'PHASE2_GRID_REVIEW' || NEXT_AUTHORIZED_PASS === 'PHASE3A_INTERPOLATION' || NEXT_AUTHORIZED_PASS === 'PHASE3A_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_EXECUTION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW', NEXT_AUTHORIZED_PASS))
+  results.push(check('20_next_pass', NEXT_AUTHORIZED_PASS === 'PHASE2_PRIMARY_GRID' || NEXT_AUTHORIZED_PASS === 'PHASE2_GRID_REVIEW' || NEXT_AUTHORIZED_PASS === 'PHASE3A_INTERPOLATION' || NEXT_AUTHORIZED_PASS === 'PHASE3A_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_EXECUTION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_REVIEW_COMPLETE', NEXT_AUTHORIZED_PASS))
   results.push(check('21_no_push', tryForbiddenEnvAction('PUSH_CHANGES').denied && FORBIDDEN_ENV_ACTIONS.includes('START_STAGE_3'), 'no push'))
   results.push(check('22_autonomy_off', ascensionAutonomyIsOff(), 'OFF'))
   results.push(check('23_validate_experiment', pyPhase0.includes('def validate_experiment') && (report?.validate_experiment as { passed?: boolean } | undefined)?.passed === true, 'hard assertions'))
@@ -104,7 +104,7 @@ export async function runControlledStabilityValidation(): Promise<{ passed: numb
   results.push(check('39_phase3a_alphas', pyPhase3a.includes('0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0') && pyPhase3a.includes('TEST_ONLY_MERGE'), 'alpha sweep'))
   results.push(check('40_phase3a_no_logit_ensemble', pyPhase3a.includes('logit_ensembling_executed": False') || pyPhase3a.includes('"logit_ensembling_executed": False'), 'no logit ensemble'))
   results.push(check('41_phase3a_auth', pyPhase3a.includes('PHASE3A_INTERPOLATION_ONLY') && TRAINING_AUTHORIZATION === 'OFF', 'training OFF'))
-  results.push(check('42_phase3a_complete', PHASE3A_STATUS === 'PHASE3A_COMPLETE' && (NEXT_AUTHORIZED_PASS === 'PHASE3A_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_EXECUTION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW') && TRAINING_AUTHORIZATION === 'OFF', PHASE3A_STATUS))
+  results.push(check('42_phase3a_complete', PHASE3A_STATUS === 'PHASE3A_COMPLETE' && (NEXT_AUTHORIZED_PASS === 'PHASE3A_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_EXECUTION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_REVIEW_COMPLETE') && TRAINING_AUTHORIZATION === 'OFF', PHASE3A_STATUS))
 
   const passed = results.filter(r => r.ok).length
   const failed = results.filter(r => r.ok === false).length

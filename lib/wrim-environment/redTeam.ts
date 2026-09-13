@@ -17,7 +17,7 @@ const MESSAGES: Record<ForbiddenEnvAction, string> = {
   ENABLE_TRAIN_BUTTON: 'No Train button. TRAINING_AUTHORIZATION=OFF after Phase 2 grid completion.',
   START_STAGE_1: 'HTTP Stage 1 is denied. Authorized diagnostic is CLI WRIM1-NEBULA-DIAG-000001 only. No Train button.',
   START_STAGE_2: 'HTTP Stage 2 is denied. WRIM1-NEBULA-STAB-000001 already ran and STOPPED at the retention sentinel. Do not continue.',
-  START_STAGE_3: 'WRIM1-RUN-000003 STAGE3A is COMPLETE_PENDING_REVIEW. STAGE3_AUTHORIZATION=NO_PENDING_REVIEW and TRAINING_AUTHORIZATION=OFF. Do not start STAGE3B. Do not train.',
+  START_STAGE_3: 'WRIM1-RUN-000003 STAGE3A review is COMPLETE. Classification B. REVIEW_REQUIRED_CONTINUOUS_DRIFT. HEALTHY_FOR_CONTINUATION=false. TRAINING_AUTHORIZATION=OFF. Do not start STAGE3B. Do not train.',
   CONTINUE_TO_100: 'Stage 2 maximum is 50 optimizer steps. Continuation denied. Sentinel stop is final for this run.',
   PROMOTE_STAGE_2: 'Stage 2 is TEST_ONLY. Promotion denied.',
   MIX_TOOL_CURRICULUM: 'TOOL_USE remains 0% for this dense baseline. Denied.',

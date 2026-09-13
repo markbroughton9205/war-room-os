@@ -27,6 +27,8 @@ import {
   STAGE3A_CANDIDATE_STATE,
   STAGE3A_EXECUTION_READINESS,
   STAGE3A_STATUS,
+  STAGE3A_REVIEW_STATUS,
+  STAGE3A_HEALTHY_FOR_CONTINUATION,
   STAGE3B_EXECUTION_READINESS,
   TRAINING_AUTHORIZATION,
 } from './identity'
@@ -91,6 +93,8 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
     stage3a_execution_readiness: STAGE3A_EXECUTION_READINESS,
     stage3b_execution_readiness: STAGE3B_EXECUTION_READINESS,
     stage3a_status: STAGE3A_STATUS,
+    stage3a_review_status: STAGE3A_REVIEW_STATUS,
+    stage3a_healthy_for_continuation: STAGE3A_HEALTHY_FOR_CONTINUATION,
     stage3a_candidate_state: STAGE3A_CANDIDATE_STATE,
     stage3a_classification: STAGE3A_CLASSIFICATION,
     stage3_eval_suite_id: STAGE3_EVAL_SUITE_ID,

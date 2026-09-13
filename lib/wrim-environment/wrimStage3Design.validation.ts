@@ -81,7 +81,7 @@ export async function runStage3DesignValidation(): Promise<{ passed: number; fai
   results.push(check('22_rael', RAEL_STATUS === 'NOT_IMPLEMENTED', RAEL_STATUS))
   results.push(check('23_22_closed', ROADMAP_22_STATUS === 'CLOSED', ROADMAP_22_STATUS))
   results.push(check('24_23_active', ROADMAP_23_STATUS === 'ACTIVE', ROADMAP_23_STATUS))
-  results.push(check('25_next_pass', NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW', NEXT_AUTHORIZED_PASS))
+  results.push(check('25_next_pass', NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_REVIEW_COMPLETE', NEXT_AUTHORIZED_PASS))
   results.push(check('26_no_delete', designMd.includes('Delete nothing now'), 'retention plan only'))
   results.push(check('27_stage3b_lr_formula', STAGE3B_LR_FORMULA === 'FROZEN_FOR_REVIEW' && designMd.includes('STAGE3B_LR_FORMULA') && designMd.includes('FROZEN_FOR_REVIEW'), STAGE3B_LR_FORMULA))
   results.push(check('28_training_still_off', TRAINING_AUTHORIZATION === 'OFF' && designMd.includes('remains **OFF**') && designMd.includes('STAGE3_AUTHORIZATION = NO'), TRAINING_AUTHORIZATION))

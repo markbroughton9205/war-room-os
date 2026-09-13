@@ -251,7 +251,7 @@ export async function runStage3EvalBaselineValidation(): Promise<{ passed: numbe
       && design.target_item_count === 35
       && STAGE3_EXECUTION_READINESS === true
       && DESIGN_EXECUTION_READINESS === true
-      && (NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW')
+      && (NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_REVIEW_COMPLETE')
       && status.train_button === false,
     NEXT_AUTHORIZED_PASS,
   ))
