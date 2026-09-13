@@ -192,14 +192,8 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
 
   const selectedWorkspace = workspaces.find(w => w.id === workspaceId)
   const engineer = mission?.engineer
-  const commanderState = toCommanderState(
-    engineer ? { currentStep: engineer.currentStep as never, failureEvidence: engineer.failureEvidence, commanderState: engineer.commanderState as never } : undefined,
-    mission?.validationResults,
-  )
-  const narrative = statusNarrative(
-    engineer as never,
-    mission?.validationResults,
-  )
+  const commanderState = toCommanderState(engineer, mission?.validationResults)
+  const narrative = statusNarrative(engineer, mission?.validationResults)
   const workstream = useMemo(() => {
     const events = engineer?.workstream?.length
       ? engineer.workstream

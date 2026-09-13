@@ -8,8 +8,6 @@ import type {
   FoundryCommanderState,
   FoundryFailureEvidence,
   FoundryWorkEvent,
-  NativeCodingMissionState,
-  NativeEngineerProgressStep,
   NativeValidationResult,
 } from './types'
 
@@ -64,8 +62,8 @@ export function parseNodeTestCounts(output: string): { tests: number; pass: numb
 }
 
 export function mapInternalStepToCommanderState(
-  step: NativeEngineerProgressStep | undefined,
-  evidence?: { failureEvidence?: FoundryFailureEvidence | null; validationResults?: NativeValidationResult[] },
+  step: string | undefined,
+  evidence?: { failureEvidence?: { errorSummary?: string } | null; validationResults?: NativeValidationResult[] },
 ): FoundryCommanderState {
   switch (step) {
     case 'IDLE':
@@ -115,7 +113,7 @@ export function canEnterRepairing(evidence?: {
 }
 
 export function toCommanderState(
-  coding: Pick<NativeCodingMissionState, 'currentStep' | 'failureEvidence' | 'commanderState'> | undefined,
+  coding: { currentStep?: string; failureEvidence?: { errorSummary?: string } | null; commanderState?: string } | undefined,
   validationResults?: NativeValidationResult[],
 ): FoundryCommanderState {
   if (!coding) return 'IDLE'
@@ -231,7 +229,17 @@ export function stepForTurn(opts: {
   return 'BUILDING'
 }
 
-export function statusNarrative(coding: NativeCodingMissionState | undefined, validationResults?: NativeValidationResult[]): {
+export function statusNarrative(coding: {
+  currentAction?: string
+  lastCompletedAction?: string
+  nextAction?: string
+  currentStep?: string
+  failureEvidence?: { errorSummary?: string } | null
+  blockingReason?: string
+  workstream?: { text: string; ok?: boolean; kind: string }[]
+  progressEvents?: { detail: string }[]
+  commanderState?: string
+} | undefined, validationResults?: NativeValidationResult[]): {
   state: FoundryCommanderState
   current: string
   completed: string[]
@@ -243,7 +251,7 @@ export function statusNarrative(coding: NativeCodingMissionState | undefined, va
     .filter(e => e.ok !== false && e.kind !== 'status')
     .slice(-6)
     .map(e => e.text)
-  const current = coding?.currentAction || coding?.progressEvents.at(-1)?.detail || 'Waiting'
+  const current = coding?.currentAction || coding?.progressEvents?.at(-1)?.detail || 'Waiting'
   const next = coding?.nextAction || (state === 'COMPLETE' ? 'Review result' : state === 'TESTING' ? 'Evaluate results' : state === 'REPAIRING' ? 'Re-run tests' : 'Continue')
   const error = state === 'REPAIRING' || state === 'BLOCKED' ? (coding?.failureEvidence?.errorSummary || coding?.blockingReason) : undefined
   return { state, current, completed, next, error }
