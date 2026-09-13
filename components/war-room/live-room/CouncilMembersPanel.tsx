@@ -9,7 +9,7 @@ import {
   type FamilyOperationStatus,
   type FamilyOperationTone,
 } from '@/lib/council/familyOperationStatus'
-import type { CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
+import { rosterMemberPresentation, type CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
 
 type ProviderConnectionStatus = 'online' | 'standby' | 'not_connected' | 'error'
 
@@ -114,21 +114,50 @@ export const CouncilMembersPanel = memo(function CouncilMembersPanel({
       data-testid="council-members-panel"
     >
       <div>
-        <p className="text-[9px] font-bold uppercase tracking-[0.35em] text-emerald-500/80">Council Members</p>
-        {councilRoster?.degradedByRoster ? (
-          <p className="mt-1 text-[8px] font-semibold uppercase tracking-widest text-amber-300/90">
-            {councilRoster.degradedLabel}
-          </p>
+        <p className="text-[9px] font-bold uppercase tracking-[0.35em] text-emerald-500/80">Council</p>
+        {councilRoster ? (
+          <div className="mt-1 space-y-0.5" data-testid="council-continuity-status">
+            <p
+              className={`text-[10px] font-semibold uppercase tracking-widest ${
+                councilRoster.operationalState === 'UNAVAILABLE'
+                  ? 'text-rose-300/90'
+                  : councilRoster.operationalState === 'DEGRADED_PARTIAL'
+                    ? 'text-amber-300/90'
+                    : 'text-emerald-200/90'
+              }`}
+            >
+              {councilRoster.operationalLabel.replace(/^COUNCIL\s+/i, '')}
+            </p>
+            <p className="text-[8px] uppercase tracking-widest text-slate-500">
+              External Models {councilRoster.externalProviderCount.configured} / {councilRoster.externalProviderCount.total} configured
+            </p>
+            <p className="text-[8px] uppercase tracking-widest text-slate-500">
+              Local {councilRoster.localCouncil.label}
+            </p>
+            <p className="text-[8px] uppercase tracking-widest text-slate-500">
+              Routing {councilRoster.routingDisplay}
+            </p>
+            <p className="text-[8px] uppercase tracking-widest text-slate-500">
+              Model Diversity {councilRoster.modelDiversity}
+            </p>
+            <p className="text-[8px] uppercase tracking-widest text-slate-500">
+              Terra {councilRoster.terraConnection}
+            </p>
+            <p className="text-[8px] uppercase tracking-widest text-slate-500">
+              Internet {councilRoster.networkEgress}
+            </p>
+          </div>
         ) : null}
+        <p className="mt-3 text-[9px] font-bold uppercase tracking-[0.35em] text-emerald-500/80">Council Members</p>
         <ul className="mt-2 space-y-2">
           {MEMBER_ORDER.map(member => {
             const rosterRow = member.rosterId ? councilRoster?.families[member.rosterId as keyof typeof councilRoster.families] : undefined
             const status = rosterRow
-              ? (rosterRow.uiStatus === 'READY' ? 'online' : 'unavailable')
+              ? (rosterRow.cloudState === 'AVAILABLE' || rosterRow.backing === 'LOCAL' || (member.id === 'nova' && rosterRow.uiStatus === 'READY') ? 'online' : 'unavailable')
               : statusForMember(member.id, member.rosterId, providerStatuses)
             const detailKey = member.rosterId ?? member.id
             const presentation = rosterRow
-              ? { tone: rosterRow.uiStatus === 'READY' ? 'ready' as const : 'unavailable' as const, label: rosterRow.uiStatus }
+              ? rosterMemberPresentation(rosterRow)
               : memberStatusPresentation(status, providerLabels?.[detailKey])
             const operationStatus = member.rosterId ? operationStatuses?.[member.rosterId] : undefined
             const operationPresentation = operationStatus ? FAMILY_OPERATION_STATUS_PRESENTATION[operationStatus] : null
@@ -155,6 +184,9 @@ export const CouncilMembersPanel = memo(function CouncilMembersPanel({
                       {operationPresentation ? ` · ${operationPresentation.label}` : ''}
                     </span>
                   </div>
+                  {'localLine' in presentation && presentation.localLine ? (
+                    <p className="text-[8px] tracking-wide text-slate-500">{presentation.localLine}</p>
+                  ) : null}
                   {roster ? (
                     <p className="truncate text-[8px] tracking-wide text-slate-500">{roster.role}</p>
                   ) : (

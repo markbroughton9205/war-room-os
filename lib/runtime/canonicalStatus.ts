@@ -12,7 +12,8 @@ import { listRevenueEngineSnapshot } from '@/lib/revenue-engine/persistence'
 import { listPersistedSignalSnapshot } from '@/lib/signals'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import type { TruthBoundaryLabel } from '@/lib/runtime/operationalReliabilityTypes'
-import { resolveDisplayCouncilRoster } from '@/lib/council/live-orchestration/rosterHealth.server'
+import { resolveDisplayCouncilRoster, localCouncilModelReadyFromProbe, localCouncilModelIdFromProbe, probeTerraConnection, probeNetworkEgress } from '@/lib/council/live-orchestration/rosterHealth.server'
+import { probeOllama } from '@/lib/native-builder/ollamaClient'
 import type { CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
 
 export type CanonicalRuntimeHealth = 'healthy' | 'degraded' | 'unavailable' | 'unknown'
@@ -401,12 +402,15 @@ export async function collectCanonicalRuntimeStatus(req: Request): Promise<Canon
   const tools = await buildToolRoutingSnapshotFromOrigin(requestOrigin(req))
   const engines = await collectEngineStatuses(tools)
   const engineControl = normalizeEngineControlPayload(buildEngineControlStatusResponse(engines), generatedAt)
-  const [signals, revenue, commander, queue, sentinel] = await Promise.all([
+  const [signals, revenue, commander, queue, sentinel, ollamaProbe, terraConnection, networkEgress] = await Promise.all([
     listPersistedSignalSnapshot(12),
     listRevenueEngineSnapshot(20),
     listCommanderSnapshot(20),
     probeActionQueue(generatedAt),
     redSentinelSubsystem(generatedAt),
+    probeOllama(),
+    probeTerraConnection(),
+    probeNetworkEgress(),
   ])
 
   const liveSignalProvider = providerRuntime.signalAvailability.liveSignalsAvailable
@@ -523,7 +527,12 @@ export async function collectCanonicalRuntimeStatus(req: Request): Promise<Canon
     subsystems,
     providers,
     engineControl,
-    councilRoster: resolveDisplayCouncilRoster(),
+    councilRoster: resolveDisplayCouncilRoster(process.env, {
+      localReady: localCouncilModelReadyFromProbe(ollamaProbe),
+      localModel: localCouncilModelIdFromProbe(ollamaProbe),
+      terraConnection,
+      networkEgress,
+    }),
     summary: {
       health: unavailableSubsystems.length ? 'degraded' : degradedSubsystems.length ? 'degraded' : 'healthy',
       confidence,

@@ -117,7 +117,8 @@ export function runLiveCouncilOrchestrationValidation(): CaseResult[] {
         && snap.families.claude?.unavailableReason === 'UNAVAILABLE_BILLING'
         && snap.families.grok?.unavailableReason === 'UNAVAILABLE_AUTH'
         && snap.redTeam === 'SKIPPED_BY_POLICY'
-        && snap.degradedByRoster
+        && snap.degradedByRoster === true
+        && snap.operationalState === 'DEGRADED_PARTIAL'
         && snap.activeFloorFamilies.join(',') === 'chatgpt,gemini'
     })(), 'roster'),
   ]

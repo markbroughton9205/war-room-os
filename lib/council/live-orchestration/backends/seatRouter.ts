@@ -71,10 +71,9 @@ function policyForMode(mode: CouncilRoutingMode, seat: ModelBackendInvokeInput['
  * Council Seat Router. Resolves which backend answers for a seat under the active routing mode,
  * invokes it, and returns the answer with full backend provenance (including fallback history).
  *
- * EXTERNAL_ONLY — the default, see routingMode.ts — resolves to invokeForPolicy('EXTERNAL_ONLY',
- * ...), which is `invokeExternalBackend` and nothing else: a pure pass-through to the existing,
- * unmodified streamProvider.ts path. Council behavior is unchanged unless an operator explicitly
- * sets COUNCIL_ROUTING_MODE.
+ * Canonical default preference is AUTO (see routingMode.ts). AUTO with no cloud keys resolves
+ * to LOCAL_FIRST so packaged War Room continues through invokeLocalBackend. Explicit
+ * EXTERNAL_ONLY remains a pure pass-through to invokeExternalBackend.
  */
 export async function invokeCouncilSeat(input: ModelBackendInvokeInput): Promise<ModelBackendInvokeResult> {
   input.signal.throwIfAborted()

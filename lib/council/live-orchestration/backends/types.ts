@@ -14,6 +14,8 @@ export type CouncilRoutingMode = 'LOCAL_ONLY' | 'LOCAL_FIRST' | 'HYBRID' | 'EXTE
 
 export const COUNCIL_ROUTING_MODES: CouncilRoutingMode[] = ['LOCAL_ONLY', 'LOCAL_FIRST', 'HYBRID', 'EXTERNAL_ONLY']
 
+/** AUTO is a configured preference that resolves to one of COUNCIL_ROUTING_MODES. */
+
 /** Per-seat override consulted only when the active mode is HYBRID. */
 export type SeatBackendPolicy = 'LOCAL_ONLY' | 'LOCAL_FIRST' | 'EXTERNAL_FIRST' | 'EXTERNAL_ONLY'
 
@@ -56,7 +58,7 @@ export type ModelBackendInvokeInput = {
   signal: AbortSignal
   onDelta: StreamDeltaHandler
   timeoutKind: 'social' | 'council' | 'research'
-  /** Testing/validation hook only — never used to bypass EXTERNAL_ONLY's production default. */
+  /** Testing/validation hook only — never used to bypass Commander-configured routing policy. */
   routingModeOverride?: CouncilRoutingMode
 }
 

@@ -203,6 +203,10 @@ fs.writeFileSync(
   path.join(runtimeRoot, 'windowsUserEnv.cjs'),
   fs.readFileSync(path.join(repoRoot, 'desktop', 'src', 'windowsUserEnv.cjs'), 'utf8'),
 )
+fs.writeFileSync(
+  path.join(runtimeRoot, 'councilRoutingBootstrap.cjs'),
+  fs.readFileSync(path.join(repoRoot, 'desktop', 'src', 'councilRoutingBootstrap.cjs'), 'utf8'),
+)
 
 // Boot script is written at BUILD time: the installed resources directory may be read-only.
 const uiServerJs = path.join(uiRoot, 'server.js')
@@ -215,6 +219,7 @@ fs.writeFileSync(
     '// Electron in ELECTRON_RUN_AS_NODE mode mis-parses absolute Windows paths containing spaces.',
     "const path = require('node:path')",
     "try { require('./windowsUserEnv.cjs').applyWindowsUserEnvironmentToProcess() } catch { /* overlay is best-effort */ }",
+    "try { require('./councilRoutingBootstrap.cjs').applyCouncilRoutingDefault() } catch { /* AUTO default is best-effort */ }",
     "const serverPath = path.join(__dirname, 'ui', 'server.js')",
     'process.chdir(path.dirname(serverPath))',
     'require(serverPath)',
@@ -234,6 +239,7 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const { mergeWindowsUserEnvironment, applyWindowsUserEnvironmentToProcess } = require('./windowsUserEnv.cjs')
+const { applyCouncilRoutingDefault } = require('./councilRoutingBootstrap.cjs')
 
 function findServer(root) {
   const p = path.join(root, 'ui', 'server.js')
@@ -242,6 +248,7 @@ function findServer(root) {
 
 function startUi(opts) {
   try { applyWindowsUserEnvironmentToProcess() } catch { /* overlay is best-effort */ }
+  try { applyCouncilRoutingDefault() } catch { /* AUTO default is best-effort */ }
   const runtimeRoot = opts.runtimeRoot
   const electronExec = opts.electronExec
   if (!fs.existsSync(path.join(runtimeRoot, 'boot-ui.cjs'))) {

@@ -56,6 +56,7 @@ const ALL_CLOUD_KEYS = {
   ANTHROPIC_API_KEY: undefined,
   XAI_API_KEY: undefined,
   GEMINI_API_KEY: undefined,
+  WAR_ROOM_COUNCIL_RUNTIME_CONFIG_PATH: '',
 }
 
 const SEAT_ENV_VAR: Partial<Record<CouncilOrchestrationFamily, string>> = {
@@ -181,16 +182,16 @@ export async function runCouncilLiveRoutingValidation(): Promise<CaseResult[]> {
     ),
   )
 
-  // 3. Default routing mode resolves EXTERNAL_ONLY.
-  const defaultMode = await withEnv({ COUNCIL_ROUTING_MODE: undefined }, async () => resolveCouncilRoutingMode())
-  results.push(check('default routing mode resolves EXTERNAL_ONLY', defaultMode === 'EXTERNAL_ONLY', `resolved=${defaultMode}`))
+  // 3. Default routing preference is AUTO; with no cloud keys the effective mode is LOCAL_FIRST.
+  const defaultMode = await withEnv({ ...ALL_CLOUD_KEYS, COUNCIL_ROUTING_MODE: undefined, WAR_ROOM_COUNCIL_RUNTIME_CONFIG_PATH: '' }, async () => resolveCouncilRoutingMode())
+  results.push(check('default routing mode resolves LOCAL_FIRST under AUTO with no cloud keys', defaultMode === 'LOCAL_FIRST', `resolved=${defaultMode}`))
 
-  // 4. Unset env does not activate local — invokeCouncilSeat resolves to EXTERNAL backendType.
-  await withEnv(ALL_CLOUD_KEYS, async () => {
+  // 4. Explicit EXTERNAL_ONLY does not activate local — invokeCouncilSeat resolves to EXTERNAL backendType.
+  await withEnv({ ...ALL_CLOUD_KEYS, COUNCIL_ROUTING_MODE: 'EXTERNAL_ONLY', WAR_ROOM_COUNCIL_RUNTIME_CONFIG_PATH: '' }, async () => {
     const result = await invokeCouncilSeat(baseInput('claude'))
     results.push(
       check(
-        'unset env does not activate local',
+        'EXTERNAL_ONLY does not activate local',
         result.backend.backendType === 'EXTERNAL',
         `backendType=${result.backend.backendType}`,
       ),
@@ -504,7 +505,7 @@ export async function runCouncilLiveRoutingValidation(): Promise<CaseResult[]> {
   // serving live seats while mode is EXTERNAL_ONLY. localReadyForLiveRouting is readiness/
   // eligibility (real, computed); localServingLiveSeats stays the literal 'UNKNOWN' — this route
   // has no per-invocation telemetry and must never claim to know what a live call actually did.
-  const statusRes = await withEnv(ALL_CLOUD_KEYS, async () => backendStatusGet())
+  const statusRes = await withEnv({ ...ALL_CLOUD_KEYS, COUNCIL_ROUTING_MODE: 'EXTERNAL_ONLY', WAR_ROOM_COUNCIL_RUNTIME_CONFIG_PATH: '' }, async () => backendStatusGet())
   const statusBody = (await statusRes.json()) as {
     liveRoutingWired: boolean
     routingModeResolved: string
@@ -514,7 +515,7 @@ export async function runCouncilLiveRoutingValidation(): Promise<CaseResult[]> {
   results.push(check('status API reports liveRoutingWired=true', statusBody.liveRoutingWired === true, `liveRoutingWired=${statusBody.liveRoutingWired}`))
   results.push(
     check(
-      'status API still reports current resolved mode EXTERNAL_ONLY when env unset',
+      'status API reports EXTERNAL_ONLY when that mode is explicit',
       statusBody.routingModeResolved === 'EXTERNAL_ONLY',
       `routingModeResolved=${statusBody.routingModeResolved}`,
     ),
@@ -625,8 +626,8 @@ export async function runCouncilLiveRoutingValidation(): Promise<CaseResult[]> {
   )
   results.push(
     check(
-      'Continue path routes chatgpt/claude/grok/gemini/red_team/baby through callCouncilProvider',
-      /LOCAL_ROUTED_CONTINUE_FAMILIES\s*=\s*new Set\(\['chatgpt', 'claude', 'grok', 'gemini', 'red_team', 'baby'\]\)/.test(executeSource)
+      'Continue path routes chatgpt/claude/grok/gemini/red_team/baby/nova through callCouncilProvider',
+      /LOCAL_ROUTED_CONTINUE_FAMILIES\s*=\s*new Set\(\['chatgpt', 'claude', 'grok', 'gemini', 'red_team', 'baby', 'nova'\]\)/.test(executeSource)
       && /LOCAL_ROUTED_CONTINUE_FAMILIES\.has\(councilSingleFamily\)/.test(executeSource)
       && /callCouncilProvider\(councilSingleFamily, userPrompt, \{\s*systemPromptOverride/.test(executeSource),
       'LOCAL_ROUTED_CONTINUE_FAMILIES set exists, is checked, and dispatches into callCouncilProvider with an override options object',

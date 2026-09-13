@@ -124,7 +124,7 @@ import {
 import { filterDecreeRelevantPriorReplies, isLightweightPingDecree } from '@/lib/council/contextRelevance'
 import { invokeCouncilSeat, localRoutingBypassesCloudFloorGate, resolveCouncilRoutingMode, type SeatInvokeStatus } from '@/lib/council/live-orchestration/backends'
 import type { BackendMetadata } from '@/lib/council/live-orchestration/backends/types'
-import { resolveLiveCouncilRoster, familyIsFloorEligible } from '@/lib/council/live-orchestration/rosterHealth.server'
+import { resolveLiveCouncilRoster, resolveDisplayCouncilRoster, familyIsFloorEligible } from '@/lib/council/live-orchestration/rosterHealth.server'
 import { resolveVisibleFloorOrder } from '@/lib/council/live-orchestration/floorScheduler'
 import { rosterToFloorFlags } from '@/lib/council/live-orchestration/rosterHealth'
 import { classifyProviderFailure } from '@/lib/council/live-orchestration/failureTaxonomy'
@@ -299,10 +299,10 @@ type ProviderResult = {
 
 /**
  * SeatInvokeStatus ('OK' | 'FAILED' | 'TIMED_OUT' | 'UNAVAILABLE' | 'NO_LOCAL_BACKEND') ->
- * ProviderResultStatus. Under EXTERNAL_ONLY (the default/production mode) invokeExternalBackend()
- * only ever produces the first four values — identical to the old streamCouncilFamily() status —
- * so this mapping is the identity function in production today. NO_LOCAL_BACKEND (only reachable
- * under a non-default COUNCIL_ROUTING_MODE) maps to UNAVAILABLE, the closest honest equivalent.
+ * ProviderResultStatus. Under EXTERNAL_ONLY, invokeExternalBackend() only ever produces the first
+ * four values — identical to the old streamCouncilFamily() status — so this mapping is the identity
+ * function on that path. Packaged default routing preference is AUTO (0 cloud keys → LOCAL_FIRST).
+ * NO_LOCAL_BACKEND maps to UNAVAILABLE, the closest honest equivalent.
  */
 export function mapSeatInvokeStatusToProviderResultStatus(status: SeatInvokeStatus): ProviderResultStatus {
   if (status === 'NO_LOCAL_BACKEND') return 'UNAVAILABLE'
@@ -700,6 +700,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   }
 
   const liveCouncilRoster = resolveLiveCouncilRoster()
+  const displayCouncilRoster = resolveDisplayCouncilRoster()
   const liveCouncilFloor = rosterToFloorFlags(liveCouncilRoster)
   const councilLogicalRequestId =
     typeof body.councilLogicalRequestId === 'string' && body.councilLogicalRequestId.trim()
@@ -750,7 +751,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         {
           ...payload,
           conversationId: payload.conversationId ?? conversationId,
-          councilRoster: liveCouncilRoster,
+          councilRoster: displayCouncilRoster,
           agiContextSnapshotId: warRoomContextSnapshotId,
           agiContextAssemblyDurationMs: contextAssemblyDurationMs,
         },
@@ -1909,12 +1910,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     }
 
     try {
-      // Council Seat Router entry point. Under COUNCIL_ROUTING_MODE=LOCAL_FIRST (production's
-      // actual current setting), invokeCouncilSeat() tries the local Ollama/Nebula backend first
-      // and falls back to invokeExternalBackend() (a pass-through to the same streamCouncilFamily()
-      // call this replaced — same provider adapters, same retry/timeout policy, same real
-      // token-by-token onDelta streaming) only if local fails. Under the default/unset
-      // EXTERNAL_ONLY mode it resolves straight to invokeExternalBackend() as before.
+      // Council Seat Router entry point. AUTO (packaged default) with no cloud keys resolves to
+      // LOCAL_FIRST so invokeCouncilSeat() can use sovereign local inference. LOCAL_FIRST tries
+      // Ollama/Nebula first and falls back to invokeExternalBackend() (pass-through to the same
+      // streamCouncilFamily() this replaced — same adapters, retry/timeout, token-by-token onDelta)
+      // only if local fails. Explicit EXTERNAL_ONLY still resolves straight to invokeExternalBackend().
       const seatResult = await invokeCouncilSeat({
         seat: family,
         systemPrompt: systemFor(),

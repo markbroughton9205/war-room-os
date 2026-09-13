@@ -5,10 +5,14 @@ import {
   buildCouncilRosterSnapshot,
   withNebulaLocalDisplayOverride,
   type CouncilRosterSnapshot,
+  type RosterContinuityInput,
   type RosterPolicyOverride,
 } from './rosterHealth'
-import { localRoutingBypassesCloudFloorGate } from './backends/routingMode'
+import { classifyNetworkEgress, classifyResearchProviders } from './councilContinuity'
+import { localRoutingBypassesCloudFloorGate, resolveCouncilRoutingMode, resolveCouncilRoutingPreference } from './backends/routingMode'
 import { SEAT_LOCAL_ROLE_SLOT } from './backends/seatRoleSlot'
+import { type OllamaProbeResult } from '@/lib/native-builder/ollamaClient'
+import { localCandidateHealthFromProbe } from './backends/localBackend'
 import { localRegistryEntryForSlot } from './backends/localModelRegistry'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 
@@ -22,38 +26,115 @@ export function readRosterPolicyOverrides(env: NodeJS.ProcessEnv = process.env):
   }
 }
 
+function cloudConfigured(env: NodeJS.ProcessEnv) {
+  return {
+    chatgpt: envHasUsableProviderSecret('OPENAI_API_KEY', env),
+    claude: envHasUsableProviderSecret('ANTHROPIC_API_KEY', env),
+    grok: envHasUsableProviderSecret('XAI_API_KEY', env),
+    gemini: envHasUsableProviderSecret('GEMINI_API_KEY', env),
+    red_team: envHasUsableProviderSecret('ANTHROPIC_API_KEY', env),
+  }
+}
+
+function researchFromEnv(env: NodeJS.ProcessEnv): RosterContinuityInput['researchProviders'] {
+  return classifyResearchProviders({
+    tavilyConfigured: envHasUsableProviderSecret('TAVILY_API_KEY', env),
+    firecrawlConfigured: envHasUsableProviderSecret('FIRECRAWL_API_KEY', env),
+    xaiConfigured: envHasUsableProviderSecret('XAI_API_KEY', env),
+  })
+}
+
 export function resolveLiveCouncilRoster(env: NodeJS.ProcessEnv = process.env): CouncilRosterSnapshot {
   return buildCouncilRosterSnapshot({
-    configured: {
-      chatgpt: envHasUsableProviderSecret('OPENAI_API_KEY', env),
-      claude: envHasUsableProviderSecret('ANTHROPIC_API_KEY', env),
-      grok: envHasUsableProviderSecret('XAI_API_KEY', env),
-      gemini: envHasUsableProviderSecret('GEMINI_API_KEY', env),
-      red_team: envHasUsableProviderSecret('ANTHROPIC_API_KEY', env),
-    },
+    configured: cloudConfigured(env),
     overrides: readRosterPolicyOverrides(env),
+    continuity: {
+      localReady: false,
+      routingPreference: resolveCouncilRoutingPreference(env),
+      routingModeResolved: resolveCouncilRoutingMode(env),
+      terraConnection: 'UNKNOWN',
+      networkEgress: 'UNKNOWN',
+      researchProviders: researchFromEnv(env),
+    },
   })
+}
+
+export function localCouncilModelReadyFromProbe(probe: Pick<OllamaProbeResult, 'available' | 'models'>): boolean {
+  const entry = localRegistryEntryForSlot('GENERAL')
+  return localCandidateHealthFromProbe(entry, probe as OllamaProbeResult) === 'READY'
+}
+
+export function localCouncilModelIdFromProbe(probe: Pick<OllamaProbeResult, 'available' | 'models'>): string | null {
+  const entry = localRegistryEntryForSlot('GENERAL')
+  if (!entry || !localCouncilModelReadyFromProbe(probe)) return null
+  return entry.modelId
+}
+
+export async function probeTerraConnection(): Promise<CouncilRosterSnapshot['terraConnection']> {
+  const origin = (process.env.WAR_ROOM_LOCAL_CORE_ORIGIN?.trim() || 'http://127.0.0.1:3847').replace(/\/+$/, '')
+  try {
+    const res = await fetch(`${origin}/api/local/health`, { signal: AbortSignal.timeout(1500), cache: 'no-store' })
+    return res.ok ? 'CONNECTED' : 'DISCONNECTED'
+  } catch {
+    return 'DISCONNECTED'
+  }
+}
+
+export async function probeNetworkEgress(): Promise<CouncilRosterSnapshot['networkEgress']> {
+  try {
+    const res = await fetch('https://example.com', { method: 'GET', signal: AbortSignal.timeout(1500), cache: 'no-store' })
+    return classifyNetworkEgress(res.ok ? 'reachable' : 'error')
+  } catch {
+    return 'UNAVAILABLE'
+  }
 }
 
 export function familyIsFloorEligible(family: CouncilOrchestrationFamily, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveLiveCouncilRoster(env).families[family]?.floorEligible === true
 }
 
-/**
- * Commander-facing display variant of resolveLiveCouncilRoster(). Cloud-key floor eligibility used
- * for real external-routing decisions (app/api/chat/execute.ts's liveCouncilFloor) is completely
- * unaffected — this overlays local Nebula agent availability only for status/UI display, so the
- * Members panel and status banner don't report "0/4 PROVIDERS ACTIVE" while a LOCAL_FIRST/
- * LOCAL_ONLY/HYBRID Nebula Council is genuinely serving those seats via Ollama. Under the default
- * EXTERNAL_ONLY mode this returns the base snapshot unchanged.
- */
-export function resolveDisplayCouncilRoster(env: NodeJS.ProcessEnv = process.env): CouncilRosterSnapshot {
-  const base = resolveLiveCouncilRoster(env)
-  if (!localRoutingBypassesCloudFloorGate()) return base
+function locallyEnabledSeats(): Partial<Record<CouncilOrchestrationFamily, boolean>> {
   const locallyEnabled: Partial<Record<CouncilOrchestrationFamily, boolean>> = {}
-  for (const family of ['chatgpt', 'claude', 'grok', 'gemini', 'red_team'] as CouncilOrchestrationFamily[]) {
+  for (const family of ['chatgpt', 'claude', 'grok', 'gemini', 'red_team', 'nova'] as CouncilOrchestrationFamily[]) {
     const slot = SEAT_LOCAL_ROLE_SLOT[family]
     locallyEnabled[family] = Boolean(slot && localRegistryEntryForSlot(slot))
   }
-  return withNebulaLocalDisplayOverride(base, locallyEnabled)
+  return locallyEnabled
+}
+
+/**
+ * Commander-facing display variant. Cloud-key floor used for real external-routing decisions
+ * (app/api/chat/execute.ts liveCouncilFloor) is unaffected. When routing permits local and the
+ * local model is ready, seats keep honest cloud vendor lines and expose local continuity separately.
+ */
+export function resolveDisplayCouncilRoster(
+  env: NodeJS.ProcessEnv = process.env,
+  continuity?: Pick<RosterContinuityInput, 'localReady' | 'localModel' | 'terraConnection' | 'networkEgress' | 'researchProviders'>,
+): CouncilRosterSnapshot {
+  const base = resolveLiveCouncilRoster(env)
+  const routingPreference = resolveCouncilRoutingPreference(env)
+  const routingModeResolved = resolveCouncilRoutingMode(env)
+  const localRouting = localRoutingBypassesCloudFloorGate(env)
+  const registryLocal = Object.values(locallyEnabledSeats()).some(Boolean)
+  const localReady = localRouting && Boolean(continuity?.localReady ?? registryLocal)
+  const merged: RosterContinuityInput = {
+    localReady,
+    localModel: continuity?.localModel ?? null,
+    routingPreference,
+    routingModeResolved,
+    terraConnection: continuity?.terraConnection ?? base.terraConnection,
+    networkEgress: continuity?.networkEgress ?? base.networkEgress,
+    researchProviders: continuity?.researchProviders ?? researchFromEnv(env),
+  }
+  if (!localRouting && !localReady) {
+    return attachDisplayContinuity(base, merged)
+  }
+  return withNebulaLocalDisplayOverride(base, locallyEnabledSeats(), merged)
+}
+
+function attachDisplayContinuity(
+  snapshot: CouncilRosterSnapshot,
+  continuity: RosterContinuityInput,
+): CouncilRosterSnapshot {
+  return withNebulaLocalDisplayOverride(snapshot, {}, continuity)
 }

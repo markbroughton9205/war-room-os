@@ -11,6 +11,7 @@ const net = require('node:net')
 const fs = require('node:fs')
 const os = require('node:os')
 const { applyWindowsUserEnvironmentToProcess, presenceSummary } = require('./windowsUserEnv.cjs')
+const { applyCouncilRoutingDefault } = require('./councilRoutingBootstrap.cjs')
 
 const LOCAL_UI_ORIGIN = process.env.WAR_ROOM_LOCAL_UI_ORIGIN || 'http://127.0.0.1:3848'
 const LOCAL_CORE_ORIGIN = process.env.WAR_ROOM_LOCAL_CORE_ORIGIN || 'http://127.0.0.1:3847'
@@ -371,6 +372,12 @@ appendLog(`boot pid=${process.pid} packaged=${isPackaged()} exec=${process.execP
 if (process.platform === 'win32') {
   const overlayNames = applyWindowsUserEnvironmentToProcess()
   appendLog(`windowsUserEnv overlay names=${overlayNames.length} ${presenceSummary()}`)
+}
+try {
+  const routingSource = applyCouncilRoutingDefault()
+  appendLog(`councilRouting source=${routingSource} mode=${process.env.COUNCIL_ROUTING_MODE || 'UNSET'}`)
+} catch (err) {
+  appendLog(`councilRouting bootstrap skipped: ${err}`)
 }
 
 const gotLock = app.requestSingleInstanceLock()

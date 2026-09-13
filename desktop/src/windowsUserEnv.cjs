@@ -28,6 +28,9 @@ const ALWAYS = new Set([
   'AISHUB_USERNAME',
   'TERRA_AIS_CATCHER_INGEST_TOKEN',
   'WAR_ROOM_COMMANDER_USER_ID',
+  'COUNCIL_ROUTING_MODE',
+  'COUNCIL_SEAT_BACKEND_POLICY',
+  'OLLAMA_BASE_URL',
 ])
 
 const SECRET_NAME = /(_API_KEY|_CLIENT_SECRET|_CLIENT_ID|_TOKEN|_SECRET)$/i
@@ -35,6 +38,8 @@ const SECRET_NAME = /(_API_KEY|_CLIENT_SECRET|_CLIENT_ID|_TOKEN|_SECRET)$/i
 function shouldOverlay(name) {
   if (!name || SKIP.has(String(name).toUpperCase())) return false
   if (ALWAYS.has(name)) return true
+  const upper = String(name).toUpperCase()
+  if (ALWAYS.has(upper)) return true
   return SECRET_NAME.test(name)
 }
 

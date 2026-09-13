@@ -29,19 +29,32 @@ function installMockFetch(scenario: MockFetchScenario): () => void {
   const original = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input)
+    const encoder = new TextEncoder()
+    const asResponse = (ok: boolean, status: number, body: unknown) => {
+      const bodyText = typeof body === 'string' ? body : JSON.stringify(body)
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(bodyText))
+          controller.close()
+        },
+      })
+      return {
+        ok,
+        status,
+        json: async () => (typeof body === 'string' ? {} : body),
+        text: async () => bodyText,
+        body: stream,
+      } as unknown as Response
+    }
     if (url.endsWith('/api/tags')) {
       if (!scenario.tagsOk) throw new Error('mock: connection refused')
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ models: scenario.installedModels.map(name => ({ name })) }),
-      } as Response
+      return asResponse(true, 200, { models: scenario.installedModels.map(name => ({ name })) })
     }
     if (url.endsWith('/api/generate')) {
       if (!scenario.generateOk) {
-        return { ok: false, status: 500, text: async () => 'mock generate failure' } as Response
+        return asResponse(false, 500, 'mock generate failure')
       }
-      return { ok: true, status: 200, json: async () => ({ response: scenario.generateText ?? 'mock local reply' }) } as Response
+      return asResponse(true, 200, { response: scenario.generateText ?? 'mock local reply', done: true })
     }
     throw new Error(`unexpected mock fetch url: ${url}`)
   }) as typeof fetch

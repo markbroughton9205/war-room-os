@@ -95,7 +95,13 @@ function withEnv<T>(vars: Record<string, string | undefined>, fn: () => Promise<
   })
 }
 
-const NO_CLOUD_KEYS = { OPENAI_API_KEY: undefined, ANTHROPIC_API_KEY: undefined, XAI_API_KEY: undefined, GEMINI_API_KEY: undefined }
+const NO_CLOUD_KEYS = {
+  OPENAI_API_KEY: undefined,
+  ANTHROPIC_API_KEY: undefined,
+  XAI_API_KEY: undefined,
+  GEMINI_API_KEY: undefined,
+  WAR_ROOM_COUNCIL_RUNTIME_CONFIG_PATH: '',
+}
 
 function componentSource(): string {
   const path = fileURLToPath(new URL('../../../../components/war-room/providers/CouncilBackendStatusPanel.tsx', import.meta.url))
@@ -158,16 +164,19 @@ export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[
     ),
   )
 
-  // 2. External backend metadata projects correctly — provider is the display-formatted name
-  //    (e.g. "Anthropic"), never the raw internal id, but still traceable back to it 1:1.
+  // 2. External/local backend metadata projects honestly — LOCAL BACKING when cloud is absent
+  //    and local is ready; otherwise EXTERNAL with the display-formatted cloud provider name.
   results.push(
     check(
-      'external backend metadata projects correctly',
-      snapshot.seats.every(
-        row => row.active.backendType === 'EXTERNAL'
-          && row.active.provider === providerDisplayName((EXTERNAL_PROVIDER_BY_SEAT as Record<string, string>)[row.seat]),
-      ),
-      'every row backendType=EXTERNAL and provider matches providerDisplayName(EXTERNAL_PROVIDER_BY_SEAT[seat])',
+      'backend metadata projects honestly without faking cloud providers',
+      snapshot.seats.every(row => {
+        if (row.active.backendType === 'LOCAL') {
+          return row.active.provider === 'ollama'
+        }
+        return row.active.backendType === 'EXTERNAL'
+          && row.active.provider === providerDisplayName((EXTERNAL_PROVIDER_BY_SEAT as Record<string, string>)[row.seat])
+      }),
+      'LOCAL rows use ollama; EXTERNAL rows match providerDisplayName(EXTERNAL_PROVIDER_BY_SEAT[seat])',
     ),
   )
 
@@ -253,19 +262,16 @@ export async function runCouncilBackendStatusUiValidation(): Promise<CaseResult[
     ),
   )
 
-  // 12. EXTERNAL_ONLY represented correctly — under the default (no env override), wired=true but
-  // localReadyForLiveRouting is structurally guaranteed false: invokeExternalBackend() is the only
-  // path invokeCouncilSeat() can take under EXTERNAL_ONLY, so this isn't environment-dependent.
-  // localServingLiveSeats stays the literal 'UNKNOWN' regardless of mode — this route has no
-  // per-invocation telemetry, so it never claims to know whether a live seat actually served.
+  // 12. EXTERNAL_ONLY represented correctly when that mode is explicit.
+  const { body: externalOnlySnapshot } = await withEnv({ ...NO_CLOUD_KEYS, COUNCIL_ROUTING_MODE: 'EXTERNAL_ONLY' }, () => fetchSnapshot())
   results.push(
     check(
       'EXTERNAL_ONLY represented correctly (wired does not imply local is ready or serving)',
-      snapshot.liveRoutingWired === true
-      && snapshot.routingModeResolved === 'EXTERNAL_ONLY'
-      && snapshot.localReadyForLiveRouting === false
-      && snapshot.localServingLiveSeats === 'UNKNOWN',
-      `liveRoutingWired=${snapshot.liveRoutingWired} routingModeResolved=${snapshot.routingModeResolved} localReadyForLiveRouting=${snapshot.localReadyForLiveRouting} localServingLiveSeats=${snapshot.localServingLiveSeats}`,
+      externalOnlySnapshot.liveRoutingWired === true
+      && externalOnlySnapshot.routingModeResolved === 'EXTERNAL_ONLY'
+      && externalOnlySnapshot.localReadyForLiveRouting === false
+      && externalOnlySnapshot.localServingLiveSeats === 'UNKNOWN',
+      `liveRoutingWired=${externalOnlySnapshot.liveRoutingWired} routingModeResolved=${externalOnlySnapshot.routingModeResolved} localReadyForLiveRouting=${externalOnlySnapshot.localReadyForLiveRouting} localServingLiveSeats=${externalOnlySnapshot.localServingLiveSeats}`,
     ),
   )
 

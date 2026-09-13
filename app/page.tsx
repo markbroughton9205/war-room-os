@@ -12481,6 +12481,18 @@ function Home() {
     [memories.length, persistenceAvailable],
   )
   const internetHealthLabel = useMemo(() => {
+    const egress = internetStatus.NETWORK_EGRESS
+    const search = internetStatus.SEARCH_PROVIDER_CONFIGURATION
+    if (egress === 'AVAILABLE') {
+      if (search === 'CONFIG_NEEDED') return 'Network available · search providers config needed'
+      const live = internetStatus.overallStatus === 'live' || internetStatus.canUseInternet === true
+      if (live) {
+        const trimmed = typeof internetStatus.label === 'string' ? internetStatus.label.trim() : ''
+        return trimmed || 'Live'
+      }
+      return 'Network available'
+    }
+    if (egress === 'UNAVAILABLE') return 'Network unavailable'
     const live = internetStatus.overallStatus === 'live' || internetStatus.canUseInternet === true
     if (live) {
       const trimmed = typeof internetStatus.label === 'string' ? internetStatus.label.trim() : ''
@@ -12488,8 +12500,12 @@ function Home() {
       return 'Live'
     }
     const fallback = typeof internetStatus.label === 'string' ? internetStatus.label.trim() : ''
+    if (fallback && fallback.toLowerCase() !== 'needs api key') return fallback
+    if (search === 'CONFIG_NEEDED') return 'Network unknown · search providers config needed'
     return fallback || 'Unknown'
   }, [
+    internetStatus.NETWORK_EGRESS,
+    internetStatus.SEARCH_PROVIDER_CONFIGURATION,
     internetStatus.canUseInternet,
     internetStatus.label,
     internetStatus.overallStatus,
@@ -13138,11 +13154,29 @@ function Home() {
                 systemStatusLine={chatHealthLabel}
                 missionHint={councilContinueStatusLine}
               />
-              {councilRoster?.degradedByRoster ? (
+              {councilRoster?.operationalState === 'UNAVAILABLE' ? (
                 <div
                   className="border-b px-4 py-1.5 text-[9px] font-semibold uppercase tracking-widest text-amber-200/90 sm:px-6"
                   style={{ borderColor: 'rgba(251,191,36,0.35)', background: 'rgba(251,191,36,0.08)' }}
                   role="status"
+                >
+                  {compactFamilyRosterLine(councilRoster)}
+                </div>
+              ) : councilRoster?.operationalState === 'DEGRADED_PARTIAL' ? (
+                <div
+                  className="border-b px-4 py-1.5 text-[9px] font-semibold uppercase tracking-widest text-amber-200/90 sm:px-6"
+                  style={{ borderColor: 'rgba(251,191,36,0.35)', background: 'rgba(251,191,36,0.08)' }}
+                  role="status"
+                  data-testid="council-continuity-banner"
+                >
+                  {compactFamilyRosterLine(councilRoster)}
+                </div>
+              ) : councilRoster ? (
+                <div
+                  className="border-b px-4 py-1.5 text-[9px] font-semibold uppercase tracking-widest text-emerald-200/80 sm:px-6"
+                  style={{ borderColor: 'rgba(16,185,129,0.28)', background: 'rgba(16,185,129,0.06)' }}
+                  role="status"
+                  data-testid="council-continuity-banner"
                 >
                   {compactFamilyRosterLine(councilRoster)}
                 </div>

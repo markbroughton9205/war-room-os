@@ -1,27 +1,81 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { envHasUsableProviderSecret } from '@/lib/providers/secretPresence'
+import {
+  countConfiguredExternalProviders,
+  parseCouncilRoutingPreference,
+  resolveAutoEffectiveMode,
+  type CouncilRoutingPreference,
+} from '@/lib/council/live-orchestration/councilContinuity'
+import { readPackagedCouncilRoutingPreference } from './packagedRoutingConfig'
 import { COUNCIL_ROUTING_MODES, type CouncilRoutingMode, type SeatBackendPolicy } from './types'
 
-const DEFAULT_MODE: CouncilRoutingMode = 'EXTERNAL_ONLY'
+const CANONICAL_DEFAULT_PREFERENCE: CouncilRoutingPreference = 'AUTO'
+
+export const EXTERNAL_PROVIDER_ENV: Record<'chatgpt' | 'claude' | 'grok' | 'gemini', string> = {
+  chatgpt: 'OPENAI_API_KEY',
+  claude: 'ANTHROPIC_API_KEY',
+  grok: 'XAI_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+}
+
+export function configuredExternalCouncilProviders(env: NodeJS.ProcessEnv = process.env): {
+  chatgpt: boolean
+  claude: boolean
+  grok: boolean
+  gemini: boolean
+} {
+  return {
+    chatgpt: envHasUsableProviderSecret(EXTERNAL_PROVIDER_ENV.chatgpt, env),
+    claude: envHasUsableProviderSecret(EXTERNAL_PROVIDER_ENV.claude, env),
+    grok: envHasUsableProviderSecret(EXTERNAL_PROVIDER_ENV.grok, env),
+    gemini: envHasUsableProviderSecret(EXTERNAL_PROVIDER_ENV.gemini, env),
+  }
+}
+
+export function externalCouncilProviderConfiguredCount(env: NodeJS.ProcessEnv = process.env): number {
+  return countConfiguredExternalProviders(configuredExternalCouncilProviders(env))
+}
 
 /**
- * Production-safe by construction. Nothing changes unless an operator explicitly sets
- * COUNCIL_ROUTING_MODE in their environment — there is no other code path that can select a
- * mode other than EXTERNAL_ONLY, and EXTERNAL_ONLY is a pure pass-through to the pre-existing
- * external-only Council behavior (see externalBackend.ts / seatRouter.ts).
+ * Configured routing preference (including AUTO).
+ *
+ * Order:
+ * 1. explicit secure packaged configuration (`council-runtime.json` in AppData)
+ * 2. Windows USER / process environment (`COUNCIL_ROUTING_MODE`)
+ * 3. safe application setting (same env channel after spawn / Next load)
+ * 4. canonical default AUTO
+ *
+ * Checkout `.env.local` is never read by packaged Electron; this resolver does not
+ * open that file. Packaged children inherit env the desktop shell overlays.
  */
-export function resolveCouncilRoutingMode(): CouncilRoutingMode {
-  const raw = process.env.COUNCIL_ROUTING_MODE?.trim().toUpperCase()
-  if (raw && (COUNCIL_ROUTING_MODES as string[]).includes(raw)) return raw as CouncilRoutingMode
-  return DEFAULT_MODE
+export function resolveCouncilRoutingPreference(env: NodeJS.ProcessEnv = process.env): CouncilRoutingPreference {
+  const packaged = env === process.env ? readPackagedCouncilRoutingPreference() : null
+  if (packaged) return packaged
+  const fromEnv = parseCouncilRoutingPreference(env.COUNCIL_ROUTING_MODE)
+  if (fromEnv) return fromEnv
+  return CANONICAL_DEFAULT_PREFERENCE
+}
+
+/**
+ * Effective invoke mode for seatRouter. AUTO expands from live cloud-key presence:
+ * any configured external provider → HYBRID; otherwise LOCAL_FIRST.
+ * Never reports a cloud provider as available without a usable key.
+ */
+export function resolveCouncilRoutingMode(env: NodeJS.ProcessEnv = process.env): CouncilRoutingMode {
+  const preference = resolveCouncilRoutingPreference(env)
+  if (preference !== 'AUTO' && (COUNCIL_ROUTING_MODES as string[]).includes(preference)) {
+    return preference
+  }
+  return resolveAutoEffectiveMode(externalCouncilProviderConfiguredCount(env))
 }
 
 /**
  * Cloud API-key presence is backend availability, not Nebula agent eligibility.
- * LOCAL_FIRST / LOCAL_ONLY / HYBRID must keep ASTRA-selected seats on the floor
- * so invokeCouncilSeat can route them to Ollama before any external fallback.
+ * LOCAL_FIRST / LOCAL_ONLY / HYBRID (including AUTO that resolves to those) must keep
+ * ASTRA-selected seats on the floor so invokeCouncilSeat can route them to Ollama.
  */
-export function localRoutingBypassesCloudFloorGate(): boolean {
-  return resolveCouncilRoutingMode() !== 'EXTERNAL_ONLY'
+export function localRoutingBypassesCloudFloorGate(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveCouncilRoutingMode(env) !== 'EXTERNAL_ONLY'
 }
 
 /**
@@ -44,8 +98,8 @@ const DEFAULT_HYBRID_SEAT_POLICY: Record<CouncilOrchestrationFamily, SeatBackend
 
 const SEAT_BACKEND_POLICIES: SeatBackendPolicy[] = ['LOCAL_ONLY', 'LOCAL_FIRST', 'EXTERNAL_FIRST', 'EXTERNAL_ONLY']
 
-function parseSeatPolicyOverrides(): Partial<Record<CouncilOrchestrationFamily, SeatBackendPolicy>> {
-  const raw = process.env.COUNCIL_SEAT_BACKEND_POLICY?.trim()
+function parseSeatPolicyOverrides(env: NodeJS.ProcessEnv = process.env): Partial<Record<CouncilOrchestrationFamily, SeatBackendPolicy>> {
+  const raw = env.COUNCIL_SEAT_BACKEND_POLICY?.trim()
   if (!raw) return {}
   try {
     const parsed = JSON.parse(raw) as Record<string, string>
@@ -61,7 +115,7 @@ function parseSeatPolicyOverrides(): Partial<Record<CouncilOrchestrationFamily, 
   }
 }
 
-export function resolveSeatBackendPolicy(seat: CouncilOrchestrationFamily): SeatBackendPolicy {
-  const overrides = parseSeatPolicyOverrides()
+export function resolveSeatBackendPolicy(seat: CouncilOrchestrationFamily, env: NodeJS.ProcessEnv = process.env): SeatBackendPolicy {
+  const overrides = parseSeatPolicyOverrides(env)
   return overrides[seat] ?? DEFAULT_HYBRID_SEAT_POLICY[seat] ?? 'LOCAL_FIRST'
 }
