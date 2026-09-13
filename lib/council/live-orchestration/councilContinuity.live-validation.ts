@@ -67,48 +67,90 @@ export async function runCouncilContinuityLiveProof(): Promise<ContinuityLiveRes
 
     const roster = buildCouncilRosterSnapshot({
       configured: { chatgpt: false, claude: false, grok: false, gemini: false },
-      continuity: { localReady: true, routingPreference: preference, routingModeResolved: mode },
+      continuity: { localReady: true, routingPreference: preference, routingModeResolved: mode, networkEgress: 'AVAILABLE', terraConnection: 'CONNECTED' },
     })
     const fakeCloud = [roster.families.chatgpt, roster.families.claude, roster.families.grok, roster.families.gemini]
-      .some(entry => entry?.cloudState === 'AVAILABLE' || /READY/i.test(entry?.uiDetail ?? '') && /OpenAI|Anthropic|xAI|Gemini/.test(entry?.uiDetail ?? ''))
+      .some(entry => entry?.cloudState === 'AVAILABLE' || /OpenAI|Anthropic|xAI|Gemini/.test(entry?.uiDetail ?? ''))
+    const fourReady = ['chatgpt', 'claude', 'grok', 'gemini'].every(seat =>
+      roster.families[seat as 'chatgpt']?.memberIdentityStatus === 'READY'
+    )
     results.push({
       name: 'live_roster_no_false_cloud_ready',
-      pass: roster.operationalState === 'READY_LOCAL' && !fakeCloud && roster.families.chatgpt?.cloudState === 'NOT_CONFIGURED',
-      detail: `state=${roster.operationalState} aurora=${roster.families.chatgpt?.uiDetail}`,
-    })
-
-    const deltas: string[] = []
-    const result = await invokeCouncilSeat({
-      seat: 'chatgpt',
-      systemPrompt: 'You are AURORA in War Room. Answer in one short sentence.',
-      userPrompt: 'Council, confirm local continuity is operating. One sentence.',
-      maxTokens: 120,
-      signal: new AbortController().signal,
-      onDelta: delta => {
-        if (delta) deltas.push(delta)
-      },
-      timeoutKind: 'social',
-    })
-
-    const local = result.backend.backendType === 'LOCAL'
-    const providerHonest = result.backend.provider === 'ollama'
-    const notFrontier = !['openai', 'anthropic', 'xai', 'google', 'OpenAI', 'Anthropic'].includes(result.backend.provider)
-    const modelLocal = result.backend.model === NEBULA_SHARED_LOCAL_MODEL_ID || result.backend.model.startsWith('huihui_ai/qwen3-abliterated:')
-    results.push({
-      name: 'live_request_accepted_local_inference',
-      pass: result.ok && local && providerHonest && notFrontier && modelLocal && result.text.trim().length > 0,
-      detail: `ok=${result.ok} type=${result.backend.backendType} provider=${result.backend.provider} model=${result.backend.model} textLen=${result.text.length} deltas=${deltas.length}`,
+      pass: roster.operationalState === 'READY_LOCAL' && !fakeCloud && roster.families.chatgpt?.cloudState === 'NOT_CONFIGURED' && fourReady,
+      detail: `state=${roster.operationalState} aurora=${roster.families.chatgpt?.uiDetail} ready=${fourReady}`,
     })
     results.push({
-      name: 'live_audit_backing_is_local_not_cloud',
-      pass: local && providerHonest && notFrontier && result.backend.status === 'OK',
-      detail: JSON.stringify({
+      name: 'live_roster_identities_are_council_not_vendors',
+      pass: roster.families.chatgpt?.identityName === 'AURORA'
+        && roster.families.claude?.identityName === 'ORION'
+        && roster.families.grok?.identityName === 'PULSAR'
+        && roster.families.gemini?.identityName === 'LUMEN'
+        && roster.reasoningDiversity === 'ROLE-DIVERSE / MODEL-SHARED',
+      detail: `diversity=${roster.reasoningDiversity}`,
+    })
+
+    const members = [
+      { seat: 'chatgpt' as const, name: 'AURORA', stance: 'broad synthesis / strategic framing' },
+      { seat: 'claude' as const, name: 'ORION', stance: 'engineering / architecture / operational viability' },
+      { seat: 'grok' as const, name: 'PULSAR', stance: 'research / signals / evidence discovery' },
+      { seat: 'gemini' as const, name: 'LUMEN', stance: 'claim verification / calibration / traceability' },
+    ]
+    const perspectives: { name: string; text: string; backendType: string; provider: string; model: string }[] = []
+    for (const member of members) {
+      const deltas: string[] = []
+      const result = await invokeCouncilSeat({
+        seat: member.seat,
+        systemPrompt: `You are ${member.name} in the War Room Council. Stay in identity. Do not claim to be OpenAI, Anthropic, xAI, Gemini, ChatGPT, Claude, Grok, or Google. Role: ${member.stance}. Answer in two short sentences as ${member.name}.`,
+        userPrompt: `Council task: Confirm you are ${member.name}, that you can reason over War Room knowledge, and give one ${member.stance} observation about local Council continuity. Do not impersonate a commercial provider.`,
+        maxTokens: 120,
+        signal: new AbortController().signal,
+        onDelta: delta => {
+          if (delta) deltas.push(delta)
+        },
+        timeoutKind: 'social',
+      })
+      const local = result.backend.backendType === 'LOCAL'
+      const providerHonest = result.backend.provider === 'ollama'
+      const notFrontier = !/openai|anthropic|xai|google/i.test(result.backend.provider)
+      const impersonation = /\b(i am (openai|anthropic|xai|google|chatgpt|claude|gemini)|as (openai|anthropic|chatgpt))\b/i.test(result.text)
+      const modelLocal = result.backend.model === NEBULA_SHARED_LOCAL_MODEL_ID || result.backend.model.startsWith('huihui_ai/qwen3-abliterated:')
+      perspectives.push({
+        name: member.name,
+        text: result.text,
         backendType: result.backend.backendType,
         provider: result.backend.provider,
         model: result.backend.model,
-        status: result.backend.status,
-        fallbackFrom: result.backend.fallbackFrom ?? null,
-      }),
+      })
+      results.push({
+        name: `live_${member.name}_receives_task_with_identity`,
+        pass: result.ok && local && providerHonest && notFrontier && modelLocal && result.text.trim().length > 0 && !impersonation,
+        detail: `ok=${result.ok} identity=${member.name} type=${result.backend.backendType} provider=${result.backend.provider} model=${result.backend.model} textLen=${result.text.length} impersonation=${impersonation}`,
+      })
+    }
+
+    const uniqueBackends = new Set(perspectives.map(row => `${row.backendType}:${row.provider}:${row.model}`))
+    results.push({
+      name: 'live_diversity_truth_shared_local_model',
+      pass: perspectives.length === 4 && uniqueBackends.size === 1,
+      detail: `entities=${perspectives.length} uniqueBackends=${uniqueBackends.size} models=${[...uniqueBackends].join('|')}`,
+    })
+
+    const synthesisDeltas: string[] = []
+    const synthesis = await invokeCouncilSeat({
+      seat: 'chatgpt',
+      systemPrompt: 'You are AURORA, War Room Council synthesizer. Combine the four Council perspectives without claiming four independent model brains.',
+      userPrompt: `Synthesize these Council perspectives in 3 sentences. Disclose that they share one local backend if that is true.\n${perspectives.map(row => `${row.name} [${row.provider}/${row.model}]: ${row.text}`).join('\n')}`,
+      maxTokens: 180,
+      signal: new AbortController().signal,
+      onDelta: delta => {
+        if (delta) synthesisDeltas.push(delta)
+      },
+      timeoutKind: 'social',
+    })
+    results.push({
+      name: 'live_council_synthesis_from_four_entities',
+      pass: synthesis.ok && synthesis.backend.backendType === 'LOCAL' && synthesis.text.trim().length > 0,
+      detail: `ok=${synthesis.ok} type=${synthesis.backend.backendType} provider=${synthesis.backend.provider} textLen=${synthesis.text.length} deltas=${synthesisDeltas.length}`,
     })
   })
 

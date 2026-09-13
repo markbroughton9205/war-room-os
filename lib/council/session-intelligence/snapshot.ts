@@ -1,4 +1,5 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
 import type {
   DeliberationEvidenceReference,
   DeliberationSession,
@@ -49,25 +50,15 @@ function nebulaIdForSeat(seat: CouncilOrchestrationFamily, turn?: DeliberationTu
   if (typeof turn?.agent_identity === 'string' && turn.agent_identity.trim()) {
     return turn.agent_identity.trim().toUpperCase()
   }
-  const map: Partial<Record<CouncilOrchestrationFamily, string>> = {
-    chatgpt: 'ORION',
-    claude: 'LUMEN',
-    grok: 'PULSAR',
-    gemini: 'AURORA',
-    red_team: 'PHOENIX',
-    nova: 'NOVA',
-    baby: 'BABY',
-    bridge_architect: 'BRIDGE',
-  }
-  return map[seat] ?? null
+  return displayNameForSeat(seat).toUpperCase()
 }
 
 function reasoningRoleForSeat(seat: CouncilOrchestrationFamily): string | null {
   const map: Partial<Record<CouncilOrchestrationFamily, string>> = {
-    chatgpt: 'systems',
-    claude: 'evidence',
-    grok: 'adversarial',
-    gemini: 'synthesis',
+    chatgpt: 'synthesis',
+    claude: 'systems',
+    grok: 'evidence',
+    gemini: 'calibration',
     red_team: 'challenge',
     nova: 'strategy',
     baby: 'session_assist',

@@ -4810,59 +4810,48 @@ function BabyAiObserverPanel({
 }
 
 
-const CLOUD_AGENT_FAMILIES = [
-  { family: 'AURORA', provider: 'OpenAI', role: 'Strategy synthesis, orchestration, and response framing.', status: 'Cloud API provider' },
-  { family: 'ORION', provider: 'Anthropic', role: 'Architecture review, invariants, and implementation risk.', status: 'Architecture reviewer' },
-  { family: 'PULSAR', provider: 'xAI', role: 'Signal triage, contradictions, and opportunity framing.', status: 'Cloud API provider' },
-  { family: 'LUMEN', provider: 'Google', role: 'Long-context reasoning, synthesis, and research support.', status: 'Cloud API provider' },
-  { family: 'PHOENIX', provider: 'Anthropic', role: 'Adversarial risk review and approval-boundary challenge.', status: 'Risk reviewer' },
+const COUNCIL_AGENT_FAMILIES = [
+  { family: 'AURORA', role: 'Integrator / final Council synthesis' },
+  { family: 'ORION', role: 'Engineering / architecture / operational viability' },
+  { family: 'PULSAR', role: 'Research / signals / evidence discovery' },
+  { family: 'LUMEN', role: 'Claim verification / calibration / traceability' },
+  { family: 'PHOENIX', role: 'Adversarial review / failure analysis / recovery' },
 ]
 
 const PROVIDER_CONFIGURATION_ITEMS = [
-  { provider: 'OpenAI', env: 'OPENAI_API_KEY', powers: 'ChatGPT family, Baby AI strategy, OpenAI-backed synthesis.' },
-  { provider: 'Anthropic', env: 'ANTHROPIC_API_KEY', powers: 'Claude architecture reviewer and Red Team risk reviewer.' },
-  { provider: 'xAI', env: 'XAI_API_KEY', powers: 'Grok signal and contradiction review.' },
-  { provider: 'Google', env: 'GEMINI_API_KEY', powers: 'Gemini long-context and synthesis lane.' },
+  { provider: 'OpenAI', env: 'OPENAI_API_KEY', powers: 'Optional external backing. Does not create or name AURORA.' },
+  { provider: 'Anthropic', env: 'ANTHROPIC_API_KEY', powers: 'Optional external backing. Does not create or name ORION or PHOENIX.' },
+  { provider: 'xAI', env: 'XAI_API_KEY', powers: 'Optional external backing. Does not create or name PULSAR.' },
+  { provider: 'Google', env: 'GEMINI_API_KEY', powers: 'Optional external backing. Does not create or name LUMEN.' },
 ]
 
 const AGENT_GROWTH_STAGES = ['seed', 'observing', 'learning', 'useful', 'specialist', 'senior']
 
-function CloudAgentFamiliesPanel({ engines }: { engines: EngineStatus[] }) {
-  const engineByIdForPanel = new Map(engines.map(engine => [engine.id, engine]))
-  const providerReady = (provider: string) => {
-    const id = provider === 'OpenAI' ? 'chatgpt' : provider === 'Anthropic' ? 'claude' : provider === 'xAI' ? 'grok' : provider === 'Google' ? 'gemini' : null
-    if (!id) return false
-    return Boolean(engineByIdForPanel.get(id)?.functional)
-  }
-
+function CloudAgentFamiliesPanel({ engines: _engines }: { engines: EngineStatus[] }) {
   return (
     <div data-agents-panel className="relative z-20 flex-shrink-0 border-b border-yellow-900 px-6 py-3 pointer-events-auto"
       style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.035), rgba(167,139,250,0.025), rgba(0,0,0,0.14))' }}>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#93C5FD' }}>CLOUD AGENT FAMILIES</h2>
+          <h2 className="text-xs font-bold tracking-widest" style={{ color: '#93C5FD' }}>COUNCIL MEMBERS</h2>
           <p className="mt-1 text-xs" style={{ color: '#777' }}>
-            War Room agent families now route through cloud providers only. Cursor remains a manual workspace, and no browser panel invokes a machine-resident model or connector.
+            AURORA, ORION, PULSAR, and LUMEN are persistent War Room identities. Commercial API keys are optional backends, not the Council.
           </p>
         </div>
-        <span className="rounded px-3 py-2 text-[10px] font-bold tracking-widest" style={{ border: '1px solid rgba(147,197,253,0.35)', color: '#BFDBFE', background: 'rgba(0,0,0,0.28)' }}>
-          Cloud only
+        <span className="rounded px-3 py-2 text-[10px] font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#BBF7D0', background: 'rgba(0,0,0,0.28)' }}>
+          Identity ≠ provider
         </span>
       </div>
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-        {CLOUD_AGENT_FAMILIES.map(item => {
-          const ready = providerReady(item.provider)
-          return (
-            <article key={item.family} className="rounded px-3 py-3 text-xs" style={{ border: ready ? '1px solid rgba(52,211,153,0.24)' : '1px solid rgba(255,255,255,0.08)', background: ready ? 'rgba(52,211,153,0.035)' : 'rgba(0,0,0,0.24)' }}>
-              <div className="font-bold tracking-widest" style={{ color: ready ? '#DCFCE7' : '#CBD5E1' }}>{item.family}</div>
-              <div className="mt-1 text-[10px] tracking-widest" style={{ color: '#93C5FD' }}>{item.provider}</div>
-              <p className="mt-2 leading-relaxed" style={{ color: '#94A3B8' }}>{item.role}</p>
-              <div className="mt-3 rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid rgba(255,255,255,0.10)', color: ready ? '#86EFAC' : '#FDE68A' }}>
-                {ready ? 'configured' : 'awaiting cloud key'}
-              </div>
-            </article>
-          )
-        })}
+        {COUNCIL_AGENT_FAMILIES.map(item => (
+          <article key={item.family} className="rounded px-3 py-3 text-xs" style={{ border: '1px solid rgba(52,211,153,0.24)', background: 'rgba(52,211,153,0.035)' }}>
+            <div className="font-bold tracking-widest" style={{ color: '#DCFCE7' }}>{item.family}</div>
+            <p className="mt-2 leading-relaxed" style={{ color: '#94A3B8' }}>{item.role}</p>
+            <div className="mt-3 rounded px-2 py-1 text-[10px] font-bold tracking-widest" style={{ border: '1px solid rgba(255,255,255,0.10)', color: '#86EFAC' }}>
+              persistent identity
+            </div>
+          </article>
+        ))}
       </div>
     </div>
   )

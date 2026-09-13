@@ -116,8 +116,8 @@ function buildRound1Session(conversationId: string, roundId: string): Deliberati
       origin_type: 'TERRA',
     }],
   })
-  const primary = append(session, 'chatgpt', 'direct_response', 1, 'ORION: AIS shows PILOT L-139 underway near Helsinki. Evidence ev-terra-ais.')
-  append(session, 'claude', 'direct_response', 2, 'LUMEN: Confirms AIS observation from shared evidence.', { status: 'failed' })
+  const primary = append(session, 'chatgpt', 'direct_response', 1, 'AURORA: AIS shows PILOT L-139 underway near Helsinki. Evidence ev-terra-ais.')
+  append(session, 'claude', 'direct_response', 2, 'ORION: Confirms AIS observation from shared evidence.', { status: 'failed' })
   const challenge = append(session, 'red_team', 'red_team_challenge', 3, 'PHOENIX: Challenge destination certainty.', {
     challengeTargetIds: [primary.output_message_id!],
   })
@@ -125,7 +125,7 @@ function buildRound1Session(conversationId: string, roundId: string): Deliberati
     revisionOfMessageId: primary.output_message_id,
     challengeTargetIds: [challenge.turn_id],
   })
-  const synthesis = append(session, 'gemini', 'council_synthesis', 5, 'AURORA: Synthesis — vessel observed on AIS; LUMEN failed; destination uncertain.')
+  const synthesis = append(session, 'chatgpt', 'council_synthesis', 5, 'AURORA: Synthesis — vessel observed on AIS; ORION failed; destination uncertain.')
   session.synthesis_turn_id = synthesis.turn_id
   applyPipelineProvenance(session)
   return session
@@ -169,13 +169,13 @@ export function runCouncilSessionIntelligenceValidation(): SessionIntelligenceCa
     commanderMessage: 'Continue using what we have. Do not invent LUMEN.',
     evidenceReferences: session1.evidence_references,
   })
-  append(session2, 'chatgpt', 'direct_response', 1, 'ORION follow-up using prior AIS context.', {
+  append(session2, 'chatgpt', 'direct_response', 1, 'AURORA follow-up using prior AIS context.', {
     backendType: 'EXTERNAL',
     providerModel: 'anthropic:claude-sonnet',
   })
   append(session2, 'red_team', 'red_team_challenge', 2, 'PHOENIX: Keep prior failure visible.')
   append(session2, 'chatgpt', 'revision_or_stand_firm', 3, 'DECISION: STAND_FIRM\nCHALLENGE_ADDRESSED: yes\nStand firm.')
-  const synth2 = append(session2, 'gemini', 'council_synthesis', 4, 'AURORA: Continued from degraded Round 1 without fabricating LUMEN.')
+  const synth2 = append(session2, 'chatgpt', 'council_synthesis', 4, 'AURORA: Continued from degraded Round 1 without fabricating LUMEN.')
   session2.synthesis_turn_id = synth2.turn_id
   applyPipelineProvenance(session2)
 

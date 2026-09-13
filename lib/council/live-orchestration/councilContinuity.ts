@@ -6,9 +6,10 @@ import type { CouncilRoutingMode } from '@/lib/council/live-orchestration/backen
  * OpenAI/Anthropic/xAI/Gemini key presence. Missing optional cloud credentials
  * must not collapse into COUNCIL UNAVAILABLE when sovereign local inference is ready.
  *
- * Qwen / Ollama is a local partner brain (currently backing NOVA and, when routing
- * allows, other seats). It is not WRIM, not Ra'el, and must never be labeled as a
- * frontier vendor.
+ * AURORA / ORION / PULSAR / LUMEN are first-class Council entities. Commercial
+ * API keys are optional backends. Qwen / Ollama is a temporary local partner brain
+ * (currently backing seats when routing allows). It is not the Council, not WRIM,
+ * not Ra'el, and must never be labeled as a frontier vendor.
  */
 
 export const COUNCIL_OPERATIONAL_STATES = [
@@ -125,9 +126,10 @@ export function classifyCouncilOperationalState(input: {
 }
 
 export function councilOperationalLabel(state: CouncilOperationalState): string {
-  if (state === 'READY_LOCAL') return 'COUNCIL READY · LOCAL'
-  if (state === 'READY_HYBRID') return 'COUNCIL READY · HYBRID'
-  if (state === 'READY_MULTI_MODEL') return 'COUNCIL READY · MULTI-MODEL'
+  // Entity-first labels. Backing (local vs hybrid vs external) is a separate status plane.
+  if (state === 'READY_LOCAL') return 'COUNCIL READY · LIVE'
+  if (state === 'READY_HYBRID') return 'COUNCIL READY · LIVE'
+  if (state === 'READY_MULTI_MODEL') return 'COUNCIL READY · LIVE'
   if (state === 'DEGRADED_PARTIAL') return 'COUNCIL DEGRADED · PARTIAL'
   return 'COUNCIL UNAVAILABLE'
 }
@@ -175,10 +177,10 @@ export function classifyResearchProviders(input: {
 }
 
 export function modelDiversityLabel(input: { externalAvailableCount: number; localReady: boolean }): string {
-  if (input.externalAvailableCount >= 2 && input.localReady) return 'HYBRID'
+  if (input.externalAvailableCount >= 2 && input.localReady) return 'MULTI-MODEL'
   if (input.externalAvailableCount >= 2) return 'MULTI-MODEL'
   if (input.externalAvailableCount === 1 && input.localReady) return 'HYBRID'
-  if (input.localReady) return 'LOCAL ONLY'
+  if (input.localReady) return 'SHARED LOCAL MODEL'
   if (input.externalAvailableCount === 1) return 'SINGLE EXTERNAL'
   return 'NONE'
 }

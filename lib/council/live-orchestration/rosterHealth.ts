@@ -1,10 +1,19 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { displayNameForSeat } from '@/lib/council/nebula/identity'
 import {
+  councilEntityHeadline,
+} from '@/lib/council/nebula/entityPresence'
+import { NEBULA_SHARED_LOCAL_MODEL_ID } from '@/lib/council/nebula/modelProfile'
+import {
+  projectCouncilMemberIdentity,
+  type BackingRuntimeKind,
+  type BackingRuntimeStatus,
+  type MemberIdentityStatus,
+} from '@/lib/council/live-orchestration/councilIdentity'
+import {
   classifyCloudProviderState,
   classifyCouncilOperationalState,
   cloudFamilyId,
-  cloudStatusLine,
   councilOperationalLabel,
   councilRoutingDisplay,
   EXTERNAL_COUNCIL_PROVIDER_TOTAL,
@@ -43,16 +52,27 @@ export type CouncilFamilyRosterEntry = {
   membership: CouncilRosterMembershipState
   unavailableReason: CouncilRosterUnavailableReason | null
   floorEligible: boolean
-  /** Cloud-provider UI status only. Local continuity never paints this READY for a missing vendor. */
+  /** Entity-facing status. READY when any usable backing exists. Independent of cloud keys. */
   uiStatus: 'READY' | 'UNAVAILABLE'
+  /** Entity status label: READY or BACKEND UNAVAILABLE. Never a vendor name. */
   uiDetail: string
-  /** Cloud credential presence for this seat's historical provider. Independent of local backing. */
+  identityName: string
+  identityRole: string
+  memberIdentityStatus: MemberIdentityStatus
+  backingRuntimeStatus: BackingRuntimeStatus
+  backingKind: BackingRuntimeKind
+  backingModel: string | null
+  backingProvider: string | null
+  backingLine: string
+  /** Cloud credential presence for this seat's optional historical provider. Independent of entity health. */
   externalConfigured: boolean
   /** Honest cloud-provider state. Null for NOVA (local-only identity). */
   cloudState: ExternalProviderState | null
+  optionalExternalDetail: string | null
+  optionalExternalLine: string | null
   localContinuity: LocalContinuityState
-  /** Honest backing label: LOCAL vs the named cloud provider. Never claims OpenAI when OpenAI is absent. */
-  backing: 'LOCAL' | 'EXTERNAL' | 'NONE'
+  /** Honest backing label: LOCAL vs EXTERNAL vs none. Never claims OpenAI when OpenAI is absent. */
+  backing: 'LOCAL' | 'EXTERNAL' | 'HYBRID' | 'NONE'
 }
 
 export type CouncilRosterSnapshot = {
@@ -78,6 +98,14 @@ export type CouncilRosterSnapshot = {
   localModel: string | null
   localCouncil: { ready: boolean; novaReady: boolean; label: string }
   modelDiversity: string
+  reasoningDiversity: string
+  entityHeadline: string
+  entityReadyCount: number
+  entityPresentCount: number
+  backingIntelligence: { label: string; ready: boolean; model: string | null }
+  knowledgeAccess: 'AVAILABLE'
+  internetAccess: NetworkEgressState
+  terraAccess: 'CONNECTED' | 'DISCONNECTED' | 'UNKNOWN'
   terraConnection: 'CONNECTED' | 'DISCONNECTED' | 'UNKNOWN'
   networkEgress: NetworkEgressState
   researchProviders: ResearchProviderState
@@ -137,20 +165,28 @@ function entryFromPolicy(input: {
   configured: boolean
   override: string | null
   localReady?: boolean
+  localModel?: string | null
 }): CouncilFamilyRosterEntry {
-  const { family, configured, override, localReady } = input
+  const { family, configured, override, localReady, localModel } = input
   const cloudId = cloudIdForFamily(family)
   const cloudState = cloudId ? classifyCloudProviderState({ configured, override }) : null
   const cloudAvailable = cloudState === 'AVAILABLE'
   const localContinuity: LocalContinuityState = localReady ? 'AVAILABLE' : 'UNAVAILABLE'
   const floorEligible = cloudAvailable || Boolean(localReady)
-  const backing: CouncilFamilyRosterEntry['backing'] = cloudAvailable ? 'EXTERNAL' : localReady ? 'LOCAL' : 'NONE'
-  const uiStatus: CouncilFamilyRosterEntry['uiStatus'] = cloudAvailable ? 'READY' : 'UNAVAILABLE'
-  const uiDetail = cloudId && cloudState
-    ? cloudStatusLine(cloudId, cloudState)
-    : localReady
-      ? 'Local · READY'
-      : 'Local · UNAVAILABLE'
+  const identity = projectCouncilMemberIdentity({
+    family,
+    cloudState,
+    localReady: Boolean(localReady),
+    localModel,
+  })
+  const backing: CouncilFamilyRosterEntry['backing'] =
+    identity.backingRuntimeStatus === 'HYBRID'
+      ? 'HYBRID'
+      : identity.backingRuntimeStatus === 'EXTERNAL'
+        ? 'EXTERNAL'
+        : identity.backingRuntimeStatus === 'LOCAL'
+          ? 'LOCAL'
+          : 'NONE'
   const membership: CouncilRosterMembershipState = cloudAvailable
     ? 'ACTIVE'
     : override === 'SKIPPED_BY_POLICY'
@@ -165,10 +201,20 @@ function entryFromPolicy(input: {
     membership,
     unavailableReason: unavailableReasonFromCloud(cloudState, configured),
     floorEligible,
-    uiStatus,
-    uiDetail,
+    uiStatus: identity.uiStatus,
+    uiDetail: identity.uiDetail,
+    identityName: identity.identityName,
+    identityRole: identity.identityRole,
+    memberIdentityStatus: identity.memberIdentityStatus,
+    backingRuntimeStatus: identity.backingRuntimeStatus,
+    backingKind: identity.backingKind,
+    backingModel: identity.backingModel,
+    backingProvider: identity.backingProvider,
+    backingLine: identity.backingLine,
     externalConfigured: configured,
     cloudState,
+    optionalExternalDetail: identity.optionalExternalDetail,
+    optionalExternalLine: identity.optionalExternalLine,
     localContinuity,
     backing,
   }
@@ -192,6 +238,14 @@ function attachContinuity(
     | 'localModel'
     | 'localCouncil'
     | 'modelDiversity'
+    | 'reasoningDiversity'
+    | 'entityHeadline'
+    | 'entityReadyCount'
+    | 'entityPresentCount'
+    | 'backingIntelligence'
+    | 'knowledgeAccess'
+    | 'internetAccess'
+    | 'terraAccess'
     | 'terraConnection'
     | 'networkEgress'
     | 'researchProviders'
@@ -227,6 +281,10 @@ function attachContinuity(
   const novaReady = snapshot.families.nova?.uiStatus === 'READY' || localReady
   const unavailable = operationalState === 'UNAVAILABLE'
   const degradedPartial = operationalState === 'DEGRADED_PARTIAL'
+  const entityPresentCount = PRIMARY_FAMILIES.length
+  const entityReadyCount = primary.filter(entry => entry?.memberIdentityStatus === 'READY').length
+  const diversity = modelDiversityLabel({ externalAvailableCount, localReady })
+  const backendAvailable = localReady || externalAvailableCount > 0
   return {
     ...snapshot,
     operationalState,
@@ -249,9 +307,27 @@ function attachContinuity(
     localCouncil: {
       ready: localReady,
       novaReady,
-      label: novaReady ? 'NOVA · READY' : localReady ? 'LOCAL · READY' : 'UNAVAILABLE',
+      label: novaReady ? 'NOVA READY' : localReady ? 'LOCAL READY' : 'UNAVAILABLE',
     },
-    modelDiversity: modelDiversityLabel({ externalAvailableCount, localReady }),
+    modelDiversity: diversity,
+    reasoningDiversity: localReady && externalAvailableCount === 0
+      ? 'ROLE-DIVERSE / MODEL-SHARED'
+      : externalAvailableCount >= 2
+        ? 'MULTI-MODEL'
+        : localReady || externalAvailableCount > 0
+          ? 'ROLE-DIVERSE'
+          : 'NONE',
+    entityHeadline: councilEntityHeadline(backendAvailable),
+    entityReadyCount,
+    entityPresentCount,
+    backingIntelligence: {
+      label: localReady ? 'War Room Local' : externalAvailableCount > 0 ? 'External' : 'None',
+      ready: backendAvailable,
+      model: localReady ? (continuity.localModel ?? NEBULA_SHARED_LOCAL_MODEL_ID) : null,
+    },
+    knowledgeAccess: 'AVAILABLE',
+    internetAccess: continuity.networkEgress ?? 'UNKNOWN',
+    terraAccess: continuity.terraConnection ?? 'UNKNOWN',
     terraConnection: continuity.terraConnection ?? 'UNKNOWN',
     networkEgress: continuity.networkEgress ?? 'UNKNOWN',
     researchProviders: continuity.researchProviders ?? 'CONFIG_NEEDED',
@@ -273,18 +349,19 @@ export function buildCouncilRosterSnapshot(input: {
   const geminiOverride = parseRosterOverride(input.overrides?.gemini)
   const redOverride = parseRosterOverride(input.overrides?.red_team)
 
-  families.chatgpt = entryFromPolicy({ family: 'chatgpt', configured: Boolean(input.configured.chatgpt), override: chatgptOverride, localReady })
-  families.claude = entryFromPolicy({ family: 'claude', configured: Boolean(input.configured.claude), override: claudeOverride, localReady })
-  families.grok = entryFromPolicy({ family: 'grok', configured: Boolean(input.configured.grok), override: grokOverride, localReady })
-  families.gemini = entryFromPolicy({ family: 'gemini', configured: Boolean(input.configured.gemini), override: geminiOverride, localReady })
+  const localModel = input.continuity?.localModel ?? null
+  families.chatgpt = entryFromPolicy({ family: 'chatgpt', configured: Boolean(input.configured.chatgpt), override: chatgptOverride, localReady, localModel })
+  families.claude = entryFromPolicy({ family: 'claude', configured: Boolean(input.configured.claude), override: claudeOverride, localReady, localModel })
+  families.grok = entryFromPolicy({ family: 'grok', configured: Boolean(input.configured.grok), override: grokOverride, localReady, localModel })
+  families.gemini = entryFromPolicy({ family: 'gemini', configured: Boolean(input.configured.gemini), override: geminiOverride, localReady, localModel })
 
   const claudeActive = families.claude?.floorEligible === true
   let redTeam: CouncilRosterSnapshot['redTeam'] = 'UNAVAILABLE'
   if (!input.configured.red_team && !input.configured.claude && !localReady) {
-    families.red_team = entryFromPolicy({ family: 'red_team', configured: false, override: null, localReady })
+    families.red_team = entryFromPolicy({ family: 'red_team', configured: false, override: null, localReady, localModel })
     redTeam = 'UNAVAILABLE'
   } else if (redOverride === 'ACTIVE' && claudeActive) {
-    families.red_team = entryFromPolicy({ family: 'red_team', configured: true, override: 'ACTIVE', localReady })
+    families.red_team = entryFromPolicy({ family: 'red_team', configured: true, override: 'ACTIVE', localReady, localModel })
     redTeam = 'ACTIVE'
   } else if (!claudeActive && !localReady) {
     families.red_team = {
@@ -293,8 +370,12 @@ export function buildCouncilRosterSnapshot(input: {
       membership: 'SKIPPED_BY_POLICY',
       unavailableReason: families.claude?.unavailableReason ?? 'UNAVAILABLE_OTHER',
       floorEligible: false,
-      uiStatus: 'UNAVAILABLE',
-      uiDetail: cloudStatusLine('claude', families.claude?.cloudState ?? 'UNKNOWN'),
+      ...projectCouncilMemberIdentity({
+        family: 'red_team',
+        cloudState: families.claude?.cloudState ?? 'UNKNOWN',
+        localReady: false,
+        localModel,
+      }),
       externalConfigured: Boolean(input.configured.red_team ?? input.configured.claude),
       cloudState: families.claude?.cloudState ?? 'UNKNOWN',
       localContinuity: 'UNAVAILABLE',
@@ -307,6 +388,7 @@ export function buildCouncilRosterSnapshot(input: {
       configured: Boolean(input.configured.red_team || input.configured.claude),
       override: redOverride,
       localReady,
+      localModel,
     })
     redTeam = families.red_team.floorEligible ? 'ACTIVE' : 'UNAVAILABLE'
   }
@@ -317,8 +399,12 @@ export function buildCouncilRosterSnapshot(input: {
     membership: localReady ? 'ACTIVE' : 'UNAVAILABLE',
     unavailableReason: localReady ? null : 'UNAVAILABLE_OTHER',
     floorEligible: localReady,
-    uiStatus: localReady ? 'READY' : 'UNAVAILABLE',
-    uiDetail: localReady ? 'Local · READY' : 'Local · UNAVAILABLE',
+    ...projectCouncilMemberIdentity({
+      family: 'nova',
+      cloudState: null,
+      localReady,
+      localModel,
+    }),
     externalConfigured: false,
     cloudState: null,
     localContinuity: localReady ? 'AVAILABLE' : 'UNAVAILABLE',
@@ -357,9 +443,8 @@ export function rosterToFloorFlags(snapshot: CouncilRosterSnapshot): {
 const DISPLAY_OVERRIDE_FAMILIES: CouncilOrchestrationFamily[] = [...PRIMARY_FAMILIES, 'red_team']
 
 /**
- * Display overlay for local routing. Cloud vendor lines stay honest (NOT CONFIGURED / AUTH FAILED).
- * Local continuity is a separate field. Execution floor eligibility may become true without
- * painting AURORA as OpenAI READY.
+ * Display overlay for local routing. Entity stays named and READY when local backing exists.
+ * Optional cloud vendor lines stay honest (NOT CONFIGURED / AUTH FAILED) and never replace identity.
  */
 export function withNebulaLocalDisplayOverride(
   snapshot: CouncilRosterSnapshot,
@@ -368,24 +453,37 @@ export function withNebulaLocalDisplayOverride(
 ): CouncilRosterSnapshot {
   const families = { ...snapshot.families }
   const localReady = Boolean(continuity?.localReady ?? Object.values(locallyEnabled).some(Boolean))
+  const localModel = continuity?.localModel ?? snapshot.localModel
   for (const family of DISPLAY_OVERRIDE_FAMILIES) {
     const row = families[family]
     if (!row || !locallyEnabled[family] || !localReady) continue
     if (row.cloudState === 'AVAILABLE') continue
+    const identity = projectCouncilMemberIdentity({
+      family,
+      cloudState: row.cloudState,
+      localReady: true,
+      localModel,
+    })
     families[family] = {
       ...row,
+      ...identity,
       floorEligible: true,
       membership: row.membership === 'SKIPPED_BY_POLICY' ? 'SKIPPED_BY_POLICY' : 'ACTIVE',
       localContinuity: 'AVAILABLE',
-      backing: 'LOCAL',
+      backing: identity.backingRuntimeStatus === 'HYBRID' ? 'HYBRID' : 'LOCAL',
     }
   }
   if (families.nova) {
+    const identity = projectCouncilMemberIdentity({
+      family: 'nova',
+      cloudState: null,
+      localReady,
+      localModel,
+    })
     families.nova = {
       ...families.nova,
+      ...identity,
       floorEligible: localReady,
-      uiStatus: localReady ? 'READY' : 'UNAVAILABLE',
-      uiDetail: localReady ? 'Local · READY' : 'Local · UNAVAILABLE',
       backing: localReady ? 'LOCAL' : 'NONE',
       localContinuity: localReady ? 'AVAILABLE' : 'UNAVAILABLE',
       membership: localReady ? 'ACTIVE' : 'UNAVAILABLE',
@@ -404,7 +502,7 @@ export function withNebulaLocalDisplayOverride(
     },
     {
       localReady,
-      localModel: continuity?.localModel ?? snapshot.localModel,
+      localModel,
       routingPreference: continuity?.routingPreference ?? snapshot.routingPreference,
       routingModeResolved: continuity?.routingModeResolved ?? snapshot.routingModeResolved,
       terraConnection: continuity?.terraConnection ?? snapshot.terraConnection,
@@ -415,44 +513,51 @@ export function withNebulaLocalDisplayOverride(
 }
 
 export function compactFamilyRosterLine(snapshot: CouncilRosterSnapshot): string {
-  const cloud = `External ${snapshot.externalProviderCount.configured}/${snapshot.externalProviderCount.total} configured`
-  const local = `Local ${snapshot.localCouncil.label}`
-  const routing = `Routing ${snapshot.routingDisplay}`
-  const diversity = `Diversity ${snapshot.modelDiversity}`
-  const terra = `Terra ${snapshot.terraConnection}`
-  const internet = `Internet ${snapshot.networkEgress}`
-  return `${snapshot.operationalLabel} · ${cloud} · ${local} · ${routing} · ${diversity} · ${terra} · ${internet}`
+  const members = snapshot.operationalState === 'UNAVAILABLE'
+    ? `Members ${snapshot.entityPresentCount} PRESENT · BACKEND UNAVAILABLE`
+    : `Members ${snapshot.entityReadyCount}/${snapshot.entityPresentCount} READY`
+  const backing = !snapshot.localAvailable && snapshot.externalAvailable <= 0
+    ? 'Backing BACKEND_UNAVAILABLE'
+    : snapshot.localAvailable && snapshot.externalAvailable <= 0
+      ? 'Backing Local sovereign runtime'
+      : snapshot.localAvailable
+        ? 'Backing Hybrid'
+        : 'Backing External'
+  const diversity = `Diversity ${snapshot.reasoningDiversity}`
+  const external = `External ${snapshot.externalProviderCount.configured}/${snapshot.externalProviderCount.total} configured`
+  const terra = `Terra ${snapshot.terraAccess}`
+  const internet = `Internet ${snapshot.internetAccess}`
+  return `${snapshot.entityHeadline} · ${members} · ${backing} · ${diversity} · ${external} · ${terra} · ${internet}`
 }
 
 export type RosterMemberPresentation = {
   tone: 'ready' | 'needs_key' | 'quota' | 'error' | 'unavailable' | 'degraded' | 'offline'
   label: string
   localLine: string | null
+  optionalExternalLine: string | null
 }
 
 export function rosterMemberPresentation(entry: CouncilFamilyRosterEntry): RosterMemberPresentation {
-  if (entry.family === 'nova') {
+  const optionalExternalLine = entry.optionalExternalLine
+  const localLine = entry.backingRuntimeStatus === 'LOCAL' || entry.backing === 'LOCAL'
+    ? 'Backing: Local'
+    : entry.backingRuntimeStatus === 'HYBRID' || entry.backing === 'HYBRID'
+      ? 'Backing: Hybrid'
+      : entry.backingRuntimeStatus === 'EXTERNAL' || entry.backing === 'EXTERNAL'
+        ? 'Backing: External'
+        : 'Backing: None'
+  if (entry.memberIdentityStatus === 'READY') {
     return {
-      tone: entry.uiStatus === 'READY' ? 'ready' : 'unavailable',
-      label: entry.uiDetail,
-      localLine: null,
+      tone: 'ready',
+      label: 'READY',
+      localLine,
+      optionalExternalLine,
     }
   }
-  const localLine = entry.localContinuity === 'AVAILABLE' ? 'Local continuity · AVAILABLE' : 'Local continuity · UNAVAILABLE'
-  if (entry.cloudState === 'AVAILABLE') {
-    return { tone: 'ready', label: entry.uiDetail, localLine }
+  return {
+    tone: 'unavailable',
+    label: 'BACKEND UNAVAILABLE',
+    localLine,
+    optionalExternalLine,
   }
-  if (entry.cloudState === 'NOT_CONFIGURED') {
-    return { tone: 'needs_key', label: entry.uiDetail, localLine }
-  }
-  if (entry.cloudState === 'BILLING_BLOCKED') {
-    return { tone: 'quota', label: entry.uiDetail, localLine }
-  }
-  if (entry.cloudState === 'AUTH_FAILED' || entry.cloudState === 'NETWORK_ERROR' || entry.cloudState === 'PROVIDER_ERROR') {
-    return { tone: 'error', label: entry.uiDetail, localLine }
-  }
-  if (entry.cloudState === 'DISABLED') {
-    return { tone: 'offline', label: entry.uiDetail, localLine }
-  }
-  return { tone: 'unavailable', label: entry.uiDetail, localLine }
 }

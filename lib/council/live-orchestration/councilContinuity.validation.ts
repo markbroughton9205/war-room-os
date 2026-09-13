@@ -127,7 +127,7 @@ export async function runCouncilLocalContinuityValidation(): Promise<CaseResult[
   const caseA = classifyCouncilOperationalState({ externalConfiguredCount: 0, localReady: true })
   results.push(check(
     'CASE 1 0-cloud/local-ready → READY_LOCAL',
-    caseA === 'READY_LOCAL' && councilOperationalLabel(caseA) === 'COUNCIL READY · LOCAL',
+    caseA === 'READY_LOCAL' && councilOperationalLabel(caseA) === 'COUNCIL READY · LIVE',
     caseA,
   ))
 
@@ -176,13 +176,13 @@ export async function runCouncilLocalContinuityValidation(): Promise<CaseResult[
       && localSnap.operationalState === 'READY_LOCAL'
       && localSnap.degradedByRoster === false
       && !compactFamilyRosterLine(localSnap).includes('0/4 PROVIDERS ACTIVE')
-      && localSnap.families.chatgpt?.uiStatus === 'UNAVAILABLE'
+      && localSnap.families.chatgpt?.uiStatus === 'READY'
       && localSnap.families.chatgpt?.cloudState === 'NOT_CONFIGURED'
-      && localSnap.families.chatgpt?.uiDetail === 'OpenAI · NOT CONFIGURED'
+      && localSnap.families.chatgpt?.uiDetail === 'READY'
+      && localSnap.families.chatgpt?.identityName === 'AURORA'
       && localSnap.families.chatgpt?.localContinuity === 'AVAILABLE'
       && !/openai ready/i.test(localSnap.families.chatgpt?.uiDetail ?? '')
       && localSnap.families.nova?.uiStatus === 'READY'
-      && localSnap.families.nova?.uiDetail === 'Local · READY'
       && localSnap.routingDisplay === 'LOCAL'
       && displayNameForSeat('claude') === 'ORION'
       && displayNameForSeat('claude') !== 'ORIGIN',
@@ -191,9 +191,11 @@ export async function runCouncilLocalContinuityValidation(): Promise<CaseResult[
 
   results.push(check(
     'seat presentation does not paint AURORA as connected OpenAI',
-    rosterMemberPresentation(localSnap.families.chatgpt!).tone === 'needs_key'
-      && rosterMemberPresentation(localSnap.families.chatgpt!).label === 'OpenAI · NOT CONFIGURED'
-      && rosterMemberPresentation(localSnap.families.chatgpt!).localLine === 'Local continuity · AVAILABLE'
+    rosterMemberPresentation(localSnap.families.chatgpt!).tone === 'ready'
+      && rosterMemberPresentation(localSnap.families.chatgpt!).label === 'READY'
+      && (rosterMemberPresentation(localSnap.families.chatgpt!).localLine ?? '').includes('Local')
+      && rosterMemberPresentation(localSnap.families.chatgpt!).optionalExternalLine === 'Optional external: OpenAI · NOT CONFIGURED'
+      && !/openai ready/i.test(rosterMemberPresentation(localSnap.families.chatgpt!).label)
       && rosterMemberPresentation(localSnap.families.nova!).tone === 'ready',
     JSON.stringify(rosterMemberPresentation(localSnap.families.chatgpt!)),
   ))
@@ -203,8 +205,14 @@ export async function runCouncilLocalContinuityValidation(): Promise<CaseResult[
     continuity: { localReady: false, routingPreference: 'AUTO', routingModeResolved: 'LOCAL_FIRST' },
   })
   results.push(check(
-    '0 cloud + local down is UNAVAILABLE',
-    downSnap.operationalState === 'UNAVAILABLE' && downSnap.degradedByRoster === true && downSnap.unavailableReason === 'NO_REASONING_BACKEND',
+    '0 cloud + local down keeps entities present with BACKEND_UNAVAILABLE',
+    downSnap.operationalState === 'UNAVAILABLE'
+      && downSnap.degradedByRoster === true
+      && downSnap.unavailableReason === 'NO_REASONING_BACKEND'
+      && downSnap.families.chatgpt?.identityName === 'AURORA'
+      && downSnap.families.chatgpt?.memberIdentityStatus === 'PRESENT_BACKEND_UNAVAILABLE'
+      && downSnap.entityPresentCount === 4
+      && compactFamilyRosterLine(downSnap).includes('PRESENT'),
     downSnap.operationalLabel,
   ))
 
@@ -327,7 +335,8 @@ export async function runCouncilLocalContinuityValidation(): Promise<CaseResult[
   results.push(check(
     'CASE 5 configured auth failure stays AUTH_FAILED',
     authSnap.families.chatgpt?.cloudState === 'AUTH_FAILED'
-      && authSnap.families.chatgpt?.uiDetail === 'OpenAI · AUTH FAILED'
+      && authSnap.families.chatgpt?.optionalExternalDetail === 'OpenAI · AUTH FAILED'
+      && authSnap.families.chatgpt?.uiDetail === 'READY'
       && authSnap.operationalState === 'DEGRADED_PARTIAL',
     authSnap.families.chatgpt?.uiDetail ?? '',
   ))
@@ -378,6 +387,69 @@ export async function runCouncilLocalContinuityValidation(): Promise<CaseResult[
     'Foundry/WRIM files not imported by continuity module',
     !councilOperationalLabel.toString().includes('foundry'),
     'no foundry coupling in label helper',
+  ))
+
+  const modelA = buildCouncilRosterSnapshot({
+    configured: { chatgpt: false, claude: false, grok: false, gemini: false },
+    continuity: { localReady: true, localModel: 'huihui_ai/qwen3-abliterated:14b', routingPreference: 'AUTO', routingModeResolved: 'LOCAL_FIRST' },
+  })
+  const modelB = buildCouncilRosterSnapshot({
+    configured: { chatgpt: false, claude: false, grok: false, gemini: false },
+    continuity: { localReady: true, localModel: 'qwen2.5-coder:14b', routingPreference: 'AUTO', routingModeResolved: 'LOCAL_FIRST' },
+  })
+  results.push(check(
+    'CASE 2 backend A→B leaves identities unchanged',
+    ['chatgpt', 'claude', 'grok', 'gemini'].every(seat =>
+      modelA.families[seat as 'chatgpt']?.identityName === modelB.families[seat as 'chatgpt']?.identityName
+    )
+      && modelA.families.chatgpt?.identityName === 'AURORA'
+      && modelA.localModel !== modelB.localModel,
+    `${modelA.localModel} → ${modelB.localModel}`,
+  ))
+
+  const oneExternal = buildCouncilRosterSnapshot({
+    configured: { chatgpt: true, claude: false, grok: false, gemini: false },
+    continuity: { localReady: true, routingPreference: 'AUTO', routingModeResolved: 'HYBRID' },
+  })
+  results.push(check(
+    'CASE 3 one external backend does not rename Council entities',
+    oneExternal.families.chatgpt?.identityName === 'AURORA'
+      && oneExternal.families.chatgpt?.cloudState === 'AVAILABLE'
+      && oneExternal.families.claude?.identityName === 'ORION'
+      && oneExternal.families.claude?.cloudState === 'NOT_CONFIGURED'
+      && oneExternal.entityReadyCount === 4,
+    compactFamilyRosterLine(oneExternal),
+  ))
+
+  const internetSnap = buildCouncilRosterSnapshot({
+    configured: { chatgpt: false, claude: false, grok: false, gemini: false },
+    continuity: {
+      localReady: true,
+      routingPreference: 'AUTO',
+      routingModeResolved: 'LOCAL_FIRST',
+      networkEgress: 'AVAILABLE',
+      researchProviders: 'CONFIG_NEEDED',
+      terraConnection: 'CONNECTED',
+    },
+  })
+  results.push(check(
+    'CASE 4 0-cloud Council stays READY with live internet and Terra',
+    internetSnap.families.chatgpt?.memberIdentityStatus === 'READY'
+      && internetSnap.internetAccess === 'AVAILABLE'
+      && internetSnap.terraAccess === 'CONNECTED'
+      && internetSnap.knowledgeAccess === 'AVAILABLE'
+      && internetSnap.researchProviders === 'CONFIG_NEEDED',
+    compactFamilyRosterLine(internetSnap),
+  ))
+
+  results.push(check(
+    'CASE 5 identities persist across restart because they are code-defined Nebula entities',
+    displayNameForSeat('chatgpt') === 'AURORA'
+      && displayNameForSeat('claude') === 'ORION'
+      && displayNameForSeat('grok') === 'PULSAR'
+      && displayNameForSeat('gemini') === 'LUMEN'
+      && displayNameForSeat('nova') === 'NOVA',
+    'NEBULA_AGENTS',
   ))
 
   return results

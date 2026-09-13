@@ -30,6 +30,7 @@ import { envHasUsableProviderSecret } from '@/lib/providers/secretPresence'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { nebulaAgentForSeat } from '@/lib/council/nebula/identity'
 import { NEBULA_SHARED_BRAIN_SUMMARY } from '@/lib/council/nebula/modelProfile'
+import { projectCouncilMemberIdentity } from '@/lib/council/live-orchestration/councilIdentity'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -82,6 +83,9 @@ type SeatStatusRow = {
    * field a UI should render as the agent's name; `active.provider`/`active.model` below are
    * backend provenance for Inspector/diagnostics, never a substitute identity. */
   agentIdentity: string | null
+  memberIdentityStatus?: 'READY' | 'PRESENT_BACKEND_UNAVAILABLE'
+  backingRuntimeStatus?: 'LOCAL' | 'EXTERNAL' | 'HYBRID' | 'BACKEND_UNAVAILABLE'
+  optionalExternal?: string | null
   cloudState: ReturnType<typeof classifyCloudProviderStateFromHealth> | null
   active: {
     backendType: 'LOCAL' | 'EXTERNAL'
@@ -185,10 +189,20 @@ export async function GET() {
       ? null
       : classifyCloudProviderStateFromHealth(providerStatus?.health, configured)
 
+    const identity = projectCouncilMemberIdentity({
+      family: seat,
+      cloudState,
+      localReady: useLocalBacking || (seat === 'nova' && localHealth === 'READY'),
+      localModel: entry?.modelId ?? null,
+    })
+
     return {
       seat,
       label: rosterEntry.label,
-      agentIdentity: nebulaAgentForSeat(seat)?.name ?? null,
+      agentIdentity: nebulaAgentForSeat(seat)?.name ?? identity.identityName,
+      memberIdentityStatus: identity.memberIdentityStatus,
+      backingRuntimeStatus: identity.backingRuntimeStatus,
+      optionalExternal: identity.optionalExternalLine,
       cloudState,
       active: useLocalBacking
         ? {

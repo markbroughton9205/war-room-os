@@ -1,6 +1,7 @@
 import 'server-only'
 
 import type { DeliberationSession } from '@/lib/council/family-deliberation/types'
+import { displayNameForSeat } from '@/lib/council/nebula/identity'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { appendRoundToIntelligence, buildDurableRoundSnapshot, clampText } from './snapshot'
 import { embedSessionIntelligenceInMetadata, readSessionIntelligenceFromMetadata } from './parse'
@@ -78,7 +79,7 @@ export async function persistAuthoritativeRoundMessage(input: {
   const synthesisSeat = input.round.synthesisTurnRef
     ? input.round.turnRefs.find(t => t.turnId === input.round.synthesisTurnRef)?.seatId
     : null
-  const family = synthesisSeat === 'gemini' ? 'LUMEN' : 'AURORA'
+  const family = synthesisSeat ? displayNameForSeat(synthesisSeat) : 'AURORA'
 
   const { data: inserted, error: insErr } = await sup.client
     .from(TABLE_MESSAGES)

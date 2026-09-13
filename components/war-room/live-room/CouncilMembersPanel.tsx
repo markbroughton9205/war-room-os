@@ -10,14 +10,13 @@ import {
   type FamilyOperationTone,
 } from '@/lib/council/familyOperationStatus'
 import { rosterMemberPresentation, type CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
+import { CLOUD_PROVIDER_LABEL } from '@/lib/council/live-orchestration/councilContinuity'
 
 type ProviderConnectionStatus = 'online' | 'standby' | 'not_connected' | 'error'
 
 export type CouncilMembersPanelProps = {
   providerStatuses: Record<string, ProviderConnectionStatus | string>
   providerLabels?: Record<string, string>
-  /** Current-operation outcome per family (keyed by roster id) — distinct from `providerStatuses`
-   * connectivity. Absent entries render connectivity only, matching prior behavior. */
   operationStatuses?: Partial<Record<string, FamilyOperationStatus>>
   councilRoster?: CouncilRosterSnapshot | null
   onOpenPanel?: (panel: 'command-intel' | 'operations' | 'memory-core' | 'approvals' | 'analytics' | 'red-team' | 'system-health' | 'settings') => void
@@ -43,12 +42,14 @@ const OPERATION_TONE_DOT: Record<FamilyOperationTone, { color: string; glow?: st
   red: { color: '#f87171', glow: '0 0 8px #f87171' },
 }
 
-const MEMBER_ORDER: { id: string; label: string; rosterId?: string }[] = [
-  { id: 'rael', label: "Ra'el", rosterId: undefined },
+const PRIMARY_MEMBERS: { id: string; label: string; rosterId: string }[] = [
   { id: 'chatgpt', label: displayNameForSeat('chatgpt', 'AURORA'), rosterId: 'chatgpt' },
   { id: 'claude', label: displayNameForSeat('claude', 'ORION'), rosterId: 'claude' },
-  { id: 'gemini', label: displayNameForSeat('gemini', 'LUMEN'), rosterId: 'gemini' },
   { id: 'grok', label: displayNameForSeat('grok', 'PULSAR'), rosterId: 'grok' },
+  { id: 'gemini', label: displayNameForSeat('gemini', 'LUMEN'), rosterId: 'gemini' },
+]
+
+const ADDITIONAL_MEMBERS: { id: string; label: string; rosterId: string }[] = [
   { id: 'nova', label: displayNameForSeat('nova', 'NOVA'), rosterId: 'nova' },
   { id: 'red_team', label: displayNameForSeat('red_team', 'PHOENIX'), rosterId: 'red_team' },
 ]
@@ -59,18 +60,6 @@ const QUICK_TOOLS: { label: string; panel: 'command-intel' | 'operations' | 'mem
   { label: 'Memory Core', panel: 'memory-core' },
   { label: 'System Health', panel: 'system-health' },
 ]
-
-function statusForMember(
-  memberId: string,
-  rosterId: string | undefined,
-  providerStatuses: Record<string, string>,
-): string {
-  if (memberId === 'rael') return 'online'
-  const key = rosterId ?? memberId
-  const raw = providerStatuses[key] ?? providerStatuses[memberId.replace('_', '')] ?? 'not_connected'
-  if (key === 'red_team') return providerStatuses.redteam ?? providerStatuses.red_team ?? raw
-  return raw
-}
 
 export type MemberStatusPresentation = {
   tone: keyof typeof STATUS_DOT
@@ -100,13 +89,75 @@ export function memberStatusPresentation(
   return { tone: 'offline', label: 'Offline' }
 }
 
+function MemberRow({
+  member,
+  councilRoster,
+  operationStatuses,
+}: {
+  member: { id: string; label: string; rosterId: string }
+  councilRoster?: CouncilRosterSnapshot | null
+  operationStatuses?: Partial<Record<string, FamilyOperationStatus>>
+}) {
+  const rosterRow = councilRoster?.families[member.rosterId as keyof typeof councilRoster.families]
+  const presentation = rosterRow
+    ? rosterMemberPresentation(rosterRow)
+    : memberStatusPresentation('unavailable')
+  const operationStatus = operationStatuses?.[member.rosterId]
+  const operationPresentation = operationStatus ? FAMILY_OPERATION_STATUS_PRESENTATION[operationStatus] : null
+  const dot = operationPresentation
+    ? OPERATION_TONE_DOT[operationPresentation.tone]
+    : (STATUS_DOT[presentation.tone] ?? STATUS_DOT.offline)
+  const roster = COUNCIL_ROSTER.find(r => r.id === member.rosterId)
+  const brainLine = 'localLine' in presentation ? presentation.localLine : rosterRow?.backingLine
+  const optionalExternalLine = rosterRow?.optionalExternalLine
+    ?? ('optionalExternalLine' in presentation ? presentation.optionalExternalLine : null)
+  return (
+    <li className="flex items-start gap-2" data-testid={`council-member-${member.id}`}>
+      <span
+        className="mt-1 h-2 w-2 shrink-0 rounded-full"
+        style={{ background: dot.color, boxShadow: dot.glow }}
+        title={presentation.label}
+        aria-hidden
+      />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-baseline gap-1.5">
+          <p className="text-[10px] font-bold tracking-widest text-emerald-100">{member.label}</p>
+          <span className="text-[8px] font-semibold uppercase tracking-widest text-slate-500">
+            {presentation.label}
+            {operationPresentation ? ` · ${operationPresentation.label}` : ''}
+          </span>
+        </div>
+        {typeof brainLine === 'string' && brainLine ? (
+          <p className="text-[8px] tracking-wide text-slate-500">{brainLine}</p>
+        ) : null}
+        {typeof optionalExternalLine === 'string' && optionalExternalLine ? (
+          <p className="text-[8px] tracking-wide text-slate-600">{optionalExternalLine}</p>
+        ) : null}
+        {roster ? (
+          <p className="truncate text-[8px] tracking-wide text-slate-500">{roster.role}</p>
+        ) : null}
+      </div>
+    </li>
+  )
+}
+
 export const CouncilMembersPanel = memo(function CouncilMembersPanel({
-  providerStatuses,
-  providerLabels,
   operationStatuses,
   councilRoster,
   onOpenPanel,
 }: CouncilMembersPanelProps) {
+  const optionalProviders: Array<{ name: string; state: string }> = [
+    { name: CLOUD_PROVIDER_LABEL.chatgpt, state: councilRoster?.families.chatgpt?.cloudState ?? 'NOT_CONFIGURED' },
+    { name: CLOUD_PROVIDER_LABEL.claude, state: councilRoster?.families.claude?.cloudState ?? 'NOT_CONFIGURED' },
+    { name: CLOUD_PROVIDER_LABEL.grok, state: councilRoster?.families.grok?.cloudState ?? 'NOT_CONFIGURED' },
+    { name: CLOUD_PROVIDER_LABEL.gemini, state: councilRoster?.families.gemini?.cloudState ?? 'NOT_CONFIGURED' },
+  ]
+  const headline = councilRoster?.entityHeadline?.replace(/^COUNCIL\s+/i, '') ?? 'READY · LIVE'
+  const searchLabel = councilRoster?.researchProviders === 'LIVE'
+    ? 'READY'
+    : councilRoster?.researchProviders === 'CONFIG_NEEDED'
+      ? 'CONFIG NEEDED'
+      : councilRoster?.researchProviders ?? 'UNKNOWN'
   return (
     <aside
       className="flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto rounded border border-emerald-900/40 p-3 lg:max-w-[14rem]"
@@ -119,83 +170,77 @@ export const CouncilMembersPanel = memo(function CouncilMembersPanel({
           <div className="mt-1 space-y-0.5" data-testid="council-continuity-status">
             <p
               className={`text-[10px] font-semibold uppercase tracking-widest ${
-                councilRoster.operationalState === 'UNAVAILABLE'
-                  ? 'text-rose-300/90'
-                  : councilRoster.operationalState === 'DEGRADED_PARTIAL'
-                    ? 'text-amber-300/90'
-                    : 'text-emerald-200/90'
+                councilRoster.operationalState === 'UNAVAILABLE' ? 'text-rose-300/90' : 'text-emerald-200/90'
               }`}
             >
-              {councilRoster.operationalLabel.replace(/^COUNCIL\s+/i, '')}
+              {headline}
             </p>
             <p className="text-[8px] uppercase tracking-widest text-slate-500">
-              External Models {councilRoster.externalProviderCount.configured} / {councilRoster.externalProviderCount.total} configured
+              Members {councilRoster.entityReadyCount} / {councilRoster.entityPresentCount} ready
             </p>
             <p className="text-[8px] uppercase tracking-widest text-slate-500">
-              Local {councilRoster.localCouncil.label}
+              Backing {councilRoster.backingIntelligence.label}
+              {councilRoster.backingIntelligence.ready ? ' READY' : ''}
             </p>
-            <p className="text-[8px] uppercase tracking-widest text-slate-500">
-              Routing {councilRoster.routingDisplay}
-            </p>
+            {councilRoster.backingIntelligence.model ? (
+              <p className="text-[8px] uppercase tracking-widest text-slate-500">
+                Model {councilRoster.backingIntelligence.model}
+              </p>
+            ) : null}
             <p className="text-[8px] uppercase tracking-widest text-slate-500">
               Model Diversity {councilRoster.modelDiversity}
+            </p>
+            <p className="text-[8px] uppercase tracking-widest text-slate-500">
+              Perspective {councilRoster.reasoningDiversity}
+            </p>
+            <p className="text-[8px] uppercase tracking-widest text-slate-500">
+              Live Internet {councilRoster.networkEgress}
+            </p>
+            <p className="text-[8px] uppercase tracking-widest text-slate-500">
+              Sovereign Search {searchLabel}
             </p>
             <p className="text-[8px] uppercase tracking-widest text-slate-500">
               Terra {councilRoster.terraConnection}
             </p>
             <p className="text-[8px] uppercase tracking-widest text-slate-500">
-              Internet {councilRoster.networkEgress}
+              Optional External Brains {councilRoster.externalProviderCount.configured} configured
             </p>
           </div>
         ) : null}
-        <p className="mt-3 text-[9px] font-bold uppercase tracking-[0.35em] text-emerald-500/80">Council Members</p>
+
+        <p className="mt-3 text-[9px] font-bold uppercase tracking-[0.35em] text-yellow-600/80">Operator</p>
         <ul className="mt-2 space-y-2">
-          {MEMBER_ORDER.map(member => {
-            const rosterRow = member.rosterId ? councilRoster?.families[member.rosterId as keyof typeof councilRoster.families] : undefined
-            const status = rosterRow
-              ? (rosterRow.cloudState === 'AVAILABLE' || rosterRow.backing === 'LOCAL' || (member.id === 'nova' && rosterRow.uiStatus === 'READY') ? 'online' : 'unavailable')
-              : statusForMember(member.id, member.rosterId, providerStatuses)
-            const detailKey = member.rosterId ?? member.id
-            const presentation = rosterRow
-              ? rosterMemberPresentation(rosterRow)
-              : memberStatusPresentation(status, providerLabels?.[detailKey])
-            const operationStatus = member.rosterId ? operationStatuses?.[member.rosterId] : undefined
-            const operationPresentation = operationStatus ? FAMILY_OPERATION_STATUS_PRESENTATION[operationStatus] : null
-            const dot = operationPresentation
-              ? OPERATION_TONE_DOT[operationPresentation.tone]
-              : (STATUS_DOT[presentation.tone] ?? STATUS_DOT.offline)
-            const dotTitle = operationPresentation
-              ? `${presentation.label} · ${operationPresentation.label}`
-              : presentation.label
-            const roster = member.rosterId ? COUNCIL_ROSTER.find(r => r.id === member.rosterId) : null
-            return (
-              <li key={member.id} className="flex items-start gap-2" data-testid={`council-member-${member.id}`}>
-                <span
-                  className="mt-1 h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: dot.color, boxShadow: dot.glow }}
-                  title={dotTitle}
-                  aria-hidden
-                />
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-baseline gap-1.5">
-                    <p className="text-[10px] font-bold tracking-widest text-emerald-100">{member.label}</p>
-                    <span className="text-[8px] font-semibold uppercase tracking-widest text-slate-500">
-                      {presentation.label}
-                      {operationPresentation ? ` · ${operationPresentation.label}` : ''}
-                    </span>
-                  </div>
-                  {'localLine' in presentation && presentation.localLine ? (
-                    <p className="text-[8px] tracking-wide text-slate-500">{presentation.localLine}</p>
-                  ) : null}
-                  {roster ? (
-                    <p className="truncate text-[8px] tracking-wide text-slate-500">{roster.role}</p>
-                  ) : (
-                    <p className="text-[8px] tracking-wide text-yellow-600/80">Operator · Throne</p>
-                  )}
-                </div>
-              </li>
-            )
-          })}
+          <li className="flex items-start gap-2" data-testid="council-member-rael">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: '#34d399', boxShadow: '0 0 8px #34d399' }} aria-hidden />
+            <div>
+              <p className="text-[10px] font-bold tracking-widest text-emerald-100">Ra&apos;el</p>
+              <p className="text-[8px] tracking-wide text-yellow-600/80">Operator · Throne</p>
+            </div>
+          </li>
+        </ul>
+
+        <p className="mt-3 text-[9px] font-bold uppercase tracking-[0.35em] text-emerald-500/80">Members</p>
+        <ul className="mt-2 space-y-2">
+          {PRIMARY_MEMBERS.map(member => (
+            <MemberRow key={member.id} member={member} councilRoster={councilRoster} operationStatuses={operationStatuses} />
+          ))}
+        </ul>
+
+        <p className="mt-3 text-[9px] font-bold uppercase tracking-[0.35em] text-emerald-500/80">Additional</p>
+        <ul className="mt-2 space-y-2">
+          {ADDITIONAL_MEMBERS.map(member => (
+            <MemberRow key={member.id} member={member} councilRoster={councilRoster} operationStatuses={operationStatuses} />
+          ))}
+        </ul>
+
+        <p className="mt-3 text-[9px] font-bold uppercase tracking-[0.35em] text-slate-500">Optional Model Providers</p>
+        <ul className="mt-2 space-y-1" data-testid="optional-external-brains">
+          {optionalProviders.map(provider => (
+            <li key={provider.name} className="flex items-baseline justify-between gap-2">
+              <span className="text-[8px] uppercase tracking-widest text-slate-400">{provider.name}</span>
+              <span className="text-[8px] uppercase tracking-widest text-slate-500">{provider.state.replace(/_/g, ' ')}</span>
+            </li>
+          ))}
         </ul>
       </div>
 

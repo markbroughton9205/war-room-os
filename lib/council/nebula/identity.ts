@@ -41,6 +41,17 @@ export const NEBULA_AGENT_IDS: readonly NebulaAgentId[] = [
   'astra',
 ]
 
+/** The four first-class Council members. Identities, not providers. */
+export const PRIMARY_COUNCIL_ENTITY_IDS = ['aurora', 'orion', 'pulsar', 'lumen'] as const
+export type PrimaryCouncilEntityId = (typeof PRIMARY_COUNCIL_ENTITY_IDS)[number]
+
+/**
+ * Canonical live Council members. NOVA is a durable fifth entity (strategy), not a
+ * substitute for the four and not merely a local-runtime alias.
+ */
+export const CANONICAL_COUNCIL_MEMBER_IDS = ['aurora', 'orion', 'pulsar', 'lumen', 'nova'] as const
+export type CanonicalCouncilMemberId = (typeof CANONICAL_COUNCIL_MEMBER_IDS)[number]
+
 /** `foundation` = identity registered, no live Council seat routes to it yet this phase. */
 export type NebulaAgentStatus = 'active' | 'foundation'
 

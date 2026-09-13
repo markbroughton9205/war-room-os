@@ -13,7 +13,10 @@ export type CouncilDutyState =
 export type FamilyRosterEntry = {
   id: CouncilOrchestrationFamily
   label: string
+  /** Permanent Council identity. Never a vendor name. */
+  identityName: string
   role: string
+  /** Optional historical external backend label. Not the Council entity. */
   provider: string
   optional: boolean
   engineId: EngineId | null
@@ -30,6 +33,7 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   {
     id: 'chatgpt',
     label: 'Aurora Council',
+    identityName: 'AURORA',
     role: 'Calibrated integration / final Council synthesis',
     provider: 'OpenAI',
     optional: false,
@@ -40,6 +44,7 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   {
     id: 'claude',
     label: 'Orion Council',
+    identityName: 'ORION',
     role: 'Engineering / architecture / operational viability',
     provider: 'Anthropic',
     optional: false,
@@ -50,6 +55,7 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   {
     id: 'grok',
     label: 'Pulsar Council',
+    identityName: 'PULSAR',
     role: 'Evidence discovery / research / signals',
     provider: 'xAI',
     optional: false,
@@ -60,6 +66,7 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   {
     id: 'gemini',
     label: 'Lumen Council',
+    identityName: 'LUMEN',
     role: 'Claim verification / calibration / traceability',
     provider: 'Google',
     optional: false,
@@ -70,6 +77,7 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   {
     id: 'nova',
     label: 'Nova Council',
+    identityName: 'NOVA',
     role: 'Strategy / options / sequencing / planning',
     provider: 'Local',
     optional: false,
@@ -80,6 +88,7 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   {
     id: 'red_team',
     label: 'Phoenix Council',
+    identityName: 'PHOENIX',
     role: 'Adversarial review / failure analysis / recovery',
     provider: 'Anthropic (adversarial)',
     optional: true,
@@ -90,6 +99,7 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   {
     id: 'bridge_architect',
     label: 'Bridge Architect',
+    identityName: 'BRIDGE ARCHITECT',
     role: 'Systems / bridge reasoning',
     provider: 'Local',
     optional: true,
@@ -100,6 +110,7 @@ export const COUNCIL_ROSTER: FamilyRosterEntry[] = [
   {
     id: 'baby',
     label: 'Baby AI',
+    identityName: 'BABY',
     role: 'Observer',
     provider: 'OpenAI / local',
     optional: true,

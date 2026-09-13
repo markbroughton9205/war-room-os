@@ -4,6 +4,20 @@ The Council is War Room's highest collective reasoning and synthesis layer. It c
 
 Council health is **not** synonymous with any commercial cloud provider.
 
+## Identity vs provider
+
+AURORA, ORION, PULSAR, and LUMEN are first-class Council entities. They are not aliases for OpenAI, Anthropic, xAI, or Gemini.
+
+- **Entity health** (`memberIdentityStatus`) stays READY whenever any usable backing exists, including local Ollama.
+- **Backing health** (`backingRuntimeStatus`) describes the current model/runtime resource.
+- **Optional external provider health** (`cloudState`) describes historical commercial backends. Missing keys are `NOT_CONFIGURED`, never entity death.
+
+When all four members share one local model, report `ROLE-DIVERSE / MODEL-SHARED`. Do not claim four independent model brains.
+
+NOVA remains a canonical local Council member and is not a substitute for restoring the four.
+
+Qwen / Ollama is a temporary local partner brain, not the Council, not WRIM, and not Ra'el.
+
 ## Seat vs backing
 
 - **Council seat** is the War Room identity (AURORA, ORION, PULSAR, LUMEN, NOVA). ORION is the correct Claude-seat name (not ORIGIN).
