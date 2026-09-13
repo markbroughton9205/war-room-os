@@ -52,7 +52,8 @@ export function WrimEnvironmentPanel() {
         <p>Stage 2: {status?.stage2 ?? '…'} · run {status?.stage2_run_id ?? 'WRIM1-NEBULA-STAB-000001'} · TEST_ONLY · not a promotion candidate</p>
         <p>controlled stability: {status?.controlled_stability_experiment_id ?? 'WRIM1-NEBULA-CTRL-STAB-000001'} · phase2 {String((status as { phase2_experiment_id?: string } | null)?.phase2_experiment_id ?? 'WRIM1-NEBULA-STABILITY-GRID-000001')} · decision {String(status?.controlled_stability_decision ?? 'pending')} · Stage 3 design {String(status?.ready_for_stage3_design ?? 'NO')}</p>
         <p>training authorization: {status?.training_authorization ?? 'OFF'} · train button: {String(status?.train_button ?? false)}</p>
-        <p>phase 3A: {status?.phase3a_status ?? 'PHASE3A_COMPLETE'} · next pass: {status?.next_authorized_pass ?? 'PHASE3A_REVIEW'} (Stage 3 not authorized; training OFF)</p>
+        <p>phase 3A: {status?.phase3a_status ?? 'PHASE3A_COMPLETE'} · Stage 3 design: {String((status as { stage3_design_status?: string } | null)?.stage3_design_status ?? 'READY_FOR_STAGE3_COMMANDER_REVIEW')} · Stage 3 authorization: {String((status as { stage3_authorization?: string } | null)?.stage3_authorization ?? 'NO')}</p>
+        <p>next pass: {status?.next_authorized_pass ?? 'STAGE3_COMMANDER_REVIEW'} (Stage 3 not authorized; training OFF; no Train button)</p>
       </article>
       <button type="button" className="rounded border border-cyan-600 px-3 py-1 text-xs" onClick={() => void refresh()}>
         Refresh environment status

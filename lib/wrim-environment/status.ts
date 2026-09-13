@@ -17,6 +17,10 @@ import {
   PHASE2_STATUS,
   PHASE2_EXPERIMENT_ID,
   PHASE3A_STATUS,
+  STAGE3_AUTHORIZATION,
+  STAGE3_DESIGN_STATUS,
+  STAGE3_EXECUTION_READINESS,
+  STAGE3_RUN_ID,
   TRAINING_AUTHORIZATION,
 } from './identity'
 import { resolveWrimEnvironmentPaths } from './paths'
@@ -66,6 +70,10 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
     phase2_status: PHASE2_STATUS,
     phase3a_status: PHASE3A_STATUS,
     phase2_experiment_id: PHASE2_EXPERIMENT_ID,
+    stage3_run_id: STAGE3_RUN_ID,
+    stage3_design_status: STAGE3_DESIGN_STATUS,
+    stage3_authorization: STAGE3_AUTHORIZATION,
+    stage3_execution_readiness: STAGE3_EXECUTION_READINESS,
     controlled_stability_decision: experiment?.decision ?? null,
     ready_for_stage3_design: experiment?.READY_FOR_STAGE3_DESIGN ?? 'NO',
     ready_for_stage3_training_authorization: false,

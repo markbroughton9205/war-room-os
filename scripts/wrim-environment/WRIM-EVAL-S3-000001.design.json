@@ -1,0 +1,106 @@
+{
+  "suite_id": "WRIM-EVAL-S3-000001",
+  "status": "DESIGNED_NOT_AUTHORED",
+  "kind": "EVAL_ONLY",
+  "build_now": false,
+  "target_item_count": 35,
+  "items_per_category": 5,
+  "generation": {
+    "mode": "greedy_argmax",
+    "lengths_tokens": [32, 256]
+  },
+  "leakage_rule": "Stems must not be slices of WR-CORPUS-0 genesis documents. Literary items remain UNMAPPED_NO_STEM_OVERLAP.",
+  "axes": {
+    "A_parent_behavior_retention": ["literary_prose", "special_token_stability"],
+    "B_downstream_adaptation": ["factual_prose", "code", "instruction_following"],
+    "C_generation_stability": ["long_form_continuity", "special_token_stability"],
+    "D_structured_output_capability": ["json_structured_output"]
+  },
+  "do_not_collapse_to_one_score": true,
+  "historical_overlay": {
+    "CAP-EVAL-0": "COMPATIBILITY_ONLY six literary stems; not the literary category of this suite",
+    "DIAGNOSTIC-0_d0-json": "COMPATIBILITY_ONLY structured-output probe; WRIM-0 itself is json_valid=false"
+  },
+  "categories": [
+    {
+      "id": "literary_prose",
+      "axis": "A",
+      "items": [
+        { "id": "s3-lit-01", "spec": "Narrative continuation after a calm outdoor scene; no genesis-document phrasing." },
+        { "id": "s3-lit-02", "spec": "Interior psychological beat; complete a sentence, not a poem." },
+        { "id": "s3-lit-03", "spec": "Dialogue turn with a named speaker; stay in prose." },
+        { "id": "s3-lit-04", "spec": "Time-of-day transition; require a finite next clause." },
+        { "id": "s3-lit-05", "spec": "Object-focused still life; avoid list collapse." }
+      ]
+    },
+    {
+      "id": "factual_prose",
+      "axis": "B",
+      "items": [
+        { "id": "s3-fact-01", "spec": "Short encyclopedic definition completion (non-corpus fact pattern)." },
+        { "id": "s3-fact-02", "spec": "Numeric/unit continuation that must remain dimensionally sane." },
+        { "id": "s3-fact-03", "spec": "Cause-then-effect sentence finish." },
+        { "id": "s3-fact-04", "spec": "Geographic or institutional proper-noun continuation without tool calls." },
+        { "id": "s3-fact-05", "spec": "Process description in ordered prose, not bullets unless prompted." }
+      ]
+    },
+    {
+      "id": "code",
+      "axis": "B",
+      "items": [
+        { "id": "s3-code-01", "spec": "Complete a tiny Python function body after a def line." },
+        { "id": "s3-code-02", "spec": "Close a bracketed expression without extra fences." },
+        { "id": "s3-code-03", "spec": "Continue a comment-then-code pair." },
+        { "id": "s3-code-04", "spec": "Emit a one-line assignment that uses the bound tokenizer vocabulary." },
+        { "id": "s3-code-05", "spec": "Refuse TOOL_USE / function-call markup; stay in source text." }
+      ]
+    },
+    {
+      "id": "json_structured_output",
+      "axis": "D",
+      "items": [
+        { "id": "s3-json-01", "spec": "Open-brace object with two required keys; parse with json.loads." },
+        { "id": "s3-json-02", "spec": "Array of three strings; no trailing commentary." },
+        { "id": "s3-json-03", "spec": "Nested object one level deep." },
+        { "id": "s3-json-04", "spec": "Boolean/null legal JSON tokens only." },
+        { "id": "s3-json-05", "spec": "Repair-from-prefix: complete a truncated but well-braced prefix." }
+      ]
+    },
+    {
+      "id": "instruction_following",
+      "axis": "B",
+      "items": [
+        { "id": "s3-inst-01", "spec": "Answer with exactly one word after a constrained prompt." },
+        { "id": "s3-inst-02", "spec": "Repeat a short quoted span then stop." },
+        { "id": "s3-inst-03", "spec": "Produce three comma-separated tokens, no extras." },
+        { "id": "s3-inst-04", "spec": "Stay in the requested language/register of the stem." },
+        { "id": "s3-inst-05", "spec": "Do not emit special tokens or chat-template markup." }
+      ]
+    },
+    {
+      "id": "long_form_continuity",
+      "axis": "C",
+      "items": [
+        { "id": "s3-long-01", "spec": "256-token narrative continuity; track max_run, unique_ratio_256, entropy." },
+        { "id": "s3-long-02", "spec": "256-token factual paragraph; penalize period-run collapse." },
+        { "id": "s3-long-03", "spec": "256-token code-like indent continuation; no special-token takeover." },
+        { "id": "s3-long-04", "spec": "256-token instruction list in prose; no loop of one token." },
+        { "id": "s3-long-05", "spec": "256-token JSON-ish braces then recover to prose if it fails; log both." }
+      ]
+    },
+    {
+      "id": "special_token_stability",
+      "axis": ["A", "C"],
+      "items": [
+        { "id": "s3-spec-01", "spec": "Ordinary prose stem; special_rate_256 must stay near WRIM-0 frozen rate." },
+        { "id": "s3-spec-02", "spec": "Delimiter-heavy stem (quotes, braces) without inviting BOS/EOS spray." },
+        { "id": "s3-spec-03", "spec": "Digit-heavy stem; no pad/unk loops." },
+        { "id": "s3-spec-04", "spec": "Empty-ish short stem; must not dump special IDs 0-8 as content." },
+        { "id": "s3-spec-05", "spec": "Stop-condition probe: EOS may appear as end, not as a run." }
+      ]
+    }
+  ],
+  "prompts_authored": false,
+  "wrim0_baseline_frozen": false,
+  "note": "Author stems in a later authorized pass. Do not train before prompts exist and WRIM-0 baseline is hashed."
+}
