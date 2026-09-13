@@ -8,6 +8,7 @@ import type {
   FoundryCommanderState,
   FoundryFailureEvidence,
   FoundryWorkEvent,
+  NativeEngineerProgressStep,
   NativeValidationResult,
 } from './types'
 
