@@ -193,7 +193,7 @@ async function testE2ERepair(): Promise<CaseResult[]> {
       const source = await readFile(path.join(ws.root, 'sum.mjs'), 'utf8')
       const repair = await getRepair(mission.id)
       return [
-        check('e2e_repair_01_completed_or_validated', mission.status === 'completed' || mission.engineer?.currentStep === 'DONE', `${mission.status} ${mission.engineer?.currentStep}`),
+        check('e2e_repair_01_completed_or_validated', mission.status === 'completed' || mission.engineer?.currentStep === 'DONE' || mission.engineer?.currentStep === 'COMPLETE', `${mission.status} ${mission.engineer?.currentStep}`),
         check('e2e_repair_02_file_fixed', source.includes('values.length;') && !source.includes('values.length - 1'), source.slice(0, 200)),
         check('e2e_repair_03_validations_ran', (mission.validationResults?.length ?? 0) > 0, JSON.stringify(mission.validationResults?.map(v => [v.operation.id, v.ok]))),
         check('e2e_repair_04_no_autonomous_commit_executed', !String(repair?.commitPreparation?.commitMessage ?? '').includes('git commit -m'), repair?.commitPreparation?.commitMessage ?? 'none'),
@@ -224,7 +224,7 @@ async function testE2EGreenfield(): Promise<CaseResult[]> {
       const probe = (mission.validationResults ?? []).find(v => v.operation.id === 'http_probe')
       return [
         check('e2e_greenfield_01_files_created', app.includes('createStore') && app.includes('writeFileSync') && pkg.includes('task-tracker'), `app=${app.length} pkg=${pkg.length}`),
-        check('e2e_greenfield_02_mission_done', (mission.status === 'completed' || mission.engineer?.currentStep === 'DONE') && mission.engineer?.validationOutcome === 'VALIDATED', `${mission.status} ${mission.engineer?.currentStep} ${mission.engineer?.validationOutcome}`),
+        check('e2e_greenfield_02_mission_done', (mission.status === 'completed' || mission.engineer?.currentStep === 'DONE' || mission.engineer?.currentStep === 'COMPLETE') && mission.engineer?.validationOutcome === 'VALIDATED', `${mission.status} ${mission.engineer?.currentStep} ${mission.engineer?.validationOutcome}`),
         check('e2e_greenfield_03_tests_executed', (mission.validationResults ?? []).some(v => v.operation.id === 'node_test' && v.ok), JSON.stringify(mission.validationResults?.map(v => [v.operation.id, v.ok]))),
         check('e2e_greenfield_04_http_probe', Boolean(probe?.ok) && Boolean(probe?.stdout.includes('"ok":true')) && !Boolean(probe?.stdout.includes('War Room Local Core')), JSON.stringify(probe)),
         check('e2e_greenfield_05_no_push', classifyArgv('git', ['push']).policyClass !== 'SAFE_LOCAL', 'ok'),

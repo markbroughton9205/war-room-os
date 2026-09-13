@@ -448,17 +448,57 @@ export type NativeRepairRecord = {
 export type NativeCodingExecutionMode = 'gated_repair' | 'bounded_coding'
 
 export type NativeEngineerProgressStep =
+  | 'IDLE'
   | 'ANALYZING'
   | 'PLANNING'
   | 'EDITING'
+  | 'BUILDING'
   | 'RUNNING'
   | 'TESTING'
   | 'REPAIRING'
   | 'WAITING_FOR_APPROVAL'
+  | 'AWAITING_APPROVAL'
   | 'DONE'
+  | 'COMPLETE'
   | 'BLOCKED'
   | 'CANCELLED'
   | 'PAUSED_PROVIDER_UNAVAILABLE'
+
+/** Commander-visible Foundry lifecycle. Internal steps map onto this set. */
+export type FoundryCommanderState =
+  | 'IDLE'
+  | 'PLANNING'
+  | 'BUILDING'
+  | 'RUNNING'
+  | 'TESTING'
+  | 'REPAIRING'
+  | 'AWAITING_APPROVAL'
+  | 'COMPLETE'
+  | 'BLOCKED'
+  | 'CANCELLED'
+
+export type FoundryFailureEvidence = {
+  id: string
+  at: string
+  command?: string
+  testName?: string
+  action?: string
+  errorSummary: string
+  file?: string
+  subsystem?: string
+  repairAction?: string
+}
+
+export type FoundryWorkEvent = {
+  id: string
+  at: string
+  kind: 'plan' | 'file' | 'test' | 'repair' | 'complete' | 'status' | 'process'
+  text: string
+  source: 'execution' | 'audit'
+  actionType?: string
+  path?: string
+  ok?: boolean
+}
 
 export type NativeEngineerProgressEvent = {
   at: string
@@ -494,6 +534,12 @@ export type NativeCodingMissionState = {
   activityLog?: { at: string; role: string; detail: string }[]
   chatLog?: { at: string; speaker: string; text: string }[]
   terminalHistory?: { at: string; command: string; ok: boolean; stdout: string; stderr: string }[]
+  commanderState?: FoundryCommanderState
+  currentAction?: string
+  lastCompletedAction?: string
+  nextAction?: string
+  failureEvidence?: FoundryFailureEvidence | null
+  workstream?: FoundryWorkEvent[]
 }
 
 // ---------------------------------------------------------------------------

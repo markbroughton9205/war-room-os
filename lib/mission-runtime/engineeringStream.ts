@@ -76,6 +76,9 @@ export function missionProgressFingerprint(mission: RuntimeMission): string {
     engineerStep: mission.engineer?.currentStep ?? null,
     engineerAttempt: mission.engineer?.attempt ?? null,
     progressEventCount: mission.engineer?.progressEvents.length ?? 0,
+    workstreamCount: mission.engineer?.workstream?.length ?? 0,
+    commanderState: mission.engineer?.commanderState ?? null,
+    failureId: mission.engineer?.failureEvidence?.id ?? null,
   })
 }
 

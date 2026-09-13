@@ -3,6 +3,7 @@
  * persistence, and novel greenfield missions through SingleAgentEngineeringStrategy.
  */
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -18,6 +19,21 @@ import { createFoundrySession, getFoundrySession, appendFoundryChat, listFoundry
 import { classifyArgv } from '@/lib/native-builder/commandPolicy'
 import { validatePatchPolicy } from '@/lib/native-builder/patchPolicy'
 import { classifyDevRuntime, isDevServerLaunch, isUnnecessaryDevScriptPackageMutation } from '@/lib/native-builder/foundryDevRuntime'
+import {
+  activityTextForAction,
+  canEnterRepairing,
+  looksLikeNewApplication,
+  projectNameFromPrompt,
+  stepForTurn,
+  toCommanderState,
+} from '@/lib/native-builder/foundryCommanderState'
+import {
+  FOUNDRY_DIFF_CONTEXT_ACTIONS,
+  FOUNDRY_FILE_CONTEXT_ACTIONS,
+  FOUNDRY_NORMAL_MODE_HIDDEN_CONTROLS,
+  FOUNDRY_PROJECT_CONTEXT_ACTIONS,
+} from '@/lib/native-builder/foundryUxContract'
+import { denyDeploy } from '@/lib/native-builder/gitGovernance'
 import type { NativeCodingMissionState } from '@/lib/native-builder/types'
 
 const execFileAsync = promisify(execFile)
@@ -65,6 +81,62 @@ function unitTests(): CaseResult[] {
     check('action_04_start_process_denied', !parsedRm.ok, parsedRm.ok ? 'accepted rm' : parsedRm.error),
     check('coder_01_prefers_qwen_coder', pickLocalCoderModel(['huihui_ai/qwen3-abliterated:14b', 'qwen2.5-coder:14b'], 'BUILDER') === 'qwen2.5-coder:14b', 'ok'),
     check('coder_02_json_extract', extractJsonObject('noise ```json\n{"a":1}\n```')?.a === 1, 'ok'),
+  ]
+}
+
+function uxStateMachineTests(): CaseResult[] {
+  const shellPath = path.join(process.cwd(), 'components/war-room/foundry/FoundryShell.tsx')
+  const shell = readFileSync(shellPath, 'utf8')
+  const create = parseFoundryActions({
+    actions: [{ type: 'CREATE_FILE', path: 'src/calculator.ts', content: 'export const add = (a: number, b: number) => a + b\n' }],
+  })
+  const activity = create.ok ? activityTextForAction(create.actions[0]) : ''
+  const hiddenPresentInShell = FOUNDRY_NORMAL_MODE_HIDDEN_CONTROLS.filter(label => {
+    if (label === 'Coder Agent' || label === 'Hosted coder') return shell.includes(label)
+    return new RegExp(`>${label}<`).test(shell)
+  })
+  return [
+    check('ux_01_greenfield_starts_building', stepForTurn({ hasFailure: false }) === 'BUILDING' && toCommanderState({ currentStep: 'PLANNING' }) === 'PLANNING', stepForTurn({ hasFailure: false })),
+    check('ux_02_repairing_requires_failure', canEnterRepairing({}) === false && toCommanderState({ currentStep: 'REPAIRING', failureEvidence: null }, []) === 'BUILDING', String(canEnterRepairing({}))),
+    check(
+      'ux_03_successful_test_toward_complete',
+      toCommanderState({ currentStep: 'COMPLETE' }) === 'COMPLETE' && toCommanderState({ currentStep: 'DONE' }) === 'COMPLETE',
+      'ok',
+    ),
+    check(
+      'ux_04_failed_test_records_before_repairing',
+      canEnterRepairing({
+        validationResults: [{
+          operation: { id: 'node_test' },
+          ok: false,
+          exitCode: 1,
+          stdout: 'ℹ tests 4\nℹ pass 2\nℹ fail 2\n',
+          stderr: '',
+          durationMs: 10,
+          ranAt: new Date().toISOString(),
+        }],
+      }) === true && stepForTurn({ hasFailure: true }) === 'REPAIRING',
+      'ok',
+    ),
+    check('ux_05_activity_maps_to_action', activity === 'Creating src/calculator.ts', activity),
+    check('ux_06_workspace_edit_no_approval', classifyArgv('node', ['--test']).policyClass === 'SAFE_LOCAL', classifyArgv('node', ['--test']).reason),
+    check(
+      'ux_07_commit_push_deploy_gated',
+      classifyArgv('git', ['commit', '-m', 'x']).policyClass === 'REQUIRES_APPROVAL'
+        && classifyArgv('git', ['push']).policyClass === 'REQUIRES_APPROVAL'
+        && denyDeploy().denied === true,
+      `${classifyArgv('git', ['commit', '-m', 'x']).policyClass} ${classifyArgv('git', ['push']).policyClass}`,
+    ),
+    check(
+      'ux_08_context_actions',
+      FOUNDRY_FILE_CONTEXT_ACTIONS.includes('Ask Foundry About This') && FOUNDRY_PROJECT_CONTEXT_ACTIONS.includes('Project Settings') && FOUNDRY_DIFF_CONTEXT_ACTIONS.includes('Explain Change'),
+      FOUNDRY_FILE_CONTEXT_ACTIONS.join(','),
+    ),
+    check('ux_09_one_prompt', shell.includes('data-testid="foundry-chat-input"') && shell.includes('data-testid="foundry-send"') && !shell.includes('Send to Foundry'), 'ok'),
+    check('ux_10_coder_agent_absent_normal', hiddenPresentInShell.length === 0, hiddenPresentInShell.join(',')),
+    check('ux_11_inspector_retained', shell.includes('data-testid="foundry-inspector"') && shell.includes('BuilderWorkspace'), 'ok'),
+    check('ux_12_no_dev_server', classifyArgv('pnpm', ['run', 'dev']).policyClass === 'DENIED' && !shell.includes(':3001'), classifyArgv('pnpm', ['run', 'dev']).reason),
+    check('ux_13_new_app_prompt', looksLikeNewApplication('Build me a calculator.') && projectNameFromPrompt('Build me a calculator.') === 'calculator', projectNameFromPrompt('Build me a calculator.')),
   ]
 }
 
@@ -265,6 +337,7 @@ async function run(): Promise<void> {
     for (const r of batch) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name} ${r.detail}`)
   }
   add(unitTests())
+  add(uxStateMachineTests())
   add(devRuntimeUnitTests())
   add(await testCloudOffStatus())
   add(await testSessions())

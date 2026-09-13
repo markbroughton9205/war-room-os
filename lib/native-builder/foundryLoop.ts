@@ -12,7 +12,16 @@ import { extractJsonObject, requestLocalCoderJson, resolveLocalCoder } from './l
 import { executeFoundryAction, parseFoundryActions, type FoundryAction } from './foundryActions'
 import { parseDirectRoleMention, roleBrief, selectSpecialists, type FoundryRole } from './foundryRoles'
 import { appendFoundryActivity, appendFoundryChat, attachMissionToSession, getFoundrySession, saveFoundrySession } from './foundrySessions'
-import type { NativeCodingMissionState, NativeEngineerProgressStep, NativeRepairRecord, NativeValidationResult } from './types'
+import {
+  activityTextForAction,
+  canEnterRepairing,
+  failureFromValidation,
+  parseNodeTestCounts,
+  stepForTurn,
+  toCommanderState,
+  workEventFromAction,
+} from './foundryCommanderState'
+import type { FoundryWorkEvent, NativeCodingMissionState, NativeEngineerProgressStep, NativeRepairRecord, NativeValidationResult } from './types'
 
 const MAX_TURNS = 12
 
@@ -43,11 +52,24 @@ function failureSig(results: NativeValidationResult[]): string {
 async function bump(repairId: string, step: NativeEngineerProgressStep, detail: string, extra?: Partial<NativeCodingMissionState>): Promise<NativeRepairRecord> {
   const record = await getRepair(repairId)
   if (!record?.codingMission) throw new Error(`No coding mission ${repairId}`)
+  if (step === 'REPAIRING' && !canEnterRepairing({
+    failureEvidence: extra?.failureEvidence !== undefined ? extra.failureEvidence : record.codingMission.failureEvidence,
+    validationResults: record.validationResults,
+  })) {
+    step = 'BUILDING'
+    detail = detail.startsWith('REPAIRING') ? detail : `Building: ${detail}`
+  }
   const coding = record.codingMission
+  const workstream: FoundryWorkEvent[] = extra?.workstream ?? coding.workstream ?? []
   const next: NativeCodingMissionState = {
     ...coding,
     ...extra,
     currentStep: step,
+    currentAction: extra?.currentAction ?? detail,
+    lastCompletedAction: extra?.lastCompletedAction ?? coding.lastCompletedAction,
+    nextAction: extra?.nextAction ?? coding.nextAction,
+    commanderState: toCommanderState({ currentStep: step, failureEvidence: extra?.failureEvidence ?? coding.failureEvidence }, record.validationResults),
+    workstream,
     progressEvents: [...coding.progressEvents, { at: new Date().toISOString(), step, detail }].slice(-200),
   }
   const updated = { ...record, codingMission: next, updatedAt: new Date().toISOString() }
@@ -95,11 +117,14 @@ export async function runFoundryMission(repairId: string): Promise<NativeRepairR
     })
   }
 
-  record = await bump(repairId, 'ANALYZING', `FOUNDRY_LOCAL_MODE using ${local.codingModel}.`, {
+  record = await bump(repairId, 'PLANNING', `Planning project with ${local.codingModel}.`, {
     foundryMode: 'FOUNDRY_LOCAL_MODE',
     localCoderStatus: 'LOCAL_CODER_READY',
     hostedCoderStatus: hostedStatus,
     activeRole: 'FOUNDRY_MASTER',
+    currentAction: 'Planning project',
+    nextAction: 'Create source files',
+    commanderState: 'PLANNING',
   })
   const coding = record.codingMission
   if (!coding) throw new Error(`No coding mission ${repairId}`)
@@ -122,11 +147,13 @@ export async function runFoundryMission(repairId: string): Promise<NativeRepairR
   const issue = await getIssue(record.issueId)
   if (!issue) throw new Error(`No issue for ${repairId}`)
 
-  record = await bump(repairId, 'PLANNING', `Foundry Master selected ${specialists.join(', ')}.`, {
+  record = await bump(repairId, 'PLANNING', `Planning project.`, {
     plan: specialists.map(s => `${s}: ${roleBrief(s).slice(0, 80)}`),
     activeRole: 'FOUNDRY_MASTER',
+    currentAction: 'Planning project',
+    nextAction: 'Build source files',
   })
-  await note(repairId, sessionId, 'FOUNDRY_MASTER', `Architecture roster: ${specialists.join(', ')}`, `Objective: ${request}\nSpecialists: ${specialists.join(', ')}`)
+  await note(repairId, sessionId, 'FOUNDRY_MASTER', `Planning project`, `Objective: ${request}`)
 
   if (specialists.includes('ARCHITECT')) {
     const architecture = await requestLocalCoderJson({
@@ -163,9 +190,23 @@ export async function runFoundryMission(repairId: string): Promise<NativeRepairR
       return bump(repairId, 'CANCELLED', 'Commander stopped the Foundry mission. Workspace changes were preserved.')
     }
 
-    record = await bump(repairId, turn === 0 ? 'EDITING' : 'REPAIRING', `${role} turn ${turn + 1}/${MAX_TURNS}.`, {
+    const priorFailure = canEnterRepairing({
+      failureEvidence: record.codingMission?.failureEvidence,
+      validationResults: record.validationResults,
+    })
+    const turnStep = stepForTurn({
+      hasFailure: priorFailure,
+      testsRan: (record.validationResults ?? []).length > 0 && !priorFailure,
+    })
+    record = await bump(repairId, turnStep, priorFailure
+      ? `Repairing: ${record.codingMission?.failureEvidence?.errorSummary || 'recorded failure'}`
+      : turn === 0 ? 'Building project files.' : 'Continuing build.', {
       attempt: turn + 1,
       activeRole: role,
+      currentAction: priorFailure
+        ? (record.codingMission?.failureEvidence?.repairAction || 'Fixing failed tests')
+        : 'Building project files',
+      nextAction: priorFailure ? 'Re-run tests' : 'Run tests',
     })
 
     const filesChanged = record.codingMission?.filesChanged ?? []
@@ -228,14 +269,29 @@ If you cannot finish, ASK_SPECIALIST.`
       if ((action.type === 'RUN_VALIDATION' || action.type === 'RUN_COMMAND') && !skipped) {
         testsPassed = executed.ok
         const latest = await getRepair(repairId)
-        const sig = failureSig(latest?.validationResults ?? [])
+        const results = latest?.validationResults ?? []
+        const sig = failureSig(results)
+        const counts = parseNodeTestCounts(`${executed.detail}\n${typeof executed.result === 'object' && executed.result && 'stdout' in executed.result ? String((executed.result as { stdout?: string }).stdout ?? '') : ''}`)
         if (!executed.ok) {
+          const evidence = failureFromValidation(results, `Fixing ${action.type === 'RUN_COMMAND' ? action.operation.id : (action.operation?.id ?? 'tests')}`)
+          await bump(repairId, 'REPAIRING', evidence?.errorSummary || 'Test failed', {
+            failureEvidence: evidence,
+            currentAction: evidence?.repairAction || 'Fixing failed tests',
+            nextAction: 'Re-run tests',
+            lastCompletedAction: counts ? `${counts.pass}/${counts.tests} tests passed` : 'Tests failed',
+          })
           if (isDuplicateFailureLoop(signatures, sig)) {
             return bump(repairId, 'BLOCKED', 'Repeated identical failure signature.', { blockingReason: sig, validationOutcome: 'BLOCKED_BY_ENVIRONMENT' })
           }
           signatures.push(sig)
           role = 'DEBUGGER'
         } else {
+          await bump(repairId, 'TESTING', counts ? `${counts.pass}/${counts.tests} tests passed` : 'Tests passed', {
+            failureEvidence: null,
+            currentAction: counts ? `${counts.pass}/${counts.tests} tests passed` : 'Tests passed',
+            nextAction: 'Complete mission',
+            lastCompletedAction: counts ? `${counts.pass}/${counts.tests} tests passed` : 'Tests passed',
+          })
           role = 'REVIEWER'
         }
       }
@@ -286,15 +342,35 @@ If you cannot finish, ASK_SPECIALIST.`
     stdout: v.stdout.slice(0, 2000),
     stderr: v.stderr.slice(0, 2000),
   }))
-  return bump(repairId, testsPassed ? 'DONE' : 'BLOCKED', `Foundry ${outcome}. No git commit or push was executed.`, {
+  return bump(repairId, testsPassed ? 'COMPLETE' : 'BLOCKED', `Foundry ${outcome}. No git commit or push was executed.`, {
     validationOutcome: outcome,
     filesChanged: changedFiles,
     terminalHistory,
     blockingReason: testsPassed ? undefined : lastObservation,
+    commanderState: testsPassed ? 'COMPLETE' : 'BLOCKED',
+    currentAction: testsPassed ? 'Complete' : 'Blocked',
+    nextAction: testsPassed ? 'Review result' : 'Inspect failure',
+    lastCompletedAction: testsPassed ? 'Tests passed' : lastObservation,
   })
 }
 
 async function runAction(repairId: string, sessionId: string | undefined, role: FoundryRole, action: FoundryAction) {
+  const before = await getRepair(repairId)
+  const preview = activityTextForAction(action)
+  const hasFailure = canEnterRepairing({
+    failureEvidence: before?.codingMission?.failureEvidence,
+    validationResults: before?.validationResults,
+  })
+  await bump(repairId, stepForTurn({
+    hasFailure,
+    lastActionType: action.type,
+    testsRan: action.type === 'RUN_VALIDATION' || action.type === 'RUN_COMMAND',
+    runningProcess: action.type === 'START_PROCESS',
+  }), preview, {
+    currentAction: hasFailure && action.type === 'PATCH_FILE' ? `Fixing ${'path' in action ? action.path : 'failure'}` : preview,
+    nextAction: action.type === 'CREATE_FILE' || action.type === 'PATCH_FILE' ? 'Run tests' : undefined,
+    lastCompletedAction: before?.codingMission?.lastCompletedAction,
+  })
   const executed = await executeFoundryAction(action, { repairId })
   const record = await getRepair(repairId)
   if (record?.codingMission) {
@@ -316,10 +392,20 @@ async function runAction(repairId: string, sessionId: string | undefined, role: 
       (action.type === 'RUN_VALIDATION' || action.type === 'RUN_COMMAND') && executed.result && typeof executed.result === 'object' && 'operation' in executed.result
         ? [...(record.validationResults ?? []), executed.result as NativeValidationResult]
         : record.validationResults
+    const stdout = executed.result && typeof executed.result === 'object' && 'stdout' in executed.result
+      ? String((executed.result as { stdout?: string }).stdout ?? '')
+      : executed.detail
+    const event = workEventFromAction(action, { ok: executed.ok, detail: `${executed.detail}\n${stdout}` })
     await saveRepair({
       ...record,
       validationResults,
-      codingMission: { ...current, filesChanged, commandsExecuted },
+      codingMission: {
+        ...current,
+        filesChanged,
+        commandsExecuted,
+        lastCompletedAction: event.text,
+        workstream: [...(current.workstream ?? []), event].slice(-200),
+      },
       updatedAt: new Date().toISOString(),
     })
   }

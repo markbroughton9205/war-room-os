@@ -19,6 +19,7 @@ import { appendProjectMemory, writeProjectMemory } from './projectMemory'
 import { isRepairCancellationRequested } from './processRegistry'
 import { runFoundryMission } from './foundryLoop'
 import { resolveLocalCoder } from './localCoder'
+import { failureFromValidation, toCommanderState } from './foundryCommanderState'
 import {
   invokeDirectCouncilProvider,
   resolveConfiguredProviderFamily,
@@ -50,6 +51,8 @@ async function bump(repairId: string, step: NativeEngineerProgressStep, detail: 
     ...coding,
     ...extra,
     currentStep: step,
+    commanderState: toCommanderState({ currentStep: step, failureEvidence: extra?.failureEvidence ?? coding.failureEvidence }, record.validationResults),
+    currentAction: extra?.currentAction ?? detail,
     progressEvents: [...coding.progressEvents, { at: new Date().toISOString(), step, detail }].slice(-200),
   }
   const updated = { ...record, codingMission: next, updatedAt: new Date().toISOString() }
@@ -188,7 +191,12 @@ async function runCodingMissionUnlocked(repairId: string): Promise<NativeRepairR
         })
       }
       signatures.push(sig)
-      record = await bump(repairId, 'REPAIRING', 'Validation failed — generating an evidence-backed repair.')
+      const evidence = failureFromValidation(record.validationResults ?? [], 'Generating an evidence-backed repair')
+      record = await bump(repairId, 'REPAIRING', evidence?.errorSummary || 'Validation failed — generating an evidence-backed repair.', {
+        failureEvidence: evidence,
+        currentAction: evidence?.repairAction || 'Generating repair',
+        nextAction: 'Re-run validations',
+      })
       record = await planRepair(repairId, {
         useLocalModel: true,
         hostedCoder: loopHostedCoder(),
@@ -202,7 +210,19 @@ async function runCodingMissionUnlocked(repairId: string): Promise<NativeRepairR
       const validations = record.validationResults ?? []
       const allOk = validations.length > 0 && validations.every(v => v.ok)
       if (!allOk) {
-        record = await bump(repairId, 'REPAIRING', 'Review state reached without passing validations — treating as repairable failure.')
+        const evidence = failureFromValidation(validations, 'Repairing failed or missing validations')
+          ?? {
+            id: 'missing-validation',
+            at: new Date().toISOString(),
+            errorSummary: validations.length ? 'Review reached without passing validations' : 'No validations recorded',
+            action: 'validation',
+            repairAction: 'Generate tests and repair',
+          }
+        record = await bump(repairId, 'REPAIRING', evidence.errorSummary, {
+          failureEvidence: evidence,
+          currentAction: evidence.repairAction,
+          nextAction: 'Re-run validations',
+        })
         record = await planRepair(repairId, { useLocalModel: true, hostedCoder: loopHostedCoder(), commanderRequestText: requireCoding(record).commanderRequest })
         continue
       }
