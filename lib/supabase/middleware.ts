@@ -61,6 +61,24 @@ function hasValidLocalCommanderSession(request: NextRequest): boolean {
   })
 }
 
+/**
+ * Public Supabase browser auth is optional. Packaged / local Commander boot must
+ * not construct a Supabase client (and 500) when URL or anon key are absent.
+ * Never invents placeholder values. Never logs values.
+ */
+function configuredSupabasePublicAuth(): { url: string; anonKey: string } | null {
+  const url =
+    typeof process.env.NEXT_PUBLIC_SUPABASE_URL === 'string'
+      ? process.env.NEXT_PUBLIC_SUPABASE_URL.trim()
+      : ''
+  const anonKey =
+    typeof process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY === 'string'
+      ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY.trim()
+      : ''
+  if (!url || !anonKey) return null
+  return { url, anonKey }
+}
+
 async function tryGetSupabaseUser(supabase: ReturnType<typeof createServerClient>) {
   try {
     const {
@@ -83,11 +101,14 @@ async function tryGetSupabaseUser(supabase: ReturnType<typeof createServerClient
  */
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
   let supabaseResponse = NextResponse.next({ request })
+  const { pathname } = request.nextUrl
+  const configured = configuredSupabasePublicAuth()
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
+  let user: Awaited<ReturnType<typeof tryGetSupabaseUser>> = null
+  let supabase: ReturnType<typeof createServerClient> | null = null
+
+  if (configured) {
+    supabase = createServerClient(configured.url, configured.anonKey, {
       cookies: {
         getAll() {
           return request.cookies.getAll()
@@ -100,14 +121,13 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
           )
         },
       },
-    },
-  )
+    })
+    user = await tryGetSupabaseUser(supabase)
+  }
 
-  const user = await tryGetSupabaseUser(supabase)
-  const { pathname } = request.nextUrl
   const localOk = !user && hasValidLocalCommanderSession(request)
 
-  if (user) {
+  if (user && supabase) {
     const cleanupMarkerCookie = request.cookies.get(AUTH_CLEANUP_MARKER_COOKIE)?.value
     if (cleanupMarkerCookie) {
       const marker = await verifyAuthCleanupMarkerFromRequest(request, user.id)

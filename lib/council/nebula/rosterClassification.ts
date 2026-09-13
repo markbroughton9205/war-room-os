@@ -4,6 +4,7 @@ import {
   NEBULA_IDENTITY_BY_SEAT,
   PRIMARY_COUNCIL_ENTITY_IDS,
   type NebulaAgentId,
+  type PrimaryCouncilEntityId,
 } from './identity'
 import { NEBULA_ROLE_CONTRACTS } from './roleContracts'
 
@@ -23,6 +24,18 @@ export const COUNCIL_ROSTER_CLASS = [
 export type CouncilRosterClass = (typeof COUNCIL_ROSTER_CLASS)[number]
 
 export const CORE_COUNCIL_ENTITY_IDS = PRIMARY_COUNCIL_ENTITY_IDS
+
+function isPrimaryCouncilEntityId(id: NebulaAgentId): id is PrimaryCouncilEntityId {
+  switch (id) {
+    case 'aurora':
+    case 'orion':
+    case 'pulsar':
+    case 'lumen':
+      return true
+    default:
+      return false
+  }
+}
 
 export const COUNCIL_ROSTER_CLASSIFICATION: Record<
   'aurora' | 'orion' | 'pulsar' | 'lumen' | 'nova' | 'phoenix',
@@ -56,7 +69,7 @@ export function coreCouncilIsExactlyFour(): boolean {
 
 export function novaIsAuxiliaryNotCoreSubstitute(): boolean {
   return CANONICAL_COUNCIL_MEMBER_IDS.includes('nova')
-    && !CORE_COUNCIL_ENTITY_IDS.includes('nova')
+    && !isPrimaryCouncilEntityId('nova')
     && COUNCIL_ROSTER_CLASSIFICATION.nova === 'AUXILIARY_COUNCIL_MEMBER'
     && NEBULA_AGENTS_BY_ID.nova.name === 'NOVA'
     && NEBULA_IDENTITY_BY_SEAT.nova === 'nova'
@@ -64,7 +77,7 @@ export function novaIsAuxiliaryNotCoreSubstitute(): boolean {
 }
 
 export function phoenixIsRedTeamAdversarialRole(): boolean {
-  return !CORE_COUNCIL_ENTITY_IDS.includes('phoenix')
+  return !isPrimaryCouncilEntityId('phoenix')
     && COUNCIL_ROSTER_CLASSIFICATION.phoenix === 'RED_TEAM_ADVERSARIAL_REVIEW_ROLE'
     && NEBULA_AGENTS_BY_ID.phoenix.name === 'PHOENIX'
     && NEBULA_IDENTITY_BY_SEAT.red_team === 'phoenix'

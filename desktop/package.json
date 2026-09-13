@@ -50,8 +50,7 @@
       ],
       "icon": "assets/war-room-os.ico",
       "artifactName": "War Room OS Setup.${ext}",
-      "signAndEditExecutable": true,
-      "signExecutable": false,
+      "signAndEditExecutable": false,
       "verifyUpdateCodeSignature": false
     },
     "nsis": {

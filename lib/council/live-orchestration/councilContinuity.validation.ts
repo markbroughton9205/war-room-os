@@ -310,11 +310,19 @@ export async function runCouncilLocalContinuityValidation(): Promise<CaseResult[
     restoreDown()
   }
 
+  const egressAvailable = classifyNetworkEgress('reachable')
+  const searchUnconfigured = classifyResearchProviders({})
+  const councilLocalReady = classifyCouncilOperationalState({
+    externalConfiguredCount: 0,
+    localReady: true,
+  })
   results.push(check(
     'search config is not network egress (CASE E contract)',
-    'NETWORK_EGRESS' !== 'SEARCH_PROVIDER_CONFIGURATION'
-      && 'COUNCIL_PROVIDER_CONFIGURATION' !== 'NETWORK_EGRESS',
-    'independent state names',
+    egressAvailable === 'AVAILABLE'
+      && searchUnconfigured === 'CONFIG_NEEDED'
+      && councilLocalReady === 'READY_LOCAL'
+      && councilOperationalLabel(councilLocalReady) === 'COUNCIL READY · LIVE',
+    `egress=${egressAvailable} search=${searchUnconfigured} council=${councilLocalReady}`,
   ))
 
   results.push(check(

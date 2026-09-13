@@ -69,8 +69,9 @@ function signingArgs() {
   }
   console.log('[installer] CODE_SIGNING: AZURE_TRUSTED_SIGNING')
   return [
-    // signExecutable/signAndEditExecutable defaults apply once real signing is configured.
-    '--config.win.signExecutable=true',
+    // electron-builder 26: `signExecutable` is not a valid win key. Icon/rcedit is
+    // opt-in here only when real Azure signing is configured.
+    '--config.win.signAndEditExecutable=true',
     `--config.win.azureSignOptions.publisherName=${process.env.WAR_ROOM_SIGN_PUBLISHER_NAME}`,
     `--config.win.azureSignOptions.endpoint=${process.env.WAR_ROOM_SIGN_ENDPOINT}`,
     `--config.win.azureSignOptions.codeSigningAccountName=${process.env.WAR_ROOM_SIGN_ACCOUNT_NAME}`,
