@@ -520,7 +520,9 @@ export function compactFamilyRosterLine(snapshot: CouncilRosterSnapshot): string
   const diversity = `Diversity ${snapshot.reasoningDiversity}`
   const external = `External ${snapshot.externalProviderCount.configured}/${snapshot.externalProviderCount.total} configured`
   const terra = `Terra ${snapshot.terraAccess}`
-  const internet = `Internet ${snapshot.internetAccess}`
+  const internet = snapshot.internetAccess === 'UNAVAILABLE'
+    ? 'LIVE INTERNET UNAVAILABLE'
+    : `Internet ${snapshot.internetAccess}`
   return `${snapshot.entityHeadline} · ${members} · ${backing} · ${diversity} · ${external} · ${terra} · ${internet}`
 }
 
