@@ -122,7 +122,7 @@ export async function runWrimEnvironmentValidation(): Promise<{ passed: number; 
       && STAGE1_STATUS === 'STAGE1_VERIFIED'
       && TRAINING_AUTHORIZATION === 'OFF'
       && CURRENT_WRIM_TRAINING === 'NOT_RUNNING'
-      && NEXT_AUTHORIZED_PASS === 'STAGE2_STOPPED_BY_SENTINEL_REVIEW',
+      && (NEXT_AUTHORIZED_PASS === 'PHASE2_GRID_REVIEW' || NEXT_AUTHORIZED_PASS === 'PHASE3A_INTERPOLATION' || NEXT_AUTHORIZED_PASS === 'PHASE3A_REVIEW'),
     CURRENT_WRIM_TRAINING,
   ))
   results.push(check('49_red_team', FORBIDDEN_ENV_ACTIONS.every(a => tryForbiddenEnvAction(a).denied), String(FORBIDDEN_ENV_ACTIONS.length)))
