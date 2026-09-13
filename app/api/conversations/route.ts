@@ -3,17 +3,12 @@ import {
   httpStatusForSupabaseFailure,
   warRoomSupabaseFailurePayload,
 } from '@/lib/war-room/warRoomSupabaseError'
-import { requireConversationCaller } from '@/lib/war-room/conversationAuth'
-import { stripClientOwnerFields } from '@/lib/war-room/conversationOwnership'
 
 export const dynamic = 'force-dynamic'
 
 const TABLE_CONVERSATIONS = 'war_room_conversations'
 
 export async function GET(req: Request) {
-  const caller = await requireConversationCaller()
-  if (!caller.ok) return caller.response
-
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ conversations: [] }, false)
@@ -21,19 +16,17 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url)
   const q = url.searchParams.get('q')?.trim() ?? ''
-  const includeArchived = url.searchParams.get('includeArchived') === '1'
-    || url.searchParams.get('archived') === '1'
 
+  // Personal chat history shows only sessions that hold a real message — a row created by
+  // opening the page or clicking New Chat has no last_message_at yet and must not appear as a
+  // phantom "Empty session" until the Commander actually sends or receives something in it.
   let query = sup.client
     .from(TABLE_CONVERSATIONS)
     .select('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at')
-    .eq('owner_user_id', caller.userId)
+    .is('deleted_at', null)
+    .not('last_message_at', 'is', null)
     .order('updated_at', { ascending: false })
     .limit(200)
-
-  if (!includeArchived) {
-    query = query.is('deleted_at', null)
-  }
 
   if (q) {
     query = query.ilike('title', `%${q.replace(/%/g, '')}%`)
@@ -54,29 +47,24 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const caller = await requireConversationCaller()
-  if (!caller.ok) return caller.response
-
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
     return jsonWithPersistence({ error: 'Supabase is not configured.', hint: 'Set NEXT_PUBLIC_SUPABASE_URL and the server-only Supabase role secret.' }, false, { status: 503 })
   }
 
-  let body: { title?: string; metadata?: Record<string, unknown>; owner_user_id?: unknown; ownerUserId?: unknown }
+  let body: { title?: string; metadata?: Record<string, unknown> }
   try {
     body = await req.json()
   } catch {
     return jsonWithPersistence({ error: 'Invalid JSON body.' }, true, { status: 400 })
   }
 
-  // Never trust client-supplied ownership — strip and ignore spoof attempts.
-  const safeBody = stripClientOwnerFields(body as Record<string, unknown>) as typeof body
-  const title = typeof safeBody.title === 'string' && safeBody.title.trim() ? safeBody.title.trim() : 'Untitled thread'
-  const metadata = safeBody.metadata && typeof safeBody.metadata === 'object' ? safeBody.metadata : {}
+  const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : 'Untitled thread'
+  const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata : {}
 
   const { data, error } = await sup.client
     .from(TABLE_CONVERSATIONS)
-    .insert({ title, metadata, owner_user_id: caller.userId })
+    .insert({ title, metadata })
     .select('id,title,metadata,state,created_at,updated_at,last_message_at,deleted_at')
     .single()
 

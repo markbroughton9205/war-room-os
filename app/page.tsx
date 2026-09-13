@@ -49,15 +49,11 @@ import type { RouteCommandResult } from '@/lib/engine-control/router'
 import type { StandingPermissionMode } from '@/lib/permissions/standingPermissions'
 import { grantWarRoomStandingAck, resolveStandingPostExtra } from '@/lib/permissions/standingInlineGate'
 import { postCouncilChat, sendLiveCouncilThroneMessage, type CouncilChatJson } from '@/lib/council/liveChatPipeline'
-import { SEARCH_HANDOFF_STORAGE_KEY, type SearchCouncilHandoffPayload } from '@/lib/war-room-search/types'
-import { TERRA_HANDOFF_STORAGE_KEY, isTerraHandoffBody, type TerraCouncilHandoffPayload } from '@/lib/terra/councilHandoff'
 import { postIncrementalCouncilChat } from '@/lib/council/incremental-transport/client'
 import {
   type DeliberationEvidenceReference,
   type DeliberationTurn,
 } from '@/lib/council/family-deliberation'
-import type { ScoutSwarmPublicMeta } from '@/lib/council/scout-swarm/types'
-import type { NebulaRoundHealth } from '@/lib/council/nebula/round'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 import { ArchiveViewer } from '@/components/war-room/council/ArchiveViewer'
 import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoundary'
@@ -98,26 +94,10 @@ import {
   engineRowMap,
   isEngineFunctional,
   participationFromDecree,
-  migrateParticipationToggles,
   unavailableReason,
   type CouncilDutyState,
   type CouncilParticipationToggles,
 } from '@/lib/council/familyRoster'
-import { displayNameForSeat, nebulaAgentForSeat, NEBULA_AGENTS_BY_ID } from '@/lib/council/nebula/identity'
-import { createCouncilRoundPlan, seatsForParticipatingAgents } from '@/lib/council/nebula/roundFlow'
-import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
-import { presentAgentMessage } from '@/lib/council/nebula/presentation'
-import type { CouncilRound } from '@/lib/council/nebula/roundState'
-import { CouncilLiveRoundBanner } from '@/components/council/CouncilLiveRoundBanner'
-import { CouncilRoundInspector } from '@/components/council/CouncilRoundInspector'
-import { SessionIntelligencePanel } from '@/components/council/SessionIntelligencePanel'
-import {
-  hydrateSessionIntelligenceFromConversation,
-  messageMetadataFromTurn,
-  rebuildIntelligenceFromMessages,
-  type CouncilSessionIntelligenceV1,
-  type DurableDeliberationRound,
-} from '@/lib/council/session-intelligence'
 import { extractProposedCouncilActions } from '@/lib/council/extractCouncilActions'
 import { classifyRaElMessage, type ClassifyRaElMessageResult } from '@/lib/council/conversationIntent'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
@@ -321,7 +301,6 @@ import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialC
 import { compactFamilyRosterLine, type CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
 import { createPresentationBuffer } from '@/lib/council/live-orchestration/presentationBuffer'
 import { failureUiLabel } from '@/lib/council/live-orchestration/failureTaxonomy'
-import { consumeTerraContextForDecree } from '@/lib/council/terraContextConsumption'
 import { detectOsSweepIntent } from '@/lib/war-room-sweep/councilIntent'
 import { formatCouncilOsSweepMarkdown } from '@/lib/war-room-sweep/formatCouncilResponse'
 import type { SweepReport } from '@/lib/war-room-sweep/types'
@@ -450,21 +429,11 @@ export type CouncilMessage = {
   analystOperationsPacket?: AnalystOperationsPacket
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
-  scoutSwarm?: ScoutSwarmPublicMeta
-  /** Nebula RoundHealth projection (Inspector/diagnostics) — never a substitute for the visible
-   * conversation content; failures live here, not as raw SYSTEM report cards. */
-  roundHealth?: NebulaRoundHealth
   councilStage?: import('@/lib/council/session-orchestration').CouncilMessageStage
   commanderTurnId?: string | null
   deliberationRoundId?: string | null
-  /** Logical decree identity, also stored on restored responses whose full progress snapshot
-   * is not persisted. Never infer this from the newest decree when restoring history. */
-  roundRequestId?: string | null
   shadowCouncilAssembly?: CouncilShadowSelectionReport
   councilProgress?: CouncilProgressRuntimeSnapshot
-  streaming?: boolean
-  roleLabel?: string
-  councilRound?: CouncilRound
 }
 
 type CouncilSessionLifecycle = 'active' | 'archived'
@@ -493,20 +462,15 @@ function applyLiveCouncilRenderGate(
   if (message.messageType === 'decree' || message.messageType === 'system') return message
   const family = parseCouncilMessageFamily(message.familyName)
   if (!family || message.messageType !== 'response') {
-    const content = sanitizeMemoryRuntimeText(stripHiddenReasoning(toDisplayText(message.content)))
+    const content = sanitizeMemoryRuntimeText(toDisplayText(message.content))
     return content === toDisplayText(message.content) ? message : { ...message, content }
   }
   if (opts?.stabilityMode) {
-    const content = sanitizeMemoryRuntimeText(stripHiddenReasoning(toDisplayText(message.content)))
+    const content = sanitizeMemoryRuntimeText(toDisplayText(message.content))
     if (content === toDisplayText(message.content) && !message.degraded) return message
     return { ...message, content, degraded: false, integrityStatus: content ? 'COMPLETE' : 'EMPTY' }
   }
-  const presented = presentAgentMessage({
-    agentId: nebulaAgentForSeat(family)?.id ?? null,
-    speaker: message.familyName,
-    raw: message.content,
-  })
-  const gate = applyCouncilRenderGate(family, presented.prose, {
+  const gate = applyCouncilRenderGate(family, message.content, {
     decreeText: opts?.decreeText,
     promptIntent: opts?.promptIntent,
     stabilityMode: opts?.stabilityMode,
@@ -644,7 +608,7 @@ function cloudEngineIdForCouncilFamily(f: CouncilOrchestrationFamily): EngineId 
   if (f === 'claude' || f === 'red_team') return 'claude'
   if (f === 'grok') return 'grok'
   if (f === 'gemini') return 'gemini'
-  if (f === 'nova') return null
+  if (f === 'kimi') return 'kimi'
   return null
 }
 
@@ -656,7 +620,7 @@ function familyFromContinuationDirective(text: string): CouncilOrchestrationFami
   if (/\bgemini\b|\bgoogle\b/.test(t)) return 'gemini'
   if (/\bred\s*team\b|\bredteam\b/.test(t)) return 'red_team'
   if (/\bbaby\b|\bobserver\b/.test(t)) return 'baby'
-  if (/\bnova\b/.test(t)) return 'nova'
+  if (/\bkimi\b|\bmoonshot\b/.test(t)) return 'kimi'
   if (/\bbridge(?:\s*architect)?\b/.test(t)) return 'bridge_architect'
   return null
 }
@@ -713,9 +677,6 @@ function mapWarRoomRowToCouncilMessage(
 ): CouncilMessage {
   const ts = row.created_at ? new Date(row.created_at).toLocaleTimeString() : '--:--'
   const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : undefined
-  const roundRequestId = typeof meta?.roundRequestId === 'string' && meta.roundRequestId.trim()
-    ? meta.roundRequestId.trim()
-    : null
   const persistedStage = meta ? stageFromPersistedMetadata(meta) : undefined
   if (row.role === 'user') {
     return {
@@ -727,7 +688,6 @@ function mapWarRoomRowToCouncilMessage(
       icon: '⚔',
       provider: '',
       messageType: 'decree',
-      roundRequestId,
       councilStage: persistedStage && persistedStage !== 'LEGACY' ? persistedStage : 'COMMANDER',
     }
   }
@@ -741,7 +701,6 @@ function mapWarRoomRowToCouncilMessage(
       icon: '⚙',
       provider: '',
       messageType: 'system',
-      roundRequestId,
     }
   }
   const fam = (row.family && row.family.trim()) || 'Council'
@@ -754,7 +713,6 @@ function mapWarRoomRowToCouncilMessage(
     icon: '•',
     provider: '',
     messageType: 'response',
-    roundRequestId,
     councilStage: persistedStage && persistedStage !== 'LEGACY' ? persistedStage : 'LEGACY',
   }
   return applyLiveCouncilRenderGate(base, opts)
@@ -832,8 +790,8 @@ function buildRecallPreview(args: {
 }
 
 type ToneMode = 'casual' | 'build' | 'business' | 'debate' | 'reflection'
-type TypingFamily = 'CHATGPT FAMILY' | 'CLAUDE FAMILY' | 'GROK FAMILY' | 'GEMINI FAMILY' | 'NOVA FAMILY' | 'BRIDGE ARCHITECT'
-type UsageFamily = 'Claude Family' | 'ChatGPT Family' | 'Nova Council' | 'Grok Family' | 'Gemini Family'
+type TypingFamily = 'CHATGPT FAMILY' | 'CLAUDE FAMILY' | 'GROK FAMILY' | 'GEMINI FAMILY' | 'KIMI FAMILY' | 'BRIDGE ARCHITECT'
+type UsageFamily = 'Claude Family' | 'ChatGPT Family' | 'Kimi Family' | 'Grok Family' | 'Gemini Family'
 type CouncilMode = 'continue' | 'expanded' | 'summarize'
 type ContinuationDecision = 'allow' | 'summarize' | 'hold' | 'deny'
 
@@ -862,13 +820,6 @@ type ExpansionPrompt = {
   extraCost: number
   reason: string
   urgent: boolean
-  /** True only when the resolved Council routing mode won't call a metered cloud provider for this
-   * decree (LOCAL_ONLY/LOCAL_FIRST/HYBRID — anything but EXTERNAL_ONLY). `extraCost` is a static
-   * mock cloud-pricing estimate (see MOCK_RATES_PER_MILLION) with no connection to actual routing,
-   * so presenting it as real spend when the seats are really resolving to local Ollama is
-   * misleading. Defaults to false (show the existing cost estimate) until routing status is known,
-   * so this only ever suppresses the dollar figure on positive evidence, never by assumption. */
-  isLocalOnlyExecution: boolean
 }
 
 type MemoryEntry = {
@@ -923,7 +874,7 @@ type RaelActionStatus = 'pending' | 'answered' | 'expired'
 type RaelActionUrgency = 'low' | 'medium' | 'high'
 type RepoScanStatus = 'idle' | 'scanning' | 'indexed' | 'error'
 type ProviderConnectionStatus = 'online' | 'standby' | 'error' | 'not_connected'
-type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'redteam'
+type ProviderFamilyKey = 'claude' | 'chatgpt' | 'grok' | 'gemini' | 'kimi' | 'redteam'
 
 type RaelActionItem = {
   action_id: string
@@ -1095,7 +1046,7 @@ const FAMILY_META: Record<TypingFamily, { color: string; icon: string }> = {
   'CHATGPT FAMILY': { color: '#34D399', icon: '🧠' },
   'CLAUDE FAMILY': { color: '#A78BFA', icon: '🔮' },
   'GEMINI FAMILY': { color: '#38BDF8', icon: '◇' },
-  'NOVA FAMILY': { color: '#60A5FA', icon: '◎' },
+  'KIMI FAMILY': { color: '#60A5FA', icon: '◎' },
   'BRIDGE ARCHITECT': { color: '#C084FC', icon: '⎈' },
 }
 
@@ -1165,6 +1116,7 @@ const INITIAL_PROVIDER_HEALTH: ProviderHealthState = {
     chatgpt: 'not_connected',
     grok: 'not_connected',
     gemini: 'not_connected',
+    kimi: 'not_connected',
     redteam: 'standby',
   },
   labels: {
@@ -1172,6 +1124,7 @@ const INITIAL_PROVIDER_HEALTH: ProviderHealthState = {
     chatgpt: 'OpenAI · ChatGPT · checking',
     grok: 'xAI · Grok · checking',
     gemini: 'Google · Gemini · not connected',
+    kimi: 'Moonshot · Kimi · checking',
     redteam: 'War Room · Red Team · standby',
   },
 }
@@ -1304,7 +1257,7 @@ const INITIAL_DEPLOY_STATUS: DeployStatusResponse = {
 const BASE_USAGE_ROWS: UsageEstimate[] = [
   { familyName: 'Claude Family', provider: 'Anthropic', model: 'claude-sonnet-4-20250514', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
   { familyName: 'ChatGPT Family', provider: 'OpenAI', model: 'gpt-4o', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
-  { familyName: 'Nova Council', provider: 'Local', model: 'shared local Ollama brain', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
+  { familyName: 'Kimi Family', provider: 'Moonshot', model: 'not configured', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: false },
   { familyName: 'Grok Family', provider: 'xAI', model: 'grok', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
   { familyName: 'Gemini Family', provider: 'Google', model: 'gemini (engine probe)', inputTokens: 0, outputTokens: 0, estimatedCost: 0, active: true },
 ]
@@ -1323,8 +1276,8 @@ const FAMILY_NODE_GROUPS: FamilyNodeGroup[] = [
     nodes: ['Architecture', 'Governance', 'Security', 'Logic', 'Documentation'].map(name => ({ name, status: 'idle', task: 'standing by' })),
   },
   {
-    familyName: 'Nova Council',
-    presenceKey: 'NOVA FAMILY',
+    familyName: 'Kimi Family',
+    presenceKey: 'KIMI FAMILY',
     color: '#60A5FA',
     nodes: ['Task Tree', 'Dependency', 'Parallelization', 'Operations', 'Sequencing'].map(name => ({ name, status: 'idle', task: 'standing by' })),
   },
@@ -1350,7 +1303,7 @@ const FAMILY_NODE_GROUPS: FamilyNodeGroup[] = [
 const MOCK_RATES_PER_MILLION: Record<UsageFamily, { input: number; output: number }> = {
   'Claude Family': { input: 3, output: 15 },
   'ChatGPT Family': { input: 2.5, output: 10 },
-  'Nova Council': { input: 0, output: 0 },
+  'Kimi Family': { input: 0, output: 0 },
   'Grok Family': { input: 0, output: 0 },
   'Gemini Family': { input: 2, output: 8 },
 }
@@ -1472,7 +1425,7 @@ function totalUsageCost(rows: UsageEstimate[]) {
   return rows.reduce((total, row) => total + row.estimatedCost, 0)
 }
 
-function detectExpansionNeed(message: string): Omit<ExpansionPrompt, 'decree' | 'isLocalOnlyExecution'> | null {
+function detectExpansionNeed(message: string): Omit<ExpansionPrompt, 'decree'> | null {
   const text = message.toLowerCase()
 
   if (/\b(legal|lawsuit|medical|tax|financial risk|urgent|emergency|security breach|compliance)\b/.test(text)) {
@@ -1522,21 +1475,6 @@ function councilOperationProviderStatus(message: CouncilMessage): string | null 
 
 export function councilOperationGroupKey(message: CouncilMessage, messages: readonly CouncilMessage[]): string | null {
   if (message.projectOrchestrationPacket) return `project:${message.projectOrchestrationPacket.id}`
-  const isGroupableType = message.messageType === 'response' || message.messageType === 'system'
-  // Explicit round identity: the decree that started this round stamps `roundRequestId`, and the
-  // server echoes the same `councilLogicalRequestId` back on every response/system message it
-  // produces for that round (`councilProgress.logicalRequestId`). When a response carries this id,
-  // match it ONLY to the decree with the same id — never to "whichever decree is nearest" — so a
-  // late/superseded-round response can never visually attach to a newer decree header (GitHub #42).
-  const explicitRoundId = isGroupableType ? (message.councilProgress?.logicalRequestId ?? message.roundRequestId ?? null) : null
-  if (explicitRoundId) {
-    const owningDecree = messages.find(item => item.messageType === 'decree' && item.roundRequestId === explicitRoundId)
-    // No decree carries this id (e.g. pre-fix legacy data was stamped without one) — fail closed:
-    // keep the message in its own isolated group rather than guessing which decree it belongs to.
-    const turnKey = owningDecree ? `turn:${owningDecree.id}` : `orphan:${message.id}`
-    if (message.familyDeliberationTurn?.session_id) return `deliberation:${message.familyDeliberationTurn.session_id}:${turnKey}`
-    return turnKey
-  }
   const messageIndex = messages.findIndex(item => item.id === message.id)
   const priorMessages = messageIndex >= 0 ? messages.slice(0, messageIndex + 1) : messages
   const nearestDecree = [...priorMessages].reverse().find(item => item.messageType === 'decree')
@@ -1548,7 +1486,7 @@ export function councilOperationGroupKey(message: CouncilMessage, messages: read
   // Combining it with the turn key keeps deliberation exchanges scoped to their own round while
   // still distinguishing them from ordinary single-response turns within that same round.
   if (message.familyDeliberationTurn?.session_id) return `deliberation:${message.familyDeliberationTurn.session_id}:${turnKey}`
-  if (!isGroupableType) return null
+  if (message.messageType !== 'response' && message.messageType !== 'system') return null
   return turnKey
 }
 
@@ -2005,9 +1943,7 @@ const MessageBubble = memo(function MessageBubble({
               {stageLabel(msg.familyDeliberationTurn ? stageFromDeliberationRole(msg.familyDeliberationTurn.turn_role) : (msg.councilStage ?? 'LEGACY'))}
             </span>
           ) : null}
-          {msg.streaming ? (
-            <span className="text-[10px] uppercase tracking-widest" style={{ color: '#86EFAC' }}>streaming</span>
-          ) : null}
+          {msg.provider && <span className="text-xs" style={{ color: '#444' }}>{msg.provider}</span>}
           <span className="text-xs" style={{ color: '#333' }}>{msg.timestamp}</span>
           <span className="text-xs px-1 rounded" style={{ color: '#555', background: '#111' }}>{msg.messageType}</span>
           {(msg.messageType === 'response' || msg.messageType === 'decree') && msg.content.trim() ? (
@@ -2030,7 +1966,7 @@ const MessageBubble = memo(function MessageBubble({
             borderLeft: isRael ? 'none' : `2px solid ${msg.color}`,
             borderRight: isRael ? `2px solid ${msg.color}` : 'none',
           }}>
-          {msg.content}{msg.streaming ? <span className="ml-0.5 animate-pulse" aria-hidden>▍</span> : null}
+          {msg.content}
         </div>
         {!isRael && showOperationTimeline && operationTimelineInputs.length ? (
           <details className="mt-2 w-full max-w-2xl rounded border border-emerald-900/30" style={{ background: 'rgba(0,0,0,0.18)' }}>
@@ -2067,8 +2003,6 @@ const MessageBubble = memo(function MessageBubble({
             </summary>
             <div className="mt-2 grid gap-1 normal-case tracking-normal text-slate-300">
               <div>turn_id: {msg.familyDeliberationTurn.turn_id}</div>
-              <div>identity: {msg.familyDeliberationTurn.agent_identity ?? 'n/a'}</div>
-              <div>backend: {msg.familyDeliberationTurn.backend_type ?? 'n/a'} · {msg.familyDeliberationTurn.backend_runtime ?? msg.familyDeliberationTurn.backend_provider ?? 'n/a'} · {msg.familyDeliberationTurn.provider_model ?? 'n/a'}</div>
               <div>turn_role: {msg.familyDeliberationTurn.turn_role}</div>
               <div>speaking_order: {msg.familyDeliberationTurn.speaking_order}</div>
               <div>input_message_ids: {msg.familyDeliberationTurn.input_message_ids.join(', ') || 'none'}</div>
@@ -2076,11 +2010,6 @@ const MessageBubble = memo(function MessageBubble({
               <div>revision_of_message_id: {msg.familyDeliberationTurn.revision_of_message_id ?? 'none'}</div>
               <div>completion_status: {msg.familyDeliberationTurn.completion_status}</div>
               <div>confidence: {msg.familyDeliberationTurn.confidence == null ? 'unresolved' : `${Math.round(msg.familyDeliberationTurn.confidence * 100)}%`}</div>
-              {msg.scoutSwarm ? (
-                <div>
-                  SCOUTS {msg.scoutSwarm.scoutsActive ? 'ACTIVE' : 'DONE'} · {msg.scoutSwarm.totalScouts} · phase {msg.scoutSwarm.phase} · frozen {msg.scoutSwarm.independentReportsFrozen} · cross-review {msg.scoutSwarm.crossReviewStarted ? 'started' : 'pending'} · evidence {msg.scoutSwarm.evidenceCount}
-                </div>
-              ) : null}
               {msg.familyDeliberationEvidenceReferences?.length ? (
                 <div className="mt-2">
                   <div className="font-bold text-emerald-200">source references</div>
@@ -4514,11 +4443,11 @@ function FamilyPresencePanel({
   geminiEngine: EngineStatus | null
 }) {
   const coreFamilies = [
-    { name: 'AURORA', role: 'orchestration/synthesis', color: '#34D399' },
-    { name: 'ORION', role: 'architecture/systems reasoning', color: '#A78BFA' },
-    { name: 'PULSAR', role: 'realtime radar, signal detection, X/web intelligence, current-event monitoring', color: '#F97316' },
+    { name: 'ChatGPT Family', role: 'orchestration/synthesis', color: '#34D399' },
+    { name: 'Claude Family', role: 'architecture/systems reasoning', color: '#A78BFA' },
+    { name: 'Grok Family', role: 'realtime radar, signal detection, X/web intelligence, current-event monitoring', color: '#F97316' },
     {
-      name: 'LUMEN',
+      name: 'Gemini Family',
       role: 'large-context analysis, document synthesis, multimodal interpretation, research assist (when engine-control reports functional)',
       color: '#38BDF8',
     },
@@ -4695,13 +4624,13 @@ function BabyAiObserverPanel({
   opportunities: IncomeOpportunity[]
 }) {
   const familyContributions = [
-    { family: 'ORION', skill: 'architecture, governance, systems thinking', color: '#A78BFA' },
-    { family: 'AURORA', skill: 'strategy, synthesis, communication', color: '#34D399' },
-    { family: 'NOVA', skill: 'decomposition, task sequencing, execution planning', color: '#60A5FA' },
-    { family: 'PULSAR', skill: 'realtime signal awareness', color: '#F97316' },
-    { family: 'LUMEN', skill: 'reasoning, synthesis, multimodal interpretation, research assist, large-context analysis', color: '#38BDF8' },
+    { family: 'Claude Family', skill: 'architecture, governance, systems thinking', color: '#A78BFA' },
+    { family: 'ChatGPT Family', skill: 'strategy, synthesis, communication', color: '#34D399' },
+    { family: 'Kimi Family', skill: 'decomposition, task sequencing, execution planning', color: '#60A5FA' },
+    { family: 'Grok Family', skill: 'realtime signal awareness', color: '#F97316' },
+    { family: 'Gemini Family', skill: 'reasoning, synthesis, multimodal interpretation, research assist, large-context analysis', color: '#38BDF8' },
     { family: 'Codex Agent', skill: 'coding, build, deployment awareness', color: '#FFD700' },
-    { family: 'PHOENIX', skill: 'risk detection, contradiction checking', color: '#EF4444' },
+    { family: 'Red Team', skill: 'risk detection, contradiction checking', color: '#EF4444' },
     { family: 'Archivist / Memory', skill: 'continuity and pattern memory', color: '#38BDF8' },
   ]
   const hardRules = [
@@ -4811,11 +4740,11 @@ function BabyAiObserverPanel({
 
 
 const CLOUD_AGENT_FAMILIES = [
-  { family: 'AURORA', provider: 'OpenAI', role: 'Strategy synthesis, orchestration, and response framing.', status: 'Cloud API provider' },
-  { family: 'ORION', provider: 'Anthropic', role: 'Architecture review, invariants, and implementation risk.', status: 'Architecture reviewer' },
-  { family: 'PULSAR', provider: 'xAI', role: 'Signal triage, contradictions, and opportunity framing.', status: 'Cloud API provider' },
-  { family: 'LUMEN', provider: 'Google', role: 'Long-context reasoning, synthesis, and research support.', status: 'Cloud API provider' },
-  { family: 'PHOENIX', provider: 'Anthropic', role: 'Adversarial risk review and approval-boundary challenge.', status: 'Risk reviewer' },
+  { family: 'ChatGPT Family', provider: 'OpenAI', role: 'Strategy synthesis, orchestration, and response framing.', status: 'Cloud API provider' },
+  { family: 'Claude Family', provider: 'Anthropic', role: 'Architecture review, invariants, and implementation risk.', status: 'Architecture reviewer' },
+  { family: 'Grok Family', provider: 'xAI', role: 'Signal triage, contradictions, and opportunity framing.', status: 'Cloud API provider' },
+  { family: 'Gemini Family', provider: 'Google', role: 'Long-context reasoning, synthesis, and research support.', status: 'Cloud API provider' },
+  { family: 'Red Team', provider: 'Anthropic', role: 'Adversarial risk review and approval-boundary challenge.', status: 'Risk reviewer' },
 ]
 
 const PROVIDER_CONFIGURATION_ITEMS = [
@@ -5944,9 +5873,7 @@ function ExpansionPermissionPrompt({
         </div>
       )}
       <div className="text-xs tracking-widest" style={{ color: '#ddd' }}>
-        {prompt.isLocalOnlyExecution
-          ? <>Council requests expanded analysis using local compute — no metered cost. Reason: {prompt.reason}. Continue?</>
-          : <>Council requests expanded analysis. Estimated extra usage: {formatCost(prompt.extraCost)}. Reason: {prompt.reason}. Continue?</>}
+        Council requests expanded analysis. Estimated extra usage: {formatCost(prompt.extraCost)}. Reason: {prompt.reason}. Continue?
       </div>
       <div className="flex flex-wrap gap-2 mt-3">
         <button onClick={onApprove} className="text-xs px-3 py-1 rounded tracking-widest"
@@ -6114,18 +6041,8 @@ function Home() {
   }
 
   const [loading, setLoading] = useState(false)
-  /** Bumps when a new decree round starts so the wait-limit timer resets on supersession
-   * even if `loading` stays true across the handoff. */
-  const [composerRoundToken, setComposerRoundToken] = useState(0)
   const [typingFamily, setTypingFamily] = useState<TypingFamily | null>(null)
   const [floorStream, setFloorStream] = useState<{ family: string; text: string; status: string } | null>(null)
-  const [nebulaRoundShell, setNebulaRoundShell] = useState<{
-    roundId: string
-    status: string
-    agents: string[]
-    streamingAgent: string | null
-    streamingText: string
-  } | null>(null)
   const [toolBarHealth, setToolBarHealth] = useState(initialToolBarHealth)
   const [toolBarActivity, setToolBarActivity] = useState<Partial<Record<ToolId, ToolBarLabel>>>({})
   const [operatorTab, setOperatorTab] = useState<OperatorTab>('command')
@@ -6259,7 +6176,7 @@ function Home() {
     'CLAUDE FAMILY': { status: 'idle', label: 'standby' },
     'GROK FAMILY': { status: 'idle', label: 'standby' },
     'GEMINI FAMILY': { status: 'idle', label: 'standby' },
-    'NOVA FAMILY': { status: 'idle', label: 'standby' },
+    'KIMI FAMILY': { status: 'idle', label: 'standby' },
     'BRIDGE ARCHITECT': { status: 'idle', label: 'standby' },
   })
   const [, setToolRequestActive] = useState(false)
@@ -6268,26 +6185,7 @@ function Home() {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const addSystemMessageRef = useRef<((content: string) => void) | null>(null)
   const submitDecreeRef = useRef<((decree: string, mode?: CouncilMode) => Promise<void>) | null>(null)
-  // terraCouncilContextRef is a continuously live-mirrored view of the current Terra selection —
-  // GodsEyeCommandCenter's TerraCouncilContextBridge re-writes it whenever ANY of its own
-  // dependencies changes, including layerCoverage, which an unrelated periodic background fetch
-  // refreshes independent of any decree submission. terraContextConsumedSignatureRef tracks what
-  // was last actually attached to a decree; consumeTerraContextForDecree compares the two instead
-  // of clearing the live ref, so it survives the background mirror re-writing the *same* text
-  // between decrees (confirmed live: a plain clear-on-read design still leaked a stale Terra pin
-  // into an unrelated "7 + 6" follow-up, because the mirror rewrote it back in before that second
-  // decree was submitted).
   const terraCouncilContextRef = useRef<string | null>(null)
-  const terraContextConsumedSignatureRef = useRef<string | null>(null)
-  // Stable identity (no deps) so GodsEyeCommandCenter's internal effect only re-fires when one of
-  // its own real dependencies changes, not on every one of this component's own re-renders — an
-  // inline arrow here previously got a new identity every render, causing extra needless re-fires.
-  const handleTerraContextChange = useCallback((context: string | null) => {
-    terraCouncilContextRef.current = context
-  }, [])
-  /** See the backend-status fetch effect below — null/unset means unknown (treated as "not
-   * confirmed local-only", so the expanded-analysis cost estimate still shows by default). */
-  const councilRoutingLocalOnlyRef = useRef<boolean | null>(null)
   const loadMemoriesRef = useRef<(() => Promise<void>) | null>(null)
   const lastDecreeIntentRef = useRef<ClassifyRaElMessageResult | null>(null)
   const decreeRoundGenRef = useRef(0)
@@ -6329,7 +6227,6 @@ function Home() {
   const [councilSessionSearch, setCouncilSessionSearch] = useState('')
   const [councilSessionNavOpen, setCouncilSessionNavOpen] = useState(true)
   const [councilInspectorOpen, setCouncilInspectorOpen] = useState(false)
-  const [sessionIntelligence, setSessionIntelligence] = useState<CouncilSessionIntelligenceV1 | null>(null)
   const [liveCouncilLoadState, setLiveCouncilLoadState] = useState<'restoring' | 'ready' | 'session_only' | 'error'>('restoring')
   const [liveRoomWorkspace, setLiveRoomWorkspace] = useState<'council' | 'expanded_intel'>('council')
   /**
@@ -6356,7 +6253,7 @@ function Home() {
   const [recoveredRedTeamHold, setRecoveredRedTeamHold] = useState<RedTeamHoldUnresolvedPayload | null>(null)
   const [incomeOperationsMode, setIncomeOperationsMode] = useState(false)
   const [participationToggles, setParticipationToggles] = useState<CouncilParticipationToggles>({
-    includeNova: false,
+    includeKimi: false,
     includeRedTeam: false,
     includeBaby: false,
     includeBridgeArchitect: false,
@@ -6411,19 +6308,6 @@ function Home() {
       .then(j => {
         const parsed = parseCouncilFlowMode((j as { defaultMode?: string } | null)?.defaultMode)
         if (parsed) setCouncilFlowMode(parsed)
-      })
-      .catch(() => undefined)
-  }, [])
-  // Whether the resolved Council routing mode will actually call a metered cloud provider —
-  // read once from the same canonical backend-status snapshot the Inspector uses, so the
-  // expanded-analysis approval gate can stop presenting a fabricated cloud dollar cost when the
-  // real seats resolve to local Ollama. Defaults to false (unknown -> keep showing the estimate).
-  useEffect(() => {
-    void fetch('/api/council/backend-status', { cache: 'no-store' })
-      .then(r => (r.ok ? r.json() : null))
-      .then(j => {
-        const mode = (j as { routingModeResolved?: string } | null)?.routingModeResolved
-        if (mode) councilRoutingLocalOnlyRef.current = mode !== 'EXTERNAL_ONLY'
       })
       .catch(() => undefined)
   }, [])
@@ -6568,8 +6452,6 @@ function Home() {
   const [councilResearchPhase, setCouncilResearchPhase] = useState<ResearchStatus | null>(null)
   const [councilResearchFailed, setCouncilResearchFailed] = useState(false)
   const pendingCouncilResearchContextRef = useRef<CouncilStoryContext | null>(null)
-  const pendingSearchHandoffRef = useRef<SearchCouncilHandoffPayload | null>(null)
-  const pendingTerraHandoffRef = useRef<TerraCouncilHandoffPayload | null>(null)
   const [commanderLocation, setCommanderLocation] = useState<CommanderLocationState>(DEFAULT_COMMANDER_LOCATION)
   const [horoscopeEnabled, setHoroscopeEnabled] = useState(false)
   const [astrologyMode, setAstrologyMode] = useState<AstrologyInterpretationMode>('spiritual')
@@ -6954,23 +6836,11 @@ function Home() {
           : null
         if (id && !convs.some(c => c.id === id)) id = null
         if (!id) {
-          const cre = await fetch('/api/conversations', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-            title: 'New Council Session',
-              metadata: { council: { source: 'live_council', incomeOperationsMode: false } },
-            }),
-          })
-          if (!cre.ok) {
-            setLiveCouncilLoadState('error')
-            return
-          }
-          const cj = await cre.json() as { conversation?: { id: string } }
-          id = cj.conversation?.id ?? null
-        }
-        if (!id) {
-          setLiveCouncilLoadState('error')
+          // No persisted conversation to resume — do not create one just from opening the page.
+          // postLiveCouncilMessage() lazily creates the conversation row the moment there's an
+          // actual message worth keeping (a Ra'el decree or a successful council response), so a
+          // page load or a fresh tab never leaves behind an empty "New Council Session" row.
+          setLiveCouncilLoadState('ready')
           return
         }
         if (!isCurrentRestore()) return
@@ -7004,7 +6874,7 @@ function Home() {
         } | undefined
         if (cmeta?.incomeOperationsMode !== undefined) setIncomeOperationsMode(Boolean(cmeta.incomeOperationsMode))
         if (cmeta?.participation && typeof cmeta.participation === 'object') {
-          setParticipationToggles(p => ({ ...p, ...migrateParticipationToggles(cmeta.participation) }))
+          setParticipationToggles(p => ({ ...p, ...cmeta.participation }))
         }
         if (cmeta?.duty && typeof cmeta.duty === 'object') {
           setFamilyDuty(prev => ({ ...prev, ...cmeta.duty }))
@@ -7019,15 +6889,6 @@ function Home() {
           sessionStorage.setItem(GEMINI_REPAIR_ENQUEUE_METADATA_KEY, '1')
         }
         const rows = Array.isArray(tj.messages) ? tj.messages : []
-        const mountHydratedSi = rebuildIntelligenceFromMessages({
-          conversationId: id,
-          messages: rows,
-          fallbackMetadata: tj.conversation?.metadata,
-        }) ?? hydrateSessionIntelligenceFromConversation({
-          conversationId: id,
-          metadata: tj.conversation?.metadata,
-        })
-        setSessionIntelligence(mountHydratedSi?.intelligence ?? null)
         if (rows.length > 0) {
           // Same decree/promptIntent context applyCouncilThreadHygiene derives for live
           // rendering — without it, applyLiveCouncilRenderGate has no basis to relax integrity
@@ -7297,9 +7158,7 @@ function Home() {
 
   useEffect(() => {
     if (!loading) return
-    const roundAtStart = decreeRoundGenRef.current
     const timeoutId = window.setTimeout(() => {
-      if (decreeRoundGenRef.current !== roundAtStart) return
       abortControllerRef.current?.abort()
       abortControllerRef.current = null
       setTypingFamily(null)
@@ -7308,7 +7167,7 @@ function Home() {
       setLoading(false)
     }, 75_000)
     return () => window.clearTimeout(timeoutId)
-  }, [loading, composerRoundToken, councilDispatch])
+  }, [loading, councilDispatch])
 
   const mergeCouncilConversationMetadata = async (patch: Record<string, unknown>) => {
     if (!liveCouncilConvId || !persistenceAvailable) return
@@ -7394,9 +7253,6 @@ function Home() {
       transientProviderStatus?: boolean
       allowProviderFailureMessage?: boolean
       directInvocationMetadata?: Record<string, unknown>
-      roundRequestId?: string | null
-      /** #17 turn/round intelligence metadata dual-written onto war_room_messages.metadata */
-      messageIntelligence?: Record<string, unknown> | null
     },
   ): Promise<string | null> => {
     if (
@@ -7418,7 +7274,36 @@ function Home() {
       providerRuntime: opts?.providerRuntime,
     })
     if (!shouldPersistCouncilMessage(persistable, councilPersistenceCtx)) return null
-    if (!liveCouncilConvId || !persistenceAvailable) return null
+    if (!persistenceAvailable) return null
+
+    // This is the first thing in the session worth keeping — create the conversation row now
+    // rather than at page-load/mount, so opening the page or starting a fresh tab never leaves
+    // behind an empty "New Council Session" row with no real content.
+    let conversationId = liveCouncilConvId
+    if (!conversationId) {
+      try {
+        const cre = await fetch('/api/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'New Council Session',
+            metadata: { council: { source: 'live_council', incomeOperationsMode } },
+          }),
+        })
+        if (!cre.ok) return null
+        const cj = await cre.json() as { conversation?: { id?: string } }
+        conversationId = typeof cj.conversation?.id === 'string' ? cj.conversation.id : null
+      } catch {
+        conversationId = null
+      }
+      if (!conversationId) return null
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, conversationId)
+      }
+      setLiveCouncilConvId(conversationId)
+      liveCouncilConvIdRef.current = conversationId
+      void refreshCouncilSessionList()
+    }
 
     // Reused across both attempts of the same logical write — lets the server recognize a retry
     // of a write that actually already succeeded (response merely lost in transit) and return the
@@ -7427,7 +7312,7 @@ function Home() {
 
     const attemptPersist = async (): Promise<{ ok: true; id: string | null } | { ok: false }> => {
       try {
-        const res = await fetch(`/api/conversations/${liveCouncilConvId}/messages`, {
+        const res = await fetch(`/api/conversations/${conversationId}/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -7437,11 +7322,9 @@ function Home() {
             metadata: {
               responseSuccessful: opts?.responseSuccessful === true,
               idempotencyKey,
-              ...(opts?.roundRequestId ? { roundRequestId: opts.roundRequestId } : {}),
               ...(opts?.providerRuntime ? { providerRuntime: opts.providerRuntime } : {}),
               ...(opts?.transientProviderStatus ? { transientProviderStatus: true } : {}),
               ...(opts?.directInvocationMetadata ? { directInvocation: opts.directInvocationMetadata } : {}),
-              ...(opts?.messageIntelligence ? opts.messageIntelligence : {}),
             },
           }),
         })
@@ -7781,7 +7664,7 @@ function Home() {
       setPresence('CLAUDE FAMILY', 'idle', 'standby')
       setPresence('GROK FAMILY', 'idle', 'standby')
       setPresence('GEMINI FAMILY', 'idle', 'standby')
-      setPresence('NOVA FAMILY', 'idle', 'standby')
+      setPresence('KIMI FAMILY', 'idle', 'standby')
       setPresence('BRIDGE ARCHITECT', 'idle', 'standby')
       setLoading(false)
     }, TOOL_REQUEST_TIMEOUT_MS)
@@ -7797,7 +7680,7 @@ function Home() {
     setPresence('CLAUDE FAMILY', 'idle', 'standby')
     setPresence('GROK FAMILY', 'idle', 'standby')
     setPresence('GEMINI FAMILY', 'idle', 'standby')
-    setPresence('NOVA FAMILY', 'idle', 'standby')
+    setPresence('KIMI FAMILY', 'idle', 'standby')
     setPresence('BRIDGE ARCHITECT', 'idle', 'standby')
     endToolRequest()
     setLoading(false)
@@ -8669,88 +8552,84 @@ function Home() {
     if (f === 'claude' || f === 'red_team') return 'Claude Family'
     if (f === 'grok') return 'Grok Family'
     if (f === 'gemini') return 'Gemini Family'
-    if (f === 'nova') return 'Nova Council'
+    if (f === 'kimi') return 'Kimi Family'
     return null
   }
 
   const orchestrationVisual = (f: CouncilOrchestrationFamily) => {
     const pk = orchestrationFamilyToTypingFamily(f)
-    const nebulaName = displayNameForSeat(f, f === 'red_team' ? 'PHOENIX' : f === 'baby' ? 'Baby AI' : f === 'bridge_architect' ? 'Bridge Architect' : f)
     if (f === 'red_team') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: nebulaName,
+        bubbleFamilyName: 'RED TEAM',
         colorOverride: '#F87171',
         iconOverride: '⚔',
         provider: 'Red Team · adversarial',
-        thinkingLabel: `${nebulaName} pressure-testing...`,
-        streamingLabel: `${nebulaName} streaming...`,
+        thinkingLabel: 'Red Team pressure-testing...',
+        streamingLabel: 'Red Team streaming...',
       }
     }
     if (f === 'baby') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: nebulaName,
+        bubbleFamilyName: 'BABY AI',
         colorOverride: '#5EEAD4',
         iconOverride: '◔',
         provider: 'Baby AI · observer',
-        thinkingLabel: `${nebulaName} observing...`,
-        streamingLabel: `${nebulaName} streaming...`,
+        thinkingLabel: 'Baby AI observing...',
+        streamingLabel: 'Baby AI streaming...',
       }
     }
-    if (f === 'nova') {
+    if (f === 'kimi') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: nebulaName,
-        provider: 'Local · Ollama',
-        thinkingLabel: `${nebulaName} decomposing...`,
-        streamingLabel: `${nebulaName} streaming...`,
+        bubbleFamilyName: 'Kimi Family',
+        provider: 'Local · Kimi',
+        thinkingLabel: 'Kimi decomposing...',
+        streamingLabel: 'Kimi streaming...',
       }
     }
     if (f === 'bridge_architect') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: nebulaName,
+        bubbleFamilyName: 'Bridge Architect',
         provider: 'Local · bridge',
-        thinkingLabel: `${nebulaName} reasoning...`,
-        streamingLabel: `${nebulaName} streaming...`,
+        thinkingLabel: 'Bridge Architect reasoning...',
+        streamingLabel: 'Bridge Architect streaming...',
       }
     }
     if (f === 'claude') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: nebulaName,
         provider: 'Anthropic · claude-sonnet',
-        thinkingLabel: `${nebulaName} thinking...`,
-        streamingLabel: `${nebulaName} streaming...`,
+        thinkingLabel: 'Claude thinking...',
+        streamingLabel: 'Claude streaming...',
       }
     }
     if (f === 'gemini') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: nebulaName,
+        bubbleFamilyName: 'Gemini Family',
         provider: geminiEngineRow?.probedModelId
           ? `Google · ${geminiEngineRow.probedModelId}`
           : (geminiEngineRow?.providerLabel ?? 'Google Gemini'),
-        thinkingLabel: `${nebulaName} reasoning...`,
-        streamingLabel: `${nebulaName} streaming...`,
+        thinkingLabel: 'Gemini reasoning...',
+        streamingLabel: 'Gemini streaming...',
       }
     }
     if (f === 'grok') {
       return {
         presenceKey: pk,
-        bubbleFamilyName: nebulaName,
         provider: 'xAI · grok',
-        thinkingLabel: `${nebulaName} scanning signals...`,
-        streamingLabel: `${nebulaName} streaming...`,
+        thinkingLabel: 'Grok scanning signals...',
+        streamingLabel: 'Grok streaming...',
       }
     }
     return {
       presenceKey: pk,
-      bubbleFamilyName: nebulaName,
       provider: 'OpenAI · gpt-4o',
-      thinkingLabel: `${nebulaName} analyzing...`,
-      streamingLabel: `${nebulaName} streaming...`,
+      thinkingLabel: 'ChatGPT analyzing...',
+      streamingLabel: 'ChatGPT streaming...',
     }
   }
 
@@ -8761,7 +8640,6 @@ function Home() {
     opts?: {
       councilRevealSource?: 'autonomous' | 'decree'
       autonomousDecreeRoundAtFetch?: number
-      commanderDecreeRoundAtFetch?: number
       transientMessageIds?: string[]
       shadowCouncilAssembly?: CouncilShadowSelectionReport
       councilProgress?: CouncilProgressRuntimeSnapshot
@@ -8792,17 +8670,6 @@ function Home() {
       return false
     }
     const councilRevealSource = opts?.councilRevealSource ?? 'autonomous'
-    if (
-      councilRevealSource === 'decree'
-      && typeof opts?.commanderDecreeRoundAtFetch === 'number'
-      // Reuses the same round-generation comparator as the autonomous-reveal guard below — a
-      // Commander-decree reveal produced by round N must not become visible once round N+1 is
-      // current, exactly like an autonomous reveal must not.
-      && shouldSuppressStaleAutonomousReveal(opts.commanderDecreeRoundAtFetch, decreeRoundGenRef.current)
-    ) {
-      console.warn('[council-session] suppressed_stale_decree_reveal')
-      return false
-    }
     if (councilRevealSource === 'decree' && decreePacketFlushCompleteRef.current) {
       if (process.env.NODE_ENV === 'development') {
         console.debug("[Live Council] Suppressed visible late family reply after packet close.")
@@ -9250,7 +9117,7 @@ function Home() {
       })
       await streamFamilyMessage({
         familyName: 'CHATGPT FAMILY',
-        bubbleFamilyName: displayNameForSeat('chatgpt', 'AURORA'),
+        bubbleFamilyName: 'CHATGPT FAMILY',
         content: report.markdown,
         provider: 'Council Research Team',
         messageId: createMessageId('chatgpt'),
@@ -9318,50 +9185,14 @@ function Home() {
     }
   }
 
-  /** Rotates the decree round and aborts the previous round's controller *before* the new decree
-   * becomes visible, so any in-flight previous-round async result is unambiguously stale (fails
-   * `isCurrentDecreeAsync()`/`nebulaRoundShell.roundId` checks) by the time it could resolve —
-   * closing the race that let a late response attach to a newer decree header (GitHub #42): without
-   * this, `submitDecree` only rotated the round *after* several `await`s in `sendRaelDecree` had
-   * already run with the new decree visible, leaving a window where a still-in-flight previous round
-   * could still pass every staleness check. Call this — and stamp its `roundRequestId` onto the
-   * visible decree via `appendVisibleRaelDecree` — before any such `await`. */
-  const beginDecreeRound = () => {
-    const myRound = ++decreeRoundGenRef.current
-    setComposerRoundToken(myRound)
-    const previousDecreeController = abortControllerRef.current
-    if (previousDecreeController && !previousDecreeController.signal.aborted) {
-      previousDecreeController.abort()
-    }
-    const controller = new AbortController()
-    abortControllerRef.current = controller
-    const roundRequestId = createMessageId('council-logical-request')
-    return { myRound, controller, roundRequestId }
-  }
-
-  const submitDecree = async (
-    decree: string,
-    mode?: CouncilMode,
-    preEstablishedRound?: { myRound: number; controller: AbortController; roundRequestId: string },
-  ) => {
-    if (preEstablishedRound && (
-      preEstablishedRound.controller.signal.aborted
-      || preEstablishedRound.myRound !== decreeRoundGenRef.current
-    )) return
-    // One-turn scoped: attaches this Terra selection to THIS decree only, and only if it hasn't
-    // already been attached to a prior decree — see consumeTerraContextForDecree for why a
-    // signature comparison, not a clear-on-read, is required (Build #4 readiness audit finding,
-    // then a real live-tested regression: the ref was read but never cleared/tracked at all
-    // originally, then a naive clear still leaked because a background mirror kept rewriting it).
-    // Read before any other logic in this function can return early.
-    const terraContextForThisRound = consumeTerraContextForDecree(terraCouncilContextRef, terraContextConsumedSignatureRef, mode)
-    if (terraContextForThisRound) {
-      decree = `${decree}\n\n[CURRENT TERRA CONTEXT — live globe selection; preserve provenance and do not infer missing facts]\n${terraContextForThisRound}`
+  const submitDecree = async (decree: string, mode?: CouncilMode) => {
+    const terraContext = terraCouncilContextRef.current
+    if (mode !== 'continue' && terraContext) {
+      decree = `${decree}\n\n[CURRENT TERRA CONTEXT — live globe selection; preserve provenance and do not infer missing facts]\n${terraContext}`
     }
     let decreeCompletedOk = false
     let decreeMatrixFailed = false
-    const myRound = preEstablishedRound?.myRound ?? ++decreeRoundGenRef.current
-    if (!preEstablishedRound) setComposerRoundToken(myRound)
+    const myRound = ++decreeRoundGenRef.current
     latestDecreeAttemptRoundRef.current = myRound
     orchRedTeamEarlyLatchRef.current = false
     lastAutonomousResearchFamilyRef.current = null
@@ -9372,23 +9203,8 @@ function Home() {
       return
     }
 
-    // A new Commander decree supersedes whatever the previous decree's controller was still doing
-    // — abort it so its in-flight HTTP/stream calls unwind instead of resolving later and racing
-    // this decree's own state commits (see isCurrentDecreeAsync()/decreeRoundGenRef below, which
-    // reject any such late result even if the abort itself doesn't land in time). When
-    // `preEstablishedRound` is set, `beginDecreeRound` already did this before the decree became
-    // visible — reuse its controller rather than rotating a second time.
-    let controller: AbortController
-    if (preEstablishedRound) {
-      controller = preEstablishedRound.controller
-    } else {
-      const previousDecreeController = abortControllerRef.current
-      if (previousDecreeController && !previousDecreeController.signal.aborted) {
-        previousDecreeController.abort()
-      }
-      controller = new AbortController()
-      abortControllerRef.current = controller
-    }
+    const controller = new AbortController()
+    abortControllerRef.current = controller
     const expectedCouncilSessionId = councilSnapRef.current.sessionId
     const expectedConversationId = liveCouncilConvIdRef.current
     const isCurrentDecreeAsync = () =>
@@ -9423,21 +9239,12 @@ function Home() {
     const toneMode = detectToneMode(decree)
     const outputModeInstruction = buildCouncilOutputModeInstruction(councilOutputMode)
     const intent = lastDecreeIntentRef.current ?? classifyRaElMessage(decree)
-    const classifiedTurnForSubmit = classifyCouncilTurn(decree)
     const teamResearchIntent = detectCouncilResearchIntent(decree, {
       forceTeamResearch: Boolean(pendingCouncilResearchContextRef.current),
     })
-    // Group and STATUS_CHECK stay on the local Nebula round. "current runtime health"
-    // must not be intercepted as Council Research Team (bare "current" is a live-retrieval false positive).
-    const keepLocalNebulaRound =
-      classifiedTurnForSubmit.intent === 'STATUS_CHECK'
-      || (councilFlowMode === 'stable_group' && !pendingCouncilResearchContextRef.current)
-      || Boolean(pendingSearchHandoffRef.current)
-      || Boolean(pendingTerraHandoffRef.current)
     if (
       mode !== 'continue'
       && teamResearchIntent.triggered
-      && !keepLocalNebulaRound
       && !detectOsSweepIntent(decree)
       && resolveEconomicOpsRouting(decree).mode !== 'economic_ops'
     ) {
@@ -9452,7 +9259,7 @@ function Home() {
       }
       return
     }
-    const decreeRequiresLiveRetrieval = !keepLocalNebulaRound && detectResearchIntent(decree).shouldResearch
+    const decreeRequiresLiveRetrieval = detectResearchIntent(decree).shouldResearch
     if (mode !== 'continue' && decreeRequiresLiveRetrieval) {
       setLiveResearchHud({
         mode: 'active',
@@ -9470,7 +9277,7 @@ function Home() {
     }
 
     const rosterLabel = (fid: CouncilOrchestrationFamily) =>
-      displayNameForSeat(fid, COUNCIL_ROSTER.find(r => r.id === fid)?.label ?? fid)
+      COUNCIL_ROSTER.find(r => r.id === fid)?.label ?? fid
 
     const logCouncilStreamDiagnostic = (label: string, payload: Record<string, unknown>) => {
       if (process.env.NODE_ENV !== 'development') return
@@ -9535,12 +9342,7 @@ function Home() {
           setIncrementalCouncilCompletedInputs([])
         }
         const streamed = await postIncrementalCouncilChat({
-          body: {
-            ...body,
-            councilGatherPhase: 'decree_soft',
-            ...(pendingSearchHandoffRef.current ? { searchHandoff: pendingSearchHandoffRef.current } : {}),
-            ...(pendingTerraHandoffRef.current ? { terraHandoff: pendingTerraHandoffRef.current } : {}),
-          },
+          body: { ...body, councilGatherPhase: 'decree_soft' },
           signal: merged.signal,
           fallback: 'final_snapshot_before_execution_only',
           callbacks: {
@@ -9886,8 +9688,7 @@ function Home() {
       if (skipGeminiForSessionRef.current) order = order.filter(f => f !== 'gemini')
       const applyHealthyRoster = (families: CouncilOrchestrationFamily[]) =>
         families.filter(family => {
-          if (family === 'gemini' && skipGeminiForSessionRef.current && councilFlowModeEffective !== 'stable_group') return false
-          if (councilFlowModeEffective === 'stable_group') return true
+          if (family === 'gemini' && skipGeminiForSessionRef.current) return false
           const row = councilRoster?.families[family]
           if (!row) return family === 'chatgpt' || family === 'gemini'
           return row.floorEligible
@@ -9913,7 +9714,7 @@ function Home() {
       const orderForGather = applyHealthyRoster(
         diagnosticSequential ? buildDefaultDiagnosticOrder(directedOrder) : directedOrder,
       )
-      const councilLogicalRequestId = preEstablishedRound?.roundRequestId ?? createMessageId('council-logical-request')
+      const councilLogicalRequestId = createMessageId('council-logical-request')
       decreeSubmitFaultAnchor = orderForGather[0] ?? directedOrder[0]
       const decreeTopicLockPreview = deriveTopicScopeLock(decree, undefined, {
         allowBusinessTopicsFromIntent: councilIntentState.intent === 'business_ops',
@@ -9997,7 +9798,6 @@ function Home() {
           applyAttendanceLateGatherSkip: attendanceWave,
           transientProviderStatus: opts?.transientProviderStatus,
           providerRuntime: opts?.providerRuntime,
-          roundRequestId: councilLogicalRequestId,
         })
 
       let providerRuntimeStates: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
@@ -10099,12 +9899,6 @@ function Home() {
         const isDirectInvoke = Boolean(cmd.directInvocation && cmd.targetFamilies[0] === family)
         const transientDirectStatusMessageIds: string[] = []
         const postDirectUnavailable = async (rt: ProviderFamilyOutcomeStatus, detail?: string) => {
-          if (!isCurrentDecreeAsync()) {
-            // A direct-invocation status/error belonging to a superseded decree must not surface
-            // as a visible or persisted message once a newer decree is current.
-            console.warn('[council-session] suppressed_stale_direct_invocation_status')
-            return
-          }
           const line = replaceWithRuntimeTruthLine(
             family,
             providerOutcomeToVerifiedContext({ family, runtime: rt, runtimeDetail: detail }),
@@ -10134,7 +9928,7 @@ function Home() {
         let councilProgressForMessage: CouncilProgressRuntimeSnapshot | undefined
 
         try {
-          if (family === 'bridge_architect') {
+          if (family === 'kimi' || family === 'bridge_architect') {
             runtime = 'SKIPPED'
             runtimeDetail = 'cloud_provider_unavailable'
             if (isDirectInvoke) await postDirectUnavailable('SKIPPED', runtimeDetail)
@@ -10145,19 +9939,8 @@ function Home() {
           } else {
             const eid = cloudEngineIdForCouncilFamily(family)
             const row = eid ? engineMapRef.current.get(eid) : undefined
-            // A "not functional" cloud-engine row only means the *cloud* provider has no key —
-            // under LOCAL_FIRST/LOCAL_ONLY/HYBRID routing (councilRoutingLocalOnlyRef), the server's
-            // invokeCouncilSeat still serves this family via local Ollama regardless of cloud engine
-            // status, the same way the P0-2 fix already made the single-family "Continue" path do.
-            // Gating on cloud-engine status alone here silently skipped every family with no cloud
-            // keys configured — the legacy per-family loop (this branch, used whenever a decree is
-            // lightweight enough to skip family-to-family deliberation, e.g. a bare "hello") produced
-            // a completely empty, unexplained round in a local-only environment.
             const engineGateBlocksChat =
-              !attendanceWave
-              && Boolean(row)
-              && !isEngineFunctional(engineMapRef.current, eid)
-              && !councilRoutingLocalOnlyRef.current
+              !attendanceWave && Boolean(row) && !isEngineFunctional(engineMapRef.current, eid)
             if (engineGateBlocksChat) {
               const reason = unavailableReason(row)
               if (isDirectInvoke) {
@@ -10186,13 +9969,9 @@ function Home() {
                   councilLogicalExpectedFamilies: orderForGather,
                   councilLogicalTurnIndex: orderForGather.indexOf(family),
                   councilLogicalTurnTotal: orderForGather.length,
-                  // `decree` (this round's own text) — never `conversationRuntimeSnapshot?.activeTopic`,
-                  // which is rebuilt asynchronously in a useEffect and is therefore always at least one
-                  // round stale by the time this request is built, letting a prior round's subject
-                  // outrank/leak into a fresh decree's prompt server-side (see execute.ts activeTopic).
-                  activeTopic: decree,
+                  activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
                   ...(councilFlowModeEffective === 'stable_group'
-                    ? { stableGroupPriorReplies: [] }
+                    ? { stableGroupPriorReplies: stableGroupPriorThisTurn }
                     : {}),
                   ...(sequentialDiagnosticApiRef.current
                     ? {
@@ -10214,14 +9993,7 @@ function Home() {
                   ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
                 }, attendanceWave ? { ignoreContinuation: true, onTextDelta: delta => streamBuffer.push(delta) } : { onTextDelta: delta => streamBuffer.push(delta) })
 
-                if (!isCurrentDecreeAsync()) {
-                  // A newer Commander decree started while this family's response was in flight —
-                  // drop it. It must not reveal, persist, or affect this (now superseded) round's
-                  // provider-runtime accounting.
-                  runtime = 'SKIPPED'
-                  runtimeDetail = 'superseded_by_newer_decree'
-                  textOut = null
-                } else if (chatRes.ok && chatData.councilProviderHttpStatus === 'timed_out') {
+                if (chatRes.ok && chatData.councilProviderHttpStatus === 'timed_out') {
                   runtime = 'TIMED_OUT'
                   runtimeDetail = chatData.councilProviderHttpDetail
                   textOut = null
@@ -10323,6 +10095,10 @@ function Home() {
         }
 
         if ((runtime === 'FAILED' || runtime === 'TIMED_OUT') && !textOut?.trim()) {
+          const layer = runtime === 'TIMED_OUT' ? 'TIMEOUT' : 'PROVIDER'
+          const line = failureUiLabel(rosterLabel(family), layer, runtimeDetail)
+          gatherPostSystem(line)
+          void gatherPostLive({ role: 'system', content: line, family: 'SYSTEM' })
           setFloorStream({ family: rosterLabel(family), text: '', status: 'FAILED' })
         } else if (runtime === 'RESPONDED') {
           setFloorStream(prev => prev ? { ...prev, status: 'COMPLETE' } : prev)
@@ -10346,32 +10122,12 @@ function Home() {
        * panel, so they don't need to be baked into the visible prose as a report header.
        */
       const formatFamilyDeliberationContent = (turn: DeliberationTurn): string => {
-        if (turn.full_response.trim()) {
-          return presentAgentMessage({
-            agentId: nebulaAgentForSeat(turn.provider_family)?.id ?? null,
-            speaker: turn.provider_label,
-            raw: turn.full_response,
-          }).prose
-        }
-        return `${turn.provider_label} didn't complete this round.`
+        if (turn.full_response.trim()) return turn.full_response
+        return `${turn.provider_label} didn't get a response in this round${turn.failure_reason ? ` — ${toDisplayText(turn.failure_reason)}` : ''}.`
       }
 
       const runFamilyDeliberationGather = async () => {
         try {
-          const nebulaPlan = createCouncilRoundPlan({
-            roundId: councilLogicalRequestId,
-            commanderMessage: decree,
-          })
-          const nebulaSeats = seatsForParticipatingAgents(nebulaPlan.participatingAgentIds)
-          const nebulaNames = nebulaPlan.participatingAgentIds.map(id => NEBULA_AGENTS_BY_ID[id].name)
-          setNebulaRoundShell({
-            roundId: councilLogicalRequestId,
-            status: 'PLANNING',
-            agents: nebulaNames,
-            streamingAgent: 'ASTRA',
-            streamingText: '',
-          })
-          setFloorStream({ family: 'ASTRA', text: '', status: 'CONNECTING' })
           const { res: deliberationRes, data: deliberationData } = await postCouncilChatDecreeGather({
             message: decree,
             profile: RAEL_PROFILE,
@@ -10388,74 +10144,24 @@ function Home() {
             councilProviderRuntimeStates: providerRuntimeStates,
             councilFlowMode: 'stable_group',
             councilLogicalRequestId,
-            councilLogicalExpectedFamilies: nebulaSeats,
+            councilLogicalExpectedFamilies: ['chatgpt', 'claude', 'red_team'],
             councilLogicalTurnIndex: 0,
-            councilLogicalTurnTotal: nebulaSeats.length,
-            // See the sibling call above: use `decree` (this round's own text), never the async,
-            // one-round-stale `conversationRuntimeSnapshot?.activeTopic`.
-            activeTopic: decree,
+            councilLogicalTurnTotal: 5,
+            activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
             councilDeliberationMode: 'family_to_family_v1',
             ...(liveCouncilConvId ? { conversationId: liveCouncilConvId } : {}),
-          }, {
-            ignoreContinuation: true,
-            onTextDelta: (delta, family) => {
-              const visible = stripHiddenReasoning(delta, { trim: false })
-              if (!visible) return
-              const name = family
-                ? displayNameForSeat(family as CouncilOrchestrationFamily, family)
-                : 'Council'
-              setNebulaRoundShell(prev => {
-                if (!prev || prev.roundId !== councilLogicalRequestId) return prev
-                const sameAgent = prev.streamingAgent === name
-                return {
-                  ...prev,
-                  status: name === 'AURORA' ? 'SYNTHESIZING' : 'EXECUTING',
-                  streamingAgent: name,
-                  agents: prev.agents.includes(name) ? prev.agents : [...prev.agents.filter(item => item !== 'ASTRA'), name],
-                  streamingText: sameAgent ? `${prev.streamingText}${visible}` : visible,
-                }
-              })
-              setFloorStream(prev => ({
-                family: name,
-                text: prev && prev.family === name ? `${prev.text}${visible}` : visible,
-                status: 'STREAMING',
-              }))
-            },
-          })
-          if (!isCurrentDecreeAsync()) {
-            // A newer Commander decree started while this deliberation was in flight. Discard the
-            // whole result — no partial seat reveal, no addMessages, no persistence, no round
-            // lifecycle mutation — and report "handled" so submitDecree does not fall through to
-            // the legacy per-family gather for a decree that is no longer current.
-            console.warn('[council-session] suppressed_stale_family_deliberation_gather')
-            return true
-          }
+          }, { ignoreContinuation: true })
           if (!deliberationRes.ok || !deliberationData.familyDeliberation) return false
 
           const deliberation = deliberationData.familyDeliberation
-          const responseSi = (deliberationData as { sessionIntelligence?: CouncilSessionIntelligenceV1 | null }).sessionIntelligence
-          const durableRoundFromServer =
-            (deliberationData as { durableRound?: DurableDeliberationRound | null }).durableRound
-            ?? null
-          if (responseSi && responseSi.version === '17.session-intelligence.v1') {
-            setSessionIntelligence(responseSi)
-          }
           const turns = [...deliberation.turns].sort((a, b) => a.speaking_order - b.speaking_order)
           const messagesToAdd: CouncilMessage[] = []
           const readableMessageCountBeforeFallback = () =>
             messagesToAdd.filter(message => message.messageType === 'response' && message.content.trim()).length
           const runtimeByFamily: Partial<Record<CouncilOrchestrationFamily, ProviderFamilyOutcomeStatus>> = {}
           const detailsByFamily: CouncilProviderRuntimeDetails = {}
-          // synthesis_turn_id only names a turn that WAS ATTEMPTED as synthesis — it can point at
-          // one that failed. Only use it when that turn actually completed; otherwise fall back
-          // to the latest complete turn, same as when synthesis_turn_id is absent entirely.
-          // Otherwise roundHealth/shadowCouncilAssembly would attach to no message at all in a
-          // partial-failure round where synthesis itself failed but other seats completed.
-          const completedSynthesisTurnId = deliberation.synthesis_turn_id
-            ? turns.find(turn => turn.turn_id === deliberation.synthesis_turn_id && turn.completion_status === 'complete' && Boolean(turn.output_message_id))?.turn_id
-            : undefined
           const shadowReadoutTurnId =
-            completedSynthesisTurnId
+            deliberation.synthesis_turn_id
             ?? [...turns].reverse().find(turn => turn.completion_status === 'complete' && Boolean(turn.output_message_id))?.turn_id
             ?? null
 
@@ -10474,33 +10180,27 @@ function Home() {
 
             const vis = orchestrationVisual(family)
             const meta = FAMILY_META[vis.presenceKey]
-            if (!complete) {
-              continue
-            }
-            const bubbleFamilyName = vis.bubbleFamilyName ?? rosterLabel(family)
+            const bubbleFamilyName = complete
+              ? (vis.bubbleFamilyName ?? rosterLabel(family))
+              : 'SYSTEM'
             const displayContent = formatFamilyDeliberationContent(turn)
             messagesToAdd.push({
               id: turn.output_message_id ?? turn.turn_id,
               familyName: bubbleFamilyName,
               content: displayContent,
               timestamp: new Date(turn.completed_at ?? Date.now()).toLocaleTimeString(),
-              color: vis.colorOverride ?? meta.color,
-              icon: vis.iconOverride ?? meta.icon,
-              provider: '',
-              messageType: 'response',
-              degraded: false,
+              color: complete ? (vis.colorOverride ?? meta.color) : '#FFD700',
+              icon: complete ? (vis.iconOverride ?? meta.icon) : '⚙',
+              provider: turn.provider_model ?? turn.provider_label,
+              messageType: complete ? 'response' : 'system',
+              degraded: !complete,
               familyDeliberationTurn: turn,
               familyDeliberationEvidenceReferences: deliberation.evidence_references,
               councilStage: stageFromDeliberationRole(turn.turn_role),
               commanderTurnId: turn.commander_turn_id,
               deliberationRoundId: turn.round_id,
               shadowCouncilAssembly: turn.turn_id === shadowReadoutTurnId ? deliberationData.shadowCouncilAssembly : undefined,
-              roundHealth: turn.turn_id === shadowReadoutTurnId ? deliberationData.roundHealth : undefined,
-              councilRound: turn.turn_id === shadowReadoutTurnId ? deliberationData.councilRound : undefined,
               councilProgress: deliberationData.councilProgress,
-              scoutSwarm: turn.turn_id === shadowReadoutTurnId
-                ? (deliberation.scout_swarm ?? deliberationData.scoutSwarm ?? undefined) || undefined
-                : undefined,
             })
 
             if (complete) {
@@ -10513,19 +10213,7 @@ function Home() {
                   content: displayContent,
                   family: bubbleFamilyName,
                 },
-                {
-                  responseSuccessful: true,
-                  providerRuntime: runtimeByFamily[family],
-                  roundRequestId: councilLogicalRequestId,
-                  messageIntelligence: messageMetadataFromTurn({
-                    conversationId: liveCouncilConvId ?? deliberation.session_id,
-                    roundId: turn.round_id,
-                    turn,
-                    pipelineOutcome: deliberation.pipeline?.outcome ?? null,
-                    councilStage: stageFromDeliberationRole(turn.turn_role),
-                    durableRound: turn.turn_id === shadowReadoutTurnId ? durableRoundFromServer : null,
-                  }) as Record<string, unknown>,
-                },
+                { responseSuccessful: true, providerRuntime: runtimeByFamily[family] },
               )
             }
           }
@@ -10545,7 +10233,7 @@ function Home() {
                 timestamp: new Date().toLocaleTimeString(),
                 color: vis.colorOverride ?? meta.color,
                 icon: vis.iconOverride ?? meta.icon,
-                provider: '',
+                provider: vis.provider,
                 messageType: 'response',
                 councilProgress: deliberationData.councilProgress,
                 shadowCouncilAssembly: deliberationData.shadowCouncilAssembly,
@@ -10555,55 +10243,7 @@ function Home() {
             }
           }
 
-          // deriveFamilyDeliberationRoundOutcome's one compact degraded-round notice is
-          // intentionally labeled family: 'SYSTEM' — extractReadableCouncilContributions
-          // (above) deliberately excludes SYSTEM as "not real provider text", so a fully failed
-          // round would otherwise render nothing at all here (the Provider Issues banner still
-          // covers it, but roundHealth would never reach the Inspector). Render it explicitly,
-          // once, only when every other attempt produced nothing.
-          if (messagesToAdd.length === 0 && deliberationData.roundHealth?.degraded) {
-            const notice = deliberationData.results?.find(row => row.family === 'SYSTEM')
-            if (notice?.content) {
-              messagesToAdd.push({
-                id: `roundhealth-${deliberationData.councilProgress?.requestId ?? deliberation.session_id}`,
-                familyName: 'SYSTEM',
-                content: notice.content,
-                timestamp: new Date().toLocaleTimeString(),
-                color: '#FFD700',
-                icon: '⚙',
-                provider: '',
-                messageType: 'system',
-                roundHealth: deliberationData.roundHealth,
-              })
-              void postLiveCouncilMessage(
-                { role: 'system', content: notice.content, family: 'SYSTEM' },
-                {
-                  allowProviderFailureMessage: true,
-                  roundRequestId: councilLogicalRequestId,
-                  messageIntelligence: durableRoundFromServer
-                    ? {
-                        roundId: durableRoundFromServer.roundId,
-                        pipelineOutcome: durableRoundFromServer.outcome,
-                        councilDeliberationRound: durableRoundFromServer,
-                      }
-                    : undefined,
-                },
-              )
-            }
-          }
-
-          if (messagesToAdd.length) {
-            addMessages(messagesToAdd)
-            setNebulaRoundShell(prev => prev && prev.roundId === councilLogicalRequestId
-              ? {
-                  ...prev,
-                  status: deliberationData.councilRound?.status ?? (deliberationData.roundHealth?.degraded ? 'COMPLETE_DEGRADED' : 'COMPLETE'),
-                  streamingAgent: null,
-                  streamingText: '',
-                  agents: Array.from(new Set(messagesToAdd.map(item => item.familyName))),
-                }
-              : prev)
-          }
+          if (messagesToAdd.length) addMessages(messagesToAdd)
           providerRuntimeStates = runtimeByFamily
           providerRuntimeDetails = detailsByFamily
           councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
@@ -10635,17 +10275,6 @@ function Home() {
           setFamilyDuty(Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])))
           return true
         } catch {
-          if (!isCurrentDecreeAsync()) {
-            // This failure (very likely the abort from a newer decree superseding this one, see
-            // the abortControllerRef handling in submitDecree) belongs to a round that is no
-            // longer current — resetting shared UI state here would clobber whatever the new,
-            // current round has already started rendering. Report "handled" so the caller does
-            // not fall through to the legacy gather path for a decree that is no longer current.
-            console.warn('[council-session] suppressed_stale_family_deliberation_error')
-            return true
-          }
-          setNebulaRoundShell(null)
-          setFloorStream(null)
           return false
         }
       }
@@ -10773,7 +10402,7 @@ function Home() {
           && !controller.signal.aborted
           && !councilPausedRef.current
           && !isSocialCouncilCheckin(decree)
-          && (classifyCouncilTurn(decree).depth === 'FULL' || classifyCouncilTurn(decree).intent === 'STATUS_CHECK')
+          && classifyCouncilTurn(decree).depth === 'FULL'
         ) {
           try {
             const { res: finalRes, data: finalData } = await postCouncilChatDecreeGather({
@@ -10793,14 +10422,12 @@ function Home() {
               councilLogicalExpectedFamilies: orderForGather,
               councilLogicalTurnIndex: orderForGather.indexOf('chatgpt'),
               councilLogicalTurnTotal: orderForGather.length,
-              // See the sibling calls above: use `decree` (this round's own text), never the async,
-              // one-round-stale `conversationRuntimeSnapshot?.activeTopic`.
-              activeTopic: decree,
+              activeTopic: conversationRuntimeSnapshot?.activeTopic ?? decree,
               stableGroupPriorReplies: stableGroupPriorThisTurn,
               stableGroupFinalSynthesis: true,
               councilProviderRuntimeStates: providerRuntimeStates,
             })
-            const finalExtractedResponse = finalRes.ok && isCurrentDecreeAsync()
+            const finalExtractedResponse = finalRes.ok
               ? extractReadableCouncilResponse(finalData, 'chatgpt')
               : null
             if (finalExtractedResponse?.content) {
@@ -10827,16 +10454,6 @@ function Home() {
         }
       } else {
         await Promise.allSettled(gatherPromises)
-      }
-
-      if (!isCurrentDecreeAsync()) {
-        // A newer Commander decree became current while these gathers were resolving. Individual
-        // stale per-family results are already neutralized inside gatherFamily(), but stop here
-        // regardless so this superseded invocation performs no further transcript, persistence,
-        // or round-lifecycle mutations (e.g. the "all providers failed" notice below, which would
-        // otherwise misreport this decree's outcome into the now-current round).
-        console.warn('[council-session] suppressed_stale_decree_commit')
-        return
       }
 
       let cells: GatherCell[] = attendanceWave
@@ -11024,7 +10641,6 @@ function Home() {
             ?? linesToRelease.find(l => l.family === line.family)
           const visible = await revealOrchestrationTurn(line.family, line.content, inputText(), {
             councilRevealSource: 'decree',
-            commanderDecreeRoundAtFetch: myRound,
             transientMessageIds: sourceLine?.transientMessageIds,
             shadowCouncilAssembly: sourceLine?.shadowCouncilAssembly,
             councilProgress: sourceLine?.councilProgress,
@@ -11038,7 +10654,6 @@ function Home() {
             {
               responseSuccessful: responseSuccessfulForRuntime(runtimeStates[line.family]),
               providerRuntime: runtimeStates[line.family],
-              roundRequestId: councilLogicalRequestId,
             },
           )
           const focusSnippet = compactDisplayWhitespace(line.content, 120)
@@ -11348,8 +10963,6 @@ function Home() {
         }
         setLoading(false)
       }
-      pendingSearchHandoffRef.current = null
-      pendingTerraHandoffRef.current = null
     }
   }
 
@@ -11357,54 +10970,11 @@ function Home() {
     submitDecreeRef.current = submitDecree
   })
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('searchAnalyze') !== '1') return
-    const raw = sessionStorage.getItem(SEARCH_HANDOFF_STORAGE_KEY)
-    if (!raw) return
-    try {
-      const payload = JSON.parse(raw) as SearchCouncilHandoffPayload
-      if (!payload?.query || !Array.isArray(payload.results)) return
-      sessionStorage.removeItem(SEARCH_HANDOFF_STORAGE_KEY)
-      pendingSearchHandoffRef.current = payload
-      setCommand(payload.query)
-      window.history.replaceState({}, '', '/')
-      window.setTimeout(() => {
-        void submitDecreeRef.current?.(payload.query)
-      }, 120)
-    } catch {
-      sessionStorage.removeItem(SEARCH_HANDOFF_STORAGE_KEY)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('terraAnalyze') !== '1') return
-    const raw = sessionStorage.getItem(TERRA_HANDOFF_STORAGE_KEY)
-    if (!raw) return
-    try {
-      const payload = JSON.parse(raw) as unknown
-      if (!isTerraHandoffBody(payload)) return
-      sessionStorage.removeItem(TERRA_HANDOFF_STORAGE_KEY)
-      pendingTerraHandoffRef.current = payload
-      setCommand(payload.commanderPrompt)
-      window.history.replaceState({}, '', '/')
-      window.setTimeout(() => {
-        void submitDecreeRef.current?.(payload.commanderPrompt)
-      }, 120)
-    } catch {
-      sessionStorage.removeItem(TERRA_HANDOFF_STORAGE_KEY)
-    }
-  }, [])
-
   const handleDecree = async (event?: FormEvent) => {
     event?.preventDefault()
     await sendLiveCouncilThroneMessage({
       rawInput: command,
       isBusy: () => loading,
-      allowSupersedeWhileBusy: true,
       clearDraft: () => setCommand(''),
       detectExpansion: d => {
         const expansionNeed = detectExpansionNeed(d)
@@ -11412,21 +10982,18 @@ function Home() {
         return { decree: d, ...expansionNeed }
       },
       onExpansionQueued: (decree, expansion) => {
-        const isLocalOnlyExecution = councilRoutingLocalOnlyRef.current === true
         matrixStatus('warning', 'Expanded analysis needs your approval')
         addRaelAction({
           action_id: `expanded-analysis-${decree.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80)}`,
           related_opportunity_id: null,
           title: 'Expanded analysis approval',
-          question: isLocalOnlyExecution
-            ? `Council requests expanded analysis using local compute — no metered cost. Reason: ${expansion.reason}. Continue?`
-            : `Council requests expanded analysis. Estimated extra usage: ${formatCost(expansion.extraCost)}. Reason: ${expansion.reason}. Continue?`,
+          question: `Council requests expanded analysis. Estimated extra usage: ${formatCost(expansion.extraCost)}. Reason: ${expansion.reason}. Continue?`,
           response_options: ['Approve', 'Decline', 'Summarize instead'],
           urgency: expansion.urgent ? 'high' : 'medium',
           expires_at: null,
           source_agent: 'Cost Guard',
         })
-        setExpansionPrompt({ decree, extraCost: expansion.extraCost, reason: expansion.reason, urgent: expansion.urgent, isLocalOnlyExecution })
+        setExpansionPrompt({ decree, extraCost: expansion.extraCost, reason: expansion.reason, urgent: expansion.urgent })
         setUsageRows(createUsageEstimate(decree, DEFAULT_OUTPUT_TOKEN_BUDGET))
         setCurrentDecreeCost(totalUsageCost(createUsageEstimate(decree, DEFAULT_OUTPUT_TOKEN_BUDGET)))
       },
@@ -11507,7 +11074,7 @@ function Home() {
     }
   }
 
-  const appendVisibleRaelDecree = (decree: string, roundRequestId?: string | null) => {
+  const appendVisibleRaelDecree = (decree: string) => {
     addMessages([{
       id: createMessageId('rael'),
       familyName: "RA'EL",
@@ -11516,13 +11083,12 @@ function Home() {
       color: '#FFD700',
       icon: '⚔',
       provider: '',
-      messageType: 'decree',
-      roundRequestId: roundRequestId ?? null,
+      messageType: 'decree'
     }])
 
     void postLiveCouncilMessage(
       { role: 'user', content: decree, family: "RA'EL" },
-      { responseSuccessful: true, roundRequestId },
+      { responseSuccessful: true },
     )
   }
 
@@ -11664,12 +11230,7 @@ function Home() {
      * `isRaelCouncilMessage` treats `messageType === 'decree'` or familyName containing RA'EL.
      * If external channels are ambiguous, prefer user text containing "Ra'el" — not wired here.
      */
-    // Establish and abort/rotate the round BEFORE the decree becomes visible (see `beginDecreeRound`)
-    // — several `await`s below (continuation authority, recall, OS-sweep, submitDecree itself) yield
-    // to the event loop, and a previous round still in flight at that point must already be unable to
-    // pass its staleness checks by the time it resolves.
-    const decreeRound = beginDecreeRound()
-    appendVisibleRaelDecree(decree, decreeRound.roundRequestId)
+    appendVisibleRaelDecree(decree)
     const activeSession = councilSessionList.find(s => s.id === liveCouncilConvId)
     if (liveCouncilConvId && shouldAutoTitle(activeSession?.title, Boolean((activeSession?.metadata as { council?: { titleLocked?: boolean } } | undefined)?.council?.titleLocked))) {
       const nextTitle = generateNeutralSessionTitle(decree)
@@ -11818,15 +11379,10 @@ function Home() {
       })
     }
 
-      const parsedCmd = resolveActiveCommand({ latestDecreeText: decree }).command
+    const parsedCmd = resolveActiveCommand({ latestDecreeText: decree }).command
     activeCouncilCommandRef.current = parsedCmd
     setCouncilUiCommand(parsedCmd)
     lastRaelDirectiveContentRef.current = decree
-
-    if (parsedCmd.uninstalledProviderNotice) {
-      addSystemMessage(parsedCmd.uninstalledProviderNotice, { force: true })
-      return
-    }
 
     const intent = classifyRaElMessage(decree)
     lastDecreeIntentRef.current = intent
@@ -11871,7 +11427,7 @@ function Home() {
       void runOpportunityScout()
     }
 
-    await submitDecree(decree, mode, decreeRound)
+    await submitDecree(decree, mode)
   }
 
   const handleProjectAction = (
@@ -12014,7 +11570,6 @@ function Home() {
   const startFreshCouncilSession = async (reason: 'new' | 'archive') => {
     resetCouncilTemporaryRuntime()
     setSessionLifecycle(reason === 'archive' ? 'archived' : 'active')
-    setSessionIntelligence(null)
     const nextSessionId = newSessionId()
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(COUNCIL_SESSION_STORAGE_KEY)
@@ -12073,23 +11628,12 @@ function Home() {
     setLiveCouncilConvId(id)
     liveCouncilConvIdRef.current = id
     councilDispatch({ type: 'SET_MESSAGES', payload: [] })
-    setSessionIntelligence(null)
     const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
     if (!tr.ok) return
     const tj = await tr.json() as {
       messages?: { id: string; role: string; content: string; family?: string | null; created_at: string; metadata?: Record<string, unknown> }[]
-      conversation?: { metadata?: Record<string, unknown> }
     }
     const rows = Array.isArray(tj.messages) ? tj.messages : []
-    const hydratedSi = rebuildIntelligenceFromMessages({
-      conversationId: id,
-      messages: rows,
-      fallbackMetadata: tj.conversation?.metadata,
-    }) ?? hydrateSessionIntelligenceFromConversation({
-      conversationId: id,
-      metadata: tj.conversation?.metadata,
-    })
-    setSessionIntelligence(hydratedSi?.intelligence ?? null)
     const latestRow = [...rows].reverse().find(row => row.role === 'user')
     const rowsDecreeText = latestRow ? latestRow.content.trim() : ''
     const rowsPromptIntent = rowsDecreeText ? detectPromptIntent(rowsDecreeText) : undefined
@@ -12282,7 +11826,7 @@ function Home() {
         Income Operations (Grok/Gemini/ChatGPT first)
       </label>
       <div className="mt-2 flex flex-wrap gap-2 text-[10px]" style={{ color: '#888' }}>
-        <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeNova} onChange={() => toggleParticipation('includeNova')} />NOVA</label>
+        <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeKimi} onChange={() => toggleParticipation('includeKimi')} />Kimi</label>
         <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeRedTeam} onChange={() => toggleParticipation('includeRedTeam')} />Red Team</label>
         <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeBaby} onChange={() => toggleParticipation('includeBaby')} />Baby</label>
         <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={participationToggles.includeBridgeArchitect} onChange={() => toggleParticipation('includeBridgeArchitect')} />Bridge Architect</label>
@@ -12370,7 +11914,7 @@ function Home() {
       setOperatorTab('command')
     }
   }, [operatorTab, uiMode])
-  const providerStripKeys: ProviderFamilyKey[] = ['claude', 'chatgpt', 'grok', 'gemini', 'redteam']
+  const providerStripKeys: ProviderFamilyKey[] = ['claude', 'chatgpt', 'grok', 'gemini', 'kimi', 'redteam']
   const providerStatusStyles: Record<ProviderConnectionStatus, { color: string; dot: string; shadow: string }> = {
     online: { color: '#9AE6B4', dot: '#00ff41', shadow: '0 0 8px #00ff41' },
     standby: { color: '#FFD700', dot: '#FFD700', shadow: '0 0 8px rgba(255,215,0,0.7)' },
@@ -13051,9 +12595,6 @@ function Home() {
           >
             Baby AI Private
           </Link>
-          <Link href="/search" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#6EE7B7', background: 'rgba(0,0,0,0.28)' }}>
-            Search
-          </Link>
           <Link href="/income-loot" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#6EE7B7', background: 'rgba(0,0,0,0.28)' }}>
             Revenue Command
           </Link>
@@ -13182,39 +12723,6 @@ function Home() {
               terra={<p>{terraCouncilContextRef.current ? 'Terra context is attached to the current turn only.' : 'No Terra pin.'}</p>}
               diagnostics={(
                 <div className="space-y-2">
-                  <CouncilRoundInspector
-                    roundHealth={[...visibleCouncilMessages].reverse().find(item => item.roundHealth)?.roundHealth}
-                    councilRound={[...visibleCouncilMessages].reverse().find(item => item.councilRound)?.councilRound
-                      ?? (nebulaRoundShell ? {
-                        roundId: nebulaRoundShell.roundId,
-                        requestId: nebulaRoundShell.roundId,
-                        status: nebulaRoundShell.status as CouncilRound['status'],
-                        intent: 'GENERAL',
-                        selectedAgents: [],
-                        agentStates: {},
-                        findings: [],
-                        roundHealth: null,
-                        synthesis: nebulaRoundShell.streamingText || null,
-                        createdAt: nebulaRoundShell.roundId,
-                        startedAt: null,
-                        completedAt: null,
-                        metrics: {
-                          submit_to_ack_ms: null,
-                          submit_to_round_created_ms: null,
-                          astra_plan_ms: null,
-                          agent_queue_ms: null,
-                          agent_ttft_ms: null,
-                          agent_tokens_per_second: null,
-                          agent_total_ms: null,
-                          aurora_ttft_ms: null,
-                          round_total_ms: null,
-                          model_load_ms: null,
-                          render_delay_ms: null,
-                          queue_depth: nebulaRoundShell.agents.length,
-                        },
-                        inheritedPriorRound: false,
-                      } : null)}
-                  />
                   <CouncilMembersPanel
                     providerStatuses={providerHealth.providers}
                     providerLabels={providerHealth.labels}
@@ -13223,33 +12731,6 @@ function Home() {
                     onOpenPanel={id => setDockPanelId(id)}
                   />
                   <SynthesisCard synthesis={conversationRuntimeSnapshot?.latestSynthesis} />
-                  <SessionIntelligencePanel intelligence={sessionIntelligence} />
-                  {sessionIntelligence && sessionIntelligence.roundCount > 0 ? (
-                    <div className="mt-2 rounded border border-cyan-900/50 bg-slate-950/50 px-2 py-2">
-                      <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-cyan-300">
-                        Continue Council Session
-                      </p>
-                      <p className="mb-2 text-[11px] text-slate-400">
-                        Same conversation · new round · prior session intelligence attaches automatically.
-                      </p>
-                      <button
-                        type="button"
-                        className="rounded border border-cyan-700/60 px-2 py-1 text-[11px] text-cyan-200 hover:bg-cyan-950/40"
-                        data-testid="continue-council-session"
-                        onClick={() => {
-                          setCouncilInspectorOpen(false)
-                          addSystemMessage(
-                            'CONTINUE COUNCIL SESSION ready. Enter a follow-up decree — Round N+1 will reuse this conversation and attach prior session intelligence.',
-                            { force: true },
-                          )
-                          const el = document.querySelector<HTMLTextAreaElement>('[data-testid="council-decree-input"], textarea')
-                          el?.focus()
-                        }}
-                      >
-                        Continue Council Session
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
               )}
             />
@@ -13370,9 +12851,7 @@ function Home() {
             </div>
           ) : (
         <GodsEyeCommandCenter
-          onTerraContextChange={handleTerraContextChange}
-          chatExpanded={isChatExpanded}
-          onToggleChatExpanded={() => setIsChatExpanded(prev => !prev)}
+          onTerraContextChange={context => { terraCouncilContextRef.current = context }}
           councilComposer={<CommandConsole
             command={command}
             onCommandChange={setCommand}
@@ -13493,15 +12972,6 @@ function Home() {
           )}
           thread={(
         <>
-          {nebulaRoundShell && (nebulaRoundShell.status === 'PLANNING' || nebulaRoundShell.status === 'EXECUTING' || nebulaRoundShell.status === 'SYNTHESIZING' || nebulaRoundShell.streamingText) ? (
-            <CouncilLiveRoundBanner
-              status={nebulaRoundShell.status}
-              agents={nebulaRoundShell.agents}
-              streamingAgent={nebulaRoundShell.streamingAgent}
-              streamingText={nebulaRoundShell.streamingText}
-              roundId={nebulaRoundShell.roundId}
-            />
-          ) : null}
           <CouncilMessageRows
             messages={visibleCouncilMessages}
             hiddenCount={hiddenCouncilMessageCount}
@@ -13536,7 +13006,7 @@ function Home() {
                 >
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>
-                      Council Round
+                      Incremental Council Transport
                     </div>
                     <div className="text-[9px] uppercase tracking-widest" style={{ color: '#94A3B8' }}>
                       {incrementalCouncilTransportStatus.replaceAll('_', ' ')}
@@ -13547,7 +13017,7 @@ function Home() {
                       id: incrementalCouncilProgress.requestId,
                       familyName: 'CONTROL',
                       content: incrementalCouncilRequestText ?? 'Council operation in progress.',
-                      timestamp: incrementalCouncilProgress.events[0]?.occurredAt ?? incrementalCouncilProgress.requestId,
+                      timestamp: new Date().toLocaleTimeString(),
                       provider: 'SSE',
                       messageType: 'system',
                       requestText: incrementalCouncilRequestText,
