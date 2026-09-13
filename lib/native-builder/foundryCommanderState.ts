@@ -63,7 +63,7 @@ export function parseNodeTestCounts(output: string): { tests: number; pass: numb
 
 export function mapInternalStepToCommanderState(
   step: string | undefined,
-  evidence?: { failureEvidence?: { errorSummary?: string } | null; validationResults?: NativeValidationResult[] },
+  evidence?: { failureEvidence?: { errorSummary?: string } | null; validationResults?: { ok: boolean }[] },
 ): FoundryCommanderState {
   switch (step) {
     case 'IDLE':
@@ -97,8 +97,8 @@ export function mapInternalStepToCommanderState(
 }
 
 export function hasRecordedFailure(evidence?: {
-  failureEvidence?: FoundryFailureEvidence | null
-  validationResults?: NativeValidationResult[]
+  failureEvidence?: { errorSummary?: string } | null
+  validationResults?: { ok: boolean }[]
 }): boolean {
   const last = evidence?.validationResults?.at(-1)
   if (last) return !last.ok
@@ -114,7 +114,7 @@ export function canEnterRepairing(evidence?: {
 
 export function toCommanderState(
   coding: { currentStep?: string; failureEvidence?: { errorSummary?: string } | null; commanderState?: string } | undefined,
-  validationResults?: NativeValidationResult[],
+  validationResults?: { ok: boolean }[],
 ): FoundryCommanderState {
   if (!coding) return 'IDLE'
   return mapInternalStepToCommanderState(coding.currentStep, {
@@ -239,7 +239,7 @@ export function statusNarrative(coding: {
   workstream?: { text: string; ok?: boolean; kind: string }[]
   progressEvents?: { detail: string }[]
   commanderState?: string
-} | undefined, validationResults?: NativeValidationResult[]): {
+} | undefined, validationResults?: { ok: boolean }[]): {
   state: FoundryCommanderState
   current: string
   completed: string[]
