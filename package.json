@@ -14,6 +14,7 @@
     "validate:engineer": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-engineer-validation.mjs",
     "validate:foundry": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-foundry-validation.mjs",
     "validate:council-local-continuity": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-local-continuity-validation.mjs",
+    "validate:council-identity-restoration": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-identity-restoration-validation.mjs",
     "validate:council-continuity-live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-continuity-live.mjs",
     "validate:council-local-backend": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-local-backend-foundation-validation.mjs",
     "validate:council-backend-status-ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-backend-status-ui-validation.mjs",

@@ -85,8 +85,8 @@ export async function runCouncilContinuityLiveProof(): Promise<ContinuityLiveRes
         && roster.families.claude?.identityName === 'ORION'
         && roster.families.grok?.identityName === 'PULSAR'
         && roster.families.gemini?.identityName === 'LUMEN'
-        && roster.reasoningDiversity === 'ROLE-DIVERSE / MODEL-SHARED',
-      detail: `diversity=${roster.reasoningDiversity}`,
+        && /ROLE.?DIVERSE/i.test(roster.reasoningDiversity ?? ''),
+      detail: `diversity=${roster.reasoningDiversity} model=${roster.modelDiversity}`,
     })
 
     const members = [

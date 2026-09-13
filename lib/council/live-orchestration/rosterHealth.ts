@@ -310,13 +310,7 @@ function attachContinuity(
       label: novaReady ? 'NOVA READY' : localReady ? 'LOCAL READY' : 'UNAVAILABLE',
     },
     modelDiversity: diversity,
-    reasoningDiversity: localReady && externalAvailableCount === 0
-      ? 'ROLE-DIVERSE / MODEL-SHARED'
-      : externalAvailableCount >= 2
-        ? 'MULTI-MODEL'
-        : localReady || externalAvailableCount > 0
-          ? 'ROLE-DIVERSE'
-          : 'NONE',
+    reasoningDiversity: localReady || externalAvailableCount > 0 ? 'ROLE_DIVERSE' : 'NONE',
     entityHeadline: councilEntityHeadline(backendAvailable),
     entityReadyCount,
     entityPresentCount,
@@ -539,13 +533,7 @@ export type RosterMemberPresentation = {
 
 export function rosterMemberPresentation(entry: CouncilFamilyRosterEntry): RosterMemberPresentation {
   const optionalExternalLine = entry.optionalExternalLine
-  const localLine = entry.backingRuntimeStatus === 'LOCAL' || entry.backing === 'LOCAL'
-    ? 'Backing: Local'
-    : entry.backingRuntimeStatus === 'HYBRID' || entry.backing === 'HYBRID'
-      ? 'Backing: Hybrid'
-      : entry.backingRuntimeStatus === 'EXTERNAL' || entry.backing === 'EXTERNAL'
-        ? 'Backing: External'
-        : 'Backing: None'
+  const localLine = entry.backingLine
   if (entry.memberIdentityStatus === 'READY') {
     return {
       tone: 'ready',

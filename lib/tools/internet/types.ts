@@ -31,7 +31,7 @@ export type InternetStatusResponse = {
   serverSideOnly: true
   /**
    * True when at least one of Tavily / Firecrawl responded OK to the cheap server probe
-   * (same as overallStatus === 'live').
+   * (same as overallStatus === 'live'). This is SEARCH provider liveness, not network egress.
    */
   canUseInternet: boolean
   lastChecked: string
@@ -39,4 +39,10 @@ export type InternetStatusResponse = {
   label: string
   tavily: InternetResearchAdapterSummary
   firecrawl: InternetResearchAdapterSummary
+  /** Direct outbound HTTPS (example.com HEAD). Independent of paid search keys. */
+  NETWORK_EGRESS?: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN'
+  /** Grok/Tavily/Firecrawl credential presence. Independent of egress. */
+  SEARCH_PROVIDER_CONFIGURATION?: 'CONFIGURED' | 'CONFIG_NEEDED'
+  /** OpenAI/Anthropic/xAI/Gemini Council cloud keys. Independent of Foundry and egress. */
+  COUNCIL_PROVIDER_CONFIGURATION?: { configured: number; total: number }
 }

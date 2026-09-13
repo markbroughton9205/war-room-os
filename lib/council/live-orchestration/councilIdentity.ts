@@ -93,13 +93,11 @@ export function projectCouncilMemberIdentity(input: {
   const optionalExternalLine = optionalExternalDetail
     ? `Optional external: ${optionalExternalDetail}`
     : null
-  const backingLine = backingRuntimeStatus === 'LOCAL'
-    ? 'Backing: Local'
-    : backingRuntimeStatus === 'HYBRID'
-      ? 'Backing: Hybrid'
-      : backingRuntimeStatus === 'EXTERNAL'
-        ? 'Backing: External'
-        : 'Backing: None'
+  const backingLine = backingRuntimeStatus === 'LOCAL' || backingRuntimeStatus === 'HYBRID'
+    ? 'Brain: Local Shared General'
+    : backingRuntimeStatus === 'EXTERNAL'
+      ? 'Brain: External'
+      : 'Brain: none'
   return {
     identityName,
     identityRole,

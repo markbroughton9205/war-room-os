@@ -108,9 +108,7 @@ function MemberRow({
     ? OPERATION_TONE_DOT[operationPresentation.tone]
     : (STATUS_DOT[presentation.tone] ?? STATUS_DOT.offline)
   const roster = COUNCIL_ROSTER.find(r => r.id === member.rosterId)
-  const brainLine = 'localLine' in presentation ? presentation.localLine : rosterRow?.backingLine
-  const optionalExternalLine = rosterRow?.optionalExternalLine
-    ?? ('optionalExternalLine' in presentation ? presentation.optionalExternalLine : null)
+  const brainLine = rosterRow?.backingLine ?? ('localLine' in presentation ? presentation.localLine : null)
   return (
     <li className="flex items-start gap-2" data-testid={`council-member-${member.id}`}>
       <span
@@ -129,9 +127,6 @@ function MemberRow({
         </div>
         {typeof brainLine === 'string' && brainLine ? (
           <p className="text-[8px] tracking-wide text-slate-500">{brainLine}</p>
-        ) : null}
-        {typeof optionalExternalLine === 'string' && optionalExternalLine ? (
-          <p className="text-[8px] tracking-wide text-slate-600">{optionalExternalLine}</p>
         ) : null}
         {roster ? (
           <p className="truncate text-[8px] tracking-wide text-slate-500">{roster.role}</p>
