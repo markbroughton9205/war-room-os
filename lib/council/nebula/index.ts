@@ -15,6 +15,15 @@ export {
   type NebulaAgentStatus,
   type NebulaBackendPreference,
 } from './identity'
+export {
+  COUNCIL_ROSTER_CLASSIFICATION,
+  CORE_COUNCIL_ENTITY_IDS,
+  classifyCouncilEntity,
+  coreCouncilIsExactlyFour,
+  novaIsAuxiliaryNotCoreSubstitute,
+  phoenixIsRedTeamAdversarialRole,
+  type CouncilRosterClass,
+} from './rosterClassification'
 export { runNebulaValidation, type NebulaValidationResult } from './validation'
 export {
   buildAuroraFinalSynthesisRole,
