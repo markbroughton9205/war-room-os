@@ -4,9 +4,19 @@ import { memo, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   getMatrixStatusServerSnapshot,
   getMatrixStatusSnapshot,
+  MATRIX_IDLE_SNAPSHOT,
   subscribeMatrixStatus,
+  type MatrixChannel,
 } from '@/lib/ui/matrixStatusBus'
 import { matrixRuntimeIntensity, matrixRuntimeRgb } from '@/lib/ui/matrixRuntimeColors'
+
+function isolatedSubscribe() {
+  return () => {}
+}
+
+function isolatedSnapshot() {
+  return MATRIX_IDLE_SNAPSHOT
+}
 
 const CHARSET = '01ABCDEFGHIJKLMNOPQRSTUVWXYZ{}[]<>/\\|#$%+=*'
 const GOLD = '255, 215, 0'
@@ -46,22 +56,43 @@ function makeStreams(width: number, height: number) {
   })
 }
 
-export const MatrixCodeRain = memo(function MatrixCodeRain() {
+export const MatrixCodeRain = memo(function MatrixCodeRain({
+  contained = false,
+  channelOverride = null,
+  intensity = 'normal',
+}: {
+  contained?: boolean
+  channelOverride?: MatrixChannel | null
+  intensity?: 'dim' | 'normal' | 'active'
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
   const timeoutRef = useRef<number | null>(null)
   const streamsRef = useRef<Stream[]>([])
   const lastTimeRef = useRef(0)
+  const sizeRef = useRef({ width: 0, height: 0 })
   const [reducedMotion, setReducedMotion] = useState(false)
 
-  // Real runtime state only -- never fabricated. Read via a ref inside the animation loop (not a
-  // hook dependency) so a status change never tears down/recreates the draw effect below; it just
-  // recolors the next frame. Reverts to 'idle' on its own via matrixStatusBus's auto-idle timers.
-  const statusSnap = useSyncExternalStore(subscribeMatrixStatus, getMatrixStatusSnapshot, getMatrixStatusServerSnapshot)
-  const statusRef = useRef({ kind: statusSnap.kind, channel: statusSnap.channel })
+  const isolated = contained || channelOverride != null
+  const statusSnap = useSyncExternalStore(
+    isolated ? isolatedSubscribe : subscribeMatrixStatus,
+    isolated ? isolatedSnapshot : getMatrixStatusSnapshot,
+    getMatrixStatusServerSnapshot,
+  )
+  const statusRef = useRef({
+    kind: channelOverride ?? statusSnap.kind,
+    channel: (channelOverride ?? statusSnap.channel) as MatrixChannel,
+    intensity,
+    forced: isolated,
+  })
   useEffect(() => {
-    statusRef.current = { kind: statusSnap.kind, channel: statusSnap.channel }
-  }, [statusSnap.kind, statusSnap.channel, statusSnap.tick])
+    statusRef.current = {
+      kind: channelOverride ?? statusSnap.kind,
+      channel: (channelOverride ?? statusSnap.channel) as MatrixChannel,
+      intensity,
+      forced: isolated,
+    }
+  }, [statusSnap.kind, statusSnap.channel, statusSnap.tick, channelOverride, intensity, isolated])
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -80,9 +111,15 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
     if (!context) return
 
     const maxDpr = 1
+    const readSize = () => {
+      const parent = contained ? canvas.parentElement : null
+      const width = contained ? (parent?.clientWidth || canvas.clientWidth || 1) : window.innerWidth
+      const height = contained ? (parent?.clientHeight || canvas.clientHeight || 1) : window.innerHeight
+      sizeRef.current = { width, height }
+      return sizeRef.current
+    }
     const resize = () => {
-      const width = window.innerWidth
-      const height = window.innerHeight
+      const { width, height } = readSize()
       const dpr = Math.min(window.devicePixelRatio || 1, maxDpr)
 
       canvas.width = Math.floor(width * dpr)
@@ -108,14 +145,19 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
         return
       }
 
-      const width = window.innerWidth
-      const height = window.innerHeight
+      const { width, height } = sizeRef.current
+      if (!width || !height) {
+        scheduleNext()
+        return
+      }
       const delta = Math.min(96, time - (lastTimeRef.current || time))
       lastTimeRef.current = time
 
-      const isIdle = statusRef.current.kind === 'idle'
-      const runtimeColor = isIdle ? null : matrixRuntimeRgb(statusRef.current.channel)
-      const runtimeIntensity = isIdle ? 1 : matrixRuntimeIntensity(statusRef.current.channel)
+      const snap = statusRef.current
+      const isIdle = !snap.forced && snap.kind === 'idle'
+      const runtimeColor = isIdle && !snap.forced ? null : matrixRuntimeRgb(snap.channel)
+      const dimFactor = snap.intensity === 'dim' ? 0.55 : snap.intensity === 'active' ? 1.08 : 1
+      const runtimeIntensity = (isIdle && !snap.forced ? 1 : matrixRuntimeIntensity(snap.channel)) * dimFactor
 
       context.fillStyle = 'rgba(0, 0, 0, 0.11)'
       context.fillRect(0, 0, width, height)
@@ -156,23 +198,30 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
 
     resize()
     window.addEventListener('resize', resize)
+    const observer = contained && canvas.parentElement ? new ResizeObserver(() => resize()) : null
+    if (observer && canvas.parentElement) observer.observe(canvas.parentElement)
     rafRef.current = window.requestAnimationFrame(draw)
 
     return () => {
       window.removeEventListener('resize', resize)
+      observer?.disconnect()
       if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current)
       if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current)
     }
-  }, [reducedMotion])
+  }, [reducedMotion, contained])
+
+  const hostClass = contained
+    ? 'pointer-events-none absolute inset-0 z-0 h-full w-full'
+    : 'pointer-events-none fixed inset-0 z-0 h-screen w-screen'
 
   if (reducedMotion) {
-    // Reduced motion keeps the underlying state legible (Phase G) as a static tint -- no pulse,
-    // no animation, just the current real color standing in place of the moving rain.
-    const rgb = statusSnap.kind === 'idle' ? GREEN : matrixRuntimeRgb(statusSnap.channel)
+    const rgb = channelOverride
+      ? matrixRuntimeRgb(channelOverride)
+      : (statusSnap.kind === 'idle' ? GREEN : matrixRuntimeRgb(statusSnap.channel))
     return (
       <div
         aria-hidden
-        className="pointer-events-none fixed inset-0 z-0 h-screen w-screen"
+        className={hostClass}
         style={{ background: `radial-gradient(circle at top, rgba(${rgb}, 0.05), rgba(0, 0, 0, 0.2) 45%)` }}
       />
     )
@@ -182,11 +231,11 @@ export const MatrixCodeRain = memo(function MatrixCodeRain() {
     <canvas
       ref={canvasRef}
       aria-hidden
-      className="pointer-events-none fixed inset-0 z-0 h-screen w-screen"
+      className={hostClass}
       style={{
         background: 'rgba(0, 0, 0, 0.14)',
         mixBlendMode: 'screen',
-        opacity: 'var(--war-room-matrix-opacity)',
+        opacity: intensity === 'dim' ? 'calc(var(--war-room-matrix-opacity) * 0.55)' : 'var(--war-room-matrix-opacity)',
       }}
     />
   )

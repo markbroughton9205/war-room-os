@@ -40,6 +40,12 @@ import {
   type DirectProviderFamily,
 } from '@/lib/council/providerDirectCall'
 import { getActiveWorkspaceId } from '@/lib/repo/workspaceContext'
+import { resolveRepoRoot } from '@/lib/repo/paths'
+import {
+  WAR_ROOM_CANONICAL_WORKSPACE_ID,
+  classifyWorkspaceRoot,
+  snapshotFoundryWorkspaceBinding,
+} from '@/lib/native-builder/foundryWorkspaceIdentity'
 import { logWarRoomRepoAudit } from '@/lib/war-room/repoAudit'
 import { buildCouncilAssistAuditMetadata, buildProviderResolutionAuditMetadata } from './engineeringAudit'
 import {
@@ -199,11 +205,19 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
 
     if (request.executionMode === 'bounded_coding') {
       const commanderRequest = request.naturalLanguage?.trim() || `${request.title}: ${request.description}`
+      const repoRoot = resolveRepoRoot()
+      const workspaceType = classifyWorkspaceRoot(repoRoot)
+      const workspaceId = getActiveWorkspaceId()
+        ?? (workspaceType === 'WAR_ROOM_CANONICAL_SOURCE' ? WAR_ROOM_CANONICAL_WORKSPACE_ID : undefined)
+      const workspaceBinding = snapshotFoundryWorkspaceBinding({
+        workspaceId: workspaceId ?? WAR_ROOM_CANONICAL_WORKSPACE_ID,
+        root: repoRoot,
+      })
       const session = request.sessionId
         ? { id: request.sessionId }
         : await createFoundrySession({
             title: request.title,
-            workspaceId: getActiveWorkspaceId(),
+            workspaceId,
             projectName: request.subsystem,
           })
       if (request.sessionId) await attachMissionToSession(request.sessionId, repair.id)
@@ -213,7 +227,8 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
         iterationPolicy: { maxAttempts: 8, attemptsUsed: 0, paused: false },
         codingMission: {
           mode: 'bounded_coding',
-          workspaceId: getActiveWorkspaceId(),
+          workspaceId,
+          workspaceBinding,
           commanderRequest,
           objective: request.title,
           acceptanceCriteria: [request.description],

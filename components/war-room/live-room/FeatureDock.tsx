@@ -1,8 +1,8 @@
 'use client'
 
 import { memo, useState } from 'react'
-import Link from 'next/link'
 
+import { FoundryEntryLink } from '@/components/war-room/foundry/FoundryEntryLink'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 
 export type DockPanelId =
@@ -111,10 +111,8 @@ export const FeatureDock = memo(function FeatureDock({
           </button>
         )
       })}
-      <Link
-        href="/war-room/engineering"
-        data-testid="nav-foundry"
-        aria-label="Foundry"
+      <FoundryEntryLink
+        testId="nav-foundry"
         className="group relative flex shrink-0 flex-col items-center"
       >
         <span className="pointer-events-none absolute -top-7 z-10 whitespace-nowrap rounded bg-black/95 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-emerald-200 opacity-0 group-hover:opacity-100">
@@ -129,7 +127,7 @@ export const FeatureDock = memo(function FeatureDock({
         >
           FY
         </span>
-      </Link>
+      </FoundryEntryLink>
     </nav>
   )
 })

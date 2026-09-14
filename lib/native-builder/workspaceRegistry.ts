@@ -20,6 +20,13 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { resolveBaseRepoRoot } from '@/lib/repo/paths'
 import { recordBoundaryViolation } from './boundaryLog'
+import {
+  WAR_ROOM_CANONICAL_WORKSPACE_ID,
+  classifyWorkspaceRoot,
+  decorateWorkspaceIdentity,
+  getCanonicalWarRoomSourceRoot,
+  type FoundryWorkspaceType,
+} from './foundryWorkspaceIdentity'
 
 const execFileAsync = promisify(execFile)
 
@@ -41,6 +48,9 @@ export interface WorkspaceRecord {
   framework?: string
   projectMemoryRel?: string
   missionHistory?: string[]
+  workspaceType?: FoundryWorkspaceType
+  displayTitle?: string
+  displayKind?: string
 }
 
 const REGISTRY_REL = path.join('.war-room', 'workspaces', 'registry.json')
@@ -68,7 +78,9 @@ export async function getEngineerAllowedRoots(): Promise<string[]> {
       /* not present on this machine — skip, never fabricate */
     }
   }
-  await add(resolveBaseRepoRoot())
+  await add(getCanonicalWarRoomSourceRoot())
+  const base = resolveBaseRepoRoot()
+  if (classifyWorkspaceRoot(base) !== 'INSTALLED_RUNTIME') await add(base)
   try {
     await mkdir(getProjectsRoot(), { recursive: true })
     await add(getProjectsRoot())
@@ -226,26 +238,41 @@ async function upsert(record: WorkspaceRecord): Promise<WorkspaceRecord> {
   return created
 }
 
+function withIdentity(record: WorkspaceRecord): WorkspaceRecord {
+  const identity = decorateWorkspaceIdentity({
+    id: record.id,
+    root: record.root,
+    label: record.label,
+    name: record.name,
+  })
+  return {
+    ...record,
+    workspaceType: identity.workspaceType,
+    displayTitle: identity.displayTitle,
+    displayKind: identity.displayKind,
+    label: identity.displayTitle,
+  }
+}
+
 export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
   const allowed = await getEngineerAllowedRoots()
   const listed = (await readRegistry()).filter(workspace => allowed.some(root => isPathInsideRoot(workspace.root, root)))
-  const warRoom = resolveBaseRepoRoot()
-  if (!listed.some(w => w.root === warRoom)) {
-    try {
-      const canonical = await realpath(warRoom)
-      listed.unshift(await enrich({
-        id: 'war-room-self',
-        root: canonical,
-        label: 'War Room',
-        name: 'War Room',
-        createdAt: '1970-01-01T00:00:00.000Z',
-        projectType: 'war_room',
-      }))
-    } catch {
-      /* base repo unreadable */
-    }
+  let canonicalRoot = getCanonicalWarRoomSourceRoot()
+  try {
+    canonicalRoot = await realpath(canonicalRoot)
+  } catch {
+    /* canonical path may be unresolved on this machine */
   }
-  return listed
+  const withoutCanonicalDupes = listed.filter(w => path.resolve(w.root).toLowerCase() !== path.resolve(canonicalRoot).toLowerCase())
+  withoutCanonicalDupes.unshift(await enrich({
+    id: WAR_ROOM_CANONICAL_WORKSPACE_ID,
+    root: canonicalRoot,
+    label: 'WAR ROOM OS',
+    name: 'WAR ROOM OS',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    projectType: 'war_room',
+  }))
+  return withoutCanonicalDupes.map(withIdentity)
 }
 
 export async function getWorkspace(id: string): Promise<WorkspaceRecord | null> {

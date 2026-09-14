@@ -46,6 +46,9 @@ export const FOUNDRY_NORMAL_MODE_HIDDEN_CONTROLS = [
   'Pause iteration',
 ] as const
 
+export const FOUNDRY_BACK_TO_WAR_ROOM_LABEL = '← Back to War Room'
+export const FOUNDRY_HOME_HREF = '/'
+
 export type FoundryContextKind = 'file' | 'project' | 'diff'
 
 export function actionsForContext(kind: FoundryContextKind): readonly string[] {

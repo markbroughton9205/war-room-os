@@ -9,6 +9,8 @@
  * reaches `resolved` without lib/native-builder/repairVerifier.ts producing real evidence.
  */
 
+import type { FoundryMissionWorkspaceBinding } from './foundryWorkspaceIdentityCore'
+
 // ---------------------------------------------------------------------------
 // Issues
 // ---------------------------------------------------------------------------
@@ -492,12 +494,43 @@ export type FoundryFailureEvidence = {
 export type FoundryWorkEvent = {
   id: string
   at: string
-  kind: 'plan' | 'file' | 'test' | 'repair' | 'complete' | 'status' | 'process'
+  kind: 'plan' | 'file' | 'test' | 'repair' | 'complete' | 'status' | 'process' | 'research'
   text: string
   source: 'execution' | 'audit'
   actionType?: string
   path?: string
   ok?: boolean
+}
+
+export type FoundryCompletionTruthState = {
+  surface: 'war_room_source' | 'generated_project'
+  created: string[]
+  modified: string[]
+  metadataFiles?: string[]
+  plus: number
+  minus: number
+  tests: {
+    ran: boolean
+    command: string
+    pass: number
+    fail: number
+    total: number
+    ok: boolean
+    reason: string
+  }
+  canComplete: boolean
+  installedRuntimeUpdated: false
+  headline: string
+  detail: string
+  installedSha?: string | null
+  sourceHead?: string | null
+  sourceDirty?: boolean
+}
+
+export type FoundryResearchProvenance = {
+  status: string
+  query: string
+  sources: { title: string; url: string; kind?: string }[]
 }
 
 export type NativeEngineerProgressEvent = {
@@ -511,6 +544,7 @@ export type NativeValidationOutcomeKind = 'IMPLEMENTED' | 'VALIDATED' | 'PARTIAL
 export type NativeCodingMissionState = {
   mode: NativeCodingExecutionMode
   workspaceId?: string
+  workspaceBinding?: FoundryMissionWorkspaceBinding
   commanderRequest: string
   objective: string
   acceptanceCriteria: string[]
@@ -540,6 +574,8 @@ export type NativeCodingMissionState = {
   nextAction?: string
   failureEvidence?: FoundryFailureEvidence | null
   workstream?: FoundryWorkEvent[]
+  completionTruth?: FoundryCompletionTruthState
+  researchProvenance?: FoundryResearchProvenance
 }
 
 // ---------------------------------------------------------------------------

@@ -110,3 +110,7 @@ export async function executeApprovedGitPush(input: {
 export function denyDeploy(reason = 'Deploy is not an Engineer operation. Commander must deploy through the existing governed production path.'): { ok: false; denied: true; reason: string } {
   return { ok: false, denied: true, reason }
 }
+
+export function denyInstallUpdate(reason = 'Foundry cannot replace the installed War Room runtime. Package/install stays Commander-gated on the governed desktop overlay path.'): { ok: false; denied: true; reason: string } {
+  return { ok: false, denied: true, reason }
+}

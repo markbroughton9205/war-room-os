@@ -306,6 +306,7 @@ import {
 } from '@/components/war-room/live-room'
 import { CouncilSessionNavigator, type CouncilSessionListItem } from '@/components/war-room/council/CouncilSessionNavigator'
 import { CouncilContextInspector } from '@/components/war-room/council/CouncilContextInspector'
+import { FoundryEntryLink } from '@/components/war-room/foundry/FoundryEntryLink'
 import {
   actorStageLine,
   classifyCouncilTurn,
@@ -13075,9 +13076,9 @@ function Home() {
           <Link href="/search" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#6EE7B7', background: 'rgba(0,0,0,0.28)' }}>
             Search
           </Link>
-          <Link href="/war-room/engineering" data-testid="nav-foundry-header" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.55)', color: '#6EE7B7', background: 'rgba(0,255,102,0.08)' }}>
+          <FoundryEntryLink testId="nav-foundry-header" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.55)', color: '#6EE7B7', background: 'rgba(0,255,102,0.08)' }}>
             Foundry
-          </Link>
+          </FoundryEntryLink>
           <Link href="/income-loot" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#6EE7B7', background: 'rgba(0,0,0,0.28)' }}>
             Revenue Command
           </Link>
