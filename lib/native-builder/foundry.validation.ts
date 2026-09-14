@@ -75,6 +75,20 @@ import {
   sessionHistoryKind,
   shortSessionTitle,
 } from '@/lib/native-builder/foundryVisualState'
+import {
+  FOUNDRY_TERRA_CANONICAL_SOURCE_PREFIXES,
+  FOUNDRY_TERRA_TRUTH_PASSIVE,
+  FOUNDRY_TERRA_TRUTH_PREVIEW,
+  FOUNDRY_TERRA_TRUTH_UNAVAILABLE,
+  buildFoundryTerraGibsMosaicUrl,
+  foundryTerraBackgroundTruth,
+  foundryTerraCompletedObservationDay,
+  foundryTerraNeverLabeledLive,
+  isTerraBuildRequest,
+  isTerraSourcePath,
+  parseFoundryTerraContext,
+  terraBuildContextBinding,
+} from '@/lib/native-builder/foundryTerraContext'
 import { knowledgeIsFresh } from '@/lib/native-builder/foundryEngineeringKnowledge'
 import type { NativeCodingMissionState } from '@/lib/native-builder/types'
 
@@ -183,6 +197,7 @@ function uxStateMachineTests(): CaseResult[] {
     ...foundryNavigationTests(shell),
     ...foundryTruthTests(shell),
     ...foundryVisualContractTests(shell),
+    ...foundryTerraVisualTests(shell),
   ]
 }
 
@@ -227,6 +242,49 @@ function foundryVisualContractTests(shell: string): CaseResult[] {
     check('session_ux_08_new_session_clears_mission', shell.includes('startNewSession') && shell.includes('mission: null'), 'ok'),
     check('session_ux_09_cancelled_not_current', selectedCancelled === 'CANCELLED' && cancelledKind === 'HISTORICAL', `${selectedCancelled}:${cancelledKind}`),
     check('session_ux_10_home_grouping', grouped.some(g => g.label === 'Today') && grouped.some(g => g.label === 'Yesterday'), grouped.map(g => g.label).join(',')),
+  ]
+}
+
+function foundryTerraVisualTests(shell: string): CaseResult[] {
+  const terraBgPath = path.join(process.cwd(), 'components/war-room/foundry/FoundryTerraBackground.tsx')
+  const terraCtxPath = path.join(process.cwd(), 'lib/native-builder/foundryTerraContext.ts')
+  const nav = readFileSync(path.join(process.cwd(), 'components/war-room/foundry/FoundryHomeNav.tsx'), 'utf8')
+  const css = readFileSync(path.join(process.cwd(), 'app/globals.css'), 'utf8')
+  const matrixBg = readFileSync(path.join(process.cwd(), 'components/war-room/MatrixBackground.tsx'), 'utf8')
+  const matrixRain = readFileSync(path.join(process.cwd(), 'components/MatrixCodeRain.tsx'), 'utf8')
+  const terraBg = readFileSync(terraBgPath, 'utf8')
+  const terraCtx = readFileSync(terraCtxPath, 'utf8')
+  const arbiter = readFileSync(path.join(process.cwd(), 'lib/native-builder/localModelArbiter.ts'), 'utf8')
+  const ollama = readFileSync(path.join(process.cwd(), 'lib/native-builder/ollamaClient.ts'), 'utf8')
+  const noneTruth = foundryTerraBackgroundTruth('none', true)
+  const previewTruth = foundryTerraBackgroundTruth('preview', true)
+  const missingTruth = foundryTerraBackgroundTruth('none', false)
+  const mosaic = buildFoundryTerraGibsMosaicUrl(foundryTerraCompletedObservationDay(new Date('2026-09-13T16:00:00Z')))
+  const noDuplicateTerraRuntime = !existsSync(path.join(process.cwd(), 'components/war-room/terra/Terra2.tsx'))
+    && !existsSync(path.join(process.cwd(), 'components/war-room/foundry/FoundryTerra2.tsx'))
+    && !terraBg.includes("from '@/components/war-room/terra/TerraGlobe'")
+    && !terraBg.includes("from 'cesium'")
+    && !terraBg.includes('loadCesium')
+    && !terraBg.includes('new Cesium')
+  const matrixReuse = shell.includes('MatrixBackground') && shell.includes('contained') && matrixBg.includes('MatrixCodeRain') && !terraBg.includes('MatrixCodeRain') && !terraBg.includes('requestAnimationFrame')
+  const singleMatrix = (shell.match(/<MatrixBackground /g) ?? []).length === 1
+  return [
+    check('TERRA_VISUAL_01', shell.includes('foundry-normal-mode') && shell.includes('FoundryTerraBackground') && terraBg.includes('foundry-terra-background'), 'ok'),
+    check('TERRA_VISUAL_02', noDuplicateTerraRuntime && terraCtx.includes('getGibsLayer') && FOUNDRY_TERRA_CANONICAL_SOURCE_PREFIXES.includes('components/war-room/terra/'), 'ok'),
+    check('TERRA_VISUAL_03', noneTruth.pointerEvents === 'none' && terraBg.includes('pointer-events-none') && terraBg.includes('data-pointer-events'), noneTruth.pointerEvents),
+    check('TERRA_VISUAL_04', shell.includes('foundry-glass') && shell.includes('relative z-10') && shell.includes('data-testid="foundry-prompt"') && css.includes('foundry-glass-landing'), 'ok'),
+    check('TERRA_VISUAL_05', noneTruth.live === false && missingTruth.label === FOUNDRY_TERRA_TRUTH_UNAVAILABLE && noneTruth.label === FOUNDRY_TERRA_TRUTH_PASSIVE && terraBg.includes('data-terra-live="false"') && foundryTerraNeverLabeledLive(noneTruth.label) && foundryTerraNeverLabeledLive(missingTruth.label) && !terraBg.includes('data-terra-truth="LIVE"'), `${noneTruth.label}:${missingTruth.label}`),
+    check('TERRA_VISUAL_06', parseFoundryTerraContext(null) === 'none' && parseFoundryTerraContext('preview') === 'preview' && previewTruth.pointerEvents === 'auto' && shell.includes('foundry-terra-build-context') && shell.includes('foundry-terra-preview') && terraBuildContextBinding('build').workspaceId === WAR_ROOM_CANONICAL_WORKSPACE_ID && terraBuildContextBinding('build').autonomous === false, previewTruth.pointerEvents),
+    check('TERRA_VISUAL_07', matrixReuse && matrixRain.includes('contained'), 'ok'),
+    check('TERRA_VISUAL_08', singleMatrix && !terraBg.includes('requestAnimationFrame') && !terraBg.includes('setInterval') && mosaic.includes('VIIRS_NOAA20_CorrectedReflectance_TrueColor'), String((shell.match(/<MatrixBackground /g) ?? []).length)),
+    check('TERRA_VISUAL_09', css.includes('prefers-reduced-motion') && css.includes('.foundry-glitch-mark') && css.includes('.foundry-terra-globe') && matrixBg.includes('prefers-reduced-motion'), 'ok'),
+    check('TERRA_VISUAL_10', nav.includes('foundry-back-to-war-room') && nav.includes('← Back to War Room') && !nav.includes('history.back'), 'ok'),
+    check('TERRA_VISUAL_11', shell.includes('foundry-session-list') && shell.includes('groupFoundrySessionsByDay') && shell.includes('foundry-new-session') && shell.includes('+ New Session'), 'ok'),
+    check('TERRA_VISUAL_12', shell.includes('WAR_ROOM_CANONICAL_WORKSPACE_ID') && shell.includes('Canonical Source') && isTerraSourcePath('components/war-room/terra/TerraGlobe.tsx') && isTerraBuildRequest('Inspect Terra UI files') && shell.includes('xl:grid-cols-[220px_minmax(0,1fr)_280px]') && shell.includes('grid-cols-1') && css.includes('@media (max-width: 1279px)'), 'ok'),
+    check('TERRA_VISUAL_13', shell.includes('data-testid="foundry-right"') && shell.includes('visual.label') && shell.includes('truth.tests') && !shell.includes('Math.random') && shell.includes('foundry-file-tree'), 'ok'),
+    check('TERRA_VISUAL_14', shell.includes('foundry-bottom') && ['terminal', 'diff', 'tests', 'logs', 'processes'].every(tab => shell.includes(`'${tab}'`)), 'ok'),
+    check('TERRA_VISUAL_15', (shell.match(/data-testid="foundry-chat-input"/g) ?? []).length === 1 && shell.includes('foundry-landing') && nav.includes('HIGHER VISION INC'), String((shell.match(/data-testid="foundry-chat-input"/g) ?? []).length)),
+    check('TERRA_VISUAL_16', ollama.includes("keep_alive: args.keepAlive ?? '5m'") && arbiter.includes('COUNCIL_BACKEND') && arbiter.includes('FOUNDRY_CODER') && !shell.includes('councilDeliberationMode') && previewTruth.label === FOUNDRY_TERRA_TRUTH_PREVIEW, 'ok'),
   ]
 }
 

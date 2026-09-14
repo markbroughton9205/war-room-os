@@ -28,8 +28,16 @@ import {
   workstreamMarker,
 } from '@/lib/native-builder/foundryVisualState'
 import { MatrixBackground } from '@/components/war-room/MatrixBackground'
+import {
+  FOUNDRY_TERRA_QUERY_KEY,
+  isTerraBuildRequest,
+  isTerraSourcePath,
+  parseFoundryTerraContext,
+  terraBuildContextBinding,
+} from '@/lib/native-builder/foundryTerraContext'
 import { FoundryContextMenu, type FoundryContextMenuState } from './FoundryContextMenu'
 import { FoundryHomeNav } from './FoundryHomeNav'
+import { FoundryTerraBackground } from './FoundryTerraBackground'
 import type { FoundryContextKind } from '@/lib/native-builder/foundryUxContract'
 
 const DEFAULT_BASE_PATH = '/war-room/engineering'
@@ -137,6 +145,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
   const workspaceId = searchParams.get('workspace')
   const sessionId = searchParams.get('session')
   const missionId = searchParams.get('mission')
+  const terraMode = parseFoundryTerraContext(searchParams.get(FOUNDRY_TERRA_QUERY_KEY))
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>([])
   const [status, setStatus] = useState<FoundryStatus | null>(null)
@@ -164,9 +173,11 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
     const ws = extra?.workspace === undefined ? workspaceId : extra.workspace
     const sess = extra?.session === undefined ? sessionId : extra.session
     const missionQ = extra?.mission === undefined ? missionId : extra.mission
+    const terraQ = extra?.terra === undefined ? (terraMode === 'none' ? null : terraMode) : extra.terra
     if (ws) params.set('workspace', ws)
     if (sess) params.set('session', sess)
     if (missionQ) params.set('mission', missionQ)
+    if (terraQ) params.set(FOUNDRY_TERRA_QUERY_KEY, terraQ)
     const s = params.toString()
     return s ? `${basePath}?${s}` : basePath
   }
@@ -345,7 +356,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
       requestedWorkspaceId: workspaceId,
       generatedCollisionExists: collision,
     })
-    if (resolved.kind === 'canonical' || isWarRoomSelfEditRequest(request)) {
+    if (resolved.kind === 'canonical' || isWarRoomSelfEditRequest(request) || isTerraBuildRequest(request) || terraMode !== 'none') {
       await ensureProjectAndSend(request, WAR_ROOM_CANONICAL_WORKSPACE_ID)
       return
     }
@@ -475,6 +486,15 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
   const testsFailed = tests.some(t => !t.ok)
   const showCompletion = Boolean(sessionId && commanderState === 'COMPLETE')
   const centerChat = sessionId ? (session?.chat ?? []) : []
+  const landing = !sessionId || (centerChat.length === 0 && !missionId)
+  const terraBinding = terraBuildContextBinding(terraMode)
+  const visibleFiles = terraMode === 'none' ? files : files.filter(isTerraSourcePath)
+  const setTerraContext = (mode: 'none' | 'build' | 'preview') => {
+    router.replace(qs({
+      workspace: mode === 'none' ? workspaceId : WAR_ROOM_CANONICAL_WORKSPACE_ID,
+      terra: mode === 'none' ? null : mode,
+    }))
+  }
 
   useEffect(() => {
     if (drawer !== 'processes' || !missionId) return
@@ -491,9 +511,17 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
         workspacePath={selectedWorkspace?.root}
         visual={visual}
       />
-    <div className="relative grid min-h-[calc(100vh-5.5rem)] grid-cols-1 gap-2 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_280px]" data-testid="foundry-normal-mode" onClick={() => setMenu(null)}>
+    <div className="relative grid min-h-[calc(100vh-8.5rem)] grid-cols-1 gap-2 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_280px]" data-testid="foundry-normal-mode" onClick={() => setMenu(null)}>
       <MatrixBackground contained channelOverride={visual.matrixChannel} intensity={visual.intensity} />
+      <FoundryTerraBackground terraContext={terraMode} />
       <aside className="foundry-glass relative z-10 flex min-h-0 flex-col space-y-2 rounded-lg border border-emerald-400/20 p-2" data-testid="foundry-left">
+        <div className="rounded border border-emerald-400/15 px-2 py-1.5" data-testid="foundry-identity-rail">
+          <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-slate-500">WAR ROOM</p>
+          <p className="mt-0.5 text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-200">THE FOUNDRY</p>
+          <p className={`mt-1 text-[9px] uppercase tracking-widest ${localCoderReady ? 'text-emerald-400' : 'text-slate-500'}`} data-testid="foundry-local-coder-rail">
+            LOCAL CODER {localCoderReady ? 'READY' : status?.foundryModelStatus?.localCoder ? 'UNAVAILABLE' : 'UNKNOWN'}
+          </p>
+        </div>
         <div className="rounded border border-emerald-400/15 px-2 py-1" data-testid="foundry-workspace-truth" title={selectedWorkspace?.root ?? 'No workspace selected'}>
           <p className="truncate text-[11px] font-bold text-emerald-100">{workspaceTitle}</p>
           <p className="truncate text-[9px] uppercase tracking-widest text-slate-500">{workspaceKind}</p>
@@ -560,25 +588,58 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
             ))}
           </div>
         </div>
+        <button
+          type="button"
+          className={`w-full rounded border py-1 text-[9px] uppercase tracking-widest ${terraMode === 'none' ? 'border-white/10 text-slate-500' : 'border-emerald-400/40 text-emerald-200'}`}
+          data-testid="foundry-terra-build-context"
+          onClick={() => setTerraContext(terraMode === 'none' ? 'build' : 'none')}
+        >
+          {terraMode === 'none' ? 'Terra build context' : 'Exit Terra build context'}
+        </button>
         <button type="button" className="w-full rounded border border-white/10 py-1 text-[10px] uppercase tracking-widest text-slate-500" data-testid="foundry-inspector-toggle" onClick={() => setInspector(v => !v)}>
           {inspector ? 'Hide inspector' : 'Advanced / Inspector'}
         </button>
       </aside>
 
-      <section className="foundry-glass relative z-10 flex min-h-0 flex-col rounded-lg border border-emerald-400/20" data-testid="foundry-chat">
+      <section className={`relative z-10 flex min-h-0 flex-col rounded-lg border border-emerald-400/20 ${landing ? 'foundry-glass foundry-glass-landing' : 'foundry-glass'}`} data-testid="foundry-chat">
         <div className="border-b border-emerald-400/15 px-3 py-2">
           <p className="text-[9px] uppercase tracking-[0.28em] text-emerald-500/70">Foundry</p>
           <p className="text-sm text-emerald-100" data-testid="foundry-session-identity">{sessionLabel}</p>
           <p className={`mt-1 text-[11px] uppercase tracking-widest ${foundryToneClass(visual.tone)}`} data-testid="foundry-commander-state">{visual.label}</p>
           {narrative.error ? <p className="mt-1 text-[11px] text-red-400">{narrative.error}</p> : null}
           {error ? <p className="mt-1 text-[11px] text-red-400">{error}</p> : null}
+          {terraMode !== 'none' ? (
+            <div className="mt-2 rounded border border-emerald-400/25 bg-black/30 p-2" data-testid="foundry-terra-build-banner">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-emerald-300">Terra build context</p>
+              <p className="mt-1 text-[10px] text-slate-400">Canonical Terra source. Inspect, edit, preview, test, and diff Terra UI under Foundry governance. Not autonomous. Not a new Terra runtime.</p>
+              <p className="mt-1 font-mono text-[9px] uppercase tracking-widest text-slate-500">Workspace {terraBinding.workspaceId} · imagery never LIVE</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" className="rounded border border-cyan-400/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200" data-testid="foundry-terra-preview" onClick={() => setTerraContext('preview')}>
+                  Interactive preview
+                </button>
+                <button type="button" className="rounded border border-white/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-slate-400" onClick={() => setTerraContext('none')}>
+                  Exit
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
         <div className="min-h-[180px] flex-1 space-y-2 overflow-auto p-3 text-[12px]">
           {!sessionId || (centerChat.length === 0 && !missionId) ? (
-            <div className="flex h-full min-h-[160px] items-center justify-center text-center" data-testid="foundry-new-session-empty">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-emerald-400/80">New Session / Ready</p>
+            <div className="flex h-full min-h-[220px] items-center justify-center text-center" data-testid="foundry-new-session-empty">
+              <div className="foundry-landing mx-auto max-w-xl px-2" data-testid="foundry-landing">
+                <p className="foundry-landing-mark foundry-glitch-mark">W</p>
+                <p className="mt-3 text-[11px] font-bold uppercase tracking-[0.42em] text-emerald-300">FOUNDRY READY</p>
+                <p className="mt-2 text-[13px] font-semibold uppercase tracking-[0.22em] text-emerald-100">CODE TODAY.</p>
+                <p className="text-[13px] font-semibold uppercase tracking-[0.22em] text-emerald-100">A SAFER TOMORROW.</p>
+                <p className="mt-3 text-[11px] font-bold uppercase tracking-widest text-emerald-400/80">New Session / Ready</p>
                 <p className="mt-1 text-[11px] text-slate-500">Previous work stays in session history until you select it.</p>
+                <div className="mt-4 grid grid-cols-2 gap-2" data-testid="foundry-landing-actions">
+                  <button type="button" className="foundry-action-card" onClick={() => void startNewSession()}>New Session</button>
+                  <button type="button" className="foundry-action-card" onClick={() => router.replace(qs({ workspace: workspaceId ?? WAR_ROOM_CANONICAL_WORKSPACE_ID, session: null, mission: null }))}>Open Project</button>
+                  <button type="button" className="foundry-action-card" onClick={() => setRequest('Run ')}>Run a command</button>
+                  <button type="button" className="foundry-action-card" onClick={() => setRightTab('research')}>Research</button>
+                </div>
               </div>
             </div>
           ) : null}
@@ -732,9 +793,11 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
           ))}
         </div>
         {rightTab === 'files' ? (
-          <ul className="max-h-56 space-y-0.5 overflow-auto">
+          <ul className="max-h-56 space-y-0.5 overflow-auto" data-testid="foundry-file-tree">
             {filePreview ? <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap text-[10px] text-slate-300">{filePreview.path}{'\n'}{filePreview.content.slice(0, 4000)}</pre> : null}
-            {files.slice(0, 80).map(f => (
+            {terraMode !== 'none' ? <li className="text-[9px] uppercase tracking-widest text-emerald-500/70">Terra source files</li> : null}
+            {visibleFiles.length === 0 ? <li className="text-slate-500">{terraMode === 'none' ? 'No files yet.' : 'No Terra source files in this listing yet.'}</li> : null}
+            {visibleFiles.slice(0, 80).map(f => (
               <li key={f}>
                 <button type="button" className="w-full truncate text-left text-slate-400 hover:text-emerald-300" onClick={() => void openFile(f)} onContextMenu={e => onContext('file', f, e)}>{f}</button>
               </li>

@@ -153,13 +153,42 @@ body {
 }
 
 .foundry-glass {
-  background: rgba(4, 10, 8, 0.78);
-  box-shadow: inset 0 0 0 1px rgba(0, 255, 140, 0.1), 0 0 18px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(6px);
+  background: rgba(4, 10, 8, 0.82);
+  box-shadow:
+    inset 1px 0 0 rgba(0, 255, 170, 0.22),
+    inset -1px 0 0 rgba(0, 180, 255, 0.1),
+    inset 0 0 0 1px rgba(0, 255, 140, 0.12),
+    0 0 22px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+}
+
+.foundry-glass-landing {
+  background: rgba(3, 8, 6, 0.38);
+  box-shadow:
+    inset 1px 0 0 rgba(0, 255, 170, 0.16),
+    inset -1px 0 0 rgba(0, 180, 255, 0.08),
+    0 0 28px rgba(0, 20, 12, 0.35);
 }
 
 [data-testid="foundry-normal-mode"] {
   --war-room-matrix-opacity: 0.38;
+}
+
+[data-testid="foundry-normal-mode"]::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  opacity: 0.028;
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 255, 140, 0.35) 2px,
+    rgba(0, 255, 140, 0.35) 3px
+  );
+  animation: foundry-scanline-pulse 9s ease-in-out infinite;
 }
 
 .foundry-tab-pulse {
@@ -169,4 +198,180 @@ body {
 @keyframes foundry-tab-pulse {
   0%, 100% { color: rgb(103, 232, 249); }
   50% { color: rgb(16, 185, 129); }
+}
+
+@keyframes foundry-scanline-pulse {
+  0%, 88%, 100% { opacity: 0.02; }
+  92% { opacity: 0.055; }
+}
+
+@keyframes foundry-glitch-jitter {
+  0%, 92%, 100% { transform: translate3d(0, 0, 0); text-shadow: none; }
+  93% { transform: translate3d(-1px, 0.5px, 0); text-shadow: 1px 0 rgba(0, 255, 170, 0.35), -1px 0 rgba(255, 80, 80, 0.2); }
+  96% { transform: translate3d(1px, -0.5px, 0); text-shadow: -1px 0 rgba(0, 180, 255, 0.28); }
+}
+
+@keyframes foundry-terra-drift {
+  0% { background-position: 22% 48%; }
+  100% { background-position: 78% 52%; }
+}
+
+@keyframes foundry-terra-orbit {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.foundry-glitch-mark {
+  animation: foundry-glitch-jitter 11s steps(2, end) infinite;
+}
+
+.foundry-terra-background {
+  pointer-events: none;
+}
+
+.foundry-terra-background[data-pointer-events="auto"] {
+  pointer-events: auto;
+}
+
+.foundry-terra-vignette {
+  background:
+    radial-gradient(ellipse 46% 58% at 50% 46%, rgba(0, 40, 24, 0.08), transparent 58%),
+    linear-gradient(90deg, rgba(2, 4, 3, 0.82) 0%, transparent 18%, transparent 82%, rgba(2, 4, 3, 0.82) 100%),
+    linear-gradient(180deg, rgba(2, 4, 3, 0.55) 0%, transparent 22%, transparent 78%, rgba(2, 4, 3, 0.72) 100%);
+}
+
+.foundry-terra-stage {
+  pointer-events: none;
+}
+
+.foundry-terra-globe {
+  width: min(58vmin, 680px);
+  height: min(58vmin, 680px);
+  border-radius: 50%;
+  background-image:
+    var(--foundry-terra-mosaic, none),
+    radial-gradient(circle at 32% 34%, rgba(180, 220, 255, 0.28), transparent 18%),
+    radial-gradient(circle at 28% 48%, rgba(18, 90, 48, 0.85) 0 16%, transparent 38%),
+    radial-gradient(circle at 62% 42%, rgba(12, 70, 140, 0.95), rgba(3, 18, 42, 0.95) 62%);
+  background-size: 210% 105%, auto, auto, auto;
+  background-position: 28% 50%, 0 0, 0 0, 0 0;
+  background-repeat: no-repeat;
+  box-shadow:
+    inset -18px 0 36px rgba(0, 0, 0, 0.55),
+    inset 14px 8px 28px rgba(140, 220, 255, 0.12),
+    0 0 60px rgba(0, 255, 140, 0.14),
+    0 0 0 1px rgba(0, 255, 170, 0.28);
+  animation: foundry-terra-drift 140s linear infinite;
+  filter: saturate(1.05) contrast(1.04);
+  opacity: 0.78;
+}
+
+.foundry-terra-orbits {
+  position: absolute;
+  width: min(72vmin, 820px);
+  height: min(72vmin, 820px);
+  border-radius: 50%;
+  border: 1px solid rgba(0, 255, 170, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(0, 180, 255, 0.08);
+  animation: foundry-terra-orbit 90s linear infinite;
+}
+
+.foundry-terra-orbits::before,
+.foundry-terra-orbits::after {
+  content: '';
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  border: 1px dashed rgba(0, 255, 140, 0.12);
+}
+
+.foundry-terra-orbits::after {
+  inset: 18%;
+  transform: rotate(28deg);
+  border-style: solid;
+  border-color: rgba(0, 180, 255, 0.1);
+}
+
+.foundry-terra-truth {
+  position: absolute;
+  bottom: 11%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(167, 243, 208, 0.55);
+}
+
+.foundry-terra-labels {
+  position: absolute;
+  inset: 8% 4%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 8px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.38);
+}
+
+.foundry-terra-labels li:nth-child(odd) {
+  align-self: flex-start;
+}
+
+.foundry-terra-labels li:nth-child(even) {
+  align-self: flex-end;
+}
+
+.foundry-landing-mark {
+  font-size: clamp(2.6rem, 6vw, 4.6rem);
+  line-height: 0.9;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: rgba(167, 243, 208, 0.82);
+  text-shadow: 0 0 28px rgba(0, 255, 140, 0.28), 1px 0 rgba(0, 180, 255, 0.25), -1px 0 rgba(255, 80, 80, 0.12);
+}
+
+.foundry-action-card {
+  border: 1px solid rgba(52, 211, 153, 0.28);
+  background: rgba(4, 12, 10, 0.55);
+  color: rgb(167, 243, 208);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 0.7rem 0.55rem;
+  border-radius: 0.55rem;
+}
+
+.foundry-action-card:hover {
+  border-color: rgba(52, 211, 153, 0.7);
+  background: rgba(6, 32, 22, 0.7);
+}
+
+@media (max-width: 1279px) {
+  .foundry-terra-globe {
+    width: min(46vmin, 420px);
+    height: min(46vmin, 420px);
+    opacity: 0.55;
+  }
+
+  .foundry-terra-labels {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .foundry-tab-pulse,
+  .foundry-glitch-mark,
+  .foundry-terra-globe,
+  .foundry-terra-orbits,
+  [data-testid="foundry-normal-mode"]::after {
+    animation: none !important;
+    text-shadow: none;
+  }
 }

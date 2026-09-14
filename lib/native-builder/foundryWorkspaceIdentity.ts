@@ -194,6 +194,8 @@ export const FOUNDRY_UI_SOURCE_MAP = {
   matrixTokens: 'lib/ui/matrixRuntimeColors.ts',
   uxContract: 'lib/native-builder/foundryUxContract.ts',
   visualState: 'lib/native-builder/foundryVisualState.ts',
+  terraBackground: 'components/war-room/foundry/FoundryTerraBackground.tsx',
+  terraContext: 'lib/native-builder/foundryTerraContext.ts',
 } as const
 
 export const FOUNDRY_CANONICAL_UI_FILES = Object.values(FOUNDRY_UI_SOURCE_MAP)
