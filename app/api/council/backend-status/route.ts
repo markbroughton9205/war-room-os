@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { COUNCIL_ROSTER } from '@/lib/council/familyRoster'
 import { probeOllama } from '@/lib/native-builder/ollamaClient'
+import { snapshotLocalModelArbiter, backendExecutionLabel } from '@/lib/native-builder/localModelArbiter'
 import { getProviderRuntimeHealth, type ProviderRuntimeStatus } from '@/lib/providers/health'
 import {
   EXTERNAL_PROVIDER_BY_SEAT,
@@ -126,11 +127,12 @@ function activeStatusFromProviderHealth(status: ProviderRuntimeStatus | undefine
 
 export async function GET() {
   const probeStarted = Date.now()
-  const [probe, providerRuntime, terraConnection, networkEgress] = await Promise.all([
+  const [probe, providerRuntime, terraConnection, networkEgress, localModelArbiter] = await Promise.all([
     probeOllama(),
     getProviderRuntimeHealth(),
     probeTerraConnection(),
     probeNetworkEgress(),
+    snapshotLocalModelArbiter(),
   ])
   const probeLatencyMs = Date.now() - probeStarted
 
@@ -301,6 +303,20 @@ export async function GET() {
       localBackendAvailable: probe.available,
       localReadyForLiveRouting,
       localServingLiveSeats: 'UNKNOWN' as const,
+      backendExecutionState: localModelArbiter.councilBackendExecutionState,
+      backendExecutionLabel: backendExecutionLabel(localModelArbiter.councilBackendExecutionState),
+      gpuOwner: localModelArbiter.gpuOwner,
+      foundryActive: localModelArbiter.foundryActive,
+      localModelArbiter: {
+        owners: localModelArbiter.owners,
+        councilModel: localModelArbiter.councilModel,
+        foundryCoderModel: localModelArbiter.foundryCoderModel,
+        gpuOwner: localModelArbiter.gpuOwner,
+        foundryActive: localModelArbiter.foundryActive,
+        councilBackendExecutionState: localModelArbiter.councilBackendExecutionState,
+        resident: localModelArbiter.resident.map(row => ({ name: row.name, owner: row.owner })),
+        detail: localModelArbiter.detail,
+      },
       routingModeNote:
         'routingPreference is AUTO by default for sovereign packaged War Room. routingModeResolved is the effective invoke mode ' +
         '(AUTO with 0 cloud keys → LOCAL_FIRST; AUTO with any cloud keys → HYBRID). liveRoutingWired=true means execute.ts ' +

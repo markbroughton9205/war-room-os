@@ -1,6 +1,10 @@
 import 'server-only'
 
 import { probeOllama, requestOllamaStreamingCompletion, type OllamaProbeResult } from '@/lib/native-builder/ollamaClient'
+import {
+  prepareCouncilBackend,
+  setCouncilExecutionPhase,
+} from '@/lib/native-builder/localModelArbiter'
 import { displayNameForSeat } from '@/lib/council/nebula/identity'
 import { stripHiddenReasoning } from '@/lib/council/nebula/thinkingStrip'
 import type { CouncilFailureLayer } from '../types'
@@ -25,7 +29,7 @@ function classifyLocalFailure(detail: string): CouncilFailureLayer {
  * HTTP client) rather than duplicating a client — see that file's own header for why it exists.
  *
  * Streams Ollama NDJSON tokens through `onDelta`. Thinking is stripped and never concatenated
- * into the Commander-facing text. Request options include keep_alive=-1 and think=false; they
+ * into the Commander-facing text. Request options include keep_alive=5m and think=false; they
  * do not mutate host-wide Ollama daemon configuration.
  */
 export async function invokeLocalBackend(input: ModelBackendInvokeInput): Promise<ModelBackendInvokeResult> {
@@ -84,18 +88,40 @@ export async function invokeLocalBackend(input: ModelBackendInvokeInput): Promis
     return { ok: false, text: '', partial: false, backend }
   }
 
+  const prepared = await prepareCouncilBackend()
+  if (!prepared.ok) {
+    const waiting = prepared.state === 'COUNCIL_WAITING_FOR_GPU'
+    const backend: BackendMetadata = {
+      backendType: 'LOCAL',
+      provider: 'ollama',
+      model: entry.modelId,
+      repo: entry.repo,
+      quantization: entry.quant,
+      host,
+      latencyMs: Date.now() - started,
+      status: waiting ? 'UNAVAILABLE' : 'FAILED',
+      failureClass: waiting ? 'TIMEOUT' : 'MODEL_LOAD_FAILED',
+      fallbackReason: prepared.detail,
+    }
+    return { ok: false, text: '', partial: false, backend }
+  }
+
   console.info(
     `[nebula-local] identity=${displayNameForSeat(input.seat, input.seat)} seat=${input.seat} backend=LOCAL runtime=ollama model=${entry.modelId}`,
   )
+  setCouncilExecutionPhase('COUNCIL_EXECUTING')
   const result = await requestOllamaStreamingCompletion({
     model: entry.modelId,
     prompt: input.userPrompt,
     system: input.systemPrompt,
     signal: input.signal,
+    timeoutMs: 90_000,
+    keepAlive: '5m',
     onDelta: delta => {
       if (delta) input.onDelta(delta)
     },
   })
+  setCouncilExecutionPhase('COUNCIL_READY')
   const latencyMs = Date.now() - started
 
   if (!result.ok) {

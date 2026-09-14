@@ -123,6 +123,12 @@ import {
 } from '@/lib/council/stableGroupChat'
 import { filterDecreeRelevantPriorReplies, isLightweightPingDecree } from '@/lib/council/contextRelevance'
 import { invokeCouncilSeat, localRoutingBypassesCloudFloorGate, resolveCouncilRoutingMode, type SeatInvokeStatus } from '@/lib/council/live-orchestration/backends'
+import {
+  councilDegradedBriefing,
+  partialCouncilBriefing,
+  prepareCouncilBackend,
+  setCouncilExecutionPhase,
+} from '@/lib/native-builder/localModelArbiter'
 import type { BackendMetadata } from '@/lib/council/live-orchestration/backends/types'
 import { resolveLiveCouncilRoster, resolveDisplayCouncilRoster, familyIsFloorEligible } from '@/lib/council/live-orchestration/rosterHealth.server'
 import { resolveVisibleFloorOrder } from '@/lib/council/live-orchestration/floorScheduler'
@@ -310,6 +316,7 @@ export function mapSeatInvokeStatusToProviderResultStatus(status: SeatInvokeStat
 }
 
 const PROVIDER_TIMEOUT_MS = 45_000
+const LOCAL_COUNCIL_MEMBER_TIMEOUT_MS = 90_000
 
 function displayFamilyName(family: CouncilSingleFamily): string {
   if (family === 'baby') return 'Baby AI'
@@ -1818,6 +1825,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
        * STABLE_GROUP_MAX_TOKENS instead of the generic default) — falls back to the outer
        * `maxTokens` closure value when absent. */
       maxTokensOverride?: number
+      seatSignal?: AbortSignal
     },
   ): Promise<ProviderResult> => {
     signal.throwIfAborted()
@@ -1920,7 +1928,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         systemPrompt: systemFor(),
         userPrompt,
         maxTokens: callMaxTokens,
-        signal,
+        signal: opts?.seatSignal ? AbortSignal.any([signal, opts.seatSignal]) : signal,
         onDelta: emitDelta,
         timeoutKind: isLightweightGreeting ? 'social' : classifiedTurn.shouldResearch ? 'research' : 'council',
       })
@@ -1948,6 +1956,16 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         backend: seatResult.backend,
       }
     } catch (error) {
+      if (opts?.seatSignal?.aborted && !signal.aborted) {
+        return {
+          family: familyName,
+          content: '',
+          status: 'TIMED_OUT',
+          timeoutMs: LOCAL_COUNCIL_MEMBER_TIMEOUT_MS,
+          error: `${familyName} Council timed out.`,
+          failureLayer: 'TIMEOUT',
+        }
+      }
       signal.throwIfAborted()
       return {
         family: familyName,
@@ -2074,11 +2092,15 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           error: `Controlled deliberation failure inject for ${family}/${role}`,
         }
       } else {
-        const invokeOnce = () => withTimeout(
-          displayFamilyName(family),
-          callCouncilProvider(family, prompt),
-          PROVIDER_TIMEOUT_MS,
-        )
+        const invokeOnce = async () => {
+          const seatAbort = new AbortController()
+          const timer = setTimeout(() => seatAbort.abort(), LOCAL_COUNCIL_MEMBER_TIMEOUT_MS)
+          try {
+            return await callCouncilProvider(family, prompt, { seatSignal: seatAbort.signal })
+          } finally {
+            clearTimeout(timer)
+          }
+        }
         result = await invokeOnce()
         signal.throwIfAborted()
         if ((result.status === 'FAILED' || result.status === 'TIMED_OUT') && result.backend?.backendType === 'LOCAL') {
@@ -2846,16 +2868,84 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         stateChange: 'Floor-controlled sequential provider calls started.',
       })
       recordCouncilProgressProviderStart(councilProgress, activeFamilies)
-      const providerResults: ProviderResult[] = []
-      for (const family of activeFamilies) {
-        const result = await withTimeout(
-          displayFamilyName(family),
-          callCouncilProvider(family, baseUserPrompt),
-          PROVIDER_TIMEOUT_MS,
-        )
-        providerResults.push(result)
-        recordCouncilProgressProviderResult(councilProgress, family, result)
+      const serializedFamilies = [...activeFamilies].sort((left, right) => {
+        const order: CouncilSingleFamily[] = ['claude', 'grok', 'gemini', 'chatgpt']
+        const leftRank = order.indexOf(left)
+        const rightRank = order.indexOf(right)
+        return (leftRank < 0 ? 99 : leftRank) - (rightRank < 0 ? 99 : rightRank)
+      })
+      const invokeSerializedSeat = async (family: CouncilSingleFamily): Promise<ProviderResult> => {
+        const seatAbort = new AbortController()
+        const timer = setTimeout(() => seatAbort.abort(), LOCAL_COUNCIL_MEMBER_TIMEOUT_MS)
+        try {
+          return await callCouncilProvider(family, baseUserPrompt, { seatSignal: seatAbort.signal })
+        } finally {
+          clearTimeout(timer)
+        }
       }
+      setCouncilExecutionPhase('COUNCIL_EXECUTING')
+      const prepared = await prepareCouncilBackend({ allowWaitMs: 12_000 })
+      const providerResults: ProviderResult[] = []
+      if (!prepared.ok) {
+        const missing = serializedFamilies.map(family => displayFamilyName(family))
+        const reason = prepared.state === 'COUNCIL_WAITING_FOR_GPU'
+          ? 'LOCAL_MODEL_RESOURCE_CONTENTION'
+          : prepared.state
+        providerResults.push({
+          family: 'AURORA',
+          content: [
+            councilDegradedBriefing(reason, missing),
+            prepared.detail,
+          ].filter(Boolean).join('\n'),
+          status: 'FAILED',
+          error: reason,
+          failureLayer: 'TIMEOUT',
+        })
+      } else {
+        for (const family of serializedFamilies) {
+          const result = await invokeSerializedSeat(family)
+          providerResults.push(result)
+          recordCouncilProgressProviderResult(councilProgress, family, result)
+        }
+        const hasUsable = (row: ProviderResult) => row.status === 'OK' && Boolean(row.content?.trim())
+        if (!providerResults.some(hasUsable)) {
+          const recovered = await prepareCouncilBackend()
+          if (recovered.ok) {
+            for (let index = 0; index < serializedFamilies.length; index += 1) {
+              const family = serializedFamilies[index]!
+              if (hasUsable(providerResults[index]!)) continue
+              const retry = await invokeSerializedSeat(family)
+              providerResults[index] = retry
+              recordCouncilProgressProviderResult(councilProgress, family, retry)
+            }
+          }
+        }
+        if (!providerResults.some(hasUsable)) {
+          const missing = serializedFamilies.map(family => displayFamilyName(family))
+          providerResults.push({
+            family: 'AURORA',
+            content: councilDegradedBriefing('LOCAL_MODEL_RESOURCE_CONTENTION', missing),
+            status: 'FAILED',
+            error: 'LOCAL_MODEL_RESOURCE_CONTENTION',
+            failureLayer: 'TIMEOUT',
+          })
+        } else if (providerResults.some(row => !hasUsable(row))) {
+          const available = providerResults.filter(hasUsable).map(row => row.family)
+          const missing = providerResults.filter(row => !hasUsable(row)).map(row => row.family)
+          const synthesis = providerResults.find(row => row.family === 'AURORA' && hasUsable(row))?.content
+            ?? providerResults.find(hasUsable)?.content
+            ?? ''
+          const aurora = providerResults.find(row => row.family === 'AURORA')
+          const briefing = partialCouncilBriefing(available, missing, synthesis)
+          if (aurora) {
+            aurora.content = briefing
+            aurora.status = 'OK'
+          } else {
+            providerResults.push({ family: 'AURORA', content: briefing, status: 'OK' })
+          }
+        }
+      }
+      setCouncilExecutionPhase('COUNCIL_READY')
       const providerResponses = providerResults.map(result => ({
         family: result.family,
         responseId: councilTrace.registerProviderResponse(result.family),

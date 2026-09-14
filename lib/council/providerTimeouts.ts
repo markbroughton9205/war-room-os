@@ -27,7 +27,8 @@ export function isGrokDirectInvocationEligible(args: {
 }
 
 /** Client decree gather: user cancel only until this wall clock; avoids mirroring soft packet windows. */
-export const DECREE_GATHER_HARD_HANG_MS = 55_000
+/** Client decree gather: local Council must cover GPU swap + serialized 4-seat generate. */
+export const DECREE_GATHER_HARD_HANG_MS = 240_000
 
 /** HTTP `body.mode` from Live Council (expanded = higher token budget, slightly longer budget). */
 export type CouncilHttpBodyMode = 'continue' | 'expanded' | string | undefined

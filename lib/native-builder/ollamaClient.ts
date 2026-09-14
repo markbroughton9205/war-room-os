@@ -8,7 +8,7 @@
 
 const DEFAULT_BASE_URL = 'http://localhost:11434'
 const PROBE_TIMEOUT_MS = 2000
-const GENERATE_TIMEOUT_MS = 60_000
+const GENERATE_TIMEOUT_MS = 90_000
 
 function baseUrl(): string {
   return (process.env.OLLAMA_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '')
@@ -68,14 +68,21 @@ function tokensPerSecond(evalCount: unknown, evalDurationNs: unknown): number | 
   return Math.round((evalCount / (evalDurationNs / 1e9)) * 10) / 10
 }
 
-function generateBody(args: { model: string; prompt: string; system?: string; stream: boolean; format?: 'json' }) {
+function generateBody(args: {
+  model: string
+  prompt: string
+  system?: string
+  stream: boolean
+  format?: 'json'
+  keepAlive?: number | string
+}) {
   return {
     model: args.model,
     prompt: args.prompt,
     system: args.system,
     stream: args.stream,
     think: false,
-    keep_alive: -1,
+    keep_alive: args.keepAlive ?? '5m',
     ...(args.format ? { format: args.format } : {}),
   }
 }
@@ -89,6 +96,7 @@ export async function requestOllamaCompletion(args: {
   timeoutMs?: number
   signal?: AbortSignal
   format?: 'json'
+  keepAlive?: number | string
 }): Promise<OllamaCompletionResult> {
   const streamed = await requestOllamaStreamingCompletion(args)
   return streamed
@@ -111,8 +119,8 @@ function mergeSignals(external: AbortSignal | undefined, timeoutMs: number): { s
 
 /**
  * True token streaming against Ollama /api/generate. Thinking is kept separate and is never
- * concatenated into `text`. `think: false` plus keep_alive=-1 are request options only — they do
- * not change host-wide Ollama daemon configuration.
+ * concatenated into `text`. `think: false` plus keep_alive (default 5m) are request options only —
+ * they do not change host-wide Ollama daemon configuration. Never pin models forever.
  */
 export async function requestOllamaStreamingCompletion(args: {
   model: string
@@ -122,6 +130,7 @@ export async function requestOllamaStreamingCompletion(args: {
   signal?: AbortSignal
   timeoutMs?: number
   format?: 'json'
+  keepAlive?: number | string
 }): Promise<OllamaCompletionResult> {
   const url = baseUrl()
   const started = Date.now()

@@ -353,7 +353,7 @@ export function runUnifiedCouncilExperienceValidation(): UnifiedCouncilExperienc
     ['unmount clears timer', /useEffect\(\(\) => clearTimer/.test(source)],
     ['keyboard can activate copy', /<button/.test(source) && /type="button"/.test(source)],
     ['copy state announced accessibly', /aria-live="polite"/.test(source)],
-    ['primary copy uses readable formatter', /buildReadableCommanderOperationCopy\(operation, operationInputs\[0\]\?\.requestText\)/.test(source)],
+    ['primary copy uses readable formatter', /buildReadableCommanderOperationCopy\(operation, exportRequestText\)/.test(source)],
     ['raw copy remains separate', /Copy raw JSON/.test(source)],
     ['clipboard unavailable fails safely', /Clipboard unavailable/.test(source)],
   ])

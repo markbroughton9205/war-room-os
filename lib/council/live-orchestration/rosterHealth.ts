@@ -102,6 +102,17 @@ export type CouncilRosterSnapshot = {
   entityHeadline: string
   entityReadyCount: number
   entityPresentCount: number
+  /** GPU/runtime execution truth. Distinct from entity identity readiness. */
+  backendExecutionState:
+    | 'COUNCIL_READY'
+    | 'COUNCIL_BACKEND_LOADING'
+    | 'COUNCIL_WAITING_FOR_GPU'
+    | 'COUNCIL_DEGRADED'
+    | 'COUNCIL_BACKEND_UNAVAILABLE'
+    | 'COUNCIL_EXECUTING'
+    | 'COUNCIL_SYNTHESIZING'
+  backendExecutionLabel: string
+  gpuOwner: 'FOUNDRY_CODER' | 'COUNCIL_BACKEND' | 'WRIM_FUTURE' | 'OTHER_LOCAL_MODELS' | 'NONE'
   backingIntelligence: { label: string; ready: boolean; model: string | null }
   knowledgeAccess: 'AVAILABLE'
   internetAccess: NetworkEgressState
@@ -242,6 +253,9 @@ function attachContinuity(
     | 'entityHeadline'
     | 'entityReadyCount'
     | 'entityPresentCount'
+    | 'backendExecutionState'
+    | 'backendExecutionLabel'
+    | 'gpuOwner'
     | 'backingIntelligence'
     | 'knowledgeAccess'
     | 'internetAccess'
@@ -254,6 +268,9 @@ function attachContinuity(
   > & {
     degradedByRoster?: boolean
     degradedLabel?: string
+    backendExecutionState?: CouncilRosterSnapshot['backendExecutionState']
+    backendExecutionLabel?: string
+    gpuOwner?: CouncilRosterSnapshot['gpuOwner']
   },
   continuity: RosterContinuityInput,
 ): CouncilRosterSnapshot {
@@ -314,6 +331,11 @@ function attachContinuity(
     entityHeadline: councilEntityHeadline(backendAvailable),
     entityReadyCount,
     entityPresentCount,
+    backendExecutionState: snapshot.backendExecutionState
+      ?? (backendAvailable ? 'COUNCIL_READY' : 'COUNCIL_BACKEND_UNAVAILABLE'),
+    backendExecutionLabel: snapshot.backendExecutionLabel
+      ?? (backendAvailable ? 'READY' : 'UNAVAILABLE'),
+    gpuOwner: snapshot.gpuOwner ?? (localReady ? 'COUNCIL_BACKEND' : 'NONE'),
     backingIntelligence: {
       label: localReady ? 'War Room Local' : externalAvailableCount > 0 ? 'External' : 'None',
       ready: backendAvailable,
@@ -508,8 +530,9 @@ export function withNebulaLocalDisplayOverride(
 
 export function compactFamilyRosterLine(snapshot: CouncilRosterSnapshot): string {
   const members = snapshot.operationalState === 'UNAVAILABLE'
-    ? `Members ${snapshot.entityPresentCount} PRESENT · BACKEND UNAVAILABLE`
-    : `Members ${snapshot.entityReadyCount}/${snapshot.entityPresentCount} READY`
+    ? `COUNCIL ENTITIES: ${snapshot.entityPresentCount} PRESENT`
+    : `COUNCIL ENTITIES: ${snapshot.entityReadyCount}/${snapshot.entityPresentCount} READY`
+  const backend = `BACKEND: ${snapshot.backendExecutionLabel}`
   const backing = !snapshot.localAvailable && snapshot.externalAvailable <= 0
     ? 'Backing BACKEND_UNAVAILABLE'
     : snapshot.localAvailable && snapshot.externalAvailable <= 0
@@ -523,7 +546,7 @@ export function compactFamilyRosterLine(snapshot: CouncilRosterSnapshot): string
   const internet = snapshot.internetAccess === 'UNAVAILABLE'
     ? 'LIVE INTERNET UNAVAILABLE'
     : `Internet ${snapshot.internetAccess}`
-  return `${snapshot.entityHeadline} · ${members} · ${backing} · ${diversity} · ${external} · ${terra} · ${internet}`
+  return `${snapshot.entityHeadline} · ${members} · ${backend} · ${backing} · ${diversity} · ${external} · ${terra} · ${internet}`
 }
 
 export type RosterMemberPresentation = {

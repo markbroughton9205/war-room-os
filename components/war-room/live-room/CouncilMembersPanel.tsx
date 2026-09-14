@@ -171,7 +171,10 @@ export const CouncilMembersPanel = memo(function CouncilMembersPanel({
               {headline}
             </p>
             <p className="text-[8px] uppercase tracking-widest text-slate-500">
-              Members {councilRoster.entityReadyCount} / {councilRoster.entityPresentCount} ready
+              COUNCIL ENTITIES: {councilRoster.entityReadyCount}/{councilRoster.entityPresentCount} READY
+            </p>
+            <p className="text-[8px] uppercase tracking-widest text-slate-500" data-testid="council-backend-execution">
+              BACKEND: {councilRoster.backendExecutionLabel}
             </p>
             <p className="text-[8px] uppercase tracking-widest text-slate-500">
               Backing {councilRoster.backingIntelligence.label}

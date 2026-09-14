@@ -75,10 +75,13 @@ const TERMINAL_STATUS_RANK: Record<CommanderOperationStatus, number> = {
   synthesizing: 6,
   waiting_approval: 7,
   unknown: 8,
+  partial_complete: 19,
   completed: 20,
   completed_with_failures: 21,
-  failed: 22,
-  cancelled: 23,
+  degraded: 22,
+  timed_out: 23,
+  failed: 24,
+  cancelled: 25,
 }
 
 export const COUNCIL_OPERATION_PATH_MAPPINGS: readonly CouncilOperationPathMapping[] = [
@@ -119,6 +122,10 @@ function mapping(
 }
 
 function readableStatus(value: string): string {
+  if (value === 'timed_out') return 'TIMED_OUT'
+  if (value === 'partial_complete') return 'PARTIAL_COMPLETE'
+  if (value === 'degraded') return 'DEGRADED'
+  if (value === 'completed_with_failures') return 'PARTIAL_COMPLETE'
   return value.replaceAll('_', ' ').replace(/\b\w/g, char => char.toUpperCase())
 }
 
@@ -310,13 +317,18 @@ function progressStatus(events: readonly CommanderOperationEvent[], progress: Co
       ? 'completed_with_failures'
       : 'completed'
   }
+  if (progress.status === 'degraded') return 'timed_out'
+  if (progress.status === 'closed' && events.some(event => event.type === 'family_timed_out') && !events.some(event => event.type === 'family_responded')) {
+    return 'timed_out'
+  }
   if (events.some(event => event.type === 'approval_required' || event.type === 'family_waiting_approval')) return 'waiting_approval'
   if (events.some(event => event.type === 'synthesis_started' || event.familyId === 'chatgpt' && event.type === 'family_started')) return 'synthesizing'
   if (events.some(event => event.type === 'family_started' || event.type === 'family_queued')) return 'running'
   if (events.some(event => event.type === 'families_assigned')) return 'assembling'
   if (events.some(event => event.type === 'council_mode_selected')) return 'running'
   if (events.some(event => event.type === 'request_received')) return 'received'
-  return progress.status === 'degraded' ? 'unknown' : 'idle'
+  if (progress.status === 'degraded') return 'timed_out'
+  return progress.status === 'closed' ? 'failed' : 'idle'
 }
 
 function preserveMonotonicStatus(a: CommanderOperationStatus, b: CommanderOperationStatus): CommanderOperationStatus {

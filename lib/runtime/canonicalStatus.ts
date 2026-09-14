@@ -12,7 +12,7 @@ import { listRevenueEngineSnapshot } from '@/lib/revenue-engine/persistence'
 import { listPersistedSignalSnapshot } from '@/lib/signals'
 import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import type { TruthBoundaryLabel } from '@/lib/runtime/operationalReliabilityTypes'
-import { resolveDisplayCouncilRoster, localCouncilModelReadyFromProbe, localCouncilModelIdFromProbe, probeTerraConnection, probeNetworkEgress } from '@/lib/council/live-orchestration/rosterHealth.server'
+import { resolveDisplayCouncilRoster, localCouncilModelReadyFromProbe, localCouncilModelIdFromProbe, probeTerraConnection, probeNetworkEgress, overlayLiveLocalModelArbiter } from '@/lib/council/live-orchestration/rosterHealth.server'
 import { probeOllama } from '@/lib/native-builder/ollamaClient'
 import type { CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
 
@@ -527,12 +527,12 @@ export async function collectCanonicalRuntimeStatus(req: Request): Promise<Canon
     subsystems,
     providers,
     engineControl,
-    councilRoster: resolveDisplayCouncilRoster(process.env, {
+    councilRoster: await overlayLiveLocalModelArbiter(resolveDisplayCouncilRoster(process.env, {
       localReady: localCouncilModelReadyFromProbe(ollamaProbe),
       localModel: localCouncilModelIdFromProbe(ollamaProbe),
       terraConnection,
       networkEgress,
-    }),
+    })),
     summary: {
       health: unavailableSubsystems.length ? 'degraded' : degradedSubsystems.length ? 'degraded' : 'healthy',
       confidence,

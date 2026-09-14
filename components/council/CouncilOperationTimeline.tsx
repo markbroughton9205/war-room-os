@@ -62,7 +62,8 @@ export function CouncilOperationTimeline({ input, inputs, operation: providedOpe
     [input, operationInputs],
   )
   const operation = providedOperation ?? fallbackOperation
-  const readableCopy = useMemo(() => buildReadableCommanderOperationCopy(operation, operationInputs[0]?.requestText), [operationInputs, operation])
+  const exportRequestText = operationInputs.map(item => item.requestText?.trim()).find(Boolean) ?? operationInputs[0]?.requestText
+  const readableCopy = useMemo(() => buildReadableCommanderOperationCopy(operation, exportRequestText), [exportRequestText, operation])
   const rawCopy = useMemo(() => JSON.stringify(operation.technicalData ?? operation, null, 2), [operation])
   const primaryCopy = useCopyState()
   const rawCopyState = useCopyState()

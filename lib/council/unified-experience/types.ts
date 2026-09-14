@@ -33,6 +33,9 @@ export type CommanderOperationStatus =
   | 'completed_with_failures'
   | 'failed'
   | 'cancelled'
+  | 'timed_out'
+  | 'partial_complete'
+  | 'degraded'
   | 'unknown'
 
 export type CommanderOperationEventType =

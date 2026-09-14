@@ -19,6 +19,7 @@
     "validate:council-full-live-function": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-full-live-function.mjs",
     "validate:council-continuity-live": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-continuity-live.mjs",
     "validate:council-local-backend": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-local-backend-foundation-validation.mjs",
+    "validate:council-local-runtime-recovery": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-local-runtime-recovery.mjs",
     "validate:council-backend-status-ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-backend-status-ui-validation.mjs",
     "validate:council-live-routing": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-live-routing-validation.mjs",
     "validate:council-general-local-activation": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-general-local-activation-validation.mjs",

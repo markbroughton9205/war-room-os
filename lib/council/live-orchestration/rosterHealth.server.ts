@@ -15,6 +15,11 @@ import { type OllamaProbeResult } from '@/lib/native-builder/ollamaClient'
 import { localCandidateHealthFromProbe } from './backends/localBackend'
 import { localRegistryEntryForSlot } from './backends/localModelRegistry'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
+import {
+  backendExecutionLabel,
+  snapshotLocalModelArbiter,
+  type LocalModelArbiterSnapshot,
+} from '@/lib/native-builder/localModelArbiter'
 
 export function readRosterPolicyOverrides(env: NodeJS.ProcessEnv = process.env): RosterPolicyOverride {
   return {
@@ -137,4 +142,26 @@ function attachDisplayContinuity(
   continuity: RosterContinuityInput,
 ): CouncilRosterSnapshot {
   return withNebulaLocalDisplayOverride(snapshot, {}, continuity)
+}
+
+export function attachLocalModelArbiterToRoster(
+  snapshot: CouncilRosterSnapshot,
+  arbiter: LocalModelArbiterSnapshot,
+): CouncilRosterSnapshot {
+  return {
+    ...snapshot,
+    backendExecutionState: arbiter.councilBackendExecutionState,
+    backendExecutionLabel: backendExecutionLabel(arbiter.councilBackendExecutionState),
+    gpuOwner: arbiter.gpuOwner,
+  }
+}
+
+export async function overlayLiveLocalModelArbiter(
+  snapshot: CouncilRosterSnapshot,
+): Promise<CouncilRosterSnapshot> {
+  try {
+    return attachLocalModelArbiterToRoster(snapshot, await snapshotLocalModelArbiter())
+  } catch {
+    return snapshot
+  }
 }

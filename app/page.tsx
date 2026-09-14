@@ -1609,6 +1609,9 @@ const MessageBubble = memo(function MessageBubble({
     operatorDiagnosticsMuted,
     isCurrentOperation,
   })
+  const commanderRequest = operationTimelineInputs.find(item => item.familyName === "RA'EL")?.content
+    ?? operationTimelineInputs.find(item => item.messageType === 'decree')?.content
+    ?? null
   const operationMessageInputs = useMemo(() => operationTimelineInputs.map(item => ({
     id: item.id,
     familyName: item.familyName,
@@ -1616,11 +1619,15 @@ const MessageBubble = memo(function MessageBubble({
     timestamp: item.timestamp,
     provider: item.provider,
     messageType: item.messageType,
+    requestText: item.familyName === "RA'EL" || item.messageType === 'decree' ? item.content : commanderRequest,
     providerStatus: councilOperationProviderStatus(item),
     familyDeliberationTurn: item.familyDeliberationTurn,
     requestId: item.councilProgress?.requestId ?? item.familyDeliberationTurn?.mission_id ?? null,
     sessionId: item.councilProgress?.logicalRequestId ?? item.familyDeliberationTurn?.session_id ?? null,
-  })), [operationTimelineInputs])
+    requestCompleted: item.messageType === 'system' && /COUNCIL DEGRADED|TIMED_OUT|PARTIAL COMPLETE/.test(item.content) ? true : undefined,
+    operationStatus: item.messageType === 'system' && /COUNCIL DEGRADED|TIMED_OUT/.test(item.content) ? 'timed_out' : undefined,
+    isFinal: item.messageType === 'system' && /COUNCIL DEGRADED|PARTIAL COMPLETE/.test(item.content) ? true : undefined,
+  })), [operationTimelineInputs, commanderRequest])
   const operationProgress = useMemo(
     () => [...operationTimelineInputs].reverse().find(item => item.councilProgress)?.councilProgress ?? msg.councilProgress ?? null,
     [msg.councilProgress, operationTimelineInputs],
@@ -1630,10 +1637,10 @@ const MessageBubble = memo(function MessageBubble({
       ? buildCouncilOperationTimeline({
           progress: operationProgress,
           completedInputs: operationMessageInputs,
-          requestText: null,
+          requestText: commanderRequest,
         })
       : null,
-    [operationMessageInputs, operationProgress, showOperationTimeline],
+    [commanderRequest, operationMessageInputs, operationProgress, showOperationTimeline],
   )
   if (diagnosticVisibility === 'hidden') {
     return null
@@ -7293,9 +7300,18 @@ function Home() {
       abortControllerRef.current = null
       setTypingFamily(null)
       councilDispatch({ type: 'SET_AWAITING_RESPONSES', payload: false })
-      addSystemMessageRef.current?.('Council wait limit reached. Input released.')
+      setIncrementalCouncilTransportStatus('interrupted')
+      setIncrementalCouncilProgress(prev => prev
+        ? {
+            ...prev,
+            status: 'degraded',
+          }
+        : prev)
+      addSystemMessageRef.current?.(
+        'COUNCIL DEGRADED\nThe four Council identities remain available, but the shared local reasoning backend did not finish this round before the wait limit.\nReason: LOCAL_MODEL_RESOURCE_CONTENTION\nOperation status: TIMED_OUT.',
+      )
       setLoading(false)
-    }, 75_000)
+    }, 240_000)
     return () => window.clearTimeout(timeoutId)
   }, [loading, composerRoundToken, councilDispatch])
 

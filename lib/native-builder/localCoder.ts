@@ -3,6 +3,7 @@
  * Engineering Core executes. Never grants shell access.
  */
 import { probeOllama, requestOllamaCompletion } from './ollamaClient'
+import { prepareFoundryCoder } from './localModelArbiter'
 import type { FoundryRole } from './foundryRoles'
 
 export const PREFERRED_LOCAL_CODER = 'qwen2.5-coder:14b'
@@ -85,12 +86,14 @@ export async function requestLocalCoderJson(input: {
     return { ok: false, detail: resolved.detail, status: 'LOCAL_CODER_UNAVAILABLE' }
   }
   const model = pickLocalCoderModel(resolved.models, input.role) ?? resolved.codingModel
+  await prepareFoundryCoder()
   const result = await requestOllamaCompletion({
     model,
     system: input.system,
     prompt: input.prompt,
     timeoutMs: input.timeoutMs ?? LOCAL_CODER_TIMEOUT_MS,
     format: 'json',
+    keepAlive: '5m',
   })
   if (!result.ok) return { ok: false, detail: result.detail, status: resolved.status }
   return { ok: true, text: result.text, model }

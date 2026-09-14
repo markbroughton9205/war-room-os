@@ -124,6 +124,10 @@ function roleLabel(family: CouncilOrchestrationFamily | 'system' | 'unknown' | n
 }
 
 function readableStatus(value: string): string {
+  if (value === 'timed_out') return 'TIMED_OUT'
+  if (value === 'partial_complete') return 'PARTIAL_COMPLETE'
+  if (value === 'degraded') return 'DEGRADED'
+  if (value === 'completed_with_failures') return 'PARTIAL_COMPLETE'
   return value
     .replaceAll('_', ' ')
     .replace(/\b\w/g, char => char.toUpperCase())
@@ -188,9 +192,15 @@ function operationStatus(events: readonly CommanderOperationEvent[]): CommanderO
   if (events.some(item => item.type === 'operation_failed')) return 'failed'
   if (events.some(item => item.type === 'approval_required')) return 'waiting_approval'
   if (events.some(item => item.type === 'operation_completed')) {
-    return events.some(item => item.type === 'family_failed' || item.type === 'family_unavailable')
+    return events.some(item => item.type === 'family_failed' || item.type === 'family_unavailable' || item.type === 'family_timed_out')
       ? 'completed_with_failures'
       : 'completed'
+  }
+  if (events.some(item => item.type === 'family_timed_out') && events.some(item => item.type === 'family_responded')) {
+    return 'completed_with_failures'
+  }
+  if (events.some(item => item.type === 'family_timed_out' || item.type === 'family_failed') && !events.some(item => item.type === 'family_responded')) {
+    return 'failed'
   }
   return 'running'
 }
@@ -208,7 +218,8 @@ function isAuthoritativeFinalOutput(input: CouncilOperationMessageInput): boolea
 function hasAuthoritativeTerminalState(input: CouncilOperationMessageInput): boolean {
   if (input.projectOrchestrationPacket) return true
   if (input.requestCompleted === true || input.completionEvent === true) return true
-  return input.operationStatus === 'completed' || input.operationStatus === 'request_completed'
+  const status = typeof input.operationStatus === 'string' ? input.operationStatus : ''
+  return status === 'completed' || status === 'request_completed' || status === 'timed_out' || status === 'failed' || status === 'degraded' || status === 'partial_complete'
 }
 
 function operationSeedFromInputs(inputs: readonly CouncilOperationMessageInput[]): string {
@@ -295,6 +306,7 @@ export function buildCommanderOperationFromMessages(rawInputs: readonly CouncilO
   const terminalInput = inputs.find(hasAuthoritativeTerminalState) ?? null
   const messageFamilyById = new Map<string, CouncilOrchestrationFamily | 'system' | 'unknown'>()
   const eventIdByMessageId = new Map<string, string>()
+  const firstRequestText = inputs.map(item => item.requestText?.trim()).find(Boolean) ?? first.requestText ?? null
   const events: CommanderOperationEvent[] = [
     event({
       sequence: 1,
@@ -305,7 +317,7 @@ export function buildCommanderOperationFromMessages(rawInputs: readonly CouncilO
       roleLabel: null,
       statusLabel: requestKind === 'status_check' ? 'Status check received' : 'Request received',
       messageId: null,
-      outputText: first.requestText ?? null,
+      outputText: firstRequestText,
       replyToEventId: null,
       replyToFamilyId: null,
       replyToLabel: null,
@@ -415,6 +427,13 @@ export function buildCommanderOperationFromMessages(rawInputs: readonly CouncilO
 
   const briefingText = finalInput?.content ?? ''
   const hasFinalBriefing = Boolean(finalInput)
+  const statusFromInput = terminalInput?.operationStatus === 'timed_out'
+    ? 'timed_out'
+    : terminalInput?.operationStatus === 'failed'
+      ? 'failed'
+      : terminalInput?.operationStatus === 'partial_complete' || terminalInput?.operationStatus === 'degraded'
+        ? 'partial_complete'
+        : operationStatus(events)
 
   return Object.freeze({
     operationId: operationSeed,
@@ -422,7 +441,7 @@ export function buildCommanderOperationFromMessages(rawInputs: readonly CouncilO
     sessionId: first.sessionId ?? first.familyDeliberationTurn?.session_id ?? null,
     requestKind,
     mode,
-    status: operationStatus(events),
+    status: statusFromInput,
     events,
     finalResponseId: finalInput?.id ?? null,
     completedAt: terminalInput?.timestamp ?? null,
@@ -544,11 +563,15 @@ function buildCommanderOperationFromProjectPacket(input: CouncilOperationMessage
 }
 
 export function buildReadableCommanderOperationCopy(operation: CommanderOperation, requestText?: string | null): string {
+  const persistedRequest =
+    requestText?.trim()
+    || operation.events.find(item => item.type === 'request_received' && item.outputText?.trim())?.outputText?.trim()
+    || null
   const lines: string[] = [
     'WAR ROOM OS - COMMANDER BRIEFING',
     '',
     'REQUEST',
-    requestText?.trim() || operation.events.find(item => item.type === 'request_received')?.outputText || 'Request unavailable',
+    persistedRequest || 'Request unavailable',
     '',
     'OPERATION STATUS',
     readableStatus(operation.status),
