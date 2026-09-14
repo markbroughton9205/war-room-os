@@ -1,0 +1,28 @@
+{
+  "query": "What breaking news happened today on my planet?",
+  "recordedAt": "2026-09-13T20:00:00.000Z",
+  "method": "current_shared_packet_failure_fixture",
+  "aggregate": {
+    "urlJaccard": 1,
+    "canonicalSourceOverlap": 1,
+    "evidenceOriginOverlap": 1,
+    "claimOverlap": 1,
+    "reportEmbeddingSimilarity": 0.72,
+    "effectiveRank": 1,
+    "independentOriginRatio": 0.25,
+    "duplicateDocumentRatio": 0,
+    "agentAgreement": 3,
+    "independentOrigins": 1,
+    "urlCount": 4
+  },
+  "rootCauses": [
+    "RETRIEVAL_CONVERGENCE_CONFIRMED",
+    "SHARED_BACKEND_REPRESENTATIONAL_CONVERGENCE",
+    "SYNDICATION_FALSE_CONSENSUS"
+  ],
+  "notes": [
+    "Pre-redesign baseline: several seats receive the same broad query, similar ranking, overlapping Reuters-origin URLs, and different wording around the same story.",
+    "Retain this snapshot. Do not declare later success without comparing against it.",
+    "distinct-n is rejected as a primary intelligence metric."
+  ]
+}

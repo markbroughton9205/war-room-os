@@ -52,6 +52,7 @@
     "validate:ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ui/matrixStatusBus.validation.ts && node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/ui/runtimeEventBridge.validation.ts",
     "validate:terra-context-consumption": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/terraContextConsumption.validation.ts",
     "validate:evidence-origin": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/intelligence/evidenceOrigin.validation.ts",
+    "validate:planetary-intelligence-p0": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-planetary-intelligence-p0-validation.mjs",
     "validate:build4b": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/intelligence/build4b.validation.ts",
     "validate:build4b:live": "node --env-file=.env.local --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/intelligence/build4b.live-acceptance.ts",
     "validate:build5": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/scout-swarm/scoutSwarm.validation.ts",

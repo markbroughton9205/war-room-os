@@ -93,7 +93,7 @@ export function planSeatScouts(input: {
   const out: ScoutPlan[] = []
   if (input.assignment.agentId === 'aurora' && !input.assignment.auroraDiscovery) return out
   input.assignment.scoutTypes.forEach((scoutType, index) => {
-    const query = territoryQuery(input.assignment, scoutType, input.plan.commanderDecree)
+    const query = input.assignment.queryHints?.[index] ?? territoryQuery(input.assignment, scoutType, input.plan.commanderDecree)
     const scout: ScoutPlan = {
       scoutId: scoutId(input.assignment.agentId, scoutType, index, input.plan.roundRequestId),
       scoutType,
@@ -116,7 +116,8 @@ export function planSeatScouts(input: {
         || scoutType === 'DISPROVE'
         || scoutType === 'ALTERNATIVE_EXPLANATION'
       ),
-      queryLanguage: isRegion(scoutType) ? googleNewsLocaleForRegion(scoutType).queryLanguage : 'en',
+      queryLanguage: input.assignment.queryLanguages?.[index]
+        ?? (isRegion(scoutType) ? googleNewsLocaleForRegion(scoutType).queryLanguage : 'en'),
       preferredProviders: isRegion(scoutType) ? primaryProviderIdsForRegion(scoutType) : undefined,
     }
     const admitted = admitScout(input.governor, scout)

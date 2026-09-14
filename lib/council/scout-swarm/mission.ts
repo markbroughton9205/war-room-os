@@ -1,6 +1,7 @@
 import { classifyAstraIntent } from '@/lib/council/nebula/roundFlow'
 import { classifyResearchDomain, matchedDomains } from '@/lib/research/researchDomainRouter'
 import type { NebulaAgentId } from '@/lib/council/nebula/identity'
+import { planInvestigation, shouldRunDivergentPlanetaryProtocol } from '@/lib/planetary-intelligence/investigationPlanner'
 import { selectResearchProfile } from './researchProfiles'
 import {
   REPORT_KIND_BY_AGENT,
@@ -73,6 +74,7 @@ function assignmentFor(
   decree: string,
   regions: GeographicRegion[],
   liveResearch: boolean,
+  queryHints?: { queries: string[]; languages: string[] },
 ): SeatAssignment {
   const seat = SWARM_SEAT_BY_AGENT[agentId]
   const base = {
@@ -82,17 +84,24 @@ function assignmentFor(
     kimiStored: liveResearch || /\b(prior|stored|kimi)\b/i.test(decree),
     regions: agentId === 'pulsar' ? regions : [],
     auroraDiscovery: false,
+    ...(queryHints?.queries.length
+      ? { queryHints: queryHints.queries, queryLanguages: queryHints.languages }
+      : {}),
   }
   if (agentId === 'pulsar') {
+    const planetaryTypes = queryHints?.queries.length
+      ? queryHints.queries.map((_, index) => (regions[index] ?? (index === 0 ? 'PRIMARY_SOURCE' : 'WEB_CURRENT')))
+      : null
     return {
       ...base,
       objective: `Independently gather current evidence for: ${decree}. Do not conclude from another seat. Prefer primary/regulatory sources in your PRIMARY_SOURCE scouts and industry reporting separately.`,
       sourceTerritory: 'government_regulator',
-      scoutTypes: regions.length >= 3
-        ? ['PRIMARY_SOURCE', ...regions.slice(0, 3), 'WEB_CURRENT']
-        : regions.length
-          ? ['PRIMARY_SOURCE', 'WEB_CURRENT', 'INDUSTRY', ...regions.slice(0, 2)]
-          : ['PRIMARY_SOURCE', 'WEB_CURRENT', 'INDUSTRY'],
+      scoutTypes: planetaryTypes
+        ?? (regions.length >= 3
+          ? ['PRIMARY_SOURCE', ...regions.slice(0, 3), 'WEB_CURRENT']
+          : regions.length
+            ? ['PRIMARY_SOURCE', 'WEB_CURRENT', 'INDUSTRY', ...regions.slice(0, 2)]
+            : ['PRIMARY_SOURCE', 'WEB_CURRENT', 'INDUSTRY']),
     }
   }
   if (agentId === 'orion') {
@@ -127,10 +136,12 @@ function assignmentFor(
   if (agentId === 'nova') {
     return {
       ...base,
-      liveResearch: false,
+      liveResearch: queryHints?.queries.length ? true : false,
       objective: `Independently develop multiple strategic paths for: ${decree}. Do not wait for verified constraints from other seats during discovery; mark assumptions as unverified.`,
       sourceTerritory: 'strategic_scenarios',
-      scoutTypes: ['PATH_A', 'PATH_B', 'CONSTRAINTS'],
+      scoutTypes: queryHints?.queries.length
+        ? ['PATH_A', 'PATH_B', 'CONSTRAINTS', 'SECOND_ORDER'].slice(0, queryHints.queries.length) as SeatAssignment['scoutTypes']
+        : ['PATH_A', 'PATH_B', 'CONSTRAINTS'],
     }
   }
   if (agentId === 'solara') {
@@ -166,6 +177,7 @@ export function decomposeAstraMission(input: {
   const domainLabel = classifyResearchDomain(decree)
   const regions = detectRegions(decree)
   const engineering = isEngineeringMission(decree)
+  const planetary = shouldRunDivergentPlanetaryProtocol(decree)
   const liveResearchRequired = !engineering && (
     /\b(this week|today|latest|current|breaking|changed|developments?)\b/i.test(decree)
     || intent === 'RESEARCH'
@@ -175,11 +187,22 @@ export function decomposeAstraMission(input: {
   )
   const selected = selectSeats(decree)
   const geographicScope: AstraMissionPlan['geographicScope'] = regions.length > 2 ? 'global' : regions.length ? 'regional' : /\b(u\.s\.|united states|federal)\b/i.test(decree) ? 'national' : 'none'
+  const missionId = createMissionId(input.roundRequestId)
+  const investigation = planetary
+    ? planInvestigation({ commanderIntent: decree, missionId, nowIso: createdAt })
+    : null
+  const hintsFor = (seat: 'PULSAR' | 'ORION' | 'NOVA') => {
+    const tasks = investigation?.tasks.filter(task => task.seat === seat) ?? []
+    return tasks.length
+      ? { queries: tasks.map(task => task.query), languages: tasks.map(task => task.queryLanguage) }
+      : undefined
+  }
   const assignments = selected.map(agentId => assignmentFor(
     agentId,
     decree,
     regions,
     agentId === 'orion' && engineering ? false : liveResearchRequired,
+    agentId === 'pulsar' ? hintsFor('PULSAR') : agentId === 'orion' ? hintsFor('ORION') : agentId === 'nova' ? hintsFor('NOVA') : undefined,
   ))
   const researchProfile = selectResearchProfile({
     decree,
@@ -190,7 +213,7 @@ export function decomposeAstraMission(input: {
   })
 
   return {
-    missionId: createMissionId(input.roundRequestId),
+    missionId,
     roundRequestId: input.roundRequestId,
     logicalRequestId: input.logicalRequestId,
     commanderDecree: decree,
@@ -223,6 +246,9 @@ export function decomposeAstraMission(input: {
       'Assignments do not include another seat\'s conclusion.',
       regions.length ? `Regional scatter: ${regions.join(', ')}` : 'No regional scatter — geographic breadth not required.',
       `Research profile: ${researchProfile}.`,
+      investigation
+        ? `Divergent planetary investigation planner attached (${investigation.tasks.length} partitioned tasks).`
+        : '',
       engineering && !engineeringExternalCurrent(decree)
         ? 'PULSAR live-web research is not assigned for this War Room engineering question.'
         : '',

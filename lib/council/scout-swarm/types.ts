@@ -188,6 +188,9 @@ export type SeatAssignment = {
   regions: GeographicRegion[]
   /** Explicit AURORA research is off unless this is true. */
   auroraDiscovery: boolean
+  /** Optional partitioned queries from the canonical investigation planner. */
+  queryHints?: string[]
+  queryLanguages?: string[]
 }
 
 export type AstraMissionPlan = {
