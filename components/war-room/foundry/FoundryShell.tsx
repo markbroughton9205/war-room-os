@@ -10,6 +10,7 @@ import { BuilderWorkspace } from '@/components/war-room/builder/BuilderWorkspace
 import { looksLikeNewApplication, projectNameFromPrompt, statusNarrative, toCommanderState } from '@/lib/native-builder/foundryCommanderState'
 import { persistFoundryResume, readFoundryResume } from '@/lib/native-builder/foundryNavigation'
 import { buildFoundryCompletionTruth } from '@/lib/native-builder/foundryCompletionTruth'
+import type { NativeValidationResult } from '@/lib/native-builder/types'
 import {
   WAR_ROOM_CANONICAL_WORKSPACE_ID,
   isWarRoomSelfEditRequest,
@@ -108,7 +109,7 @@ type MissionLite = {
   status: string
   title: string
   engineer?: EngineerState
-  validationResults?: { operation: { id: string; targets?: string[] }; ok: boolean; exitCode: number | null; stdout: string; stderr: string }[]
+  validationResults?: NativeValidationResult[]
   diff?: { diff: string; truncated: boolean; changedFiles: string[] }
 }
 

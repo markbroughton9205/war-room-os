@@ -130,7 +130,6 @@ import { buildCouncilOperationTimeline } from '@/lib/council/unified-experience'
 import type { CouncilProgressRuntimeSnapshot } from '@/lib/council/progress-events/runtime'
 import { parseEconomicOperationalCommand } from '@/lib/economic/commands'
 import { logEconomicOpsResolvedMode, resolveEconomicOpsRouting } from '@/lib/economic/routing'
-import { CouncilCommandBadges } from '@/components/war-room/CouncilCommandBadges'
 import { LiveEnvironmentPanel } from '@/components/intelligence/LiveEnvironmentPanel'
 import { AnalystOperationsPanel } from '@/components/war-room/analysts/AnalystOperationsPanel'
 import {
@@ -292,12 +291,13 @@ import {
 import {
   AmbientActivityFeed,
   CommandConsole,
+  CommanderLiveIntelRail,
+  CommanderPresenceTrail,
   CouncilMembersPanel,
   CouncilWorkspace,
   DockPanelContent,
   LiveRoomShell,
   LiveRoomModeProvider,
-  MatrixTopIntelRow,
   SynthesisCard,
   WarRoomOsHeader,
   useLiveRoomMode,
@@ -311,15 +311,15 @@ import {
   actorStageLine,
   classifyCouncilTurn,
   generateNeutralSessionTitle,
+  sessionTitleLocked,
   shouldAutoTitle,
   shouldRunFamilyDeliberation,
   stageFromDeliberationRole,
   stageFromPersistedMetadata,
-  stageLabel,
 } from '@/lib/council/session-orchestration'
 import { decideMemoryCandidatePrompt } from '@/lib/council/live-orchestration/memoryCandidateGate'
 import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialCheckin'
-import { compactFamilyRosterLine, type CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
+import { compactFamilyRosterLine, commanderStatusCluster, resolveCommanderPresencePhase, type CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
 import { createPresentationBuffer } from '@/lib/council/live-orchestration/presentationBuffer'
 import { failureUiLabel } from '@/lib/council/live-orchestration/failureTaxonomy'
 import { consumeTerraContextForDecree } from '@/lib/council/terraContextConsumption'
@@ -1585,7 +1585,6 @@ const MessageBubble = memo(function MessageBubble({
   isCurrentOperation = false,
   onOpenFullMemory,
   onProjectAction,
-  onPrepareRepairPacket,
 }: {
   msg: CouncilMessage
   operationTimelineInputs?: CouncilMessage[]
@@ -1598,7 +1597,6 @@ const MessageBubble = memo(function MessageBubble({
   isCurrentOperation?: boolean
   onOpenFullMemory?: (preview: CouncilMemoryRecallPreview) => void
   onProjectAction?: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
-  onPrepareRepairPacket?: (message: CouncilMessage) => void
 }) {
   const isRael = msg.familyName === "RA'EL"
   const diagnosticVisibility = resolveOperatorDiagnosticVisibility({
@@ -1994,30 +1992,24 @@ const MessageBubble = memo(function MessageBubble({
   }
 
   return (
-    <div className={`message-fade-in group flex items-start gap-3 mb-4 ${isRael ? 'flex-row-reverse' : ''}`}>
-      <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm"
+    <div className={`message-fade-in group mb-4 flex items-end gap-2 ${isRael ? 'flex-row-reverse' : ''}`}>
+      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-sm"
         style={{ background: msg.color + '22', border: `1px solid ${msg.color}40` }}>
         {msg.icon}
       </div>
-      <div className={`flex-1 max-w-2xl ${isRael ? 'items-end' : 'items-start'} flex flex-col`}>
-        <div className={`flex flex-wrap items-center gap-2 mb-1 ${isRael ? 'flex-row-reverse' : ''}`}>
-          <span className="text-xs font-bold tracking-widest" style={{ color: msg.color }}>
+      <div className={`flex max-w-[82%] flex-1 flex-col ${isRael ? 'items-end' : 'items-start'}`}>
+        <div className={`mb-1 flex flex-wrap items-center gap-2 ${isRael ? 'flex-row-reverse' : ''}`}>
+          <span className="text-[10px] font-bold tracking-widest" style={{ color: msg.color }}>
             {msg.familyDeliberationTurn
               ? actorStageLine(msg.familyName, stageFromDeliberationRole(msg.familyDeliberationTurn.turn_role))
               : msg.councilStage && msg.councilStage !== 'LEGACY' && msg.councilStage !== 'UNKNOWN_STAGE'
                 ? actorStageLine(msg.familyName, msg.councilStage)
-                : msg.familyName}
+                : isRael ? 'Commander' : msg.familyName}
           </span>
-          {msg.councilStage || msg.familyDeliberationTurn ? (
-            <span className="text-[10px] uppercase tracking-widest" style={{ color: '#94a3b8' }}>
-              {stageLabel(msg.familyDeliberationTurn ? stageFromDeliberationRole(msg.familyDeliberationTurn.turn_role) : (msg.councilStage ?? 'LEGACY'))}
-            </span>
-          ) : null}
           {msg.streaming ? (
             <span className="text-[10px] uppercase tracking-widest" style={{ color: '#86EFAC' }}>streaming</span>
           ) : null}
-          <span className="text-xs" style={{ color: '#333' }}>{msg.timestamp}</span>
-          <span className="text-xs px-1 rounded" style={{ color: '#555', background: '#111' }}>{msg.messageType}</span>
+          <span className="text-[10px]" style={{ color: '#555' }}>{msg.timestamp}</span>
           {(msg.messageType === 'response' || msg.messageType === 'decree') && msg.content.trim() ? (
             <MessageCopyButton
               message={{
@@ -2032,12 +2024,14 @@ const MessageBubble = memo(function MessageBubble({
             />
           ) : null}
         </div>
-        <div className="rounded-lg p-3 text-sm text-gray-300 whitespace-pre-wrap"
+        <div
+          className={`whitespace-pre-wrap p-3 text-sm text-gray-200 ${isRael ? 'rounded-2xl rounded-br-md' : 'rounded-2xl rounded-bl-md'}`}
           style={{
-            background: isRael ? '#1a1500' : 'rgba(255,255,255,0.03)',
-            borderLeft: isRael ? 'none' : `2px solid ${msg.color}`,
-            borderRight: isRael ? `2px solid ${msg.color}` : 'none',
-          }}>
+            background: isRael ? 'linear-gradient(180deg, rgba(8,40,48,0.92), rgba(6,24,32,0.88))' : 'rgba(8,12,18,0.72)',
+            border: isRael ? '1px solid rgba(34,211,238,0.28)' : `1px solid ${msg.color}33`,
+            boxShadow: isRael ? '0 0 18px rgba(34,211,238,0.08)' : '0 0 16px rgba(0,0,0,0.25)',
+          }}
+        >
           {msg.content}{msg.streaming ? <span className="ml-0.5 animate-pulse" aria-hidden>▍</span> : null}
         </div>
         {!isRael && showOperationTimeline && operationTimelineInputs.length ? (
@@ -2063,56 +2057,61 @@ const MessageBubble = memo(function MessageBubble({
         ) : null}
         {msg.familyDeliberationTurn ? (
           <details
-            className="mt-2 w-full max-w-2xl rounded px-3 py-2 text-[10px] tracking-widest"
-            style={{
-              border: '1px solid rgba(52,211,153,0.22)',
-              background: 'rgba(0,0,0,0.28)',
-              color: '#94A3B8',
-            }}
+            className="mt-1.5 w-full max-w-2xl text-[10px] text-slate-500"
+            data-testid="council-evidence-details"
           >
-            <summary className="cursor-pointer list-none font-bold text-emerald-300 [&::-webkit-details-marker]:hidden">
-              Deliberation provenance
+            <summary className="cursor-pointer list-none tracking-[0.14em] text-slate-500/80 hover:text-slate-400 [&::-webkit-details-marker]:hidden">
+              {msg.familyDeliberationEvidenceReferences?.length ? 'Sources' : 'Evidence'}
             </summary>
-            <div className="mt-2 grid gap-1 normal-case tracking-normal text-slate-300">
-              <div>turn_id: {msg.familyDeliberationTurn.turn_id}</div>
-              <div>identity: {msg.familyDeliberationTurn.agent_identity ?? 'n/a'}</div>
-              <div>backend: {msg.familyDeliberationTurn.backend_type ?? 'n/a'} · {msg.familyDeliberationTurn.backend_runtime ?? msg.familyDeliberationTurn.backend_provider ?? 'n/a'} · {msg.familyDeliberationTurn.provider_model ?? 'n/a'}</div>
-              <div>turn_role: {msg.familyDeliberationTurn.turn_role}</div>
-              <div>speaking_order: {msg.familyDeliberationTurn.speaking_order}</div>
-              <div>input_message_ids: {msg.familyDeliberationTurn.input_message_ids.join(', ') || 'none'}</div>
-              <div>challenge_target_ids: {msg.familyDeliberationTurn.challenge_target_ids.join(', ') || 'none'}</div>
-              <div>revision_of_message_id: {msg.familyDeliberationTurn.revision_of_message_id ?? 'none'}</div>
-              <div>completion_status: {msg.familyDeliberationTurn.completion_status}</div>
-              <div>confidence: {msg.familyDeliberationTurn.confidence == null ? 'unresolved' : `${Math.round(msg.familyDeliberationTurn.confidence * 100)}%`}</div>
-              {msg.scoutSwarm ? (
-                <div>
-                  SCOUTS {msg.scoutSwarm.scoutsActive ? 'ACTIVE' : 'DONE'} · {msg.scoutSwarm.totalScouts} · phase {msg.scoutSwarm.phase} · frozen {msg.scoutSwarm.independentReportsFrozen} · cross-review {msg.scoutSwarm.crossReviewStarted ? 'started' : 'pending'} · evidence {msg.scoutSwarm.evidenceCount}
-                </div>
-              ) : null}
+            <div className="mt-2 space-y-2 normal-case tracking-normal text-slate-400">
               {msg.familyDeliberationEvidenceReferences?.length ? (
-                <div className="mt-2">
-                  <div className="font-bold text-emerald-200">source references</div>
-                  <ul className="mt-1 space-y-1">
-                    {msg.familyDeliberationEvidenceReferences.map(ref => (
-                      <li key={ref.evidence_reference_id}>
-                        {ref.url ? (
-                          <a
-                            href={ref.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-sky-300 underline decoration-sky-500/40 underline-offset-2"
-                          >
-                            {ref.label}
-                          </a>
-                        ) : (
-                          <span>{ref.label}</span>
-                        )}
-                        <span className="text-slate-500"> · {ref.evidence_reference_id} · {ref.source_kind}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                <ul className="space-y-1">
+                  {msg.familyDeliberationEvidenceReferences.map(ref => (
+                    <li key={ref.evidence_reference_id}>
+                      {ref.url ? (
+                        <a
+                          href={ref.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sky-300/90 underline decoration-sky-500/30 underline-offset-2"
+                        >
+                          {ref.label}
+                        </a>
+                      ) : (
+                        <span>{ref.label}</span>
+                      )}
+                      <span className="text-slate-600"> · {ref.source_kind}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No source links on this turn.</p>
+              )}
+              {msg.scoutSwarm ? (
+                <p className="text-[10px] text-slate-500">
+                  Scouts {msg.scoutSwarm.scoutsActive ? 'active' : 'done'} · {msg.scoutSwarm.totalScouts} · evidence {msg.scoutSwarm.evidenceCount}
+                </p>
               ) : null}
+              <details
+                className="rounded border border-white/5 bg-black/20 px-2 py-1.5"
+                data-testid="council-provenance-details"
+              >
+                <summary className="cursor-pointer list-none text-[9px] uppercase tracking-[0.16em] text-slate-500 hover:text-slate-400 [&::-webkit-details-marker]:hidden">
+                  Provenance
+                </summary>
+                <div className="mt-1.5 grid gap-0.5 font-mono text-[10px] text-slate-500">
+                  <div>turn_id: {msg.familyDeliberationTurn.turn_id}</div>
+                  <div>identity: {msg.familyDeliberationTurn.agent_identity ?? 'n/a'}</div>
+                  <div>backend: {msg.familyDeliberationTurn.backend_type ?? 'n/a'} · {msg.familyDeliberationTurn.backend_runtime ?? msg.familyDeliberationTurn.backend_provider ?? 'n/a'} · {msg.familyDeliberationTurn.provider_model ?? 'n/a'}</div>
+                  <div>turn_role: {msg.familyDeliberationTurn.turn_role}</div>
+                  <div>speaking_order: {msg.familyDeliberationTurn.speaking_order}</div>
+                  <div>input_message_ids: {msg.familyDeliberationTurn.input_message_ids.join(', ') || 'none'}</div>
+                  <div>challenge_target_ids: {msg.familyDeliberationTurn.challenge_target_ids.join(', ') || 'none'}</div>
+                  <div>revision_of_message_id: {msg.familyDeliberationTurn.revision_of_message_id ?? 'none'}</div>
+                  <div>completion_status: {msg.familyDeliberationTurn.completion_status}</div>
+                  <div>confidence: {msg.familyDeliberationTurn.confidence == null ? 'unresolved' : `${Math.round(msg.familyDeliberationTurn.confidence * 100)}%`}</div>
+                </div>
+              </details>
             </div>
           </details>
         ) : null}
@@ -2122,16 +2121,6 @@ const MessageBubble = memo(function MessageBubble({
           responseComplete={Boolean(msg.content.trim()) && msg.messageType === 'response'}
           isUserMessage={isRael}
         />
-        {!isRael && !councilPassthroughMode && msg.messageType === 'response' && isCouncilMessageRepairPacketEligible(msg) ? (
-          <button
-            type="button"
-            onClick={() => onPrepareRepairPacket?.(msg)}
-            className="mt-2 self-start rounded px-2 py-1 text-[10px] font-bold tracking-widest"
-            style={{ border: '1px solid rgba(14,165,233,0.35)', color: '#7DD3FC', background: 'rgba(0,0,0,0.24)' }}
-          >
-            Prepare Repair Packet
-          </button>
-        ) : null}
         {msg.degraded && !councilPassthroughMode && msg.messageType === 'response' ? (
           <p className="mt-2 text-[10px] tracking-widest text-amber-700/80">
             Degraded response quality — excluded from synthesis and repair packets.
@@ -2156,7 +2145,6 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   onRecallEconomicOps,
   onOpenFullMemory,
   onProjectAction,
-  onPrepareRepairPacket,
 }: {
   messages: CouncilMessage[]
   hiddenCount: number
@@ -2175,7 +2163,6 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
   onRecallEconomicOps: () => void
   onOpenFullMemory: (preview: CouncilMemoryRecallPreview) => void
   onProjectAction: (action: 'approve' | 'pause' | 'redirect' | 'deeper_work', packet: ProjectOrchestrationPacket) => void
-  onPrepareRepairPacket: (message: CouncilMessage) => void
 }) {
   return (
     <>
@@ -2213,9 +2200,11 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
               Archive recall not connected yet — use Copy Session for full transcript.
             </span>
           ) : null}
-          <button type="button" onClick={onSummarizeSession} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #FFD700', color: '#FFD700' }}>
-            Summarize Session
-          </button>
+          {hiddenCount > 0 && onToggleShowOldDiagnostics ? (
+            <button type="button" onClick={onSummarizeSession} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #FFD700', color: '#FFD700' }}>
+              Summarize Session
+            </button>
+          ) : null}
           <button type="button" onClick={onRecallEconomicOps} className="rounded px-2 py-1 tracking-widest" style={{ border: '1px solid #34D399', color: '#86EFAC' }}>
             Recall Economic Ops
           </button>
@@ -2288,7 +2277,6 @@ const CouncilMessageRows = memo(function CouncilMessageRows({
           isCurrentOperation={isCurrentCouncilOperationMessage(msg, messages)}
           onOpenFullMemory={onOpenFullMemory}
           onProjectAction={onProjectAction}
-          onPrepareRepairPacket={onPrepareRepairPacket}
         />
       ))}
     </>
@@ -6275,12 +6263,14 @@ function Home() {
   // into an unrelated "7 + 6" follow-up, because the mirror rewrote it back in before that second
   // decree was submitted).
   const terraCouncilContextRef = useRef<string | null>(null)
+  const [terraContextNote, setTerraContextNote] = useState<string | null>(null)
   const terraContextConsumedSignatureRef = useRef<string | null>(null)
   // Stable identity (no deps) so GodsEyeCommandCenter's internal effect only re-fires when one of
   // its own real dependencies changes, not on every one of this component's own re-renders — an
   // inline arrow here previously got a new identity every render, causing extra needless re-fires.
   const handleTerraContextChange = useCallback((context: string | null) => {
     terraCouncilContextRef.current = context
+    setTerraContextNote(context ? context.split('\n').find(line => line.trim()) ?? null : null)
   }, [])
   /** See the backend-status fetch effect below — null/unset means unknown (treated as "not
    * confirmed local-only", so the expanded-analysis cost estimate still shows by default). */
@@ -6323,6 +6313,7 @@ function Home() {
   const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
   const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
   const [councilSessionList, setCouncilSessionList] = useState<CouncilSessionListItem[]>([])
+  const autoTitledSessionIdsRef = useRef(new Set<string>())
   const [councilSessionSearch, setCouncilSessionSearch] = useState('')
   const [councilSessionNavOpen, setCouncilSessionNavOpen] = useState(true)
   const [councilInspectorOpen, setCouncilInspectorOpen] = useState(false)
@@ -7058,6 +7049,23 @@ function Home() {
           )
           if (shouldReplacePersistedTranscript(councilSnapRef.current.messages, mapped)) {
             councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
+          }
+        }
+        const firstUser = rows.find(row => row.role === 'user')?.content?.trim() ?? ''
+        const listed = convs.find(c => c.id === id)
+        if (firstUser && shouldAutoTitle(listed?.title, sessionTitleLocked(listed?.metadata ?? tj.conversation?.metadata))) {
+          const nextTitle = generateNeutralSessionTitle(firstUser)
+          if (nextTitle && nextTitle !== listed?.title && nextTitle !== 'New Council Session') {
+            autoTitledSessionIdsRef.current.add(id)
+            void fetch(`/api/conversations/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ title: nextTitle, mergeMetadata: true, metadata: { council: { lastPreview: firstUser.slice(0, 140) } } }),
+            }).then(() => {
+              setCouncilSessionList(prev => prev.map(s => s.id === id ? { ...s, title: nextTitle, preview: firstUser.slice(0, 140) } : s))
+            }).catch(() => {
+              autoTitledSessionIdsRef.current.delete(id)
+            })
           }
         }
         setLiveCouncilLoadState('ready')
@@ -10348,8 +10356,8 @@ function Home() {
       /**
        * The Commander-facing bubble shows only what the family actually said — turn
        * relationships, claims, evidence, and confidence are structured data already carried
-       * on the message (`familyDeliberationTurn`) for the collapsed "Deliberation provenance"
-       * panel, so they don't need to be baked into the visible prose as a report header.
+       * on the message (`familyDeliberationTurn`) for the collapsed Sources / Evidence /
+       * Provenance detail, so they don't need to be baked into the visible prose as a report header.
        */
       const formatFamilyDeliberationContent = (turn: DeliberationTurn): string => {
         if (turn.full_response.trim()) {
@@ -11677,15 +11685,18 @@ function Home() {
     const decreeRound = beginDecreeRound()
     appendVisibleRaelDecree(decree, decreeRound.roundRequestId)
     const activeSession = councilSessionList.find(s => s.id === liveCouncilConvId)
-    if (liveCouncilConvId && shouldAutoTitle(activeSession?.title, Boolean((activeSession?.metadata as { council?: { titleLocked?: boolean } } | undefined)?.council?.titleLocked))) {
+    if (liveCouncilConvId && shouldAutoTitle(activeSession?.title, sessionTitleLocked(activeSession?.metadata))) {
       const nextTitle = generateNeutralSessionTitle(decree)
+      autoTitledSessionIdsRef.current.add(liveCouncilConvId)
       void fetch(`/api/conversations/${liveCouncilConvId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: nextTitle, mergeMetadata: true, metadata: { council: { lastPreview: decree.slice(0, 140) } } }),
       }).then(() => {
         setCouncilSessionList(prev => prev.map(s => s.id === liveCouncilConvId ? { ...s, title: nextTitle, preview: decree.slice(0, 140) } : s))
-      }).catch(() => undefined)
+      }).catch(() => {
+        autoTitledSessionIdsRef.current.delete(liveCouncilConvId)
+      })
     }
 
     if (!mode && await handleContinuationAuthorityCommand(decree)) {
@@ -12120,6 +12131,23 @@ function Home() {
       'persisted',
     )
     councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
+    const firstUser = rows.find(row => row.role === 'user')?.content?.trim() ?? ''
+    const listed = councilSessionList.find(s => s.id === id)
+    if (firstUser && shouldAutoTitle(listed?.title, sessionTitleLocked(listed?.metadata ?? tj.conversation?.metadata))) {
+      const nextTitle = generateNeutralSessionTitle(firstUser)
+      if (nextTitle && nextTitle !== listed?.title && nextTitle !== 'New Council Session') {
+        autoTitledSessionIdsRef.current.add(id)
+        void fetch(`/api/conversations/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: nextTitle, mergeMetadata: true, metadata: { council: { lastPreview: firstUser.slice(0, 140) } } }),
+        }).then(() => {
+          setCouncilSessionList(prev => prev.map(s => s.id === id ? { ...s, title: nextTitle, preview: firstUser.slice(0, 140) } : s))
+        }).catch(() => {
+          autoTitledSessionIdsRef.current.delete(id)
+        })
+      }
+    }
   }
 
   const renameCouncilSession = async (id: string, title: string) => {
@@ -12128,7 +12156,17 @@ function Home() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, mergeMetadata: true, metadata: { council: { titleLocked: true } } }),
     })
-    setCouncilSessionList(prev => prev.map(s => s.id === id ? { ...s, title } : s))
+    setCouncilSessionList(prev => prev.map(s => s.id === id ? {
+      ...s,
+      title,
+      metadata: {
+        ...(s.metadata ?? {}),
+        council: {
+          ...((s.metadata as { council?: Record<string, unknown> } | null)?.council ?? {}),
+          titleLocked: true,
+        },
+      },
+    } : s))
   }
 
   const archiveCouncilSessionFromList = async (id: string) => {
@@ -12470,6 +12508,23 @@ function Home() {
     liveResearchHud?.councilPhase,
     liveResearchHud?.responseCompletion,
   ])
+  const commanderPresencePhase = useMemo(
+    () => resolveCommanderPresencePhase({
+      loading,
+      councilState: council.councilState,
+      nebulaStatus: nebulaRoundShell?.status ?? null,
+      researchMode: liveResearchHud?.mode ?? null,
+      researchPhase: liveResearchHud?.councilPhase ?? null,
+    }),
+    [loading, council.councilState, nebulaRoundShell?.status, liveResearchHud?.mode, liveResearchHud?.councilPhase],
+  )
+  const commanderStatusPills = useMemo(
+    () => commanderStatusCluster(councilRoster, {
+      researchActive: commanderPresencePhase !== 'idle',
+      systemsOk: chatHealthLabel === 'Ready' || chatHealthLabel === 'Council thinking…',
+    }),
+    [councilRoster, commanderPresencePhase, chatHealthLabel],
+  )
   const providerHealthLabel = coreProviderStates.some(status => status === 'online' || status === 'standby')
     ? 'Ready'
     : 'Degraded'
@@ -12979,11 +13034,22 @@ function Home() {
   }, [councilMounted, liveCouncilConvId, liveCouncilLoadState])
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-black font-mono text-white">
+    <main className={isUnifiedLiveRoom
+      ? 'relative flex h-[100dvh] flex-col overflow-hidden bg-black font-mono text-white'
+      : 'relative min-h-screen overflow-x-hidden bg-black font-mono text-white'
+    }>
       {!isUnifiedLiveRoom ? <MatrixCodeRain /> : null}
       <style>{`
         .message-fade-in {
-          animation: message-fade-in 220ms ease-out;
+          animation: message-fade-in 320ms ease-out;
+        }
+
+        .commander-status-pill {
+          animation: commander-status-breathe 3.6s ease-in-out infinite;
+        }
+
+        .commander-research-scan {
+          animation: commander-research-scan 1.8s ease-in-out infinite;
         }
 
         .typing-dot {
@@ -13018,13 +13084,24 @@ function Home() {
         @keyframes message-fade-in {
           from {
             opacity: 0;
-            transform: translateY(4px);
+            transform: translateY(8px);
           }
 
           to {
             opacity: 1;
             transform: translateY(0);
           }
+        }
+
+        @keyframes commander-status-breathe {
+          0%, 100% { box-shadow: 0 0 6px rgba(52,211,153,0.25); }
+          50% { box-shadow: 0 0 14px rgba(52,211,153,0.55); }
+        }
+
+        @keyframes commander-research-scan {
+          0% { transform: translateX(-40%); opacity: 0.4; }
+          50% { opacity: 1; }
+          100% { transform: translateX(140%); opacity: 0.4; }
         }
 
         @keyframes typing-dot {
@@ -13054,11 +13131,16 @@ function Home() {
         @media (prefers-reduced-motion: reduce) {
           .message-fade-in,
           .typing-dot,
-          .tool-dot-active {
+          .tool-dot-active,
+          .commander-status-pill,
+          .commander-status-cluster,
+          .commander-status-node,
+          .commander-research-scan {
             animation: none !important;
           }
         }
       `}</style>
+      {!isUnifiedLiveRoom ? (
       <header className="relative z-10 flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-yellow-900 px-6 py-3">
         <div>
           <h1 className="text-xl font-bold tracking-widest" style={{ color: '#FFD700' }}>⚔ WAR ROOM</h1>
@@ -13085,6 +13167,7 @@ function Home() {
           <LogoutButton />
         </div>
       </header>
+      ) : null}
 
       {councilStabilityMode ? (
         <div
@@ -13145,7 +13228,7 @@ function Home() {
       <div
         className={
           isUnifiedLiveRoom
-            ? 'relative z-10 flex h-[100dvh] min-h-0 flex-col overflow-hidden'
+            ? 'relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden'
             : 'relative z-10 flex flex-col'
         }
       >
@@ -13157,11 +13240,13 @@ function Home() {
           chatExpanded={isChatExpanded}
           sessionNavOpen={councilSessionNavOpen}
           inspectorOpen={councilInspectorOpen}
+          showDock={councilInspectorOpen || Boolean(dockPanelId)}
           header={(
             <>
               <WarRoomOsHeader
                 systemStatusLine={chatHealthLabel}
                 missionHint={councilContinueStatusLine}
+                statusPills={commanderStatusPills}
               />
               {councilRoster?.operationalState === 'UNAVAILABLE' ? (
                 <div
@@ -13169,7 +13254,7 @@ function Home() {
                   style={{ borderColor: 'rgba(251,191,36,0.35)', background: 'rgba(251,191,36,0.08)' }}
                   role="status"
                 >
-                  {compactFamilyRosterLine(councilRoster)}
+                  Council is offline. Details are in Advanced / Inspector.
                 </div>
               ) : councilRoster?.operationalState === 'DEGRADED_PARTIAL' ? (
                 <div
@@ -13178,16 +13263,7 @@ function Home() {
                   role="status"
                   data-testid="council-continuity-banner"
                 >
-                  {compactFamilyRosterLine(councilRoster)}
-                </div>
-              ) : councilRoster ? (
-                <div
-                  className="border-b px-4 py-1.5 text-[9px] font-semibold uppercase tracking-widest text-emerald-200/80 sm:px-6"
-                  style={{ borderColor: 'rgba(16,185,129,0.28)', background: 'rgba(16,185,129,0.06)' }}
-                  role="status"
-                  data-testid="council-continuity-banner"
-                >
-                  {compactFamilyRosterLine(councilRoster)}
+                  Council is partially degraded. Details are in Advanced / Inspector.
                 </div>
               ) : null}
             </>
@@ -13206,6 +13282,7 @@ function Home() {
             />
           )}
           rightPanel={(
+            councilInspectorOpen ? (
             <CouncilContextInspector
               evidence={(
                 <div>
@@ -13225,6 +13302,44 @@ function Home() {
               terra={<p>{terraCouncilContextRef.current ? 'Terra context is attached to the current turn only.' : 'No Terra pin.'}</p>}
               diagnostics={(
                 <div className="space-y-2">
+                  {councilRoster ? (
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400" data-testid="council-inspector-roster">
+                      {compactFamilyRosterLine(councilRoster)}
+                    </p>
+                  ) : null}
+                  {(() => {
+                    const source = [...visibleCouncilMessages].reverse().find(item =>
+                      item.messageType === 'response' && isCouncilMessageRepairPacketEligible(item)
+                    )
+                    if (!source) return null
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => void prepareRepairPacketFromCouncilMessage(source)}
+                        className="rounded px-2 py-1 text-[9px] font-bold uppercase tracking-widest"
+                        style={{ border: '1px solid rgba(14,165,233,0.4)', color: '#7DD3FC', background: 'rgba(0,0,0,0.24)' }}
+                        data-testid="inspector-prepare-repair-packet"
+                      >
+                        Prepare Repair Packet
+                      </button>
+                    )
+                  })()}
+                  <div className="flex flex-wrap gap-1">
+                    {(['direct', 'stable_group', 'full_council'] as const).map(mode => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => persistCouncilFlowMode(mode)}
+                        className="rounded px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest"
+                        style={{
+                          border: councilFlowMode === mode ? '1px solid #FFD700' : '1px solid #333',
+                          color: councilFlowMode === mode ? '#FFD700' : '#888',
+                        }}
+                      >
+                        {mode === 'direct' ? 'Direct' : mode === 'stable_group' ? 'Group' : 'Council'}
+                      </button>
+                    ))}
+                  </div>
                   <CouncilRoundInspector
                     roundHealth={[...visibleCouncilMessages].reverse().find(item => item.roundHealth)?.roundHealth}
                     councilRound={[...visibleCouncilMessages].reverse().find(item => item.councilRound)?.councilRound
@@ -13296,6 +13411,14 @@ function Home() {
                 </div>
               )}
             />
+            ) : (
+              <CommanderLiveIntelRail
+                liveResearchHud={liveResearchHud}
+                presencePhase={commanderPresencePhase}
+                terraNote={terraContextNote}
+                sourcesPreview={liveResearchHud?.intelligence?.sourcesPreview ?? null}
+              />
+            )
           )}
           commandConsole={null}
           activePanelId={dockPanelId}
@@ -13430,19 +13553,7 @@ function Home() {
             onAttachmentSelect={file => void handleAttachmentSelect(file)}
             onAttachmentRemove={handleAttachmentRemove}
           />}
-          intelOverlay={<MatrixTopIntelRow
-            location={commanderLocation}
-            threadId={liveCouncilConvId ?? undefined}
-            onCouncilHandoff={injectLiveEnvironmentDecree}
-            onCouncilResearchHandoff={handleCouncilResearchHandoff}
-            opportunityCount={incomeOpportunities.length}
-            headlineOverride={liveResearchHud && liveResearchHud.mode !== 'inactive' ? liveResearchHud.label : null}
-            urgentWarning={chatHealthLabel && chatHealthLabel !== 'Ready' ? chatHealthLabel : null}
-            missionStatus={matrixMissionStatusLabel}
-            councilHealthLabel={matrixCouncilHealthLabel}
-            activityFeedLabel={activityFeedLabel}
-            onExpandIntel={() => setLiveRoomWorkspace('expanded_intel')}
-          />}
+          intelOverlay={null}
           council={<CouncilWorkspace
           scrollContainerRef={scrollContainerRef}
           onScroll={handleScroll}
@@ -13460,20 +13571,11 @@ function Home() {
               onToggleSessionNav={() => setCouncilSessionNavOpen(v => !v)}
               inspectorOpen={councilInspectorOpen}
               onToggleInspector={() => setCouncilInspectorOpen(v => !v)}
+              commanderView
             />
       )}
           preamble={(
         <>
-          {!(isUnifiedLiveRoom && uiMode === 'operator') ? (
-            <p className="text-[9px] tracking-widest" style={{ color: '#666' }}>
-              Council thread below — type at the bottom to speak with the families (Enter sends, Shift+Enter newline).
-            </p>
-          ) : null}
-          <CouncilCommandBadges
-            cmd={councilUiCommand}
-            packet={councilPacketRender}
-            operatorMode={isUnifiedLiveRoom && uiMode === 'operator'}
-          />
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"
@@ -13536,6 +13638,7 @@ function Home() {
           )}
           thread={(
         <>
+          <CommanderPresenceTrail phase={commanderPresencePhase} />
           {nebulaRoundShell && (nebulaRoundShell.status === 'PLANNING' || nebulaRoundShell.status === 'EXECUTING' || nebulaRoundShell.status === 'SYNTHESIZING' || nebulaRoundShell.streamingText) ? (
             <CouncilLiveRoundBanner
               status={nebulaRoundShell.status}
@@ -13553,7 +13656,7 @@ function Home() {
             councilPassthroughMode={councilPassthroughMode}
             showOldDiagnostics={showOldCouncilDiagnostics}
             onToggleShowOldDiagnostics={
-              isUnifiedLiveRoom && uiMode === 'operator'
+              isUnifiedLiveRoom && uiMode === 'advanced'
                 ? () => setShowOldCouncilDiagnostics(prev => !prev)
                 : undefined
             }
@@ -13563,9 +13666,9 @@ function Home() {
             onRecallEconomicOps={handleRecallEconomicOps}
             onOpenFullMemory={handleOpenFullMemory}
             onProjectAction={handleProjectAction}
-            onPrepareRepairPacket={prepareRepairPacketFromCouncilMessage}
           />
 
+          {isUnifiedLiveRoom ? null : (
           <details className="mt-3 rounded border border-emerald-900/30" style={{ background: 'rgba(0,0,0,0.24)' }}>
             <summary className="cursor-pointer px-3 py-2 text-[9px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>
               Runtime Details
@@ -13619,6 +13722,7 @@ function Home() {
               ) : null}
             </div>
           </details>
+          )}
 
           {expansionPrompt && (
             <ExpansionPermissionPrompt
@@ -13685,51 +13789,10 @@ function Home() {
                                 ? '#fcd34d'
                                 : '#94a3b8',
                   }}
-                  title={
-                    liveResearchHud.mode === 'inactive'
-                      ? 'Live internet research not invoked for this turn.'
-                      : [
-                          'Phase 5/6 live research HUD.',
-                          liveResearchHud.intelligence
-                            ? ` Phase 8A intelligence: ${liveResearchHud.intelligence.sourcesUsed} source(s): ${liveResearchHud.intelligence.sourcesPreview || 'none'}. Confidence ${liveResearchHud.intelligence.confidenceLevel} (${Math.round(liveResearchHud.intelligence.confidenceScore * 100)}%), freshness ${liveResearchHud.intelligence.freshness}, contradictions ${liveResearchHud.intelligence.contradictionWarnings}, weak signal ${liveResearchHud.intelligence.weakSignalDetected ? 'yes' : 'no'}.`
-                            : '',
-                          liveResearchHud.intelligence?.local?.active
-                            ? ` Local: source depth ${liveResearchHud.intelligence.local.sourceDepth}, locality ${liveResearchHud.intelligence.local.localityDepth}, corroboration ${liveResearchHud.intelligence.local.corroborationLevel}, weak signals ${liveResearchHud.intelligence.local.weakSignalCount}, contradictions ${liveResearchHud.intelligence.local.contradictionWarnings}.`
-                            : '',
-                          liveResearchHud.intelligence?.retrieval
-                            ? ` Retrieval: required ${liveResearchHud.intelligence.retrieval.required ? 'yes' : 'no'}, success ${liveResearchHud.intelligence.retrieval.success ? 'yes' : 'no'}, gaps ${liveResearchHud.intelligence.retrieval.gaps}, mix ${Object.entries(liveResearchHud.intelligence.retrieval.sourceMix).map(([tier, count]) => `${tier}:${count}`).join(', ') || 'none'}.`
-                            : '',
-                          liveResearchHud.responseCompletion
-                            ? ` Model completion: ${liveResearchHud.responseCompletion}.`
-                            : '',
-                        ].join('')
-                  }
                 >
                   {liveResearchHud.mode === 'inactive' ? 'Research idle' : liveResearchHud.label}
-                  {liveResearchHud.responseCompletion && liveResearchHud.mode !== 'inactive'
-                    ? ` · ${liveResearchHud.responseCompletion}`
-                    : ''}
-                  {liveResearchHud.sourcesCount > 0 ? ` · ${liveResearchHud.sourcesCount}` : ''}
-                  {liveResearchHud.intelligence
-                    ? ` · src ${liveResearchHud.intelligence.sourcesUsed} · ${liveResearchHud.intelligence.freshness} · ${liveResearchHud.intelligence.confidenceLevel}`
-                    : ''}
-                  {liveResearchHud.intelligence?.contradictionWarnings
-                    ? ` · contradiction ${liveResearchHud.intelligence.contradictionWarnings}`
-                    : ''}
-                  {liveResearchHud.intelligence?.weakSignalDetected ? ' · weak signal' : ''}
-                  {liveResearchHud.intelligence?.local?.active
-                    ? ` · local ${liveResearchHud.intelligence.local.localityDepth}/${liveResearchHud.intelligence.local.corroborationLevel}`
-                    : ''}
-                  {liveResearchHud.intelligence?.retrieval
-                    ? ` · retrieval ${liveResearchHud.intelligence.retrieval.success ? 'ok' : 'gap'}`
-                    : ''}
                 </span>
               ) : null}
-              <button type="button" onClick={() => startTransition(() => void handleSummarize())}
-                className="text-xs px-3 py-1 rounded tracking-widest"
-                style={{ border: '1px solid #FFD700', color: '#FFD700' }}>
-                Summarize
-              </button>
             </div>
           )}
 

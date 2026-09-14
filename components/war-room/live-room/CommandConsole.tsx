@@ -63,8 +63,8 @@ export const CommandConsole = memo(function CommandConsole({
   }
   return (
     <footer
-      className="relative z-20 max-h-[min(42vh,14rem)] flex-shrink-0 overflow-y-auto border-t border-emerald-800/60 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:max-h-none sm:px-4 sm:py-2"
-      style={{ background: 'rgba(0,0,0,0.88)', boxShadow: '0 -4px 24px rgba(0,255,102,0.08)' }}
+      className="relative z-20 max-h-[min(42vh,14rem)] flex-shrink-0 overflow-y-auto border-t border-cyan-900/40 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:max-h-none sm:px-4 sm:py-2"
+      style={{ background: 'rgba(0,8,14,0.72)', boxShadow: '0 -8px 24px rgba(0,40,80,0.18)' }}
       data-testid="command-console"
     >
       <form
@@ -114,7 +114,7 @@ export const CommandConsole = memo(function CommandConsole({
             }}
             placeholder="What's your command, Divine?"
             className="min-w-0 flex-1 self-stretch bg-transparent text-sm tracking-wide text-emerald-100 outline-none placeholder:text-emerald-700/40"
-            aria-label="Council command"
+            aria-label="War Room command"
             aria-busy={loading}
             data-testid="council-command-input"
           />
@@ -196,7 +196,7 @@ export const CommandConsole = memo(function CommandConsole({
           className="shrink-0 rounded border border-emerald-400/60 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-black disabled:opacity-40 sm:px-5 sm:py-2"
           style={{ background: loading ? '#166534' : '#34d399', boxShadow: loading ? undefined : '0 0 16px rgba(52,211,153,0.35)' }}
         >
-          {loading ? 'Council thinking…' : 'Execute'}
+          {loading ? 'Thinking…' : 'Send'}
         </button>
         </div>
       </form>

@@ -2,6 +2,20 @@
 
 import { useMemo, useState } from 'react'
 
+type SessionDayGroup = 'Today' | 'Yesterday' | 'Earlier'
+
+function sessionDayGroup(iso: string | null | undefined, nowMs = Date.now()): SessionDayGroup {
+  if (!iso) return 'Earlier'
+  const then = new Date(iso).getTime()
+  if (!Number.isFinite(then)) return 'Earlier'
+  const startOfToday = new Date(nowMs)
+  startOfToday.setHours(0, 0, 0, 0)
+  const today = startOfToday.getTime()
+  if (then >= today) return 'Today'
+  if (then >= today - 86_400_000) return 'Yesterday'
+  return 'Earlier'
+}
+
 export type CouncilSessionListItem = {
   id: string
   title: string
@@ -67,6 +81,20 @@ export function CouncilSessionNavigator({
       return title.includes(q) || preview.includes(q)
     })
   }, [search, liveSessions])
+  const grouped = useMemo(() => {
+    const buckets: Record<SessionDayGroup, CouncilSessionListItem[]> = {
+      Today: [],
+      Yesterday: [],
+      Earlier: [],
+    }
+    for (const session of filtered) {
+      buckets[sessionDayGroup(session.last_message_at || session.updated_at || session.created_at)].push(session)
+    }
+    return (['Today', 'Yesterday', 'Earlier'] as const).filter(label => buckets[label].length > 0).map(label => ({
+      label,
+      items: buckets[label],
+    }))
+  }, [filtered])
 
   return (
     <aside
@@ -112,7 +140,11 @@ export function CouncilSessionNavigator({
             )}
           </li>
         ) : (
-          filtered.map(session => {
+          grouped.flatMap(group => [
+            <li key={`group-${group.label}`} className="px-1 pt-2 text-[8px] font-bold uppercase tracking-[0.22em] text-emerald-600/80">
+              {group.label}
+            </li>,
+            ...group.items.map(session => {
             const active = session.id === activeId
             const preview = session.preview?.trim() || 'Empty session'
             const renaming = renamingId === session.id
@@ -206,7 +238,9 @@ export function CouncilSessionNavigator({
                 </div>
               </li>
             )
-          })
+          }),
+          ]
+        )
         )}
       </ul>
     </aside>

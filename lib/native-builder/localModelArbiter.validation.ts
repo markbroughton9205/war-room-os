@@ -332,7 +332,7 @@ export async function runCouncilLocalRuntimeRecoveryValidation(): Promise<CaseRe
         && typeof installedBody?.backendExecutionState === 'string',
       `backend=${String(installedBody?.backendExecutionState)} gpuOwner=${String(installedBody?.gpuOwner ?? '')}`,
     ))
-    const chat = await fetch('http://127.0.0.1:3848/api/chat', {
+    const chat: Response | Error = await fetch('http://127.0.0.1:3848/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       signal: AbortSignal.timeout(240_000),
@@ -340,7 +340,7 @@ export async function runCouncilLocalRuntimeRecoveryValidation(): Promise<CaseRe
         message: worldQuery,
         councilFlowMode: 'full_council',
       }),
-    }).catch((error: unknown) => error)
+    }).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))))
     if (chat instanceof Error) {
       results.push(check('installed Council final response', false, chat.message))
     } else {

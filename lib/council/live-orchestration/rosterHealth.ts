@@ -549,6 +549,78 @@ export function compactFamilyRosterLine(snapshot: CouncilRosterSnapshot): string
   return `${snapshot.entityHeadline} · ${members} · ${backend} · ${backing} · ${diversity} · ${external} · ${terra} · ${internet}`
 }
 
+export type CommanderStatusTone = 'nominal' | 'active' | 'degraded' | 'offline'
+
+export type CommanderStatusPill = {
+  id: 'council' | 'terra' | 'intelligence' | 'systems'
+  kicker: string
+  label: string
+  tone: CommanderStatusTone
+}
+
+/** Compact Commander-facing status. Technical roster strings stay in Inspector. */
+export function commanderStatusCluster(
+  snapshot: CouncilRosterSnapshot | null | undefined,
+  extras?: { researchActive?: boolean; systemsOk?: boolean },
+): CommanderStatusPill[] {
+  const councilDegraded = snapshot?.operationalState === 'DEGRADED_PARTIAL' || Boolean(snapshot?.degradedByRoster)
+  const councilOffline = !snapshot || snapshot.operationalState === 'UNAVAILABLE'
+  const councilOnline = Boolean(snapshot?.councilOperational) && !councilOffline && !councilDegraded
+  const terraLinked = snapshot?.terraAccess === 'CONNECTED'
+  const terraOffline = snapshot?.terraAccess === 'DISCONNECTED'
+  const researchActive = Boolean(extras?.researchActive)
+  const internetDown = snapshot?.internetAccess === 'UNAVAILABLE'
+  const systemsOk = extras?.systemsOk ?? (!councilOffline && !internetDown && !councilDegraded)
+
+  return [
+    {
+      id: 'council',
+      kicker: 'Council',
+      label: councilOffline ? 'OFFLINE' : councilDegraded ? 'DEGRADED' : 'ONLINE',
+      tone: councilOffline ? 'offline' : councilDegraded ? 'degraded' : councilOnline ? 'nominal' : 'degraded',
+    },
+    {
+      id: 'terra',
+      kicker: 'Terra',
+      label: terraOffline ? 'OFFLINE' : terraLinked ? 'LINKED' : 'STANDBY',
+      tone: terraOffline ? 'offline' : terraLinked ? 'nominal' : 'active',
+    },
+    {
+      id: 'intelligence',
+      kicker: 'Intelligence',
+      label: internetDown ? 'OFFLINE' : researchActive ? 'ACTIVE' : 'READY',
+      tone: internetDown ? 'offline' : researchActive ? 'active' : 'nominal',
+    },
+    {
+      id: 'systems',
+      kicker: 'Systems',
+      label: systemsOk ? 'NOMINAL' : councilOffline ? 'OFFLINE' : 'WATCH',
+      tone: systemsOk ? 'nominal' : councilOffline ? 'offline' : 'degraded',
+    },
+  ]
+}
+
+export type CommanderPresencePhase = 'idle' | 'understanding' | 'researching' | 'verifying' | 'synthesizing'
+
+export function resolveCommanderPresencePhase(input: {
+  loading?: boolean
+  councilState?: string | null
+  nebulaStatus?: string | null
+  researchMode?: string | null
+  researchPhase?: string | null
+}): CommanderPresencePhase {
+  const research = input.researchMode ?? ''
+  const nebula = (input.nebulaStatus ?? '').toUpperCase()
+  if (research === 'completing' || input.researchPhase === 'model_running' || (research === 'verified' && input.loading)) {
+    return nebula === 'SYNTHESIZING' || input.councilState === 'active' ? 'synthesizing' : 'verifying'
+  }
+  if (research === 'active' || research === 'sources_queried' || input.councilState === 'researching') return 'researching'
+  if (nebula === 'SYNTHESIZING') return 'synthesizing'
+  if (nebula === 'PLANNING' || nebula === 'EXECUTING') return 'understanding'
+  if (input.loading) return 'understanding'
+  return 'idle'
+}
+
 export type RosterMemberPresentation = {
   tone: 'ready' | 'needs_key' | 'quota' | 'error' | 'unavailable' | 'degraded' | 'offline'
   label: string

@@ -237,21 +237,67 @@ export function GodsEyeCommandCenter({
       <section className="relative h-full min-h-0 overflow-hidden bg-black" data-testid="gods-eye-command-center">
         <TerraShell presentation="command-center" />
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_44%,transparent_46%,rgba(0,0,0,0.38)_100%)]" aria-hidden="true" />
-        {intelOverlay ? <div className="absolute right-3 top-16 z-30 flex max-w-[calc(100%-1.5rem)] flex-col items-end gap-2">
-          <button type="button" onClick={() => setIntelOpen(value => !value)} className="rounded-full border border-cyan-300/30 bg-slate-950/85 px-3 py-2 text-[9px] font-bold uppercase tracking-[0.2em] text-cyan-200 shadow-xl backdrop-blur-xl" aria-expanded={intelOpen}>◉ Live globe intel {intelOpen ? '−' : '+'}</button>
-          {intelOpen ? <div className="w-[min(54rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-cyan-300/20 bg-black/80 shadow-2xl backdrop-blur-xl">{intelOverlay}</div> : null}
+        {intelOverlay ? <div className="absolute right-3 top-3 z-30 flex max-w-[calc(100%-1.5rem)] flex-col items-end gap-2">
+          <button type="button" onClick={() => setIntelOpen(value => !value)} className="rounded-full border border-cyan-300/25 bg-slate-950/70 px-2.5 py-1 text-[8px] font-bold uppercase tracking-[0.18em] text-cyan-200/80 backdrop-blur-xl" aria-expanded={intelOpen}>Live globe intel {intelOpen ? '−' : '+'}</button>
+          {intelOpen ? <div className="w-[min(42rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-cyan-300/20 bg-black/80 shadow-2xl backdrop-blur-xl">{intelOverlay}</div> : null}
         </div> : null}
-        <div className={`pointer-events-none absolute z-40 transition-all duration-200 ${chatMode === 'expanded' ? 'inset-2 sm:inset-4' : 'bottom-3 right-3 w-[min(25rem,calc(100%-1.5rem))]'}`}>
-          <div className={`pointer-events-auto flex min-h-0 flex-col overflow-hidden rounded-2xl border border-emerald-300/25 bg-[rgba(3,10,16,0.94)] shadow-[0_24px_80px_rgba(0,0,0,0.72)] backdrop-blur-2xl ${chatMode === 'minimized' ? 'h-12' : chatMode === 'expanded' ? 'h-full' : 'h-[min(34rem,62dvh)]'}`} data-testid="floating-council-chat">
+        <div
+          className={`pointer-events-none absolute z-40 transition-all duration-500 ease-out ${
+            chatMode === 'minimized'
+              ? 'bottom-3 right-3 w-[min(22rem,calc(100%-1.5rem))]'
+              : 'inset-2 sm:inset-3'
+          }`}
+        >
+          <div
+            className={`pointer-events-auto flex min-h-0 flex-col overflow-hidden rounded-2xl border border-cyan-300/20 bg-[rgba(3,8,14,0.78)] shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl transition-[height] duration-500 ease-out ${
+              chatMode === 'minimized' ? 'h-12' : 'h-full'
+            }`}
+            data-testid="floating-council-chat"
+            data-chat-mode={chatMode}
+          >
             <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3">
-              <div className="flex min-w-0 items-center gap-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-emerald-300/35 bg-emerald-400/10 text-xs text-emerald-200">⌁</span><div className="min-w-0"><p className="truncate text-[11px] font-bold tracking-wide text-white">Council</p><p className="flex items-center gap-1 text-[8px] uppercase tracking-[0.16em] text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> connected to Terra</p></div></div>
-              <div className="flex items-center gap-1"><button type="button" onClick={() => { setMinimized(false); toggleExpanded() }} className="grid h-7 w-7 place-items-center rounded-full text-slate-300 hover:bg-white/10" aria-label={chatMode === 'expanded' ? 'Restore compact Council chat' : 'Expand Council chat'} title={chatMode === 'expanded' ? 'Restore compact view' : 'Expand chat'}>{chatMode === 'expanded' ? <IconCollapse /> : <IconExpand />}</button><button type="button" onClick={() => setMinimized(value => !value)} className="grid h-7 w-7 place-items-center rounded-full text-slate-300 hover:bg-white/10" aria-label={chatMode === 'minimized' ? 'Open Council chat' : 'Minimize Council chat'} title={chatMode === 'minimized' ? 'Open chat' : 'Minimize chat'}>{chatMode === 'minimized' ? <IconRestore /> : <IconMinimize />}</button></div>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-emerald-300/35 bg-emerald-400/10 text-xs text-emerald-200">⌁</span>
+                <div className="min-w-0">
+                  <p className="truncate text-[11px] font-bold tracking-wide text-white">War Room</p>
+                  <p className="flex items-center gap-1 text-[8px] uppercase tracking-[0.16em] text-emerald-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 commander-status-pill" /> conversation
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => { setMinimized(false); toggleExpanded() }}
+                  className="grid h-7 w-7 place-items-center rounded-full text-cyan-200 hover:bg-white/10"
+                  aria-label={chatMode === 'expanded' ? 'Restore compact conversation view' : 'Expand conversation'}
+                  title={chatMode === 'expanded' ? 'Restore compact view' : 'Expand'}
+                  data-testid="gods-eye-expand"
+                >
+                  {chatMode === 'expanded' ? <IconCollapse /> : <IconExpand />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMinimized(value => !value)}
+                  className="grid h-7 w-7 place-items-center rounded-full text-slate-300 hover:bg-white/10"
+                  aria-label={chatMode === 'minimized' ? 'Open conversation' : 'Minimize conversation'}
+                  title={chatMode === 'minimized' ? 'Open chat' : 'Minimize chat'}
+                >
+                  {chatMode === 'minimized' ? <IconRestore /> : <IconMinimize />}
+                </button>
+              </div>
             </div>
-            {chatMode !== 'minimized' ? <><ActiveTerraContextPill /><div className="min-h-0 flex-1">{council}</div>{councilComposer ? <div className="shrink-0 border-t border-white/10">{councilComposer}</div> : null}</> : null}
+            {chatMode !== 'minimized' ? (
+              <>
+                <ActiveTerraContextPill />
+                <div className="min-h-0 flex-1">{council}</div>
+                {councilComposer ? <div className="shrink-0 border-t border-white/10">{councilComposer}</div> : null}
+              </>
+            ) : null}
           </div>
         </div>
-        <Link href="/terra" className="absolute bottom-3 left-3 z-30 rounded-full border border-cyan-400/35 bg-black/75 px-3 py-2 text-[9px] font-bold uppercase tracking-widest text-cyan-300 backdrop-blur-sm">
-          Open full Terra workspace ↗
+        <Link href="/terra" className="absolute bottom-3 left-3 z-20 rounded-full border border-cyan-400/20 bg-black/55 px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest text-cyan-300/80 backdrop-blur-sm">
+          Terra workspace
         </Link>
       </section>
     </TerraActiveLocationProvider>

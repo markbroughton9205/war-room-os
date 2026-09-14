@@ -80,6 +80,8 @@ export function runCouncilSessionOrchestrationValidation(): CaseResult[] {
     check('iso_14b_checkin_social', classifyCouncilTurn('Council check in').intent === 'SOCIAL_CHECKIN' && !shouldRunFamilyDeliberation(classifyCouncilTurn('Council check in')), 'checkin'),
     check('iso_15_full_uses_family_deliberation', shouldRunFamilyDeliberation(world), 'world deliberation'),
     check('iso_16_neutral_world_title', generateNeutralSessionTitle("Council, what's going on with the world?") === 'World Events Brief', generateNeutralSessionTitle("Council, what's going on with the world?")),
+    check('iso_16b_world_today_title', generateNeutralSessionTitle('What happened in the world today?') === 'World Intelligence — Today', generateNeutralSessionTitle('What happened in the world today?')),
+    check('iso_16c_calculator_build_title', generateNeutralSessionTitle('Build me a calculator') === 'Calculator Build', generateNeutralSessionTitle('Build me a calculator')),
     check('iso_17_opening_stage', stageFromDeliberationRole('opening_position') === 'OPENING', stageFromDeliberationRole('opening_position')),
     check('iso_18_legacy_stage_not_invented', stageFromPersistedMetadata({}) === 'LEGACY', 'legacy'),
     check('iso_19_world_query_decomposed', expandResearchQuery(world ? "what's going on with the world" : '', 'FRESHNESS_SENSITIVE').includes('geopolitics'), expandResearchQuery("what's going on with the world", 'FRESHNESS_SENSITIVE').slice(0, 80)),

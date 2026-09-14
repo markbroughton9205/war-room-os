@@ -370,8 +370,31 @@ body {
   .foundry-glitch-mark,
   .foundry-terra-globe,
   .foundry-terra-orbits,
-  [data-testid="foundry-normal-mode"]::after {
+  [data-testid="foundry-normal-mode"]::after,
+  .commander-status-pill,
+  .commander-status-cluster,
+  .commander-status-node,
+  .commander-research-scan {
     animation: none !important;
     text-shadow: none;
   }
+}
+
+@keyframes commander-status-breathe {
+  0%, 100% { box-shadow: 0 0 6px rgba(52, 211, 153, 0.2); }
+  50% { box-shadow: 0 0 14px rgba(52, 211, 153, 0.5); }
+}
+
+.commander-status-pill {
+  animation: commander-status-breathe 3.6s ease-in-out infinite;
+}
+
+@keyframes commander-research-scan {
+  0% { transform: translateX(-40%); opacity: 0.35; }
+  50% { opacity: 1; }
+  100% { transform: translateX(140%); opacity: 0.35; }
+}
+
+.commander-research-scan {
+  animation: commander-research-scan 1.8s ease-in-out infinite;
 }

@@ -26,6 +26,8 @@ export type LiveRoomShellProps = {
   chatExpanded?: boolean
   sessionNavOpen?: boolean
   inspectorOpen?: boolean
+  /** Feature dock is an Advanced surface — hidden in normal Commander view. */
+  showDock?: boolean
 }
 
 export function LiveRoomShell({
@@ -42,15 +44,16 @@ export function LiveRoomShell({
   chatExpanded = false,
   sessionNavOpen = true,
   inspectorOpen = false,
+  showDock = false,
 }: LiveRoomShellProps) {
   const showLeft = !chatExpanded && sessionNavOpen
-  const showRight = !chatExpanded && inspectorOpen
+  const showRight = !chatExpanded
   const gridClass = showLeft && showRight
-    ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-[16rem_minmax(0,1fr)_18rem] overflow-hidden'
+    ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 md:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_17rem] overflow-hidden'
     : showLeft
-      ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] overflow-hidden'
+      ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 md:grid-cols-[16rem_minmax(0,1fr)] overflow-hidden'
       : showRight
-        ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_18rem] overflow-hidden'
+        ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_17rem] overflow-hidden'
         : 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden'
   return (
     <section
@@ -68,9 +71,9 @@ export function LiveRoomShell({
         className={gridClass}
         data-testid="live-room-center"
       >
-        <div className={showLeft ? 'min-h-0 overflow-hidden p-2' : 'hidden'}>{leftNav}</div>
+        <div className={showLeft ? 'min-h-0 overflow-hidden p-2 max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-64' : 'hidden'}>{leftNav}</div>
         <div className="flex min-h-0 min-w-0 flex-col">{council}</div>
-        <div className={showRight ? 'min-h-0 overflow-hidden p-2' : 'hidden'}>{rightPanel}</div>
+        <div className={showRight ? (inspectorOpen ? 'min-h-0 overflow-hidden p-2 max-xl:absolute max-xl:inset-y-0 max-xl:right-0 max-xl:z-50 max-xl:w-72' : 'min-h-0 overflow-hidden p-2 max-xl:hidden') : 'hidden'}>{rightPanel}</div>
       </main>
 
       {activePanelId && dockPanel ? (
@@ -83,6 +86,7 @@ export function LiveRoomShell({
         className="live-room-bottom-stack relative z-20 flex flex-shrink-0 flex-col"
         data-testid="live-room-bottom-stack"
       >
+        {showDock || activePanelId ? (
         <footer className="live-room-dock flex-shrink-0" data-testid="live-room-bottom-dock">
           <div
             className="border-t border-emerald-900/70 px-2 py-0.5 sm:py-1"
@@ -95,6 +99,7 @@ export function LiveRoomShell({
             />
           </div>
         </footer>
+        ) : null}
         {commandConsole ? <div className="live-room-console flex-shrink-0">{commandConsole}</div> : null}
       </div>
     </section>

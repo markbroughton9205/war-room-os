@@ -21,8 +21,18 @@ export function generateNeutralSessionTitle(commanderText: string): string {
   const t = commanderText.replace(/\s+/g, ' ').trim()
   if (!t) return 'New Council Session'
   const lower = t.toLowerCase()
-  if (/\bworld\b/.test(lower) && /\b(going on|happening|news|brief|events?)\b/.test(lower)) {
+  if (
+    /\bworld\b/.test(lower)
+    && /\btoday\b/.test(lower)
+    && /\b(happen(?:ed|ing)?|news|intelligence|going on|events?|brief)\b/.test(lower)
+  ) {
+    return 'World Intelligence — Today'
+  }
+  if (/\bworld\b/.test(lower) && /\b(going on|happen(?:ed|ing)?|news|brief|events?)\b/.test(lower)) {
     return 'World Events Brief'
+  }
+  if (/\bbuild\b/.test(lower) && /\bcalculator\b/.test(lower)) {
+    return 'Calculator Build'
   }
   if (/\blive earth\b|\bearth\b.*\b(globe|terra)\b/.test(lower)) {
     return 'Live Earth Discussion'
@@ -47,4 +57,11 @@ export function shouldAutoTitle(currentTitle: string | null | undefined, titleLo
   if (titleLocked) return false
   const t = (currentTitle ?? '').trim()
   return !t || t === 'Live Council' || t === 'Untitled thread' || t === 'New Council Session' || t === 'LEGACY COUNCIL SESSION'
+}
+
+export function sessionTitleLocked(metadata: Record<string, unknown> | null | undefined): boolean {
+  const council = metadata && typeof metadata === 'object'
+    ? (metadata as { council?: { titleLocked?: unknown } }).council
+    : undefined
+  return council?.titleLocked === true
 }
