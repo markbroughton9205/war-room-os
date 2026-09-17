@@ -17,6 +17,9 @@ import { jarticTrafficVolumesAdapter } from '@/lib/research-engine/providers/jar
 import { wzdxWsdotAdapter } from '@/lib/research-engine/providers/wzdx_wsdot'
 import { wzdxIowaDotAdapter } from '@/lib/research-engine/providers/wzdx_iowa_dot'
 import { wzdxKytcAdapter } from '@/lib/research-engine/providers/wzdx_kytc'
+import { ohgoCamerasAdapter } from '@/lib/research-engine/providers/ohgo_cameras'
+import { ny511CamerasAdapter } from '@/lib/research-engine/providers/ny511_cameras'
+import { caltransCwwp2CamerasAdapter } from '@/lib/research-engine/providers/caltrans_cwwp2_cameras'
 import { arxivAdapter } from '@/lib/research-engine/providers/arxiv'
 import { crossrefAdapter } from '@/lib/research-engine/providers/crossref'
 import { fredAdapter } from '@/lib/research-engine/providers/fred'
@@ -420,6 +423,9 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   wzdx_wsdot: wzdxWsdotAdapter,
   wzdx_iowa_dot: wzdxIowaDotAdapter,
   wzdx_kytc: wzdxKytcAdapter,
+  ohgo_cameras: ohgoCamerasAdapter,
+  ny511_cameras: ny511CamerasAdapter,
+  caltrans_cwwp2_cameras: caltransCwwp2CamerasAdapter,
   cbdb: cbdbAdapter,
   eclac_cepalstat: eclacCepalstatAdapter,
   oecd_data_explorer: oecdDataExplorerAdapter,

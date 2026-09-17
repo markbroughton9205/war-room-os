@@ -37,6 +37,7 @@ import { normalizeWebtrisTrafficFlow } from '@/lib/terra/normalizeWebtrisTraffic
 import { normalizeDigitrafficRoadWeather } from '@/lib/terra/normalizeDigitrafficRoadWeather'
 import { normalizeOntarioTrafficCameras } from '@/lib/terra/normalizeOntarioTrafficCameras'
 import { normalizeOntarioTrafficEvents } from '@/lib/terra/normalizeOntarioTrafficEvents'
+import { normalizeOhgoTrafficCameras, normalizeNy511TrafficCameras, normalizeCaltransTrafficCameras } from '@/lib/terra/normalizeFederatedTrafficCameras'
 import { normalizeHongKongTrafficCameras } from '@/lib/terra/normalizeHongKongTrafficCameras'
 import { normalizeQuebecTrafficCameras } from '@/lib/terra/normalizeQuebecTrafficCameras'
 import { normalizeQuebecTrafficEvents } from '@/lib/terra/normalizeQuebecTrafficEvents'
@@ -190,6 +191,39 @@ export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
     description: 'Live Ontario 511 (511on.ca) traffic camera stills within a bounding box — Ontario, Canada only. Licensing/redistribution terms not independently confirmed this build.',
     defaultQueryText: '43.5,-79.6,43.9,-79.1',
     normalize: response => normalizeOntarioTrafficCameras(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'ohgo_cameras',
+    providerId: 'ohgo_cameras',
+    kind: 'traffic_camera',
+    domain: 'other',
+    label: 'Traffic Cameras (OHGO / ODOT — Ohio)',
+    description: 'ODOT / OHGO refreshed JPEG cameras within a bounding box — Ohio only (not Ohio Turnpike). PUBLIC_KEY via server-side OHGO_API_KEY. Catalog uses ETag/If-None-Match; LargeUrl is never hammered across the inventory. Catalog freshness is UNAVAILABLE without image Last-Modified — never fabricated LIVE from the poll clock.',
+    defaultQueryText: '39.0,-84.6,39.3,-84.3',
+    normalize: response => normalizeOhgoTrafficCameras(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'ny511_cameras',
+    providerId: 'ny511_cameras',
+    kind: 'traffic_camera',
+    domain: 'other',
+    label: 'Traffic Cameras (New York State)',
+    description: 'New York State traffic camera stills within a bounding box — New York only. Stills via Url; VideoUrl is a Commander link-out only (never scraped or auto-embedded). Attribution "powered by 511NY"; product name is never "511NY" and never implies NYSDOT endorsement. Throttle 10 requests / 60s.',
+    defaultQueryText: '40.6,-74.1,40.9,-73.8',
+    normalize: response => normalizeNy511TrafficCameras(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'caltrans_cwwp2_cameras',
+    providerId: 'caltrans_cwwp2_cameras',
+    kind: 'traffic_camera',
+    domain: 'other',
+    label: 'Traffic Cameras (Caltrans CWWP2 — California)',
+    description: 'Caltrans CWWP2 public CCTV stills within a bounding box — California only (districts d1–d12 intersecting the view). PUBLIC_NO_AUTH status/image files. inService false → OFFLINE. streamingVideoURL is link-out only — ≥10 concurrent streams need a written Caltrans agreement; this layer never opens a stream.',
+    defaultQueryText: '33.9,-118.4,34.2,-118.1',
+    normalize: response => normalizeCaltransTrafficCameras(response.documents),
     refreshIntervalMs: 60_000,
   },
   {

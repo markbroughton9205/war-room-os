@@ -300,6 +300,13 @@ export type ResearchProviderId =
   | 'wzdx_wsdot'
   | 'wzdx_iowa_dot'
   | 'wzdx_kytc'
+  // God's Eye US traffic-camera federation — OHGO (Ohio, PUBLIC_KEY), New York State cameras
+  // (511NY stills + VideoUrl link-out only), Caltrans CWWP2 (PUBLIC_NO_AUTH stills). HOLD
+  // sources (PA, MI, Ohio Turnpike, TfNSW, DriveBC image TLS) are documented in
+  // lib/terra/roadTrafficSourceRegistry.ts and are not ResearchProviderId members.
+  | 'ohgo_cameras'
+  | 'ny511_cameras'
+  | 'caltrans_cwwp2_cameras'
 
 export type ResearchProviderCategory =
   | 'general_web'

@@ -26,6 +26,10 @@ function run(): CaseResult[] {
   results.push(check('empty_is_no_data_not_no_coverage', resolveTerraCoverageTruth({ ...base, feedState: 'empty' }) === 'NO_DATA', 'covered but nothing returned'))
   results.push(check('healthy_nonempty_is_live', resolveTerraCoverageTruth(base) === 'LIVE', 'ok + features'))
   results.push(check('no_coverage_never_rendered_as_no_data', resolveTerraCoverageTruth({ ...base, hasKnownCoverage: false, feedState: 'empty' }) === 'NO_COVERAGE', 'invariant'))
+  results.push(check('missing_ohgo_key_is_auth_required', resolveTerraCoverageTruth({ ...base, feedState: 'error', lastErrorMessage: 'OHGO_API_KEY is not configured.' }) === 'AUTH_REQUIRED', 'ohgo key'))
+  results.push(check('war_room_401_is_auth_required_not_offline', resolveTerraCoverageTruth({ ...base, feedState: 'error', lastErrorMessage: 'HTTP 401 unauthorized' }) === 'AUTH_REQUIRED', '401'))
+  results.push(check('http_429_is_rate_limited', resolveTerraCoverageTruth({ ...base, feedState: 'error', lastErrorMessage: 'RATE_LIMITED (HTTP 429)' }) === 'RATE_LIMITED', '429'))
+  results.push(check('missing_511ny_key_is_auth_required', resolveTerraCoverageTruth({ ...base, feedState: 'error', lastErrorMessage: '511NY_API_KEY is not configured.' }) === 'AUTH_REQUIRED', '511ny key'))
 
   return results
 }

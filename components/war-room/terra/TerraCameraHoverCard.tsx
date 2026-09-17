@@ -19,6 +19,8 @@
  */
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { TerraGeoFeature } from '@/lib/terra/types'
+import { TERRA_TRAFFIC_CAMERA_HEALTH_LABELS, type TerraTrafficCameraHealthState } from '@/lib/terra/trafficCameraRecord'
+import { resolveTerraTrafficCameraStillUrl, isHtmlViewerOnlyCamera, viewerLinkLabel } from './terraTrafficCameraPreview'
 
 const HOVER_DWELL_MS = 400
 // Brief client-side cache of resolved preview URLs, keyed by feature id. Values are plain URLs
@@ -35,8 +37,15 @@ const IMAGE_FAILURE_RETRY_MS = 30_000
 const FRESHNESS_META: Record<string, { text: string; color: string }> = {
   live_video: { text: 'LIVE VIDEO', color: 'text-emerald-400' },
   still_image: { text: 'STILL IMAGE — CURRENT', color: 'text-emerald-400' },
+  LIVE: { text: 'LIVE', color: 'text-emerald-400' },
   stale: { text: 'STALE', color: 'text-amber-400' },
+  STALE: { text: 'STALE', color: 'text-amber-400' },
   offline: { text: 'OFFLINE', color: 'text-red-400' },
+  OFFLINE: { text: 'OFFLINE', color: 'text-red-400' },
+  NO_COVERAGE: { text: 'NO COVERAGE', color: 'text-amber-400' },
+  AUTH_REQUIRED: { text: 'AUTH REQUIRED', color: 'text-amber-400' },
+  RATE_LIMITED: { text: 'RATE LIMITED', color: 'text-amber-400' },
+  UNAVAILABLE: { text: 'UNAVAILABLE', color: 'text-slate-400' },
   unknown: { text: 'UNKNOWN', color: 'text-slate-400' },
 }
 
@@ -45,19 +54,15 @@ const PROVIDER_LABEL: Record<string, string> = {
   ontario_511_cameras: 'Ontario 511 (Canada)',
   hong_kong_td_cameras: 'Hong Kong Transport Department',
   quebec_511_cameras: 'Québec 511 (MTMD)',
+  ohgo_cameras: 'ODOT / OHGO (Ohio)',
+  ny511_cameras: 'New York State traffic cameras',
+  caltrans_cwwp2_cameras: 'Caltrans CWWP2 (California)',
 }
 
 function resolvePreviewImageUrl(feature: TerraGeoFeature): string | null {
   const cached = IMAGE_URL_CACHE.get(feature.id)
   if (cached !== undefined) return cached
-  let url: string | null = null
-  if (feature.providerId === 'ontario_511_cameras' && typeof feature.properties.viewId === 'string') {
-    url = `/api/terra/camera-image?provider=ontario_511_cameras&id=${encodeURIComponent(feature.properties.viewId)}`
-  } else if (feature.providerId === 'hong_kong_td_cameras' && typeof feature.properties.cameraId === 'string') {
-    url = `/api/terra/camera-image?provider=hong_kong_td_cameras&id=${encodeURIComponent(feature.properties.cameraId)}`
-  } else if (feature.providerId === 'digitraffic_road_cameras' && typeof feature.properties.imageUrl === 'string') {
-    url = feature.properties.imageUrl
-  }
+  const url = resolveTerraTrafficCameraStillUrl(feature)
   if (url !== null) {
     if (IMAGE_URL_CACHE.size >= IMAGE_URL_CACHE_MAX) IMAGE_URL_CACHE.clear()
     IMAGE_URL_CACHE.set(feature.id, url)
@@ -97,13 +102,21 @@ export function TerraCameraHoverCard({
     return () => clearTimeout(timer)
   }, [feature.id])
 
-  const freshness = typeof feature.properties.freshness === 'string' ? feature.properties.freshness : 'unknown'
-  const freshnessMeta = FRESHNESS_META[freshness] ?? FRESHNESS_META.unknown
-  const mediaAvailable = freshness !== 'stale' && freshness !== 'offline'
+  const freshness = typeof feature.properties.freshnessState === 'string'
+    ? feature.properties.freshnessState
+    : typeof feature.properties.freshness === 'string'
+      ? feature.properties.freshness
+      : 'unknown'
+  const freshnessMeta = FRESHNESS_META[freshness] ?? (
+    freshness in TERRA_TRAFFIC_CAMERA_HEALTH_LABELS
+      ? { text: TERRA_TRAFFIC_CAMERA_HEALTH_LABELS[freshness as TerraTrafficCameraHealthState], color: 'text-slate-400' }
+      : FRESHNESS_META.unknown
+  )
+  const mediaAvailable = freshness !== 'stale' && freshness !== 'offline' && freshness !== 'STALE' && freshness !== 'OFFLINE'
   const viewerUrl = typeof feature.properties.viewerUrl === 'string' ? feature.properties.viewerUrl : null
   const imageUrl = useMemo(
-    () => (mediaAvailable && !viewerUrl ? resolvePreviewImageUrl(feature) : null),
-    [feature, mediaAvailable, viewerUrl],
+    () => (mediaAvailable && !isHtmlViewerOnlyCamera(feature) ? resolvePreviewImageUrl(feature) : null),
+    [feature, mediaAvailable],
   )
 
   const showImage = dwellElapsed && imageUrl !== null && !imageFailed
@@ -144,9 +157,9 @@ export function TerraCameraHoverCard({
         <div className="flex justify-between"><dt>Status</dt><dd className={freshnessMeta.color}>{freshnessMeta.text}</dd></div>
       </dl>
 
-      {viewerUrl ? (
+      {viewerUrl && isHtmlViewerOnlyCamera(feature) ? (
         <a href={viewerUrl} target="_blank" rel="noreferrer" className="mt-2 block rounded border border-white/15 px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-widest text-cyan-300 hover:border-cyan-400/60">
-          View at source (HTML viewer)
+          {viewerLinkLabel(feature)}
         </a>
       ) : !mediaAvailable ? (
         <p className={`mt-2 text-[10.5px] ${freshnessMeta.color}`}>
@@ -169,12 +182,18 @@ export function TerraCameraHoverCard({
         </div>
       )}
 
+      {viewerUrl && !isHtmlViewerOnlyCamera(feature) && (
+        <a href={viewerUrl} target="_blank" rel="noreferrer" className="mt-2 block rounded border border-white/15 px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-widest text-cyan-300 hover:border-cyan-400/60">
+          {viewerLinkLabel(feature)}
+        </a>
+      )}
+
       <button
         type="button"
         onClick={onOpen}
         className="mt-2 w-full rounded border border-white/20 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-300 hover:border-emerald-400/60 hover:text-emerald-400"
       >
-        Open full detail
+        Open inspect card
       </button>
     </div>
   )

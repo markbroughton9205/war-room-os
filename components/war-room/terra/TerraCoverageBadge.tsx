@@ -18,6 +18,8 @@ const STATE_COLOR: Record<TerraCoverageTruthState, string> = {
   STALE: 'text-amber-400',
   OFFLINE: 'text-red-400',
   UNKNOWN: 'text-slate-400',
+  AUTH_REQUIRED: 'text-amber-400',
+  RATE_LIMITED: 'text-amber-400',
 }
 
 export function TerraCoverageBadge({ state, label }: { state: TerraCoverageTruthState; label?: string }) {

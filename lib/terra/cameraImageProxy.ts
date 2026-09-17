@@ -25,8 +25,15 @@ import 'server-only'
  *   - no credentials sent, no credentials required
  */
 import { assertAllowedProviderUrl, isAllowedHost } from '@/lib/research-engine/security/hostAllowlist'
+import { lookupCameraImageUrl } from '@/lib/terra/cameraImageUrlCache'
 
-export type TerraCameraImageProvider = 'digitraffic_road_cameras' | 'ontario_511_cameras' | 'hong_kong_td_cameras'
+export type TerraCameraImageProvider =
+  | 'digitraffic_road_cameras'
+  | 'ontario_511_cameras'
+  | 'hong_kong_td_cameras'
+  | 'ohgo_cameras'
+  | 'ny511_cameras'
+  | 'caltrans_cwwp2_cameras'
 
 export type TerraCameraImageResult =
   | { ok: true; bytes: Uint8Array; contentType: string; sourceUrl: string; attribution: string }
@@ -46,15 +53,26 @@ const ID_PATTERNS: Record<TerraCameraImageProvider, RegExp> = {
   // Hong Kong TD camera keys observed live this build (e.g. "BC101F", "AID01101", "TDS10001",
   // "TDSCPRHSK10001") — conservative uppercase-alnum charset, the documented {key}.JPG pattern.
   hong_kong_td_cameras: /^[A-Z0-9]{1,24}$/,
+  ohgo_cameras: /^ohgo:[A-Za-z0-9._-]+(?::\d{1,3})?$/,
+  ny511_cameras: /^511ny:[A-Za-z0-9._-]+$/,
+  caltrans_cwwp2_cameras: /^caltrans:d\d{1,2}:[A-Za-z0-9._-]+$/,
 }
 
 const ATTRIBUTION: Record<TerraCameraImageProvider, string> = {
   digitraffic_road_cameras: 'Source: Fintraffic / digitraffic.fi, license CC 4.0 BY',
   ontario_511_cameras: 'Source: Ontario 511 (511on.ca), Government of Ontario / Ministry of Transportation',
   hong_kong_td_cameras: 'Source: Transport Department, Government of the Hong Kong SAR (data.gov.hk)',
+  ohgo_cameras: 'ODOT / OHGO',
+  ny511_cameras: 'powered by 511NY',
+  caltrans_cwwp2_cameras: 'Caltrans CWWP2',
 }
 
-function buildSourceUrl(provider: TerraCameraImageProvider, id: string): string {
+const CACHED_URL_PROVIDERS = new Set<TerraCameraImageProvider>(['ohgo_cameras', 'ny511_cameras', 'caltrans_cwwp2_cameras'])
+
+function buildSourceUrl(provider: TerraCameraImageProvider, id: string): string | null {
+  if (CACHED_URL_PROVIDERS.has(provider)) {
+    return lookupCameraImageUrl(provider, id)?.url ?? null
+  }
   if (provider === 'digitraffic_road_cameras') return `https://weathercam.digitraffic.fi/${id}.jpg`
   if (provider === 'hong_kong_td_cameras') return `https://tdcctv.data.one.gov.hk/${id}.JPG`
   return `https://511on.ca/map/Cctv/${id}`
@@ -98,9 +116,14 @@ export async function fetchProxiedCameraImage(provider: TerraCameraImageProvider
     return { ok: false, status: null, message: `Invalid camera id format for provider ${provider}.` }
   }
 
+  const sourceUrl = buildSourceUrl(provider, id)
+  if (!sourceUrl) {
+    return { ok: false, status: null, message: 'Camera still URL is not in the current catalog cache — open the layer first, then inspect one camera. LargeUrl is never fetched for the whole catalog.' }
+  }
+
   let currentUrl: string
   try {
-    currentUrl = assertAllowedProviderUrl(provider, buildSourceUrl(provider, id)).toString()
+    currentUrl = assertAllowedProviderUrl(provider, sourceUrl).toString()
   } catch {
     return { ok: false, status: null, message: 'Camera image URL failed the provider host allowlist check.' }
   }
