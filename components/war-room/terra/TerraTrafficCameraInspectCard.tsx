@@ -193,7 +193,9 @@ export function TerraTrafficCameraInspectCard({
                 {onSelectNearby && hit.feature ? (
                   <button
                     type="button"
-                    onClick={() => onSelectNearby(hit.feature)}
+                    onClick={() => {
+                      if (hit.feature) onSelectNearby(hit.feature)
+                    }}
                     className="w-full text-left text-[10.5px] text-cyan-300 hover:underline"
                   >
                     {hit.locationName} · {hit.distanceKm.toFixed(1)} km

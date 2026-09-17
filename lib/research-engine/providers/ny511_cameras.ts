@@ -66,7 +66,7 @@ export type Ny511Camera = {
   status?: string
 }
 
-export function ny511ApiKey(env: NodeJS.ProcessEnv = process.env): string {
+export function ny511ApiKey(env: NodeJS.Dict<string> = process.env): string {
   return env['511NY_API_KEY']?.trim() ?? ''
 }
 

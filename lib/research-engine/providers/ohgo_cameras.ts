@@ -69,7 +69,7 @@ type OhgoListEnvelope = { results?: OhgoCamera[]; Results?: OhgoCamera[] }
 
 const catalogStore: { etag: string | null; cameras: OhgoCamera[] } = { etag: null, cameras: [] }
 
-export function ohgoApiKey(env: NodeJS.ProcessEnv = process.env): string {
+export function ohgoApiKey(env: NodeJS.Dict<string> = process.env): string {
   return env.OHGO_API_KEY?.trim() ?? ''
 }
 
