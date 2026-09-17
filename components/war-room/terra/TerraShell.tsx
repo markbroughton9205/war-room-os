@@ -55,7 +55,6 @@ import { TERRA_STREET_LEVEL_IMAGERY_MESSAGE } from '@/lib/terra/streetLevelImage
 import {
   terraHighResAerialUnavailable,
   TERRA_HIGH_RES_AERIAL_UNAVAILABLE_MESSAGE,
-  TERRA_FALLBACK_IMAGERY_ACTIVE_MESSAGE,
   TERRA_OPEN_MAP_DETAIL_LABEL,
   TERRA_CLOSE_MAP_DETAIL_LABEL,
 } from '@/lib/terra/aerialImagery'
@@ -2822,7 +2821,6 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
               title="NASA GIBS is a real daily photograph capped at city-scale resolution; no ion-backed aerial asset is available at this zoom. OSM map-detail is already the visible fallback. Toggle still forces OSM at any altitude."
             >
               {TERRA_HIGH_RES_AERIAL_UNAVAILABLE_MESSAGE}
-              <span className="text-cyan-300">{TERRA_FALLBACK_IMAGERY_ACTIVE_MESSAGE}</span>
               <span className="text-cyan-300">{mapDetailMode ? TERRA_CLOSE_MAP_DETAIL_LABEL : TERRA_OPEN_MAP_DETAIL_LABEL}</span>
             </button>
           )}
