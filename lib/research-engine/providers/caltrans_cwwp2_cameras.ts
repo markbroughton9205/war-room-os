@@ -9,6 +9,8 @@ import 'server-only'
  * Stills only for map density. streamingVideoURL is recorded as viewerUrl / link-out — never
  * auto-embedded. Caltrans fair-use: ≥10 concurrent streams need a written agreement; this adapter
  * never opens a stream.
+ *
+ * Camera arrays come only from the live per-district CWWP2 JSON files. No stub catalog.
  */
 import type { ResearchHealthStatus, ResearchQuery } from '@/lib/research-engine/core/types'
 import { safeJsonParse, safeProviderFetch } from '@/lib/research-engine/security/safeFetch'

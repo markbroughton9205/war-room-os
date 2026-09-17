@@ -13,6 +13,9 @@ import 'server-only'
  * adapter never scrapes, embeds, or auto-plays video.
  *
  * Throttle: 10 requests / 60 seconds (in-process). Disabled/Blocked cameras are OFFLINE.
+ *
+ * Camera arrays come only from the live 511NY HTTP response. Missing 511NY_API_KEY returns
+ * not_configured — never a stub/fixture catalog.
  */
 import type { ResearchHealthStatus, ResearchQuery } from '@/lib/research-engine/core/types'
 import { providerEnvDescriptor, isProviderEnvSatisfied } from '@/lib/research-engine/config/providerEnv'
