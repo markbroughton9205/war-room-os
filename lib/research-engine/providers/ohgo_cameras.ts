@@ -5,7 +5,8 @@ import 'server-only'
  *
  * GET https://publicapi.ohgo.com/api/v1/cameras
  * Docs: https://publicapi.ohgo.com/docs/v1/cameras
- * Auth: Authorization: APIKEY {OHGO_API_KEY} — server-side only, never a client query param.
+ * Auth: Authorization: ApiKey {OHGO_API_KEY} — server-side only, never a client query param.
+ * Live-confirmed scheme is `ApiKey` (Bearer / X-API-Key / ?apiKey= were 401).
  * Snapshots refresh every 5 seconds. This adapter fetches the camera *catalog* only — it never
  * GETs LargeUrl/SmallUrl for every camera (don't hammer stills). Inspect/hover load one still
  * through the camera-image proxy.
@@ -192,7 +193,7 @@ async function search(query: ResearchQuery) {
   const cached = cacheGet<ReturnType<typeof okResponse>>(cacheKey)
   if (cached) return { ok: true as const, response: { ...cached, fromCache: true } }
 
-  const headers: Record<string, string> = { Authorization: `APIKEY ${key}`, Accept: 'application/json' }
+  const headers: Record<string, string> = { Authorization: `ApiKey ${key}`, Accept: 'application/json' }
   if (catalogStore.etag) headers['If-None-Match'] = catalogStore.etag
 
   const result = await safeProviderFetch(PROVIDER, `${BASE_URL}?page-all=true`, { timeoutMs: 20_000, headers })
@@ -251,7 +252,7 @@ async function healthCheck(): Promise<ResearchHealthStatus> {
   try {
     const result = await safeProviderFetch(PROVIDER, `${BASE_URL}?page-all=true`, {
       timeoutMs: 10_000,
-      headers: { Authorization: `APIKEY ${ohgoApiKey()}`, Accept: 'application/json' },
+      headers: { Authorization: `ApiKey ${ohgoApiKey()}`, Accept: 'application/json' },
     })
     const state = result.ok ? 'ready' : result.status === 401 || result.status === 403 ? 'authentication_failed' : result.status === 429 ? 'rate_limited' : 'degraded'
     return { provider: PROVIDER, state, checkedAt: nowIso(), detail: result.ok ? 'cameras endpoint reachable' : `HTTP ${result.status}`, durationMs: Date.now() - started }

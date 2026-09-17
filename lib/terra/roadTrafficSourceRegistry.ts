@@ -296,7 +296,7 @@ export const ROAD_TRAFFIC_SOURCE_REGISTRY: RoadTrafficSourceRecord[] = [
     reconciliationStatus: 'MISSING',
     configurationState: 'CREDENTIAL_REQUIRED',
     authenticationRequired: true,
-    rightsState: 'OHGO Public API terms of use — https://publicapi.ohgo.com/docs/terms-of-use. Register at https://publicapi.ohgo.com/docs/registration. Authorization: APIKEY {OHGO_API_KEY} server-side only.',
+    rightsState: 'OHGO Public API terms of use — https://publicapi.ohgo.com/docs/terms-of-use. Register at https://publicapi.ohgo.com/docs/registration. Authorization: ApiKey {OHGO_API_KEY} server-side only.',
     evidenceStatus: 'verified_via_official_docs_this_build',
     evidenceNote: 'IMPLEMENTED this phase. GET https://publicapi.ohgo.com/api/v1/cameras (+ /cameras/{id}). PUBLIC_KEY. Catalog ETag/If-None-Match; LargeUrl never hammered. Federation id ohgo:{Id}[+view]. feedType=REFRESHED_IMAGE. Catalog freshness is UNAVAILABLE without image Last-Modified — never fabricated LIVE from the poll clock. Ohio Turnpike HTML viewers are a separate HOLD and are not this adapter.',
   },

@@ -1,5 +1,7 @@
 /**
- * Mock OHGO adapter validation — no live key, no network catalog poll.
+ * Offline regression for OHGO / NY / Caltrans mapping + missing-key behavior.
+ * Does NOT substitute cameras into the Terra layer. The adapters themselves are live HTTP
+ * clients (ohgo_cameras.ts / ny511_cameras.ts / caltrans_cwwp2_cameras.ts).
  *   node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/terra/ohgoCameras.validation.ts
  */
 import { pathToFileURL } from 'node:url'
