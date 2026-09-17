@@ -4,32 +4,9 @@ import { useEffect, useRef } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
 import { buildGibsTileUrlTemplate } from '@/lib/earth-intelligence/gibsTileUrl'
-import { TERRA_SCALE_THRESHOLDS_M } from './useTerraCameraScale'
+import { resolveTerraImageryAlphas, TERRA_IMAGERY_PROVIDER_FAIL_STREAK } from '@/lib/terra/aerialImagery'
 
 const CROSSFADE_MS = 900
-
-// God's Eye multi-scale phase, mission section 3: photographic Earth must remain at high
-// altitude, but transition toward closer-range aerial detail as the camera approaches the
-// surface. GIBS True Color is capped at native zoom level 9 (see maximumLevel below) — well short
-// of city/street detail. Reusing the exact REGIONAL/CITY bands useTerraCameraScale.ts already
-// defines (not a second set of thresholds) keeps this crossfade and the discrete scale-level badge
-// in agreement about where "regional" ends and "city" begins.
-const IMAGERY_FADE_FULL_ABOVE_M = TERRA_SCALE_THRESHOLDS_M.regional
-const IMAGERY_FADE_ZERO_AT_M = TERRA_SCALE_THRESHOLDS_M.city
-
-function heightBasedAlpha(heightMeters: number): number {
-  if (heightMeters >= IMAGERY_FADE_FULL_ABOVE_M) return 1
-  if (heightMeters <= IMAGERY_FADE_ZERO_AT_M) return 0
-  return (heightMeters - IMAGERY_FADE_ZERO_AT_M) / (IMAGERY_FADE_FULL_ABOVE_M - IMAGERY_FADE_ZERO_AT_M)
-}
-
-/** Inverse of heightBasedAlpha — 0 above regional (GIBS still fully covers), rising to 1 by city
- * scale, staying 1 through local/building. Only meaningful once a real ion World Imagery asset has
- * loaded (see `aerialAvailable` below); this is deliberately the complement of the same band, not
- * an independently-tuned one, so the handoff has no gap or double-exposure seam. */
-function inverseHeightBasedAlpha(heightMeters: number): number {
-  return 1 - heightBasedAlpha(heightMeters)
-}
 
 /** GIBS' curated Terra layers are daily products. Step on UTC observation days and request the
  * previous completed day so "live" never implies a fabricated continuously-updating texture. */
@@ -49,8 +26,9 @@ export type TerraEarthImageryProps = {
    * account/entitlement issues are real, same rule as OSM Buildings) — `onAerialImageryAvailabilityChange`
    * reports the real detected outcome, never bare token presence. */
   hasIonToken: boolean
-  /** Commander-toggled escape hatch: shows the OSM raster base (roads/labels/boundaries/POIs) on
-   * top of the photographic imagery instead of leaving it as an automatic close-range takeover. */
+  /** Commander overlay: force the OSM raster base on top of photographs. Close-range OSM is
+   * already the automatic fallback when high-res aerial is unavailable — this toggle is not the
+   * only way to keep the globe readable. */
   mapDetailMode: boolean
   /** Fires once the real availability of ion World Imagery (Bing Maps Aerial) is known — `false`
    * immediately when no token is configured, or after a real failed asset request. */
@@ -100,11 +78,11 @@ export function TerraEarthImagery({ viewer, selectedTime, hasIonToken, mapDetail
     void loadCesium().then(async Cesium => {
       if (cancelled || targetViewer.isDestroyed()) return
 
-      // The Viewer's baseLayer (TerraGlobe.tsx) — controlled here so it only surfaces via the
-      // explicit "map detail" toggle instead of bleeding through whenever the photographic layers
-      // above it fade during the crossfade band.
+      // The Viewer's baseLayer (TerraGlobe.tsx) — OSM raster. Hidden while photographs cover the
+      // view; automatically raised at city+ when high-res aerial is missing (and whenever GIBS
+      // tiles fail). The Commander map-detail toggle still forces it at any altitude.
       osmBaseLayer = targetViewer.imageryLayers.get(0) ?? null
-      if (osmBaseLayer) osmBaseLayer.alpha = mapDetailModeRef.current ? 1 : 0
+      if (osmBaseLayer) osmBaseLayer.alpha = 0
 
       // Real satellite/aerial photography (Cesium ion's World Imagery, Bing Maps Aerial) — the
       // same lawfully-configured ion boundary as World Terrain/OSM Buildings, reused rather than
@@ -139,24 +117,50 @@ export function TerraEarthImagery({ viewer, selectedTime, hasIonToken, mapDetail
       trueColorLayer = targetViewer.imageryLayers.addImageryProvider(trueColor)
       trueColorLayer.alpha = 0
 
-      const aerialAvailable = worldImageryLayer !== null
+      let aerialAvailable = worldImageryLayer !== null
+      let photographicFailed = false
+      let worldFailStreak = 0
+      let gibsFailStreak = 0
 
       const applyAlpha = () => {
         if (!trueColorLayer || targetViewer.isDestroyed()) return
-        if (mapDetailModeRef.current) {
-          if (osmBaseLayer) osmBaseLayer.alpha = 1
-          trueColorLayer.alpha = 0
-          if (worldImageryLayer) worldImageryLayer.alpha = 0
-          return
-        }
         const height = targetViewer.camera.positionCartographic.height
-        // Without a real aerial asset there is nothing to hand off to at close range — hold GIBS
-        // at full opacity instead of fading it toward the OSM base, so the Commander always sees a
-        // real (if low-resolution close up) photograph rather than a silently-substituted map.
-        trueColorLayer.alpha = fadeInProgress * (aerialAvailable ? heightBasedAlpha(height) : 1)
-        if (worldImageryLayer) worldImageryLayer.alpha = fadeInProgress * inverseHeightBasedAlpha(height)
-        if (osmBaseLayer) osmBaseLayer.alpha = 0
+        const alphas = resolveTerraImageryAlphas({
+          aerialAvailable,
+          photographicFailed,
+          mapDetailMode: mapDetailModeRef.current,
+          heightMeters: height,
+          fade: fadeInProgress,
+        })
+        if (osmBaseLayer) osmBaseLayer.alpha = alphas.osm
+        trueColorLayer.alpha = alphas.gibs
+        if (worldImageryLayer) worldImageryLayer.alpha = alphas.world
       }
+
+      const markWorldImageryFailed = () => {
+        if (!aerialAvailable) return
+        aerialAvailable = false
+        onAerialImageryAvailabilityChangeRef.current?.(false)
+        applyAlpha()
+      }
+
+      const worldProvider = worldImageryLayer?.imageryProvider
+      if (worldProvider && typeof worldProvider.errorEvent?.addEventListener === 'function') {
+        worldProvider.errorEvent.addEventListener(() => {
+          if (cancelled) return
+          worldFailStreak += 1
+          if (worldFailStreak >= TERRA_IMAGERY_PROVIDER_FAIL_STREAK) markWorldImageryFailed()
+        })
+      }
+
+      trueColor.errorEvent.addEventListener(() => {
+        if (cancelled || photographicFailed) return
+        gibsFailStreak += 1
+        if (gibsFailStreak >= TERRA_IMAGERY_PROVIDER_FAIL_STREAK) {
+          photographicFailed = true
+          applyAlpha()
+        }
+      })
 
       const startedAt = performance.now()
       const fade = (now: number) => {
