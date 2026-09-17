@@ -10,18 +10,22 @@
  *
  * Stops immediately on any real user input (pointerdown/wheel on the Cesium canvas — not
  * Cesium's own `camera.changed` event, which this hook's own rotation would otherwise trigger,
- * creating a self-stopping feedback loop). Resumes automatically after an idle period, or
- * immediately via the exposed `resume()` action (TerraShell's "Resume Cinematic View" control).
- * Respects `prefers-reduced-motion` — does not orbit at all when the OS/browser requests it.
+ * creating a self-stopping feedback loop). Idle auto-resume is allowed only while navigation
+ * ownership is IDLE or AUTO_ORBIT. Commander inspect, camera fly, search fly, and manual globe
+ * lock auto-resume. Orbit returns through Resume Cinematic View or an explicit toggle.
+ * Canvas interaction does not permanently kill orbit unless auto-resume is locked or pause()
+ * was called. Respects `prefers-reduced-motion`.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
+import type { TerraScaleLevel } from './useTerraCameraScale'
 
-// Roughly one full revolution every ~13 real minutes — "subtle and cinematic," never a fast
-// screensaver spin.
+// Subtle cinematic at close range; zoomed-out Earth should still read as live and spinning.
 const ORBIT_RADIANS_PER_MS = 0.008 / 1000
+const GLOBAL_ORBIT_RADIANS_PER_MS = 0.055 / 1000
 const IDLE_RESUME_DELAY_MS = 20_000
+const GLOBAL_IDLE_RESUME_DELAY_MS = 1_800
 
 export type TerraCinematicOrbitResult = {
   orbiting: boolean
@@ -31,17 +35,43 @@ export type TerraCinematicOrbitResult = {
   suppressedByReducedMotion: boolean
   pause: () => void
   resume: () => void
+  toggle: () => void
+  lockAutoResume: (locked: boolean) => void
 }
 
-export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boolean): TerraCinematicOrbitResult {
+export function useTerraCinematicOrbit(
+  viewer: CesiumViewer | null,
+  enabled: boolean,
+  scaleLevel: TerraScaleLevel = 'global',
+  options?: { autoResumeLocked?: boolean },
+): TerraCinematicOrbitResult {
   const [orbiting, setOrbiting] = useState(false)
   const [suppressedByReducedMotion, setSuppressedByReducedMotion] = useState(false)
   const lastInteractionAtRef = useRef(0)
   const pausedByUserRef = useRef(false)
   const orbitingRef = useRef(false)
+  const scaleLevelRef = useRef(scaleLevel)
+  const autoResumeLockedRef = useRef(Boolean(options?.autoResumeLocked))
+  useEffect(() => {
+    scaleLevelRef.current = scaleLevel
+  }, [scaleLevel])
+  useEffect(() => {
+    autoResumeLockedRef.current = Boolean(options?.autoResumeLocked)
+  }, [options?.autoResumeLocked])
 
   useEffect(() => {
     lastInteractionAtRef.current = Date.now()
+  }, [])
+
+  const noteInteraction = useCallback(() => {
+    lastInteractionAtRef.current = Date.now()
+    if (autoResumeLockedRef.current) {
+      pausedByUserRef.current = true
+    }
+    if (orbitingRef.current) {
+      orbitingRef.current = false
+      setOrbiting(false)
+    }
   }, [])
 
   const pause = useCallback(() => {
@@ -53,7 +83,16 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
     }
   }, [])
 
+  const lockAutoResume = useCallback((locked: boolean) => {
+    autoResumeLockedRef.current = locked
+    if (locked && orbitingRef.current) {
+      orbitingRef.current = false
+      setOrbiting(false)
+    }
+  }, [])
+
   const resume = useCallback(() => {
+    autoResumeLockedRef.current = false
     pausedByUserRef.current = false
     // Sets the "last interaction" far enough in the past that the idle-check below allows
     // orbiting to start on the very next frame, rather than waiting out the full idle delay
@@ -66,12 +105,20 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
     }
   }, [])
 
+  const toggle = useCallback(() => {
+    if (pausedByUserRef.current) {
+      resume()
+      return
+    }
+    pause()
+  }, [pause, resume])
+
   // Real user input only — never Cesium's own camera-changed event, which this hook's own
   // rotation would otherwise immediately re-trigger.
   useEffect(() => {
     if (!viewer || !enabled) return
     const canvas = viewer.scene.canvas
-    const onInteract = () => pause()
+    const onInteract = () => noteInteraction()
     canvas.addEventListener('pointerdown', onInteract)
     canvas.addEventListener('wheel', onInteract, { passive: true })
     canvas.addEventListener('touchstart', onInteract, { passive: true })
@@ -80,7 +127,7 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
       canvas.removeEventListener('wheel', onInteract)
       canvas.removeEventListener('touchstart', onInteract)
     }
-  }, [viewer, enabled, pause])
+  }, [viewer, enabled, noteInteraction])
 
   // Deriving suppressedByReducedMotion as its own small effect (rather than inline in the main
   // orbit-loop effect below) keeps that state update the ONLY thing this effect does — still
@@ -122,8 +169,12 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
           return
         }
         const now = Date.now()
+        const zoomedOut = scaleLevelRef.current === 'global' || scaleLevelRef.current === 'regional'
+        const idleDelay = zoomedOut ? GLOBAL_IDLE_RESUME_DELAY_MS : IDLE_RESUME_DELAY_MS
         const idleFor = now - lastInteractionAtRef.current
-        const shouldOrbit = !pausedByUserRef.current && idleFor >= IDLE_RESUME_DELAY_MS
+        const shouldOrbit = !pausedByUserRef.current
+          && !autoResumeLockedRef.current
+          && (orbitingRef.current || idleFor >= idleDelay)
         // rAF owns camera motion only. React is notified solely on the two semantic state edges,
         // never once per animation frame.
         if (orbitingRef.current !== shouldOrbit) {
@@ -141,7 +192,8 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
         }
         const elapsedMs = now - lastFrameAt
         lastFrameAt = now
-        viewer.camera.rotate(CesiumModule!.Cartesian3.UNIT_Z, -ORBIT_RADIANS_PER_MS * elapsedMs)
+        const rate = zoomedOut ? GLOBAL_ORBIT_RADIANS_PER_MS : ORBIT_RADIANS_PER_MS
+        viewer.camera.rotate(CesiumModule!.Cartesian3.UNIT_Z, -rate * elapsedMs)
       }
       frameHandle = requestAnimationFrame(frame)
     }
@@ -153,5 +205,5 @@ export function useTerraCinematicOrbit(viewer: CesiumViewer | null, enabled: boo
     }
   }, [viewer, enabled, suppressedByReducedMotion])
 
-  return { orbiting, suppressedByReducedMotion, pause, resume }
+  return { orbiting, suppressedByReducedMotion, pause, resume, toggle, lockAutoResume }
 }

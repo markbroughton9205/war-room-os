@@ -6,6 +6,7 @@ import { withProviderGate } from '@/lib/research-engine/security/providerGate'
 import { cacheGet, cacheSet, CACHE_TTL } from '@/lib/research-engine/cache/ttlCache'
 import type { ResearchProviderAdapter } from '@/lib/research-engine/providers/adapter'
 import { errorResponse, makeDocument, okResponse, nowIso } from '@/lib/research-engine/providers/shared'
+import { TERRA_PUBLIC_USER_AGENT, TERRA_OFFICIAL_VIEWERS } from '@/lib/terra/terraPublicIdentity'
 
 const PROVIDER = 'open_meteo' as const
 const BASE_URL = 'https://api.open-meteo.com/v1/forecast'
@@ -44,7 +45,10 @@ async function fetchForecast(query: ResearchQuery) {
   url.searchParams.set('longitude', String(coords.lon))
   url.searchParams.set('current', 'temperature_2m,wind_speed_10m')
 
-  const result = await safeProviderFetch(PROVIDER, url.toString(), { timeoutMs: 10_000 })
+  const result = await safeProviderFetch(PROVIDER, url.toString(), {
+    timeoutMs: 10_000,
+    headers: { 'User-Agent': TERRA_PUBLIC_USER_AGENT, Accept: 'application/json' },
+  })
   if (!result.ok) return { ok: false as const, kind: 'http_error' as const, status: result.status }
 
   const data = safeJsonParse<OpenMeteoResponse>(result.text)
@@ -52,14 +56,14 @@ async function fetchForecast(query: ResearchQuery) {
     return { ok: false as const, kind: 'malformed' as const, message: 'Open-Meteo response did not contain the expected "current" forecast object.' }
   }
 
-  const canonicalUrl = 'https://open-meteo.com/en/docs'
+  const canonicalUrl = TERRA_OFFICIAL_VIEWERS.openMeteo
   const documents = [makeDocument({
     id: `open_meteo:${coords.lat}:${coords.lon}:${data.current.time}`,
     provider: PROVIDER,
     providerRecordId: `${coords.lat}:${coords.lon}:${data.current.time}`,
     title: `Weather at ${coords.lat},${coords.lon} — ${data.current.time}`,
     summary: `Temperature: ${data.current.temperature_2m}${data.current_units?.temperature_2m ?? '°C'}, Wind: ${data.current.wind_speed_10m}${data.current_units?.wind_speed_10m ?? 'km/h'}`,
-    contentSnippet: null,
+    contentSnippet: data.timezone ?? null,
     canonicalUrl,
     sourceUrl: url.toString(),
     sourceName: 'Open-Meteo',
@@ -67,12 +71,17 @@ async function fetchForecast(query: ResearchQuery) {
     authors: [],
     organization: null,
     publishedAt: data.current.time,
-    updatedAt: null,
-    geography: data.timezone ?? null,
+    updatedAt: data.current.time,
+    geography: `lat ${coords.lat}, lon ${coords.lon}`,
     language: null,
-    identifiers: { latitude: String(coords.lat), longitude: String(coords.lon) },
+    identifiers: {
+      latitude: String(coords.lat),
+      longitude: String(coords.lon),
+      viewerUrl: canonicalUrl,
+      observedAt: data.current.time,
+    },
     subjects: [],
-    license: null,
+    license: 'CC BY 4.0',
     accessStatus: 'open',
   })]
   const response = okResponse(PROVIDER, { documents, durationMs: Date.now() - started })
@@ -85,7 +94,14 @@ async function run(query: ResearchQuery) {
     return await withProviderGate(PROVIDER, async () => {
       const outcome = await fetchForecast(query)
       if (outcome.ok) return outcome.response
-      if (outcome.kind === 'http_error') throw new Error(`Open-Meteo fetch failed with HTTP ${outcome.status}`)
+      if (outcome.kind === 'http_error') {
+        return errorResponse(PROVIDER, {
+          provider: PROVIDER,
+          category: outcome.status === 429 ? 'rate_limited' : 'upstream_error',
+          message: outcome.status === 429 ? 'Open-Meteo RATE_LIMITED (HTTP 429).' : `Open-Meteo fetch failed with HTTP ${outcome.status}`,
+          httpStatus: outcome.status,
+        }, 0)
+      }
       throw new Error(outcome.message)
     })
   } catch (error) {

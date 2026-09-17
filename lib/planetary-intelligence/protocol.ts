@@ -9,6 +9,7 @@ import { commitLanePacket, createBlindStore, lockFirstPass, visibleContextForLan
 import { buildCoverageMatrix, planGapFill } from './coverage'
 import { fuseLedger } from './fusion'
 import { planInvestigation } from './investigationPlanner'
+import { applyEvidenceTruth } from './evidenceTruth'
 import { preserveLanguage } from './language'
 import { addClaim, addDocument, attachOrigins, createLedger, setVerification, type ClaimEvidenceLedger } from './ledger'
 import { commanderDisplay } from './metrics'
@@ -133,8 +134,10 @@ export function fixtureRetrieve(task: InvestigationTask): RetrievedDocument[] {
   }
 
   return rows.map((row, index) => {
-    const preserved = preserveLanguage({ text: row.text, declaredLanguage: language })
-    const injection = index === 0 && task.seat === 'PULSAR' ? sanitized : sanitizeUntrustedContent(row.text)
+    const native = nativeFixturePhrase(language, topic)
+    const text = `${native} ${row.text}`
+    const preserved = preserveLanguage({ text, declaredLanguage: language })
+    const injection = index === 0 && task.seat === 'PULSAR' ? sanitized : sanitizeUntrustedContent(text)
     return {
       documentId: documentId(row.url, row.title),
       url: row.url,
@@ -148,6 +151,7 @@ export function fixtureRetrieve(task: InvestigationTask): RetrievedDocument[] {
       retrievalProvider: task.preferredProviders[0] ?? 'fixture',
       query: task.query,
       queryLanguage: task.queryLanguage,
+      requestedLanguage: task.requestedLanguage || language,
       detectedLanguage: preserved.originalLanguage,
       originalText: preserved.originalText,
       translatedText: preserved.translatedText,
@@ -155,9 +159,10 @@ export function fixtureRetrieve(task: InvestigationTask): RetrievedDocument[] {
       translationTime: preserved.translationTime,
       translationConfidence: preserved.translationConfidence,
       publishedAt: '2026-09-13T16:00:00.000Z',
-      contentHash: hashEvidenceContent(row.text) || createHash('sha256').update(row.text).digest('hex'),
-      simhash: simhash64(row.text),
+      contentHash: hashEvidenceContent(text) || createHash('sha256').update(text).digest('hex'),
+      simhash: simhash64(text),
       geography: geo === 'GLOBAL' ? 'AFRICA' : geo,
+      observedTopic: topic,
       topic,
       sourceClass: row.sourceClass ?? 'JOURNALISM',
       evidenceClass: row.evidenceClass ?? 'LOCAL_REPORTING',
@@ -167,6 +172,18 @@ export function fixtureRetrieve(task: InvestigationTask): RetrievedDocument[] {
       promptInjectionDetected: injection.injectionDetected,
     }
   })
+}
+
+function nativeFixturePhrase(language: string, topic: string): string {
+  if (language === 'fr') return `actualité urgente et reportages locaux pour ${topic}`
+  if (language === 'es') return `noticias de última hora y reportes locales para ${topic}`
+  if (language === 'ja') return `${topic} の現地速報 一次情報`
+  if (language === 'de') return `aktuelle meldungen und lokale berichte für ${topic}`
+  if (language === 'sw') return `habari za haraka za mitaa leo kuhusu ${topic}`
+  if (language === 'id') return `berita terbaru jurnalisme daerah tentang ${topic}`
+  if (language === 'ar') return `${topic} تقارير محلية عاجلة`
+  if (language === 'hi') return `${topic} ताज़ा स्थानीय ख़बर`
+  return `breaking local reporting on ${topic}`
 }
 
 async function collectForTasks(input: {
@@ -181,7 +198,7 @@ async function collectForTasks(input: {
   const packets: LanePacket[] = []
   for (const task of input.tasks) {
     void visibleContextForLane(input.store, task.taskId, input.store.locked ? 'POST_LOCK' : 'FIRST_PASS')
-    const raw = await input.retrieve(task)
+    const raw = (await input.retrieve(task)).map(doc => applyEvidenceTruth(doc, task))
     const ranked = rankLocalFirst(rankWithNovelty({ seat: task.seat, documents: raw, ledger: reservation }), task.geographicScope)
     const kept = ranked.slice(0, task.searchBudget)
     for (const doc of kept) {
@@ -296,9 +313,10 @@ export async function runDivergentCouncilProtocol(input: {
     priority: 9,
     query: `contradictions missing stories false consensus uncovered geography for: ${input.commanderIntent}`,
     queryLanguage: 'en',
+    requestedLanguage: 'en',
     preferredProviders: ['tavily'],
   }
-  const phoenixDocs = await retrieve(phoenixTask)
+  const phoenixDocs = (await retrieve(phoenixTask)).map(doc => applyEvidenceTruth(doc, phoenixTask))
   const phoenixFindings = [
     ...coverage.filter(cell => cell.status === 'MISSING' || cell.status === 'WEAK').map(cell => `COVERAGE INSUFFICIENT: ${cell.geography} × ${cell.topic} × ${cell.language}`),
     ...phoenixDocs.map(doc => `PHOENIX: ${doc.title}`),
@@ -325,9 +343,10 @@ export async function runDivergentCouncilProtocol(input: {
     priority: 9,
     query: `primary source official statement regulator filing for: ${input.commanderIntent}`,
     queryLanguage: 'en',
+    requestedLanguage: 'en',
     preferredProviders: ['federal_register', 'tavily'],
   }
-  const lumenDocs = await retrieve(lumenTask)
+  const lumenDocs = (await retrieve(lumenTask)).map(doc => applyEvidenceTruth(doc, lumenTask))
   const lumenVerifications: string[] = []
   for (const doc of lumenDocs) {
     ledger = addDocument(ledger, doc)

@@ -21,6 +21,7 @@ import {
   rateLimitedDiagnostics,
 } from './requestControl'
 import { tileBounds, urbanTileCacheKey } from './tiles'
+import { TERRA_URBAN_INCLUDE_LABELS } from './lod'
 import {
   TERRA_URBAN_ATTRIBUTION,
   TERRA_URBAN_LICENSE,
@@ -38,7 +39,8 @@ function emptyDiagnostics(state: TerraUrbanDiagnosticState, lod: TerraUrbanLod):
   return {
     roads: state,
     buildings: lod === 'city' ? 'UNAVAILABLE' : state,
-    labels: lod === 'building' ? state : 'UNAVAILABLE',
+    signals: lod === 'city' ? 'UNAVAILABLE' : state,
+    labels: TERRA_URBAN_INCLUDE_LABELS[lod] ? state : 'UNAVAILABLE',
   }
 }
 
@@ -56,6 +58,7 @@ export function emptyUrbanTile(key: TerraUrbanTileKey, state: TerraUrbanDiagnost
     roads: [],
     buildings: [],
     labels: [],
+    signals: [],
     diagnostics: emptyDiagnostics(state, key.lod),
     error,
     rateLimited: state === 'RATE_LIMITED',
@@ -67,7 +70,8 @@ function withGeometryDiagnostics(lod: TerraUrbanLod, liveState: TerraUrbanDiagno
   return {
     roads: liveState,
     buildings: lod === 'city' ? 'UNAVAILABLE' : liveState,
-    labels: lod === 'building' ? liveState : 'UNAVAILABLE',
+    signals: lod === 'city' ? 'UNAVAILABLE' : liveState,
+    labels: TERRA_URBAN_INCLUDE_LABELS[lod] ? liveState : 'UNAVAILABLE',
   }
 }
 
@@ -152,6 +156,7 @@ async function fetchAndNormalize(
     truncated: geometry.truncated,
     roads: geometry.roads,
     buildings: geometry.buildings,
+    signals: geometry.signals,
     labels: geometry.labels,
     diagnostics: withGeometryDiagnostics(representative.lod, liveState),
     error: geometry.truncated ? 'Viewport truncated to object cap.' : null,

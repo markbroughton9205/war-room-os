@@ -16,7 +16,9 @@ export const dynamic = 'force-dynamic'
 export default function TerraPage() {
   return (
     <WarRoomUiModeProvider>
-      <TerraActiveLocationProvider><TerraShell /></TerraActiveLocationProvider>
+      <TerraActiveLocationProvider>
+        <TerraShell />
+      </TerraActiveLocationProvider>
     </WarRoomUiModeProvider>
   )
 }

@@ -8,7 +8,7 @@
  * Guessed heights are never presented as observed measurements.
  */
 
-export const TERRA_URBAN_TILE_VERSION = 'v1' as const
+export const TERRA_URBAN_TILE_VERSION = 'v3' as const
 export const TERRA_URBAN_SOURCE = 'openstreetmap_overpass' as const
 export const TERRA_URBAN_LICENSE = 'ODbL-1.0' as const
 export const TERRA_URBAN_ATTRIBUTION = '© OpenStreetMap contributors'
@@ -54,7 +54,29 @@ export type TerraUrbanRoad = {
   osmId: number
   highway: string
   name: string | null
+  lanes: string | null
+  maxspeed: string | null
   geometry: TerraUrbanCoordinate[]
+}
+
+/** OSM traffic-signal infrastructure — geometry only. Never a live RED/YELLOW/GREEN phase. */
+export const TERRA_URBAN_SIGNAL_NODE_KINDS = ['intersection', 'signalized_crossing', 'traffic_light_node', 'pedestrian_signal'] as const
+export type TerraUrbanSignalNodeKind = (typeof TERRA_URBAN_SIGNAL_NODE_KINDS)[number]
+
+export const TERRA_SIGNAL_INFRASTRUCTURE_STATUS = 'STATIC INFRASTRUCTURE' as const
+export const TERRA_LIVE_SIGNAL_PHASE = 'NO_COVERAGE' as const
+
+export type TerraUrbanSignal = {
+  id: string
+  osmType: 'node'
+  osmId: number
+  nodeKind: TerraUrbanSignalNodeKind
+  name: string | null
+  direction: string | null
+  longitude: number
+  latitude: number
+  status: typeof TERRA_SIGNAL_INFRASTRUCTURE_STATUS
+  livePhase: typeof TERRA_LIVE_SIGNAL_PHASE
 }
 
 export type TerraUrbanBuilding = {
@@ -64,6 +86,9 @@ export type TerraUrbanBuilding = {
   buildingType: string
   name: string | null
   address: string | null
+  houseNumber: string | null
+  streetName: string | null
+  entrance: string | null
   levels: number | null
   heightMeters: number
   heightSource: TerraUrbanHeightSource
@@ -76,7 +101,7 @@ export type TerraUrbanBuilding = {
 export type TerraUrbanLabel = {
   id: string
   osmId: number
-  kind: 'street' | 'building'
+  kind: 'street' | 'building' | 'house_number'
   text: string
   longitude: number
   latitude: number
@@ -94,10 +119,12 @@ export type TerraUrbanTilePayload = {
   truncated: boolean
   roads: TerraUrbanRoad[]
   buildings: TerraUrbanBuilding[]
+  signals: TerraUrbanSignal[]
   labels: TerraUrbanLabel[]
   diagnostics: {
     roads: TerraUrbanDiagnosticState
     buildings: TerraUrbanDiagnosticState
+    signals: TerraUrbanDiagnosticState
     labels: TerraUrbanDiagnosticState
   }
   error: string | null
@@ -107,10 +134,15 @@ export type TerraUrbanTilePayload = {
 
 export type TerraUrbanSelection = {
   osmId: string
-  osmType: 'way' | 'relation' | 'cesium_osm_buildings'
+  osmType: 'way' | 'relation' | 'cesium_osm_buildings' | 'reearth_buildings'
   buildingType: string | null
   name: string | null
   address: string | null
+  houseNumber: string | null
+  streetName: string | null
+  entrance: string | null
+  overtureId: string | null
+  gersId: string | null
   levels: number | null
   heightMeters: number | null
   heightSource: TerraUrbanHeightSource | null
@@ -118,4 +150,5 @@ export type TerraUrbanSelection = {
   footprint: TerraUrbanCoordinate[] | null
   longitude: number
   latitude: number
+  provider: 'osm_overpass' | 'cesium_osm_buildings' | 'reearth_buildings'
 }

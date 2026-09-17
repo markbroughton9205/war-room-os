@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 import {
-  LOCAL_SESSION_COOKIE,
+  applyLocalSessionCookie,
   assertLocalMutationOrigin,
   assertLocalOnlyRequest,
   extractBearerOrCookieToken,
   getLocalOwnershipStore,
+  LOCAL_SESSION_COOKIE,
 } from '@/lib/sovereign-runtime/local-ownership'
 
 export const dynamic = 'force-dynamic'
@@ -33,6 +34,6 @@ export async function POST() {
   })
   store.logout(token)
   const res = NextResponse.json({ ok: true })
-  res.headers.set('set-cookie', `${LOCAL_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`)
+  applyLocalSessionCookie(res, null)
   return res
 }

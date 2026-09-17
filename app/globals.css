@@ -374,7 +374,10 @@ body {
   .commander-status-pill,
   .commander-status-cluster,
   .commander-status-node,
-  .commander-research-scan {
+  .commander-research-scan,
+  .commander-agent-icon,
+  .commander-agent-icon[data-state="active"],
+  .commander-agent-icon[data-state="selected"] {
     animation: none !important;
     text-shadow: none;
   }
@@ -397,4 +400,128 @@ body {
 
 .commander-research-scan {
   animation: commander-research-scan 1.8s ease-in-out infinite;
+}
+
+@keyframes commander-agent-idle {
+  0%, 100% { box-shadow: 0 0 6px var(--commander-agent-glow, rgba(103, 232, 249, 0.28)); }
+  50% { box-shadow: 0 0 14px var(--commander-agent-glow, rgba(103, 232, 249, 0.5)); }
+}
+
+@keyframes commander-agent-active {
+  0%, 100% { box-shadow: 0 0 8px var(--commander-agent-glow, rgba(52, 211, 153, 0.4)); transform: scale(1); }
+  50% { box-shadow: 0 0 18px var(--commander-agent-glow, rgba(52, 211, 153, 0.7)); transform: scale(1.05); }
+}
+
+.commander-agent-icon {
+  animation: commander-agent-idle 3.4s ease-in-out infinite;
+}
+
+.commander-agent-icon[data-state="active"] {
+  animation: commander-agent-active 1.15s ease-in-out infinite;
+}
+
+.commander-agent-icon[data-state="selected"] {
+  animation: none;
+  box-shadow: 0 0 16px var(--commander-agent-glow, rgba(103, 232, 249, 0.7)), 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+@keyframes wr-media-eq {
+  0%, 100% { transform: scaleY(0.28); }
+  50% { transform: scaleY(1); }
+}
+
+.wr-media-eq-bar {
+  transform-origin: center bottom;
+  animation: wr-media-eq 0.85s ease-in-out infinite;
+}
+
+/* Terra globe — Cesium default chrome is an artifact. Keep OSM/NASA text credits; hide the
+   circular ion logo and empty widget docks that otherwise overlay the planet. */
+#terra-globe-root {
+  z-index: 0;
+  pointer-events: auto;
+}
+
+#terra-globe-root .cesium-viewer,
+#terra-globe-root .cesium-widget,
+#terra-globe-root .cesium-widget canvas {
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+#terra-globe-root .cesium-viewer-toolbar,
+#terra-globe-root .cesium-viewer-animationContainer,
+#terra-globe-root .cesium-viewer-timelineContainer,
+#terra-globe-root .cesium-viewer-fullscreenContainer,
+#terra-globe-root .cesium-viewer-vrContainer,
+#terra-globe-root .cesium-credit-logoContainer,
+#terra-globe-root .cesium-credit-lightboxOverlay {
+  display: none !important;
+}
+
+#terra-globe-root .cesium-viewer-bottom,
+#terra-globe-root .cesium-widget-credits {
+  position: absolute;
+  left: 50%;
+  right: auto;
+  bottom: 5.5rem;
+  max-width: min(36rem, 46vw);
+  transform: translateX(-50%);
+  padding: 0 8px;
+  background: transparent;
+  color: rgba(148, 163, 184, 0.72);
+  font-size: 9px;
+  line-height: 1.35;
+  text-align: center;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+  z-index: 4;
+}
+
+#terra-globe-root .cesium-widget-credits a,
+#terra-globe-root .cesium-widget-credits a:visited {
+  color: rgba(103, 232, 249, 0.7);
+  pointer-events: auto;
+}
+
+.terra-inspect > summary {
+  list-style: none;
+}
+
+.terra-inspect > summary [data-chevron="open"] {
+  display: none;
+}
+
+.terra-inspect[open] > summary [data-chevron="closed"] {
+  display: none;
+}
+
+.terra-inspect[open] > summary [data-chevron="open"] {
+  display: inline;
+}
+
+.terra-live-dot {
+  animation: terra-live-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes terra-live-pulse {
+  0%, 100% { opacity: 0.55; box-shadow: 0 0 4px rgba(52, 211, 153, 0.25); }
+  50% { opacity: 1; box-shadow: 0 0 10px rgba(52, 211, 153, 0.7); }
+}
+
+.terra-live-chip {
+  animation: terra-live-chip-glow 4.8s ease-in-out infinite;
+}
+
+@keyframes terra-live-chip-glow {
+  0%, 100% { border-color: rgba(52, 211, 153, 0.28); }
+  50% { border-color: rgba(34, 211, 238, 0.5); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terra-live-dot,
+  .terra-live-chip {
+    animation: none !important;
+  }
 }

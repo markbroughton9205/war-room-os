@@ -3,9 +3,9 @@
 /**
  * Automatic urban geography on the existing Terra Cesium scene.
  *
- * Viewport-bounded OSM roads + building extrusions, fetched once per camera settle, rendered as
- * Cesium primitives (never one React node per house). Failures degrade this overlay only —
- * intelligence layers and the globe keep running.
+ * IMAGERY_FIRST. Viewport-bounded OSM roads + building footprints, fetched once per camera settle.
+ * Crude 3D extrusion is Commander opt-in (CRUDE_EXTRUSION = DISABLED_BY_DEFAULT). Footprints stay
+ * pickable without brown/olive block masses. Failures degrade this overlay only.
  */
 import { useEffect, useRef } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
@@ -26,8 +26,9 @@ import {
 } from '@/lib/terra/urbanDetail/requestControl'
 import {
   clearUrbanBuildingsForPick,
-  registerUrbanBuildingsForPick,
+  registerUrbanGeometryForPick,
   TERRA_URBAN_BUILDING_ENTITY_PREFIX,
+  TERRA_URBAN_SIGNAL_ENTITY_PREFIX,
 } from '@/lib/terra/urbanDetail/pick'
 import { expandBounds, tilesForBounds, urbanTileId } from '@/lib/terra/urbanDetail/tiles'
 import type {
@@ -43,12 +44,16 @@ export type TerraUrbanDetailStatus = {
   lod: TerraUrbanLod | null
   roads: TerraUrbanDiagnosticState
   buildings: TerraUrbanDiagnosticState
+  signals: TerraUrbanDiagnosticState
   labels: TerraUrbanDiagnosticState
   terrain: TerraUrbanDiagnosticState
   source: string | null
   buildingCount: number
   roadCount: number
+  signalCount: number
   houseCount: number
+  streetLabelCount: number
+  houseLabelCount: number
   fromCache: boolean
   truncated: boolean
   error: string | null
@@ -63,12 +68,16 @@ const IDLE_STATUS: TerraUrbanDetailStatus = {
   lod: null,
   roads: 'UNAVAILABLE',
   buildings: 'UNAVAILABLE',
+  signals: 'UNAVAILABLE',
   labels: 'UNAVAILABLE',
   terrain: 'UNAVAILABLE',
   source: null,
   buildingCount: 0,
   roadCount: 0,
+  signalCount: 0,
   houseCount: 0,
+  streetLabelCount: 0,
+  houseLabelCount: 0,
   fromCache: false,
   truncated: false,
   error: null,
@@ -83,6 +92,7 @@ type Destroyable = { destroy?: () => void; isDestroyed?: () => boolean }
 type UrbanSceneHandles = {
   roadPrimitive: Destroyable | null
   buildingDataSource: { name?: string } | null
+  signalDataSource: { name?: string } | null
   labelCollection: Destroyable | null
 }
 
@@ -108,9 +118,9 @@ async function fetchUrbanViewportTile(cacheKey: string, params: URLSearchParams,
   if (existing) return existing
   const pending = (async () => {
     urbanNetworkFetches += 1
-    const response = await fetch(`/api/terra/urban-tiles?${params}`, { cache: 'no-store', signal })
+    const response = await fetch(`/api/terra/urban-tiles?${params}`, { cache: 'no-store', credentials: 'include', signal })
     if (!response.ok) {
-      const error = new Error(`Urban tile request HTTP ${response.status}`)
+      const error = new Error(response.status === 401 || response.status === 403 ? 'AUTH_REQUIRED' : `Urban tile request HTTP ${response.status}`)
       ;(error as Error & { status?: number }).status = response.status
       throw error
     }
@@ -169,7 +179,7 @@ function destroyHandle(handle: Destroyable | null, collection: { remove: (value:
 function clearUrbanScene(viewer: CesiumViewer, handles: UrbanSceneHandles): UrbanSceneHandles {
   if (!isViewerAlive(viewer)) {
     clearUrbanBuildingsForPick()
-    return { roadPrimitive: null, buildingDataSource: null, labelCollection: null }
+    return { roadPrimitive: null, buildingDataSource: null, signalDataSource: null, labelCollection: null }
   }
   destroyHandle(handles.roadPrimitive, viewer.scene.groundPrimitives)
   if (handles.buildingDataSource) {
@@ -179,9 +189,16 @@ function clearUrbanScene(viewer: CesiumViewer, handles: UrbanSceneHandles): Urba
       // Viewer may already be tearing down.
     }
   }
+  if (handles.signalDataSource) {
+    try {
+      viewer.dataSources.remove(handles.signalDataSource as never, true)
+    } catch {
+      // Viewer may already be tearing down.
+    }
+  }
   destroyHandle(handles.labelCollection, viewer.scene.primitives)
   clearUrbanBuildingsForPick()
-  return { roadPrimitive: null, buildingDataSource: null, labelCollection: null }
+  return { roadPrimitive: null, buildingDataSource: null, signalDataSource: null, labelCollection: null }
 }
 
 async function sampleTerrainHeights(
@@ -222,6 +239,7 @@ async function renderUrbanTile(
   viewer: CesiumViewer,
   tile: TerraUrbanTilePayload,
   previous: UrbanSceneHandles,
+  extrudeBuildings: boolean,
 ): Promise<UrbanSceneHandles> {
   const handles = clearUrbanScene(viewer, previous)
   if (!isViewerAlive(viewer) || !viewer.scene?.globe) return handles
@@ -236,6 +254,7 @@ async function renderUrbanTile(
           try {
             const positions = Cesium.Cartesian3.fromDegreesArray(geometry.flatMap(coord => [coord.longitude, coord.latitude]))
             return [new Cesium.GeometryInstance({
+              id: { terraUrban: true, kind: 'road', roadId: road.id },
               geometry: new Cesium.GroundPolylineGeometry({ positions, width: highwayWidthPx(road.highway) }),
               attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(roadColor(Cesium, road.highway)) },
             })]
@@ -269,27 +288,41 @@ async function renderUrbanTile(
     }
 
     if (tile.buildings.length > 0) {
-      const terrainHeights = await sampleTerrainHeights(Cesium, viewer, tile.buildings)
+      const terrainHeights = extrudeBuildings ? await sampleTerrainHeights(Cesium, viewer, tile.buildings) : []
       if (!isViewerAlive(viewer) || !viewer.scene?.globe) return handles
       const dataSource = new Cesium.CustomDataSource('terra-urban-buildings')
-      registerUrbanBuildingsForPick(tile.buildings)
       for (let index = 0; index < tile.buildings.length; index++) {
         const building = tile.buildings[index]
         const ring = uniqueCoordinates(building.footprint)
         if (ring.length < 3) continue
-        const terrainHeight = terrainHeights[index] ?? 0
         try {
-          dataSource.entities.add({
-            id: `${TERRA_URBAN_BUILDING_ENTITY_PREFIX}${building.id}`,
-            name: building.name ?? building.buildingType,
-            polygon: {
-              hierarchy: Cesium.Cartesian3.fromDegreesArray(ring.flatMap(coord => [coord.longitude, coord.latitude])),
-              height: terrainHeight,
-              extrudedHeight: terrainHeight + Math.max(2.2, building.heightMeters),
-              material: buildingColor(Cesium, building),
-              outline: false,
-            },
-          })
+          if (extrudeBuildings) {
+            const terrainHeight = terrainHeights[index] ?? 0
+            dataSource.entities.add({
+              id: `${TERRA_URBAN_BUILDING_ENTITY_PREFIX}${building.id}`,
+              name: building.name ?? building.buildingType,
+              polygon: {
+                hierarchy: Cesium.Cartesian3.fromDegreesArray(ring.flatMap(coord => [coord.longitude, coord.latitude])),
+                height: terrainHeight,
+                extrudedHeight: terrainHeight + Math.max(2.2, building.heightMeters),
+                material: buildingColor(Cesium, building),
+                outline: false,
+              },
+            })
+          } else {
+            // IMAGERY_FIRST footprint — no height / no extrudedHeight. Ground classification stays
+            // pickable (OSM id + inspect) without a 3D mass over the photograph.
+            dataSource.entities.add({
+              id: `${TERRA_URBAN_BUILDING_ENTITY_PREFIX}${building.id}`,
+              name: building.name ?? building.buildingType,
+              polygon: {
+                hierarchy: Cesium.Cartesian3.fromDegreesArray(ring.flatMap(coord => [coord.longitude, coord.latitude])),
+                material: Cesium.Color.fromCssColorString('#67e8f9').withAlpha(0.03),
+                outline: false,
+                classificationType: Cesium.ClassificationType.TERRAIN,
+              },
+            })
+          }
         } catch {
           // Skip a single malformed footprint; keep the rest of the tile.
         }
@@ -297,24 +330,58 @@ async function renderUrbanTile(
       if (dataSource.entities.values.length > 0) {
         await viewer.dataSources.add(dataSource)
         handles.buildingDataSource = dataSource
-      } else {
-        clearUrbanBuildingsForPick()
       }
     }
+
+    if ((tile.signals ?? []).length > 0) {
+      const signalSource = new Cesium.CustomDataSource('terra-urban-signals')
+      const signalColor = Cesium.Color.fromCssColorString('#94a3b8')
+      const signalOutline = Cesium.Color.fromCssColorString('#0f172a')
+      for (const signal of tile.signals) {
+        try {
+          signalSource.entities.add({
+            id: `${TERRA_URBAN_SIGNAL_ENTITY_PREFIX}${signal.id}`,
+            name: signal.name ?? 'traffic signal',
+            position: Cesium.Cartesian3.fromDegrees(signal.longitude, signal.latitude),
+            point: {
+              pixelSize: 7,
+              color: signalColor,
+              outlineColor: signalOutline,
+              outlineWidth: 1,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            },
+          })
+        } catch {
+          // Skip a single malformed node; keep the rest of the tile.
+        }
+      }
+      if (signalSource.entities.values.length > 0) {
+        await viewer.dataSources.add(signalSource)
+        handles.signalDataSource = signalSource
+      }
+    }
+
+    registerUrbanGeometryForPick({
+      buildings: tile.buildings,
+      roads: tile.roads,
+      signals: tile.signals ?? [],
+    })
 
     if (tile.labels.length > 0) {
       const collection = new Cesium.LabelCollection({ scene: viewer.scene })
       for (const label of tile.labels) {
+        const houseNumber = label.kind === 'house_number'
         collection.add({
-          position: Cesium.Cartesian3.fromDegrees(label.longitude, label.latitude, 12),
+          position: Cesium.Cartesian3.fromDegrees(label.longitude, label.latitude, houseNumber ? 6 : 12),
           text: label.text,
-          font: '11px sans-serif',
-          fillColor: Cesium.Color.WHITE,
+          font: houseNumber ? '10px sans-serif' : '11px sans-serif',
+          fillColor: houseNumber ? Cesium.Color.fromCssColorString('#fde68a') : Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2800),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, houseNumber ? 1400 : 22000),
         })
       }
       viewer.scene.primitives.add(collection)
@@ -335,12 +402,16 @@ function statusFromTile(tile: TerraUrbanTilePayload, lod: TerraUrbanLod, enabled
     lod,
     roads: tile.diagnostics.roads,
     buildings: tile.diagnostics.buildings,
+    signals: tile.diagnostics.signals ?? 'UNAVAILABLE',
     labels: tile.diagnostics.labels,
     terrain,
     source: tile.source,
     buildingCount: tile.buildings.length,
     roadCount: tile.roads.length,
+    signalCount: tile.signals?.length ?? 0,
     houseCount: tile.buildings.filter(building => isHouseBuildingType(building.buildingType)).length,
+    streetLabelCount: (tile.labels ?? []).filter(label => label.kind === 'street').length,
+    houseLabelCount: (tile.labels ?? []).filter(label => label.kind === 'house_number').length,
     fromCache: tile.fromCache,
     truncated: tile.truncated,
     error: tile.error,
@@ -355,6 +426,7 @@ type Props = {
   scaleLevel: TerraScaleLevel
   rectangle: TerraDegreeRectangle | null
   enabled: boolean
+  extrudeBuildings?: boolean
   hasWorldTerrain: boolean
   onStatusChange?: (status: TerraUrbanDetailStatus) => void
 }
@@ -364,10 +436,12 @@ export function TerraUrbanDetail({
   scaleLevel,
   rectangle,
   enabled,
+  // CRUDE_EXTRUSION = DISABLED_BY_DEFAULT. Building identities/footprints still fetch and remain pickable.
+  extrudeBuildings = false,
   hasWorldTerrain,
   onStatusChange,
 }: Props) {
-  const handlesRef = useRef<UrbanSceneHandles>({ roadPrimitive: null, buildingDataSource: null, labelCollection: null })
+  const handlesRef = useRef<UrbanSceneHandles>({ roadPrimitive: null, buildingDataSource: null, signalDataSource: null, labelCollection: null })
   const onStatusChangeRef = useRef(onStatusChange)
   const lastViewportKeyRef = useRef<string | null>(null)
   useEffect(() => {
@@ -388,7 +462,7 @@ export function TerraUrbanDetail({
     async function applyTile(Cesium: CesiumNS, tile: TerraUrbanTilePayload, lod: TerraUrbanLod, terrain: TerraUrbanDiagnosticState, loadMs: number | null, cacheKey: string) {
       if (cancelled || !isViewerAlive(targetViewer)) return
       if (hasUsableUrbanGeometry(tile)) {
-        handlesRef.current = await renderUrbanTile(Cesium, targetViewer, tile, handlesRef.current)
+        handlesRef.current = await renderUrbanTile(Cesium, targetViewer, tile, handlesRef.current, extrudeBuildings)
         lastViewportKeyRef.current = cacheKey
       } else if (!sameUrbanViewportKey(lastViewportKeyRef.current, cacheKey)) {
         handlesRef.current = clearUrbanScene(targetViewer, handlesRef.current)
@@ -427,6 +501,7 @@ export function TerraUrbanDetail({
           diagnostics: {
             roads: cached.diagnostics.roads === 'UNAVAILABLE' || cached.diagnostics.roads === 'RATE_LIMITED' ? cached.diagnostics.roads : 'CACHED',
             buildings: cached.diagnostics.buildings === 'UNAVAILABLE' || cached.diagnostics.buildings === 'RATE_LIMITED' ? cached.diagnostics.buildings : 'CACHED',
+            signals: cached.diagnostics.signals === 'UNAVAILABLE' || cached.diagnostics.signals === 'RATE_LIMITED' ? cached.diagnostics.signals : 'CACHED',
             labels: cached.diagnostics.labels === 'UNAVAILABLE' || cached.diagnostics.labels === 'RATE_LIMITED' ? cached.diagnostics.labels : 'CACHED',
           },
         }, lod, terrain, 0, cacheKey)
@@ -505,7 +580,7 @@ export function TerraUrbanDetail({
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [viewer, scaleLevel, west, south, east, north, enabled, hasWorldTerrain])
+  }, [viewer, scaleLevel, west, south, east, north, enabled, extrudeBuildings, hasWorldTerrain])
 
   useEffect(() => {
     return () => {

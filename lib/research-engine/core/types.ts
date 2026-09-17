@@ -288,6 +288,11 @@ export type ResearchProviderId =
   | 'digitraffic_road_weather'
   | 'ontario_511_cameras'
   | 'ontario_511_events'
+  | 'ohgo_cameras'
+  | 'ohgo_events'
+  | 'ohgo_road_weather'
+  | 'ny511_cameras'
+  | 'caltrans_cctv'
   // God's Eye Phase 3 — global traffic expansion. All seven real adapters, keyless, zero-cost,
   // every endpoint verified live this build (see lib/terra/roadTrafficSourceRegistry.ts for the
   // per-source evidence notes, including the gated candidates that did NOT become providers).

@@ -1,9 +1,11 @@
 /**
  * #22 Phase 11C — Application data paths (not repo / .next / public).
  * Override via WAR_ROOM_LOCAL_DATA_DIR for isolated tests.
+ *
+ * Canonical algorithm lives in ./appDataRoot.cjs (shared with Electron desktop/src/appDataRoot.cjs).
  */
+import { createRequire } from 'node:module'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 
 export type LocalAppDataPaths = {
@@ -16,31 +18,28 @@ export type LocalAppDataPaths = {
   dbPath: string
 }
 
-export function resolveLocalAppDataRoot(override?: string | null): string {
-  const env = override?.trim() || process.env.WAR_ROOM_LOCAL_DATA_DIR?.trim()
-  if (env) return path.resolve(env)
+const require = createRequire(import.meta.url)
+const impl = require('./appDataRoot.cjs') as {
+  resolveAppDataRoot: (options?: { override?: string | null }) => string
+  resolveAppDataPaths: (options?: { override?: string | null }) => {
+    root: string
+    data: string
+    logs: string
+    cache: string
+    exports: string
+    runtime: string
+  }
+}
 
-  if (process.platform === 'win32') {
-    const base = process.env.LOCALAPPDATA?.trim() || path.join(os.homedir(), 'AppData', 'Local')
-    return path.join(base, 'War Room OS')
-  }
-  if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'War Room OS')
-  }
-  return path.join(os.homedir(), '.local', 'share', 'war-room-os')
+export function resolveLocalAppDataRoot(override?: string | null): string {
+  return impl.resolveAppDataRoot(override == null ? undefined : { override })
 }
 
 export function resolveLocalAppDataPaths(override?: string | null): LocalAppDataPaths {
-  const root = resolveLocalAppDataRoot(override)
-  const data = path.join(root, 'data')
+  const resolved = impl.resolveAppDataPaths(override == null ? undefined : { override })
   return {
-    root,
-    data,
-    logs: path.join(root, 'logs'),
-    cache: path.join(root, 'cache'),
-    exports: path.join(root, 'exports'),
-    runtime: path.join(root, 'runtime'),
-    dbPath: path.join(data, 'local-ownership.sqlite'),
+    ...resolved,
+    dbPath: path.join(resolved.data, 'local-ownership.sqlite'),
   }
 }
 

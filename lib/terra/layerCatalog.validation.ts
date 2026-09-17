@@ -23,6 +23,7 @@ const REQUIRES_NON_EMPTY_QUERY_TEXT = new Set([
   'usgs_water', 'opensky', 'digitraffic_marine', 'idai_gazetteer', 'nominatim', 'pleiades', 'whg',
   'osm_overpass', 'ohm_overpass', 'met_no', 'open_meteo', 'obis', 'gbif', 'edh',
   'nasa_eonet', 'nws_weather', 'digitraffic_road_cameras', 'drivebc_events',
+  'ohgo_cameras', 'ohgo_events', 'ohgo_road_weather', 'caltrans_cctv',
 ])
 
 function run(): CaseResult[] {

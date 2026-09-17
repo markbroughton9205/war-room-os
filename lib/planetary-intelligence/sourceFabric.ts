@@ -220,11 +220,27 @@ export function manualRefreshUsesSamePath(): true {
   return true
 }
 
+export function resolveFeedItemUrl(input: { url: string; guid?: string; feedUrl?: string; title?: string }): string {
+  const candidates = [input.url, input.guid ?? '']
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim()
+    if (/^https?:\/\//i.test(trimmed)) return trimmed
+    if (/^ftp:\/\//i.test(trimmed)) return trimmed.replace(/^ftp:\/\//i, 'https://')
+  }
+  if (input.feedUrl && (input.title || input.guid)) {
+    const id = (input.guid || input.title || 'item').replace(/[^a-z0-9]+/gi, '-').slice(0, 48)
+    return `${input.feedUrl.split('#')[0]}#${id}`
+  }
+  return input.url
+}
+
 export type ParsedFeedItem = {
   url: string
   title: string
   publishedAt: string | null
   kind: EndpointType
+  summary?: string
+  categories?: string[]
 }
 
 export function parseRssOrAtomOrSitemap(xml: string, kind: EndpointType): ParsedFeedItem[] {
@@ -233,9 +249,14 @@ export function parseRssOrAtomOrSitemap(xml: string, kind: EndpointType): Parsed
     const blocks = xml.split(/<item[\s>]|<entry[\s>]/i).slice(1)
     for (const block of blocks) {
       const title = textBetween(block, 'title')
-      const link = hrefBetween(block) || textBetween(block, 'link')
-      const published = textBetween(block, 'pubDate') || textBetween(block, 'updated') || textBetween(block, 'published')
-      if (link) items.push({ url: link, title, publishedAt: published || null, kind })
+      const href = hrefBetween(block)
+      const about = /rdf:about=["']([^"']+)["']/i.exec(block)?.[1]
+      const guid = textBetween(block, 'guid')
+      const link = href || textBetween(block, 'link') || about || guid || ''
+      const published = textBetween(block, 'pubDate') || textBetween(block, 'updated') || textBetween(block, 'published') || textBetween(block, 'sent') || textBetween(block, 'dc:date')
+      const summary = stripTags(textBetween(block, 'description') || textBetween(block, 'summary') || textBetween(block, 'content') || textBetween(block, 'dc:description'))
+      const categories = [...block.matchAll(/<categor(?:y|ies)[^>]*>([^<]*)<\/categor/gi)].map(match => match[1]!.trim()).filter(Boolean)
+      if (link) items.push({ url: link, title, publishedAt: published || null, kind, summary: summary.slice(0, 800) || undefined, categories: categories.length ? categories : undefined })
     }
   }
   if (kind === 'SITEMAP' || kind === 'NEWS_SITEMAP') {
@@ -256,6 +277,10 @@ function textBetween(block: string, tag: string): string {
 function hrefBetween(block: string): string | null {
   const match = block.match(/<link[^>]+href=["']([^"']+)["']/i)
   return match?.[1] ?? null
+}
+
+function stripTags(value: string): string {
+  return value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 export function noFakeMaximum(): boolean {

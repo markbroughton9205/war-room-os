@@ -99,7 +99,7 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   statcan_wds: ['www150.statcan.gc.ca'],
   uk_ons: ['api.beta.ons.gov.uk'],
   insee_melodi: ['api.insee.fr'],
-  open_meteo: ['api.open-meteo.com'],
+  open_meteo: ['api.open-meteo.com', 'geocoding-api.open-meteo.com'],
   noaa_cdo: ['www.ncei.noaa.gov'],
   met_no: ['api.met.no'],
   noaa_swpc: ['services.swpc.noaa.gov'],
@@ -300,6 +300,14 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   // host is allowlisted separately for app/api/terra/camera-image/route.ts, not here.
   ontario_511_cameras: ['511on.ca'],
   ontario_511_events: ['511on.ca'],
+  // itscameras.dot.state.oh.us is the live JPEG host (verified this build: image/jpeg
+  // magic bytes, no API key). The ohgo_cameras adapter only ever calls publicapi.ohgo.com;
+  // the image host is fetched by lib/terra/cameraImageProxy.ts.
+  ohgo_cameras: ['publicapi.ohgo.com', 'itscameras.dot.state.oh.us'],
+  ohgo_events: ['publicapi.ohgo.com'],
+  ohgo_road_weather: ['publicapi.ohgo.com'],
+  ny511_cameras: ['511ny.org'],
+  caltrans_cctv: ['cwwp2.dot.ca.gov'],
   // God's Eye Phase 3 — every host independently verified live this build (real HTTP 200
   // responses fetched during development; see each adapter's own header comment for the exact
   // confirmed shape).
@@ -313,6 +321,20 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   wzdx_wsdot: ['wzdx.wsdot.wa.gov'],
   wzdx_iowa_dot: ['iowa-atms.cloud-q-free.com'],
   wzdx_kytc: ['storage.googleapis.com'],
+}
+
+/**
+ * Terra official HTTPS hosts that are not Research Engine providers.
+ * youtube.googleapis.com is the YouTube Data API v3 host only — not *.googleapis.com.
+ */
+export const TERRA_OFFICIAL_HOST_ALLOWLIST = {
+  youtube_data_api: ['youtube.googleapis.com'],
+} as const
+
+export type TerraOfficialFetchService = keyof typeof TERRA_OFFICIAL_HOST_ALLOWLIST
+
+export function isTerraOfficialHost(service: TerraOfficialFetchService, hostname: string): boolean {
+  return TERRA_OFFICIAL_HOST_ALLOWLIST[service].some(host => host.toLowerCase() === hostname.toLowerCase())
 }
 
 export function isAllowedHost(provider: ResearchProviderId, hostname: string): boolean {

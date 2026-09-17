@@ -55,6 +55,59 @@ function mustExist(p, label) {
   if (!fs.existsSync(p)) throw new Error(`Missing ${label}: ${p}`)
 }
 
+function resolveEsbuildExecutable() {
+  const binDirs = [
+    path.join(repoRoot, 'desktop', 'node_modules', 'esbuild', 'bin'),
+    path.join(repoRoot, 'node_modules', 'esbuild', 'bin'),
+  ]
+  const names = process.platform === 'win32' ? ['esbuild.exe', 'esbuild'] : ['esbuild']
+  for (const dir of binDirs) {
+    for (const name of names) {
+      const candidate = path.join(dir, name)
+      if (fs.existsSync(candidate)) return candidate
+    }
+  }
+  return null
+}
+
+function isNativeEsbuildExecutable(filePath) {
+  if (filePath.endsWith('.exe')) return true
+  const fd = fs.openSync(filePath, 'r')
+  try {
+    const buf = Buffer.alloc(4)
+    const n = fs.readSync(fd, buf, 0, 4, 0)
+    if (n < 2) return false
+    if (buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46) return true
+    if (buf[0] === 0x4d && buf[1] === 0x5a) return true
+    if (buf[0] === 0xcf && buf[1] === 0xfa) return true
+    if (buf[0] === 0xce && buf[1] === 0xfa) return true
+    if (buf[0] === 0xca && buf[1] === 0xfe) return true
+    return false
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+function spawnEsbuild(args, spawnOpts = {}) {
+  const exe = resolveEsbuildExecutable()
+  if (!exe) throw new Error('esbuild executable not found under desktop/node_modules or repo node_modules')
+  const opts = { encoding: 'utf8', shell: false, cwd: repoRoot, ...spawnOpts }
+  if (isNativeEsbuildExecutable(exe)) {
+    return spawnSync(exe, args, opts)
+  }
+  return spawnSync(process.execPath, [exe, ...args], opts)
+}
+
+if (process.argv.includes('--esbuild-version')) {
+  const probe = spawnEsbuild(['--version'])
+  if (probe.stdout) process.stdout.write(probe.stdout)
+  if (probe.stderr) process.stderr.write(probe.stderr)
+  if (probe.status !== 0) {
+    throw new Error(`esbuild --version failed (status=${probe.status}): ${probe.error || probe.stderr || probe.stdout || ''}`)
+  }
+  process.exit(0)
+}
+
 console.log('=== prepare-desktop-runtime ===')
 
 const standalone = path.join(repoRoot, '.next', 'standalone')
@@ -154,13 +207,9 @@ copyDir(path.join(repoRoot, 'desktop', 'renderer'), path.join(runtimeRoot, 'rend
 
 assertNoSecrets(uiRoot)
 
-// Bundle Core with esbuild (desktop local install)
-const esbuildBin = path.join(repoRoot, 'desktop', 'node_modules', 'esbuild', 'bin', 'esbuild')
-const esbuildCmd = fs.existsSync(esbuildBin)
-  ? esbuildBin
-  : path.join(repoRoot, 'node_modules', 'esbuild', 'bin', 'esbuild')
-
-if (!fs.existsSync(esbuildCmd) && !fs.existsSync(esbuildCmd + '.exe')) {
+// Bundle Core with esbuild (desktop local install). Invoke the native
+// esbuild executable directly — never pass an ELF/PE binary through Node.
+if (!resolveEsbuildExecutable()) {
   console.log('esbuild not found in desktop — installing electron-builder tooling peers via npm in desktop…')
   const inst = spawnSync('npm', ['install', '--save-dev', 'esbuild@0.25.0', 'electron-builder@26.0.12'], {
     cwd: path.join(repoRoot, 'desktop'),
@@ -170,30 +219,29 @@ if (!fs.existsSync(esbuildCmd) && !fs.existsSync(esbuildCmd + '.exe')) {
   if (inst.status !== 0) throw new Error('Failed to install esbuild/electron-builder in desktop/')
 }
 
-const esbuildJs = path.join(repoRoot, 'desktop', 'node_modules', 'esbuild', 'bin', 'esbuild')
+if (!resolveEsbuildExecutable()) {
+  throw new Error('esbuild executable still missing after install')
+}
+
 const entry = path.join(repoRoot, 'desktop', 'runtime-src', 'start-core-entry.mjs')
 mustExist(entry, 'desktop/runtime-src/start-core-entry.mjs')
 
 const outFile = path.join(coreDir, 'server.cjs')
-const bundle = spawnSync(
-  process.execPath,
-  [
-    esbuildJs,
-    entry,
-    '--bundle',
-    '--platform=node',
-    '--format=cjs',
-    `--outfile=${outFile}`,
-    `--alias:@=${repoRoot}`,
-    '--external:electron',
-    '--external:onnxruntime-node',
-    '--external:@huggingface/transformers',
-    `--alias:server-only=${path.join(repoRoot, 'desktop', 'runtime-src', 'server-only-stub.cjs')}`,
-    '--packages=bundle',
-    '--banner:js=const __import_meta_url = require("url").pathToFileURL(__filename).href;',
-  ],
-  { cwd: repoRoot, encoding: 'utf8', shell: false },
-)
+const bundle = spawnEsbuild([
+  entry,
+  '--bundle',
+  '--platform=node',
+  '--format=cjs',
+  `--outfile=${outFile}`,
+  `--alias:@=${repoRoot}`,
+  '--external:electron',
+  '--external:onnxruntime-node',
+  '--external:@huggingface/transformers',
+  `--alias:server-only=${path.join(repoRoot, 'desktop', 'runtime-src', 'server-only-stub.cjs')}`,
+  '--packages=bundle',
+  '--banner:js=const __import_meta_url = require("url").pathToFileURL(__filename).href;',
+  '--define:import.meta.url=__import_meta_url',
+])
 if (bundle.status !== 0) {
   console.error(bundle.stderr || bundle.stdout)
   throw new Error('Core esbuild bundle failed')
@@ -203,6 +251,9 @@ fs.writeFileSync(
   path.join(runtimeRoot, 'windowsUserEnv.cjs'),
   fs.readFileSync(path.join(repoRoot, 'desktop', 'src', 'windowsUserEnv.cjs'), 'utf8'),
 )
+const appDataRootSrc = fs.readFileSync(path.join(repoRoot, 'desktop', 'src', 'appDataRoot.cjs'), 'utf8')
+fs.writeFileSync(path.join(runtimeRoot, 'appDataRoot.cjs'), appDataRootSrc)
+fs.writeFileSync(path.join(coreDir, 'appDataRoot.cjs'), appDataRootSrc)
 fs.writeFileSync(
   path.join(runtimeRoot, 'councilRoutingBootstrap.cjs'),
   fs.readFileSync(path.join(repoRoot, 'desktop', 'src', 'councilRoutingBootstrap.cjs'), 'utf8'),
@@ -269,7 +320,8 @@ function startUi(opts) {
       NODE_ENV: 'production',
     },
     stdio: opts.stdio || 'ignore',
-    windowsHide: true,
+    windowsHide: process.platform === 'win32',
+    detached: process.platform !== 'win32',
   })
   return child
 }
@@ -315,6 +367,7 @@ function startCoreChild(opts) {
     },
     stdio: 'ignore',
     windowsHide: true,
+    detached: process.platform !== 'win32',
   })
   return child
 }

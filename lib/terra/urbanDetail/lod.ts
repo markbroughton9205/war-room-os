@@ -33,15 +33,33 @@ export const TERRA_URBAN_INCLUDE_BUILDINGS: Record<TerraUrbanLod, boolean> = {
 }
 
 export const TERRA_URBAN_INCLUDE_LABELS: Record<TerraUrbanLod, boolean> = {
+  city: true,
+  local: true,
+  building: true,
+}
+
+/** Traffic-signal nodes are street-level only — hidden at city/global zoom. */
+export const TERRA_URBAN_INCLUDE_SIGNALS: Record<TerraUrbanLod, boolean> = {
+  city: false,
+  local: true,
+  building: true,
+}
+
+export const TERRA_URBAN_INCLUDE_HOUSE_NUMBERS: Record<TerraUrbanLod, boolean> = {
   city: false,
   local: false,
   building: true,
 }
 
-export const TERRA_URBAN_OBJECT_CAPS: Record<TerraUrbanLod, { roads: number; buildings: number; labels: number }> = {
-  city: { roads: 350, buildings: 0, labels: 0 },
-  local: { roads: 450, buildings: 600, labels: 0 },
-  building: { roads: 500, buildings: 900, labels: 60 },
+/** Major named roads that may label at city LOD. Neighborhood/street add the rest. */
+export const TERRA_URBAN_CITY_STREET_NAME_HIGHWAYS = [
+  'motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link',
+] as const
+
+export const TERRA_URBAN_OBJECT_CAPS: Record<TerraUrbanLod, { roads: number; buildings: number; signals: number; streetLabels: number; houseNumbers: number }> = {
+  city: { roads: 350, buildings: 0, signals: 0, streetLabels: 24, houseNumbers: 0 },
+  local: { roads: 450, buildings: 600, signals: 80, streetLabels: 36, houseNumbers: 0 },
+  building: { roads: 500, buildings: 900, signals: 160, streetLabels: 48, houseNumbers: 36 },
 }
 
 /** Reject a viewport so wide that a fetch would mean "download a state." Degrees. */

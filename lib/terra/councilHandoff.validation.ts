@@ -1,13 +1,16 @@
 import { pathToFileURL } from 'node:url'
 import {
+  buildTerraCouncilHandoffFromIntelItem,
   buildTerraCouncilHandoffPayload,
   buildTerraHandoffEvidencePacket,
+  canSendTerraIntelItemToCouncil,
   canSendTerraObjectToCouncil,
   evidenceFromTerraHandoff,
   isTerraHandoffBody,
   resolveTerraCouncilLineage,
 } from './councilHandoff'
 import type { TerraLiveGeoObject } from './liveGeoIntelligence'
+import type { TerraLiveIntelItem } from './liveIntelPanelModel'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 
@@ -140,6 +143,66 @@ export function runTerraCouncilHandoffValidation(): CaseResult[] {
     '13_14_handoff_timestamp_present',
     Boolean(customPayload?.lineage.handedOffAt && customPacket?.findings.includes(`handedOffAt=${customPayload.lineage.handedOffAt}`)),
     customPayload?.lineage.handedOffAt ?? 'missing',
+  ))
+  const newsItem: TerraLiveIntelItem = {
+    id: 'rss-1',
+    category: 'HEADLINES',
+    headline: 'Major earthquake strikes Los Angeles',
+    summary: 'A magnitude 5.1 earthquake was reported.',
+    timestamp: NOW,
+    location: 'Los Angeles',
+    lat: null,
+    lon: null,
+    source: 'BBC World News',
+    sourceUrl: 'https://www.bbc.com/news/quake-1',
+    provider: 'public_rss',
+    confidence: null,
+    verificationState: null,
+    coverageState: 'LIVE',
+    freshnessState: 'LIVE',
+    eventType: 'news',
+    severity: null,
+    relatedTerraEntityIds: [],
+    relatedEvidenceIds: ['rss-1'],
+    retrievedAt: NOW,
+    sourceCount: 2,
+    sources: [
+      { name: 'BBC World News', url: 'https://www.bbc.com/news/quake-1', provider: 'public_rss', publishedAt: NOW },
+      { name: 'Al Jazeera', url: 'https://www.aljazeera.com/quake-1', provider: 'public_rss', publishedAt: NOW },
+    ],
+    breakingReason: null,
+    coordinateOrigin: null,
+    originalLanguage: 'en',
+    originalHeadline: 'Major earthquake strikes Los Angeles',
+    englishHeadline: 'Major earthquake strikes Los Angeles',
+    originalSummary: 'A magnitude 5.1 earthquake was reported.',
+    englishSummary: 'A magnitude 5.1 earthquake was reported.',
+    translationState: 'ORIGINAL_ONLY',
+    utcTimestamp: NOW,
+    timezone: null,
+    localTime: null,
+    utcOffset: null,
+    dayNightState: null,
+    dstActive: null,
+    relativeAge: null,
+    translation: null,
+    nativeLocationName: 'Los Angeles',
+    englishLocationName: 'Los Angeles',
+  }
+  const newsHandoff = buildTerraCouncilHandoffFromIntelItem({ item: newsItem, commanderPrompt: 'Separate observed facts from analysis.' })
+  const newsEvidence = newsHandoff ? evidenceFromTerraHandoff(newsHandoff) : null
+  cases.push(check(
+    '13_15_news_without_coords_preserves_sources',
+    Boolean(
+      canSendTerraIntelItemToCouncil(newsItem)
+      && newsHandoff
+      && newsEvidence?.origin_type === 'TERRA'
+      && newsHandoff.observedFacts.includes('LAYER: Observed Data')
+      && newsHandoff.observedFacts.includes('https://www.bbc.com/news/quake-1')
+      && newsHandoff.observedFacts.includes('COORDINATES: not reported')
+      && newsHandoff.lineage.latitude === null
+    ),
+    newsHandoff ? 'ok' : 'missing handoff',
   ))
 
   return cases

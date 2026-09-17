@@ -8,6 +8,7 @@ const ALLOW = new Set([
   'sovereign.getHealth',
   'sovereign.getBootState',
   'sovereign.openExternalSafe',
+  'terra.nativeLocation.getFix',
 ])
 
 contextBridge.exposeInMainWorld('warRoomDesktop', {

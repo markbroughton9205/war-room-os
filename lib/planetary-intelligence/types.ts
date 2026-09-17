@@ -88,6 +88,7 @@ export const SOURCE_LIFECYCLE_STATES = [
   'OFFLINE',
   'DEAD',
   'ARCHIVED',
+  'REVIEW_REQUIRED',
 ] as const
 export type SourceLifecycleState = (typeof SOURCE_LIFECYCLE_STATES)[number]
 
@@ -196,6 +197,7 @@ export type InvestigationTask = {
   priority: number
   query: string
   queryLanguage: string
+  requestedLanguage: string
   preferredProviders: string[]
   reason?: string
 }
@@ -225,7 +227,11 @@ export type RetrievedDocument = {
   retrievalProvider: string
   query: string
   queryLanguage: string
+  requestedLanguage?: string
   detectedLanguage: string | null
+  detectedLanguageConfidence?: number
+  evidenceLanguageMatch?: boolean
+  queryLanguageClass?: 'NATIVE_QUERY_CONFIRMED' | 'MIXED_LANGUAGE_QUERY' | 'ENGLISH_FALLBACK' | 'LANGUAGE_GENERATION_FAILED'
   originalText: string
   translatedText: string | null
   translationMethod: string | null
@@ -235,6 +241,14 @@ export type RetrievedDocument = {
   contentHash: string
   simhash: string
   geography: PlanetaryGeography | null
+  taskGeography?: PlanetaryGeography | 'GLOBAL' | null
+  eventGeography?: PlanetaryGeography | null
+  sourceHeadquartersGeography?: PlanetaryGeography | null
+  sourceCoverageGeography?: PlanetaryGeography | null
+  datelineGeography?: PlanetaryGeography | null
+  localityClass?: 'HYPERLOCAL' | 'CITY_LOCAL' | 'REGIONAL' | 'NATIONAL' | 'INTERNATIONAL' | 'SPECIALIST' | 'OFFICIAL' | 'UNKNOWN'
+  sourceGeographyMatch?: 'MATCH' | 'PARTIAL_MATCH' | 'NO_MATCH' | 'UNKNOWN'
+  observedTopic?: PlanetaryTopic | null
   topic: PlanetaryTopic | null
   sourceClass: SourceClass
   evidenceClass: EvidenceClass
@@ -329,6 +343,12 @@ export type CoverageCell = {
   qualityDistribution: Record<string, number>
   verification: string
   status: CoverageCellStatus
+  qualifyingDocumentCount: number
+  languageMatchedCount: number
+  geographyMatchedCount: number
+  sourceClassMatchedCount: number
+  rejectionReasons: string[]
+  explanation: string
 }
 
 export type SourceRecord = {
@@ -397,6 +417,7 @@ export type CommanderIntelligenceDisplay = {
 export type GapFillTask = InvestigationTask & {
   reason: string
   targetCellId: string
+  failedDimension?: string
 }
 
 export type FusionResult = {

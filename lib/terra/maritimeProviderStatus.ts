@@ -10,9 +10,11 @@ import type { TerraMaritimeCoverageState } from './maritimeCoverage'
 
 export const TERRA_PROVIDER_STATUS_LABELS: Record<TerraLiveFreshness, string> = {
   LIVE: 'LIVE',
+  RECENT: 'RECENT',
   DELAYED: 'DELAYED',
   CACHED: 'CACHED',
   STALE: 'STALE',
+  STALE_LAST_GOOD: 'STALE LAST KNOWN GOOD',
   EMPTY: 'EMPTY',
   NO_COVERAGE: 'NO COVERAGE',
   READY: 'READY',
@@ -23,7 +25,11 @@ export const TERRA_PROVIDER_STATUS_LABELS: Record<TerraLiveFreshness, string> = 
   NOT_IMPLEMENTED: 'NOT IMPLEMENTED',
   DISABLED: 'DISABLED',
   UNAVAILABLE: 'UNAVAILABLE',
+  ERROR_UPSTREAM: 'ERROR UPSTREAM',
   AUTH_FAILED: 'AUTH FAILED',
+  AUTH_REQUIRED: 'AUTH REQUIRED',
+  RATE_LIMITED: 'RATE LIMITED',
+  PARTIAL: 'PARTIAL',
   NOT_CONFIGURED: 'NOT CONFIGURED',
 }
 
@@ -122,6 +128,10 @@ export function maritimeProviderReason(record: MaritimeSourceRecord, freshness: 
       return 'Implemented provider failed at runtime.'
     case 'AUTH_FAILED':
       return 'AUTH FAILED: provider rejected the configured credentials. Values are not shown.'
+    case 'AUTH_REQUIRED':
+      return 'AUTH REQUIRED: Commander session is missing. Public feeds may still run; credentialed providers stay gated.'
+    case 'PARTIAL':
+      return 'Some providers in this family returned live data; others did not.'
     case 'NOT_CONFIGURED':
       return 'Provider is registered but is not configured for live use.'
   }

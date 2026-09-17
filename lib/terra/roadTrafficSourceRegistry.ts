@@ -106,6 +106,71 @@ export const ROAD_TRAFFIC_SOURCE_REGISTRY: RoadTrafficSourceRecord[] = [
     evidenceNote: 'GET 511on.ca/api/v2/get/event called live this build — real HTTP 200, real coordinates, real EventType/Severity/LanesAffected vocabulary, real Unix-epoch Reported/LastUpdated timestamps. Implemented this phase.',
   },
   {
+    id: 'ohgo_cameras',
+    displayName: 'OHGO / ODOT traffic cameras (Ohio)',
+    jurisdiction: 'Ohio, United States',
+    capabilities: ['camera'],
+    researchProviderId: 'ohgo_cameras',
+    reconciliationStatus: 'MISSING',
+    configurationState: 'ENABLED',
+    authenticationRequired: true,
+    rightsState: 'OHGO Public API terms — https://publicapi.ohgo.com/docs/terms-of-use. Server-side OHGO_API_KEY required. Ohio Turnpike HTML viewers are not this adapter.',
+    evidenceStatus: 'verified_live_this_build',
+    evidenceNote: 'GET cameras with map-bounds-sw/ne and Authorization: ApiKey (OHGO_API_KEY). JPEG host itscameras.dot.state.oh.us returns image/jpeg without the API key. Adapter fetches metadata only; stills via camera-image proxy. Key is never logged. Empty bbox is LIVE_EMPTY.',
+  },
+  {
+    id: 'ohgo_events',
+    displayName: 'OHGO / ODOT road events (Ohio)',
+    jurisdiction: 'Ohio, United States',
+    capabilities: ['event'],
+    researchProviderId: 'ohgo_events',
+    reconciliationStatus: 'SAME_PROVIDER_FAMILY_REUSE_ADAPTER',
+    configurationState: 'ENABLED',
+    authenticationRequired: true,
+    rightsState: 'OHGO Public API terms. Server-side OHGO_API_KEY. Bounded map-bounds queries.',
+    evidenceStatus: 'verified_via_official_docs_this_build',
+    evidenceNote: 'GET incidents, construction, dangerous-slowdowns, travel-delays with map-bounds-sw/ne. Same key family as ohgo_cameras.',
+  },
+  {
+    id: 'ohgo_road_weather',
+    displayName: 'OHGO / ODOT weather sensor sites (Ohio)',
+    jurisdiction: 'Ohio, United States',
+    capabilities: ['road_weather'],
+    researchProviderId: 'ohgo_road_weather',
+    reconciliationStatus: 'SAME_PROVIDER_FAMILY_REUSE_ADAPTER',
+    configurationState: 'ENABLED',
+    authenticationRequired: true,
+    rightsState: 'OHGO Public API terms. Server-side OHGO_API_KEY.',
+    evidenceStatus: 'verified_via_official_docs_this_build',
+    evidenceNote: 'GET weather-sensor-sites with map-bounds. Same key family as ohgo_cameras.',
+  },
+  {
+    id: 'caltrans_cctv',
+    displayName: 'Caltrans CWWP2 CCTV stills (California)',
+    jurisdiction: 'California, United States',
+    capabilities: ['camera'],
+    researchProviderId: 'caltrans_cctv',
+    reconciliationStatus: 'MISSING',
+    configurationState: 'ENABLED',
+    authenticationRequired: false,
+    rightsState: 'Caltrans CWWP2 fair use — stills only, no bulk streaming.',
+    evidenceStatus: 'verified_live_this_build',
+    evidenceNote: 'Canonical id caltrans_cctv (one registry row). Keyless GET cwwp2.dot.ca.gov/data/d{n}/cctv/cctvStatusD{nn}.json including d7 (Los Angeles) and d4 (Bay Area) returns HTTP 200 with currentImageURL stills on the same host. HLS on wzmedia.dot.ca.gov is never fetched or embedded. Catalog retrieval can be LIVE; image-capture freshness is UNAVAILABLE/UNKNOWN without a per-still capture timestamp.',
+  },
+  {
+    id: 'ny511_cameras',
+    displayName: '511NY traffic cameras',
+    jurisdiction: 'New York State, United States',
+    capabilities: ['camera'],
+    researchProviderId: 'ny511_cameras',
+    reconciliationStatus: 'MISSING',
+    configurationState: 'CREDENTIAL_REQUIRED',
+    authenticationRequired: true,
+    rightsState: '511NY developer key required for the API; official map is public at https://511ny.org/.',
+    evidenceStatus: 'verified_live_this_build',
+    evidenceNote: 'Unauthenticated GET https://511ny.org/api/v2/get/cameras returns HTTP 400. No 511NY_API_KEY in this environment — adapter is not_configured, no NYC nearby envelope, no stub cameras. Canonical id ny511_cameras; coverage/Nearby alias 511ny.',
+  },
+  {
     id: 'alberta_511',
     displayName: '511 Alberta',
     jurisdiction: 'Alberta, Canada',
@@ -158,7 +223,7 @@ export const ROAD_TRAFFIC_SOURCE_REGISTRY: RoadTrafficSourceRecord[] = [
     evidenceNote: 'UPGRADED to verified_live_this_build: sd511.org/api/v2/get/cameras (with and without a test key param) returns a real HTTP 301, and the redirect target path serves a real HTTP 404 — no keyless Iteris-style API path exists at that host. EXTERNAL DEPENDENCY: same registered-developer-key pattern as Alberta.',
   },
   {
-    id: 'quebec_511_wfs',
+    id: 'quebec_511_cameras',
     displayName: 'Québec 511 (MTMD open-data WFS)',
     jurisdiction: 'Québec, Canada',
     capabilities: ['camera', 'event'],
@@ -197,7 +262,7 @@ export const ROAD_TRAFFIC_SOURCE_REGISTRY: RoadTrafficSourceRecord[] = [
     evidenceNote: 'GET /stations and /stations/{id}/data both called live this build — real HTTP 200, real sub-minute-fresh sensor readings (air/road/ground temperature, humidity, visibility, wind, precipitation). Same organization/host family/terms as digitraffic_road_cameras and digitraffic_marine — reuses that family\'s exact adapter shape, not a third Digitraffic client. Sensor codes this build cannot decode with documented confidence (road-condition codes, ice-frequency/conductivity diagnostics — Digitraffic publishes no fetchable code-table endpoint) are preserved raw, never guessed.',
   },
   {
-    id: 'hong_kong_td_traffic_snapshots',
+    id: 'hong_kong_td_cameras',
     displayName: 'Hong Kong Transport Department traffic snapshots',
     jurisdiction: 'Hong Kong SAR',
     capabilities: ['camera'],
@@ -288,6 +353,16 @@ export const ROAD_TRAFFIC_SOURCE_REGISTRY: RoadTrafficSourceRecord[] = [
     evidenceNote: 'CORRECTED this build: FL511 is NOT an ArcGIS feed (the "ArcGIS cameras" display name reflects Phase 1\'s guess). GET fl511.com/api/v2/get/cameras returns a real HTTP 400 application/xml "<Error><Message>Invalid Key</Message></Error>" — the exact Iteris API-key gate confirmed for Alberta, i.e. FL511 runs the same Iteris/511 platform. EXTERNAL DEPENDENCY: requires a Commander-issued Iteris developer key before any adapter can be built.',
   },
 ]
+
+export function roadTrafficSourceRegistryDuplicateIds(): string[] {
+  const seen = new Set<string>()
+  const duplicates = new Set<string>()
+  for (const record of ROAD_TRAFFIC_SOURCE_REGISTRY) {
+    if (seen.has(record.id)) duplicates.add(record.id)
+    seen.add(record.id)
+  }
+  return [...duplicates]
+}
 
 export function getRoadTrafficSourceRecord(id: string): RoadTrafficSourceRecord | undefined {
   return ROAD_TRAFFIC_SOURCE_REGISTRY.find(record => record.id === id)

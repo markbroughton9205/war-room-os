@@ -30,7 +30,10 @@ export function LocalCommanderLoginPanel({ next }: { next: string }) {
         setMode(j.bootstrapped ? 'login' : 'bootstrap')
         if (j.authenticated) router.replace(next || '/')
       })
-      .catch(() => setStatus({ bootstrapped: false }))
+      .catch(() => {
+        setStatus({ bootstrapped: false })
+        setMode('bootstrap')
+      })
   }, [next, router])
 
   async function submit(e: React.FormEvent) {

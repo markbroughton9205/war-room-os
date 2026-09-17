@@ -41,8 +41,10 @@ type OverpassResponse = { elements?: OverpassElement[] }
 
 class OsmOverpassQueryError extends Error {}
 
+import { TERRA_PUBLIC_USER_AGENT } from '@/lib/terra/terraPublicIdentity'
+
 function userAgent(): string {
-  return process.env.OSM_OVERPASS_USER_AGENT_BASE?.trim() || 'WarRoomResearchEngine/1.0 (contact: research-engine@warroom.local)'
+  return process.env.OSM_OVERPASS_USER_AGENT_BASE?.trim() || TERRA_PUBLIC_USER_AGENT
 }
 
 function kmToDegrees(km: number): number {
@@ -176,7 +178,16 @@ async function run(query: ResearchQuery) {
     return await withProviderGate(PROVIDER, async () => {
       const outcome = await search(query)
       if (outcome.ok) return outcome.response
-      if (outcome.kind === 'http_error') throw new Error(`Overpass query failed with HTTP ${outcome.status}`)
+      if (outcome.kind === 'http_error') {
+        const status = outcome.status
+        const category = status === 429 ? 'rate_limited' : 'upstream_error'
+        return errorResponse(PROVIDER, {
+          provider: PROVIDER,
+          category,
+          message: `Overpass query failed with HTTP ${status}`,
+          httpStatus: status,
+        }, 0)
+      }
       throw new Error(outcome.message)
     })
   } catch (error) {

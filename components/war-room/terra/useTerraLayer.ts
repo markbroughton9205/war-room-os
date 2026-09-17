@@ -14,13 +14,20 @@
  */
 import { startTransition, useCallback, useEffect, useRef, useState } from 'react'
 import type { TerraGeoFeature } from '@/lib/terra/types'
+import { classifyTerraLayerLiveStatus, classifyTerraLayerRootCause, type TerraLayerLiveStatus, type TerraLayerRootCause } from '@/lib/terra/layerLiveStatus'
+import { isPublicTerraLayer } from '@/lib/terra/publicLayers'
 import { bridgeTerraFeedState } from '@/lib/ui/runtimeEventBridge'
 import { matrixChannelStatus } from '@/lib/ui/matrixStatusBus'
 
 export type TerraLayerFeedState = 'loading' | 'live' | 'empty' | 'error' | 'stale'
 
+export type TerraLayerDisplayedDataStatus = 'CURRENT' | 'STALE_LAST_GOOD' | 'NONE'
+
 export type TerraLayerFeedResult = {
   state: TerraLayerFeedState
+  liveStatus: TerraLayerLiveStatus
+  displayedDataStatus: TerraLayerDisplayedDataStatus
+  rootCause: TerraLayerRootCause | null
   features: TerraGeoFeature[]
   skippedCount: number
   lastFetchedAt: string | null
@@ -39,11 +46,13 @@ const DEFAULT_AUTO_REFRESH_MS = 120_000
 
 type ApiResponse = {
   status: 'success' | 'empty' | 'error'
+  liveStatus?: TerraLayerLiveStatus
+  rootCause?: TerraLayerRootCause | null
   features: TerraGeoFeature[]
   skippedCount: number
   fetchedAt: string
   fromCache: boolean
-  error: { message: string } | null
+  error: { message: string; category?: string; httpStatus?: number | null } | null
 }
 
 export function useTerraLayer(
@@ -68,6 +77,8 @@ export function useTerraLayer(
   const [skippedCount, setSkippedCount] = useState(0)
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null)
   const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null)
+  const [liveStatus, setLiveStatus] = useState<TerraLayerLiveStatus>('LOADING')
+  const [rootCause, setRootCause] = useState<TerraLayerRootCause | null>(null)
   const hasLoadedOnceRef = useRef(false)
   const requestIdRef = useRef(0)
   // In-flight request cancellation: a superseded requery (queryOverride change, manual refresh)
@@ -104,22 +115,45 @@ export function useTerraLayer(
     if (!hasLoadedOnceRef.current) transition('loading')
     try {
       const qs = queryOverride ? `?q=${encodeURIComponent(queryOverride)}` : ''
-      const res = await fetch(`/api/terra/layers/${encodeURIComponent(layerId)}${qs}`, { cache: 'no-store', signal: controller.signal })
+      const res = await fetch(`/api/terra/layers/${encodeURIComponent(layerId)}${qs}`, { cache: 'no-store', credentials: 'include', signal: controller.signal })
       if (requestId !== requestIdRef.current) return // superseded by a later request
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) {
+        const commanderAuth = (res.status === 401 || res.status === 403) && !isPublicTerraLayer(layerId)
+        const cause = commanderAuth
+          ? 'COMMANDER_AUTH_REQUIRED'
+          : classifyTerraLayerRootCause({ httpStatus: res.status, message: `HTTP ${res.status}` })
+        startTransition(() => {
+          setRootCause(cause)
+          setLiveStatus(classifyTerraLayerLiveStatus({ feedState: 'error', rootCause: cause }))
+        })
+        throw new Error(commanderAuth ? 'AUTH_REQUIRED' : `HTTP ${res.status}`)
+      }
       const body: ApiResponse = await res.json()
       hasLoadedOnceRef.current = true
       if (body.status === 'error') {
+        const cause = body.rootCause ?? classifyTerraLayerRootCause({ message: body.error?.message, category: body.error?.category, httpStatus: body.error?.httpStatus })
         setLastErrorMessage(body.error?.message ?? `Layer "${layerId}" request failed.`)
+        startTransition(() => {
+          setRootCause(cause)
+          setLiveStatus(body.liveStatus ?? classifyTerraLayerLiveStatus({ feedState: featureCountRef.current > 0 ? 'stale' : 'error', rootCause: cause }))
+        })
         transition(featureCountRef.current > 0 ? 'stale' : 'error')
         return
       }
       featureCountRef.current = body.features.length
+      const nextLive = body.liveStatus ?? classifyTerraLayerLiveStatus({
+        feedState: body.features.length === 0 ? 'empty' : 'live',
+        fromCache: body.fromCache,
+        rootCause: body.rootCause ?? (body.features.length === 0 ? 'EMPTY_HEALTHY_RESULT' : null),
+        featureCount: body.features.length,
+      })
       startTransition(() => {
         setFeatures(body.features)
         setSkippedCount(body.skippedCount)
         setLastFetchedAt(body.fetchedAt)
         setLastErrorMessage(null)
+        setLiveStatus(nextLive)
+        setRootCause(body.rootCause ?? (body.features.length === 0 ? 'EMPTY_HEALTHY_RESULT' : null))
       })
       transition(body.features.length === 0 ? 'empty' : 'live')
       if (body.features.length > 0 && !everHadDataRef.current) {
@@ -129,7 +163,14 @@ export function useTerraLayer(
     } catch (error) {
       if (controller.signal.aborted || requestId !== requestIdRef.current) return
       hasLoadedOnceRef.current = true
-      startTransition(() => setLastErrorMessage(error instanceof Error ? error.message : String(error)))
+      startTransition(() => {
+        setLastErrorMessage(error instanceof Error ? error.message : String(error))
+        if (!rootCause) {
+          const cause = classifyTerraLayerRootCause({ message: error instanceof Error ? error.message : String(error) })
+          setRootCause(cause)
+          setLiveStatus(classifyTerraLayerLiveStatus({ feedState: featureCountRef.current > 0 ? 'stale' : 'error', rootCause: cause }))
+        }
+      })
       transition(featureCountRef.current > 0 ? 'stale' : 'error')
       console.error(`[terra] layer "${layerId}" request failed`, error)
     }
@@ -152,6 +193,13 @@ export function useTerraLayer(
 
   return {
     state: enabled ? state : 'empty',
+    liveStatus: enabled ? liveStatus : 'LIVE_EMPTY',
+    displayedDataStatus: !enabled || features.length === 0
+      ? 'NONE'
+      : (state === 'stale' || liveStatus === 'ERROR_UPSTREAM' || liveStatus === 'ERROR_PARSE' || liveStatus === 'RATE_LIMITED' || liveStatus === 'UNAVAILABLE')
+        ? 'STALE_LAST_GOOD'
+        : 'CURRENT',
+    rootCause: enabled ? rootCause : null,
     features: enabled ? features : [],
     skippedCount,
     lastFetchedAt,

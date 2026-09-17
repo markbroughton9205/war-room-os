@@ -19,11 +19,9 @@
  * ground-level PHOTOGRAPHY, which is a distinct, separately-gated capability.
  */
 
-export type TerraStreetLevelImageryStatus = 'not_configured'
-
-export const TERRA_STREET_LEVEL_IMAGERY_STATUS: TerraStreetLevelImageryStatus = 'not_configured'
-
-export const TERRA_STREET_LEVEL_IMAGERY_MESSAGE = 'STREET-LEVEL PHOTOGRAPHIC IMAGERY — NOT YET CONFIGURED'
+export type TerraStreetLevelImageryStatus = 'evaluation_active'
+export const TERRA_STREET_LEVEL_IMAGERY_STATUS: TerraStreetLevelImageryStatus = 'evaluation_active'
+export const TERRA_STREET_LEVEL_IMAGERY_MESSAGE = 'STREET INTELLIGENCE — MAPILLARYJS EVALUATION · PANORAMAX EVALUATION · HOSTED AUTH_REQUIRED WITHOUT TOKEN · OWN IMAGERY NO_COVERAGE'
 
 /** A future provider would implement this shape — coordinates in, either a real panorama
  * reference or null (never a fabricated placeholder image). Not called anywhere in this phase. */

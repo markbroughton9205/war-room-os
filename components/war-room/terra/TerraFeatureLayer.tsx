@@ -18,6 +18,9 @@ import type { CustomDataSource, Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
 import { terraEntityId } from '@/lib/terra/cesiumEntityId'
 import type { TerraGeoFeature, TerraIntelligenceEventKind } from '@/lib/terra/types'
+import { sourcedCameraBearingDegrees } from '@/lib/terra/godsEye/cameraBearing'
+import { cameraInspectFreshness } from '@/lib/terra/godsEye/cameraInspectFreshness'
+import { cameraPinColor, cameraPinStateFromImageFreshness } from '@/lib/terra/godsEye/cameraFederation'
 import { terraAircraftBillboardRotationRadians } from '@/lib/terra/aircraftOrientation'
 import type { TerraAircraftTrailPoint } from '@/lib/terra/aircraftTrail'
 
@@ -33,6 +36,8 @@ type Props = {
    * feature, unclustered) — a merged blob is wrong for "how many distinct earthquakes are here,"
    * but right for "roughly how many landmarks are in this area" at broad zoom. */
   cluster?: boolean
+  /** Camera federation: cluster billboard uses the camera glyph and a numeric count label. */
+  clusterKind?: 'camera'
   /** Bounded session-only trails, keyed by icao24 (aircraft,
    * components/war-room/terra/useTerraAircraftTrails.ts) or MMSI (vessels,
    * useTerraVesselTrails.ts) — each TerraFeatureLayer instance only ever renders its own layer's
@@ -57,6 +62,9 @@ const AIRCRAFT_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
 // reusing the exact same rotation convention (terraAircraftBillboardRotationRadians).
 const VESSEL_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
   '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><path d="M14 2 L19 10 L19 22 L14 26 L9 22 L9 10 Z" fill="white"/></svg>',
+)}`
+const CAMERA_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40"><path d="M16 1 C9.4 1 4 6.4 4 13 c0 8.8 12 25 12 25 s12-16.2 12-25 C28 6.4 22.6 1 16 1 z" fill="white"/><rect x="9" y="8" width="14" height="10" rx="1.6" fill="#0B1A22"/><circle cx="16" cy="13" r="3.1" fill="white"/><rect x="19.2" y="9.2" width="2.6" height="2" fill="white"/></svg>',
 )}`
 
 const MIN_PIXEL_SIZE = 7
@@ -97,8 +105,11 @@ function resolveStyle(kind: TerraIntelligenceEventKind, feature: TerraGeoFeature
       return { color: '#22D3EE', pixelSize: 10 }
     case 'landmark_poi':
       return { color: '#A78BFA', pixelSize: 9 }
-    case 'traffic_camera':
-      return { color: '#FBBF24', pixelSize: 9 }
+    case 'traffic_camera': {
+      const inspect = cameraInspectFreshness(feature)
+      const pinState = cameraPinStateFromImageFreshness(inspect.imageFreshness)
+      return { color: cameraPinColor(pinState), pixelSize: 12 }
+    }
     case 'traffic_event': {
       // Visual weight only varies by real source-reported severity (Open511's own MAJOR/MODERATE/
       // MINOR/UNKNOWN vocabulary, preserved verbatim in properties.severity) — never a War
@@ -116,7 +127,7 @@ function resolveStyle(kind: TerraIntelligenceEventKind, feature: TerraGeoFeature
 const CLUSTER_PIXEL_RANGE = 60
 const CLUSTER_MINIMUM_SIZE = 3
 
-export function TerraFeatureLayer({ layerId, viewer, enabled, features, selectedId, cluster = false, trails }: Props) {
+export function TerraFeatureLayer({ layerId, viewer, enabled, features, selectedId, cluster = false, clusterKind, trails }: Props) {
   const dataSourceRef = useRef<CustomDataSource | null>(null)
 
   // Owns the DataSource's lifecycle against this specific viewer instance only. Recreated per
@@ -139,6 +150,62 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
         created.clustering.enabled = true
         created.clustering.pixelRange = CLUSTER_PIXEL_RANGE
         created.clustering.minimumClusterSize = CLUSTER_MINIMUM_SIZE
+        created.clustering.clusterLabels = true
+        created.clustering.clusterBillboards = true
+        created.clustering.clusterEvent.addEventListener((clusteredEntities, cluster) => {
+          const count = Array.isArray(clusteredEntities) ? clusteredEntities.length : 0
+          cluster.label.show = true
+          cluster.label.text = String(count)
+          cluster.label.font = 'bold 12px monospace'
+          cluster.label.fillColor = Cesium.Color.fromCssColorString('#ECFEFF')
+          cluster.label.outlineColor = Cesium.Color.fromCssColorString('#0B1A22')
+          cluster.label.outlineWidth = 4
+          cluster.label.style = Cesium.LabelStyle.FILL_AND_OUTLINE
+          cluster.label.pixelOffset = new Cesium.Cartesian2(0, -18)
+          cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY
+          cluster.billboard.show = true
+          cluster.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY
+          if (clusterKind === 'camera') {
+            cluster.billboard.image = CAMERA_GLYPH_DATA_URI
+            cluster.billboard.color = Cesium.Color.fromCssColorString('#22D3EE')
+            cluster.point.show = false
+          }
+          let sumLat = 0
+          let sumLon = 0
+          let west = Infinity
+          let east = -Infinity
+          let south = Infinity
+          let north = -Infinity
+          let samples = 0
+          const now = viewer!.clock.currentTime
+          for (const entity of clusteredEntities) {
+            const position = entity.position?.getValue(now)
+            if (!position) continue
+            const cartographic = Cesium.Cartographic.fromCartesian(position)
+            const lat = Cesium.Math.toDegrees(cartographic.latitude)
+            const lon = Cesium.Math.toDegrees(cartographic.longitude)
+            sumLat += lat
+            sumLon += lon
+            west = Math.min(west, lon)
+            east = Math.max(east, lon)
+            south = Math.min(south, lat)
+            north = Math.max(north, lat)
+            samples += 1
+          }
+          if (samples > 0) {
+            cluster.billboard.id = {
+              terraCluster: true,
+              layerId,
+              count,
+              latitude: sumLat / samples,
+              longitude: sumLon / samples,
+              west,
+              south,
+              east,
+              north,
+            }
+          }
+        })
       }
       viewer!.dataSources.add(created)
       dataSourceRef.current = created
@@ -156,7 +223,7 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
       }
       if (dataSourceRef.current === created) dataSourceRef.current = null
     }
-  }, [viewer, layerId, cluster])
+  }, [viewer, layerId, cluster, clusterKind])
 
   // Redraws entities whenever the feature list, selection, or visibility changes. Cheap at this
   // phase's scale (tens of points, capped at 100 by the adapter) — full removeAll()+rebuild, not
@@ -229,7 +296,26 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
         // vessel report with the AIS heading-not-available sentinel already filtered to null
         // upstream) falls through to the same plain point every other kind uses.
         const headingKind = feature.kind === 'aircraft_state' || feature.kind === 'vessel_position'
-        const headingDeg = headingKind && typeof feature.properties.headingDeg === 'number' ? feature.properties.headingDeg : null
+        const cameraBearing = feature.kind === 'traffic_camera' ? sourcedCameraBearingDegrees(feature.properties.direction) : null
+        const headingDeg = headingKind && typeof feature.properties.headingDeg === 'number'
+          ? feature.properties.headingDeg
+          : cameraBearing
+        if (feature.kind === 'traffic_camera') {
+          dataSource!.entities.add({
+            id: entityId,
+            position: Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude),
+            billboard: {
+              image: CAMERA_GLYPH_DATA_URI,
+              color: Cesium.Color.fromCssColorString(isSelected ? '#FFFFFF' : color),
+              scale: isSelected ? 1.35 : 1,
+              rotation: cameraBearing !== null ? terraAircraftBillboardRotationRadians(cameraBearing) : 0,
+              alignedAxis: Cesium.Cartesian3.ZERO,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+            },
+          })
+          continue
+        }
         if (headingDeg !== null) {
           dataSource!.entities.add({
             id: entityId,

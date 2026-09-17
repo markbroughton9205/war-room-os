@@ -56,8 +56,8 @@ export function objectFromHandoff(handoff: TerraCouncilHandoffPayload): TerraLiv
     category: lineage.layer,
     title: lineage.title,
     summary: handoff.observedFacts.slice(0, 240),
-    latitude: lineage.latitude,
-    longitude: lineage.longitude,
+    latitude: lineage.latitude ?? Number.NaN,
+    longitude: lineage.longitude ?? Number.NaN,
     observedAt: lineage.observedAt,
     receivedAt: lineage.receivedAt,
     provider: lineage.provider,
@@ -154,7 +154,7 @@ export function analyzeTerraWorldState(input: AnalyzeTerraInput): {
     reason: p.reason,
   }))
 
-  let providerOk = providers.filter(p => p.freshness === 'LIVE' || p.freshness === 'CACHED' || p.freshness === 'READY').length
+  const providerOk = providers.filter(p => p.freshness === 'LIVE' || p.freshness === 'CACHED' || p.freshness === 'READY').length
   let providerFailures = providers.filter(p => p.freshness === 'UNAVAILABLE' || p.freshness === 'AUTH_FAILED').length
 
   if (input.simulateProviderFailure) {

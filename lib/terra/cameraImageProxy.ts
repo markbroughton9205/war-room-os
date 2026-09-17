@@ -3,9 +3,8 @@ import 'server-only'
 /**
  * God's Eye Phase 2 — the camera-image proxy boundary. Backs
  * app/api/terra/camera-image/route.ts, the smallest lawful server-side boundary the mission asked
- * for: a Commander-authenticated, strictly-allowlisted, binary-safe image fetch for exactly the two
- * real camera image hosts this phase confirmed live (digitraffic_road_cameras' weathercam.digitraffic.fi
- * pattern URL, ontario_511_cameras' 511on.ca/map/Cctv/{id} direct-JPEG URL).
+ * for: a strictly-allowlisted, binary-safe image fetch. Public/provider-auth camera stills
+ * may be served without a Commander session. The client never supplies a URL.
  *
  * Deliberately NOT lib/research-engine/security/safeFetch.ts: that module decodes every response
  * body as UTF-8 text (correct for the JSON/XML every Research Engine adapter fetches, but silently
@@ -24,9 +23,13 @@ import 'server-only'
  *   - image content-type enforced on the response before any bytes are returned to the caller
  *   - no credentials sent, no credentials required
  */
-import { assertAllowedProviderUrl, isAllowedHost } from '@/lib/research-engine/security/hostAllowlist'
+import { isAllowedHost } from '@/lib/research-engine/security/hostAllowlist'
+import { validateBoundedTargetUrl } from '@/lib/research-engine/security/targetUrlValidator'
+import { lookupCameraImageUrl } from '@/lib/terra/cameraImageUrlCache'
+import { buildOhgoStillUrl, isOhgoStillPath, parseOhgoStillPath } from '@/lib/terra/ohgoStillPath'
+import { buildCaltransStillUrl, isCaltransStillPath, parseCaltransStillPath } from '@/lib/terra/caltransStillPath'
 
-export type TerraCameraImageProvider = 'digitraffic_road_cameras' | 'ontario_511_cameras' | 'hong_kong_td_cameras'
+export type TerraCameraImageProvider = 'digitraffic_road_cameras' | 'ontario_511_cameras' | 'hong_kong_td_cameras' | 'ohgo_cameras' | 'caltrans_cctv'
 
 export type TerraCameraImageResult =
   | { ok: true; bytes: Uint8Array; contentType: string; sourceUrl: string; attribution: string }
@@ -35,6 +38,27 @@ export type TerraCameraImageResult =
 const TIMEOUT_MS = 8_000
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024 // 4 MB — generous for a single camera still, never a video stream
 const MAX_REDIRECTS = 1
+const ALLOWED_STILL_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/gif', 'image/webp'])
+
+/**
+ * Camera stills are reconstructed server-side from an opaque id. Every hop (initial + redirect)
+ * must be https, on the provider host allowlist, without userinfo/custom ports/private IPs.
+ * This function is the SSRF gate — never fetch a caller-supplied URL.
+ */
+export function assertCameraImageHopUrl(provider: TerraCameraImageProvider, url: string): URL {
+  const bounded = validateBoundedTargetUrl(url)
+  if (!bounded.ok) {
+    throw new Error(bounded.reason)
+  }
+  const parsed = new URL(bounded.url)
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Camera image URL must be https.')
+  }
+  if (!isAllowedHost(provider, parsed.hostname)) {
+    throw new Error(`Blocked host "${parsed.hostname}" for camera provider ${provider}.`)
+  }
+  return parsed
+}
 
 const ID_PATTERNS: Record<TerraCameraImageProvider, RegExp> = {
   // Digitraffic weathercam preset ids observed live this build (e.g. "C1503503") — conservative
@@ -46,18 +70,41 @@ const ID_PATTERNS: Record<TerraCameraImageProvider, RegExp> = {
   // Hong Kong TD camera keys observed live this build (e.g. "BC101F", "AID01101", "TDS10001",
   // "TDSCPRHSK10001") — conservative uppercase-alnum charset, the documented {key}.JPG pattern.
   hong_kong_td_cameras: /^[A-Z0-9]{1,24}$/,
+  ohgo_cameras: /^(?:ohgo:[A-Za-z0-9._-]+(?::\d{1,3})?|[A-Za-z0-9][A-Za-z0-9_./-]{0,180}\.jpe?g)$/i,
+  caltrans_cctv: /^(?:caltrans:d\d{1,2}:[A-Za-z0-9._-]+|d\d{1,2}\/cctv\/image\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\.jpe?g)$/i,
 }
 
 const ATTRIBUTION: Record<TerraCameraImageProvider, string> = {
   digitraffic_road_cameras: 'Source: Fintraffic / digitraffic.fi, license CC 4.0 BY',
   ontario_511_cameras: 'Source: Ontario 511 (511on.ca), Government of Ontario / Ministry of Transportation',
   hong_kong_td_cameras: 'Source: Transport Department, Government of the Hong Kong SAR (data.gov.hk)',
+  ohgo_cameras: 'ODOT / OHGO',
+  caltrans_cctv: 'Caltrans CWWP2',
 }
 
-function buildSourceUrl(provider: TerraCameraImageProvider, id: string): string {
+function buildSourceUrl(provider: TerraCameraImageProvider, id: string): string | null {
+  if (provider === 'ohgo_cameras') {
+    if (isOhgoStillPath(id)) return buildOhgoStillUrl(id)
+    const cached = lookupCameraImageUrl(provider, id)
+    if (!cached) return null
+    const path = parseOhgoStillPath(cached.url)
+    return path ? buildOhgoStillUrl(path) : null
+  }
+  if (provider === 'caltrans_cctv') {
+    if (isCaltransStillPath(id)) return buildCaltransStillUrl(id)
+    const cached = lookupCameraImageUrl(provider, id)
+    if (!cached) return null
+    const path = parseCaltransStillPath(cached.url)
+    return path ? buildCaltransStillUrl(path) : null
+  }
   if (provider === 'digitraffic_road_cameras') return `https://weathercam.digitraffic.fi/${id}.jpg`
   if (provider === 'hong_kong_td_cameras') return `https://tdcctv.data.one.gov.hk/${id}.JPG`
   return `https://511on.ca/map/Cctv/${id}`
+}
+
+function stillContentTypeAllowed(contentType: string): boolean {
+  const mime = contentType.split(';')[0].trim().toLowerCase()
+  return ALLOWED_STILL_TYPES.has(mime)
 }
 
 async function readImageBodyWithCap(response: Response, maxBytes: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
@@ -94,13 +141,18 @@ async function readImageBodyWithCap(response: Response, maxBytes: number): Promi
 }
 
 export async function fetchProxiedCameraImage(provider: TerraCameraImageProvider, id: string): Promise<TerraCameraImageResult> {
-  if (!ID_PATTERNS[provider].test(id)) {
-    return { ok: false, status: null, message: `Invalid camera id format for provider ${provider}.` }
+  if (!ID_PATTERNS[provider].test(id) || id.includes('..') || id.includes('://') || id.includes('\\') || id.startsWith('/')) {
+    return { ok: false, status: 400, message: `Invalid camera id format for provider ${provider}.` }
+  }
+
+  const sourceUrl = buildSourceUrl(provider, id)
+  if (!sourceUrl) {
+    return { ok: false, status: 404, message: 'Camera still URL is not in the current catalog cache — open the layer first, then inspect one camera. LargeUrl is never fetched for the whole catalog.' }
   }
 
   let currentUrl: string
   try {
-    currentUrl = assertAllowedProviderUrl(provider, buildSourceUrl(provider, id)).toString()
+    currentUrl = assertCameraImageHopUrl(provider, sourceUrl).toString()
   } catch {
     return { ok: false, status: null, message: 'Camera image URL failed the provider host allowlist check.' }
   }
@@ -112,17 +164,19 @@ export async function fetchProxiedCameraImage(provider: TerraCameraImageProvider
     let redirects = 0
     let hopUrl = currentUrl
     for (;;) {
+      // credentials omitted; no Authorization / OHGO_API_KEY — stills are public JPEGs on
+      // allowlisted image hosts. Provider keys stay on catalog adapters only.
       response = await fetch(hopUrl, { method: 'GET', redirect: 'manual', signal: controller.signal, credentials: 'omit' })
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location')
         if (!location) break
         redirects += 1
         if (redirects > MAX_REDIRECTS) return { ok: false, status: response.status, message: 'Too many redirects for camera image request.' }
-        const nextUrl = new URL(location, hopUrl)
-        if (nextUrl.protocol !== 'https:' || !isAllowedHost(provider, nextUrl.hostname)) {
+        try {
+          hopUrl = assertCameraImageHopUrl(provider, new URL(location, hopUrl).toString()).toString()
+        } catch {
           return { ok: false, status: null, message: 'Blocked redirect to a disallowed host for camera image request.' }
         }
-        hopUrl = nextUrl.toString()
         continue
       }
       break
@@ -131,7 +185,7 @@ export async function fetchProxiedCameraImage(provider: TerraCameraImageProvider
     if (!response.ok) return { ok: false, status: response.status, message: `Camera image request failed with HTTP ${response.status}.` }
 
     const contentType = response.headers.get('content-type') ?? ''
-    if (!contentType.toLowerCase().startsWith('image/')) {
+    if (!stillContentTypeAllowed(contentType)) {
       return { ok: false, status: response.status, message: `Camera image request returned a non-image content-type ("${contentType || 'none'}").` }
     }
 

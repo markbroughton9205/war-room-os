@@ -70,7 +70,7 @@ async function search(query: ResearchQuery) {
         organization: null,
         publishedAt: timespan ? `${timespan.gte ?? ''}` : null,
         updatedAt: null,
-        geography: props.ccodes?.length ? props.ccodes.join(', ') : geo,
+        geography: geo ?? (props.ccodes?.length ? props.ccodes.join(', ') : null),
         language: null,
         identifiers: { whg_index_id: id },
         subjects: props.placetypes ?? [],

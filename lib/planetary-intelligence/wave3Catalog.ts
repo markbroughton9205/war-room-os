@@ -1,0 +1,78 @@
+import type { EndpointType } from './types'
+import type { Wave1Candidate } from './registryTypes'
+import { WAVE3_PRIORITY_CELLS, type Wave3PriorityCell } from './wave3Cells'
+
+export type Wave3Candidate = Wave1Candidate & {
+  gapKey: string
+  knownEndpointUrl?: string | null
+  knownEndpointType?: EndpointType | null
+  existingIdentity?: boolean
+}
+
+function candidate(input: Omit<Wave3Candidate, 'supportedLanguages' | 'discoveryMethod' | 'requestedDiscoveryLanguage' | 'actualQueryLanguage' | 'ownershipType' | 'continent'> & Partial<Wave3Candidate>): Wave3Candidate {
+  return {
+    continent: input.continent ?? (input.region.includes('AFRICA') ? 'Africa' : input.region.includes('ASIA') || input.region === 'MIDDLE_EAST' ? 'Asia' : input.region === 'EUROPE' ? 'Europe' : input.region === 'OCEANIA' ? 'Oceania' : 'Americas'),
+    localityClass: input.localityClass ?? 'NATIONAL',
+    sourceRole: input.sourceRole,
+    supportedLanguages: input.supportedLanguages ?? [input.primaryLanguage],
+    ownershipType: input.ownershipType ?? (input.sourceType === 'OFFICIAL_RECORD' || input.sourceType === 'ALERT_FEED' || input.sourceType === 'PRIMARY_PUBLIC_SIGNAL' ? 'GOVERNMENT' : 'INDEPENDENT'),
+    discoveryMethod: input.discoveryMethod ?? 'wave3_gap_directed',
+    requestedDiscoveryLanguage: input.primaryLanguage,
+    actualQueryLanguage: input.primaryLanguage,
+    existingIdentity: input.existingIdentity ?? false,
+    knownEndpointUrl: input.knownEndpointUrl ?? input.endpointUrl ?? null,
+    knownEndpointType: input.knownEndpointType ?? input.endpointType ?? null,
+    ...input,
+  }
+}
+
+export function wave3Catalog(): Wave3Candidate[] {
+  const cells = Object.fromEntries(WAVE3_PRIORITY_CELLS.map(cell => [cell.gapKey, cell])) as Record<string, Wave3PriorityCell>
+  return [
+    candidate({ gapKey: 'ja-infra', canonicalName: 'MLIT Press RDF', homepage: 'https://www.mlit.go.jp', country: 'Japan', region: 'EAST_ASIA', primaryLanguage: 'ja', sourceType: 'OFFICIAL_RECORD', sourceRole: 'OFFICIAL', publisher: 'MLIT Japan', parentCompany: 'MLIT Japan', endpointUrl: 'https://www.mlit.go.jp/pressrelease.rdf', endpointType: 'RSS', existingIdentity: true, gapPriority: 'ja-infra', topics: ['INFRASTRUCTURE'] }),
+    candidate({ gapKey: 'ja-infra', canonicalName: 'MLIT Disaster RDF', homepage: 'https://www.mlit.go.jp', country: 'Japan', region: 'EAST_ASIA', primaryLanguage: 'ja', sourceType: 'OFFICIAL_RECORD', sourceRole: 'OFFICIAL', publisher: 'MLIT Japan', parentCompany: 'MLIT Japan', endpointUrl: 'https://www.mlit.go.jp/saigai.rdf', endpointType: 'RSS', existingIdentity: true, gapPriority: 'ja-infra', topics: ['INFRASTRUCTURE'] }),
+    candidate({ gapKey: 'ja-infra', canonicalName: 'Geospatial Information Authority of Japan', homepage: 'https://www.gsi.go.jp', country: 'Japan', region: 'EAST_ASIA', primaryLanguage: 'ja', sourceType: 'OFFICIAL_RECORD', sourceRole: 'OFFICIAL', publisher: 'GSI Japan', parentCompany: 'GSI Japan', gapPriority: 'ja-infra', topics: ['INFRASTRUCTURE'] }),
+    candidate({ gapKey: 'ja-infra', canonicalName: 'NILIM', homepage: 'https://www.nilim.go.jp', country: 'Japan', region: 'EAST_ASIA', primaryLanguage: 'ja', sourceType: 'OFFICIAL_RECORD', sourceRole: 'OFFICIAL', publisher: 'NILIM', parentCompany: 'NILIM', gapPriority: 'ja-infra', topics: ['INFRASTRUCTURE'] }),
+    candidate({ gapKey: 'ja-infra', canonicalName: 'Tokyo Metropolitan Government', homepage: 'https://www.metro.tokyo.lg.jp', country: 'Japan', region: 'EAST_ASIA', localityClass: 'CITY_LOCAL', cityLocality: 'Tokyo', primaryLanguage: 'ja', sourceType: 'OFFICIAL_RECORD', sourceRole: 'OFFICIAL', publisher: 'Tokyo Metropolitan Government', parentCompany: 'Tokyo Metropolitan Government', gapPriority: 'ja-infra', topics: ['INFRASTRUCTURE'] }),
+    candidate({ gapKey: 'ja-infra', canonicalName: 'Osaka Prefecture', homepage: 'https://www.pref.osaka.lg.jp', country: 'Japan', region: 'EAST_ASIA', localityClass: 'REGIONAL', stateProvince: 'Osaka', primaryLanguage: 'ja', sourceType: 'OFFICIAL_RECORD', sourceRole: 'OFFICIAL', publisher: 'Osaka Prefecture', parentCompany: 'Osaka Prefecture', gapPriority: 'ja-infra', topics: ['INFRASTRUCTURE'] }),
+
+    candidate({ gapKey: 'sw-health', canonicalName: 'AMREF Kenya', homepage: 'https://amref.org/kenya/', country: 'Kenya', region: 'EAST_AFRICA', primaryLanguage: 'sw', sourceType: 'COMMUNITY_SOURCE', sourceRole: 'HEALTH', publisher: 'AMREF Health Africa', parentCompany: 'AMREF Health Africa', supportedLanguages: ['sw', 'en'], gapPriority: 'sw-health', topics: ['HEALTH'] }),
+    candidate({ gapKey: 'sw-health', canonicalName: 'AMREF Tanzania', homepage: 'https://amref.org/tanzania/', country: 'Tanzania', region: 'EAST_AFRICA', primaryLanguage: 'sw', sourceType: 'COMMUNITY_SOURCE', sourceRole: 'HEALTH', publisher: 'AMREF Health Africa Tanzania', parentCompany: 'AMREF Health Africa Tanzania', supportedLanguages: ['sw', 'en'], gapPriority: 'sw-health', topics: ['HEALTH'] }),
+    candidate({ gapKey: 'sw-health', canonicalName: 'Twaweza', homepage: 'https://twaweza.org', country: 'Tanzania', region: 'EAST_AFRICA', primaryLanguage: 'sw', sourceType: 'COMMUNITY_SOURCE', sourceRole: 'NGO', publisher: 'Twaweza', parentCompany: 'Twaweza', supportedLanguages: ['sw', 'en'], gapPriority: 'sw-health', topics: ['HEALTH'] }),
+    candidate({ gapKey: 'sw-health', canonicalName: 'Nairobi County', homepage: 'https://nairobi.go.ke', country: 'Kenya', region: 'EAST_AFRICA', localityClass: 'CITY_LOCAL', cityLocality: 'Nairobi', primaryLanguage: 'sw', sourceType: 'COMMUNITY_SOURCE', sourceRole: 'HEALTH', publisher: 'Nairobi City County', parentCompany: 'Nairobi City County', supportedLanguages: ['sw', 'en'], gapPriority: 'sw-health', topics: ['HEALTH'] }),
+    candidate({ gapKey: 'sw-health', canonicalName: 'Makueni County', homepage: 'https://makueni.go.ke', country: 'Kenya', region: 'EAST_AFRICA', localityClass: 'REGIONAL', stateProvince: 'Makueni', primaryLanguage: 'sw', sourceType: 'COMMUNITY_SOURCE', sourceRole: 'HEALTH', publisher: 'Makueni County', parentCompany: 'Makueni County', supportedLanguages: ['sw', 'en'], gapPriority: 'sw-health', topics: ['HEALTH'] }),
+
+    candidate({ gapKey: 'id-infra', canonicalName: 'Kompas', homepage: 'https://www.kompas.com', country: 'Indonesia', region: 'SOUTHEAST_ASIA', primaryLanguage: 'id', sourceType: 'JOURNALISM', sourceRole: 'NATIONAL', publisher: 'Kompas Gramedia', parentCompany: 'Kompas Gramedia', existingIdentity: true, gapPriority: 'id-infra', topics: ['INFRASTRUCTURE'] }),
+    candidate({ gapKey: 'id-infra', canonicalName: 'Tempo', homepage: 'https://www.tempo.co', country: 'Indonesia', region: 'SOUTHEAST_ASIA', primaryLanguage: 'id', sourceType: 'JOURNALISM', sourceRole: 'NATIONAL', publisher: 'Tempo Inti Media', parentCompany: 'Tempo Inti Media', existingIdentity: true, gapPriority: 'id-infra', topics: ['INFRASTRUCTURE'] }),
+    candidate({ gapKey: 'id-infra', canonicalName: 'Antara', homepage: 'https://www.antaranews.com', country: 'Indonesia', region: 'SOUTHEAST_ASIA', primaryLanguage: 'id', sourceType: 'JOURNALISM', sourceRole: 'NATIONAL', publisher: 'LKBN Antara', parentCompany: 'LKBN Antara', endpointUrl: 'https://www.antaranews.com/rss/nasional', endpointType: 'RSS', existingIdentity: true, gapPriority: 'id-infra', topics: ['INFRASTRUCTURE'] }),
+    candidate({ gapKey: 'id-infra', canonicalName: 'Republika', homepage: 'https://www.republika.co.id', country: 'Indonesia', region: 'SOUTHEAST_ASIA', primaryLanguage: 'id', sourceType: 'JOURNALISM', sourceRole: 'NATIONAL', publisher: 'Republika', parentCompany: 'Mahaka Media', existingIdentity: true, gapPriority: 'id-infra', topics: ['INFRASTRUCTURE'] }),
+
+    candidate({ gapKey: 'ar-safety', canonicalName: 'Bahrain Civil Defence CAP', homepage: 'https://www.civildefence.gov.bh', country: 'Bahrain', region: 'MIDDLE_EAST', primaryLanguage: 'ar', sourceType: 'PRIMARY_PUBLIC_SIGNAL', sourceRole: 'PUBLIC_SAFETY', publisher: 'Bahrain Civil Defence', parentCompany: 'Bahrain Civil Defence', endpointUrl: 'https://cap-sources.s3.amazonaws.com/bh-gdcd-ar/rss.xml', endpointType: 'PUBLIC_ALERT_FEED', gapPriority: 'ar-safety', topics: ['PUBLIC_SAFETY'] }),
+    candidate({ gapKey: 'ar-safety', canonicalName: 'Egypt Civil Defence CAP', homepage: 'https://www.moi.gov.eg', country: 'Egypt', region: 'MIDDLE_EAST', primaryLanguage: 'ar', sourceType: 'PRIMARY_PUBLIC_SIGNAL', sourceRole: 'PUBLIC_SAFETY', publisher: 'Egypt Civil Defence', parentCompany: 'Egypt Civil Defence', endpointUrl: 'https://cap-sources.s3.amazonaws.com/eg-cd-ar/rss.xml', endpointType: 'PUBLIC_ALERT_FEED', gapPriority: 'ar-safety', topics: ['PUBLIC_SAFETY'] }),
+    candidate({ gapKey: 'ar-safety', canonicalName: 'NCEMA', homepage: 'https://www.ncema.gov.ae', country: 'United Arab Emirates', region: 'MIDDLE_EAST', primaryLanguage: 'ar', sourceType: 'PRIMARY_PUBLIC_SIGNAL', sourceRole: 'PUBLIC_SAFETY', publisher: 'NCEMA', parentCompany: 'NCEMA', gapPriority: 'ar-safety', topics: ['PUBLIC_SAFETY'] }),
+    candidate({ gapKey: 'ar-safety', canonicalName: 'PETRA Jordan', homepage: 'https://petra.gov.jo', country: 'Jordan', region: 'MIDDLE_EAST', primaryLanguage: 'ar', sourceType: 'PRIMARY_PUBLIC_SIGNAL', sourceRole: 'PUBLIC_SAFETY', publisher: 'Jordan News Agency', parentCompany: 'PETRA Jordan', existingIdentity: true, gapPriority: 'ar-safety', topics: ['PUBLIC_SAFETY'] }),
+
+    candidate({ gapKey: 'de-energy', canonicalName: 'pv magazine Deutschland', homepage: 'https://www.pv-magazine.de', country: 'Germany', region: 'EUROPE', primaryLanguage: 'de', sourceType: 'TRADE_SOURCE', sourceRole: 'TRADE', publisher: 'pv magazine Deutschland', parentCompany: 'pv magazine Deutschland', endpointUrl: 'https://www.pv-magazine.de/feed/', endpointType: 'RSS', gapPriority: 'de-energy', topics: ['ENERGY'] }),
+    candidate({ gapKey: 'de-energy', canonicalName: 'BWE Seminare', homepage: 'https://www.bwe-seminare.de', country: 'Germany', region: 'EUROPE', primaryLanguage: 'de', sourceType: 'TRADE_SOURCE', sourceRole: 'TRADE', publisher: 'BWE Seminare', parentCompany: 'Bundesverband WindEnergie', endpointUrl: 'https://www.bwe-seminare.de/rss.xml', endpointType: 'RSS', gapPriority: 'de-energy', topics: ['ENERGY'] }),
+    candidate({ gapKey: 'de-energy', canonicalName: 'BDEW', homepage: 'https://www.bdew.de', country: 'Germany', region: 'EUROPE', primaryLanguage: 'de', sourceType: 'TRADE_SOURCE', sourceRole: 'TRADE', publisher: 'BDEW', parentCompany: 'BDEW', existingIdentity: true, gapPriority: 'de-energy', topics: ['ENERGY'] }),
+    candidate({ gapKey: 'de-energy', canonicalName: 'ENTSO-E', homepage: 'https://www.entsoe.eu', country: 'Belgium', region: 'EUROPE', primaryLanguage: 'de', sourceType: 'TRADE_SOURCE', sourceRole: 'TRADE', publisher: 'ENTSO-E', parentCompany: 'ENTSO-E', supportedLanguages: ['de', 'en', 'fr'], existingIdentity: true, gapPriority: 'de-energy', topics: ['ENERGY'] }),
+
+    candidate({ gapKey: 'es-science', canonicalName: 'SciELO en Español', homepage: 'https://blog.scielo.org/es/', country: 'Brazil', region: 'LATIN_AMERICA', primaryLanguage: 'es', sourceType: 'SCIENTIFIC_SOURCE', sourceRole: 'SCIENTIFIC', publisher: 'SciELO', parentCompany: 'SciELO', endpointUrl: 'https://blog.scielo.org/es/feed/', endpointType: 'RSS', gapPriority: 'es-science', topics: ['SCIENCE'] }),
+    candidate({ gapKey: 'es-science', canonicalName: 'CICTERRA CONICET', homepage: 'https://cicterra.conicet.unc.edu.ar', country: 'Argentina', region: 'LATIN_AMERICA', primaryLanguage: 'es', sourceType: 'SCIENTIFIC_SOURCE', sourceRole: 'SCIENTIFIC', publisher: 'CICTERRA CONICET-UNC', parentCompany: 'CICTERRA CONICET-UNC', endpointUrl: 'https://cicterra.conicet.unc.edu.ar/feed/rss/', endpointType: 'RSS', gapPriority: 'es-science', topics: ['SCIENCE'] }),
+    candidate({ gapKey: 'es-science', canonicalName: 'Agencia CyTA', homepage: 'https://www.agenciacyta.org.ar', country: 'Argentina', region: 'LATIN_AMERICA', primaryLanguage: 'es', sourceType: 'SCIENTIFIC_SOURCE', sourceRole: 'SCIENTIFIC', publisher: 'Agencia CyTA', parentCompany: 'Agencia CyTA', endpointUrl: 'https://www.agenciacyta.org.ar/feed/', endpointType: 'RSS', gapPriority: 'es-science', topics: ['SCIENCE'] }),
+    candidate({ gapKey: 'es-science', canonicalName: 'CONICET', homepage: 'https://www.conicet.gov.ar', country: 'Argentina', region: 'LATIN_AMERICA', primaryLanguage: 'es', sourceType: 'SCIENTIFIC_SOURCE', sourceRole: 'SCIENTIFIC', publisher: 'CONICET', parentCompany: 'CONICET', existingIdentity: true, gapPriority: 'es-science', topics: ['SCIENCE'] }),
+
+    candidate({ gapKey: 'hi-econ', canonicalName: 'Dainik Jagran', homepage: 'https://www.jagran.com', country: 'India', region: 'SOUTH_ASIA', primaryLanguage: 'hi', sourceType: 'JOURNALISM', sourceRole: 'NATIONAL', publisher: 'Dainik Jagran', parentCompany: 'Jagran Prakashan', existingIdentity: true, gapPriority: 'hi-econ', topics: ['ECONOMICS'] }),
+    candidate({ gapKey: 'hi-econ', canonicalName: 'Amar Ujala', homepage: 'https://www.amarujala.com', country: 'India', region: 'SOUTH_ASIA', primaryLanguage: 'hi', sourceType: 'JOURNALISM', sourceRole: 'NATIONAL', publisher: 'Amar Ujala', parentCompany: 'Amar Ujala', existingIdentity: true, gapPriority: 'hi-econ', topics: ['ECONOMICS'] }),
+    candidate({ gapKey: 'hi-econ', canonicalName: 'Navbharat Times', homepage: 'https://navbharattimes.indiatimes.com', country: 'India', region: 'SOUTH_ASIA', primaryLanguage: 'hi', sourceType: 'JOURNALISM', sourceRole: 'NATIONAL', publisher: 'Navbharat Times', parentCompany: 'Bennett Coleman', gapPriority: 'hi-econ', topics: ['ECONOMICS'] }),
+
+    candidate({ gapKey: 'oceania-weather', canonicalName: 'BOM NSW Warnings', homepage: 'https://www.bom.gov.au', country: 'Australia', region: 'OCEANIA', primaryLanguage: 'en', sourceType: 'ALERT_FEED', sourceRole: 'WEATHER', publisher: 'Bureau of Meteorology', parentCompany: 'Bureau of Meteorology', endpointUrl: 'https://www.bom.gov.au/fwo/IDZ00054.warnings_nsw.xml', endpointType: 'PUBLIC_ALERT_FEED', existingIdentity: true, gapPriority: 'oceania-weather', topics: ['WEATHER'] }),
+    candidate({ gapKey: 'oceania-weather', canonicalName: 'BOM Victoria Warnings', homepage: 'https://www.bom.gov.au', country: 'Australia', region: 'OCEANIA', primaryLanguage: 'en', sourceType: 'ALERT_FEED', sourceRole: 'WEATHER', publisher: 'Bureau of Meteorology', parentCompany: 'Bureau of Meteorology', endpointUrl: 'https://www.bom.gov.au/fwo/IDZ00059.warnings_vic.xml', endpointType: 'PUBLIC_ALERT_FEED', existingIdentity: true, gapPriority: 'oceania-weather', topics: ['WEATHER'] }),
+    candidate({ gapKey: 'oceania-weather', canonicalName: 'MetService', homepage: 'https://www.metservice.com', country: 'New Zealand', region: 'OCEANIA', primaryLanguage: 'en', sourceType: 'ALERT_FEED', sourceRole: 'WEATHER', publisher: 'MetService', parentCompany: 'MetService', existingIdentity: true, gapPriority: 'oceania-weather', topics: ['WEATHER'] }),
+    candidate({ gapKey: 'oceania-weather', canonicalName: 'Fiji Meteorological Service', homepage: 'https://www.met.gov.fj', country: 'Fiji', region: 'OCEANIA', primaryLanguage: 'en', sourceType: 'ALERT_FEED', sourceRole: 'WEATHER', publisher: 'Fiji Meteorological Service', parentCompany: 'Fiji Meteorological Service', existingIdentity: true, gapPriority: 'oceania-weather', topics: ['WEATHER'] }),
+  ].map(row => ({ ...row, gapPriority: row.gapPriority ?? cells[row.gapKey]?.gapKey ?? row.gapKey }))
+}
+
+export function wave3CatalogForCell(gapKey: string): Wave3Candidate[] {
+  return wave3Catalog().filter(item => item.gapKey === gapKey)
+}

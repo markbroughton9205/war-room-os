@@ -3,6 +3,7 @@ import type { GeographicRegion } from '@/lib/council/scout-swarm/types'
 import { isClosedFormKnowledgeQuestion, isSimpleFastPathPrompt } from '@/lib/council/scout-swarm/eligibility'
 import { classifyCouncilTurn } from '@/lib/council/session-orchestration/turnIntent'
 import { FIRST_PASS_DISCOVERY_SEATS, SEAT_ROLES } from './identity'
+import { classifyGeneratedQuery } from './languageTruth'
 import type {
   InvestigationPlan,
   InvestigationTask,
@@ -85,6 +86,10 @@ function pulsarQuery(geo: PlanetaryGeography, language: string): string {
   if (lang === 'pt') return `reportagens locais emergentes hoje ${geoLabel} jornalismo regional RSS`
   if (lang === 'ar') return `تقارير محلية عاجلة اليوم ${geoLabel}`
   if (lang === 'ja') return `${geoLabel} 地域報道 速報 今日 ローカルジャーナリズム`
+  if (lang === 'de') return `aktuelle lokale und regionale meldungen heute ${geoLabel} unterversorgte quellen`
+  if (lang === 'sw') return `habari za haraka za mitaa leo ${geoLabel} uandishi wa kanda`
+  if (lang === 'id') return `berita lokal dan regional terbaru hari ini ${geoLabel} jurnalisme daerah`
+  if (lang === 'hi') return `${geoLabel} स्थानीय क्षेत्रीय रिपोर्ट आज`
   return `breaking local and regional reporting today ${geoLabel} emerging stories under-covered RSS live feeds${locale ? ` query_language=${locale.queryLanguage}` : ''}`
 }
 
@@ -100,7 +105,16 @@ function novaQuery(topic: PlanetaryTopic, geo: PlanetaryGeography, language: str
   if (language === 'es' || language === 'pt') {
     return `${language === 'pt' ? 'ciência economia pesquisa acadêmica' : 'ciencia economía investigación académica'} ${geoLabel} hoy fuentes especializadas`
   }
+  if (language === 'ja') return `${geoLabel} の学術研究 ${topicLabel} 専門誌`
+  if (language === 'sw') return `utafiti wa sayansi na uchumi ${topicLabel} ${geoLabel} machapisho maalum`
+  if (language === 'id') return `penelitian sains ekonomi akademik ${topicLabel} ${geoLabel} publikasi khusus jurnalisme daerah`
   return `science economics academic research under-covered ${topicLabel} ${geoLabel} specialist publications ${language}`
+}
+
+function withLanguageTruth<T extends InvestigationTask>(task: Omit<T, 'requestedLanguage'> & { requestedLanguage?: string }): T {
+  const requested = task.requestedLanguage || task.languages[0] || 'en'
+  const classified = classifyGeneratedQuery(task.query, requested)
+  return { ...task, requestedLanguage: requested, queryLanguage: classified.queryLanguage } as T
 }
 
 export function planInvestigation(input: {
@@ -130,7 +144,7 @@ export function planInvestigation(input: {
   const pulsarGeos = GEO_LANES.slice(0, 6)
   pulsarGeos.forEach((lane, index) => {
     const language = lane.languages[0]!
-    tasks.push({
+    tasks.push(withLanguageTruth({
       taskId: taskId(input.missionId, 'PULSAR', index),
       missionId: input.missionId,
       seat: 'PULSAR',
@@ -146,13 +160,14 @@ export function planInvestigation(input: {
       priority: 10 - index,
       query: pulsarQuery(lane.geo, language),
       queryLanguage: language,
+      requestedLanguage: language,
       preferredProviders: ['public_news_rss', 'tavily', 'searxng'],
-    })
+    }))
   })
 
   ORION_TOPICS.slice(0, 4).forEach((topic, index) => {
     const lane = GEO_LANES[(index + 2) % GEO_LANES.length]!
-    tasks.push({
+    tasks.push(withLanguageTruth({
       taskId: taskId(input.missionId, 'ORION', index),
       missionId: input.missionId,
       seat: 'ORION',
@@ -168,15 +183,16 @@ export function planInvestigation(input: {
       priority: 8 - index,
       query: orionQuery(topic, lane.geo),
       queryLanguage: 'en',
+      requestedLanguage: 'en',
       preferredProviders: ['federal_register', 'arxiv', 'tavily'],
-    })
+    }))
   })
 
   const novaLanes = [GEO_LANES[1]!, GEO_LANES[2]!, GEO_LANES[3]!, GEO_LANES[4]!]
   novaLanes.forEach((lane, index) => {
     const topic = NOVA_TOPICS[index % NOVA_TOPICS.length]!
     const language = lane.languages[0]!
-    tasks.push({
+    tasks.push(withLanguageTruth({
       taskId: taskId(input.missionId, 'NOVA', index),
       missionId: input.missionId,
       seat: 'NOVA',
@@ -192,8 +208,9 @@ export function planInvestigation(input: {
       priority: 7 - index,
       query: novaQuery(topic, lane.geo, language),
       queryLanguage: language,
+      requestedLanguage: language,
       preferredProviders: ['arxiv', 'jstage', 'eclac_cepalstat', 'tavily'],
-    })
+    }))
   })
 
   if (complexity !== 'BROAD_PLANETARY') {

@@ -24,9 +24,11 @@ import {
 
 export const TERRA_LIVE_FRESHNESS_STATES = [
   'LIVE',
+  'RECENT',
   'DELAYED',
   'CACHED',
   'STALE',
+  'STALE_LAST_GOOD',
   'EMPTY',
   'NO_COVERAGE',
   'READY',
@@ -37,7 +39,11 @@ export const TERRA_LIVE_FRESHNESS_STATES = [
   'NOT_IMPLEMENTED',
   'DISABLED',
   'UNAVAILABLE',
+  'ERROR_UPSTREAM',
   'AUTH_FAILED',
+  'AUTH_REQUIRED',
+  'RATE_LIMITED',
+  'PARTIAL',
   'NOT_CONFIGURED',
 ] as const
 export type TerraLiveFreshness = (typeof TERRA_LIVE_FRESHNESS_STATES)[number]
@@ -106,6 +112,8 @@ export type TerraLiveProviderStatus = {
   objectCount: number
   /** Client-safe boolean only — never the credential value. */
   credentialsPresent?: boolean
+  /** Client-safe ingest path. Never includes credentials. */
+  transport?: 'YOUTUBE_DATA_API' | 'YOUTUBE_ATOM' | 'LAST_KNOWN_GOOD'
 }
 
 export type TerraLiveLayerStatus = {
@@ -121,6 +129,8 @@ export type TerraLiveIntelSnapshot = {
   layers: TerraLiveLayerStatus[]
   providers: TerraLiveProviderStatus[]
   truncated: boolean
+  authState?: 'AUTHENTICATED' | 'AUTH_REQUIRED'
+  panel?: import('./liveIntelPanelModel').TerraEarthIntelPanelSnapshot
 }
 
 export type TerraLiveFreshnessInput = {

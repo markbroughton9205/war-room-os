@@ -9,9 +9,9 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 const net = require('node:net')
 const fs = require('node:fs')
-const os = require('node:os')
 const { applyWindowsUserEnvironmentToProcess, presenceSummary } = require('./windowsUserEnv.cjs')
 const { applyCouncilRoutingDefault } = require('./councilRoutingBootstrap.cjs')
+const { resolveAppDataRoot, resolveAppDataPaths } = require('./appDataRoot.cjs')
 
 const LOCAL_UI_ORIGIN = process.env.WAR_ROOM_LOCAL_UI_ORIGIN || 'http://127.0.0.1:3848'
 const LOCAL_CORE_ORIGIN = process.env.WAR_ROOM_LOCAL_CORE_ORIGIN || 'http://127.0.0.1:3847'
@@ -28,11 +28,19 @@ function isPackaged() {
 }
 
 function resolveIconPath() {
-  const candidates = [
+  const windowsCandidates = [
     path.join(__dirname, '..', 'assets', 'war-room-os.ico'),
     path.join(process.resourcesPath || '', 'assets', 'war-room-os.ico'),
     path.join(__dirname, '..', 'assets', 'war-room-os-icon.png'),
+    path.join(process.resourcesPath || '', 'assets', 'war-room-os-icon.png'),
   ]
+  const linuxCandidates = [
+    path.join(__dirname, '..', 'assets', 'war-room-os.png'),
+    path.join(process.resourcesPath || '', 'assets', 'war-room-os.png'),
+    path.join(__dirname, '..', 'assets', 'war-room-os-icon.png'),
+    path.join(process.resourcesPath || '', 'assets', 'war-room-os-icon.png'),
+  ]
+  const candidates = process.platform === 'win32' ? windowsCandidates : linuxCandidates
   return candidates.find(p => p && fs.existsSync(p)) || null
 }
 
@@ -51,28 +59,31 @@ function repoRootFromDesktop() {
 }
 
 function appDataRoot() {
-  const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
-  return path.join(base, 'War Room OS')
+  return resolveAppDataRoot()
 }
 
 function ensureAppDataDirs() {
-  const root = appDataRoot()
-  for (const sub of ['data', 'logs', 'cache', 'exports', 'runtime']) {
-    fs.mkdirSync(path.join(root, sub), { recursive: true })
+  const paths = resolveAppDataPaths()
+  for (const dir of [paths.root, paths.data, paths.logs, paths.cache, paths.exports, paths.runtime]) {
+    fs.mkdirSync(dir, { recursive: true })
   }
-  return root
+  return paths.root
 }
 
 /**
- * Commander-owned mutable data lives under %LOCALAPPDATA%\War Room OS\data.
- * WAR_ROOM_LOCAL_DATA_DIR overrides it for isolated/clean-profile testing; the
- * override is propagated so the owned UI child resolves the same store.
+ * Commander-owned mutable data lives under the platform app-data root /data.
+ * Windows: %LOCALAPPDATA%\War Room OS\data
+ * Linux:   $XDG_DATA_HOME/war-room-os/data or ~/.local/share/war-room-os/data
+ * WAR_ROOM_LOCAL_DATA_DIR overrides the root for isolated/clean-profile testing.
  */
 function localDataDir() {
-  const dir = process.env.WAR_ROOM_LOCAL_DATA_DIR?.trim() || path.join(appDataRoot(), 'data')
+  const dir = resolveAppDataPaths().data
   fs.mkdirSync(dir, { recursive: true })
-  process.env.WAR_ROOM_LOCAL_DATA_DIR = dir
   return dir
+}
+
+function pinChildDataRoot() {
+  process.env.WAR_ROOM_LOCAL_DATA_DIR = appDataRoot()
 }
 
 function appendLog(line) {
@@ -142,8 +153,36 @@ function attachUiChildLogging(child) {
   child.on('error', err => appendLog(`ui:error ${err}`))
 }
 
+function ownedSpawnExtras() {
+  return process.platform === 'win32' ? { windowsHide: true } : { windowsHide: true, detached: true }
+}
+
 function killOwned(child) {
   if (!child || child.killed || child.exitCode !== null) return
+  const pid = child.pid
+  if (process.platform !== 'win32' && typeof pid === 'number') {
+    try {
+      process.kill(-pid, 'SIGTERM')
+    } catch {
+      try {
+        child.kill('SIGTERM')
+      } catch {
+        /* ignore */
+      }
+    }
+    setTimeout(() => {
+      try {
+        if (child.exitCode === null && !child.killed) process.kill(-pid, 'SIGKILL')
+      } catch {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 3000)
+    return
+  }
   try {
     child.kill('SIGTERM')
   } catch {
@@ -165,7 +204,7 @@ function startOwnedNextDev(repoRoot) {
       HOSTNAME: '127.0.0.1',
     },
     stdio: 'ignore',
-    windowsHide: true,
+    ...ownedSpawnExtras(),
   })
 }
 
@@ -180,13 +219,14 @@ function startOwnedCoreDev(repoRoot) {
       cwd: repoRoot,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', WAR_ROOM_RUNTIME_SURFACE: 'DESKTOP_LOCAL' },
       stdio: 'ignore',
-      windowsHide: true,
+      ...ownedSpawnExtras(),
     },
   )
 }
 
 async function ensureRuntimes() {
   ensureAppDataDirs()
+  pinChildDataRoot()
   const packaged = isPackaged()
   const rt = runtimeRoot()
   const dataDir = localDataDir()
@@ -202,7 +242,7 @@ async function ensureRuntimes() {
         try {
           ownedCoreHandle = await coreMod.startCoreInProcess({
             runtimeRoot: rt,
-            localDataDir: localDataDir(),
+            localDataDir: appDataRoot(),
           })
           appendLog('Core started in-process')
         } catch (err) {
@@ -270,6 +310,25 @@ function createWindow(startUrl, diagnosticDetail) {
 
   const win = new BrowserWindow(winOpts)
   mainWindow = win
+
+  // Commander-explicit My Location uses Chromium geolocation. Electron must answer the
+  // permission check/request or Linux/Chromium reports POSITION_UNAVAILABLE even when
+  // navigator.geolocation exists. OS location still comes from GeoClue2 / xdg-desktop-portal;
+  // coordinates are never invented here.
+  win.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (permission === 'geolocation') {
+      appendLog('geolocation permission request granted (Commander My Location)')
+      callback(true)
+      return
+    }
+    callback(false)
+  })
+  win.webContents.session.setPermissionCheckHandler((_webContents, permission) => {
+    return permission === 'geolocation'
+  })
+  if (process.platform === 'linux') {
+    appendLog('linux geolocation: Chromium uses GeoClue2 (geoclue-2.0 / org.freedesktop.GeoClue2) via xdg-desktop-portal')
+  }
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedLocalUrl(url)) return { action: 'allow' }
@@ -342,6 +401,66 @@ ipcMain.handle('sovereign.openExternalSafe', async (_evt, url) => {
   }
 })
 
+function parseGeoClueWhereAmI(text) {
+  const lat = /Latitude:\s*(-?\d+(?:\.\d+)?)°/.exec(text)
+  const lon = /Longitude:\s*(-?\d+(?:\.\d+)?)°/.exec(text)
+  const acc = /Accuracy:\s*(-?\d+(?:\.\d+)?)\s*meters/i.exec(text)
+  if (!lat || !lon) return null
+  const latitude = Number(lat[1])
+  const longitude = Number(lon[1])
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null
+  const accuracyMeters = acc && Number.isFinite(Number(acc[1])) ? Number(acc[1]) : null
+  return { latitude, longitude, accuracyMeters }
+}
+
+ipcMain.handle('terra.nativeLocation.getFix', async () => {
+  if (process.platform !== 'linux') {
+    return { ok: false, reason: `NATIVE LOCATION UNAVAILABLE on ${process.platform}. GeoClue adapter is Linux-only.` }
+  }
+  const candidates = [
+    '/usr/libexec/geoclue-2.0/demos/where-am-i',
+    '/usr/lib/geoclue-2.0/demos/where-am-i',
+    'where-am-i',
+  ]
+  for (const command of candidates) {
+    try {
+      const parsed = await new Promise((resolve) => {
+        const child = spawn(command, ['-t', '8'], { stdio: ['ignore', 'pipe', 'pipe'] })
+        let stdout = ''
+        const timer = setTimeout(() => {
+          child.kill('SIGTERM')
+          resolve(null)
+        }, 9000)
+        child.stdout.on('data', chunk => { stdout += String(chunk) })
+        child.on('error', () => {
+          clearTimeout(timer)
+          resolve(null)
+        })
+        child.on('close', () => {
+          clearTimeout(timer)
+          resolve(parseGeoClueWhereAmI(stdout))
+        })
+      })
+      if (!parsed) continue
+      const accuracyMeters = parsed.accuracyMeters
+      return {
+        ok: true,
+        lat: parsed.latitude,
+        lon: parsed.longitude,
+        accuracyMeters,
+        altitude: null,
+        heading: null,
+        speed: null,
+        timestamp: Date.now(),
+        source: accuracyMeters != null && accuracyMeters > 500 ? 'NETWORK_COARSE' : 'NATIVE_GEOCLUE',
+      }
+    } catch {
+      continue
+    }
+  }
+  return { ok: false, reason: 'NATIVE LOCATION UNAVAILABLE. GeoClue where-am-i demo was not found or returned no coordinates. Browser geolocation remains the primary source. Coordinates were not invented.' }
+})
+
 for (const ch of ['shell.exec', 'powershell.run', 'fs.write', 'child_process']) {
   ipcMain.handle(ch, async () => ({ ok: false, error: 'DENIED' }))
 }
@@ -369,6 +488,13 @@ process.on('unhandledRejection', err => {
 })
 
 appendLog(`boot pid=${process.pid} packaged=${isPackaged()} exec=${process.execPath}`)
+if (process.platform === 'linux') {
+  try {
+    app.setDesktopName('war-room-os.desktop')
+  } catch {
+    /* ignore */
+  }
+}
 if (process.platform === 'win32') {
   const overlayNames = applyWindowsUserEnvironmentToProcess()
   appendLog(`windowsUserEnv overlay names=${overlayNames.length} ${presenceSummary()}`)
@@ -409,7 +535,7 @@ if (!gotLock) {
       } else {
         createWindow(
           null,
-          'UI_FAILED / possible PORT_CONFLICT on 3848.\nCore :3847 also unavailable.\nNo website fallback.\nCheck %LOCALAPPDATA%\\War Room OS\\logs\\desktop-main.log',
+          `UI_FAILED / possible PORT_CONFLICT on 3848.\nCore :3847 also unavailable.\nNo website fallback.\nCheck ${path.join(appDataRoot(), 'logs', 'desktop-main.log')}`,
         )
       }
       return

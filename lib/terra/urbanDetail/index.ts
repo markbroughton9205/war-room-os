@@ -9,16 +9,21 @@ export type {
   TerraUrbanLod,
   TerraUrbanRoad,
   TerraUrbanSelection,
+  TerraUrbanSignal,
+  TerraUrbanSignalNodeKind,
   TerraUrbanTileKey,
   TerraUrbanTilePayload,
 } from './types'
 export {
+  TERRA_LIVE_SIGNAL_PHASE,
+  TERRA_SIGNAL_INFRASTRUCTURE_STATUS,
   TERRA_URBAN_ATTRIBUTION,
   TERRA_URBAN_DIAGNOSTIC_STATES,
   TERRA_URBAN_HEIGHT_METHODS,
   TERRA_URBAN_HEIGHT_SOURCES,
   TERRA_URBAN_LICENSE,
   TERRA_URBAN_LODS,
+  TERRA_URBAN_SIGNAL_NODE_KINDS,
   TERRA_URBAN_SOURCE,
   TERRA_TERRAIN_REQUIRES_PROVIDER,
   TERRA_URBAN_TILE_VERSION,
@@ -28,6 +33,8 @@ export {
   TERRA_URBAN_HIGHWAY_CLASSES,
   TERRA_URBAN_INCLUDE_BUILDINGS,
   TERRA_URBAN_INCLUDE_LABELS,
+  TERRA_URBAN_INCLUDE_HOUSE_NUMBERS,
+  TERRA_URBAN_INCLUDE_SIGNALS,
   TERRA_URBAN_MAX_SPAN_DEG,
   TERRA_URBAN_OBJECT_CAPS,
   TERRA_URBAN_TILE_ZOOM,
@@ -42,14 +49,24 @@ export { expandBounds, tilesForBounds, tileBounds, urbanTileCacheKey, urbanTileI
 export { defaultHeightForBuildingType, parseOsmBuildingLevels, parseOsmHeightMeters, resolveUrbanBuildingHeight } from './height'
 export {
   TERRA_URBAN_BUILDING_ENTITY_PREFIX,
+  TERRA_URBAN_SIGNAL_ENTITY_PREFIX,
   clearUrbanBuildingsForPick,
   findUrbanBuildingAt,
+  findUrbanRoadAt,
+  findUrbanSignalAt,
   isTerraUrbanBuildingPick,
+  isTerraUrbanRoadPick,
+  isTerraUrbanSignalPick,
   registerUrbanBuildingsForPick,
+  registerUrbanGeometryForPick,
+  registerUrbanRoadsForPick,
+  registerUrbanSignalsForPick,
   resolveTerraUrbanBuildingFromPick,
+  resolveTerraUrbanRoadFromPick,
+  resolveTerraUrbanSignalFromPick,
   urbanBuildingToSelection,
 } from './pick'
-export type { TerraUrbanBuildingPickId } from './pick'
+export type { TerraUrbanBuildingPickId, TerraUrbanRoadPickId, TerraUrbanSignalPickId } from './pick'
 export { normalizeOverpassUrbanGeometry } from './normalize'
 export { buildUrbanOverpassQuery } from './query'
 export {

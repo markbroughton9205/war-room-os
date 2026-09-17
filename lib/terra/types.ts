@@ -227,6 +227,8 @@ export type TerraResolvedGeography =
        * supply one. Lets a search-driven camera fly to a rectangle sized to the actual matched
        * place (a country's real bbox vs. a single address') instead of one fixed altitude. */
       boundingBox?: { south: number; north: number; west: number; east: number } | null
+      nativeName?: string | null
+      englishName?: string | null
     }
   | {
       quality: 'ambiguous' | 'unresolved'
@@ -237,6 +239,19 @@ export type TerraResolvedGeography =
       /** Honest, human-readable reason — never fabricated, always traceable to what the resolver
        * actually returned (or didn't). */
       reason: string
+      /** Present only for ambiguous lookups. Each row is a real Nominatim candidate. Never
+       * auto-selected; the Commander must pick or refine the query. Coordinates stay off the
+       * top-level ambiguous result. */
+      matches?: Array<{
+        latitude: number
+        longitude: number
+        label: string
+        placeType: string | null
+        boundingBox: { south: number; north: number; west: number; east: number } | null
+        nativeName: string | null
+        englishName: string | null
+        sourceUrl: string | null
+      }>
     }
 
 /**

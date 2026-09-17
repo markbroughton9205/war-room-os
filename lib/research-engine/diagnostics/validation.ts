@@ -433,7 +433,7 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const add = async (id: string, fn: () => boolean | string | Promise<boolean | string>) => results.push(await test(id, fn))
 
   await add('re_01_all_31_providers_registered', () =>
-    RESEARCH_PROVIDER_ENV.length === 277 || `expected 277 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 282 || `expected 282 providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_02_missing_required_env_not_configured', () => {
     const emptyEnv = { NODE_ENV: 'test' } as NodeJS.ProcessEnv
@@ -1061,6 +1061,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
       digitraffic_road_weather: ['geoSearch'],
       ontario_511_cameras: ['geoSearch'],
       ontario_511_events: ['geoSearch'],
+      ohgo_cameras: ['geoSearch'],
+      ohgo_events: ['geoSearch'],
+      ohgo_road_weather: ['geoSearch'],
+      caltrans_cctv: ['geoSearch'],
+      ny511_cameras: ['geoSearch'],
       hong_kong_td_cameras: ['geoSearch'],
       quebec_511_cameras: ['geoSearch'],
       quebec_511_events: ['geoSearch'],
@@ -1840,13 +1845,13 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   const UNAUTHORIZED_BATCH_1_IDS = ['world_bank_data_catalog', 'world_bank_finances', 'world_bank_climate'] as const
 
   await add('re_100_registered_provider_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 277 || `expected 277 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 282 || `expected 282 registered providers, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_101_implemented_count_derives_to_24_from_descriptors_and_registry', () => {
     const implementedDescriptors = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const implementedAdapters = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return (implementedDescriptors === 273 && implementedAdapters === 273)
-      || `expected 273 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
+    return (implementedDescriptors === 278 && implementedAdapters === 278)
+      || `expected 278 implemented in both descriptors and registry, got descriptors=${implementedDescriptors} registry=${implementedAdapters}`
   })
 
   await add('re_102_three_target_adapters_registered_and_reachable', () => {
@@ -3138,11 +3143,11 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
   })
 
   await add('re_229_final_provider_descriptor_count_is_31', () =>
-    RESEARCH_PROVIDER_ENV.length === 277 || `expected 277 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
+    RESEARCH_PROVIDER_ENV.length === 282 || `expected 282 total provider descriptors, found ${RESEARCH_PROVIDER_ENV.length}`)
 
   await add('re_230_final_implemented_count_is_24', () => {
     const count = Object.keys(IMPLEMENTED_PROVIDER_ADAPTERS).length
-    return count === 273 || `expected 273 implemented adapters, found ${count}`
+    return count === 278 || `expected 278 implemented adapters, found ${count}`
   })
 
   await add('re_231_final_unimplemented_count_is_7', () => {
@@ -4220,8 +4225,8 @@ export async function runResearchEngineValidation(): Promise<ResearchValidationR
     const totalCount = RESEARCH_PROVIDER_ENV.length
     const implementedCount = RESEARCH_PROVIDER_ENV.filter(d => d.implemented).length
     const blockedCount = RESEARCH_PROVIDER_ENV.filter(d => !d.implemented).length
-    return (descriptor?.implemented === true && totalCount === 277 && implementedCount === 273 && blockedCount === 4)
-      || `expected fmcsa implemented plus a 273/4 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
+    return (descriptor?.implemented === true && totalCount === 282 && implementedCount === 278 && blockedCount === 4)
+      || `expected fmcsa implemented plus a 278/4 split, got implemented=${descriptor?.implemented} total=${totalCount} implemented=${implementedCount} blocked=${blockedCount}`
   })
 
   await add('re_652_implemented_descriptor_ids_exactly_equal_registry_keys', () => {

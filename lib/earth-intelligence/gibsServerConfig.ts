@@ -1,5 +1,5 @@
 import 'server-only'
-import { PUBLIC_GIBS_WMTS_BASE_URL } from '@/lib/earth-intelligence/gibsTileUrl'
+import { PUBLIC_GIBS_WMTS_BASE_URL } from '@/lib/earth-intelligence/gibsPublicBase'
 
 /**
  * Server-only read of the NASA GIBS env var. GIBS itself is a public,

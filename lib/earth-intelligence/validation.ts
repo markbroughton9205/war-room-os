@@ -37,8 +37,16 @@ export function runEarthIntelligenceValidation(): EarthIntelligenceValidationRes
     join(process.cwd(), 'components/earth-intelligence/EarthIntelligenceMap.tsx'),
     'utf8',
   )
+  const terraImagerySource = readFileSync(
+    join(process.cwd(), 'components/war-room/terra/TerraEarthImagery.tsx'),
+    'utf8',
+  )
   const healthRouteSource = readFileSync(
     join(process.cwd(), 'app/api/earth-intelligence/health/route.ts'),
+    'utf8',
+  )
+  const serverConfigSource = readFileSync(
+    join(process.cwd(), 'lib/earth-intelligence/gibsServerConfig.ts'),
     'utf8',
   )
   const envExampleSource = readFileSync(join(process.cwd(), '.env.example'), 'utf8')
@@ -224,6 +232,26 @@ export function runEarthIntelligenceValidation(): EarthIntelligenceValidationRes
       if (envExampleSource.includes('NASA_API_KEY')) return '.env.example still references NASA_API_KEY'
       if (mapSource.includes('NEXT_PUBLIC_NASA')) return 'client map component references a NEXT_PUBLIC NASA credential'
       if (healthRouteSource.includes('NEXT_PUBLIC_NASA')) return 'health route references a NEXT_PUBLIC NASA credential'
+      return true
+    }),
+
+    // 19. Server-only GIBS config must not share a module graph with the client tile builder.
+    test('boundary_19_gibs_server_config_not_reachable_from_client_tile_url', () => {
+      if (!serverConfigSource.includes("import 'server-only'")) {
+        return 'gibsServerConfig.ts lost its server-only import'
+      }
+      if (serverConfigSource.includes('gibsTileUrl')) {
+        return 'gibsServerConfig.ts still imports gibsTileUrl, which is used by client components'
+      }
+      if (!serverConfigSource.includes('gibsPublicBase')) {
+        return 'gibsServerConfig.ts no longer compares against the shared public GIBS base URL'
+      }
+      if (mapSource.includes('gibsServerConfig')) {
+        return 'EarthIntelligenceMap.tsx imports server-only gibsServerConfig'
+      }
+      if (terraImagerySource.includes('gibsServerConfig')) {
+        return 'TerraEarthImagery.tsx imports server-only gibsServerConfig'
+      }
       return true
     }),
   ]

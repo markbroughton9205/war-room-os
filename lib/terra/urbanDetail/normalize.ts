@@ -3,13 +3,17 @@
  * applied here so a dense tile cannot explode the Cesium scene.
  */
 import { resolveUrbanBuildingHeight } from './height'
-import { isHouseBuildingType, TERRA_URBAN_HIGHWAY_CLASSES, TERRA_URBAN_INCLUDE_BUILDINGS, TERRA_URBAN_INCLUDE_LABELS, TERRA_URBAN_OBJECT_CAPS } from './lod'
-import type {
-  TerraUrbanBuilding,
-  TerraUrbanCoordinate,
-  TerraUrbanLabel,
-  TerraUrbanLod,
-  TerraUrbanRoad,
+import { isHouseBuildingType, TERRA_URBAN_CITY_STREET_NAME_HIGHWAYS, TERRA_URBAN_HIGHWAY_CLASSES, TERRA_URBAN_INCLUDE_BUILDINGS, TERRA_URBAN_INCLUDE_HOUSE_NUMBERS, TERRA_URBAN_INCLUDE_LABELS, TERRA_URBAN_INCLUDE_SIGNALS, TERRA_URBAN_OBJECT_CAPS } from './lod'
+import {
+  TERRA_LIVE_SIGNAL_PHASE,
+  TERRA_SIGNAL_INFRASTRUCTURE_STATUS,
+  type TerraUrbanBuilding,
+  type TerraUrbanCoordinate,
+  type TerraUrbanLabel,
+  type TerraUrbanLod,
+  type TerraUrbanRoad,
+  type TerraUrbanSignal,
+  type TerraUrbanSignalNodeKind,
 } from './types'
 
 export type OverpassGeometryPoint = { lat?: number; lon?: number }
@@ -21,6 +25,8 @@ export type OverpassMember = {
 export type OverpassElement = {
   type?: string
   id?: number
+  lat?: number
+  lon?: number
   tags?: Record<string, string>
   geometry?: OverpassGeometryPoint[]
   members?: OverpassMember[]
@@ -30,6 +36,7 @@ export type OverpassResponse = { elements?: OverpassElement[] }
 export type NormalizedUrbanGeometry = {
   roads: TerraUrbanRoad[]
   buildings: TerraUrbanBuilding[]
+  signals: TerraUrbanSignal[]
   labels: TerraUrbanLabel[]
   truncated: boolean
 }
@@ -80,6 +87,12 @@ function buildingFootprint(element: OverpassElement): TerraUrbanCoordinate[] {
   return closeRing(ringFromGeometry(outer?.geometry))
 }
 
+function sourcedField(value: string | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 function formatAddress(tags: Record<string, string>): string | null {
   const parts = [
     tags['addr:housenumber'],
@@ -96,6 +109,16 @@ function highwayAllowed(highway: string, lod: TerraUrbanLod): boolean {
   return (TERRA_URBAN_HIGHWAY_CLASSES[lod] as readonly string[]).includes(highway)
 }
 
+function classifySignalNode(tags: Record<string, string>): TerraUrbanSignalNodeKind | null {
+  const highway = tags.highway
+  const crossing = tags.crossing
+  if (highway === 'crossing' && crossing === 'traffic_signals') return 'pedestrian_signal'
+  if (highway === 'traffic_signals' && (crossing === 'traffic_signals' || crossing === 'pelican' || crossing === 'toucan')) return 'signalized_crossing'
+  if (crossing === 'traffic_signals' && highway !== 'traffic_signals') return 'signalized_crossing'
+  if (highway === 'traffic_signals') return 'traffic_light_node'
+  return null
+}
+
 function dropPriority(building: TerraUrbanBuilding): number {
   if (isHouseBuildingType(building.buildingType)) return 0
   if (building.buildingType === 'apartments' || building.buildingType === 'residential') return 1
@@ -110,9 +133,37 @@ export function normalizeOverpassUrbanGeometry(response: OverpassResponse | null
   const allowedHighways = new Set(TERRA_URBAN_HIGHWAY_CLASSES[lod])
   const roads: TerraUrbanRoad[] = []
   const buildings: TerraUrbanBuilding[] = []
+  const signals: TerraUrbanSignal[] = []
   const labels: TerraUrbanLabel[] = []
   const seenRoad = new Set<string>()
   const seenBuilding = new Set<string>()
+  const seenSignal = new Set<string>()
+
+  if (TERRA_URBAN_INCLUDE_SIGNALS[lod]) {
+    for (const element of elements) {
+      if (element.type !== 'node' || typeof element.id !== 'number') continue
+      const tags = element.tags ?? {}
+      const nodeKind = classifySignalNode(tags)
+      if (!nodeKind) continue
+      const coord = asCoordinate({ lat: element.lat, lon: element.lon })
+      if (!coord) continue
+      const id = `node/${element.id}`
+      if (seenSignal.has(id)) continue
+      seenSignal.add(id)
+      signals.push({
+        id,
+        osmType: 'node',
+        osmId: element.id,
+        nodeKind,
+        name: tags.name?.trim() || tags.ref?.trim() || null,
+        direction: tags.direction?.trim() || null,
+        longitude: coord.longitude,
+        latitude: coord.latitude,
+        status: TERRA_SIGNAL_INFRASTRUCTURE_STATUS,
+        livePhase: TERRA_LIVE_SIGNAL_PHASE,
+      })
+    }
+  }
 
   for (const element of elements) {
     if ((element.type !== 'way' && element.type !== 'relation') || typeof element.id !== 'number') continue
@@ -130,6 +181,8 @@ export function normalizeOverpassUrbanGeometry(response: OverpassResponse | null
         osmId: element.id,
         highway,
         name: tags.name?.trim() || tags.ref?.trim() || null,
+        lanes: sourcedField(tags.lanes),
+        maxspeed: sourcedField(tags.maxspeed),
         geometry,
       })
       continue
@@ -152,6 +205,9 @@ export function normalizeOverpassUrbanGeometry(response: OverpassResponse | null
       buildingType: tags.building,
       name: tags.name?.trim() || tags['name:en']?.trim() || null,
       address: formatAddress(tags),
+      houseNumber: sourcedField(tags['addr:housenumber']),
+      streetName: sourcedField(tags['addr:street']),
+      entrance: sourcedField(tags.entrance),
       levels: height.levels,
       heightMeters: height.heightMeters,
       heightSource: height.heightSource,
@@ -167,12 +223,18 @@ export function normalizeOverpassUrbanGeometry(response: OverpassResponse | null
 
   const truncatedRoads = roads.length > caps.roads
   const truncatedBuildings = buildings.length > caps.buildings
+  const truncatedSignals = signals.length > caps.signals
   const keptRoads = roads.slice(0, caps.roads)
   const keptBuildings = buildings.slice(0, caps.buildings)
+  const keptSignals = signals.slice(0, caps.signals)
 
   if (TERRA_URBAN_INCLUDE_LABELS[lod]) {
+    const cityHighways = new Set<string>(TERRA_URBAN_CITY_STREET_NAME_HIGHWAYS)
+    let streetLabelCount = 0
     for (const road of keptRoads) {
       if (!road.name) continue
+      if (lod === 'city' && !cityHighways.has(road.highway)) continue
+      if (streetLabelCount >= caps.streetLabels) break
       const center = centroidOf(road.geometry)
       if (!center) continue
       labels.push({
@@ -183,15 +245,37 @@ export function normalizeOverpassUrbanGeometry(response: OverpassResponse | null
         longitude: center.longitude,
         latitude: center.latitude,
       })
-      if (labels.length >= caps.labels) break
+      streetLabelCount += 1
+    }
+    if (TERRA_URBAN_INCLUDE_HOUSE_NUMBERS[lod]) {
+      let houseLabelCount = 0
+      for (const building of keptBuildings) {
+        if (!building.houseNumber) continue
+        if (houseLabelCount >= caps.houseNumbers) break
+        labels.push({
+          id: `house:${building.id}`,
+          osmId: building.osmId,
+          kind: 'house_number',
+          text: building.houseNumber,
+          longitude: building.longitude,
+          latitude: building.latitude,
+        })
+        houseLabelCount += 1
+      }
     }
   }
 
+  const streetLabelCount = labels.filter(label => label.kind === 'street').length
+  const houseLabelCount = labels.filter(label => label.kind === 'house_number').length
+  const cityHighwaysForCap = new Set<string>(TERRA_URBAN_CITY_STREET_NAME_HIGHWAYS)
+  const namedRoads = keptRoads.filter(road => Boolean(road.name) && (lod !== 'city' || cityHighwaysForCap.has(road.highway))).length
+  const numberedBuildings = keptBuildings.filter(building => Boolean(building.houseNumber)).length
   return {
     roads: keptRoads,
     buildings: keptBuildings,
-    labels: labels.slice(0, caps.labels),
-    truncated: truncatedRoads || truncatedBuildings || labels.length > caps.labels,
+    signals: keptSignals,
+    labels,
+    truncated: truncatedRoads || truncatedBuildings || truncatedSignals || namedRoads > streetLabelCount || numberedBuildings > houseLabelCount,
   }
 }
 

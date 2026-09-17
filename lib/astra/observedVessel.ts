@@ -81,8 +81,8 @@ export function observedVesselFromTerraSeed(
   if (seed) {
     const lineage = seed.lineage
     if (!vessel.name && lineage.title) vessel.name = lineage.title
-    if (vessel.latitude === undefined) vessel.latitude = lineage.latitude
-    if (vessel.longitude === undefined) vessel.longitude = lineage.longitude
+    if (vessel.latitude === undefined && typeof lineage.latitude === 'number') vessel.latitude = lineage.latitude
+    if (vessel.longitude === undefined && typeof lineage.longitude === 'number') vessel.longitude = lineage.longitude
     if (!vessel.observedAt && lineage.observedAt) vessel.observedAt = lineage.observedAt
     if (!vessel.freshness) vessel.freshness = lineage.freshness
     if (!vessel.provider) vessel.provider = lineage.provider

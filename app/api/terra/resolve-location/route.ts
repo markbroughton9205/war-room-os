@@ -1,16 +1,23 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { requireCommanderSession } from '@/lib/security/commanderSession'
-import { parseTerraCoordinates, type TerraLocationResolution } from '@/lib/terra/locationCommand'
-import { resolvePlaceNameViaNominatim, reverseResolveCoordinatesViaNominatim } from '@/lib/terra/resolveGeography'
+import { parseTerraCoordinates, type TerraLocationResolution, looksLikePostalCode } from '@/lib/terra/locationCommand'
+import { reverseResolveCoordinatesViaNominatim } from '@/lib/terra/resolveGeography'
+import { resolveCommanderPlaceSearch } from '@/lib/terra/geocodeSearchPolicy'
 import type { TerraReverseLocationResolution } from '@/lib/terra/activeLocation'
+import { formatPlaceDisplayLabel } from '@/lib/terra/liveIntelLanguage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   const commander = await requireCommanderSession('Terra location resolution')
-  if (!commander.ok) return commander.response
+  let requestedBy = 'terra-public-geocode'
+  if (commander.ok) {
+    requestedBy = commander.userId
+  } else if (commander.response.status === 403) {
+    return commander.response
+  }
 
   const latitudeText = request.nextUrl.searchParams.get('lat')
   const longitudeText = request.nextUrl.searchParams.get('lon')
@@ -39,25 +46,60 @@ export async function GET(request: NextRequest) {
   const coordinates = parseTerraCoordinates(command)
   if (coordinates) return NextResponse.json<TerraLocationResolution>({ status: 'resolved', target: coordinates })
 
-  const resolution = await resolvePlaceNameViaNominatim(command, `commander-location:${commander.userId}`)
+  const resolution = await resolveCommanderPlaceSearch(command, `commander-location:${requestedBy}`)
+  const source = resolution.resolverProviderId === 'open_meteo'
+    ? 'open_meteo' as const
+    : resolution.resolverProviderId === 'geonames'
+      ? 'geonames' as const
+      : 'nominatim' as const
   if (resolution.quality === 'strong' || resolution.quality === 'exact') {
     return NextResponse.json<TerraLocationResolution>({
       status: 'resolved',
       target: {
         latitude: resolution.latitude,
         longitude: resolution.longitude,
-        label: resolution.matchTitle,
-        source: 'nominatim',
+        query: command,
+        label: formatPlaceDisplayLabel(resolution.nativeName, resolution.englishName) ?? resolution.matchTitle,
+        source,
         placeType: resolution.placeType ?? null,
         boundingBox: resolution.boundingBox ?? null,
+        nativeName: resolution.nativeName ?? null,
+        englishName: resolution.englishName ?? null,
+        sourceUrl: resolution.sourceUrl ?? null,
+        coverage: source,
+        retrievedAt: resolution.retrievedAt,
+        instantRequested: false,
       },
     })
   }
 
+  if (resolution.quality === 'ambiguous') {
+    const matches = (resolution.matches ?? []).map(match => ({
+      latitude: match.latitude,
+      longitude: match.longitude,
+      query: command,
+      label: match.label,
+      source,
+      placeType: match.placeType,
+      boundingBox: match.boundingBox,
+      nativeName: match.nativeName,
+      englishName: match.englishName,
+      sourceUrl: match.sourceUrl,
+      coverage: source,
+      retrievedAt: resolution.retrievedAt,
+      instantRequested: false,
+    }))
+    return NextResponse.json<TerraLocationResolution>({
+      status: 'ambiguous',
+      message: looksLikePostalCode(command)
+        ? 'That postal code matches more than one place. Pick a listed match or add a city, state, or country — coordinates are never guessed.'
+        : 'That command matches multiple locations. Pick a listed match or add a city, region, postal code, or country.',
+      matches,
+    })
+  }
+
   return NextResponse.json<TerraLocationResolution>({
-    status: resolution.quality,
-    message: resolution.quality === 'ambiguous'
-      ? 'That command matches multiple locations. Add a city, region, postal code, or country and try again.'
-      : ('reason' in resolution ? resolution.reason : 'Location could not be resolved.'),
+    status: 'unresolved',
+    message: 'reason' in resolution ? resolution.reason : 'Location could not be resolved.',
   })
 }

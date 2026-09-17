@@ -10,16 +10,13 @@
 'use strict'
 
 const fs = require('node:fs')
-const os = require('node:os')
 const path = require('node:path')
+const { resolveAppDataPaths } = require('./appDataRoot.cjs')
 
 const ALLOWED = new Set(['AUTO', 'LOCAL_ONLY', 'LOCAL_FIRST', 'HYBRID', 'EXTERNAL_ONLY'])
 
 function dataDir() {
-  const env = process.env.WAR_ROOM_LOCAL_DATA_DIR && String(process.env.WAR_ROOM_LOCAL_DATA_DIR).trim()
-  if (env) return env
-  const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
-  return path.join(base, 'War Room OS', 'data')
+  return resolveAppDataPaths().data
 }
 
 function configPath() {

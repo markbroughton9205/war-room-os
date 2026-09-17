@@ -5,8 +5,10 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import {
   LOCAL_SESSION_COOKIE,
   assertLocalOnlyRequest,
+  extractBearerOrCookieToken,
   getLocalOwnershipStore,
 } from '@/lib/sovereign-runtime/local-ownership'
+import { isLocalDesktopCommanderRuntime, resolveLocalCommanderUserId } from '@/lib/security/commanderSessionPolicy'
 
 export type CommanderSession =
   | {
@@ -18,21 +20,9 @@ export type CommanderSession =
       response: NextResponse
     }
 
-function isPackagedDesktopRuntime() {
-  return process.env.WAR_ROOM_PACKAGED === '1' || process.env.WAR_ROOM_RUNTIME_SURFACE === 'DESKTOP_LOCAL'
-}
+export { isLocalDesktopCommanderRuntime, resolveLocalCommanderUserId } from '@/lib/security/commanderSessionPolicy'
 
-function localSessionTokenFromCookieHeader(cookieHeader: string | null): string | null {
-  if (!cookieHeader) return null
-  for (const part of cookieHeader.split(';')) {
-    const [name, ...rest] = part.trim().split('=')
-    if (name === LOCAL_SESSION_COOKIE) return decodeURIComponent(rest.join('=') || '')
-  }
-  return null
-}
-
-async function readPackagedDesktopCommander(): Promise<{ userId: string } | null> {
-  if (!isPackagedDesktopRuntime()) return null
+async function readLoopbackLocalCommander(): Promise<{ userId: string } | null> {
   const requestHeaders = await headers()
   const gate = assertLocalOnlyRequest({
     host: requestHeaders.get('host'),
@@ -40,30 +30,39 @@ async function readPackagedDesktopCommander(): Promise<{ userId: string } | null
   })
   if (!gate.ok) return null
 
-  try {
-    const sessionClient = await createSupabaseServerClient()
-    const { data, error } = await sessionClient.auth.getUser()
-    if (!error && data.user?.id) return { userId: data.user.id }
-  } catch {
-    /* packaged desktop may be offline-local */
-  }
+  const token = extractBearerOrCookieToken({
+    authorization: requestHeaders.get('authorization'),
+    cookieHeader: requestHeaders.get('cookie'),
+    cookieName: LOCAL_SESSION_COOKIE,
+  })
+  if (!token) return null
 
   try {
     const store = getLocalOwnershipStore(process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null)
-    const auth = store.verifySessionToken(localSessionTokenFromCookieHeader(requestHeaders.get('cookie')))
-    if (auth?.identity?.id) return { userId: auth.identity.id }
+    const auth = store.verifySessionToken(token)
+    if (!auth?.identity?.id) return null
+    const commanderConfig = readCommanderIdentityConfig()
+    const userId = resolveLocalCommanderUserId({
+      loopbackOk: true,
+      localIdentityId: auth.identity.id,
+      linkedRemoteUserId: auth.identity.linked_remote_user_id,
+      configuredCommanderUserId: commanderConfig.ok ? commanderConfig.commanderUserId : null,
+    })
+    return userId ? { userId } : null
   } catch {
-    /* local ownership store is optional for this fallback */
+    return null
   }
-  return null
 }
 
 export async function requireCommanderSession(actionLabel = 'War Room memory'): Promise<CommanderSession> {
+  // Loopback wr_local_session is the Commander for this installation. Evaluate it before
+  // Supabase so a leftover remote cookie cannot 403 Terra after a valid local login.
+  const local = await readLoopbackLocalCommander()
+  if (local) return { ok: true, userId: local.userId }
+
   const commanderConfig = readCommanderIdentityConfig()
   if (!commanderConfig.ok) {
-    const packaged = await readPackagedDesktopCommander()
-    if (packaged) return { ok: true, userId: packaged.userId }
-    if (isPackagedDesktopRuntime()) {
+    if (isLocalDesktopCommanderRuntime()) {
       return {
         ok: false,
         response: NextResponse.json({ error: 'Authenticated Commander session required.' }, { status: 401 }),
@@ -86,21 +85,19 @@ export async function requireCommanderSession(actionLabel = 'War Room memory'): 
     userId = null
   }
 
-  if (!userId) {
-    const packaged = await readPackagedDesktopCommander()
-    if (packaged) return { ok: true, userId: packaged.userId }
-    return {
-      ok: false,
-      response: NextResponse.json({ error: 'Authenticated Commander session required.' }, { status: 401 }),
-    }
+  if (userId === commanderConfig.commanderUserId) {
+    return { ok: true, userId }
   }
 
-  if (userId !== commanderConfig.commanderUserId) {
+  if (userId && userId !== commanderConfig.commanderUserId) {
     return {
       ok: false,
       response: NextResponse.json({ error: 'Commander session required.' }, { status: 403 }),
     }
   }
 
-  return { ok: true, userId }
+  return {
+    ok: false,
+    response: NextResponse.json({ error: 'Authenticated Commander session required.' }, { status: 401 }),
+  }
 }

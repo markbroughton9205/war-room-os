@@ -4,6 +4,7 @@
  *   node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/terra/requestSequence.validation.ts
  */
 import { pathToFileURL } from 'node:url'
+import { inspectEnrichAppliesTo } from './godsEye/inspectRace'
 import { isTerraRequestStale } from './requestSequence'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
@@ -23,6 +24,8 @@ function run(): CaseResult[] {
   // after B's request was issued, not just after B's response.
   results.push(check('late_arriving_first_request_is_stale_once_superseded', isTerraRequestStale(1, 2) === true, 'A (seq 1) arriving after B (seq 2) was issued'))
   results.push(check('second_request_response_is_not_stale', isTerraRequestStale(2, 2) === false, 'B (seq 2) arriving as the latest issued request'))
+  results.push(check('enrich_from_a_does_not_bind_to_b', inspectEnrichAppliesTo({ latitude: 41.0814, longitude: -81.519 }, { latitude: 40.7128, longitude: -74.006 }) === false, 'Akron vs Manhattan'))
+  results.push(check('null_enrich_never_applies', inspectEnrichAppliesTo({ latitude: 41.0814, longitude: -81.519 }, { latitude: null, longitude: null }) === false, 'pending coords required'))
 
   return results
 }

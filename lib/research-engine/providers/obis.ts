@@ -10,6 +10,8 @@ import { errorResponse, makeDocument, okResponse, nowIso } from '@/lib/research-
 const PROVIDER = 'obis' as const
 const BASE_URL = 'https://api.obis.org/v3'
 const MAX_RESULTS = 20
+const NEAR_PATTERN = /^near\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s*,\s*(\d+(?:\.\d+)?))?$/i
+const MAX_NEAR_RADIUS_KM = 80
 
 type Occurrence = {
   id?: string
@@ -35,7 +37,20 @@ async function search(query: ResearchQuery) {
   if (cached) return { ok: true as const, response: { ...cached, fromCache: true } }
 
   const url = new URL(`${BASE_URL}/occurrence`)
-  url.searchParams.set('scientificname', text)
+  const near = NEAR_PATTERN.exec(text)
+  if (near) {
+    const lat = Number(near[1])
+    const lon = Number(near[2])
+    const radiusKm = Math.max(1, Math.min(near[3] ? Number(near[3]) : 25, MAX_NEAR_RADIUS_KM))
+    const delta = radiusKm / 111
+    const south = lat - delta
+    const north = lat + delta
+    const west = lon - delta
+    const east = lon + delta
+    url.searchParams.set('geometry', `POLYGON((${west} ${south},${east} ${south},${east} ${north},${west} ${north},${west} ${south}))`)
+  } else {
+    url.searchParams.set('scientificname', text)
+  }
   url.searchParams.set('size', String(limit))
 
   const result = await safeProviderFetch(PROVIDER, url.toString(), { timeoutMs: 12_000 })

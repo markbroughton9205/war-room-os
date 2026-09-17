@@ -15,6 +15,11 @@ import { webtrisAdapter } from '@/lib/research-engine/providers/webtris'
 import { digitrafficRoadWeatherAdapter } from '@/lib/research-engine/providers/digitraffic_road_weather'
 import { ontario511CamerasAdapter } from '@/lib/research-engine/providers/ontario_511_cameras'
 import { ontario511EventsAdapter } from '@/lib/research-engine/providers/ontario_511_events'
+import { ohgoCamerasAdapter } from '@/lib/research-engine/providers/ohgo_cameras'
+import { ohgoEventsAdapter } from '@/lib/research-engine/providers/ohgo_events'
+import { ohgoRoadWeatherAdapter } from '@/lib/research-engine/providers/ohgo_road_weather'
+import { caltransCctvAdapter } from '@/lib/research-engine/providers/caltrans_cctv'
+import { ny511CamerasAdapter } from '@/lib/research-engine/providers/ny511_cameras'
 import { hongKongTdCamerasAdapter } from '@/lib/research-engine/providers/hong_kong_td_cameras'
 import { quebec511CamerasAdapter } from '@/lib/research-engine/providers/quebec_511_cameras'
 import { quebec511EventsAdapter } from '@/lib/research-engine/providers/quebec_511_events'
@@ -423,6 +428,11 @@ export const IMPLEMENTED_PROVIDER_ADAPTERS: Partial<Record<ResearchProviderId, R
   digitraffic_road_weather: digitrafficRoadWeatherAdapter,
   ontario_511_cameras: ontario511CamerasAdapter,
   ontario_511_events: ontario511EventsAdapter,
+  ohgo_cameras: ohgoCamerasAdapter,
+  ohgo_events: ohgoEventsAdapter,
+  ohgo_road_weather: ohgoRoadWeatherAdapter,
+  caltrans_cctv: caltransCctvAdapter,
+  ny511_cameras: ny511CamerasAdapter,
   hong_kong_td_cameras: hongKongTdCamerasAdapter,
   quebec_511_cameras: quebec511CamerasAdapter,
   quebec_511_events: quebec511EventsAdapter,

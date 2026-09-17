@@ -19,6 +19,7 @@
  */
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { TerraGeoFeature } from '@/lib/terra/types'
+import { cameraPreviewHref } from '@/lib/terra/godsEye/trafficCamera'
 
 const HOVER_DWELL_MS = 400
 // Brief client-side cache of resolved preview URLs, keyed by feature id. Values are plain URLs
@@ -33,11 +34,15 @@ const IMAGE_FAILURE_RETRY_MS = 30_000
 // avoid a TerraShell ↔ hover-card module cycle) — live video vs still vs stale vs offline is
 // source-reported, never inferred.
 const FRESHNESS_META: Record<string, { text: string; color: string }> = {
-  live_video: { text: 'LIVE VIDEO', color: 'text-emerald-400' },
-  still_image: { text: 'STILL IMAGE — CURRENT', color: 'text-emerald-400' },
+  live_video: { text: 'AVAILABLE', color: 'text-cyan-300' },
+  still_image: { text: 'AVAILABLE', color: 'text-cyan-300' },
   stale: { text: 'STALE', color: 'text-amber-400' },
   offline: { text: 'OFFLINE', color: 'text-red-400' },
-  unknown: { text: 'UNKNOWN', color: 'text-slate-400' },
+  unknown: { text: 'UNAVAILABLE', color: 'text-slate-400' },
+  UNAVAILABLE: { text: 'UNAVAILABLE', color: 'text-slate-400' },
+  LIVE: { text: 'AVAILABLE', color: 'text-cyan-300' },
+  STALE: { text: 'STALE', color: 'text-amber-400' },
+  OFFLINE: { text: 'OFFLINE', color: 'text-red-400' },
 }
 
 const PROVIDER_LABEL: Record<string, string> = {
@@ -45,19 +50,15 @@ const PROVIDER_LABEL: Record<string, string> = {
   ontario_511_cameras: 'Ontario 511 (Canada)',
   hong_kong_td_cameras: 'Hong Kong Transport Department',
   quebec_511_cameras: 'Québec 511 (MTMD)',
+  ohgo_cameras: 'OHGO / ODOT (Ohio)',
+  caltrans_cctv: 'Caltrans CWWP2 (California)',
 }
 
 function resolvePreviewImageUrl(feature: TerraGeoFeature): string | null {
   const cached = IMAGE_URL_CACHE.get(feature.id)
   if (cached !== undefined) return cached
-  let url: string | null = null
-  if (feature.providerId === 'ontario_511_cameras' && typeof feature.properties.viewId === 'string') {
-    url = `/api/terra/camera-image?provider=ontario_511_cameras&id=${encodeURIComponent(feature.properties.viewId)}`
-  } else if (feature.providerId === 'hong_kong_td_cameras' && typeof feature.properties.cameraId === 'string') {
-    url = `/api/terra/camera-image?provider=hong_kong_td_cameras&id=${encodeURIComponent(feature.properties.cameraId)}`
-  } else if (feature.providerId === 'digitraffic_road_cameras' && typeof feature.properties.imageUrl === 'string') {
-    url = feature.properties.imageUrl
-  }
+  const preview = cameraPreviewHref({ providerId: feature.providerId, properties: feature.properties })
+  const url = preview.kind === 'still' ? preview.href : null
   if (url !== null) {
     if (IMAGE_URL_CACHE.size >= IMAGE_URL_CACHE_MAX) IMAGE_URL_CACHE.clear()
     IMAGE_URL_CACHE.set(feature.id, url)
@@ -73,6 +74,8 @@ export function TerraCameraHoverCard({
   y,
   onOpen,
   onDismiss,
+  onPin,
+  positioned = true,
 }: {
   feature: TerraGeoFeature
   /** Cursor position relative to the globe container. */
@@ -80,6 +83,8 @@ export function TerraCameraHoverCard({
   y: number
   onOpen: () => void
   onDismiss: () => void
+  onPin?: () => void
+  positioned?: boolean
 }) {
   // The metadata header renders immediately on hover; only the image waits out the dwell, so a
   // fast pass over many cameras never issues a single image request. State resets come free from
@@ -97,9 +102,13 @@ export function TerraCameraHoverCard({
     return () => clearTimeout(timer)
   }, [feature.id])
 
-  const freshness = typeof feature.properties.freshness === 'string' ? feature.properties.freshness : 'unknown'
-  const freshnessMeta = FRESHNESS_META[freshness] ?? FRESHNESS_META.unknown
-  const mediaAvailable = freshness !== 'stale' && freshness !== 'offline'
+  const freshness = typeof feature.properties.freshnessState === 'string'
+    ? feature.properties.freshnessState
+    : typeof feature.properties.freshness === 'string' ? feature.properties.freshness : 'unknown'
+  const freshnessMeta = imageFailed
+    ? FRESHNESS_META.offline
+    : (FRESHNESS_META[freshness] ?? FRESHNESS_META.unknown)
+  const mediaAvailable = freshness !== 'stale' && freshness !== 'offline' && freshness !== 'STALE' && freshness !== 'OFFLINE'
   const viewerUrl = typeof feature.properties.viewerUrl === 'string' ? feature.properties.viewerUrl : null
   const imageUrl = useMemo(
     () => (mediaAvailable && !viewerUrl ? resolvePreviewImageUrl(feature) : null),
@@ -109,23 +118,32 @@ export function TerraCameraHoverCard({
   const showImage = dwellElapsed && imageUrl !== null && !imageFailed
 
   // Flip left of the cursor near the right edge so the card never leaves the viewport.
-  const flipX = typeof window !== 'undefined' && x + CARD_WIDTH_PX + 32 > window.innerWidth
-  const style: CSSProperties = flipX
-    ? { left: x - 12, top: y + 16, transform: 'translateX(-100%)' }
-    : { left: x + 16, top: y + 16 }
+  const flipX = positioned && typeof window !== 'undefined' && x + CARD_WIDTH_PX + 32 > window.innerWidth
+  const style: CSSProperties | undefined = positioned
+    ? (flipX
+      ? { left: x - 12, top: y + 16, transform: 'translateX(-100%)' }
+      : { left: x + 16, top: y + 16 })
+    : undefined
 
   return (
     <div
       role="dialog"
       aria-label={`${feature.title} — camera preview`}
-      className="pointer-events-auto absolute z-40 w-72 rounded border border-cyan-400/30 bg-black/85 p-3 shadow-2xl backdrop-blur-md"
+      className={`pointer-events-auto w-72 rounded border border-cyan-400/30 bg-black/85 p-3 shadow-2xl backdrop-blur-md ${positioned ? 'absolute z-40' : ''}`}
       style={style}
     >
       <div className="mb-1 flex items-start justify-between gap-2">
         <p className="text-[11px] font-semibold leading-snug text-slate-100">{feature.title}</p>
-        <button type="button" onClick={onDismiss} aria-label="Dismiss preview" className="shrink-0 text-[10px] text-slate-500 hover:text-slate-300">
-          dismiss
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {onPin ? (
+            <button type="button" onClick={onPin} aria-label="Pin camera preview" className="text-[10px] uppercase tracking-widest text-cyan-300 hover:text-cyan-100" data-testid="terra-camera-hover-pin">
+              pin
+            </button>
+          ) : null}
+          <button type="button" onClick={onDismiss} aria-label="Dismiss preview" className="text-[10px] text-slate-500 hover:text-slate-300">
+            dismiss
+          </button>
+        </div>
       </div>
       <dl className="space-y-0.5 text-[10.5px] text-slate-400">
         {typeof feature.properties.road === 'string' && (
@@ -135,13 +153,18 @@ export function TerraCameraHoverCard({
           <div className="flex justify-between"><dt>Direction</dt><dd className="text-slate-200">{feature.properties.direction.replace(/_/g, ' ').toLowerCase()}</dd></div>
         )}
         <div className="flex justify-between"><dt>Provider</dt><dd className="text-slate-200">{PROVIDER_LABEL[feature.providerId] ?? feature.providerId}</dd></div>
-        {feature.timestamp && (
-          <div className="flex justify-between"><dt>Captured</dt><dd className="text-slate-200">{new Date(feature.timestamp).toLocaleString()}</dd></div>
+        {typeof feature.properties.capturedAt === 'string' && (
+          <div className="flex justify-between"><dt>Captured</dt><dd className="text-slate-200">{new Date(feature.properties.capturedAt).toLocaleString()}</dd></div>
         )}
-        {!feature.timestamp && (
-          <div className="flex justify-between"><dt>Captured</dt><dd className="text-slate-500">not reported by source</dd></div>
+        <div className="flex justify-between"><dt>Catalog status</dt><dd className="text-emerald-400">{feature.provenance.fromCache ? 'CACHED' : 'LIVE'}</dd></div>
+        {typeof feature.properties.capturedAt === 'string' ? (
+          <div className="flex justify-between"><dt>Image capture freshness</dt><dd className={freshnessMeta.color}>{freshnessMeta.text}</dd></div>
+        ) : (
+          <>
+            <div className="flex justify-between"><dt>Image capture freshness</dt><dd className="text-slate-500">UNKNOWN</dd></div>
+            <p className="text-[10px] text-slate-500">Source did not report capture time</p>
+          </>
         )}
-        <div className="flex justify-between"><dt>Status</dt><dd className={freshnessMeta.color}>{freshnessMeta.text}</dd></div>
       </dl>
 
       {viewerUrl ? (

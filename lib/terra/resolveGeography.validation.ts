@@ -9,8 +9,10 @@ import { pathToFileURL } from 'node:url'
 import { __setResearchFetchForTests } from '@/lib/research-engine/security/safeFetch'
 import { __resetCacheForTests } from '@/lib/research-engine/cache/ttlCache'
 import { __resetProviderGateForTests } from '@/lib/research-engine/security/providerGate'
+import { __resetNominatimBackoffForTests } from '@/lib/research-engine/providers/nominatim'
 import { resolvePlaceNameViaNominatim, reverseResolveCoordinatesViaNominatim } from './resolveGeography'
-import { parseTerraCoordinates } from './locationCommand'
+import { resolveCommanderPlaceSearch, isTransientGeocoderFailure } from './geocodeSearchPolicy'
+import { parseTerraCoordinates, looksLikePostalCode } from './locationCommand'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 
@@ -25,6 +27,7 @@ function jsonResponse(data: unknown): Response {
 async function withMockedFetch<T>(response: Response, fn: () => Promise<T>): Promise<T> {
   __resetProviderGateForTests()
   __resetCacheForTests()
+  __resetNominatimBackoffForTests()
   __setResearchFetchForTests((async () => response) as typeof fetch)
   try {
     return await fn()
@@ -32,6 +35,27 @@ async function withMockedFetch<T>(response: Response, fn: () => Promise<T>): Pro
     __setResearchFetchForTests(null)
     __resetProviderGateForTests()
     __resetCacheForTests()
+    __resetNominatimBackoffForTests()
+  }
+}
+
+async function withMockedFetchSequence<T>(responses: Response[], fn: () => Promise<T>): Promise<T> {
+  __resetProviderGateForTests()
+  __resetCacheForTests()
+  __resetNominatimBackoffForTests()
+  let index = 0
+  __setResearchFetchForTests((async () => {
+    const response = responses[Math.min(index, responses.length - 1)]
+    index += 1
+    return response
+  }) as typeof fetch)
+  try {
+    return await fn()
+  } finally {
+    __setResearchFetchForTests(null)
+    __resetProviderGateForTests()
+    __resetCacheForTests()
+    __resetNominatimBackoffForTests()
   }
 }
 
@@ -41,6 +65,8 @@ async function run(): Promise<CaseResult[]> {
   const direct = parseTerraCoordinates('40.7128, -74.0060')
   results.push(check('typed_coordinates_resolve_without_guessing', direct?.latitude === 40.7128 && direct.longitude === -74.006, JSON.stringify(direct)))
   results.push(check('out_of_range_coordinates_are_rejected', parseTerraCoordinates('91, 181') === null, '91, 181'))
+  results.push(check('five_digit_zip_is_recognized_as_postal', looksLikePostalCode('44310') === true, '44310'))
+  results.push(check('city_name_is_not_treated_as_postal', looksLikePostalCode('Akron') === false, 'Akron'))
 
   // --- Exact/strong: exactly one real coordinate-bearing candidate ---
   await withMockedFetch(
@@ -109,7 +135,25 @@ async function run(): Promise<CaseResult[]> {
     const resolved = await reverseResolveCoordinatesViaNominatim({ latitude: 0, longitude: -140, height: null, hasTerrainHeight: false })
     results.push(check('reverse_unavailable_retains_coordinate_only_context', resolved.status === 'coordinate_only' && resolved.location.latitude === 0 && resolved.location.longitude === -140, JSON.stringify(resolved)))
     results.push(check('reverse_unavailable_is_explicitly_unresolved', resolved.location.status === 'coordinate_only' && resolved.location.detail.includes('unavailable'), resolved.location.detail))
+    results.push(check('reverse_unavailable_keeps_reverse_status_unavailable', resolved.location.reverseGeocodeStatus === 'unavailable', String(resolved.location.reverseGeocodeStatus)))
   })
+
+  // --- ZIP / postal: a unique Nominatim postcode among mixed nearby features is selected ---
+  await withMockedFetch(
+    jsonResponse([
+      { place_id: 11, osm_type: 'way', osm_id: 1, lat: '41.081', lon: '-81.519', display_name: 'Main Street, Akron, OH', name: 'Main Street', class: 'highway', type: 'residential' },
+      { place_id: 12, osm_type: 'relation', osm_id: 2, lat: '41.0814', lon: '-81.519', display_name: '44310, Akron, Ohio, United States', name: '44310', class: 'place', type: 'postcode', boundingbox: ['41.05', '41.12', '-81.58', '-81.45'] },
+      { place_id: 13, osm_type: 'node', osm_id: 3, lat: '41.09', lon: '-81.50', display_name: 'Akron, Ohio', name: 'Akron', class: 'place', type: 'city' },
+    ]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('44310', 'edh:test-zip')
+      results.push(check('unique_postcode_among_mixed_results_resolves', resolved.quality === 'strong' || resolved.quality === 'exact', `quality=${resolved.quality}`))
+      if (resolved.quality === 'strong' || resolved.quality === 'exact') {
+        results.push(check('zip_uses_postcode_coordinates_not_a_guessed_street', resolved.latitude === 41.0814 && resolved.longitude === -81.519, `lat=${resolved.latitude} lon=${resolved.longitude}`))
+        results.push(check('zip_place_type_is_postcode', resolved.placeType === 'place/postcode', `placeType=${resolved.placeType}`))
+      }
+    },
+  )
 
   // --- Ambiguous: two distinct coordinate-bearing candidates — must NOT auto-select either ---
   await withMockedFetch(
@@ -121,6 +165,7 @@ async function run(): Promise<CaseResult[]> {
       const resolved = await resolvePlaceNameViaNominatim('Richmond', 'edh:test-2')
       results.push(check('multiple_candidates_stay_ambiguous_not_auto_selected', resolved.quality === 'ambiguous', `quality=${resolved.quality}`))
       results.push(check('ambiguous_result_carries_no_coordinates', !('longitude' in resolved), `keys=${Object.keys(resolved).join(',')}`))
+      results.push(check('ambiguous_result_lists_real_matches', resolved.quality === 'ambiguous' && (resolved.matches?.length ?? 0) === 2 && resolved.matches?.every(match => typeof match.latitude === 'number'), `matches=${JSON.stringify(resolved.quality === 'ambiguous' ? resolved.matches : null)}`))
     },
   )
 
@@ -146,6 +191,38 @@ async function run(): Promise<CaseResult[]> {
       results.push(check('malformed_coordinate_candidate_is_not_treated_as_valid', resolved.quality === 'unresolved', `quality=${resolved.quality}`))
     },
   )
+
+  results.push(check(
+    'http_429_is_transient_geocoder_failure',
+    isTransientGeocoderFailure('Nominatim search failed with HTTP 429.') && !isTransientGeocoderFailure('Resolver returned no candidate with real, range-valid coordinates.'),
+    '429 vs empty',
+  ))
+
+  await withMockedFetch(new Response('Too Many Requests', { status: 429 }), async () => {
+    const resolved = await reverseResolveCoordinatesViaNominatim({ latitude: 40.7421, longitude: -81.5193, height: null, hasTerrainHeight: false })
+    results.push(check(
+      'reverse_429_keeps_requested_coordinates',
+      resolved.status === 'coordinate_only' && resolved.location.latitude === 40.7421 && resolved.location.longitude === -81.5193,
+      JSON.stringify(resolved.location),
+    ))
+    results.push(check(
+      'reverse_429_does_not_invent_a_place_name',
+      resolved.location.place === null && resolved.location.reverseGeocodeStatus === 'unavailable',
+      resolved.location.detail,
+    ))
+  })
+
+  await withMockedFetchSequence([
+    new Response('Too Many Requests', { status: 429 }),
+    jsonResponse({ results: [{ id: 1, name: 'Akron', latitude: 41.08144, longitude: -81.51901, country: 'United States', country_code: 'US', admin1: 'Ohio' }] }),
+  ], async () => {
+    const resolved = await resolveCommanderPlaceSearch('Akron, Ohio', 'commander-location:test')
+    results.push(check(
+      'search_429_falls_back_to_open_meteo_without_fabricating',
+      (resolved.quality === 'strong' || resolved.quality === 'exact') && resolved.resolverProviderId === 'open_meteo' && resolved.latitude === 41.08144 && resolved.longitude === -81.51901,
+      JSON.stringify(resolved),
+    ))
+  })
 
   return results
 }

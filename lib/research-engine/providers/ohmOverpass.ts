@@ -18,14 +18,17 @@ const MAX_RESULTS = 20
 const DEFAULT_RADIUS_KM = 10
 const MAX_RADIUS_KM = 100
 const NEAR_PATTERN = /^(.*?)\s+near\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s*,\s*(\d+(?:\.\d+)?))?$/i
+const HISTORIC_NEAR_PATTERN = /^historic\s+near\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s*,\s*(\d+(?:\.\d+)?))?$/i
 
 type OverpassElement = { type?: string; id?: number; lat?: number; lon?: number; center?: { lat?: number; lon?: number }; tags?: Record<string, string> }
 type OverpassResponse = { elements?: OverpassElement[] }
 
 class OhmOverpassQueryError extends Error {}
 
+import { TERRA_PUBLIC_USER_AGENT } from '@/lib/terra/terraPublicIdentity'
+
 function userAgent(): string {
-  return process.env.OHM_OVERPASS_USER_AGENT_BASE?.trim() || 'WarRoomResearchEngine/1.0 (contact: research-engine@warroom.local)'
+  return process.env.OHM_OVERPASS_USER_AGENT_BASE?.trim() || TERRA_PUBLIC_USER_AGENT
 }
 
 function kmToDegrees(km: number): number {
@@ -42,16 +45,28 @@ function buildQuery(name: string, lat: number, lon: number, radiusKm: number, li
   return `[out:json][timeout:25];nwr[name~"${escapedName}",i](${south},${west},${north},${east});out center ${limit};`
 }
 
+function buildHistoricQuery(lat: number, lon: number, radiusKm: number, limit: number): string {
+  const delta = kmToDegrees(radiusKm)
+  const south = lat - delta
+  const north = lat + delta
+  const west = lon - delta
+  const east = lon + delta
+  const bbox = `${south},${west},${north},${east}`
+  return `[out:json][timeout:25];nwr[historic][name](${bbox});out center ${limit};`
+}
+
 async function search(query: ResearchQuery) {
   const started = Date.now()
-  const match = NEAR_PATTERN.exec(query.text.trim())
-  if (!match) {
-    throw new OhmOverpassQueryError('Query must be in the form "<name> near <lat>,<lon>[,<radiusKm>]" — Overpass has no unbounded worldwide search.')
+  const trimmed = query.text.trim()
+  const historicMatch = HISTORIC_NEAR_PATTERN.exec(trimmed)
+  const namedMatch = historicMatch ? null : NEAR_PATTERN.exec(trimmed)
+  if (!historicMatch && !namedMatch) {
+    throw new OhmOverpassQueryError('Query must be in the form "<name> near <lat>,<lon>[,<radiusKm>]" or "historic near <lat>,<lon>[,<radiusKm>]" — Overpass has no unbounded worldwide search.')
   }
-  const [, rawName, latStr, lonStr, radiusStr] = match
-  const name = rawName.trim().slice(0, 100)
-  const lat = Number(latStr)
-  const lon = Number(lonStr)
+  const lat = Number(historicMatch ? historicMatch[1] : namedMatch![2])
+  const lon = Number(historicMatch ? historicMatch[2] : namedMatch![3])
+  const radiusStr = historicMatch ? historicMatch[3] : namedMatch![4]
+  const name = historicMatch ? 'historic' : namedMatch![1].trim().slice(0, 100)
   if (!name || !Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
     throw new OhmOverpassQueryError('Invalid name or out-of-range coordinates.')
   }
@@ -62,7 +77,9 @@ async function search(query: ResearchQuery) {
   const cached = cacheGet<ReturnType<typeof okResponse>>(cacheKey)
   if (cached) return { ok: true as const, response: { ...cached, fromCache: true } }
 
-  const overpassQuery = buildQuery(name, lat, lon, radiusKm, limit)
+  const overpassQuery = historicMatch
+    ? buildHistoricQuery(lat, lon, radiusKm, limit)
+    : buildQuery(name, lat, lon, radiusKm, limit)
   const result = await safeProviderFetch(PROVIDER, BASE_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': userAgent() },
@@ -119,7 +136,16 @@ async function run(query: ResearchQuery) {
     return await withProviderGate(PROVIDER, async () => {
       const outcome = await search(query)
       if (outcome.ok) return outcome.response
-      if (outcome.kind === 'http_error') throw new Error(`OHM Overpass query failed with HTTP ${outcome.status}`)
+      if (outcome.kind === 'http_error') {
+        const status = outcome.status
+        const category = status === 429 ? 'rate_limited' : 'upstream_error'
+        return errorResponse(PROVIDER, {
+          provider: PROVIDER,
+          category,
+          message: `OHM Overpass query failed with HTTP ${status}`,
+          httpStatus: status,
+        }, 0)
+      }
       throw new Error(outcome.message)
     })
   } catch (error) {

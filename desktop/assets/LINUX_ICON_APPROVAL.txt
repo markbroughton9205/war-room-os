@@ -1,0 +1,24 @@
+WAR ROOM OS — LINUX ICON APPROVAL
+==================================
+
+Approved artwork for the Linux desktop package (deb / AppImage / GNOME dock / launcher).
+
+Source supplied by the Commander : /home/chosenone/War Room OS.png
+Installed in repository as       : desktop/assets/war-room-os.png
+Copied                           : byte-for-byte, no edit, no re-render, no redesign
+SHA-256                          : cf2ccedcae41cdb2b95d8ae754876d662ab17fb5591786d7c4846d606a665724
+Bytes                            : 1951508
+Dimensions                       : 1254 x 1254, RGB, opaque (no alpha)
+
+Approved design, as specified by the Commander:
+  - dark cinematic rounded-square design
+  - metallic WR crest emblem
+  - green / cyan luminous accents
+
+Scope: this file is the sole Linux crest source. Packaging resizes it (no redesign) into
+desktop/assets/linux-icons/{16,32,48,64,128,256,512}x{size}.png and sets build.linux.icon
+to that directory so GNOME/hicolor can resolve Icon=war-room-os. It is a separate asset
+from desktop/assets/war-room-os-icon.png, which remains the sole source for the Windows
+.ico (desktop/assets/war-room-os.ico) per desktop/assets/ICON_APPROVAL.txt.
+Keeping these decoupled means running `npm run icon:ico` / `npm run dist` (Windows) will
+NOT regenerate the Windows icon from this Linux artwork.

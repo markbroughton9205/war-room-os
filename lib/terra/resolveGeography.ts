@@ -33,10 +33,11 @@ import 'server-only'
  * lib/terra/types.ts).
  */
 import { executeResearch } from '@/lib/research-engine/core/execute'
-import type { ResearchProviderId } from '@/lib/research-engine/core/types'
+import type { ResearchDocument, ResearchProviderId } from '@/lib/research-engine/core/types'
 import type { TerraResolvedGeography } from '@/lib/terra/types'
 import type { TerraActiveLocation, TerraReverseLocationResolution } from '@/lib/terra/activeLocation'
 import { reverseNominatimCoordinates } from '@/lib/research-engine/providers/nominatim'
+import { isNominatimPostalType, looksLikePostalCode } from '@/lib/terra/locationCommand'
 
 const RESOLVER_PROVIDER_ID: ResearchProviderId = 'nominatim'
 
@@ -52,12 +53,53 @@ function isFiniteNumber(value: unknown): value is number {
 /** Parses the four bbox_* identifier strings nominatim.ts attaches onto a search document (see
  * that file's `search()`) back into a real bounding box — undefined/malformed input honestly
  * yields `null`, never a guessed or zero-sized box. */
+type NominatimSearchCandidate = { lat: number; lon: number; doc: ResearchDocument }
+
+export function selectNominatimSearchCandidate(
+  queryUsed: string,
+  candidates: NominatimSearchCandidate[],
+): { quality: 'strong'; candidate: NominatimSearchCandidate; reason: string } | { quality: 'ambiguous'; reason: string } {
+  if (candidates.length === 1) {
+    return { quality: 'strong', candidate: candidates[0], reason: 'Exactly one coordinate-bearing candidate.' }
+  }
+  if (looksLikePostalCode(queryUsed)) {
+    const postcodes = candidates.filter(candidate => isNominatimPostalType(candidate.doc.identifiers.class, candidate.doc.identifiers.type))
+    if (postcodes.length === 1) {
+      return { quality: 'strong', candidate: postcodes[0], reason: 'Unique Nominatim postcode match among mixed nearby features.' }
+    }
+    if (postcodes.length > 1) {
+      return { quality: 'ambiguous', reason: `Resolver returned ${postcodes.length} distinct postcode candidates — never auto-selecting one.` }
+    }
+  }
+  return {
+    quality: 'ambiguous',
+    reason: `Resolver returned ${candidates.length} distinct coordinate-bearing candidates — never auto-selecting one.`,
+  }
+}
+
+/** Parses the four bbox_* identifier strings nominatim.ts attaches onto a search document (see
+ * that file's `search()`) back into a real bounding box — undefined/malformed input honestly
+ * yields `null`, never a guessed or zero-sized box. */
 function bboxFromIdentifierStrings(south?: string, north?: string, west?: string, east?: string): { south: number; north: number; west: number; east: number } | null {
   if (south === undefined || north === undefined || west === undefined || east === undefined) return null
   const parsed = { south: Number(south), north: Number(north), west: Number(west), east: Number(east) }
   if (!Object.values(parsed).every(isFiniteNumber)) return null
   if (parsed.south > parsed.north || parsed.west > parsed.east) return null
   return parsed
+}
+
+function nominatimCandidateMatch(candidate: NominatimSearchCandidate) {
+  const { class: placeClass, type: placeTypeValue, bbox_south, bbox_north, bbox_west, bbox_east } = candidate.doc.identifiers
+  return {
+    latitude: candidate.lat,
+    longitude: candidate.lon,
+    label: candidate.doc.title,
+    placeType: placeClass && placeTypeValue ? `${placeClass}/${placeTypeValue}` : null,
+    boundingBox: bboxFromIdentifierStrings(bbox_south, bbox_north, bbox_west, bbox_east),
+    nativeName: candidate.doc.identifiers.name_native ?? null,
+    englishName: candidate.doc.identifiers.name_en ?? null,
+    sourceUrl: candidate.doc.canonicalUrl,
+  }
 }
 
 export async function resolvePlaceNameViaNominatim(placeName: string, sourceEntityId: string): Promise<TerraResolvedGeography> {
@@ -68,13 +110,14 @@ export async function resolvePlaceNameViaNominatim(placeName: string, sourceEnti
     return { quality: 'unresolved', resolverProviderId: RESOLVER_PROVIDER_ID, sourceEntityId, queryUsed: placeName, retrievedAt, reason: 'Empty place name — nothing to resolve.' }
   }
 
+  const postalQuery = looksLikePostalCode(queryUsed)
   const { summary } = await executeResearch({
     text: queryUsed,
     intent: null,
     providers: [RESOLVER_PROVIDER_ID],
-    // A small, fixed candidate window — just enough to distinguish "one clear match" from "the
-    // name is genuinely ambiguous," never a large result set implying a browse/search UI.
-    maxResults: 3,
+    // Postal queries get a slightly wider window so a unique `postcode` hit can be distinguished
+    // from nearby roads/cities. Still never a browse UI, and never auto-selects among 2+ postcodes.
+    maxResults: postalQuery ? 8 : 3,
     dateFrom: null,
     dateTo: null,
     requireCurrent: false,
@@ -115,34 +158,40 @@ export async function resolvePlaceNameViaNominatim(placeName: string, sourceEnti
       reason: 'Resolver returned no candidate with real, range-valid coordinates.',
     }
   }
-  if (candidates.length > 1) {
+
+  const selected = selectNominatimSearchCandidate(queryUsed, candidates)
+  if (selected.quality === 'ambiguous') {
+    const listed = looksLikePostalCode(queryUsed)
+      ? candidates.filter(candidate => isNominatimPostalType(candidate.doc.identifiers.class, candidate.doc.identifiers.type))
+      : candidates
     return {
       quality: 'ambiguous',
       resolverProviderId: RESOLVER_PROVIDER_ID,
       sourceEntityId,
       queryUsed,
       retrievedAt,
-      reason: `Resolver returned ${candidates.length} distinct coordinate-bearing candidates — never auto-selecting one.`,
+      reason: selected.reason,
+      matches: listed.map(nominatimCandidateMatch),
     }
   }
 
-  const only = candidates[0]
-  const { class: placeClass, type: placeTypeValue, bbox_south, bbox_north, bbox_west, bbox_east } = only.doc.identifiers
-  const boundingBox = bboxFromIdentifierStrings(bbox_south, bbox_north, bbox_west, bbox_east)
+  const match = nominatimCandidateMatch(selected.candidate)
   return {
     quality: 'strong',
-    longitude: only.lon,
-    latitude: only.lat,
+    longitude: match.longitude,
+    latitude: match.latitude,
     altitude: null,
     resolutionMethod: 'place_name_lookup',
     resolverProviderId: RESOLVER_PROVIDER_ID,
     sourceEntityId,
     queryUsed,
-    matchTitle: only.doc.title,
-    sourceUrl: only.doc.canonicalUrl,
+    matchTitle: match.label,
+    sourceUrl: match.sourceUrl,
     retrievedAt,
-    placeType: placeClass && placeTypeValue ? `${placeClass}/${placeTypeValue}` : null,
-    boundingBox,
+    placeType: match.placeType,
+    boundingBox: match.boundingBox,
+    nativeName: match.nativeName,
+    englishName: match.englishName,
   }
 }
 
@@ -167,10 +216,20 @@ export async function reverseResolveCoordinatesViaNominatim(input: {
     source: 'coordinates',
     sourceLabel: 'Commander-selected coordinates',
     sourceUrl: null,
+    nativePlaceName: null,
+    englishPlaceName: null,
     status: 'coordinate_only',
     confidence: 'coordinate_only',
     detail,
     selectedAt,
+    city: null,
+    county: null,
+    state: null,
+    country: null,
+    countryCode: null,
+    locality: null,
+    reverseNeighborhood: null,
+    reverseGeocodeStatus: 'unavailable',
   })
 
   if (!Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90 ||
@@ -197,12 +256,22 @@ export async function reverseResolveCoordinatesViaNominatim(input: {
       source: 'nominatim',
       sourceLabel: 'OpenStreetMap Nominatim',
       sourceUrl: resolution.sourceUrl,
+      nativePlaceName: resolution.nativeName,
+      englishPlaceName: resolution.englishName,
       status: 'resolved',
       confidence: 'provider_supported',
       detail: resolution.category
         ? `Provider-supported reverse match (${resolution.category}); no numeric confidence was supplied.`
         : 'Provider-supported reverse match; no numeric confidence was supplied.',
       selectedAt,
+      city: resolution.city,
+      county: resolution.county,
+      state: resolution.state,
+      country: resolution.country,
+      countryCode: resolution.countryCode,
+      locality: resolution.locality,
+      reverseNeighborhood: resolution.neighbourhood,
+      reverseGeocodeStatus: 'ok',
     },
   }
 }

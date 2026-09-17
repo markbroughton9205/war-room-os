@@ -5,7 +5,10 @@ import {
   assertLocalOnlyRequest,
   getLocalOwnershipRuntimeTruth,
   getLocalOwnershipStore,
+  localSessionCookieAudit,
+  resolveLocalAppDataPaths,
 } from '@/lib/sovereign-runtime/local-ownership'
+import { existsSync } from 'node:fs'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -19,7 +22,9 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: gate.reason, code: gate.code }, { status: 403 })
   }
 
-  const store = getLocalOwnershipStore(process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null)
+  const dataDirOverride = process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null
+  const store = getLocalOwnershipStore(dataDirOverride)
+  const paths = resolveLocalAppDataPaths(dataDirOverride)
   const token = (() => {
     const cookie = h.get('cookie') || ''
     for (const part of cookie.split(';')) {
@@ -31,11 +36,19 @@ export async function GET() {
     return null
   })()
   const auth = store.verifySessionToken(token)
+  const bootstrapped = store.hasLocalCommander()
 
   return NextResponse.json({
     ok: true,
-    bootstrapped: store.hasLocalCommander(),
+    bootstrapped,
     authenticated: Boolean(auth),
+    bootstrap_required: !bootstrapped,
+    canonical_host: '127.0.0.1',
+    cookie_policy: localSessionCookieAudit(),
+    store: {
+      source: dataDirOverride ? 'WAR_ROOM_LOCAL_DATA_DIR' : 'PLATFORM_DEFAULT',
+      db_present: existsSync(paths.dbPath),
+    },
     identity: auth?.identity ?? store.getCommanderPublic(),
     session: auth
       ? {

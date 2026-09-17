@@ -4,33 +4,32 @@ import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { executeResearch } from '@/lib/research-engine/core/execute'
 import { getTerraLayerDefinition, TERRA_LAYER_CATALOG } from '@/lib/terra/layerCatalog'
 import { projectTerraIntelligenceEvents } from '@/lib/terra/projectTerraIntelligenceEvent'
+import { isPublicTerraLayer } from '@/lib/terra/publicLayers'
+import { classifyTerraLayerLiveStatus, classifyTerraLayerRootCause } from '@/lib/terra/layerLiveStatus'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /**
- * Terra's generic multi-layer data route (Phase 3) — replaces the Phase 1/2
- * app/api/terra/earthquakes/route.ts single-layer route. One route serves every entry in
- * TERRA_LAYER_CATALOG through the same code path: it calls executeResearch(), the exact same
- * Research Engine entry point every other caller (including app/api/research/search/route.ts)
- * uses, scoped to that layer's one providerId, then runs the layer's own `normalize` function.
- * Adding a new layer means adding one lib/terra/layerCatalog.ts entry — never a new route file,
- * never new per-provider branching here.
- *
- * `?q=` optionally overrides the layer's documented defaultQueryText (e.g. a different USGS water
- * site number, or a different OpenSky bounding box); omitted, the catalog's own default is used —
- * the same "fixed, documented default" convention usgs_earthquake_feed's adapter already
- * established, not a new pattern.
+ * Terra's generic multi-layer data route. Public Earth-observation layers do not require a
+ * Commander session. Protected layers (OpenSky, credentialed AIS, Commander-private) still do.
+ * 403 (wrong identity) still blocks.
  */
 export async function GET(request: NextRequest, context: { params: Promise<{ layerId: string }> }) {
-  const commander = await requireCommanderSession('Terra layer data')
-  if (!commander.ok) return commander.response
-
   const { layerId } = await context.params
+  const commander = await requireCommanderSession('Terra layer data')
+  let requestedBy = 'terra-public-layer'
+  if (commander.ok) {
+    requestedBy = commander.userId
+  } else if (commander.response.status === 403) {
+    return commander.response
+  } else if (!isPublicTerraLayer(layerId)) {
+    return commander.response
+  }
   const layer = getTerraLayerDefinition(layerId)
   if (!layer) {
     return NextResponse.json(
-      { tool: 'terra-layers', status: 'error', layerId, features: [], skippedCount: 0, fetchedAt: new Date().toISOString(), fromCache: false, error: { message: `Unknown Terra layer "${layerId}". Known layers: ${TERRA_LAYER_CATALOG.map(l => l.id).join(', ')}.` } },
+      { tool: 'terra-layers', status: 'error', liveStatus: 'UNAVAILABLE', rootCause: 'UNKNOWN', layerId, features: [], skippedCount: 0, fetchedAt: new Date().toISOString(), fromCache: false, error: { message: `Unknown Terra layer "${layerId}". Known layers: ${TERRA_LAYER_CATALOG.map(l => l.id).join(', ')}.` } },
       { status: 404 },
     )
   }
@@ -45,31 +44,49 @@ export async function GET(request: NextRequest, context: { params: Promise<{ lay
     dateFrom: null,
     dateTo: null,
     requireCurrent: true,
-    requestedBy: commander.userId,
+    requestedBy,
     requestedAt: startedAt,
   })
 
   const providerResponse = summary.providerResponses.find(response => response.provider === layer.providerId) ?? null
 
   if (!providerResponse || !providerResponse.ok) {
+    const error = providerResponse?.error ?? { provider: layer.providerId, category: 'unknown', message: `${layer.providerId} did not respond.`, httpStatus: null }
+    const rootCause = classifyTerraLayerRootCause({
+      httpStatus: error.httpStatus,
+      category: error.category,
+      message: error.message,
+    })
     return NextResponse.json({
       tool: 'terra-layers',
       status: 'error',
+      liveStatus: classifyTerraLayerLiveStatus({ feedState: 'error', rootCause }),
+      rootCause,
       layerId: layer.id,
       features: [],
       skippedCount: 0,
       fetchedAt: summary.completedAt,
       fromCache: false,
-      error: providerResponse?.error ?? { provider: layer.providerId, category: 'unknown', message: `${layer.providerId} did not respond.`, httpStatus: null },
+      error,
     })
   }
 
   const { events, skippedCount } = await layer.normalize(providerResponse)
   const features = projectTerraIntelligenceEvents(events)
+  const emptyHealthy = features.length === 0
+  const rootCause = emptyHealthy ? 'EMPTY_HEALTHY_RESULT' : null
+  const liveStatus = classifyTerraLayerLiveStatus({
+    feedState: emptyHealthy ? 'empty' : 'live',
+    fromCache: providerResponse.fromCache,
+    rootCause,
+    featureCount: features.length,
+  })
 
   return NextResponse.json({
     tool: 'terra-layers',
-    status: features.length === 0 ? 'empty' : 'success',
+    status: emptyHealthy ? 'empty' : 'success',
+    liveStatus,
+    rootCause,
     layerId: layer.id,
     features,
     skippedCount,

@@ -3,6 +3,7 @@
 import { createContext, useContext, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import type { TerraActiveLocation } from '@/lib/terra/activeLocation'
 import type { TerraGeoFeature } from '@/lib/terra/types'
+import { CommanderLocationProvider } from './CommanderLocationProvider'
 import type { TerraAircraftRegionalSummary } from '@/lib/terra/aircraftRegionalSummary'
 import type { TerraVesselRegionalSummary } from '@/lib/terra/vesselRegionalSummary'
 import type { TerraMaritimeCoverageState } from '@/lib/terra/maritimeCoverage'
@@ -56,7 +57,11 @@ export function TerraActiveLocationProvider({ children }: { children: ReactNode 
     () => ({ activeLocation, setActiveLocation, selectedEvent, setSelectedEvent, aircraftSummary, setAircraftSummary, maritimeSummary, setMaritimeSummary, layerCoverage, setLayerCoverage }),
     [activeLocation, selectedEvent, aircraftSummary, maritimeSummary, layerCoverage],
   )
-  return <TerraActiveLocationContext.Provider value={value}>{children}</TerraActiveLocationContext.Provider>
+  return (
+    <TerraActiveLocationContext.Provider value={value}>
+      <CommanderLocationProvider>{children}</CommanderLocationProvider>
+    </TerraActiveLocationContext.Provider>
+  )
 }
 
 /** Semantic handoff for the existing/future Council. It intentionally contains only location, the

@@ -23,6 +23,8 @@ import {
   type TerraLiveLayerId,
 } from './liveGeoIntelligence'
 import type { TerraGeoFeature } from './types'
+import type { TerraLiveIntelItem } from './liveIntelPanelModel'
+import { observedMediaFacts } from './liveIntelMedia'
 
 export const TERRA_HANDOFF_STORAGE_KEY = 'war-room-terra-handoff'
 export const TERRA_HANDOFF_ACTION = 'send_selected_object' as const
@@ -35,8 +37,8 @@ export type TerraCouncilLineage = {
   provider: string
   evidenceId: string | null
   sourceUrl: string | null
-  latitude: number
-  longitude: number
+  latitude: number | null
+  longitude: number | null
   coordinateOrigin: string | null
   freshness: TerraLiveFreshness
   observedAt: string | null
@@ -65,14 +67,22 @@ const BLOCKED_HANDOFF_FRESHNESS = new Set<TerraLiveFreshness>([
   'DISABLED',
   'UNAVAILABLE',
   'AUTH_FAILED',
+  'AUTH_REQUIRED',
 ])
 
 function freshnessToEvidence(freshness: TerraLiveFreshness): EvidenceFreshness {
   if (freshness === 'LIVE') return 'live'
   if (freshness === 'CACHED') return 'recent'
   if (freshness === 'DELAYED') return 'aging'
-  if (freshness === 'STALE' || freshness === 'HISTORICAL') return 'stale'
+  if (freshness === 'STALE' || freshness === 'STALE_LAST_GOOD' || freshness === 'HISTORICAL') return 'stale'
   return 'unknown'
+}
+
+export function canSendTerraIntelItemToCouncil(item: TerraLiveIntelItem | null | undefined): boolean {
+  if (!item) return false
+  if (!item.sourceUrl && item.relatedEvidenceIds.length === 0) return false
+  if (BLOCKED_HANDOFF_FRESHNESS.has(item.freshnessState)) return false
+  return true
 }
 
 export function canSendTerraObjectToCouncil(object: TerraLiveGeoObject | null | undefined): boolean {
@@ -159,7 +169,8 @@ export function buildTerraCouncilHandoffPayload(args: {
 export function evidenceFromTerraHandoff(payload: TerraCouncilHandoffPayload): IntelligenceEvidenceItem | null {
   const lineage = payload.lineage
   if (!lineage || payload.action !== TERRA_HANDOFF_ACTION) return null
-  if (!isValidLiveCoordinate(lineage.latitude, lineage.longitude)) return null
+  const hasCoords = lineage.latitude !== null && lineage.longitude !== null && isValidLiveCoordinate(lineage.latitude, lineage.longitude)
+  if (!hasCoords && !lineage.sourceUrl && !lineage.evidenceId) return null
   const content = [
     payload.observedFacts,
     'TERRA LINEAGE',
@@ -236,7 +247,7 @@ export function buildTerraHandoffEvidencePacket(payload: TerraCouncilHandoffPayl
       `provider=${lineage.provider}`,
       `evidenceId=${lineage.evidenceId ?? 'none'}`,
       `freshness=${lineage.freshness}`,
-      `coordinates=${lineage.latitude.toFixed(5)},${lineage.longitude.toFixed(5)}`,
+      `coordinates=${lineage.latitude !== null && lineage.longitude !== null ? `${lineage.latitude.toFixed(5)},${lineage.longitude.toFixed(5)}` : 'not reported'}`,
       `handedOffAt=${lineage.handedOffAt}`,
       `commanderQuestion=${payload.commanderPrompt}`,
     ].join('\n'),
@@ -249,8 +260,86 @@ export function buildTerraHandoffEvidencePacket(payload: TerraCouncilHandoffPayl
       'Evidence originated from a Commander-selected Terra object, not a new parallel Council or globe.',
       'origin_type is TERRA. Registered-but-not-implemented AIS providers are never reported live.',
       'Preserve objectId, provider, evidenceId, coordinates, freshness, and source URL as session lineage.',
-      'Do not invent vessel identity, coordinates, or unobserved facts.',
+      'Keep Observed Data, Council Analysis, and Commander Annotation as separate layers. Council must not silently rewrite Terra truth.',
+      'Do not invent vessel identity, coordinates, conflict boundaries, or unobserved facts.',
     ],
+  }
+}
+
+export function buildTerraCouncilHandoffFromIntelItem(args: {
+  item: TerraLiveIntelItem
+  commanderPrompt?: string
+  terraScope?: string | null
+}): TerraCouncilHandoffPayload | null {
+  if (!canSendTerraIntelItemToCouncil(args.item)) return null
+  const item = args.item
+  const observedFacts = [
+    'LAYER: Observed Data',
+    `SELECTED: ${item.headline}`,
+    `CATEGORY: ${item.category}`,
+    `EVENT TYPE: ${item.eventType ?? 'not reported'}`,
+    `PROVIDER: ${item.provider}`,
+    `SOURCE: ${item.source}`,
+    `SOURCE URL: ${item.sourceUrl ?? 'none'}`,
+    `PUBLISHED: ${item.timestamp ?? 'not reported'}`,
+    `EVENT LOCAL TIME: ${item.localTime ?? 'not reported'}`,
+    `TIMEZONE: ${item.timezone ?? 'not reported'}`,
+    `UTC: ${item.utcTimestamp ?? 'not reported'}`,
+    `UTC OFFSET: ${item.utcOffset ?? 'not reported'}`,
+    `DAY/NIGHT: ${item.dayNightState ?? 'not reported'}`,
+    `ORIGINAL LANGUAGE: ${item.originalLanguage ?? 'unknown'}`,
+    `ORIGINAL HEADLINE: ${item.originalHeadline}`,
+    item.originalSummary ? `ORIGINAL SUMMARY: ${item.originalSummary}` : null,
+    item.englishHeadline && item.englishHeadline !== item.originalHeadline ? `ENGLISH HEADLINE (translation, not verified Terra truth): ${item.englishHeadline}` : null,
+    item.englishSummary && item.englishSummary !== item.originalSummary ? `ENGLISH SUMMARY (translation, not verified Terra truth): ${item.englishSummary}` : null,
+    `TRANSLATION STATE: ${item.translationState}`,
+    item.translation ? `TRANSLATION MODEL: ${item.translation.translationModel} AT ${item.translation.translatedAt}` : null,
+    `RETRIEVED: ${item.retrievedAt}`,
+    `FRESHNESS: ${item.freshnessState}`,
+    `COVERAGE: ${item.coverageState}`,
+    `VERIFICATION: ${item.verificationState ?? 'not classified'}`,
+    `COORDINATES: ${item.lat !== null && item.lon !== null ? `${item.lat.toFixed(5)}, ${item.lon.toFixed(5)}` : 'not reported'}`,
+    `COORDINATE ORIGIN: ${item.coordinateOrigin ?? 'not reported'}`,
+    `LOCATION: ${item.location ?? 'not reported'}`,
+    item.nativeLocationName ? `NATIVE PLACE NAME: ${item.nativeLocationName}` : null,
+    item.englishLocationName ? `ENGLISH PLACE NAME: ${item.englishLocationName}` : null,
+    `TERRA SCOPE: ${args.terraScope ?? 'not reported'}`,
+    `SOURCE COUNT: ${item.sourceCount}`,
+    `SOURCES: ${item.sources.map(source => `${source.name}${source.url ? ` <${source.url}>` : ''}`).join(' | ')}`,
+    `EVIDENCE IDS: ${item.relatedEvidenceIds.join(', ') || 'none'}`,
+    item.breakingReason ? `BREAKING REASON: ${item.breakingReason}` : null,
+    item.summary ? `SUMMARY: ${item.summary}` : null,
+    ...observedMediaFacts(item.mediaPreview),
+    'Council Analysis is a separate layer. Do not rewrite these observed facts.',
+    'Commander Annotation is a separate layer.',
+  ].filter(Boolean).join('\n')
+  const commanderPrompt = args.commanderPrompt?.trim()
+    || `Analyze this Terra Live Intel item using only the supplied observed facts and sources: ${item.headline}. Separate Observed Data from Council Analysis. Do not invent coordinates, conflict boundaries, or unobserved facts.`
+  return {
+    action: TERRA_HANDOFF_ACTION,
+    commanderPrompt,
+    lineage: {
+      objectId: item.id,
+      layer: item.category === 'EARTH' || item.category === 'LOCAL' ? 'intelligence_events' : 'other',
+      type: item.eventType ?? item.category.toLowerCase(),
+      title: item.headline,
+      provider: item.provider,
+      evidenceId: item.relatedEvidenceIds[0] ?? item.id,
+      sourceUrl: item.sourceUrl,
+      latitude: item.lat,
+      longitude: item.lon,
+      coordinateOrigin: item.coordinateOrigin,
+      freshness: item.freshnessState,
+      observedAt: item.timestamp,
+      receivedAt: item.retrievedAt,
+      handedOffAt: new Date().toISOString(),
+      sourceFamily: item.source,
+      country: null,
+      region: item.location,
+      jurisdiction: null,
+      commanderAction: TERRA_HANDOFF_ACTION,
+    },
+    observedFacts,
   }
 }
 
@@ -264,7 +353,7 @@ export function isTerraHandoffBody(value: unknown): value is TerraCouncilHandoff
   const row = lineage as Record<string, unknown>
   return typeof row.objectId === 'string'
     && typeof row.provider === 'string'
-    && typeof row.latitude === 'number'
-    && typeof row.longitude === 'number'
+    && (typeof row.latitude === 'number' || row.latitude === null)
+    && (typeof row.longitude === 'number' || row.longitude === null)
 }
 

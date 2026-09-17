@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 import {
-  LOCAL_SESSION_COOKIE,
+  applyLocalSessionCookie,
   assertLocalMutationOrigin,
   assertLocalOnlyRequest,
   getLocalOwnershipStore,
@@ -9,10 +9,6 @@ import {
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-function cookie(token: string) {
-  return `${LOCAL_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${12 * 60 * 60}`
-}
 
 /** Explicit first-run local Commander bootstrap — loopback only. */
 export async function POST(req: Request) {
@@ -50,6 +46,6 @@ export async function POST(req: Request) {
     identity: login.auth.identity,
     session_id: login.auth.session.session_id,
   })
-  res.headers.set('set-cookie', cookie(login.auth.token))
+  applyLocalSessionCookie(res, login.auth.token)
   return res
 }

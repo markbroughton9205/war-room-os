@@ -17,9 +17,19 @@
  * this by construction, not by caller discipline.
  */
 
-export type TerraCameraFeedType = 'still' | 'video'
+export type TerraCameraFeedType = 'still' | 'video' | 'refreshed_image'
 
 export type TerraCameraFreshnessState = 'live_video' | 'still_image' | 'stale' | 'offline' | 'unknown'
+
+/** Federation health vocabulary (OHGO). A current refreshed still is LIVE, never live_video. */
+export type TerraTrafficCameraFederationHealth =
+  | 'LIVE'
+  | 'STALE'
+  | 'OFFLINE'
+  | 'NO_COVERAGE'
+  | 'AUTH_REQUIRED'
+  | 'RATE_LIMITED'
+  | 'UNAVAILABLE'
 
 export const TERRA_CAMERA_FRESHNESS_LABELS: Record<TerraCameraFreshnessState, string> = {
   live_video: 'LIVE VIDEO',
@@ -63,4 +73,63 @@ export function resolveTerraCameraFreshness(params: {
   if (ageMs <= liveThresholdMs) return feedType === 'video' ? 'live_video' : 'still_image'
   if (ageMs <= STALE_WINDOW_MS) return 'stale'
   return 'offline'
+}
+
+/**
+ * Federation health for a refreshed-JPEG camera. `LIVE` here means "current still", never live
+ * video. Catalog poll without a capture timestamp is UNAVAILABLE — never fabricated LIVE.
+ */
+export function resolveTerraTrafficCameraFederationHealth(params: {
+  feedType: TerraCameraFeedType
+  refreshIntervalSec: number | null
+  capturedAtIso: string | null
+  nowIso: string
+  sourceReportsUnavailable: boolean
+  httpStatus?: number | null
+  emptyBody?: boolean
+  sessionUnauthorized?: boolean
+  rateLimited?: boolean
+  outsideCoverage?: boolean
+  liveMultiplier?: number
+}): TerraTrafficCameraFederationHealth {
+  const {
+    feedType,
+    refreshIntervalSec,
+    capturedAtIso,
+    nowIso,
+    sourceReportsUnavailable,
+    httpStatus = null,
+    emptyBody = false,
+    sessionUnauthorized = false,
+    rateLimited = false,
+    outsideCoverage = false,
+    liveMultiplier = 5,
+  } = params
+  void feedType
+
+  if (outsideCoverage) return 'NO_COVERAGE'
+  if (sessionUnauthorized) return 'AUTH_REQUIRED'
+  if (rateLimited || httpStatus === 429) return 'RATE_LIMITED'
+  if (sourceReportsUnavailable || emptyBody) return 'OFFLINE'
+  if (httpStatus !== null && httpStatus >= 400) return 'OFFLINE'
+
+  if (!capturedAtIso || refreshIntervalSec === null || refreshIntervalSec <= 0) return 'UNAVAILABLE'
+
+  const capturedMs = Date.parse(capturedAtIso)
+  const nowMs = Date.parse(nowIso)
+  if (!Number.isFinite(capturedMs) || !Number.isFinite(nowMs)) return 'UNAVAILABLE'
+
+  const ageMs = nowMs - capturedMs
+  const liveThresholdMs = refreshIntervalSec * 1000 * Math.max(1, liveMultiplier)
+
+  if (ageMs <= liveThresholdMs) return 'LIVE'
+  if (ageMs <= STALE_WINDOW_MS) return 'STALE'
+  return 'OFFLINE'
+}
+
+export function federationHealthFromLegacyFreshness(freshness: TerraCameraFreshnessState): TerraTrafficCameraFederationHealth {
+  if (freshness === 'live_video' || freshness === 'still_image') return 'LIVE'
+  if (freshness === 'stale') return 'STALE'
+  if (freshness === 'offline') return 'OFFLINE'
+  return 'UNAVAILABLE'
 }

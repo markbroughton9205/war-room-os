@@ -17,8 +17,21 @@ const MAX_ALERTS = 60
 // rather than a second nws_* adapter, since it is the exact same organization and API
 // (api.weather.gov) the existing forecast capability already uses.
 const ALERTS_BARE_PATTERN = /^alerts$/i
+const ALERTS_SEVERE_BARE_PATTERN = /^alerts\s+severe$/i
 const ALERTS_NEAR_PATTERN = /^alerts\s+near\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/i
+const ALERTS_SEVERE_NEAR_PATTERN = /^alerts\s+severe\s+near\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/i
 const ALERTS_AREA_PATTERN = /^alerts\s+area\s+([A-Za-z]{2})$/i
+
+/** Official NWS CAP event names tracked for Terra tornado / severe-weather counters.
+ * Watches are included as watches — never reinterpreted as confirmed tornadoes. */
+const SEVERE_WEATHER_EVENT_NAMES = [
+  'Tornado Warning',
+  'Tornado Watch',
+  'Severe Thunderstorm Warning',
+  'Severe Thunderstorm Watch',
+  'Flash Flood Warning',
+  'Extreme Wind Warning',
+] as const
 
 type PointsResponse = { properties?: { forecast?: string; relativeLocation?: { properties?: { city?: string; state?: string } } } }
 type Period = {
@@ -54,6 +67,7 @@ type NwsAlertProperties = {
   expires?: string
   ends?: string | null
   web?: string
+  affectedZones?: string[]
 }
 type NwsAlertFeature = { id?: string; geometry?: NwsAlertGeometry; properties?: NwsAlertProperties }
 type NwsAlertsResponse = { features?: NwsAlertFeature[] }
@@ -120,14 +134,19 @@ async function searchForecast(lat: string, lon: string, started: number) {
  * both are preserved as documents, but only polygon-bearing alerts also get a geoFeature (never a
  * fabricated point for a zone-only alert).
  */
-async function searchAlerts(scope: { kind: 'bare' } | { kind: 'point'; lat: string; lon: string } | { kind: 'area'; state: string }, started: number) {
-  const cacheKey = scope.kind === 'bare' ? 'nws_weather:alerts:bare' : scope.kind === 'point' ? `nws_weather:alerts:point:${scope.lat}:${scope.lon}` : `nws_weather:alerts:area:${scope.state}`
+async function searchAlerts(scope: { kind: 'bare' } | { kind: 'point'; lat: string; lon: string } | { kind: 'area'; state: string }, started: number, severeOnly = false) {
+  const cacheKey = `${scope.kind === 'bare' ? 'nws_weather:alerts:bare' : scope.kind === 'point' ? `nws_weather:alerts:point:${scope.lat}:${scope.lon}` : `nws_weather:alerts:area:${scope.state}`}${severeOnly ? ':severe-csv' : ''}`
   const cached = cacheGet<ReturnType<typeof okResponse>>(cacheKey)
   if (cached) return { ok: true as const, response: { ...cached, fromCache: true } }
 
   const url = new URL(`${BASE_URL}/alerts/active`)
   if (scope.kind === 'point') url.searchParams.set('point', `${scope.lat},${scope.lon}`)
   if (scope.kind === 'area') url.searchParams.set('area', scope.state.toUpperCase())
+  if (severeOnly) {
+    // NWS accepts one comma-separated `event` value. Repeated `event=` params return an empty
+    // feature list (HTTP 200), which must never be presented as LIVE_EMPTY.
+    url.searchParams.set('event', SEVERE_WEATHER_EVENT_NAMES.join(','))
+  }
 
   const result = await safeProviderFetch(PROVIDER, url.toString(), { timeoutMs: 15_000, headers: { 'User-Agent': USER_AGENT, Accept: 'application/geo+json' } })
   if (!result.ok) return { ok: false as const, kind: 'http_error' as const, status: result.status }
@@ -165,9 +184,19 @@ async function searchAlerts(scope: { kind: 'bare' } | { kind: 'point'; lat: stri
         certainty: props.certainty ?? 'Unknown',
         urgency: props.urgency ?? 'Unknown',
         status: props.status ?? '',
+        ...(props.messageType ? { messageType: props.messageType } : {}),
+        ...(props.headline ? { headline: props.headline } : {}),
+        ...(props.description ? { description: props.description.slice(0, 4000) } : {}),
+        ...(props.instruction ? { instruction: props.instruction.slice(0, 4000) } : {}),
+        ...(props.areaDesc ? { areaDesc: props.areaDesc } : {}),
+        ...(props.sent ? { sent: props.sent } : {}),
+        ...(props.effective ? { effective: props.effective } : {}),
         ...(props.expires ? { expires: props.expires } : {}),
         ...(props.onset ? { onset: props.onset } : {}),
         ...(props.ends ? { ends: props.ends } : {}),
+        ...(Array.isArray(props.affectedZones)
+          ? { affectedZones: props.affectedZones.filter((item): item is string => typeof item === 'string').join(' | ') }
+          : {}),
       },
       subjects: [],
       license: null,
@@ -193,7 +222,10 @@ async function search(query: ResearchQuery) {
   const started = Date.now()
   const text = query.text.trim()
 
+  if (ALERTS_SEVERE_BARE_PATTERN.test(text)) return searchAlerts({ kind: 'bare' }, started, true)
   if (ALERTS_BARE_PATTERN.test(text)) return searchAlerts({ kind: 'bare' }, started)
+  const severeNearMatch = ALERTS_SEVERE_NEAR_PATTERN.exec(text)
+  if (severeNearMatch) return searchAlerts({ kind: 'point', lat: severeNearMatch[1], lon: severeNearMatch[2] }, started, true)
   const nearMatch = ALERTS_NEAR_PATTERN.exec(text)
   if (nearMatch) return searchAlerts({ kind: 'point', lat: nearMatch[1], lon: nearMatch[2] }, started)
   const areaMatch = ALERTS_AREA_PATTERN.exec(text)
@@ -201,7 +233,7 @@ async function search(query: ResearchQuery) {
 
   const coordMatch = COORD_PATTERN.exec(text)
   if (!coordMatch) {
-    throw new Error('Query must be "lat,lon" coordinates within the US for a forecast (e.g. "38.8894,-77.0352"), or "alerts" / "alerts near <lat,lon>" / "alerts area <ST>" for active severe-weather alerts.')
+    throw new Error('Query must be "lat,lon" coordinates within the US for a forecast (e.g. "38.8894,-77.0352"), or "alerts" / "alerts severe" / "alerts near <lat,lon>" / "alerts severe near <lat,lon>" / "alerts area <ST>" for active severe-weather alerts.')
   }
   const [, lat, lon] = coordMatch
   return searchForecast(lat, lon, started)

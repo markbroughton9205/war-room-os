@@ -25,6 +25,9 @@ const SECRET_ENV_NAMES = [
   'AISSTREAM_API_KEY',
   'BARENTSWATCH_CLIENT_SECRET',
   'BARENTSWATCH_CLIENT_ID',
+  'OHGO_API_KEY',
+  '511NY_API_KEY',
+  'YOUTUBE_API_KEY',
 ] as const
 
 function redactConfiguredEnvValues(text: string): string {

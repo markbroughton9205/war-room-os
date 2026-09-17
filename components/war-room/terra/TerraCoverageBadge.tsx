@@ -22,7 +22,8 @@ const STATE_COLOR: Record<TerraCoverageTruthState, string> = {
 
 export function TerraCoverageBadge({ state, label }: { state: TerraCoverageTruthState; label?: string }) {
   return (
-    <p className={`text-[10px] font-bold uppercase tracking-widest ${STATE_COLOR[state]}`}>
+    <p className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest ${STATE_COLOR[state]}`}>
+      {state === 'LIVE' ? <span className="terra-live-dot h-1.5 w-1.5 rounded-full bg-emerald-400" /> : null}
       {label ?? TERRA_COVERAGE_TRUTH_LABELS[state]}
     </p>
   )

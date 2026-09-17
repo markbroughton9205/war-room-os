@@ -3,9 +3,10 @@ import 'server-only'
 import type { ResearchHealthStatus, ResearchQuery } from '@/lib/research-engine/core/types'
 import { safeJsonParse, safeProviderFetch } from '@/lib/research-engine/security/safeFetch'
 import { withProviderGate } from '@/lib/research-engine/security/providerGate'
-import { cacheGet, cacheSet, CACHE_TTL } from '@/lib/research-engine/cache/ttlCache'
+import { cacheGet, cacheSet, cacheTtlFromExpiresHeader, CACHE_TTL } from '@/lib/research-engine/cache/ttlCache'
 import type { ResearchProviderAdapter } from '@/lib/research-engine/providers/adapter'
 import { errorResponse, makeDocument, okResponse, nowIso } from '@/lib/research-engine/providers/shared'
+import { TERRA_PUBLIC_USER_AGENT, TERRA_OFFICIAL_VIEWERS } from '@/lib/terra/terraPublicIdentity'
 
 const PROVIDER = 'met_no' as const
 const BASE_URL = 'https://api.met.no/weatherapi/locationforecast/2.0/compact'
@@ -22,7 +23,7 @@ type MetNoResponse = {
  * (confirmed live) — a real, non-placeholder contact string is used instead.
  */
 function userAgent(): string {
-  return process.env.MET_NO_USER_AGENT_BASE?.trim() || 'WarRoomResearchEngine/1.0 (github.com/war-room-os)'
+  return TERRA_PUBLIC_USER_AGENT
 }
 
 function parseCoords(text: string): { lat: number; lon: number } | null {
@@ -48,7 +49,7 @@ async function fetchForecast(query: ResearchQuery) {
   url.searchParams.set('lat', String(coords.lat))
   url.searchParams.set('lon', String(coords.lon))
 
-  const result = await safeProviderFetch(PROVIDER, url.toString(), { headers: { 'User-Agent': userAgent() }, timeoutMs: 10_000 })
+  const result = await safeProviderFetch(PROVIDER, url.toString(), { headers: { 'User-Agent': userAgent(), Accept: 'application/json' }, timeoutMs: 10_000 })
   if (!result.ok) return { ok: false as const, kind: 'http_error' as const, status: result.status }
 
   const data = safeJsonParse<MetNoResponse>(result.text)
@@ -58,14 +59,14 @@ async function fetchForecast(query: ResearchQuery) {
   }
 
   const details = first.data?.instant?.details ?? {}
-  const canonicalUrl = 'https://www.yr.no/'
+  const canonicalUrl = TERRA_OFFICIAL_VIEWERS.metNorway
   const documents = [makeDocument({
     id: `met_no:${coords.lat}:${coords.lon}:${first.time}`,
     provider: PROVIDER,
     providerRecordId: `${coords.lat}:${coords.lon}:${first.time}`,
     title: `Weather at ${coords.lat},${coords.lon} — ${first.time}`,
     summary: `Temperature: ${details.air_temperature ?? 'unknown'}°C, Pressure: ${details.air_pressure_at_sea_level ?? 'unknown'} hPa`,
-    contentSnippet: null,
+    contentSnippet: result.lastModified ? `Last-Modified: ${result.lastModified}` : null,
     canonicalUrl,
     sourceUrl: url.toString(),
     sourceName: 'Met.no (Norwegian Meteorological Institute)',
@@ -73,16 +74,22 @@ async function fetchForecast(query: ResearchQuery) {
     authors: [],
     organization: 'Norwegian Meteorological Institute',
     publishedAt: first.time,
-    updatedAt: data?.properties?.meta?.updated_at ?? null,
-    geography: null,
+    updatedAt: data?.properties?.meta?.updated_at ?? result.lastModified ?? null,
+    geography: `lat ${coords.lat}, lon ${coords.lon}`,
     language: null,
-    identifiers: { latitude: String(coords.lat), longitude: String(coords.lon) },
+    identifiers: {
+      latitude: String(coords.lat),
+      longitude: String(coords.lon),
+      viewerUrl: canonicalUrl,
+      ...(result.expires ? { expires: result.expires } : {}),
+      ...(result.lastModified ? { lastModified: result.lastModified } : {}),
+    },
     subjects: [],
     license: 'CC BY 4.0',
     accessStatus: 'open',
   })]
   const response = okResponse(PROVIDER, { documents, durationMs: Date.now() - started })
-  cacheSet(cacheKey, response, CACHE_TTL.liveFeed)
+  cacheSet(cacheKey, response, cacheTtlFromExpiresHeader(result.expires, CACHE_TTL.liveFeed))
   return { ok: true as const, response }
 }
 
@@ -91,7 +98,16 @@ async function run(query: ResearchQuery) {
     return await withProviderGate(PROVIDER, async () => {
       const outcome = await fetchForecast(query)
       if (outcome.ok) return outcome.response
-      if (outcome.kind === 'http_error') throw new Error(`Met.no fetch failed with HTTP ${outcome.status}`)
+      if (outcome.kind === 'http_error') {
+        const status = outcome.status
+        const category = status === 429 ? 'rate_limited' : 'upstream_error'
+        const message = status === 429
+          ? 'MET Norway RATE_LIMITED (HTTP 429).'
+          : status === 403
+            ? 'MET Norway UPSTREAM_403 — identifying User-Agent required; request was rejected.'
+            : `MET Norway fetch failed with HTTP ${status}`
+        return errorResponse(PROVIDER, { provider: PROVIDER, category, message, httpStatus: status }, 0)
+      }
       throw new Error(outcome.message)
     })
   } catch (error) {

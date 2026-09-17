@@ -10,7 +10,9 @@ import {
 } from '@/lib/auth/recovery'
 import { hasPresentedLocalCommanderSession } from '@/lib/sovereign-runtime/local-ownership/edgeSession'
 
-const PUBLIC_PATHS = ['/login', '/signup', '/forgot-password', '/auth/callback', '/auth/cleanup']
+// /cesium is vendor static runtime (Cesium.js / Workers / Assets / Widgets / ThirdParty),
+// not Commander-private data. Matcher also skips /cesium/; this list is defense in depth.
+const PUBLIC_PATHS = ['/login', '/signup', '/forgot-password', '/auth/callback', '/auth/cleanup', '/terra', '/cesium']
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(`${path}/`))
@@ -36,9 +38,22 @@ const PUBLIC_API_PATHS = new Set([
   '/api/payments/proof',
   '/api/tools/internet/status',
   '/api/tools/research',
+  // Read-only Terra Live Intel: public USGS/NHC/EONET/NWS/RSS feeds. Credentialed AIS/Exa
+  // stay gated inside the route. Middleware 401 was surfacing as "live-intel HTTP 401"
+  // before the route could report AUTH_REQUIRED honestly.
+  '/api/terra/live-intel',
+  '/api/terra/live-intel/translate',
+  // Nominatim geocode/reverse for Terra search and click-context. Credentialed geocoders stay unused.
+  '/api/terra/resolve-location',
+  // Public/provider-auth camera stills. Opaque id only; SSRF gate is in cameraImageProxy.
+  '/api/terra/camera-image',
+  // Lawful public street-level imagery lookup. Coordinates only; no Google scraping.
+  '/api/terra/street-view',
+  // Public IEM NEXRAD mosaic frame metadata. Tiles are fetched by the browser from IEM, not proxied.
+  '/api/terra/weather/radar',
 ])
 
-const PUBLIC_API_PREFIXES = ['/api/debug/', '/api/sovereign/local-auth/']
+const PUBLIC_API_PREFIXES = ['/api/debug/', '/api/sovereign/local-auth/', '/api/terra/layers/']
 
 function isExemptApiRequest(pathname: string, method: string): boolean {
   // GET now requires a session (log reads are Commander-only); POST keeps its
@@ -230,7 +245,11 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     } else if (!isPublicPath(pathname)) {
       const loginUrl = request.nextUrl.clone()
       loginUrl.pathname = '/login'
+      const current = `${pathname}${request.nextUrl.search}`
       loginUrl.search = ''
+      if (current !== '/' && !current.startsWith('/login')) {
+        loginUrl.searchParams.set('next', current)
+      }
       return NextResponse.redirect(loginUrl)
     }
   }

@@ -1,4 +1,4 @@
-import { TERRA_URBAN_HIGHWAY_CLASSES, TERRA_URBAN_INCLUDE_BUILDINGS } from './lod'
+import { TERRA_URBAN_HIGHWAY_CLASSES, TERRA_URBAN_INCLUDE_BUILDINGS, TERRA_URBAN_INCLUDE_SIGNALS } from './lod'
 import type { TerraUrbanBounds, TerraUrbanLod } from './types'
 
 export function buildUrbanOverpassQuery(bounds: TerraUrbanBounds, lod: TerraUrbanLod): string {
@@ -8,5 +8,8 @@ export function buildUrbanOverpassQuery(bounds: TerraUrbanBounds, lod: TerraUrba
   const buildingClause = TERRA_URBAN_INCLUDE_BUILDINGS[lod]
     ? `way["building"](${bbox});relation["building"]["type"="multipolygon"](${bbox});`
     : ''
-  return `[out:json][timeout:22][maxsize:16777216];(${roadClause}${buildingClause});out geom;`
+  const signalClause = TERRA_URBAN_INCLUDE_SIGNALS[lod]
+    ? `node["highway"="traffic_signals"](${bbox});node["crossing"="traffic_signals"](${bbox});`
+    : ''
+  return `[out:json][timeout:22][maxsize:16777216];(${roadClause}${buildingClause}${signalClause});out geom;`
 }

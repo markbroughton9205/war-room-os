@@ -1,15 +1,13 @@
 import { getGibsLayer } from '@/lib/earth-intelligence/gibsLayers'
+import { PUBLIC_GIBS_WMTS_BASE_URL } from '@/lib/earth-intelligence/gibsPublicBase'
+
+export { PUBLIC_GIBS_WMTS_BASE_URL }
 
 /**
- * Public NASA GIBS WMTS REST base URL (epsg3857, "best available" endpoint).
- * GIBS documents this as a public, unauthenticated endpoint — it takes no API
- * key. This constant is safe to ship to the browser. It intentionally mirrors
- * the value of the server-side NASA_GIBS_WMTS_BASE_URL env var (see
- * lib/earth-intelligence/gibsServerConfig.ts) without reading that env var
- * into client code. This is the only host any tile request in this module
- * can ever be built against — nothing here accepts a caller-supplied host.
+ * Tile URL builder for NASA GIBS. The public host lives in gibsPublicBase.ts
+ * so this module can stay client-safe. Server-only env comparison belongs in
+ * gibsServerConfig.ts and must not import this file.
  */
-export const PUBLIC_GIBS_WMTS_BASE_URL = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/'
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 

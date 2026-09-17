@@ -36,6 +36,7 @@ import { normalizeDriveBcTrafficEvents } from '@/lib/terra/normalizeDriveBcTraff
 import { normalizeWebtrisTrafficFlow } from '@/lib/terra/normalizeWebtrisTrafficFlow'
 import { normalizeDigitrafficRoadWeather } from '@/lib/terra/normalizeDigitrafficRoadWeather'
 import { normalizeOntarioTrafficCameras } from '@/lib/terra/normalizeOntarioTrafficCameras'
+import { normalizeOhgoTrafficCameras, normalizeCaltransTrafficCameras } from '@/lib/terra/normalizeFederatedTrafficCameras'
 import { normalizeOntarioTrafficEvents } from '@/lib/terra/normalizeOntarioTrafficEvents'
 import { normalizeHongKongTrafficCameras } from '@/lib/terra/normalizeHongKongTrafficCameras'
 import { normalizeQuebecTrafficCameras } from '@/lib/terra/normalizeQuebecTrafficCameras'
@@ -190,6 +191,50 @@ export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
     description: 'Live Ontario 511 (511on.ca) traffic camera stills within a bounding box — Ontario, Canada only. Licensing/redistribution terms not independently confirmed this build.',
     defaultQueryText: '43.5,-79.6,43.9,-79.1',
     normalize: response => normalizeOntarioTrafficCameras(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'ohgo_cameras',
+    providerId: 'ohgo_cameras',
+    kind: 'traffic_camera',
+    domain: 'other',
+    label: 'Traffic Cameras (OHGO / ODOT — Ohio)',
+    description: 'ODOT / OHGO refreshed JPEG cameras within a bounding box — Ohio only (not Ohio Turnpike). PUBLIC_KEY via server-side OHGO_API_KEY. Catalog uses ETag/If-None-Match; LargeUrl is never hammered across the inventory. Catalog freshness is UNAVAILABLE without image Last-Modified — never fabricated LIVE from the poll clock.',
+    defaultQueryText: '41.00,-81.70,41.20,-81.30',
+    normalize: response => normalizeOhgoTrafficCameras(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'caltrans_cctv',
+    providerId: 'caltrans_cctv',
+    kind: 'traffic_camera',
+    domain: 'other',
+    label: 'Traffic Cameras (Caltrans CWWP2 — California)',
+    description: 'Caltrans CWWP2 JPEG stills within a bounding box — California only. Keyless per-district JSON. HLS streams are never fetched or embedded. Catalog freshness is UNAVAILABLE without a per-still capture timestamp — never fabricated LIVE from the poll clock.',
+    defaultQueryText: '37.70,-122.55,37.85,-122.35',
+    normalize: response => normalizeCaltransTrafficCameras(response.documents),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'ohgo_events',
+    providerId: 'ohgo_events',
+    kind: 'traffic_event',
+    domain: 'other',
+    label: 'Traffic Events (OHGO / ODOT — Ohio)',
+    description: 'ODOT / OHGO incidents, construction, dangerous slowdowns, travel delays, and digital signs within a bounding box — Ohio only. PUBLIC_KEY via server-side OHGO_API_KEY. Empty bbox is LIVE_EMPTY, never fabricated events.',
+    defaultQueryText: '41.00,-81.70,41.20,-81.30',
+    normalize: response => normalizeLatentGeoDocuments(response.documents, { providerId: 'ohgo_events', kind: 'traffic_event', domain: 'other' }),
+    refreshIntervalMs: 60_000,
+  },
+  {
+    id: 'ohgo_road_weather',
+    providerId: 'ohgo_road_weather',
+    kind: 'road_weather_observation',
+    domain: 'weather',
+    label: 'Road Weather (OHGO / ODOT — Ohio)',
+    description: 'ODOT / OHGO weather sensor sites (RWIS) within a bounding box — Ohio only. PUBLIC_KEY via server-side OHGO_API_KEY.',
+    defaultQueryText: '41.00,-81.70,41.20,-81.30',
+    normalize: response => normalizeLatentGeoDocuments(response.documents, { providerId: 'ohgo_road_weather', kind: 'road_weather_observation', domain: 'weather' }),
     refreshIntervalMs: 60_000,
   },
   {
@@ -455,7 +500,7 @@ export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
     kind: 'volcano_event',
     domain: 'hazards',
     label: 'Active Volcanic Activity (NASA EONET)',
-    description: 'Currently active volcanoes (Smithsonian Global Volcanism Program via NASA EONET, category=volcanoes).',
+    description: 'Currently active volcanic events via NASA EONET (Smithsonian Global Volcanism Program). PARTIAL coverage — not a global USGS volcano alert-level system.',
     defaultQueryText: 'volcanoes',
     refreshIntervalMs: 10 * 60 * 1000,
     normalize: response => normalizeNasaEonet(response, { kind: 'volcano_event', domain: 'hazards' }),
@@ -480,8 +525,8 @@ export const TERRA_LAYER_CATALOG: TerraLayerDefinition[] = [
     // Nationwide active alerts — real CAP severity/urgency/certainty preserved verbatim in
     // properties. Zone-only alerts (no real polygon) are honestly skipped, not geo-resolved from
     // a compound multi-county area description.
-    description: 'Real NOAA/NWS CAP alerts (Severe Thunderstorm Warning, Flash Flood Warning, Red Flag Warning, etc.) with real polygon warning areas.',
-    defaultQueryText: 'alerts',
+    description: 'NOAA/NWS CAP tornado and severe-weather alerts (Tornado Warning/Watch, Severe Thunderstorm Warning/Watch, Flash Flood Warning, Extreme Wind Warning). Watches are not confirmed tornadoes. Real polygon warning areas where NWS supplies geometry — zone-only alerts are skipped, never guessed.',
+    defaultQueryText: 'alerts severe',
     normalize: normalizeNwsAlerts,
   },
   {

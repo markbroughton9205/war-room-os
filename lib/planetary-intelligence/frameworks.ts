@@ -26,7 +26,7 @@ export const FRAMEWORK_DECISIONS = [
 ] as const
 
 export function noWholesaleFrameworkTakeover(): boolean {
-  return FRAMEWORK_DECISIONS.every(item => item.decision !== 'ADOPT_WHOLESALE')
+  return FRAMEWORK_DECISIONS.every(item => (item.decision as string) !== 'ADOPT_WHOLESALE')
 }
 
 export function agplRemainsIsolated(): boolean {

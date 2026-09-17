@@ -51,6 +51,8 @@ function makeActiveLocation(overrides: Partial<TerraActiveLocation> = {}): Terra
     source: 'nominatim',
     sourceLabel: 'OpenStreetMap Nominatim',
     sourceUrl: 'https://nominatim.openstreetmap.org/test',
+    nativePlaceName: null,
+    englishPlaceName: null,
     status: 'resolved',
     confidence: 'provider_supported',
     detail: 'Provider-supported reverse match.',

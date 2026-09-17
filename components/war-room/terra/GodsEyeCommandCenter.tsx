@@ -6,6 +6,7 @@ import { TerraShell } from './TerraShell'
 import { TerraActiveLocationProvider, useTerraActiveLocation } from './TerraActiveLocationContext'
 import { resolveTerraLinkedStatus, type TerraLinkedStatusResult, type TerraLinkedStatusSignal } from '@/lib/terra/terraLinkedStatus'
 import { IconCollapse, IconExpand, IconMinimize, IconRestore } from '@/components/war-room/council/CommandIcons'
+import { CommanderAgentDock } from './CommanderAgentDock'
 import { CouncilRuntimeStatus } from '@/components/war-room/council/CouncilRuntimeStatus'
 import { CouncilGodsEyeStatus } from '@/components/war-room/council/CouncilGodsEyeStatus'
 import { resolveCouncilGodsEyeStatus } from '@/lib/terra/godsEyeStatusAdapter'
@@ -43,10 +44,17 @@ function TerraCouncilContextBridge({ onContextChange }: { onContextChange?: (con
     if (!activeLocation) return onContextChange?.(null)
     const lines = [
       `Active Terra location: ${activeLocation.label}`,
-      `Coordinates: ${activeLocation.latitude.toFixed(5)}, ${activeLocation.longitude.toFixed(5)}`,
+      activeLocation.contextType === 'GPS'
+        ? 'Coordinates: withheld — device geolocation is not sent to Council'
+        : `Coordinates: ${activeLocation.latitude.toFixed(5)}, ${activeLocation.longitude.toFixed(5)}`,
       `Location provenance: ${activeLocation.sourceLabel}`,
       `Location availability: ${activeLocation.status}`,
     ]
+    if (activeLocation.city) lines.push(`City: ${activeLocation.city}`)
+    if (activeLocation.county) lines.push(`County/district: ${activeLocation.county}`)
+    if (activeLocation.state) lines.push(`State/province: ${activeLocation.state}`)
+    if (activeLocation.country) lines.push(`Country: ${activeLocation.country}`)
+    if (activeLocation.contextType) lines.push(`Context type: ${activeLocation.contextType}`)
     if (selectedEvent) {
       lines.push(`OBSERVED:`)
       lines.push(`Selected Terra event: ${selectedEvent.title}`)
@@ -254,6 +262,7 @@ export function GodsEyeCommandCenter({
             }`}
             data-testid="floating-council-chat"
             data-chat-mode={chatMode}
+            data-conversation-auto-expand="disabled"
           >
             <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3">
               <div className="flex min-w-0 items-center gap-2">
@@ -290,8 +299,11 @@ export function GodsEyeCommandCenter({
             {chatMode !== 'minimized' ? (
               <>
                 <ActiveTerraContextPill />
-                <div className="min-h-0 flex-1">{council}</div>
-                {councilComposer ? <div className="shrink-0 border-t border-white/10">{councilComposer}</div> : null}
+                <div className="relative min-h-0 flex-1 overflow-hidden">
+                  <div className="h-full min-h-0 overflow-hidden pr-14">{council}</div>
+                  <CommanderAgentDock />
+                </div>
+                {councilComposer ? <div className="relative z-40 shrink-0 border-t border-white/10">{councilComposer}</div> : null}
               </>
             ) : null}
           </div>

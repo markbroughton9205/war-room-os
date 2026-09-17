@@ -37,6 +37,9 @@
     "work",
     "desktop/runtime/**",
     "desktop/dist*/**",
-    "lib/wrim-environment/**/*.validation.ts"
+    "lib/wrim-environment/**/*.validation.ts",
+    "**/*.windows-bak/**",
+    "**/node_modules.windows-bak/**",
+    "**/.next.windows-bak/**"
   ]
 }

@@ -35,9 +35,9 @@ export function simhash64(text: string): string {
       vector[bit + 32] += (h2 >>> bit) & 1 ? 1 : -1
     }
   }
-  let out = 0n
+  let out = BigInt(0)
   for (let bit = 0; bit < 64; bit += 1) {
-    if ((vector[bit] ?? 0) >= 0) out |= 1n << BigInt(bit)
+    if ((vector[bit] ?? 0) >= 0) out |= BigInt(1) << BigInt(bit)
   }
   return out.toString(16).padStart(16, '0')
 }
@@ -48,7 +48,7 @@ export function hammingHex(a: string, b: string): number {
   let xor = left ^ right
   let count = 0
   while (xor) {
-    xor &= xor - 1n
+    xor &= xor - BigInt(1)
     count += 1
   }
   return count

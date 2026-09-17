@@ -53,6 +53,13 @@ export function terraScaleLevelForHeight(heightMeters: number): TerraScaleLevel 
   return 'building'
 }
 
+const TERRA_SCALE_ORDER: readonly TerraScaleLevel[] = ['global', 'regional', 'city', 'local', 'building']
+
+/** True when the camera is at `min` or closer (street-level objects stay hidden at global zoom). */
+export function terraScaleMeetsMin(current: TerraScaleLevel, min: TerraScaleLevel): boolean {
+  return TERRA_SCALE_ORDER.indexOf(current) >= TERRA_SCALE_ORDER.indexOf(min)
+}
+
 export type TerraCameraScale = {
   level: TerraScaleLevel
   /** Increments once per real Cesium `camera.moveEnd` — the native Cesium "camera has settled"

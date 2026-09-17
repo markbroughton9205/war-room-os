@@ -58,7 +58,7 @@ export function useTerraRelatedIntelligence(query: string | null): TerraRelatedI
     requestRef.current = { sequence, controller }
     const kickoff = setTimeout(() => setFeed(prev => ({ ...prev, state: 'loading' })), 0)
 
-    void fetch(`/api/terra/event-intelligence?q=${encodeURIComponent(query)}`, { cache: 'no-store', signal: controller.signal })
+    void fetch(`/api/terra/event-intelligence?q=${encodeURIComponent(query)}`, { cache: 'no-store', credentials: 'include', signal: controller.signal })
       .then(async response => {
         if (!response.ok) throw new Error(`Related intelligence request failed with HTTP ${response.status}.`)
         return response.json() as Promise<ApiResponse>

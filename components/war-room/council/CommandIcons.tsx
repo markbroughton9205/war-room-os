@@ -134,3 +134,87 @@ export function IconInspector(props: IconProps) {
     </Base>
   )
 }
+
+/** Navigate — compass for the Navigation Agent. */
+export function IconNavigate(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+    </Base>
+  )
+}
+
+/** Learn — open book for the World Learning Agent. */
+export function IconLearn(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      <path d="M8 7h8" />
+      <path d="M8 11h6" />
+    </Base>
+  )
+}
+
+/** Integrate — linked nodes for Cross-Agent Integration. */
+export function IconIntegrate(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="12" cy="18" r="3" />
+      <path d="M8.5 7.5 10.5 15" />
+      <path d="M15.5 7.5 13.5 15" />
+    </Base>
+  )
+}
+
+/** Media — equalizer bars (playing indicator). */
+export function IconRadio(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 10v4" />
+      <path d="M8 7v10" />
+      <path d="M12 4v16" />
+      <path d="M16 7v10" />
+      <path d="M20 10v4" />
+    </Base>
+  )
+}
+
+/** Media — broadcast beacon matching the approved War Room Media player glyph. */
+export function IconBroadcast(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="12" cy="16" r="1.6" fill="currentColor" stroke="none" />
+      <path d="M8.2 12.6a5.2 5.2 0 0 1 7.6 0" />
+      <path d="M5.4 9.8a9 9 0 0 1 13.2 0" />
+      <path d="M12 16V8.5" />
+    </Base>
+  )
+}
+
+/** Camera — traffic-camera discovery and inspect. Lucide camera body, stroke-only. */
+export function IconCamera(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+      <circle cx="12" cy="13" r="3" />
+    </Base>
+  )
+}
+
+/** Nearby — compact inventory glyph. */
+export function IconNearby(props: IconProps) {
+  return (
+    <Base {...props}>
+      <circle cx="12" cy="12" r="3" />
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 2v2" />
+      <path d="M12 20v2" />
+      <path d="M2 12h2" />
+      <path d="M20 12h2" />
+    </Base>
+  )
+}

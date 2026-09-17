@@ -10,6 +10,8 @@ import { errorResponse, makeDocument, okResponse, nowIso } from '@/lib/research-
 const PROVIDER = 'gbif' as const
 const BASE_URL = 'https://api.gbif.org/v1'
 const MAX_RESULTS = 25
+const NEAR_PATTERN = /^near\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s*,\s*(\d+(?:\.\d+)?))?$/i
+const MAX_NEAR_RADIUS_KM = 80
 
 type GbifOccurrence = {
   key?: number
@@ -34,7 +36,18 @@ async function search(query: ResearchQuery) {
   if (cached) return { ok: true as const, response: { ...cached, fromCache: true } }
 
   const url = new URL(`${BASE_URL}/occurrence/search`)
-  url.searchParams.set('scientificName', text)
+  const near = NEAR_PATTERN.exec(text)
+  if (near) {
+    const lat = Number(near[1])
+    const lon = Number(near[2])
+    const radiusKm = Math.max(1, Math.min(near[3] ? Number(near[3]) : 25, MAX_NEAR_RADIUS_KM))
+    const delta = radiusKm / 111
+    url.searchParams.set('decimalLatitude', `${(lat - delta).toFixed(4)},${(lat + delta).toFixed(4)}`)
+    url.searchParams.set('decimalLongitude', `${(lon - delta).toFixed(4)},${(lon + delta).toFixed(4)}`)
+    url.searchParams.set('hasCoordinate', 'true')
+  } else {
+    url.searchParams.set('scientificName', text)
+  }
   url.searchParams.set('limit', String(limit))
 
   const result = await safeProviderFetch(PROVIDER, url.toString(), { timeoutMs: 12_000 })

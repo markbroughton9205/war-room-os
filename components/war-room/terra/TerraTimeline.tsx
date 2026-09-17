@@ -54,7 +54,7 @@ export function TerraTimeline({
   const isLive = time.mode === 'live'
 
   return (
-    <div className="pointer-events-auto w-[min(640px,90vw)] rounded border border-white/10 bg-black/70 p-3 backdrop-blur-sm">
+    <div className="pointer-events-auto w-[min(560px,72vw)] rounded-lg border border-white/10 bg-black/65 px-3 py-2 backdrop-blur-md">
       <div className="mb-2 flex items-center justify-between">
         <p className={`text-[10px] font-bold uppercase tracking-widest ${isLive ? 'text-emerald-400' : 'text-amber-400'}`}>
           {isLive ? 'LIVE — NOW' : `HISTORICAL — ${formatUtcLabel(time.currentTime)}`}

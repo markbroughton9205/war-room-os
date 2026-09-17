@@ -7,6 +7,7 @@ export * from './crypto'
 export * from './gate'
 export * from './store'
 export * from './chat'
+export * from './sessionCookie'
 
 export function getLocalOwnershipRuntimeTruth() {
   return {

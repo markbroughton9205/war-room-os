@@ -20,6 +20,7 @@
  * can run in a plain Node validation script.
  */
 import type { TerraGeoFeature, TerraIntelligenceEventKind } from './types'
+import { CAMERA_INSPECT_ALTITUDE_M } from './godsEye/navigationOwnership'
 
 export type TerraEventCameraFraming =
   | { mode: 'rectangle'; west: number; south: number; east: number; north: number }
@@ -52,6 +53,7 @@ const EVENT_KIND_POINT_ALTITUDE_M: Partial<Record<TerraIntelligenceEventKind, nu
   place: 20_000,
   geographic_feature: 20_000,
   landmark_poi: 2_000,
+  traffic_camera: CAMERA_INSPECT_ALTITUDE_M,
 }
 const DEFAULT_POINT_ALTITUDE_M = 60_000
 
@@ -80,6 +82,14 @@ function computeRegionBoundingBox(rings: number[][][]): { west: number; south: n
 }
 
 export function resolveTerraEventCameraFraming(feature: TerraGeoFeature): TerraEventCameraFraming {
+  if (feature.kind === 'traffic_camera') {
+    return {
+      mode: 'point',
+      longitude: feature.longitude,
+      latitude: feature.latitude,
+      altitudeMeters: CAMERA_INSPECT_ALTITUDE_M,
+    }
+  }
   if (feature.geometryKind === 'region' && feature.regionRings && feature.regionRings.length > 0) {
     const bbox = computeRegionBoundingBox(feature.regionRings)
     if (bbox) {

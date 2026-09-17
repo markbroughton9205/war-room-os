@@ -51,7 +51,9 @@ export default async function LoginPage({
     remoteUser = null
   }
 
-  if (remoteUser) {
+  // Loopback first-run / local login must remain reachable. A remote Supabase cookie is not
+  // wr_local_session and must not skip the official Local Commander bootstrap UI.
+  if (remoteUser && !loopback) {
     redirect(next)
   }
 

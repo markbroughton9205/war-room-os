@@ -41,6 +41,7 @@ export type PublicNewsItem = {
   categories: PublicNewsCategory[]
   /** Flags feeds (e.g. Bloomberg) that are largely video-segment headlines rather than article text. */
   contentDensity?: 'thin' | 'normal'
+  language?: string | null
 }
 
 export type TrustedRssFeedDescriptor = {
@@ -52,6 +53,8 @@ export type TrustedRssFeedDescriptor = {
   contentDensity?: 'thin' | 'normal'
   regions?: GeographicRegion[]
   genericGlobalFallback?: boolean
+  /** Declared feed language — does not replace per-item detection. */
+  language?: string | null
 }
 
 /**
@@ -70,7 +73,7 @@ export const TRUSTED_RSS_FEEDS: TrustedRssFeedDescriptor[] = [
   { name: 'ABC News', url: 'http://feeds.abcnews.com/abcnews/topstories', format: 'rss', categories: ['world', 'news'], reliability: 'HIGH', regions: ['NORTH_AMERICA'] },
   { name: 'AllAfrica', url: 'https://allafrica.com/tools/headlines/rdf/africa/headlines.rdf', format: 'rdf', categories: ['world', 'news', 'africa'], reliability: 'MEDIUM', regions: ['AFRICA'] },
   { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', format: 'rss', categories: ['world', 'news'], reliability: 'HIGH', regions: ['MIDDLE_EAST'], genericGlobalFallback: true },
-  { name: 'Le Monde', url: 'https://www.lemonde.fr/rss/en_continu.xml', format: 'rss', categories: ['world', 'news', 'europe'], reliability: 'HIGH', regions: ['EUROPE'] },
+  { name: 'Le Monde', url: 'https://www.lemonde.fr/rss/en_continu.xml', format: 'rss', categories: ['world', 'news', 'europe'], reliability: 'HIGH', regions: ['EUROPE'], language: 'fr' },
   { name: 'The Hindu', url: 'https://www.thehindu.com/news/feeder/default.rss', format: 'rss', categories: ['world', 'news', 'asia'], reliability: 'HIGH', regions: ['SOUTH_ASIA'] },
   { name: 'South China Morning Post', url: 'https://www.scmp.com/rss/2/feed', format: 'rss', categories: ['world', 'news', 'asia'], reliability: 'HIGH', regions: ['EAST_ASIA'] },
   { name: 'Deutsche Welle', url: 'https://rss.dw.com/rdf/rss-en-all', format: 'rdf', categories: ['world', 'news', 'europe'], reliability: 'HIGH', regions: ['EUROPE'] },
@@ -163,6 +166,7 @@ function parseTrustedFeedXml(xml: string, feed: TrustedRssFeedDescriptor, retrie
     ...(feed.contentDensity === 'thin' || (item.snippet.length > 0 && item.snippet.length < THIN_SNIPPET_LENGTH)
       ? { contentDensity: 'thin' as const }
       : {}),
+    ...(feed.language ? { language: feed.language } : {}),
   }))
 }
 

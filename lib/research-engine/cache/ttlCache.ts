@@ -23,6 +23,10 @@ export function cacheSet<T>(key: string, value: T, ttlMs: number): void {
   store.set(key, { value, expiresAt: Date.now() + ttlMs })
 }
 
+export function cacheDelete(key: string): void {
+  store.delete(key)
+}
+
 export async function withCache<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<{ value: T; fromCache: boolean }> {
   const cached = cacheGet<T>(key)
   if (cached !== null) return { value: cached, fromCache: true }
@@ -40,6 +44,14 @@ export const CACHE_TTL = {
   health: 30 * 1000,
   errorCooldown: 30 * 1000,
 } as const
+
+/** Honor upstream Expires when present. Never cache forever; never ignore a still-valid Expires. */
+export function cacheTtlFromExpiresHeader(expiresHeader: string | null, fallbackMs: number = CACHE_TTL.liveFeed): number {
+  if (!expiresHeader) return fallbackMs
+  const at = Date.parse(expiresHeader)
+  if (!Number.isFinite(at)) return fallbackMs
+  return Math.max(15_000, Math.min(at - Date.now(), 30 * 60_000))
+}
 
 export function __resetCacheForTests(): void {
   store.clear()

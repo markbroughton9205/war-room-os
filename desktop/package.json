@@ -4,15 +4,19 @@
   "private": true,
   "description": "Sovereign AI Operations Headquarters",
   "author": "War Room OS",
+  "homepage": "https://warroomos.com",
+  "desktopName": "war-room-os",
   "main": "src/main.cjs",
   "productName": "War Room OS",
   "scripts": {
     "start": "electron .",
     "build:check": "node scripts/build-check.cjs",
     "icon:ico": "node scripts/generate-icon-ico.cjs",
+    "icon:linux": "node scripts/generate-linux-icons.cjs",
     "prepare:runtime": "node ../scripts/prepare-desktop-runtime.mjs",
     "dist": "npm run icon:ico && node scripts/build-installer.cjs",
-    "dist:dir": "electron-builder --win dir --x64"
+    "dist:dir": "electron-builder --win dir --x64",
+    "dist:linux": "npm run icon:linux && electron-builder --linux AppImage deb --x64"
   },
   "build": {
     "appId": "com.warroomos.desktop",
@@ -27,6 +31,7 @@
       "package.json",
       "assets/war-room-os.ico",
       "assets/war-room-os-icon.png",
+      "assets/war-room-os.png",
       "assets/ICON_PROVENANCE.json"
     ],
     "extraResources": [
@@ -38,6 +43,14 @@
       {
         "from": "assets/war-room-os.ico",
         "to": "assets/war-room-os.ico"
+      },
+      {
+        "from": "assets/war-room-os-icon.png",
+        "to": "assets/war-room-os-icon.png"
+      },
+      {
+        "from": "assets/war-room-os.png",
+        "to": "assets/war-room-os.png"
       }
     ],
     "asar": true,
@@ -66,6 +79,32 @@
       "deleteAppDataOnUninstall": false,
       "uninstallDisplayName": "War Room OS",
       "include": "build/installer.nsh"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/linux-icons",
+      "category": "Utility",
+      "executableName": "war-room-os",
+      "syncDesktopName": true,
+      "maintainer": "War Room OS <noreply@warroomos.com>",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "synopsis": "Sovereign AI Operations Headquarters",
+      "desktop": {
+        "entry": {
+          "Name": "War Room OS",
+          "Comment": "Sovereign AI Operations Headquarters",
+          "StartupWMClass": "War Room OS"
+        }
+      }
     },
     "publish": null
   },

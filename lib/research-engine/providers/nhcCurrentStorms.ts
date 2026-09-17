@@ -134,6 +134,12 @@ async function search(query: ResearchQuery) {
         forecastAdvisoryUrl: storm.forecastAdvisory?.url ?? null,
         forecastDiscussionUrl: storm.forecastDiscussion?.url ?? null,
         forecastGraphicsUrl: storm.forecastGraphics?.url ?? null,
+        publicAdvisoryUrl: storm.publicAdvisory?.url ?? null,
+        advisoryTimestamp: storm.publicAdvisory?.issuance ?? storm.lastUpdate ?? null,
+        forecastTrackKmz: storm.forecastTrack?.kmzFile ?? null,
+        trackConeKmz: storm.trackCone?.kmzFile ?? null,
+        bestTrackKmz: storm.bestTrackGIS?.kmzFile ?? null,
+        watchesWarningsNote: 'NHC watches/warnings and cone/track GIS are linked as source products; polygons are not fabricated from KMZ in this build.',
       },
     }))
 

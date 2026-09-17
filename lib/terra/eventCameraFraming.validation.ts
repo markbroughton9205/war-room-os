@@ -5,6 +5,7 @@
 import { pathToFileURL } from 'node:url'
 import type { TerraGeoFeature } from './types'
 import { resolveTerraEventCameraFraming } from './eventCameraFraming'
+import { CAMERA_INSPECT_ALTITUDE_M } from './godsEye/navigationOwnership'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 
@@ -53,6 +54,30 @@ function run(): CaseResult[] {
     const allPoint = earthquake.mode === 'point' && cyclone.mode === 'point' && landmark.mode === 'point'
     const distinctAltitudes = allPoint && earthquake.altitudeMeters !== cyclone.altitudeMeters && cyclone.altitudeMeters > earthquake.altitudeMeters && earthquake.altitudeMeters > landmark.altitudeMeters
     results.push(check('event_kind_changes_altitude_cyclone_wider_than_earthquake_wider_than_landmark', distinctAltitudes, `${JSON.stringify(earthquake)} ${JSON.stringify(cyclone)} ${JSON.stringify(landmark)}`))
+  }
+
+  {
+    const camera = resolveTerraEventCameraFraming(makeFeature({ kind: 'traffic_camera', longitude: -81.63, latitude: 41.24 }))
+    results.push(check(
+      'traffic_camera_view_is_street_inspect_not_city',
+      camera.mode === 'point' && camera.altitudeMeters === CAMERA_INSPECT_ALTITUDE_M && camera.altitudeMeters < 2_000,
+      JSON.stringify(camera),
+    ))
+  }
+
+  {
+    const cameraWithRings = resolveTerraEventCameraFraming(makeFeature({
+      kind: 'traffic_camera',
+      geometryKind: 'region',
+      regionRings: [[[-82, 41], [-81, 41], [-81, 42], [-82, 42], [-82, 41]]],
+      longitude: -81.63,
+      latitude: 41.24,
+    }))
+    results.push(check(
+      'traffic_camera_never_uses_coverage_rectangle',
+      cameraWithRings.mode === 'point' && cameraWithRings.longitude === -81.63 && cameraWithRings.latitude === 41.24,
+      JSON.stringify(cameraWithRings),
+    ))
   }
 
   // --- Region geometry (a real polygon) is fit to its own bounding box, not a fixed altitude ---

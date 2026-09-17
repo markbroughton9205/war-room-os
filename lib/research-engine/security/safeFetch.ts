@@ -25,6 +25,9 @@ export type SafeFetchResult = {
   attempts: number
   finalUrl: string
   retryAfterMs: number | null
+  etag: string | null
+  expires: string | null
+  lastModified: string | null
 }
 
 const DEFAULT_TIMEOUT_MS = 12_000
@@ -200,6 +203,9 @@ export async function safeProviderFetch(provider: ResearchProviderId, url: strin
         attempts,
         finalUrl: redactUrlForLogging(currentUrl),
         retryAfterMs: retryDelayFromRetryAfter(response.headers.get('retry-after')),
+        etag: response.headers.get('etag'),
+        expires: response.headers.get('expires'),
+        lastModified: response.headers.get('last-modified'),
       }
     } catch (error) {
       clearTimeout(timer)

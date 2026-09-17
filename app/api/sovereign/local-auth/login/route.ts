@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 import {
-  LOCAL_SESSION_COOKIE,
+  applyLocalSessionCookie,
   assertLocalMutationOrigin,
   assertLocalOnlyRequest,
   getLocalOwnershipStore,
@@ -9,10 +9,6 @@ import {
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-function cookie(token: string) {
-  return `${LOCAL_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${12 * 60 * 60}`
-}
 
 /** Offline local Commander login — no Supabase. */
 export async function POST(req: Request) {
@@ -47,6 +43,6 @@ export async function POST(req: Request) {
     session_id: login.auth.session.session_id,
     auth_mode: 'LOCAL_COMMANDER_SESSION',
   })
-  res.headers.set('set-cookie', cookie(login.auth.token))
+  applyLocalSessionCookie(res, login.auth.token)
   return res
 }

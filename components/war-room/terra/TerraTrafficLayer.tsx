@@ -9,7 +9,8 @@
  * truth model: every row resolves through lib/terra/coverageTruth.ts's resolveTerraCoverageTruth
  * and renders the shared TerraCoverageBadge, so NO_COVERAGE (camera outside the source's real
  * envelope) is never shown as "no data," a stale refresh is never re-labeled live, and a source
- * whose only real data is historical (WebTRIS, JARTIC) can never report LIVE.
+ * whose only real data is historical (WebTRIS ~2-month lag) can never report LIVE.
+ * JARTIC hourly volumes are LIVE TRAFFIC VOLUMES of the latest published hour-band, not live signal phase.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
@@ -22,6 +23,7 @@ import { resolveTerraCoverageTruth } from '@/lib/terra/coverageTruth'
 import type { TerraDegreeRectangle } from '@/lib/terra/aircraftBoundingBox'
 import type { TerraGeoFeature, TerraTimeMode } from '@/lib/terra/types'
 import type { TerraScaleLevel } from './useTerraCameraScale'
+import { terraScaleMeetsMin } from './useTerraCameraScale'
 
 const TerraFeatureLayer = dynamic(() => import('./TerraFeatureLayer').then(m => m.TerraFeatureLayer), { ssr: false })
 
@@ -32,9 +34,8 @@ export type TerraTrafficLayerDef = {
   unitNoun: string
   refreshMs: number
   cluster?: boolean
-  /** True when the source's only real data is inherently historical/lagged (WebTRIS's ~2-month
-   * batch reports, JARTIC's hourly volumes with ~2h publication lag) — the coverage resolver then
-   * can never report LIVE for a successful fetch, only STALE. */
+  /** True when the source's only real data is inherently historical (WebTRIS ~2-month batch).
+   * JARTIC latest published hourly volumes are not historical — they are LIVE TRAFFIC VOLUMES. */
   allHistorical?: boolean
   /** Amber note rendered under the badge for lagged/historical sources — the honest-recency label. */
   recencyNote?: string
@@ -42,11 +43,13 @@ export type TerraTrafficLayerDef = {
   coverageRegionLabel: string
   hasCoverage: (rectangle: TerraDegreeRectangle | null) => boolean
   buildQuery: (rectangle: TerraDegreeRectangle | null) => string | null
+  /** Street-level layers (cameras, signals) stay off until this scale. Defaults to regional so only global is skipped. */
+  minScaleLevel?: TerraScaleLevel
 }
 
 export type TerraTrafficLayerSelection =
   | { kind: 'feature'; layerId: string; featureId: string }
-  | { kind: 'none' | 'miss' | 'ground' | 'urban-building' }
+  | { kind: 'none' | 'miss' | 'ground' | 'urban-building' | 'urban-road' | 'urban-signal' }
 
 export function TerraTrafficLayer({
   def,
@@ -58,6 +61,10 @@ export function TerraTrafficLayer({
   rectangle,
   defaultEnabled,
   hideControls = false,
+  forceEnabled = false,
+  skipScaleGate = false,
+  clusterOverride,
+  onAuthRequired,
 }: {
   def: TerraTrafficLayerDef
   viewer: CesiumViewer | null
@@ -73,8 +80,21 @@ export function TerraTrafficLayer({
   /** Command-center mode: fetch and render markers, but no toggle/status chrome (same headless
    * convention as TerraLayerRow's hideControls). */
   hideControls?: boolean
+  /** Camera discovery federation: query this layer from the active Terra location even if the
+   * advanced Layer Controls toggle is off. */
+  forceEnabled?: boolean
+  /** Camera discovery supplies a location-centered bbox; do not wait for city-scale globe zoom. */
+  skipScaleGate?: boolean
+  /** Camera federation LOD: cluster at country/city, individual pins at street. */
+  clusterOverride?: boolean
+  onAuthRequired?: (layerId: string, authRequired: boolean) => void
 }) {
   const [enabled, setEnabled] = useState(defaultEnabled)
+  const layerOn = enabled || forceEnabled
+
+  useEffect(() => {
+    if (forceEnabled) setEnabled(true)
+  }, [forceEnabled])
 
   // The source's own coverage answer, computed independently of the enabled toggle, so the row
   // can distinguish "outside this provider's real envelope" from "inside but nothing returned."
@@ -84,19 +104,30 @@ export function TerraTrafficLayer({
   // while the layer is off — matching every other layer's "null query = don't fetch" convention.
   // The source's own builder additionally returns null outside its real coverage envelope.
   const boundingBoxQuery = useMemo(() => {
-    if (!enabled) return null
-    if (cameraScaleLevel === 'global') return null
+    if (!layerOn) return null
+    if (!skipScaleGate && !terraScaleMeetsMin(cameraScaleLevel, def.minScaleLevel ?? 'regional')) return null
     return def.buildQuery(rectangle)
-  }, [enabled, cameraScaleLevel, def, rectangle])
+  }, [layerOn, skipScaleGate, cameraScaleLevel, def, rectangle])
 
   const autoRefreshAllowed = shouldAutoRefreshTerraLayer(timeMode)
   const feed = useTerraLayer(def.layerId, boundingBoxQuery !== null, def.refreshMs, autoRefreshAllowed, boundingBoxQuery)
 
+  const lastCatalogRef = useRef<TerraGeoFeature[]>([])
+  if (boundingBoxQuery !== null && (feed.features.length > 0 || feed.state === 'live' || feed.state === 'empty')) {
+    lastCatalogRef.current = feed.features
+  }
   useEffect(() => {
-    // Deferred a tick — see useTerraLayer.ts's own identical kickoff pattern for why.
-    const timeout = setTimeout(() => onFeaturesChange(def.layerId, feed.features), 0)
+    // LOD unload returns empty features from useTerraLayer; keep the last catalog for Nearby /
+    // inspect. Markers stay off because TerraFeatureLayer is gated on boundingBoxQuery.
+    const published = boundingBoxQuery === null ? lastCatalogRef.current : feed.features
+    const timeout = setTimeout(() => onFeaturesChange(def.layerId, published), 0)
     return () => clearTimeout(timeout)
-  }, [def.layerId, feed.features, onFeaturesChange])
+  }, [def.layerId, feed.features, onFeaturesChange, boundingBoxQuery])
+
+  const authRequired = feed.rootCause === 'COMMANDER_AUTH_REQUIRED'
+  useEffect(() => {
+    onAuthRequired?.(def.layerId, authRequired)
+  }, [authRequired, def.layerId, onAuthRequired])
 
   const coverageState = useMemo(
     () =>
@@ -131,7 +162,15 @@ export function TerraTrafficLayer({
 
   return (
     <>
-      <TerraFeatureLayer layerId={def.layerId} viewer={viewer} enabled={boundingBoxQuery !== null} features={feed.features} selectedId={selectedId} cluster={def.cluster} />
+      <TerraFeatureLayer
+        layerId={def.layerId}
+        viewer={viewer}
+        enabled={boundingBoxQuery !== null}
+        features={feed.features}
+        selectedId={selectedId}
+        cluster={clusterOverride ?? def.cluster}
+        clusterKind={def.unitNoun === 'camera' ? 'camera' : undefined}
+      />
       {!hideControls && (
         <div className="mt-1 border-t border-white/10 pt-2 first:border-t-0 first:pt-0 first:mt-0">
           <div className="flex items-center justify-between text-[11px]">
@@ -140,14 +179,14 @@ export function TerraTrafficLayer({
               type="button"
               onClick={() => setEnabled(prev => !prev)}
               className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
-                enabled ? 'border-emerald-400/60 text-emerald-400' : 'border-white/20 text-slate-500'
+                layerOn ? 'border-emerald-400/60 text-emerald-400' : 'border-white/20 text-slate-500'
               }`}
-              aria-pressed={enabled}
+              aria-pressed={layerOn}
             >
-              {enabled ? 'On' : 'Off'}
+              {layerOn ? 'On' : 'Off'}
             </button>
           </div>
-          {enabled && (
+          {layerOn && (
             <div className="mt-1 space-y-1">
               {boundingBoxQuery === null && hasCoverage ? (
                 // Coverage exists here but no bounded query is possible (global camera scale, or a
@@ -163,12 +202,23 @@ export function TerraTrafficLayer({
                 <>
                   <TerraCoverageBadge state={coverageState} />
                   {def.recencyNote && <p className="text-[10.5px] text-amber-300/90">{def.recencyNote}</p>}
+                  <p className="text-[10.5px] text-slate-500">Provider status: {feed.liveStatus}</p>
                   <p className="text-[10.5px] text-slate-500">
-                    {feed.features.length} {def.unitNoun}{feed.features.length === 1 ? '' : 's'} in view
+                    Displayed data: {feed.displayedDataStatus === 'STALE_LAST_GOOD' ? 'STALE_LAST_GOOD' : feed.displayedDataStatus === 'CURRENT' ? 'CURRENT' : 'NONE'}
+                  </p>
+                  <p className="text-[10.5px] text-slate-500">
+                    {feed.displayedDataStatus === 'STALE_LAST_GOOD'
+                      ? `Item count: ${feed.features.length} ${def.unitNoun}${feed.features.length === 1 ? '' : 's'} retained`
+                      : `${feed.features.length} ${def.unitNoun}${feed.features.length === 1 ? '' : 's'} in view`}
                     {feed.skippedCount > 0 && ` · ${feed.skippedCount} unprojectable`}
                   </p>
-                  {feed.lastFetchedAt && <p className="text-[10.5px] text-slate-500">Last fetched: {new Date(feed.lastFetchedAt).toLocaleTimeString()}</p>}
-                  {feed.lastErrorMessage && <p className="text-[10.5px] text-red-400">{feed.lastErrorMessage}</p>}
+                  {feed.lastFetchedAt && (
+                    <p className="text-[10.5px] text-slate-500">
+                      {feed.displayedDataStatus === 'STALE_LAST_GOOD' ? 'Last success: ' : 'Last fetched: '}
+                      {new Date(feed.lastFetchedAt).toLocaleTimeString()}
+                    </p>
+                  )}
+                  {feed.lastErrorMessage && <p className={`text-[10.5px] ${feed.lastErrorMessage === 'AUTH_REQUIRED' ? 'text-amber-300' : 'text-red-400'}`}>{feed.lastErrorMessage}</p>}
                   <button
                     type="button"
                     onClick={feed.refresh}

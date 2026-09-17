@@ -27,7 +27,28 @@ export function assertLocalOnlyRequest(input: {
   return { ok: true }
 }
 
-const ALLOWED_ORIGINS = new Set([LOCAL_UI_ORIGIN, LOCAL_CORE_ORIGIN, 'http://localhost:3848', 'http://localhost:3847'])
+const LOCAL_WAR_ROOM_PORTS = new Set(['3848', '3847', '3001'])
+
+function isAllowedLocalWarRoomOrigin(raw: string | null | undefined): boolean {
+  if (!raw?.trim()) return false
+  try {
+    const url = new URL(raw)
+    if (!isLoopbackRequestHost(url.host)) return false
+    const port = url.port || (url.protocol === 'https:' ? '443' : '80')
+    return LOCAL_WAR_ROOM_PORTS.has(port)
+  } catch {
+    return false
+  }
+}
+
+const ALLOWED_ORIGINS = new Set([
+  LOCAL_UI_ORIGIN,
+  LOCAL_CORE_ORIGIN,
+  'http://localhost:3848',
+  'http://localhost:3847',
+  'http://127.0.0.1:3001',
+  'http://localhost:3001',
+])
 
 /**
  * State-changing local routes require Origin (or same-host Referer) matching local origins.
@@ -43,14 +64,14 @@ export function assertLocalMutationOrigin(input: {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return { ok: true }
 
   const origin = input.origin?.trim() || null
-  if (origin && ALLOWED_ORIGINS.has(origin)) return { ok: true }
+  if (origin && (ALLOWED_ORIGINS.has(origin) || isAllowedLocalWarRoomOrigin(origin))) return { ok: true }
 
   if (input.referer) {
     try {
       const u = new URL(input.referer)
       const refOrigin = `${u.protocol}//${u.host}`
-      if (ALLOWED_ORIGINS.has(refOrigin)) return { ok: true }
-      if (isLoopbackRequestHost(u.host) && (u.port === '3848' || u.port === '3847' || u.port === '')) {
+      if (ALLOWED_ORIGINS.has(refOrigin) || isAllowedLocalWarRoomOrigin(refOrigin)) return { ok: true }
+      if (isLoopbackRequestHost(u.host) && LOCAL_WAR_ROOM_PORTS.has(u.port || '80')) {
         return { ok: true }
       }
     } catch {

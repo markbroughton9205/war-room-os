@@ -2,6 +2,8 @@
 
 import type { TerraActiveLocation } from '@/lib/terra/activeLocation'
 import type { TerraGeoFeature } from '@/lib/terra/types'
+import { resolveTerraWorldTime } from '@/lib/terra/worldTime'
+import { coverageProvidersForPoint } from '@/lib/terra/coverageFederation'
 
 export type TerraNearbyLandmarksSummary = {
   /** Whether the nearby-landmarks layer is currently gated on (a location is active AND the
@@ -39,16 +41,24 @@ export function TerraEarthKnowledgePanel({ location, onDismiss, nearby, compact 
           <p className="line-clamp-2 text-[12px] font-semibold text-slate-100">{location.label}</p>
           <dl className={`mt-2 space-y-1 text-[10.5px] text-slate-400 ${compact ? 'hidden sm:block' : ''}`}>
             {location.place && <div className="flex justify-between gap-3"><dt>Place</dt><dd className="text-right text-slate-200">{location.place}</dd></div>}
+            {location.searchQuery && location.contextType === 'SEARCH' ? (
+              <div className="flex justify-between gap-3"><dt>Selected</dt><dd className="text-right text-cyan-200">{location.searchQuery}</dd></div>
+            ) : null}
+            {location.reverseSublocalityLabel ? (
+              <div className="flex justify-between gap-3"><dt>Inside</dt><dd className="text-right text-slate-200">{location.reverseSublocalityLabel}</dd></div>
+            ) : null}
             {location.address && <div className="flex justify-between gap-3"><dt>Address</dt><dd className="max-w-[65%] text-right text-slate-200">{location.address}</dd></div>}
             {location.region && <div className="flex justify-between gap-3"><dt>Region</dt><dd className="text-right text-slate-200">{location.region}</dd></div>}
             <div className="flex justify-between gap-3"><dt>Coordinates</dt><dd className="font-mono text-right text-slate-200">{location.latitude.toFixed(5)}°, {location.longitude.toFixed(5)}°</dd></div>
             <div className="flex justify-between gap-3"><dt>Height</dt><dd className="text-right text-slate-200">{location.hasTerrainHeight && location.height !== null ? `${location.height.toFixed(0)} m terrain` : 'unavailable'}</dd></div>
+            <WorldTimeRows latitude={location.latitude} longitude={location.longitude} place={location.place ?? location.label} />
             <div className="flex justify-between gap-3"><dt>Status</dt><dd className={location.status === 'resolved' ? 'text-emerald-300' : location.status === 'resolving' ? 'text-cyan-300' : 'text-amber-300'}>{location.status === 'coordinate_only' ? 'coordinate-only / unresolved' : location.status}</dd></div>
             <div className="flex justify-between gap-3"><dt>Confidence</dt><dd className="text-right text-slate-200">{location.confidence === 'provider_supported' ? 'provider-supported' : 'exact coordinate only'}</dd></div>
             <div className="flex justify-between gap-3"><dt>Source</dt><dd className="text-right text-slate-200">{location.sourceLabel}</dd></div>
           </dl>
           <p className={`mt-1.5 text-[10px] leading-snug ${location.status === 'coordinate_only' ? 'text-amber-300/90' : 'text-slate-500'} ${compact ? 'hidden sm:block' : ''}`}>{location.detail}</p>
           {location.sourceUrl && <a href={location.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[10px] text-cyan-400 hover:underline">Open provenance source ↗</a>}
+          <OfficialLiveViewers latitude={location.latitude} longitude={location.longitude} />
 
           {/* God's Eye multi-scale phase, mission section 9: Earth Knowledge deepens with nearby
               landmarks/POIs once the camera is close enough for a bounded search to make sense —
@@ -76,5 +86,48 @@ export function TerraEarthKnowledgePanel({ location, onDismiss, nearby, compact 
         </div>
       )}
     </section>
+  )
+}
+
+function OfficialLiveViewers({ latitude, longitude }: { latitude: number; longitude: number }) {
+  const viewers = coverageProvidersForPoint(latitude, longitude)
+    .filter(row => row.viewerUrl)
+    .slice(0, 8)
+  if (!viewers.length) return null
+  return (
+    <div className="mt-2 border-t border-white/10 pt-1.5">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-400/60">Official live sources</p>
+      <ul className="mt-0.5 space-y-0.5">
+        {viewers.map(row => (
+          <li key={row.id}>
+            <a
+              href={row.viewerUrl!}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[10px] text-cyan-300 hover:underline"
+            >
+              {row.endpointType === 'OFFICIAL_VIEWER' ? 'OPEN OFFICIAL LIVE VIEW' : 'OPEN PROVIDER MAP'} · {row.id}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function WorldTimeRows({ latitude, longitude, place }: { latitude: number; longitude: number; place: string | null }) {
+  const worldTime = resolveTerraWorldTime({
+    utcIso: new Date().toISOString(),
+    latitude,
+    longitude,
+    place,
+  })
+  return (
+    <>
+      <div className="flex justify-between gap-3"><dt>Timezone</dt><dd className="text-right text-slate-200">{worldTime.timeZone ?? 'unavailable'}</dd></div>
+      <div className="flex justify-between gap-3"><dt>Local time</dt><dd className="text-right text-slate-200">{worldTime.localTime ?? 'unavailable'}</dd></div>
+      <div className="flex justify-between gap-3"><dt>Day/night</dt><dd className="text-right text-slate-200">{worldTime.dayNightState ?? 'unavailable'}</dd></div>
+      <div className="flex justify-between gap-3"><dt>Time coverage</dt><dd className="text-right text-slate-200">{worldTime.coverageState}</dd></div>
+    </>
   )
 }

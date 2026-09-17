@@ -143,13 +143,19 @@ export function TerraEarthImagery({ viewer, selectedTime, hasIonToken, mapDetail
 
       const applyAlpha = () => {
         if (!trueColorLayer || targetViewer.isDestroyed()) return
+        if (mapDetailModeRef.current) {
+          if (osmBaseLayer) osmBaseLayer.alpha = 1
+          trueColorLayer.alpha = 0
+          if (worldImageryLayer) worldImageryLayer.alpha = 0
+          return
+        }
         const height = targetViewer.camera.positionCartographic.height
         // Without a real aerial asset there is nothing to hand off to at close range — hold GIBS
         // at full opacity instead of fading it toward the OSM base, so the Commander always sees a
         // real (if low-resolution close up) photograph rather than a silently-substituted map.
         trueColorLayer.alpha = fadeInProgress * (aerialAvailable ? heightBasedAlpha(height) : 1)
         if (worldImageryLayer) worldImageryLayer.alpha = fadeInProgress * inverseHeightBasedAlpha(height)
-        if (osmBaseLayer) osmBaseLayer.alpha = mapDetailModeRef.current ? 1 : 0
+        if (osmBaseLayer) osmBaseLayer.alpha = 0
       }
 
       const startedAt = performance.now()

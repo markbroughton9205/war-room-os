@@ -2,30 +2,27 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { fetchProxiedCameraImage, type TerraCameraImageProvider } from '@/lib/terra/cameraImageProxy'
+import { isPublicTerraLayer } from '@/lib/terra/publicLayers'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const ALLOWED_PROVIDERS: TerraCameraImageProvider[] = ['digitraffic_road_cameras', 'ontario_511_cameras', 'hong_kong_td_cameras']
+const ALLOWED_PROVIDERS: TerraCameraImageProvider[] = ['digitraffic_road_cameras', 'ontario_511_cameras', 'hong_kong_td_cameras', 'ohgo_cameras', 'caltrans_cctv']
 
 /**
- * God's Eye Phase 2's camera-image proxy boundary — see lib/terra/cameraImageProxy.ts for the full
- * security rationale. Same Commander-session gate every other Terra API route uses
- * (app/api/terra/layers/[layerId]/route.ts); this route adds no separate auth path.
- *
- * GET /api/terra/camera-image?provider=digitraffic_road_cameras&id={presetId}
- * GET /api/terra/camera-image?provider=ontario_511_cameras&id={viewId}
- * GET /api/terra/camera-image?provider=hong_kong_td_cameras&id={cameraKey}
- *
- * `id` is the only client-supplied identifier — never a URL — so this route has no
- * arbitrary-URL-proxying surface regardless of what a caller sends.
+ * Camera still proxy. Client supplies only `provider` + opaque `id` — never a URL.
+ * Public / provider-auth stills may be served without a Commander session (401 proceeds).
+ * Wrong-identity 403 still blocks. This is not an arbitrary-URL fetcher.
  */
 export async function GET(request: NextRequest) {
   const commander = await requireCommanderSession('Terra camera image proxy')
-  if (!commander.ok) return commander.response
-
   const provider = request.nextUrl.searchParams.get('provider')
   const id = request.nextUrl.searchParams.get('id')
+
+  if (!commander.ok) {
+    if (commander.response.status === 403) return commander.response
+    if (!provider || !isPublicTerraLayer(provider)) return commander.response
+  }
 
   if (!provider || !ALLOWED_PROVIDERS.includes(provider as TerraCameraImageProvider)) {
     return NextResponse.json({ error: `Unknown or unsupported camera image provider. Allowed: ${ALLOWED_PROVIDERS.join(', ')}.` }, { status: 400 })

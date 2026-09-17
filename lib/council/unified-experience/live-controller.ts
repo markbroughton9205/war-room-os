@@ -327,7 +327,6 @@ function progressStatus(events: readonly CommanderOperationEvent[], progress: Co
   if (events.some(event => event.type === 'families_assigned')) return 'assembling'
   if (events.some(event => event.type === 'council_mode_selected')) return 'running'
   if (events.some(event => event.type === 'request_received')) return 'received'
-  if (progress.status === 'degraded') return 'timed_out'
   return progress.status === 'closed' ? 'failed' : 'idle'
 }
 

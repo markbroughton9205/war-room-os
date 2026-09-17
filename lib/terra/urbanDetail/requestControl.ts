@@ -4,6 +4,7 @@
  * motion cannot fan out duplicate provider calls.
  */
 import type { TerraUrbanDiagnosticState, TerraUrbanLod, TerraUrbanTilePayload } from './types'
+import { TERRA_URBAN_INCLUDE_LABELS } from './lod'
 
 /** Extra wait after Cesium `camera.moveEnd` so a zoom gesture is one fetch, not many. */
 export const TERRA_URBAN_CAMERA_DEBOUNCE_MS = 450
@@ -78,6 +79,7 @@ export function asCachedUrbanPayload(payload: TerraUrbanTilePayload): TerraUrban
     diagnostics: {
       roads: cached(payload.diagnostics.roads),
       buildings: cached(payload.diagnostics.buildings),
+      signals: cached(payload.diagnostics.signals ?? 'UNAVAILABLE'),
       labels: cached(payload.diagnostics.labels),
     },
   }
@@ -93,6 +95,7 @@ export function asStaleUrbanPayload(payload: TerraUrbanTilePayload, error: strin
     diagnostics: {
       roads: mapDiagnosticForStale(payload.diagnostics.roads),
       buildings: mapDiagnosticForStale(payload.diagnostics.buildings),
+      signals: mapDiagnosticForStale(payload.diagnostics.signals ?? 'UNAVAILABLE'),
       labels: mapDiagnosticForStale(payload.diagnostics.labels),
     },
   }
@@ -102,13 +105,14 @@ export function rateLimitedDiagnostics(lod: TerraUrbanLod): TerraUrbanTilePayloa
   return {
     roads: 'RATE_LIMITED',
     buildings: lod === 'city' ? 'UNAVAILABLE' : 'RATE_LIMITED',
-    labels: lod === 'building' ? 'RATE_LIMITED' : 'UNAVAILABLE',
+    signals: lod === 'city' ? 'UNAVAILABLE' : 'RATE_LIMITED',
+    labels: TERRA_URBAN_INCLUDE_LABELS[lod] ? 'RATE_LIMITED' : 'UNAVAILABLE',
   }
 }
 
 export function hasUsableUrbanGeometry(payload: TerraUrbanTilePayload | null | undefined): boolean {
   if (!payload) return false
-  return payload.roads.length > 0 || payload.buildings.length > 0
+  return payload.roads.length > 0 || payload.buildings.length > 0 || (payload.signals?.length ?? 0) > 0
 }
 
 export function sameUrbanViewportKey(a: string | null | undefined, b: string | null | undefined): boolean {

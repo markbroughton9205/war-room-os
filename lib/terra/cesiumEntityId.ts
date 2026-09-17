@@ -12,3 +12,25 @@ export function terraEntityId(featureId: string): string {
 export function featureIdFromTerraEntityId(entityId: unknown): string | null {
   return typeof entityId === 'string' && entityId.startsWith(PREFIX) ? entityId.slice(PREFIX.length) : null
 }
+
+export type TerraClusterPick = {
+  terraCluster: true
+  layerId: string
+  count: number
+  latitude: number
+  longitude: number
+  west?: number
+  south?: number
+  east?: number
+  north?: number
+}
+
+export function isTerraClusterPick(value: unknown): value is TerraClusterPick {
+  if (!value || typeof value !== 'object') return false
+  const rec = value as Partial<TerraClusterPick>
+  return rec.terraCluster === true
+    && typeof rec.layerId === 'string'
+    && typeof rec.count === 'number'
+    && Number.isFinite(rec.latitude)
+    && Number.isFinite(rec.longitude)
+}
