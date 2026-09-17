@@ -2,17 +2,18 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
-import { TerraWorkspaceLayoutStore, type WorkspacePanelSize, type WorkspaceViewport } from './terraWorkspaceStore'
+import { TerraWorkspaceLayoutStore, type TerraWorkspaceAttentionState, type WorkspacePanelSize, type WorkspaceViewport } from './terraWorkspaceStore'
 import { setTerraGlobeInputsEnabled } from './isolateTerraGlobeInputs'
 import type { TerraWorkspacePanelId } from '@/lib/terra/workspace/panelIds'
 import type { TerraWorkspacePanelRecord } from '@/lib/terra/workspace/layout'
 
-type LayoutApi = {
+export type LayoutApi = {
   store: TerraWorkspaceLayoutStore
   getViewer: () => CesiumViewer | null
   getViewport: () => WorkspaceViewport
   isolateGlobe: (isolated: boolean) => void
   registerSize: (id: TerraWorkspacePanelId, size: WorkspacePanelSize) => void
+  getSizes: () => Partial<Record<TerraWorkspacePanelId, WorkspacePanelSize>>
 }
 
 const TerraWorkspaceLayoutContext = createContext<LayoutApi | null>(null)
@@ -38,9 +39,15 @@ function readViewport(node: HTMLElement | null): WorkspaceViewport {
 export function TerraWorkspaceLayoutProvider({
   viewer,
   children,
+  onApiReady,
 }: {
   viewer: CesiumViewer | null
   children: ReactNode
+  /** Lets the component that renders this provider (e.g. TerraShell, which owns the click
+   * handlers that need to route into Smart Click) reach the same store instance imperatively —
+   * the context hook only works for the provider's own descendants, not its ancestor. Fires
+   * once the provider's memoized api is ready; never creates a second store/provider. */
+  onApiReady?: (api: LayoutApi) => void
 }) {
   const storeRef = useRef<TerraWorkspaceLayoutStore | null>(null)
   if (!storeRef.current) storeRef.current = new TerraWorkspaceLayoutStore()
@@ -65,7 +72,12 @@ export function TerraWorkspaceLayoutProvider({
     registerSize: (id, size) => {
       sizesRef.current[id] = size
     },
+    getSizes: () => sizesRef.current,
   }), [store])
+
+  useEffect(() => {
+    onApiReady?.(api)
+  }, [api, onApiReady])
 
   useEffect(() => {
     const host = hostRef.current
@@ -76,9 +88,17 @@ export function TerraWorkspaceLayoutProvider({
     if (host) observer?.observe(host)
     const onKey = (event: KeyboardEvent) => {
       if (!event.altKey || !event.shiftKey) return
-      if (event.key !== 'R' && event.key !== 'r') return
-      event.preventDefault()
-      store.reset(readViewport(hostRef.current), sizesRef.current)
+      if (event.key === 'R' || event.key === 'r') {
+        event.preventDefault()
+        store.reset(readViewport(hostRef.current), sizesRef.current)
+        return
+      }
+      if (event.key === 'O' || event.key === 'o') {
+        const target = event.target as HTMLElement | null
+        if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return
+        event.preventDefault()
+        store.smartOrganize(readViewport(hostRef.current), sizesRef.current)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => {
@@ -108,6 +128,7 @@ export function useTerraWorkspacePanelState(id: TerraWorkspacePanelId): {
   record: TerraWorkspacePanelRecord
   rank: number
   dragging: boolean
+  attention: TerraWorkspaceAttentionState | undefined
   store: TerraWorkspaceLayoutStore
   api: LayoutApi
 } {
@@ -117,6 +138,7 @@ export function useTerraWorkspacePanelState(id: TerraWorkspacePanelId): {
     record: snapshot.panels[id] ?? EMPTY_RECORD,
     rank: snapshot.zOrder.indexOf(id) < 0 ? snapshot.zOrder.length : snapshot.zOrder.indexOf(id),
     dragging: snapshot.draggingId === id,
+    attention: snapshot.attention[id],
     store: api.store,
     api,
   }

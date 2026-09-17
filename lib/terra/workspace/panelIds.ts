@@ -140,6 +140,29 @@ export const TERRA_GLOBE_FOCUS_MINIMIZE: readonly TerraWorkspacePanelId[] = [
   'left_rail',
 ]
 
+/** Smart Click's one deterministic interaction router. Each real Terra interaction kind maps to
+ * exactly one primary panel (opened/fronted/attention-marked) plus optional secondary panels
+ * that only ever receive an attention indicator, never open on their own — "one click, one
+ * primary panel" (mission section 7/9). Callers classify the interaction (camera vs weather vs
+ * building vs ...); this table is the single place the panel mapping lives, so it never gets
+ * duplicated across components. */
+export type TerraSmartClickInteractionKind =
+  | 'camera'
+  | 'weather_alert'
+  | 'street_view_point'
+  | 'building_or_object'
+  | 'hazard_or_event'
+  | 'location'
+
+export const TERRA_SMART_CLICK_ROUTES: Record<TerraSmartClickInteractionKind, { primary: TerraWorkspacePanelId; secondary: readonly TerraWorkspacePanelId[] }> = {
+  camera: { primary: 'gods_eye_inspect', secondary: ['nearby_cameras'] },
+  weather_alert: { primary: 'weather_drawer', secondary: ['live_intel'] },
+  street_view_point: { primary: 'street_view', secondary: [] },
+  building_or_object: { primary: 'gods_eye_inspect', secondary: ['street_intel'] },
+  hazard_or_event: { primary: 'live_intel', secondary: ['gods_eye_inspect'] },
+  location: { primary: 'location_gps', secondary: ['nearby_cameras'] },
+}
+
 export const TERRA_INTEL_FOCUS_MINIMIZE: readonly TerraWorkspacePanelId[] = [
   'hazard_counters',
   'globe_status',

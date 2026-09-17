@@ -1,5 +1,7 @@
 import type { TerraWorkspacePanelId } from './panelIds'
 
+export type TerraSmartOrganizePlacement = { id: TerraWorkspacePanelId; x: number; y: number; dock: 'float' }
+
 export const TERRA_WORKSPACE_LAYOUT_KEY = 'terra-workspace-layout:v1'
 export const TERRA_WORKSPACE_Z_BASE = 50
 export const TERRA_WORKSPACE_Z_SPAN = 20
@@ -23,10 +25,21 @@ export type TerraWorkspacePanelRecord = {
   dock: TerraWorkspaceDock
 }
 
+export type TerraWorkspaceSettings = {
+  smartClick: boolean
+  smartOpen: boolean
+}
+
+export const TERRA_WORKSPACE_DEFAULT_SETTINGS: TerraWorkspaceSettings = {
+  smartClick: true,
+  smartOpen: false,
+}
+
 export type TerraWorkspaceLayoutV1 = {
   version: 1
   panels: Partial<Record<TerraWorkspacePanelId, TerraWorkspacePanelRecord>>
   zOrder: TerraWorkspacePanelId[]
+  settings?: Partial<TerraWorkspaceSettings>
 }
 
 export function isWorkspaceDock(value: unknown): value is TerraWorkspaceDock {
@@ -51,6 +64,34 @@ export function clampPanelPosition(input: {
     x: Math.min(maxX, Math.max(minX, input.x)),
     y: Math.min(maxY, Math.max(minY, input.y)),
   }
+}
+
+/** Smart Click's "shift only enough to expose useful content" recovery. Bringing a panel to
+ * front already resolves ordinary sibling-panel overlap (the panel now renders on top of
+ * whatever used to cover it), so the only real occlusion risk left is the pinned WORKSPACE
+ * control (always top-most at TERRA_WORKSPACE_CONTROL_Z, fixed near the top-left corner) and
+ * the panel being fully or partially off-screen. This clamps on-screen and, for float panels
+ * other than the control itself, nudges clear of the control's corner if they'd overlap it. */
+export function recoverPanelPosition(input: {
+  x: number
+  y: number
+  panelWidth: number
+  panelHeight: number
+  viewportWidth: number
+  viewportHeight: number
+  avoidPinnedControl: boolean
+}): { x: number; y: number } {
+  const clamped = clampPanelPosition(input)
+  if (!input.avoidPinnedControl) return clamped
+  const controlZoneWidth = 228
+  const controlZoneHeight = 160
+  const overlapsControl = clamped.x < controlZoneWidth && clamped.y < controlZoneHeight
+  if (!overlapsControl) return clamped
+  return clampPanelPosition({
+    ...input,
+    x: clamped.x,
+    y: controlZoneHeight,
+  })
 }
 
 export function dockedPosition(input: {
@@ -139,6 +180,80 @@ export function normalizePanelRecord(raw: Partial<TerraWorkspacePanelRecord> | u
   }
 }
 
+/** Reflowed by Smart Organize; every other panel (large viewers, the pinned workspace control)
+ * keeps whatever position it already has — Smart Organize arranges the HUD/control chrome
+ * around the globe, it does not relocate contextual viewers the Commander just opened. */
+const SMART_ORGANIZE_TOP_IDS: readonly TerraWorkspacePanelId[] = ['search_command', 'globe_status', 'hazard_counters']
+const SMART_ORGANIZE_LEFT_IDS: readonly TerraWorkspacePanelId[] = ['left_rail', 'nearby_cameras', 'camera_directory']
+const SMART_ORGANIZE_RIGHT_IDS: readonly TerraWorkspacePanelId[] = ['live_intel', 'gods_eye_controls', 'camera_discovery', 'area_live_controls', 'location_gps', 'weather_drawer', 'weather_toast']
+const SMART_ORGANIZE_BOTTOM_IDS: readonly TerraWorkspacePanelId[] = ['timeline', 'radar']
+
+/** Pure layout heuristic for the WORKSPACE → SMART ORGANIZE action. Packs the currently-visible
+ * (non-minimized) HUD/control panels into top/left/right/bottom bands sized from each panel's
+ * actual measured dimensions (never assumed fixed sizes), leaving the center of the viewport —
+ * the globe's focal area — clear, and clamps every result on-screen via clampPanelPosition so
+ * nothing is ever placed off-screen. Does not decide persistence — callers choose whether/when
+ * to save the result. */
+export function computeSmartOrganizeLayout(input: {
+  panels: Partial<Record<TerraWorkspacePanelId, TerraWorkspacePanelRecord>>
+  sizes: Partial<Record<TerraWorkspacePanelId, { width: number; height: number }>>
+  viewportWidth: number
+  viewportHeight: number
+}): TerraSmartOrganizePlacement[] {
+  const { panels, sizes, viewportWidth, viewportHeight } = input
+  const margin = TERRA_WORKSPACE_MARGIN_PX
+  const sizeOf = (id: TerraWorkspacePanelId) => sizes[id] ?? { width: 280, height: 96 }
+  const isVisible = (id: TerraWorkspacePanelId) => {
+    const record = panels[id]
+    return record !== undefined && !record.minimized
+  }
+  const place = (id: TerraWorkspacePanelId, x: number, y: number, width: number, height: number): TerraSmartOrganizePlacement => {
+    const clamped = clampPanelPosition({ x, y, panelWidth: width, panelHeight: height, viewportWidth, viewportHeight })
+    return { id, x: clamped.x, y: clamped.y, dock: 'float' }
+  }
+  const results: TerraSmartOrganizePlacement[] = []
+
+  // TOP band: left-to-right, starting clear of the pinned workspace control at the top-left.
+  let topX = 240
+  for (const id of SMART_ORGANIZE_TOP_IDS) {
+    if (!isVisible(id)) continue
+    const size = sizeOf(id)
+    results.push(place(id, topX, margin, size.width, size.height))
+    topX += size.width + margin
+  }
+
+  // LEFT column: stacked, below the workspace control.
+  let leftY = 148
+  for (const id of SMART_ORGANIZE_LEFT_IDS) {
+    if (!isVisible(id)) continue
+    const size = sizeOf(id)
+    results.push(place(id, margin, leftY, size.width, size.height))
+    leftY += size.height + margin
+  }
+
+  // RIGHT column: stacked, right-aligned.
+  let rightY = margin
+  for (const id of SMART_ORGANIZE_RIGHT_IDS) {
+    if (!isVisible(id)) continue
+    const size = sizeOf(id)
+    results.push(place(id, viewportWidth - size.width - 12, rightY, size.width, size.height))
+    rightY += size.height + margin
+  }
+
+  // BOTTOM row: centered as a group, hugging the bottom edge.
+  const bottomVisible = SMART_ORGANIZE_BOTTOM_IDS.filter(isVisible)
+  const bottomTotalWidth = bottomVisible.reduce((sum, id) => sum + sizeOf(id).width, 0) + margin * Math.max(0, bottomVisible.length - 1)
+  let bottomX = Math.max(margin, (viewportWidth - bottomTotalWidth) / 2)
+  for (const id of bottomVisible) {
+    const size = sizeOf(id)
+    bottomX = bottomX
+    results.push(place(id, bottomX, viewportHeight - size.height - 12, size.width, size.height))
+    bottomX += size.width + margin
+  }
+
+  return results
+}
+
 export function parseWorkspaceLayout(raw: string | null): TerraWorkspaceLayoutV1 | null {
   if (!raw) return null
   try {
@@ -149,10 +264,17 @@ export function parseWorkspaceLayout(raw: string | null): TerraWorkspaceLayoutV1
       const normalized = normalizePanelRecord(record)
       if (normalized) panels[id as TerraWorkspacePanelId] = normalized
     }
+    const settings = parsed.settings && typeof parsed.settings === 'object'
+      ? {
+        smartClick: typeof parsed.settings.smartClick === 'boolean' ? parsed.settings.smartClick : TERRA_WORKSPACE_DEFAULT_SETTINGS.smartClick,
+        smartOpen: typeof parsed.settings.smartOpen === 'boolean' ? parsed.settings.smartOpen : TERRA_WORKSPACE_DEFAULT_SETTINGS.smartOpen,
+      }
+      : undefined
     return {
       version: 1,
       panels,
       zOrder: Array.isArray(parsed.zOrder) ? parsed.zOrder : [],
+      settings,
     }
   } catch {
     return null

@@ -22,7 +22,7 @@ export function TerraWorkspacePanel({
   dockable?: boolean
   className?: string
 }) {
-  const { record, rank, dragging, store, api } = useTerraWorkspacePanelState(id)
+  const { record, rank, dragging, attention, store, api } = useTerraWorkspacePanelState(id)
   const rootRef = useRef<HTMLElement | null>(null)
   const dragRef = useRef<{ pointerId: number; originX: number; originY: number; startX: number; startY: number } | null>(null)
   const label = title ?? TERRA_WORKSPACE_PANEL_TITLE[id]
@@ -141,7 +141,7 @@ export function TerraWorkspacePanel({
       data-terra-panel-minimized={record.minimized ? 'true' : 'false'}
       data-terra-panel-dock={record.dock}
       data-terra-panel-dragging={dragging ? 'true' : 'false'}
-      onPointerDownCapture={() => store.front(id, true)}
+      onPointerDownCapture={() => store.smartClick(id, api.getViewport(), sizeOf())}
     >
       <div className="flex items-center gap-1 rounded-t-lg border border-b-0 border-white/15 bg-black/80 px-1.5 py-0.5 backdrop-blur-md">
         <button
@@ -158,6 +158,20 @@ export function TerraWorkspacePanel({
         >
           {label}
         </button>
+        {record.minimized && attention ? (
+          <span
+            key={`${attention.reason}-${attention.unseenCount}`}
+            className="animate-pulse h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
+            style={{ animationIterationCount: 3 }}
+            data-testid={`terra-workspace-attention-${id}`}
+            title={`Unseen: ${attention.reason}`}
+          />
+        ) : null}
+        {record.minimized && attention && attention.unseenCount > 1 ? (
+          <span className="shrink-0 text-[8px] font-bold text-amber-300" data-testid={`terra-workspace-attention-count-${id}`}>
+            {attention.unseenCount}
+          </span>
+        ) : null}
         {canDock ? (
           <select
             className="h-5 max-w-[4.5rem] rounded border border-white/15 bg-black/70 px-0.5 text-[8px] uppercase tracking-widest text-slate-300"

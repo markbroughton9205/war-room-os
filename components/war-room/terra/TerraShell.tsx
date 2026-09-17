@@ -55,6 +55,7 @@ import { TERRA_STREET_LEVEL_IMAGERY_MESSAGE } from '@/lib/terra/streetLevelImage
 import {
   terraHighResAerialUnavailable,
   TERRA_HIGH_RES_AERIAL_UNAVAILABLE_MESSAGE,
+  TERRA_FALLBACK_IMAGERY_ACTIVE_MESSAGE,
   TERRA_OPEN_MAP_DETAIL_LABEL,
   TERRA_CLOSE_MAP_DETAIL_LABEL,
 } from '@/lib/terra/aerialImagery'
@@ -96,8 +97,9 @@ import { TerraNearbyCameras } from './TerraNearbyCameras'
 import { TerraNearbyGodsEye } from './TerraNearbyGodsEye'
 import { TerraAreaLiveControl } from './TerraAreaLiveControl'
 import { AreaLiveMediaViewer } from './AreaLiveMediaViewer'
-import { TerraWorkspaceLayoutProvider } from './workspace/TerraWorkspaceLayoutProvider'
+import { TerraWorkspaceLayoutProvider, type LayoutApi } from './workspace/TerraWorkspaceLayoutProvider'
 import { TerraWorkspacePanel } from './workspace/TerraWorkspacePanel'
+import type { TerraSmartClickInteractionKind } from '@/lib/terra/workspace/panelIds'
 import { TerraWorkspaceResetButton } from './workspace/TerraWorkspaceResetButton'
 import { TerraWorkspaceControl } from './workspace/TerraWorkspaceControl'
 import { TerraCameraHoverWorkspace } from './workspace/TerraCameraHoverWorkspace'
@@ -237,7 +239,7 @@ function StatusLine({ status, aerialImageryActive, osmBuildingsVisible }: { stat
       Satellite imagery: NASA GIBS daily
       {aerialImageryActive
         ? <span className="text-cyan-400"> · ion World Imagery close-range</span>
-        : <span className="text-amber-400"> · high-res aerial unavailable{status.hasIonToken ? '' : ' (Cesium ion account token required)'}</span>}
+        : <span className="text-amber-400"> · high-res aerial unavailable{status.hasIonToken ? '' : ' (Cesium ion account token required)'} · fallback map detail at city scale</span>}
       <span className="text-slate-500"> · OSM map-detail available</span>
       {status.hasRealTerrain
         ? <span className="text-cyan-400"> · Terrain active</span>
@@ -871,6 +873,11 @@ function searchProvenance(source: TerraLocationTarget['source']): {
 function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'workspace' | 'command-center' }) {
   const [globeStatus, setGlobeStatus] = useState<TerraGlobeStatus>({ phase: 'loading' })
   const [viewer, setViewer] = useState<CesiumViewer | null>(null)
+  // Smart Click's escape hatch into the workspace layout store: TerraWorkspaceLayoutProvider is
+  // rendered further down in this same component's JSX, so its context can't be consumed here —
+  // onApiReady hands back the same store instance imperatively (see workspaceLayoutApiRef usage
+  // below), never a second store/provider.
+  const workspaceLayoutApiRef = useRef<LayoutApi | null>(null)
   const [selection, setSelection] = useState<Selection>({ kind: 'none' })
   const [layerFeatures, setLayerFeatures] = useState<Record<string, TerraGeoFeature[]>>({})
   const { activeLocation, setActiveLocation, selectedEvent, setSelectedEvent, setAircraftSummary, setMaritimeSummary } = useTerraActiveLocation()
@@ -2729,6 +2736,43 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   }, [activateCoordinate, cameraScale.level, cameraViewRectangle.rectangle, cameraViewRectangle.settledAt, cinematicFlight.flying, gps, navState])
 
   const commandCenter = presentation === 'command-center'
+
+  // Smart Click's primary-panel router (mission section 6/11 of the Smart Click completion
+  // brief): a real Commander click already drives `selection`/`selectedFeature` and
+  // `streetViewOpen` — this just classifies what was actually clicked and asks the workspace
+  // store to front/pulse the one relevant panel. Explicitly a no-op in command-center
+  // presentation, since Smart Click only applies inside Terra Workspace (mission section 9).
+  useEffect(() => {
+    if (commandCenter) return
+    const api = workspaceLayoutApiRef.current
+    if (!api) return
+    let kind: TerraSmartClickInteractionKind | null = null
+    if (selection.kind === 'feature' && selectedFeature) {
+      if (selectedFeature.kind === 'traffic_camera') kind = 'camera'
+      else if (selectedFeature.kind === 'severe_weather_alert' || selectedFeature.kind === 'tsunami_alert') kind = 'weather_alert'
+      else if (
+        selectedFeature.kind === 'earthquake'
+        || selectedFeature.kind === 'tropical_cyclone'
+        || selectedFeature.kind === 'wildfire_incident'
+        || selectedFeature.kind === 'volcano_event'
+        || selectedFeature.kind === 'flood_event'
+        || selectedFeature.kind === 'traffic_event'
+      ) kind = 'hazard_or_event'
+      else kind = 'building_or_object'
+    } else if (selection.kind === 'ground') {
+      kind = 'location'
+    }
+    if (!kind) return
+    api.store.notifyInteraction(kind, api.getViewport(), api.getSizes())
+  }, [commandCenter, selection, selectedFeature])
+
+  useEffect(() => {
+    if (commandCenter) return
+    if (!streetViewOpen || !streetViewOrigin) return
+    const api = workspaceLayoutApiRef.current
+    if (!api) return
+    api.store.notifyInteraction('street_view_point', api.getViewport(), api.getSizes())
+  }, [commandCenter, streetViewOpen, streetViewOrigin])
   const viewingDetached = Boolean(
     gps.location
     && activeLocation
@@ -2775,9 +2819,10 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
               type="button"
               onClick={() => setMapDetailMode(v => !v)}
               className="flex items-center gap-1.5 rounded border border-amber-500/40 bg-amber-950/40 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-amber-300 hover:bg-amber-900/50"
-              title="NASA GIBS is a real daily photograph capped at city-scale resolution; no ion-backed aerial asset is available at this zoom. Toggle the OSM map-detail base instead."
+              title="NASA GIBS is a real daily photograph capped at city-scale resolution; no ion-backed aerial asset is available at this zoom. OSM map-detail is already the visible fallback. Toggle still forces OSM at any altitude."
             >
               {TERRA_HIGH_RES_AERIAL_UNAVAILABLE_MESSAGE}
+              <span className="text-cyan-300">{TERRA_FALLBACK_IMAGERY_ACTIVE_MESSAGE}</span>
               <span className="text-cyan-300">{mapDetailMode ? TERRA_CLOSE_MAP_DETAIL_LABEL : TERRA_OPEN_MAP_DETAIL_LABEL}</span>
             </button>
           )}
@@ -2853,7 +2898,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           onAuthRequired={handleCameraLayerAuth}
         />
       ))}
-      <TerraWorkspaceLayoutProvider viewer={viewer}>
+      <TerraWorkspaceLayoutProvider viewer={viewer} onApiReady={api => { workspaceLayoutApiRef.current = api }}>
         {hoveredCameraFeature && cameraHover && (
           <TerraCameraHoverWorkspace
             key={hoveredCameraFeature.id}
@@ -2868,10 +2913,12 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
             onDismiss={() => setCameraHover(null)}
           />
         )}
+        {!commandCenter && (
         <TerraWorkspacePanel id="workspace_control" title="Workspace" minimizable={false} dockable={false}>
           <TerraWorkspaceControl />
         </TerraWorkspacePanel>
-        {inspectCardForUi ? (
+        )}
+        {!commandCenter && inspectCardForUi ? (
           <TerraWorkspacePanel id="gods_eye_inspect" title="Inspect">
             <TerraGodsEyeInspectCard
               model={inspectCardForUi}
@@ -2903,6 +2950,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
             />
           </TerraWorkspacePanel>
         ) : null}
+        {!commandCenter && (
         <TerraWorkspacePanel id="nearby_cameras" title="Nearby Cameras">
           <div className="w-[min(22rem,86vw)] space-y-2">
             <TerraNearbyGodsEye snapshot={nearbyGodsEyeSnapshot} />
@@ -2923,7 +2971,8 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
             )}
           </div>
         </TerraWorkspacePanel>
-        {camerasMode ? (
+        )}
+        {!commandCenter && camerasMode ? (
           <TerraWorkspacePanel id="camera_directory" title="Camera Directory">
             <TerraGodsEyeCameraDirectory
               lod={cameraLod}
@@ -2942,7 +2991,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
             />
           </TerraWorkspacePanel>
         ) : null}
-        {streetIntelOpen ? (
+        {!commandCenter && streetIntelOpen ? (
           <TerraWorkspacePanel id="street_intel" title="Street Intelligence">
             <TerraStreetIntelligence
               open={streetIntelOpen}
@@ -2956,7 +3005,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           </TerraWorkspacePanel>
         ) : null}
 
-      {streetViewOpen && streetViewOrigin ? (
+      {!commandCenter && streetViewOpen && streetViewOrigin ? (
         <TerraWorkspacePanel id="street_view" title="Street View">
           <TerraStreetViewPanel
             key={`${streetViewOrigin.latitude.toFixed(5)},${streetViewOrigin.longitude.toFixed(5)},${streetViewOrigin.context}`}
@@ -2970,7 +3019,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         </TerraWorkspacePanel>
       ) : null}
 
-      {weatherAlerts.toast ? (
+      {!commandCenter && weatherAlerts.toast ? (
         <TerraWorkspacePanel id="weather_toast" title="Weather Alert" minimizable={false}>
           <TerraWeatherAlertToast
             toast={weatherAlerts.toast}
@@ -2982,7 +3031,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         </TerraWorkspacePanel>
       ) : null}
 
-      {weatherDrawerAlert ? (
+      {!commandCenter && weatherDrawerAlert ? (
         <TerraWorkspacePanel id="weather_drawer" title="Weather">
           <TerraWeatherDetailDrawer
             alert={weatherDrawerAlert}
@@ -3001,7 +3050,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         </TerraWorkspacePanel>
       ) : null}
 
-      {areaLiveMediaOpen && areaLiveMedia ? (
+      {!commandCenter && areaLiveMediaOpen && areaLiveMedia ? (
         <TerraWorkspacePanel id="area_live_viewer" title="Area Live">
           <AreaLiveMediaViewer
             media={areaLiveMedia}
@@ -3131,56 +3180,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           />
       </TerraWorkspacePanel>
       </>
-      ) : (
-      <>
-      <TerraWorkspacePanel id="search_command" title="Search" minimizable={false}>
-        <div className="w-[min(28rem,92vw)]">
-          <TerraLocationCommandInput
-            onResolvedLocation={handleResolvedLocation}
-            flightOutcome={cinematicFlight.outcome}
-            flightPurpose={cinematicFlight.purpose}
-            flightLabel={cinematicFlight.label}
-            streetViewState={streetViewState}
-            streetViewDisabled={!resolveStreetViewOrigin()}
-            onStreetView={() => openStreetView()}
-            onNearby={focusNearbyCameras}
-            onGps={gps.locateOnce}
-          />
-        </div>
-      </TerraWorkspacePanel>
-      <TerraWorkspacePanel id="location_gps" title="Location" minimizable={false}>
-        {locationControl}
-      </TerraWorkspacePanel>
-      <TerraWorkspacePanel id="gods_eye_controls" title="God's Eye">
-        <TerraGodsEyeViewMode mode={godsEyeViewMode} onChange={handleGodsEyeViewModeChange} />
-      </TerraWorkspacePanel>
-      <TerraWorkspacePanel id="camera_discovery" title="Camera Discovery" dockable={false}>
-        <TerraCameraDiscoveryControl
-          state={cameraDiscovery.prompt}
-          coveringLabel={cameraDiscovery.coveringLabel}
-          officialViewerUrl={cameraDiscovery.officialViewerUrl}
-          onDiscover={handleDiscoverCameras}
-          onFocusNearby={focusNearbyCameras}
-        />
-      </TerraWorkspacePanel>
-      <TerraWorkspacePanel id="area_live_controls" title="Area Live Controls" dockable={false}>
-        <TerraAreaLiveControl
-          open={areaLiveOpen || godsEyeViewMode === 'AREA_LIVE'}
-          category={areaLiveCategory}
-          workspace={areaLiveWorkspace}
-          selectedRowId={areaLiveIntelId ? `intel:${areaLiveIntelId}` : (selection.kind === 'feature' ? `camera:${selection.layerId}:${selection.featureId}` : null)}
-          onToggle={handleAreaLiveToggle}
-          onCategory={setAreaLiveCategory}
-          onViewRow={viewAreaLiveRow}
-          onPreviewRow={previewAreaLiveRow}
-          onPreviewEnd={endAreaLivePreview}
-          onOpenOfficialViewer={openAreaLiveOfficialViewer}
-          onSourceRow={openAreaLiveRowSource}
-          onSendRow={sendAreaLiveRowToCouncil}
-        />
-      </TerraWorkspacePanel>
-      </>
-      )}
+      ) : null}
 
       {!commandCenter && (
       <TerraWorkspacePanel
@@ -3234,8 +3234,8 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
             </li>
             <li className="flex items-center justify-between">
               <span>Map detail (OSM raster)</span>
-              <button type="button" onClick={() => setMapDetailMode(v => !v)} className={mapDetailMode ? 'font-bold text-cyan-300' : 'text-slate-400 hover:text-slate-200'}>
-                {mapDetailMode ? 'on' : 'off'}
+              <button type="button" onClick={() => setMapDetailMode(v => !v)} className={mapDetailMode || highResAerialUnavailable ? 'font-bold text-cyan-300' : 'text-slate-400 hover:text-slate-200'}>
+                {mapDetailMode ? 'on' : highResAerialUnavailable ? 'fallback' : 'off'}
               </button>
             </li>
             <li className={`flex items-center justify-between ${globeStatus.phase === 'ready' && globeStatus.hasRealTerrain ? '' : 'opacity-40'}`}>
@@ -3546,6 +3546,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         </TerraWorkspacePanel>
       )}
 
+      {!commandCenter && (
       <TerraWorkspacePanel id="radar" title="Radar" minimizable={false}>
         <TerraRadarStatus
           catalog={radar.catalog}
@@ -3561,6 +3562,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           onPlay={radar.setPlaying}
         />
       </TerraWorkspacePanel>
+      )}
       {!commandCenter && (
         <TerraWorkspacePanel id="timeline" title="Timeline" minimizable={false}>
           <TerraTimeline
