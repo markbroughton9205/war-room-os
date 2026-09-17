@@ -61,8 +61,13 @@ function TerraCouncilContextBridge({ onContextChange }: { onContextChange?: (con
         const p = selectedEvent.properties
         if (typeof p.road === 'string') lines.push(`Camera road: ${p.road}`)
         if (typeof p.direction === 'string') lines.push(`Camera direction: ${p.direction}`)
-        lines.push(`Camera feed type: still image`)
-        if (typeof p.freshness === 'string') lines.push(`Camera freshness: ${p.freshness}`)
+        if (typeof p.feedType === 'string') lines.push(`Camera feed type: ${p.feedType === 'REFRESHED_IMAGE' || p.feedType === 'STILL' ? 'refreshed still image (not live video)' : p.feedType}`)
+        else lines.push(`Camera feed type: still image`)
+        if (typeof p.freshnessState === 'string') lines.push(`Camera freshness state: ${p.freshnessState}`)
+        else if (typeof p.freshness === 'string') lines.push(`Camera freshness: ${p.freshness}`)
+        if (typeof p.coverageState === 'string') lines.push(`Camera coverage state: ${p.coverageState}`)
+        if (typeof p.attribution === 'string') lines.push(`Camera attribution: ${p.attribution}`)
+        if (typeof p.viewerUrl === 'string') lines.push(`Camera viewer (link-out only, not embedded): ${p.viewerUrl}`)
       }
       if (selectedEvent.kind === 'traffic_event') {
         const p = selectedEvent.properties
@@ -154,9 +159,21 @@ function terraLinkedSignals(
         precipitationIntensityMmH: typeof p.precipitationIntensityMmH === 'number' ? p.precipitationIntensityMmH : null,
       })
     }
-    if (selectedEvent.kind === 'traffic_camera' && typeof p.freshness === 'string') {
-      const freshness = p.freshness as 'live_video' | 'still_image' | 'stale' | 'offline' | 'unknown'
-      signals.push({ kind: 'camera_freshness', freshness })
+    if (selectedEvent.kind === 'traffic_camera') {
+      const freshness = typeof p.freshness === 'string'
+        ? p.freshness
+        : p.freshnessState === 'LIVE'
+          ? 'still_image'
+          : p.freshnessState === 'STALE'
+            ? 'stale'
+            : p.freshnessState === 'OFFLINE'
+              ? 'offline'
+              : typeof p.freshnessState === 'string'
+                ? 'unknown'
+                : null
+      if (freshness === 'live_video' || freshness === 'still_image' || freshness === 'stale' || freshness === 'offline' || freshness === 'unknown') {
+        signals.push({ kind: 'camera_freshness', freshness })
+      }
     }
   }
   for (const state of Object.values(layerCoverage ?? {})) {

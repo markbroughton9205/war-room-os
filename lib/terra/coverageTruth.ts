@@ -18,7 +18,7 @@
  */
 import type { TerraLayerFeedState } from '@/components/war-room/terra/useTerraLayer'
 
-export const TERRA_COVERAGE_TRUTH_STATES = ['NO_COVERAGE', 'NO_DATA', 'LOADING', 'LIVE', 'STALE', 'OFFLINE', 'UNKNOWN'] as const
+export const TERRA_COVERAGE_TRUTH_STATES = ['NO_COVERAGE', 'NO_DATA', 'LOADING', 'LIVE', 'STALE', 'OFFLINE', 'UNKNOWN', 'AUTH_REQUIRED', 'RATE_LIMITED'] as const
 export type TerraCoverageTruthState = (typeof TERRA_COVERAGE_TRUTH_STATES)[number]
 
 export const TERRA_COVERAGE_TRUTH_LABELS: Record<TerraCoverageTruthState, string> = {
@@ -29,6 +29,8 @@ export const TERRA_COVERAGE_TRUTH_LABELS: Record<TerraCoverageTruthState, string
   STALE: 'STALE',
   OFFLINE: 'OFFLINE',
   UNKNOWN: 'UNKNOWN',
+  AUTH_REQUIRED: 'AUTH REQUIRED',
+  RATE_LIMITED: 'RATE LIMITED',
 }
 
 export function resolveTerraCoverageTruth(params: {
@@ -53,9 +55,13 @@ export function resolveTerraCoverageTruth(params: {
   if (!hasKnownCoverage || boundingBoxQuery === null) return 'NO_COVERAGE'
   if (feedState === 'loading') return 'LOADING'
   if (feedState === 'error') {
+    const message = lastErrorMessage ?? ''
+    // War Room session 401 / missing public key is AUTH_REQUIRED — the provider is not dead.
+    if (/\b401\b/.test(message) || /not configured|OHGO_API_KEY|511NY_API_KEY|AUTH_REQUIRED/i.test(message)) return 'AUTH_REQUIRED'
+    if (/\b429\b/.test(message) || /RATE_LIMITED/i.test(message)) return 'RATE_LIMITED'
     // A definite upstream failure is OFFLINE; an ambiguous error with no HTTP-status evidence is
     // honestly UNKNOWN rather than assumed OFFLINE.
-    if (lastErrorMessage && /\b(4\d{2}|5\d{2})\b/.test(lastErrorMessage)) return 'OFFLINE'
+    if (/\b(4\d{2}|5\d{2})\b/.test(message)) return 'OFFLINE'
     return 'UNKNOWN'
   }
   if (feedState === 'stale' || allFeaturesHistoricalOrStale === true) return 'STALE'

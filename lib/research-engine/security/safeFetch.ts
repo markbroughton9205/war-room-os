@@ -23,6 +23,10 @@ export type SafeFetchResult = {
   durationMs: number
   attempts: number
   finalUrl: string
+  /** Response ETag when the upstream sent one — used for If-None-Match polling (OHGO). */
+  etag: string | null
+  /** Response Last-Modified when the upstream sent one — used for still-image freshness. */
+  lastModified: string | null
 }
 
 const DEFAULT_TIMEOUT_MS = 12_000
@@ -167,6 +171,8 @@ export async function safeProviderFetch(provider: ResearchProviderId, url: strin
         durationMs: Date.now() - startedAt,
         attempts,
         finalUrl: redactUrlForLogging(currentUrl),
+        etag: response.headers.get('etag'),
+        lastModified: response.headers.get('last-modified'),
       }
     } catch (error) {
       clearTimeout(timer)

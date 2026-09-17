@@ -313,6 +313,13 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   wzdx_wsdot: ['wzdx.wsdot.wa.gov'],
   wzdx_iowa_dot: ['iowa-atms.cloud-q-free.com'],
   wzdx_kytc: ['storage.googleapis.com'],
+  // OHGO catalog is publicapi.ohgo.com; still JPEGs are also hosted there (LargeUrl/SmallUrl).
+  // Adapter only ever fetches the catalog; the image host is for cameraImageProxy inspect/hover.
+  ohgo_cameras: ['publicapi.ohgo.com', 'ohgo.com', 'www.ohgo.com'],
+  // 511NY metadata + stills. VideoUrl is never fetched by the adapter (link-out only).
+  ny511_cameras: ['511ny.org', 'www.511ny.org'],
+  // Caltrans CWWP2 status JSON + currentImageURL stills. streamingVideoURL is never fetched.
+  caltrans_cwwp2_cameras: ['cwwp2.dot.ca.gov'],
 }
 
 export function isAllowedHost(provider: ResearchProviderId, hostname: string): boolean {

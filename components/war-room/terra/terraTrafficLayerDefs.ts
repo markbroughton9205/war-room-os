@@ -15,6 +15,9 @@ import { buildTerraTrafficEventBoundingBoxQuery, terraCameraViewHasTrafficEventC
 import { buildTerraWebtrisBoundingBoxQuery, terraCameraViewHasWebtrisCoverage } from '@/lib/terra/webtrisBoundingBox'
 import { buildTerraRoadWeatherBoundingBoxQuery, terraCameraViewHasRoadWeatherCoverage } from '@/lib/terra/digitrafficRoadWeatherBoundingBox'
 import { buildTerraOntario511BoundingBoxQuery, terraCameraViewHasOntario511Coverage } from '@/lib/terra/ontarioBoundingBox'
+import { buildTerraOhgoBoundingBoxQuery, terraCameraViewHasOhgoCoverage } from '@/lib/terra/ohgoBoundingBox'
+import { buildTerraNy511BoundingBoxQuery, terraCameraViewHasNy511Coverage } from '@/lib/terra/ny511BoundingBox'
+import { buildTerraCaltransBoundingBoxQuery, terraCameraViewHasCaltransCoverage } from '@/lib/terra/caltransBoundingBox'
 import { buildTerraHongKongTdBoundingBoxQuery, terraCameraViewHasHongKongTdCoverage } from '@/lib/terra/hongKongBoundingBox'
 import { buildTerraQuebec511BoundingBoxQuery, terraCameraViewHasQuebec511Coverage } from '@/lib/terra/quebec511BoundingBox'
 import { buildTerraJarticBoundingBoxQuery, terraCameraViewHasJarticCoverage } from '@/lib/terra/jarticBoundingBox'
@@ -71,6 +74,36 @@ export const TERRA_TRAFFIC_LAYER_DEFS: TerraTrafficLayerDef[] = [
     coverageRegionLabel: 'Ontario',
     hasCoverage: terraCameraViewHasOntario511Coverage,
     buildQuery: buildTerraOntario511BoundingBoxQuery,
+  },
+  {
+    layerId: 'ohgo_cameras',
+    label: 'Cameras (OHGO / ODOT — Ohio)',
+    unitNoun: 'camera',
+    refreshMs: 60_000,
+    cluster: true,
+    coverageRegionLabel: 'Ohio',
+    hasCoverage: terraCameraViewHasOhgoCoverage,
+    buildQuery: buildTerraOhgoBoundingBoxQuery,
+  },
+  {
+    layerId: 'ny511_cameras',
+    label: 'Cameras (New York State)',
+    unitNoun: 'camera',
+    refreshMs: 60_000,
+    cluster: true,
+    coverageRegionLabel: 'New York State',
+    hasCoverage: terraCameraViewHasNy511Coverage,
+    buildQuery: buildTerraNy511BoundingBoxQuery,
+  },
+  {
+    layerId: 'caltrans_cwwp2_cameras',
+    label: 'Cameras (Caltrans CWWP2 — California)',
+    unitNoun: 'camera',
+    refreshMs: 60_000,
+    cluster: true,
+    coverageRegionLabel: 'California',
+    hasCoverage: terraCameraViewHasCaltransCoverage,
+    buildQuery: buildTerraCaltransBoundingBoxQuery,
   },
   {
     layerId: 'ontario_511_events',

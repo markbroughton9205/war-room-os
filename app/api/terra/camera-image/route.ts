@@ -6,7 +6,14 @@ import { fetchProxiedCameraImage, type TerraCameraImageProvider } from '@/lib/te
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const ALLOWED_PROVIDERS: TerraCameraImageProvider[] = ['digitraffic_road_cameras', 'ontario_511_cameras', 'hong_kong_td_cameras']
+const ALLOWED_PROVIDERS: TerraCameraImageProvider[] = [
+  'digitraffic_road_cameras',
+  'ontario_511_cameras',
+  'hong_kong_td_cameras',
+  'ohgo_cameras',
+  'ny511_cameras',
+  'caltrans_cwwp2_cameras',
+]
 
 /**
  * God's Eye Phase 2's camera-image proxy boundary — see lib/terra/cameraImageProxy.ts for the full

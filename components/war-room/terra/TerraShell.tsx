@@ -65,6 +65,7 @@ import { TerraCoverageBadge } from './TerraCoverageBadge'
 import { TerraTrafficLayer } from './TerraTrafficLayer'
 import { TERRA_TRAFFIC_LAYER_DEFS } from './terraTrafficLayerDefs'
 import { TerraCameraHoverCard } from './TerraCameraHoverCard'
+import { TerraTrafficCameraInspectCard } from './TerraTrafficCameraInspectCard'
 
 const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe), {
   ssr: false,
@@ -192,21 +193,8 @@ const KIND_DETAIL_LABEL: Record<TerraIntelligenceEventKind, string> = {
 // media live (see lib/terra/roadCameraStaleness.ts). Colors intentionally mirror this file's
 // existing FEED_STATE_LABEL palette (emerald=current, amber=degraded, red=error) rather than
 // inventing a second scheme.
-const CAMERA_FRESHNESS_LABEL: Record<string, { text: string; color: string }> = {
-  live_video: { text: 'LIVE VIDEO', color: 'text-emerald-400' },
-  still_image: { text: 'STILL IMAGE — CURRENT', color: 'text-emerald-400' },
-  stale: { text: 'STALE', color: 'text-amber-400' },
-  offline: { text: 'OFFLINE', color: 'text-red-400' },
-  unknown: { text: 'UNKNOWN', color: 'text-slate-400' },
-}
-
-// Phase 3: per-provider camera attribution (previously hardcoded to the two Phase 1/2 sources).
-const CAMERA_ATTRIBUTION: Record<string, string> = {
-  digitraffic_road_cameras: 'Fintraffic / digitraffic.fi, CC BY 4.0',
-  ontario_511_cameras: 'Ontario 511 (511on.ca), Government of Ontario',
-  hong_kong_td_cameras: 'Transport Department, Government of the Hong Kong SAR (data.gov.hk)',
-  quebec_511_cameras: 'Québec 511 — Ministère des Transports et de la Mobilité durable',
-}
+// Camera freshness / attribution live on TerraTrafficCameraInspectCard and TerraCameraHoverCard
+// (federation LIVE/STALE/OFFLINE + legacy still_image). TerraShell no longer duplicates them.
 
 // Maritime's richer bespoke resolver (lib/terra/maritimeCoverage.ts — RATE_LIMITED, DELAYED_DATA,
 // NO_VESSELS_OBSERVED) keeps its own label text, but its states surface through the SAME shared
@@ -253,7 +241,7 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   )
 }
 
-function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
+function FeatureDetailFields({ feature, nearbyCameras, onSelectNearbyCamera }: { feature: TerraGeoFeature; nearbyCameras?: TerraGeoFeature[]; onSelectNearbyCamera?: (feature: TerraGeoFeature) => void }) {
   const coords = `${feature.latitude.toFixed(3)}°, ${feature.longitude.toFixed(3)}°`
   switch (feature.kind) {
     case 'earthquake':
@@ -381,58 +369,14 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
           {typeof feature.properties.osm_id === 'string' && <Row label="OSM record" value={feature.properties.osm_id} mono />}
         </>
       )
-    case 'traffic_camera': {
-      const freshness = typeof feature.properties.freshness === 'string' ? feature.properties.freshness : 'unknown'
-      const freshnessMeta = CAMERA_FRESHNESS_LABEL[freshness] ?? CAMERA_FRESHNESS_LABEL.unknown
-      // Québec 511 publishes an HTML viewer page per camera, never a direct JPEG (see
-      // lib/terra/normalizeQuebecTrafficCameras.ts) — a link, never an <img>.
-      const viewerUrl = typeof feature.properties.viewerUrl === 'string' ? feature.properties.viewerUrl : null
-      // Ontario 511 and Hong Kong TD images are proxied (app/api/terra/camera-image/route.ts)
-      // rather than hotlinked directly — this phase's camera-image proxy boundary. Digitraffic's
-      // imageUrl stays a direct hotlink, matching Phase 1's existing, unchanged behavior.
-      const proxiedImageUrl =
-        feature.providerId === 'ontario_511_cameras' && typeof feature.properties.viewId === 'string'
-          ? `/api/terra/camera-image?provider=ontario_511_cameras&id=${encodeURIComponent(feature.properties.viewId)}`
-          : feature.providerId === 'hong_kong_td_cameras' && typeof feature.properties.cameraId === 'string'
-            ? `/api/terra/camera-image?provider=hong_kong_td_cameras&id=${encodeURIComponent(feature.properties.cameraId)}`
-            : null
-      const directImageUrl = feature.providerId === 'digitraffic_road_cameras' && typeof feature.properties.imageUrl === 'string' ? feature.properties.imageUrl : null
+    case 'traffic_camera':
       return (
-        <>
-          <Row label="Coordinates" value={coords} mono />
-          {typeof feature.properties.road === 'string' && <Row label="Road" value={feature.properties.road} />}
-          {typeof feature.properties.direction === 'string' && <Row label="Direction" value={feature.properties.direction.replace(/_/g, ' ').toLowerCase()} />}
-          <Row label="Feed type" value={viewerUrl ? 'HTML viewer at source (no direct still published)' : 'Still image (refreshing)'} />
-          <div className="flex justify-between"><dt>Status</dt><dd className={freshnessMeta.color}>{freshnessMeta.text}</dd></div>
-          {feature.timestamp && <Row label="Captured" value={new Date(feature.timestamp).toLocaleString()} />}
-          {typeof feature.properties.collectionIntervalSec === 'number' && <Row label="Refresh interval" value={`${feature.properties.collectionIntervalSec}s`} />}
-          {proxiedImageUrl && (
-            // eslint-disable-next-line @next/next/no-img-element -- proxied still image, not a Next-optimizable local asset.
-            <img
-              src={proxiedImageUrl}
-              alt={`${feature.title} — road camera still image`}
-              className="mt-1 w-full rounded border border-white/10"
-              loading="lazy"
-            />
-          )}
-          {directImageUrl && (
-            // eslint-disable-next-line @next/next/no-img-element -- external provider-hosted still image, refreshed at source cadence; not a Next-optimizable local asset.
-            <img
-              src={directImageUrl}
-              alt={`${feature.title} — road camera still image`}
-              className="mt-1 w-full rounded border border-white/10"
-              loading="lazy"
-            />
-          )}
-          {viewerUrl && (
-            <a href={viewerUrl} target="_blank" rel="noreferrer" className="mt-1 block rounded border border-white/15 px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-widest text-cyan-300 hover:border-cyan-400/60">
-              View at source (HTML viewer)
-            </a>
-          )}
-          <Row label="Attribution" value={CAMERA_ATTRIBUTION[feature.providerId] ?? feature.provenance.provider} />
-        </>
+        <TerraTrafficCameraInspectCard
+          feature={feature}
+          nearbyFeatures={nearbyCameras}
+          onSelectNearby={onSelectNearbyCamera}
+        />
       )
-    }
     case 'traffic_event':
       return (
         <>
@@ -705,6 +649,11 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     if (selection.kind !== 'feature') return null
     return (layerFeatures[selection.layerId] ?? []).find(f => f.id === selection.featureId) ?? null
   }, [selection, layerFeatures])
+
+  const nearbyCameraFeatures = useMemo(
+    () => Object.values(layerFeatures).flat().filter(item => item.kind === 'traffic_camera'),
+    [layerFeatures],
+  )
 
   // Event -> exact-location intelligence phase, mission section 7/8: a bounded semantic query
   // built from the selected event's own title/kind plus (once resolved) its reverse-resolved
@@ -981,6 +930,15 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     }
   }, [activateCoordinate, layerFeatures, setSelectedEvent, flyToEventFeature])
 
+  const selectNearbyCamera = useCallback((next: TerraGeoFeature) => {
+    for (const [layerId, features] of Object.entries(layerFeatures)) {
+      if (features.some(item => item.id === next.id)) {
+        handleEntityClick(`${layerId}:${next.id}`)
+        return
+      }
+    }
+  }, [layerFeatures, handleEntityClick])
+
   const handleResolvedLocation = useCallback((target: TerraLocationTarget) => {
     reverseRequestRef.current.controller?.abort()
     reverseRequestRef.current = { sequence: reverseRequestRef.current.sequence + 1, controller: null }
@@ -1140,6 +1098,23 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         {/* God's Eye command center has no right rail (see below), so Related Intelligence for an
             event selection folds in here, directly under Earth Knowledge — same semantic behavior
             as the full /terra workspace's right-rail panel, just a different layout slot. */}
+        {commandCenter && selectedFeature?.kind === 'traffic_camera' && (
+          <div className="pointer-events-auto mt-2 max-h-[min(28rem,50vh)] overflow-y-auto rounded border border-cyan-400/30 bg-black/80 p-3 shadow-2xl backdrop-blur-md">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-400/80">Camera inspect</p>
+              <button type="button" onClick={() => { setSelection({ kind: 'none' }); setSelectedEvent(null) }} className="text-[10px] text-slate-500 hover:text-slate-300">
+                dismiss
+              </button>
+            </div>
+            <p className="mb-2 text-[12px] font-semibold text-slate-100">{selectedFeature.title}</p>
+            <TerraTrafficCameraInspectCard
+              feature={selectedFeature}
+              nearbyFeatures={nearbyCameraFeatures}
+              onSelectNearby={selectNearbyCamera}
+              compact
+            />
+          </div>
+        )}
         {commandCenter && selectedFeature && (
           <div className="mt-2">
             <TerraRelatedIntelligencePanel feed={relatedIntelligence} active compact />
@@ -1407,11 +1382,25 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
               </button>
             </div>
             <p className="text-[12px] font-semibold text-slate-100">{selectedFeature.title}</p>
-            <dl className="mt-2 space-y-1 text-[11px] text-slate-400">
-              <FeatureDetailFields feature={selectedFeature} />
-              <CoordinateOriginFields feature={selectedFeature} />
-              <Row label="Provider" value={selectedFeature.provenance.provider} />
-            </dl>
+            {selectedFeature.kind === 'traffic_camera' ? (
+              <div className="mt-2">
+                <FeatureDetailFields
+                  feature={selectedFeature}
+                  nearbyCameras={nearbyCameraFeatures}
+                  onSelectNearbyCamera={selectNearbyCamera}
+                />
+                <dl className="mt-2 space-y-1 text-[11px] text-slate-400">
+                  <CoordinateOriginFields feature={selectedFeature} />
+                  <Row label="Provider" value={selectedFeature.provenance.provider} />
+                </dl>
+              </div>
+            ) : (
+              <dl className="mt-2 space-y-1 text-[11px] text-slate-400">
+                <FeatureDetailFields feature={selectedFeature} nearbyCameras={nearbyCameraFeatures} onSelectNearbyCamera={selectNearbyCamera} />
+                <CoordinateOriginFields feature={selectedFeature} />
+                <Row label="Provider" value={selectedFeature.provenance.provider} />
+              </dl>
+            )}
             {selectedFeature.rawReference.canonicalUrl && (
               <a href={selectedFeature.rawReference.canonicalUrl} target="_blank" rel="noreferrer" className="mt-2 block truncate text-[10.5px] text-cyan-400 hover:underline">
                 {selectedFeature.rawReference.canonicalUrl}
