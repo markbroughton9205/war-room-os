@@ -11,6 +11,9 @@ import 'server-only'
  * GETs LargeUrl/SmallUrl for every camera (don't hammer stills). Inspect/hover load one still
  * through the camera-image proxy.
  *
+ * Camera arrays come only from the live OHGO HTTP response (or a 304 replay of that response).
+ * Missing OHGO_API_KEY returns not_configured — never a stub/fixture catalog.
+ *
  * ETag / If-None-Match: the previous catalog response is reused on HTTP 304.
  */
 import type { ResearchHealthStatus, ResearchQuery } from '@/lib/research-engine/core/types'

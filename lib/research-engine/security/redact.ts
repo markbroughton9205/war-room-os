@@ -30,6 +30,7 @@ export function redactSecretsFromText(text: string): string {
   return text
     .replace(/([?&](?:api_key|apikey|key|token|access_token|secret|webkey)=)[^&\s]+/gi, '$1REDACTED')
     .replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/gi, '$1REDACTED')
+    .replace(/(ApiKey\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1REDACTED')
     .replace(/(Authorization["']?\s*[:=]\s*["']?)[A-Za-z0-9._~+/=-]{8,}/gi, '$1REDACTED')
     .replace(/(?:[A-Za-z]:\\|\.{0,2}\/)[^\s()<>"']*\.(?:ts|tsx|js|jsx|mjs|cjs)(?::\d+(?::\d+)?)?/g, '[internal-path-redacted]')
     .replace(/\bat\s+[\w.$<>[\]]+\s*\([^)]*\)/g, '[stack-frame-redacted]')
