@@ -72,6 +72,10 @@ MAX_TOKENS_PER_RUN = TRAIN_PREFIX_TOKENS
 # Locked WR-CORPUS-1 mix — do not change between cells.
 LOCKED_MIX = dict(MIX)
 
+# Authoritative WRIM-0 genesis train document pool. Coverage accounting must
+# start from this set so zero-token documents are reported as starved.
+from run000006_coverage import FROZEN_GENESIS_TRAIN_IDS, rehearsal_coverage_report  # noqa: E402
+
 
 def genesis_doc_id(unit: PackedUnit) -> str:
     return str(unit.unit_id).split("#", 1)[0].split(":", 1)[0]
@@ -274,25 +278,33 @@ def genesis_token_audit(units: list[PackedUnit], prefix_tokens: int, all_doc_ids
         used += take
         if used >= prefix_tokens:
             break
-    docs = list(all_doc_ids) if all_doc_ids else sorted(by_doc)
-    counts = [float(by_doc.get(d, 0)) for d in docs]
+    coverage = rehearsal_coverage_report(dict(by_doc), all_doc_ids=all_doc_ids)
+    docs = coverage["ALL_DOC_IDS"]
+    counts = [float(coverage["DOC_TOKEN_COUNTS"][d]) for d in docs]
     total_reh = float(sum(counts)) or 1.0
-    shares = {d: float(by_doc.get(d, 0)) / total_reh for d in docs}
+    shares = coverage["DOC_TOKEN_SHARES"]
     share_vals = list(shares.values())
     return {
         "prefix_tokens": prefix_tokens,
         "rehearsal_tokens_in_prefix": int(sum(by_doc.values())),
-        "n_genesis_docs_in_prefix": len(by_doc),
-        "tokens_per_genesis_doc": {d: int(by_doc.get(d, 0)) for d in docs},
-        "share_per_genesis_doc": {d: round(shares[d], 8) for d in docs},
+        "n_genesis_docs_in_prefix": coverage["n_genesis_docs_in_prefix"],
+        "tokens_per_genesis_doc": {d: int(coverage["DOC_TOKEN_COUNTS"][d]) for d in docs},
+        "share_per_genesis_doc": {d: round(float(shares[d]), 8) for d in docs},
         "tokens_by_doc": dict(by_doc),
         "pct_of_rehearsal_by_doc": {k: round(100.0 * v / total_reh, 4) for k, v in by_doc.items()},
-        "max_doc_share_of_rehearsal": round(max(share_vals, default=0.0), 6),
+        "max_doc_share_of_rehearsal": coverage["MAX_DOC_SHARE"],
         "normalized_shannon_entropy": round(normalized_shannon_entropy(counts), 8),
         "gini_coefficient": round(gini_coefficient(counts), 8),
         "maximum_exposure_gap": round((max(share_vals) - min(share_vals)) if share_vals else 0.0, 8),
-        "starved_docs": [d for d in docs if by_doc.get(d, 0) <= 0],
-        "note": "Document-level rehearsal statistics only. Retention probes are synthetic/unmapped.",
+        "starved_docs": coverage["STARVED_DOC_IDS"],
+        "ALL_DOC_IDS": coverage["ALL_DOC_IDS"],
+        "CONSUMED_DOC_IDS": coverage["CONSUMED_DOC_IDS"],
+        "STARVED_DOC_IDS": coverage["STARVED_DOC_IDS"],
+        "DOC_TOKEN_COUNTS": coverage["DOC_TOKEN_COUNTS"],
+        "DOC_TOKEN_SHARES": coverage["DOC_TOKEN_SHARES"],
+        "MAX_DOC_SHARE": coverage["MAX_DOC_SHARE"],
+        "EFFECTIVE_DOCUMENT_N": coverage["EFFECTIVE_DOCUMENT_N"],
+        "note": "Document-level rehearsal statistics only. Retention probes are synthetic/unmapped. Coverage pool always includes FROZEN_GENESIS_TRAIN_IDS.",
     }
 
 

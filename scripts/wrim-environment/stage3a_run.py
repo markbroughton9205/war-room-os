@@ -19,7 +19,7 @@ import torch.nn.functional as F
 from safetensors.torch import load_file, save_file
 from tokenizers import Tokenizer
 
-from experiment_pack import encode_raw_families, genesis_token_audit, pack_train_stream
+from experiment_pack import FROZEN_GENESIS_TRAIN_IDS, encode_raw_families, genesis_token_audit, pack_train_stream
 from phase2_grid import (
     annotate_stream,
     diagnostic0_snapshot,
@@ -664,7 +664,7 @@ def run_stage3a(
     frozen_special = float((baseline["obj"].get("special_token_baseline") or {}).get("mean_special_rate_256") or 0.0)
     interleaved = packed.get("interleaved") or []
     buckets, docs = annotate_stream(interleaved)
-    all_docs = sorted({d for d in docs if d})
+    all_docs = list(FROZEN_GENESIS_TRAIN_IDS)
 
     model.enable_training()
     model.to(device)

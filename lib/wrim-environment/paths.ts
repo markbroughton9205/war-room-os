@@ -30,6 +30,10 @@ export type WrimEnvironmentPaths = {
     phase2GridCheckpointDir: string
     stage3DryRunCheckpointDir: string
     stage3aCheckpointDir: string
+    run000006PreflightReportPath: string
+    run000006ConfigPath: string
+    run000006UnsignedConfigPath: string
+    run000006CheckpointDir: string
   manifestPath: string
   venvPython: string
   venvRoot: string
@@ -65,6 +69,10 @@ export function resolveWrimEnvironmentPaths(dataDirOverride?: string | null): Wr
     phase2GridCheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'stability-grid-000001'),
     stage3DryRunCheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-RUN-000003', 'dry-run'),
     stage3aCheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-RUN-000003', 'STAGE3A'),
+    run000006PreflightReportPath: path.join(root, 'wrim1-run-000006-pretraining-gate.json'),
+    run000006ConfigPath: path.join(root, 'WRIM1-RUN-000006-TRAINING-CONFIG-000001.json'),
+    run000006UnsignedConfigPath: path.join(root, 'WRIM1-RUN-000006-TRAINING-CONFIG-000001.unsigned.json'),
+    run000006CheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-RUN-000006'),
     manifestPath: path.join(root, 'environment-manifest.json'),
     venvRoot,
     venvPython: path.join(venvRoot, 'Scripts', 'python.exe'),

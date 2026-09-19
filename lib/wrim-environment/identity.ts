@@ -60,6 +60,22 @@ export const CONTROLLED_STABILITY_CLASSIFICATION = 'TEST_ONLY / CONTROLLED_EXPER
 export const PHASE3A_STATUS = 'PHASE3A_COMPLETE' as const
 export const NEXT_AUTHORIZED_PASS = 'STAGE3A_CANDIDATE_ADJUDICATION_COMPLETE' as const
 
+export const RUN_000006_ID = 'WRIM1-RUN-000006' as const
+export const RUN_000006_PRETRAINING_STATUS = 'GATE_COMPLETE' as const
+export const RUN_000006_TRAINING_AUTHORIZATION = 'OFF' as const
+export const RUN_000006_PARENT = 'WRIM-0' as const
+export const RUN_000006_STEPS = 25 as const
+export const RUN_000006_TOKENS_PER_STEP = 4096 as const
+export const RUN_000006_MAX_TOKENS = 102400 as const
+export const RUN_000006_PEAK_LR = 1e-5 as const
+export const RUN_000006_WARMUP_STEPS = 12 as const
+export const RUN_000006_SEED = 6006 as const
+export const RUN_000006_REHEARSAL = 'BALANCED_GENESIS' as const
+export const RUN_000006_SUITE_SHA256 =
+  '934ff60bcd179ec643257fbfaa30f2a3a7621b175fc7d3c3d0efc30d946d5ac4' as const
+export const REFERENCE_NLL_CANONICAL_LF_SHA256 =
+  '43c57b52610cbdaf7a6edf4791b05e2d360936b3341a0b6ca1838d940dd27dfe' as const
+
 export const SMOKE_ARGMAX_ID = 126 as const
 export const SMOKE_ENTROPY = 6.033060550689697 as const
 export const CPU_ENTROPY_TOL = 1e-4 as const
