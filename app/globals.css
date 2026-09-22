@@ -525,3 +525,62 @@ body {
     animation: none !important;
   }
 }
+
+@keyframes hvs-home-idle-glow {
+  0%,
+  100% {
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45), 0 0 18px rgba(201, 162, 39, 0.12);
+  }
+  50% {
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45), 0 0 26px rgba(246, 231, 193, 0.22);
+  }
+}
+
+.hvs-home-app-icon {
+  animation: hvs-home-idle-glow 5.4s ease-in-out infinite;
+}
+
+.hvs-studio-mark-iris {
+  transform-box: view-box;
+  transform-origin: 64px 56px;
+  animation: hvs-studio-iris 16s linear infinite;
+}
+
+.hvs-studio-mark-playhead {
+  transform-box: view-box;
+  animation: hvs-studio-playhead 4.8s ease-in-out infinite;
+}
+
+@keyframes hvs-studio-iris {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes hvs-studio-playhead {
+  0%,
+  100% { transform: translateX(0); }
+  50% { transform: translateX(18px); }
+}
+
+.hvs-home-app-icon-host[data-hvs-motion='paused'] .hvs-home-app-icon,
+.hvs-home-app-icon-host[data-hvs-motion='paused'] .hvs-studio-mark-iris,
+.hvs-home-app-icon-host[data-hvs-motion='paused'] .hvs-studio-mark-playhead {
+  animation-play-state: paused;
+}
+
+.hvs-home-app-icon-host[data-hvs-motion='reduced'] .hvs-home-app-icon,
+.hvs-home-app-icon-host[data-hvs-motion='reduced'] .hvs-studio-mark-iris,
+.hvs-home-app-icon-host[data-hvs-motion='reduced'] .hvs-studio-mark-playhead {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hvs-home-app-icon,
+  .hvs-studio-mark-iris,
+  .hvs-studio-mark-playhead,
+  .hvs-home-app-icon-host[data-hvs-motion='reduced'] .hvs-home-app-icon,
+  .hvs-home-app-icon-host[data-hvs-motion='reduced'] .hvs-studio-mark-iris,
+  .hvs-home-app-icon-host[data-hvs-motion='reduced'] .hvs-studio-mark-playhead {
+    animation: none !important;
+  }
+}
