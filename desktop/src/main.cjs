@@ -14,6 +14,7 @@ const { applyCouncilRoutingDefault } = require('./councilRoutingBootstrap.cjs')
 const { resolveAppDataRoot, resolveAppDataPaths } = require('./appDataRoot.cjs')
 const serverLifecycle = require('./serverLifecycle.cjs')
 const desktopTrust = require('./desktopTrust.cjs')
+const { resolveRendererSandbox } = require('./rendererSandbox.cjs')
 const warRoomBrowser = require('./warRoomBrowser.cjs')
 const warRoomCdp = require('./warRoomCdp.cjs')
 const foundryWorkbenchView = require('./foundryWorkbench.cjs')
@@ -414,6 +415,10 @@ async function ensureRuntimes() {
 
 function createWindow(startUrl, diagnosticDetail, sessionToken) {
   const iconPath = resolveIconPath()
+  // Secure by default: the renderer sandbox stays ON. Only an explicit operator opt-in
+  // (WAR_ROOM_DISABLE_RENDERER_SANDBOX=1, Linux only) turns it off, for environments where
+  // AT-SPI/accessibility compatibility requires an unsandboxed renderer. See rendererSandbox.cjs.
+  const linuxRendererSandboxDisabled = resolveRendererSandbox(process.platform, process.env).disabledByOverride
   const winOpts = {
     width: 1440,
     height: 900,
@@ -423,9 +428,8 @@ function createWindow(startUrl, diagnosticDetail, sessionToken) {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
-      // Linux AT-SPI only publishes renderer controls when the renderer is not Chromium-sandboxed.
-      // nodeIntegration stays false and contextIsolation stays true.
-      sandbox: process.platform === 'linux' ? false : true,
+      // nodeIntegration stays false and contextIsolation stays true regardless of the sandbox gate.
+      sandbox: !linuxRendererSandboxDisabled,
       enableBlinkFeatures: 'AccessibilityObjectModel',
     },
   }
@@ -440,6 +444,7 @@ function createWindow(startUrl, diagnosticDetail, sessionToken) {
   const win = new BrowserWindow(winOpts)
   mainWindow = win
   appendLog('WINDOW_CREATED')
+  appendLog(`rendererSandbox = ${linuxRendererSandboxDisabled ? 'disabled-by-explicit-linux-override' : 'enabled'}`)
   win.on('closed', () => appendLog('WINDOW_CLOSED'))
   browserSurface = warRoomBrowser.attach(win)
   workbenchSurface = foundryWorkbenchView.attach(win)
