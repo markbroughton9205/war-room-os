@@ -79,6 +79,9 @@ export function missionProgressFingerprint(mission: RuntimeMission): string {
     workstreamCount: mission.engineer?.workstream?.length ?? 0,
     commanderState: mission.engineer?.commanderState ?? null,
     failureId: mission.engineer?.failureEvidence?.id ?? null,
+    engineeringEventCount: mission.engineer?.engineeringRuntime?.events.length ?? 0,
+    engineeringHead: mission.engineer?.engineeringRuntime?.events.at(-1)?.eventId ?? null,
+    engineeringBlocked: mission.engineer?.engineeringRuntime?.blockedDetail?.summary ?? null,
   })
 }
 

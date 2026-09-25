@@ -47,6 +47,7 @@ export async function POST(req: Request) {
     coderProvider: body.coderProvider,
     naturalLanguage: body.naturalLanguage,
     executionMode: body.executionMode,
+    specialistIntelligence: body.specialistIntelligence === 'model' ? 'model' : undefined,
     autoRun: body.autoRun,
     waitForCompletion: body.waitForCompletion,
     sessionId: body.sessionId,

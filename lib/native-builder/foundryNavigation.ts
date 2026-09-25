@@ -7,6 +7,8 @@ export const WAR_ROOM_HOME_HREF = '/'
 export const FOUNDRY_CANONICAL_PATH = '/war-room/engineering'
 export const FOUNDRY_RESUME_STORAGE_KEY = 'war-room-foundry-resume'
 export const FOUNDRY_HOME_SHORTCUT_HINT = 'Alt+H'
+/** Exact Commander-saved Foundry app icon. Do not regenerate or substitute. */
+export const FOUNDRY_HOME_ICON_SRC = '/foundry/foundry-icon.png'
 
 export type FoundryResumeState = {
   basePath: string

@@ -10,18 +10,20 @@ export function FoundryEntryLink({
   children,
   testId = 'nav-foundry',
   style,
+  ariaLabel = 'Foundry',
 }: {
   className?: string
   children: ReactNode
   testId?: string
   style?: CSSProperties
+  ariaLabel?: string
 }) {
   const [href, setHref] = useState(FOUNDRY_CANONICAL_PATH)
   useEffect(() => {
-    setHref(readFoundryResumeHref())
+    queueMicrotask(() => setHref(readFoundryResumeHref()))
   }, [])
   return (
-    <Link href={href} data-testid={testId} className={className} style={style} aria-label="Foundry">
+    <Link href={href} data-testid={testId} className={className} style={style} aria-label={ariaLabel}>
       {children}
     </Link>
   )

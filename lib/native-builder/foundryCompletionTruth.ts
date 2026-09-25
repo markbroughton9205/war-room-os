@@ -22,6 +22,23 @@ export type FoundryTestTruth = {
   reason: string
 }
 
+/**
+ * Present only when the truth was derived from a mission's persisted engineering-runtime evidence
+ * (see foundryCompletionHistory.ts) rather than from the live workspace.
+ */
+export type FoundryCompletionHistory = {
+  source: 'engineering_runtime'
+  validation: 'COMPLETE / VERIFIED' | 'NOT COMPLETE'
+  review: 'accepted' | 'findings' | 'none'
+  verifier: 'accepted' | 'none'
+  /** False when no recorded command output carried a parseable test count. */
+  testsCounted: boolean
+  /** False when no FILE_EDITED diff survived in the persisted events. */
+  diffKnown: boolean
+  /** A later rollback is subsequent history; it never rewrites the completion above. */
+  rolledBack: boolean
+}
+
 export type FoundryCompletionTruth = {
   surface: FoundryWorkspaceSurface
   created: string[]
@@ -38,6 +55,7 @@ export type FoundryCompletionTruth = {
   installedSha?: string | null
   sourceHead?: string | null
   sourceDirty?: boolean
+  history?: FoundryCompletionHistory
 }
 
 const METADATA_RE = /(^|\/)\.war-room(\/|$)/i

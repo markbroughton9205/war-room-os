@@ -30,6 +30,14 @@ export function registerActiveProcess(repairId: string, child: ChildProcess, lab
   activeByRepair.set(repairId, set)
 }
 
+/** Drop wrapper event-loop refs so the parent can exit while the owned child keeps running. */
+export function detachChildFromWrapper(child: ChildProcess): void {
+  child.unref()
+  child.stdin?.unref()
+  child.stdout?.unref()
+  child.stderr?.unref()
+}
+
 export function unregisterActiveProcess(repairId: string, child: ChildProcess): void {
   const set = activeByRepair.get(repairId)
   if (!set) return
@@ -80,6 +88,17 @@ async function killTreeWindows(child: ChildProcess): Promise<void> {
     killer.on('exit', () => resolve())
     killer.on('error', () => resolve())
   })
+}
+
+/** Public tree-kill, for owners (e.g. terminalSession.ts) that track a child outside the
+ * repairId-keyed registry but still want the same POSIX-group-kill / Windows-taskkill discipline
+ * instead of a second reimplementation. */
+export async function killChildTree(child: ChildProcess): Promise<void> {
+  if (process.platform === 'win32') {
+    await killTreeWindows(child)
+  } else {
+    killTreePosix(child)
+  }
 }
 
 export type KillResult = { killed: number; label: string }

@@ -18,7 +18,8 @@ export const FOUNDRY_FILE_CONTEXT_ACTIONS = [
 ] as const
 
 export const FOUNDRY_PROJECT_CONTEXT_ACTIONS = [
-  'Open',
+  'Open in War Room',
+  'Open externally',
   'Rename',
   'Duplicate',
   'Run',
@@ -46,7 +47,7 @@ export const FOUNDRY_NORMAL_MODE_HIDDEN_CONTROLS = [
   'Pause iteration',
 ] as const
 
-export const FOUNDRY_BACK_TO_WAR_ROOM_LABEL = '← Back to War Room'
+export const FOUNDRY_BACK_TO_WAR_ROOM_LABEL = '← War Room'
 export const FOUNDRY_HOME_HREF = '/'
 
 export type FoundryContextKind = 'file' | 'project' | 'diff'

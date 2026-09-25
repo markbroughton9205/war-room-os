@@ -27,6 +27,12 @@ import {
   getCanonicalWarRoomSourceRoot,
   type FoundryWorkspaceType,
 } from './foundryWorkspaceIdentity'
+import {
+  decorateProjectVisibility,
+  filterProjectsForView,
+  type FoundryProjectClassification,
+  type FoundryProjectHistoryView,
+} from './foundryProjectVisibility'
 
 const execFileAsync = promisify(execFile)
 
@@ -51,6 +57,18 @@ export interface WorkspaceRecord {
   workspaceType?: FoundryWorkspaceType
   displayTitle?: string
   displayKind?: string
+  classification?: FoundryProjectClassification
+  classificationEvidence?: string[]
+  visibility?: 'commander' | 'system'
+  testArtifact?: boolean
+  archived?: boolean
+  previewUrl?: string | null
+  previewPort?: number | null
+  previewLive?: boolean
+  runtimeStatus?: 'RUNNING' | 'STOPPED' | 'BUILDING' | 'NEEDS_ATTENTION'
+  lastWorkedAt?: string
+  applicationProjectId?: string
+  projectKindLabel?: string
 }
 
 const REGISTRY_REL = path.join('.war-room', 'workspaces', 'registry.json')
@@ -87,6 +105,15 @@ export async function getEngineerAllowedRoots(): Promise<string[]> {
   } catch {
     /* projects root could not be created */
   }
+  try {
+    const foundryProjects = process.env.FOUNDRY_PROJECTS_ROOT?.trim()
+      ? path.resolve(process.env.FOUNDRY_PROJECTS_ROOT.trim())
+      : path.join(os.homedir(), 'FoundryProjects')
+    await mkdir(foundryProjects, { recursive: true })
+    await add(foundryProjects)
+  } catch {
+    /* FoundryProjects root could not be created */
+  }
   for (const historical of CODE_OPERATOR_ALLOWED_ROOTS) {
     await add(historical)
   }
@@ -98,6 +125,9 @@ export async function getEngineerAllowedRoots(): Promise<string[]> {
 }
 
 export function isPathInsideRoot(canonicalPath: string, canonicalRoot: string): boolean {
+  if (/^[A-Za-z]:[\\/]/.test(canonicalPath) && process.platform !== 'win32') return false
+  if (/^[A-Za-z]:[\\/]/.test(canonicalRoot) && process.platform !== 'win32') return false
+  if (!path.isAbsolute(canonicalPath) || !path.isAbsolute(canonicalRoot)) return false
   const rel = path.relative(canonicalRoot, canonicalPath)
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }
@@ -254,7 +284,7 @@ function withIdentity(record: WorkspaceRecord): WorkspaceRecord {
   }
 }
 
-export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
+export async function listWorkspaces(view: FoundryProjectHistoryView | 'engine' = 'engine'): Promise<WorkspaceRecord[]> {
   const allowed = await getEngineerAllowedRoots()
   const listed = (await readRegistry()).filter(workspace => allowed.some(root => isPathInsideRoot(workspace.root, root)))
   let canonicalRoot = getCanonicalWarRoomSourceRoot()
@@ -271,8 +301,93 @@ export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
     name: 'WAR ROOM OS',
     createdAt: '1970-01-01T00:00:00.000Z',
     projectType: 'war_room',
+    classification: 'COMMANDER_REAL',
+    visibility: 'commander',
+    testArtifact: false,
+    archived: false,
   }))
-  return withoutCanonicalDupes.map(withIdentity)
+  const decorated = withoutCanonicalDupes.map(record => decorateProjectVisibility(withIdentity(record)))
+  const { listFoundryApplicationProjects, toWorkspaceRecord } = await import('./foundryProjectIsolation')
+  const { presentCommanderProjectCard } = await import('./foundryCommanderProjects')
+  const { reconcileDuplicateFoundryProjects } = await import('./foundryProjectIndexHygiene')
+  if (view === 'commander') await reconcileDuplicateFoundryProjects()
+  const appProjects = await listFoundryApplicationProjects()
+  for (const project of appProjects) {
+    const existing = decorated.find(item => item.id === project.projectId || path.resolve(item.root) === path.resolve(project.projectRoot))
+    const card = await presentCommanderProjectCard(project)
+    if (existing) {
+      existing.previewUrl = card.previewUrl
+      existing.previewPort = card.previewPort
+      existing.previewLive = card.previewLive
+      existing.runtimeStatus = card.runtimeStatus
+      existing.lastWorkedAt = card.lastWorkedAt ?? existing.lastOpenedAt
+      existing.applicationProjectId = card.applicationProjectId ?? project.projectId
+      existing.projectKindLabel = card.kind
+      existing.displayKind = card.kind
+      existing.displayTitle = card.name
+      existing.label = card.name
+    } else {
+      const record = decorateProjectVisibility(withIdentity(toWorkspaceRecord(project)))
+      record.previewUrl = card.previewUrl
+      record.previewPort = card.previewPort
+      record.previewLive = card.previewLive
+      record.runtimeStatus = card.runtimeStatus
+      record.lastWorkedAt = card.lastWorkedAt ?? record.lastOpenedAt
+      record.applicationProjectId = project.projectId
+      record.projectKindLabel = card.kind
+      record.displayKind = card.kind
+      record.displayTitle = card.name
+      record.label = card.name
+      decorated.push(record)
+    }
+  }
+  const canonical = decorated.find(item => item.id === WAR_ROOM_CANONICAL_WORKSPACE_ID)
+  if (canonical) {
+    canonical.projectKindLabel = 'System Project'
+    canonical.displayKind = 'System Project'
+  }
+  if (view === 'engine') return decorated
+  return filterProjectsForView(decorated, view)
+}
+
+export async function archiveConfirmedTestProjects(): Promise<{
+  counts: Record<FoundryProjectClassification, number>
+  archived: Array<{ id: string; label: string; root: string; classification: FoundryProjectClassification }>
+  preserved: Array<{ id: string; label: string; root: string; classification: FoundryProjectClassification }>
+}> {
+  const all = await readRegistry()
+  const counts: Record<FoundryProjectClassification, number> = {
+    COMMANDER_REAL: 0,
+    SYSTEM_TEST: 0,
+    ACCEPTANCE_FIXTURE: 0,
+    CONTRACT_TEST: 0,
+    INTERNAL: 0,
+    UNKNOWN: 0,
+  }
+  const archived: Array<{ id: string; label: string; root: string; classification: FoundryProjectClassification }> = []
+  const preserved: Array<{ id: string; label: string; root: string; classification: FoundryProjectClassification }> = []
+  const next = all.map(record => {
+    const decorated = decorateProjectVisibility(record)
+    counts[decorated.classification ?? 'UNKNOWN'] += 1
+    if (decorated.testArtifact || decorated.visibility === 'system' || decorated.archived) {
+      archived.push({
+        id: decorated.id,
+        label: decorated.label,
+        root: decorated.root,
+        classification: decorated.classification ?? 'UNKNOWN',
+      })
+    } else {
+      preserved.push({
+        id: decorated.id,
+        label: decorated.label,
+        root: decorated.root,
+        classification: decorated.classification ?? 'UNKNOWN',
+      })
+    }
+    return decorated
+  })
+  await writeRegistry(next)
+  return { counts, archived, preserved }
 }
 
 export async function getWorkspace(id: string): Promise<WorkspaceRecord | null> {
@@ -362,5 +477,13 @@ export async function createNewProjectWorkspace(input: {
     name,
     createdAt: new Date().toISOString(),
     projectType: 'new_project',
+    classification: /wr-engineer-e2e|wr-foundry-e2e|(?:^|[\\/])(?:tmp|temp)[\\/]|appdata[\\/]local[\\/]temp/i.test(projectsRoot)
+      ? 'SYSTEM_TEST'
+      : 'COMMANDER_REAL',
+    visibility: /wr-engineer-e2e|wr-foundry-e2e|(?:^|[\\/])(?:tmp|temp)[\\/]|appdata[\\/]local[\\/]temp/i.test(projectsRoot)
+      ? 'system'
+      : 'commander',
+    testArtifact: /wr-engineer-e2e|wr-foundry-e2e|(?:^|[\\/])(?:tmp|temp)[\\/]|appdata[\\/]local[\\/]temp/i.test(projectsRoot),
+    archived: /wr-engineer-e2e|wr-foundry-e2e|(?:^|[\\/])(?:tmp|temp)[\\/]|appdata[\\/]local[\\/]temp/i.test(projectsRoot),
   })
 }

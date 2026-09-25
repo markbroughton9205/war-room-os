@@ -2,7 +2,7 @@
  * Schema-validated Foundry actions. Malformed/unauthorized actions are rejected.
  * Execution always goes through Engineering Core tools — never a raw shell string.
  */
-import { executeEngineerTool } from './engineerTools'
+import { executeEngineerTool, isEngineerToolName, type EngineerToolName } from './engineerTools'
 import { classifyArgv } from './commandPolicy'
 import { terminalRepoDiff, terminalRepoStatus } from './terminalExecutor'
 import type { NativeValidationOperation } from './types'
@@ -28,6 +28,7 @@ export const FOUNDRY_ACTION_TYPES = [
   'ASK_SPECIALIST',
   'COMPLETE_MISSION',
   'NOTE',
+  'TOOL_CALL',
 ] as const
 
 export type FoundryActionType = (typeof FOUNDRY_ACTION_TYPES)[number]
@@ -46,6 +47,7 @@ export type FoundryAction =
   | { type: 'ASK_SPECIALIST'; specialist: FoundryRole; task: string }
   | { type: 'COMPLETE_MISSION'; summary?: string }
   | { type: 'NOTE'; text: string }
+  | { type: 'TOOL_CALL'; tool: EngineerToolName; input: Record<string, unknown> }
 
 export type FoundryActionResult = {
   ok: boolean
@@ -133,6 +135,12 @@ function parseOne(type: FoundryActionType, row: Record<string, unknown>): { ok: 
       return { ok: true, action: { type, summary: asString(row.summary) || undefined } }
     case 'NOTE':
       return { ok: true, action: { type, text: asString(row.text) || asString(row.summary) } }
+    case 'TOOL_CALL': {
+      const toolName = asString(row.tool)
+      if (!isEngineerToolName(toolName)) return { ok: false, error: `TOOL_CALL requires a known tool name, got: ${toolName || '(missing)'}` }
+      const toolInput = row.input && typeof row.input === 'object' && !Array.isArray(row.input) ? (row.input as Record<string, unknown>) : {}
+      return { ok: true, action: { type, tool: toolName, input: toolInput } }
+    }
   }
 }
 
@@ -203,5 +211,9 @@ export async function executeFoundryAction(action: FoundryAction, ctx: { repairI
       return { ok: true, type: action.type, detail: action.summary || 'Mission complete requested.' }
     case 'NOTE':
       return { ok: true, type: action.type, detail: action.text.slice(0, 400) }
+    case 'TOOL_CALL': {
+      const result = await executeEngineerTool({ tool: action.tool, input: action.input }, ctx)
+      return { ok: result.ok, type: action.type, detail: result.ok ? `${action.tool} ok` : result.error ?? `${action.tool} failed`, result: result.result }
+    }
   }
 }

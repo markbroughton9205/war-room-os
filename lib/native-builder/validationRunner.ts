@@ -41,6 +41,7 @@ const execFileAsync = promisify(execFile)
 const MAX_BUFFER = 10 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 120_000
 const BUILD_TIMEOUT_MS = 400_000
+const PACKAGE_TIMEOUT_MS = 600_000
 const CAPTURE_LIMIT = 20_000
 
 /** pnpm on Windows resolves via a .cmd shim, which execFile/spawn need shell:true to locate — args
@@ -193,11 +194,23 @@ async function resolveOperationArgv(
     case 'build':
       return { ok: true, argv: { cmd: 'pnpm', args: ['run', 'build'], timeoutMs: BUILD_TIMEOUT_MS } }
 
+    case 'prepare_desktop_runtime':
+      return { ok: true, argv: { cmd: 'node', args: ['scripts/prepare-desktop-runtime.mjs'], timeoutMs: BUILD_TIMEOUT_MS } }
+
+    case 'package_desktop_linux':
+      return { ok: true, argv: { cmd: 'npm', args: ['run', 'desktop:dist:linux'], timeoutMs: PACKAGE_TIMEOUT_MS } }
+
     case 'git_diff_check':
       return { ok: true, argv: { cmd: 'git', args: ['diff', '--check'], timeoutMs: DEFAULT_TIMEOUT_MS } }
 
-    case 'node_test':
-      return { ok: true, argv: { cmd: 'node', args: ['--test'], timeoutMs: DEFAULT_TIMEOUT_MS } }
+    case 'node_test': {
+      const files = validateTargetFiles(op.targets)
+      const scoped = files.filter(file => /^scripts\/foundry\/.+\.test\.(mjs|js)$/.test(file))
+      if (files.length && scoped.length !== files.length) {
+        return { ok: false, error: 'node_test targets must be scripts/foundry/*.test.mjs files.' }
+      }
+      return { ok: true, argv: { cmd: 'node', args: scoped.length ? ['--test', ...scoped] : ['--test'], timeoutMs: DEFAULT_TIMEOUT_MS } }
+    }
 
     case 'package_install': {
       const pm = op.targets?.[0] === 'npm' ? 'npm' : op.targets?.[0] === 'yarn' ? 'yarn' : 'pnpm'
@@ -216,6 +229,30 @@ async function resolveOperationArgv(
 
     case 'http_probe':
       return { ok: false, error: 'http_probe is handled by the dedicated localhost probe, not argv spawn.' }
+
+    case 'validate_suite': {
+      const suite = op.targets?.[0]
+      if (!suite) return { ok: false, error: 'validate_suite requires a target script name.' }
+      if (!suite.startsWith('validate:')) {
+        return { ok: false, error: 'validate_suite only allows package.json scripts prefixed "validate:" (the project\'s test convention per CLAUDE.md).' }
+      }
+      if (suite.endsWith(':live')) {
+        return { ok: false, error: 'Live-acceptance suites (suffix ":live") call real external services and are excluded from test.run.' }
+      }
+      let scripts: Record<string, string> = {}
+      try {
+        const raw = await access(resolveRepoRelativePath('package.json'), FsConstants.F_OK).then(() => true).catch(() => false)
+        if (!raw) return { ok: false, error: 'package.json not found.' }
+        const { readFile } = await import('node:fs/promises')
+        scripts = (JSON.parse(await readFile(resolveRepoRelativePath('package.json'), 'utf8')) as { scripts?: Record<string, string> }).scripts ?? {}
+      } catch (error) {
+        return { ok: false, error: `Failed to read package.json scripts: ${error instanceof Error ? error.message : String(error)}` }
+      }
+      if (!Object.prototype.hasOwnProperty.call(scripts, suite)) {
+        return { ok: false, error: `Unknown package.json script: "${suite}".` }
+      }
+      return { ok: true, argv: { cmd: 'pnpm', args: ['run', suite], timeoutMs: BUILD_TIMEOUT_MS } }
+    }
 
     case 'validation_script': {
       const script = op.targets?.[0]

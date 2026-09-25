@@ -5,7 +5,10 @@ import { detectToolchain } from './toolchain'
 import { getProjectsRoot } from './workspaceRegistry'
 import { listRepairs } from './storage'
 import { listAllOwnedProcesses } from './processRegistry'
+import { resolveFoundryBrainStatus, type FoundryBrainStatus } from './foundryBrainStatus'
 import { resolveLocalCoder } from './localCoder'
+import { resolveLocalModelHealth, type LocalModelHealth } from './localModelHealth'
+import { readFoundryRuntimeConfig } from './foundryRuntimeConfig'
 
 export type EngineerOverallStatus =
   | 'OFFLINE'
@@ -29,6 +32,9 @@ export type EngineerStatusSnapshot = {
     generalModel: string | null
     models: string[]
     detail: string
+    brain: FoundryBrainStatus
+    localModel: LocalModelHealth
+    localMissionReliability?: 'VALIDATED' | 'UNPROVEN'
   }
   councilProviderStatus: 'COUNCIL_READY' | 'COUNCIL_DEGRADED'
   projectsRoot: string
@@ -48,14 +54,20 @@ export async function getEngineerStatus(): Promise<EngineerStatusSnapshot> {
   const waiting = active.some(r => r.state === 'awaiting_local_execution_approval' || r.state === 'awaiting_commander_review')
   const working = active.some(r => ['applying_patch', 'validating', 'planning', 'inspecting_repository'].includes(r.state))
   const blocked = active.some(r => r.state === 'blocked' || r.state === 'verification_failed')
-  const local = await resolveLocalCoder()
+  const reliability = readFoundryRuntimeConfig().localMissionReliability === 'VALIDATED' ? 'VALIDATED' : 'UNPROVEN'
+  const [local, brain, localModel] = await Promise.all([
+    resolveLocalCoder(),
+    resolveFoundryBrainStatus(),
+    resolveLocalModelHealth({ tryStart: true }),
+  ])
 
+  const usableBrain = localModel.state === 'READY' || (brain.ready && !brain.usageLimited)
   let overall: EngineerOverallStatus = 'READY'
   if (node?.state !== 'AVAILABLE') overall = 'CONFIG_REQUIRED'
+  else if (!usableBrain) overall = 'BLOCKED'
   if (working) overall = 'WORKING'
   else if (waiting) overall = 'WAITING_APPROVAL'
   else if (blocked) overall = 'BLOCKED'
-  else if (local.status !== 'LOCAL_CODER_READY' && node?.state === 'AVAILABLE') overall = 'READY'
 
   const cap = (state: CapabilityState): CapabilityState => state
 
@@ -66,10 +78,15 @@ export async function getEngineerStatus(): Promise<EngineerStatusSnapshot> {
     foundryModelStatus: {
       localCoder: local.status,
       hostedCoder: local.hostedStatus,
-      codingModel: local.codingModel,
+      codingModel: local.codingModel || brain.configuredModel,
       generalModel: local.generalModel,
       models: local.models,
-      detail: local.detail,
+      detail: localModel.state === 'READY'
+        ? `${localModel.detail} Remote: ${brain.detail}`
+        : brain.detail,
+      brain,
+      localModel,
+      localMissionReliability: reliability,
     },
     councilProviderStatus: local.hostedStatus === 'HOSTED_CODER_READY' ? 'COUNCIL_READY' : 'COUNCIL_DEGRADED',
     projectsRoot: getProjectsRoot(),
@@ -81,7 +98,8 @@ export async function getEngineerStatus(): Promise<EngineerStatusSnapshot> {
       gitCommit: cap('CONFIG_REQUIRED'),
       gitPush: cap('CONFIG_REQUIRED'),
       deploy: cap('NOT_AVAILABLE'),
-      localCoder: cap(local.status === 'LOCAL_CODER_READY' ? 'AVAILABLE' : 'NOT_AVAILABLE'),
+      localCoder: cap(localModel.state === 'READY' ? 'AVAILABLE' : 'NOT_AVAILABLE'),
+      foundryBrain: cap(usableBrain ? 'AVAILABLE' : 'NOT_AVAILABLE'),
       hostedCoder: cap(local.hostedStatus === 'HOSTED_CODER_READY' ? 'AVAILABLE' : 'CONFIG_REQUIRED'),
       visualVerification: cap('NOT_AVAILABLE'),
     },

@@ -9,6 +9,7 @@
  * reaches `resolved` without lib/native-builder/repairVerifier.ts producing real evidence.
  */
 
+import type { FoundryEngineeringRuntimeState } from './foundryEngineeringEvents'
 import type { FoundryMissionWorkspaceBinding } from './foundryWorkspaceIdentityCore'
 
 // ---------------------------------------------------------------------------
@@ -177,6 +178,9 @@ export type NativeValidationOperationId =
   | 'typecheck'
   | 'eslint_targeted'
   | 'build'
+  | 'prepare_desktop_runtime'
+  | 'package_desktop_linux'
+  | 'validate_suite'
   | 'validation_script'
   | 'git_diff_check'
   | 'node_test'
@@ -546,6 +550,7 @@ export type NativeCodingMissionState = {
   workspaceId?: string
   workspaceBinding?: FoundryMissionWorkspaceBinding
   commanderRequest: string
+  specialistIntelligence?: 'model'
   objective: string
   acceptanceCriteria: string[]
   plan: string[]
@@ -576,6 +581,8 @@ export type NativeCodingMissionState = {
   workstream?: FoundryWorkEvent[]
   completionTruth?: FoundryCompletionTruthState
   researchProvenance?: FoundryResearchProvenance
+  /** Operator-visible engineering actions. Absent on repairs written before this field. */
+  engineeringRuntime?: FoundryEngineeringRuntimeState
 }
 
 // ---------------------------------------------------------------------------

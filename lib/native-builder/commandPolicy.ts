@@ -103,3 +103,109 @@ export function classifyCommandCwd(cwd: string, workspaceRoot: string): Classifi
   }
   return { policyClass: 'SAFE_LOCAL', reason: 'cwd is inside the authorized workspace.' }
 }
+
+/**
+ * Browser tools are not argv commands, but they can still reach arbitrary network/filesystem
+ * targets if unconstrained — an SSRF-shaped risk classifyArgv was never built to see. Foundry's
+ * browser tool may only look at the local machine (loopback) or files inside the workspace it is
+ * already trusted to read.
+ */
+export function classifyBrowserTarget(rawUrl: string): ClassifiedCommand {
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    return { policyClass: 'DENIED', reason: `Not a valid URL: ${rawUrl}` }
+  }
+  if (parsed.protocol === 'file:') {
+    // file:// containment (repo-root escape, denylisted paths) is enforced by the caller via
+    // repositoryInspector's resolveRepoRelativePath/assertCanonicalRepoPath — this only confirms
+    // the scheme itself is one we ever consider.
+    return { policyClass: 'SAFE_LOCAL', reason: 'file:// target — containment enforced separately.' }
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { policyClass: 'DENIED', reason: `Browser scheme not permitted: ${parsed.protocol}` }
+  }
+  const host = parsed.hostname.toLowerCase()
+  if (host === '127.0.0.1' || host === 'localhost' || host === '::1') {
+    return { policyClass: 'SAFE_LOCAL', reason: 'Loopback target.' }
+  }
+  // Persistent internet browser: bounded documentation/research allowlist.
+  // Arbitrary public hosts remain DENIED — this is not an open SSRF proxy.
+  if (SAFE_PUBLIC_BROWSER_HOSTS.has(host)) {
+    return { policyClass: 'SAFE_LOCAL', reason: `Allowlisted public Internet target (${host}).` }
+  }
+  return { policyClass: 'DENIED', reason: `Browser target must be loopback or an allowlisted public host (example.com / example.org), got: ${host}` }
+}
+
+/** Hosts the Foundry persistent browser may fetch besides loopback. Keep this list tiny. */
+export const SAFE_PUBLIC_BROWSER_HOSTS = new Set([
+  'example.com',
+  'www.example.com',
+  'example.org',
+  'www.example.org',
+  'developer.mozilla.org',
+  'react.dev',
+  'nextjs.org',
+  'nodejs.org',
+  'www.typescriptlang.org',
+  'docs.cesium.com',
+  'github.com',
+])
+
+/**
+ * Installing a new build is a system-affecting action (it can replace what a real launcher
+ * points at). A target under the real `~/.local/opt` install root is DENIED outright for an
+ * autonomous mission; anywhere else requires explicit Commander confirmation.
+ */
+export function classifyInstallTarget(installRoot: string, realOptRoot: string): ClassifiedCommand {
+  const target = path.resolve(installRoot)
+  const real = path.resolve(realOptRoot)
+  const rel = path.relative(real, target)
+  const insideRealOpt = rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  if (insideRealOpt) {
+    return {
+      policyClass: 'DENIED',
+      reason: 'Installing directly into the real ~/.local/opt install root is never autonomous.',
+      approvalKind: 'shell_mutating',
+    }
+  }
+  return {
+    policyClass: 'REQUIRES_APPROVAL',
+    reason: 'Install target requires explicit Commander confirmation (commanderConfirmed: true).',
+    approvalKind: 'shell_mutating',
+  }
+}
+
+/**
+ * PASS 002 — the dedicated production-install pathway (installerTool.installerInstallProduction).
+ * Unlike classifyInstallTarget, this ALLOWS a target inside the real ~/.local/opt root, but never
+ * as SAFE_LOCAL: it always requires explicit Commander confirmation, and it still refuses the bare
+ * root directory itself (an install must always be a NEW named, versioned subdirectory — never
+ * something that could collide with or overwrite the root or an existing sibling install).
+ */
+export function classifyProductionInstallTarget(installDir: string, realOptRoot: string): ClassifiedCommand {
+  const target = path.resolve(installDir)
+  const real = path.resolve(realOptRoot)
+  if (target === real) {
+    return {
+      policyClass: 'DENIED',
+      reason: 'A production install must target a new named subdirectory of the real install root, never the root itself.',
+      approvalKind: 'shell_mutating',
+    }
+  }
+  const rel = path.relative(real, target)
+  const insideRealOpt = !rel.startsWith('..') && !path.isAbsolute(rel)
+  if (!insideRealOpt) {
+    return {
+      policyClass: 'DENIED',
+      reason: 'installerInstallProduction only targets the real install root — use installerInstall for tmp/ overrides.',
+      approvalKind: 'shell_mutating',
+    }
+  }
+  return {
+    policyClass: 'REQUIRES_APPROVAL',
+    reason: 'Production install into the real ~/.local/opt root requires explicit Commander confirmation (commanderConfirmed: true).',
+    approvalKind: 'shell_mutating',
+  }
+}

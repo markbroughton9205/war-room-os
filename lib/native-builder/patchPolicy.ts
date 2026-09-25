@@ -83,14 +83,16 @@ function validateOnePatch(
   }
   const basename = rel.split('/').pop() ?? rel
   const skipPackageJsonBlock = profile === 'external_coding' && EXTERNAL_UNBLOCKED_BASENAMES.has(basename)
-  if (!skipPackageJsonBlock && BLOCKED_PATH_PATTERNS.some(pattern => pattern.test(rel))) {
+  const skipEnvExample = profile === 'external_coding' && /^\.env\.example$/i.test(basename)
+  if (!skipPackageJsonBlock && !skipEnvExample && BLOCKED_PATH_PATTERNS.some(pattern => pattern.test(rel))) {
     violations.push({ rule: 'path_denylist', file: rel, detail: 'Path matches a blocked pattern (secrets, lockfiles, deploy config, schema, auth/billing/permissions code).' })
     return null
   }
   const ext = path.extname(rel).toLowerCase()
   const allowed = profile === 'external_coding' ? EXTERNAL_ALLOWED_EXTENSIONS : WAR_ROOM_ALLOWED_EXTENSIONS
   const gitignoreOk = profile === 'external_coding' && basename === '.gitignore'
-  if (!gitignoreOk && !allowed.has(ext)) {
+  const foundryFixtureTxt = rel.startsWith('scripts/foundry/') && ext === '.txt'
+  if (!gitignoreOk && !foundryFixtureTxt && !allowed.has(ext)) {
     violations.push({ rule: 'file_type_denylist', file: rel, detail: `File extension "${ext || '(none)'}" is not in the allowed set (${[...allowed].join(', ')}).` })
     return null
   }

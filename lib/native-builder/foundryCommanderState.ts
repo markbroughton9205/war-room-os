@@ -2,7 +2,6 @@
  * Foundry Commander lifecycle. Distinguishes internal orchestration steps from the
  * states a Commander should see, and refuses REPAIRING without recorded failure evidence.
  */
-import { createHash } from 'node:crypto'
 import type { FoundryAction } from './foundryActions'
 import type {
   FoundryCommanderState,
@@ -27,6 +26,15 @@ export const FOUNDRY_COMMANDER_STATES = [
 
 const NEW_APP = /\b(build|create|make|scaffold|start|new)\b.{0,40}\b(app|application|calculator|crm|tracker|game|website|cli|tool|server|page)\b/i
 const BUILD_ME = /\bbuild me\b|\bmake me\b|\bcreate (a|an|me)\b/i
+
+function shortEventId(input: string): string {
+  let h = 2166136261
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return (h >>> 0).toString(16).padStart(8, '0').slice(0, 12)
+}
 
 export function looksLikeNewApplication(text: string): boolean {
   const t = text.trim()
@@ -136,10 +144,7 @@ export function failureFromValidation(
   const summary = counts && counts.fail > 0
     ? `${counts.fail} test${counts.fail === 1 ? '' : 's'} failed`
     : (output.split('\n').filter(Boolean).slice(-4).join(' ').slice(0, 240) || `${last.operation.id} failed`)
-  const id = createHash('sha256')
-    .update(`${last.operation.id}:${last.exitCode}:${output.slice(0, 400)}`)
-    .digest('hex')
-    .slice(0, 12)
+  const id = shortEventId(`${last.operation.id}:${last.exitCode}:${output.slice(0, 400)}`)
   return {
     id,
     at: last.ranAt || new Date().toISOString(),
@@ -186,6 +191,8 @@ export function activityTextForAction(action: FoundryAction, result?: { ok: bool
       return action.summary || 'Mission complete'
     case 'NOTE':
       return action.text.slice(0, 160)
+    case 'TOOL_CALL':
+      return `Running ${action.tool}`
   }
 }
 
@@ -207,7 +214,7 @@ export function workEventFromAction(
               : 'status'
   const path = 'path' in action ? action.path : undefined
   return {
-    id: createHash('sha256').update(`${action.type}:${path ?? ''}:${Date.now()}:${Math.random()}`).digest('hex').slice(0, 12),
+    id: shortEventId(`${action.type}:${path ?? ''}:${Date.now()}:${Math.random()}`),
     at: new Date().toISOString(),
     kind,
     text: activityTextForAction(action, result),

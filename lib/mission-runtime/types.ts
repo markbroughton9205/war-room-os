@@ -85,6 +85,7 @@ export type EngineeringMissionRequest = {
   naturalLanguage?: string
   /** bounded_coding: mission start authorizes in-workspace local-dev. Default gated_repair. */
   executionMode?: 'gated_repair' | 'bounded_coding'
+  specialistIntelligence?: 'model'
   autoRun?: boolean
   waitForCompletion?: boolean
   sessionId?: string

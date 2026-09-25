@@ -46,25 +46,39 @@ function pathInside(child: string, root: string): boolean {
 export function getCanonicalWarRoomSourceRoot(): string {
   const env = process.env.WAR_ROOM_CANONICAL_SOURCE?.trim()
   if (env) return path.resolve(env)
-  const known = path.resolve('C:\\Users\\markb\\Documents\\Codex\\war-room-os')
+  const foundryMarker = path.join('components', 'war-room', 'foundry', 'FoundryShell.tsx')
+  const knownCandidates = [
+    'C:\\Users\\markb\\Documents\\Codex\\war-room-os',
+    path.join(os.homedir(), 'Documents', 'Codex', 'war-room-os'),
+    path.join(os.homedir(), 'Codex', 'war-room-os'),
+    '/home/chosenone/Codex/war-room-os',
+  ]
+  const knownExisting = knownCandidates.map(item => path.resolve(item)).find(item => existsSync(path.join(item, foundryMarker)))
   const base = resolveBaseRepoRoot()
   const projects = getGeneratedProjectsRoot()
-  const foundryMarker = path.join('components', 'war-room', 'foundry', 'FoundryShell.tsx')
+  const normalizedBase = base.replace(/\\/g, '/')
+  const looksInstalled = /\/\.local\/opt\/.*\/resources\/runtime\/ui$/i.test(normalizedBase)
+    || /\/Programs\/War Room OS/i.test(normalizedBase)
+    || /\/opt\/War Room OS/i.test(normalizedBase)
+  if (looksInstalled && knownExisting) return knownExisting
   if (pathInside(base, projects)) {
-    return existsSync(path.join(known, foundryMarker)) ? known : base
+    return knownExisting ?? base
   }
-  if (existsSync(path.join(base, foundryMarker))) return base
-  if (existsSync(path.join(known, foundryMarker))) return known
+  if (!looksInstalled && existsSync(path.join(base, foundryMarker))) return base
+  if (knownExisting) return knownExisting
   return base
 }
 
 function defaultInstalledRoots(): string[] {
+  const roots: string[] = [path.join(os.homedir(), '.local', 'opt')]
   const local = process.env.LOCALAPPDATA?.trim()
-  if (!local) return []
-  return [
-    path.join(local, 'Programs', 'War Room OS'),
-    path.join(local, 'Programs', 'WARROO~1'),
-  ]
+  if (local) {
+    roots.push(
+      path.join(local, 'Programs', 'War Room OS'),
+      path.join(local, 'Programs', 'WARROO~1'),
+    )
+  }
+  return roots
 }
 
 export function classifyWorkspaceRoot(
@@ -183,6 +197,7 @@ export const FOUNDRY_UI_SOURCE_MAP = {
   homeNav: 'components/war-room/foundry/FoundryHomeNav.tsx',
   contextMenu: 'components/war-room/foundry/FoundryContextMenu.tsx',
   entryLink: 'components/war-room/foundry/FoundryEntryLink.tsx',
+  homeAppIcon: 'components/war-room/foundry/FoundryHomeAppIcon.tsx',
   inspector: 'components/war-room/builder/BuilderWorkspace.tsx',
   canonicalRoute: 'app/war-room/engineering/page.tsx',
   aliasCodeOperator: 'app/war-room/code-operator/page.tsx',

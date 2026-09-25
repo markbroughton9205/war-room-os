@@ -4,6 +4,7 @@
  * Retrieved pages are untrusted data and must not execute.
  */
 import { tavilyWarRoomSearch } from '@/lib/internet/warRoomSearchProviders'
+import { foundryResearchFetch } from './foundryResearchTransport'
 import {
   lookupFoundryKnowledge,
   readFoundryEngineeringKnowledge,
@@ -91,10 +92,9 @@ function kindForUrl(url: string): FoundryResearchSource['kind'] {
 async function fetchOfficialSnippet(url: string): Promise<string | null> {
   if (!isAllowlistedResearchUrl(url)) return null
   try {
-    const res = await fetch(url, {
+    const res = await foundryResearchFetch(url, {
       method: 'GET',
       headers: { Accept: 'text/html,text/plain,*/*', 'User-Agent': 'WarRoom-Foundry-Research/1.0' },
-      signal: AbortSignal.timeout(12000),
     })
     if (!res.ok) return null
     const text = sanitizeRetrievedText(await res.text())
@@ -138,7 +138,12 @@ export async function runFoundryCodingResearch(input: {
   let usedLiveInternet = false
   let status: FoundryResearchStatus = local ? 'PARTIAL' : 'CONFIG_NEEDED'
 
-  const tavily = await tavilyWarRoomSearch(query, 5)
+  const tavily = await tavilyWarRoomSearch(query, 5, {
+    fetchImpl: ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' || input instanceof URL ? input : input.url
+      return foundryResearchFetch(url, init)
+    }) as typeof fetch,
+  })
   if (tavily.ok && tavily.results.length) {
     usedLiveInternet = true
     status = 'LIVE'

@@ -6,9 +6,12 @@
  * Presence of that script is not a reason to mutate package.json.
  */
 import type { FoundryAction } from './foundryActions'
+import { LOCAL_UI_ORIGIN } from '@/lib/sovereign-runtime/constants'
+
+const LOCAL_UI_HOST_PORT = LOCAL_UI_ORIGIN.replace(/^https?:\/\//, '')
 
 export const DEV_SERVER_REQUIREMENT_PASS =
-  'DEV_TOOLING_PRESENT. DEV_RUNTIME_REQUIRED=false. package.json left unchanged. Installed Foundry uses production UI 127.0.0.1:3848 with relative /api paths. Do not start next/pnpm/npm/yarn dev or bind port 3001.'
+  `DEV_TOOLING_PRESENT. DEV_RUNTIME_REQUIRED=false. package.json left unchanged. Installed Foundry uses production UI ${LOCAL_UI_HOST_PORT} with relative /api paths. Do not start next/pnpm/npm/yarn dev or bind port 3001.`
 
 const PACKAGE_JSON = /(^|\/)package\.json$/i
 const DEV_SCRIPT_KEY = /["']dev["']\s*:/

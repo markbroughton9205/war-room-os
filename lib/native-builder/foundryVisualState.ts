@@ -15,7 +15,7 @@ export type FoundryVisualTreatment = {
 }
 
 const STATE_TREATMENT: Record<FoundryCommanderState, FoundryVisualTreatment> = {
-  IDLE: { tone: 'dim', matrixChannel: 'green', intensity: 'dim', label: 'IDLE' },
+  IDLE: { tone: 'dim', matrixChannel: 'green', intensity: 'dim', label: 'READY' },
   PLANNING: { tone: 'amber', matrixChannel: 'amber', intensity: 'normal', label: 'PLANNING' },
   BUILDING: { tone: 'green', matrixChannel: 'green', intensity: 'active', label: 'BUILDING' },
   RUNNING: { tone: 'green', matrixChannel: 'green', intensity: 'active', label: 'RUNNING' },

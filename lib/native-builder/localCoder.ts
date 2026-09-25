@@ -2,8 +2,9 @@
  * Canonical local coding-provider adapter. The model proposes structured actions;
  * Engineering Core executes. Never grants shell access.
  */
-import { probeOllama, requestOllamaCompletion } from './ollamaClient'
+import { requestOllamaCompletion, type OllamaFormat, type OllamaGenerateOptions } from './ollamaClient'
 import { prepareFoundryCoder } from './localModelArbiter'
+import { resolveLocalModelHealth } from './localModelHealth'
 import type { FoundryRole } from './foundryRoles'
 
 export const PREFERRED_LOCAL_CODER = 'qwen2.5-coder:14b'
@@ -54,25 +55,31 @@ export function pickLocalCoderModel(models: string[], role: FoundryRole = 'BUILD
   return models.find(m => /coder/i.test(m)) ?? models[0] ?? null
 }
 
-export async function resolveLocalCoder(): Promise<LocalCoderResolution> {
-  const probe = await probeOllama()
-  const codingModel = pickLocalCoderModel(probe.models, 'BUILDER')
-  const generalModel = pickLocalCoderModel(probe.models, 'FOUNDRY_MASTER')
-  const ready = probe.available && Boolean(codingModel)
+function resolutionFromHealth(health: Awaited<ReturnType<typeof resolveLocalModelHealth>>): LocalCoderResolution {
+  const codingModel = health.model
+  const generalModel = pickLocalCoderModel(health.models, 'FOUNDRY_MASTER')
+  const ready = health.state === 'READY' && Boolean(codingModel)
   return {
     status: ready ? 'LOCAL_CODER_READY' : 'LOCAL_CODER_UNAVAILABLE',
     hostedStatus: hostedKeysPresent() ? 'HOSTED_CODER_READY' : 'HOSTED_CODER_UNAVAILABLE',
     available: ready,
-    baseUrl: probe.baseUrl,
-    models: probe.models,
+    baseUrl: health.endpoint,
+    models: health.models,
     codingModel,
     generalModel,
-    detail: ready
-      ? `Local coder ${codingModel} on ${probe.baseUrl}.`
-      : probe.available
-        ? `Ollama reachable but no usable coding model. Saw: ${probe.models.join(', ') || '(none)'}.`
-        : probe.detail,
+    detail: health.detail,
   }
+}
+
+export async function resolveLocalCoder(opts?: { routingRetry?: boolean }): Promise<LocalCoderResolution> {
+  const attempts = opts?.routingRetry ? 4 : 1
+  const probeTimeoutMs = opts?.routingRetry ? 8_000 : undefined
+  let last = resolutionFromHealth(await resolveLocalModelHealth({ tryStart: true, probeTimeoutMs }))
+  for (let attempt = 1; attempt < attempts && !last.available; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 400 * attempt))
+    last = resolutionFromHealth(await resolveLocalModelHealth({ tryStart: true, probeTimeoutMs }))
+  }
+  return last
 }
 
 export async function requestLocalCoderJson(input: {
@@ -80,7 +87,10 @@ export async function requestLocalCoderJson(input: {
   system: string
   prompt: string
   timeoutMs?: number
-}): Promise<{ ok: true; text: string; model: string } | { ok: false; detail: string; status: LocalCoderStatus }> {
+  format?: OllamaFormat
+  options?: OllamaGenerateOptions
+  keepAlive?: number | string
+}): Promise<{ ok: true; text: string; model: string; metrics?: { totalMs: number | null; promptEvalMs: number | null; evalCount: number | null } } | { ok: false; detail: string; status: LocalCoderStatus }> {
   const resolved = await resolveLocalCoder()
   if (!resolved.available || !resolved.codingModel) {
     return { ok: false, detail: resolved.detail, status: 'LOCAL_CODER_UNAVAILABLE' }
@@ -92,23 +102,38 @@ export async function requestLocalCoderJson(input: {
     system: input.system,
     prompt: input.prompt,
     timeoutMs: input.timeoutMs ?? LOCAL_CODER_TIMEOUT_MS,
-    format: 'json',
-    keepAlive: '5m',
+    format: input.format ?? 'json',
+    keepAlive: input.keepAlive ?? '5m',
+    options: input.options,
   })
   if (!result.ok) return { ok: false, detail: result.detail, status: resolved.status }
-  return { ok: true, text: result.text, model }
+  return {
+    ok: true,
+    text: result.text,
+    model,
+    metrics: {
+      totalMs: result.metrics.totalMs,
+      promptEvalMs: result.metrics.promptEvalMs,
+      evalCount: result.metrics.evalCount,
+    },
+  }
 }
 
 export function extractJsonObject(raw: string): Record<string, unknown> | null {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const candidate = (fenced?.[1] ?? raw).trim()
+  const trimmed = raw.trim()
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const candidate = (fenced?.[1] ?? trimmed).trim()
   const start = candidate.indexOf('{')
   const end = candidate.lastIndexOf('}')
   if (start < 0 || end <= start) return null
-  try {
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as unknown
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null
-  } catch {
-    return null
+  const slice = candidate.slice(start, end + 1)
+  for (const text of [slice, slice.replace(/,\s*([}\]])/g, '$1')]) {
+    try {
+      const parsed = JSON.parse(text) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+    } catch {
+      /* try next */
+    }
   }
+  return null
 }

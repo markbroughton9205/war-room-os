@@ -10,8 +10,15 @@ const DEFAULT_BASE_URL = 'http://localhost:11434'
 const PROBE_TIMEOUT_MS = 2000
 const GENERATE_TIMEOUT_MS = 90_000
 
-function baseUrl(): string {
-  return (process.env.OLLAMA_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '')
+export function resolveOllamaBaseUrl(env: NodeJS.Dict<string> | undefined = process.env): string {
+  const raw = String(env?.OLLAMA_BASE_URL || env?.OLLAMA_HOST || DEFAULT_BASE_URL).trim()
+  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/+$/, '')
+  if (/^[\w.-]+:\d+$/.test(raw)) return `http://${raw}`
+  return DEFAULT_BASE_URL
+}
+
+function baseUrl(env: NodeJS.Dict<string> | undefined = process.env): string {
+  return resolveOllamaBaseUrl(env)
 }
 
 export type OllamaProbeResult = {
@@ -21,11 +28,15 @@ export type OllamaProbeResult = {
   detail: string
 }
 
-export async function probeOllama(): Promise<OllamaProbeResult> {
-  const url = baseUrl()
+export async function probeOllama(
+  env: NodeJS.Dict<string> | undefined = process.env,
+  opts?: { timeoutMs?: number },
+): Promise<OllamaProbeResult> {
+  const url = resolveOllamaBaseUrl(env)
+  const timeoutMs = opts?.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : PROBE_TIMEOUT_MS
   try {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
     const res = await fetch(`${url}/api/tags`, { signal: controller.signal })
     clearTimeout(timeout)
     if (!res.ok) {
@@ -68,13 +79,26 @@ function tokensPerSecond(evalCount: unknown, evalDurationNs: unknown): number | 
   return Math.round((evalCount / (evalDurationNs / 1e9)) * 10) / 10
 }
 
+export type OllamaGenerateOptions = {
+  temperature?: number
+  top_p?: number
+  top_k?: number
+  repeat_penalty?: number
+  num_predict?: number
+  num_ctx?: number
+  seed?: number
+}
+
+export type OllamaFormat = 'json' | Record<string, unknown>
+
 function generateBody(args: {
   model: string
   prompt: string
   system?: string
   stream: boolean
-  format?: 'json'
+  format?: OllamaFormat
   keepAlive?: number | string
+  options?: OllamaGenerateOptions
 }) {
   return {
     model: args.model,
@@ -84,6 +108,7 @@ function generateBody(args: {
     think: false,
     keep_alive: args.keepAlive ?? '5m',
     ...(args.format ? { format: args.format } : {}),
+    ...(args.options ? { options: args.options } : {}),
   }
 }
 
@@ -95,8 +120,9 @@ export async function requestOllamaCompletion(args: {
   system?: string
   timeoutMs?: number
   signal?: AbortSignal
-  format?: 'json'
+  format?: OllamaFormat
   keepAlive?: number | string
+  options?: OllamaGenerateOptions
 }): Promise<OllamaCompletionResult> {
   const streamed = await requestOllamaStreamingCompletion(args)
   return streamed
@@ -129,8 +155,9 @@ export async function requestOllamaStreamingCompletion(args: {
   onDelta?: (delta: string) => void
   signal?: AbortSignal
   timeoutMs?: number
-  format?: 'json'
+  format?: OllamaFormat
   keepAlive?: number | string
+  options?: OllamaGenerateOptions
 }): Promise<OllamaCompletionResult> {
   const url = baseUrl()
   const started = Date.now()
@@ -158,7 +185,7 @@ export async function requestOllamaStreamingCompletion(args: {
 }
 
 async function requestOllamaStreamingCompletionCompat(
-  args: { model: string; prompt: string; system?: string; onDelta?: (delta: string) => void; format?: 'json' },
+  args: { model: string; prompt: string; system?: string; onDelta?: (delta: string) => void; format?: OllamaFormat; options?: OllamaGenerateOptions },
   signal: AbortSignal,
   started: number,
 ): Promise<OllamaCompletionResult> {
@@ -173,6 +200,7 @@ async function requestOllamaStreamingCompletionCompat(
         system: args.system,
         stream: true,
         ...(args.format ? { format: args.format } : {}),
+        ...(args.options ? { options: args.options } : {}),
       }),
     })
     if (!res.ok) {

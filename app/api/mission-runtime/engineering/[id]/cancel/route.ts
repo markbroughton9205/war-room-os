@@ -28,6 +28,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'This execution strategy does not support cancellation.' }, { status: 400 })
     }
     try {
+      // stopCodingMission serializes with the executor's own writes under the mission record lock, so a late executor write can never overwrite the cancellation. The lock is taken there, not here.
       const mission = await strategy.cancel(id, body.reason)
       return NextResponse.json({ mission })
     } catch (error) {

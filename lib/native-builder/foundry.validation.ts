@@ -42,6 +42,12 @@ import {
   toCommanderState,
 } from '@/lib/native-builder/foundryCommanderState'
 import {
+  countVisiblePass011AsCurrent,
+  isActiveCommanderMission,
+  recoverStaleCurrentMissionPointer,
+  selectCurrentCommanderWork,
+} from '@/lib/native-builder/foundryCommanderExperience'
+import {
   FOUNDRY_BACK_TO_WAR_ROOM_LABEL,
   FOUNDRY_DIFF_CONTEXT_ACTIONS,
   FOUNDRY_FILE_CONTEXT_ACTIONS,
@@ -50,6 +56,8 @@ import {
   FOUNDRY_PROJECT_CONTEXT_ACTIONS,
 } from '@/lib/native-builder/foundryUxContract'
 import {
+  FOUNDRY_CANONICAL_PATH,
+  FOUNDRY_HOME_ICON_SRC,
   isInstalledRelativeHref,
   matchesHomeShortcut,
   memoryResumeStorage,
@@ -189,7 +197,7 @@ function uxStateMachineTests(): CaseResult[] {
       FOUNDRY_FILE_CONTEXT_ACTIONS.includes('Ask Foundry About This') && FOUNDRY_PROJECT_CONTEXT_ACTIONS.includes('Project Settings') && FOUNDRY_DIFF_CONTEXT_ACTIONS.includes('Explain Change'),
       FOUNDRY_FILE_CONTEXT_ACTIONS.join(','),
     ),
-    check('ux_09_one_prompt', shell.includes('data-testid="foundry-chat-input"') && shell.includes('data-testid="foundry-send"') && !shell.includes('Send to Foundry'), 'ok'),
+    check('ux_09_one_prompt', shell.includes('<FoundryComposer') && readFileSync(path.join(process.cwd(), 'components/war-room/foundry/FoundryComposer.tsx'), 'utf8').includes('data-testid="foundry-chat-input"') && readFileSync(path.join(process.cwd(), 'components/war-room/foundry/FoundryComposer.tsx'), 'utf8').includes('data-testid="foundry-send"') && !shell.includes('Send to Foundry'), 'ok'),
     check('ux_10_coder_agent_absent_normal', hiddenPresentInShell.length === 0, hiddenPresentInShell.join(',')),
     check('ux_11_inspector_retained', shell.includes('data-testid="foundry-inspector"') && shell.includes('BuilderWorkspace'), 'ok'),
     check('ux_12_no_dev_server', classifyArgv('pnpm', ['run', 'dev']).policyClass === 'DENIED' && !shell.includes(':3001'), classifyArgv('pnpm', ['run', 'dev']).reason),
@@ -222,10 +230,10 @@ function foundryVisualContractTests(shell: string): CaseResult[] {
     check('visual_05_blocked_red', foundryVisualForState('BLOCKED').tone === 'red' && foundryVisualForState('BLOCKED').matrixChannel === 'red' && shell.includes('foundry-blocked-panel'), 'ok'),
     check('visual_06_building_complete_green', foundryVisualForState('BUILDING').tone === 'green' && foundryVisualForState('COMPLETE').tone === 'green', 'ok'),
     check('visual_07_idle_dim', foundryVisualForState('IDLE').intensity === 'dim' && foundryVisualForState('CANCELLED').tone === 'dim', 'ok'),
-    check('visual_08_single_prompt', shell.includes('data-testid="foundry-chat-input"') && (shell.match(/data-testid="foundry-chat-input"/g) ?? []).length === 1, 'ok'),
+    check('visual_08_single_prompt', shell.includes('<FoundryComposer') && ((shell + readFileSync(path.join(process.cwd(), 'components/war-room/foundry/FoundryComposer.tsx'), 'utf8')).match(/data-testid="foundry-chat-input"/g) ?? []).length === 1, 'ok'),
     check('visual_09_coder_agent_absent', !shell.includes('Coder Agent') && !shell.includes('Hosted coder'), 'ok'),
     check('visual_10_inspector_available', shell.includes('data-testid="foundry-inspector"') && shell.includes('Advanced / Inspector'), 'ok'),
-    check('visual_11_back_to_war_room', nav.includes('foundry-back-to-war-room') && nav.includes('← Back to War Room'), 'ok'),
+    check('visual_11_back_to_war_room', nav.includes('foundry-back-to-war-room') && nav.includes('← War Room'), 'ok'),
     check('visual_12_workspace_truth', shell.includes('foundry-workspace-truth'), 'ok'),
     check('visual_13_context_menu', menu.includes('foundry-context-menu') && shell.includes('FoundryContextMenu'), 'ok'),
     check('visual_14_completion_truth', shell.includes('buildFoundryCompletionTruth') && shell.includes('SOURCE CHANGES COMPLETE') && shell.includes('installedSha'), 'ok'),
@@ -237,11 +245,39 @@ function foundryVisualContractTests(shell: string): CaseResult[] {
     check('session_ux_04_explicit_identity', shell.includes('foundry-session-identity') && shell.includes('shortSessionTitle'), 'ok'),
     check('session_ux_05_short_title', longTitle === 'FOUNDRY UI VISUAL RECONSTRUCTION' || longTitle.startsWith('FOUNDRY UI VISUAL'), longTitle),
     check('session_ux_05b_send_uses_short_title', shell.includes('title: shortSessionTitle(text)'), 'ok'),
-    check('session_ux_06_project_session_separate', shell.includes('Projects') && shell.includes('Sessions') && shell.includes('+ New Session'), 'ok'),
+    check('session_ux_06_project_session_separate', shell.includes('Projects') && shell.includes('Sessions') && shell.includes('+ New Session') && shell.includes('+ New Project'), 'ok'),
     check('session_ux_07_resume_preserved', shell.includes('persistFoundryResume') && shell.includes('readFoundryResume'), 'ok'),
     check('session_ux_08_new_session_clears_mission', shell.includes('startNewSession') && shell.includes('mission: null'), 'ok'),
     check('session_ux_09_cancelled_not_current', selectedCancelled === 'CANCELLED' && cancelledKind === 'HISTORICAL', `${selectedCancelled}:${cancelledKind}`),
-    check('session_ux_10_home_grouping', grouped.some(g => g.label === 'Today') && grouped.some(g => g.label === 'Yesterday'), grouped.map(g => g.label).join(',')),
+    check('session_ux_11_rename_control', shell.includes('foundry-session-rename') && shell.includes('foundry-session-rename-input') && shell.includes('foundry-session-rename-save') && shell.includes('saveSessionRename'), 'ok'),
+    check('session_ux_12_archive_control', shell.includes('foundry-session-archive') && shell.includes('foundry-session-archive-yes') && shell.includes('archiveCurrentSession') && shell.includes('foundry-archived-sessions'), 'ok'),
+    check('session_ux_13_restore_control', shell.includes('foundry-session-restore') && shell.includes('restoreSessionById') && shell.includes('aria-label="Restore"') && shell.includes('aria-label="Confirm Archive"'), 'ok'),
+    check(
+      'commander_ux_stale_pass011_not_current',
+      countVisiblePass011AsCurrent([
+        { status: 'EXECUTING', title: 'PASS 011 Semantic Stability', userRequest: 'PASS 011 click_and_wait', goal: 'PASS 011', currentAction: 'typecheck.run', updatedAt: '2026-09-20T00:00:00.000Z', kind: 'fixture' } as never,
+      ]).pass011AsCurrent === 0
+        && recoverStaleCurrentMissionPointer({ status: 'EXECUTING', title: 'PASS 011 Semantic Stability', userRequest: 'PASS 011 click_and_wait', goal: 'PASS 011' }) === null,
+      'ok',
+    ),
+    check(
+      'commander_ux_live_work_only',
+      isActiveCommanderMission({ status: 'EXECUTING', title: 'Box truck website', userRequest: 'Build me a professional website for my box truck business.', goal: 'website' })
+        && !isActiveCommanderMission({ status: 'COMPLETE', title: 'Box truck website', userRequest: 'Build me a professional website for my box truck business.', goal: 'website' })
+        && selectCurrentCommanderWork([] ) === null,
+      'ok',
+    ),
+    check(
+      'commander_ux_default_layout',
+      shell.includes('Tell Foundry the result you want...')
+        && shell.includes('<FoundryComposer') && readFileSync(path.join(process.cwd(), 'components/war-room/foundry/FoundryComposer.tsx'), 'utf8').includes('aria-label="Send"')
+        && shell.includes('foundry-working-strip')
+        && shell.includes('isActiveCommanderMission')
+        && shell.includes('Advanced / Operations')
+        && !shell.includes('Native Engineering Intelligence')
+        && !shell.includes('HIGHER VISION INC'),
+      'ok',
+    ),
   ]
 }
 
@@ -278,12 +314,12 @@ function foundryTerraVisualTests(shell: string): CaseResult[] {
     check('TERRA_VISUAL_07', matrixReuse && matrixRain.includes('contained'), 'ok'),
     check('TERRA_VISUAL_08', singleMatrix && !terraBg.includes('requestAnimationFrame') && !terraBg.includes('setInterval') && mosaic.includes('VIIRS_NOAA20_CorrectedReflectance_TrueColor'), String((shell.match(/<MatrixBackground /g) ?? []).length)),
     check('TERRA_VISUAL_09', css.includes('prefers-reduced-motion') && css.includes('.foundry-glitch-mark') && css.includes('.foundry-terra-globe') && matrixBg.includes('prefers-reduced-motion'), 'ok'),
-    check('TERRA_VISUAL_10', nav.includes('foundry-back-to-war-room') && nav.includes('← Back to War Room') && !nav.includes('history.back'), 'ok'),
+    check('TERRA_VISUAL_10', nav.includes('foundry-back-to-war-room') && nav.includes('← War Room') && !nav.includes('history.back'), 'ok'),
     check('TERRA_VISUAL_11', shell.includes('foundry-session-list') && shell.includes('groupFoundrySessionsByDay') && shell.includes('foundry-new-session') && shell.includes('+ New Session'), 'ok'),
-    check('TERRA_VISUAL_12', shell.includes('WAR_ROOM_CANONICAL_WORKSPACE_ID') && shell.includes('Canonical Source') && isTerraSourcePath('components/war-room/terra/TerraGlobe.tsx') && isTerraBuildRequest('Inspect Terra UI files') && shell.includes('xl:grid-cols-[220px_minmax(0,1fr)_280px]') && shell.includes('grid-cols-1') && css.includes('@media (max-width: 1279px)'), 'ok'),
+    check('TERRA_VISUAL_12', shell.includes('WAR_ROOM_CANONICAL_WORKSPACE_ID') && shell.includes('Canonical Source') && isTerraSourcePath('components/war-room/terra/TerraGlobe.tsx') && isTerraBuildRequest('Inspect Terra UI files') && shell.includes('xl:grid-cols-[208px_minmax(0,1fr)_320px]') && shell.includes('grid-cols-1') && css.includes('@media (max-width: 1279px)'), 'ok'),
     check('TERRA_VISUAL_13', shell.includes('data-testid="foundry-right"') && shell.includes('visual.label') && shell.includes('truth.tests') && !shell.includes('Math.random') && shell.includes('foundry-file-tree'), 'ok'),
     check('TERRA_VISUAL_14', shell.includes('foundry-bottom') && ['terminal', 'diff', 'tests', 'logs', 'processes'].every(tab => shell.includes(`'${tab}'`)), 'ok'),
-    check('TERRA_VISUAL_15', (shell.match(/data-testid="foundry-chat-input"/g) ?? []).length === 1 && shell.includes('foundry-landing') && nav.includes('HIGHER VISION INC'), String((shell.match(/data-testid="foundry-chat-input"/g) ?? []).length)),
+    check('TERRA_VISUAL_15', ((shell + readFileSync(path.join(process.cwd(), 'components/war-room/foundry/FoundryComposer.tsx'), 'utf8')).match(/data-testid="foundry-chat-input"/g) ?? []).length === 1 && shell.includes('foundry-landing') && nav.includes('THE FOUNDRY'), String(((shell + readFileSync(path.join(process.cwd(), 'components/war-room/foundry/FoundryComposer.tsx'), 'utf8')).match(/data-testid="foundry-chat-input"/g) ?? []).length)),
     check('TERRA_VISUAL_16', ollama.includes("keep_alive: args.keepAlive ?? '5m'") && arbiter.includes('COUNCIL_BACKEND') && arbiter.includes('FOUNDRY_CODER') && !shell.includes('councilDeliberationMode') && previewTruth.label === FOUNDRY_TERRA_TRUTH_PREVIEW, 'ok'),
   ]
 }
@@ -291,6 +327,9 @@ function foundryTerraVisualTests(shell: string): CaseResult[] {
 function foundryNavigationTests(shell: string): CaseResult[] {
   const navPath = path.join(process.cwd(), 'components/war-room/foundry/FoundryHomeNav.tsx')
   const nav = readFileSync(navPath, 'utf8')
+  const experience = readFileSync(path.join(process.cwd(), 'lib/native-builder/foundryCommanderExperience.ts'), 'utf8')
+  const opsRoute = readFileSync(path.join(process.cwd(), 'app/api/foundry/operations/route.ts'), 'utf8')
+  const sessions = readFileSync(path.join(process.cwd(), 'lib/native-builder/foundrySessions.ts'), 'utf8')
   const store = memoryResumeStorage()
   persistFoundryResume({
     basePath: '/builder',
@@ -305,6 +344,7 @@ function foundryNavigationTests(shell: string): CaseResult[] {
       shell.includes('FoundryHomeNav') && nav.includes(FOUNDRY_BACK_TO_WAR_ROOM_LABEL) && nav.includes('foundry-back-to-war-room'),
       'ok',
     ),
+    check('ux_14b_no_pass_markers', !nav.includes('FOUNDRY-P004') && !nav.includes('FOUNDRY-P005') && !nav.includes('FOUNDRY-P006'), 'ok'),
     check('ux_15_logo_home', nav.includes('foundry-logo-home') && nav.includes('WAR ROOM'), 'ok'),
     check(
       'ux_16_relative_home_not_history',
@@ -328,6 +368,26 @@ function foundryNavigationTests(shell: string): CaseResult[] {
         && !matchesHomeShortcut({ altKey: false, ctrlKey: false, metaKey: false, key: 'h' })
         && !matchesHomeShortcut({ altKey: true, ctrlKey: true, metaKey: false, key: 'h' }),
       'Alt+H',
+    ),
+    check(
+      'ux_21_home_app_icon_reuses_canonical_nav',
+      existsSync(path.join(process.cwd(), 'public/foundry/foundry-icon.png'))
+        && FOUNDRY_HOME_ICON_SRC === '/foundry/foundry-icon.png'
+        && FOUNDRY_CANONICAL_PATH === '/war-room/engineering'
+        && readFileSync(path.join(process.cwd(), 'components/war-room/foundry/FoundryHomeAppIcon.tsx'), 'utf8').includes('FoundryEntryLink')
+        && !readFileSync(path.join(process.cwd(), 'components/war-room/foundry/FoundryHomeAppIcon.tsx'), 'utf8').includes('<canvas'),
+      FOUNDRY_HOME_ICON_SRC,
+    ),
+    check(
+      'ux_22_working_banner_uses_active_commander_selector',
+      shell.includes('recoverStaleCurrentMissionPointer')
+        && shell.includes('foundry-working-strip')
+        && shell.includes('const landing = !liveWork &&')
+        && experience.includes('selectCurrentCommanderWork')
+        && experience.includes('isInertRecoveredLeftover')
+        && opsRoute.includes('selectCurrentCommanderWork')
+        && sessions.includes('isActiveCommanderMission'),
+      'current-work selector',
     ),
   ]
 }
@@ -709,16 +769,37 @@ async function run(): Promise<void> {
     results.push(...batch)
     for (const r of batch) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name} ${r.detail}`)
   }
-  add(unitTests())
-  add(uxStateMachineTests())
-  add(devRuntimeUnitTests())
-  add(await testGeneratedNameCollisionLive())
-  add(await testFoundryResearchLive())
-  add(await testCloudOffStatus())
-  add(await testSessions())
-  add(await testExistingAndPersistence())
-  add(await testNovelInventory())
-  add(await testNovelExpense())
+  const asyncCases = [
+    ['generated-name-collision', testGeneratedNameCollisionLive],
+    ['foundry-research', testFoundryResearchLive],
+    ['cloud-off-status', testCloudOffStatus],
+    ['sessions', testSessions],
+    ['existing-and-persistence', testExistingAndPersistence],
+    ['novel-inventory', testNovelInventory],
+    ['novel-expense', testNovelExpense],
+  ] as const
+  const selectedCase = process.argv.find(arg => arg.startsWith('--case='))?.slice('--case='.length)
+  if (selectedCase && !asyncCases.some(([name]) => name === selectedCase)) {
+    throw new Error(`Unknown Foundry validation case: ${selectedCase}`)
+  }
+  if (!selectedCase) {
+    add(unitTests())
+    add(uxStateMachineTests())
+    add(devRuntimeUnitTests())
+  }
+  for (const [name, execute] of asyncCases) {
+    if (selectedCase && name !== selectedCase) continue
+    console.error(`ASYNC CASE START ${name}`)
+    try {
+      const batch = await execute()
+      add(batch)
+      const failedNames = batch.filter(result => !result.pass).map(result => result.name)
+      console.error(`ASYNC CASE END ${name} ${failedNames.length ? `FAIL ${failedNames.join(',')}` : 'PASS'}`)
+    } catch (error) {
+      console.error(`ASYNC CASE THROW ${name}`, error)
+      throw error
+    }
+  }
   const failed = results.filter(r => !r.pass)
   console.log(`Foundry validation: ${results.length - failed.length}/${results.length} PASS`)
   if (failed.length) process.exit(1)

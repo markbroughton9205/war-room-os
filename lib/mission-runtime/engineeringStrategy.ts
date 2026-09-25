@@ -243,6 +243,7 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
           progressEvents: [{ at: new Date().toISOString(), step: 'PLANNING', detail: 'Planning project.' }],
           visualVerification: 'VISUAL_VERIFICATION_NOT_AVAILABLE',
           sessionId: session.id,
+          specialistIntelligence: request.specialistIntelligence,
           foundryMode: 'FOUNDRY_LOCAL_MODE',
           commanderState: 'PLANNING',
           currentAction: 'Planning project',

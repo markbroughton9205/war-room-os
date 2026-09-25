@@ -5,6 +5,7 @@ const result = spawnSync(process.execPath, [
   './scripts/ts-extension-loader.mjs',
   '--experimental-transform-types',
   'lib/native-builder/foundry.validation.ts',
+  ...process.argv.slice(2),
 ], {
   cwd: process.cwd(),
   stdio: 'inherit',

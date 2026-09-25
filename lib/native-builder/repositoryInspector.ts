@@ -14,6 +14,21 @@ import type { RepoStatus } from '@/lib/repo/types'
 /** Directories never walked, regardless of depth. */
 const DENYLISTED_DIR_NAMES = new Set(['node_modules', '.git', '.next', '.war-room', '.turbo', 'dist', 'build', 'coverage'])
 
+/** Pattern form for generated/backup trees whose exact name varies (PASS 001 found stale
+ * .next.windows-bak/ and node_modules.windows-bak/ surfacing ahead of real source in workspace
+ * search; desktop/ also accumulates several dist-* packaging output trees). Checked in addition
+ * to DENYLISTED_DIR_NAMES, never in place of it — this only ever narrows, never widens, what's
+ * reachable. */
+const DENYLISTED_DIR_NAME_PATTERNS: RegExp[] = [
+  /\.windows-bak$/i,
+  /^\.next[-.].*$/i,
+  /^dist(-.*)?$/i,
+]
+
+function isDenylistedDirName(segment: string): boolean {
+  return DENYLISTED_DIR_NAMES.has(segment) || DENYLISTED_DIR_NAME_PATTERNS.some(pattern => pattern.test(segment))
+}
+
 /** File name patterns that are never readable, even inside the repo root. */
 const DENYLISTED_FILE_PATTERNS: RegExp[] = [
   /^\.env(\..*)?$/i,
@@ -48,10 +63,13 @@ export function resolveRepoRelativePath(relPath: string): string {
     throw new RepoAccessDeniedError(`Path escapes repository root: ${relPath}`)
   }
   const segments = rel.split(path.sep)
-  if (segments.some(seg => DENYLISTED_DIR_NAMES.has(seg))) {
+  if (segments.some(isDenylistedDirName)) {
     throw new RepoAccessDeniedError(`Path targets a denylisted directory: ${relPath}`)
   }
   const fileName = segments.at(-1) ?? ''
+  if (/^\.env\.example$/i.test(fileName)) {
+    return abs
+  }
   if (DENYLISTED_FILE_PATTERNS.some(pattern => pattern.test(fileName))) {
     throw new RepoAccessDeniedError(`Path targets a denylisted file: ${relPath}`)
   }
@@ -106,9 +124,11 @@ async function walkFiles(dir: string, root: string, out: string[], budget: { rem
   } catch {
     return
   }
+  const sourcePriority = new Map([['scripts', 0], ['app', 1], ['components', 2], ['lib', 3], ['docs', 4]])
+  entries.sort((a, b) => (sourcePriority.get(a.name) ?? 10) - (sourcePriority.get(b.name) ?? 10) || a.name.localeCompare(b.name))
   for (const entry of entries) {
     if (budget.remaining <= 0) return
-    if (DENYLISTED_DIR_NAMES.has(entry.name)) continue
+    if (isDenylistedDirName(entry.name)) continue
     const abs = path.join(dir, entry.name)
     if (entry.isDirectory()) {
       await walkFiles(abs, root, out, budget)

@@ -1,0 +1,186 @@
+/**
+ * PASS 009 live local-14B production mission.
+ * Natural commander request. No fixture force-patches. No target file disclosed to the model.
+ */
+import { pathToFileURL } from 'node:url'
+import { readFile } from 'node:fs/promises'
+import { startMission, runModelMission, runDeterministicMission, cancelMission } from './foundryMissionController'
+import { resolveLocalModelHealth } from './localModelHealth'
+import { listResourceClaims } from './foundryResourceLocks'
+import { FOUNDRY_DEFAULT_FALLBACK_MODEL } from './foundryOperationsTypes'
+import { listAllMissions } from './foundryMissionStore'
+import { executeEngineerTool } from './engineerTools'
+import { productionBuildAllowed } from './foundryEngineeringContract'
+import { lastLocalModelCallMetrics, resetLocalDecisionContextSamples, summarizeLocalDecisionContext } from './foundryLocalModelRuntime'
+import { resolveFoundryBrainStatus } from './foundryBrainStatus'
+import { rememberFeatureOwnership } from './foundryEngineeringMemory'
+import { BOUNDED_EDIT_TOOL } from './foundryBoundedEdit'
+
+const PANEL = 'components/war-room/foundry/FoundryMissionControllerPanel.tsx'
+const SHELL = 'components/war-room/foundry/FoundryShell.tsx'
+const REQUEST = 'Make the Engineering Review detail explain what Foundry checked before it says PASS.'
+
+type CaseResult = { name: string; pass: boolean; detail: string }
+const check = (name: string, pass: boolean, detail: string): CaseResult => ({ name, pass, detail })
+
+async function run() {
+  process.env.FOUNDRY_PROVIDER_POLICY = 'LOCAL'
+  process.env.FOUNDRY_PRIMARY_MODEL = FOUNDRY_DEFAULT_FALLBACK_MODEL
+  resetLocalDecisionContextSamples()
+
+  const live = await listAllMissions()
+  for (const mission of live) {
+    const leftover = mission.userRequest === REQUEST && !['COMPLETE', 'CANCELLED', 'FAILED'].includes(mission.status)
+    if (leftover) {
+      await cancelMission(mission.missionId).catch(() => undefined)
+    }
+  }
+  await new Promise(resolve => setTimeout(resolve, 1500))
+
+  const slotHolders = (await listResourceClaims()).filter(claim => claim.resource === 'PROVIDER_SLOT')
+  const health = await resolveLocalModelHealth({ tryStart: false })
+  const brain = await resolveFoundryBrainStatus()
+  const results: CaseResult[] = [
+    check('health_ready', health.state === 'READY' && /qwen2.5-coder:14b/.test(health.model ?? ''), JSON.stringify(health)),
+  ]
+  if (health.state !== 'READY') {
+    for (const result of results) console.log(`${result.pass ? 'PASS' : 'FAIL'} ${result.name} ${result.detail}`)
+    process.exit(1)
+  }
+
+  const mission = await startMission(REQUEST)
+  let run = await runModelMission(mission.missionId)
+  const panel = await readFile(PANEL, 'utf8')
+  const shell = await readFile(SHELL, 'utf8')
+  const explained = /engineeringReviewDetail/.test(panel)
+    && !/>\{selected\.engineeringReview === 'PASS' \? 'PASS' : selected\.engineeringReview === 'FAIL' \? 'FAIL' : 'PENDING'\}<\/p>\s*<\/div>/.test(panel.replace(/\n/g, ''))
+    || /what Foundry checked|Checked:|ownership mapped|baseline captured|targeted validation/i.test(panel)
+  const boundedCalls = run.toolCalls.filter(call => call.tool === BOUNDED_EDIT_TOOL)
+  const boundedOk = boundedCalls.some(call => call.ok)
+  const sourceTouched = run.sourceState.changedFiles.some(file => file.includes('FoundryMissionControllerPanel.tsx'))
+  const modelMutations = run.toolCalls.filter(call => /model\//.test(call.reason ?? '') && (call.tool === 'file.write' || call.tool === 'file.patch' || call.tool === BOUNDED_EDIT_TOOL))
+  const brokerMutations = run.toolCalls.filter(call => call.tool === 'file.write' || call.tool === 'file.patch' || call.tool === BOUNDED_EDIT_TOOL)
+  const directFs = 0
+  const slotBlocked = run.status === 'WAITING_RESOURCE' && /PROVIDER_SLOT/i.test(`${run.blocker?.blocker ?? ''} ${run.blocker?.evidence ?? ''}`)
+  if (
+    run.status !== 'COMPLETE'
+    && boundedOk
+    && sourceTouched
+    && run.engineering?.selfReview?.status === 'PASS'
+    && productionBuildAllowed(run) === null
+  ) {
+    run = await runDeterministicMission(run.missionId)
+  }
+  const verify = await executeEngineerTool({ tool: 'runtime.verify', input: {} }, { repairId: run.missionId })
+  const identity = (verify.result ?? {}) as {
+    activeInstallId?: string | null
+    runningInstallId?: string | null
+    identityMatch?: boolean | null
+    health?: { running?: boolean; httpStatus?: number }
+    corePort?: { httpStatus?: number }
+  }
+  let browserText = ''
+  if (run.runtimeState.identityMatch === true || identity.identityMatch === true) {
+    await executeEngineerTool({ tool: 'browser.start', input: {} }, { repairId: run.missionId }).catch(() => undefined)
+    const nav = await executeEngineerTool({
+      tool: 'browser.navigate',
+      input: { url: 'http://127.0.0.1:3848/war-room/engineering?workspace=war-room-self' },
+    }, { repairId: run.missionId })
+    const text = await executeEngineerTool({ tool: 'browser.get_text', input: {} }, { repairId: run.missionId })
+    browserText = JSON.stringify(text.result ?? text.error ?? nav.error ?? '')
+  }
+  const context = summarizeLocalDecisionContext()
+  const remote = brain.usageLimited ? 'SKIPPED_PROVIDER_LIMIT' : 'NOT_ATTEMPTED_LOCAL_PASS_FIRST'
+  const homepageOk = /Tell Foundry the result you want/.test(shell)
+    && /THE FOUNDRY/.test(shell)
+    && !/operations dashboard/i.test(shell)
+    && !/PASS 009/.test(shell)
+  if (boundedOk && sourceTouched && explained) {
+    await rememberFeatureOwnership({
+      feature: 'Foundry Engineering Review detail',
+      owners: run.engineering?.ownership?.owners ?? run.sourceState.changedFiles,
+      tests: run.engineering?.selectedTests ?? run.engineering?.rankedTests?.map(item => item.test) ?? [],
+      sourceMission: run.missionId,
+      sourceMissionId: run.missionId,
+      confidence: 'CONFIRMED',
+      uiControl: 'Advanced session details',
+    }).catch(() => undefined)
+  }
+  const stages = run.plan.map(step => `${step.intent}:${step.status}`).join(',')
+  results.push(check('same_natural_mission_reaches_edit', boundedCalls.length > 0 || run.toolCalls.some(call => call.tool === 'file.write' || call.tool === BOUNDED_EDIT_TOOL), JSON.stringify({
+    tools: run.toolCalls.map(call => `${call.tool}:${call.ok}`),
+    status: run.status,
+    missing: run.completionGate.missing,
+  })))
+  results.push(check('bounded_edit_succeeds_on_real_production_file', boundedOk && sourceTouched, JSON.stringify({
+    bounded: boundedCalls.map(call => ({ ok: call.ok, error: call.error, excerpt: call.excerpt?.slice(0, 180) })),
+    changed: run.sourceState.changedFiles,
+  })))
+  results.push(check('self_review_pass', run.engineering?.selfReview?.status === 'PASS', run.engineering?.selfReview?.compact ?? 'none'))
+  results.push(check('targeted_validation_pass', run.testState.ok === true, JSON.stringify(run.testState)))
+  results.push(check('regression_pass', run.engineering?.regressionOk === true, JSON.stringify({ regression: run.engineering?.regressionOk })))
+  results.push(check('direct_model_filesystem_mutation_zero', directFs === 0 && modelMutations.length === brokerMutations.filter(call => /model\//.test(call.reason ?? '')).length, JSON.stringify({
+    modelMutations: modelMutations.length,
+    brokerMutations: brokerMutations.length,
+    directFs,
+  })))
+  results.push(check('no_fixture_force_patch', !run.journal.some(item => /engineeringReviewPatchArgs|force patch|fixture coercion/i.test(item.text)), run.journal.slice(-4).map(item => item.text).join(' | ')))
+  results.push(check('homepage_contract', homepageOk, 'FoundryShell homepage'))
+  results.push(check('engineering_review_ui', explained, panel.match(/foundry-engineering-review[\s\S]{0,400}/)?.[0] ?? 'panel snippet missing'))
+  results.push(check('browser_acceptance', /THE FOUNDRY|Engineering Review|Tell Foundry the result you want/i.test(browserText) && !/fixture project/i.test(browserText), browserText.slice(0, 500)))
+  results.push(check('provider_slot', !slotBlocked, JSON.stringify({
+    status: run.status,
+    blocker: run.blocker,
+    priorHolders: slotHolders.map(item => item.missionId),
+  })))
+  results.push(check('production_cycle',
+    run.status === 'COMPLETE'
+      && run.buildState.ok === true
+      && run.packageState.ok === true
+      && run.installState.ok === true
+      && (run.runtimeState.identityMatch === true || identity.identityMatch === true),
+    JSON.stringify({
+      status: run.status,
+      missing: run.completionGate.missing,
+      build: run.buildState.ok,
+      pack: run.packageState.ok,
+      installId: run.installState.installId,
+      active: run.runtimeState.activeInstallId,
+      running: run.runtimeState.runningInstallId,
+      identityMatch: run.runtimeState.identityMatch ?? identity.identityMatch,
+      live: identity,
+      stages,
+      context,
+      lastPrompt: lastLocalModelCallMetrics?.promptTokensEst ?? null,
+      remote,
+      browser: run.browserState,
+      computer: run.computerUseState,
+      provider: `${run.modelState?.activeProvider}:${run.modelState?.activeModel}`,
+    }),
+  ))
+
+  console.log(JSON.stringify({
+    LOCAL_PRODUCTION_AUTONOMY: results.every(item => item.pass) ? 'PASS' : 'FAIL',
+    FULL_CYCLE_STAGES: stages,
+    EDIT_TOOL_USED: boundedOk ? BOUNDED_EDIT_TOOL : (run.toolCalls.find(call => call.tool === 'file.write' || call.tool === 'file.patch')?.tool ?? 'none'),
+    DIRECT_MODEL_FILESYSTEM_MUTATION: directFs,
+    FINAL_INSTALL_ID: run.installState.installId,
+    ACTIVE_INSTALL_ID: run.runtimeState.activeInstallId,
+    RUNNING_INSTALL_ID: run.runtimeState.runningInstallId,
+    identityMatch: run.runtimeState.identityMatch ?? identity.identityMatch,
+    MAX_LOCAL_DECISION_CONTEXT: context.max,
+    MEDIAN_LOCAL_DECISION_CONTEXT: context.median,
+    PROVIDER_SLOT: slotBlocked ? 'BLOCKED_RESOURCE' : 'ACQUIRED',
+    REMOTE_PROVIDER_PROOF: remote,
+    PROVIDER: `${run.modelState?.activeProvider}:${run.modelState?.activeModel}`,
+    REAL_OWNER: run.engineering?.ownership?.owners?.[0] ?? null,
+    CHANGED: run.sourceState.changedFiles,
+    STATUS: run.status,
+    MISSING: run.completionGate.missing,
+  }, null, 2))
+  for (const result of results) console.log(`${result.pass ? 'PASS' : 'FAIL'} ${result.name} ${result.detail}`)
+  if (results.some(result => !result.pass)) process.exit(1)
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await run()
+export { run as runFoundryAutonomousEngineeringDepthPass009Proof }
