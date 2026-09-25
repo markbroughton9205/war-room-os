@@ -63,7 +63,13 @@ function loopbackPortInUse(port) {
     `s.listen({host:${JSON.stringify(LOOPBACK)},port:${n},exclusive:true},()=>{s.close(()=>{process.stdout.write("0");});});`,
   ].join('')
   try {
-    const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 1200 })
+    const r = spawnSync(process.execPath, ['-e', script], {
+      encoding: 'utf8',
+      timeout: 1200,
+      // Run the Electron binary strictly as Node. Without this the packaged app would start a
+      // full desktop instance for every probe (which re-runs main.cjs and probes again: recursion).
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    })
     if (String(r.stdout).trim() === '0') return false
   } catch {
     /* fail closed */
@@ -104,7 +110,13 @@ function bindEphemeralLoopback() {
     '});',
   ].join('')
   try {
-    const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 1500 })
+    const r = spawnSync(process.execPath, ['-e', script], {
+      encoding: 'utf8',
+      timeout: 1500,
+      // Run the Electron binary strictly as Node. Without this the packaged app would start a
+      // full desktop instance for every probe (which re-runs main.cjs and probes again: recursion).
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    })
     const port = Number(String(r.stdout).trim())
     if (Number.isInteger(port) && port > 0) return port
   } catch {
