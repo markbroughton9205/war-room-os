@@ -35,6 +35,7 @@
  *     the Commander's own already-running session.
  */
 import path from 'node:path'
+import { installedAppTreeDir } from './installLayout'
 import { existsSync, readFileSync, readlinkSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
@@ -204,7 +205,7 @@ export async function runtimeVerify(): Promise<RuntimeVerifyResult> {
     const runningInstallId = relToOpt.split(path.sep)[0]
     const installDir = path.join(optRoot, runningInstallId)
     const identity = await readInstalledIdentity(installDir)
-    const executablePath = path.join(installDir, 'opt', 'War Room OS', 'war-room-os')
+    const executablePath = path.join(installedAppTreeDir(installDir), 'war-room-os')
     return {
       ownership: 'INSTALLED_RUNTIME',
       health,
@@ -432,7 +433,7 @@ function ownerFromInstalledExecutable(pid: number, port: number): VerifiedPortOw
   if (!stamp.executable || path.resolve(exe) !== path.resolve(stamp.executable)) {
     return { reason: `exe ${exe} is not the stamped executable ${stamp.executable}` }
   }
-  const runtimeRoot = path.join(installDir, 'opt', 'War Room OS', 'resources', 'runtime')
+  const runtimeRoot = path.join(installedAppTreeDir(installDir), 'resources', 'runtime')
   return { port, pid, runtimeRoot: existsSync(runtimeRoot) ? runtimeRoot : installDir, installId }
 }
 

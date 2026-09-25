@@ -12,6 +12,7 @@
  */
 import { chmod, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { APP_TREE_DIRNAME, installedAppTreeDir } from './installLayout'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import os from 'node:os'
@@ -150,7 +151,7 @@ export function normalizeInstallStamp(raw: unknown, installId: string, installDi
   const executable =
     (typeof s.executable === 'string' && s.executable) ||
     (typeof s.binary === 'string' && s.binary) ||
-    path.join(installDir, 'opt', 'War Room OS', 'war-room-os')
+    path.join(installedAppTreeDir(installDir), 'war-room-os')
   const gitSha = String(s.gitSha ?? s.source_commit ?? '')
   const gitShort = String(s.gitShort ?? s.git_short ?? gitSha.slice(0, 7))
   return {
@@ -244,8 +245,8 @@ export type InstallerInstallProductionInput = {
   appimage: ProductionInstallArtifact
   deb: ProductionInstallArtifact
   /** electron-builder's unpacked app tree (package.run's linuxUnpackedDir) — copied into
-   * `<installDir>/opt/War Room OS/`, matching the layout every existing real install already
-   * uses. Without this, an install is a package-file archive only, not something a launcher can
+   * `<installDir>/opt/War-Room-OS/` (space-free: Chromium cannot exec a SUID sandbox helper
+   * whose path contains spaces; older installs keep `opt/War Room OS/`). Without this, an install is a package-file archive only, not something a launcher can
    * actually run. */
   linuxUnpackedDir: string
   feature: string
@@ -330,9 +331,9 @@ export async function installerInstallProduction(input: InstallerInstallProducti
   const debDest = path.join(installDir, path.basename(input.deb.path))
   await cp(input.appimage.path, appimageDest)
   await cp(input.deb.path, debDest)
-  // The runnable tree — same layout as every existing real install (`opt/War Room OS/...`), which
-  // is what installer.activate's launcher shim ultimately points at.
-  const appTreeDest = path.join(installDir, 'opt', 'War Room OS')
+  // The runnable tree — `opt/War-Room-OS/...` (space-free so the adjacent SUID chrome-sandbox helper
+  // is executable by Chromium), which is what installer.activate's launcher shim points at.
+  const appTreeDest = path.join(installDir, 'opt', APP_TREE_DIRNAME)
   await mkdir(path.dirname(appTreeDest), { recursive: true })
   // electron-builder/Next standalone output legitimately contains relative package symlinks.
   // Preserve that packaged topology; dereferencing makes a dangling optional dependency abort
@@ -581,7 +582,7 @@ export async function installerActivate(input: InstallerActivateInput): Promise<
   if (stamp.install_id !== input.installId) {
     return { ok: false, error: `INSTALL_STAMP.json install_id "${stamp.install_id}" does not match requested "${input.installId}" — refusing a mismatched identity.`, stage: 'validate' }
   }
-  const executablePath = stamp.executable ?? path.join(installDir, 'opt', 'War Room OS', 'war-room-os')
+  const executablePath = stamp.executable ?? path.join(installedAppTreeDir(installDir), 'war-room-os')
   if (!existsSync(executablePath)) {
     return { ok: false, error: `Expected executable does not exist: ${executablePath} — this install looks partial, refusing to activate it.`, stage: 'validate' }
   }

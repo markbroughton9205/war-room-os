@@ -17,6 +17,7 @@ function sourceHelper(repoRoot) {
 function packagedHelpers(appDir) {
   return [
     path.join(appDir, 'chrome-sandbox'),
+    path.join(appDir, 'opt', 'War-Room-OS', 'chrome-sandbox'),
     path.join(appDir, 'opt', 'War Room OS', 'chrome-sandbox'),
   ]
 }

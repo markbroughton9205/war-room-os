@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
+import { installedAppTreeDir } from './installLayout'
 import { appendJournal, saveMission, transitionMission } from './foundryMissionStore'
 import { realInstallOptRoot, type InstallStamp } from './installerTool'
 import { logWarRoomRepoAudit } from '@/lib/war-room/repoAudit'
@@ -163,7 +164,7 @@ export function verifyInstallArtifactIntegrity(
     stamp = null
   }
   const stampValid = Boolean(stamp?.install_id && stamp.install_id === installId)
-  const executable = stamp?.executable || path.join(installDir, 'opt', 'War Room OS', 'war-room-os')
+  const executable = stamp?.executable || path.join(installedAppTreeDir(installDir), 'war-room-os')
   const executableExists = existsSync(executable)
   const appimageOk = !stamp?.appimage || !existsSync(stamp.appimage) || Boolean(fileSha256(stamp.appimage))
   const debOk = !stamp?.deb || !existsSync(stamp.deb) || Boolean(fileSha256(stamp.deb))

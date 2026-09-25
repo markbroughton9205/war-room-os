@@ -4,13 +4,14 @@
  */
 import { pathToFileURL } from 'node:url'
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { resolveRepoRoot } from '@/lib/repo/paths'
 import { classifyProductionInstallTarget } from './commandPolicy'
+import { APP_TREE_DIRNAME, LEGACY_APP_TREE_DIRNAME, installedAppTreeDir } from './installLayout'
 import {
   installerActivate,
   installerActiveStatus,
@@ -19,6 +20,7 @@ import {
   installerRollbackActivation,
   installerRollbackTarget,
   installerStatus,
+  normalizeInstallStamp,
   realInstallOptRoot,
 } from './installerTool'
 
@@ -293,6 +295,44 @@ async function activationSafetyTests(): Promise<CaseResult[]> {
   }
 }
 
+/** 05n — canonical space-free app tree (`opt/War-Room-OS`) with legacy `opt/War Room OS` compatibility.
+ * Chromium splits the SUID chrome-sandbox helper path on spaces, so new installs must not use spaces. */
+async function installLayoutTests(): Promise<CaseResult[]> {
+  const results: CaseResult[] = []
+  const base = await mkdtemp(path.join(tmpdir(), 'wr-install-layout-'))
+  try {
+    const fresh = path.join(base, 'fresh')
+    const legacy = path.join(base, 'legacy')
+    const both = path.join(base, 'both')
+    await mkdir(path.join(legacy, 'opt', LEGACY_APP_TREE_DIRNAME), { recursive: true })
+    await mkdir(path.join(both, 'opt', LEGACY_APP_TREE_DIRNAME), { recursive: true })
+    await mkdir(path.join(both, 'opt', APP_TREE_DIRNAME), { recursive: true })
+    await mkdir(fresh, { recursive: true })
+    results.push(check('layout_canonical_name_is_space_free', APP_TREE_DIRNAME === 'War-Room-OS' && !APP_TREE_DIRNAME.includes(' '), APP_TREE_DIRNAME))
+    results.push(check('layout_legacy_name_kept', LEGACY_APP_TREE_DIRNAME === 'War Room OS', LEGACY_APP_TREE_DIRNAME))
+    results.push(check('layout_new_install_uses_space_free_path', installedAppTreeDir(fresh) === path.join(fresh, 'opt', 'War-Room-OS'), installedAppTreeDir(fresh)))
+    results.push(check('layout_legacy_install_still_resolves', installedAppTreeDir(legacy) === path.join(legacy, 'opt', 'War Room OS'), installedAppTreeDir(legacy)))
+    results.push(check('layout_prefers_space_free_when_both_exist', installedAppTreeDir(both) === path.join(both, 'opt', 'War-Room-OS'), installedAppTreeDir(both)))
+    const legacyStamp = normalizeInstallStamp({ install_id: 'x' }, 'x', legacy)
+    const freshStamp = normalizeInstallStamp({ install_id: 'x' }, 'x', fresh)
+    results.push(check('layout_stamp_default_exe_legacy', legacyStamp?.executable === path.join(legacy, 'opt', 'War Room OS', 'war-room-os'), legacyStamp?.executable ?? 'null'))
+    results.push(check('layout_stamp_default_exe_new', freshStamp?.executable === path.join(fresh, 'opt', 'War-Room-OS', 'war-room-os'), freshStamp?.executable ?? 'null'))
+    const root = resolveRepoRoot()
+    const installer = readFileSync(path.join(root, 'lib/native-builder/installerTool.ts'), 'utf8')
+    results.push(check('layout_installer_writes_space_free_tree', /appTreeDest = path\.join\(installDir, 'opt', APP_TREE_DIRNAME\)/.test(installer) && !/appTreeDest = path\.join\(installDir, 'opt', 'War Room OS'\)/.test(installer), ''))
+    results.push(check('layout_installer_has_no_spaced_canonical_default', !/path\.join\(installDir, 'opt', 'War Room OS'/.test(installer), ''))
+    const control = readFileSync(path.join(root, 'lib/native-builder/runtimeControl.ts'), 'utf8')
+    results.push(check('layout_runtime_control_resolves_both', !/'opt', 'War Room OS'/.test(control) && (control.match(/installedAppTreeDir\(/g) ?? []).length >= 2, ''))
+    const handoff = readFileSync(path.join(root, 'lib/native-builder/foundryActivationHandoff.ts'), 'utf8')
+    results.push(check('layout_activation_handoff_resolves_both', !/'opt', 'War Room OS'/.test(handoff) && /installedAppTreeDir\(/.test(handoff), ''))
+    const prepare = readFileSync(path.join(root, 'desktop/workbench-host/prepare-linux-chrome-sandbox.cjs'), 'utf8')
+    results.push(check('layout_sandbox_prepare_checks_new_and_legacy', prepare.includes("'opt', 'War-Room-OS', 'chrome-sandbox'") && prepare.includes("'opt', 'War Room OS', 'chrome-sandbox'"), ''))
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+  return results
+}
+
 async function readdirSafe(dir: string): Promise<string[]> {
   try {
     return await readdir(dir)
@@ -314,6 +354,7 @@ async function run(): Promise<void> {
   add(await productionInstallRoundTripTests())
   add(await rollbackTargetTests())
   add(await activationSafetyTests())
+  add(await installLayoutTests())
   const failed = results.filter(r => !r.pass)
   console.log(`installerTool validation: ${results.length - failed.length}/${results.length} PASS`)
   if (failed.length) process.exit(1)

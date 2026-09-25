@@ -46,6 +46,27 @@ function rmrf(p) {
  * dereference is required: pnpm's standalone tree is a symlink farm into node_modules/.pnpm.
  * Preserving symlinks would leave the installed app pointing back at the developer checkout.
  */
+/**
+ * Next's standalone output traces repo-root files that server code touches dynamically, which pulls
+ * scratch/evidence directories into the packaged UI runtime (observed: ~900 MB of tmp/, a .war-room
+ * state snapshot and proof artifacts). None of it belongs in a shipped package.
+ */
+const PACKAGED_SCRATCH_TOP_LEVEL = new Set(['tmp', '.tmp', '.war-room', '.claude', 'scratchpad', 'artifacts'])
+function isPackagedScratchName(name) {
+  // `.next-*` are other Next dist dirs (terra flight/atlas builds); only the standalone's own `.next` ships.
+  return PACKAGED_SCRATCH_TOP_LEVEL.has(name) || /^WR-[A-Z0-9-]+$/.test(name) || /^\.next-/.test(name)
+}
+function stripPackagedScratch(dir) {
+  if (!fs.existsSync(dir)) return []
+  const removed = []
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!isPackagedScratchName(ent.name)) continue
+    fs.rmSync(path.join(dir, ent.name), { recursive: true, force: true })
+    removed.push(ent.name)
+  }
+  return removed
+}
+
 function copyDir(src, dest, dereference = true) {
   fs.mkdirSync(dest, { recursive: true })
   fs.cpSync(src, dest, { recursive: true, dereference })
@@ -123,6 +144,8 @@ fs.mkdirSync(coreDir, { recursive: true })
 
 console.log('Copying Next standalone → desktop/runtime/ui')
 copyDir(standalone, uiRoot)
+const strippedScratch = stripPackagedScratch(uiRoot)
+if (strippedScratch.length) console.log(`Stripped repo scratch from runtime/ui: ${strippedScratch.join(', ')}`)
 // Standalone NFT may over-trace; strip non-runtime trees if present.
 for (const drop of [
   '.git',
@@ -205,7 +228,12 @@ copyDir(publicDir, uiPublic)
 // Diagnostic renderer for Core fallback
 copyDir(path.join(repoRoot, 'desktop', 'renderer'), path.join(runtimeRoot, 'renderer'))
 
+stripPackagedScratch(uiRoot)
 assertNoSecrets(uiRoot)
+{
+  const leftover = fs.existsSync(uiRoot) ? fs.readdirSync(uiRoot).filter(isPackagedScratchName) : []
+  if (leftover.length) throw new Error(`Packaged runtime/ui still contains scratch entries: ${leftover.join(', ')}`)
+}
 
 // Bundle Core with esbuild (desktop local install). Invoke the native
 // esbuild executable directly — never pass an ELF/PE binary through Node.
