@@ -1,0 +1,87 @@
+{
+  "name": "foundry-adapter",
+  "displayName": "Foundry",
+  "description": "Foundry Workbench adapter. Collects editor, diagnostic, terminal, and bounded SCM context. Does not call AI providers or write AI mutations. Git commit/push stay Foundry-gated.",
+  "version": "0.3.0",
+  "publisher": "foundry",
+  "license": "UNLICENSED",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "enabledApiProposals": ["terminalDataWriteEvent"],
+  "contributes": {
+    "commands": [
+      { "command": "foundry.ask", "title": "Foundry: Ask" },
+      { "command": "foundry.editSelection", "title": "Foundry: Edit Selection" },
+      { "command": "foundry.explainSelection", "title": "Foundry: Explain Selection" },
+      { "command": "foundry.explainSymbol", "title": "Foundry: Explain Symbol" },
+      { "command": "foundry.fixDiagnostic", "title": "Foundry: Fix Diagnostic" },
+      { "command": "foundry.explainDiagnostic", "title": "Foundry: Explain Diagnostic" },
+      { "command": "foundry.generateTests", "title": "Foundry: Generate Tests" },
+      { "command": "foundry.refactorSelection", "title": "Foundry: Refactor Selection" },
+      { "command": "foundry.addDocumentation", "title": "Foundry: Add Documentation" },
+      { "command": "foundry.findReferences", "title": "Foundry: Find References" },
+      { "command": "foundry.openComposer", "title": "Foundry: Open Composer" },
+      { "command": "foundry.attachTerminalOutput", "title": "Foundry: Attach Terminal Output" },
+      { "command": "foundry.openProblems", "title": "Foundry: Open Problems" },
+      { "command": "foundry.newTerminal", "title": "Foundry: New Terminal" },
+      { "command": "foundry.acceptProposal", "title": "Foundry: Accept Proposal" },
+      { "command": "foundry.rejectProposal", "title": "Foundry: Reject Proposal" },
+      { "command": "foundry.explainChange", "title": "Foundry: Explain Change" },
+      { "command": "foundry.reviewChanges", "title": "Foundry: Review Changes" },
+      { "command": "foundry.governedCommit", "title": "Foundry: Governed Commit" },
+      { "command": "foundry.governedPush", "title": "Foundry: Governed Push" },
+      { "command": "foundry.openScm", "title": "Foundry: Open Source Control" },
+      { "command": "foundry.attachDebugContext", "title": "Foundry: Attach Debug Context" },
+      { "command": "foundry.explainDebugState", "title": "Foundry: Explain Debug State" },
+      { "command": "foundry.fixFromDebugState", "title": "Foundry: Fix From Debug State" },
+      { "command": "foundry.explainFailedTest", "title": "Foundry: Explain Failed Test" },
+      { "command": "foundry.fixFailedTest", "title": "Foundry: Fix Failed Test" },
+      { "command": "foundry.attachTestResult", "title": "Foundry: Attach Test Result" },
+      { "command": "foundry.openTesting", "title": "Foundry: Open Test Explorer" },
+      { "command": "foundry.openTestExplorer", "title": "Foundry: Open Test Explorer (alias)" },
+      { "command": "foundry.openExtensions", "title": "Foundry: Open Extensions" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "foundry.ask", "group": "foundry@1" },
+        { "command": "foundry.editSelection", "group": "foundry@2" },
+        { "command": "foundry.explainSelection", "group": "foundry@3" },
+        { "command": "foundry.refactorSelection", "group": "foundry@4" },
+        { "command": "foundry.generateTests", "group": "foundry@5" }
+      ],
+      "problem/context": [
+        { "command": "foundry.fixDiagnostic", "group": "foundry@1" },
+        { "command": "foundry.explainDiagnostic", "group": "foundry@2" }
+      ],
+      "scm/title": [
+        { "command": "foundry.reviewChanges", "group": "navigation@1" },
+        { "command": "foundry.governedCommit", "group": "navigation@2" },
+        { "command": "foundry.governedPush", "group": "navigation@3" }
+      ],
+      "scm/resourceState/context": [
+        { "command": "foundry.reviewChanges", "group": "foundry@1" }
+      ],
+      "commandPalette": [
+        { "command": "foundry.reviewChanges" },
+        { "command": "foundry.governedCommit" },
+        { "command": "foundry.governedPush" },
+        { "command": "foundry.openScm" },
+        { "command": "foundry.attachDebugContext" },
+        { "command": "foundry.explainDebugState" },
+        { "command": "foundry.fixFromDebugState" },
+        { "command": "foundry.explainFailedTest" },
+        { "command": "foundry.fixFailedTest" },
+        { "command": "foundry.attachTestResult" },
+        { "command": "foundry.openTesting" },
+        { "command": "foundry.openExtensions" }
+      ]
+    },
+    "keybindings": [
+      { "command": "foundry.ask", "key": "ctrl+alt+f", "when": "editorTextFocus" },
+      { "command": "foundry.editSelection", "key": "ctrl+alt+e", "when": "editorHasSelection" },
+      { "command": "foundry.governedCommit", "key": "ctrl+enter", "when": "gitOpenRepositoryCount != 0" }
+    ]
+  }
+}

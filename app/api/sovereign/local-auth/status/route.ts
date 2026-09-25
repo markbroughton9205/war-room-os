@@ -8,6 +8,8 @@ import {
   localSessionCookieAudit,
   resolveLocalAppDataPaths,
 } from '@/lib/sovereign-runtime/local-ownership'
+import { AUTH_MODE, DESKTOP_TRUST_HEADER } from '@/lib/sovereign-runtime/local-ownership/desktopTrustShared'
+import { verifyDesktopTrustProof } from '@/lib/sovereign-runtime/local-ownership/desktopTrust'
 import { existsSync } from 'node:fs'
 
 export const dynamic = 'force-dynamic'
@@ -37,6 +39,15 @@ export async function GET() {
   })()
   const auth = store.verifySessionToken(token)
   const bootstrapped = store.hasLocalCommander()
+  const trust = verifyDesktopTrustProof({
+    presentedHeader: h.get(DESKTOP_TRUST_HEADER),
+    dataDirOverride: dataDirOverride,
+  })
+  const authMode = auth && trust.ok
+    ? AUTH_MODE.LOCAL_COMMANDER_TRUSTED
+    : auth
+      ? AUTH_MODE.LOCAL_COMMANDER_SESSION
+      : AUTH_MODE.UNAUTHENTICATED
 
   return NextResponse.json({
     ok: true,
@@ -61,6 +72,6 @@ export async function GET() {
     data_mode: store.getDataMode(false),
     recovery: 'NOT_IMPLEMENTED',
     remote: 'REMOTE_UNAVAILABLE',
-    auth_mode: auth ? 'LOCAL_COMMANDER_SESSION' : 'NONE',
+    auth_mode: authMode,
   })
 }

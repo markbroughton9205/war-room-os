@@ -8,7 +8,8 @@ import {
   verifyAuthCleanupMarkerFromRequest,
   verifyRecoveryMarkerFromRequest,
 } from '@/lib/auth/recovery'
-import { hasPresentedLocalCommanderSession } from '@/lib/sovereign-runtime/local-ownership/edgeSession'
+import { hasPresentedLocalCommanderSession, hasPresentedTrustedDesktopProof } from '@/lib/sovereign-runtime/local-ownership/edgeSession'
+import { DESKTOP_TRUST_HEADER, TRUSTED_DESKTOP_MINT_PATH } from '@/lib/sovereign-runtime/local-ownership/desktopTrustShared'
 
 // /cesium is vendor static runtime (Cesium.js / Workers / Assets / Widgets / ThirdParty),
 // not Commander-private data. Matcher also skips /cesium/; this list is defense in depth.
@@ -73,6 +74,13 @@ function hasValidLocalCommanderSession(request: NextRequest): boolean {
     host: request.headers.get('host'),
     authorization: request.headers.get('authorization'),
     cookieHeader: request.headers.get('cookie'),
+  })
+}
+
+function hasTrustedDesktopPresentation(request: NextRequest): boolean {
+  return hasPresentedTrustedDesktopProof({
+    host: request.headers.get('host'),
+    trustHeader: request.headers.get(DESKTOP_TRUST_HEADER),
   })
 }
 
@@ -243,9 +251,20 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       }
     } else if (!isPublicPath(pathname)) {
+      const current = `${pathname}${request.nextUrl.search}`
+      // Trusted installed desktop: mint wr_local_session in Node, then enter War Room.
+      // Ordinary browsers and LAN hosts never present this header.
+      if (hasTrustedDesktopPresentation(request) && pathname !== TRUSTED_DESKTOP_MINT_PATH) {
+        const mintUrl = request.nextUrl.clone()
+        mintUrl.pathname = TRUSTED_DESKTOP_MINT_PATH
+        mintUrl.search = ''
+        if (current !== '/' && !current.startsWith('/login')) {
+          mintUrl.searchParams.set('next', current)
+        }
+        return NextResponse.redirect(mintUrl)
+      }
       const loginUrl = request.nextUrl.clone()
       loginUrl.pathname = '/login'
-      const current = `${pathname}${request.nextUrl.search}`
       loginUrl.search = ''
       if (current !== '/' && !current.startsWith('/login')) {
         loginUrl.searchParams.set('next', current)

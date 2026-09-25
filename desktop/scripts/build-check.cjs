@@ -8,6 +8,7 @@ const root = path.join(__dirname, '..')
 const required = [
   'src/main.cjs',
   'src/preload.cjs',
+  'src/desktopTrust.cjs',
   'renderer/index.html',
   'renderer/app.js',
   'renderer/styles.css',

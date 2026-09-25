@@ -4,7 +4,7 @@
  * Dev: may use repo checkout runtimes.
  * Never opens https://warroomos.com. Never kills prod/DEV/cloudflared/Ollama.
  */
-const { app, BrowserWindow, shell, ipcMain, nativeImage } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, nativeImage, session } = require('electron')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const net = require('node:net')
@@ -12,19 +12,67 @@ const fs = require('node:fs')
 const { applyWindowsUserEnvironmentToProcess, presenceSummary } = require('./windowsUserEnv.cjs')
 const { applyCouncilRoutingDefault } = require('./councilRoutingBootstrap.cjs')
 const { resolveAppDataRoot, resolveAppDataPaths } = require('./appDataRoot.cjs')
+const serverLifecycle = require('./serverLifecycle.cjs')
+const desktopTrust = require('./desktopTrust.cjs')
+const warRoomBrowser = require('./warRoomBrowser.cjs')
+const warRoomCdp = require('./warRoomCdp.cjs')
+const foundryWorkbenchView = require('./foundryWorkbench.cjs')
+const foundryWorkbenchHost = require('../workbench-host/index.cjs')
+const hvsNavigation = require('./hvsNavigation.cjs')
+
+app.commandLine.appendSwitch('force-renderer-accessibility', 'complete')
+app.commandLine.appendSwitch('enable-features', 'AccessibilityObjectModel,RendererAccessibility')
+// W1: never normalize Chromium sandbox bypass flags as production policy. Guest workbench remains sandboxed.
+const REMOTE_DEBUGGING_ADDRESS = '127.0.0.1'
+const claimedCdp = process.platform === 'linux' ? warRoomCdp.claimWarRoomCdpEndpoint() : null
+const REMOTE_DEBUGGING_PORT = claimedCdp ? String(claimedCdp.cdpPort) : ''
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('ozone-platform-hint', 'x11')
+  app.commandLine.appendSwitch('ozone-platform', 'x11')
+  app.commandLine.appendSwitch('remote-debugging-address', REMOTE_DEBUGGING_ADDRESS)
+  if (REMOTE_DEBUGGING_PORT) {
+    app.commandLine.appendSwitch('remote-debugging-port', REMOTE_DEBUGGING_PORT)
+  }
+  process.env.GDK_BACKEND = 'x11'
+  const modules = String(process.env.GTK_MODULES || '')
+  if (!modules.includes('atk-bridge')) {
+    process.env.GTK_MODULES = [modules, 'gail:atk-bridge'].filter(Boolean).join(':')
+  }
+  process.env.GNOME_ACCESSIBILITY = '1'
+  process.env.ACCESSIBILITY_ENABLED = '1'
+}
+try { app.setName('War Room OS') } catch { /* ignore */ }
 
 const LOCAL_UI_ORIGIN = process.env.WAR_ROOM_LOCAL_UI_ORIGIN || 'http://127.0.0.1:3848'
 const LOCAL_CORE_ORIGIN = process.env.WAR_ROOM_LOCAL_CORE_ORIGIN || 'http://127.0.0.1:3847'
 const PUBLIC_HOSTS = new Set(['warroomos.com', 'www.warroomos.com'])
-const ALLOWED_PORTS = new Set([3847, 3848, 3000, 3001])
+const ALLOWED_PORTS = new Set([3847, 3848, 3849, 3000, 3001])
 
 let ownedUiChild = null
 let ownedCoreHandle = null
 let ownedCoreChild = null
 let mainWindow = null
+let browserSurface = null
+let workbenchSurface = null
+// SAME_RUNTIME-verified processes this instance reused rather than spawned. Not a
+// ChildProcess — see serverLifecycle.captureReusedOwnership(). Re-verified in full
+// before shutdown is ever allowed to terminate either one.
+let reusedUiOwnership = null
+let reusedCoreOwnership = null
 
 function isPackaged() {
   return app.isPackaged === true
+}
+
+function linuxChromeSandboxStatus() {
+  const prepare = require('../workbench-host/prepare-linux-chrome-sandbox.cjs')
+  const candidates = [
+    path.join(path.dirname(process.execPath), 'chrome-sandbox'),
+    isPackaged() ? path.join(process.resourcesPath || '', '..', 'chrome-sandbox') : '',
+    path.join(__dirname, '..', 'node_modules', 'electron', 'dist', 'chrome-sandbox'),
+  ].filter(Boolean)
+  const helper = candidates.find(item => fs.existsSync(item)) || candidates[candidates.length - 1]
+  return prepare.inspectHelper(helper)
 }
 
 function resolveIconPath() {
@@ -134,7 +182,19 @@ async function waitForUi(ms = 90000) {
         redirect: 'manual',
         signal: AbortSignal.timeout(2000),
       })
-      if (res.status === 200 || res.status === 307 || res.status === 302) return true
+      if (res.status === 200 || res.status === 307 || res.status === 302) {
+        try {
+          const hvs = await fetch(LOCAL_UI_ORIGIN + '/higher-vision-studios', {
+            method: 'GET',
+            redirect: 'manual',
+            signal: AbortSignal.timeout(2000),
+          })
+          appendLog(`hvs route status=${hvs.status}`)
+        } catch (err) {
+          appendLog(`hvs route probe_failed: ${err}`)
+        }
+        return true
+      }
     } catch {
       /* retry */
     }
@@ -149,7 +209,11 @@ function attachUiChildLogging(child) {
   const write = prefix => data => appendLog(`ui:${prefix} ${String(data).trim().slice(0, 2000)}`)
   if (child.stdout) child.stdout.on('data', write('out'))
   if (child.stderr) child.stderr.on('data', write('err'))
-  child.on('exit', (code, signal) => appendLog(`ui:exit code=${code} signal=${signal}`))
+  appendLog(`UI_CHILD_START pid=${child.pid ?? 'unknown'}`)
+  child.on('exit', (code, signal) => {
+    appendLog(`UI_CHILD_EXIT code=${code} signal=${signal ?? 'none'}`)
+    appendLog(`ui:exit code=${code} signal=${signal}`)
+  })
   child.on('error', err => appendLog(`ui:error ${err}`))
 }
 
@@ -224,15 +288,65 @@ function startOwnedCoreDev(repoRoot) {
   )
 }
 
+/**
+ * Decide whether ensureRuntimes() should spawn a new owned process for `port`.
+ * Returns { spawn, reused }:
+ *   spawn=true, reused=null   => port is free (or a verified stale runtime was just
+ *                                 terminated) — caller should spawn its own child.
+ *   spawn=false, reused=<rec> => a SAME_RUNTIME-verified owner was adopted by
+ *                                 reference (see serverLifecycle.captureReusedOwnership).
+ *   spawn=false, reused=null  => reuse an already-open port with no adoption (non-Linux),
+ *                                 or abort because ownership could not be safely resolved.
+ * Never kills on anything less than a positive RUNTIME_MANIFEST.json match.
+ */
+async function resolvePortForSpawn(port, rt, label) {
+  if (!(await probePort(port))) return { spawn: true, reused: null }
+
+  if (process.platform !== 'linux') {
+    appendLog(`${label} port ${port} already open — reuse (no kill)${process.platform === 'darwin' ? ' [macOS ownership verification: FOLLOW_UP_REQUIRED]' : ''}`)
+    return { spawn: false, reused: null }
+  }
+
+  const ownership = serverLifecycle.classifyPortOwner({ port, currentRuntimeRoot: rt, log: appendLog })
+  if (ownership.status === 'SAME_RUNTIME') {
+    appendLog(`SAME_RUNTIME_REUSE ${label} port=${port} pid=${ownership.pid} runtimeRoot=${ownership.runtimeRoot} sourceCommit=${ownership.sourceCommit || 'n/a'} — same runtime root, verified owner, reuse`)
+    const reused = serverLifecycle.captureReusedOwnership({ pid: ownership.pid, port, runtimeRoot: ownership.runtimeRoot })
+    return { spawn: false, reused }
+  }
+  if (ownership.status === 'STALE_RUNTIME') {
+    appendLog(`STALE_RUNTIME_FOUND ${label} port=${port} pid=${ownership.pid} runtimeRoot=${ownership.runtimeRoot} sourceCommit=${ownership.sourceCommit || 'n/a'}`)
+    const killed = await serverLifecycle.terminateVerifiedStaleRuntime(ownership.pid)
+    const stillOpen = await probePort(port)
+    if (killed && !stillOpen) {
+      appendLog(`STALE_RUNTIME_TERMINATED ${label} port=${port} pid=${ownership.pid} — port released, spawning current runtime`)
+      return { spawn: true, reused: null }
+    }
+    appendLog(`PORT_CONFLICT_SAFE_ABORT ${label} port=${port} pid=${ownership.pid} reason=stale_termination_incomplete killed=${killed} stillOpen=${stillOpen}`)
+    return { spawn: false, reused: null }
+  }
+  appendLog(`UNKNOWN_PORT_OWNER ${label} port=${port} pid=${ownership.pid ?? 'unresolved'} reason=${ownership.reason} — PORT_CONFLICT_SAFE_ABORT (process left running, never destroyed on unproven ownership)`)
+  return { spawn: false, reused: null }
+}
+
 async function ensureRuntimes() {
   ensureAppDataDirs()
   pinChildDataRoot()
+  try {
+    desktopTrust.loadOrCreateDesktopTrustSecret()
+    appendLog('desktopTrust ready')
+  } catch (err) {
+    appendLog(`desktopTrust init_failed: ${err}`)
+  }
   const packaged = isPackaged()
   const rt = runtimeRoot()
   const dataDir = localDataDir()
-  appendLog(`ensureRuntimes packaged=${packaged} runtimeRoot=${rt} dataDir=${dataDir}`)
+  const runtimeDataDir = resolveAppDataPaths().runtime
+  const currentManifest = serverLifecycle.readRuntimeManifest(rt)
+  const currentSourceCommit = currentManifest && typeof currentManifest.source_commit === 'string' ? currentManifest.source_commit : null
+  appendLog(`ensureRuntimes packaged=${packaged} runtimeRoot=${rt} dataDir=${dataDir} sourceCommit=${currentSourceCommit || 'n/a'}`)
 
-  if (!(await probePort(3847))) {
+  const coreResolution = await resolvePortForSpawn(3847, rt, 'Core')
+  if (coreResolution.spawn) {
     const startCorePath = packaged
       ? path.join(process.resourcesPath, 'runtime', 'start-core.cjs')
       : path.join(__dirname, '..', 'runtime', 'start-core.cjs')
@@ -244,6 +358,7 @@ async function ensureRuntimes() {
             runtimeRoot: rt,
             localDataDir: appDataRoot(),
           })
+          appendLog('CORE_START mode=in-process')
           appendLog('Core started in-process')
         } catch (err) {
           appendLog(`Core in-process failed: ${err}`)
@@ -256,11 +371,17 @@ async function ensureRuntimes() {
     } else if (!packaged) {
       ownedCoreChild = startOwnedCoreDev(repoRootFromDesktop())
     }
-  } else {
-    appendLog('Core port 3847 already open — reuse (no kill)')
+    const coreOwnedPid = ownedCoreChild ? ownedCoreChild.pid : (ownedCoreHandle ? process.pid : null)
+    if (coreOwnedPid) {
+      serverLifecycle.writeLockFile(runtimeDataDir, { pid: coreOwnedPid, port: 3847, runtimeRoot: rt, sourceCommit: currentSourceCommit })
+    }
+  } else if (coreResolution.reused) {
+    reusedCoreOwnership = coreResolution.reused
+    serverLifecycle.writeLockFile(runtimeDataDir, { pid: reusedCoreOwnership.pid, port: 3847, runtimeRoot: reusedCoreOwnership.runtimeRoot, sourceCommit: currentSourceCommit, adopted: true })
   }
 
-  if (!(await probePort(3848))) {
+  const uiResolution = await resolvePortForSpawn(3848, rt, 'UI')
+  if (uiResolution.spawn) {
     if (packaged || fs.existsSync(path.join(rt, 'ui'))) {
       try {
         const startUiPath = packaged
@@ -269,6 +390,7 @@ async function ensureRuntimes() {
         const { startUi } = require(startUiPath)
         ownedUiChild = startUi({ runtimeRoot: rt, electronExec: process.execPath, stdio: 'pipe' })
         attachUiChildLogging(ownedUiChild)
+        appendLog('UI_CHILD_START source=packaged')
         appendLog('UI child spawned from packaged runtime')
       } catch (err) {
         appendLog(`UI packaged start error: ${err}`)
@@ -277,8 +399,12 @@ async function ensureRuntimes() {
     } else {
       ownedUiChild = startOwnedNextDev(repoRootFromDesktop())
     }
-  } else {
-    appendLog('UI port 3848 already open — reuse (no kill)')
+    if (ownedUiChild) {
+      serverLifecycle.writeLockFile(runtimeDataDir, { pid: ownedUiChild.pid, port: 3848, runtimeRoot: rt, sourceCommit: currentSourceCommit })
+    }
+  } else if (uiResolution.reused) {
+    reusedUiOwnership = uiResolution.reused
+    serverLifecycle.writeLockFile(runtimeDataDir, { pid: reusedUiOwnership.pid, port: 3848, runtimeRoot: reusedUiOwnership.runtimeRoot, sourceCommit: currentSourceCommit, adopted: true })
   }
 
   const ready = await waitForUi()
@@ -286,7 +412,7 @@ async function ensureRuntimes() {
   return ready
 }
 
-function createWindow(startUrl, diagnosticDetail) {
+function createWindow(startUrl, diagnosticDetail, sessionToken) {
   const iconPath = resolveIconPath()
   const winOpts = {
     width: 1440,
@@ -297,7 +423,10 @@ function createWindow(startUrl, diagnosticDetail) {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true,
+      // Linux AT-SPI only publishes renderer controls when the renderer is not Chromium-sandboxed.
+      // nodeIntegration stays false and contextIsolation stays true.
+      sandbox: process.platform === 'linux' ? false : true,
+      enableBlinkFeatures: 'AccessibilityObjectModel',
     },
   }
   if (iconPath) {
@@ -310,6 +439,15 @@ function createWindow(startUrl, diagnosticDetail) {
 
   const win = new BrowserWindow(winOpts)
   mainWindow = win
+  appendLog('WINDOW_CREATED')
+  win.on('closed', () => appendLog('WINDOW_CLOSED'))
+  browserSurface = warRoomBrowser.attach(win)
+  workbenchSurface = foundryWorkbenchView.attach(win)
+  try { win.setTitle('War Room OS') } catch { /* ignore */ }
+  try { if (typeof win.setAccessibleTitle === 'function') win.setAccessibleTitle('War Room OS') } catch { /* ignore */ }
+  win.webContents.on('did-finish-load', () => {
+    try { app.setAccessibilitySupportEnabled(true) } catch { /* ignore */ }
+  })
 
   // Commander-explicit My Location uses Chromium geolocation. Electron must answer the
   // permission check/request or Linux/Chromium reports POSITION_UNAVAILABLE even when
@@ -331,28 +469,56 @@ function createWindow(startUrl, diagnosticDetail) {
   }
 
   win.webContents.setWindowOpenHandler(({ url }) => {
+    const rewritten = hvsNavigation.rewriteFileHvsToInstalledUi(url, LOCAL_UI_ORIGIN)
+    if (rewritten) {
+      void win.loadURL(rewritten)
+      return { action: 'deny' }
+    }
+    if (hvsNavigation.isOwnedUiOrigin(url, LOCAL_UI_ORIGIN)) {
+      void win.loadURL(url)
+      return { action: 'deny' }
+    }
     if (isAllowedLocalUrl(url)) return { action: 'allow' }
-    void shell.openExternal(url)
+    if (browserSurface) void browserSurface.open({ url })
     return { action: 'deny' }
   })
 
   win.webContents.on('will-navigate', (event, url) => {
+    const rewritten = hvsNavigation.rewriteFileHvsToInstalledUi(url, LOCAL_UI_ORIGIN)
+    if (rewritten) {
+      event.preventDefault()
+      appendLog(`hvs file-route rewritten origin=${LOCAL_UI_ORIGIN}`)
+      void win.loadURL(rewritten)
+      return
+    }
+    if (hvsNavigation.isOwnedUiOrigin(url, LOCAL_UI_ORIGIN)) {
+      return
+    }
+    if (foundryWorkbenchView.isWorkbenchUrl(url)) {
+      event.preventDefault()
+      return
+    }
+    if (warRoomBrowser.isLoopbackHttp(url)) {
+      event.preventDefault()
+      void browserSurface.open({ url })
+      return
+    }
     if (!isAllowedLocalUrl(url)) {
       event.preventDefault()
-      try {
-        if (PUBLIC_HOSTS.has(new URL(url).hostname)) return
-      } catch {
-        return
-      }
-      void shell.openExternal(url)
     }
   })
 
   if (diagnosticDetail) {
     const html = `<!doctype html><html><body style="font-family:system-ui;background:#0b0f14;color:#e8eef7;padding:2rem">
       <h1>War Room OS</h1>
-      <p>Local runtime diagnostic</p>
+      <p style="letter-spacing:.2em;font-weight:700">HIGHER VISION STUDIOS UNAVAILABLE</p>
+      <p>War Room UI runtime is not ready.</p>
+      <p><button onclick="location.href='${LOCAL_UI_ORIGIN}/'" style="background:#123;color:#e8eef7;border:1px solid #4ade80;padding:.5rem 1rem;cursor:pointer">RETRY</button></p>
+      <details><summary>Advanced details</summary>
       <pre>${String(diagnosticDetail).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</pre>
+      <p>Installed UI: ${LOCAL_UI_ORIGIN}</p>
+      <p>Core: ${LOCAL_CORE_ORIGIN}</p>
+      </details>
       <p>Website fallback: DENIED</p>
       <p>AppData: ${appDataRoot()}</p>
     </body></html>`
@@ -360,7 +526,19 @@ function createWindow(startUrl, diagnosticDetail) {
     return
   }
 
-  void win.loadURL(startUrl)
+  const secret = process.env.WAR_ROOM_DESKTOP_TRUST_SECRET
+  desktopTrust.attachDesktopTrustHeaders(win.webContents.session, secret)
+  void (async () => {
+    if (sessionToken) {
+      try {
+        await desktopTrust.applyLocalSessionCookie(win.webContents.session, LOCAL_UI_ORIGIN, sessionToken)
+        appendLog('desktopTrust cookie=ok')
+      } catch (err) {
+        appendLog(`desktopTrust cookie_failed: ${err}`)
+      }
+    }
+    void win.loadURL(startUrl)
+  })()
 }
 
 ipcMain.handle('sovereign.getRuntimeTruth', async () => ({
@@ -389,6 +567,14 @@ ipcMain.handle('sovereign.getBootState', async () => ({
   core: (await probePort(3847)) ? 'CORE_READY' : 'CORE_FAILED',
 }))
 
+ipcMain.handle('warRoomBrowser.open', async (_evt, payload) => browserSurface ? browserSurface.open(payload) : { ok: false, error: 'browser not ready' })
+ipcMain.handle('warRoomBrowser.navigate', async (_evt, payload) => browserSurface ? browserSurface.navigate(payload) : { ok: false })
+ipcMain.handle('warRoomBrowser.back', async () => browserSurface ? browserSurface.back() : { ok: false })
+ipcMain.handle('warRoomBrowser.forward', async () => browserSurface ? browserSurface.forward() : { ok: false })
+ipcMain.handle('warRoomBrowser.reload', async () => browserSurface ? browserSurface.reload() : { ok: false })
+ipcMain.handle('warRoomBrowser.stop', async () => browserSurface ? browserSurface.stop() : { ok: false })
+ipcMain.handle('warRoomBrowser.hide', async () => browserSurface ? browserSurface.hide() : { ok: false })
+
 ipcMain.handle('sovereign.openExternalSafe', async (_evt, url) => {
   if (typeof url !== 'string') return { ok: false }
   try {
@@ -400,6 +586,31 @@ ipcMain.handle('sovereign.openExternalSafe', async (_evt, url) => {
     return { ok: false }
   }
 })
+
+ipcMain.handle('warRoom.browser.open', async (_evt, payload) => {
+  if (!browserSurface) return { open: false, activeTabId: null, tabs: [] }
+  return browserSurface.openUrl(payload?.url)
+})
+ipcMain.handle('warRoom.browser.navigate', async (_evt, payload) => {
+  if (!browserSurface) return { open: false, activeTabId: null, tabs: [] }
+  return browserSurface.navigate(payload)
+})
+ipcMain.handle('warRoom.browser.back', async () => browserSurface ? browserSurface.back() : { open: false, activeTabId: null, tabs: [] })
+ipcMain.handle('warRoom.browser.forward', async () => browserSurface ? browserSurface.forward() : { open: false, activeTabId: null, tabs: [] })
+ipcMain.handle('warRoom.browser.reload', async () => browserSurface ? browserSurface.reload() : { open: false, activeTabId: null, tabs: [] })
+ipcMain.handle('warRoom.browser.stop', async () => browserSurface ? browserSurface.stop() : { open: false, activeTabId: null, tabs: [] })
+ipcMain.handle('warRoom.browser.closeTab', async (_evt, payload) => browserSurface ? browserSurface.closeTab(payload) : { open: false, activeTabId: null, tabs: [] })
+ipcMain.handle('warRoom.browser.close', async () => browserSurface ? browserSurface.closeAll() : { open: false, activeTabId: null, tabs: [] })
+ipcMain.handle('warRoom.browser.setBounds', async (_evt, bounds) => browserSurface ? browserSurface.setBounds(bounds) : { open: false, activeTabId: null, tabs: [] })
+ipcMain.handle('warRoom.browser.getState', async () => browserSurface ? browserSurface.getState() : { open: false, activeTabId: null, tabs: [] })
+
+ipcMain.handle('foundry.workbench.ensure', async () => workbenchSurface ? workbenchSurface.ensure() : { ok: false, error: 'workbench not ready' })
+ipcMain.handle('foundry.workbench.setBounds', async (_evt, bounds) => workbenchSurface ? workbenchSurface.setBounds(bounds) : { viewOpen: false })
+ipcMain.handle('foundry.workbench.hide', async () => workbenchSurface ? workbenchSurface.hide() : { viewOpen: false })
+ipcMain.handle('foundry.workbench.getState', async () => workbenchSurface ? workbenchSurface.getState() : { viewOpen: false })
+ipcMain.handle('foundry.workbench.stop', async () => foundryWorkbenchHost.stopOwned())
+ipcMain.handle('foundry.workbench.returnFocus', async () => workbenchSurface ? workbenchSurface.returnFocus() : { viewOpen: false })
+ipcMain.handle('foundry.workbench.recover', async () => foundryWorkbenchHost.restartOwned())
 
 function parseGeoClueWhereAmI(text) {
   const lat = /Latitude:\s*(-?\d+(?:\.\d+)?)°/.exec(text)
@@ -465,7 +676,50 @@ for (const ch of ['shell.exec', 'powershell.run', 'fs.write', 'child_process']) 
   ipcMain.handle(ch, async () => ({ ok: false, error: 'DENIED' }))
 }
 
+/**
+ * Terminate a SAME_RUNTIME process this instance adopted by reference (never spawned,
+ * so killOwned() has no handle for it). Re-runs the full verification chain first —
+ * alive, same process generation, cwd/manifest, still owns the port — and refuses to
+ * touch anything if any of that has changed since adoption. Never consults the lock
+ * file for this decision.
+ */
+async function terminateReusedOwnership(record, port, runtimeDataDir) {
+  if (!record) return
+  const verdict = serverLifecycle.reverifyReusedOwnership(record, { log: appendLog })
+  if (!verdict.ok) {
+    appendLog(`REUSED_OWNERSHIP_SAFE_ABORT port=${port} pid=${record.pid} reason=${verdict.reason} — not terminating`)
+    return
+  }
+  const killed = await serverLifecycle.terminateVerifiedStaleRuntime(record.pid)
+  if (killed) {
+    appendLog(`REUSED_OWNERSHIP_TERMINATED port=${port} pid=${record.pid}`)
+    serverLifecycle.clearLockFile(runtimeDataDir, port)
+  } else {
+    appendLog(`REUSED_OWNERSHIP_TERMINATION_FAILED port=${port} pid=${record.pid}`)
+  }
+}
+
+function packageIdentity() {
+  const execPath = String(process.execPath || '')
+  const marker = `${path.sep}.local${path.sep}opt${path.sep}`
+  const idx = execPath.indexOf(marker)
+  if (idx < 0) return 'unpackaged'
+  const rest = execPath.slice(idx + marker.length)
+  const installId = rest.split(path.sep)[0]
+  return installId || 'unpackaged'
+}
+
+function quitFor(reason) {
+  appendLog(`APP_QUIT_CALLED reason=${reason}`)
+  app.quit()
+}
+
 async function shutdownOwned() {
+  appendLog('SHUTDOWN_OWNED_START')
+  appendLog('CORE_STOP')
+  const runtimeDataDir = resolveAppDataPaths().runtime
+  if (ownedUiChild) serverLifecycle.clearLockFile(runtimeDataDir, 3848)
+  if (ownedCoreChild || ownedCoreHandle) serverLifecycle.clearLockFile(runtimeDataDir, 3847)
   killOwned(ownedUiChild)
   killOwned(ownedCoreChild)
   if (ownedCoreHandle && typeof ownedCoreHandle.close === 'function') {
@@ -478,15 +732,36 @@ async function shutdownOwned() {
   ownedUiChild = null
   ownedCoreChild = null
   ownedCoreHandle = null
+
+  await terminateReusedOwnership(reusedUiOwnership, 3848, runtimeDataDir)
+  await terminateReusedOwnership(reusedCoreOwnership, 3847, runtimeDataDir)
+  reusedUiOwnership = null
+  reusedCoreOwnership = null
+  try { await foundryWorkbenchHost.stopOwned() } catch { /* ignore */ }
+  try { workbenchSurface?.destroy?.() } catch { /* ignore */ }
+  workbenchSurface = null
+  appendLog('SHUTDOWN_OWNED_END')
 }
 
 process.on('uncaughtException', err => {
+  appendLog('UNCAUGHT_EXCEPTION')
   appendLog(`FATAL uncaughtException: ${err && err.stack ? err.stack : err}`)
 })
 process.on('unhandledRejection', err => {
+  appendLog('UNHANDLED_REJECTION')
   appendLog(`FATAL unhandledRejection: ${err && err.stack ? err.stack : err}`)
 })
+for (const signalName of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  process.on(signalName, () => {
+    appendLog(signalName)
+    quitFor(signalName)
+  })
+}
+process.on('exit', code => {
+  try { appendLog(`PROCESS_EXIT code=${code}`) } catch { /* ignore */ }
+})
 
+appendLog(`APP_START package=${packageIdentity()} pid=${process.pid} packaged=${isPackaged()}`)
 appendLog(`boot pid=${process.pid} packaged=${isPackaged()} exec=${process.execPath}`)
 if (process.platform === 'linux') {
   try {
@@ -506,12 +781,16 @@ try {
   appendLog(`councilRouting bootstrap skipped: ${err}`)
 }
 
-const gotLock = app.requestSingleInstanceLock()
+const holderPackage = packageIdentity()
+const gotLock = app.requestSingleInstanceLock({ packageId: holderPackage })
 if (!gotLock) {
+  appendLog(`SECOND_INSTANCE incoming=${holderPackage} holder=already-locked`)
   appendLog('SECOND_INSTANCE — focusing existing War Room OS window, quitting this launch')
-  app.quit()
+  quitFor('SECOND_INSTANCE')
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
+    const incoming = additionalData && typeof additionalData.packageId === 'string' ? additionalData.packageId : 'unknown'
+    appendLog(`SECOND_INSTANCE holder=${holderPackage} incoming=${incoming}`)
     const wins = BrowserWindow.getAllWindows()
     if (wins[0]) {
       if (wins[0].isMinimized()) wins[0].restore()
@@ -519,6 +798,24 @@ if (!gotLock) {
     }
   })
   app.whenReady().then(async () => {
+    try { app.setAccessibilitySupportEnabled(true) } catch { /* ignore */ }
+    if (process.platform === 'linux') {
+      try {
+        const userData = app.getPath('userData')
+        const activePortFile = path.join(userData, 'DevToolsActivePort')
+        if (fs.existsSync(activePortFile)) {
+          const reported = Number(String(fs.readFileSync(activePortFile, 'utf8')).split(/\r?\n/)[0])
+          if (Number.isInteger(reported) && reported > 0) {
+            warRoomCdp.recordResolvedCdpPort(reported)
+          }
+        } else if (claimedCdp?.cdpPort) {
+          warRoomCdp.recordResolvedCdpPort(claimedCdp.cdpPort)
+        }
+      } catch (err) {
+        appendLog(`cdp persist_failed: ${err}`)
+      }
+    }
+    appendLog(`APP_READY package=${holderPackage}`)
     appendLog('app ready — starting owned runtimes')
     if (process.platform === 'win32') {
       try {
@@ -528,26 +825,52 @@ if (!gotLock) {
       }
     }
     const ready = await ensureRuntimes()
+    try {
+      desktopTrust.attachDesktopTrustHeaders(session.defaultSession, process.env.WAR_ROOM_DESKTOP_TRUST_SECRET)
+    } catch (err) {
+      appendLog(`desktopTrust attach_failed: ${err}`)
+    }
     if (!ready) {
       const coreUp = await probePort(3847)
       if (coreUp) {
-        createWindow(LOCAL_CORE_ORIGIN + '/', null)
+        createWindow(LOCAL_CORE_ORIGIN + '/', null, null)
       } else {
         createWindow(
           null,
           `UI_FAILED / possible PORT_CONFLICT on 3848.\nCore :3847 also unavailable.\nNo website fallback.\nCheck ${path.join(appDataRoot(), 'logs', 'desktop-main.log')}`,
+          null,
         )
       }
       return
     }
-    createWindow(LOCAL_UI_ORIGIN + '/', null)
+    let sessionToken = null
+    try {
+      sessionToken = await desktopTrust.mintTrustedDesktopSession(LOCAL_UI_ORIGIN, process.env.WAR_ROOM_DESKTOP_TRUST_SECRET)
+      appendLog(`desktopTrust session=${sessionToken ? 'ok' : 'mint_failed'}`)
+    } catch (err) {
+      appendLog(`desktopTrust mint_error: ${err}`)
+    }
+    createWindow(LOCAL_UI_ORIGIN + '/', null, sessionToken)
+    if (foundryWorkbenchHost.isFoundryWorkbenchW0Enabled()) {
+      try {
+        const sandbox = linuxChromeSandboxStatus()
+        appendLog(`workbench lazy-start; sandbox verdict=${sandbox.verdict} mode=${sandbox.mode || 'none'} uid=${sandbox.uid ?? 'n/a'} helper=${sandbox.helper || 'none'}`)
+        appendLog('workbench owned child deferred until foundry.workbench.ensure')
+      } catch (err) {
+        appendLog(`workbench sandbox inspect failed: ${err}`)
+      }
+    }
   })
   app.on('window-all-closed', () => {
+    appendLog('WINDOW_ALL_CLOSED')
     void shutdownOwned().then(() => {
-      if (process.platform !== 'darwin') app.quit()
+      if (process.platform !== 'darwin') quitFor('WINDOW_ALL_CLOSED')
     })
   })
   app.on('before-quit', () => {
+    appendLog('BEFORE_QUIT')
     void shutdownOwned()
   })
+  app.on('will-quit', () => appendLog('WILL_QUIT'))
+  app.on('quit', (_event, code) => appendLog(`QUIT code=${code}`))
 }

@@ -8,6 +8,8 @@ export * from './gate'
 export * from './store'
 export * from './chat'
 export * from './sessionCookie'
+export * from './desktopTrustShared'
+export * from './desktopTrust'
 
 export function getLocalOwnershipRuntimeTruth() {
   return {
@@ -30,5 +32,7 @@ export function getLocalOwnershipRuntimeTruth() {
     CREDENTIAL_KDF: 'scrypt' as const,
     OS_SECURE_STORAGE: 'NOT_USED_HASHED_SCRYPT_IN_APPDATA' as const,
     ELECTRON_SAFESTORAGE: 'EVALUATED_NOT_REQUIRED_FOR_CORE' as const,
+    TRUSTED_DESKTOP_AUTO_ENTRY: 'IMPLEMENTED' as const,
+    LOCAL_COMMANDER_TRUSTED_MODE: 'IMPLEMENTED' as const,
   }
 }

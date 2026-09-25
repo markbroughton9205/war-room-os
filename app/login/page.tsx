@@ -10,6 +10,8 @@ import {
   extractBearerOrCookieToken,
   getLocalOwnershipStore,
 } from '@/lib/sovereign-runtime/local-ownership'
+import { DESKTOP_TRUST_HEADER, TRUSTED_DESKTOP_MINT_PATH } from '@/lib/sovereign-runtime/local-ownership/desktopTrustShared'
+import { verifyDesktopTrustProof } from '@/lib/sovereign-runtime/local-ownership/desktopTrust'
 
 export default async function LoginPage({
   searchParams,
@@ -22,6 +24,17 @@ export default async function LoginPage({
   const h = await headers()
   const host = h.get('host')
   const loopback = isLoopbackRequestHost(host)
+
+  // Trusted installed desktop: mint session in Node instead of showing a password wall.
+  if (loopback) {
+    const proof = verifyDesktopTrustProof({
+      presentedHeader: h.get(DESKTOP_TRUST_HEADER),
+      dataDirOverride: process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null,
+    })
+    if (proof.ok) {
+      redirect(`${TRUSTED_DESKTOP_MINT_PATH}?next=${encodeURIComponent(next)}`)
+    }
+  }
 
   // Local Commander session on loopback — enter War Room without Supabase
   if (loopback) {

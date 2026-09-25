@@ -1,0 +1,20 @@
+{
+  "product": "Foundry Workbench W0",
+  "architecture": "HYBRID_B_CODE_OSS_REH_WEB",
+  "upstreamName": "OpenVSCode Server",
+  "upstreamOfficialRepo": "https://github.com/gitpod-io/openvscode-server",
+  "upstreamReleasesRepo": "https://github.com/gitpod-io/openvscode-releases",
+  "upstreamLicense": "MIT",
+  "upstreamLicenseUrl": "https://github.com/gitpod-io/openvscode-server/blob/main/LICENSE.txt",
+  "tag": "openvscode-server-v1.109.5",
+  "commit": "4ffe2270acdf711bbefecc3e8c79f4b3631640e5",
+  "asset": "openvscode-server-v1.109.5-linux-x64.tar.gz",
+  "assetUrl": "https://github.com/gitpod-io/openvscode-server/releases/download/openvscode-server-v1.109.5/openvscode-server-v1.109.5-linux-x64.tar.gz",
+  "assetSha256": "b433bf4f0227321a7014d8460d10a8f958adc0f45aa79bd889e84e65e8f88363",
+  "microsoftProductBinaries": false,
+  "microsoftMarketplace": false,
+  "galleryW0": "DISABLED",
+  "bind": "127.0.0.1",
+  "port": 3849,
+  "nestedElectron": false
+}

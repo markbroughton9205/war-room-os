@@ -156,6 +156,15 @@ function run(): CaseResult[] {
   ))
 
   results.push(check(
+    'trusted_desktop_mint_is_not_host_header_alone',
+    middlewareSource.includes('hasTrustedDesktopPresentation')
+      && middlewareSource.includes('TRUSTED_DESKTOP_MINT_PATH')
+      && !middlewareSource.includes('WAR_ROOM_PACKAGED')
+      && readFileSync(resolve('app/login/page.tsx'), 'utf8').includes('verifyDesktopTrustProof'),
+    'installed desktop proof is header+secret; Node mints wr_local_session',
+  ))
+
+  results.push(check(
     'terra_page_is_public_for_provider_auth_cameras',
     readFileSync(resolve('lib/supabase/middleware.ts'), 'utf8').includes("'/terra'"),
     '/terra loads without wr_local_session; Commander-private APIs stay route-gated',

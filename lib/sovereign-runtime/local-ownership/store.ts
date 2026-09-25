@@ -205,7 +205,8 @@ export class LocalOwnershipStore {
   }
 
   /**
-   * Explicit first-run bootstrap — never implicit from localhost/Windows user/Electron.
+   * Explicit first-run bootstrap — never implicit from localhost/Windows user.
+   * Trusted installed desktop uses ensureTrustedDesktopCommander() instead of this password form.
    */
   bootstrapCommander(input: {
     password: string
@@ -355,6 +356,32 @@ export class LocalOwnershipStore {
     const auth = this.issueSession(row.id, row.installation_id)
     this.audit(row.id, 'LOCAL_LOGIN', row.id, 'OK')
     return { ok: true, auth }
+  }
+
+  /**
+   * Machine-scoped Commander session for the trusted installed desktop.
+   * Does not accept a password, does not create a Supabase user, and does not
+   * store plaintext credentials. First run hashes a discarded high-entropy secret
+   * so the existing scrypt column remains valid; later launches only mint a session.
+   */
+  ensureTrustedDesktopCommander():
+    | { ok: true; auth: LocalAuthSession; first_run: boolean }
+    | { ok: false; reason: string; code: string } {
+    let first_run = false
+    if (!this.hasLocalCommander()) {
+      const discarded = newHighEntropyToken(32)
+      const boot = this.bootstrapCommander({ password: discarded, displayName: 'Local Commander' })
+      if (!boot.ok) return boot
+      first_run = true
+      this.audit(boot.identity.id, 'TRUSTED_DESKTOP_BOOTSTRAP', boot.identity.id, 'OK')
+    }
+    const identity = this.getCommanderPublic()
+    if (!identity) {
+      return { ok: false, reason: 'Local Commander identity missing.', code: 'NOT_BOOTSTRAPPED' }
+    }
+    const auth = this.issueSession(identity.id, identity.installation_id)
+    this.audit(identity.id, 'TRUSTED_DESKTOP_SESSION', identity.id, 'OK')
+    return { ok: true, auth, first_run }
   }
 
   /** Always mints a fresh session id + token — never accepts client-supplied session ids. */

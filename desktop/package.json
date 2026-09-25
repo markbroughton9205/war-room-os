@@ -28,6 +28,7 @@
     },
     "files": [
       "src/**/*",
+      "workbench-host/**/*",
       "package.json",
       "assets/war-room-os.ico",
       "assets/war-room-os-icon.png",
@@ -106,6 +107,7 @@
         }
       }
     },
+    "afterPack": "./scripts/after-pack-linux-sandbox.cjs",
     "publish": null
   },
   "devDependencies": {

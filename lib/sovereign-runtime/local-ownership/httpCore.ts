@@ -3,6 +3,7 @@
  */
 import type http from 'node:http'
 import {
+  AUTH_MODE,
   LOCAL_SESSION_COOKIE,
   assertLocalMutationOrigin,
   assertLocalOnlyRequest,
@@ -12,6 +13,8 @@ import {
   runLocalOwnedChat,
   type LocalOwnershipStore,
 } from '@/lib/sovereign-runtime/local-ownership'
+import { DESKTOP_TRUST_HEADER } from '@/lib/sovereign-runtime/local-ownership/desktopTrustShared'
+import { verifyDesktopTrustProof } from '@/lib/sovereign-runtime/local-ownership/desktopTrust'
 
 function json(res: http.ServerResponse, status: number, body: unknown, extraHeaders?: Record<string, string | string[]>) {
   const payload = JSON.stringify(body)
@@ -158,6 +161,27 @@ export function tryHandleLocalOwnershipHttp(
           identity: result.auth.identity,
           session_id: result.auth.session.session_id,
           session_token: result.auth.token,
+        })
+      }
+
+      if (url.pathname === '/api/local/auth/trusted-desktop' && (req.method === 'POST' || req.method === 'GET')) {
+        const headerVal = req.headers[DESKTOP_TRUST_HEADER]
+        const presented = Array.isArray(headerVal) ? headerVal[0] : headerVal
+        const proof = verifyDesktopTrustProof({
+          presentedHeader: presented,
+          dataDirOverride: opts?.dataDirOverride,
+        })
+        if (!proof.ok) return json(res, 403, { ok: false, error: proof.reason, code: proof.code })
+        const minted = store.ensureTrustedDesktopCommander()
+        if (!minted.ok) return json(res, 500, minted)
+        setSessionCookie(res, minted.auth.token)
+        return json(res, 200, {
+          ok: true,
+          identity: minted.auth.identity,
+          session_id: minted.auth.session.session_id,
+          session_token: minted.auth.token,
+          first_run: minted.first_run,
+          auth_mode: AUTH_MODE.LOCAL_COMMANDER_TRUSTED,
         })
       }
 

@@ -1,13 +1,20 @@
 'use client'
 
 import { useEffect } from 'react'
+import { usePathname } from 'next/navigation'
 
 import { CompactMediaPlayer } from './CompactMediaPlayer'
 import { MediaLauncher } from './MediaLauncher'
 import { MediaWindow } from './MediaWindow'
 import { useMediaPlayback } from './MediaPlaybackProvider'
 
+function isFoundryEngineeringPath(pathname: string | null): boolean {
+  return pathname === '/war-room/engineering' || Boolean(pathname?.startsWith('/war-room/engineering/'))
+}
+
 export function MediaHost() {
+  const pathname = usePathname()
+  const foundryEngineering = isFoundryEngineeringPath(pathname)
   const { state, controller } = useMediaPlayback()
 
   useEffect(() => {
@@ -32,7 +39,12 @@ export function MediaHost() {
 
   return (
     <>
-      {!state.headerLauncherMounted ? (
+      {foundryEngineering ? (
+        // Foundry keeps the conversation and composer clear: the launcher sits in a utility position.
+        <div className="pointer-events-none fixed right-3 top-14 z-[85] lg:bottom-3 lg:left-3 lg:right-auto lg:top-auto" data-testid="media-launcher-global" data-media-dock="foundry-utility">
+          <MediaLauncher variant="fallback" />
+        </div>
+      ) : !state.headerLauncherMounted ? (
         <div className="pointer-events-none fixed bottom-4 left-4 z-[85]" data-testid="media-launcher-global">
           <MediaLauncher variant="fallback" />
         </div>
