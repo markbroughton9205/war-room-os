@@ -1,0 +1,5 @@
+
+
+def customer_lines(orders, customer):
+    rows = list_orders([order for order in orders if order["customer"] == customer])
+    return "\n".join(order["id"] for order in rows[:1])

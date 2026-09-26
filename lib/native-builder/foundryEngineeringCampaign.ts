@@ -137,6 +137,27 @@ export type EngineeringCampaign = {
   greenSnapshot?: { generation: number; files: Record<string, string> }
   reworkOrigin?: 'TEST' | 'REVIEW'
   reverts?: number
+  /** The files a review-driven rework was put back on (for engineering memory). */
+  revertedFiles?: string[]
+  /** The first failure of the mission, before any edit, as typed fields only (never raw output). Engineering memory is keyed on it. */
+  baselineFailure?: { exception: string | null; tests: string[]; frames: string[] }
+  /** Evidence trail for engineering memory: files edited in the cycle that turned failing tests green, files after whose edit the very same failure came back, and the last failure key seen. */
+  memoryTrail?: { greenFiles: string[]; ineffective: string[]; lastKey: string | null; editsAtRun: number }
+  /** Phase 4: what engineering memory did in this mission. The memory itself lives in the project store; this is the mission's record of using and saving it. */
+  memory?: {
+    status: 'FRESH' | 'SAME' | 'QUARANTINED'
+    used: { id: string; kind: string; files: string[]; why: string[] }[]
+    ignored: { id: string; kind: string; why: string }[]
+    /** Files an earlier verified mission found unrelated to this kind of failure and the tests confirmed again now, so their first-pass edit is skipped. */
+    skipped: string[]
+    /** Files the earlier verified evidence points at, edited first. */
+    forced: string[]
+    notes: string[]
+    saved: string[]
+    savedAt?: string
+    revalidated?: { id: string; from: string; to: string; why: string }[]
+    told?: string[]
+  }
   /** The working set, why each file is in it, the symbols, linked tests, changed files, refreshes and expansions. Survives restart with the record. */
   context?: ProjectContext
 }

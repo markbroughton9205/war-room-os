@@ -1,0 +1,5 @@
+
+
+class ItalianInvoiceTests(unittest.TestCase):
+    def test_italian_customers_are_charged_their_local_tax(self):
+        self.assertEqual(invoice_total(LINES, "IT"), 122.0)

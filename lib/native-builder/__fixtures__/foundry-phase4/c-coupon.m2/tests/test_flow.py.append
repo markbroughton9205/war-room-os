@@ -1,0 +1,5 @@
+
+
+class CaseTests(unittest.TestCase):
+    def test_codes_are_case_insensitive(self):
+        self.assertEqual(place_order(CART, "save10"), 27.0)

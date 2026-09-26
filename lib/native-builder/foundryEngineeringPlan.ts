@@ -58,6 +58,7 @@ export type PlanTrigger =
   | 'NO_EFFECTIVE_CHANGE'
   | 'CONTEXT_EXPANDED'
   | 'CHANGE_REVERTED'
+  | 'MEMORY_USED'
 
 export type PlanChange = {
   op: 'ADD' | 'REOPEN' | 'RETARGET' | 'KEEP' | 'DEFER'
@@ -327,6 +328,7 @@ export const PLAN_TRIGGER_SUMMARY: Record<PlanTrigger, string> = {
   DRIFT_GUARD: "The tests also show a problem that has nothing to do with your request, so I'm leaving it alone and staying on what you asked.",
   HYPOTHESIS_CONTRADICTED: "I checked that idea against the files and it doesn't hold, so I'm changing course.",
   EDIT_INEFFECTIVE: "My change didn't fix it, so I'm ruling that file out and looking at the rest of the project.",
+  MEMORY_USED: "I remember something relevant from earlier in this project, so I'm using it as a starting point and checking it against the code as it is now.",
   CHANGE_REVERTED: "That change made tests that had passed fail again, so I put the files back and kept what was working.",
   CONTEXT_EXPANDED: "The failing run points at another part of the project, so I'm adding it to what I'm looking at.",
   NO_EFFECTIVE_CHANGE: "The change I was about to make would not have changed anything, so I'm not repeating it and I'm looking at the problem another way.",

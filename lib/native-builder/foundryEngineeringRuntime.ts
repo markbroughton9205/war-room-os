@@ -144,6 +144,7 @@ import {
 } from './foundryProgressEvaluation'
 import { callCampaignSpecialist, missingNamesFromFailure, specialistRequestFromCampaign, type NoEffectiveChange } from './foundryEngineeringSpecialist'
 import {
+  CONTEXT_LIMITS,
   buildIndex,
   contentHash,
   contextDetails,
@@ -165,6 +166,23 @@ import {
   type ProjectIndex,
 } from './foundryProjectContext'
 import { contextShouldOwn, diskHashes, isFilterShaped, readProjectFile, readProjectSources } from './foundryProjectContextIO'
+import {
+  MEMORY_LIMITS,
+  causeSuggestions,
+  describeIgnoredMemory,
+  describeMemoryUse,
+  memoriesFromMission,
+  memoryDetails,
+  memoryNotes,
+  mergeMemories,
+  retrieveMemories,
+  revalidateStore,
+  unrelatedCandidates,
+  type FailureKey,
+  type MemoryStore,
+  type RetrievalResult,
+} from './foundryProjectMemory'
+import { listTopLevelNames, loadMemory, saveMemory } from './foundryProjectMemoryIO'
 import { resolveRepoRoot } from '@/lib/repo/paths'
 import { getRepair, saveRepair } from './storage'
 import { MissionSealedError, MissionSupersededError, assertExecutorMayWrite, isMissionOwned, withRecordLock } from './foundryMissionOwnership'
@@ -361,6 +379,12 @@ export function stopEngineeringProcess(missionId: string): boolean {
   return true
 }
 
+/** Commands feed models and the Activity log, so they must not print terminal colour codes (FORCE_COLOR would otherwise win over NO_COLOR). */
+export function plainOutputEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { FORCE_COLOR: _force, ...rest } = env
+  return { ...rest, NO_COLOR: '1' }
+}
+
 export function runEngineeringCommand(input: {
   missionId: string
   cmd: string
@@ -370,7 +394,7 @@ export function runEngineeringCommand(input: {
 }): Promise<{ code: number | null; stdout: string; stderr: string; durationMs: number; timedOut: boolean; cancelled: boolean }> {
   const started = Date.now()
   return new Promise(resolve => {
-    const child = spawn(input.cmd, input.args, { cwd: input.cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(input.cmd, input.args, { cwd: input.cwd, stdio: ['ignore', 'pipe', 'pipe'], env: plainOutputEnv(process.env) })
     let stdout = ''
     let stderr = ''
     let settled = false
@@ -616,11 +640,38 @@ async function runOwnedEngineeringMissionInner(repairId: string): Promise<Native
   const sessionId = initial.codingMission.sessionId
   const request = initial.codingMission.commanderRequest
   try {
-    return await runOwnedBody(repairId, initial.issueId, sessionId, request)
+    const result = await runOwnedBody(repairId, initial.issueId, sessionId, request)
+    if (result?.state === 'blocked') await persistBlockedMemory(repairId)
+    return result
   } catch (error) {
     if (error instanceof MissionSupersededError || error instanceof MissionSealedError) throw error
     const message = error instanceof Error ? error.message : String(error)
     return sealBlocked(repairId, blocked('Engineering runtime stopped on an unexpected error.', message, [], false, 'Inspect the mission event log and retry from a checkpoint.'))
+  }
+}
+
+/**
+ * A mission that ended blocked can still have learned something with bounded evidence (a strategy that changed nothing, a disproval). That is kept as a
+ * SESSION note for this session only; it becomes durable project knowledge only if a later verified mission confirms it. No verified fix is claimed.
+ */
+async function persistBlockedMemory(repairId: string): Promise<void> {
+  try {
+    const record = await getRepair(repairId)
+    const campaign = record?.codingMission?.engineeringRuntime?.campaign
+    if (!campaign || campaign.contextMode !== 'CONTEXT' || !campaign.context || campaign.memory?.savedAt) return
+    const root = resolveRepoRoot()
+    const at = new Date().toISOString()
+    const index = buildIndex(await readProjectSources(root))
+    const loaded = await loadMemory(root, at)
+    const revalidated = revalidateStore(loaded.store, index, at, repairId)
+    const candidates = memoriesFromMission({
+      mission: repairId, session: record?.codingMission?.sessionId ?? null, at, resolved: false, index, context: campaign.context, filesMutated: campaign.filesMutated,
+      baseline: campaign.baselineFailure ?? null, ruledOut: [...(campaign.ruledOut ?? []), ...(campaign.memoryTrail?.ineffective ?? []).filter(file => !(campaign.ruledOut ?? []).some(item => item.file === file)).map(file => ({ file, layer: 'code', basis: 'EDIT' as const }))], noEffect: campaign.noEffect ?? [], reverted: campaign.revertedFiles ?? [], greenFiles: campaign.memoryTrail?.greenFiles ?? [],
+      testCommand: null, greenGeneration: campaign.mutationGeneration, projectFiles: [],
+    })
+    await saveMemory(root, mergeMemories(revalidated.store, candidates, at))
+  } catch {
+    // Memory is an aid: failing to save it never changes the mission's outcome.
   }
 }
 
@@ -1516,6 +1567,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     if (!restored.length) return false
     state.mutationGeneration += 1
     state.reverts = (state.reverts ?? 0) + 1
+    state.revertedFiles = [...new Set([...(state.revertedFiles ?? []), ...restored])].slice(-6)
     state.reworkOrigin = undefined
     await refreshContextFiles(restored, 'I put it back')
     for (const file of restored) state.context = noteChanged(state.context!, file, state.mutationGeneration)
@@ -1523,11 +1575,179 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     revisePlanFor('CHANGE_REVERTED', { evidence: restored.map(file => `${file}: put back to the version whose tests passed`) })
     return true
   }
+  // ---- Phase 4: engineering memory. Project-scoped, evidence-backed, revalidated against the current code before use, and never a substitute for fresh evidence.
+  let memoryStore: MemoryStore | null = null
+  const memoryNow = () => new Date().toISOString()
+  const memoryState = () => (state.memory ??= { status: 'FRESH', used: [], ignored: [], skipped: [], forced: [], notes: [], saved: [] })
+  /** Loads this project's store (a store that belongs to another project is set aside) and revalidates it against the project as it is right now. */
+  const memoryReady = async (): Promise<MemoryStore> => {
+    if (memoryStore) return memoryStore
+    const at = memoryNow()
+    const loaded = await loadMemory(root, at)
+    const revalidated = revalidateStore(loaded.store, await ensureIndex(), at, repairId)
+    memoryStore = revalidated.store
+    const m = memoryState()
+    m.status = loaded.status
+    if (revalidated.changed.length) m.revalidated = revalidated.changed.slice(0, 8)
+    if (revalidated.changed.length || loaded.status === 'QUARANTINED') await saveMemory(root, memoryStore)
+    return memoryStore
+  }
+  /** Called after every integration test run: which edit turned the tests green, and which edit left the very same failure in place. Typed evidence only. */
+  const noteMemoryTrail = async (passed: boolean, output: string) => {
+    if (!contextOn()) return
+    const trail = (state.memoryTrail ??= { greenFiles: [], ineffective: [], lastKey: null, editsAtRun: 0 })
+    const editedNow = Math.max(0, state.appliedEditKeys.length - trail.editsAtRun)
+    const filesNow = (state.recentEdits ?? []).slice(-Math.min(2, editedNow || 0)).map(item => item.file).filter(file => editedNow > 0)
+    if (passed) {
+      if (!trail.greenFiles.length && trail.lastKey !== null && filesNow.length) trail.greenFiles = [...new Set(filesNow)]
+    } else {
+      const fp = fingerprintTestFailure(output.replace(/\u001b\[[0-9;]*m/g, ''), 'TEST')
+      const key = `${fp.exceptions[0] ?? ''}|${[...fp.failingTests].sort().join(',')}`
+      const base = state.baselineFailure
+      const stillTheOriginalFailure = Boolean(base) && (fp.exceptions[0] ?? null) === base!.exception && base!.tests.some(test => fp.failingTests.includes(test))
+      if (editedNow > 0 && trail.lastKey === key && stillTheOriginalFailure) trail.ineffective = [...new Set([...trail.ineffective, ...filesNow])].slice(-6)
+      trail.lastKey = key
+    }
+    trail.editsAtRun = state.appliedEditKeys.length
+  }
+  const contextPaths = () => (state.context?.entries ?? []).map(entry => entry.path)
+  const memoryQuery = (failure: FailureKey | null) => ({
+    sessionId: sessionId ?? null,
+    goal: request,
+    files: contextPaths(),
+    symbols: (state.context?.entries ?? []).flatMap(entry => entry.symbols.map(symbol => symbol.name)),
+    tests: failure?.tests ?? [],
+    failure,
+  })
+  /** Records what memory contributed and tells the Commander in plain words. Ids and statuses go to Activity only. */
+  const announceMemory = async (result: RetrievalResult, stage: 'start' | 'failure', extra: string[] = []) => {
+    const m = memoryState()
+    const fresh = result.hits.filter(hit => !m.used.some(item => item.id === hit.memory.id))
+    const freshIgnored = result.ignored.filter(item => !m.ignored.some(known => known.id === item.memory.id))
+    for (const hit of fresh) m.used.push({ id: hit.memory.id, kind: hit.memory.kind, files: hit.memory.files.slice(0, 4), why: hit.reasons })
+    for (const item of freshIgnored) m.ignored.push({ id: item.memory.id, kind: item.memory.kind, why: item.why })
+    m.used = m.used.slice(-8)
+    m.ignored = m.ignored.slice(-6)
+    const notes = memoryNotes(result)
+    if (notes.length) m.notes = notes
+    const sentences: string[] = []
+    if (m.status === 'QUARANTINED' && !(m.told ?? []).includes('quarantine')) {
+      sentences.push("The notes saved for this project belong to a different project, so I'm not using them.")
+      m.told = [...(m.told ?? []), 'quarantine']
+    }
+    const use = fresh.length ? describeMemoryUse({ hits: fresh, ignored: [] }, stage) : null
+    if (use) sentences.push(use)
+    const skipped = freshIgnored.length ? describeIgnoredMemory({ hits: [], ignored: freshIgnored }) : null
+    if (skipped) sentences.push(skipped)
+    sentences.push(...extra)
+    if (!sentences.length) return
+    state.knowledge.decisions.push(`MEMORY ${[...fresh.map(hit => hit.memory.kind), ...freshIgnored.map(item => `ignored-${item.memory.kind}`)].join(',')}`.slice(0, 140))
+    await bindCampaign(repairId, sessionId, 'PLANNING', sentences[0], state, emit(repairId, sessionId, 'ARCHITECTING', sentences.join(' '), { status: 'info', detail: memoryDetails(result).join('\n') }))
+  }
+  /** A verified fix for the same kind of failure points at a file: look there first, if it still exists and still holds the symbol it was about. The edit is still checked by the tests. */
+  const addMemoryCause = async (cause: { file: string; memoryId: string; why: string }) => {
+    if (!contextOn()) return
+    const index = await ensureIndex()
+    const facts = index.files[cause.file]
+    if (!facts) return
+    const at = memoryNow()
+    const known = state.context!.entries.find(entry => entry.path === cause.file)
+    if (!known) {
+      if (state.context!.entries.length >= CONTEXT_LIMITS.workingSetHardMax) return
+      const entry = { path: cause.file, role: 'implementation' as const, score: 85, reasons: [cause.why], symbols: [], hash: facts.hash, via: 'memory' }
+      state.context = { ...state.context!, entries: [...state.context!.entries, entry], expansions: [...state.context!.expansions, { at, file: cause.file, reason: cause.why, evidence: `earlier verified mission (${cause.memoryId})`, generation: state.mutationGeneration }].slice(-12) }
+      await load(cause.file)
+    }
+    const layer = layerOfFile(cause.file, state.componentFiles) === 'frontend' ? 'frontend' : 'backend'
+    if (!state.componentFiles[layer].includes(cause.file)) state.componentFiles[layer].push(cause.file)
+    state.componentFiles[layer] = [cause.file, ...state.componentFiles[layer].filter(file => file !== cause.file)]
+    const task = state.tasks.find(item => item.id === layer)
+    if (task) task.workingSet = [cause.file, ...task.workingSet.filter(file => file !== cause.file)]
+    if (layer === 'frontend' && !memoryState().forced.includes(cause.file)) memoryState().forced.push(cause.file)
+    state.knowledge.decisions.push(`MEMORY_CAUSE ${cause.file}`)
+    revisePlanFor('MEMORY_USED', {
+      evidence: [`${cause.file}: ${cause.why}`],
+      retarget: task ? [{ taskId: layer, workingSet: [...task.workingSet], why: cause.why }] : [],
+    })
+  }
+  /**
+   * An earlier verified mission found a file unrelated to this kind of failure. That is only a reason to ask again: the tests are run once more, and the
+   * first-pass edit of that file is skipped only if today's evidence confirms it. If the evidence does not confirm it, memory yields and nothing changes.
+   */
+  const confirmUnrelated = async (candidate: { file: string; memoryId: string }): Promise<string | null> => {
+    const layer = layerOfFile(candidate.file, state.componentFiles)
+    if (!layer) return null
+    const evidence = await gatherIsolationEvidence(candidate.file, layer)
+    if (!evidence) return "The tests don't confirm that earlier lesson here, so I'm not relying on it."
+    state.ruledOut = mergeRuledOut(state.ruledOut, [{ file: candidate.file, layer, basis: 'ISOLATED_TESTS' }])
+    const m = memoryState()
+    if (!m.skipped.includes(candidate.file)) m.skipped.push(candidate.file)
+    const suspects = evidence.suspectLayers.flatMap(name => state.componentFiles[name as 'backend' | 'frontend']?.slice(0, 1) ?? [])
+    for (const file of suspects) if (!m.forced.includes(file)) m.forced.push(file)
+    const line = `The tests that call ${candidate.file} directly pass (${evidence.passing.slice(0, 2).join(', ')}), and the failing test (${evidence.failing[0]}) goes through ${suspects.join(', ') || 'another file'}, so look there first.`
+    state.context = { ...state.context!, evidence: [line, ...state.context!.evidence].slice(0, 2) }
+    state.knowledge.decisions.push(`MEMORY_CONFIRMED_UNRELATED ${candidate.file}`)
+    revisePlanFor('MEMORY_USED', { evidence: [line] })
+    return "An earlier fix showed this file wasn't the cause of this kind of failure, and the tests confirm that again, so I'm looking at the code that uses it instead."
+  }
+  /** After a failure (and the baseline run): retrieve what is relevant, act on it only as a starting point, and say so. */
+  const applyMemoryForFailure = async (raw: string, stage: 'start' | 'failure') => {
+    if (!contextOn()) return
+    const clean = raw.replace(/\u001b\[[0-9;]*m/g, '')
+    const fp = fingerprintTestFailure(clean, 'TEST')
+    const index = await ensureIndex()
+    // Frames in the order the failing run went through them (the fingerprint's own list is sorted), so the innermost project frame is the file the exception was raised in.
+    const firstTrace = clean.split(/^={10,}\s*$/m).find(block => block.includes('Traceback')) ?? ''
+    const known = Object.keys(index.files)
+    const ordered = [...firstTrace.matchAll(/File "([^"]+)", line \d+, in (\S+)/g)]
+      .map(hit => {
+        const abs = hit[1].replace(/\\/g, '/')
+        const file = known.filter(candidate => abs.endsWith(`/${candidate}`)).sort((a, b) => b.length - a.length)[0]
+        return file ? `${file}:${hit[2]}` : null
+      })
+      .filter((frame, i, all): frame is string => Boolean(frame) && frame !== all[i - 1])
+    const failure: FailureKey = { exception: fp.exceptions[0] ?? null, tests: fp.failingTests.slice(0, 4), frames: (ordered.length ? ordered : fp.frames).slice(0, 8) }
+    if (state.mutationGeneration === 0 && !state.baselineFailure) {
+      state.baselineFailure = failure
+      state.memoryTrail = { greenFiles: [], ineffective: [], lastKey: `${fp.exceptions[0] ?? ''}|${[...fp.failingTests].sort().join(',')}`, editsAtRun: 0 }
+    }
+    const store = await memoryReady()
+    const result = retrieveMemories(store, memoryQuery(failure), index)
+    for (const cause of causeSuggestions(result, index)) await addMemoryCause(cause)
+    const extra: string[] = []
+    if (state.mutationGeneration === 0) {
+      for (const candidate of unrelatedCandidates(result, index, contextPaths())) {
+        const said = await confirmUnrelated(candidate)
+        if (said) extra.push(said)
+      }
+    }
+    await announceMemory(result, stage, extra)
+  }
+  /** What the tests just proved is written down, but only from typed evidence: a verified completion, a recorded disproval, a no-op, a revert. */
+  const writeMemoryAtCompletion = async () => {
+    if (!contextOn() || memoryState().savedAt) return
+    const at = memoryNow()
+    const index = await ensureIndex()
+    const revalidated = revalidateStore(await memoryReady(), index, at, repairId)
+    const candidates = memoriesFromMission({
+      mission: repairId, session: sessionId ?? null, at, resolved: true, index, context: state.context ?? null, filesMutated: state.filesMutated,
+      baseline: state.baselineFailure ?? null, ruledOut: [...(state.ruledOut ?? []), ...(state.memoryTrail?.ineffective ?? []).filter(file => !(state.ruledOut ?? []).some(item => item.file === file)).map(file => ({ file, layer: layerOfFile(file, state.componentFiles) ?? 'code', basis: 'EDIT' as const }))], noEffect: state.noEffect ?? [], reverted: state.revertedFiles ?? [], greenFiles: state.memoryTrail?.greenFiles ?? [],
+      testCommand: 'python3 -m unittest discover -s tests', greenGeneration: state.mutationGeneration, projectFiles: await listTopLevelNames(root),
+    })
+    memoryStore = mergeMemories(revalidated.store, candidates, at)
+    await saveMemory(root, memoryStore)
+    const m = memoryState()
+    m.savedAt = at
+    m.saved = candidates.map(item => item.id).slice(0, MEMORY_LIMITS.writesPerMission)
+    if (revalidated.changed.length) m.revalidated = [...(m.revalidated ?? []), ...revalidated.changed].slice(0, 8)
+    if (candidates.length) await bindCampaign(repairId, sessionId, 'DONE', "I'll remember what worked here for next time.", state, emit(repairId, sessionId, 'CHECKPOINT_CREATED', "I'll remember what worked here for next time.", { status: 'info', detail: candidates.map(item => `${item.kind} ${item.id}: ${item.subject}`).join('\n') }))
+  }
   const contextSourceFiles = () => (state.context?.entries ?? []).filter(entry => entry.role !== 'test' && entry.role !== 'config').slice(0, 4).map(entry => entry.path)
   /** Which implementation tasks may edit in a context-driven campaign: the owner of the change on the first pass, and afterwards only the layer a diagnosis actually pointed at. */
   const contextNeedsEdit = (task: CampaignTask) => {
     const debugIds = task.dependsOn.filter(id => id.startsWith('debug-'))
-    if (!debugIds.length) return task.role === 'BACKEND'
+    // First pass. A file an earlier verified mission found unrelated to this failure, and today's tests confirmed unrelated again, is not edited blindly; the file that evidence points at is.
+    if (!debugIds.length) return task.role === 'BACKEND' ? !(state.memory?.skipped ?? []).includes(task.workingSet[0]) : (state.memory?.forced ?? []).includes(task.workingSet[0])
     const layers = debugIds.map(id => layerForRepairTarget(state.plan?.tasks.find(item => item.id === id)?.repairTarget, state.componentFiles)).filter(Boolean)
     return (layers as string[]).includes(task.id) || (task.role === 'BACKEND' && layers.length === 0)
   }
@@ -1785,6 +2005,9 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
         if (current.id === 'discover' && contextOn() && !state.checkpoints.includes('BASELINE') && state.commandsRun < commandLimit()) {
           state.commandsRun += 1
           state.checkpoints.push('BASELINE')
+          // What this project taught Foundry earlier is retrieved before the first edit, and checked against the code as it is now.
+          const startStore = await memoryReady()
+          await announceMemory(retrieveMemories(startStore, memoryQuery(null), await ensureIndex()), 'start')
           const bin = await pythonBin(root)
           recordTestStart(state, `python3 ${regressionTestCommand().args.join(' ')}`, new Date().toISOString())
           const baseline = await runStepCommand(repairId, sessionId, bin, regressionTestCommand().args, root, 'Checking the tests before changing anything')
@@ -1794,6 +2017,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             const finding = `tests fail before any change: ${keyFailureLine(raw)} ${raw.replace(/\s+/g, ' ').slice(0, 240)}`
             state.repairFinding = finding
             state.knowledge.failures.push(finding.slice(0, 200))
+            await applyMemoryForFailure(raw, 'start')
           }
         }
         completeCampaignTask(current, ['evidenced'])
@@ -1866,6 +2090,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
         state.phase = 'COMPLETE'
         state.checkpoints.push('PROJECT_READY')
         completeCampaignTask(current, [call.workerLabel, 'PROJECT_READY'])
+        await writeMemoryAtCompletion()
         await bindCampaign(repairId, sessionId, 'DONE', emitProgress(), state, emit(repairId, sessionId, 'PROJECT_READY', 'Verifier accepted the campaign from disk truth.', { status: 'pass', detail: `${call.workerLabel}; ${emitProgress()}`, validationResult: 'PASS' }))
       } else {
         const contractText = await load(state.componentFiles.contract[0] ?? '')
@@ -1891,7 +2116,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             ...files.map(file => ({ file, text: sources.get(file) ?? '' })),
             ...(contextOn() && (current.role === 'BACKEND' || current.role === 'FRONTEND') ? await contextTestExcerpts(files) : []),
           ]
-          const notesForCall = contextOn() ? contextNotes(state.context!, await ensureIndex(), current.role === 'BACKEND' || current.role === 'FRONTEND' ? current.workingSet[0] : undefined) : []
+          const notesForCall = contextOn() ? [...(state.memory?.notes ?? []), ...contextNotes(state.context!, await ensureIndex(), current.role === 'BACKEND' || current.role === 'FRONTEND' ? current.workingSet[0] : undefined)] : []
           // The record shows exactly what reached the model: which files, and which context notes.
           if (contextOn()) state.context = noteSent(state.context!, { role: current.role, task: current.id, files: shownExcerpts.map(item => item.file), notes: notesForCall })
           const call = await callCampaignSpecialist(specialistRequestFromCampaign({
@@ -2034,6 +2259,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             const passed = result.code === 0 || scopedPass
             state.knowledge.tests.push(`integrate ${passed ? 'pass' : 'fail'}`)
             if (passed) state.progress = noteGreen(state.progress, { at: new Date().toISOString(), mutationGeneration: state.mutationGeneration })
+            await noteMemoryTrail(passed, `${result.stdout}\n${result.stderr}`)
             if (passed && contextOn()) await snapshotGreen()
             if (!passed) {
               const raw = scoped?.relatedText ?? `${result.stdout}\n${result.stderr}`
@@ -2058,6 +2284,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
                 continue
               }
               state.reworkOrigin = 'TEST'
+              await applyMemoryForFailure(`${result.stdout}\n${result.stderr}`, 'failure')
               // The failing run may point at code the working set does not hold yet: grow it, with the reason, before the diagnosis is asked for.
               await expandContext(`${result.stdout}\n${result.stderr}`)
               await gatherContextEvidence()

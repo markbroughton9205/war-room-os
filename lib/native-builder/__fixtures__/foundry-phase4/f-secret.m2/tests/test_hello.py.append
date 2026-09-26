@@ -1,0 +1,5 @@
+
+
+class FriendTests(unittest.TestCase):
+    def test_an_empty_name_is_a_friend(self):
+        self.assertEqual(greet(""), "hello, friend!")

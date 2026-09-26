@@ -192,7 +192,7 @@ export function buildLiveProgress(input: LiveProgressInput): LiveProgress {
         // A real replan recorded by the runtime (never inferred): the plan changed because the evidence changed.
         let trigger = ''
         try { trigger = String((JSON.parse(e.detail ?? '{}') as { trigger?: string }).trigger ?? '') } catch { /* payload is technical detail only */ }
-        if (['FAILURE_CHANGED', 'CONTRADICTION', 'REPAIR_RETARGET', 'HYPOTHESIS_DISPROVEN', 'HYPOTHESIS_CONTRADICTED', 'EDIT_INEFFECTIVE', 'NO_EFFECTIVE_CHANGE', 'CONTEXT_EXPANDED', 'CHANGE_REVERTED'].includes(trigger)) replans += 1
+        if (['FAILURE_CHANGED', 'CONTRADICTION', 'REPAIR_RETARGET', 'HYPOTHESIS_DISPROVEN', 'HYPOTHESIS_CONTRADICTED', 'EDIT_INEFFECTIVE', 'NO_EFFECTIVE_CHANGE', 'CONTEXT_EXPANDED', 'CHANGE_REVERTED', 'MEMORY_USED'].includes(trigger)) replans += 1
         if (trigger === 'DRIFT_GUARD') leftAlone += 1
         acc.tech.plan.push(`plan revised${trigger ? ` · ${trigger}` : ''}`)
         break

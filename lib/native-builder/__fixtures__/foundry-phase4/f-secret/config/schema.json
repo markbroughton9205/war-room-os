@@ -1,0 +1,7 @@
+{
+  "variables": {
+    "GREETING_STYLE": {"default": "plain", "description": "plain or formal"},
+    "ENABLE_SHOUTING": {"type": "boolean", "default": false, "description": "feature flag: greetings are shouted"},
+    "SMTP_PASSWORD": {"secret": true, "description": "mail server password"}
+  }
+}

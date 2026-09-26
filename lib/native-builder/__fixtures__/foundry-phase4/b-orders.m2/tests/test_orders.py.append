@@ -1,0 +1,8 @@
+
+
+from orders.report import customer_lines
+
+
+class CustomerReportTests(unittest.TestCase):
+    def test_customer_report_lists_every_order(self):
+        self.assertEqual(customer_lines(ROWS, "ana"), "A\nB")
