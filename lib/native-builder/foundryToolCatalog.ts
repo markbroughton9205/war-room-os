@@ -203,6 +203,9 @@ export function validateModelToolRequest(
   }
   const input = { ...(args as Record<string, unknown>) }
   if (entry.name === 'terminal.execute') coerceTerminalExecuteArgs(input)
+  // `reason` on a governed edit is an audit note, not an authorization. A local model often omits it, which used to block an otherwise
+  // valid edit ("missing required argument reason"). Record that the model proposed the edit instead of refusing it.
+  if (entry.name === 'file.replace_unique' && !('reason' in input)) input.reason = 'Edit proposed by the model for the current task.'
   if (entry.args.commanderConfirmed === 'true') {
     input.commanderConfirmed = true
   }

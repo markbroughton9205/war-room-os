@@ -18,6 +18,8 @@
  * Pure: no filesystem, network, clock (timestamps are passed in), or React.
  */
 
+import type { DeferredFailure } from './foundryGoalAnchor'
+
 export type PlanTaskStatus = 'PLANNED' | 'ACTIVE' | 'DONE' | 'REOPENED' | 'SKIPPED'
 
 export type PlanTask = {
@@ -49,9 +51,16 @@ export type PlanTrigger =
   | 'REPAIR_RETARGET'
   | 'INVALID_OUTPUT'
   | 'COMMANDER_CONTINUATION'
+  | 'DRIFT_GUARD'
+  | 'HYPOTHESIS_DISPROVEN'
+  | 'HYPOTHESIS_CONTRADICTED'
+  | 'EDIT_INEFFECTIVE'
+  | 'NO_EFFECTIVE_CHANGE'
+  | 'CONTEXT_EXPANDED'
+  | 'CHANGE_REVERTED'
 
 export type PlanChange = {
-  op: 'ADD' | 'REOPEN' | 'RETARGET' | 'KEEP'
+  op: 'ADD' | 'REOPEN' | 'RETARGET' | 'KEEP' | 'DEFER'
   taskId: string
   why: string
 }
@@ -74,9 +83,11 @@ export type EngineeringPlan = {
   acceptance: string[]
   tasks: PlanTask[]
   revisions: PlanRevision[]
+  /** Failures that have nothing to do with the request. Recorded and reported, never repaired. */
+  deferred?: DeferredFailure[]
 }
 
-export const PLAN_LIMITS = { maxRevisions: 12, maxTasks: 32, maxEvidence: 4, maxEvidenceChars: 160 } as const
+export const PLAN_LIMITS = { maxRevisions: 12, maxTasks: 32, maxEvidence: 4, maxEvidenceChars: 160, maxDeferred: 8 } as const
 
 export type CampaignTaskLike = {
   id: string
@@ -229,6 +240,8 @@ export type RevisionInput = {
   retarget?: readonly { taskId: string; workingSet: string[]; why: string }[]
   /** Completed tasks deliberately left alone, so the revision states what was NOT repeated. */
   keep?: readonly { taskId: string; why: string }[]
+  /** Failures deliberately left alone because they are unrelated to the request (the goal anchor). */
+  defer?: readonly DeferredFailure[]
   components: ComponentFilesLike
 }
 
@@ -259,6 +272,12 @@ export function revisePlan(plan: EngineeringPlan, input: RevisionInput): Enginee
     changes.push({ op: 'RETARGET', taskId: task.id, why: short(item.why) })
   }
   for (const item of input.keep ?? []) changes.push({ op: 'KEEP', taskId: item.taskId, why: short(item.why) })
+  let deferred = plan.deferred
+  for (const item of input.defer ?? []) {
+    if ((deferred ?? []).some(known => known.test === item.test)) continue
+    deferred = cap([...(deferred ?? []), { test: short(item.test), file: item.file, why: short(item.why) }], PLAN_LIMITS.maxDeferred)
+    changes.push({ op: 'DEFER', taskId: 'goal', why: short(`${item.test}: ${item.why}`) })
+  }
   const entry: PlanRevision = {
     version: revision,
     at: input.at,
@@ -267,7 +286,22 @@ export function revisePlan(plan: EngineeringPlan, input: RevisionInput): Enginee
     evidence: input.evidence.map(short).slice(0, PLAN_LIMITS.maxEvidence),
     changes,
   }
-  return { ...plan, revision, tasks, revisions: cap([...plan.revisions, entry], PLAN_LIMITS.maxRevisions) }
+  return { ...plan, revision, tasks, revisions: cap([...plan.revisions, entry], PLAN_LIMITS.maxRevisions), ...(deferred ? { deferred } : {}) }
+}
+
+/**
+ * A new diagnosis that names a different layer than an earlier one, after that earlier attempt failed, means the earlier belief
+ * was disproven. Returns the evidence for the revision, or null when there is no earlier belief or it agrees.
+ */
+export function disprovenHypothesis(plan: EngineeringPlan, debugId: string, hypothesis: string, target: string | null, components: ComponentFilesLike): string[] | null {
+  const layer = layerForRepairTarget(target, components)
+  if (!layer) return null
+  // Only the belief held immediately before this diagnosis can be disproven by it; comparing with every older belief would
+  // report the same swing over and over.
+  const prior = plan.tasks.filter(task => task.id.startsWith('debug-') && task.id !== debugId && task.hypothesis && task.repairTarget).at(-1)
+  const priorLayer = prior ? layerForRepairTarget(prior.repairTarget, components) : null
+  if (prior && priorLayer && priorLayer !== layer) return [`Earlier idea: ${prior.hypothesis}`, `Now: ${short(hypothesis)}`]
+  return null
 }
 
 /** Links the debugger's hypothesis and repair target to the task that will act on it, so every repair is traceable to its cause. */
@@ -290,6 +324,13 @@ export const PLAN_TRIGGER_SUMMARY: Record<PlanTrigger, string> = {
   INVALID_OUTPUT: "A worker's answer wasn't usable, so I'm asking again with a narrower task.",
   REPAIR_RETARGET: "The cause points at a different file than planned, so I'm changing which file I work on.",
   COMMANDER_CONTINUATION: "You asked me to keep trying, so I'm continuing this plan with a different approach.",
+  DRIFT_GUARD: "The tests also show a problem that has nothing to do with your request, so I'm leaving it alone and staying on what you asked.",
+  HYPOTHESIS_CONTRADICTED: "I checked that idea against the files and it doesn't hold, so I'm changing course.",
+  EDIT_INEFFECTIVE: "My change didn't fix it, so I'm ruling that file out and looking at the rest of the project.",
+  CHANGE_REVERTED: "That change made tests that had passed fail again, so I put the files back and kept what was working.",
+  CONTEXT_EXPANDED: "The failing run points at another part of the project, so I'm adding it to what I'm looking at.",
+  NO_EFFECTIVE_CHANGE: "The change I was about to make would not have changed anything, so I'm not repeating it and I'm looking at the problem another way.",
+  HYPOTHESIS_DISPROVEN: "The first fix didn't settle it, and the evidence now points at a different part of the project, so I'm changing course.",
 }
 
 /** Old records (before the plan existed) resume with a plan reconstructed from their tasks; nothing is invented. */
@@ -347,19 +388,22 @@ export function planSummary(plan: EngineeringPlan | null | undefined): PlanSumma
   if (!plan) return null
   const initial = plan.revisions[0]?.summary ?? initialSummary(plan)
   const latest = plan.revisions.length > 1 ? plan.revisions[plan.revisions.length - 1] : null
+  // Leaving an unrelated failure alone is not a change of course.
+  const courseChanges = plan.revisions.filter((revision, index) => index > 0 && revision.trigger !== 'DRIFT_GUARD').length
   return {
     headline: initial,
     lastRevision: latest ? latest.summary : null,
-    changes: Math.max(0, plan.revisions.length - 1),
-    retrospective: retrospectiveLine(Math.max(0, plan.revisions.length - 1)),
+    changes: courseChanges,
+    retrospective: retrospectiveLine(courseChanges, plan.deferred?.length ?? 0),
     steps: plan.tasks.filter(task => !task.id.startsWith('debug-')).map(task => task.title),
   }
 }
 
-function retrospectiveLine(changes: number): string {
+function retrospectiveLine(changes: number, deferred = 0): string {
   const base = 'I read the project, made the change, ran the tests, reviewed it and verified it from disk.'
-  if (changes <= 0) return base
-  return `${base} I changed course ${changes === 1 ? 'once' : `${changes} times`} when the evidence changed.`
+  const left = deferred > 0 ? ` ${deferred === 1 ? 'One failing test that has nothing to do with your request was' : `${deferred} failing tests that have nothing to do with your request were`} left as found.` : ''
+  if (changes <= 0) return `${base}${left}`
+  return `${base} I changed course ${changes === 1 ? 'once' : `${changes} times`} when the evidence changed.${left}`
 }
 
 export function planEventPayload(plan: EngineeringPlan): string {

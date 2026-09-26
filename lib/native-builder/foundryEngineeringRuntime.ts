@@ -107,12 +107,16 @@ import {
   ensurePlan,
   decideRepairTarget,
   linkHypothesis,
+  disprovenHypothesis,
+  layerForRepairTarget,
   planEventPayload,
   revisePlan,
   syncPlanStatus,
   type PlanTrigger,
   type RevisionInput,
 } from './foundryEngineeringPlan'
+import { acceptanceBasis, reviewClaimDecision, reviewerContract, setAsideNote, testsGreenAtCurrentGeneration, type ReviewClaimDecision } from './foundryAcceptanceBasis'
+import { contradictedClaim, debugFilesFor, failingTestFiles, filesNamedBy, ineffectiveEdits, isolatedLayerEvidence, layerOfFile, mergeRuledOut, noEffectExhausted, recordNoEffect, reopenAfterNoEffect, reopenableLayers, scopeTestFailures, type DeferredFailure, type IsolatedLayerEvidence } from './foundryGoalAnchor'
 import {
   PROGRESS_LIMITS,
   clearPendingContinuation,
@@ -124,6 +128,7 @@ import {
   ensureCampaignProgress,
   evaluateFailure,
   evaluateInvalidOutput,
+  evaluateNoEffectiveChange,
   evaluateNoTests,
   fingerprintFinding,
   fingerprintTestFailure,
@@ -137,7 +142,29 @@ import {
   type ProgressDecision,
   type ProgressStopReason,
 } from './foundryProgressEvaluation'
-import { callCampaignSpecialist, specialistRequestFromCampaign } from './foundryEngineeringSpecialist'
+import { callCampaignSpecialist, missingNamesFromFailure, specialistRequestFromCampaign, type NoEffectiveChange } from './foundryEngineeringSpecialist'
+import {
+  buildIndex,
+  contentHash,
+  contextDetails,
+  contextNotes,
+  debugSet,
+  describeContext,
+  describeExpansion,
+  discoverContext,
+  expandFromEvidence,
+  layersFromContext,
+  noteChanged,
+  noteRead,
+  noteSent,
+  minimalRevertSpan,
+  refreshContext,
+  restoreContext,
+  staleEntries,
+  updateIndex,
+  type ProjectIndex,
+} from './foundryProjectContext'
+import { contextShouldOwn, diskHashes, isFilterShaped, readProjectFile, readProjectSources } from './foundryProjectContextIO'
 import { resolveRepoRoot } from '@/lib/repo/paths'
 import { getRepair, saveRepair } from './storage'
 import { MissionSealedError, MissionSupersededError, assertExecutorMayWrite, isMissionOwned, withRecordLock } from './foundryMissionOwnership'
@@ -1085,15 +1112,31 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
   }
   applyProgressBudgets()
   const commandLimit = () => progressLimits(state.progress).commands
+  // The project index is memory-only (rebuilt from disk); what persists is the context: the working set, its reasons, links, changes and expansions.
+  let projectIndex: ProjectIndex | null = null
+  const ensureIndex = async (): Promise<ProjectIndex> => {
+    projectIndex ??= buildIndex(await readProjectSources(root))
+    return projectIndex
+  }
   if (!resuming) {
     await bindCampaign(repairId, sessionId, 'PLANNING', 'Campaign started.', state, emit(repairId, sessionId, 'CAMPAIGN_STARTED', 'One engineering campaign started.', { status: 'running', detail: request.slice(0, 280) }))
     if (isGovernanceProbe(request)) return governBlocked(repairId, sessionId, request)
     const map = await scanRepositoryStructure(root)
     state.repoFileCount = map.fileCount
     state.componentFiles = classifyCampaignFiles(map.names)
+    // Phase 3: unless this is the status-filter fixture shape, the layers come from what the goal is about, found from the goal and the project alone.
+    state.contextMode = 'CONVENTION'
+    if (!isFilterShaped(request)) {
+      const found = discoverContext(await ensureIndex(), request, new Date().toISOString())
+      if (found.entries.some(entry => entry.role === 'implementation' || entry.role === 'consumer')) {
+        state.context = found
+        state.contextMode = 'CONTEXT'
+        state.componentFiles = layersFromContext(found)
+      }
+    }
     const git = await captureGitBaseline(root)
     state.preexistingDirty = [...new Set([...git.dirty, ...git.untracked])]
-    const plan = buildCampaignPlan(state.componentFiles, request)
+    const plan = buildCampaignPlan(state.componentFiles, request, state.contextMode === 'CONTEXT')
     state.tasks = plan.tasks
     state.parallelGroups = plan.parallelGroups
     state.phases = [...new Set(plan.tasks.map(item => item.phase))].map(type => ({
@@ -1107,7 +1150,8 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     state.knowledge.decisions.push('Backend and frontend are parallel-ready. Writes run serially under file locks.')
     state.checkpoints.push('PLAN_READY')
     state.phase = 'PLAN'
-    await bindCampaign(repairId, sessionId, 'PLANNING', emitProgress(), state, emit(repairId, sessionId, 'ARCHITECTING', 'Architecture is taken from repository paths.', { status: 'pass', detail: state.knowledge.architecture.join(' ') }))
+    if (state.contextMode === 'CONTEXT' && state.context) state.knowledge.architecture.push(...contextDetails(state.context).slice(0, 4))
+    await bindCampaign(repairId, sessionId, 'PLANNING', emitProgress(), state, emit(repairId, sessionId, 'ARCHITECTING', state.contextMode === 'CONTEXT' && state.context ? describeContext(state.context) : 'Architecture is taken from repository paths.', { status: 'pass', detail: state.contextMode === 'CONTEXT' && state.context ? contextDetails(state.context).join('\n') : state.knowledge.architecture.join(' ') }))
     await bindCampaign(repairId, sessionId, 'PLANNING', emitProgress(), state, emit(repairId, sessionId, 'PLAN_READY', emitProgress(), { status: 'pass', detail: state.tasks.map(item => item.id).join(', ') }))
     if (state.pauseAfter === 'PLAN_READY') {
       const paused = await getRepair(repairId)
@@ -1154,6 +1198,8 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
 
   // Planning: revisions are recorded as the task graph changes and announced once, at the top of the next loop turn.
   let planDirty = false
+  /** True when a repair edit was applied since the previous failure: only then can a new diagnosis say the earlier one did not settle it. */
+  let editedSinceLastFailure = false
   const revisePlanFor = (trigger: PlanTrigger, input: Omit<RevisionInput, 'at' | 'components' | 'trigger' | 'summary'>) => {
     if (!state.plan) return
     state.plan = revisePlan(state.plan, { ...input, trigger, summary: PLAN_TRIGGER_SUMMARY[trigger], at: new Date().toISOString(), components: state.componentFiles })
@@ -1162,7 +1208,9 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
   /** Links the debugger's hypothesis to its task, and replans when the diagnosis contradicts which layer was reopened or which file to edit. */
   const linkRepairToPlan = (debugId: string, hypothesis: string, target: string | null) => {
     if (!state.plan) return
+    const disproven = editedSinceLastFailure ? disprovenHypothesis(state.plan, debugId, hypothesis, target, state.componentFiles) : null
     state.plan = linkHypothesis(state.plan, debugId, hypothesis, target)
+    if (disproven) revisePlanFor('HYPOTHESIS_DISPROVEN', { evidence: disproven })
     const decision = decideRepairTarget({ target, components: state.componentFiles, tasks: state.tasks })
     if (!decision) return
     const task = state.tasks.find(item => item.id === decision.layer)
@@ -1181,14 +1229,14 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
   }
 
   /** The plan changes with the evidence: a debug step is added, only the work the failure implicates is reopened, and finished work is kept. */
-  const replanForRework = (finding: string, debugId: string, trigger: PlanTrigger) => {
+  const replanForRework = (finding: string, debugId: string, trigger: PlanTrigger, ruledOutNote?: string) => {
     if (!state.plan) return
     state.plan = syncPlanStatus(state.plan, state.tasks)
     const reopenedIds = state.plan.tasks.filter(task => task.status === 'REOPENED').map(task => task.id)
     const debugTask = state.tasks.find(task => task.id === debugId)
     if (!debugTask) return
     revisePlanFor(trigger, {
-      evidence: [finding],
+      evidence: ruledOutNote ? [ruledOutNote, finding] : [finding],
       add: [{ task: debugTask, why: 'Find the cause before changing the code again.' }],
       reopen: reopenedIds.map(taskId => ({ taskId, why: taskId === 'backend' || taskId === 'frontend' ? 'The failure points at this layer.' : 'It has to run again after the change.' })),
       keep: state.tasks.filter(task => task.status === 'COMPLETE' && !task.id.startsWith('debug-')).map(task => ({ taskId: task.id, why: 'Already done and still valid, so it is not repeated.' })),
@@ -1201,6 +1249,28 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     const last = state.plan.revisions[state.plan.revisions.length - 1]
     if (!last) return
     await bindCampaign(repairId, sessionId, 'REPAIRING', last.summary, state, emit(repairId, sessionId, 'PLAN_REVISED', last.summary, { status: 'info', detail: planEventPayload(state.plan) }))
+  }
+
+  /**
+   * Goal anchor (myopia protection). The request and its acceptance criteria stay the fixed point: a failing test that has
+   * nothing to do with them, and that nothing Foundry changed can reach, is recorded and reported, never chased.
+   * Output that cannot be classified with certainty stays a real failure.
+   */
+  const scopeTests = async (raw: string, code: number | null) => {
+    if (code === 0) return null
+    const testSources: Record<string, string> = {}
+    for (const rel of failingTestFiles(raw)) {
+      const read = await readRepoFile(rel)
+      if (read.ok) testSources[rel] = read.content
+    }
+    const scoped = scopeTestFailures({ output: raw, root, components: state.componentFiles, mutated: state.filesMutated, sources: testSources })
+    return scoped.reliable ? scoped : null
+  }
+  const deferUnrelated = (deferred: readonly DeferredFailure[]) => {
+    const fresh = deferred.filter(item => !(state.plan?.deferred ?? []).some(known => known.test === item.test))
+    if (!fresh.length) return
+    revisePlanFor('DRIFT_GUARD', { evidence: fresh.map(item => item.test), defer: fresh })
+    state.knowledge.decisions.push(`DEFERRED unrelated failure ${fresh.map(item => item.test).join('; ').slice(0, 160)}`)
   }
 
   const openRework = (attribution: string) => {
@@ -1241,8 +1311,13 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
    * strategy identity, progress signals, earned budget) and never a bare cycle count. On a stop the typed
    * reason is left in `state.progress.stop` for `blockedByProgress`.
    */
-  const openModelRework = (finding: string, fingerprint: FailureFingerprint | null, invalid?: { role: string }, origin: 'TEST' | 'REVIEW' | 'VERIFY' = 'TEST') => {
+  const openModelRework = (finding: string, fingerprint: FailureFingerprint | null, invalid?: { role: string; taskId?: string }, origin: 'TEST' | 'REVIEW' | 'VERIFY' = 'TEST', noEffect?: { noEffect: true; planTrigger: PlanTrigger }) => {
     if (state.tasks.some(task => task.role === 'DEBUGGER' && (task.status === 'READY' || task.status === 'RUNNING'))) return false
+    if (noEffect) {
+      // The no-effect verdict was already evaluated by handleNoEffectiveChange: open the rework it decided on.
+      reopenReworkTasks(finding, 'NO_EFFECTIVE_CHANGE', noEffect.planTrigger)
+      return true
+    }
     const at = new Date().toISOString()
     const verdict = invalid || !fingerprint
       ? evaluateInvalidOutput(state.progress, { role: invalid?.role ?? 'SPECIALIST', summary: finding, at, mutationGeneration: state.mutationGeneration, reworkCycles: state.reworkCycles })
@@ -1252,20 +1327,39 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     applyProgressBudgets()
     state.progress = { ...state.progress, stopFinding: verdict.decision.proceed ? null : finding.slice(0, 400) }
     if (!verdict.decision.proceed) return false
+    // A reviewer, tester, verifier, debugger or architect that answered unusably says nothing about the code: ask that same role again (bounded by the
+    // invalid-output streak above) instead of reopening the implementation, which would undo work the evidence says is fine.
+    if (invalid && invalid.taskId && !['BACKEND', 'FRONTEND'].includes(invalid.role)) {
+      const retry = state.tasks.find(task => task.id === invalid.taskId)
+      if (retry) {
+        retry.status = 'READY'
+        retry.verification = 'PENDING'
+        revisePlanFor('INVALID_OUTPUT', { evidence: [finding] })
+        return true
+      }
+    }
     reopenReworkTasks(finding, invalid ? 'INVALID_OUTPUT' : origin === 'REVIEW' ? 'REVIEW_FINDING' : origin === 'VERIFY' ? 'VERIFY_FINDING' : 'TEST_FAILURE')
     return true
   }
 
   /** Opens one rework cycle: a debugger task, then the implementation and verification tasks it feeds. Shared by a normal rework and a Commander continuation. */
-  const reopenReworkTasks = (finding: string, trigger: PlanTrigger = 'TEST_FAILURE') => {
+  const reopenReworkTasks = (finding: string, trigger: PlanTrigger = 'TEST_FAILURE', planTrigger?: PlanTrigger) => {
     const previousSignature = state.lastFailureSignature
     state.reworkCycles += 1
-    state.repairFinding = finding
-    state.knowledge.failures.push(finding)
-    state.reviewFindings = [finding]
-    const signature = failureSignature(finding)
+    // A worker that answered unusably says nothing new about the project. The real failure that started this repair stays the evidence,
+    // otherwise the next diagnosis is about the worker's formatting mistake instead of the code (the newest observation displacing the goal).
+    const carried = (trigger === 'INVALID_OUTPUT' || trigger === 'NO_EFFECTIVE_CHANGE') && state.repairFinding ? state.repairFinding : finding
+    state.repairFinding = carried
+    if (carried === finding) state.knowledge.failures.push(finding)
+    state.reviewFindings = [carried]
+    const signature = failureSignature(carried)
     state.lastFailureSignature = signature
+    const editsSinceFailure = state.appliedEditKeys.length - (state.editsAtFailure ?? 0)
+    editedSinceLastFailure = editsSinceFailure > 0
     state.editsAtFailure = state.appliedEditKeys.length
+    // Evidence beats belief: edits were applied and the same failure came back, so those files are not the cause. Rule them out instead of trying them again.
+    const ineffective = trigger === 'INVALID_OUTPUT' || trigger === 'NO_EFFECTIVE_CHANGE' ? [] : ineffectiveEdits({ sameFailure: Boolean(previousSignature) && previousSignature === signature, editsSinceFailure, recentEdits: state.recentEdits ?? [], components: state.componentFiles })
+    if (ineffective.length) state.ruledOut = mergeRuledOut(state.ruledOut, ineffective)
     const debugId = `debug-${state.reworkCycles}`
     state.tasks.push({
       id: debugId,
@@ -1273,17 +1367,19 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
       role: 'DEBUGGER',
       status: 'READY',
       dependsOn: [],
-      purpose: finding.slice(0, 180),
+      purpose: carried.slice(0, 180),
       acceptance: 'A root-cause hypothesis is recorded before the repair edit.',
       inputs: [],
       outputs: [],
       evidence: [],
-      workingSet: state.componentFiles.backend.slice(0, 1),
+      workingSet: contextOn()
+        ? debugSet(state.context!, [...(state.ruledOut ?? []).map(item => item.file), ...(state.noEffect ?? []).filter(item => item.attempts >= 2).map(item => item.file)])
+        : debugFilesFor(state.componentFiles, state.ruledOut, state.noEffect),
       writes: [],
       attempt: 0,
       verification: 'PENDING',
     })
-    const reopen = new Set(reworkImplementationIds(finding))
+    const reopen = new Set(trigger === 'NO_EFFECTIVE_CHANGE' ? reopenAfterNoEffect(reworkImplementationIds(finding), state.ruledOut, state.noEffect, state.componentFiles) : reopenableLayers(reworkImplementationIds(finding), state.ruledOut))
     for (const id of ['backend', 'frontend'] as const) {
       const item = state.tasks.find(task => task.id === id)
       if (!item || !reopen.has(id)) continue
@@ -1298,7 +1394,240 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
       item.verification = 'PENDING'
       item.dependsOn = Array.from(new Set([debugId, ...item.dependsOn]))
     }
-    replanForRework(finding, debugId, trigger === 'TEST_FAILURE' && previousSignature && previousSignature !== signature ? 'FAILURE_CHANGED' : trigger)
+    replanForRework(
+      finding,
+      debugId,
+      ineffective.length ? 'EDIT_INEFFECTIVE' : planTrigger ?? (trigger === 'TEST_FAILURE' && previousSignature && previousSignature !== signature ? 'FAILURE_CHANGED' : trigger),
+      ineffective.length ? `I changed ${ineffective.map(item => item.file).join(', ')} and the same test still fails.` : undefined,
+    )
+  }
+
+  // ---- Phase 3: automatic codebase context (working set, freshness, evidence-driven growth). Inert unless the campaign is context-driven.
+  const contextOn = () => state.contextMode === 'CONTEXT' && Boolean(state.context)
+  /** Brings named files back in line with disk after an edit or a suspected change: disk is the truth, never the cached text. */
+  const refreshContextFiles = async (files: readonly string[], why: string): Promise<string[]> => {
+    if (!contextOn()) return []
+    const index = await ensureIndex()
+    const updates = await Promise.all(files.map(async rel => ({ path: rel, content: await readProjectFile(root, rel) })))
+    const changed = updateIndex(index, updates)
+    for (const update of updates) if (update.content !== null) sources.set(update.path, update.content)
+    const refreshed = refreshContext(state.context!, index, changed, why, new Date().toISOString(), state.mutationGeneration)
+    state.context = refreshed.context
+    return refreshed.refreshed
+  }
+  /** Before a specialist reasons about files: any working-set file that changed on disk since it was read is re-read first, then what was shown is recorded. */
+  const freshenForCall = async (files: readonly string[]) => {
+    if (!contextOn()) return
+    const onDisk = await diskHashes(root, files)
+    const stale = files.filter(file => {
+      const cached = sources.get(file)
+      return cached !== undefined && onDisk[file] !== null && onDisk[file] !== contentHash(cached)
+    })
+    if (stale.length) await refreshContextFiles(stale, 'it changed on disk since I last read it')
+    for (const file of files) {
+      const text = sources.get(file)
+      if (text !== undefined) state.context = noteRead(state.context!, file, text, state.mutationGeneration)
+    }
+  }
+  /** Runtime evidence decides when the working set grows: the failing run's frames, the names an error mentions, and the failing test. */
+  const expandContext = async (evidenceText: string) => {
+    if (!contextOn()) return
+    const index = await ensureIndex()
+    const grown = expandFromEvidence(state.context!, index, { text: evidenceText, root }, new Date().toISOString(), state.mutationGeneration)
+    if (!grown.added.length) return
+    state.context = grown.context
+    for (const entry of grown.added) {
+      const layer = entry.role === 'test' ? 'tests' : entry.role === 'consumer' ? 'frontend' : 'backend'
+      const files = state.componentFiles[layer]
+      if (!files.includes(entry.path)) files.push(entry.path)
+      const task = state.tasks.find(item => item.id === (layer === 'tests' ? 'integrate' : layer))
+      if (task && !task.workingSet.includes(entry.path)) task.workingSet.push(entry.path)
+      await load(entry.path)
+    }
+    state.knowledge.decisions.push(`CONTEXT_EXPANDED ${grown.added.map(entry => `${entry.path}: ${entry.reasons[0]}`).join('; ').slice(0, 220)}`)
+    revisePlanFor('CONTEXT_EXPANDED', {
+      evidence: grown.added.map(entry => `${entry.path}: ${entry.reasons[0]}`),
+      retarget: grown.added.flatMap(entry => {
+        const layer = entry.role === 'consumer' ? 'frontend' : entry.role === 'test' ? 'integrate' : 'backend'
+        const task = state.tasks.find(item => item.id === layer)
+        return task ? [{ taskId: layer, workingSet: [...task.workingSet], why: entry.reasons[0] ?? 'the failing run points here' }] : []
+      }),
+    })
+    const expansion = grown.context.expansions[grown.context.expansions.length - 1]
+    const last = state.plan?.revisions[state.plan.revisions.length - 1]
+    if (state.plan && last && expansion) state.plan.revisions[state.plan.revisions.length - 1] = { ...last, summary: describeExpansion(expansion) }
+  }
+
+  /** The tests that cover the working set, shown read-only to whoever edits, so the edit is made against what verifies it. */
+  const contextTestExcerpts = async (already: readonly string[]) => {
+    const out: { file: string; text: string; readOnly: true }[] = []
+    for (const entry of (state.context?.entries ?? []).filter(item => item.role === 'test' && !already.includes(item.path)).slice(0, 2)) out.push({ file: entry.path, text: await load(entry.path), readOnly: true })
+    return out
+  }
+  /**
+   * Test linkage + dependency direction as evidence: when the working set holds more than one code file, one verbose run shows whether the tests that call a layer
+   * directly pass while the failing test goes through a different layer. Recorded as plain sentences the diagnosis and the implementers are shown. Bounded: one
+   * command per failure, only when there is another layer to point at.
+   */
+  const gatherContextEvidence = async () => {
+    if (!contextOn()) return
+    state.context = { ...state.context!, evidence: [] }
+    const codeFiles = state.context!.entries.filter(entry => entry.role !== 'test')
+    if (codeFiles.length < 2 || state.commandsRun >= commandLimit()) return
+    state.commandsRun += 1
+    const bin = await pythonBin(root)
+    const result = await runStepCommand(repairId, sessionId, bin, ['-m', 'unittest', 'discover', '-s', 'tests', '-v'], root, 'Checking which code the failing test goes through')
+    const testSources: Record<string, string> = {}
+    for (const rel of state.componentFiles.tests ?? []) testSources[rel] = await load(rel)
+    const lines: string[] = []
+    for (const layer of ['backend', 'frontend'] as const) {
+      const first = state.componentFiles[layer][0]
+      if (!first) continue
+      const found = isolatedLayerEvidence({ layer, components: state.componentFiles, verboseOutput: `${result.stdout}\n${result.stderr}`, testSources })
+      if (!found) continue
+      const suspects = found.suspectLayers.flatMap(name => state.componentFiles[name as 'backend' | 'frontend']?.slice(0, 1) ?? [])
+      lines.push(`The tests that call ${first} directly pass (${found.passing.slice(0, 2).join(', ')}), and the failing test (${found.failing[0]}) goes through ${suspects.join(', ') || 'another file'}, so look there first.`)
+    }
+    state.context = { ...state.context!, evidence: lines.slice(0, 2) }
+  }
+  /** The mutated files exactly as they are while the covering tests pass. */
+  const snapshotGreen = async () => {
+    const files: Record<string, string> = {}
+    for (const file of state.filesMutated) {
+      const text = await readProjectFile(root, file)
+      if (text !== null) files[file] = text
+    }
+    state.greenSnapshot = { generation: state.mutationGeneration, files }
+    state.reworkOrigin = undefined
+  }
+  /** Puts files back to the last green version when a review-opened rework made them fail. Governed, minimal-span edits; bounded to two per mission. */
+  const revertReviewDrivenBreak = async (): Promise<boolean> => {
+    const snap = state.greenSnapshot
+    if (!contextOn() || state.reworkOrigin !== 'REVIEW' || !snap || snap.generation >= state.mutationGeneration || (state.reverts ?? 0) >= 2) return false
+    const restored: string[] = []
+    for (const [file, saved] of Object.entries(snap.files)) {
+      const now = await readProjectFile(root, file)
+      if (now === null) continue
+      const span = minimalRevertSpan(now, saved)
+      if (!span) continue
+      const applied = await applyUniqueEdit({ repairId, issueId, file, before: now, after: saved, start: span.start, end: span.end, reason: 'Put the file back to the version whose tests passed.', sourceKind: 'deterministic' })
+      if (applied.ok) restored.push(file)
+    }
+    if (!restored.length) return false
+    state.mutationGeneration += 1
+    state.reverts = (state.reverts ?? 0) + 1
+    state.reworkOrigin = undefined
+    await refreshContextFiles(restored, 'I put it back')
+    for (const file of restored) state.context = noteChanged(state.context!, file, state.mutationGeneration)
+    state.knowledge.decisions.push(`CHANGE_REVERTED ${restored.join(', ')}: the change a review opened broke tests that passed`)
+    revisePlanFor('CHANGE_REVERTED', { evidence: restored.map(file => `${file}: put back to the version whose tests passed`) })
+    return true
+  }
+  const contextSourceFiles = () => (state.context?.entries ?? []).filter(entry => entry.role !== 'test' && entry.role !== 'config').slice(0, 4).map(entry => entry.path)
+  /** Which implementation tasks may edit in a context-driven campaign: the owner of the change on the first pass, and afterwards only the layer a diagnosis actually pointed at. */
+  const contextNeedsEdit = (task: CampaignTask) => {
+    const debugIds = task.dependsOn.filter(id => id.startsWith('debug-'))
+    if (!debugIds.length) return task.role === 'BACKEND'
+    const layers = debugIds.map(id => layerForRepairTarget(state.plan?.tasks.find(item => item.id === id)?.repairTarget, state.componentFiles)).filter(Boolean)
+    return (layers as string[]).includes(task.id) || (task.role === 'BACKEND' && layers.length === 0)
+  }
+  if (resuming && state.contextMode === 'CONTEXT') {
+    const restored = restoreContext(state.context)
+    if (restored) {
+      state.context = restored
+      const onDisk = await diskHashes(root, restored.entries.map(entry => entry.path))
+      const stale = staleEntries(restored, onDisk)
+      if (stale.length) await refreshContextFiles(stale, 'it changed while the mission was stopped')
+      await bindCampaign(repairId, sessionId, 'PLANNING', 'The same files are still in view.', state, emit(repairId, sessionId, 'ARCHITECTING', `I picked up where I left off. ${describeContext(state.context!)}`, { status: 'pass', detail: contextDetails(state.context!).join('\n') }))
+    } else {
+      state.contextMode = 'CONVENTION'
+      state.context = undefined
+    }
+  }
+
+  /**
+   * Alternate evidence for a file whose edit strategy is ineffective: run the tests verbosely once and see whether tests that call the file's
+   * layer directly pass while the failing ones go through another layer. Bounded (one command per file per mutation generation) and the
+   * same command governance as every other test run. Returns null when the picture is unclear; an unclear picture is never evidence.
+   */
+  const gatherIsolationEvidence = async (file: string, layer: string): Promise<IsolatedLayerEvidence | null> => {
+    const key = `${file}@${state.mutationGeneration}`
+    if ((state.isolationChecked ?? []).includes(key)) return null
+    if (state.commandsRun >= commandLimit()) {
+      state.budgetExhausted = true
+      return null
+    }
+    state.commandsRun += 1
+    state.isolationChecked = [...(state.isolationChecked ?? []), key].slice(-8)
+    const bin = await pythonBin(root)
+    const result = await runStepCommand(repairId, sessionId, bin, ['-m', 'unittest', 'discover', '-s', 'tests', '-v'], root, 'Checking one layer on its own')
+    const testSources: Record<string, string> = {}
+    for (const rel of state.componentFiles.tests ?? []) testSources[rel] = await load(rel)
+    return isolatedLayerEvidence({ layer, components: state.componentFiles, verboseOutput: `${result.stdout}\n${result.stderr}`, testSources })
+  }
+
+  /**
+   * A worker proposed an edit that would change nothing (nothing was written). That says the way of editing this file is not producing
+   * progress; it does not say the hypothesis is false. First time: recorded, the same task is asked again. Repeated: that strategy is marked
+   * ineffective (stagnation evidence, never a fresh attempt), the working set is reordered so other layers come first, and alternate
+   * evidence is gathered. Only if that evidence really shows the layer is fine is the hypothesis disproven and the belief moved. Blocked only
+   * once every distinct way to edit was exhausted.
+   */
+  const handleNoEffectiveChange = async (current: CampaignTask, noEffect: NoEffectiveChange, summary: string): Promise<'retry' | 'switched' | 'blocked' | 'settled'> => {
+    // Context-driven: the covering tests pass on the files as they are now and the worker proposes nothing that would change them, so the remark that reopened
+    // this task cannot be acted on. It is settled by evidence, never blocked as if the model could not edit.
+    if (contextOn() && testsGreenAtCurrentGeneration(state)) {
+      state.knowledge.decisions.push(`NO_CHANGE_NEEDED ${noEffect.file}: the covering tests pass on the current files`)
+      completeCampaignTask(current, [`no change needed: the covering tests pass (${noEffect.file})`])
+      return 'settled'
+    }
+    const layer = layerOfFile(noEffect.file, state.componentFiles) ?? current.id
+    const recorded = recordNoEffect(state.noEffect, { file: noEffect.file, layer, key: noEffect.key, attempts: noEffect.attempts })
+    state.noEffect = recorded.records
+    const exhausted = noEffectExhausted(state.noEffect, state.componentFiles)
+    const verdict = evaluateNoEffectiveChange(state.progress, { file: noEffect.file, role: current.role, repeated: recorded.repeated, exhausted, at: new Date().toISOString(), mutationGeneration: state.mutationGeneration, reworkCycles: state.reworkCycles })
+    state.progress = verdict.progress
+    lastDecision = verdict.decision
+    applyProgressBudgets()
+    state.progress = { ...state.progress, stopFinding: verdict.decision.proceed ? null : summary.slice(0, 400) }
+    state.knowledge.decisions.push(`NO_EFFECTIVE_CHANGE ${noEffect.file} x${recorded.record.attempts}`)
+    if (!verdict.decision.proceed) return 'blocked'
+    revisePlanFor('NO_EFFECTIVE_CHANGE', {
+      evidence: [`${noEffect.file}: the proposed edit would have changed nothing`, ...(recorded.repeated ? [`I proposed ${recorded.record.attempts} edits to ${noEffect.file} and none would change it`] : [])],
+    })
+    if (!recorded.repeated) {
+      current.status = 'READY'
+      current.verification = 'PENDING'
+      return 'retry'
+    }
+    const evidence = await gatherIsolationEvidence(noEffect.file, layer)
+    const base = state.repairFinding ?? summary
+    let finding = base
+    let planTrigger: PlanTrigger = 'NO_EFFECTIVE_CHANGE'
+    let statement: string | null = null
+    if (evidence) {
+      state.ruledOut = mergeRuledOut(state.ruledOut, [{ file: noEffect.file, layer, basis: 'ISOLATED_TESTS' }])
+      const suspect = evidence.suspectLayers[0] ? (state.componentFiles[evidence.suspectLayers[0] as 'backend' | 'frontend']?.[0] ?? evidence.suspectLayers[0]) : ''
+      statement = `The tests that call ${noEffect.file} directly pass (${evidence.passing.slice(0, 3).join(', ')}), and the failing test (${evidence.failing.slice(0, 2).join(', ')}) goes through ${suspect}, so the cause is not in ${noEffect.file}.`
+      finding = `${base} ${statement}`
+      planTrigger = 'HYPOTHESIS_DISPROVEN'
+      state.knowledge.decisions.push(`DISPROVEN ${noEffect.file}: ${statement.slice(0, 150)}`)
+      // The layer is fine as it stands: its task is settled by evidence, not left failed (a failed task would stall everything that depends on it).
+      completeCampaignTask(current, [`no edit needed: ${statement.slice(0, 140)}`])
+    } else {
+      // Not disproven, only ineffective: this file stops being retried the same way, and its task is settled so the next layer can move.
+      completeCampaignTask(current, [`edit strategy ineffective for ${noEffect.file}; trying another approach`])
+    }
+    if (!openModelRework(finding, null, undefined, 'TEST', { noEffect: true, planTrigger })) return 'blocked'
+    if (statement) {
+      state.repairFinding = `${base} ${statement}`.slice(0, 900)
+      const target = evidence?.suspectLayers[0]
+      revisePlanFor('CONTRADICTION', {
+        evidence: [statement],
+        reopen: target && (target === 'backend' || target === 'frontend') ? [{ taskId: target, why: `The failing test goes through the ${target}, and the tests that call ${noEffect.file} directly pass.` }] : [],
+      })
+    }
+    return 'switched'
   }
 
   const UNBLOCK: Record<ProgressStopReason, string> = {
@@ -1311,6 +1640,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     ITERATION_LIMIT: 'Foundry used every task step it had earned while still making progress. Continue in a new mission from the current files.',
     WINDOW_EXHAUSTED: 'Foundry made some progress but used the repair window that progress earned. Continue in a new mission from the current files.',
     ABSOLUTE_BOUND: 'Foundry reached the absolute repair limit for one mission while still making progress. Continue in a new mission from the current files.',
+    CAPABILITY_NO_EFFECTIVE_CHANGE: 'Every way of editing that Foundry tried produced a change that would alter nothing. Use a model that can produce effective edits, or narrow the task.',
     CAPABILITY_INVALID_OUTPUT: 'The model repeatedly returned unusable structured output. Use a model that can produce structured edits, or narrow the task.',
     POLICY_NO_TESTS: 'Add tests the project can run, then start a new mission.',
     PROVIDER: 'Start the model provider and retry. No cloud fallback is used.',
@@ -1375,8 +1705,14 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     if (!state.filesMutated.includes(edit.file)) state.filesMutated.push(edit.file)
     if (!current.writes.includes(edit.file)) current.writes.push(edit.file)
     state.appliedEditKeys.push(key)
+    state.recentEdits = [...(state.recentEdits ?? []), { file: edit.file, diff: (applied.diff ?? '').slice(0, 1200) }].slice(-2)
     state.progress = noteMutation(state.progress, { file: edit.file, before: edit.before, after: edit.after, start: edit.start, end: edit.end })
     sources.set(edit.file, edit.after)
+    if (contextOn()) {
+      state.context = noteChanged(state.context!, edit.file, state.mutationGeneration)
+      // Disk is the truth: re-read what was just written and re-link, instead of trusting the text the edit computed.
+      await refreshContextFiles([edit.file], 'I changed it')
+    }
     await bindCampaign(repairId, sessionId, 'EDITING', `Edited ${edit.file}.`, state, emit(repairId, sessionId, 'FILE_EDITED', edit.file, { status: 'pass', filePath: edit.file, diff: applied.diff }))
     return 'applied' as const
   }
@@ -1445,7 +1781,26 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
           const field = contractFieldName([await load(current.workingSet[0] ?? '')])
           if (field) state.knowledge.interfaces.push(`contract field ${field}`)
         }
+        // A context-driven mission looks at the tests once before it changes anything, so the first edit is made against real failure evidence.
+        if (current.id === 'discover' && contextOn() && !state.checkpoints.includes('BASELINE') && state.commandsRun < commandLimit()) {
+          state.commandsRun += 1
+          state.checkpoints.push('BASELINE')
+          const bin = await pythonBin(root)
+          recordTestStart(state, `python3 ${regressionTestCommand().args.join(' ')}`, new Date().toISOString())
+          const baseline = await runStepCommand(repairId, sessionId, bin, regressionTestCommand().args, root, 'Checking the tests before changing anything')
+          recordTestFinish(state, baseline.code ?? 1, new Date().toISOString())
+          if (baseline.code !== 0) {
+            const raw = `${baseline.stdout}\n${baseline.stderr}`
+            const finding = `tests fail before any change: ${keyFailureLine(raw)} ${raw.replace(/\s+/g, ' ').slice(0, 240)}`
+            state.repairFinding = finding
+            state.knowledge.failures.push(finding.slice(0, 200))
+          }
+        }
         completeCampaignTask(current, ['evidenced'])
+      } else if (current.id === 'architect' && contextOn()) {
+        // The context engine already named what the change is about; there is nothing left for a model to guess from file names.
+        state.knowledge.architecture.push(describeContext(state.context!))
+        completeCampaignTask(current, ['context'])
       } else if (current.id === 'verify') {
         if (state.commandsRun >= commandLimit()) {
           state.budgetExhausted = true
@@ -1455,7 +1810,9 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
         const bin = await pythonBin(root)
         await bindCampaign(repairId, sessionId, 'TESTING', 'Verifier is re-running the tests.', state, emit(repairId, sessionId, 'VERIFICATION_STARTED', 'VERIFIER — verifying', { status: 'running' }))
         const result = await runStepCommand(repairId, sessionId, bin, regressionTestCommand().args, root, 'Campaign verification')
-        const passed = result.code === 0
+        const scopedVerify = await scopeTests(`${result.stdout}\n${result.stderr}`, result.code)
+        if (scopedVerify?.deferred.length) deferUnrelated(scopedVerify.deferred)
+        const passed = result.code === 0 || Boolean(scopedVerify?.onlyUnrelated)
         state.knowledge.tests.push(`verify ${passed ? 'pass' : 'fail'}`)
         const contractText = await load(state.componentFiles.contract[0] ?? '')
         const backend = await load(state.componentFiles.backend[0] ?? '')
@@ -1512,21 +1869,31 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
         await bindCampaign(repairId, sessionId, 'DONE', emitProgress(), state, emit(repairId, sessionId, 'PROJECT_READY', 'Verifier accepted the campaign from disk truth.', { status: 'pass', detail: `${call.workerLabel}; ${emitProgress()}`, validationResult: 'PASS' }))
       } else {
         const contractText = await load(state.componentFiles.contract[0] ?? '')
-        const files = (current.workingSet.length ? current.workingSet : [
+        const files = (current.workingSet.length ? current.workingSet : contextOn() ? contextSourceFiles() : [
           state.componentFiles.contract[0],
           state.componentFiles.backend[0],
           state.componentFiles.frontend[0],
         ]).filter(Boolean) as string[]
         for (const file of files) await load(file)
+        await freshenForCall(files)
         const bodyFile = current.workingSet[0] ?? ''
         const body = bodyFile ? sources.get(bodyFile) ?? '' : ''
-        const reopened = current.dependsOn.some(id => id.startsWith('debug-')) && reworkImplementationIds(state.repairFinding ?? '').includes(current.id)
+        // Reopened by the failure text, or because the diagnosis this task waits on named this layer's file.
+        const reopened = current.dependsOn.some(id => id.startsWith('debug-') && (state.plan?.tasks.find(task => task.id === id)?.repairTarget ? layerForRepairTarget(state.plan.tasks.find(task => task.id === id)?.repairTarget, state.componentFiles) === current.id : false))
+          || (current.dependsOn.some(id => id.startsWith('debug-')) && reworkImplementationIds(state.repairFinding ?? '').includes(current.id))
         const needsEdit = current.role === 'BACKEND' || current.role === 'FRONTEND'
-          ? implementationNeedsEdit(current.role, body, contractText, state.repairFinding) || reopened
+          ? contextOn() ? contextNeedsEdit(current) : implementationNeedsEdit(current.role, body, contractText, state.repairFinding) || reopened
           : false
         if ((current.role === 'BACKEND' || current.role === 'FRONTEND') && !needsEdit) {
           completeCampaignTask(current, ['no edit authorized for this acceptance'])
         } else {
+          const shownExcerpts = [
+            ...files.map(file => ({ file, text: sources.get(file) ?? '' })),
+            ...(contextOn() && (current.role === 'BACKEND' || current.role === 'FRONTEND') ? await contextTestExcerpts(files) : []),
+          ]
+          const notesForCall = contextOn() ? contextNotes(state.context!, await ensureIndex(), current.role === 'BACKEND' || current.role === 'FRONTEND' ? current.workingSet[0] : undefined) : []
+          // The record shows exactly what reached the model: which files, and which context notes.
+          if (contextOn()) state.context = noteSent(state.context!, { role: current.role, task: current.id, files: shownExcerpts.map(item => item.file), notes: notesForCall })
           const call = await callCampaignSpecialist(specialistRequestFromCampaign({
             campaign: state,
             taskId: current.id,
@@ -1534,10 +1901,12 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             purpose: current.purpose,
             acceptance: current.acceptance,
             workingSet: files,
-            excerpts: files.map(file => ({ file, text: sources.get(file) ?? '' })),
+            excerpts: shownExcerpts,
             needsEdit,
             attempt: current.attempt,
-            contractText,
+            ...(contextOn() ? { generalMode: true, contextNotes: notesForCall } : {}),
+            // A reviewer judges against the request and its acceptance criteria. A raw line of the contract file is context, not an acceptance sentence.
+            contractText: current.role === 'REVIEWER' ? reviewerContract(acceptanceBasis({ request: state.request, acceptance: state.acceptance, contracts: await contractsOf() })) : contractText,
           }), sources)
           state.modelCalls += call.calls
           state.callsByRole[current.role] = (state.callsByRole[current.role] ?? 0) + call.calls
@@ -1549,9 +1918,20 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
           }
           if (call.failureClass) {
             current.status = 'FAILED'
+            if (call.failureClass === 'INVALID_OUTPUT' && call.noEffect && (current.role === 'BACKEND' || current.role === 'FRONTEND')) {
+              // An edit that would change nothing is not unusable output and not a failed hypothesis: it is evidence the way of editing is not working.
+              const outcome = await handleNoEffectiveChange(current, call.noEffect, call.receipt.summary)
+              if (outcome === 'blocked') {
+                await reportProgress('TESTING')
+                return sealBlocked(repairId, blockedByProgress(`every way of editing tried produced no effective change (${call.noEffect.file})`, 'The specialist could not produce an effective edit.'))
+              }
+              await reportProgress('REPAIRING')
+              await bindCampaign(repairId, sessionId, 'REPAIRING', outcome === 'settled' ? 'Nothing needed to change: the covering tests already pass.' : 'The proposed change would not have changed anything, so a different approach was chosen.', state, emit(repairId, sessionId, 'REWORKING', outcome === 'settled' ? 'nothing needed to change, the tests already pass' : 'that change would not have altered the file', { status: outcome === 'settled' ? 'info' : 'fail', detail: call.workerLabel }))
+              continue
+            }
             if (call.failureClass === 'INVALID_OUTPUT') {
               // Unusable structured output is a capability signal, not a code failure: it has its own bounded streak.
-              const reopened = openModelRework(`invalid specialist output from ${current.role}: ${call.receipt.summary}`, null, { role: current.role })
+              const reopened = openModelRework(`invalid specialist output from ${current.role}: ${call.receipt.summary}`, null, { role: current.role, taskId: current.id })
               await reportProgress(reopened ? 'REPAIRING' : 'TESTING')
               if (reopened) {
                 await bindCampaign(repairId, sessionId, 'REPAIRING', 'Invalid specialist output was rejected.', state, emit(repairId, sessionId, 'REWORKING', `invalid specialist output from ${current.role}`, { status: 'fail', detail: call.workerLabel }))
@@ -1589,20 +1969,40 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             if (edited === 'blocked-task') continue
           }
           if (current.role === 'REVIEWER') {
-            const gap = Boolean(call.result && reviewerFoundGap(call.result.summary))
+            let gap = Boolean(call.result && reviewerFoundGap(call.result.summary))
+            const backendNow = sources.get(state.componentFiles.backend[0] ?? '') ?? ''
+            const frontendNow = sources.get(state.componentFiles.frontend[0] ?? '') ?? ''
+            let setAside: ReviewClaimDecision | null = null
+            let claimKey = ''
+            if (gap && call.result) {
+              // A reviewer sentence is a claim. It reopens work only when it maps to a real acceptance criterion and is not the same claim already handled while the tests pass.
+              const verdict = reviewClaimDecision({
+                claim: call.result.summary,
+                basis: acceptanceBasis({ request: state.request, acceptance: state.acceptance, contracts: await contractsOf() }),
+                earlierClaims: state.reviewedClaims ?? [],
+                testsGreenNow: testsGreenAtCurrentGeneration(state),
+                filesMeetCriteria: diskMeetsContract(contractText, backendNow, frontendNow),
+              })
+              claimKey = verdict.key
+              if (verdict.decision !== 'REOPEN') {
+                gap = false
+                setAside = verdict.decision
+                state.knowledge.decisions.push(`REVIEW_SET_ASIDE ${verdict.decision} ${verdict.support.reason}: ${call.result.summary.slice(0, 120)}`)
+              }
+            }
             state.reviewFindings = gap && call.result ? [call.result.summary] : []
-            await bindCampaign(repairId, sessionId, 'TESTING', 'Reviewer checked the campaign.', state, emit(repairId, sessionId, 'REVIEWING', gap ? state.reviewFindings[0] : 'Review found no blocking gap.', { status: gap ? 'fail' : 'pass', detail: call.workerLabel }))
+            await bindCampaign(repairId, sessionId, 'TESTING', 'Reviewer checked the campaign.', state, emit(repairId, sessionId, 'REVIEWING', gap ? state.reviewFindings[0] : 'Review found no blocking gap.', { status: gap ? 'fail' : 'pass', detail: setAside ? `${call.workerLabel} · ${setAsideNote(setAside)}` : call.workerLabel }))
             if (gap) {
-              const backendNow = sources.get(state.componentFiles.backend[0] ?? '') ?? ''
-              const frontendNow = sources.get(state.componentFiles.frontend[0] ?? '') ?? ''
               const finding = state.reviewFindings[0] ?? ''
               const actionable = !diskMeetsContract(contractText, backendNow, frontendNow)
-                || implementationNeedsEdit('BACKEND', backendNow, contractText, finding)
-                || implementationNeedsEdit('FRONTEND', frontendNow, contractText, finding)
+                || implementationNeedsEdit('BACKEND', backendNow, contractText, finding, 'REVIEW')
+                || implementationNeedsEdit('FRONTEND', frontendNow, contractText, finding, 'REVIEW')
               if (!actionable) {
                 state.reviewFindings = []
               } else {
               current.status = 'FAILED'
+              state.reviewedClaims = [...(state.reviewedClaims ?? []), claimKey].slice(-6)
+              state.reworkOrigin = 'REVIEW'
               if (!openModelRework(state.reviewFindings[0], fingerprintFinding(state.reviewFindings[0], 'REVIEW'), undefined, 'REVIEW')) {
                 await reportProgress('TESTING')
                 return sealBlocked(repairId, blockedByProgress(state.reviewFindings[0], 'The review finding needs a bounded repair.'))
@@ -1627,12 +2027,16 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             const command = `python3 ${regressionTestCommand().args.join(' ')}`
             recordTestStart(state, command, new Date().toISOString())
             const result = await runStepCommand(repairId, sessionId, bin, regressionTestCommand().args, root, 'Campaign integration')
-            recordTestFinish(state, result.code ?? 1, new Date().toISOString())
-            const passed = result.code === 0
+            const scoped = await scopeTests(`${result.stdout}\n${result.stderr}`, result.code)
+            const scopedPass = Boolean(scoped?.onlyUnrelated)
+            recordTestFinish(state, result.code ?? 1, new Date().toISOString(), scopedPass && scoped ? { deferred: scoped.deferred.length } : undefined)
+            if (scoped?.deferred.length) deferUnrelated(scoped.deferred)
+            const passed = result.code === 0 || scopedPass
             state.knowledge.tests.push(`integrate ${passed ? 'pass' : 'fail'}`)
             if (passed) state.progress = noteGreen(state.progress, { at: new Date().toISOString(), mutationGeneration: state.mutationGeneration })
+            if (passed && contextOn()) await snapshotGreen()
             if (!passed) {
-              const raw = `${result.stdout}\n${result.stderr}`
+              const raw = scoped?.relatedText ?? `${result.stdout}\n${result.stderr}`
               const noTests = result.code === 5 || /NO TESTS RAN/i.test(raw)
               const finding = `integration defect ${keyFailureLine(raw)} ${raw.replace(/\s+/g, ' ').slice(0, 200)}`
               current.status = 'FAILED'
@@ -1645,6 +2049,18 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
                 await reportProgress('TESTING')
                 return sealBlocked(repairId, blockedByProgress(finding, 'The test command collected no tests.'))
               }
+              // A change that a reviewer's remark opened must not turn tests that passed red: put the files back to the version that worked, then verify again.
+              if (await revertReviewDrivenBreak()) {
+                current.status = 'READY'
+                current.verification = 'PENDING'
+                await reportProgress('TESTING')
+                await bindCampaign(repairId, sessionId, 'REPAIRING', 'That change broke tests that passed, so the files were put back.', state, emit(repairId, sessionId, 'REWORKING', 'that change broke passing tests, so I put the files back', { status: 'info', detail: call.workerLabel }))
+                continue
+              }
+              state.reworkOrigin = 'TEST'
+              // The failing run may point at code the working set does not hold yet: grow it, with the reason, before the diagnosis is asked for.
+              await expandContext(`${result.stdout}\n${result.stderr}`)
+              await gatherContextEvidence()
               // Failure identity is semantic (exception, failing tests, project frames, normalized values), not a raw-string match.
               if (!openModelRework(finding, fingerprintTestFailure(raw, 'TEST'))) {
                 await reportProgress('TESTING')
@@ -1665,6 +2081,18 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             if (target) state.knowledge.decisions.push(`REPAIR_TARGET ${target.slice(0, 180)}`)
             state.repairFinding = hypothesis
             state.progress = noteDebuggerFinding(state.progress, { hypothesis, repairTarget: target ?? null })
+            // Runtime evidence beats the diagnosis: if a project file already defines the name the diagnosis calls undefined, say so and point the repair at the import.
+            const claimedNames = missingNamesFromFailure([hypothesis]).undefinedNames
+            if (claimedNames.length) {
+              const definitions: Record<string, string> = {}
+              for (const file of [...state.componentFiles.contract, ...state.componentFiles.backend, ...state.componentFiles.frontend]) definitions[file] = await load(file)
+              const contradicted = contradictedClaim(claimedNames, definitions, filesNamedBy(hypothesis, state.componentFiles))
+              if (contradicted) {
+                state.repairFinding = `${hypothesis} ${contradicted.file} already defines ${contradicted.name}: import ${contradicted.name} from it where it is used.`.slice(0, 420)
+                state.knowledge.decisions.push(`CONTRADICTED ${contradicted.name} is defined in ${contradicted.file}`)
+                revisePlanFor('HYPOTHESIS_CONTRADICTED', { evidence: [`${contradicted.file} already defines ${contradicted.name}`, hypothesis] })
+              }
+            }
             linkRepairToPlan(current.id, hypothesis, target ?? null)
           }
           if (current.status === 'RUNNING') completeCampaignTask(current, [call.workerLabel, call.result?.summary ?? 'specialist'])
@@ -1718,6 +2146,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
           if (!state.filesMutated.includes(edit.file)) state.filesMutated.push(edit.file)
           if (!current.writes.includes(edit.file)) current.writes.push(edit.file)
           state.appliedEditKeys.push(key)
+          state.recentEdits = [...(state.recentEdits ?? []), { file: edit.file, diff: (applied.diff ?? '').slice(0, 1200) }].slice(-2)
           state.mutationGeneration += 1
           sources.set(edit.file, edit.after)
           await bindCampaign(repairId, sessionId, 'EDITING', `Edited ${edit.file}.`, state, emit(repairId, sessionId, 'FILE_EDITED', edit.file, { status: 'pass', filePath: edit.file, diff: applied.diff }))
@@ -1736,8 +2165,11 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
       const command = `python3 ${regressionTestCommand().args.join(' ')}`
       recordTestStart(state, command, new Date().toISOString())
       const result = await runStepCommand(repairId, sessionId, bin, regressionTestCommand().args, root, current.id === 'verify' ? 'Campaign verification' : 'Campaign integration')
-      recordTestFinish(state, result.code ?? 1, new Date().toISOString())
-      const passed = result.code === 0
+      const scopedLegacy = await scopeTests(`${result.stdout}\n${result.stderr}`, result.code)
+      const legacyScopedPass = Boolean(scopedLegacy?.onlyUnrelated)
+      recordTestFinish(state, result.code ?? 1, new Date().toISOString(), legacyScopedPass && scopedLegacy ? { deferred: scopedLegacy.deferred.length } : undefined)
+      if (scopedLegacy?.deferred.length) deferUnrelated(scopedLegacy.deferred)
+      const passed = result.code === 0 || legacyScopedPass
       state.knowledge.tests.push(`${current.id} ${passed ? 'pass' : 'fail'}`)
       if (!passed) {
         const attribution = attributeFailure(state.strategy, false) ?? 'integration defect'
@@ -1827,7 +2259,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
 async function runOwnedBody(repairId: string, issueId: string, sessionId: string | undefined, request: string): Promise<NativeRepairRecord> {
   const root = resolveRepoRoot()
   const priorCampaign = (await getRepair(repairId))?.codingMission?.engineeringRuntime?.campaign
-  if (priorCampaign?.phase || campaignShouldOwn(request)) {
+  if (priorCampaign?.phase || campaignShouldOwn(request) || await contextShouldOwn(root, request)) {
     return runCampaignBody(repairId, issueId, sessionId, request)
   }
   const priorLarge = (await getRepair(repairId))?.codingMission?.engineeringRuntime?.largeProject

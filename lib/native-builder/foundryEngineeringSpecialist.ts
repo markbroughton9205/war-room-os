@@ -19,8 +19,10 @@ import { extractJsonObject } from './localCoder'
 import { FOUNDRY_MODEL_TOOL_CATALOG } from './foundryToolCatalog'
 import type { FoundryModelContext, FoundryMissionModel } from './foundryModelTypes'
 import type { PlannedEdit } from './foundryLargeProject'
+import { noEffectStatements, ruledOutStatements } from './foundryGoalAnchor'
 import {
   MAX_MODEL_CALLS_PER_CAMPAIGN,
+  contractFieldName,
   pythonLooksUnparseable,
   specialistActivity,
   type CampaignRole,
@@ -65,13 +67,20 @@ export type FoundrySpecialistRequest = {
   failureEvidence: string[]
   /** Edits earlier repair attempts already made without fixing the failure. The next attempt should try something else. */
   alreadyTried?: string[]
+  /** Set only when the newest failure is an import/syntax error right after an edit: the edit that most likely caused it. */
+  suspectEdit?: string
   resourceBudget: { callsRemaining: number; ceiling: number }
   localOnly: boolean
   reasoningDepth: 'R0' | 'R1' | 'R2' | 'R3' | 'R4'
-  excerpts: { file: string; text: string }[]
+  /** readOnly excerpts (linked tests) are shown so the change is made against what verifies it; they are never edit targets. */
+  excerpts: { file: string; text: string; readOnly?: boolean }[]
   needsEdit: boolean
   pin: { provider: string; model: string } | null
   attempt: number
+  /** Phase 3: the layers came from goal-driven context discovery, so implementer prompts are worded from the request, not from the status-filter fixture. */
+  generalMode?: boolean
+  /** Symbol-level, secret-free notes from the context engine: what the code defines, who calls it, what it calls, which tests cover it. */
+  contextNotes?: string[]
 }
 
 export type FoundrySpecialistResult = {
@@ -88,8 +97,12 @@ export type FoundrySpecialistResult = {
   verdict: '' | 'PROJECT_READY' | 'NOT_READY'
 }
 
+/** An implementer proposed an edit whose replacement equals the text already in the file. Nothing would change. */
+export type NoEffectiveChange = { file: string; key: string; /** How many proposals in this call were such no-ops (the first and any correction). */ attempts: number }
+
 export type SpecialistCall = {
   receipt: CampaignWorkerReceipt
+  noEffect?: NoEffectiveChange | null
   result: FoundrySpecialistResult | null
   failureClass: SpecialistFailureClass | null
   activity: string
@@ -134,7 +147,8 @@ export function parseSpecialistPayload(input: {
   needsEdit: boolean
   sources: ReadonlyMap<string, string>
   requiredPaths?: string[]
-}): { result: FoundrySpecialistResult; failureClass: SpecialistFailureClass | null; edit: PlannedEdit | null } {
+  generalMode?: boolean
+}): { result: FoundrySpecialistResult; failureClass: SpecialistFailureClass | null; edit: PlannedEdit | null; noEffect?: NoEffectiveChange | null } {
   const parsed = input.raw ? extractJsonObject(input.raw) : null
   const summary = clip(input.summary || (typeof parsed?.reasoningSummary === 'string' ? parsed.reasoningSummary : ''), 500)
   const tool = parsed?.tool && typeof parsed.tool === 'object' && !Array.isArray(parsed.tool)
@@ -147,7 +161,7 @@ export function parseSpecialistPayload(input: {
     : {}
   const edits: FoundrySpecialistResult['proposedEdits'] = []
   if (!policy && toolName === 'file.replace_unique') {
-    const file = typeof args.path === 'string' ? args.path : ''
+    const file = typeof args.path === 'string' ? resolveWorkingPath(args.path, input.sources) : ''
     const search = typeof args.matchText === 'string' ? args.matchText : ''
     const replace = typeof args.replacementText === 'string'
       ? args.replacementText
@@ -186,8 +200,10 @@ export function parseSpecialistPayload(input: {
   if (input.role === 'DEBUGGER' && hypotheses.length === 0 && !edits.length) return { result, failureClass: 'INVALID_OUTPUT', edit: null }
   const proposal = edits[0]
   const edit = proposal && (!input.needsEdit || proposal.search) ? editFromProposal(proposal, input.sources) : null
+  // In a context-driven campaign a file may already do what the request needs: an implementer that says so, without proposing anything, is a valid answer.
+  if (input.generalMode && input.needsEdit && (input.role === 'BACKEND' || input.role === 'FRONTEND') && !toolName && !edits.length && /STATUS pass/i.test(summary)) return { result, failureClass: null, edit: null }
   if (input.needsEdit && !edit) {
-    const path = typeof args.path === 'string' ? args.path : ''
+    const path = typeof args.path === 'string' ? resolveWorkingPath(args.path, input.sources) : ''
     const search = typeof args.matchText === 'string' ? args.matchText : ''
     const known = path ? input.sources.get(path) : undefined
     const reason = !path
@@ -196,12 +212,17 @@ export function parseSpecialistPayload(input: {
         ? `path ${path} is outside the working set`
         : !search
           ? 'matchText is required and must occur once in the working-set file'
-          : 'matchText is missing or not unique in the working-set file'
+          : explainProposalRefusal({ search, replace: typeof args.replacementText === 'string' ? args.replacementText : '' }, known)
     result.evidence = [summary]
     result.summary = reason
-    return { result, failureClass: 'INVALID_OUTPUT', edit: null }
+    const replacement = typeof args.replacementText === 'string' ? args.replacementText : ''
+    const noEffect = known !== undefined && search && replacement === search ? { file: path, key: noEffectKey(search), attempts: 1 } : null
+    return { result, failureClass: 'INVALID_OUTPUT', edit: null, noEffect }
   }
-  if (edits.length && !edit) return { result, failureClass: 'INVALID_OUTPUT', edit: null }
+  if (edits.length && !edit) {
+    const noEffect = proposal && proposal.search && proposal.replace === proposal.search && input.sources.has(proposal.file) ? { file: proposal.file, key: noEffectKey(proposal.search), attempts: 1 } : null
+    return { result, failureClass: 'INVALID_OUTPUT', edit: null, noEffect }
+  }
   return { result, failureClass: null, edit }
 }
 
@@ -226,18 +247,87 @@ export function editFromProposal(
       reason: 'Specialist proposed a governed file replacement.',
     }
   }
-  const start = source.indexOf(proposal.search)
-  if (start < 0 || source.indexOf(proposal.search, start + proposal.search.length) >= 0) return null
-  const after = source.slice(0, start) + proposal.replace + source.slice(start + proposal.search.length)
+  const located = locateUniqueMatch(source, proposal.search, proposal.replace)
+  if (!located) return null
+  const after = source.slice(0, located.start) + located.replacement + source.slice(located.end)
   if (pythonLooksUnparseable(after) && !pythonLooksUnparseable(source)) return null
   return {
     file: proposal.file,
     before: source,
     after,
-    start,
-    end: start + proposal.search.length,
+    start: located.start,
+    end: located.end,
     reason: 'Specialist proposed a governed unique replacement.',
   }
+}
+
+/**
+ * Finds the one place a proposed matchText belongs. Exact text first. A small model often copies the right lines with the wrong
+ * indentation or trailing spaces; when the lines match once ignoring only that whitespace, the edit is applied to the real lines
+ * and the replacement is re-indented to fit them. Anything ambiguous stays refused.
+ */
+export function locateUniqueMatch(source: string, search: string, replace: string): { start: number; end: number; replacement: string } | null {
+  const exact = source.indexOf(search)
+  if (exact >= 0) return source.indexOf(search, exact + search.length) >= 0 ? null : { start: exact, end: exact + search.length, replacement: replace }
+  const wanted = search.split('\n').map(line => line.trim()).filter(Boolean)
+  if (!wanted.length) return null
+  const lines = source.split('\n')
+  const hits: number[] = []
+  for (let i = 0; i + wanted.length <= lines.length; i += 1) {
+    let ok = true
+    let j = i
+    for (const want of wanted) {
+      while (j < lines.length && !lines[j].trim() && want) j += 1
+      if (j >= lines.length || lines[j].trim() !== want) { ok = false; break }
+      j += 1
+    }
+    if (ok) hits.push(i)
+    if (hits.length > 1) return null
+  }
+  if (hits.length !== 1) return null
+  const first = hits[0]
+  let last = first
+  for (let matched = 0, k = first; matched < wanted.length; k += 1) { if (lines[k]?.trim()) { matched += 1; last = k } }
+  const offset = (index: number) => lines.slice(0, index).reduce((sum, line) => sum + line.length + 1, 0)
+  const start = offset(first)
+  const end = offset(last) + lines[last].length
+  const realIndent = /^\s*/.exec(lines[first])?.[0] ?? ''
+  const askedIndent = /^\s*/.exec(search.split('\n').find(line => line.trim()) ?? '')?.[0] ?? ''
+  const replacementLines = replace.split('\n')
+  const replacementIndent = /^\s*/.exec(replacementLines.find(line => line.trim()) ?? '')?.[0] ?? ''
+  // Re-indent only when the replacement shares the indentation the model wrongly used for matchText.
+  const reindent = replacementIndent === askedIndent && realIndent !== askedIndent
+  const adjusted = reindent
+    ? replacementLines.map(line => (line.trim() ? realIndent + line.slice(replacementIndent.length) : line)).join('\n')
+    : replace
+  return { start, end, replacement: adjusted }
+}
+
+/** A worker often writes `/shop/pricing.py`, `./shop/pricing.py` or an absolute path for the working-set file `shop/pricing.py`: they are the same file. */
+export function resolveWorkingPath(rawPath: string, sources: ReadonlyMap<string, string>): string {
+  if (sources.has(rawPath)) return rawPath
+  const trimmed = rawPath.replace(/\\/g, '/').replace(/^(?:\.\/|\/)+/, '')
+  if (sources.has(trimmed)) return trimmed
+  let best = ''
+  for (const key of sources.keys()) if (rawPath.replace(/\\/g, '/').endsWith(`/${key}`) && key.length > best.length) best = key
+  return best || rawPath
+}
+
+/** Short stable identity of a proposed text, so an identical repeat is recognised without keeping the text. */
+export function noEffectKey(text: string): string {
+  let hash = 5381
+  for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+  return `n${(hash >>> 0).toString(36)}`
+}
+
+/** Says precisely why a proposed edit was refused, so the correction the model receives is about the real problem. */
+export function explainProposalRefusal(proposal: { search: string; replace: string }, source: string): string {
+  if (!proposal.search) return 'matchText is required and must occur once in the working-set file'
+  if (proposal.replace === proposal.search) return 'replacementText is identical to matchText, so nothing would change'
+  const exact = source.indexOf(proposal.search)
+  if (exact >= 0 && source.indexOf(proposal.search, exact + proposal.search.length) >= 0) return 'matchText occurs more than once in the working-set file; include more surrounding lines so it occurs once'
+  if (exact < 0 && !locateUniqueMatch(source, proposal.search, proposal.replace)) return 'matchText was not found in the working-set file; copy it exactly from SOURCE'
+  return 'the edit would leave the file with a syntax error; keep every existing line that is not being changed'
 }
 
 function candidatesFromEvidence(models: FoundryMissionModel[]): FoundryRoutingCandidate[] {
@@ -307,10 +397,41 @@ function permissions(): FoundryModelContext['permissions'] {
   }
 }
 
+/** Names a Python failure says are undefined, and names an import asked for that the module does not define. */
+export function missingNamesFromFailure(evidence: readonly string[]): { undefinedNames: string[]; unknownImports: string[] } {
+  const text = evidence.join(' ')
+  const NAME = '([A-Za-z_][A-Za-z0-9_]*)'
+  const Q = '[\'"`]'
+  const undefinedNames = new Set<string>()
+  const patterns = [
+    new RegExp(`name ${Q}${NAME}${Q} is not defined`, 'g'),
+    new RegExp(`${Q}${NAME}${Q}\\s+(?:is|are|was)\\s+(?:not defined|undefined|not imported|never imported|not being imported)`, 'g'),
+    new RegExp(`missing\\s+(?:definition|import)\\s+(?:of|for)\\s+${Q}${NAME}${Q}`, 'g'),
+  ]
+  for (const pattern of patterns) for (const hit of text.matchAll(pattern)) undefinedNames.add(hit[1])
+  // Argument names of the edit tool are not project symbols: a complaint about them is a formatting problem, never a missing import.
+  for (const argument of ['matchText', 'replacementText', 'path', 'reason', 'anchorId', 'content']) undefinedNames.delete(argument)
+  const unknownImports = [...new Set([...text.matchAll(new RegExp(`cannot import name ${Q}${NAME}${Q}`, 'g'))].map(hit => hit[1]))]
+  // A name the runner says cannot be imported is not "undefined" in the sense of needing an import.
+  for (const name of unknownImports) undefinedNames.delete(name)
+  return { undefinedNames: [...undefinedNames].slice(0, 3), unknownImports: unknownImports.slice(0, 3) }
+}
+
+/** The +/- lines of a unified diff, compact enough for a small model's prompt. */
+export function compactDiff(diff: string | undefined | null, max = 220): string {
+  if (!diff) return ''
+  return diff.split('\n').filter(line => /^[+-]/.test(line) && !/^(\+\+\+|---)/.test(line)).map(line => line.trim()).join(' ').replace(/\s+/g, ' ').slice(0, max)
+}
+
+/** A failure that says the project no longer even loads: the edit made just before it is the prime suspect. */
+export function editBrokeTheProject(evidence: readonly string[]): boolean {
+  return /ImportError|ModuleNotFoundError|SyntaxError|IndentationError|Failed to import test module|cannot import name/i.test(evidence.join(' '))
+}
+
 function promptFor(input: FoundrySpecialistRequest): string {
   const source = input.role === 'ARCHITECT'
     ? input.excerpts.map(item => item.file).join('\n')
-    : input.excerpts.map(item => `SOURCE ${item.file}\n${item.text.slice(0, 4000)}`).join('\n')
+    : input.excerpts.map(item => `${item.readOnly ? 'TEST (read only, never edit)' : 'SOURCE'} ${item.file}\n${item.text.slice(0, item.readOnly ? 2500 : 4000)}`).join('\n')
   const lead = input.role === 'ARCHITECT'
     ? 'Return REPLAN. From the file names, name the shared contract, the backend, and the frontend, the interface they share, the dependency order, and one risk. Do not call a tool.'
     : ''
@@ -323,13 +444,15 @@ function promptFor(input: FoundrySpecialistRequest): string {
     input.alreadyTried?.length && (input.role === 'DEBUGGER' || input.role === 'BACKEND' || input.role === 'FRONTEND')
       ? `ALREADY TRIED, DO NOT REPEAT ${input.alreadyTried.join(' | ').slice(0, 320)}`
       : '',
+    input.suspectEdit && (input.role === 'DEBUGGER' || input.role === 'BACKEND' || input.role === 'FRONTEND') ? `MY LAST EDIT MAY HAVE CAUSED THIS ${input.suspectEdit.slice(0, 240)}` : '',
     input.projectFacts.length ? `FACTS ${input.projectFacts.join(' | ').slice(0, 300)}` : '',
+    input.contextNotes?.length && input.role !== 'REVIEWER' && input.role !== 'VERIFIER' ? `CONTEXT ${input.contextNotes.join(' | ').slice(0, 900)}` : '',
     'Do not commit, push, deploy, spend, or write files yourself.',
     source,
   ].filter(Boolean)
   if (input.role === 'ARCHITECT') return shared.join('\n')
   if (input.role === 'REVIEWER') {
-    return ['Compare every acceptance sentence in CONTRACT with SOURCE. A STATUSES list is not a defect. Return REPLAN. reasoningSummary must be STATUS fail and name each unmet acceptance, or STATUS pass when every acceptance sentence is implemented. Do not call a tool.', ...shared].join('\n')
+    return ['Compare the REQUEST and each numbered ACCEPTANCE line in CONTRACT with SOURCE. Only those lines are acceptance; a constant or label in SOURCE is not. A STATUSES list is not a defect. Return REPLAN. reasoningSummary must be STATUS fail and name each unmet acceptance, or STATUS pass when every acceptance sentence is implemented. Do not call a tool.', ...shared].join('\n')
   }
   if (input.role === 'VERIFIER') {
     const passed = input.projectFacts.some(item => /verify pass/.test(item))
@@ -349,6 +472,29 @@ function promptFor(input: FoundrySpecialistRequest): string {
   }
   const file = input.workingSet[0] ?? input.excerpts[0]?.file ?? ''
   const missingName = /NameError|not defined|not imported|ImportError/i.test(input.failureEvidence.join(' '))
+  const named = missingNamesFromFailure(input.failureEvidence)
+  if (input.generalMode) {
+    return [
+      ...shared,
+      `Return TOOL file.replace_unique for ${file}.`,
+      'path must be that working-set file. matchText must be copied exactly from SOURCE and occur once. replacementText is the replacement. Do not use anchorId. Do not use src/example.ts.',
+      'Do not replace the whole file. Keep every existing function, assignment, and import that SOURCE already has.',
+      input.role === 'FRONTEND'
+        ? `Update ${file} so it works with the change made in the code it uses (see CONTEXT and FAILURE). Change only what the request and the failure require.`
+        : `Make the smallest change in ${file} that carries out the request in CONTRACT and makes the failing test in FAILURE pass. Change only behavior the request asks for; do not rename or remove anything else.`,
+      `TEST shows what must hold. Do not add behavior that the request and TEST do not ask for. If ${file} already does what is needed, return REPLAN with reasoningSummary STATUS pass and no tool call instead.`,
+      named.unknownImports.length
+        ? `The import of ${named.unknownImports.join(', ')} is wrong: that name does not exist in the module it is imported from. Fix the import using names SOURCE shows the module defines.`
+        : named.undefinedNames.length
+          ? `${named.undefinedNames.join(', ')} is used but never imported or defined. Import or define it using the names CONTEXT and SOURCE show.`
+          : '',
+      'Do not return COMPLETE.',
+    ].filter(Boolean).join('\n')
+  }
+  // The row key the contract defines (its value, e.g. "status"), and the shared helper that normalizes it when there is one. The word CONTRACT is only a
+  // prompt label; a worker that reads it as a field name writes .get("contract").
+  const filterField = contractFieldName([input.missionContract]) ?? 'status'
+  const normalizer = /def\s+(normalize_[A-Za-z_]+)\s*\(/.exec(input.missionContract)?.[1] ?? null
   return [
     ...shared,
     `Return TOOL file.replace_unique for ${file}.`,
@@ -356,10 +502,14 @@ function promptFor(input: FoundrySpecialistRequest): string {
     'Do not replace the whole file. Keep every existing function, assignment, and import that SOURCE already has.',
     input.role === 'FRONTEND'
       ? 'The UI must pass the caller filter argument into the existing API function. Do not filter the rows again after that call.'
-      : 'The backend must keep rows whose contract field equals the supplied filter argument. When no filter is supplied, return every row. Do not hardcode one status literal.',
-    missingName
-      ? 'FAILURE names a missing name. Add the missing import from CONTRACT with one unique replacement. Do not define a local copy. Do not delete existing functions or data.'
-      : 'A name used in the file must be imported or defined in SOURCE. If CONTRACT defines a helper, import it before calling it.',
+      : `The backend must keep rows whose "${filterField}" value equals the supplied filter argument${normalizer ? `, comparing ${normalizer} on both sides` : ''}. "${filterField}" is the row key; it is not a variable named contract. When no filter is supplied, return every row. Do not hardcode one status literal.`,
+    named.unknownImports.length
+      ? `The import of ${named.unknownImports.join(', ')} is wrong: that name does not exist in the module it is imported from. Remove it from the import line, and import only names the shared module actually defines (see SOURCE and CONTRACT). Do not invent a name.`
+      : named.undefinedNames.length
+        ? `${named.undefinedNames.join(', ')} is used but never imported. Add exactly ${named.undefinedNames.join(', ')} to the existing import from the shared module (the CONTRACT text shows it is defined there). Import that name and no other. Do not define a local copy. Do not delete existing functions or data.`
+        : missingName
+          ? 'FAILURE names a missing name. Add the missing import from the shared module with one unique replacement, using the name exactly as SOURCE uses it. Do not define a local copy. Do not delete existing functions or data.'
+          : 'A name used in the file must be imported or defined in SOURCE. If CONTRACT defines a helper, import it before calling it.',
     'Do not return COMPLETE.',
   ].join('\n')
 }
@@ -447,6 +597,8 @@ async function dispatchPinned(input: FoundrySpecialistRequest, provider: string,
 }
 
 export const IMPLEMENTER_CORRECTION_LIMIT = 1
+export const TOOL_NOT_EXPOSED = /was not exposed for this reasoning turn/i
+export const TOOL_NOT_AVAILABLE_CORRECTION = 'REJECTED you called a tool that is not available in this step. Everything you need is in SOURCE. Do not call a tool. Return REPLAN with your answer in reasoningSummary.'
 
 export function implementerCorrectionPrompt(reason: string): string {
   return `REJECTED ${reason}. Return one TOOL file.replace_unique. path must be a working-set file. matchText must be copied once from SOURCE. Include replacementText. Do not use anchorId or src/example.ts.`
@@ -545,6 +697,11 @@ export async function callCampaignSpecialist(input: FoundrySpecialistRequest, so
     const retry = await dispatchPinned(input, provider, model, models)
     routed = retry.ok ? retry : routed
   }
+  // A small model sometimes reaches for a tool (usually file.read) in a step that has none. The files are already in SOURCE: say so once and ask again.
+  if (!routed.ok && TOOL_NOT_EXPOSED.test(routed.error) && callsRemaining > (switchedWorker ? 2 : 1)) {
+    const retry = await dispatchPinned({ ...input, failureEvidence: [...input.failureEvidence, TOOL_NOT_AVAILABLE_CORRECTION] }, provider, model, models)
+    routed = retry.ok ? retry : routed
+  }
   if (!routed.ok) {
     const failure = failureFromError(routed.error)
     return {
@@ -569,6 +726,7 @@ export async function callCampaignSpecialist(input: FoundrySpecialistRequest, so
     needsEdit: input.needsEdit,
     sources,
     requiredPaths: input.workingSet,
+    generalMode: input.generalMode,
   })
   if (allowImplementerCorrection({ needsEdit: input.needsEdit, failureClass: parsed.failureClass, correctionsUsed, callsRemaining, calls })) {
     correctionsUsed += 1
@@ -584,6 +742,7 @@ export async function callCampaignSpecialist(input: FoundrySpecialistRequest, so
         needsEdit: input.needsEdit,
         sources,
         requiredPaths: input.workingSet,
+        generalMode: input.generalMode,
       })
       accepted.result.evidence = [`REJECTED ${rejectedEvidence}`, ...accepted.result.evidence]
       parsed = accepted
@@ -591,11 +750,14 @@ export async function callCampaignSpecialist(input: FoundrySpecialistRequest, so
     }
   }
   const receipt = receiptFor(input, routed.ok ? routed.provider : provider, routed.ok ? routed.model : model, decision.routingDecisionId, parsed.failureClass ?? parsed.result.status, parsed.result.summary, parsed.failureClass)
+  // The first proposal and its correction both changing nothing is one ineffective strategy seen twice, not two independent tries.
+  const noEffect = parsed.noEffect ? { ...parsed.noEffect, attempts: parsed.noEffect.attempts + (/identical to matchText/.test(rejectedEvidence) ? 1 : 0) } : null
   if (rejectedEvidence) receipt.evidenceInputs = [`REJECTED ${rejectedEvidence}`, ...receipt.evidenceInputs]
   return {
     receipt,
     result: parsed.result,
     failureClass: parsed.failureClass,
+    noEffect,
     activity,
     workerLabel: `${routed.ok ? routed.provider : provider}/${routed.ok ? routed.model : model}`,
     edit: parsed.edit,
@@ -612,10 +774,12 @@ export function specialistRequestFromCampaign(input: {
   purpose: string
   acceptance: string
   workingSet: string[]
-  excerpts: { file: string; text: string }[]
+  excerpts: { file: string; text: string; readOnly?: boolean }[]
   needsEdit: boolean
   attempt: number
   contractText?: string
+  generalMode?: boolean
+  contextNotes?: string[]
 }): FoundrySpecialistRequest {
   const campaign = input.campaign
   return {
@@ -626,10 +790,14 @@ export function specialistRequestFromCampaign(input: {
     taskPurpose: input.purpose,
     acceptanceCriteria: [input.acceptance],
     workingSet: input.workingSet,
-    projectFacts: [...campaign.knowledge.architecture, ...campaign.knowledge.tests].slice(0, 6),
+    // The newest test results decide what a verifier is told; the oldest ones must not push them out of a long mission's facts.
+    projectFacts: [...campaign.knowledge.architecture.slice(0, 2), ...campaign.knowledge.tests.slice(-4)],
     knownInterfaces: campaign.knowledge.interfaces.slice(0, 4),
-    failureEvidence: campaign.repairFinding ? [campaign.repairFinding] : campaign.knowledge.failures.slice(-2),
-    alreadyTried: campaign.progress?.triedSummaries?.slice(-4) ?? [],
+    // A reviewer or verifier judges the files as they are now. The failure that started the repair is history once the tests pass, and
+    // handing it to them anchors a small model on a problem that is already fixed.
+    failureEvidence: input.role === 'REVIEWER' || input.role === 'VERIFIER' ? [] : campaign.repairFinding ? [campaign.repairFinding] : campaign.knowledge.failures.slice(-2),
+    alreadyTried: [...ruledOutStatements(campaign.ruledOut), ...noEffectStatements(campaign.noEffect), ...(campaign.progress?.triedSummaries?.slice(-4) ?? [])],
+    ...suspectEditFor(campaign),
     resourceBudget: { callsRemaining: campaign.modelCallBudget - campaign.modelCalls, ceiling: campaign.modelCallBudget },
     localOnly: campaign.localOnly,
     reasoningDepth: 'R1',
@@ -637,7 +805,17 @@ export function specialistRequestFromCampaign(input: {
     needsEdit: input.needsEdit,
     pin: campaign.pin,
     attempt: input.attempt,
+    ...(input.generalMode ? { generalMode: true } : {}),
+    ...(input.contextNotes?.length ? { contextNotes: input.contextNotes } : {}),
   }
+}
+
+/** Only when the project stopped loading after an edit does the request carry that edit; elsewhere extra context only distracts a small model. */
+function suspectEditFor(campaign: EngineeringCampaign): { suspectEdit?: string } {
+  const last = campaign.recentEdits?.at(-1)
+  const evidence = campaign.repairFinding ? [campaign.repairFinding] : campaign.knowledge.failures.slice(-2)
+  if (!last || !editBrokeTheProject(evidence)) return {}
+  return { suspectEdit: `${last.file}: ${compactDiff(last.diff)}` }
 }
 
 export function campaignCallsRemaining(campaign: EngineeringCampaign): number {

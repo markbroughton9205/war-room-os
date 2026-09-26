@@ -59,7 +59,7 @@ export const STRONG_SIGNALS: readonly ProgressSignal[] = [
 
 export type StrategyIdentity = 'NEW_STRATEGY' | 'SAME_STRATEGY' | 'NO_MUTATION'
 export type FailureKind = 'TEST' | 'REVIEW' | 'VERIFY'
-export type ObservationKind = FailureKind | 'GREEN' | 'INVALID_OUTPUT'
+export type ObservationKind = FailureKind | 'GREEN' | 'INVALID_OUTPUT' | 'NO_EFFECTIVE_CHANGE'
 export type FailureDepth = 'STRUCTURAL' | 'BEHAVIORAL' | 'UNKNOWN'
 
 export type FailureFingerprint = {
@@ -132,6 +132,7 @@ export type ProgressStopReason =
   | 'ITERATION_LIMIT'
   | 'ABSOLUTE_BOUND'
   | 'CAPABILITY_INVALID_OUTPUT'
+  | 'CAPABILITY_NO_EFFECTIVE_CHANGE'
   | 'POLICY_NO_TESTS'
   | 'PROVIDER'
 
@@ -170,6 +171,10 @@ export type CampaignProgress = {
   continuation: ContinuationState
   /** Invalid structured outputs so far. They spend model calls, not repair attempts, so they do not use the repair window. */
   invalidOutputTotal: number
+  /** Edits a worker proposed that would have changed nothing. Not invalid output and not a failed hypothesis: evidence that one way of editing is not producing progress. */
+  noEffectTotal: number
+  /** Times the ineffective strategy was abandoned for a materially different one. */
+  noEffectSwitches: number
   credits: number
   greens: number
   semanticFailureTransitions: number
@@ -296,6 +301,8 @@ export function emptyCampaignProgress(): CampaignProgress {
     stopFinding: null,
     continuation: emptyContinuation(),
     invalidOutputTotal: 0,
+    noEffectTotal: 0,
+    noEffectSwitches: 0,
     credits: 0,
     greens: 0,
     semanticFailureTransitions: 0,
@@ -886,6 +893,49 @@ export function evaluateInvalidOutput(prior: CampaignProgress, input: { role: st
   return { progress: p, decision: { proceed: !stop, classification, signals: [], strategy: null, stop: stopInfo, notes: [], summary: summarize(classification, [], null, stopInfo) } }
 }
 
+/**
+ * A worker proposed an edit whose replacement equals the file's current text. Nothing is written. This is evidence about the strategy,
+ * not about the hypothesis: the first one is recorded and the mission stays alive; a repeat marks "edit this file" as ineffective, which counts
+ * as stagnating strategy evidence (never as a fresh independent attempt) and forces a materially different next move. Only when every distinct
+ * approach was exhausted (`exhausted`) is the model judged unable to edit, which is a capability block, not stagnation of the code.
+ */
+export function evaluateNoEffectiveChange(prior: CampaignProgress, input: { file: string; role: string; repeated: boolean; exhausted: boolean; at: string; mutationGeneration: number; reworkCycles: number }): { progress: CampaignProgress; decision: ProgressDecision } {
+  const p = clone(prior)
+  const limits = progressLimits(p)
+  p.noEffectTotal = (p.noEffectTotal ?? 0) + 1
+  if (input.repeated) p.noEffectSwitches = (p.noEffectSwitches ?? 0) + 1
+  const summary = `${input.file}: the proposed edit would not change the file`
+  if (!p.triedSummaries.includes(summary)) p.triedSummaries.push(summary)
+  p.triedSummaries = cap(p.triedSummaries, 12)
+  let stop: ProgressStopReason | null = null
+  if (input.exhausted) stop = 'CAPABILITY_NO_EFFECTIVE_CHANGE'
+  else if (input.reworkCycles >= limits.absoluteCycles) stop = 'STAGNATION_WINDOW'
+  const classification: ProgressClass = stop === 'CAPABILITY_NO_EFFECTIVE_CHANGE' ? 'BLOCKED_CAPABILITY' : input.repeated ? 'STAGNATING' : (p.classification ?? 'STAGNATING')
+  const stopInfo: ProgressStop | null = stop
+    ? { reason: stop, classification, message: stopMessage(stop, p, limits, input.reworkCycles, input.role), cyclesUsed: input.reworkCycles, cycleLimit: limits.cycles, absoluteCycles: limits.absoluteCycles }
+    : null
+  record(p, {
+    at: input.at,
+    kind: 'NO_EFFECTIVE_CHANGE',
+    fingerprintId: null,
+    exception: 'NoEffectiveChange',
+    message: normalizeVolatile(summary).slice(0, 200),
+    failingCount: null,
+    failingTests: [],
+    class: classification,
+    signals: [],
+    strategy: 'NO_MUTATION',
+    mutationGeneration: input.mutationGeneration,
+    hypothesis: null,
+    repairTarget: null,
+    stop,
+  })
+  if (input.repeated && !stop) pushNotes(p, [{ icon: '↻', text: 'That change would not have altered anything, so I am trying a different approach' }])
+  p.stop = stopInfo
+  if (stop || input.repeated) p.classification = classification
+  return { progress: p, decision: { proceed: !stop, classification, signals: [], strategy: 'NO_MUTATION', stop: stopInfo, notes: [], summary: summarize(classification, [], 'NO_MUTATION', stopInfo) } }
+}
+
 export function resetInvalidOutputStreak(prior: CampaignProgress): CampaignProgress {
   if (prior.invalidOutputStreak === 0) return prior
   return { ...prior, invalidOutputStreak: 0 }
@@ -978,6 +1028,7 @@ function stopMessage(reason: ProgressStopReason, p: CampaignProgress, limits: Pr
     case 'ITERATION_LIMIT': return `Foundry used all ${limits.iterations} task steps it had earned (absolute limit ${limits.absoluteIterations}) while still making progress.`
     case 'WINDOW_EXHAUSTED': return `Repair attempts (${cycles}) reached the window earned by progress so far (${limits.cycles}); the absolute limit is ${limits.absoluteCycles}.`
     case 'ABSOLUTE_BOUND': return `Foundry reached the absolute limit of ${limits.absoluteCycles} repair cycles for one mission while still making progress.`
+    case 'CAPABILITY_NO_EFFECTIVE_CHANGE': return `Every way of editing that Foundry tried produced a proposal that would change nothing (${p.noEffectTotal} in all, ${p.noEffectSwitches} approaches abandoned), so the model cannot make an effective edit here.`
     case 'CAPABILITY_INVALID_OUTPUT': return `The model returned unusable structured output ${p.invalidOutputTotal} times during this mission${role ? ` (latest from ${role})` : ''}, so it cannot make reliable edits.`
     case 'POLICY_NO_TESTS': return 'The test command collected no tests, so the verification barrier cannot be satisfied.'
     case 'PROVIDER': return 'The model provider is unavailable.'
@@ -1028,6 +1079,7 @@ export function blockedSummaryFor(reason: ProgressStopReason): string {
     case 'ABSOLUTE_BOUND':
       return 'BLOCKED_REPAIR_LIMIT'
     case 'CAPABILITY_INVALID_OUTPUT':
+    case 'CAPABILITY_NO_EFFECTIVE_CHANGE':
       return 'BLOCKED_CAPABILITY'
     case 'POLICY_NO_TESTS':
       return 'BLOCKED_POLICY'

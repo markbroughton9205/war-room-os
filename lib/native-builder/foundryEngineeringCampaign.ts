@@ -5,6 +5,7 @@
  */
 import type { PlannedEdit } from './foundryLargeProject'
 import type { EngineeringPlan } from './foundryEngineeringPlan'
+import type { ProjectContext } from './foundryProjectContext'
 import { emptyCampaignProgress, type CampaignProgress } from './foundryProgressEvaluation'
 
 export const MAX_ACTIVE_SUBTASKS = 8
@@ -90,6 +91,16 @@ export type EngineeringCampaign = {
   filesInspected: string[]
   filesMutated: string[]
   appliedEditKeys: string[]
+  /** The last applied edit (file + unified diff). Only used to tell a repairer that its own edit broke the project. */
+  recentEdits?: { file: string; diff: string }[]
+  /** Files a repair edit was applied to without changing the failure: runtime evidence that the cause is elsewhere. Survives restart with the record. */
+  ruledOut?: { file: string; layer: string; basis?: 'EDIT' | 'ISOLATED_TESTS' }[]
+  /** Files where a worker proposed edits that would have changed nothing. Survives restart with the record, so a resumed mission does not start the same ineffective strategy again. */
+  noEffect?: { file: string; layer: string; key: string; attempts: number }[]
+  /** Passing/failing tests that were already used as alternate evidence for a file at a mutation generation, so the same diagnostic is not run twice. */
+  isolationChecked?: string[]
+  /** Identities of reviewer claims that already led to a rework. The same claim again, with tests green, does not start another repair. */
+  reviewedClaims?: string[]
   checkpoints: string[]
   pauseAfter: string | null
   startedAt: string
@@ -120,6 +131,14 @@ export type EngineeringCampaign = {
   componentFiles: { contract: string[]; backend: string[]; frontend: string[]; tests: string[]; database: string[] }
   /** The explicit engineering plan (goal, acceptance, dependency-ordered tasks, revisions). Optional so records written before plans existed still load. */
   plan?: EngineeringPlan | null
+  /** Phase 3: how the layers were found. CONVENTION = directory names (Phase 2 fixtures); CONTEXT = goal-driven discovery. */
+  contextMode?: 'CONVENTION' | 'CONTEXT'
+  /** The mutated files as they were when the covering tests last passed, and what opened the current rework. A review-driven change that turns them red is put back. */
+  greenSnapshot?: { generation: number; files: Record<string, string> }
+  reworkOrigin?: 'TEST' | 'REVIEW'
+  reverts?: number
+  /** The working set, why each file is in it, the symbols, linked tests, changed files, refreshes and expansions. Survives restart with the record. */
+  context?: ProjectContext
 }
 
 export function campaignShouldOwn(request: string): boolean {
@@ -199,7 +218,10 @@ export type CampaignTestReceipt = {
   exitCode: number | null
   startedAt: string
   completedAt: string | null
-  result: 'NOT_RUN' | 'RUNNING' | 'RUNNING_INTERRUPTED' | 'FAILED' | 'PASSED'
+  /** PASSED_SCOPED: the runner exited non-zero, but every failure was proven unrelated to the request (see foundryGoalAnchor). The exit code stays as the runner reported it. */
+  result: 'NOT_RUN' | 'RUNNING' | 'RUNNING_INTERRUPTED' | 'FAILED' | 'PASSED' | 'PASSED_SCOPED'
+  /** Unrelated failures left as found when result is PASSED_SCOPED. */
+  deferredFailures?: number
 }
 
 export function verificationBarrierSatisfied(campaign: {
@@ -208,7 +230,10 @@ export function verificationBarrierSatisfied(campaign: {
   tasks: readonly { id: string; role: string; status: string }[]
 }): boolean {
   const latest = [...(campaign.testReceipts ?? [])].reverse().find(item => item.command.includes('unittest'))
-  if (!latest || latest.result !== 'PASSED' || latest.exitCode !== 0) return false
+  if (!latest) return false
+  const passedClean = latest.result === 'PASSED' && latest.exitCode === 0
+  const passedScoped = latest.result === 'PASSED_SCOPED' && (latest.deferredFailures ?? 0) > 0
+  if (!passedClean && !passedScoped) return false
   if (latest.testedMutationGeneration !== campaign.mutationGeneration) return false
   if (campaign.tasks.some(task => task.role === 'DEBUGGER' && task.status !== 'COMPLETE')) return false
   return true
@@ -225,12 +250,13 @@ export function recordTestStart(campaign: { mutationGeneration: number; testRece
   })
 }
 
-export function recordTestFinish(campaign: { testReceipts: CampaignTestReceipt[] }, exitCode: number, completedAt: string): void {
+export function recordTestFinish(campaign: { testReceipts: CampaignTestReceipt[] }, exitCode: number, completedAt: string, scoped?: { deferred: number }): void {
   const latest = [...campaign.testReceipts].reverse().find(item => item.result === 'RUNNING')
   if (!latest) return
   latest.exitCode = exitCode
   latest.completedAt = completedAt
-  latest.result = exitCode === 0 ? 'PASSED' : 'FAILED'
+  latest.result = exitCode === 0 ? 'PASSED' : scoped && scoped.deferred > 0 ? 'PASSED_SCOPED' : 'FAILED'
+  if (exitCode !== 0 && scoped && scoped.deferred > 0) latest.deferredFailures = scoped.deferred
 }
 
 export function interruptRunningTest(campaign: { testReceipts?: CampaignTestReceipt[] }): void {
@@ -297,7 +323,9 @@ function task(id: string, phase: CampaignPhaseType, role: CampaignRole, dependsO
   }
 }
 
-export function buildCampaignPlan(components: EngineeringCampaign['componentFiles'], request: string): { tasks: CampaignTask[]; parallelGroups: string[][] } {
+export function buildCampaignPlan(components: EngineeringCampaign['componentFiles'], request: string, contextDriven = false): { tasks: CampaignTask[]; parallelGroups: string[][] } {
+  // A context-driven plan is worded from the request, not from the status-filter fixture the layered plan was first written for.
+  const goal = request.replace(/\s+/g, ' ').trim().slice(0, 220)
   const tasks: CampaignTask[] = [
     task('discover', 'DISCOVER', 'ARCHITECT', [], 'Map the repository structure.', 'Components are named from paths, not from a guessed layout.', []),
     task('architect', 'ARCHITECT', 'ARCHITECT', ['discover'], 'Identify backend, frontend, and contract files.', 'At least three component kinds are evidenced.', [
@@ -305,16 +333,16 @@ export function buildCampaignPlan(components: EngineeringCampaign['componentFile
     ]),
   ]
   const implement: CampaignTask[] = []
-  if (components.contract.length) implement.push(task('contract', 'IMPLEMENT', 'ARCHITECT', ['architect'], 'Read the shared contract.', 'The contract field is recorded before implementation edits.', components.contract))
-  if (components.backend.length) implement.push(task('backend', 'IMPLEMENT', 'BACKEND', ['architect'], 'Filter the API by the evidenced field.', 'The API uses the accepted field.', components.backend))
-  if (components.frontend.length) implement.push(task('frontend', 'IMPLEMENT', 'FRONTEND', ['architect'], 'Pass the filter through the UI.', 'The UI forwards the filter argument.', components.frontend))
+  if (components.contract.length) implement.push(task('contract', 'IMPLEMENT', 'ARCHITECT', ['architect'], contextDriven ? 'Read the shared code the change depends on.' : 'Read the shared contract.', contextDriven ? 'The shared code is read before implementation edits.' : 'The contract field is recorded before implementation edits.', components.contract))
+  if (components.backend.length) implement.push(task('backend', 'IMPLEMENT', 'BACKEND', ['architect'], contextDriven ? `Make the requested change in the code that owns it: ${goal}` : 'Filter the API by the evidenced field.', contextDriven ? 'The requested behavior works in this code.' : 'The API uses the accepted field.', components.backend))
+  if (components.frontend.length) implement.push(task('frontend', 'IMPLEMENT', 'FRONTEND', ['architect'], contextDriven ? `Update the code that uses it so it works with the change, only if it needs to: ${goal}` : 'Pass the filter through the UI.', contextDriven ? 'The code that uses the change still works with it.' : 'The UI forwards the filter argument.', components.frontend))
   if (components.database.length) implement.push(task('database', 'IMPLEMENT', 'DATABASE', ['architect'], 'Record the data contract. Do not apply a schema migration.', 'No database mutation.', components.database))
   tasks.push(...implement)
   const implementIds = implement.map(item => item.id)
   tasks.push(
-    task('integrate', 'INTEGRATE', 'TEST', implementIds, 'Run the tests that import the wired components.', 'Backend and UI results agree.', components.tests),
+    task('integrate', 'INTEGRATE', 'TEST', implementIds, contextDriven ? 'Run the tests that cover the changed code.' : 'Run the tests that import the wired components.', contextDriven ? 'The covering tests pass.' : 'Backend and UI results agree.', components.tests),
     task('review', 'REVIEW', 'REVIEWER', ['integrate'], 'Check contract, scope, and unintended edits.', 'Review findings are empty or repaired.', []),
-    task('verify', 'VERIFY', 'VERIFIER', ['review'], 'Re-run tests from disk truth.', 'The requested filter works through API and UI.', components.tests),
+    task('verify', 'VERIFY', 'VERIFIER', ['review'], 'Re-run tests from disk truth.', contextDriven ? 'The requested change works and the tests pass.' : 'The requested filter works through API and UI.', components.tests),
   )
   const parallel = implementIds.filter(id => id === 'backend' || id === 'frontend')
   return { tasks, parallelGroups: parallel.length > 1 ? [parallel] : [] }
@@ -423,7 +451,7 @@ export function campaignEdit(input: {
 export function reviewCampaign(input: { backend: string; frontend: string; contracts: readonly string[]; mutated: readonly string[]; dirty: readonly string[] }): string[] {
   const findings: string[] = []
   const field = contractField(input.contracts)
-  if (field && !input.backend.includes(`.get("${field}")`)) findings.push(`API filter does not use contract field ${field}.`)
+  if (field && !backendUsesField(input.backend, field) && !input.backend.includes(`["${field}"]`)) findings.push(`API filter does not use contract field ${field}.`)
   if (!/status\s*=\s*status/.test(input.frontend)) findings.push('UI does not forward the filter.')
   if (input.mutated.some(file => file.startsWith('archive/'))) findings.push('Archive file was mutated.')
   if (input.mutated.some(file => input.dirty.includes(file))) findings.push('Preexisting dirty file was mutated.')
@@ -557,12 +585,21 @@ export function stalledSameFailure(input: { finding: string; lastSignature: stri
   return Boolean(input.lastSignature) && signature === input.lastSignature && input.appliedEdits === input.editsAtFailure
 }
 
-export function implementationNeedsEdit(role: 'BACKEND' | 'FRONTEND', source: string, contract: string, repairFinding: string | null): boolean {
+/**
+ * origin REVIEW: a reviewer's sentence is a claim, not evidence. A claim that a name is undefined only reopens the code when the source
+ * really uses an unbound name (checked above); otherwise passing tests and a clean source outweigh the sentence.
+ */
+/** A backend that special-cases "open" and never handles "closed" or a general status comparison. One that also handles the rest is not open-only. */
+export function isOpenOnly(source: string): boolean {
+  return /if status == ["']open["']/.test(source) && !/["']closed["']/.test(source) && !/\w+\.get\([^)]*\)\s*==\s*status\b/.test(source)
+}
+
+export function implementationNeedsEdit(role: 'BACKEND' | 'FRONTEND', source: string, contract: string, repairFinding: string | null, origin: 'TEST' | 'REVIEW' = 'TEST'): boolean {
   const field = contractFieldName([contract]) ?? 'status'
   const forwards = /status\s*=\s*status/.test(source)
-  const openOnly = /if status == ["']open["']/.test(source)
-  const missingSymbol = /NameError|not defined|not imported|ImportError|SyntaxError|parenthesis|invalid syntax/i.test(repairFinding ?? '')
-  const appliesItemFilter = /normalize_status\(item\.get\(/.test(source) || new RegExp(`item\\.get\\(["']${field}["']\\)\\s*==`).test(source)
+  const openOnly = isOpenOnly(source)
+  const missingSymbol = origin === 'TEST' && /NameError|not defined|not imported|ImportError|SyntaxError|parenthesis|invalid syntax/i.test(repairFinding ?? '')
+  const appliesItemFilter = /normalize_status\(item\.get\(/.test(source) || new RegExp(`item\\.get\\(["']${field}["'](?:\\s*,[^()]*)?\\)\\s*==`).test(source)
   const hasUnfiltered = /return list\(/.test(source)
   const broken = sourceUsesUnboundName(source)
   if (broken) return true
@@ -593,16 +630,21 @@ export function campaignCompletionAllowed(input: {
     && !input.unresolvedFailure
 }
 
+/** True when the backend reads the contract field from each item. A default argument (`.get("status", "")`) is still the same read. */
+export function backendUsesField(backend: string, field: string): boolean {
+  const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`\\.get\\(\\s*["']${escaped}["']\\s*[,)]`).test(backend)
+}
+
 export function diskMeetsContract(contract: string, backend: string, frontend: string): boolean {
   const field = contractFieldName([contract])
   const usesField = !field
-    || backend.includes(`.get("${field}")`)
-    || backend.includes(`.get('${field}')`)
+    || backendUsesField(backend, field)
     || backend.includes(`["${field}"]`)
     || backend.includes(`['${field}']`)
     || backend.includes('FILTER_FIELD')
   if (!usesField) return false
   if (/forwards status/i.test(contract) && !/status\s*=\s*status/.test(frontend)) return false
-  if (/closed returns only closed/i.test(contract) && /if status == ["']open["']/.test(backend)) return false
+  if (/closed returns only closed/i.test(contract) && isOpenOnly(backend)) return false
   return true
 }

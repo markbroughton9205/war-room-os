@@ -4,6 +4,8 @@ import { getMissionExecutionStrategy } from '@/lib/mission-runtime'
 import { runInResolvedWorkspace } from '@/lib/mission-runtime/withWorkspace'
 import { listWorkspaces } from '@/lib/native-builder/workspaceRegistry'
 import { campaignShouldOwn } from '@/lib/native-builder/foundryEngineeringCampaign'
+import { contextShouldOwn } from '@/lib/native-builder/foundryProjectContextIO'
+import { resolveRepoRoot } from '@/lib/repo/paths'
 import {
   WAR_ROOM_CANONICAL_WORKSPACE_ID,
   decorateWorkspaceIdentity,
@@ -123,7 +125,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       naturalLanguage: text,
       subsystem: 'project',
       executionMode: 'bounded_coding',
-      specialistIntelligence: campaignShouldOwn(text) ? 'model' : undefined,
+      // A request the campaign owns (by its API/UI shape, or because discovery grounds it in the project) is carried out by model-driven specialists.
+      specialistIntelligence: campaignShouldOwn(text) || await contextShouldOwn(resolveRepoRoot(), text) ? 'model' : undefined,
       autoRun: true,
       waitForCompletion: body.waitForCompletion === true,
       sessionId: id,

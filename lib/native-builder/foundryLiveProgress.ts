@@ -103,6 +103,7 @@ export function buildLiveProgress(input: LiveProgressInput): LiveProgress {
   let deeper = false, resolvedLabel: string | null = null
   let failedAttempts = 0
   let replans = 0
+  let leftAlone = 0
   let reviewState: LiveStepState = 'QUEUED'
   // The reviewer can raise a concern the runtime judges non-actionable (nothing to change): that is not a failed review.
   // Only a rework that follows the finding makes the review step FAIL.
@@ -191,7 +192,8 @@ export function buildLiveProgress(input: LiveProgressInput): LiveProgress {
         // A real replan recorded by the runtime (never inferred): the plan changed because the evidence changed.
         let trigger = ''
         try { trigger = String((JSON.parse(e.detail ?? '{}') as { trigger?: string }).trigger ?? '') } catch { /* payload is technical detail only */ }
-        if (['FAILURE_CHANGED', 'CONTRADICTION', 'REPAIR_RETARGET'].includes(trigger)) replans += 1
+        if (['FAILURE_CHANGED', 'CONTRADICTION', 'REPAIR_RETARGET', 'HYPOTHESIS_DISPROVEN', 'HYPOTHESIS_CONTRADICTED', 'EDIT_INEFFECTIVE', 'NO_EFFECTIVE_CHANGE', 'CONTEXT_EXPANDED', 'CHANGE_REVERTED'].includes(trigger)) replans += 1
+        if (trigger === 'DRIFT_GUARD') leftAlone += 1
         acc.tech.plan.push(`plan revised${trigger ? ` · ${trigger}` : ''}`)
         break
       }
@@ -226,6 +228,9 @@ export function buildLiveProgress(input: LiveProgressInput): LiveProgress {
   if (acc.state.build === 'PASS' && editedFiles.length === 0 && firstBuildStarted) acc.detail.build = null
   if (acc.state.test === 'RUNNING') acc.detail.test = testDetail(editedFiles.length ? editedFiles : [])
   if (testFailures > 0 && acc.state.test === 'RUNNING') acc.notes.test.push({ state: 'RUNNING', text: 'Running tests again…' })
+
+  // A failing test that has nothing to do with the request is reported plainly and never chased (the goal anchor).
+  if (leftAlone > 0) acc.notes.test.push({ state: 'PASS', text: 'Left an unrelated failing test alone' })
 
   // Notes that keep the course-changes visible instead of resetting the panel.
   if (testFailures > 0) {

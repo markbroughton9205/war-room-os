@@ -24,6 +24,7 @@ import { acquireMissionOwnership, isMissionOwned, releaseMissionOwnership, runAs
 import { engineeringRuntimeShouldOwn, runOwnedEngineeringMission, terminalSealReason } from './foundryEngineeringRuntime'
 import { countProjectFiles, largeProjectShouldOwn } from './foundryLargeProject'
 import { campaignShouldOwn } from './foundryEngineeringCampaign'
+import { contextShouldOwn } from './foundryProjectContextIO'
 import { decideFailureContinuation, buildFailureSignature, sourceFingerprint } from './foundryEngineeringFailure'
 import { emptyEngineeringRuntime, engineeringEvent, reduceEngineeringEvents, workstreamTextForEvent, type FoundryEngineeringEventType } from './foundryEngineeringEvents'
 import { runFoundryMission } from './foundryLoop'
@@ -203,7 +204,7 @@ async function runCodingMissionUnlocked(repairId: string): Promise<NativeRepairR
   if (record.codingMission.engineeringRuntime?.campaign?.phase || record.codingMission.engineeringRuntime?.largeProject?.phase) {
     return runOwnedEngineeringMission(repairId)
   }
-  if (campaignShouldOwn(record.codingMission.commanderRequest ?? '')) {
+  if (campaignShouldOwn(record.codingMission.commanderRequest ?? '') || await contextShouldOwn(resolveRepoRoot(), record.codingMission.commanderRequest ?? '')) {
     return runOwnedEngineeringMission(repairId)
   }
   const projectFileCount = await countProjectFiles()

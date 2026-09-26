@@ -2,6 +2,7 @@
  * Model-backed campaign checks.
  * Unit checks do not call a model. The two fixtures do.
  */
+import { isOpenOnly } from './foundryEngineeringCampaign'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -264,7 +265,7 @@ async function main() {
   check('fixture2_review', reviewerFoundGap(review?.summary ?? ''), review?.summary ?? 'none')
   check('fixture2_debug', Boolean(debug?.summary), debug?.summary ?? 'none')
   check('fixture2_rework', (campaign2?.reworkCycles ?? 0) >= 1 && campaign2?.blindRetryCount === 0, String(campaign2?.reworkCycles ?? 0))
-  check('fixture2_ready', campaign2?.verification === 'PROJECT_READY' && !/if status == ["']open["']/.test(readFileSync(path.join(root2, 'backend/api.py'), 'utf8')) && /status=status/.test(readFileSync(path.join(root2, 'frontend/board.py'), 'utf8')), campaign2?.verification ?? `${repair2?.codingMission?.engineeringRuntime?.blockedDetail?.summary ?? 'none'}: ${repair2?.codingMission?.engineeringRuntime?.blockedDetail?.failure ?? ''}`)
+  check('fixture2_ready', campaign2?.verification === 'PROJECT_READY' && !isOpenOnly(readFileSync(path.join(root2, 'backend/api.py'), 'utf8')) && /status=status/.test(readFileSync(path.join(root2, 'frontend/board.py'), 'utf8')), campaign2?.verification ?? `${repair2?.codingMission?.engineeringRuntime?.blockedDetail?.summary ?? 'none'}: ${repair2?.codingMission?.engineeringRuntime?.blockedDetail?.failure ?? ''}`)
   check('fixture2_truth', campaign2?.modelDirectWrites === 0 && campaign2?.rawChainOfThoughtStored === 0 && (campaign2?.modelCalls ?? 0) <= MAX_MODEL_CALLS_PER_CAMPAIGN, String(campaign2?.modelCalls ?? 0))
   rmSync(root2, { recursive: true, force: true })
 

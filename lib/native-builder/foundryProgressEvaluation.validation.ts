@@ -355,13 +355,17 @@ function main() {
   // ==================== gates and wiring are unchanged ====================
   const campaignSource = readFileSync(path.join(process.cwd(), 'lib/native-builder/foundryEngineeringCampaign.ts'), 'utf8').replace(/\r\n/g, '\n')
   const fn = (name: string) => { const start = campaignSource.indexOf(`export function ${name}`); return campaignSource.slice(start, campaignSource.indexOf('\n}\n', start) + 3) }
+  // Phase 2 goal anchor: the barrier now also accepts a scoped pass (non-zero exit, every failure proven unrelated, at least one deferral recorded). Nothing else in it changed.
   check('G_barrier_function_source_unchanged', fn('verificationBarrierSatisfied') === `export function verificationBarrierSatisfied(campaign: {
   mutationGeneration: number
   testReceipts?: CampaignTestReceipt[]
   tasks: readonly { id: string; role: string; status: string }[]
 }): boolean {
   const latest = [...(campaign.testReceipts ?? [])].reverse().find(item => item.command.includes('unittest'))
-  if (!latest || latest.result !== 'PASSED' || latest.exitCode !== 0) return false
+  if (!latest) return false
+  const passedClean = latest.result === 'PASSED' && latest.exitCode === 0
+  const passedScoped = latest.result === 'PASSED_SCOPED' && (latest.deferredFailures ?? 0) > 0
+  if (!passedClean && !passedScoped) return false
   if (latest.testedMutationGeneration !== campaign.mutationGeneration) return false
   if (campaign.tasks.some(task => task.role === 'DEBUGGER' && task.status !== 'COMPLETE')) return false
   return true
