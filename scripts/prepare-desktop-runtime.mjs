@@ -46,6 +46,11 @@ function rmrf(p) {
  * dereference is required: pnpm's standalone tree is a symlink farm into node_modules/.pnpm.
  * Preserving symlinks would leave the installed app pointing back at the developer checkout.
  */
+function isForbiddenCopyName(name) {
+  const lower = name.toLowerCase()
+  return FORBIDDEN_COPY.some(f => lower === f || lower.startsWith('.env'))
+}
+
 /**
  * Next's standalone output traces repo-root files that server code touches dynamically, which pulls
  * scratch/evidence directories into the packaged UI runtime (observed: ~900 MB of tmp/, a .war-room
@@ -70,6 +75,22 @@ function stripPackagedScratch(dir) {
 function copyDir(src, dest, dereference = true) {
   fs.mkdirSync(dest, { recursive: true })
   fs.cpSync(src, dest, { recursive: true, dereference })
+}
+
+function stripForbiddenCopies(dir) {
+  if (!fs.existsSync(dir)) return
+  const stack = [dir]
+  while (stack.length) {
+    const cur = stack.pop()
+    for (const ent of fs.readdirSync(cur, { withFileTypes: true })) {
+      const p = path.join(cur, ent.name)
+      if (isForbiddenCopyName(ent.name)) {
+        fs.rmSync(p, { recursive: true, force: true })
+        continue
+      }
+      if (ent.isDirectory() && ent.name !== 'node_modules') stack.push(p)
+    }
+  }
 }
 
 function mustExist(p, label) {
@@ -146,6 +167,62 @@ console.log('Copying Next standalone → desktop/runtime/ui')
 copyDir(standalone, uiRoot)
 const strippedScratch = stripPackagedScratch(uiRoot)
 if (strippedScratch.length) console.log(`Stripped repo scratch from runtime/ui: ${strippedScratch.join(', ')}`)
+
+/**
+ * Next's standalone trace can emit generated package links under `.next/node_modules` whose
+ * target is expected in the standalone pnpm store but was not copied (observed for
+ * `@playwright/test-<trace hash>`). A successful electron-builder run can preserve that dangling
+ * link and only fail later during side-by-side installation. Materialize each generated package
+ * from the real workspace dependency now and fail packaging early if its source is unavailable.
+ */
+function materializeNextTracedPackages() {
+  const tracedRoot = path.join(uiRoot, '.next', 'node_modules')
+  if (!fs.existsSync(tracedRoot)) return
+  let materialized = 0
+  const materializeDirectory = (directory, scope = null) => {
+    if (!fs.existsSync(directory)) return
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name.startsWith('@') && scope === null) {
+        materializeDirectory(path.join(directory, entry.name), entry.name)
+        continue
+      }
+      const destination = path.join(directory, entry.name)
+      let isLink = entry.isSymbolicLink()
+      if (!isLink) {
+        try {
+          isLink = fs.lstatSync(destination).isSymbolicLink()
+        } catch {
+          isLink = false
+        }
+      }
+      if (!isLink) continue
+      const packageName = entry.name.replace(/-[0-9a-f]{16}$/i, '')
+      let source = scope
+        ? path.join(repoRoot, 'node_modules', scope, packageName)
+        : path.join(repoRoot, 'node_modules', packageName)
+      if (!fs.existsSync(source)) {
+        const pnpmRoot = path.join(repoRoot, 'node_modules', '.pnpm')
+        const pnpmPrefix = scope ? `${scope.replace('/', '+')}+${packageName}@` : `${packageName}@`
+        const hit = fs.existsSync(pnpmRoot)
+          ? fs.readdirSync(pnpmRoot).find(name => name.startsWith(pnpmPrefix))
+          : null
+        if (hit) {
+          source = path.join(pnpmRoot, hit, 'node_modules', ...(scope ? [scope, packageName] : [packageName]))
+        }
+      }
+      if (!fs.existsSync(source)) {
+        throw new Error(`Cannot materialize traced package ${scope ? `${scope}/` : ''}${packageName}: ${source}`)
+      }
+      fs.rmSync(destination, { force: true })
+      copyDir(source, destination)
+      materialized += 1
+    }
+  }
+  materializeDirectory(tracedRoot)
+  console.log(`Materialized ${materialized} Next traced package link(s)`)
+}
+materializeNextTracedPackages()
+
 // Standalone NFT may over-trace; strip non-runtime trees if present.
 for (const drop of [
   '.git',
@@ -165,6 +242,14 @@ for (const drop of [
   if (fs.existsSync(p)) rmrf(p)
 }
 
+const clawdcodeAttributionSrc = path.join(repoRoot, 'docs', 'third-party', 'clawdcode.md')
+if (fs.existsSync(clawdcodeAttributionSrc)) {
+  const clawdcodeAttributionDest = path.join(uiRoot, 'docs', 'third-party', 'clawdcode.md')
+  fs.mkdirSync(path.dirname(clawdcodeAttributionDest), { recursive: true })
+  fs.copyFileSync(clawdcodeAttributionSrc, clawdcodeAttributionDest)
+  console.log('Preserved MIT attribution →', clawdcodeAttributionDest)
+}
+
 /**
  * pnpm's standalone output resolves transitive deps through node_modules/.pnpm symlinks.
  * Once dereferenced those lookups fail (e.g. `Cannot find module '@next/env'`), so flatten
@@ -176,7 +261,14 @@ function hoistPnpmStore() {
   if (!fs.existsSync(store)) return
   let hoisted = 0
   const place = (src, dest) => {
-    if (fs.existsSync(dest)) return
+    if (fs.existsSync(dest)) {
+      try {
+        if (!fs.lstatSync(dest).isSymbolicLink()) return
+      } catch {
+        return
+      }
+      fs.rmSync(dest, { force: true })
+    }
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     fs.cpSync(src, dest, { recursive: true, dereference: true })
     hoisted += 1
@@ -219,16 +311,66 @@ function vendorSwcHelpers() {
 }
 vendorSwcHelpers()
 
+function resolveWorkspacePackage(packageName) {
+  const direct = path.join(repoRoot, 'node_modules', ...packageName.split('/'))
+  if (fs.existsSync(direct)) return direct
+  const pnpmRoot = path.join(repoRoot, 'node_modules', '.pnpm')
+  if (!fs.existsSync(pnpmRoot)) return null
+  const prefix = `${packageName.replace('/', '+')}@`
+  const hit = fs.readdirSync(pnpmRoot).find(name => name.startsWith(prefix))
+  if (!hit) return null
+  const src = path.join(pnpmRoot, hit, 'node_modules', ...packageName.split('/'))
+  return fs.existsSync(src) ? src : null
+}
+
+function vendorWorkspacePackage(packageName) {
+  const dest = path.join(uiRoot, 'node_modules', ...packageName.split('/'))
+  const src = resolveWorkspacePackage(packageName)
+  if (!src) {
+    throw new Error(`Cannot vendor ${packageName}: package not found in node_modules or .pnpm store`)
+  }
+  if (fs.existsSync(dest)) rmrf(dest)
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  copyDir(src, dest)
+  console.log(`Vendored ${packageName} →`, dest)
+}
+
+function vendorPlaywrightForBrowserBroker() {
+  for (const name of ['@playwright/test', 'playwright', 'playwright-core']) {
+    vendorWorkspacePackage(name)
+  }
+}
+vendorPlaywrightForBrowserBroker()
+
 const uiStatic = path.join(uiRoot, '.next', 'static')
 fs.mkdirSync(path.dirname(uiStatic), { recursive: true })
 copyDir(staticDir, uiStatic)
 const uiPublic = path.join(uiRoot, 'public')
 copyDir(publicDir, uiPublic)
 
+const computerUseBackend = path.join(repoRoot, 'scripts', 'foundry', 'computer-use-backend.py')
+if (fs.existsSync(computerUseBackend)) {
+  const runtimeCu = path.join(runtimeRoot, 'scripts', 'foundry', 'computer-use-backend.py')
+  const uiCu = path.join(uiRoot, 'scripts', 'foundry', 'computer-use-backend.py')
+  fs.mkdirSync(path.dirname(runtimeCu), { recursive: true })
+  fs.mkdirSync(path.dirname(uiCu), { recursive: true })
+  fs.copyFileSync(computerUseBackend, runtimeCu)
+  fs.copyFileSync(computerUseBackend, uiCu)
+  console.log('Copied scripts/foundry/computer-use-backend.py into packaged runtime')
+}
+
+const buildMetaSrc = path.join(repoRoot, '.next', 'build-meta.json')
+const buildMetaDest = path.join(uiRoot, '.next', 'build-meta.json')
+if (fs.existsSync(buildMetaSrc)) {
+  fs.copyFileSync(buildMetaSrc, buildMetaDest)
+  console.log('Copied .next/build-meta.json → desktop/runtime/ui/.next/build-meta.json')
+}
+
 // Diagnostic renderer for Core fallback
 copyDir(path.join(repoRoot, 'desktop', 'renderer'), path.join(runtimeRoot, 'renderer'))
 
 stripPackagedScratch(uiRoot)
+stripForbiddenCopies(uiRoot)
 assertNoSecrets(uiRoot)
 {
   const leftover = fs.existsSync(uiRoot) ? fs.readdirSync(uiRoot).filter(isPackagedScratchName) : []
@@ -404,12 +546,23 @@ module.exports = { startCoreInProcess, startCoreChild }
 `,
 )
 
+let buildMeta = {}
+try {
+  buildMeta = JSON.parse(fs.readFileSync(path.join(repoRoot, '.next', 'build-meta.json'), 'utf8'))
+} catch {
+  buildMeta = {}
+}
 const meta = {
   prepared_at: new Date().toISOString(),
   ui_root: 'desktop/runtime/ui',
   core_bundle: 'desktop/runtime/core/server.cjs',
   secrets_bundled: false,
   repo_independent: true,
+  source_commit: typeof buildMeta.gitSha === 'string' ? buildMeta.gitSha : null,
+  git_short: typeof buildMeta.gitShort === 'string' ? buildMeta.gitShort : null,
+  git_dirty: typeof buildMeta.gitDirty === 'boolean' ? buildMeta.gitDirty : null,
+  git_ref: typeof buildMeta.gitRef === 'string' ? buildMeta.gitRef : null,
+  built_at: typeof buildMeta.builtAt === 'string' ? buildMeta.builtAt : null,
 }
 fs.writeFileSync(path.join(runtimeRoot, 'RUNTIME_MANIFEST.json'), JSON.stringify(meta, null, 2))
 console.log(JSON.stringify({ ok: true, ...meta }, null, 2))

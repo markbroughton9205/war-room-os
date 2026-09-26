@@ -1,7 +1,8 @@
 /**
  * Phase 3 - automatic codebase context. Pure checks of the context engine plus textual assertions on the runtime wiring; the live behaviour is proven by the Phase 3 live proofs.
  */
-import { readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import {
   CONTEXT_LIMITS,
@@ -47,7 +48,9 @@ const results: Result[] = []
 const check = (name: string, pass: boolean, detail = '') => { results.push({ name, pass, detail }); console.log(`${pass ? 'PASS' : 'FAIL'} ${name} ${detail}`.trimEnd()) }
 
 const repo = resolveRepoRoot()
-const fixtureRoot = (name: string) => path.join(repo, 'tmp/foundry-phase3/fixtures', name)
+// Fixtures are committed with the Foundry source (never read from tmp/). The one secret file a fixture needs is created in a temp copy at run time.
+const FIXTURES = 'lib/native-builder/__fixtures__/foundry-phase3'
+const fixtureRoot = (name: string) => path.join(repo, FIXTURES, name)
 const AT = '2026-09-25T12:00:00.000Z'
 
 const shop: SourceFile[] = [
@@ -207,11 +210,15 @@ async function main() {
   const gNotes = contextNotes(gCtx, gIdx)
   check('M_the_caller_and_the_callee_of_the_implementation_are_named_with_their_files', gNotes.some(n => n.startsWith('notify/dispatch.py') && n.includes('used by notify/alerts.py:raise_alert') && n.includes('calls emphasize (notify/style.py)')), gNotes[0])
   check('M_caller_and_callee_files_carry_relevance_reasons', gCtx.entries.find(e => e.path === 'notify/alerts.py')?.reasons.some(r => /uses dispatch/.test(r)) === true && gCtx.entries.find(e => e.path === 'notify/style.py')?.reasons.some(r => /relies on emphasize/.test(r)) === true, '')
-  const hFiles = await readProjectSources(fixtureRoot('h-config'))
+  const hRoot = mkdtempSync(path.join(os.tmpdir(), 'foundry-h-config-'))
+  cpSync(fixtureRoot('h-config'), hRoot, { recursive: true })
+  writeFileSync(path.join(hRoot, '.env'), 'SMTP_PASSWORD=FAKE-SECRET-VALUE-9f8e7d\nAPI_TOKEN=sk-FAKEfakefakefakefake0123\nGREETING_STYLE=formal\n')
+  const secretFileExists = existsSync(path.join(hRoot, '.env')) && !existsSync(path.join(fixtureRoot('h-config'), '.env'))
+  const hFiles = await readProjectSources(hRoot)
   const hIdx = buildIndex(hFiles)
   const hCtx = discoverContext(hIdx, 'Greetings should shout when the shouting flag is on', AT)
   const hAll = JSON.stringify(hCtx) + contextDetails(hCtx).join('\n') + contextNotes(hCtx, hIdx).join('\n')
-  check('M_a_secret_file_is_never_read_indexed_or_shown', !hFiles.some(f => f.path === '.env') && !('.env' in hIdx.files) && !hCtx.entries.some(e => e.path === '.env') && !hFiles.some(f => f.content.includes('FAKE-SECRET-VALUE')), hFiles.map(f => f.path).join())
+  check('M_a_secret_file_is_never_read_indexed_or_shown', secretFileExists && !hFiles.some(f => f.path === '.env') && !('.env' in hIdx.files) && !hCtx.entries.some(e => e.path === '.env') && !hFiles.some(f => f.content.includes('FAKE-SECRET-VALUE')), hFiles.map(f => f.path).join())
   check('M_env_names_defaults_and_flags_come_from_code_template_and_schema_without_secret_values', hCtx.env.some(e => e.name === 'GREETING_STYLE' && e.default === 'plain') && hCtx.env.some(e => e.name === 'ENABLE_SHOUTING' && e.flag === true && e.default === 'false') && hCtx.env.some(e => e.name === 'SMTP_PASSWORD' && e.secret && e.default === undefined) && !hAll.includes('FAKE-SECRET-VALUE') && !hAll.includes('sk-FAKE') && !hAll.includes('hunter2'), JSON.stringify(hCtx.env))
   check('M_the_schema_and_the_template_join_as_config_entries_with_a_reason_and_only_names_reach_the_model', hCtx.entries.some(e => e.path === 'config/schema.json' && e.role === 'config' && /declares/.test(e.reasons[0])) && layersFromContext(hCtx).contract.every(p => !/schema\.json|\.env/.test(p)) && debugSet(hCtx).every(p => !/schema\.json|\.env/.test(p)), JSON.stringify(layersFromContext(hCtx)))
   check('M_a_json_schema_yields_only_declared_variables_not_nested_keys', indexFile({ path: 'c/schema.json', content: '{"variables":{"A_FLAG":{"type":"boolean","default":true},"API_KEY":{"default":"zzz"}},"other":{"default":1}}' }).env.map(e => e.name).join() === 'A_FLAG,API_KEY' && indexFile({ path: 'c/schema.json', content: '{"variables":{"API_KEY":{"default":"zzz"}}}' }).env[0].default === undefined, '')
@@ -222,6 +229,10 @@ async function main() {
   check('K_the_context_engine_is_pure', !/from 'node:(fs|net|http|child_process)|fetch\(|Date\.now\(|new Date\(|Math\.random\(/.test(anchor), '')
   const live = readFileSync(path.join(repo, 'lib/native-builder/foundryLiveProgress.ts'), 'utf8')
   check('K_an_expansion_is_a_real_replan_in_live_progress', live.includes("'CONTEXT_EXPANDED'"), '')
+
+  rmSync(hRoot, { recursive: true, force: true })
+  const ownSource = readFileSync(path.join(repo, 'lib/native-builder/foundryProjectContext.validation.ts'), 'utf8')
+  check('T_no_fixture_is_read_from_tmp_and_the_fixtures_are_committed_files', !/['"`]tmp\/foundry/.test(ownSource) && existsSync(path.join(repo, FIXTURES, 'h-config/.env.example')) && !existsSync(path.join(repo, FIXTURES, 'h-config/.env')), '')
 
   const failed = results.filter(r => !r.pass)
   console.log(`PROJECT_CONTEXT_VALIDATION ${failed.length ? 'FAIL' : 'PASS'} ${results.length - failed.length}/${results.length}`)

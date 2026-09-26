@@ -31,7 +31,9 @@ const results: Result[] = []
 const check = (name: string, pass: boolean, detail = '') => { results.push({ name, pass, detail }); console.log(`${pass ? 'PASS' : 'FAIL'} ${name} ${detail}`.trimEnd()) }
 
 const repo = resolveRepoRoot()
-const fixture = (rel: string) => readFileSync(path.join(repo, 'tmp/foundry-phase2/fixtures/c-final', rel), 'utf8')
+// The fixture is committed with the Foundry source (never read from tmp/).
+const FIXTURE = 'lib/native-builder/__fixtures__/foundry-phase2/c-final'
+const fixture = (rel: string) => readFileSync(path.join(repo, FIXTURE, rel), 'utf8')
 const components: ComponentFilesLike = { contract: ['shared/contract.py'], backend: ['backend/api.py'], frontend: ['frontend/board.py'], tests: ['tests/test_rows.py'], database: [] }
 const testSources = { 'tests/test_rows.py': fixture('tests/test_rows.py') }
 const VERBOSE = `test_closed_rows_come_back (test_rows.RowTests.test_closed_rows_come_back) ... ok
@@ -167,6 +169,9 @@ async function main() {
   check('W_the_prompt_carries_the_ineffective_strategy', specialist.includes('...noEffectStatements(campaign.noEffect)'), '')
   const live = readFileSync(path.join(repo, 'lib/native-builder/foundryLiveProgress.ts'), 'utf8')
   check('W_a_no_effective_change_is_a_real_replan_in_live_progress', live.includes("'NO_EFFECTIVE_CHANGE'"), '')
+
+  const ownSource = readFileSync(path.join(repo, 'lib/native-builder/foundryNoEffectRecovery.validation.ts'), 'utf8')
+  check('T_no_fixture_is_read_from_tmp', !/['"`]tmp\/foundry/.test(ownSource) && ownSource.includes(FIXTURE), '')
 
   const failed = results.filter(r => !r.pass)
   console.log(`NO_EFFECT_RECOVERY_VALIDATION ${failed.length ? 'FAIL' : 'PASS'} ${results.length - failed.length}/${results.length}`)
