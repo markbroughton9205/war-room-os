@@ -97,11 +97,11 @@ async function applyOnePatch(repairId: string, patch: StructuredPatch): Promise<
 
   let nextContent: string
   if (patch.operation === 'replace_range') {
-    nextContent = current.content.replace(matchText, patch.replacementText ?? '')
+    nextContent = current.content.replace(matchText, () => patch.replacementText ?? '')
   } else if (patch.operation === 'insert_after') {
-    nextContent = current.content.replace(matchText, `${matchText}${patch.replacementText ?? ''}`)
+    nextContent = current.content.replace(matchText, () => `${matchText}${patch.replacementText ?? ''}`)
   } else {
-    nextContent = current.content.replace(matchText, `${patch.replacementText ?? ''}${matchText}`)
+    nextContent = current.content.replace(matchText, () => `${patch.replacementText ?? ''}${matchText}`)
   }
 
   await snapshotFileBeforePatch(repairId, patch.file, current.content, true)
