@@ -149,3 +149,6 @@ id_ed25519*
 /model-lab
 /.war-room/sovereign-model-lab
 **/.claude/settings.local.json
+
+# Local lint diagnostic output; preserve on disk, never track.
+/lint-errors.txt
