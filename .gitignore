@@ -28,7 +28,14 @@
 
 # next.js
 /.next/
+/.next.windows-bak/
+/node_modules.windows-bak/
 /out/
+
+# stale historical build snapshots (generated/compiled artifacts, not active source)
+/work/build18/
+/work/build19/
+/work/build20/
 
 # production
 /build
@@ -74,3 +81,71 @@ model-lab/manifests/wave9/commander-authorization.token
 # scripts/copy-cesium-assets.mjs. Never hand-edited, never committed — reproducible from the
 # cesium npm package version pinned in package.json.
 /public/cesium/
+
+
+# HVS local generation weights — never commit. Canonical store is
+# application-data/media-command/models/{image,voice,audio}/ not this repo.
+/media-command/models/
+**/*.safetensors
+**/*.onnx
+
+# Verified generated historical output/dependencies; retain on disk pending review.
+/desktop/node_modules.windows-bak/
+
+# ---- Phase 8 hygiene (Fantastic 5, 2026-10-04) ----
+# scratch / evidence roots: curate keepers into docs/ FIRST
+/tmp/
+/.tmp/
+/artifacts/
+/work/*
+!/work/searxng-local/
+# NEVER use a /** negation here: it would re-include work/searxng-local/.env
+# every Next.js build dir variant
+/.next*/
+# dependencies at any depth (root-anchored rule misses tmp/**/node_modules)
+node_modules/
+# release packages / archives
+*.AppImage
+*.deb
+*.tgz
+# logs, profiles, run-state
+*.log
+*.cpuprofile
+*.heapsnapshot
+*.pid
+# local databases
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+# atomic-write temps and editor backups (0 tracked files match)
+*.tmp
+*.bak
+*.orig
+# model weights anywhere, with no negation allowed after this
+*.safetensors
+*.onnx
+*.gguf
+*.ckpt
+*.pt
+*.pth
+# browser / Electron profiles
+.edata*/
+**/Local Storage/
+# credentials and tool state (preventive)
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+/.aws/
+/.codex/
+/.agents/
+.venv/
+/.pnpm-store/
+# moved from .git/info/exclude so every clone ignores them
+/model-lab
+/.war-room/sovereign-model-lab
+**/.claude/settings.local.json
