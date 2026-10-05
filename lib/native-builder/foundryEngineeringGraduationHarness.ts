@@ -535,6 +535,7 @@ function runUnknownOutcome(input: {
   runId: string
 }): Record<string, string | number | boolean> {
   const task = input.graph.tasks.find(item => item.mutating) ?? input.graph.tasks[0]
+  const currentTaskStatus = (record: typeof task): typeof task.status => record.status
   task.status = 'RUNNING'
   beginUnattendedDurableAction({
     missionId: input.missionId,
@@ -556,7 +557,7 @@ function runUnknownOutcome(input: {
     workspaceRoot: input.projectRoot,
   })
   return {
-    blindReplayPrevented: recovered.blindRequeue === 0 && (task.status === 'WAITING' || recovered.halted),
+    blindReplayPrevented: recovered.blindRequeue === 0 && (currentTaskStatus(task) === 'WAITING' || recovered.halted),
     blindRequeue: recovered.blindRequeue,
     reused: replay.reason === 'DURABLE_RESULT_REUSED',
   }

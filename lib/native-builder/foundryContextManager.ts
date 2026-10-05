@@ -44,7 +44,7 @@ export type FoundryContextPack = {
 
 const SECRET_SOURCE = /\.env|credential|secret|id_rsa|\.pem/i
 
-function compactText(value: string, max = FOUNDRY_CONTEXT_DEFAULTS.maxExcerptChars): string {
+function compactText(value: string, max: number = FOUNDRY_CONTEXT_DEFAULTS.maxExcerptChars): string {
   const redacted = redactSecretLikeText(value)
   return redacted.length > max ? `${redacted.slice(0, max)}…` : redacted
 }

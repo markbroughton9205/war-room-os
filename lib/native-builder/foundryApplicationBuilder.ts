@@ -331,7 +331,7 @@ function recordApplicationBuilderEvidence(mission: FoundryMissionRecord, origin:
     { criterionId: 'CR-TEST', type: 'TEST', status: testsOk ? 'PASS' : 'FAIL', result: mission.testState.detail || 'no tests' },
     { criterionId: 'CR-RUNTIME', type: 'RUNTIME', status: previewOk ? 'PASS' : 'FAIL', result: origin || 'no preview' },
     { criterionId: 'CR-BROWSER', type: 'BROWSER', status: desktopOk || previewOk ? 'PASS' : 'FAIL', result: builder?.viewportResults.map(item => `${item.name}:${item.ok}`).join(',') || origin },
-    { criterionId: 'CR-PERSISTENCE', type: 'PERSISTENCE', status: persistOk || testsOk ? 'PASS' : 'FAIL', result: builder?.evidence.restartDetail || mission.testState.detail || 'no persist proof' },
+    { criterionId: 'CR-PERSISTENCE', type: 'PERSISTENCE', status: persistOk || testsOk ? 'PASS' : 'FAIL', result: (typeof builder?.evidence.restartDetail === 'string' ? builder.evidence.restartDetail : '') || mission.testState.detail || 'no persist proof' },
     { criterionId: 'CR-SECURITY', type: 'SECURITY', status: 'PASS', result: `COMMIT=${APPLICATION_BUILDER_GOVERNANCE.COMMIT} PUSH=${APPLICATION_BUILDER_GOVERNANCE.PUSH} LIVE_DEPLOY=${APPLICATION_BUILDER_GOVERNANCE.LIVE_DEPLOY}` },
     { criterionId: 'CR-SCOPE', type: 'DIFF_SCOPE', status: 'PASS', result: (mission.sourceState.changedFiles || []).join(',') || 'isolated project' },
   ]
@@ -473,7 +473,7 @@ export async function runApplicationBuilderMission(missionId: string): Promise<F
       builder.reusedResearch = []
       builder.refreshedResearch = []
     }
-    const factPages = (isCrm
+    const factPages: ReadonlyArray<readonly [string, string, string]> = (isCrm
       ? [
           ['https://developer.mozilla.org/en-US/docs/Web/HTML/Element/label', 'MDN HTML label element', 'form association'],
           ['https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html', 'WCAG info and relationships', 'accessible forms'],
@@ -492,7 +492,7 @@ export async function runApplicationBuilderMission(missionId: string): Promise<F
           ['https://developer.mozilla.org/en-US/docs/Web/HTML/Element/label', 'MDN HTML label element', 'form association'],
           ['https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html', 'WCAG info and relationships', 'accessible forms'],
           ['https://schema.org/LocalBusiness', 'schema.org LocalBusiness', 'SEO structured data'],
-        ]) as const
+        ])
     for (const [url, title, usedFor] of factPages) {
       const page = await fetchPublicPage(url, { missionId: mission.missionId })
       if (!page.ok) continue
@@ -650,7 +650,7 @@ export async function runApplicationBuilderMission(missionId: string): Promise<F
           })
           if (injected.ok) {
             builder.evidence.controlledFailure = 'convert-to-customer route removed from server.mjs'
-            await appendJournal(mission, { kind: 'observe', text: 'CONTROLLED_FAILURE: convert-to-customer route removed from server.mjs before tests.' })
+            await appendJournal(mission, { kind: 'observation', text: 'CONTROLLED_FAILURE: convert-to-customer route removed from server.mjs before tests.' })
           }
         } else if (isLocalData) {
           const broken = stripItemsListRoute(generated.files['server.mjs']).replace(/PORT \|\| \d+/, `PORT || ${originPort}`)
@@ -663,7 +663,7 @@ export async function runApplicationBuilderMission(missionId: string): Promise<F
           })
           if (injected.ok) {
             builder.evidence.controlledFailure = 'items list route removed from server.mjs'
-            await appendJournal(mission, { kind: 'observe', text: 'CONTROLLED_FAILURE: items list route removed from server.mjs before tests.' })
+            await appendJournal(mission, { kind: 'observation', text: 'CONTROLLED_FAILURE: items list route removed from server.mjs before tests.' })
           }
         } else {
           const broken = generated.files['contact.html'].replace(/<form[\s\S]*?<\/form>/, '<p data-testid="quote-broken">Quote form temporarily unavailable.</p>')
@@ -676,7 +676,7 @@ export async function runApplicationBuilderMission(missionId: string): Promise<F
           })
           if (injected.ok) {
             builder.evidence.controlledFailure = 'quote-form removed from contact.html'
-            await appendJournal(mission, { kind: 'observe', text: 'CONTROLLED_FAILURE: quote form removed from contact.html before tests.' })
+            await appendJournal(mission, { kind: 'observation', text: 'CONTROLLED_FAILURE: quote form removed from contact.html before tests.' })
           }
         }
       }

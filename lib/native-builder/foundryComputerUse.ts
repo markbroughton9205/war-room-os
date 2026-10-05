@@ -146,7 +146,7 @@ export function mapHitIntoWarRoomWindow(
       raw,
       translated: normalized.rect,
       center: normalized.point,
-      insideWindow: normalized.insideAppFrame === true && (normalized.insideDisplay === true || !context.displays.length),
+      insideWindow: normalized.insideAppFrame === true && (normalized.insideDisplay === true || !context?.displays.length),
       normalized,
     }
   }

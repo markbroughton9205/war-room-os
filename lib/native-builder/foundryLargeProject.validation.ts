@@ -174,7 +174,7 @@ async function main() {
   fixtureCheckout(restartRoot)
   const paused = await runMission(restartRoot, request1, 'Fix checkout resume', 'MAP_COMPLETE')
   const pausedLarge = paused.codingMission?.engineeringRuntime?.largeProject
-  check('restart_paused', paused.state !== 'resolved' && pausedLarge?.checkpoints.includes('MAP_COMPLETE') && (pausedLarge.filesMutated.length ?? 0) === 0, pausedLarge?.checkpoints.join(',') ?? paused.state)
+  check('restart_paused', Boolean(paused.state !== 'resolved' && pausedLarge?.checkpoints.includes('MAP_COMPLETE') && (pausedLarge.filesMutated.length ?? 0) === 0), pausedLarge?.checkpoints.join(',') ?? paused.state)
   const resumed = await runWithWorkspaceRoot(restartRoot, async () => {
     const record = await getRepair(paused.id)
     if (!record?.codingMission?.engineeringRuntime?.largeProject) throw new Error('missing pause')

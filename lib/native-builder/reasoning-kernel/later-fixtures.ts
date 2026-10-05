@@ -17,7 +17,7 @@ import type { FoundryReasoningSession } from './types'
 export type PhaseResult = { name: string; pass: boolean; detail: string }
 const check = (name: string, pass: boolean, detail: string): PhaseResult => ({ name, pass, detail })
 
-function sessionFor(id: string, goal: string, signals?: FoundryReasoningSession['signals']): FoundryReasoningSession {
+function sessionFor(id: string, goal: string, signals?: Partial<FoundryReasoningSession['signals']>): FoundryReasoningSession {
   const session = createFoundryReasoningSession({ missionId: id, goal, now: '2026-09-22T00:00:00.000Z', signals })
   selectSessionStrategy(session)
   return session
@@ -214,7 +214,7 @@ export function runFrk09Fixtures(): PhaseResult[] {
   results.push(check('FIXTURE_CYCLE', cycleFindings.some(item => item.category === 'GRAPH_INCONSISTENCY') && repaired.sourceRewritten === false && cycle.reasoningGraph.edges.every(edge => edge.from !== edge.to), 'cycle'))
 
   const stale = sessionFor('frk09-stale', 'Stale evidence.')
-  stale.evidence.push({ evidenceId: 'e', source: 'SOURCE_CODE', statement: 'STALE_EVIDENCE old row', actor: 'file.read', ref: 'source', observedAt: stale.createdAt, supportsHypothesisIds: [], contradictsHypothesisIds: [], authority: 'TOOL_RUNTIME' })
+  stale.evidence.push({ evidenceId: 'e', source: 'SOURCE_CODE', statement: 'STALE_EVIDENCE old row', provenance: { actor: 'file.read', ref: 'source', observedAt: stale.createdAt }, supportsHypothesisIds: [], contradictsHypothesisIds: [], authority: 'TOOL_RUNTIME' })
   results.push(check('FIXTURE_STALE', diagnoseReasoningHealth(stale).some(item => item.category === 'EVIDENCE_STALE'), 'stale'))
 
   const poisoned = sessionFor('frk09-poison', 'Poisoned lesson.')
@@ -276,7 +276,7 @@ export function runFrk11Fixtures(): PhaseResult[] {
   results.push(check('CACHE_HIT', readCache(cached, 'code-index') === 'parser is outside the loop', 'hit'))
 
   const evidenceSession = sessionFor('frk11-evidence', 'Reuse fresh evidence.')
-  evidenceSession.evidence.push({ evidenceId: 'ev-1', source: 'TEST_RESULT', statement: 'the targeted test failed', actor: 'test.run', ref: 'order.test', observedAt: evidenceSession.createdAt, supportsHypothesisIds: [], contradictsHypothesisIds: [], authority: 'TOOL_RUNTIME' })
+  evidenceSession.evidence.push({ evidenceId: 'ev-1', source: 'TEST_RESULT', statement: 'the targeted test failed', provenance: { actor: 'test.run', ref: 'order.test', observedAt: evidenceSession.createdAt }, supportsHypothesisIds: [], contradictsHypothesisIds: [], authority: 'TOOL_RUNTIME' })
   const reused = reuseEvidence(evidenceSession, 'ev-1')
   results.push(check('EVIDENCE_REUSE', reused.reused && reused.tests === 0 && evidenceSession.efficiency.evidenceReuses === 1, String(reused.tests)))
 

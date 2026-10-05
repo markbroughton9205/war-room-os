@@ -207,7 +207,7 @@ export function parseYoutubeChannelsList(
   if (!items.length) return { error: 'channels.list returned no items.' }
   const item = asRecord(items[0])
   const returnedId = validateYoutubeChannelId(asString(item?.id))
-  if (!returnedId || returnedId !== expected) {
+  if (!item || !returnedId || returnedId !== expected) {
     return { error: 'channels.list channel id did not match the verified registry id.' }
   }
   const snippet = asRecord(item.snippet)

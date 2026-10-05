@@ -119,7 +119,7 @@ function stopDesktop(proc: ReturnType<typeof spawn>): void {
 async function runElectron(projectRoot: string, args: string[], mark: string, timeoutMs = 12_000): Promise<{ stdout: string; stderr: string; status: number | null }> {
   const bin = foundryElectronBin()
   if (!bin) return { stdout: '', stderr: 'ELECTRON_UNAVAILABLE', status: null }
-  const env = { ...process.env, DISPLAY: process.env.DISPLAY || ':0', ELECTRON_ENABLE_LOGGING: '1' }
+  const env: NodeJS.ProcessEnv = { ...process.env, DISPLAY: process.env.DISPLAY || ':0', ELECTRON_ENABLE_LOGGING: '1' }
   delete env.ELECTRON_RUN_AS_NODE
   const proc = spawn(bin, args, {
     cwd: projectRoot,

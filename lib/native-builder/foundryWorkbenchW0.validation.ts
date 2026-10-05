@@ -5,6 +5,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { resolveRepoRoot } from '@/lib/repo/paths'
+import { childProcessEnv } from '@/lib/repo/childProcessEnv'
 import { FOUNDRY_WORKBENCH_HOST, FOUNDRY_WORKBENCH_PORT, FOUNDRY_WORKBENCH_PARTITION, isFoundryWorkbenchW0Enabled } from './foundryWorkbenchW0'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
@@ -26,7 +27,7 @@ async function run() {
   const provenance = JSON.parse(source('desktop/workbench-host/provenance.json')) as Record<string, unknown>
   const results: CaseResult[] = []
 
-  results.push(check('flag_default_off', isFoundryWorkbenchW0Enabled({} as NodeJS.ProcessEnv) === false && isFoundryWorkbenchW0Enabled({ FOUNDRY_WORKBENCH_W0: '0' } as NodeJS.ProcessEnv) === false, 'default off'))
+  results.push(check('flag_default_off', isFoundryWorkbenchW0Enabled(childProcessEnv({})) === false && isFoundryWorkbenchW0Enabled(childProcessEnv({ FOUNDRY_WORKBENCH_W0: '0' })) === false, 'default off'))
   const constants = source('desktop/workbench-host/constants.cjs')
   results.push(check('loopback_port', FOUNDRY_WORKBENCH_HOST === '127.0.0.1' && FOUNDRY_WORKBENCH_PORT === 3849 && constants.includes("'127.0.0.1'") && constants.includes('3849'), `${FOUNDRY_WORKBENCH_HOST}:${FOUNDRY_WORKBENCH_PORT}`))
   results.push(check('no_lan_bind', !/0\.0\.0\.0/.test(host) && !/0\.0\.0\.0/.test(view), 'no 0.0.0.0'))

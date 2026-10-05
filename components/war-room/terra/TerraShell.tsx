@@ -1306,7 +1306,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   }, [])
 
   const flyToStreetViewCapture = useCallback((item: StreetViewItem) => {
-    commandNav('COMMANDER_INSPECT')
+    commandNav('GROUND_INSPECT')
     cinematicFlight.flyTo({
       longitude: item.longitude,
       latitude: item.latitude,

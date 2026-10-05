@@ -758,7 +758,7 @@ export function buildRuntimeView(missionId: string): FoundryRuntimeView {
   }
   const hasOwner = Boolean(runtime.ownerInstanceId && runtime.leaseId && loadRuntimeLease(runtime.missionId))
   const hasWake = Boolean(runtime.nextWakeAt && loadWakeIndex().some(item => item.runtimeId === runtime.runtimeId && !item.executedAt))
-  let truthfulLabel = runtime.state
+  let truthfulLabel: string = runtime.state
   let detail = `Last active ${runtime.lastActiveAt}`
   if (runtime.state === 'ACTIVE') {
     truthfulLabel = hasOwner ? `ACTIVE · Running ${runtime.activeTaskIds.length} tasks` : 'No runtime owner'

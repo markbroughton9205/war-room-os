@@ -1,0 +1,159 @@
+/**
+ * Retry Terra freeze-stability packaging with disk-backed TMPDIR (fpm .deb often fails on tmpfs).
+ */
+import { mkdir, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { resolveRepoRoot } from '@/lib/repo/paths'
+import { loadMission, saveMission, transitionMission } from '@/lib/native-builder/foundryMissionStore'
+import { closeVerifiedInstallMission, evidenceFromInstallVerify } from '@/lib/native-builder/foundryInstallMissionLifecycle'
+import { claimToolResources } from '@/lib/native-builder/foundryOperationsManager'
+import { executeEngineerTool, type EngineerToolName } from '@/lib/native-builder/engineerTools'
+import { installerActiveStatus } from '@/lib/native-builder/installerTool'
+import { portInspect } from '@/lib/native-builder/portInspector'
+
+const MISSION_ID = '546a20f5-fe6f-4d39-b3ab-6d6783ff7ed4'
+
+async function leaseTool(missionId: string, tool: EngineerToolName, input: Record<string, unknown>) {
+  const mission = await loadMission(missionId)
+  if (!mission) throw new Error(`missing mission ${missionId}`)
+  const claimed = await claimToolResources(mission, tool, input, 180_000)
+  if (!claimed.ok) return { ok: false, error: claimed.error, result: null as unknown }
+  try {
+    return await executeEngineerTool({ tool, input }, { repairId: mission.missionId, mission })
+  } finally {
+    for (const release of claimed.releases) await release()
+    await saveMission(mission)
+  }
+}
+
+async function main() {
+  const tmp = path.join(os.homedir(), '.cache', 'foundry-package-tmp')
+  await mkdir(tmp, { recursive: true })
+  process.env.TMPDIR = tmp
+  process.env.TEMP = tmp
+  process.env.TMP = tmp
+  process.env.FOUNDRY_PRODUCTION_MISSION_ID = MISSION_ID
+
+  const mission = await loadMission(MISSION_ID)
+  if (!mission) throw new Error('missing mission')
+  console.log('MISSION', mission.missionId, mission.status)
+  let current = mission
+  if (current.status === 'PAUSED') {
+    await transitionMission(current, 'EXECUTING', 'resume package retry')
+    current = (await loadMission(MISSION_ID))!
+  }
+  if (current.status === 'EXECUTING') {
+    await transitionMission(current, 'BUILDING', 'resume package retry')
+    current = (await loadMission(MISSION_ID))!
+  }
+  if (current.status === 'BUILDING') {
+    await transitionMission(current, 'PACKAGING', 'retry package with disk TMPDIR')
+  }
+
+  const packed = await leaseTool(MISSION_ID, 'package.run', {})
+  console.log('PACKAGE', packed.ok, packed.error ?? '')
+  if (!packed.ok) process.exit(1)
+  const pack = packed.result as {
+    appimage: { path: string; sha256: string }
+    deb: { path: string; sha256: string }
+    linuxUnpackedDir: string
+  }
+
+  const loadedPkg = await loadMission(MISSION_ID)
+  if (loadedPkg) await transitionMission(loadedPkg, 'INSTALLING', 'package ok')
+
+  const installed = await leaseTool(MISSION_ID, 'installer.install_production', {
+    appimage: pack.appimage,
+    deb: pack.deb,
+    linuxUnpackedDir: pack.linuxUnpackedDir,
+    feature: 'terra-freeze-stability',
+    commanderConfirmed: true,
+  })
+  console.log('INSTALL', installed.ok, installed.error ?? JSON.stringify(installed.result))
+  if (!installed.ok) process.exit(1)
+  const installPayload = installed.result as { stamp?: { install_id?: string }; installDir?: string } | undefined
+  const installId = installPayload?.stamp?.install_id
+  const installDir = installPayload?.installDir
+    ?? (installId ? path.join(process.env.HOME ?? '', '.local/opt', installId) : null)
+  if (!installId) {
+    console.error('missing install id')
+    process.exit(1)
+  }
+  const loadedInst = await loadMission(MISSION_ID)
+  if (loadedInst) {
+    loadedInst.installState.ok = true
+    loadedInst.installState.installId = installId
+    await saveMission(loadedInst)
+  }
+
+  const activated = await leaseTool(MISSION_ID, 'installer.activate', {
+    installId,
+    commanderConfirmed: true,
+  })
+  console.log('ACTIVATE', activated.ok, activated.error ?? JSON.stringify(activated.result))
+  if (!activated.ok) process.exit(1)
+
+  const transition = await leaseTool(MISSION_ID, 'runtime.transition_to_active', {
+    commanderConfirmed: true,
+  })
+  console.log('TRANSITION', transition.ok, transition.error ?? JSON.stringify(transition.result))
+  if (!transition.ok) process.exit(1)
+
+  const verify = await executeEngineerTool({ tool: 'runtime.verify', input: {} }, { repairId: MISSION_ID })
+  const active = await installerActiveStatus()
+  const p3847 = await portInspect({ port: 3847 })
+  const p3848 = await portInspect({ port: 3848 })
+  const verifyResult = verify.result as {
+    identity?: { installId?: string }
+    activeInstallId?: string
+    runningInstallId?: string
+    identityMatch?: boolean
+    health?: { running?: boolean }
+    corePort?: { running?: boolean }
+  } | undefined
+  const completedOwner = await loadMission(MISSION_ID)
+  if (completedOwner && completedOwner.status !== 'COMPLETE') {
+    completedOwner.installState = { ok: true, installId, detail: 'installer.install_production PASS' }
+    const closed = await closeVerifiedInstallMission(
+      completedOwner,
+      evidenceFromInstallVerify({
+        missionInstallId: installId,
+        activeInstallId: active.activeInstallId ?? verifyResult?.activeInstallId ?? null,
+        runningInstallId: verifyResult?.runningInstallId ?? verifyResult?.identity?.installId ?? null,
+        identityMatch: verifyResult?.identityMatch ?? null,
+        uiHealthOk: verifyResult?.health?.running === true,
+        coreHealthOk: verifyResult?.corePort?.running === true,
+        buildOk: true,
+        packageOk: true,
+        installOk: true,
+      }),
+    )
+    if (!closed.ok) {
+      console.error('INSTALL_MISSION_CLOSE_REFUSED', closed.status, closed.detail)
+      process.exit(1)
+    }
+  }
+  const report = {
+    missionId: MISSION_ID,
+    installId,
+    installDir,
+    launcher: active.launcherPath,
+    activeInstallId: active.activeInstallId,
+    activeExecutable: active.activeExecutable,
+    verify: verify.result ?? verify.error,
+    port3847: p3847,
+    port3848: p3848,
+    tmpdir: tmp,
+  }
+  const out = path.join(resolveRepoRoot(), 'tmp/terra-freeze-stability/install-report.json')
+  await writeFile(out, JSON.stringify(report, null, 2) + '\n')
+  console.log('REPORT', out)
+  console.log(JSON.stringify(report, null, 2))
+  if (!verify.ok) process.exit(1)
+}
+
+main().catch(error => {
+  console.error(error)
+  process.exit(1)
+})

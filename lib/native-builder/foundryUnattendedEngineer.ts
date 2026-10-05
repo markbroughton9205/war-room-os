@@ -406,7 +406,7 @@ export function performUnattendedOperation(input: {
     actionClass: classified.class,
     kind,
     taskId: input.taskId,
-    mutating: kind === 'write' || kind === 'test' || kind === 'build' || kind === 'replan',
+    mutating: kind === 'test' || kind === 'build' || kind === 'replan',
     tool: input.op.toLowerCase(),
   })
   if (!started.ok) {

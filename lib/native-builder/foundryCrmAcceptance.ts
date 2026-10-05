@@ -230,8 +230,8 @@ export async function verifyCrmViewports(origin: string): Promise<Array<{
     { name: 'tablet' as const, width: 768, height: 1024 },
     { name: 'mobile' as const, width: 390, height: 844 },
   ]
-  const chromium = await loadPlaywright()
-  if (!chromium) {
+  const loaded = await loadPlaywright()
+  if (!loaded) {
     return checks.map(check => ({
       ...check,
       ok: false,
@@ -241,7 +241,7 @@ export async function verifyCrmViewports(origin: string): Promise<Array<{
       missingContent: true,
     }))
   }
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] }).catch(() => null)
+  const browser = await loaded.chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'], executablePath: loaded.executablePath }).catch(() => null)
   if (!browser) {
     return checks.map(check => ({ ...check, ok: false, detail: 'Chromium launch failed', overflow: false, blankScreen: true, missingContent: true }))
   }

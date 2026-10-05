@@ -6,6 +6,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { childProcessEnv } from '@/lib/repo/childProcessEnv'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { resolveRepoRoot } from '@/lib/repo/paths'
@@ -63,9 +64,9 @@ function holdPort(port: number): Promise<{ close: () => Promise<void> }> {
   })
 }
 
-function launchDesktop(root: string, extraEnv: NodeJS.ProcessEnv = {}) {
+function launchDesktop(root: string, extraEnv: Record<string, string | undefined> = {}) {
   const electronBin = path.join(root, 'desktop/node_modules/electron/dist/electron')
-  const env = { ...process.env, ...extraEnv, FOUNDRY_WORKBENCH_W0: '1' }
+  const env = childProcessEnv({ ...process.env, ...extraEnv, FOUNDRY_WORKBENCH_W0: '1' })
   delete env.ELECTRON_RUN_AS_NODE
   const child = spawn(electronBin, [path.join(root, 'desktop/src/main.cjs')], {
     cwd: path.join(root, 'desktop'),

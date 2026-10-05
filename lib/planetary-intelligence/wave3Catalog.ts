@@ -9,11 +9,10 @@ export type Wave3Candidate = Wave1Candidate & {
   existingIdentity?: boolean
 }
 
-function candidate(input: Omit<Wave3Candidate, 'supportedLanguages' | 'discoveryMethod' | 'requestedDiscoveryLanguage' | 'actualQueryLanguage' | 'ownershipType' | 'continent'> & Partial<Wave3Candidate>): Wave3Candidate {
+function candidate(input: Omit<Wave3Candidate, 'supportedLanguages' | 'discoveryMethod' | 'requestedDiscoveryLanguage' | 'actualQueryLanguage' | 'ownershipType' | 'continent' | 'localityClass'> & Partial<Wave3Candidate>): Wave3Candidate {
   return {
     continent: input.continent ?? (input.region.includes('AFRICA') ? 'Africa' : input.region.includes('ASIA') || input.region === 'MIDDLE_EAST' ? 'Asia' : input.region === 'EUROPE' ? 'Europe' : input.region === 'OCEANIA' ? 'Oceania' : 'Americas'),
     localityClass: input.localityClass ?? 'NATIONAL',
-    sourceRole: input.sourceRole,
     supportedLanguages: input.supportedLanguages ?? [input.primaryLanguage],
     ownershipType: input.ownershipType ?? (input.sourceType === 'OFFICIAL_RECORD' || input.sourceType === 'ALERT_FEED' || input.sourceType === 'PRIMARY_PUBLIC_SIGNAL' ? 'GOVERNMENT' : 'INDEPENDENT'),
     discoveryMethod: input.discoveryMethod ?? 'wave3_gap_directed',

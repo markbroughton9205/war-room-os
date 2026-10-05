@@ -12,6 +12,8 @@ export type ProjectDedupeCandidate = {
   projectName: string
   projectRoot: string
   projectType: FoundryNewProjectRecord['projectType']
+  /** Carried over from the project record when there is one; a candidate without it is treated as resolved. */
+  status?: string
   createdAt: string
   lastSuccessAt?: string
   lastOpenedAt?: string

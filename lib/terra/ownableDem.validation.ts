@@ -39,7 +39,7 @@ function run(): CaseResult[] {
   results.push(check(
     'opentopography_blocked_until_key_and_approval',
     ownableDemProductLicense('opentopography')?.ingestAllowed === false,
-    ownableDemProductLicense('opentopography')?.ingestBlockedReason ?? 'missing',
+    (() => { const license = ownableDemProductLicense('opentopography'); return license && 'ingestBlockedReason' in license ? license.ingestBlockedReason : 'missing' })(),
   ))
   const globe = readFileSync(resolve('components/war-room/terra/TerraGlobe.tsx'), 'utf8')
   results.push(check(

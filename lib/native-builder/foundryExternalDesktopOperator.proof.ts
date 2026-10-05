@@ -52,10 +52,11 @@ async function main() {
   const warRoomTargets = await listElectronCdpTargets().catch(() => [])
   const cursorOnWarRoom = warRoomTargets.filter(item => /cursor/i.test(`${item.title} ${item.url}`))
 
-  let insert = { ok: false, actionSuccess: false, stateSuccess: false, error: 'not attempted', result: undefined as unknown }
-  let submit = { ok: false, actionSuccess: false, stateSuccess: false, error: 'not attempted', result: undefined as unknown }
-  let generation = { ok: false, result: undefined as unknown, error: 'not attempted' }
-  let response = { ok: false, result: undefined as unknown, error: 'not attempted' }
+  type StepResult = { ok: boolean; actionSuccess?: boolean; stateSuccess?: boolean; error?: string; result?: unknown }
+  let insert: StepResult = { ok: false, actionSuccess: false, stateSuccess: false, error: 'not attempted', result: undefined }
+  let submit: StepResult = { ok: false, actionSuccess: false, stateSuccess: false, error: 'not attempted', result: undefined }
+  let generation: StepResult = { ok: false, result: undefined, error: 'not attempted' }
+  let response: StepResult = { ok: false, result: undefined, error: 'not attempted' }
 
   const composerBound = observe.ok === true && observe.binding?.semanticTarget === 'composer'
   if (composerBound) {
@@ -87,7 +88,7 @@ async function main() {
     '5_accessibility_backend': discover.result,
     '6_Cursor_Chromium_Electron_investigation': debug,
     '7_Cursor_dedicated_endpoint_result': debug.present ? 'PRESENT' : 'NOT_PRESENT',
-    '8_Wayland_backend': { focus: focus.result, portal: (await import('./external-app/backends')).externalPython ? 'used-atspi-keysynth-and-gnome-screenshot' : 'n/a' },
+    '8_Wayland_backend': { focus: focus.result, focusBackend: focus.backend, observationBackend: observe.backend, portal: 'NOT_VERIFIED' },
     '9_vision_backend': observe.backend,
     '10_target_binding_design': observe.binding ?? null,
     '11_external_focus_result': { ok: focus.ok, actionSuccess: focus.actionSuccess, stateSuccess: focus.stateSuccess, error: focus.error },

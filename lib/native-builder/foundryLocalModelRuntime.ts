@@ -436,7 +436,7 @@ export function buildLocalFoundryModelContext(
     unresolvedQuestions: progress.remaining,
     loopWarning: loopWarning && !/BUILD_DONE|installer\.activate|ops-write-conflict/i.test(loopWarning) ? loopWarning.slice(0, 280) : undefined,
     tools,
-    boundedRetryLock: lock,
+    boundedRetryLock: lock ?? undefined,
   }
 }
 

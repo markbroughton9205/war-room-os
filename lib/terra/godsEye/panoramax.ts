@@ -19,7 +19,7 @@ export const PANORAMAX_REPLACES_CESIUM = false
 
 export type PanoramaxProviderState = {
   id: 'PANORAMAX'
-  status: typeof PANORAMAX_STATUS
+  status: GodsEyeEvaluationState
   coverageState: GodsEyeLayerTruthState
   coverageScope: 'LOCAL' | 'REGIONAL'
   instanceUrl: string | null

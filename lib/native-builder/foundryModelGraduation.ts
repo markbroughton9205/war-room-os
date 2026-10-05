@@ -1059,7 +1059,7 @@ export class FoundryModelGraduationHarness {
       if (turn === 0) {
         notes.push(`firstRoute=${routed.selectedProvider}:${routed.selectedModel} reason=${routed.reason} attempts=${routed.attempts.map(item => `${item.provider}:${item.ok ? 'ok' : (item.error ?? 'fail').slice(0, 80)}`).join('|')}`)
       }
-      if (routed.response.ok && routed.selectedProvider && routed.selectedProvider !== 'none' && routed.selectedModel !== 'harness-reference') {
+      if (routed.response.ok && routed.selectedProvider && !Object.is(routed.selectedProvider, 'none') && routed.selectedModel !== 'harness-reference') {
         realModelRoute = true
       }
 

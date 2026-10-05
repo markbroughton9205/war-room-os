@@ -68,7 +68,9 @@ export function qualifyLocalStory(input: {
   lat?: number | null
   lon?: number | null
   context: TerraLocalContext
+  /** Qualification reads the source's own coverage; a matched source may carry its match level and reason along, and they are not used here. */
   source: Pick<TerraLocalMatchedSource, 'coverageLevel' | 'city' | 'county' | 'metro' | 'state' | 'country' | 'aliases' | 'serviceArea' | 'name'>
+    & Partial<Pick<TerraLocalMatchedSource, 'matchLevel' | 'matchReason'>>
 }): TerraLocalStoryQualification {
   const haystack = scrubPublisher(
     [input.title, input.summary ?? '', input.geography ?? '', ...(input.tags ?? [])].join(' ').toLowerCase(),

@@ -304,7 +304,7 @@ async function run(): Promise<void> {
         ))
         results.push(check(
           'STATIC_WEB_STATUS_COMPUTED',
-          Boolean(staticWeb) && staticWeb!.status === 'PASSED_FIXTURE' && staticWeb!.status !== 'RELIABLE' && staticWeb!.status !== 'PASSED_MULTI_FIXTURE' && (staticWeb!.modelDrivenDistinctFixturePassCount ?? 0) === 1,
+          Boolean(staticWeb) && staticWeb!.status === 'PASSED_FIXTURE' && (staticWeb!.modelDrivenDistinctFixturePassCount ?? 0) === 1,
           staticWeb ? `${staticWeb.status} distinct=${staticWeb.modelDrivenDistinctFixturePassCount}` : 'missing',
         ))
       } else {

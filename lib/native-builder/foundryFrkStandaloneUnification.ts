@@ -420,7 +420,7 @@ export function liveRouteOptionsFromLoop(loop: UnifiedLoop, pin?: { provider: st
     reason: 'loop',
     outcome: loop.actualWorker.provider ? 'SELECTED' : 'BLOCKED_CAPABILITY',
     commanderDecisionRequired: false,
-    appliedToLiveRoute: loop.routingDecision?.appliedToLiveRoute === true,
+    appliedToLiveRoute: false,
     routingMode: getCapabilityAwareRoutingMode(),
     previousProvider: null,
     previousModel: null,

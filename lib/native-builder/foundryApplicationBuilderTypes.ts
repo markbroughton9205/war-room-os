@@ -27,6 +27,7 @@ export type FoundryProjectType =
   | 'full_stack_web_app'
   | 'database_backed_app'
   | 'internal_business_tool'
+  | 'local_data_app'
   | 'desktop_later'
   | 'mobile_later'
 
@@ -101,6 +102,8 @@ export type FoundryAssetRequest = {
   kind: 'logo' | 'icon' | 'illustration' | 'photo' | 'placeholder'
   purpose: string
   whyUnavailable: string
+  /** False for an asset the project can do without (a generated stand-in is used until it is supplied). */
+  required?: boolean
 }
 
 export type FoundryProductRequirements = {

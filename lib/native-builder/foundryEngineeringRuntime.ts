@@ -829,7 +829,7 @@ async function runLargeProjectBody(repairId: string, issueId: string, sessionId:
     if (kind === 'targeted') {
       await bindLarge(repairId, sessionId, 'TESTING', 'Running the targeted test.', state, emit(repairId, sessionId, 'TEST_STARTED', testFile ?? 'tests', { status: 'running', command: `${bin} ${args.join(' ')}` }))
     } else if (kind === 'regression') {
-      await bindLarge(repairId, sessionId, 'VALIDATING', 'Running the wider test directory.', state, emit(repairId, sessionId, 'REPAIR_VALIDATION_STARTED', 'RECHECKING', { status: 'running', command: `${bin} ${args.join(' ')}` }))
+      await bindLarge(repairId, sessionId, 'TESTING', 'Running the wider test directory.', state, emit(repairId, sessionId, 'REPAIR_VALIDATION_STARTED', 'RECHECKING', { status: 'running', command: `${bin} ${args.join(' ')}` }))
     }
     const result = await runStepCommand(repairId, sessionId, bin, args, root, label)
     const latest = await getRepair(repairId)
@@ -1018,7 +1018,7 @@ async function runLargeProjectBody(repairId: string, issueId: string, sessionId:
   state.checkpoints.push('REGRESSION_PASS')
   state.phase = 'COMPLETE'
   state.plan = [...new Set([...state.plan, 'phase 6 completion'])]
-  await bindLarge(repairId, sessionId, 'VALIDATING', 'Regression passed.', state, emit(repairId, sessionId, 'CHECKPOINT_CREATED', 'REGRESSION_PASS', { status: 'pass' }))
+  await bindLarge(repairId, sessionId, 'TESTING', 'Regression passed.', state, emit(repairId, sessionId, 'CHECKPOINT_CREATED', 'REGRESSION_PASS', { status: 'pass' }))
   return sealLargeComplete(repairId, sessionId, state)
 }
 

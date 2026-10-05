@@ -165,7 +165,7 @@ async function run(): Promise<CaseResult[]> {
       const resolved = await resolvePlaceNameViaNominatim('Richmond', 'edh:test-2')
       results.push(check('multiple_candidates_stay_ambiguous_not_auto_selected', resolved.quality === 'ambiguous', `quality=${resolved.quality}`))
       results.push(check('ambiguous_result_carries_no_coordinates', !('longitude' in resolved), `keys=${Object.keys(resolved).join(',')}`))
-      results.push(check('ambiguous_result_lists_real_matches', resolved.quality === 'ambiguous' && (resolved.matches?.length ?? 0) === 2 && resolved.matches?.every(match => typeof match.latitude === 'number'), `matches=${JSON.stringify(resolved.quality === 'ambiguous' ? resolved.matches : null)}`))
+      results.push(check('ambiguous_result_lists_real_matches', Boolean(resolved.quality === 'ambiguous' && (resolved.matches?.length ?? 0) === 2 && resolved.matches?.every(match => typeof match.latitude === 'number')), `matches=${JSON.stringify(resolved.quality === 'ambiguous' ? resolved.matches : null)}`))
     },
   )
 

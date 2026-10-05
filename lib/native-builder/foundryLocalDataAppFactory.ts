@@ -69,8 +69,10 @@ export function buildLocalDataAppFiles(input: LocalDataFactoryInput): {
   return {
     files,
     assetRequests: [{
+      id: 'operator-logo',
       kind: 'logo',
       purpose: 'Optional operator logo; a generated mark is used until Commander supplies one.',
+      whyUnavailable: 'No operator logo has been supplied yet.',
       required: false,
     }],
     databaseSchema: [

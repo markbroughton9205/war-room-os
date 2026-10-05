@@ -1,0 +1,38 @@
+{
+  "classification": "HISTORICAL_INSTALLER_SOURCE_SNAPSHOT",
+  "captured_at_et": "2026-10-05T15:25:18.358951-04:00",
+  "executable": false,
+  "current_deployment_verification": false,
+  "sources": [
+    {
+      "original": "tmp/foundry-final-product-cleanup-install.ts",
+      "destination": "lib/native-builder/__fixtures__/install-lifecycle-source/tmp/foundry-final-product-cleanup-install.ts.txt",
+      "size": 9195,
+      "sha256": "5b1ab07b4f33698719691df14e0a6f2459952872875545b1aa07877cb483d69e"
+    },
+    {
+      "original": "tmp/foundry-operational-readiness-install.ts",
+      "destination": "lib/native-builder/__fixtures__/install-lifecycle-source/tmp/foundry-operational-readiness-install.ts.txt",
+      "size": 7845,
+      "sha256": "d1f8a57f85de17d871a45dde73e27dd07463cbae57ed0589b1b47941551dcf6f"
+    },
+    {
+      "original": "tmp/terra-freeze-stability/install-production.ts",
+      "destination": "lib/native-builder/__fixtures__/install-lifecycle-source/tmp/terra-freeze-stability/install-production.ts.txt",
+      "size": 8238,
+      "sha256": "12efd2a83f2b3e06375a88abe8031b883724e8ef2bd43c8a881c3ee14a94064f"
+    },
+    {
+      "original": "tmp/terra-freeze-stability/retry-package-install.ts",
+      "destination": "lib/native-builder/__fixtures__/install-lifecycle-source/tmp/terra-freeze-stability/retry-package-install.ts.txt",
+      "size": 6568,
+      "sha256": "f94b558465b1fea5247dad2067472261d8f95878c7be34ad8654c4211f3863cb"
+    },
+    {
+      "original": "tmp/war-room-commander-shell-install.ts",
+      "destination": "lib/native-builder/__fixtures__/install-lifecycle-source/tmp/war-room-commander-shell-install.ts.txt",
+      "size": 7903,
+      "sha256": "9595042b6f19f8d2fe369db3eeb2c24a1014ed38a93ebf0a863c5024d3bdea7f"
+    }
+  ]
+}

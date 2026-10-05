@@ -305,10 +305,10 @@ export async function runSourceFabricWave3(input: {
   const coveredOrBlocked = cellResults.every(item => item.coverageAfter === 'COVERED' || item.coverageAfter === 'BLOCKED')
   const nothingMoved = allNewDocs.length < 1 && newLive < 1
   const classification = coveredOrBlocked
-    ? 'PLANETARY_SOURCE_FABRIC_WAVE3_COMPLETE'
+    ? 'PLANETARY_SOURCE_FABRIC_WAVE3_COMPLETE' as const
     : nothingMoved
-      ? 'PLANETARY_SOURCE_FABRIC_WAVE3_BLOCKED'
-      : 'PLANETARY_SOURCE_FABRIC_WAVE3_PARTIAL'
+      ? 'PLANETARY_SOURCE_FABRIC_WAVE3_BLOCKED' as const
+      : 'PLANETARY_SOURCE_FABRIC_WAVE3_PARTIAL' as const
   const result = {
     classification,
     startingSources: startingSources.length,

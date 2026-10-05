@@ -117,7 +117,7 @@ async function run() {
   ))
   results.push(check(
     'outside_frame_refuses_without_click',
-    pickSafeInteriorPoint({ x: 10, y: 10, width: 20, height: 20 }, warRoom).error === 'AT_SPI_POINT_OUTSIDE_APP_FRAME',
+    (() => { const outside = pickSafeInteriorPoint({ x: 10, y: 10, width: 20, height: 20 }, warRoom); return 'error' in outside && outside.error === 'AT_SPI_POINT_OUTSIDE_APP_FRAME' })(),
     'AT_SPI_POINT_OUTSIDE_APP_FRAME',
   ))
 

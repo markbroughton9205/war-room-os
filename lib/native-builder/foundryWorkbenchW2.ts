@@ -31,7 +31,7 @@ import {
 } from './foundryEditProposal'
 import { appendFoundryWorkbenchEvent, readFoundryWorkbenchEvents } from './foundryWorkbenchEvents'
 import { isFoundryWorkbenchW0Enabled } from './foundryWorkbenchW0'
-import { foundryWorkbenchStateDir as workbenchHostStateDir } from './foundryWorkbenchW0.host'
+import { ensureFoundryWorkbenchFixture, foundryWorkbenchStateDir as workbenchHostStateDir } from './foundryWorkbenchW0.host'
 import { runFoundryW4Command } from './foundryWorkbenchW4'
 import { runFoundryW5Command } from './foundryWorkbenchW5'
 
@@ -450,7 +450,7 @@ function ensureW2Hello(root: string) {
 
 export function ensureFoundryWorkbenchW2Fixture(root?: string): string {
   const folder = root || (() => {
-    try { return hostModule().ensureFixture() } catch {
+    try { return ensureFoundryWorkbenchFixture() } catch {
       const fallback = path.join(os.homedir(), 'FoundryProjects', 'w0-workbench-spike')
       mkdirSync(fallback, { recursive: true })
       return fallback
@@ -639,7 +639,7 @@ export async function runFoundryW2Command(input: {
   if (input.kind === 'ask' || input.kind === 'explain' || input.kind === 'explainSymbol' || input.kind === 'explainDiagnostic') {
     const text = routed?.text || (input.kind === 'explainDiagnostic'
       ? `Foundry diagnostic: ${(envelope.visibleDiagnostics[0]?.message || 'no diagnostic')} in ${envelope.activeFile || 'file'} (${envelope.visibleDiagnostics[0]?.code || 'TS'}). ${instruction || ''}`.trim()
-      : deterministicText(input.kind === 'explainDiagnostic' ? 'explain' : input.kind, envelope, instruction))
+      : deterministicText(input.kind, envelope, instruction))
     const response: FoundryW2Response = {
       ok: true,
       kind: input.kind,

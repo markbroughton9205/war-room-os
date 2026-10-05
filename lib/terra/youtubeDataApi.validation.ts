@@ -331,7 +331,6 @@ async function runUnit(): Promise<CaseResult[]> {
       && first.providers[0]?.transport === 'YOUTUBE_DATA_API'
       && stale.providers[0]?.freshness === 'STALE_LAST_GOOD'
       && stale.providers[0]?.transport === 'LAST_KNOWN_GOOD'
-      && stale.providers[0]?.freshness !== 'LIVE'
       && stale.seeds[0]?.youtubeVideoId === 'DuORJdo5rI0',
     `first=${first.providers[0]?.freshness}/${first.providers[0]?.transport} stale=${stale.providers[0]?.freshness}/${stale.providers[0]?.transport}`,
   ))
@@ -527,7 +526,7 @@ async function runLive(): Promise<CaseResult[]> {
   results.push(check(
     'live_last_known_good_after_simulated_failure',
     liveSeeds.seeds.some(seed => seed.verifiedVideoSourceId === 'wkyc-youtube')
-      ? stale.providers[0]?.freshness === 'STALE_LAST_GOOD' && stale.providers[0]?.transport === 'LAST_KNOWN_GOOD' && stale.providers[0]?.freshness !== 'LIVE'
+      ? stale.providers[0]?.freshness === 'STALE_LAST_GOOD' && stale.providers[0]?.transport === 'LAST_KNOWN_GOOD'
       : stale.providers[0]?.freshness !== 'LIVE',
     `${stale.providers[0]?.freshness}/${stale.providers[0]?.transport} items=${stale.seeds.length}`,
   ))

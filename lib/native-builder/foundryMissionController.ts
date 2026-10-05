@@ -2334,6 +2334,11 @@ async function blockForModelFailure(mission: FoundryMissionRecord, error: string
   await cleanupOwnedResources(mission)
 }
 
+/** Read status again after calls that may mutate the mission record. */
+function statusNow(mission: FoundryMissionRecord): FoundryMissionRecord['status'] {
+  return mission.status
+}
+
 async function runModelMissionUnlocked(
   missionId: string,
   suppliedRouter?: FoundryModelRouter,
@@ -2363,7 +2368,7 @@ async function runModelMissionUnlocked(
           why: 'Installed artifact is no longer intact. Activation cannot resume.',
           unblock: 'Rebuild/repackage/reinstall only after integrity is restored.',
         }
-        if (mission.status !== 'FAILED') await transitionMission(mission, 'FAILED', integrity.detail)
+        if (statusNow(mission) !== 'FAILED') await transitionMission(mission, 'FAILED', integrity.detail)
         await saveMission(mission)
         return mission
       }
@@ -2527,7 +2532,7 @@ async function runModelMissionUnlocked(
             await stepInstall(mission)
             if (mission.installState.ok && mission.installState.installId) {
               await stepActivate(mission)
-              if (mission.status === ACTIVATION_PENDING_STATE) {
+              if (statusNow(mission) === ACTIVATION_PENDING_STATE) {
                 await saveMission(mission)
                 return mission
               }
@@ -3135,7 +3140,7 @@ async function runModelMissionUnlocked(
       await stepInstall(mission)
       if (mission.installState.ok === true && mission.installState.installId) {
         await stepActivate(mission)
-        if (mission.status === ACTIVATION_PENDING_STATE) {
+        if (statusNow(mission) === ACTIVATION_PENDING_STATE) {
           await saveMission(mission)
           break
         }
@@ -3229,8 +3234,8 @@ async function runModelMissionUnlocked(
     && mission.sourceState.changedFiles.length === 0
     && mission.toolCalls.some(call => call.ok && call.tool === 'workspace.search')
     && mission.toolCalls.some(call => call.ok && call.tool === 'file.read')
-    && mission.status !== 'COMPLETE'
-    && mission.status !== 'CANCELLED'
+    && statusNow(mission) !== 'COMPLETE'
+    && statusNow(mission) !== 'CANCELLED'
   ) {
     mission.completionGate = { complete: true, missing: [], detail: 'Locate-only gates satisfied after search/read.' }
     await completeWhenGatePasses(mission)

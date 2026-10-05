@@ -43,7 +43,6 @@ export async function GET() {
       stockCommand: snapshot.pendingCommand.stockCommand,
     })
     return NextResponse.json({
-      enabled: true,
       ...composerContextSnapshot(),
       lastResponse: result,
       history: w2ProposalHistory().map(item => ({
@@ -59,15 +58,14 @@ export async function GET() {
   if (snapshot.acceptRequest?.proposalId) {
     consumeWorkbenchBus('accept-request.json')
     const result = await acceptW2Proposal(snapshot.acceptRequest.proposalId)
-    return NextResponse.json({ enabled: true, ...composerContextSnapshot(), lastResponse: result })
+    return NextResponse.json({ ...composerContextSnapshot(), lastResponse: result })
   }
   if (snapshot.rejectRequest?.proposalId) {
     consumeWorkbenchBus('reject-request.json')
     const result = await rejectW2Proposal(snapshot.rejectRequest.proposalId)
-    return NextResponse.json({ enabled: true, ...composerContextSnapshot(), lastResponse: result })
+    return NextResponse.json({ ...composerContextSnapshot(), lastResponse: result })
   }
   return NextResponse.json({
-    enabled: true,
     ...snapshot,
     history: w2ProposalHistory().map(item => ({
       proposalId: item.proposalId,

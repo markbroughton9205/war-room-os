@@ -14,7 +14,7 @@ function existing(files: string[]): string[] {
   return files.map(repoFile).filter((item): item is string => Boolean(item))
 }
 
-function skill(partial: Omit<SkillRecord, 'capabilityStatus' | 'confidence' | 'lifecycle' | 'version' | 'unsupportedReason' | 'lastSourceVerified' | 'lastCapabilityEvaluated'> & {
+function skill(partial: Omit<SkillRecord, 'capabilityStatus' | 'confidence' | 'lifecycle' | 'version' | 'unsupportedReason' | 'lastSourceVerified' | 'lastCapabilityEvaluated' | 'productionProofMissions'> & {
   lastSourceVerified?: string | null
 }): SkillRecord {
   const implementationFiles = existing(partial.evidence.implementationFiles)

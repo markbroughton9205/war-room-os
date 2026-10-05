@@ -95,6 +95,7 @@ type MissionDetail = {
   agentEvents?: Array<{ eventId: string; at: string; type: string; text: string; tool?: string | null; ok?: boolean | null }>
   contractVerdict?: FoundryContractVerdictView | null
   engineeringClass?: string | null
+  reasoningStatus?: string | null
   reasoningBrief?: {
     strategy?: string
     depth?: string

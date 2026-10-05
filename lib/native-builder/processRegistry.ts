@@ -33,9 +33,10 @@ export function registerActiveProcess(repairId: string, child: ChildProcess, lab
 /** Drop wrapper event-loop refs so the parent can exit while the owned child keeps running. */
 export function detachChildFromWrapper(child: ChildProcess): void {
   child.unref()
-  child.stdin?.unref()
-  child.stdout?.unref()
-  child.stderr?.unref()
+  // Piped stdio of a child process are sockets at runtime; the stream types do not say so, so they are asked first.
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    if (stream && 'unref' in stream && typeof stream.unref === 'function') stream.unref()
+  }
 }
 
 export function unregisterActiveProcess(repairId: string, child: ChildProcess): void {

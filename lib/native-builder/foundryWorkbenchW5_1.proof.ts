@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { childProcessEnv } from '@/lib/repo/childProcessEnv'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { resolveRepoRoot } from '@/lib/repo/paths'
@@ -117,14 +118,14 @@ function readJson(file: string): Record<string, unknown> | null {
   }
 }
 
-function launchDesktop(root: string, extraEnv: NodeJS.ProcessEnv = {}) {
+function launchDesktop(root: string, extraEnv: Record<string, string | undefined> = {}) {
   const electronBin = path.join(root, 'desktop/node_modules/electron/dist/electron')
-  const env = {
+  const env = childProcessEnv({
     ...process.env,
     ...extraEnv,
     FOUNDRY_WORKBENCH_W0: '1',
     FOUNDRY_WORKBENCH_W2_DETERMINISTIC: '1',
-  }
+  })
   delete env.ELECTRON_RUN_AS_NODE
   const child = spawn(electronBin, [path.join(root, 'desktop/src/main.cjs')], {
     cwd: path.join(root, 'desktop'),
@@ -194,15 +195,15 @@ function truncateWorkbenchLogs(stateDir: string) {
   }
 }
 
-function launchExtHostClient(root: string, folder: string, sandboxEnv: NodeJS.ProcessEnv) {
+function launchExtHostClient(root: string, folder: string, sandboxEnv: Record<string, string | undefined>) {
   const electronBin = path.join(root, 'desktop/node_modules/electron/dist/electron')
-  const env = {
+  const env = childProcessEnv({
     ...process.env,
     ...sandboxEnv,
     FOUNDRY_WORKBENCH_W0: '1',
     FOUNDRY_WORKBENCH_W0_FOLDER: folder,
     FOUNDRY_WORKBENCH_W2_DETERMINISTIC: '1',
-  }
+  })
   delete env.ELECTRON_RUN_AS_NODE
   const child = spawn(electronBin, [path.join(root, 'desktop/workbench-host/exthost-client.cjs')], {
     cwd: path.join(root, 'desktop'),

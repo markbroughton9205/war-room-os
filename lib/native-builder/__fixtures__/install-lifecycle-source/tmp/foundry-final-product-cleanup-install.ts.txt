@@ -1,0 +1,193 @@
+/**
+ * Additive per-user install for Foundry final product cleanup.
+ * COMMIT=NO PUSH=NO LIVE_DEPLOY=NO. Does not touch /opt/War Room OS.
+ */
+import path from 'node:path'
+import { resolveRepoRoot } from '@/lib/repo/paths'
+import { startMission } from '@/lib/native-builder/foundryMissionController'
+import { loadMission, saveMission, transitionMission } from '@/lib/native-builder/foundryMissionStore'
+import { closeVerifiedInstallMission, evidenceFromInstallVerify } from '@/lib/native-builder/foundryInstallMissionLifecycle'
+import { claimToolResources } from '@/lib/native-builder/foundryOperationsManager'
+import { executeEngineerTool, type EngineerToolName } from '@/lib/native-builder/engineerTools'
+import { runProductionLeaseWatchdog } from '@/lib/native-builder/foundryProductionLeaseWatchdog'
+import { readProductionOwner } from '@/lib/native-builder/foundryProductionOwnership'
+import { installerActiveStatus } from '@/lib/native-builder/installerTool'
+import { portInspect } from '@/lib/native-builder/portInspector'
+import { listFoundryApplicationProjects } from '@/lib/native-builder/foundryProjectIsolation'
+import { presentCommanderProjectCard } from '@/lib/native-builder/foundryCommanderProjects'
+import { runLocalDataBrowserAcceptance } from '@/lib/native-builder/foundryLocalDataAcceptance'
+import { commanderResultFromMission } from '@/lib/native-builder/foundryCommanderExperience'
+import { loadMission as loadFoundryMission } from '@/lib/native-builder/foundryMissionStore'
+import { playwrightChromiumAvailable, resolvePlaywrightChromiumExecutable } from '@/lib/native-builder/foundryPlaywright'
+
+async function leaseTool(missionId: string, tool: EngineerToolName, input: Record<string, unknown>) {
+  const mission = await loadMission(missionId)
+  if (!mission) throw new Error(`missing mission ${missionId}`)
+  const claimed = await claimToolResources(mission, tool, input, 900_000)
+  if (!claimed.ok) return { ok: false, error: claimed.error, result: null as unknown }
+  try {
+    return await executeEngineerTool({ tool, input }, { repairId: mission.missionId, mission })
+  } finally {
+    for (const release of claimed.releases) await release()
+    await saveMission(mission)
+  }
+}
+
+async function main() {
+  process.env.FOUNDRY_PROVIDER_POLICY = process.env.FOUNDRY_PROVIDER_POLICY ?? 'LOCAL'
+  process.env.TMPDIR = process.env.TMPDIR || `${process.env.HOME}/.cache/wr-builder-tmp`
+  const watchdog = await runProductionLeaseWatchdog()
+  console.log('WATCHDOG', watchdog.code, watchdog.released, watchdog.reason)
+
+  const owner = await readProductionOwner()
+  console.log('OWNER_BEFORE', owner?.productionOwnerMissionId, owner?.activeInstallId, owner?.productionGeneration)
+
+  const mission = await startMission(
+    'Close Foundry product cleanup blockers: result labels from real projectType, one Lane & Box card, Playwright browser verification, HTTP-live runtime RUNNING. Do not commit. Do not push. Do not modify Terra, WRIM, Harbor Desk, or Lane & Box app source.',
+    'Foundry Final Product Cleanup',
+    { productionOwner: true, productionRole: 'PRODUCTION_OWNER' },
+  )
+  process.env.FOUNDRY_PRODUCTION_MISSION_ID = mission.missionId
+  console.log('MISSION', mission.missionId)
+  await transitionMission(mission, 'UNDERSTANDING', 'cleanup')
+  await transitionMission(mission, 'INSPECTING', 'cleanup')
+  await transitionMission(mission, 'PLANNING', 'cleanup')
+  await transitionMission(mission, 'EXECUTING', 'cleanup')
+  await transitionMission(mission, 'BUILDING', 'cleanup')
+  await saveMission(mission)
+
+  const built = await leaseTool(mission.missionId, 'build.run', {})
+  console.log('BUILD', built.ok, built.error ?? '')
+  if (!built.ok) process.exit(1)
+  const loadedBuild = await loadMission(mission.missionId)
+  if (loadedBuild) {
+    loadedBuild.buildState = { ok: true, detail: 'build.run PASS' }
+    await transitionMission(loadedBuild, 'PACKAGING', 'build ok')
+  }
+
+  const packed = await leaseTool(mission.missionId, 'package.run', {})
+  console.log('PACKAGE', packed.ok, packed.error ?? '')
+  if (!packed.ok) process.exit(1)
+  const pack = packed.result as {
+    appimage: { path: string; sha256: string }
+    deb: { path: string; sha256: string }
+    linuxUnpackedDir: string
+  }
+  const loadedPkg = await loadMission(mission.missionId)
+  if (loadedPkg) {
+    loadedPkg.packageState = { ok: true, detail: 'package.run PASS' }
+    await transitionMission(loadedPkg, 'INSTALLING', 'package ok')
+  }
+
+  const installed = await leaseTool(mission.missionId, 'installer.install_production', {
+    appimage: pack.appimage,
+    deb: pack.deb,
+    linuxUnpackedDir: pack.linuxUnpackedDir,
+    feature: 'foundry-final-product-cleanup',
+    commanderConfirmed: true,
+  })
+  console.log('INSTALL', installed.ok, installed.error ?? JSON.stringify(installed.result))
+  if (!installed.ok) process.exit(1)
+  const installPayload = installed.result as { stamp?: { install_id?: string }; installDir?: string } | undefined
+  const installId = installPayload?.stamp?.install_id
+  if (!installId) {
+    console.error('missing install id')
+    process.exit(1)
+  }
+
+  const activated = await leaseTool(mission.missionId, 'installer.activate', {
+    installId,
+    commanderConfirmed: true,
+  })
+  console.log('ACTIVATE', activated.ok, activated.error ?? JSON.stringify(activated.result))
+  if (!activated.ok) process.exit(1)
+
+  const transition = await leaseTool(mission.missionId, 'runtime.transition_to_active', {
+    commanderConfirmed: true,
+  })
+  console.log('TRANSITION', transition.ok, transition.error ?? JSON.stringify(transition.result))
+  if (!transition.ok) process.exit(1)
+
+  const verify = await executeEngineerTool({ tool: 'runtime.verify', input: {} }, { repairId: mission.missionId })
+  const active = await installerActiveStatus()
+  const p3847 = await portInspect({ port: 3847 })
+  const p3848 = await portInspect({ port: 3848 })
+  console.log('VERIFY', verify.ok, JSON.stringify(verify.result ?? verify.error))
+
+  const cards = []
+  for (const project of await listFoundryApplicationProjects()) {
+    cards.push(await presentCommanderProjectCard(project))
+  }
+  const browser = await runLocalDataBrowserAcceptance({ origin: 'http://127.0.0.1:18820', includeLowStock: true })
+  const continuation = await loadFoundryMission('a0b3a18e-8f76-47f3-a221-6230c9dfd3e7')
+  const result = continuation ? commanderResultFromMission(continuation) : null
+
+  const verifyResult = verify.result as {
+    identity?: { installId?: string }
+    activeInstallId?: string
+    runningInstallId?: string
+    identityMatch?: boolean
+    health?: { running?: boolean }
+    corePort?: { running?: boolean }
+  } | undefined
+
+  const completedOwner = await loadMission(mission.missionId)
+  if (completedOwner && completedOwner.status !== 'COMPLETE') {
+    completedOwner.installState = { ok: true, installId, detail: 'installer.install_production PASS' }
+    const closed = await closeVerifiedInstallMission(
+      completedOwner,
+      evidenceFromInstallVerify({
+        missionInstallId: installId,
+        activeInstallId: active.activeInstallId ?? verifyResult?.activeInstallId ?? null,
+        runningInstallId: verifyResult?.runningInstallId ?? verifyResult?.identity?.installId ?? null,
+        identityMatch: verifyResult?.identityMatch ?? null,
+        uiHealthOk: verifyResult?.health?.running === true,
+        coreHealthOk: verifyResult?.corePort?.running === true,
+        browserAcceptanceOk: browser.ok === true,
+        buildOk: true,
+        packageOk: true,
+        installOk: true,
+      }),
+    )
+    if (!closed.ok) {
+      console.error('INSTALL_MISSION_CLOSE_REFUSED', closed.status, closed.detail)
+      process.exit(1)
+    }
+  }
+
+  const report = {
+    missionId: mission.missionId,
+    installId,
+    verify: verify.result ?? verify.error,
+    activeInstallId: active.activeInstallId,
+    runningInstallId: verifyResult?.runningInstallId ?? verifyResult?.identity?.installId,
+    identityMatch: verifyResult?.identityMatch,
+    launcher: active.launcherPath,
+    port3847: p3847,
+    port3848: p3848,
+    cards: cards.map(card => ({
+      id: card.id,
+      name: card.name,
+      kind: card.kind,
+      status: card.runtimeStatus,
+      port: card.previewPort,
+      ownership: card.previewOwnership,
+    })),
+    laneBoxCount: cards.filter(card => /lane & box/i.test(card.name)).length,
+    browser,
+    playwrightAvailable: playwrightChromiumAvailable(),
+    playwrightExecutable: resolvePlaywrightChromiumExecutable() ?? null,
+    resultKind: result?.kind ?? null,
+    resultOpenLabel: result?.openLabel ?? null,
+  }
+  const out = path.join(resolveRepoRoot(), 'tmp/foundry-final-product-cleanup-install-report.json')
+  await (await import('node:fs/promises')).writeFile(out, JSON.stringify(report, null, 2) + '\n')
+  console.log('REPORT', out)
+  console.log(JSON.stringify(report, null, 2))
+  if (!activated.ok || !transition.ok || !verify.ok || !browser.ok) process.exit(1)
+}
+
+main().catch(error => {
+  console.error(error)
+  process.exit(1)
+})

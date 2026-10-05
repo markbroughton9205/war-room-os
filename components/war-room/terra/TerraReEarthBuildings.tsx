@@ -35,18 +35,19 @@ export function TerraReEarthBuildings({ viewer, enabled, scaleLevel, onStatusCha
     }
 
     let cancelled = false
+    const activeViewer: CesiumViewer = viewer
     async function load() {
       onStatusChangeRef.current?.('loading')
       const Cesium = await loadCesium()
-      if (cancelled || viewer.isDestroyed()) return
+      if (cancelled || activeViewer.isDestroyed()) return
       try {
         if (!tilesetRef.current) {
           const tileset = await Cesium.Cesium3DTileset.fromUrl(RE_EARTH_BUILDINGS_TILESET_URL)
-          if (cancelled || viewer.isDestroyed()) {
+          if (cancelled || activeViewer.isDestroyed()) {
             tileset.destroy()
             return
           }
-          viewer.scene.primitives.add(tileset)
+          activeViewer.scene.primitives.add(tileset)
           tilesetRef.current = tileset
         }
         tilesetRef.current.show = scaleLevel === 'city' || scaleLevel === 'local' || scaleLevel === 'building'

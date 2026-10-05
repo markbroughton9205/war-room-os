@@ -210,6 +210,7 @@ export async function closeVerifiedInstallMission(
     }
   }
 
+  const currentInstallStatus = (record: FoundryMissionRecord): FoundryMissionState => record.status
   const path = legalInstallCompletionPath(mission.status, true)
   for (const next of path) {
     const text = next === 'EXECUTING'
@@ -224,7 +225,7 @@ export async function closeVerifiedInstallMission(
     await transitionInstallMission(mission, next, text, persist)
   }
 
-  if (mission.status === 'COMPLETE' && persist === 'store') {
+  if (currentInstallStatus(mission) === 'COMPLETE' && persist === 'store') {
     const { rememberMissionOwnership } = await import('./foundryEngineeringDepth')
     const { cleanupOwnedResources } = await import('./foundryOperationsManager')
     await rememberMissionOwnership(mission)
@@ -233,7 +234,7 @@ export async function closeVerifiedInstallMission(
   }
 
   return {
-    ok: mission.status === 'COMPLETE',
+    ok: currentInstallStatus(mission) === 'COMPLETE',
     status: mission.status,
     detail: gate.detail,
     gateComplete: true,

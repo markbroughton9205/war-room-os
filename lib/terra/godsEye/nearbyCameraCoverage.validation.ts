@@ -39,7 +39,7 @@ function run(): CaseResult[] {
   const richfield = nearbyCameraCoverageForPoint({ latitude: 41.2397, longitude: -81.6382, nearbyCount: 0, authRequired: true, indexLoaded: true })
   results.push(check('richfield_ohgo_is_not_commander_auth', richfield.locationState === 'NONE_WITHIN_RADIUS' && richfield.coveringProviders.some(row => row.id === 'ohgo_cameras'), richfield.locationState))
   const zoomOutCached = nearbyCameraCoverageForPoint({ latitude: 41.0814, longitude: -81.519, nearbyCount: 4, authRequired: true, indexLoaded: true })
-  results.push(check('akron_zoom_out_with_catalog_stays_covered', zoomOutCached.locationState === 'COVERED' && zoomOutCached.locationState !== 'AUTH_REQUIRED', zoomOutCached.locationState))
+  results.push(check('akron_zoom_out_with_catalog_stays_covered', zoomOutCached.locationState === 'COVERED', zoomOutCached.locationState))
   const zoomOutNoCatalog = nearbyCameraCoverageForPoint({ latitude: 41.0814, longitude: -81.519, nearbyCount: 0, authRequired: true, indexLoaded: false })
   results.push(check('akron_zoom_out_without_markers_is_not_auth', zoomOutNoCatalog.locationState !== 'AUTH_REQUIRED' && zoomOutNoCatalog.reason.includes('not AUTH_REQUIRED'), zoomOutNoCatalog.locationState))
   const failed = nearbyCameraCoverageForPoint({ latitude: 41.0814, longitude: -81.519, nearbyCount: 0, retrievalFailed: true })

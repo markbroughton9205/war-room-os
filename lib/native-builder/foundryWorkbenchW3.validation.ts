@@ -91,7 +91,7 @@ async function run() {
   const staleEnv = envelopeForBrokenTs(fixture)
   const staleProp = await runFoundryW2Command({ kind: 'fix', envelope: staleEnv, instruction: 'Fix the type error', providerClass: 'local' })
   writeFileSync(broken, before.replace('"wrong"', '1'))
-  const staleApply = staleProp.proposal ? await acceptW2Proposal(staleProp.proposal.proposalId) : { ok: true }
+  const staleApply: Pick<Awaited<ReturnType<typeof acceptW2Proposal>>, 'ok' | 'code' | 'error'> = staleProp.proposal ? await acceptW2Proposal(staleProp.proposal.proposalId) : { ok: true }
   results.push(check('fixture_H_stale_diagnostic', staleApply.ok === false && staleApply.code === 'EDIT_PROPOSAL_STALE', String(staleApply.code)))
 
   results.push(check('language_providers_wired', /executeDefinitionProvider/.test(adapter) && /executeReferenceProvider/.test(adapter) && /executeCompletionItemProvider/.test(adapter) && /prepareRename/.test(adapter), 'native providers'))

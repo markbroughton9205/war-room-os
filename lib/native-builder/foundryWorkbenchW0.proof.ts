@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { childProcessEnv } from '@/lib/repo/childProcessEnv'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { resolveRepoRoot } from '@/lib/repo/paths'
@@ -139,7 +140,7 @@ async function run() {
   let editorProof = { buffer: false, edit: false, save: false, match: false, explorer: false, partition: '', detail: 'electron view-proof pending' }
   const electronBin = path.join(root, 'desktop/node_modules/electron/dist/electron')
   if (existsSync(electronBin)) {
-    const env = { ...process.env, FOUNDRY_WORKBENCH_W0: '1' }
+    const env = childProcessEnv({ ...process.env, FOUNDRY_WORKBENCH_W0: '1' })
     delete env.ELECTRON_RUN_AS_NODE
     const view = spawnSync(electronBin, [
       '--no-sandbox',
@@ -203,6 +204,7 @@ async function run() {
     ? await fetch(`http://127.0.0.1:3849/hello.ts?tkn=${encodeURIComponent(token)}`, { method: 'PUT', body: 'pwned-via-workbench', signal: AbortSignal.timeout(3000) }).then(r => r.status).catch(() => 0)
     : 0
   const unknownTool = await executeEngineerTool({
+    // @ts-expect-error Deliberately invalid tool tests runtime rejection; do not widen the production tool union.
     tool: 'workspace.fs.writeFile',
     input: { path: 'pwned.ts', contents: 'nope' },
   }, { repairId: 'w0-workbench-spike' })

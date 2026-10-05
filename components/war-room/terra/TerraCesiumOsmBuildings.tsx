@@ -28,18 +28,19 @@ export function TerraCesiumOsmBuildings({ viewer, enabled }: Props) {
     }
 
     let cancelled = false
+    const activeViewer: CesiumViewer = viewer
     async function load() {
       const Cesium = await loadCesium()
-      if (cancelled || viewer.isDestroyed()) return
+      if (cancelled || activeViewer.isDestroyed()) return
       try {
         if (!tilesetRef.current) {
           const created = await Cesium.createOsmBuildingsAsync()
-          if (cancelled || viewer.isDestroyed()) {
+          if (cancelled || activeViewer.isDestroyed()) {
             created.destroy()
             return
           }
           created.show = true
-          viewer.scene.primitives.add(created)
+          activeViewer.scene.primitives.add(created)
           tilesetRef.current = created
           return
         }

@@ -296,7 +296,7 @@ export function buildEngineeringCapabilitiesView(certs = listCertifications()): 
     const cert = byClass.get(projectClass)
     const referencePassCount = cert?.referencePassCount ?? 0
     const modelDrivenPassCount = cert?.modelDrivenPassCount ?? 0
-    const proofLabel = modelDrivenPassCount > 0 && referencePassCount > 0
+    const proofLabel: FoundryEngineeringCapabilitiesView['rows'][number]['proofLabel'] = modelDrivenPassCount > 0 && referencePassCount > 0
       ? 'MIXED'
       : modelDrivenPassCount > 0
         ? 'MODEL DRIVEN VERIFIED'

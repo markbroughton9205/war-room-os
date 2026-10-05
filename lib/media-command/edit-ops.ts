@@ -3,7 +3,7 @@
  * Inverse commands power undo. AI goes: proposal → schema → preconditions → policy → preview → commit.
  */
 import { addTime, compareTime, convertTime, fromSeconds, mediaTime, parseMediaTime, subTime, toSeconds, zeroTime, type MediaTime } from './time'
-import { cloneProject, findAsset, findClip, IDENTITY_CROP, IDENTITY_TRANSFORM, type AssetRecord, type Clip, type HvsProject, type Track } from './types'
+import { cloneProject, findAsset, findClip, IDENTITY_CROP, IDENTITY_TRANSFORM, type AssetRecord, type Clip, type HvsProject, type OverlaySpec, type Track } from './types'
 import type { EditCommand, EditCommandResult } from './edit-commands'
 import { validateEditCommandSchema } from './edit-commands'
 import { LUXURY_BEAUTY_V1_ID, getThemeSpec } from './themes'
@@ -849,7 +849,7 @@ export function applyEditCommand(project: HvsProject, command: EditCommand): { p
       const preset = command.stylePreset ? getTitlePreset(command.stylePreset) : null
       const positionPreset = command.positionPreset ?? preset?.positionPreset ?? 'top-center'
       const baked = positionPreset === 'custom' ? { x: 0.5, y: 0.18, alignment: 'center' as const } : POSITION_PRESETS[positionPreset]
-      let overlay = {
+      let overlay: OverlaySpec = {
         id: newId('ov'),
         kind: 'title' as const,
         titleKind: command.titleKind ?? preset?.titleKind ?? 'title',

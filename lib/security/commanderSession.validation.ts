@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { childProcessEnv } from '@/lib/repo/childProcessEnv'
 import { isLocalDesktopCommanderRuntime, resolveLocalCommanderUserId } from './commanderSessionPolicy'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
@@ -62,9 +63,9 @@ function run(): CaseResult[] {
 
   results.push(check(
     'desktop_runtime_includes_packaged_and_desktop_surface',
-    isLocalDesktopCommanderRuntime({ WAR_ROOM_PACKAGED: '1' })
-      && isLocalDesktopCommanderRuntime({ WAR_ROOM_RUNTIME_SURFACE: 'DESKTOP_LOCAL' })
-      && !isLocalDesktopCommanderRuntime({}),
+    isLocalDesktopCommanderRuntime(childProcessEnv({ WAR_ROOM_PACKAGED: '1' }))
+      && isLocalDesktopCommanderRuntime(childProcessEnv({ WAR_ROOM_RUNTIME_SURFACE: 'DESKTOP_LOCAL' }))
+      && !isLocalDesktopCommanderRuntime(childProcessEnv({})),
     'DESKTOP_LOCAL and PACKAGED both count as local desktop runtime',
   ))
 
