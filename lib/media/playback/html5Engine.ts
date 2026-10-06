@@ -66,6 +66,11 @@ export class Html5PlaybackEngine {
     audio.muted = muted
   }
 
+  isCurrentUrlPlaying(url: string): boolean {
+    if (!this.audio || this.audio.paused) return false
+    return this.audio.src === url || this.audio.currentSrc === url
+  }
+
   async playUrl(url: string, volume: number, muted: boolean): Promise<void> {
     const audio = this.getAudio()
     this.applyVolume(volume, muted)

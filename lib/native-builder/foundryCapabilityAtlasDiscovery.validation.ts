@@ -113,7 +113,7 @@ async function run() {
     results.push(check('missing_source_metadata_rejected', missing.action === 'rejected' && missing.reason.includes('missing'), missing.reason))
 
     const python = atlas.skills.get('software.languages.python')
-    results.push(check('docs_do_not_prove', python?.capabilityStatus === 'LEARNABLE' && python.capabilityStatus !== 'PROVEN' && python.capabilityStatus !== 'EVALUATED', python?.capabilityStatus ?? 'missing'))
+    results.push(check('docs_do_not_prove', python?.capabilityStatus === 'LEARNABLE', python?.capabilityStatus ?? 'missing'))
 
     const repoLink = ingestDiscoveryCandidate(atlas, candidate({
       sourceId: 'fixture-pytorch-repo',

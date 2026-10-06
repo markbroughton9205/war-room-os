@@ -491,6 +491,7 @@ async function runTask(graphId: string, taskId: string, files: Record<string, st
     }
   }
   const nextGeneration = maxExecutionGeneration(graph, taskId) + 1
+  const startedAt = new Date().toISOString()
   const agent: FoundryAgentRecord = {
     agentId: `${task.role.toLowerCase()}-${randomUUID().slice(0, 8)}`,
     role: task.role,
@@ -501,7 +502,7 @@ async function runTask(graphId: string, taskId: string, files: Record<string, st
     status: 'RUNNING',
     workspaceId: null,
     modelRouting: routeModelForRole(task.role),
-    startedAt: new Date().toISOString(),
+    startedAt,
     finishedAt: null,
     latestAction: `Starting ${task.role}`,
     filesChanged: [],
@@ -509,7 +510,7 @@ async function runTask(graphId: string, taskId: string, files: Record<string, st
     executionGeneration: nextGeneration,
   }
   task.status = 'RUNNING'
-  task.startedAt = agent.startedAt
+  task.startedAt = startedAt
   task.agentId = agent.agentId
   const durableActionId = `cc-${graph.graphId}-${task.taskId}-${nextGeneration}`
   persistDurableRuntimeAction({
@@ -519,7 +520,7 @@ async function runTask(graphId: string, taskId: string, files: Record<string, st
     kind: task.mutating ? 'write' : 'tool',
     state: 'STARTED',
     mutating: Boolean(task.mutating || roleIsMutating(task.role)),
-    startedAt: agent.startedAt,
+    startedAt,
     finishedAt: null,
     resultSummary: null,
     evidencePath: null,

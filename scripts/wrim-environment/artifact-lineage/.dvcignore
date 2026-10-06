@@ -1,0 +1,6 @@
+# DVC must not absorb WRIM weights, streams, or checkpoints from this folder.
+*
+!lab-test-artifact.json
+!lab-test-artifact.json.dvc
+!.dvcignore
+!config

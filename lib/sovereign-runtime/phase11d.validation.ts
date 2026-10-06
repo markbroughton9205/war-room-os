@@ -1,6 +1,7 @@
 /**
  * #22 Phase 11D — Installable Windows War Room application validation.
  */
+import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -52,6 +53,13 @@ export async function runPhase11dPackagingValidation(): Promise<{
     publish?: unknown
   }
   const mainSrc = fs.readFileSync(path.join(desktop, 'src', 'main.cjs'), 'utf8')
+  const appDataHelperSrc = fs.existsSync(path.join(desktop, 'src', 'appDataRoot.cjs'))
+    ? fs.readFileSync(path.join(desktop, 'src', 'appDataRoot.cjs'), 'utf8')
+    : ''
+  const libAppDataHelperSrc = fs.existsSync(path.join(repoRoot, 'lib', 'sovereign-runtime', 'local-ownership', 'appDataRoot.cjs'))
+    ? fs.readFileSync(path.join(repoRoot, 'lib', 'sovereign-runtime', 'local-ownership', 'appDataRoot.cjs'), 'utf8')
+    : ''
+  const appDataContractSrc = `${mainSrc}\n${appDataHelperSrc}\n${libAppDataHelperSrc}`
   const png = path.join(desktop, 'assets', 'war-room-os-icon.png')
   const ico = path.join(desktop, 'assets', 'war-room-os.ico')
   const provenancePath = path.join(desktop, 'assets', 'ICON_PROVENANCE.json')
@@ -112,7 +120,22 @@ export async function runPhase11dPackagingValidation(): Promise<{
   results.push(check('20_no_npm_start_required', /War Room OS/.test(mainSrc), 'ok'))
   results.push(check('21_no_env_in_files', !(build.files || []).some((f: string) => f.includes('.env')), 'ok'))
   results.push(check('22_23_no_secret_globs', !JSON.stringify(build).includes('.env.local'), 'ok'))
-  results.push(check('24_appdata', /LOCALAPPDATA|War Room OS/.test(mainSrc), 'ok'))
+  results.push(check('24_appdata', /LOCALAPPDATA/.test(appDataContractSrc) && /War Room OS/.test(appDataContractSrc), 'windows localappdata'))
+  results.push(
+    check(
+      '24b_appdata_linux_xdg',
+      /XDG_DATA_HOME/.test(appDataContractSrc) && /\.local['"` ,\\/]+share/.test(appDataContractSrc),
+      'linux xdg',
+    ),
+  )
+  results.push(check('24c_appdata_darwin', /Application Support/.test(appDataContractSrc), 'darwin'))
+  results.push(
+    check(
+      '24d_shared_helper',
+      /appDataRoot\.cjs/.test(mainSrc) && fs.existsSync(path.join(desktop, 'src', 'appDataRoot.cjs')),
+      'electron uses shared helper',
+    ),
+  )
   results.push(check('25_26_uninstall_preserves_data', build.nsis?.deleteAppDataOnUninstall === false, 'ok'))
   results.push(check('33_ollama_optional', /Ollama|LOCAL_MODEL|3847/.test(mainSrc) || true, 'optional'))
   results.push(check('36_website_optional', !/loadURL\(\s*['"]https:\/\/warroomos/.test(mainSrc), 'ok'))
@@ -124,7 +147,14 @@ export async function runPhase11dPackagingValidation(): Promise<{
   results.push(check('49_single_instance', /requestSingleInstanceLock/.test(mainSrc), 'ok'))
   results.push(check('50_shutdown_owned_only', /shutdownOwned|killOwned\(ownedUiChild\)/.test(mainSrc), 'ok'))
   results.push(check('51_context_isolation', /contextIsolation:\s*true/.test(mainSrc), 'ok'))
-  results.push(check('52_sandbox', /sandbox:\s*true/.test(mainSrc), 'ok'))
+  // The renderer sandbox is on by default; only the explicit Linux opt-in (WAR_ROOM_DISABLE_RENDERER_SANDBOX=1) can turn it off, and main.cjs takes its value from that policy.
+  const rendererSandbox = createRequire(import.meta.url)('../../desktop/src/rendererSandbox.cjs') as { resolveRendererSandbox: (platform: string, env: Record<string, string>) => { sandbox: boolean } }
+  results.push(check('52_sandbox',
+    /sandbox:\s*!linuxRendererSandboxDisabled/.test(mainSrc) && !/sandbox:\s*false/.test(mainSrc)
+      && rendererSandbox.resolveRendererSandbox('linux', {}).sandbox === true
+      && rendererSandbox.resolveRendererSandbox('linux', { WAR_ROOM_DISABLE_RENDERER_SANDBOX: 'true' }).sandbox === true
+      && rendererSandbox.resolveRendererSandbox('win32', { WAR_ROOM_DISABLE_RENDERER_SANDBOX: '1' }).sandbox === true,
+    'ok'))
   results.push(check('53_no_node_integration', /nodeIntegration:\s*false/.test(mainSrc), 'ok'))
   results.push(check('54_55_no_shell_ipc', /shell\.exec/.test(mainSrc) && /DENIED/.test(mainSrc), 'ok'))
   results.push(check('56_remote_nav', /PUBLIC_HOSTS|warroomos\.com/.test(mainSrc), 'ok'))

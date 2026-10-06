@@ -6,13 +6,22 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 
 import { useApplicationActivity } from '@/lib/ui/applicationActivity'
 import { TerraHomeEarth3D } from './TerraHomeEarth3D'
-import { EARTH_ASSETS, EARTH_STATUS_LABEL, EARTH_VISUAL_LABEL } from './terraHomeEarth/earthAssets'
+import {
+  EARTH_ASSETS,
+  EARTH_STATUS_LABEL,
+  EARTH_VISUAL_ACTIVE_LABEL,
+  EARTH_VISUAL_LABEL,
+  EARTH_VISUAL_UNAVAILABLE_LABEL,
+  TERRA_RUNTIME_STATE_LABEL,
+  TERRA_RUNTIME_UNAVAILABLE_LABEL,
+} from './terraHomeEarth/earthAssets'
 import {
   INTERACTION_IDLE_MS,
   resolveHomeEarthQuality,
   type HomeEarthQuality,
 } from './terraHomeEarth/earthQuality'
 import type { HomeEarthRendererHandle } from './terraHomeEarth/earthRenderer'
+import { godsEyeCardLabel, type GodsEyeRuntimeState } from '@/lib/terra/godsEye/runtimeState'
 import '@/app/terra-home-globe.css'
 
 type TerraMotion = 'live' | 'paused' | 'reduced'
@@ -85,6 +94,7 @@ export function TerraHomeGlobePreview() {
   const [failedTex, setFailedTex] = useState(false)
   const [reducedMotion, setReducedMotion] = useState(false)
   const [rendererMode, setRendererMode] = useState<EarthRendererMode>('pending')
+  const [godsEyeRuntime, setGodsEyeRuntime] = useState<GodsEyeRuntimeState | null>(null)
   const isClient = useSyncExternalStore(subscribeClientFlag, isClientSnapshot, isServerSnapshot)
   const quality: HomeEarthQuality = isClient
     ? resolveHomeEarthQuality({
@@ -105,12 +115,31 @@ export function TerraHomeGlobePreview() {
       ? 'clamp(13rem, 34vmin, 23rem)'
       : 'clamp(12rem, 30vmin, 20rem)'
   const orbitSeconds = 90
+  const terraRuntimeState = previewUnavailable ? TERRA_RUNTIME_UNAVAILABLE_LABEL : TERRA_RUNTIME_STATE_LABEL
+  const godseyeState = godsEyeCardLabel(godsEyeRuntime)
+  const earthVisualState = previewUnavailable ? EARTH_VISUAL_UNAVAILABLE_LABEL : EARTH_VISUAL_ACTIVE_LABEL
   const statusLabel = EARTH_STATUS_LABEL
   const visualLabel = webglUnavailable
     ? previewUnavailable
       ? 'Earth preview · 3D unavailable'
       : 'Earth visual · NASA Blue Marble · 2D fallback'
     : EARTH_VISUAL_LABEL
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch('/api/terra/gods-eye/health', { cache: 'no-store' })
+        if (!res.ok) return
+        const body = await res.json() as GodsEyeRuntimeState
+        if (!cancelled) setGodsEyeRuntime(body)
+      } catch {
+        /* leave the last runtime snapshot */
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -304,8 +333,10 @@ export function TerraHomeGlobePreview() {
         </div>
 
         <div className="mt-4 text-center">
-          <p className="text-[10px] font-bold uppercase tracking-[0.36em] text-cyan-200">{statusLabel}</p>
-          <p className="mt-1 text-[8px] uppercase tracking-[0.2em] text-slate-500">{visualLabel}</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.36em] text-cyan-200" data-testid="terra-runtime-state" data-terra-runtime-state={terraRuntimeState}>{terraRuntimeState || statusLabel}</p>
+          <p className="mt-1 text-[8px] uppercase tracking-[0.2em] text-slate-400" data-testid="godseye-state" data-godseye-state={godseyeState}>{godseyeState}</p>
+          <p className="mt-1 text-[8px] uppercase tracking-[0.2em] text-slate-500" data-testid="earth-visual-state" data-earth-visual-state={earthVisualState}>{earthVisualState}</p>
+          <p className="mt-1 text-[8px] uppercase tracking-[0.2em] text-slate-600">{visualLabel}</p>
           <Link
             href="/terra"
             className="mt-3 inline-flex rounded-full border border-cyan-300/35 bg-cyan-300/5 px-4 py-1.5 text-[9px] font-bold uppercase tracking-[0.24em] text-cyan-100 hover:bg-cyan-300/10"

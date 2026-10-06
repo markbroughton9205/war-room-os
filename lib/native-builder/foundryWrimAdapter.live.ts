@@ -158,9 +158,10 @@ async function main() {
   mkdirSync(process.env.FRK_REASONING_ROOT, { recursive: true })
   let frk: Record<string, unknown> = {}
   try {
+    const hostGoal = 'Pinned WRIM adapter transport. No file mutation.'
     const host: UnifiedLoopHost = {
       missionId: `m18-wrim-frk-${Date.now()}`,
-      goal: 'Pinned WRIM adapter transport. No file mutation.',
+      goal: hostGoal,
       userRequest: PROMPT,
       createdAt: new Date().toISOString(),
       observations: [],
@@ -169,7 +170,7 @@ async function main() {
       mission: host,
       workspaceRoot: workspace,
       writeSet: [],
-      goal: host.goal,
+      goal: hostGoal,
       acceptance: ['wrim pinned, no fallback'],
       routing: {
         remotePermitted: false,

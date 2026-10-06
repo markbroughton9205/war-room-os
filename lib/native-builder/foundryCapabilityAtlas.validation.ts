@@ -282,7 +282,7 @@ async function run() {
     let knowledgeProvenBlocked = false
     try {
       assertCanAssignStatus('PROVEN', {
-        evaluations: [{ evaluationId: 'k', skillId: 'x', level: 'KNOWLEDGE_EVAL', title: 'docs', requiredSteps: ['read'], evidencePaths: ['docs'], missionId: null, outcome: 'PASS', evaluatedAt: new Date().toISOString(), notes: '', production: false }],
+        evaluations: [{ evaluationId: 'k', skillId: 'x', level: 'KNOWLEDGE_EVAL', title: 'docs', requiredSteps: ['read'], evidencePaths: ['docs'], missionId: null, outcome: 'PASS', evaluatedAt: new Date().toISOString(), notes: '', production: false, command: null, resultSummary: 'documentation was read', environment: null, limitations: 'knowledge only; nothing was run', confidence: 'none' }],
         productionProofMissions: [],
       })
     } catch (error) {

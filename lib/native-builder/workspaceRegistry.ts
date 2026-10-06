@@ -12,8 +12,9 @@
  * CODE_OPERATOR_ALLOWED_ROOTS is retained as a historical extra root (if it exists on disk).
  * It is no longer the sole allowlist.
  */
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, stat } from 'node:fs/promises'
 import os from 'node:os'
+import { transactJsonFile } from './foundryJsonTransaction'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
@@ -152,21 +153,21 @@ function isWorkspaceRecord(v: unknown): v is WorkspaceRecord {
   return typeof o.id === 'string' && typeof o.root === 'string' && typeof o.label === 'string' && typeof o.createdAt === 'string'
 }
 
-async function readRegistry(): Promise<WorkspaceRecord[]> {
-  try {
-    const raw = await readFile(registryPath(), 'utf8')
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(isWorkspaceRecord)
-  } catch {
-    return []
+async function readRegistry(target = registryPath()): Promise<WorkspaceRecord[]> {
+  let raw: string
+  try { raw = await readFile(target, 'utf8') } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
   }
+  const parsed: unknown = JSON.parse(raw)
+  if (!Array.isArray(parsed) || !parsed.every(isWorkspaceRecord)) {
+    throw new Error(`Invalid workspace registry at ${target}; existing bytes preserved.`)
+  }
+  return parsed
 }
 
-async function writeRegistry(records: WorkspaceRecord[]): Promise<void> {
-  const p = registryPath()
-  await mkdir(path.dirname(p), { recursive: true })
-  await writeFile(p, JSON.stringify(records, null, 2), 'utf8')
+function updateRegistry<R>(change: (all: WorkspaceRecord[]) => { value: WorkspaceRecord[]; result: R }): Promise<R> {
+  return transactJsonFile(registryPath(), readRegistry, change)
 }
 
 export class WorkspaceValidationError extends Error {}
@@ -254,18 +255,28 @@ async function canonicalExistingDir(candidate: string): Promise<string> {
 }
 
 async function upsert(record: WorkspaceRecord): Promise<WorkspaceRecord> {
-  const all = await readRegistry()
-  const existing = all.find(w => w.root === record.root)
-  if (existing) {
-    const merged = await enrich({ ...existing, ...record, id: existing.id, lastOpenedAt: new Date().toISOString() })
-    const next = all.map(w => (w.id === existing.id ? merged : w))
-    await writeRegistry(next)
-    return merged
-  }
-  const created = await enrich({ ...record, lastOpenedAt: new Date().toISOString() })
-  all.push(created)
-  await writeRegistry(all)
-  return created
+  // Filesystem/git discovery can await outside the transaction. Identity and stored metadata
+  // are merged only after rereading under the shared filesystem lock.
+  const discovered = await enrich(record)
+  return updateRegistry(all => {
+    const existing = all.find(w => w.root === record.root)
+    const merged: WorkspaceRecord = existing ? {
+      ...discovered,
+      ...existing,
+      ...record,
+      id: existing.id,
+      root: existing.root,
+      createdAt: existing.createdAt,
+      path: existing.root,
+      gitRepository: discovered.gitRepository,
+      gitBranch: discovered.gitBranch,
+      lastOpenedAt: new Date().toISOString(),
+    } : { ...discovered, lastOpenedAt: new Date().toISOString() }
+    return {
+      value: existing ? all.map(w => w.id === existing.id ? merged : w) : [...all, merged],
+      result: merged,
+    }
+  })
 }
 
 function withIdentity(record: WorkspaceRecord): WorkspaceRecord {
@@ -355,7 +366,7 @@ export async function archiveConfirmedTestProjects(): Promise<{
   archived: Array<{ id: string; label: string; root: string; classification: FoundryProjectClassification }>
   preserved: Array<{ id: string; label: string; root: string; classification: FoundryProjectClassification }>
 }> {
-  const all = await readRegistry()
+  return updateRegistry(all => {
   const counts: Record<FoundryProjectClassification, number> = {
     COMMANDER_REAL: 0,
     SYSTEM_TEST: 0,
@@ -386,8 +397,8 @@ export async function archiveConfirmedTestProjects(): Promise<{
     }
     return decorated
   })
-  await writeRegistry(next)
-  return { counts, archived, preserved }
+  return { value: next, result: { counts, archived, preserved } }
+  })
 }
 
 export async function getWorkspace(id: string): Promise<WorkspaceRecord | null> {
@@ -398,7 +409,15 @@ export async function getWorkspace(id: string): Promise<WorkspaceRecord | null> 
 export async function touchWorkspace(id: string): Promise<WorkspaceRecord | null> {
   const current = await getWorkspace(id)
   if (!current) return null
-  return upsert({ ...current, lastOpenedAt: new Date().toISOString() })
+  return updateRegistry(all => {
+    const stored = all.find(w => w.id === current.id || w.root === current.root)
+    if (!stored) {
+      const touched = { ...current, lastOpenedAt: new Date().toISOString() }
+      return { value: [...all, touched], result: touched }
+    }
+    const touched = { ...stored, lastOpenedAt: new Date().toISOString() }
+    return { value: all.map(w => w.id === stored.id ? touched : w), result: touched }
+  })
 }
 
 /** Phase B path — still requires a git repository. */

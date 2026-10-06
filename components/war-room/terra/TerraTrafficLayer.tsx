@@ -62,9 +62,11 @@ export function TerraTrafficLayer({
   defaultEnabled,
   hideControls = false,
   forceEnabled = false,
+  externallyEnabled = true,
   skipScaleGate = false,
   clusterOverride,
   onAuthRequired,
+  onProviderAuthFail,
 }: {
   def: TerraTrafficLayerDef
   viewer: CesiumViewer | null
@@ -83,14 +85,17 @@ export function TerraTrafficLayer({
   /** Camera discovery federation: query this layer from the active Terra location even if the
    * advanced Layer Controls toggle is off. */
   forceEnabled?: boolean
+  /** Smart Layer Governor gate. OFF/UNLOADED wins even over discovery requests. */
+  externallyEnabled?: boolean
   /** Camera discovery supplies a location-centered bbox; do not wait for city-scale globe zoom. */
   skipScaleGate?: boolean
   /** Camera federation LOD: cluster at country/city, individual pins at street. */
   clusterOverride?: boolean
   onAuthRequired?: (layerId: string, authRequired: boolean) => void
+  onProviderAuthFail?: (layerId: string, failed: boolean) => void
 }) {
   const [enabled, setEnabled] = useState(defaultEnabled)
-  const layerOn = enabled || forceEnabled
+  const layerOn = externallyEnabled && (enabled || forceEnabled)
 
   useEffect(() => {
     if (forceEnabled) setEnabled(true)
@@ -125,9 +130,13 @@ export function TerraTrafficLayer({
   }, [def.layerId, feed.features, onFeaturesChange, boundingBoxQuery])
 
   const authRequired = feed.rootCause === 'COMMANDER_AUTH_REQUIRED'
+  const providerAuthFailed = feed.rootCause === 'PROVIDER_AUTH_REQUIRED' || feed.rootCause === 'MISSING_ENV'
   useEffect(() => {
     onAuthRequired?.(def.layerId, authRequired)
   }, [authRequired, def.layerId, onAuthRequired])
+  useEffect(() => {
+    onProviderAuthFail?.(def.layerId, providerAuthFailed)
+  }, [providerAuthFailed, def.layerId, onProviderAuthFail])
 
   const coverageState = useMemo(
     () =>

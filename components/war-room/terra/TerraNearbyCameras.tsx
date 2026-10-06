@@ -1,14 +1,17 @@
 'use client'
 
 import { nearbyPublicCameras, type NearbyCameraIndexFeature, type NearbyPublicCamera } from '@/lib/terra/godsEye/nearbyCameras'
-import { nearbyCameraCoverageForPoint } from '@/lib/terra/godsEye/nearbyCameraCoverage'
+import { nearbyCameraCoverageForPoint, type NearbyProviderTruthState } from '@/lib/terra/godsEye/nearbyCameraCoverage'
 import { CAMERA_DISCOVERY_EXPANDED_RADIUS_KM, CAMERA_DISCOVERY_RADIUS_KM } from '@/lib/terra/godsEye/cameraDiscovery'
 import { IconCamera } from '@/components/war-room/council/CommandIcons'
+import type { NearbyActivePointSource } from '@/lib/terra/nearbyActivePoint'
+import type { TerraAddressMatchQuality } from '@/lib/terra/geocodeMatchQuality'
+import { matchQualityLabel } from '@/lib/terra/geocodeMatchQuality'
 
 function formatDistance(distanceKm: number): string {
-  const miles = distanceKm * 0.621371
-  if (miles < 0.1) return `${Math.round(distanceKm * 1000)} m`
-  return `${miles.toFixed(1)} mi`
+  if (distanceKm < 0.1) return `${Math.round(distanceKm * 1000)} m`
+  if (distanceKm < 10) return `${distanceKm.toFixed(1)} km`
+  return `${Math.round(distanceKm)} km`
 }
 
 const FEED_CLASS: Record<NearbyPublicCamera['feedState'], string> = {
@@ -18,13 +21,31 @@ const FEED_CLASS: Record<NearbyPublicCamera['feedState'], string> = {
   UNAVAILABLE: 'text-slate-500',
 }
 
+function displayCoverageState(truthState: NearbyProviderTruthState | null | undefined, locationState: string): string {
+  if (truthState === 'AUTH_FAIL') return 'AUTH_FAIL'
+  if (truthState === 'NO_DATA') return 'NO_DATA / NONE_WITHIN_RADIUS'
+  if (truthState === 'LOADING') return 'LOADING'
+  if (truthState === 'LIVE') return 'LIVE'
+  if (truthState === 'STALE') return 'STALE'
+  if (truthState === 'OFFLINE') return 'OFFLINE'
+  if (truthState === 'NO_COVERAGE') return 'NO_COVERAGE'
+  if (locationState === 'PROVIDER_AUTH_REQUIRED') return 'PARTIAL · PROVIDER AUTH REQUIRED'
+  return locationState
+}
+
 export function TerraNearbyCameras({
   latitude,
   longitude,
   originLabel,
+  originSource = null,
+  matchQuality = null,
   features,
   indexLoaded,
   authRequired,
+  providerAuthFailed,
+  coveringLayerIds,
+  coveringProviderIds,
+  truthState,
   radiusKm = CAMERA_DISCOVERY_RADIUS_KM,
   selectedId,
   onSelect,
@@ -34,9 +55,15 @@ export function TerraNearbyCameras({
   latitude: number | null
   longitude: number | null
   originLabel: string
+  originSource?: NearbyActivePointSource | null
+  matchQuality?: TerraAddressMatchQuality | null
   features: readonly NearbyCameraIndexFeature[]
   indexLoaded?: boolean
   authRequired?: boolean
+  providerAuthFailed?: boolean
+  coveringLayerIds?: readonly string[] | null
+  coveringProviderIds?: readonly string[] | null
+  truthState?: NearbyProviderTruthState | null
   radiusKm?: number
   selectedId?: string | null
   onSelect: (camera: NearbyPublicCamera) => void
@@ -52,24 +79,35 @@ export function TerraNearbyCameras({
     )
   }
 
-  const cameras = nearbyPublicCameras({ latitude, longitude, features, maxKm: radiusKm })
+  const cameras = nearbyPublicCameras({ latitude, longitude, features, maxKm: radiusKm, coveringLayerIds })
   const coverage = nearbyCameraCoverageForPoint({
     latitude,
     longitude,
     nearbyCount: cameras.length,
     indexLoaded,
     commanderAuthRequired: authRequired,
+    providerAuthFailed,
     radiusKm,
   })
-  const canExpandRadius = coverage.locationState === 'NONE_WITHIN_RADIUS' && radiusKm < CAMERA_DISCOVERY_EXPANDED_RADIUS_KM && typeof onExpandRadius === 'function'
+  const shownTruth = truthState ?? coverage.truthState
+  const shownState = displayCoverageState(shownTruth, coverage.locationState)
+  const canExpandRadius = (coverage.locationState === 'NONE_WITHIN_RADIUS' || shownTruth === 'NO_DATA') && radiusKm < CAMERA_DISCOVERY_EXPANDED_RADIUS_KM && typeof onExpandRadius === 'function'
+  const coveringIds = coveringProviderIds ?? coverage.coveringProviderIds
+  const coveringLabel = coverage.coveringProviders.map(row => row.agency).join(' · ') || (coveringIds.length ? coveringIds.join(' · ') : 'none')
   return (
-    <div className="pointer-events-auto max-h-[min(22rem,calc(100vh-16rem))] overflow-y-auto rounded border border-white/10 bg-black/40 p-2" data-testid="terra-nearby-cameras" data-coverage-state={coverage.locationState}>
+    <div className="pointer-events-auto max-h-[min(22rem,calc(100vh-16rem))] overflow-y-auto rounded border border-white/10 bg-black/40 p-2" data-testid="terra-nearby-cameras" data-coverage-state={coverage.locationState} data-truth-state={shownTruth} data-covering-ids={coveringIds.join(',')} data-origin-source={originSource ?? ''}>
       <div className="flex items-baseline justify-between gap-2">
         <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">Nearby cameras</p>
         <span className="font-mono text-[9px] uppercase tracking-widest text-cyan-300" data-testid="terra-nearby-cameras-count">{cameras.length}</span>
       </div>
       <p className="mt-0.5 text-[10px] text-slate-500">
-        {originLabel} · regional public stills only · {coverage.locationState === 'PROVIDER_AUTH_REQUIRED' ? 'PARTIAL · PROVIDER AUTH REQUIRED' : coverage.locationState}
+        {originSource ? `${originSource} · ` : ''}{originLabel} · covering providers only · {shownState}
+      </p>
+      {matchQuality ? (
+        <p className="mt-0.5 font-mono text-[9px] uppercase tracking-widest text-amber-200" data-testid="terra-nearby-match-quality">{matchQualityLabel(matchQuality)}</p>
+      ) : null}
+      <p className="mt-0.5 font-mono text-[9px] uppercase tracking-widest text-slate-500" data-testid="terra-nearby-covering-providers">
+        {coveringIds.length ? coveringLabel : 'NO CAMERA ENVELOPE'} · {shownTruth}
       </p>
       {coverage.locationState === 'AUTH_REQUIRED' ? (
         <p className="mt-1 text-[10px] text-amber-300/90">
@@ -78,6 +116,8 @@ export function TerraNearbyCameras({
             Commander sign in
           </a>
         </p>
+      ) : coverage.locationState === 'AUTH_FAIL' || shownTruth === 'AUTH_FAIL' ? (
+        <p className="mt-1 text-[10px] text-amber-300/90">{coverage.reason}</p>
       ) : coverage.locationState === 'PROVIDER_AUTH_REQUIRED' ? (
         <div className="mt-1 space-y-1">
           <p className="text-[10px] text-amber-300/90">{coverage.reason}</p>

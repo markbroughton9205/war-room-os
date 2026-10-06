@@ -1,5 +1,6 @@
 import { isLightweightPingDecree } from '@/lib/council/contextRelevance'
 import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialCheckin'
+import { isWarRoomRuntimeStatusDecree } from '@/lib/council/nebula/runtimeStatus'
 import { detectResearchIntent } from '@/lib/research/researchIntent'
 import type { CouncilOrchestrationDepth, CouncilTurnIntent } from './types'
 
@@ -15,7 +16,7 @@ const STATUS_PING =
   /^(?:(?:hey|hi|hello)\s+)?(?:council[,!]?\s+)?(?:quick\s+)?(?:status\s+ping|status(?:\s+check)?|ping)[!?.\s]*$/i
 
 const WAR_ROOM_RUNTIME_STATUS =
-  /(?:status\s+summary\s+of\s+(?:the\s+)?war\s*room|(?:war\s*room|runtime)\s+status|system\s+health|(?:give\s+me\s+(?:a\s+)?)?(?:short\s+)?status\s+summary|fresh\s+council\s+round|(?:current\s+)?runtime\s+health)/i
+  /(?:status\s+(?:on|of|for)\s+(?:the\s+)?war\s*room|status\s+summary\s+of\s+(?:the\s+)?war\s*room|(?:war\s*room|runtime)\s+status|system\s+health|(?:give\s+me\s+(?:a\s+)?)?(?:short\s+)?status\s+summary|fresh\s+council\s+round|(?:current\s+)?runtime\s+health)/i
 
 const PRESENCE_GOING_ON =
   /^(?:(?:hey|hi|hello)\s+)?(?:council[,!]?\s+)?(?:what(?:'s|s|\s+is)\s+going\s+on|whats\s+going\s+on)[!?.\s]*$/i
@@ -64,7 +65,9 @@ export function classifyCouncilTurn(text: string): ClassifiedCouncilTurn {
   const research = detectResearchIntent(raw, { intentKind: 'natural' })
   const lightweight = isLightweightPingDecree(raw)
   const socialCheckin = isSocialCouncilCheckin(raw)
-  const statusPing = STATUS_PING.test(raw) || (WAR_ROOM_RUNTIME_STATUS.test(raw) && !/\b(panama|freight|broughton|relocation)\b/i.test(raw))
+  const statusPing = STATUS_PING.test(raw)
+    || isWarRoomRuntimeStatusDecree(raw)
+    || (WAR_ROOM_RUNTIME_STATUS.test(raw) && !/\b(panama|freight|broughton|relocation)\b/i.test(raw))
   const presenceGoingOn = PRESENCE_GOING_ON.test(raw) && !WORLD_FRESH.test(raw)
 
   if (socialCheckin || lightweight || statusPing || presenceGoingOn) {

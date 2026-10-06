@@ -347,7 +347,11 @@ function collectEnvelope(extra) {
 }
 
 function queueCommand(stateDir, kind, envelope, instruction, extra) {
+  let ownerBinding = null
+  try { ownerBinding = JSON.parse(fs.readFileSync(path.join(stateDir, 'assist-owner.json'), 'utf8')) } catch { /* server refuses unbound model assists */ }
   const payload = {
+    owningMissionId: ownerBinding && ownerBinding.owningMissionId,
+    owningBindingId: ownerBinding && ownerBinding.bindingId,
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     kind,
     instruction: instruction || '',

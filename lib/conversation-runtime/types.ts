@@ -1,6 +1,7 @@
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import type { CouncilCompressedSummary } from '@/lib/council/compression'
 import type { ProviderFamilyConversationState } from '@/lib/provider-state/types'
+import type { CaptureTruth, CouncilPath } from '@/lib/council/gi/types'
 
 export const CONVERSATION_TURN_TYPES = [
   'commander_message',
@@ -19,6 +20,9 @@ export type ConversationTurnRecord = {
   family?: CouncilOrchestrationFamily
   messageId?: string
   preview: string
+  path_used?: CouncilPath
+  envelope_turn_id?: string
+  capture_truth?: CaptureTruth
 }
 
 export type CouncilConversationRuntime = {

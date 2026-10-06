@@ -1,3 +1,4 @@
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import {
   loadCapabilityAtlas,
@@ -13,6 +14,8 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET(req: Request) {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   const url = new URL(req.url)
   const query = (url.searchParams.get('q') ?? '').trim()
   const skillId = (url.searchParams.get('skill') ?? '').trim()

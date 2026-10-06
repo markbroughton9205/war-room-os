@@ -64,6 +64,13 @@ export type FoundryDurableToolStatus =
   | 'INTERRUPTED'
   | 'UNKNOWN'
 
+export type FoundryRepoWriteScope = {
+  version: 1
+  workspaceRoot: string
+  targets: string[]
+  fileIds: string[]
+}
+
 export type FoundryResourceClaim = {
   resource: FoundryResourceId
   missionId: string
@@ -72,6 +79,7 @@ export type FoundryResourceClaim = {
   acquiredAt: string
   heartbeatAt: string
   exclusive: boolean
+  repoWriteScope?: FoundryRepoWriteScope
   paths?: string[]
   operation: string
 }

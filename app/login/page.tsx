@@ -76,6 +76,7 @@ export default async function LoginPage({
         <div className="mb-6 text-center">
           <h1 className="text-xl font-bold tracking-widest" style={{ color: '#FFD700' }}>⚔ WAR ROOM</h1>
           <p className="mt-1 text-xs tracking-widest" style={{ color: '#444' }}>RA&apos;EL — HIGHER VISION INC</p>
+          <p className="mt-2 text-[10px] tracking-widest">Native Engineering Intelligence</p>
         </div>
 
         {loopback ? <LocalCommanderLoginPanel next={next} /> : null}

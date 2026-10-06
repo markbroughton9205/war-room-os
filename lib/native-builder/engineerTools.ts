@@ -2,6 +2,9 @@
  * Structured Engineer tools. The model may name these; the Engineering Core validates
  * the payload and executes through existing native-builder machinery. No arbitrary tool strings.
  */
+import { AUTHORING_MAX_CHANGED_LINES } from './patchPolicy'
+import { diagnoseAll, evaluatePatch, introducesStrayCharacters, syntaxErrorCount } from './foundryNarrowRepair'
+import { commanderDeclaredNewFiles } from './foundryEngineeringContract'
 import { mkdir, rename } from 'node:fs/promises'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
@@ -130,6 +133,12 @@ export const ENGINEER_TOOL_NAMES = [
   'mission.list',
   'mission.inspect',
   'mission.pause',
+  'job.start',
+  'task.run',
+  'job.status',
+  'job.wait',
+  'job.cancel',
+  'mission.graph',
   'mission.resume',
   'mission.set_priority',
   'mission.request_authorization',
@@ -276,12 +285,52 @@ export async function executeEngineerTool(call: EngineerToolCall, ctx: { repairI
       }
       case 'file.write': {
         const file = await containedRel(String(input.path ?? ''))
-        const content = String(input.content ?? '')
+        let content = String(input.content ?? '')
         const dirtyHold = refuseIfDirtyCommanderBuffer(resolveRepoRelativePath(file))
         if (dirtyHold.blocked) {
           return { ok: false, tool, error: dirtyHold.reason }
         }
         const existing = await readRepoFile(file)
+        // PATCH_FILE: startLine/endLine replace only those lines, and only if the authoritative diagnostics improve (narrow repair).
+        let narrowSummary: string | undefined
+        if (input.startLine !== undefined || input.endLine !== undefined) {
+          if (!existing.ok) return { ok: false, tool, error: `PATCH_REJECTED: ${file} does not exist; a bounded patch needs an existing file.` }
+          const patched = evaluatePatch(resolveRepoRoot(), file, { startLine: Number(input.startLine), endLine: Number(input.endLine ?? input.startLine), replacement: content })
+          if (!patched.ok) return { ok: false, tool, error: patched.error }
+          content = patched.content
+          narrowSummary = patched.summary
+        }
+        // A complete-file candidate that does not parse is refused before disk when the file parsed before; an identical repeat is refused at once.
+        if (existing.ok) {
+          const { sourceSyntaxProblem } = await import('./foundrySyntaxGuard')
+          const bad = sourceSyntaxProblem(file, content)
+          if (bad && !sourceSyntaxProblem(file, existing.content)) {
+            const recovery = await import('./foundrySyntaxRecovery')
+            const { ensureEngineeringState: engineeringState } = await import('./foundryEngineeringDepth')
+            const state = ctx.mission ? engineeringState(ctx.mission) : null
+            const sourceSha = sha256(existing.content)
+            const signature = recovery.candidateSignature(file, sourceSha, '', content)
+            if (state && recovery.isRepeatedBadCandidate(state.syntaxRecovery, file, sourceSha, signature)) {
+              state.syntaxRecovery = recovery.recordSyntaxRejection(state.syntaxRecovery, file, sourceSha, signature, bad)
+              return { ok: false, tool, error: recovery.repeatedBadPatchMessage(file, bad, state.syntaxRecovery.count, true) }
+            }
+            if (state) state.syntaxRecovery = recovery.recordSyntaxRejection(state.syntaxRecovery, file, sourceSha, signature, bad)
+            return { ok: false, tool, error: `PATCH_BREAKS_SYNTAX: the complete file you wrote for ${file} does not parse (${bad}). Nothing was written; the file is unchanged. Do not repeat this content; return the COMPLETE corrected file.` }
+          }
+        }
+        // During a syntax-recovery escalation the rewrite may fix the broken line, not delete existing declarations.
+        if (existing.ok && ctx.mission && /\.(?:tsx?|jsx?|mjs|cjs)$/.test(file)) {
+          const recovery = await import('./foundrySyntaxRecovery')
+          const { ensureEngineeringState: engineeringState } = await import('./foundryEngineeringDepth')
+          const state = engineeringState(ctx.mission)
+          if (state.syntaxRecovery?.path === file && state.syntaxRecovery.sourceSha === sha256(existing.content)) {
+            const dropped = recovery.droppedDeclarations(existing.content, content)
+            if (dropped.length) return { ok: false, tool, error: recovery.droppedDeclarationsMessage(file, dropped) }
+          }
+        }
+        if (existing.ok && existing.content === content) {
+          return { ok: false, tool, error: `NO_CHANGE: the content is identical to ${file} as it already is on disk. Change what the request or the reported problems name, or finish.` }
+        }
         const proposal: NativeRepairProposal = existing.ok
           ? {
               issueId: ctx.repairId,
@@ -325,7 +374,21 @@ export async function executeEngineerTool(call: EngineerToolCall, ctx: { repairI
               rollbackPlan: 'Snapshot rollback.',
               generatedAt: new Date().toISOString(),
             }
-        const applied = await applyProposal(ctx.repairId, proposal)
+        // A file the mission was assigned to author is written whole; the 150-line cap is for self-repair patches, not for authoring that file.
+        const assigned = ctx.mission ? commanderDeclaredNewFiles(ctx.mission.userRequest).includes(file) : false
+        // ...but a whole-file write may not destroy it: no new syntax errors, and a fragment may not replace most of an existing file.
+        if (assigned && existing.ok && narrowSummary === undefined) {
+          if (syntaxErrorCount(file, content) > syntaxErrorCount(file, existing.content)) return { ok: false, tool, error: `WRITE_REFUSED: the new content of ${file} has syntax errors the current file does not. Patch the target lines with startLine/endLine instead.` }
+          if (introducesStrayCharacters(file, existing.content, content)) return { ok: false, tool, error: `WRITE_REFUSED: the new content of ${file} adds stray non-code characters (CJK/full-width text); that is corrupted output. Write plain ASCII code only.` }
+          // Monotonic for whole-file rewrites too: a rewrite that leaves the file with MORE compiler/lint errors than it has now is not an improvement.
+          if (/\.(?:tsx?)$/.test(file)) {
+            const before = diagnoseAll(resolveRepoRoot(), file).length
+            if (before > 0 && diagnoseAll(resolveRepoRoot(), file, { [file]: content }).length > before) return { ok: false, tool, error: `WRITE_REFUSED: the new content of ${file} has more diagnostics than the file as it is (${before}). A rewrite must not make the file worse; patch the target lines with startLine/endLine instead.` }
+          }
+          if (existing.content.length > 400 && content.length < existing.content.length * 0.5) return { ok: false, tool, error: `WRITE_REFUSED: the new content is under half the size of ${file}; it looks like a fragment, not the whole file. Patch only the target lines with startLine/endLine.` }
+        }
+        const applied = await applyProposal(ctx.repairId, proposal, assigned ? { maxChangedLines: AUTHORING_MAX_CHANGED_LINES } : undefined)
+        if (narrowSummary && applied.ok) return { ok: true, tool, result: { ...applied, narrowRepair: narrowSummary } }
         return { ok: applied.ok, tool, result: applied, error: applied.ok ? undefined : applied.outcomes.map(o => o.detail).join('; ') }
       }
       case 'file.patch': {
@@ -540,12 +603,14 @@ export async function executeEngineerTool(call: EngineerToolCall, ctx: { repairI
       case 'lint.run': {
         const targets = Array.isArray(input.targets) ? input.targets.map(String) : undefined
         const result = await lintRun({ repairId: ctx.repairId, targets })
-        return { ok: result.ok, tool, result, error: result.ok ? undefined : (result.stderr || `lint.run failed (exitCode=${result.exitCode}).`) }
+        return { ok: result.ok, tool, result, error: result.ok ? undefined : ([result.stdout, result.stderr].filter(Boolean).join('\n').trim().slice(0, 1800) || `lint.run failed (exitCode=${result.exitCode}).`) }
       }
       case 'typecheck.run': {
         const scopeGlob = input.scopeGlob ? String(input.scopeGlob) : undefined
         const result = await typecheckRun({ repairId: ctx.repairId, scopeGlob })
-        return { ok: result.ok, tool, result, error: result.ok ? undefined : (result.scopedErrorCount ? `${result.scopedErrorCount} error(s) in scope ${scopeGlob}.` : result.baselineNote) }
+        // A scoped check answers for its own files: another writer's file being mid-edit must not fail this one.
+        const scopedOk = scopeGlob ? (result.scopedErrorCount ?? 0) === 0 : result.ok
+        return { ok: scopedOk, tool, result, error: scopedOk ? undefined : (result.scopedErrorCount ? `${result.scopedErrorCount} error(s) in scope ${scopeGlob}: ${(result.scopedErrors ?? []).slice(0, 6).join(' | ').slice(0, 1200)}` : result.baselineNote) }
       }
       case 'package.run': {
         const result = await packageRun({ repairId: ctx.repairId })
@@ -677,6 +742,48 @@ export async function executeEngineerTool(call: EngineerToolCall, ctx: { repairI
         const { inspectOperations } = await import('./foundryOperationsManager')
         const missionId = typeof input.missionId === 'string' ? input.missionId : undefined
         return { ok: true, tool, result: await inspectOperations(missionId) }
+      }
+      case 'job.start': {
+        const { executiveStartJob } = await import('./foundryMissionExecutiveRuntime')
+        const { resolveRepoRoot } = await import('@/lib/repo/paths')
+        const kind = String(input.kind ?? '')
+        if (!['build', 'typecheck', 'test', 'lint'].includes(kind)) return { ok: false, tool, error: 'job.start kind must be build|typecheck|test|lint.' }
+        const started = executiveStartJob({
+          missionId: ctx.repairId, goal: ctx.mission?.goal, cwd: resolveRepoRoot(),
+          spec: { kind: kind as 'build' | 'typecheck' | 'test' | 'lint', suite: input.suite ? String(input.suite) : undefined, targets: Array.isArray(input.targets) ? input.targets.map(String) : undefined },
+          taskId: input.taskId ? String(input.taskId) : undefined, blocks: Array.isArray(input.blocks) ? input.blocks.map(String) : undefined,
+        })
+        if (!started.ok) return { ok: false, tool, error: started.error }
+        return { ok: true, tool, result: { jobId: started.job.jobId, taskId: started.taskId, state: started.job.state, duplicate: started.duplicate, claims: started.job.claims, note: started.queued ? `QUEUED (not refused): ${started.queued}. It starts by itself, in order, when that clears. Do not call job.start again; continue with independent work.` : started.duplicate ? 'ALREADY RUNNING. Do not call job.start again; continue with the next step (mission.graph / independent reads).' : 'Running in the background. Do not call job.start again. Next: add dependent tasks with mission.graph if asked, and do independent read-only work; completion wakes dependent tasks.' } }
+      }
+      case 'task.run': {
+        const { executiveRunTask } = await import('./foundryMissionExecutiveRuntime')
+        const out = await executiveRunTask({ missionId: ctx.repairId, taskId: String(input.taskId ?? '') })
+        return { ok: out.ok, tool, result: out.result, error: out.error }
+      }
+      case 'job.status': {
+        const { executiveRoot } = await import('./foundryMissionExecutiveRuntime')
+        const { listJobs, inspectJob, jobLogTail } = await import('./foundryBackgroundJobs')
+        const jobs = listJobs(executiveRoot(), { missionId: ctx.repairId }).filter(job => !input.jobId || job.jobId === String(input.jobId))
+        return { ok: true, tool, result: jobs.map(job => { const live = inspectJob(executiveRoot(), job); return { jobId: job.jobId, taskId: job.taskId, kind: job.kind, state: live.job.state, reconciliation: live.reconciliation, exitStatus: live.job.exitStatus, startedAt: job.startedAt, logTail: input.jobId ? jobLogTail(live.job, 2000) : undefined } }) }
+      }
+      case 'job.wait': {
+        const { waitForJobEvent } = await import('./foundryMissionExecutiveRuntime')
+        const jobId = String(input.jobId ?? '')
+        const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 300_000, 1_000), 600_000)
+        const done = await waitForJobEvent(jobId, timeoutMs)
+        if (!done) return { ok: true, tool, result: { jobId, state: 'RUNNING', note: 'Still running after the bounded wait; continue independent work.' } }
+        return { ok: true, tool, result: { jobId, state: done.state, exitStatus: done.exitStatus } }
+      }
+      case 'job.cancel': {
+        const { executiveCancelJob } = await import('./foundryMissionExecutiveRuntime')
+        const cancelled = executiveCancelJob(String(input.jobId ?? ''))
+        return cancelled ? { ok: true, tool, result: { jobId: cancelled.jobId, state: cancelled.state } } : { ok: false, tool, error: 'Unknown job.' }
+      }
+      case 'mission.graph': {
+        const { executiveGraphTool } = await import('./foundryMissionExecutiveRuntime')
+        const out = executiveGraphTool(ctx.repairId, input)
+        return { ok: out.ok, tool, result: out.result, error: out.error }
       }
       case 'mission.pause': {
         const { pauseMission } = await import('./foundryMissionController')

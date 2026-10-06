@@ -1,3 +1,4 @@
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import {
   authorizeTerminalCwd,
@@ -11,6 +12,8 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET(req: Request) {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   const id = new URL(req.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id is required.' }, { status: 400 })
   const session = readFoundryTerminal(id)
@@ -19,6 +22,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   let body: { action?: string; id?: string; cwd?: string; data?: string } = {}
   try {
     const raw = await req.json()

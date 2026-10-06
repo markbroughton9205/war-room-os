@@ -15,7 +15,7 @@ import { FOUNDRY_MODEL_TOOL_CATALOG } from './foundryToolCatalog'
 import { createResourceBudget, refuseAutomaticBudgetIncrease } from './foundryResourceGovernor'
 import { unattendedToolBrokerWrite } from './foundryUnattendedEngineer'
 import { applyReplan } from './foundryReplanEngine'
-import type { FoundryAdversarialFinding } from './foundryEngineeringReasoningTypes'
+import type { FoundryAdversarialFinding, FoundryEngineeringDossier, FoundryEngineeringLesson } from './foundryEngineeringReasoningTypes'
 import { buildTaskGraph, ticketManagerGraphSeeds } from './foundryTaskGraph'
 import type { FoundryMissionModel, FoundryModelContext, FoundryModelProviderId, FoundryModelRequestKind, FoundryModelResponse } from './foundryModelTypes'
 import type { FoundryMissionPermissions } from './foundryMissionTypes'
@@ -28,8 +28,6 @@ import {
   recallEngineeringLessons,
   retainEngineeringLesson,
   selectNextCapabilityTask,
-  type FoundryEngineeringDossier,
-  type FoundryEngineeringLesson,
 } from './foundryEngineeringReasoning'
 import { FOUNDRY_REASONING_SCHEMA_VERSION } from './foundryEngineeringReasoningTypes'
 import {
@@ -197,6 +195,10 @@ function labeled(text: string, name: string): string[] {
   return [...matches].map(item => clip(item[1] ?? '', 400)).filter(Boolean)
 }
 
+function startingRole(): FoundryReasoningRole {
+  return 'IMPLEMENTER'
+}
+
 function toolsFor(role: FoundryReasoningRole) {
   const allowed = role === 'IMPLEMENTER' || role === 'DEBUGGER' ? WRITE_TOOLS : READ_TOOLS
   const tools = FOUNDRY_MODEL_TOOL_CATALOG.filter(tool => allowed.has(tool.name))
@@ -315,7 +317,8 @@ function dossierFromModel(input: {
     missionId: input.missionId,
     capabilityClass: input.reasoningCase.capabilityClass,
     problemModel: summary,
-    assumptions: labeled(summary, 'ASSUMPTION').slice(0, 12),
+    // A model's assumption is labelled as one, so it is not stated as fact and carries no evidence ids.
+    assumptions: labeled(summary, 'ASSUMPTION').slice(0, 12).map((statement, index) => ({ id: `A-model-${index + 1}`, statement, evidenceIds: [], statedAsFact: false })),
     uncertainties: labeled(summary, 'UNCERTAINTY').slice(0, 12),
     codebaseModel: Object.keys(input.reasoningCase.files),
     hypotheses: labeled(summary, 'HYPOTHESIS').slice(0, 6).map((statement, index) => ({ id: `h${index + 1}`, statement, status: 'open' as const })),
@@ -576,7 +579,8 @@ export async function runModelReasoningCase(input: {
   }
 
   const router = input.router ?? new FoundryModelRouter()
-  let role: FoundryReasoningRole = 'IMPLEMENTER'
+  // The role can move through the whole staged sequence (architect, test engineer, implementer, debugger, reviewer), so it is not narrowed to where it starts.
+  let role: FoundryReasoningRole = startingRole()
   let warning: string | undefined
   try {
     for (let turn = 0; turn < callLimit; turn += 1) {
@@ -585,7 +589,7 @@ export async function runModelReasoningCase(input: {
         notes.push('per-case wall clock exhausted')
         break
       }
-      const kind: FoundryModelRequestKind = role === 'DEBUGGER' ? 'diagnoseFailure' : role === 'REVIEWER' ? 'summarizeProgress' : role === 'ARCHITECT' ? 'reasonMission' : 'chooseNextAction'
+      const kind: FoundryModelRequestKind = role === 'DEBUGGER' ? 'diagnoseFailure' : role === 'REVIEWER' ? 'summarizeProgress' : 'chooseNextAction'
       const routed = await routeOnce({
         router,
         missionId,
@@ -649,7 +653,6 @@ export async function runModelReasoningCase(input: {
       const decision = response.decision
       if (decision.decision === 'TOOL' && decision.tool && !toolsFor(role).some(tool => tool.name === decision.tool?.name)) {
         observations.push({ tool: decision.tool.name, ok: false, reason: 'ROLE_REFUSED', error: `${role} cannot call ${decision.tool.name}` })
-        if (role === 'ARCHITECT') role = 'IMPLEMENTER'
         continue
       }
       if (decision.decision === 'TOOL' && decision.tool && (decision.tool.name === 'file.write' || decision.tool.name === 'file.replace_unique')) {
@@ -804,18 +807,12 @@ export async function runModelReasoningCase(input: {
         if (role === 'REVIEWER') {
           /* The review turn already has the diff. Close it below. */
         } else {
-          if (role === 'ARCHITECT') role = 'TEST_ENGINEER'
-          else if (role === 'TEST_ENGINEER') role = 'IMPLEMENTER'
           continue
         }
       }
       if (decision.decision === 'COMPLETE' && !verified) {
         notes.push('COMPLETE before independent verifier')
         if (role !== 'IMPLEMENTER' && role !== 'DEBUGGER') role = 'IMPLEMENTER'
-        continue
-      }
-      if (role === 'ARCHITECT' || role === 'TEST_ENGINEER') {
-        role = 'IMPLEMENTER'
         continue
       }
       if (role === 'REVIEWER') {

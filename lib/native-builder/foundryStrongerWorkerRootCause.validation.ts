@@ -25,7 +25,9 @@ const FROZEN = {
   verifier: '8c38d96e7081d6afc34c530f9a6c1cb214769dd093af8212116bfda29319172f',
   criteria: 'aefe7ca2590f75c9d13c4c97f3419811f86f1f5a605009cc9391778ed326075e',
   fidelity: 'f71e0249516733c2538f62159270d096c69142f4625dd5539a2c57ed26140b4b',
-  broker: '71927e2a90b100a4361383fe8734c9341dcdc8bbaa6eb9b002b505382483ec8a',
+  // Re-frozen 2026-09-27: the only change to foundryUnattendedEngineer.ts since the Qwen baseline is the removal of an unreachable `kind === 'write'`
+  // comparison (type cleanup for whole-project tsc = 0). Behaviour is identical, so the recorded Qwen baseline still applies.
+  broker: '3c6a16468dbb0db623c3d5db93d1a76c459a3f1bc23ed8b5cc1c6d5d4a84d0d7',
   root: '8d9250bf0ed658309475fb385f730ef8a360ba7929e0345edd0c54d40d67d312',
 } as const
 
@@ -86,12 +88,14 @@ function currentHashes() {
 
 async function probeComposer(): Promise<{ ok: boolean; detail: string }> {
   const router = new FoundryModelRouter([new CursorAgentProvider(PIN.model)])
+  // The probe is its own mission: its budget must not be one that every earlier probe has already spent.
+  const probeId = `composer-availability-${Date.now().toString(36)}`
   let routed: Awaited<ReturnType<FoundryModelRouter['route']>>
   try {
     routed = await router.route('chooseNextAction', {
       kind: 'chooseNextAction',
       context: {
-        missionId: 'composer-availability',
+        missionId: probeId,
         missionKind: 'application',
         userRequest: 'Availability probe only. Return decision COMPLETE. Do not read or write files.',
         goal: 'Prove the pinned route answers.',
@@ -111,13 +115,13 @@ async function probeComposer(): Promise<{ ok: boolean; detail: string }> {
         completionGate: { complete: false, missing: [], detail: 'probe' },
         tools: FOUNDRY_MODEL_TOOL_CATALOG.filter(tool => tool.name === 'file.read'),
       },
-    }, { missionId: 'composer-availability', pinProvider: PIN.provider })
+    }, { missionId: probeId, pinProvider: PIN.provider })
   } catch (error) {
     return { ok: false, detail: publicProviderError(error instanceof Error ? error.message : 'probe failed') }
   }
   const response = routed.response
   if (routed.selectedProvider !== PIN.provider || routed.selectedModel !== PIN.model) {
-    return { ok: false, detail: 'Pinned Composer did not stay selected. Qwen was not used.' }
+    return { ok: false, detail: `Pinned Composer did not stay selected (pinned ${PIN.provider}/${PIN.model}, routed ${routed.selectedProvider}/${routed.selectedModel}${response.ok ? '' : `: ${publicProviderError(response.error)}`}). Qwen was not used.` }
   }
   if (!response.ok && response.failureClass !== 'MALFORMED') {
     return { ok: false, detail: publicProviderError(response.error) }

@@ -77,7 +77,7 @@ export async function recoverActiveEngineeringCampaigns(): Promise<{
       started.push(record.id)
       const repairId = record.id
       const root = workspace.root
-      void runWithWorkspaceRoot(root, () => runCodingMission(repairId)).catch(() => undefined)
+      void Promise.resolve(runWithWorkspaceRoot(root, () => runCodingMission(repairId))).catch(() => undefined)
     }
   }
   return { started, duplicateRecoveryStartCount }

@@ -132,6 +132,7 @@ export function makeMaritimeVesselDocument(provider: ResearchProviderId, observa
       ...(draughtMeters !== null ? { draughtMeters: String(draughtMeters) } : {}),
       ...(shipTypeCode !== null ? { shipTypeCode: String(shipTypeCode) } : {}),
       ...(shipTypeLabel ? { shipTypeLabel } : {}),
+      ...(name ? { name } : {}),
       lastObservedIso: observation.observedAtIso,
     },
     subjects: [],

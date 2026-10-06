@@ -5,6 +5,7 @@ import {
 } from '@/lib/war-room/warRoomSupabaseError'
 import { requireConversationCaller } from '@/lib/war-room/conversationAuth'
 import { stripClientOwnerFields } from '@/lib/war-room/conversationOwnership'
+import { localCommanderOwnerId, localConversationsGet, localConversationsPost } from '@/lib/war-room/localConversationGateway'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,10 +13,16 @@ const TABLE_CONVERSATIONS = 'war_room_conversations'
 
 export async function GET(req: Request) {
   const caller = await requireConversationCaller()
-  if (!caller.ok) return caller.response
+  if (!caller.ok) {
+    const ownerId = await localCommanderOwnerId(req)
+    if (ownerId) return localConversationsGet(req, ownerId)
+    return caller.response
+  }
 
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
+    const ownerId = await localCommanderOwnerId(req)
+    if (ownerId) return localConversationsGet(req, ownerId)
     return jsonWithPersistence({ conversations: [] }, false)
   }
 
@@ -55,10 +62,16 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const caller = await requireConversationCaller()
-  if (!caller.ok) return caller.response
+  if (!caller.ok) {
+    const ownerId = await localCommanderOwnerId(req)
+    if (ownerId) return localConversationsPost(req, ownerId)
+    return caller.response
+  }
 
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
+    const ownerId = await localCommanderOwnerId(req)
+    if (ownerId) return localConversationsPost(req, ownerId)
     return jsonWithPersistence({ error: 'Supabase is not configured.', hint: 'Set NEXT_PUBLIC_SUPABASE_URL and the server-only Supabase role secret.' }, false, { status: 503 })
   }
 

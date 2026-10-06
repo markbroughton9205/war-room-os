@@ -608,10 +608,13 @@ export async function runFoundryAutonomousEngineeringDepthPass010Validation(): P
       aroundMatch: 'ENGINEERING REVIEW',
       contextLines: 6,
     })
+    // The window is found from the file as it is now (the panel grows and lines move), not from fixed line numbers.
+    const panelLines = readFileSync(path.join(ROOT, 'components/war-room/foundry/FoundryMissionControllerPanel.tsx'), 'utf8').split(/\r?\n/)
+    const reviewLine = panelLines.findIndex(line => line.includes('ENGINEERING REVIEW')) + 1
     const ranged = await compactFileRead({
       path: 'components/war-room/foundry/FoundryMissionControllerPanel.tsx',
-      startLine: 187,
-      endLine: 199,
+      startLine: Math.max(1, reviewLine - 6),
+      endLine: reviewLine + 6,
     })
     const queryRead = await compactFileRead({
       path: CHIP_REL,

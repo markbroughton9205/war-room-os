@@ -35,7 +35,30 @@ import {
   STAGE3A_PREFERRED_KIND,
   STAGE3B_EXECUTION_READINESS,
   TRAINING_AUTHORIZATION,
+  WRIM_SOVEREIGN_LAB_STATUS,
+  RETENTION_BREAK_FORENSIC_STATUS,
+  RETENTION_REPAIR_EXPERIMENTS_STATUS,
 } from './identity'
+import {
+  FOUNDATIONAL_REMEDIATION_CLASSIFICATION,
+  FOUNDATIONAL_REMEDIATION_DESIGN_STATUS,
+} from './foundationalRemediationDesign'
+import {
+  FOUNDATIONAL_AUDIT_STATUS,
+  FOUNDATIONAL_CLASSIFICATION,
+  FOUNDATIONAL_READINESS_CLASS,
+} from './foundationalRootCause'
+import { WRIM_LAB_BIND, WRIM_LAB_PORTS } from './labPorts'
+import { WRIM_CHECKPOINT_FORMAT_V1, WRIM_CHECKPOINT_FORMAT_V2 } from './checkpointFormat'
+import {
+  CORRECTIVE_STAGE3A_DESIGN_STATUS,
+  CORRECTIVE_STAGE3A_EXECUTION_READINESS,
+  CORRECTIVE_STAGE3A_PARENT,
+  CORRECTIVE_STAGE3A_PILOT_CLASSIFICATION,
+  CORRECTIVE_STAGE3A_PILOT_STATUS,
+  CORRECTIVE_STAGE3A_RUN_ID,
+  CORRECTIVE_DEV_SUITE_ID,
+} from './stage3aCorrectiveDesign'
 import {
   STAGE3_EVAL_SUITE_ID,
   STAGE3_EVAL_SUITE_STATUS,
@@ -52,6 +75,7 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
   let stage2: Record<string, unknown> | null = null
   let experiment: Record<string, unknown> | null = null
   let manifest: Record<string, unknown> | null = null
+  let p1: Record<string, unknown> | null = null
   if (fs.existsSync(paths.reportPath)) {
     report = JSON.parse(fs.readFileSync(paths.reportPath, 'utf8')) as Record<string, unknown>
   }
@@ -66,6 +90,21 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
   }
   if (fs.existsSync(paths.manifestPath)) {
     manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8')) as Record<string, unknown>
+  }
+  if (fs.existsSync(paths.foundationalP1ReportPath)) {
+    p1 = JSON.parse(fs.readFileSync(paths.foundationalP1ReportPath, 'utf8')) as Record<string, unknown>
+  }
+  let lab: Record<string, unknown> | null = null
+  if (fs.existsSync(paths.sovereignLabReportPath)) {
+    lab = JSON.parse(fs.readFileSync(paths.sovereignLabReportPath, 'utf8')) as Record<string, unknown>
+  }
+  let forensic: Record<string, unknown> | null = null
+  if (fs.existsSync(paths.retentionBreakForensicReportPath)) {
+    forensic = JSON.parse(fs.readFileSync(paths.retentionBreakForensicReportPath, 'utf8')) as Record<string, unknown>
+  }
+  let repair: Record<string, unknown> | null = null
+  if (fs.existsSync(paths.retentionRepairExperimentsReportPath)) {
+    repair = JSON.parse(fs.readFileSync(paths.retentionRepairExperimentsReportPath, 'utf8')) as Record<string, unknown>
   }
   const cuda = (report?.cuda ?? {}) as { name?: string; available?: boolean }
   const precision = (report?.precision ?? {}) as Record<string, string>
@@ -105,6 +144,20 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
     stage3a_preferred_kind: STAGE3A_PREFERRED_KIND,
     stage3a_candidate_state: STAGE3A_CANDIDATE_STATE,
     stage3a_classification: STAGE3A_CLASSIFICATION,
+    corrective_stage3a_run_id: CORRECTIVE_STAGE3A_RUN_ID,
+    corrective_stage3a_design_status: CORRECTIVE_STAGE3A_DESIGN_STATUS,
+    corrective_stage3a_execution_readiness: CORRECTIVE_STAGE3A_EXECUTION_READINESS,
+    corrective_stage3a_parent: CORRECTIVE_STAGE3A_PARENT,
+    corrective_stage3a_pilot_status: CORRECTIVE_STAGE3A_PILOT_STATUS,
+    corrective_stage3a_pilot_classification: CORRECTIVE_STAGE3A_PILOT_CLASSIFICATION,
+    foundational_audit_status: FOUNDATIONAL_AUDIT_STATUS,
+    foundational_classification: FOUNDATIONAL_CLASSIFICATION,
+    foundational_readiness_class: FOUNDATIONAL_READINESS_CLASS,
+    foundational_remediation_design_status: FOUNDATIONAL_REMEDIATION_DESIGN_STATUS,
+    foundational_remediation_classification: FOUNDATIONAL_REMEDIATION_CLASSIFICATION,
+    foundational_p1_classification: p1?.final_classification ?? null,
+    p2_authorized: false,
+    corrective_dev_suite_id: CORRECTIVE_DEV_SUITE_ID,
     stage3_eval_suite_id: STAGE3_EVAL_SUITE_ID,
     stage3_eval_suite_status: STAGE3_EVAL_SUITE_STATUS,
     stage3b_lr_formula: STAGE3B_LR_FORMULA,
@@ -129,5 +182,33 @@ export function wrimEnvironmentStatusPayload(dataDirOverride?: string | null) {
     experiment_report_present: Boolean(experiment),
     phase0_report_present: fs.existsSync(paths.phase0ReportPath),
     manifest_present: Boolean(manifest),
+    wrim_lab: {
+      status: WRIM_SOVEREIGN_LAB_STATUS,
+      bind: WRIM_LAB_BIND,
+      ports: WRIM_LAB_PORTS,
+      report_present: Boolean(lab),
+      classification: lab?.final_classification ?? null,
+      run000005: lab?.run000005 ?? null,
+      services: lab?.services ?? null,
+      roles: lab?.roles_distinct ?? null,
+      checkpoint_format_v1: WRIM_CHECKPOINT_FORMAT_V1,
+      checkpoint_format_v2: WRIM_CHECKPOINT_FORMAT_V2,
+      training_authorization: TRAINING_AUTHORIZATION,
+    },
+    retention_break_forensic: {
+      status: RETENTION_BREAK_FORENSIC_STATUS,
+      report_present: Boolean(forensic),
+      classification: forensic?.final_classification ?? null,
+      optimizer_steps_this_pass: forensic?.optimizer_steps_this_pass ?? 0,
+      training_authorization: TRAINING_AUTHORIZATION,
+    },
+    retention_repair_experiments: {
+      status: RETENTION_REPAIR_EXPERIMENTS_STATUS,
+      report_present: Boolean(repair),
+      classification: repair?.final_classification ?? null,
+      optimizer_steps_this_pass: repair?.optimizer_steps_this_pass ?? 0,
+      training_authorization: TRAINING_AUTHORIZATION,
+      experiments_executed: repair?.experiments_executed ?? false,
+    },
   }
 }

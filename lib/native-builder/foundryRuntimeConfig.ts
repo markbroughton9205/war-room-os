@@ -149,7 +149,10 @@ export function persistFoundryRuntimeConfig(input?: {
   localEndpoint?: string
   localMissionReliability?: 'VALIDATED' | 'UNPROVEN'
 }): FoundryRuntimeConfig {
-  const current = readFoundryRuntimeConfig()
+  // An environment override (a validator pinning a policy, a shell variable) is for the process that set it: saving must not bake it into the operator's stored
+  // choice. What is not being changed keeps the stored value; only a project with nothing stored starts from the resolved values.
+  const resolved = readFoundryRuntimeConfig()
+  const current = readStoredConfig() ?? resolved
   const next: FoundryRuntimeConfig = {
     primaryModel: (input?.primaryModel ?? current.primaryModel).trim() || FOUNDRY_DEFAULT_PRIMARY_MODEL,
     fallbackModel: input && 'fallbackModel' in input

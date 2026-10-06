@@ -1,3 +1,6 @@
+import type { TerraAddressMatchQuality } from './geocodeMatchQuality'
+import type { TerraEnrichmentState } from './placePrecision/matchClass'
+
 export type TerraLocationTarget = {
   latitude: number
   longitude: number
@@ -20,6 +23,20 @@ export type TerraLocationTarget = {
   retrievedAt: string | null
   /** Commander explicitly requested an instant camera jump instead of cinematic flight. */
   instantRequested: boolean
+  /** Honest address precision. JUMP/GO share this accepted target; JUMP only flips instantRequested. */
+  matchQuality?: TerraAddressMatchQuality
+  houseNumber?: string | null
+  road?: string | null
+  city?: string | null
+  state?: string | null
+  postcode?: string | null
+  streetMismatch?: boolean
+  provider?: string | null
+  precisionSource?: string | null
+  enrichmentState?: TerraEnrichmentState | null
+  enrichmentEligible?: boolean
+  geometryType?: 'point' | 'polygon' | 'polyline' | 'bbox' | null
+  ring?: Array<{ longitude: number; latitude: number }> | null
 }
 
 export type TerraLocationResolution =
@@ -78,6 +95,11 @@ export function parseTerraCoordinates(command: string): TerraLocationTarget | nu
     boundingBox: null,
     nativeName: null,
     englishName: null,
+    matchQuality: 'COORDINATE',
+    precisionSource: 'typed_coordinates',
+    enrichmentState: 'skipped',
+    enrichmentEligible: false,
+    geometryType: 'point',
     ...emptyTargetExtras(),
   }
 }

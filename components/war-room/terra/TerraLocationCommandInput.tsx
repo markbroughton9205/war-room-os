@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { TerraMediaIntelHandoff } from './TerraMediaIntelHandoff'
 import type { TerraLocationResolution, TerraLocationTarget } from '@/lib/terra/locationCommand'
+import type { TerraAddressMatchQuality } from '@/lib/terra/geocodeMatchQuality'
+import { matchQualityLabel } from '@/lib/terra/geocodeMatchQuality'
 import {
   formatCinematicFlightStatus,
   type TerraCinematicFlightPurpose,
@@ -25,6 +27,9 @@ export function TerraLocationCommandInput({
   flightOutcome = 'IDLE',
   flightPurpose = null,
   flightLabel = '',
+  refineStatus = '',
+  precisionSource = '',
+  matchQuality = null,
   streetViewState = 'IDLE',
   streetViewDisabled = false,
   onStreetView,
@@ -35,6 +40,9 @@ export function TerraLocationCommandInput({
   flightOutcome?: TerraCinematicFlightState
   flightPurpose?: TerraCinematicFlightPurpose | null
   flightLabel?: string
+  refineStatus?: string
+  precisionSource?: string
+  matchQuality?: TerraAddressMatchQuality | null
   streetViewState?: StreetViewState | 'IDLE' | 'LOADING'
   streetViewDisabled?: boolean
   onStreetView?: () => void
@@ -44,6 +52,8 @@ export function TerraLocationCommandInput({
   const [command, setCommand] = useState('')
   const [state, setState] = useState<{ phase: 'idle' | 'resolving' | 'resolved' | 'error'; message: string }>({ phase: 'idle', message: '' })
   const [matches, setMatches] = useState<TerraLocationTarget[]>([])
+  const [acceptedQuality, setAcceptedQuality] = useState<string>('')
+  const instantRef = useRef(false)
   const requestRef = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null })
 
   useEffect(() => () => requestRef.current.controller?.abort(), [])
@@ -72,8 +82,12 @@ export function TerraLocationCommandInput({
 
   function flyToTarget(target: TerraLocationTarget, instantRequested: boolean) {
     setMatches([])
+    instantRef.current = instantRequested
+    const quality = target.matchQuality ? matchQualityLabel(target.matchQuality) : ''
+    setAcceptedQuality(quality)
     onResolvedLocation({ ...target, instantRequested, query: target.query?.trim() || command.trim() || target.label })
-    setState({ phase: 'resolved', message: instantRequested ? `Jumping to ${target.label}` : `Flying to ${target.label}` })
+    const qualitySuffix = quality ? ` · ${quality}` : ''
+    setState({ phase: 'resolved', message: instantRequested ? `Jumping to ${target.label}${qualitySuffix}` : `Flying to ${target.label}${qualitySuffix}` })
   }
 
   async function resolve(instantRequested: boolean) {
@@ -83,7 +97,9 @@ export function TerraLocationCommandInput({
     const controller = new AbortController()
     const sequence = requestRef.current.sequence + 1
     requestRef.current = { sequence, controller }
+    instantRef.current = instantRequested
     setMatches([])
+    setAcceptedQuality('')
     setState({ phase: 'resolving', message: 'Resolving location…' })
     try {
       const response = await fetch(`/api/terra/resolve-location?q=${encodeURIComponent(query)}`, { cache: 'no-store', credentials: 'include', signal: controller.signal })
@@ -91,6 +107,7 @@ export function TerraLocationCommandInput({
       if (requestRef.current.sequence !== sequence) return
       if (result.status === 'ambiguous') {
         setMatches(result.matches)
+        setAcceptedQuality(matchQualityLabel('AMBIGUOUS'))
         setState({ phase: 'error', message: result.message })
         return
       }
@@ -160,19 +177,47 @@ export function TerraLocationCommandInput({
       >
         {state.message}
       </p>
+      {acceptedQuality ? (
+        <p className="mt-0.5 px-1 font-mono text-[9px] uppercase tracking-widest text-amber-200" data-testid="terra-search-match-quality">
+          {acceptedQuality}
+          {precisionSource ? ` · ${precisionSource}` : ''}
+        </p>
+      ) : matchQuality ? (
+        <p className="mt-0.5 px-1 font-mono text-[9px] uppercase tracking-widest text-amber-200" data-testid="terra-search-match-quality">
+          {matchQualityLabel(matchQuality)}
+          {precisionSource ? ` · ${precisionSource}` : ''}
+        </p>
+      ) : null}
+      {refineStatus ? (
+        <p className="mt-0.5 px-1 font-mono text-[9px] uppercase tracking-widest text-cyan-300" data-testid="terra-search-refine-status">
+          {refineStatus}
+        </p>
+      ) : null}
       {matches.length > 0 ? (
-        <ul className="mt-1 max-h-40 space-y-1 overflow-auto px-1">
-          {matches.map(match => (
+        <ul className="mt-1 max-h-40 space-y-1 overflow-auto px-1" data-testid="terra-location-matches">
+          {matches.map(match => {
+            const meta = [
+              match.road || match.label.split(',')[0],
+              match.city,
+              match.state,
+              match.postcode,
+              match.matchQuality ? matchQualityLabel(match.matchQuality) : null,
+              match.streetMismatch ? 'DIFFERENT STREET TYPE' : null,
+              match.precisionSource ?? match.provider ?? match.source,
+            ].filter(Boolean).join(' · ')
+            return (
             <li key={`${match.latitude},${match.longitude},${match.label}`}>
               <button
                 type="button"
-                className="w-full truncate rounded border border-white/10 bg-black/60 px-2 py-1 text-left text-[10px] text-cyan-100 hover:border-cyan-400/40"
-                onClick={() => flyToTarget(match, false)}
+                className="w-full rounded border border-white/10 bg-black/60 px-2 py-1 text-left text-[10px] text-cyan-100 hover:border-cyan-400/40"
+                onClick={() => flyToTarget(match, instantRef.current)}
               >
-                {match.label}
+                <span className="block truncate">{match.label}</span>
+                <span className="mt-0.5 block font-mono text-[9px] uppercase tracking-widest text-slate-500">{meta}</span>
               </button>
             </li>
-          ))}
+            )
+          })}
         </ul>
       ) : null}
     </form>

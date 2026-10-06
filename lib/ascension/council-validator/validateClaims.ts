@@ -96,7 +96,7 @@ export function validateCouncilClaims(input: ValidateClaimsInput): ValidateClaim
     const claimLimitations: string[] = []
     let validation_result: CouncilClaimValidationState = 'PASS'
     let support_state = claim.evidence_support ?? 'UNVERIFIED'
-    let freshness_state = claim.freshness ?? 'UNKNOWN'
+    const freshness_state = claim.freshness ?? 'UNKNOWN'
     let confidence_state = claim.confidence_asserted ?? 'UNVERIFIED'
     let policy_state = 'OK'
     let runtime_truth_state = 'OK'

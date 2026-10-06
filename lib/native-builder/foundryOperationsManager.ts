@@ -3,7 +3,8 @@
  * Does not replace PASS 004/005 controller, model, or tool broker.
  */
 import { randomUUID } from 'node:crypto'
-import { resolveBaseRepoRoot } from '@/lib/repo/paths'
+import { correctLegacyMissionIntent } from './foundryMissionPlanner'
+import { resolveRepoRoot } from '@/lib/repo/paths'
 import { logWarRoomRepoAudit } from '@/lib/war-room/repoAudit'
 import { hasActiveProcesses } from './processRegistry'
 import { appendJournal, listAllMissions, listMissions, loadMission, saveMission, transitionMission } from './foundryMissionStore'
@@ -12,6 +13,7 @@ import {
   acquireResource,
   heartbeatResourceClaim,
   listResourceClaims,
+  missionResourceGenerationIsCurrent,
   reclaimStaleResources,
   releaseMissionResources,
 } from './foundryResourceLocks'
@@ -47,6 +49,7 @@ import {
   type FoundryRegistryEntry,
   type FoundryResourceId,
 } from './foundryOperationsTypes'
+import { missionRepoWriteRoot } from './foundryRepoWriteScope'
 import type { EngineerToolName } from './engineerTools'
 
 const HEARTBEAT_STALL_MS = 8 * 60 * 1000
@@ -65,8 +68,8 @@ function bumpVersion(mission: FoundryMissionRecord): void {
 export function ensureOperationsFields(mission: FoundryMissionRecord): FoundryMissionRecord {
   mission.priority ??= 'NORMAL'
   mission.owner ??= 'commander'
-  mission.workspace ??= resolveBaseRepoRoot()
-  mission.repoIdentity ??= resolveBaseRepoRoot()
+  mission.workspace ??= resolveRepoRoot()
+  mission.repoIdentity ??= resolveRepoRoot()
   mission.resumeToken ??= `${mission.missionId}:1`
   mission.stateVersion ??= 1
   mission.lockClaims ??= []
@@ -90,7 +93,7 @@ export function ensureOperationsFields(mission: FoundryMissionRecord): FoundryMi
 
 export function pinDefaultModel(mission: FoundryMissionRecord): FoundryPinnedModel {
   const config = applyFoundryRuntimeConfig()
-  const spec = config.primaryModel || FOUNDRY_DEFAULT_PRIMARY_MODEL
+  const spec = mission.modelPolicy === 'LOCAL_ONLY' ? `ollama:${config.localModelId}` : config.primaryModel || FOUNDRY_DEFAULT_PRIMARY_MODEL
   const [provider, ...rest] = spec.split(':')
   const pinned: FoundryPinnedModel = {
     provider,
@@ -106,7 +109,7 @@ export async function heartbeatMission(mission: FoundryMissionRecord, action?: s
   mission.lastHeartbeat = now()
   if (action) mission.currentAction = action
   for (const claim of mission.lockClaims ?? []) {
-    await heartbeatResourceClaim(claim.resource, mission.missionId)
+    await heartbeatResourceClaim(claim.resource, mission.missionId, claim.callId)
   }
   if ((mission.lockClaims ?? []).some(claim => claim.resource === 'PRODUCTION_LEASE')) {
     const { heartbeatProductionLease } = await import('./foundryProductionLease')
@@ -138,7 +141,9 @@ export async function pauseMission(missionId: string, reason = 'Commander paused
   const mission = await loadMission(missionId)
   if (!mission) throw new Error(`Unknown mission ${missionId}`)
   if (FOUNDRY_TERMINAL_STATES.includes(mission.status)) return mission
+  if (reason.startsWith('Pause honored') && !mission.pauseRequested) return mission
   mission.pauseRequested = true
+  await saveMission(mission, 'pause')
   if (mission.activeToolCallId) {
     const active = (mission.durableToolCalls ?? []).find(call => call.toolCallId === mission.activeToolCallId)
     if (active && classifyToolIdempotency(active.tool) !== 'READ_ONLY') {
@@ -157,6 +162,7 @@ export async function pauseMission(missionId: string, reason = 'Commander paused
 export async function resumeMissionRecord(missionId: string): Promise<FoundryMissionRecord> {
   const mission = await loadMission(missionId)
   if (!mission) throw new Error(`Unknown mission ${missionId}`)
+  if (FOUNDRY_TERMINAL_STATES.includes(mission.status) || mission.cancelRequested) return mission
   if (!isResumeEligible(mission) || mission.superseded === true) {
     await appendJournal(mission, {
       kind: 'observation',
@@ -166,7 +172,16 @@ export async function resumeMissionRecord(missionId: string): Promise<FoundryMis
     return mission
   }
   if (mission.authorization?.waiting) return mission
+  if (mission.blocker) {
+    await appendJournal(mission, { kind: 'observation', text: `Previous blocker preserved on resume: ${JSON.stringify(mission.blocker)}` })
+    mission.blocker = null
+  }
   mission.pauseRequested = false
+  await saveMission(mission, 'resume')
+  if (correctLegacyMissionIntent(mission)) {
+    if (mission.engineering?.lintRegionRecovery) delete mission.engineering.lintRegionRecovery
+    await appendJournal(mission, { kind: 'decision', text: 'Corrected legacy application classification from the original request before resume; historical gates and authorization limits are preserved.' })
+  }
   if (['PAUSED', 'WAITING_RESOURCE', 'RECOVERING', 'BLOCKED', 'QUEUED'].includes(mission.status)) {
     await transitionMission(mission, 'EXECUTING', 'Commander resumed the same mission')
   }
@@ -256,6 +271,7 @@ export async function claimToolResources(
       missionId: mission.missionId,
       operation: tool,
       paths: intendedWritePaths(input),
+      workspaceRoot: resource === 'REPO_WRITE' ? await missionRepoWriteRoot(mission) : undefined,
       waitMs,
       alreadyHeld,
     })
@@ -361,9 +377,12 @@ export async function recordOwnedCleanup(
 }
 
 export async function cleanupOwnedResources(mission: FoundryMissionRecord): Promise<void> {
+  const recordedClaims = (mission.lockClaims ?? []).map(claim => ({ ...claim }))
+  // Fence even process cleanup before acting on a stale execution record. Releases below use the captured tokens.
+  if (!await missionResourceGenerationIsCurrent(mission.missionId, recordedClaims)) return
   const { isTerminalClaimMission, releaseTerminalMissionClaims } = await import('./foundryTerminalResourceRelease')
   if (isTerminalClaimMission(mission)) {
-    await releaseTerminalMissionClaims(mission)
+    await releaseTerminalMissionClaims(mission, recordedClaims)
     await appendJournal(mission, { kind: 'decision', text: `Released terminal mission claims for ${mission.missionId}. Installed runtime and historical production generations were left intact.` })
     return
   }
@@ -377,12 +396,13 @@ export async function cleanupOwnedResources(mission: FoundryMissionRecord): Prom
   } finally {
     const holdLease = shouldHoldProductionLease(mission)
     if (holdLease) {
-      await releaseMissionResources(mission.missionId, FOUNDRY_LOCK_ORDER.filter(resource => resource !== 'PRODUCTION_LEASE'))
-      mission.lockClaims = (mission.lockClaims ?? []).filter(claim => claim.resource === 'PRODUCTION_LEASE')
+      await releaseMissionResources(mission.missionId, FOUNDRY_LOCK_ORDER.filter(resource => resource !== 'PRODUCTION_LEASE'), recordedClaims)
+      mission.lockClaims = (mission.lockClaims ?? []).filter(claim => claim.resource === 'PRODUCTION_LEASE'
+        || !recordedClaims.some(old => old.resource === claim.resource && old.callId === claim.callId))
     } else {
-      await releaseMissionResources(mission.missionId)
-      mission.lockClaims = []
-      mission.runtimeClaims = []
+      await releaseMissionResources(mission.missionId, undefined, recordedClaims)
+      mission.lockClaims = (mission.lockClaims ?? []).filter(claim => !recordedClaims.some(old => old.resource === claim.resource && old.callId === claim.callId))
+      if (!mission.lockClaims.some(claim => claim.resource === 'ACTIVE_RUNTIME')) mission.runtimeClaims = []
       await releaseProductionLease(mission.missionId).catch(() => undefined)
     }
   }

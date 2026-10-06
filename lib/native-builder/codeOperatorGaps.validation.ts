@@ -258,6 +258,20 @@ async function testStreamingValidation(): Promise<CaseResult[]> {
     JSON.stringify(buffered.map(e => e.text.slice(0, 60))),
   ))
 
+  // A flood of output evicts old output, never the marker that says which command it came from.
+  {
+    const floodId = `${repairId}-flood`
+    appendCommandOutput(floodId, 'op', 'system', '[run] flooding command')
+    for (let line = 0; line < 3000; line += 1) appendCommandOutput(floodId, 'op', 'stdout', `line ${line}`)
+    const kept = getCommandOutput(floodId, 0)
+    results.push(check(
+      'stream_03_run_marker_survives_an_output_flood_and_the_ring_stays_bounded',
+      kept.some(e => e.stream === 'system' && e.text === '[run] flooding command') && kept.length <= 2000 && kept.filter(e => e.stream === 'stdout').at(-1)?.text === 'line 2999',
+      JSON.stringify({ kept: kept.length }),
+    ))
+    clearCommandOutput(floodId)
+  }
+
   // Cancellation marker: remaining operations are skipped honestly, not launched.
   markRepairCancelled(repairId)
   const skipped = await runValidationOperations([{ id: 'git_diff_check' }, { id: 'typecheck' }], { repairId })

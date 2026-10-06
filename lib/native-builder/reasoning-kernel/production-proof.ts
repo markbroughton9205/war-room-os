@@ -83,19 +83,19 @@ export async function runInstalledLibraryProof(): Promise<Record<string, string 
   const first = openBranch(search, {
     label: 'stale read',
     kind: 'hypothesis',
-    reason: 'hypothesis',
+    reason: 'alternative',
     scorecard: { requirementsCoverage: 'covered', estimatedToolCost: 'cheap', evidenceSupport: 1 },
   })
   const second = openBranch(search, {
     label: 'wrong writer',
     kind: 'hypothesis',
-    reason: 'hypothesis',
+    reason: 'alternative',
     scorecard: { requirementsCoverage: 'missed', estimatedToolCost: 'moderate' },
   })
-  openBranch(search, { label: 'third candidate', kind: 'hypothesis', reason: 'hypothesis' })
+  openBranch(search, { label: 'third candidate', kind: 'hypothesis', reason: 'alternative' })
   if (second.branch) weakenBranch(search, second.branch.branchId, 'runtime observation missed this cause')
   const selected = selectBestBranch(search)
-  const overflow = openBranch(search, { label: 'extra', kind: 'hypothesis', reason: 'hypothesis' })
+  const overflow = openBranch(search, { label: 'extra', kind: 'hypothesis', reason: 'alternative' })
   const withinBudget = search.search.branches.length <= search.search.budget.maxBranches
 
   const strategy = createFoundryReasoningSession({

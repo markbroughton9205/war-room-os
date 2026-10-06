@@ -97,7 +97,7 @@ function run(): CaseResult[] {
 
   results.push(check('no_coverage_copy_is_honest', STREET_VIEW_NO_COVERAGE_TITLE === 'STREET VIEW UNAVAILABLE HERE' && STREET_VIEW_NO_COVERAGE_BODY.includes('No public street imagery provider'), `${STREET_VIEW_NO_COVERAGE_TITLE} / ${STREET_VIEW_NO_COVERAGE_BODY}`))
   const urban = readFileSync(resolve('components/war-room/terra/TerraUrbanDetail.tsx'), 'utf8')
-  results.push(check('footprint_path_omits_extruded_height', urban.includes('CRUDE_EXTRUSION = DISABLED_BY_DEFAULT') && urban.includes('IMAGERY_FIRST footprint') && urban.includes('classificationType: Cesium.ClassificationType.TERRAIN'), 'footprints not extruded'))
+  results.push(check('footprint_path_omits_extruded_height', urban.includes('CRUDE_EXTRUSION = DISABLED_BY_DEFAULT') && urban.includes('IMAGERY_FIRST.') && urban.includes('building footprints') && /extrudeBuildings = false/.test(urban) && urban.includes('classificationType: Cesium.ClassificationType.TERRAIN'), 'footprints not extruded'))
   const globe = readFileSync(resolve('components/war-room/terra/TerraGlobe.tsx'), 'utf8')
   const osmBuildings = readFileSync(resolve('components/war-room/terra/TerraCesiumOsmBuildings.tsx'), 'utf8')
   results.push(check('globe_does_not_autoload_osm_buildings', !globe.includes('createOsmBuildingsAsync'), 'boot path imagery-first'))

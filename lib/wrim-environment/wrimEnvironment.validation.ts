@@ -122,7 +122,7 @@ export async function runWrimEnvironmentValidation(): Promise<{ passed: number; 
       && STAGE1_STATUS === 'STAGE1_VERIFIED'
       && TRAINING_AUTHORIZATION === 'OFF'
       && CURRENT_WRIM_TRAINING === 'NOT_RUNNING'
-      && (NEXT_AUTHORIZED_PASS === 'PHASE2_GRID_REVIEW' || NEXT_AUTHORIZED_PASS === 'PHASE3A_INTERPOLATION' || NEXT_AUTHORIZED_PASS === 'PHASE3A_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_EXECUTION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_REVIEW_COMPLETE' || NEXT_AUTHORIZED_PASS === 'STAGE3A_CANDIDATE_SELECTION_COMPLETE' || NEXT_AUTHORIZED_PASS === 'STAGE3A_CANDIDATE_ADJUDICATION_COMPLETE'),
+      && (['PHASE2_GRID_REVIEW', 'PHASE3A_INTERPOLATION', 'PHASE3A_REVIEW', 'STAGE3_COMMANDER_REVIEW', 'STAGE3_EXECUTION_REVIEW', 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW', 'STAGE3A_COMMANDER_REVIEW', 'STAGE3A_REVIEW_COMPLETE', 'STAGE3A_CANDIDATE_SELECTION_COMPLETE', 'STAGE3A_CANDIDATE_ADJUDICATION_COMPLETE', 'CORRECTIVE_STAGE3A_COMMANDER_AUTHORIZATION', 'CORRECTIVE_STAGE3A_PILOT_COMPLETE', 'FOUNDATIONAL_ROOT_CAUSE_REVIEW_COMPLETE', 'FOUNDATIONAL_REMEDIATION_DESIGN_COMPLETE', 'FOUNDATIONAL_P1_READINESS_COMPLETE', 'FOUNDATIONAL_P1_STREAM_REFINEMENT_COMPLETE', 'FOUNDATIONAL_P1_SOVEREIGNTY_AUDIT_COMPLETE', 'FOUNDATIONAL_P2_TRAINING_CONFIGURATION_REQUIRED', 'FOUNDATIONAL_P2_RECIPE_READY', 'FOUNDATIONAL_P2_DIAGNOSTIC_COMPLETE', 'FOUNDATIONAL_P2_ROOT_CAUSE_COMPLETE', 'P2_NEXT_A_SCHEDULE_HORIZON_RECIPE_FROZEN'].includes(NEXT_AUTHORIZED_PASS)),
     CURRENT_WRIM_TRAINING,
   ))
   results.push(check('49_red_team', FORBIDDEN_ENV_ACTIONS.every(a => tryForbiddenEnvAction(a).denied), String(FORBIDDEN_ENV_ACTIONS.length)))
@@ -147,8 +147,8 @@ export async function runWrimEnvironmentValidation(): Promise<{ passed: number; 
   results.push(check(
     '57_stage1_reload',
     Boolean(stage1Live)
-      && (stage1Live.checkpoint as { works_after_reload?: boolean; hash_match?: boolean } | undefined)?.works_after_reload === true
-      && (stage1Live.checkpoint as { hash_match?: boolean } | undefined)?.hash_match === true
+      && (stage1Live?.checkpoint as { works_after_reload?: boolean; hash_match?: boolean } | undefined)?.works_after_reload === true
+      && (stage1Live?.checkpoint as { hash_match?: boolean } | undefined)?.hash_match === true
       && fs.existsSync(path.join(stage1Ckpt, 'model.safetensors')),
     'reload works',
   ))

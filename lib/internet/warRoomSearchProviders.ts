@@ -1,14 +1,19 @@
 type TavilyResult = { title?: string; url?: string; content?: string; score?: number }
 type TavilyResponse = { results?: TavilyResult[]; error?: string }
 
-export async function tavilyWarRoomSearch(query: string, maxResults = 8) {
+export async function tavilyWarRoomSearch(query: string, maxResults = 8, options?: {
+  fetchImpl?: typeof fetch
+  signal?: AbortSignal
+}) {
   const apiKey = process.env.TAVILY_API_KEY?.trim()
   if (!apiKey) {
     return { ok: false as const, skipped: true as const, reason: 'TAVILY_API_KEY missing', results: [] as TavilyResult[], durationMs: 0, statusCode: null as number | null }
   }
   const started = Date.now()
-  const response = await fetch('https://api.tavily.com/search', {
+  const fetchImpl = options?.fetchImpl ?? fetch
+  const response = await fetchImpl('https://api.tavily.com/search', {
     method: 'POST',
+    redirect: 'error',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
@@ -22,7 +27,7 @@ export async function tavilyWarRoomSearch(query: string, maxResults = 8) {
       include_images: false,
       include_favicon: false,
     }),
-    signal: AbortSignal.timeout(20000),
+    signal: options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
   })
   const durationMs = Date.now() - started
   const data = (await response.json()) as TavilyResponse
@@ -43,20 +48,25 @@ function webResultsFromResponse(response: FirecrawlSearchResponse) {
   return response.data?.web ?? []
 }
 
-export async function firecrawlWarRoomSearch(query: string, limit = 8) {
+export async function firecrawlWarRoomSearch(query: string, limit = 8, options?: {
+  fetchImpl?: typeof fetch
+  signal?: AbortSignal
+}) {
   const apiKey = process.env.FIRECRAWL_API_KEY?.trim()
   if (!apiKey) {
     return { ok: false as const, skipped: true as const, reason: 'FIRECRAWL_API_KEY missing', results: [] as { title: string; url: string; description: string }[], durationMs: 0, statusCode: null as number | null }
   }
   const started = Date.now()
-  const response = await fetch('https://api.firecrawl.dev/v2/search', {
+  const fetchImpl = options?.fetchImpl ?? fetch
+  const response = await fetchImpl('https://api.firecrawl.dev/v2/search', {
     method: 'POST',
+    redirect: 'error',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ query, limit, sources: ['web'] }),
-    signal: AbortSignal.timeout(20000),
+    signal: options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
   })
   const durationMs = Date.now() - started
   const data = (await response.json()) as FirecrawlSearchResponse

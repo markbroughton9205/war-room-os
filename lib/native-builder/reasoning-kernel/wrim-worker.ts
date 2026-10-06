@@ -16,6 +16,7 @@ import type {
   FoundryWorkerDiagnostics,
 } from '../foundryModelTypes'
 import type { FoundryRoutingCandidate } from '../foundryWorkerRouting'
+import { childProcessEnv } from '@/lib/repo/childProcessEnv'
 import type { FoundryReasoningSession } from './types'
 
 export type WrimCapabilityHandshake = {
@@ -127,7 +128,7 @@ function inferScriptPath(): string {
 }
 
 function sanitizedEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
+  const env: NodeJS.ProcessEnv = childProcessEnv({
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     USER: process.env.USER,
@@ -141,7 +142,7 @@ function sanitizedEnv(): NodeJS.ProcessEnv {
     NVIDIA_VISIBLE_DEVICES: process.env.NVIDIA_VISIBLE_DEVICES,
     PYTHONNOUSERSITE: '1',
     PYTHONWARNINGS: 'ignore',
-  }
+  })
   for (const [key, value] of Object.entries(process.env)) {
     if (!value || SECRET_ENV.test(key)) continue
     if (key.startsWith('CUDA') || key.startsWith('NVIDIA') || key === 'LD_LIBRARY_PATH') env[key] = value

@@ -149,6 +149,7 @@ async function main() {
   check('governance_paid', paid.commandClass === 'FINANCIAL' && paid.allowed === false, paid.commandClass)
   check('dirty_isolation', classifyWorkspacePath({ path: 'keep.txt', preexisting: ['keep.txt', 'serialize.py'], modified: ['serialize.py'], created: [], deleted: [] }) === 'PREEXISTING' && classifyWorkspacePath({ path: 'serialize.py', preexisting: ['keep.txt', 'serialize.py'], modified: ['serialize.py'], created: [], deleted: [] }) === 'MISSION_MODIFIED', 'classes')
   check('own_small_fix', engineeringRuntimeShouldOwn({ fileCount: 2, request: 'Fix the failing serialization script' }) && !engineeringRuntimeShouldOwn({ fileCount: 4000, request: 'Fix the repo' }), 'scope')
+  check('own_small_fix_not_for_a_workspace_without_python', !engineeringRuntimeShouldOwn({ fileCount: 3, request: 'Fix the sum helper so tests pass.', pythonFileCount: 0 }) && engineeringRuntimeShouldOwn({ fileCount: 3, request: 'Fix the failing serialization script', pythonFileCount: 1 }) && engineeringRuntimeShouldOwn({ fileCount: 3, request: 'governance block probe', pythonFileCount: 0 }), 'scope')
 
   const trainerSource = readFileSync(path.join(process.cwd(), 'scripts/wrim-environment/wrim_single_trainer_lock.py'), 'utf8')
   const names = trainerScriptNames(trainerSource)

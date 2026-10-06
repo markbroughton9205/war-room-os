@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import type { GodsEyeInspectCardModel, GodsEyeInspectSectionId } from '@/lib/terra/godsEye/inspect'
 import { inspectFeatureLabel } from '@/lib/terra/godsEye/inspect'
 
-const SECTION_ORDER: GodsEyeInspectSectionId[] = ['IDENTITY', 'LOCATION', 'URBAN', 'MOBILITY', 'STREET', 'LIVE_INTEL', 'PROVENANCE']
+const SECTION_ORDER: GodsEyeInspectSectionId[] = ['IDENTITY', 'CLASSIFICATION', 'LOCATION', 'POSITION', 'SIGNAL', 'QUALITY', 'TRANSPONDER', 'URBAN', 'MOBILITY', 'STREET', 'LIVE_INTEL', 'PROVENANCE']
 
 export function TerraGodsEyeInspectCard({
   model,

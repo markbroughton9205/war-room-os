@@ -69,7 +69,8 @@ export function setLifecycle(session: FoundryReasoningSession, lifecycle: FrkLif
   session.search.lifecycle = lifecycle
 }
 
-export function bindPointerToMission(mission: FoundryMissionRecord, pointer: MissionReasoningPointer): void {
+/** Only the four reasoning fields are written, so any host that carries them can be bound (a full mission record is one such host). */
+export function bindPointerToMission(mission: Pick<FoundryMissionRecord, 'reasoningSessionId' | 'reasoningBrief' | 'reasoningStatus' | 'reasoningUpdatedAt'>, pointer: MissionReasoningPointer): void {
   mission.reasoningSessionId = pointer.reasoningSessionId
   mission.reasoningBrief = pointer.reasoningBrief
   mission.reasoningStatus = pointer.reasoningStatus

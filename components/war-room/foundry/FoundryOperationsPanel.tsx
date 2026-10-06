@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FoundryLiveAgentEvents } from './FoundryLiveAgentEvents'
 import { FoundryContractVerdictPanel } from './FoundryContractVerdictPanel'
 import { FoundryReasoningKernelSection } from './FoundryReasoningKernelSection'
@@ -95,6 +95,7 @@ type MissionDetail = {
   agentEvents?: Array<{ eventId: string; at: string; type: string; text: string; tool?: string | null; ok?: boolean | null }>
   contractVerdict?: FoundryContractVerdictView | null
   engineeringClass?: string | null
+  reasoningStatus?: string | null
   reasoningBrief?: {
     strategy?: string
     depth?: string
@@ -177,12 +178,12 @@ function QueueColumn({
   )
 }
 
-export function FoundryOperationsPanel() {
+export function FoundryOperationsPanel({ initialMissionId }: { initialMissionId?: string } = {}) {
   const [request, setRequest] = useState('')
   const [queue, setQueue] = useState<Queue>({
     active: [], queued: [], blocked: [], waitingAuthorization: [], waitingResource: [], paused: [], recovering: [],
   })
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(initialMissionId ?? null)
   const [selected, setSelected] = useState<MissionDetail | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -193,39 +194,47 @@ export function FoundryOperationsPanel() {
   const [lastWatchdogScan, setLastWatchdogScan] = useState<WatchdogScanView>(null)
   const [routingMode, setRoutingMode] = useState<'SHADOW' | 'ENABLED'>('SHADOW')
 
+  const refreshInFlight = useRef(false)
+  const refreshGeneration = useRef(0)
   const refresh = useCallback(async () => {
-    const listing = await json<{
-      queue: Queue
-      runtimeConfig?: { primaryModel: string }
-      missions: MissionDetail[]
-      productionLease?: ProductionLeaseView
-      productionOwner?: ProductionOwnerView
-      lastWatchdogScan?: WatchdogScanView
-    }>(`/api/foundry/operations?view=${view}`)
-    setQueue(listing.queue)
-    const routing = await json<{ mode?: string }>(`/api/foundry/routing-mode`).catch(() => ({ mode: 'SHADOW' }))
-    if (routing.mode === 'ENABLED' || routing.mode === 'SHADOW') setRoutingMode(routing.mode)
-    setProductionLease(listing.productionLease ?? null)
-    setProductionOwner(listing.productionOwner ?? null)
-    setLastWatchdogScan(listing.lastWatchdogScan ?? null)
-    if (listing.runtimeConfig?.primaryModel) setModelLabel(listing.runtimeConfig.primaryModel)
-    const id = selectedId && listing.missions.some(item => item.missionId === selectedId) ? selectedId : null
-    if (!id) {
-      setSelected(null)
-      return
-    }
-    const detail = await json<{ mission: MissionDetail }>(`/api/foundry/missions/${id}`)
-    setSelected(detail.mission)
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
+    try {
+      const generation = refreshGeneration.current
+      if (selectedId) {
+        const detail = await json<{ mission: MissionDetail }>(`/api/foundry/missions/${selectedId}`)
+        if (generation !== refreshGeneration.current) return
+        setSelected(detail.mission)
+      } else setSelected(null)
+      const listing = await json<{
+        queue: Queue
+        runtimeConfig?: { primaryModel: string }
+        missions: MissionDetail[]
+        productionLease?: ProductionLeaseView
+        productionOwner?: ProductionOwnerView
+        lastWatchdogScan?: WatchdogScanView
+      }>(`/api/foundry/operations?view=${view}`)
+      if (generation !== refreshGeneration.current) return
+      setQueue(listing.queue)
+      const routing = await json<{ mode?: string }>(`/api/foundry/routing-mode`).catch(() => ({ mode: 'SHADOW' }))
+      if (generation !== refreshGeneration.current) return
+      if (routing.mode === 'ENABLED' || routing.mode === 'SHADOW') setRoutingMode(routing.mode)
+      setProductionLease(listing.productionLease ?? null)
+      setProductionOwner(listing.productionOwner ?? null)
+      setLastWatchdogScan(listing.lastWatchdogScan ?? null)
+      if (listing.runtimeConfig?.primaryModel) setModelLabel(listing.runtimeConfig.primaryModel)
+    } finally { refreshInFlight.current = false }
   }, [selectedId, view])
 
   useEffect(() => {
+    refreshGeneration.current += 1
     queueMicrotask(() => {
       void refresh().catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
     })
     const timer = window.setInterval(() => {
       void refresh().catch(() => undefined)
     }, 2_000)
-    return () => window.clearInterval(timer)
+    return () => { refreshGeneration.current += 1; window.clearInterval(timer) }
   }, [refresh])
 
   const act = async (label: string, fn: () => Promise<void>) => {
@@ -319,7 +328,7 @@ export function FoundryOperationsPanel() {
             key={item}
             type="button"
             className={`rounded border px-2 py-0.5 text-[9px] uppercase tracking-widest ${view === item ? 'border-cyan-400/50 text-cyan-200' : 'border-white/10 text-slate-500'}`}
-            onClick={() => { setSelectedId(null); setView(item) }}
+            onClick={() => { setSelected(null); setSelectedId(null); setView(item) }}
           >
             {item === 'system' ? 'System/Test' : item}
           </button>
@@ -346,16 +355,16 @@ export function FoundryOperationsPanel() {
       ) : (
       <>
       <div className="mt-3 flex flex-wrap gap-2">
-        <QueueColumn title="Active" items={queue.active} selectedId={selectedId} onSelect={setSelectedId} />
-        <QueueColumn title="Queued" items={queue.queued} selectedId={selectedId} onSelect={setSelectedId} />
-        <QueueColumn title="Blocked" items={queue.blocked} selectedId={selectedId} onSelect={setSelectedId} />
-        <QueueColumn title="Waiting Authorization" items={queue.waitingAuthorization} selectedId={selectedId} onSelect={setSelectedId} />
+        <QueueColumn title="Active" items={queue.active} selectedId={selectedId} onSelect={id => { setSelected(null); setSelectedId(id) }} />
+        <QueueColumn title="Queued" items={queue.queued} selectedId={selectedId} onSelect={id => { setSelected(null); setSelectedId(id) }} />
+        <QueueColumn title="Blocked" items={queue.blocked} selectedId={selectedId} onSelect={id => { setSelected(null); setSelectedId(id) }} />
+        <QueueColumn title="Waiting Authorization" items={queue.waitingAuthorization} selectedId={selectedId} onSelect={id => { setSelected(null); setSelectedId(id) }} />
       </div>
       {queue.waitingResource.length || queue.paused.length || queue.recovering.length ? (
         <div className="mt-2 flex flex-wrap gap-2">
-          <QueueColumn title="Waiting Resource" items={queue.waitingResource} selectedId={selectedId} onSelect={setSelectedId} />
-          <QueueColumn title="Paused" items={queue.paused} selectedId={selectedId} onSelect={setSelectedId} />
-          <QueueColumn title="Recovering" items={queue.recovering} selectedId={selectedId} onSelect={setSelectedId} />
+          <QueueColumn title="Waiting Resource" items={queue.waitingResource} selectedId={selectedId} onSelect={id => { setSelected(null); setSelectedId(id) }} />
+          <QueueColumn title="Paused" items={queue.paused} selectedId={selectedId} onSelect={id => { setSelected(null); setSelectedId(id) }} />
+          <QueueColumn title="Recovering" items={queue.recovering} selectedId={selectedId} onSelect={id => { setSelected(null); setSelectedId(id) }} />
         </div>
       ) : null}
       </>
@@ -535,14 +544,14 @@ export function FoundryOperationsPanel() {
               ))}
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" disabled={busy !== null} className="rounded border border-white/20 px-3 py-1 text-[10px] uppercase tracking-widest text-slate-200" onClick={() => void act('pause', async () => {
+              <button type="button" disabled={busy !== null && busy !== 'resume'} className="rounded border border-white/20 px-3 py-1 text-[10px] uppercase tracking-widest text-slate-200" onClick={() => void act('pause', async () => {
                 await json(`/api/foundry/missions/${selected.missionId}/pause`, { method: 'POST' })
               })}>Pause</button>
               <button type="button" disabled={busy !== null} className="rounded border border-cyan-400/40 px-3 py-1 text-[10px] uppercase tracking-widest text-cyan-200" onClick={() => void act('resume', async () => {
                 await json(`/api/foundry/missions/${selected.missionId}/resume`, { method: 'POST' })
               })}>Resume</button>
               {!['COMPLETE', 'CANCELLED', 'FAILED'].includes(selected.status) ? (
-                <button type="button" disabled={busy !== null} className="rounded border border-red-400/30 px-3 py-1 text-[10px] uppercase tracking-widest text-red-200" onClick={() => void act('cancel', async () => {
+                <button type="button" disabled={busy !== null && busy !== 'resume'} className="rounded border border-red-400/30 px-3 py-1 text-[10px] uppercase tracking-widest text-red-200" onClick={() => void act('cancel', async () => {
                   await json(`/api/foundry/missions/${selected.missionId}/cancel`, { method: 'POST' })
                 })}>Cancel</button>
               ) : null}

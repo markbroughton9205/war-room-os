@@ -16,6 +16,23 @@ export type AnchorScore = {
   goalMatch: string
 }
 
+/**
+ * Where an anchor candidate came from. The text alone cannot say it: `return a - b` is just a short line, but as a statement of the function a fix goal names it is
+ * exactly what the fix changes.
+ */
+export type AnchorOrigin = { kind: 'NAMED_FUNCTION_BODY'; functionName: string }
+
+/** Lifts a statement of the named function over its declaration header, which only matches the generic word "function". Enough to reach HIGH alone; scores without an origin are unchanged. */
+export const NAMED_BODY_LINE_BONUS = 60
+
+const FIX_INTENT = /\b(?:fix(?:es|ed|ing)?|repair(?:s|ed|ing)?|debug(?:s|ged|ging)?|bugs?|buggy|wrong|incorrect(?:ly)?|broken|fail(?:s|ed|ing|ure|ures)?|regressions?|off-by-one|typos?|mistakes?)\b/i
+const STRUCTURAL_INTENT = /\b(?:renam(?:e|es|ed|ing)|signature)\b/i
+
+/** A goal that corrects one existing behaviour. A feature, a rename or a signature change targets the declaration, not a statement inside it. */
+export function isLocalizedFixGoal(text: string): boolean {
+  return FIX_INTENT.test(text) && !STRUCTURAL_INTENT.test(text)
+}
+
 const TYPE_HEADER = /^\s*(export\s+)?(type|interface|enum)\s/
 const TYPE_PROPERTY = /^\s+[A-Za-z_]\w*\??:\s/
 const JSXISH = /<[A-Za-z]|className=|data-testid=/
@@ -42,7 +59,7 @@ export function collectGoalTerms(goal: string): string[] {
   ].map(item => item.trim()).filter(item => item.length >= 6))]
 }
 
-export function scoreAnchorText(text: string, goal: string): AnchorScore {
+export function scoreAnchorText(text: string, goal: string, origin?: AnchorOrigin): AnchorScore {
   const bindings = extractProtectedBindings(text)
   const terms = collectGoalTerms(goal)
   const lower = text.toLowerCase()
@@ -75,15 +92,21 @@ export function scoreAnchorText(text: string, goal: string): AnchorScore {
   if ((TYPE_HEADER.test(text) || TYPE_PROPERTY.test(text.split('\n')[0] ?? '')) && !JSXISH.test(text)) score -= 45
   if (JSXISH.test(text) && /review|status|detail|label|chip/i.test(goal)) score += 10
   if (bindings.length && JSXISH.test(text) && /review|status|detail|chip|label|render/i.test(goal)) score += 30
+  if (origin) {
+    score += NAMED_BODY_LINE_BONUS
+    matchedGoalTerms.unshift(origin.functionName)
+  }
   const relevance: AnchorRelevance = score >= 40 ? 'HIGH' : score >= 12 ? 'MEDIUM' : 'LOW'
   const goalMatch = matchedGoalTerms[0] ?? (bindingHits[0] ?? 'none')
-  const reason = relevance === 'HIGH'
-    ? `goal/bindings/testid overlap (${matchedGoalTerms.slice(0, 4).join(', ') || bindingHits.join(', ')})`
-    : relevance === 'MEDIUM'
-      ? 'partial goal overlap'
-      : (TYPE_HEADER.test(text) || TYPE_PROPERTY.test(text.split('\n')[0] ?? '')) && !JSXISH.test(text)
-        ? 'header/type region without requested UI semantics'
-        : 'no requested goal terms or required bindings'
+  const reason = origin
+    ? `unique statement inside ${origin.functionName}, the function the goal names`
+    : relevance === 'HIGH'
+      ? `goal/bindings/testid overlap (${matchedGoalTerms.slice(0, 4).join(', ') || bindingHits.join(', ')})`
+      : relevance === 'MEDIUM'
+        ? 'partial goal overlap'
+        : (TYPE_HEADER.test(text) || TYPE_PROPERTY.test(text.split('\n')[0] ?? '')) && !JSXISH.test(text)
+          ? 'header/type region without requested UI semantics'
+          : 'no requested goal terms or required bindings'
   return { score, relevance, matchedGoalTerms, bindings, reason, symbol, goalMatch }
 }
 

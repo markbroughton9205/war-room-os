@@ -1,11 +1,16 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
@@ -19,7 +24,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": [
+        "./*"
+      ]
     }
   },
   "include": [
@@ -29,7 +36,13 @@
     "**/*.d.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    ".next-terra-atlas/types/**/*.ts",
+    ".next-terra-atlas/dev/types/**/*.ts",
+    ".next-terra-flight/types/**/*.ts",
+    ".next-terra-flight/dev/types/**/*.ts",
+    "tmp/foundry-resume-build/types/**/*.ts",
+    "tmp/foundry-resume-build/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
@@ -40,6 +53,8 @@
     "lib/wrim-environment/**/*.validation.ts",
     "**/*.windows-bak/**",
     "**/node_modules.windows-bak/**",
-    "**/.next.windows-bak/**"
+    "**/.next.windows-bak/**",
+    "tmp/**/standalone/**",
+    ".tmp/**"
   ]
 }

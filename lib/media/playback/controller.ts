@@ -2,7 +2,8 @@ import { MEDIA_ALERT_DUCK_POLICY_NOTE, decideAlertDuck } from '@/lib/media/alert
 import { persistMediaAutoMode, readMediaAutoMode } from '@/lib/media/autoMediaPreference'
 import { getHtml5PlaybackEngine } from '@/lib/media/playback/html5Engine'
 import { buildProvenance, isPlaybackEligible, isNeverPinStreamUrl, playbackBlockReason } from '@/lib/media/provenance'
-import { getOhioMediaStations, getMediaStationById } from '@/lib/media/stationRegistry'
+import { getFederatedStations } from '@/lib/media/federation'
+import { getMediaStationById } from '@/lib/media/stationRegistry'
 import type {
   MediaAutoMode,
   MediaNormalizedState,
@@ -15,25 +16,50 @@ import type {
 
 const DEFAULT_VOLUME = 0.8
 const LAST_STATION_STORAGE_KEY = 'war-room-media-last-station-id'
+const VOLUME_STORAGE_KEY = 'war-room-media-volume'
 
-function readLastStationId(): string | null {
+function readStorage(key: string, store: 'session' | 'local'): string | null {
   if (typeof window === 'undefined') return null
   try {
-    const id = window.sessionStorage.getItem(LAST_STATION_STORAGE_KEY)
-    return id?.trim() || null
+    const bucket = store === 'session' ? window.sessionStorage : window.localStorage
+    return bucket.getItem(key)
   } catch {
     return null
   }
 }
 
-function persistLastStationId(id: string | null) {
+function writeStorage(key: string, value: string | null) {
   if (typeof window === 'undefined') return
-  try {
-    if (!id) window.sessionStorage.removeItem(LAST_STATION_STORAGE_KEY)
-    else window.sessionStorage.setItem(LAST_STATION_STORAGE_KEY, id)
-  } catch {
-    // Identity restore is optional.
+  for (const store of ['sessionStorage', 'localStorage'] as const) {
+    try {
+      if (!value) window[store].removeItem(key)
+      else window[store].setItem(key, value)
+    } catch {
+      // Identity/volume restore is optional.
+    }
   }
+}
+
+function readLastStationId(): string | null {
+  return readStorage(LAST_STATION_STORAGE_KEY, 'session')?.trim()
+    || readStorage(LAST_STATION_STORAGE_KEY, 'local')?.trim()
+    || null
+}
+
+function persistLastStationId(id: string | null) {
+  writeStorage(LAST_STATION_STORAGE_KEY, id)
+}
+
+function readPersistedVolume(): number | null {
+  const raw = readStorage(VOLUME_STORAGE_KEY, 'local') ?? readStorage(VOLUME_STORAGE_KEY, 'session')
+  if (!raw) return null
+  const next = Number(raw)
+  if (!Number.isFinite(next)) return null
+  return Math.min(1, Math.max(0, next))
+}
+
+function persistVolume(volume: number) {
+  writeStorage(VOLUME_STORAGE_KEY, String(volume))
 }
 
 function defaultState(): MediaNormalizedState {
@@ -72,10 +98,12 @@ export class MediaPlaybackController {
   private state: MediaNormalizedState = defaultState()
   private readonly listeners = new Set<Listener>()
   private readonly engine = typeof Audio === 'undefined' ? null : getHtml5PlaybackEngine()
-  private readonly stations = getOhioMediaStations()
+  private readonly stations = getFederatedStations()
   private pendingAudiblePlay = false
   private surfaceMounted = false
   private shellLauncherMounts = 0
+  private terraWorkspaceSurfaceMounts = 0
+  private terraWorkspaceSurfaceActive = false
   /** True only after an explicit Commander Play gesture in this JS session. */
   private commanderPlaybackAuthorized = false
 
@@ -117,16 +145,21 @@ export class MediaPlaybackController {
     this.emit()
   }
 
-  private isSurfaceVisible(): boolean {
+  private isFloatingSurfaceVisible(): boolean {
     return this.state.presentation === 'window' || this.state.presentation === 'compact'
   }
 
+  private isSurfaceVisible(): boolean {
+    return this.terraWorkspaceSurfaceActive || this.isFloatingSurfaceVisible()
+  }
+
   private canEmitAudio(): boolean {
-    return this.isSurfaceVisible() && this.surfaceMounted
+    return this.surfaceMounted && this.isSurfaceVisible()
   }
 
   private ensureVisibleSurface() {
-    if (this.state.presentation === 'window' || this.state.presentation === 'compact') return
+    if (this.terraWorkspaceSurfaceActive) return
+    if (this.isFloatingSurfaceVisible()) return
     this.patch({ presentation: 'compact' })
   }
 
@@ -156,6 +189,21 @@ export class MediaPlaybackController {
     this.patch({ headerLauncherMounted: next })
   }
 
+  setTerraWorkspaceSurfaceActive(active: boolean) {
+    this.terraWorkspaceSurfaceMounts = Math.max(0, this.terraWorkspaceSurfaceMounts + (active ? 1 : -1))
+    this.terraWorkspaceSurfaceActive = this.terraWorkspaceSurfaceMounts > 0
+  }
+
+  isTerraWorkspaceSurfaceActive(): boolean {
+    return this.terraWorkspaceSurfaceActive
+  }
+
+  /** Hide MediaWindow/compact without stopping authorized audio. */
+  dismissFloatingPresentation() {
+    if (this.state.presentation === 'closed') return
+    this.patch({ presentation: 'closed', sourceInfoOpen: false })
+  }
+
   hydrateAutoMediaMode() {
     const mode = readMediaAutoMode()
     if (this.state.autoMediaMode === mode) return
@@ -168,6 +216,8 @@ export class MediaPlaybackController {
    */
   hydrateSession() {
     this.hydrateAutoMediaMode()
+    const volume = readPersistedVolume()
+    if (volume != null && volume !== this.state.volume) this.patch({ volume })
     if (this.commanderPlaybackAuthorized && (this.state.playbackState === 'playing' || this.state.playbackState === 'loading')) {
       return
     }
@@ -179,6 +229,30 @@ export class MediaPlaybackController {
     if (!station) return
     this.applyStation(station, { origin: 'manual', surfaceReason: 'RESTORED_SESSION' })
     this.patch({ playbackState: 'paused' })
+  }
+
+  /**
+   * Rail / window open: keep current station, else restore last, else registry default.
+   * Never starts audible playback by itself. Never opens MediaWindow/compact on Terra.
+   */
+  ensureStationSelected() {
+    if (this.state.station) return
+    this.hydrateSession()
+    if (this.state.station) return
+    const fallback = this.stations[0]
+    if (!fallback) return
+    this.applyStation(fallback, { origin: 'manual', surfaceReason: null })
+    this.patch({ playbackState: 'paused' })
+  }
+
+  /**
+   * Explicit Commander WAR ROOM MEDIA click: select a station if needed, then
+   * start/resume audio. Does not restart an already-playing stream.
+   */
+  activateFromCommanderRail() {
+    this.ensureStationSelected()
+    if (this.state.playbackState === 'playing' || this.state.playbackState === 'loading') return
+    this.playFromCommanderGesture()
   }
 
   setAutoMediaMode(mode: MediaAutoMode) {
@@ -193,14 +267,13 @@ export class MediaPlaybackController {
   }
 
   openWindow() {
+    if (this.terraWorkspaceSurfaceActive) return
     this.patch({ presentation: 'window' })
-    if (!this.state.station && this.stations[0]) {
-      this.applyStation(this.stations[0], { origin: 'manual', surfaceReason: null })
-      this.patch({ playbackState: 'paused' })
-    }
+    this.ensureStationSelected()
   }
 
   launch() {
+    if (this.terraWorkspaceSurfaceActive) return
     if (this.state.presentation === 'closed') {
       this.openWindow()
       return
@@ -221,11 +294,13 @@ export class MediaPlaybackController {
   }
 
   minimize() {
+    if (this.terraWorkspaceSurfaceActive) return
     if (this.state.presentation === 'closed') return
     this.patch({ presentation: 'compact' })
   }
 
   restore() {
+    if (this.terraWorkspaceSurfaceActive) return
     this.patch({ presentation: 'window' })
   }
 
@@ -373,6 +448,12 @@ export class MediaPlaybackController {
       this.patch({ playbackState: 'error', errorMessage: 'HTML5 Audio is not available.' })
       return
     }
+    if (
+      (this.state.playbackState === 'playing' || this.state.playbackState === 'loading')
+      && this.engine.isCurrentUrlPlaying(station.streamUrl)
+    ) {
+      return
+    }
     this.patch({ playbackState: 'loading', errorMessage: null })
     try {
       await this.engine.playUrl(station.streamUrl, this.state.volume, this.state.muted)
@@ -402,6 +483,7 @@ export class MediaPlaybackController {
     const next = Math.min(1, Math.max(0, volume))
     this.engine?.applyVolume(next, this.state.muted)
     this.patch({ volume: next })
+    persistVolume(next)
   }
 
   setMuted(muted: boolean) {

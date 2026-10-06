@@ -81,7 +81,7 @@ def run_authorized_training(args: argparse.Namespace) -> dict[str, Any]:
     from stage2_pack import _pack_selected, encode_corpus1_val_units, encode_rehearsal_val_units, take_until_budget
     from stage3_eval_baseline import concat_units
     from stage3_runtime import parent_pointer, utc_now, write_abort, write_json
-    from stage3a_run import evaluate_candidate, load_baseline, load_suite, save_continuity, save_weights
+    from stage3a_run import disable_tf32, evaluate_candidate, load_baseline, load_suite, save_continuity, save_weights
     from run000006_pack import balanced_genesis_units, load_frozen_genesis_train_units
     from run000006_identity import LOCKED_MIX
     from experiment_pack import FROZEN_GENESIS_TRAIN_IDS, encode_raw_families, _wr_corpus_1_families
@@ -124,10 +124,12 @@ def run_authorized_training(args: argparse.Namespace) -> dict[str, Any]:
     torch.manual_seed(SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(SEED)
+    disable_tf32()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = Tokenizer.from_file(str(tokenizer_path))
+    state, _coverage = load_model_state_from_safetensors(weights)
     model = WRIM0Model()
-    load_model_state_from_safetensors(model, str(weights))
+    model.load_state_dict(state, strict=True)
     model.to(device)
     suite = load_suite(Path(args.suite))
     baseline = load_baseline(Path(args.baseline))

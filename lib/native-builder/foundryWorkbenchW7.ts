@@ -15,7 +15,7 @@ import { MICROSOFT_MARKETPLACE_ENABLED as W6_MARKETPLACE, OPENVSX_DEFAULT_ON as 
 const require = createRequire(import.meta.url)
 
 export const WORKBENCH_DEFAULT_READY_POLICY = 'WORKBENCH_DEFAULT_READY may become PASS while WORKBENCH_DEFAULT_ENABLED remains NO'
-export const WORKBENCH_DEFAULT_ENABLED = false
+export const WORKBENCH_DEFAULT_ENABLED: boolean = false
 export const OPENVSX_DEFAULT_ON = false
 export const MICROSOFT_MARKETPLACE_ENABLED = false
 export const W4_1_STILL_DEFERRED = true

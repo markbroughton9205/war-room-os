@@ -29,6 +29,10 @@ import {
   trafficCameraRecordFromProperties,
 } from '../trafficCameraRecord'
 import { cameraInspectFreshness, type CameraCatalogStatus, type CameraImageFreshness } from './cameraInspectFreshness'
+import {
+  cameraLicensePolicyForProvider,
+  type TerraTrafficCameraLicensePolicy,
+} from '../trafficCameraContract'
 
 export const GODS_EYE_VIEW_MODES = ['EARTH', 'CAMERAS', 'AREA_LIVE', 'HAZARDS', 'INTEL'] as const
 export type GodsEyeViewMode = (typeof GODS_EYE_VIEW_MODES)[number]
@@ -86,6 +90,7 @@ export type CameraProviderAdapterContract = {
   viewerUrl: string | null
   sourceUrl: string | null
   license: string
+  licensePolicy: TerraTrafficCameraLicensePolicy
   /** Existing Terra layer route — not a parallel fetch stack. */
   catalogRoute: string | null
 }
@@ -204,6 +209,7 @@ export function cameraProviderAdapterContracts(): CameraProviderAdapterContract[
       viewerUrl: row.viewerUrl,
       sourceUrl: row.apiUrl ?? row.viewerUrl,
       license: row.license,
+      licensePolicy: cameraLicensePolicyForProvider(row.id),
       catalogRoute: fetchableLayerIds[0] ? `/api/terra/layers/${fetchableLayerIds[0]}` : null,
     }
   })
@@ -284,7 +290,7 @@ export function godsEyeCameraLodPolicy(lod: GodsEyeCameraLod): GodsEyeCameraLodP
     return { lod, fetchCatalog: false, showCoverageEnvelopes: true, clusterPins: false, showIndividualPins: false }
   }
   if (lod === 'COUNTRY') {
-    return { lod, fetchCatalog: true, showCoverageEnvelopes: true, clusterPins: true, showIndividualPins: false }
+    return { lod, fetchCatalog: false, showCoverageEnvelopes: true, clusterPins: true, showIndividualPins: false }
   }
   if (lod === 'REGION') {
     return { lod, fetchCatalog: true, showCoverageEnvelopes: false, clusterPins: true, showIndividualPins: false }

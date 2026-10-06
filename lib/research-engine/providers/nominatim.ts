@@ -55,6 +55,7 @@ export function __resetNominatimBackoffForTests(): void {
 }
 
 import { TERRA_PUBLIC_USER_AGENT } from '@/lib/terra/terraPublicIdentity'
+import { decodeNominatimStructuredSearch } from '@/lib/terra/addressParse'
 
 function userAgent(): string {
   return process.env.NOMINATIM_USER_AGENT_BASE?.trim() || TERRA_PUBLIC_USER_AGENT
@@ -217,8 +218,9 @@ export async function reverseNominatimCoordinates(latitude: number, longitude: n
 
 async function search(query: ResearchQuery) {
   const started = Date.now()
-  const text = query.text.trim().slice(0, 200)
+  const text = query.text.trim().slice(0, 800)
   if (!text) return { ok: true as const, response: okResponse(PROVIDER, { documents: [], durationMs: Date.now() - started }) }
+  const structured = decodeNominatimStructuredSearch(text)
   const limit = Math.max(1, Math.min(query.maxResults ?? 5, MAX_RESULTS))
   const cacheKey = `nominatim:${text}:${limit}`
   const cached = cacheGet<ReturnType<typeof okResponse>>(cacheKey)
@@ -229,11 +231,24 @@ async function search(query: ResearchQuery) {
   }
 
   const url = new URL(BASE_URL)
-  url.searchParams.set('q', text)
   url.searchParams.set('format', 'json')
   url.searchParams.set('limit', String(limit))
   url.searchParams.set('namedetails', '1')
   url.searchParams.set('addressdetails', '1')
+  if (structured) {
+    if (structured.street) url.searchParams.set('street', structured.street)
+    if (structured.city) url.searchParams.set('city', structured.city)
+    if (structured.county) url.searchParams.set('county', structured.county)
+    if (structured.state) url.searchParams.set('state', structured.state)
+    if (structured.postalcode) url.searchParams.set('postalcode', structured.postalcode)
+    if (structured.country) url.searchParams.set('country', structured.country)
+    if (structured.countrycodes) url.searchParams.set('countrycodes', structured.countrycodes)
+    if (structured.q && !structured.street && !structured.city && !structured.postalcode) {
+      url.searchParams.set('q', structured.q)
+    }
+  } else {
+    url.searchParams.set('q', text.slice(0, 200))
+  }
 
   await throttle()
   const result = await safeProviderFetch(PROVIDER, url.toString(), { headers: { 'User-Agent': userAgent() }, timeoutMs: 10_000, maxRetries: 0 })
@@ -259,6 +274,14 @@ async function search(query: ResearchQuery) {
       const identifiers: Record<string, string> = { place_id: String(row.place_id) }
       if (row.class) identifiers.class = row.class
       if (row.type) identifiers.type = row.type
+      if (row.osm_type) identifiers.osm_type = row.osm_type
+      if (row.address?.house_number) identifiers.house_number = row.address.house_number
+      if (row.address?.road) identifiers.road = row.address.road
+      if (row.address?.postcode) identifiers.postcode = row.address.postcode
+      const addressCity = row.address?.city ?? row.address?.town ?? row.address?.village ?? row.address?.municipality
+      if (addressCity) identifiers.city = addressCity
+      if (row.address?.state) identifiers.state = row.address.state
+      if (row.address?.country_code) identifiers.country_code = row.address.country_code.toUpperCase()
       const names = nominatimNativeEnglish(row.namedetails, row.name ?? row.display_name)
       if (names.nativeName) identifiers.name_native = names.nativeName
       if (names.englishName) identifiers.name_en = names.englishName

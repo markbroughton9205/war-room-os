@@ -11,6 +11,8 @@ export type LiveRoomCenterProps = {
   thread: ReactNode
   composer?: ReactNode
   inlineBelowThread?: ReactNode
+  activeSessionId?: string | null
+  transcriptOwnerId?: string | null
 }
 
 export function LiveRoomCenter({
@@ -21,6 +23,8 @@ export function LiveRoomCenter({
   thread,
   composer,
   inlineBelowThread,
+  activeSessionId,
+  transcriptOwnerId,
 }: LiveRoomCenterProps) {
   useEffect(() => {
     const el = scrollContainerRef.current
@@ -54,6 +58,8 @@ export function LiveRoomCenter({
       {preamble ? <div className="flex-shrink-0 px-4 pt-2 pb-1 sm:px-5">{preamble}</div> : null}
       <div
         data-testid="live-council-messages"
+        data-active-session-id={activeSessionId ?? ''}
+        data-transcript-owner-id={transcriptOwnerId ?? ''}
         ref={scrollContainerRef}
         onScroll={handleScroll}
         className="min-h-0 flex-1 overflow-y-auto px-3 pt-2 pb-4 sm:px-5 [scroll-padding-bottom:4rem]"

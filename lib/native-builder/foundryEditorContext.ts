@@ -383,7 +383,7 @@ export function editorContextChips(envelope: FoundryEditorContextEnvelope | null
     ? `Terminal ${envelope.terminalSession.lineCount} lines`
     : null
   const git = envelope.git?.branch
-    ? `Git ${envelope.git.branch} · ${envelope.git.changedFiles.length} changed`
+    ? `Git ${envelope.git.branch} · ${envelope.git.changedFiles?.length ?? 0} changed`
     : envelope.gitDiffHunks?.length
       ? `Git ${envelope.gitDiffHunks.length} hunks`
       : null

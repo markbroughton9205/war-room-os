@@ -1,0 +1,24 @@
+{
+  "version": "wrim-stop-policy-v1",
+  "soft_stop_min_hits": 2,
+  "review_required_hits": 1,
+  "generation_axes": ["looping", "collapse", "unique128", "unique256"],
+  "looping_degrade_delta": 2,
+  "looping_improve_delta": 2,
+  "collapse_degrade_delta": 2,
+  "collapse_improve_delta": 2,
+  "unique_degrade_delta": 0.05,
+  "unique_improve_delta": 0.03,
+  "higher_is_better": ["unique128", "unique256"],
+  "lower_is_better": ["looping", "collapse"],
+  "floor_metrics": ["json_valid", "instruction", "entity"],
+  "hard_abort": {
+    "dnll_gt": 0.105,
+    "kl_gt": 0.018,
+    "val0_gt": 8.890125,
+    "cap_le": 3,
+    "special_rate_gt": 0.08
+  },
+  "next_step_allowed_only_if": "CONTINUE_ELIGIBLE",
+  "note": "SOFT_STOP and REVIEW_REQUIRED both forbid the next optimizer step. HARD_ABORT is a separate class. Floor metrics remaining at 0 are UNCHANGED_AT_FLOOR."
+}

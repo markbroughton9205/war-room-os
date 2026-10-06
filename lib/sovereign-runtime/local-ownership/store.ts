@@ -125,6 +125,16 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+function parseJsonObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
 export type LocalAuthSession = {
   token: string
   session: LocalSessionRecord
@@ -140,6 +150,7 @@ export class LocalOwnershipStore {
     ensureLocalAppDataDirs(this.paths)
     this.db = new DatabaseSync(this.paths.dbPath)
     this.db.exec(SCHEMA)
+    this.ensureCouncilPersistenceColumns()
     tightenFileMode(this.paths.dbPath)
     this.ensureInstallation()
   }
@@ -594,6 +605,218 @@ export class LocalOwnershipStore {
       .prepare('UPDATE local_conversation SET updated_at = ? WHERE id = ? AND owner_local_identity_id = ?')
       .run(ts, conversationId, ownerId)
     return record
+  }
+
+  /**
+   * Additive columns on the existing ownership database.
+   * Council session rows stay in local_conversation / local_message.
+   * This is not a second store.
+   */
+  private ensureCouncilPersistenceColumns(): void {
+    const add = (table: string, column: string, ddl: string) => {
+      const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+      if (!cols.some(col => col.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+    }
+    add('local_conversation', 'metadata_json', 'TEXT')
+    add('local_conversation', 'state', 'TEXT')
+    add('local_conversation', 'last_message_at', 'TEXT')
+    add('local_message', 'family', 'TEXT')
+    add('local_message', 'metadata_json', 'TEXT')
+    this.db.exec(`CREATE TABLE IF NOT EXISTS local_persistence_probe (
+      id TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      written_at TEXT NOT NULL,
+      readback_at TEXT
+    )`)
+  }
+
+  probePersistence(): {
+    readable: boolean
+    writable: boolean
+    last_write_at: string | null
+    last_readback_at: string | null
+    reason: string | null
+  } {
+    const id = 'council-runtime'
+    const payload = newPrefixedId('probe', 8)
+    const written = nowIso()
+    try {
+      this.db.prepare(
+        `INSERT INTO local_persistence_probe (id, payload, written_at, readback_at)
+         VALUES (?, ?, ?, NULL)
+         ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, written_at = excluded.written_at, readback_at = NULL`,
+      ).run(id, payload, written)
+    } catch (error) {
+      return {
+        readable: false,
+        writable: false,
+        last_write_at: null,
+        last_readback_at: null,
+        reason: error instanceof Error ? error.message : 'persistence probe write failed',
+      }
+    }
+    const row = this.db.prepare('SELECT payload, written_at FROM local_persistence_probe WHERE id = ?').get(id) as
+      | { payload: string; written_at: string }
+      | undefined
+    if (!row || row.payload !== payload) {
+      return { readable: false, writable: true, last_write_at: written, last_readback_at: null, reason: 'persistence readback mismatch' }
+    }
+    const readback = nowIso()
+    this.db.prepare('UPDATE local_persistence_probe SET readback_at = ? WHERE id = ?').run(readback, id)
+    const confirmed = this.db.prepare('SELECT readback_at FROM local_persistence_probe WHERE id = ?').get(id) as
+      | { readback_at: string | null }
+      | undefined
+    if (confirmed?.readback_at !== readback) {
+      return { readable: false, writable: true, last_write_at: written, last_readback_at: null, reason: 'persistence readback timestamp mismatch' }
+    }
+    return { readable: true, writable: true, last_write_at: written, last_readback_at: readback, reason: null }
+  }
+
+  listCouncilConversations(ownerId: string): Array<LocalConversationRecord & {
+    metadata: Record<string, unknown>
+    state: string
+    last_message_at: string | null
+  }> {
+    const rows = this.db.prepare(
+      `SELECT id, owner_local_identity_id, title, origin, data_mode, created_at, updated_at, deleted_at,
+              metadata_json, state, last_message_at
+       FROM local_conversation
+       WHERE owner_local_identity_id = ? AND deleted_at IS NULL
+       ORDER BY updated_at DESC`,
+    ).all(ownerId) as Array<LocalConversationRecord & { metadata_json: string | null; state: string | null; last_message_at: string | null }>
+    return rows.map(row => ({
+      ...row,
+      metadata: parseJsonObject(row.metadata_json),
+      state: row.state || 'active',
+      last_message_at: row.last_message_at,
+    }))
+  }
+
+  createCouncilConversation(ownerId: string, title: string, metadata: Record<string, unknown>): LocalConversationRecord & {
+    metadata: Record<string, unknown>
+    state: string
+    last_message_at: string | null
+  } {
+    const id = newPrefixedId('lcnv', 16)
+    const ts = nowIso()
+    const safeTitle = (title.trim() || 'New Council Session').slice(0, 200)
+    this.db.prepare(
+      `INSERT INTO local_conversation
+       (id, owner_local_identity_id, title, origin, data_mode, created_at, updated_at, deleted_at, metadata_json, state, last_message_at)
+       VALUES (?, ?, ?, 'LOCAL', 'LOCAL_ONLY', ?, ?, NULL, ?, 'active', NULL)`,
+    ).run(id, ownerId, safeTitle, ts, ts, JSON.stringify(metadata))
+    this.audit(ownerId, 'LOCAL_CONVERSATION_CREATE', id, 'OK')
+    return {
+      id,
+      owner_local_identity_id: ownerId,
+      title: safeTitle,
+      origin: 'LOCAL',
+      data_mode: 'LOCAL_ONLY',
+      created_at: ts,
+      updated_at: ts,
+      deleted_at: null,
+      metadata,
+      state: 'active',
+      last_message_at: null,
+    }
+  }
+
+  getCouncilConversation(ownerId: string, conversationId: string) {
+    const row = this.listCouncilConversations(ownerId).find(item => item.id === conversationId) ?? null
+    return row
+  }
+
+  patchCouncilConversation(ownerId: string, conversationId: string, patch: {
+    title?: string
+    state?: string
+    metadata?: Record<string, unknown>
+  }) {
+    const existing = this.getCouncilConversation(ownerId, conversationId)
+    if (!existing) return null
+    const ts = nowIso()
+    const title = typeof patch.title === 'string' ? (patch.title.trim() || existing.title).slice(0, 200) : existing.title
+    const state = patch.state && ['active', 'paused', 'archived'].includes(patch.state) ? patch.state : existing.state
+    const metadata = patch.metadata ?? existing.metadata
+    const deletedAt = state === 'archived' ? ts : null
+    this.db.prepare(
+      `UPDATE local_conversation
+       SET title = ?, state = ?, metadata_json = ?, updated_at = ?, deleted_at = ?
+       WHERE id = ? AND owner_local_identity_id = ?`,
+    ).run(title, state, JSON.stringify(metadata), ts, deletedAt, conversationId, ownerId)
+    if (state === 'archived') return null
+    return this.getCouncilConversation(ownerId, conversationId)
+  }
+
+  addCouncilMessage(ownerId: string, conversationId: string, input: {
+    role: string
+    content: string
+    family?: string | null
+    metadata?: Record<string, unknown>
+  }) {
+    const conv = this.getConversation(ownerId, conversationId)
+    if (!conv) return null
+    const id = newPrefixedId('lmsg', 16)
+    const ts = nowIso()
+    const metadata = input.metadata ?? {}
+    this.db.prepare(
+      `INSERT INTO local_message
+       (id, conversation_id, owner_local_identity_id, role, content, created_at,
+        actual_provider, actual_model, local_or_remote, fallback_used, intelligence_class, family, metadata_json)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 'LOCAL', 0, 'council', ?, ?)`,
+    ).run(id, conversationId, ownerId, input.role, String(input.content || ''), ts, input.family ?? null, JSON.stringify(metadata))
+    const preview = String(input.content || '').trim().slice(0, 160)
+    const existing = this.getCouncilConversation(ownerId, conversationId)
+    const prev = existing?.metadata ?? {}
+    const prevCouncil = prev.council && typeof prev.council === 'object' && !Array.isArray(prev.council)
+      ? prev.council as Record<string, unknown>
+      : {}
+    const nextMeta = { ...prev, council: { ...prevCouncil, lastPreview: preview } }
+    this.db.prepare(
+      `UPDATE local_conversation
+       SET updated_at = ?, last_message_at = ?, metadata_json = ?
+       WHERE id = ? AND owner_local_identity_id = ?`,
+    ).run(ts, ts, JSON.stringify(nextMeta), conversationId, ownerId)
+    return {
+      id,
+      conversation_id: conversationId,
+      role: input.role,
+      content: String(input.content || ''),
+      family: input.family ?? null,
+      metadata,
+      created_at: ts,
+    }
+  }
+
+  listCouncilMessages(ownerId: string, conversationId: string) {
+    if (!this.getConversation(ownerId, conversationId)) return null
+    const rows = this.db.prepare(
+      `SELECT id, conversation_id, role, content, created_at, family, metadata_json
+       FROM local_message
+       WHERE conversation_id = ? AND owner_local_identity_id = ?
+       ORDER BY created_at ASC`,
+    ).all(conversationId, ownerId) as Array<{
+      id: string
+      conversation_id: string
+      role: string
+      content: string
+      created_at: string
+      family: string | null
+      metadata_json: string | null
+    }>
+    return rows.map(row => ({
+      id: row.id,
+      conversation_id: row.conversation_id,
+      role: row.role,
+      content: row.content,
+      family: row.family,
+      metadata: parseJsonObject(row.metadata_json),
+      created_at: row.created_at,
+    }))
+  }
+
+  findCouncilMessageByIdempotency(ownerId: string, conversationId: string, idempotencyKey: string) {
+    const rows = this.listCouncilMessages(ownerId, conversationId) ?? []
+    return rows.find(row => row.metadata.idempotencyKey === idempotencyKey) ?? null
   }
 
   listMessages(ownerId: string, conversationId: string): LocalMessageRecord[] | null {

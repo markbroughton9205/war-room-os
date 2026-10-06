@@ -1,10 +1,11 @@
+import { appendFileSync } from 'node:fs'
 import { streamCouncilFamily, familyIsStreamConfigured } from '@/lib/council/live-orchestration/streamProvider'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { requestLocalCoderJson, resolveLocalCoder } from './localCoder'
 import { parseAndValidateModelDecision } from './foundryModelDecision'
 import { buildFoundryModelPrompt, FOUNDRY_MODEL_SYSTEM_PROMPT } from './foundryModelPrompt'
 import {
-  FOUNDRY_LOCAL_DECISION_SCHEMA,
+  localDecisionSchemaForTools,
   FOUNDRY_LOCAL_GENERATE_OPTIONS,
   FOUNDRY_LOCAL_MODEL_SYSTEM_PROMPT,
   LOCAL_MODEL_MAX_REPAIRS,
@@ -134,14 +135,26 @@ class OllamaModel extends BaseModel {
     const needsLongWrite = /file\.write path=(server|store|catalog|pipeline|events)\.mjs|file\.write path=(main|app)\.js|file\.write path=(about\.html|styles\.css)|file\.write path=lib\/(util|compute)\.js|file\.write path=src\/(index|blank|repo|slug|title|a|b|service)\.mjs|server\.mjs already listens|still missing POST routes|:memory:|DatabaseSync/i.test(
       `${request.context.userRequest}\n${request.context.importantFindings.join('\n')}\n${request.context.loopWarning ?? ''}`,
     )
-    const generateOptions = needsLongWrite
-      ? { ...FOUNDRY_LOCAL_GENERATE_OPTIONS, num_predict: 2_048 }
-      : FOUNDRY_LOCAL_GENERATE_OPTIONS
+    // Authoring a whole source file inside one JSON reply needs far more than a tool-choice reply: a truncated reply is invalid JSON.
+    const narrowPatch = request.context.importantFindings.some(item => item.startsWith('AUTHORING_NARROW: '))
+    const writingSource = !narrowPatch && request.context.importantFindings.some(item => item.startsWith('AUTHORING: ')) && !request.context.importantFindings.some(item => item.startsWith('AUTHORING_NEXT_CALL: '))
+    // temperature 0 with a fixed seed returns the same reply to the same prompt: after a no-op or repeated-failure result, sample differently.
+    const stuck = /NO_CHANGE|REPEATED_FAILURE|PATCH_REJECTED/.test(request.context.recentToolResults[0]?.excerpt ?? '')
+    const generateOptions = narrowPatch
+      ? { ...FOUNDRY_LOCAL_GENERATE_OPTIONS, num_predict: 1_024, ...(stuck ? { temperature: 0.5, seed: Date.now() % 100_000 } : {}) }
+      : writingSource
+      ? { ...FOUNDRY_LOCAL_GENERATE_OPTIONS, num_predict: 4_096, ...(stuck ? { temperature: 0.5, seed: Date.now() % 100_000 } : {}) }
+      : needsLongWrite
+        ? { ...FOUNDRY_LOCAL_GENERATE_OPTIONS, num_predict: 2_048 }
+        : FOUNDRY_LOCAL_GENERATE_OPTIONS
     const first = await requestLocalCoderJson({
+      signal: request.abortSignal,
       role: 'FOUNDRY_MASTER',
+      preferredModel: this.model,
+      requireLoopback: request.requireLoopback,
       system: FOUNDRY_LOCAL_MODEL_SYSTEM_PROMPT,
       prompt,
-      format: FOUNDRY_LOCAL_DECISION_SCHEMA,
+      format: localDecisionSchemaForTools(request.context.tools),
       options: generateOptions,
       keepAlive: '30m',
     })
@@ -156,20 +169,27 @@ class OllamaModel extends BaseModel {
       return { ok: false as const, error: first.detail, model: this.model }
     }
     let text = first.text
+    const traceReply = (label: string, reply: string, verdict: string) => {
+      if (process.env.FOUNDRY_PROMPT_TRACE) appendFileSync(process.env.FOUNDRY_PROMPT_TRACE, `\n=====${label} chars=${reply.length} verdict=${verdict}=====\n${reply}\n`)
+    }
     let parsed = parseAndValidateModelDecision(
       text,
       request.context.permissions,
       new Set(request.context.tools.map(tool => tool.name)),
       request.context.boundedRetryLock,
     )
+    traceReply('REPLY', text, parsed.ok ? 'OK' : parsed.error)
     let repairs = 0
     while (!parsed.ok && repairs < LOCAL_MODEL_MAX_REPAIRS) {
       repairs += 1
       const repaired = await requestLocalCoderJson({
-        role: 'FOUNDRY_MASTER',
+        signal: request.abortSignal,
+      role: 'FOUNDRY_MASTER',
+        preferredModel: this.model,
+      requireLoopback: request.requireLoopback,
         system: FOUNDRY_LOCAL_MODEL_SYSTEM_PROMPT,
-        prompt: buildLocalRepairPrompt(parsed.error, text),
-        format: FOUNDRY_LOCAL_DECISION_SCHEMA,
+        prompt: buildLocalRepairPrompt(parsed.error, text, request),
+        format: localDecisionSchemaForTools(request.context.tools),
         options: { ...generateOptions, num_predict: Math.max(generateOptions.num_predict, 400) },
         keepAlive: '30m',
       })
@@ -181,6 +201,7 @@ class OllamaModel extends BaseModel {
         new Set(request.context.tools.map(tool => tool.name)),
         request.context.boundedRetryLock,
       )
+      traceReply(`REPAIR_REPLY_${repairs}`, text, parsed.ok ? 'OK' : parsed.error)
     }
     recordLocalModelCallMetrics({
       promptChars: prompt.length,

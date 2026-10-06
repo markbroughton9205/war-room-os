@@ -11,7 +11,7 @@
 
 export type GibsTileFormat = 'jpg' | 'png'
 
-export type GibsTemporalResolution = 'daily' | '8-day-composite' | 'annual'
+export type GibsTemporalResolution = 'daily' | '10-minute' | '8-day-composite' | 'annual'
 
 export type GibsLayerStatus = 'available' | 'unavailable'
 
@@ -143,6 +143,60 @@ export const GIBS_LAYERS: GibsLayerDefinition[] = [
     description:
       'Annual composite of nighttime light emissions, useful for observing human settlement, infrastructure, and power-availability patterns.',
     caveat: 'This is a yearly composite, not a live or daily feed.',
+    status: 'available',
+    tileFormat: 'png',
+    tileMatrixSet: 'GoogleMapsCompatible_Level8',
+    maxNativeZoom: 8,
+    temporalResolution: 'annual',
+    defaultDate: '2016-01-01',
+  },
+  {
+    id: 'night-lights-daily-dnb',
+    label: 'Night Lights (daily DNB)',
+    identifier: 'VIIRS_SNPP_GapFilled_BRDF_Corrected_DayNightBand_Radiance',
+    description:
+      'Daily VIIRS Day/Night Band radiance (gap-filled BRDF-corrected). Public GIBS path used when VNP46A2 Black Marble granules are not retrievable without Earthdata login.',
+    caveat: 'Daily radiance, not live electricity and not the VNP46A2 science granule.',
+    status: 'available',
+    tileFormat: 'png',
+    tileMatrixSet: 'GoogleMapsCompatible_Level8',
+    maxNativeZoom: 8,
+    temporalResolution: 'daily',
+    defaultDate: '2026-09-16',
+  },
+  {
+    id: 'goes-east-geocolor',
+    label: 'GOES-East GeoColor',
+    identifier: 'GOES-East_ABI_GeoColor',
+    description: 'NOAA GOES-East ABI GeoColor geostationary imagery at 10-minute observed steps. Americas full disk.',
+    caveat: 'Regional GOES-East coverage only. Successive observed frames, not interpolated motion.',
+    status: 'available',
+    tileFormat: 'png',
+    tileMatrixSet: 'GoogleMapsCompatible_Level7',
+    maxNativeZoom: 7,
+    temporalResolution: '10-minute',
+    defaultDate: '2026-09-18',
+  },
+  {
+    id: 'goes-west-geocolor',
+    label: 'GOES-West GeoColor',
+    identifier: 'GOES-West_ABI_GeoColor',
+    description: 'NOAA GOES-West ABI GeoColor geostationary imagery at 10-minute observed steps. Pacific full disk.',
+    caveat: 'Regional GOES-West coverage only. Successive observed frames, not interpolated motion.',
+    status: 'available',
+    tileFormat: 'png',
+    tileMatrixSet: 'GoogleMapsCompatible_Level7',
+    maxNativeZoom: 7,
+    temporalResolution: '10-minute',
+    defaultDate: '2026-09-18',
+  },
+  {
+    id: 'black-marble',
+    label: 'Black Marble',
+    identifier: 'VIIRS_Black_Marble',
+    description:
+      'NASA Black Marble 2016 Earth-at-night composite from VIIRS on Suomi NPP — observed city and anthropogenic lights on a darkened Earth, not a generated glow map.',
+    caveat: 'Annual 2016 composite. Not live power status and not a daily night photograph.',
     status: 'available',
     tileFormat: 'png',
     tileMatrixSet: 'GoogleMapsCompatible_Level8',

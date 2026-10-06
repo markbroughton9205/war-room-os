@@ -9,6 +9,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { resolveRepoRoot } from '@/lib/repo/paths'
 import { FOUNDRY_AGENT_EVENT_TYPES } from './foundryAgentEvents'
+import type { FoundryMissionPermissions } from './foundryMissionTypes'
 import {
   authorizeResourceAction,
   beginResourceUsage,
@@ -59,16 +60,22 @@ function fakeModel(provider: 'openai' | 'ollama' | 'cursor-agent', ok = true, er
   }
 }
 
+/** A stub mission that is allowed to do nothing. */
+const NO_PERMISSIONS: FoundryMissionPermissions = {
+  filesystem: false, terminal: false, browser: false, computerUse: false, tests: false, lint: false, typecheck: false, build: false, package: false,
+  installProduction: false, activateInstall: false, installedRuntimeControl: false, process: false, commit: false, push: false, liveDeploy: false, internetResearch: false,
+}
+
 function stubContext(missionId: string) {
   return {
     missionId,
-    missionKind: 'repair' as const,
+    missionKind: 'fixture' as const,
     userRequest: 'fixture',
     goal: 'fixture',
     successCriteria: [],
     constraints: [],
-    permissions: {},
-    phase: 'RUNNING' as const,
+    permissions: NO_PERMISSIONS,
+    phase: 'EXECUTING' as const,
     plan: [],
     hypotheses: [],
     changedFiles: [],

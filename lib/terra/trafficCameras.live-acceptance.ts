@@ -77,6 +77,7 @@ async function run(): Promise<CaseResult[]> {
     return results
   }
 
+  const credentialHealth = await ohgoCamerasAdapter.healthCheck()
   const response = await ohgoCamerasAdapter.run({ text: '39.00,-84.60,39.30,-84.30', maxResults: 80 })
   const ids = response.documents.map(doc => doc.providerRecordId ?? doc.id)
   const sample = response.documents[0]
@@ -88,13 +89,13 @@ async function run(): Promise<CaseResult[]> {
 
   results.push(check(
     'OHGO_AUTH',
-    response.ok && response.error?.category !== 'authentication_failed',
-    `ok=${response.ok} category=${response.error?.category ?? 'none'} http=${response.error?.httpStatus ?? 'none'}`,
+    credentialHealth.state === 'ready',
+    `credential_health=${credentialHealth.state} checked_at=${credentialHealth.checkedAt} catalog_ok=${response.ok} catalog_from_cache=${response.fromCache}`,
   ))
   results.push(check(
     'OHGO_CAMERA_CATALOG',
     response.ok && response.documents.length > 0 && ids.every(id => typeof id === 'string' && id.startsWith('ohgo:')),
-    `n=${response.documents.length} sample_id=${ids[0] ?? 'none'}`,
+    `n=${response.documents.length} sample_id=${ids[0] ?? 'none'} from_cache=${response.fromCache}`,
   ))
   results.push(check(
     'OHGO_CAMERA_COUNT',

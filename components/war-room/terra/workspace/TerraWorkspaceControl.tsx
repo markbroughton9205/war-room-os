@@ -2,11 +2,13 @@
 
 import { useState, useSyncExternalStore } from 'react'
 import { useTerraWorkspaceLayoutApi } from './TerraWorkspaceLayoutProvider'
+import { useTerraMissionControlOptional } from '../mission-control/TerraMissionControlProvider'
 import type { TerraWorkspacePreset } from '@/lib/terra/workspace/layout'
 import type { TerraWorkspaceDock } from '@/lib/terra/workspace/layout'
 
 export function TerraWorkspaceControl() {
   const api = useTerraWorkspaceLayoutApi()
+  const mission = useTerraMissionControlOptional()
   const settings = useSyncExternalStore(api.store.subscribe, api.store.getSnapshot, api.store.getSnapshot).settings
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const viewport = () => api.getViewport()
@@ -54,6 +56,20 @@ export function TerraWorkspaceControl() {
           onClick={() => api.store.setSmartOpenEnabled(!settings.smartOpen)}
         >
           Open {settings.smartOpen ? 'ON' : 'OFF'}
+        </button>
+        <button
+          type="button"
+          className={`col-span-2 rounded border px-1 py-0.5 text-[8px] uppercase tracking-widest ${settings.missionControlChrome ? 'border-cyan-300/40 text-cyan-200' : 'border-white/15 text-slate-400'}`}
+          aria-pressed={settings.missionControlChrome}
+          data-testid="terra-workspace-mission-control-toggle"
+          title="Mission Control hosts panels in drawers. Classic restores floating panels."
+          onClick={() => {
+            const next = !settings.missionControlChrome
+            api.store.setMissionControlChrome(next)
+            mission?.setChromeEnabled(next)
+          }}
+        >
+          Chrome {settings.missionControlChrome ? 'MISSION' : 'CLASSIC'}
         </button>
       </div>
       <p className="mt-1 text-[8px] uppercase tracking-widest text-slate-500">Presets</p>

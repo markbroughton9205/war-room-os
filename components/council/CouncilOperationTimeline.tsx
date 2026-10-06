@@ -10,6 +10,7 @@ import {
   type CommanderOperation,
   type CouncilOperationMessageInput,
 } from '@/lib/council/unified-experience'
+import { sanitizeRuntimeDetailsText } from '@/lib/council/commander-chat/normalChatContract'
 
 type CopyState = 'idle' | 'copied' | 'failed'
 
@@ -124,28 +125,38 @@ export function CouncilOperationTimeline({ input, inputs, operation: providedOpe
         <h3 className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#93C5FD' }}>
           Commander Briefing
         </h3>
-        <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed" style={{ color: '#E5E7EB' }}>
-          {operation.briefing.body}
-        </p>
+        {sanitizeRuntimeDetailsText(operation.briefing.body) ? (
+          <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed" style={{ color: '#E5E7EB' }}>
+            {sanitizeRuntimeDetailsText(operation.briefing.body)}
+          </p>
+        ) : null}
         {operation.briefing.recommendation ? (
           <p className="mt-2 text-xs leading-relaxed" style={{ color: '#BAE6FD' }}>
             Recommended path: {operation.briefing.recommendation}
           </p>
         ) : null}
+        {operation.briefing.risks.length || operation.briefing.approvalRequirements.length || sanitizeRuntimeDetailsText(operation.briefing.evidenceStatus) ? (
         <div className="mt-2 grid gap-2 md:grid-cols-3">
+          {operation.briefing.risks.length ? (
           <div>
             <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#FCA5A5' }}>Open Risks</div>
-            <p className="mt-1 text-[11px]" style={{ color: '#CBD5E1' }}>{operation.briefing.risks.join('; ') || 'None reported.'}</p>
+            <p className="mt-1 text-[11px]" style={{ color: '#CBD5E1' }}>{operation.briefing.risks.join('; ')}</p>
           </div>
+          ) : null}
+          {operation.briefing.approvalRequirements.length ? (
           <div>
             <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#FDE68A' }}>Approval Requirements</div>
-            <p className="mt-1 text-[11px]" style={{ color: '#CBD5E1' }}>{operation.briefing.approvalRequirements.join('; ') || 'None reported.'}</p>
+            <p className="mt-1 text-[11px]" style={{ color: '#CBD5E1' }}>{operation.briefing.approvalRequirements.join('; ')}</p>
           </div>
+          ) : null}
+          {sanitizeRuntimeDetailsText(operation.briefing.evidenceStatus) ? (
           <div>
             <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#86EFAC' }}>Evidence Status</div>
-            <p className="mt-1 whitespace-pre-wrap text-[11px]" style={{ color: '#CBD5E1' }}>{operation.briefing.evidenceStatus}</p>
+            <p className="mt-1 whitespace-pre-wrap text-[11px]" style={{ color: '#CBD5E1' }}>{sanitizeRuntimeDetailsText(operation.briefing.evidenceStatus)}</p>
           </div>
+          ) : null}
         </div>
+        ) : null}
         {operation.briefing.nextActions.length ? (
           <div className="mt-2">
             <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#C4B5FD' }}>Next Actions</div>

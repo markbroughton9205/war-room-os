@@ -9,6 +9,13 @@ import {
   type AreaLiveCameraMedia,
 } from '@/lib/terra/godsEye/areaLiveMedia'
 
+/** React has no `defaultMuted` prop; the DOM property is what keeps a muted stream muted across reloads, so set it on the element. */
+function syncDefaultMuted(muted: boolean) {
+  return (element: HTMLVideoElement | null) => {
+    if (element) element.defaultMuted = muted
+  }
+}
+
 export function AreaLiveMediaViewer({
   media,
   expanded,
@@ -129,7 +136,7 @@ export function AreaLiveMediaViewer({
             src={videoSrc}
             className={`w-full bg-black object-contain ${expanded ? 'max-h-[min(28rem,46vh)]' : 'max-h-[min(16rem,32vh)]'}`}
             muted={nativeMuted}
-            defaultMuted={nativeMuted}
+            ref={syncDefaultMuted(nativeMuted)}
             playsInline
             autoPlay
             controls={commanderPlay}
@@ -156,7 +163,7 @@ export function AreaLiveMediaViewer({
             src={videoSrc}
             className={`w-full bg-black object-contain ${expanded ? 'max-h-[min(28rem,46vh)]' : 'max-h-[min(16rem,32vh)]'}`}
             muted={nativeMuted}
-            defaultMuted={nativeMuted}
+            ref={syncDefaultMuted(nativeMuted)}
             playsInline
             autoPlay
             controls={commanderPlay}

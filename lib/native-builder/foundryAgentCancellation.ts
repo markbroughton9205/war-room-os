@@ -26,7 +26,8 @@ type MissionAbortState = {
   scopes: Set<FoundryAbortScope>
 }
 
-const missions = new Map<string, MissionAbortState>()
+const shared = globalThis as typeof globalThis & { __warRoomFoundryAbortRegistry?: Map<string, MissionAbortState> }
+const missions = shared.__warRoomFoundryAbortRegistry ??= new Map<string, MissionAbortState>()
 
 export function combineAbortSignals(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
   const live = signals.filter((item): item is AbortSignal => Boolean(item))

@@ -29,7 +29,7 @@ export function WrimReconciliationPanel() {
   }, [])
 
   useEffect(() => {
-    void refresh().catch(err => setError(err instanceof Error ? err.message : String(err)))
+    queueMicrotask(() => void refresh().catch(err => setError(err instanceof Error ? err.message : String(err))))
   }, [refresh])
 
   const hw = status?.nebula_readiness as { cpuName?: string; gpuName?: string; gpuVramMiB?: number } | undefined

@@ -3,6 +3,7 @@
 import { memo, useState } from 'react'
 
 import { FoundryEntryLink } from '@/components/war-room/foundry/FoundryEntryLink'
+import { HvsEntryLink } from '@/components/war-room/higher-vision-studios/HvsEntryLink'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 
 export type DockPanelId =
@@ -128,6 +129,23 @@ export const FeatureDock = memo(function FeatureDock({
           FY
         </span>
       </FoundryEntryLink>
+      <HvsEntryLink
+        testId="nav-higher-vision-studios-dock"
+        className="group relative flex shrink-0 flex-col items-center"
+      >
+        <span className="pointer-events-none absolute -top-7 z-10 whitespace-nowrap rounded bg-black/95 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-amber-200 opacity-0 group-hover:opacity-100">
+          Higher Vision Studios
+        </span>
+        <span
+          className="relative flex h-9 w-9 items-center justify-center rounded-xl text-[9px] font-bold uppercase tracking-widest text-amber-100 transition-transform sm:h-10 sm:w-10"
+          style={{
+            border: '1px solid rgba(201,162,39,0.7)',
+            background: 'rgba(201,162,39,0.12)',
+          }}
+        >
+          HV
+        </span>
+      </HvsEntryLink>
     </nav>
   )
 })

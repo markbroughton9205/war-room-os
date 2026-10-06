@@ -37,7 +37,8 @@ export const DockPanel = memo(function DockPanel({ panelId, onClose, onMinimize,
 
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 bottom-[var(--live-room-bottom-reserved,7rem)] z-30 flex justify-center px-3 sm:px-6"
+      className="pointer-events-none fixed inset-x-0 z-30 flex justify-center px-3 sm:px-6"
+      style={{ bottom: 'var(--live-room-bottom-reserved, 7rem)' }}
       data-testid="dock-panel-overlay"
     >
       <section

@@ -1,3 +1,5 @@
+import { bindWorkbenchAssistOwner, clearWorkbenchAssistBinding, readWorkbenchAssistBinding } from '@/lib/native-builder/foundryWorkbenchAssistRouting'
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import { isFoundryWorkbenchW0Enabled } from '@/lib/native-builder/foundryWorkbenchW0'
 import {
@@ -26,6 +28,8 @@ const KINDS = new Set<FoundryW2AssistKind>([
 ])
 
 export async function GET() {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   if (!isFoundryWorkbenchW0Enabled()) {
     return NextResponse.json({ enabled: false })
   }
@@ -34,6 +38,8 @@ export async function GET() {
     consumeWorkbenchBus('pending-command.json')
     const result = await runFoundryW2Command({
       kind: snapshot.pendingCommand.kind,
+      owningMissionId: snapshot.pendingCommand.owningMissionId,
+      owningBindingId: snapshot.pendingCommand.owningBindingId,
       envelope: snapshot.pendingCommand.envelope,
       instruction: snapshot.pendingCommand.instruction,
       commanderApproved: Boolean(snapshot.pendingCommand.commanderApproved),
@@ -43,7 +49,6 @@ export async function GET() {
       stockCommand: snapshot.pendingCommand.stockCommand,
     })
     return NextResponse.json({
-      enabled: true,
       ...composerContextSnapshot(),
       lastResponse: result,
       history: w2ProposalHistory().map(item => ({
@@ -59,16 +64,16 @@ export async function GET() {
   if (snapshot.acceptRequest?.proposalId) {
     consumeWorkbenchBus('accept-request.json')
     const result = await acceptW2Proposal(snapshot.acceptRequest.proposalId)
-    return NextResponse.json({ enabled: true, ...composerContextSnapshot(), lastResponse: result })
+    return NextResponse.json({ ...composerContextSnapshot(), lastResponse: result })
   }
   if (snapshot.rejectRequest?.proposalId) {
     consumeWorkbenchBus('reject-request.json')
     const result = await rejectW2Proposal(snapshot.rejectRequest.proposalId)
-    return NextResponse.json({ enabled: true, ...composerContextSnapshot(), lastResponse: result })
+    return NextResponse.json({ ...composerContextSnapshot(), lastResponse: result })
   }
   return NextResponse.json({
-    enabled: true,
     ...snapshot,
+    ownerBinding: readWorkbenchAssistBinding(),
     history: w2ProposalHistory().map(item => ({
       proposalId: item.proposalId,
       status: item.status,
@@ -81,6 +86,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   if (!isFoundryWorkbenchW0Enabled()) {
     return NextResponse.json({ error: 'FOUNDRY_WORKBENCH_W0 is off' }, { status: 403 })
   }
@@ -88,6 +95,10 @@ export async function POST(req: Request) {
     action?: string
     kind?: string
     instruction?: string
+    owningMissionId?: string
+    owningBindingId?: string
+    owningSessionId?: string
+    workspaceRoot?: string
     proposalId?: string
     envelope?: FoundryEditorContextEnvelope
     replacementText?: string
@@ -103,6 +114,22 @@ export async function POST(req: Request) {
     if (raw && typeof raw === 'object') body = raw as typeof body
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
+  }
+  if (body.action === 'clearOwner') {
+    clearWorkbenchAssistBinding()
+    return NextResponse.json({ ok: true })
+  }
+  if (body.action === 'bindOwner') {
+    const selectionId = clearWorkbenchAssistBinding()
+    if (typeof body.owningMissionId !== 'string' || typeof body.owningSessionId !== 'string' || typeof body.workspaceRoot !== 'string') {
+      return NextResponse.json({ ok: false, error: 'Explicit mission, session and workspace are required.' }, { status: 400 })
+    }
+    try {
+      const ownerBinding = await bindWorkbenchAssistOwner(body.owningMissionId, body.owningSessionId, body.workspaceRoot, selectionId, req.signal)
+      return NextResponse.json({ ok: true, ownerBinding })
+    } catch {
+      return NextResponse.json({ ok: false, error: 'The selected session, mission policy and workspace could not be verified.' }, { status: 409 })
+    }
   }
   if (body.action === 'attach' && body.envelope) {
     const envelope = attachEditorContext(body.envelope)
@@ -133,6 +160,8 @@ export async function POST(req: Request) {
   }
   const result = await runFoundryW2Command({
     kind,
+    owningMissionId: typeof body.owningMissionId === 'string' ? body.owningMissionId : undefined,
+    owningBindingId: typeof body.owningBindingId === 'string' ? body.owningBindingId : undefined,
     envelope: body.envelope,
     instruction: body.instruction,
     providerClass: body.providerClass,

@@ -248,11 +248,14 @@ async function independentlyVerifyMutable(input: {
     const invalid = nodeRun(projectRoot, ['cli.mjs', '--nope'])
     const tests = existsSync(path.join(projectRoot, 'cli.test.mjs')) ? nodeRun(projectRoot, ['--test', 'cli.test.mjs']) : { status: 1, stdout: '', stderr: 'missing tests' }
     if (letter === 'E') {
+      // The evidence names the exact invocation, not just its result: a model whose --name takes no argument sees precisely why (an extra
+      // argv entry it rejected), not just an opaque exit code. The name value itself is redacted downstream by sanitizeVerifierDetail.
+      const greetInvocation = `ran: cli.mjs --name ${String(hidden?.values.person ?? 'Nia')} (2 argv entries) -> stdout=${JSON.stringify(greet.stdout.trim().slice(0, 60))} stderr=${JSON.stringify(greet.stderr.trim().slice(0, 60))} exit=${greet.status}`
       criteria.push(row('E1', true, help.status === 0 && /Usage/i.test(help.stdout), 'CLI', help.stdout.slice(0, 80)))
-      criteria.push(row('E2', true, /Hello/.test(greet.stdout), 'CLI', greet.stdout.trim()))
+      criteria.push(row('E2', true, /Hello/.test(greet.stdout), 'CLI', greetInvocation))
       criteria.push(row('E3', true, sum.stdout.trim() === String(hidden?.values.sum ?? ''), 'CLI', `${sum.stdout.trim()} vs ${hidden?.values.sum}`))
       criteria.push(row('E4', true, invalid.status === 2, 'CLI', String(invalid.status)))
-      criteria.push(row('E5', true, greet.status === 0, 'CLI', String(greet.status)))
+      criteria.push(row('E5', true, greet.status === 0, 'CLI', greetInvocation))
       criteria.push(row('E6', true, tests.status === 0, 'TEST_RUNNER', tests.stderr.slice(0, 80)))
       if (read(projectRoot, 'cli.mjs')?.includes(String(hidden?.values.sum ?? '___never___')) && !/reduce/.test(read(projectRoot, 'cli.mjs') || '')) {
         forbiddenShortcutHits.push('print a hardcoded sum')

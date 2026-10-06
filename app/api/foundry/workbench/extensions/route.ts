@@ -1,3 +1,4 @@
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import { isFoundryWorkbenchW0Enabled } from '@/lib/native-builder/foundryWorkbenchW0'
 import { foundryWorkbenchStateDir } from '@/lib/native-builder/foundryWorkbenchW0.host'
@@ -27,11 +28,15 @@ function snapshot() {
 }
 
 export async function GET() {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   if (!isFoundryWorkbenchW0Enabled()) return NextResponse.json({ enabled: false })
   return NextResponse.json(snapshot())
 }
 
 export async function POST(req: Request) {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   if (!isFoundryWorkbenchW0Enabled()) return NextResponse.json({ enabled: false, ok: false })
   const body = await req.json() as {
     action?: string

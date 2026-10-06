@@ -90,7 +90,7 @@ async function run() {
       'consumers_discover_selected_port',
       /discoverWarRoomCdpOrigin/.test(computer)
         && /readDesktopCdpRuntime/.test(computer)
-        && /claimWarRoomCdpEndpoint/.test(main)
+        && /configureWarRoomCdp/.test(main)
         && !/--remote-debugging-port=9222/.test(installer)
         && !/--remote-debugging-port=9222/.test(runtime)
         && !computer.includes('http://127.0.0.1:9222'),

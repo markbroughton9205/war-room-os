@@ -3,14 +3,6 @@
 import { MEDIA_TABS, type MediaTabId } from '@/lib/media/types'
 import { useMediaPlayback } from './MediaPlaybackProvider'
 
-const TAB_LABEL: Record<MediaTabId, string> = {
-  radio: 'Radio',
-  news: 'News',
-  weather: 'Weather',
-  podcasts: 'Podcasts',
-  saved: 'Saved',
-}
-
 function TabGlyph({ tab }: { tab: MediaTabId }) {
   const common = { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, 'aria-hidden': true as const }
   if (tab === 'radio') {
@@ -56,31 +48,28 @@ function TabGlyph({ tab }: { tab: MediaTabId }) {
 
 export function MediaTabs() {
   const { state, controller } = useMediaPlayback()
+  const operational = MEDIA_TABS.filter(tab => tab === 'radio')
 
   return (
     <nav className="flex shrink-0 flex-wrap gap-1.5 px-3.5 py-2" aria-label="Media sections" data-testid="media-tabs">
-      {MEDIA_TABS.map(tab => {
+      {operational.map(tab => {
         const active = state.activeTab === tab
-        const enabled = tab === 'radio'
         return (
           <button
             key={tab}
             type="button"
             data-testid={`media-tab-${tab}`}
-            disabled={!enabled}
             aria-pressed={active}
-            title={enabled ? TAB_LABEL[tab] : `${TAB_LABEL[tab]} is not available this pass`}
+            title="Music"
             className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold ${
               active
                 ? 'border-emerald-400/80 bg-emerald-400 text-slate-950 shadow-[0_0_16px_rgba(52,211,153,0.35)]'
-                : enabled
-                  ? 'border-white/12 bg-black/30 text-slate-200 hover:border-cyan-300/40'
-                  : 'cursor-not-allowed border-white/8 text-slate-600'
+                : 'border-white/12 bg-black/30 text-slate-200 hover:border-cyan-300/40'
             }`}
             onClick={() => controller.setActiveTab(tab)}
           >
             <TabGlyph tab={tab} />
-            {TAB_LABEL[tab]}
+            Music
           </button>
         )
       })}

@@ -197,6 +197,7 @@ async function search(query: ResearchQuery) {
         ...(draughtMeters !== null ? { draughtMeters: String(draughtMeters) } : {}),
         ...(shipTypeCode !== null ? { shipTypeCode: String(shipTypeCode) } : {}),
         ...(shipTypeLabel ? { shipTypeLabel } : {}),
+        ...(name ? { name } : {}),
         lastObservedIso,
         vesselMetadataAvailable: String(vesselsOk),
       },

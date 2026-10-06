@@ -4,6 +4,8 @@ import { IntentEngine } from './IntentEngine'
 import { SkillRouter } from './SkillRouter'
 import { createRoutingNote } from './RoutingNote'
 import type { CouncilDecisionInput, IntentClarificationReason, RoutingNote } from './types'
+import { isGiEng01ShortPathEnabled } from '@/lib/council/gi/featureFlag'
+import { classifyCouncilPath } from '@/lib/council/gi/pathClassifier'
 
 function describeClarification(reasonKind: IntentClarificationReason): string {
   switch (reasonKind) {
@@ -52,6 +54,11 @@ export class CouncilDecisionEngine {
       decisionPath.push(describeClarification(intent.clarificationReason))
     }
 
+    const giPath = isGiEng01ShortPathEnabled() ? classifyCouncilPath(input.message) : null
+    if (giPath) {
+      decisionPath.push(`GI-ENG-01 path ${giPath.path} (${giPath.mission_class}).`)
+    }
+
     decisionPath.push('Provider selection deferred to Phase 46D.')
 
     const reason = describeClarification(intent.clarificationReason)
@@ -65,6 +72,7 @@ export class CouncilDecisionEngine {
       decisionPath,
       timestamp: input.timestamp,
       routingId: input.routingId,
+      path: giPath?.path,
     })
   }
 }

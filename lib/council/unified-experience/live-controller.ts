@@ -349,7 +349,7 @@ function summaryFor(mode: CommanderOperationMode, events: readonly CommanderOper
       ? 'System operation'
       : 'Council operation'
   const fragments = [
-    respondedCount ? `${respondedCount} agent${respondedCount === 1 ? '' : 's'} responded` : 'ASTRA coordinating',
+    respondedCount ? `${respondedCount} agent${respondedCount === 1 ? '' : 's'} responded` : 'Council coordinating',
     failedCount ? `${failedCount} failed/timed out` : null,
     unavailableCount ? `${unavailableCount} unavailable` : null,
     skippedCount ? `${skippedCount} skipped` : null,

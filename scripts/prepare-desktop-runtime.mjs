@@ -152,12 +152,14 @@ if (process.argv.includes('--esbuild-version')) {
 
 console.log('=== prepare-desktop-runtime ===')
 
-const standalone = path.join(repoRoot, '.next', 'standalone')
-const staticDir = path.join(repoRoot, '.next', 'static')
+const nextDistName = process.env.WAR_ROOM_NEXT_DIST_DIR || '.next'
+const nextDist = path.join(repoRoot, nextDistName)
+const standalone = path.join(nextDist, 'standalone')
+const staticDir = path.join(nextDist, 'static')
 const publicDir = path.join(repoRoot, 'public')
-mustExist(path.join(repoRoot, '.next', 'BUILD_ID'), '.next/BUILD_ID')
-mustExist(standalone, '.next/standalone (run pnpm run build with output:standalone)')
-mustExist(staticDir, '.next/static')
+mustExist(path.join(nextDist, 'BUILD_ID'), `${nextDistName}/BUILD_ID`)
+mustExist(standalone, `${nextDistName}/standalone (run pnpm run build with output:standalone)`)
+mustExist(staticDir, `${nextDistName}/static`)
 mustExist(publicDir, 'public')
 
 rmrf(runtimeRoot)
@@ -176,7 +178,7 @@ if (strippedScratch.length) console.log(`Stripped repo scratch from runtime/ui: 
  * from the real workspace dependency now and fail packaging early if its source is unavailable.
  */
 function materializeNextTracedPackages() {
-  const tracedRoot = path.join(uiRoot, '.next', 'node_modules')
+  const tracedRoot = path.join(uiRoot, nextDistName, 'node_modules')
   if (!fs.existsSync(tracedRoot)) return
   let materialized = 0
   const materializeDirectory = (directory, scope = null) => {
@@ -342,7 +344,7 @@ function vendorPlaywrightForBrowserBroker() {
 }
 vendorPlaywrightForBrowserBroker()
 
-const uiStatic = path.join(uiRoot, '.next', 'static')
+const uiStatic = path.join(uiRoot, nextDistName, 'static')
 fs.mkdirSync(path.dirname(uiStatic), { recursive: true })
 copyDir(staticDir, uiStatic)
 const uiPublic = path.join(uiRoot, 'public')
@@ -359,8 +361,8 @@ if (fs.existsSync(computerUseBackend)) {
   console.log('Copied scripts/foundry/computer-use-backend.py into packaged runtime')
 }
 
-const buildMetaSrc = path.join(repoRoot, '.next', 'build-meta.json')
-const buildMetaDest = path.join(uiRoot, '.next', 'build-meta.json')
+const buildMetaSrc = path.join(nextDist, 'build-meta.json')
+const buildMetaDest = path.join(uiRoot, nextDistName, 'build-meta.json')
 if (fs.existsSync(buildMetaSrc)) {
   fs.copyFileSync(buildMetaSrc, buildMetaDest)
   console.log('Copied .next/build-meta.json → desktop/runtime/ui/.next/build-meta.json')
@@ -407,6 +409,10 @@ const bundle = spawnEsbuild([
   '--external:electron',
   '--external:onnxruntime-node',
   '--external:@huggingface/transformers',
+  '--external:playwright',
+  '--external:playwright-core',
+  '--external:@playwright/test',
+  '--external:chromium-bidi',
   `--alias:server-only=${path.join(repoRoot, 'desktop', 'runtime-src', 'server-only-stub.cjs')}`,
   '--packages=bundle',
   '--banner:js=const __import_meta_url = require("url").pathToFileURL(__filename).href;',
@@ -443,10 +449,13 @@ fs.writeFileSync(
     "try { require('./councilRoutingBootstrap.cjs').applyCouncilRoutingDefault() } catch { /* AUTO default is best-effort */ }",
     "const serverPath = path.join(__dirname, 'ui', 'server.js')",
     'process.chdir(path.dirname(serverPath))',
-    'require(serverPath)',
+    "require('./uiProcessLifecycle.cjs').runOwnedUiServer(() => require(serverPath))",
     '',
   ].join('\n'),
 )
+
+fs.copyFileSync(path.join(repoRoot, 'desktop', 'src', 'uiProcessLifecycle.cjs'), path.join(runtimeRoot, 'uiProcessLifecycle.cjs'))
+fs.copyFileSync(path.join(repoRoot, 'desktop', 'src', 'ownedHttpDrain.cjs'), path.join(runtimeRoot, 'ownedHttpDrain.cjs'))
 
 // Launcher wrappers
 fs.writeFileSync(
@@ -489,9 +498,9 @@ function startUi(opts) {
       WAR_ROOM_PACKAGED: '1',
       NODE_ENV: 'production',
     },
-    stdio: opts.stdio || 'ignore',
+    stdio: [opts.stdio === 'pipe' ? 'pipe' : 'ignore', opts.stdio === 'pipe' ? 'pipe' : 'ignore', opts.stdio === 'pipe' ? 'pipe' : 'ignore', 'ipc'],
     windowsHide: process.platform === 'win32',
-    detached: process.platform !== 'win32',
+    detached: false,
   })
   return child
 }
@@ -548,7 +557,7 @@ module.exports = { startCoreInProcess, startCoreChild }
 
 let buildMeta = {}
 try {
-  buildMeta = JSON.parse(fs.readFileSync(path.join(repoRoot, '.next', 'build-meta.json'), 'utf8'))
+  buildMeta = JSON.parse(fs.readFileSync(path.join(nextDist, 'build-meta.json'), 'utf8'))
 } catch {
   buildMeta = {}
 }
@@ -565,4 +574,13 @@ const meta = {
   built_at: typeof buildMeta.builtAt === 'string' ? buildMeta.builtAt : null,
 }
 fs.writeFileSync(path.join(runtimeRoot, 'RUNTIME_MANIFEST.json'), JSON.stringify(meta, null, 2))
-console.log(JSON.stringify({ ok: true, ...meta }, null, 2))
+if (process.env.FOUNDRY_PREPARE_WORKBENCH === '1') {
+  const prepared = spawnSync(process.execPath, [path.join(repoRoot, 'desktop/workbench-host/prepare.cjs')], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  })
+  if (prepared.status !== 0) {
+    throw new Error(prepared.stderr || prepared.stdout || 'workbench prepare failed')
+  }
+}
+console.log(JSON.stringify({ ok: true, ...meta, workbenchPrepared: process.env.FOUNDRY_PREPARE_WORKBENCH === '1' }, null, 2))

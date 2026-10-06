@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { getProviderRuntimeHealth } from '@/lib/providers/health'
 import { listPersistedSignalSnapshot } from '@/lib/signals'
 import { getLastOrchestrationStepResult } from '@/lib/war-room/diagnostics'
+import { getBrowserBroker } from '@/lib/browser-broker'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -13,8 +14,12 @@ export async function GET() {
     listPersistedSignalSnapshot(1),
   ])
 
+  const browserBroker = getBrowserBroker().diagnostics()
+
   return NextResponse.json({
     generatedAt: new Date().toISOString(),
+    browserBroker,
+    browserBrokerSource: '/api/runtime/browser-broker',
     providerStatusSource: '/api/runtime/canonical-status',
     babyProviderBindingSource: '/api/runtime/canonical-status',
     signalMigrationStatus: signals.migrationStatus,

@@ -88,7 +88,7 @@ function run(): CaseResult[] {
       && isCameraInspectPlaceType('traffic_camera') === true
       && isCameraClusterPlaceType('camera_cluster') === true
       && CAMERA_CLUSTER_ALTITUDE_M >= CITY_SCALE_FLOOR_M
-      && CAMERA_CLUSTER_ALTITUDE_M !== CAMERA_INSPECT_ALTITUDE_M,
+      && !Object.is(CAMERA_CLUSTER_ALTITUDE_M, CAMERA_INSPECT_ALTITUDE_M),
     `inspect=${CAMERA_INSPECT_ALTITUDE_M} cluster=${CAMERA_CLUSTER_ALTITUDE_M}`,
   ))
   results.push(check(

@@ -4,6 +4,7 @@
  */
 import { graphInvariant } from './graph'
 import { explainSession, nextSessionId } from './session'
+import type { FoundryReasoningHealthFinding } from './program-types'
 import type { FoundryReasoningSession } from './types'
 
 export function diagnoseReasoningHealth(session: FoundryReasoningSession): FoundryReasoningHealthFinding[] {

@@ -75,7 +75,7 @@ function run(): CaseResult[] {
     check('canonical_includes_ny511', CANONICAL_CAMERA_PROVIDER_IDS.includes('ny511_cameras'), CANONICAL_CAMERA_PROVIDER_IDS.join(',')),
     check('nearby_envelopes_auto_from_registry', nearbyCameraEnvelopesFromRegistry().some(row => row.id === 'ohgo_cameras') && nearbyCameraEnvelopesFromRegistry().some(row => row.id === '511ny'), nearbyCameraEnvelopesFromRegistry().map(row => row.id).join(',')),
     check('planet_lod_no_catalog_fetch', godsEyeCameraLodPolicy('PLANET').fetchCatalog === false && godsEyeCameraLodPolicy('PLANET').showCoverageEnvelopes === true, JSON.stringify(godsEyeCameraLodPolicy('PLANET'))),
-    check('country_lod_clusters', godsEyeCameraLodPolicy('COUNTRY').fetchCatalog && godsEyeCameraLodPolicy('COUNTRY').clusterPins, JSON.stringify(godsEyeCameraLodPolicy('COUNTRY'))),
+    check('country_lod_coverage_only', !godsEyeCameraLodPolicy('COUNTRY').fetchCatalog && godsEyeCameraLodPolicy('COUNTRY').showCoverageEnvelopes && !godsEyeCameraLodPolicy('COUNTRY').showIndividualPins, JSON.stringify(godsEyeCameraLodPolicy('COUNTRY'))),
     check('region_lod_clusters', godsEyeCameraLodPolicy('REGION').clusterPins && !godsEyeCameraLodPolicy('REGION').showCoverageEnvelopes, JSON.stringify(godsEyeCameraLodPolicy('REGION'))),
     check('city_lod_clustered_pins', godsEyeCameraLodPolicy('CITY').showIndividualPins && godsEyeCameraLodPolicy('CITY').clusterPins, JSON.stringify(godsEyeCameraLodPolicy('CITY'))),
     check('street_lod_individual_pins', godsEyeCameraLodPolicy('STREET').showIndividualPins && !godsEyeCameraLodPolicy('STREET').clusterPins, JSON.stringify(godsEyeCameraLodPolicy('STREET'))),

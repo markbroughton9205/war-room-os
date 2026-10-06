@@ -52,6 +52,15 @@ const PUBLIC_API_PATHS = new Set([
   '/api/terra/street-view',
   // Public IEM NEXRAD mosaic frame metadata. Tiles are fetched by the browser from IEM, not proxied.
   '/api/terra/weather/radar',
+  // Aggregate echo measurement over the same public mosaic. Validated stamp/bbox only, tile URLs
+  // are built from constants, and the reply is pixel counts — this is what separates a measured
+  // NO_PRECIP from an unmeasured NO_DATA on the public Terra surface.
+  '/api/terra/weather/radar/echo',
+  '/api/terra/earth-pulse',
+  '/api/terra/earth-pulse/clouds',
+  '/api/terra/earth-pulse/lightning',
+  '/api/terra/earth-pulse/aurora',
+  '/api/terra/earth-pulse/night-lights',
 ])
 
 const PUBLIC_API_PREFIXES = ['/api/debug/', '/api/sovereign/local-auth/', '/api/terra/layers/']

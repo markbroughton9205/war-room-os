@@ -13,7 +13,7 @@ import { FOUNDRY_AUTHORITY_SNAPSHOT } from './foundryContractTypes'
 import { appendFoundryWorkbenchEvent } from './foundryWorkbenchEvents'
 import { buildFoundryEditorContextEnvelope, editorContextChips, type FoundryEditorContextEnvelope, type FoundryGitDiffHunk } from './foundryEditorContext'
 import { executeEngineerTool } from './engineerTools'
-import { FoundryModelRouter } from './foundryModelRouter'
+import { routeWorkbenchAssist } from './foundryWorkbenchAssistRouting'
 
 const require = createRequire(import.meta.url)
 
@@ -271,6 +271,8 @@ export function w4AuthorityStillZero(): boolean {
 }
 
 export async function runFoundryW4Command(input: {
+  owningMissionId?: string
+  owningBindingId?: string
   kind: string
   workspaceRoot?: string
   envelope?: FoundryEditorContextEnvelope | null
@@ -313,26 +315,21 @@ export async function runFoundryW4Command(input: {
 
   if (kind === 'scmDiff' || kind === 'reviewChanges') {
     const snapshot = collectScmSnapshot(cwd, input.dirtyBuffers)
-    const envelope = envelopeWithScm(cwd)
+    const envelope = envelopeWithScm(cwd, { git: snapshot, gitDiffHunks: snapshot.boundedDiffHunks })
     const instruction = input.instruction || 'Explain these changes. Review this diff. Do not commit or push.'
     let text = `Read-only review of ${snapshot.changedFiles.length} changed file(s) on ${snapshot.branch}.`
     if (snapshot.boundedDiffHunks[0]) text += ` First hunk: ${snapshot.boundedDiffHunks[0].file}`
     try {
-      if (String(process.env.FOUNDRY_WORKBENCH_W2_DETERMINISTIC || '') !== '1') {
-        const router = new FoundryModelRouter()
-        const routed = await router.route({
-          intent: 'review',
-          instruction: `${instruction}\n\n${snapshot.boundedDiffHunks.map(item => item.text).join('\n').slice(0, 1500)}`,
-          context: { envelope },
-        } as never)
-        if (routed && typeof routed === 'object' && 'text' in routed && routed.text) text = String(routed.text)
-      }
-    } catch { /* deterministic fallback */ }
+      // Deterministic assist (FOUNDRY_WORKBENCH_W2_DETERMINISTIC) is honoured inside the shared router helper, which returns null instead of calling a model.
+      const routed = await routeWorkbenchAssist(`${instruction}\n\n${snapshot.boundedDiffHunks.map(item => item.text).join('\n').slice(0, 1500)}`, envelope, input.owningMissionId, input.owningBindingId)
+      if (routed?.text) text = routed.text
+    } catch {
+      return { ok: false, kind, readOnly: true, code: 'WORKBENCH_ASSIST_POLICY_REFUSED', error: 'Workbench review requires a verified owning mission policy, matching workspace and allowed source context.' }
+    }
     const prepare = await executeEngineerTool({ tool: 'git.commit_prepare', input: {} }, { repairId: 'w4-review' }).catch(() => null)
     if (prepare && !prepare.ok) {
       /* commit_prepare may fail without a mission; still a read-only review */
     }
-    return { ok: true, kind, readOnly: true, text, snapshot, envelope, chips: editorContextChips(envelope), confirmation: { commit_prepare: prepare && prepare.ok ? 'available' : 'not-a-commit' } }
   }
 
   if (kind === 'scmStage' || kind === 'scmUnstage') {

@@ -1,8 +1,11 @@
 'use client'
 
 import { useEffect, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { TERRA_WORKSPACE_DOCKS, TERRA_WORKSPACE_KEYBOARD_STEP_LARGE_PX, TERRA_WORKSPACE_KEYBOARD_STEP_PX, zIndexForRank, type TerraWorkspaceDock } from '@/lib/terra/workspace/layout'
 import { TERRA_WORKSPACE_DOCKABLE_IDS, TERRA_WORKSPACE_PANEL_TITLE, type TerraWorkspacePanelId } from '@/lib/terra/workspace/panelIds'
+import { primaryHostForPanel } from '@/lib/terra/missionControl/mapping'
+import { useTerraMissionControlOptional } from '../mission-control/TerraMissionControlProvider'
 import { useTerraWorkspacePanelState } from './TerraWorkspaceLayoutProvider'
 
 export function TerraWorkspacePanel({
@@ -12,6 +15,7 @@ export function TerraWorkspacePanel({
   sticky,
   minimizable = true,
   dockable,
+  closable = false,
   className = '',
 }: {
   id: TerraWorkspacePanelId
@@ -20,14 +24,26 @@ export function TerraWorkspacePanel({
   sticky?: ReactNode
   minimizable?: boolean
   dockable?: boolean
+  closable?: boolean
   className?: string
 }) {
-  const { record, rank, dragging, attention, store, api } = useTerraWorkspacePanelState(id)
+  const { record, exists, rank, dragging, attention, store, api } = useTerraWorkspacePanelState(id)
+  const mission = useTerraMissionControlOptional()
   const rootRef = useRef<HTMLElement | null>(null)
   const dragRef = useRef<{ pointerId: number; originX: number; originY: number; startX: number; startY: number } | null>(null)
   const label = title ?? TERRA_WORKSPACE_PANEL_TITLE[id]
   const canDock = dockable ?? TERRA_WORKSPACE_DOCKABLE_IDS.includes(id)
   const pinnedTop = id === 'workspace_control'
+  const hideClosed = Boolean(record.closed || (closable && !exists))
+  const hosted = Boolean(mission?.chromeEnabled && primaryHostForPanel(id).kind !== 'overlay')
+  const activeSlotKey = hosted && mission ? mission.activeSlotKeyForPanel(id) : null
+  const slotNode = activeSlotKey && mission ? mission.slotNode(activeSlotKey) : null
+
+  useEffect(() => {
+    if (!hideClosed) return
+    const size = api.getSizes()[id] ?? { width: 336, height: 280 }
+    store.ensurePanel(id, api.getViewport(), size)
+  }, [api, closable, hideClosed, id, store])
 
   useEffect(() => {
     const node = rootRef.current
@@ -50,7 +66,7 @@ export function TerraWorkspacePanel({
         api.isolateGlobe(false)
       }
     }
-  }, [api, id, store])
+  }, [api, id, store, record.closed, hosted, slotNode])
 
   const sizeOf = () => {
     const rect = rootRef.current?.getBoundingClientRect()
@@ -126,6 +142,68 @@ export function TerraWorkspacePanel({
     store.move(id, record.x + dx, record.y + dy, api.getViewport(), sizeOf(), true)
   }
 
+  if (hideClosed) {
+    return (
+      <div
+        hidden
+        data-testid={`terra-workspace-panel-${id}`}
+        data-terra-panel-id={id}
+        data-terra-panel-closed="true"
+        data-terra-panel-minimized="false"
+        data-terra-panel-hosted={hosted ? 'true' : 'false'}
+      />
+    )
+  }
+
+  if (hosted) {
+    const body = (
+      <section
+        ref={rootRef}
+        className="pointer-events-auto w-full min-w-0 overflow-x-auto"
+        data-testid={`terra-workspace-panel-${id}`}
+        data-terra-panel-id={id}
+        data-terra-panel-hosted="true"
+        data-terra-panel-slot={activeSlotKey ?? 'parked'}
+        data-terra-panel-locked={record.locked ? 'true' : 'false'}
+        data-terra-panel-minimized="false"
+        data-terra-panel-dock={record.dock}
+        data-terra-panel-dragging="false"
+        data-terra-panel-closed="false"
+        data-terra-panel-chrome={record.playerChrome === 'compact' ? 'compact' : 'full'}
+        onPointerDownCapture={() => {
+          store.smartClick(id, api.getViewport(), sizeOf())
+          store.clearAttention(id)
+        }}
+      >
+        <div className="mb-1 flex items-center gap-1">
+          <p className="min-w-0 flex-1 truncate text-[9px] font-bold uppercase tracking-[0.16em] text-cyan-100/80">{label}</p>
+          {attention ? (
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" data-testid={`terra-workspace-attention-${id}`} title={`Unseen: ${attention.reason}`} />
+          ) : null}
+          {closable ? (
+            <button
+              type="button"
+              className="shrink-0 rounded border border-white/15 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-slate-400"
+              aria-label={`Close ${label}`}
+              data-testid={`terra-workspace-close-${id}`}
+              onClick={() => store.closePanel(id)}
+            >
+              close
+            </button>
+          ) : null}
+        </div>
+        {sticky}
+        <div>{children}</div>
+      </section>
+    )
+    if (slotNode) return createPortal(body, slotNode)
+    return (
+      <div hidden data-terra-panel-parked={id}>
+        {body}
+      </div>
+    )
+  }
+
   return (
     <section
       ref={rootRef}
@@ -137,10 +215,13 @@ export function TerraWorkspacePanel({
       }}
       data-testid={`terra-workspace-panel-${id}`}
       data-terra-panel-id={id}
+      data-terra-panel-hosted="false"
       data-terra-panel-locked={record.locked ? 'true' : 'false'}
       data-terra-panel-minimized={record.minimized ? 'true' : 'false'}
       data-terra-panel-dock={record.dock}
       data-terra-panel-dragging={dragging ? 'true' : 'false'}
+      data-terra-panel-closed="false"
+      data-terra-panel-chrome={record.playerChrome === 'compact' ? 'compact' : 'full'}
       onPointerDownCapture={() => store.smartClick(id, api.getViewport(), sizeOf())}
     >
       <div className="flex items-center gap-1 rounded-t-lg border border-b-0 border-white/15 bg-black/80 px-1.5 py-0.5 backdrop-blur-md">
@@ -203,6 +284,17 @@ export function TerraWorkspacePanel({
             onClick={() => store.setMinimized(id, !record.minimized)}
           >
             {record.minimized ? 'restore' : 'min'}
+          </button>
+        ) : null}
+        {closable ? (
+          <button
+            type="button"
+            className="shrink-0 rounded border border-white/15 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-slate-400"
+            aria-label={`Close ${label}`}
+            data-testid={`terra-workspace-close-${id}`}
+            onClick={() => store.closePanel(id)}
+          >
+            close
           </button>
         ) : null}
       </div>

@@ -237,7 +237,7 @@ async function fetchLiveTerraVessel(): Promise<{ ok: boolean; object: TerraLiveG
       return { ok: false, object: null, detail: `MMSI ${MMSI} not in live /locations (lat=${lat} lon=${lon})`, item: null }
     }
     let vesselName = 'PILOT L-139'
-    let navLabel = 'AIS observation'
+    const navLabel = 'AIS observation'
     if (vesRes.ok) {
       const vessel = JSON.parse(await vesRes.text()) as { name?: string }
       if (typeof vessel.name === 'string' && vessel.name.trim()) vesselName = vessel.name.trim()

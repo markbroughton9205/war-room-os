@@ -401,13 +401,26 @@ export async function runPhase15CloseoutValidation(): Promise<{
       ),
     )
 
-    const exe = process.env.LOCALAPPDATA
-      ? path.join(process.env.LOCALAPPDATA, 'Programs', 'War Room OS', 'War Room OS.exe')
-      : ''
-    results.push(check('4_installed_exe', Boolean(exe && fs.existsSync(exe)), exe ? 'exists' : 'LOCALAPPDATA missing'))
-    const shortcuts = shortcutExists()
-    results.push(check('5_desktop_shortcut', shortcuts.desktop, shortcuts.desktop ? 'found' : 'missing'))
-    results.push(check('6_start_menu', shortcuts.startMenu, shortcuts.startMenu ? 'found' : 'missing'))
+    let exe = ''
+    if (process.platform === 'win32') {
+      exe = process.env.LOCALAPPDATA
+        ? path.join(process.env.LOCALAPPDATA, 'Programs', 'War Room OS', 'War Room OS.exe')
+        : ''
+      results.push(check('4_installed_exe', Boolean(exe && fs.existsSync(exe)), exe ? 'exists' : 'LOCALAPPDATA missing'))
+      const shortcuts = shortcutExists()
+      results.push(check('5_desktop_shortcut', shortcuts.desktop, shortcuts.desktop ? 'found' : 'missing'))
+      results.push(check('6_start_menu', shortcuts.startMenu, shortcuts.startMenu ? 'found' : 'missing'))
+    } else {
+      // The same three facts on Linux: the launcher runs an installed executable, and the application menu has an entry for it.
+      const launcher = path.join(os.homedir(), '.local', 'bin', 'war-room-os-user')
+      const launcherText = fs.existsSync(launcher) ? fs.readFileSync(launcher, 'utf8') : ''
+      exe = /exec "([^"]+)"/.exec(launcherText)?.[1] ?? ''
+      results.push(check('4_installed_exe', Boolean(exe && fs.existsSync(exe)), exe || 'launcher missing'))
+      const applications = path.join(os.homedir(), '.local', 'share', 'applications')
+      const entries = fs.existsSync(applications) ? fs.readdirSync(applications).filter(name => /^war-room-os.*\.desktop$/.test(name)) : []
+      results.push(check('5_desktop_shortcut', entries.length > 0, entries.join(',') || 'missing'))
+      results.push(check('6_start_menu', entries.some(name => /(^|\n)Exec=/.test(fs.readFileSync(path.join(applications, name), 'utf8'))), entries.join(',') || 'missing'))
+    }
     const png = path.join(repoRoot, 'desktop', 'assets', 'war-room-os-icon.png')
     const provenance = JSON.parse(read('desktop/assets/ICON_PROVENANCE.json')) as { png_sha256?: string; redesigned?: boolean }
     results.push(

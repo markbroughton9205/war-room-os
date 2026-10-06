@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { WarRoomBackControl } from '@/components/war-room/WarRoomBackControl'
 
 export default function GlobePage() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -99,7 +100,8 @@ export default function GlobePage() {
   return (
     <main className="min-h-screen bg-black relative font-mono overflow-hidden">
       <canvas ref={canvasRef} className="absolute inset-0" />
-      <div className="absolute top-6 left-6 z-10">
+      <div className="absolute top-6 left-6 z-10 flex flex-col gap-2">
+        <WarRoomBackControl variant="overlay" />
         <h1 className="text-xl font-bold tracking-widest" style={{color:'#00ff41',textShadow:'0 0 20px #00ff41'}}>
           GLOBAL INTELLIGENCE
         </h1>

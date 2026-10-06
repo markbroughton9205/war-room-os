@@ -6,6 +6,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { childProcessEnv } from '@/lib/repo/childProcessEnv'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { resolveRepoRoot } from '@/lib/repo/paths'
@@ -77,9 +78,9 @@ function readJson(file: string): Record<string, unknown> | null {
   }
 }
 
-function launchDesktop(root: string, extraEnv: NodeJS.ProcessEnv = {}) {
+function launchDesktop(root: string, extraEnv: Record<string, string | undefined> = {}) {
   const electronBin = path.join(root, 'desktop/node_modules/electron/dist/electron')
-  const env = { ...process.env, ...extraEnv, FOUNDRY_WORKBENCH_W0: '1', FOUNDRY_WORKBENCH_W2_DETERMINISTIC: '1' }
+  const env = childProcessEnv({ ...process.env, ...extraEnv, FOUNDRY_WORKBENCH_W0: '1', FOUNDRY_WORKBENCH_W2_DETERMINISTIC: '1' })
   delete env.ELECTRON_RUN_AS_NODE
   return { child: spawn(electronBin, [path.join(root, 'desktop/src/main.cjs')], { cwd: path.join(root, 'desktop'), env, stdio: ['ignore', 'pipe', 'pipe'] }) }
 }
@@ -94,9 +95,9 @@ async function stopDesktop(child: ChildProcess | null) {
   try { process.kill(child.pid, 'SIGKILL') } catch { /* ignore */ }
 }
 
-function launchExtHostClient(root: string, folder: string, sandboxEnv: NodeJS.ProcessEnv) {
+function launchExtHostClient(root: string, folder: string, sandboxEnv: Record<string, string | undefined>) {
   const electronBin = path.join(root, 'desktop/node_modules/electron/dist/electron')
-  const env = { ...process.env, ...sandboxEnv, FOUNDRY_WORKBENCH_W0: '1', FOUNDRY_WORKBENCH_W0_FOLDER: folder, FOUNDRY_WORKBENCH_W2_DETERMINISTIC: '1' }
+  const env = childProcessEnv({ ...process.env, ...sandboxEnv, FOUNDRY_WORKBENCH_W0: '1', FOUNDRY_WORKBENCH_W0_FOLDER: folder, FOUNDRY_WORKBENCH_W2_DETERMINISTIC: '1' })
   delete env.ELECTRON_RUN_AS_NODE
   return { child: spawn(electronBin, [path.join(root, 'desktop/workbench-host/exthost-client.cjs')], { cwd: path.join(root, 'desktop'), env, stdio: ['ignore', 'pipe', 'pipe'] }) }
 }
@@ -148,7 +149,7 @@ async function waitPortDown(port: number, timeoutMs: number) {
   return !portListening(port)
 }
 
-async function bounce(host: Host, root: string, folder: string, sandboxEnv: NodeJS.ProcessEnv, stateDir: string, launched: { child: ChildProcess }, client: { child: ChildProcess }) {
+async function bounce(host: Host, root: string, folder: string, sandboxEnv: Record<string, string | undefined>, stateDir: string, launched: { child: ChildProcess }, client: { child: ChildProcess }) {
   const readyBefore = parseAdapterReady(readJson(path.join(stateDir, 'adapter-ready.json')))
   await stopExtHostClient(stateDir, client.child)
   await stopDesktop(launched.child)

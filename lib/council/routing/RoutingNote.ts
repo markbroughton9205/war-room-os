@@ -29,6 +29,7 @@ export function createRoutingNote(input: {
   decisionPath: string[]
   timestamp?: string
   routingId?: string
+  path?: import('@/lib/council/gi/types').CouncilPath
 }): RoutingNote {
   const timestamp = input.timestamp ?? new Date().toISOString()
 
@@ -50,5 +51,6 @@ export function createRoutingNote(input: {
     decisionPath: input.decisionPath,
     providerRecommendation: null,
     timestamp,
+    path: input.path,
   }
 }

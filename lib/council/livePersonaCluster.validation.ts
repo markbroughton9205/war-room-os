@@ -99,8 +99,9 @@ export async function runLivePersonaClusterValidation(): Promise<ValidationCase[
   cases.push(await runCase({
     caseId: 'lcp_persona_001_opening_position_pinned',
     category: 'P. Persona and role instructions',
+    // The default pipeline answers with direct_response; opening position remains as a labelled compatibility stage with the same instruction.
     run: () => rolePrompts.opening_position!.includes(
-      'Turn role: opening position. Give your read — your position, the reasoning behind it, real risks, and what you\'d actually do next.',
+      'Turn role: opening position (compatibility). Give your read — your position, the reasoning behind it, real risks, and what you\'d actually do next.',
     ),
   }))
   cases.push(await runCase({
@@ -116,7 +117,10 @@ export async function runLivePersonaClusterValidation(): Promise<ValidationCase[
   cases.push(await runCase({
     caseId: 'lcp_persona_004_revision_no_message_id_citations',
     category: 'P. Persona and role instructions',
-    run: () => rolePrompts.revision_or_stand_firm!.includes('No message-ID citations or labeled sections'),
+    // The revision stage is a structured decision now (DECISION / CHALLENGE_ADDRESSED / EVIDENCE_REFS ...), so labelled fields are required there; what stays forbidden is hidden reasoning and message-ID citation in the visible response.
+    run: () => rolePrompts.revision_or_stand_firm!.includes('Turn role: revision or stand firm.')
+      && rolePrompts.revision_or_stand_firm!.includes('no hidden reasoning')
+      && rolePrompts.revision_or_stand_firm!.includes('DECISION: REVISE | STAND_FIRM'),
   }))
   cases.push(await runCase({
     caseId: 'lcp_persona_005_synthesis_plain_language',
@@ -333,8 +337,10 @@ export async function runLivePersonaClusterValidation(): Promise<ValidationCase[
     caseId: 'lcp_ui_001_command_console_thinking_copy',
     category: 'U. UI copy and coupling',
     run: () => {
+      // The console shows the status text it is given; the thinking copy is resolved once in the page.
       const source = readSource('components/war-room/live-room/CommandConsole.tsx')
-      return source.includes('Council thinking…') && !source.includes('Council responding…') && !/'Working…'/.test(source)
+      const page = readSource('app/page.tsx')
+      return page.includes("if (loading) return 'Council thinking…'") && !page.includes('Council responding…') && !source.includes('Council responding…') && !/'Working…'/.test(source)
     },
   }))
   cases.push(await runCase({

@@ -9,10 +9,8 @@
  * TerraEarthImagery.tsx: that consumer reads camera height directly and mutates a Cesium
  * ImageryLayer's alpha imperatively (no React state, so it can update as smoothly as Cesium's own
  * `camera.changed` firing allows). This hook instead exposes a DISCRETE level and only calls
- * setState on a real level transition — the same "React learns about state edges, not every raw
- * sample" discipline already established by useTerraCinematicOrbit.ts's `orbitingRef` pattern —
- * because level-gated consumers (an effect toggling a 3D tileset's `.show`, a layer's `enabled`
- * flag) only care when the bucket actually changes, not every intermediate meter of camera height.
+ * setState on Cesium `camera.moveEnd` — never mid-zoom — because level-gated consumers
+ * (governor enablement, tilesets, feature rebuilds) destroy Cesium texture-backed resources.
  *
  * Thresholds (documented, not arbitrary): Cesium's own camera height is meters above the WGS84
  * ellipsoid at the camera's ground target. These bands were calibrated against a real measurement
@@ -35,6 +33,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
+import { nextViewBand, type TerraViewBand } from '@/lib/terra/layerGovernor'
 
 export type TerraScaleLevel = 'global' | 'regional' | 'city' | 'local' | 'building'
 
@@ -66,6 +65,8 @@ export type TerraCameraScale = {
    * signal. Consumers that need to re-run a bounded query only when the Commander stops moving
    * the camera (never mid-drag, never per-frame) watch this, not `level` alone. */
   settledAt: number
+  heightMeters: number
+  viewBand: TerraViewBand
 }
 
 /** Plain top-level helpers, not inline in the hook/effect body — this repo's react-hooks/
@@ -89,8 +90,7 @@ function configureTerraCameraChangeSensitivity(targetViewer: CesiumViewer): void
   targetViewer.camera.percentageChanged = 0.05
 }
 
-function attachTerraCameraListeners(targetViewer: CesiumViewer, onChanged: () => void, onMoveEnd: () => void): () => void {
-  targetViewer.camera.changed.addEventListener(onChanged)
+function attachTerraCameraListeners(targetViewer: CesiumViewer, onMoveEnd: () => void): () => void {
   targetViewer.camera.moveEnd.addEventListener(onMoveEnd)
   return () => {
     // Real behavior observed in authenticated browser testing: a sibling TerraGlobe remount
@@ -98,7 +98,6 @@ function attachTerraCameraListeners(targetViewer: CesiumViewer, onChanged: () =>
     // before this cleanup runs — removeEventListener on an already-destroyed viewer's camera
     // throws the same way every other Cesium getter does post-destroy.
     if (!isTerraCesiumViewerAlive(targetViewer)) return
-    targetViewer.camera.changed.removeEventListener(onChanged)
     targetViewer.camera.moveEnd.removeEventListener(onMoveEnd)
   }
 }
@@ -106,7 +105,10 @@ function attachTerraCameraListeners(targetViewer: CesiumViewer, onChanged: () =>
 export function useTerraCameraScale(viewer: CesiumViewer | null): TerraCameraScale {
   const [level, setLevel] = useState<TerraScaleLevel>('global')
   const [settledAt, setSettledAt] = useState(0)
+  const [heightMeters, setHeightMeters] = useState(12_000_000)
+  const [viewBand, setViewBand] = useState<TerraViewBand>('GLOBAL')
   const levelRef = useRef(level)
+  const viewBandRef = useRef(viewBand)
 
   useEffect(() => {
     if (!viewer) return
@@ -122,20 +124,29 @@ export function useTerraCameraScale(viewer: CesiumViewer | null): TerraCameraSca
 
       const recomputeLevel = () => {
         if (!isTerraCesiumViewerAlive(targetViewer)) return
-        const next = terraScaleLevelForHeight(terraCameraHeightMeters(targetViewer))
-        if (levelRef.current !== next) {
+        const height = terraCameraHeightMeters(targetViewer)
+        const next = terraScaleLevelForHeight(height)
+        const nextBand = nextViewBand(height, viewBandRef.current)
+        const bandChanged = viewBandRef.current !== nextBand
+        const levelChanged = levelRef.current !== next
+        if (levelChanged) {
           levelRef.current = next
           setLevel(next)
         }
+        if (bandChanged) {
+          viewBandRef.current = nextBand
+          setViewBand(nextBand)
+        }
+        if (bandChanged || levelChanged) setHeightMeters(height)
       }
       recomputeLevel()
 
-      const onChanged = () => recomputeLevel()
       const onMoveEnd = () => {
         recomputeLevel()
+        if (isTerraCesiumViewerAlive(targetViewer)) setHeightMeters(terraCameraHeightMeters(targetViewer))
         setSettledAt(Date.now())
       }
-      detach = attachTerraCameraListeners(targetViewer, onChanged, onMoveEnd)
+      detach = attachTerraCameraListeners(targetViewer, onMoveEnd)
     }
     void attach()
 
@@ -145,5 +156,5 @@ export function useTerraCameraScale(viewer: CesiumViewer | null): TerraCameraSca
     }
   }, [viewer])
 
-  return { level, settledAt }
+  return { level, settledAt, heightMeters, viewBand }
 }

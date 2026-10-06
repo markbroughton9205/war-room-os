@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { WarRoomBackControl } from '@/components/war-room/WarRoomBackControl'
 import { WarRoomSearchPanel } from '@/components/war-room/search/WarRoomSearchPanel'
 
 export const metadata: Metadata = {
@@ -11,6 +12,9 @@ export const dynamic = 'force-dynamic'
 export default function WarRoomSearchPage() {
   return (
     <main className="min-h-screen bg-black">
+      <div className="px-4 pt-6">
+        <WarRoomBackControl />
+      </div>
       <WarRoomSearchPanel />
     </main>
   )

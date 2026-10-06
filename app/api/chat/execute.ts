@@ -245,6 +245,17 @@ import {
   type ActualCouncilSelectionSnapshot,
   type CouncilShadowSelectionReport,
 } from '@/lib/council/adaptive-assembly'
+import {
+  classifyEvidenceBoardMission,
+  deliberationSessionFromEbc,
+  selectedSeatsFromEbc,
+  evidenceBoardTerminatesFamilyRequest,
+  shouldDispatchEvidenceBoardCouncil,
+  type EbcPublicSnapshot,
+} from '@/lib/council/evidence-board'
+import { maybeHandleGiFrontDoor } from '@/lib/council/gi'
+import { lightweightIntelligencePublic, runCouncilIntelligenceMission } from '@/lib/council/intelligence'
+import type { CouncilIntelligencePublic } from '@/lib/council/intelligence/types'
 
 function buildResearchAntiLoopAugment(threadBlock: string): string {
   const hits = threadBlock.match(/\bprimary\s+finding\b/gi) ?? []
@@ -692,18 +703,26 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     ? parsedSingleFamily
     : undefined
   const orchestrationAugment = typeof body.orchestrationAugment === 'string' ? body.orchestrationAugment : ''
-  const conversationId =
+  let conversationId =
     typeof body.conversationId === 'string' && /^[0-9a-f-]{36}$/i.test(body.conversationId.trim())
       ? body.conversationId.trim()
       : null
 
   // #19: service-role bypasses RLS — prove ownership before any context/#17/persist work.
+  // A local Home ledger id is not a remote conversation. Unauthenticated and not-found
+  // results detach the id and the round continues with no remote reads or writes.
+  // Unavailable storage and invalid ids still fail closed.
   let conversationOwnerUserId: string | null = null
   if (conversationId) {
     const { requireOwnedConversation } = await import('@/lib/war-room/conversationOwnership')
+    const { shouldDetachConversationBinding } = await import('@/lib/council/commander-chat/conversationBinding')
     const owned = await requireOwnedConversation(conversationId, { includeDeleted: false })
-    if (!owned.ok) return owned.response
-    conversationOwnerUserId = owned.userId
+    if (!owned.ok) {
+      if (!shouldDetachConversationBinding({ status: owned.status, code: owned.code })) return owned.response
+      conversationId = null
+    } else {
+      conversationOwnerUserId = owned.userId
+    }
   }
 
   const liveCouncilRoster = resolveLiveCouncilRoster()
@@ -808,6 +827,13 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         }),
       )
     }
+    const hvsHandled = await import('@/lib/intent-prerouter/hvs')
+      .then(mod => mod.tryHandleWarRoomHvs(message, conversationId))
+      .catch(error => {
+        console.error('[hvs-prerouter] failed, falling through to Council pipeline:', error instanceof Error ? error.message : error)
+        return null
+      })
+    if (hvsHandled) return hvsHandled
   }
 
   councilTrace.record('request_received', {
@@ -898,7 +924,30 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
    * ignored.
    */
   const classifiedTurn = classifyCouncilTurn(raelDirectiveText)
-  const swarmEligible = familyDeliberationRequestedRaw && shouldRunIndependentScoutSwarm(raelDirectiveText, classifiedTurn)
+  const ebcClassification = classifyEvidenceBoardMission({ commanderMessage: raelDirectiveText })
+  const giFrontDoor = await maybeHandleGiFrontDoor({
+    text: raelDirectiveText,
+    conversationId,
+    roomId: conversationId ?? 'council-room',
+    sessionId: conversationId ?? 'ephemeral-session',
+    priorTurns: Array.isArray(body.threadHistory)
+      ? body.threadHistory.map(row => typeof row?.content === 'string' ? row.content : '').filter(Boolean).slice(-8)
+      : [],
+  })
+  if (giFrontDoor) {
+    const giIntelligence = lightweightIntelligencePublic({
+      missionId: ebcClassification.mission_id,
+      commanderMessage: raelDirectiveText,
+      ebcClass: ebcClassification.mission_class === 'SOCIAL_CHECKIN' ? 'SOCIAL_CHECKIN' : undefined,
+    })
+    return NextResponse.json(withTrace({ ...giFrontDoor, councilIntelligence: giIntelligence }))
+  }
+  let evidenceBoardCouncil: EbcPublicSnapshot | null = null
+  let councilIntelligence: CouncilIntelligencePublic | null = null
+  const swarmEligible =
+    familyDeliberationRequestedRaw
+    && !shouldDispatchEvidenceBoardCouncil(ebcClassification.mission_class)
+    && shouldRunIndependentScoutSwarm(raelDirectiveText, classifiedTurn)
   const astraMission = swarmEligible
     ? decomposeAstraMission({
         decree: raelDirectiveText,
@@ -924,7 +973,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   }
   const nebulaSelectedSeats = astraMission
     ? astraMission.selectedPermanentSeats.map(agentId => SWARM_SEAT_BY_AGENT[agentId])
-    : seatsForParticipatingAgents(nebulaRoundPlan.participatingAgentIds)
+    : selectedSeatsFromEbc(ebcClassification)
   let nebulaRound: CouncilRound = createCouncilRound({
     roundId: nebulaRoundPlan.roundId,
     requestId: councilTrace.councilTraceId,
@@ -2190,8 +2239,6 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       stateChange: 'Floor-controlled sequential families using configured providers only.',
     })
 
-    const skipSocialDeepStages = classifiedTurn.intent === 'SOCIAL_CHECKIN' || (classifiedTurn.depth === 'FAST' && classifiedTurn.intent !== 'STATUS_CHECK')
-    const localCouncilLive = localRoutingBypassesCloudFloorGate()
     if (astraMission) {
       let speakingOrder = 0
       const swarm = await runIndependentScoutSwarm({
@@ -2251,113 +2298,26 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       progress.closeIfTerminal()
       return session
     }
-    const primaryFamilies = (nebulaDeliberationFamilies.length
-      ? nebulaDeliberationFamilies
-      : resolveVisibleFloorOrder({
-          configured: localCouncilLive
-            ? { ...liveCouncilFloor.configured, ...Object.fromEntries(nebulaSelectedSeats.map(seat => [seat, true])) }
-            : liveCouncilFloor.configured,
-          eligible: localCouncilLive
-            ? { ...liveCouncilFloor.eligible, ...Object.fromEntries(nebulaSelectedSeats.map(seat => [seat, true])) }
-            : liveCouncilFloor.eligible,
-          includeRedTeam: false,
-        })
-    ).filter(family => family !== 'chatgpt' || !nebulaRoundPlan.participatingAgentIds.includes('aurora'))
-    const runAuroraSynthesis = !skipSocialDeepStages || classifiedTurn.intent === 'STATUS_CHECK'
-    // Default family deep path seats PHOENIX when floor-eligible even if GENERAL roster omitted red_team.
-    // Scout/ASTRA missions keep their own selectedPermanentSeats and do not use this branch.
-    const willRunPhoenix = !skipSocialDeepStages
-      && (familyIsFloorEligible('red_team') || localCouncilLive)
-    let speakingOrder = 0
-    // #16 default path: PRIMARY (direct_response) → PHOENIX → REVISION/STAND_FIRM → AURORA.
-    // opening_position is dormant compatibility — do not add a redundant opening call.
-    for (const family of primaryFamilies) {
-      if (runAuroraSynthesis && family === 'chatgpt') continue
-      if (family === 'red_team') continue
-      speakingOrder += 1
-      await callTurn(family, 'direct_response', speakingOrder, {
-        inputMessageIds: [session.commander_message_id],
-        // Keep seat open for revision when PHOENIX will challenge completed primaries.
-        finalFamilyTurn: !willRunPhoenix,
-      })
-    }
 
-    const availableIds = completedOutputIds()
-    let phoenixTurn: DeliberationTurn | null = null
-    if (willRunPhoenix && availableIds.length > 0) {
-      speakingOrder += 1
-      phoenixTurn = await callTurn('red_team', 'red_team_challenge', speakingOrder, {
-        inputMessageIds: [session.commander_message_id, ...availableIds],
-        challengeTargetIds: availableIds,
-        finalFamilyTurn: true,
-      })
-    } else if (willRunPhoenix && availableIds.length === 0) {
-      appendUnresolvedTurn('red_team', 'red_team_challenge', speakingOrder + 1, 'No completed primary-family messages were available; PHOENIX was not invented.')
+    const intel = await runCouncilIntelligenceMission({
+      commanderMessage: raelDirectiveText,
+      engine03: { skip: true },
+    })
+    evidenceBoardCouncil = intel.snapshot
+    councilIntelligence = intel.public
+    const ebc = intel.ebc
+    if (!ebc) {
+      session.diagnostics.push('Intelligence pipeline returned without EBC; refusing to invent a transcript.')
+      applyPipelineProvenance(session)
+      progress.closeIfTerminal()
+      return session
     }
-
-    // #16 key stage: challenged primaries get revision_or_stand_firm after PHOENIX.
-    const challengedPrimaries = seatsChallengedByPhoenix(session, phoenixTurn)
-    if (phoenixTurn?.completion_status === 'complete' && phoenixTurn.output_message_id && challengedPrimaries.length > 0) {
-      for (const primary of challengedPrimaries) {
-        speakingOrder += 1
-        await callTurn(primary.provider_family as CouncilSingleFamily, 'revision_or_stand_firm', speakingOrder, {
-          inputMessageIds: [
-            session.commander_message_id,
-            ...(primary.output_message_id ? [primary.output_message_id] : []),
-            phoenixTurn.output_message_id,
-          ],
-          challengeTargetIds: [phoenixTurn.output_message_id],
-          revisionOfMessageId: primary.output_message_id,
-          targetTurn: primary,
-          finalFamilyTurn: true,
-        })
-      }
-    } else if (willRunPhoenix && challengedPrimaries.length === 0) {
-      // Primaries that completed but were not revised still need terminal progress when phoenix skipped/failed.
-      for (const family of primaryFamilies) {
-        if (runAuroraSynthesis && family === 'chatgpt') continue
-        const primaryTurn = session.turns.find(
-          turn => turn.provider_family === family
-            && turn.turn_role === 'direct_response'
-            && turn.completion_status === 'complete',
-        )
-        if (primaryTurn) {
-          progress.recordTurnCompleted(primaryTurn, { finalFamilyTurn: true })
-        }
-      }
-    }
-
-    const synthesisGate = evaluateSynthesisGate(session)
-    if (runAuroraSynthesis && synthesisGate.canSynthesize) {
-      speakingOrder += 1
-      const synthesisTurn = await callTurn('chatgpt', 'council_synthesis', speakingOrder, {
-        inputMessageIds: synthesisInputMessageIds(session),
-        extraContextBlock: buildSynthesisContextBlock(session),
-        finalFamilyTurn: true,
-      })
-      if (synthesisTurn.completion_status !== 'complete') {
-        session.diagnostics.push('AURORA synthesis failed; deliberation marked FAILED with no fabricated synthesis.')
-        progress.recordStageProgress('DELIBERATION_FAILED', 'AURORA synthesis failed')
-      }
-    } else if (skipSocialDeepStages) {
-      session.diagnostics.push('Social check-in: family acknowledgments completed the round without synthesis or PHOENIX challenge.')
-    } else {
-      session.diagnostics.push(
-        synthesisGate.reasons[0]
-          ?? 'Synthesis not requested because no completed family outputs were available.',
-      )
-      progress.recordStageProgress('DELIBERATION_FAILED', synthesisGate.reasons[0] ?? 'insufficient material')
-    }
-
+    const ebcSession = deliberationSessionFromEbc(ebc, raelDirectiveText, intel.commander_brief)
+    session.turns.push(...ebcSession.turns)
+    session.synthesis_turn_id = ebcSession.synthesis_turn_id
+    session.diagnostics.push(...ebcSession.diagnostics)
+    session.completion_status = ebcSession.completion_status
     applyPipelineProvenance(session)
-    if (session.pipeline?.outcome === 'DEGRADED') {
-      progress.recordStageProgress('DELIBERATION_DEGRADED', synthesisGate.reasons.join('; ') || 'degraded')
-    } else if (session.pipeline?.outcome === 'COMPLETE') {
-      progress.recordStageProgress('DELIBERATION_COMPLETED', 'complete')
-    } else {
-      progress.recordStageProgress('DELIBERATION_FAILED', synthesisGate.reasons.join('; ') || 'failed')
-    }
-
     progress.closeIfTerminal()
     return session
   }
@@ -2403,7 +2363,16 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           .filter(Boolean)
           .join('')
 
-    await runTurnLiveResearchIfNeeded()
+    const evidenceBoardRound = evidenceBoardTerminatesFamilyRequest(ebcClassification.mission_class)
+    const engine03OwnsExecution =
+      shouldDispatchEvidenceBoardCouncil(ebcClassification.mission_class)
+      && !directFamily
+      && !isAttendanceFlow
+      && (!familyDeliberationRequested || evidenceBoardRound)
+
+    if (!engine03OwnsExecution) {
+      await runTurnLiveResearchIfNeeded()
+    }
     if (liveResearchPacket) {
       const failurePolicy = applyResearchFailurePolicy(liveResearchPacket)
       augmentBlock = [
@@ -2424,6 +2393,60 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       modeGovernorBlock: councilStabilityMode ? '' : modeGovernorBlock,
       contextBlock: warRoomContextBlock,
     })
+
+    if (engine03OwnsExecution) {
+      const intel = await runCouncilIntelligenceMission({
+        commanderMessage: raelDirectiveText,
+        engine03: {
+          onPhase: phase => {
+            councilProgress?.recordDiagnostic(`engine03_${phase.toLowerCase()}`, phase)
+          },
+        },
+        conversationId,
+        sessionId: conversationId,
+        priorTurns: Array.isArray(body.threadHistory)
+          ? body.threadHistory.map(row => typeof row?.content === 'string' ? row.content : '').filter(Boolean).slice(-8)
+          : [],
+      })
+      const ebc = intel.ebc
+      evidenceBoardCouncil = intel.snapshot
+      councilIntelligence = intel.public
+      if (!ebc) {
+        if (intel.public.orchestration?.engines04?.mission_state) {
+          return NextResponse.json(withTrace({
+            results: [],
+            familyDeliberation: null,
+            evidenceBoardCouncil: intel.snapshot,
+            councilIntelligence: intel.public,
+            councilSingleResponse: intel.commander_brief,
+            hardStop: true,
+            mode: 'evidence_board_council',
+            showContinue: false,
+            councilFailureCode: intel.public.conversational_failure_code ?? null,
+          }))
+        }
+        return NextResponse.json(withTrace({ error: 'Evidence Board Council did not run', councilIntelligence }), { status: 500 })
+      }
+      const familyDeliberation = deliberationSessionFromEbc(ebc, raelDirectiveText, intel.commander_brief)
+      const { results, roundHealth } = deriveFamilyDeliberationRoundOutcome(familyDeliberation)
+      return NextResponse.json(withTrace(attachShadowMetadata({
+        results,
+        familyDeliberation,
+        evidenceBoardCouncil: intel.snapshot,
+        councilIntelligence: intel.public,
+        roundHealth,
+        councilSingleResponse: intel.commander_brief,
+        hardStop: true,
+        mode: 'evidence_board_council',
+        showContinue: false,
+        councilFailureCode: intel.public.conversational_failure_code ?? null,
+      }, createActualSelectionSnapshot({
+        executionMode: 'family_to_family_deliberation',
+        actualSelectedFamilies: selectedSeatsFromEbc(ebc),
+        actualSynthesisFamily: 'chatgpt',
+        actualSelectionSource: 'system_selected',
+      }))))
+    }
 
     if (familyDeliberationRequested) {
       const deliberationFamiliesRaw = nebulaDeliberationFamilies.length
@@ -2599,6 +2622,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         roundHealth,
         councilRound: nebulaRound,
         councilSingleResponse: synthesis?.full_response ?? '',
+        evidenceBoardCouncil,
+        councilIntelligence,
         hardStop: false,
         mode: 'family_to_family_deliberation',
         showContinue: false,

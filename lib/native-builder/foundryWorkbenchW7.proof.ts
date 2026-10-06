@@ -6,6 +6,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, appendFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { childProcessEnv } from '@/lib/repo/childProcessEnv'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { resolveRepoRoot } from '@/lib/repo/paths'
@@ -103,9 +104,9 @@ function readJson(file: string): Record<string, unknown> | null {
   }
 }
 
-function launchDesktop(root: string, extraEnv: NodeJS.ProcessEnv = {}) {
+function launchDesktop(root: string, extraEnv: Record<string, string | undefined> = {}) {
   const electronBin = path.join(root, 'desktop/node_modules/electron/dist/electron')
-  const env = { ...process.env, ...extraEnv, FOUNDRY_WORKBENCH_W0: '1', FOUNDRY_WORKBENCH_W2_DETERMINISTIC: '1' }
+  const env = childProcessEnv({ ...process.env, ...extraEnv, FOUNDRY_WORKBENCH_W0: '1', FOUNDRY_WORKBENCH_W2_DETERMINISTIC: '1' })
   delete env.ELECTRON_RUN_AS_NODE
   delete env.ELECTRON_DISABLE_SANDBOX
   delete env.FOUNDRY_WORKBENCH_ALLOW_SANDBOX_BYPASS
@@ -124,7 +125,7 @@ async function stopDesktop(child: ChildProcess | null) {
 
 function launchExtHostClient(root: string, folder: string) {
   const electronBin = path.join(root, 'desktop/node_modules/electron/dist/electron')
-  const env = { ...process.env, FOUNDRY_WORKBENCH_W0: '1', FOUNDRY_WORKBENCH_W0_FOLDER: folder, FOUNDRY_WORKBENCH_W2_DETERMINISTIC: '1' }
+  const env = childProcessEnv({ ...process.env, FOUNDRY_WORKBENCH_W0: '1', FOUNDRY_WORKBENCH_W0_FOLDER: folder, FOUNDRY_WORKBENCH_W2_DETERMINISTIC: '1' })
   delete env.ELECTRON_RUN_AS_NODE
   delete env.ELECTRON_DISABLE_SANDBOX
   delete env.FOUNDRY_WORKBENCH_ALLOW_SANDBOX_BYPASS
@@ -306,7 +307,7 @@ async function run() {
 
   const dirtyProp = await runFoundryW2Command({ kind: 'edit', envelope: envelopeFromDiskFile(folder, 'hello.ts'), instruction: 'typed result' })
   writeFileSync(path.join(stateDir, 'dirty-buffers.json'), JSON.stringify({ paths: [hello] }))
-  const dirtyApply = dirtyProp.proposal ? await acceptW2Proposal(dirtyProp.proposal.proposalId) : { ok: true, error: 'missing' }
+  const dirtyApply: Pick<Awaited<ReturnType<typeof acceptW2Proposal>>, 'ok' | 'code' | 'error'> = dirtyProp.proposal ? await acceptW2Proposal(dirtyProp.proposal.proposalId) : { ok: true, error: 'missing' }
   const clobberCount = dirtyApply.ok === true ? 1 : 0
   writeFileSync(path.join(stateDir, 'dirty-buffers.json'), JSON.stringify({ paths: [] }))
   results.push(check('W7_DIRTY_BUFFER_CLOBBER_COUNT', clobberCount === 0 && /DIRTY_COMMANDER_BUFFER/.test(String(dirtyApply.code || dirtyApply.error || '')), `clobber=${clobberCount} code=${dirtyApply.code}`))
@@ -334,7 +335,7 @@ async function run() {
   const broken = path.join(folder, 'broken.ts')
   const beforeDiag = readFileSync(broken, 'utf8')
   const explain = await runFoundryW2Command({ kind: 'explainDiagnostic', envelope: envelopeForBrokenTs(folder) })
-  const fix = await runFoundryW2Command({ kind: 'fixDiagnostic', envelope: envelopeForBrokenTs(folder) })
+  const fix = await runFoundryW2Command({ kind: 'fix', envelope: envelopeForBrokenTs(folder) })
   const fixAccepted = fix.proposal ? await acceptW2Proposal(fix.proposal.proposalId) : { ok: false, error: 'no proposal' }
   results.push(check('fixture_E_diagnostics', langReady && liveDiags.length > 0 && explain.readOnly === true && (fixAccepted.ok === true || readFileSync(broken, 'utf8') !== beforeDiag || Boolean(fix.proposal)), `diags=${liveDiags.length} fix=${fixAccepted.ok}`))
 

@@ -20,6 +20,44 @@ export {
 } from './types'
 export type { RadarCatalog, RadarCoverageState, RadarFrame } from './types'
 export { iemStampFromIso, isoFromIemScan, mergeRadarFrames, pickLatestRadarFrame, radarFrameFromIso, ridgeTileUrlTemplate } from './frames'
-export { pointInRadarCoverage, rectanglesIntersect, viewIntersectsRadarCoverage } from './coverage'
+export {
+  pointInRadarCoverage,
+  radarCoverageLabel,
+  rectanglesIntersect,
+  viewIntersectsRadarCoverage,
+  viewWithinRadarCoverage,
+} from './coverage'
 export { radarFrameAgeMs, resolveRadarViewState } from './state'
 export { radarFrameAgeLabel } from './age'
+export {
+  RADAR_ECHO_FLOOR_DBZ,
+  RADAR_INTENSITY_BANDS,
+  RADAR_INTENSITY_QUANTITY,
+  RADAR_INTENSITY_UNIT,
+  radarIntensityBandLabel,
+  radarLegendSummary,
+} from './legend'
+export type { RadarIntensityBand } from './legend'
+export {
+  RADAR_COVERAGE_FITS,
+  RADAR_ECHO_STATES,
+  RADAR_EXPECTED_UPDATE_SECONDS,
+  RADAR_PRESENTATION_STATUSES,
+  RADAR_QUORUM_DEGRADED_BELOW,
+  buildRadarActiveDetails,
+  parseRadarQuorum,
+  radarCoverageFit,
+  radarEchoCopy,
+  radarFrameTimeLabels,
+  radarQuorumRatio,
+  resolveRadarEchoState,
+  resolveRadarPresentationStatus,
+} from './presentation'
+export type {
+  RadarActiveDetails,
+  RadarCoverageFit,
+  RadarEchoState,
+  RadarFrameTimeLabels,
+  RadarPresentationStatus,
+  RadarQuorum,
+} from './presentation'

@@ -1,3 +1,7 @@
+import { appendFileSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { resolveRepoRoot } from '@/lib/repo/paths'
+import { buildNarrowContext } from './foundryNarrowRepair'
 /**
  * Local 14B Foundry brain: compact context, constrained JSON, bounded schema repair.
  * Does not change Ollama service health. Does not grant filesystem access.
@@ -8,12 +12,16 @@ import { FOUNDRY_MODEL_TOOL_CATALOG, toolAllowedByPermissions } from './foundryT
 import { buildFoundryModelContext } from './foundryModelContext'
 import { compactEngineeringDecisionContext } from './foundryEngineeringContract'
 import { compactWriteScopePrompt } from './foundryMissionWriteSet'
-import { buildEngineeringGateTable, genericExampleForTool } from './foundryEngineeringGateTable'
+import { authoringProgress, buildEngineeringGateTable, genericExampleForTool } from './foundryEngineeringGateTable'
 import { ensureEngineeringState } from './foundryEngineeringDepth'
 import { boundedRetryLockFromMission } from './foundryBoundedRetry'
+import { isBackgroundOrchestrationRequest, isBuildMissionRequest, missionWantsBackgroundWork, orchestrationNextCall, orchestrationProgress } from './foundryMissionExecutiveRuntime'
 
 export const LOCAL_MODEL_CONTEXT_BUDGET_TOKENS = 1_500
 export const LOCAL_MODEL_MAX_REPAIRS = 2
+const NARROW_PATCH_EXAMPLE = '{"decision":"TOOL","reasoningSummary":"fix one diagnostic","tool":{"name":"file.write","args":{"path":"src/example.ts","startLine":12,"endLine":12,"content":"  const total = items.length\\n","reason":"fix TS2322"}}}'
+/** Writing a whole source file needs room for the request plus the file being fixed; the local context window (num_ctx) holds far more than the lean default. */
+const AUTHORING_PROMPT_BUDGET_FACTOR = 3
 export const LOCAL_MODEL_DEFAULT_REASONING = 'Local model selected validated action.'
 
 export const FOUNDRY_LOCAL_GENERATE_OPTIONS = {
@@ -35,15 +43,53 @@ export const FOUNDRY_LOCAL_DECISION_SCHEMA = {
       type: 'object',
       properties: {
         name: { type: 'string' },
-        args: { type: 'object' },
+        args: { type: 'object', additionalProperties: true },
       },
       required: ['name'],
     },
     result: { type: 'string' },
-    blocker: { type: 'string' },
+    blocker: { type: 'string', minLength: 1 },
   },
   required: ['decision'],
 } as const
+
+/** Constrain local decoding to this turn's actual broker tools, including repair attempts. */
+function localArgumentSchema(name: string, spec: string): Record<string, unknown> {
+  if (name === 'operation') return { type: 'object', properties: { id: { type: 'string' }, targets: { type: 'array', items: { type: 'string' } }, script: { type: 'string' }, repairId: { type: 'string' } }, required: ['id'], additionalProperties: false }
+  if (spec === 'true') return { type: 'boolean', const: true }
+  if (/boolean/.test(spec)) return { type: 'boolean' }
+  if (/array|\[\]/.test(spec) || name === 'targets') return { type: 'array', items: { type: 'string' } }
+  if (/number|integer/.test(spec) || ['startLine', 'endLine', 'maxResults', 'timeoutMs', 'maxLines'].includes(name)) return { type: 'number' }
+  if (/object|StructuredPatch/.test(spec)) return { type: 'object', additionalProperties: true }
+  return { type: 'string' }
+}
+
+export function localDecisionSchemaForTools(tools: readonly { name: string; args?: Record<string, string>; required?: readonly string[] }[]) {
+  const unique = [...new Map(tools.map(tool => [tool.name, tool])).values()]
+  const { decision, reasoningSummary, result, blocker } = FOUNDRY_LOCAL_DECISION_SCHEMA.properties
+  const properties = { decision, reasoningSummary, result, blocker }
+  const toolSchemas = unique.map(tool => ({
+    type: 'object',
+    properties: {
+      name: { type: 'string', enum: [tool.name] },
+      args: tool.args ? {
+        type: 'object',
+        properties: Object.fromEntries(Object.entries(tool.args).map(([name, spec]) => [name, localArgumentSchema(name, spec)])),
+        required: [...(tool.required ?? [])],
+        additionalProperties: false,
+      } : { type: 'object', additionalProperties: true },
+    },
+    required: ['name', 'args'],
+    additionalProperties: false,
+  }))
+  return {
+    ...FOUNDRY_LOCAL_DECISION_SCHEMA,
+    properties: unique.length ? { ...properties, tool: { anyOf: toolSchemas } }
+      : { ...properties, decision: { type: 'string', enum: ['REPLAN', 'COMPLETE', 'BLOCKED'] } },
+    additionalProperties: false,
+  }
+}
+
 
 export const FOUNDRY_LOCAL_MODEL_SYSTEM_PROMPT = `You are Foundry's local reasoning engine.
 You do not edit files. Foundry executes tools.
@@ -181,6 +227,34 @@ export function nextOrderedInspectPath(mission: FoundryMissionRecord, requestedP
 }
 
 export function localToolsForMission(mission: FoundryMissionRecord): FoundryModelToolDescription[] {
+  const base = baseLocalToolsForMission(mission)
+  if (!missionWantsBackgroundWork(mission.userRequest)) return base
+  if (isBuildMissionRequest(mission.userRequest)) {
+    // Build missions are fully driven by the executive: offer exactly the tools of the current phase.
+    const phase = orchestrationProgress(mission.missionId, mission.userRequest).phase
+    const names = phase === 'RUN_TASKS' ? ['task.run'] : phase === 'TASKS_OPEN' ? ['mission.graph'] : phase === 'START_JOB' ? ['job.start'] : phase === 'JOB_RUNNING' ? ['job.wait', 'job.status'] : []
+    return FOUNDRY_MODEL_TOOL_CATALOG.filter(entry => names.includes(entry.name) && toolAllowedByPermissions(entry, mission.permissions)).map(compactTool)
+  }
+  const allowed = FOUNDRY_MODEL_TOOL_CATALOG.filter(entry => toolAllowedByPermissions(entry, mission.permissions))
+  // job.start is only offered while no job exists: re-offering it while one runs invites the duplicate-start loop.
+  const progress = orchestrationProgress(mission.missionId, mission.userRequest)
+  // Offer a tool only while its purpose is unmet: job.start before a job exists, mission.graph only while graph steps remain.
+  const wanted = [...(progress.phase === 'START_JOB' ? ['job.start'] : []), ...(progress.wantsGraph || progress.readyIndependent.length ? ['mission.graph'] : []), 'job.status', 'job.wait', 'workspace.search', 'file.read', 'code.owners']
+  const have = new Set(base.map(entry => entry.name))
+  const extra = wanted.flatMap(name => {
+    const entry = allowed.find(item => item.name === name)
+    return entry && !have.has(entry.name) ? [compactTool(entry)] : []
+  })
+  const graphDone = !progress.wantsGraph && progress.readyIndependent.length === 0
+  const orchestration = isBackgroundOrchestrationRequest(mission.userRequest)
+  // A requested job still to start is the one thing to do next, even while another job runs.
+  if (orchestration && progress.phase === 'START_JOB') return [...base, ...extra].filter(entry => entry.name === 'job.start')
+  // A named graph step is the one thing to do next: offer only that tool until it is taken.
+  if (orchestration && progress.phase === 'JOB_RUNNING' && progress.wantsGraph) return [...base, ...extra].filter(entry => entry.name === 'mission.graph')
+  return [...base, ...extra].filter(entry => !(orchestration && /^file\.(write|patch|replace_unique|move|delete)$/.test(entry.name))).filter(entry => !(progress.phase !== 'START_JOB' && entry.name === 'job.start') && !(graphDone && entry.name === 'mission.graph'))
+}
+
+function baseLocalToolsForMission(mission: FoundryMissionRecord): FoundryModelToolDescription[] {
   const allowed = FOUNDRY_MODEL_TOOL_CATALOG.filter(entry => toolAllowedByPermissions(entry, mission.permissions))
   const byName = new Map(allowed.map(entry => [entry.name, compactTool(entry)]))
   const pick = (...names: string[]) => names.flatMap(name => byName.get(name as never) ? [byName.get(name as never)!] : [])
@@ -349,12 +423,60 @@ export function summarizeObservation(tool: string, ok: boolean, excerpt?: string
   return `${tool} ok: ${body.slice(0, 360)}`
 }
 
+/**
+ * The sibling modules a file being written imports (named in the request or already in the file) are the contract it must satisfy; the model cannot
+ * write correct property accesses against a type it has never seen. Read-only, capped.
+ */
+export function authoringReferences(files: string[], request: string, current: string): string {
+  const root = resolveRepoRoot()
+  const dir = path.dirname(files[0] ?? '')
+  const specs = [...new Set([...`${request}\n${current}`.matchAll(/['"](\.{1,2}\/[\w./@-]+)['"]/g)].map(match => match[1]))]
+  const parts: string[] = []
+  for (const spec of specs) {
+    const base = path.posix.normalize(path.posix.join(dir, spec))
+    for (const candidate of [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`]) {
+      if (files.includes(candidate)) break
+      try {
+        parts.push(`--- ${candidate} (read-only reference; do not rewrite) ---\n${readFileSync(path.join(root, candidate), 'utf8').slice(0, 3_000)}`)
+        break
+      } catch { /* try the next extension */ }
+    }
+  }
+  return parts.join('\n').slice(0, 7_000)
+}
+
 export function buildLocalFoundryModelContext(
   mission: FoundryMissionRecord,
   loopWarning?: string,
 ): FoundryModelContext {
   const base = buildFoundryModelContext(mission, loopWarning)
   const tools = localToolsForMission(mission)
+  const authoring = authoringProgress(mission)
+  if (authoring && !isBackgroundOrchestrationRequest(mission.userRequest)) {
+    const root = resolveRepoRoot()
+    const current = authoring.phase === 'WRITE' && authoring.fixing
+      ? authoring.files.map(file => { try { return `--- ${file} (current) ---\n${readFileSync(path.join(root, file), 'utf8').slice(0, 6000)}` } catch { return '' } }).filter(Boolean).join('\n')
+      : ''
+    // Existing file with compile errors: the executive picks ONE diagnostic and hands the model only its window (narrow repair), not the whole file.
+    const narrow = authoring.phase === 'WRITE' && authoring.fixing && /^(?:TypeScript|Lint) found problems/.test(authoring.detail) && authoring.files.length === 1
+      ? buildNarrowContext(root, authoring.files[0])
+      : null
+    const references = authoring.phase === 'WRITE' && !narrow ? authoringReferences(authoring.files, mission.userRequest, current) : ''
+    const nextCall = authoring.phase === 'TYPECHECK'
+      ? JSON.stringify({ decision: 'TOOL', reasoningSummary: 'type-check what I wrote', tool: { name: 'typecheck.run', args: { scopeGlob: authoring.files[0] } } })
+      : authoring.phase === 'LINT'
+      ? JSON.stringify({ decision: 'TOOL', reasoningSummary: 'lint what I wrote', tool: { name: 'lint.run', args: { targets: authoring.files } } })
+      : authoring.phase === 'REVIEW'
+        ? JSON.stringify({ decision: 'TOOL', reasoningSummary: 'self review', tool: { name: 'engineering.review', args: {} } })
+        : ''
+    return {
+      ...base,
+      plan: [], hypotheses: [], relevantExcerpts: [], visualEvidence: [], recentErrors: [], unresolvedQuestions: [], loopWarning: undefined,
+      importantFindings: [`AUTHORING: ${authoring.detail}`, ...(nextCall ? [`AUTHORING_NEXT_CALL: ${nextCall}`] : []), ...(narrow ? [`AUTHORING_NARROW: ${narrow.text}`] : current ? [`AUTHORING_CURRENT: ${current}`] : []), ...(authoring.phase === 'WRITE' && references ? [`AUTHORING_REFERENCE: ${references}`] : [])],
+      recentToolResults: mission.toolCalls.slice(-1).filter(call => !call.ok).map(call => ({ tool: call.tool, ok: false, reason: call.reason, excerpt: (call.error ?? call.excerpt ?? '').slice(0, 500), error: call.error?.slice(0, 280) })),
+      tools,
+    }
+  }
   const lock = boundedRetryLockFromMission(mission)
   if (lock) {
     const lastFail = [...mission.toolCalls].reverse().find(call => call.tool === 'file.replace_unique' && !call.ok)
@@ -411,7 +533,7 @@ export function buildLocalFoundryModelContext(
   }
   const recentCalls = mission.toolCalls.slice(-6)
   const lastRead = [...recentCalls].reverse().find(call => call.tool === 'file.read')
-  const lastOther = [...recentCalls].reverse().find(call => call.tool !== 'file.read' && (call.tool === 'file.replace_unique' || call.tool === 'lint.run' || call.tool.startsWith('code.') || call.tool.startsWith('engineering.')))
+  const lastOther = [...recentCalls].reverse().find(call => call.tool !== 'file.read' && (call.tool === 'file.replace_unique' || call.tool === 'lint.run' || call.tool.startsWith('code.') || call.tool.startsWith('engineering.') || call.tool.startsWith('job.') || call.tool === 'mission.graph'))
   const pickedCalls = [lastRead, lastOther].filter((item, index, all): item is NonNullable<typeof item> => Boolean(item) && all.findIndex(other => other === item) === index)
   const recentToolResults = (pickedCalls.length ? pickedCalls : mission.toolCalls.slice(-2)).map(call => ({
     tool: call.tool,
@@ -436,8 +558,33 @@ export function buildLocalFoundryModelContext(
     unresolvedQuestions: progress.remaining,
     loopWarning: loopWarning && !/BUILD_DONE|installer\.activate|ops-write-conflict/i.test(loopWarning) ? loopWarning.slice(0, 280) : undefined,
     tools,
-    boundedRetryLock: lock,
+    boundedRetryLock: lock ?? undefined,
   }
+}
+
+/** Lean prompt for orchestration missions: the edit scaffolding (write scope, action plan) is irrelevant here and would crowd out the next step. */
+function buildOrchestrationPrompt(request: FoundryModelRequest, tools: string, latest: string, schemaFail?: string): string {
+  const context = request.context
+  const gate = context.importantFindings.find(item => item.includes('EVIDENCE_REQUIRED=')) ?? ''
+  const evidence = /EVIDENCE_REQUIRED=([^\n]*)/.exec(gate)?.[1] ?? context.completionGate.detail
+  const executive = context.importantFindings.find(item => item.startsWith('EXECUTIVE: ')) ?? ''
+  const nextCall = orchestrationNextCall(context.missionId, context.userRequest, context.recentToolResults.some(item => item.tool === 'file.read' && item.ok))
+  return [
+    `KIND: ${request.kind}`,
+    `COMMANDER REQUEST: ${context.userRequest}`,
+    `STATE: ${evidence}`,
+    executive,
+    context.completionGate.missing.length === 0
+      ? 'GATE IS SATISFIED. Return {"decision":"COMPLETE","reasoningSummary":"<state the build/job exit status and findings the Commander asked for>"}. Do not call more tools.'
+      : 'Take the next step with a TOOL. Never repeat a tool call whose result already says it is done.',
+    nextCall ? `NEXT_CALL (use exactly this):\n${nextCall}` : '',
+    schemaFail ? `LAST_SCHEMA_FAILURE: ${schemaFail}` : '',
+    'TOOLS:',
+    tools,
+    'LATEST OBSERVATIONS:',
+    latest || '(none)',
+    'Return one JSON decision now.',
+  ].filter(Boolean).join('\n').slice(0, LOCAL_MODEL_CONTEXT_BUDGET_TOKENS * 4)
 }
 
 export function buildLocalFoundryModelPrompt(request: FoundryModelRequest): string {
@@ -448,6 +595,62 @@ export function buildLocalFoundryModelPrompt(request: FoundryModelRequest): stri
   }).join('\n')
   const latest = context.recentToolResults.map(item => item.excerpt || `${item.tool} ${item.ok ? 'ok' : 'FAIL'}`).join('\n---\n')
   const schemaFail = context.recentErrors[0]?.message
+  if (context.importantFindings.some(item => item.startsWith('AUTHORING: '))) {
+    const find = (prefix: string) => context.importantFindings.find(item => item.startsWith(prefix))?.slice(prefix.length) ?? ''
+    const narrowText = find('AUTHORING_NARROW: ')
+    if (narrowText) {
+      const narrowPrompt = [
+        `KIND: ${request.kind}`,
+        narrowText,
+        'RULES: file.write args are path, startLine, endLine, content and reason - all five are required. path is exactly the FILE above, never any other file. startLine and endLine are exactly the PATCH RANGE. content is the replacement for lines startLine..endLine ONLY (no line numbers, no other lines): the complete statement(s) again, with the fix. Keep everything else as it is.',
+        `SYNTAX EXAMPLE (fake names only):\n${NARROW_PATCH_EXAMPLE}`,
+        context.recentToolResults.length ? `LAST RESULT: ${context.recentToolResults[0].excerpt}` : '',
+        'TOOLS:',
+        tools,
+        schemaFail ? `LAST_SCHEMA_FAILURE: ${schemaFail}` : '',
+        'Return one JSON decision now.',
+      ].filter(Boolean).join('\n')
+      if (process.env.FOUNDRY_PROMPT_TRACE) appendFileSync(process.env.FOUNDRY_PROMPT_TRACE, `\n=====TURN ${new Date().toISOString()}=====\n${narrowPrompt}\n`)
+      return narrowPrompt
+    }
+    const next = find('AUTHORING_NEXT_CALL: ')
+    const writing = !next
+    const fixing = writing && Boolean(find('AUTHORING_CURRENT: '))
+    const budgetChars = LOCAL_MODEL_CONTEXT_BUDGET_TOKENS * 4 * (writing ? AUTHORING_PROMPT_BUDGET_FACTOR : 1)
+    const reference = find('AUTHORING_REFERENCE: ')
+    const compose = (currentFile: string) => [
+      `KIND: ${request.kind}`,
+      `COMMANDER REQUEST: ${context.userRequest}`,
+      `STATE: ${find('AUTHORING: ')}`,
+      next ? `NEXT_CALL (use exactly this):\n${next}` : '',
+      writing ? `SYNTAX EXAMPLE (fake names only):\n${genericExampleForTool('file.write')}` : '',
+      reference ? `IMPORTED MODULES:\n${reference}` : '',
+      currentFile ? `CURRENT FILE:\n${currentFile}` : '',
+      context.recentToolResults.length ? `LAST RESULT: ${context.recentToolResults[0].excerpt}` : '',
+      context.completionGate.missing.length === 0 ? 'GATE IS SATISFIED. Return {"decision":"COMPLETE","reasoningSummary":"<what was created and verified>"}.' : '',
+      'TOOLS:',
+      tools,
+      schemaFail ? `LAST_SCHEMA_FAILURE: ${schemaFail}` : '',
+      // Last, where it weighs most: what to change, and that changing nothing was already tried.
+      fixing ? `FIX NOW: ${find('AUTHORING: ')}` : '',
+      fixing && /NO_CHANGE/.test(context.recentToolResults[0]?.excerpt ?? '') ? 'YOUR LAST WRITE WAS BYTE-IDENTICAL TO THE FILE ON DISK, so it fixed nothing. Edit the exact lines named above.' : '',
+      'Return one JSON decision now.',
+    ].filter(Boolean).join('\n')
+    // The file being rewritten is the only elastic part. Cutting the finished prompt would shear off the file mid-statement (the model then copies
+    // the cut-off text back to disk) and the instructions that follow it, so the file is trimmed to what is left of the budget instead.
+    const current = find('AUTHORING_CURRENT: ')
+    const spare = budgetChars - compose('').length
+    const shown = current.length <= spare ? current : `${current.slice(0, Math.max(0, spare - 90))}\n[FILE CUT OFF HERE BY THE PROMPT BUDGET: this is not the end of the file. Never write a file that stops here.]`
+    const prompt = compose(current ? shown : '')
+    if (process.env.FOUNDRY_PROMPT_TRACE) appendFileSync(process.env.FOUNDRY_PROMPT_TRACE, `\n=====TURN ${new Date().toISOString()}=====\n${prompt}\n`)
+    return prompt
+  }
+  if (isBackgroundOrchestrationRequest(context.userRequest)) {
+    const lean = buildOrchestrationPrompt(request, tools, latest, schemaFail)
+    // Diagnostic only: set FOUNDRY_PROMPT_TRACE=<file> to record exactly what the local model was shown each turn.
+    if (process.env.FOUNDRY_PROMPT_TRACE) appendFileSync(process.env.FOUNDRY_PROMPT_TRACE, `\n=====TURN ${new Date().toISOString()}=====\n${lean}\n`)
+    return lean
+  }
   const gateFinding = context.importantFindings.find(item => item.includes('CURRENT_INTENT=')) ?? ''
   let prompt = [
     `KIND: ${request.kind}`,
@@ -468,6 +671,7 @@ export function buildLocalFoundryModelPrompt(request: FoundryModelRequest): stri
     schemaFail ? `LAST_SCHEMA_FAILURE: ${schemaFail}` : '',
     'TOOLS:',
     tools,
+    orchestrationNextCall(context.missionId, context.userRequest, false) ? `NEXT_CALL (use exactly this):\n${orchestrationNextCall(context.missionId, context.userRequest, false)}` : '',
     /Do not use src\/example\.ts/.test(context.goal)
       ? 'SYNTAX: one JSON TOOL file.replace_unique. path is the working-set file. matchText is copied once from SOURCE. replacementText is the replacement. Do not use anchorId.'
       : (genericExampleForTool(context.tools[0]?.name) ? `SYNTAX EXAMPLE (fake names only):\n${genericExampleForTool(context.tools[0]?.name)}` : ''),
@@ -480,8 +684,9 @@ export function buildLocalFoundryModelPrompt(request: FoundryModelRequest): stri
   return prompt
 }
 
-export function buildLocalRepairPrompt(error: string, invalidText: string): string {
+export function buildLocalRepairPrompt(error: string, invalidText: string, request?: FoundryModelRequest): string {
   return [
+    ...(request ? ['ORIGINAL TURN (use its tools and exact argument names):', buildLocalFoundryModelPrompt(request)] : []),
     'VALIDATION FAILURE:',
     error,
     'Invalid response:',

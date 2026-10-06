@@ -75,6 +75,8 @@ async function run() {
     currentAction: 'typecheck.run',
     classification: 'COMMANDER_REAL',
     visibility: 'commander',
+    kind: live.kind,
+    updatedAt: '2026-01-01T00:00:00.000Z',
   }]).pass011AsCurrent === 0, 'pass011'))
   results.push(check('system_mission_hidden', !isActiveCommanderMission({
     ...live,
@@ -183,7 +185,7 @@ async function run() {
   ]
   const canonicalId = chooseCanonicalApplicationProject(transportDupes)
   results.push(check('duplicate_index_keeps_canonical', canonicalId === 'dd4af6c3-5603-4584-b0ad-88ff900df5c0', canonicalId))
-  const archived = archiveDuplicateProjectRecords(transportDupes.map(item => ({ ...item, missionId: 'm', stack: null, requirements: null, researchSources: [], acceptanceCriteria: [], status: 'PROJECT_READY' as const })), canonicalId, ['5d99f290-efaa-4b6c-ae5d-7dc6954c4b45'])
+  const archived = archiveDuplicateProjectRecords(transportDupes.map(item => ({ ...item, missionId: 'm', stack: null, requirements: null, researchSources: [], acceptanceCriteria: [], status: 'PROJECT_READY' as const, archived: false as boolean })), canonicalId, ['5d99f290-efaa-4b6c-ae5d-7dc6954c4b45'])
   results.push(check('duplicate_metadata_archived_not_deleted', archived.find(item => item.projectId === '5d99f290-efaa-4b6c-ae5d-7dc6954c4b45')?.archived === true && archived.find(item => item.projectId === canonicalId)?.archived !== true, 'archive'))
   results.push(check('project_history_preserved', archived.every(item => item.projectRoot.startsWith('/home/chosenone/FoundryProjects/')), 'roots kept'))
   results.push(check('new_project_identity_unresolved', projectBrandIdentityIsResolved({ status: 'NEW_PROJECT' }) === false, 'new'))

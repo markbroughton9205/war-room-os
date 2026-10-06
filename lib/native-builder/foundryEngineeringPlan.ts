@@ -59,6 +59,12 @@ export type PlanTrigger =
   | 'CONTEXT_EXPANDED'
   | 'CHANGE_REVERTED'
   | 'MEMORY_USED'
+  | 'RESEARCH_USED'
+  | 'RUNTIME_EVIDENCE'
+  | 'PARTIAL_PROGRESS'
+  | 'OSCILLATION'
+  | 'EDIT_PRESERVED'
+  | 'SECURE_DEFAULT'
 
 export type PlanChange = {
   op: 'ADD' | 'REOPEN' | 'RETARGET' | 'KEEP' | 'DEFER'
@@ -328,6 +334,12 @@ export const PLAN_TRIGGER_SUMMARY: Record<PlanTrigger, string> = {
   DRIFT_GUARD: "The tests also show a problem that has nothing to do with your request, so I'm leaving it alone and staying on what you asked.",
   HYPOTHESIS_CONTRADICTED: "I checked that idea against the files and it doesn't hold, so I'm changing course.",
   EDIT_INEFFECTIVE: "My change didn't fix it, so I'm ruling that file out and looking at the rest of the project.",
+  RESEARCH_USED: "I checked the official docs for the part that depends on a library version, so I'm updating the plan around what they say.",
+  PARTIAL_PROGRESS: "Part of my change worked, but it also removed something the code still uses, so I'm keeping what worked and repairing only that.",
+  OSCILLATION: "My last changes swung the failure back and forth between two problems, so I'm keeping the part that worked and fixing only what broke instead of starting over.",
+  SECURE_DEFAULT: "Two supported options do the same job here and one of them is riskier, so I chose the safer one.",
+  EDIT_PRESERVED: "My change would have removed something the code still uses, so I kept that part in place and changed only what was asked.",
+  RUNTIME_EVIDENCE: "I ran the failing test under a trace and it showed what the code actually did, so I'm pointing the change there.",
   MEMORY_USED: "I remember something relevant from earlier in this project, so I'm using it as a starting point and checking it against the code as it is now.",
   CHANGE_REVERTED: "That change made tests that had passed fail again, so I put the files back and kept what was working.",
   CONTEXT_EXPANDED: "The failing run points at another part of the project, so I'm adding it to what I'm looking at.",

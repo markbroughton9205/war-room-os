@@ -33,9 +33,10 @@ export function registerActiveProcess(repairId: string, child: ChildProcess, lab
 /** Drop wrapper event-loop refs so the parent can exit while the owned child keeps running. */
 export function detachChildFromWrapper(child: ChildProcess): void {
   child.unref()
-  child.stdin?.unref()
-  child.stdout?.unref()
-  child.stderr?.unref()
+  // Piped stdio of a child process are sockets at runtime; the stream types do not say so, so they are asked first.
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    if (stream && 'unref' in stream && typeof stream.unref === 'function') stream.unref()
+  }
 }
 
 export function unregisterActiveProcess(repairId: string, child: ChildProcess): void {
@@ -78,6 +79,23 @@ function killTreePosix(child: ChildProcess): void {
       /* already exited */
     }
   }
+}
+
+function signalTreePosix(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (typeof child.pid !== 'number') return
+  try { process.kill(-child.pid, signal) } catch {
+    try { child.kill(signal) } catch { /* already exited */ }
+  }
+}
+
+async function stopTreePosix(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  signalTreePosix(child, 'SIGTERM')
+  await new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, 1500)
+    child.once('close', () => { clearTimeout(timer); resolve() })
+  })
+  if (child.exitCode === null && child.signalCode === null) killTreePosix(child)
 }
 
 async function killTreeWindows(child: ChildProcess): Promise<void> {
@@ -134,7 +152,7 @@ export async function killProcessesForRepair(repairId: string): Promise<KillResu
     if (process.platform === 'win32') {
       await killTreeWindows(tracked.child)
     } else {
-      killTreePosix(tracked.child)
+      await stopTreePosix(tracked.child)
     }
     results.push({ killed: tracked.child.pid ?? -1, label: tracked.label })
     set.delete(tracked)

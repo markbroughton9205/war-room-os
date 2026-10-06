@@ -74,6 +74,8 @@ function run(): CaseResult[] {
     results.push(check('speed_course_heading_are_typed_numbers', event?.properties.speedKnots === 14.2 && event?.properties.courseDeg === 271.5 && event?.properties.headingDeg === 270, JSON.stringify(event?.properties)))
     results.push(check('nav_status_label_is_preserved_verbatim', event?.properties.navStatLabel === 'Under way using engine', String(event?.properties.navStatLabel)))
     results.push(check('destination_and_draught_are_preserved', event?.properties.destination === 'HELSINKI' && event?.properties.draughtMeters === 6.4, JSON.stringify(event?.properties)))
+    results.push(check('passenger_ais_code_classifies_as_passenger_not_ferry', event?.properties.vesselIconType === 'PASSENGER', String(event?.properties.vesselIconType)))
+    results.push(check('missing_name_identifier_stays_null', event?.properties.name === null, JSON.stringify(event?.properties.name)))
     results.push(check('observed_at_uses_real_last_observed_not_batch_time', event?.observedAt === '2026-08-27T00:59:50.000Z', String(event?.observedAt)))
     results.push(check('temporal_status_is_current', event?.temporalStatus === 'current', String(event?.temporalStatus)))
   }
@@ -109,6 +111,7 @@ function run(): CaseResult[] {
     const props = events[0]?.properties as Record<string, unknown>
     const allNull = props.callSign === null && props.imo === null && props.destination === null && props.draughtMeters === null && props.shipTypeCode === null && props.shipTypeLabel === null
     results.push(check('missing_optional_fields_stay_null_not_fabricated', allNull, JSON.stringify(props)))
+    results.push(check('missing_ship_type_is_unknown_vessel', props.vesselIconType === 'UNKNOWN_VESSEL' && props.name === null, JSON.stringify({ vesselIconType: props.vesselIconType, name: props.name })))
     results.push(check('vessel_metadata_unavailable_flag_is_preserved', props.vesselMetadataAvailable === false, JSON.stringify(props.vesselMetadataAvailable)))
   }
 

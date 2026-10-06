@@ -95,7 +95,7 @@ async function run() {
   const dirtyEnv = envelopeFromDiskFile(fixture, 'hello.ts')
   const dirtyProp = await runFoundryW2Command({ kind: 'edit', envelope: dirtyEnv, instruction: 'typed result', providerClass: 'local' })
   writeFileSync(path.join(process.env.FOUNDRY_WORKBENCH_STATE_DIR, 'dirty-buffers.json'), JSON.stringify({ paths: [hello] }))
-  const dirtyApply = dirtyProp.proposal ? await acceptW2Proposal(dirtyProp.proposal.proposalId) : { ok: true }
+  const dirtyApply: Pick<Awaited<ReturnType<typeof acceptW2Proposal>>, 'ok' | 'code' | 'error'> = dirtyProp.proposal ? await acceptW2Proposal(dirtyProp.proposal.proposalId) : { ok: true }
   results.push(check('fixture_F_dirty', dirtyApply.ok === false && /DIRTY_COMMANDER_BUFFER/.test(String(dirtyApply.code || dirtyApply.error)) && readFileSync(hello, 'utf8') === before, String(dirtyApply.code)))
   writeFileSync(path.join(process.env.FOUNDRY_WORKBENCH_STATE_DIR, 'dirty-buffers.json'), JSON.stringify({ paths: [] }))
 

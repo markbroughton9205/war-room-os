@@ -1,0 +1,1228 @@
+{
+  "id": "WRIM_GENESIS_FOUNDATION_CURRICULUM_v1",
+  "canonical": "STEP_400",
+  "parent": "WRIM1-UH1-AC2-EA1-000010/step-25",
+  "current_school": "SCHOOL_05_NATURAL_ENTRY",
+  "current_mission": "NATURAL_ENTRY_NE1_REVIEW",
+  "mod_02a_imported": true,
+  "mod_02a_do_not_rerun": true,
+  "school_04_callable_remediation": "SCHOOL_04B_ROUTER_DATA_REMEDIATION",
+  "schools": [
+    {
+      "id": "SCHOOL_00_TRUTH_REPRODUCIBILITY",
+      "name": "Truth / Reproducibility",
+      "purpose": "Prove environment and lineage before any experiment.",
+      "status": "REQUIRED_PREFLIGHT",
+      "next": [
+        "SCHOOL_01_RESPONSE_CONTROL"
+      ],
+      "authorized_actions": [
+        "verify_hashes",
+        "verify_tokenizer",
+        "verify_lock",
+        "read_checkpoints"
+      ],
+      "prohibited_actions": [
+        "train",
+        "promote"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "canonical_match",
+        "parent_hash_match",
+        "tokenizer_match",
+        "stage3_baseline_readable"
+      ],
+      "failure_criteria": [
+        "hash_mismatch",
+        "lock_contention",
+        "checkpoint_unreadable"
+      ],
+      "repair_path": "Repair environment or return boundary. Do not train.",
+      "return_to_commander_if": [
+        "FROZEN_HASH_VIOLATION",
+        "TRAINER_GOVERNANCE_FAILURE"
+      ],
+      "missions": [
+        {
+          "id": "VERIFY_WRIM_TRUTH",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_01_RESPONSE_CONTROL",
+      "name": "Response Control",
+      "purpose": "Assistant-entry, span, EOS, ramble, empty, multi-turn reset.",
+      "status": "ESTABLISHED_REGRESSION_ONLY",
+      "next": [
+        "SCHOOL_02_STRUCTURED_ENTRY"
+      ],
+      "authorized_actions": [
+        "regression_eval"
+      ],
+      "prohibited_actions": [
+        "unfreeze_body",
+        "change_tokenizer"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "eos_stopping",
+        "empty_low",
+        "ramble_controlled",
+        "multi_turn_reset"
+      ],
+      "failure_criteria": [
+        "newline_attractor_return",
+        "no_eos"
+      ],
+      "repair_path": "Reopen only if future failures appear.",
+      "return_to_commander_if": [],
+      "missions": [
+        {
+          "id": "RESPONSE_CONTROL_REGRESSION",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_02_STRUCTURED_ENTRY",
+      "name": "Structured Entry",
+      "purpose": "Preserve EA1 first-token classes.",
+      "status": "ESTABLISHED",
+      "next": [
+        "SCHOOL_03_STRUCTURED_CONTINUATION"
+      ],
+      "authorized_actions": [
+        "eval_entry_classes"
+      ],
+      "prohibited_actions": [
+        "remove_ea1_globally",
+        "train_ea1_without_gate"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "blue_cat_dog_no_entry_retained"
+      ],
+      "failure_criteria": [
+        "structured_entry_collapse"
+      ],
+      "repair_path": "Restore EA1+RA1 identity from parent 000010.",
+      "return_to_commander_if": [],
+      "missions": [
+        {
+          "id": "EA1_IDENTITY",
+          "trainable": [],
+          "frozen": [
+            "base",
+            "ra1"
+          ]
+        }
+      ],
+      "notes": "EA1 remains useful for natural entry. Do not remove globally."
+    },
+    {
+      "id": "SCHOOL_03_STRUCTURED_CONTINUATION",
+      "name": "Structured Continuation",
+      "purpose": "Preserve RA1 phrase continuation.",
+      "status": "ESTABLISHED",
+      "next": [
+        "SCHOOL_04_RESPONSE_MODE_ROUTING"
+      ],
+      "authorized_actions": [
+        "eval_phrase"
+      ],
+      "prohibited_actions": [
+        "enlarge_ra1",
+        "train_ra1_without_gate"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "phrase>=17",
+        "paraphrase>=3"
+      ],
+      "failure_criteria": [
+        "phrase_destroyed_by_bypass_on_structured"
+      ],
+      "repair_path": "Fail-closed structured route EA1+RA1.",
+      "return_to_commander_if": [],
+      "missions": [
+        {
+          "id": "RA1_IDENTITY",
+          "trainable": [],
+          "frozen": [
+            "base",
+            "ea1"
+          ]
+        }
+      ],
+      "notes": "Protected capability. phrase 17 blue 3 no 5 dog 5 cat 4 two 6 three 10 paraphrase 3."
+    },
+    {
+      "id": "SCHOOL_04_RESPONSE_MODE_ROUTING",
+      "name": "Response-Mode Routing",
+      "purpose": "Learn when RA1 should apply. STRUCTURED=EA1+RA1 NATURAL=EA1+BYPASS.",
+      "status": "EXPERIMENTAL_PASS_WITH_GENERALIZATION_AND_REGRESSION_WORK_REMAINING",
+      "next": [
+        "SCHOOL_05_NATURAL_ENTRY",
+        "SCHOOL_04B_ROUTER_DATA_REMEDIATION"
+      ],
+      "authorized_actions": [
+        "import_mod02a_evidence",
+        "router_eval_readonly",
+        "enter_04b_explicitly"
+      ],
+      "prohibited_actions": [
+        "rerun_mod02a_by_default",
+        "install_rmr1_production",
+        "train_na1",
+        "implement_ne1"
+      ],
+      "token_budget": {
+        "kind": "classification",
+        "lm_tokens": 0,
+        "examples": 4096
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "MOD_02A_ROUTER_PROOF=PASS already recorded"
+      ],
+      "failure_criteria": [
+        "false_natural_destroys_phrase"
+      ],
+      "repair_path": "SCHOOL_04B callable remediation. Do not block School 05.",
+      "return_to_commander_if": [
+        "ROUTER_REPRESENTATION_BOUNDARY"
+      ],
+      "missions": [
+        {
+          "id": "MOD_02A",
+          "status": "COMPLETED",
+          "trainable": [
+            "rmr1"
+          ],
+          "frozen": [
+            "base",
+            "ea1",
+            "ra1",
+            "na1",
+            "lm_head",
+            "tok_emb",
+            "transformer"
+          ],
+          "do_not_rerun": true,
+          "extra_unseen_recall": 0.45,
+          "production_ready": false,
+          "two_token_regression_open": true
+        }
+      ],
+      "notes": "MOD-02A implemented and completed. Linear 514. extra-unseen 0.45 vs probe 0.65. ROUTER_PRODUCTION_READY=NO. ROUTER_REGRESSION_OPEN=YES on two-token val (1 vs 3). Do not treat routing as pending. Do not install in War Room runtime."
+    },
+    {
+      "id": "SCHOOL_04B_ROUTER_DATA_REMEDIATION",
+      "name": "Router Data Remediation",
+      "purpose": "Callable lane for extra-unseen routing, template leakage, two-token regression.",
+      "status": "CALLABLE_NOT_CURRENT",
+      "next": [
+        "SCHOOL_04_RESPONSE_MODE_ROUTING",
+        "SCHOOL_05_NATURAL_ENTRY"
+      ],
+      "authorized_actions": [
+        "audit_templates",
+        "new_router_curriculum_version",
+        "recalibrate_threshold_on_val_only"
+      ],
+      "prohibited_actions": [
+        "train_on_extra_unseen",
+        "enlarge_to_mlp_without_commander",
+        "block_school_05"
+      ],
+      "token_budget": {
+        "kind": "classification",
+        "lm_tokens": 0,
+        "examples": 4096
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "extra_unseen_recall_meaningfully_up",
+        "two_token_identity_restored",
+        "val_false_natural_still_low"
+      ],
+      "failure_criteria": [
+        "official_fit_extra_fail_after_3_strategies"
+      ],
+      "repair_path": "After 3 distinct data strategies return ROUTER_REPRESENTATION_BOUNDARY.",
+      "return_to_commander_if": [
+        "ROUTER_REPRESENTATION_BOUNDARY",
+        "SCIENTIFIC_LANE_EXHAUSTED"
+      ],
+      "missions": [
+        {
+          "id": "ROUTER_DATA_REMEDIATION",
+          "status": "AVAILABLE",
+          "trainable": [
+            "rmr1"
+          ],
+          "frozen": [
+            "all_wrim"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_05_NATURAL_ENTRY",
+      "name": "Natural Entry",
+      "purpose": "Diagnose and, only if gated, bound a NE1 capacity proof. Token1 is the bottleneck.",
+      "status": "CURRENT",
+      "next": [
+        "SCHOOL_06_NATURAL_CONTINUATION"
+      ],
+      "authorized_actions": [
+        "natural_entry_diagnostic",
+        "token1_rank_attractor_map",
+        "gold_token1_ceiling",
+        "ea1_residual_probe",
+        "leakage_audit",
+        "plan_ne1_but_do_not_auto_build"
+      ],
+      "prohibited_actions": [
+        "automatically_create_ne1",
+        "train_ea1_ra1_base",
+        "use_learned_router_in_first_ne1_proof",
+        "train_on_heldout_eval",
+        "install_rmr1"
+      ],
+      "token_budget": {
+        "kind": "lm",
+        "lm_tokens": 204800,
+        "extend_once_to": 204800
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "diagnostic_complete",
+        "ne1_decision_recorded",
+        "if_ne1_trained: extra_unseen_token1_and_greedy_improve"
+      ],
+      "failure_criteria": [
+        "token1_not_earliest_failure",
+        "gold_token1_does_not_unlock_span"
+      ],
+      "repair_path": "Data/objective redesign using current EA1 before any NE1.",
+      "return_to_commander_if": [
+        "ARCHITECTURE_CHANGE_REQUIRED",
+        "SCIENTIFIC_LANE_EXHAUSTED"
+      ],
+      "missions": [
+        {
+          "id": "NATURAL_ENTRY_NE1_REVIEW",
+          "status": "CURRENT",
+          "kind": "DIAGNOSTIC_AND_DECISION",
+          "trainable": [],
+          "frozen": [
+            "base",
+            "ea1",
+            "ra1",
+            "rmr1",
+            "lm_head",
+            "tok_emb"
+          ],
+          "options": [
+            "A_data_objective_redesign_ea1",
+            "B_bounded_ne1_proof",
+            "C_other_entry_mechanism"
+          ],
+          "ne1_auto_create": false
+        }
+      ],
+      "notes": "EA1+BYPASS official 3 extra 1; EA1-off+BYPASS 2/0. Gold token1 3\u21926 / 1\u21929. EA1 residual cosine phrase-vs-natural ~0.984. Attractors: no dog blue red ok. RMR1 frozen experimental, not part of first NE1 proof. If NE1: B32 entry-only pre_lm_head zero-init train NE1 only; natural=NE1 then BYPASS; structured EA1+RA1 protected; oracle NATURAL mode for capacity proof; budget 102400 extend once to 204800."
+    },
+    {
+      "id": "SCHOOL_06_NATURAL_CONTINUATION",
+      "name": "Natural Continuation",
+      "purpose": "After entry is corrected, test whether frozen-base BYPASS span is enough.",
+      "status": "PENDING",
+      "next": [
+        "SCHOOL_07_NATURAL_GENERALIZATION"
+      ],
+      "authorized_actions": [
+        "free_greedy",
+        "gold_prefix_1_2_3",
+        "prefix_depth"
+      ],
+      "prohibited_actions": [
+        "revive_na1_without_token2plus_localization"
+      ],
+      "token_budget": {
+        "kind": "lm",
+        "lm_tokens": 409600
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bypass_sufficient_or_failure_localized_to_span"
+      ],
+      "failure_criteria": [
+        "entry_still_broken"
+      ],
+      "repair_path": "Do not revive NA1 unless entry is established AND bypass span is insufficient.",
+      "return_to_commander_if": [],
+      "missions": [
+        {
+          "id": "NATURAL_CONTINUATION_BYPASS_TEST",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_07_NATURAL_GENERALIZATION",
+      "name": "Natural Generalization",
+      "purpose": "Train/val/extra-unseen/family/paraphrase/adversarial-template must stay distinct.",
+      "status": "PENDING",
+      "next": [
+        "SCHOOL_08_MULTI_TURN_CONVERSATION"
+      ],
+      "authorized_actions": [
+        "contamination_audit",
+        "heldout_eval"
+      ],
+      "prohibited_actions": [
+        "train_on_extra_unseen",
+        "merge_public_metrics"
+      ],
+      "token_budget": {
+        "kind": "lm",
+        "lm_tokens": 409600
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "extra_unseen_and_family_holdout_reported_separately"
+      ],
+      "failure_criteria": [
+        "template_memorization_only"
+      ],
+      "repair_path": "New dataset version + hash + lineage. No silent mutation.",
+      "return_to_commander_if": [
+        "DATA_BOUNDARY_REQUIRES_NEW_CORPUS_SOURCE",
+        "EVALUATION_SUITE_CONTAMINATION"
+      ],
+      "missions": [
+        {
+          "id": "NATURAL_GENERALIZATION_GATES",
+          "trainable": [],
+          "frozen": [
+            "eval_suites"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_08_MULTI_TURN_CONVERSATION",
+      "name": "Multi-turn Conversation",
+      "purpose": "Two/three-turn continuity, route reset, mode changes. Not persistent memory.",
+      "status": "PENDING",
+      "next": [
+        "SCHOOL_09_INSTRUCTION_FOLLOWING"
+      ],
+      "authorized_actions": [
+        "multi_turn_eval",
+        "route_reset_eval"
+      ],
+      "prohibited_actions": [
+        "claim_long_term_memory"
+      ],
+      "token_budget": {
+        "kind": "lm",
+        "lm_tokens": 204800
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "structured_to_natural_and_reverse_no_leak",
+        "followup_continuity"
+      ],
+      "failure_criteria": [
+        "route_latch_leaks_across_eos"
+      ],
+      "repair_path": "Reuse RMR1 latch/EOS tests; do not conflate with Ra'el memory.",
+      "return_to_commander_if": [],
+      "missions": [
+        {
+          "id": "MULTI_TURN_CONTEXT_WINDOW",
+          "trainable": [],
+          "frozen": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_09_INSTRUCTION_FOLLOWING",
+      "name": "Instruction Following",
+      "purpose": "Brief, JSON, code-only, explain, list, transform, classify, extract, constraints.",
+      "status": "PENDING",
+      "next": [
+        "SCHOOL_10_GENERAL_LANGUAGE"
+      ],
+      "authorized_actions": [
+        "instruction_eval"
+      ],
+      "prohibited_actions": [
+        "train_on_eval_answers"
+      ],
+      "token_budget": {
+        "kind": "lm",
+        "lm_tokens": 204800
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "format_constraints_heldout"
+      ],
+      "failure_criteria": [
+        "ignores_negative_constraints"
+      ],
+      "repair_path": "Separate train/eval instruction sets.",
+      "return_to_commander_if": [],
+      "missions": [
+        {
+          "id": "INSTRUCTION_FOLLOWING_HELD_OUT",
+          "trainable": [],
+          "frozen": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_10_GENERAL_LANGUAGE",
+      "name": "General Language",
+      "purpose": "Held-out QA, definitions, short explanation, summary, classification.",
+      "status": "PENDING",
+      "next": [
+        "SCHOOL_11_REASONING_FOUNDATION"
+      ],
+      "authorized_actions": [
+        "heldout_language_eval"
+      ],
+      "prohibited_actions": [
+        "train_on_general_eval"
+      ],
+      "token_budget": {
+        "kind": "lm",
+        "lm_tokens": 204800
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "heldout_language_improves_without_nl_nll_regression"
+      ],
+      "failure_criteria": [
+        "independent_nl_nll_regresses"
+      ],
+      "repair_path": "Retention floor vs STEP_400.",
+      "return_to_commander_if": [],
+      "missions": [
+        {
+          "id": "GENERAL_LANGUAGE_HELD_OUT",
+          "trainable": [],
+          "frozen": [
+            "eval_nl"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_11_REASONING_FOUNDATION",
+      "name": "Reasoning Foundation",
+      "purpose": "Small measurable reasoning. Do not claim advanced reasoning.",
+      "status": "PENDING",
+      "next": [
+        "SCHOOL_12_STRUCTURED_OUTPUT"
+      ],
+      "authorized_actions": [
+        "one_two_step_deduction_eval"
+      ],
+      "prohibited_actions": [
+        "train_on_eval_answers",
+        "claim_advanced_reasoning"
+      ],
+      "token_budget": {
+        "kind": "lm",
+        "lm_tokens": 204800
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "exact_and_semantic_tracked_separately"
+      ],
+      "failure_criteria": [
+        "eval_contamination"
+      ],
+      "repair_path": "Separate train/eval reasoning sets.",
+      "return_to_commander_if": [
+        "EVALUATION_SUITE_CONTAMINATION"
+      ],
+      "missions": [
+        {
+          "id": "REASONING_FOUNDATION_SMALL",
+          "trainable": [],
+          "frozen": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_12_STRUCTURED_OUTPUT",
+      "name": "Structured Output",
+      "purpose": "Preserve JSON/code NLL and simple schemas.",
+      "status": "PENDING",
+      "next": [
+        "SCHOOL_13_TOOL_USE_READINESS"
+      ],
+      "authorized_actions": [
+        "json_code_eval"
+      ],
+      "prohibited_actions": [
+        "regress_code_json_nll"
+      ],
+      "token_budget": {
+        "kind": "lm",
+        "lm_tokens": 102400
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "code_json_nll_not_worse_than_parent"
+      ],
+      "failure_criteria": [
+        "code_or_json_nll_regression"
+      ],
+      "repair_path": "Retention eval bundle.",
+      "return_to_commander_if": [],
+      "missions": [
+        {
+          "id": "STRUCTURED_OUTPUT_RETENTION",
+          "trainable": [],
+          "frozen": []
+        }
+      ],
+      "notes": "Independent NL NLL ~6.972 general ~5.247 code ~3.579 json ~3.282."
+    },
+    {
+      "id": "SCHOOL_13_TOOL_USE_READINESS",
+      "name": "Tool-use Readiness",
+      "purpose": "Recognize tool need, category, bounded args, interpret result. No unrestricted tools.",
+      "status": "PENDING",
+      "next": [
+        "SCHOOL_14_SELF_EVALUATION"
+      ],
+      "authorized_actions": [
+        "tool_readiness_eval"
+      ],
+      "prohibited_actions": [
+        "unrestricted_autonomous_tool_execution"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "tool_category_and_arg_construction_heldout"
+      ],
+      "failure_criteria": [
+        "executes_tools_outside_war_room_governance"
+      ],
+      "repair_path": "Keep governance in War Room, not WRIM.",
+      "return_to_commander_if": [
+        "SECURITY_GOVERNANCE_VIOLATION"
+      ],
+      "missions": [
+        {
+          "id": "TOOL_USE_READINESS",
+          "trainable": [],
+          "frozen": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_14_SELF_EVALUATION",
+      "name": "Self-evaluation / Uncertainty",
+      "purpose": "Unknown, insufficient evidence, needs tool, needs clarification, confidence bucket.",
+      "status": "PENDING",
+      "next": [
+        "SCHOOL_15_FOUNDATION_GRADUATION"
+      ],
+      "authorized_actions": [
+        "uncertainty_behavior_eval"
+      ],
+      "prohibited_actions": [
+        "claim_calibrated_probability_if_unproven"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "refuses_or_defers_when_unsupported"
+      ],
+      "failure_criteria": [
+        "hallucinated_certainty"
+      ],
+      "repair_path": "Behavior eval only until calibration is measured.",
+      "return_to_commander_if": [],
+      "missions": [
+        {
+          "id": "UNCERTAINTY_BEHAVIOR",
+          "trainable": [],
+          "frozen": []
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SCHOOL_15_FOUNDATION_GRADUATION",
+      "name": "Foundation Graduation",
+      "purpose": "Frozen WRIM-FOUNDATION-GRADUATION-1-v1.0.0. Never train on it. Never self-promote.",
+      "status": "PENDING",
+      "next": [
+        "RAEL_00_FOUNDATION_INGESTION"
+      ],
+      "authorized_actions": [
+        "run_graduation_suite_readonly"
+      ],
+      "prohibited_actions": [
+        "train_on_graduation_suite",
+        "self_promote",
+        "change_canonical",
+        "start_stage3b",
+        "start_rael_training"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "FOUNDATION_READY_FOR_GRADUATION_REVIEW returned to Commander"
+      ],
+      "failure_criteria": [
+        "FOUNDATION_NOT_READY_CONTINUE_CURRICULUM"
+      ],
+      "repair_path": "Continue earlier school. Stage3 floor 5/6 prefer 6/6 never 4/6.",
+      "return_to_commander_if": [
+        "FOUNDATION_READY_FOR_GRADUATION_REVIEW",
+        "CANONICAL_PROMOTION_DECISION_REQUIRED"
+      ],
+      "missions": [
+        {
+          "id": "FOUNDATION_GRADUATION_REVIEW",
+          "trainable": [],
+          "frozen": [
+            "graduation_suite"
+          ]
+        }
+      ],
+      "notes": ""
+    }
+  ],
+  "rael_bridge": [
+    {
+      "id": "RAEL_00_FOUNDATION_INGESTION",
+      "name": "Foundation ingestion",
+      "purpose": "Design only. Ingest graduated WRIM, do not auto-train Ra'el.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [
+        "RAEL_01_IDENTITY_ORCHESTRATION"
+      ],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_00_FOUNDATION_INGESTION",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "RAEL_01_IDENTITY_ORCHESTRATION",
+      "name": "Identity / orchestration contract",
+      "purpose": "Ra'el is not a renamed WRIM checkpoint.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [
+        "RAEL_02_COUNCIL_ROUTING"
+      ],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_01_IDENTITY_ORCHESTRATION",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "RAEL_02_COUNCIL_ROUTING",
+      "name": "Council routing",
+      "purpose": "Design Council integration.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [
+        "RAEL_03_TOOL_USE_GOVERNANCE"
+      ],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_02_COUNCIL_ROUTING",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "RAEL_03_TOOL_USE_GOVERNANCE",
+      "name": "Tool-use governance",
+      "purpose": "War Room remains tool governor.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [
+        "RAEL_04_PERSISTENT_MEMORY"
+      ],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_03_TOOL_USE_GOVERNANCE",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "RAEL_04_PERSISTENT_MEMORY",
+      "name": "Persistent memory integration",
+      "purpose": "Not School 08 context-window chat.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [
+        "RAEL_05_WORLD_LEARNING"
+      ],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_04_PERSISTENT_MEMORY",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "RAEL_05_WORLD_LEARNING",
+      "name": "World-learning interface",
+      "purpose": "Design only.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [
+        "RAEL_06_PLANNING"
+      ],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_05_WORLD_LEARNING",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "RAEL_06_PLANNING",
+      "name": "Planning / decomposition",
+      "purpose": "Design only.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [
+        "RAEL_07_SELF_EVALUATION"
+      ],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_06_PLANNING",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "RAEL_07_SELF_EVALUATION",
+      "name": "Self-evaluation",
+      "purpose": "Design only.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [
+        "RAEL_08_SPECIALIST_ROUTING"
+      ],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_07_SELF_EVALUATION",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "RAEL_08_SPECIALIST_ROUTING",
+      "name": "Specialist routing",
+      "purpose": "Future sparse experts; no full MoE in Genesis.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [
+        "RAEL_09_CONTINUOUS_BOUNDED_LEARNING"
+      ],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_08_SPECIALIST_ROUTING",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "RAEL_09_CONTINUOUS_BOUNDED_LEARNING",
+      "name": "Continuous bounded learning",
+      "purpose": "Design only.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [
+        "RAEL_10_SOVEREIGN_RUNTIME"
+      ],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_09_CONTINUOUS_BOUNDED_LEARNING",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "RAEL_10_SOVEREIGN_RUNTIME",
+      "name": "Sovereign runtime integration",
+      "purpose": "Design only.",
+      "status": "DESIGN_ONLY_AFTER_FOUNDATION_GRADUATION",
+      "next": [],
+      "authorized_actions": [
+        "design_document"
+      ],
+      "prohibited_actions": [
+        "rael_training",
+        "auto_execute"
+      ],
+      "token_budget": {
+        "kind": "none",
+        "lm_tokens": 0
+      },
+      "strategy_ceiling": 3,
+      "success_criteria": [
+        "bridge_document_complete"
+      ],
+      "failure_criteria": [
+        "false_relabel_wrim_as_rael"
+      ],
+      "repair_path": "Return RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION.",
+      "return_to_commander_if": [
+        "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+      ],
+      "missions": [
+        {
+          "id": "RAEL_10_SOVEREIGN_RUNTIME",
+          "status": "DESIGN_ONLY",
+          "trainable": [],
+          "frozen": [
+            "all"
+          ]
+        }
+      ],
+      "notes": ""
+    }
+  ],
+  "advancement_rule": "May advance without Commander if school success, retention floors, token accounting, gradient safety pass, and no architecture/canonical/promotion action is required.",
+  "ordinary_bugs": "Fix, validate, continue. Do not return to Commander.",
+  "scientific_vs_engineering": [
+    "IMPLEMENTATION_FAILURE",
+    "DATA_FAILURE",
+    "OBJECTIVE_FAILURE",
+    "CAPACITY_FAILURE",
+    "ROUTING_FAILURE",
+    "GENERALIZATION_FAILURE",
+    "RETENTION_FAILURE",
+    "ARCHITECTURE_BOUNDARY"
+  ]
+}

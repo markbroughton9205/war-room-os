@@ -22,11 +22,18 @@ const eslintConfig = defineConfig([
     // artifacts (scripts/prepare-desktop-runtime.mjs, electron-builder). Gitignored.
     "desktop/runtime/**",
     "desktop/dist*/**",
+    // Windows→Linux migration backups (Phase 9D quarantine renames). Preserved for
+    // evidence/recovery, not linted — vendored/bundled code, not first-party source.
+    "**/*.windows-bak/**",
+    "**/node_modules.windows-bak/**",
+    "**/.next.windows-bak/**",
   ]),
   {
     // Electron main/preload and desktop build scripts are genuinely CommonJS: the Electron
     // main process loads `.cjs` via require, so ESM import syntax is not an option here.
-    files: ["desktop/**/*.cjs"],
+    // lib/sovereign-runtime/local-ownership/*.cjs is the shared app-data-root module loaded
+    // by that same Electron CJS code (see appDataRoot.cjs header) — same constraint applies.
+    files: ["desktop/**/*.cjs", "lib/sovereign-runtime/local-ownership/**/*.cjs"],
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
 ]);

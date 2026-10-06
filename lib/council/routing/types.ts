@@ -1,3 +1,4 @@
+import type { CouncilPath } from '@/lib/council/gi/types'
 import type { CouncilEntityId } from '../entities/types'
 import type {
   CouncilSkillCategory,
@@ -66,6 +67,7 @@ export type RoutingNote = {
   decisionPath: string[]
   providerRecommendation: null
   timestamp: string
+  path?: CouncilPath
 }
 
 export type CouncilDecisionInput = {

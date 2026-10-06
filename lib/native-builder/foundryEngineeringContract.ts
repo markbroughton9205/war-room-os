@@ -85,6 +85,10 @@ const LOCKED_UNLESS_ALLOWED = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|\.env|\
 const OUTSIDE_WORKSPACE = /(?:^|\/)\.\.(?:\/|$)/
 
 export function compactOwnershipQuery(text: string): string {
+  // Keep an explicitly named implementation path intact; word splitting loses extensions.
+  const namedSources = text.match(/[A-Za-z0-9_./-]+\.(?:tsx?|jsx?|mjs|cjs)\b/g) ?? []
+  const implementation = namedSources.find(file => !/\.(?:test|spec|validation|proof)\./i.test(file) && !/(?:^|\/)(?:eslint|next|vite)\.config\./i.test(file))
+  if (implementation) return implementation.replace(/^\.\//, '')
   const stop = /^(make|the|what|that|this|with|from|into|only|before|after|says|does|then|when|your|their|want|you)$/i
   const titled = text.match(/[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}/)?.[0]
   const unique = text.match(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g) ?? []
@@ -240,7 +244,30 @@ export function assessMutationTarget(
   return { path: rel, allowed, codes, whyThisFile, dependents: dependents.slice(0, 8), relatedTests: relatedTests.slice(0, 8) }
 }
 
-export function evaluateWriteSafety(mission: FoundryMissionRecord, rel: string, index?: FoundryCodeIndex): WriteSafety {
+export function commanderDeclaredNewFiles(request: string): string[] {
+  return [...request.matchAll(/\b(?:create|add|write|rewrite)\s+(?:the\s+)?(?:new\s+)?file\s+((?:lib|app|components|scripts|hooks)\/[\w./@-]+\.[\w]+)/gi)].map(match => match[1])
+}
+function posixRelPath(rel: string): string { return rel.split('\\').join('/').replace(/^\.\//, '') }
+
+/**
+ * A model that answers `{"decision":"REPLAN","tool":{"name":"file.write","args":{...}}}` has made a TOOL decision in the wrong envelope. When the gate requires a tool
+ * (so the REPLAN is refused anyway) and the decision carries a complete tool call, run the tool instead of discarding it.
+ */
+export function coerceReplanWithTool<T extends { decision: string; tool?: { name?: unknown; args?: unknown } | null }>(decision: T): T | null {
+  const tool = decision.tool
+  if (decision.decision !== 'REPLAN' || !tool || typeof tool.name !== 'string' || !tool.name.trim() || !tool.args || typeof tool.args !== 'object') return null
+  return { ...decision, decision: 'TOOL' }
+}
+
+/** An absolute path that lies inside the repository is the same target as its repo-relative form (models copy absolute paths out of tool results); anything outside stays outside. */
+export function toRepoRelativeTarget(rel: string, root: string): string {
+  if (!rel || !path.isAbsolute(rel)) return rel
+  const relative = path.relative(root, rel)
+  return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative.split(path.sep).join('/') : rel
+}
+
+export function evaluateWriteSafety(mission: FoundryMissionRecord, relInput: string, index?: FoundryCodeIndex): WriteSafety {
+  const rel = toRepoRelativeTarget(relInput, resolveRepoRoot())
   const codes: string[] = []
   if (!rel || OUTSIDE_WORKSPACE.test(rel) || path.isAbsolute(rel)) {
     return { allowed: false, reason: 'Target is outside the authorized workspace.', codes: ['OUTSIDE_WORKSPACE'] }
@@ -265,6 +292,10 @@ export function evaluateWriteSafety(mission: FoundryMissionRecord, rel: string, 
   const baseline = Boolean(mission.baseline?.recordedAt) || Boolean(mission.sourceState.baselineFiles.length)
   if (!baseline) {
     return { allowed: false, reason: 'BASELINE_CAPTURED=false. Capture a targeted baseline before mutation.', codes: ['BASELINE_MISSING'] }
+  }
+  // The Commander named this exact new file: it is the owner by declaration, so there is no pre-existing evidence to connect it to.
+  if (commanderDeclaredNewFiles(mission.userRequest).includes(posixRelPath(rel))) {
+    return { allowed: true, reason: 'Commander-declared new file', codes: ['COMMANDER_DECLARED_NEW_FILE'] }
   }
   const assessment = assessMutationTarget(mission, rel, index)
   codes.push(...assessment.codes)
@@ -299,11 +330,12 @@ export function evaluateWriteSafety(mission: FoundryMissionRecord, rel: string, 
 
 function siblingTests(rel: string): string[] {
   const dir = path.posix.dirname(rel)
+  const stem = path.posix.basename(rel).replace(/\.(?:ts|tsx|js|jsx|mjs|cjs)$/, '').replace(/\.(?:test|spec|validation|proof)$/, '')
   const abs = path.join(resolveRepoRoot(), dir)
   if (!existsSync(abs)) return []
   try {
     return readdirSync(abs)
-      .filter(name => /\.(test|spec|validation|proof)\.(ts|tsx|js|mjs|cjs)$/.test(name))
+      .filter(name => /\.(test|spec|validation|proof)\.(ts|tsx|js|mjs|cjs)$/.test(name) && name.replace(/\.(?:test|spec|validation|proof)\.(?:ts|tsx|js|mjs|cjs)$/, '') === stem)
       .map(name => path.posix.join(dir, name))
   } catch {
     return []
@@ -352,8 +384,7 @@ export function rejectIrrelevantTest(mission: FoundryMissionRecord, targets: str
   }
   const unrelated = targets.filter(target => {
     if (allowed.has(target)) return false
-    if (ranked.some(item => target.includes(path.posix.dirname(item.test)) || item.test.includes(target))) return false
-    if (mission.sourceState.changedFiles.some(file => path.posix.dirname(file) === path.posix.dirname(target))) return false
+    // Sharing a directory (especially root '.') does not make a test relevant.
     return isTestFile(target) || target.startsWith('validate:')
   })
   if (unrelated.length) {

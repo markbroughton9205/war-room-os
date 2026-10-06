@@ -194,7 +194,7 @@ async function run(): Promise<void> {
     if (startE.status === 'ACTIVE') {
       const opE = performUnattendedOperation({ missionId: 'm-e', op: 'MODEL_CALL', actionId: 'act-e-model', graph: graphE })
       if (opE.status === 'ACTIVE') resourceBypass += 1
-      results.push(check('fixture_E_budget', opE.status === 'NEEDS_COMMANDER' || startE.status === 'NEEDS_COMMANDER', opE.reason || startE.reason))
+      results.push(check('fixture_E_budget', opE.status === 'NEEDS_COMMANDER', opE.reason || startE.reason))
     } else {
       results.push(check('fixture_E_budget', startE.status === 'NEEDS_COMMANDER', startE.reason))
     }

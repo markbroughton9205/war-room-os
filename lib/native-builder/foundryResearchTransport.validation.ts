@@ -4,7 +4,6 @@
  * Does not stop the retained 127.0.0.1:18780 preview.
  */
 import http from 'node:http'
-import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
@@ -22,12 +21,11 @@ import {
 } from './foundryResearchTransport'
 import { inspectRetainedApplicationPreview } from './foundryApplicationBuilderLifecycle'
 import { findListenerPidOnLoopback, isPidAlive } from './foundryProjectProcessRegistry'
+import { ensureLivePreview, LIVE_PORT, LIVE_PROJECT, stopOwnLivePreview } from './foundryLivePreviewFixture'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 const check = (name: string, pass: boolean, detail: string): CaseResult => ({ name, pass, detail })
 
-const LIVE_PROJECT = path.join(os.homedir(), 'FoundryProjects', 'professional-website-for-a')
-const LIVE_PORT = 18780
 
 function startFixtureServer(handler: (req: http.IncomingMessage, res: http.ServerResponse) => void): Promise<{
   port: number
@@ -50,6 +48,7 @@ function startFixtureServer(handler: (req: http.IncomingMessage, res: http.Serve
 }
 
 async function run(): Promise<void> {
+  const ownLivePreviewPid = await ensureLivePreview('research-transport-live-preview')
   const liveBefore = await inspectRetainedApplicationPreview({ projectRoot: LIVE_PROJECT, port: LIVE_PORT })
   const previewPidBefore = findListenerPidOnLoopback(LIVE_PORT)
   const results: CaseResult[] = []
@@ -181,6 +180,7 @@ async function run(): Promise<void> {
     LIVE_PROJECT,
   ))
 
+  stopOwnLivePreview(ownLivePreviewPid)
   for (const result of results) console.log(`${result.pass ? 'PASS' : 'FAIL'} ${result.name} ${result.detail}`)
   const failed = results.filter(result => !result.pass)
   console.log(`Foundry Application Builder research lifecycle: ${results.length - failed.length}/${results.length} PASS`)

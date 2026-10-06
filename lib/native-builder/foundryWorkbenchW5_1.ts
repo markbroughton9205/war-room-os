@@ -53,6 +53,8 @@ export type AdapterReadyProof = {
   extensionId: string
   version: string
   activationTimestamp: string
+  /** True when more than one copy of the adapter extension is active at once. */
+  duplicateActivation?: boolean
   workbench?: {
     appName?: string
     appHost?: string

@@ -1,4 +1,7 @@
-﻿'use client'
+'use client'
+
+import { standaloneRepairBinding } from '@/lib/native-builder/foundryLaunchPolicy'
+import { missionForSelectedPage, currentWorkForSelectedPage } from '@/lib/native-builder/foundryPageScope'
 
 /**
  * THE FOUNDRY — Commander coding workspace.
@@ -80,6 +83,7 @@ import type { FoundryEngineeringEvent, FoundryEngineeringRuntimeState } from '@/
 import { commanderStatusHeadline, commanderVisibleSessions, looksLikeInternalSourcePath } from '@/lib/native-builder/foundryCommanderShell'
 import type { FoundryCommandCenterSnapshot } from '@/lib/native-builder/foundryAgentTypes'
 import type { FoundryContextKind } from '@/lib/native-builder/foundryUxContract'
+import { classifyStartResponse, failed as startFailed, planStartWorkspace, requested as startRequested, startStatusAttributes, startStatusSentence, type StartStatus } from '@/lib/native-builder/foundryMissionStart'
 
 const DEFAULT_BASE_PATH = '/war-room/engineering'
 
@@ -404,7 +408,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
   const [systemProjectsOpen, setSystemProjectsOpen] = useState(false)
   const [status, setStatus] = useState<FoundryStatus | null>(null)
   const [session, setSession] = useState<SessionItem | null>(null)
-  const [mission, setMission] = useState<MissionLite | null>(null)
+  const [loadedMission, setMission] = useState<MissionLite | null>(null)
   const [files, setFiles] = useState<string[]>([])
   // Which workspace the current `files` listing belongs to (and whether the listing succeeded); null until one has arrived.
   const [filesFor, setFilesFor] = useState<FilesListedFor>(null)
@@ -427,9 +431,15 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
   const [archivedSessions, setArchivedSessions] = useState<SessionItem[]>([])
   const [renameTitle, setRenameTitle] = useState('')
   const [opsQueue, setOpsQueue] = useState<FoundryMissionView | null>(null)
-  const [currentWork, setCurrentWork] = useState<FoundryMissionView | null>(null)
+  const [loadedCurrentWork, setCurrentWork] = useState<FoundryMissionView | null>(null)
+  const mission = missionForSelectedPage(loadedMission, missionId)
+  const currentWork = currentWorkForSelectedPage(loadedCurrentWork, { missionId, workspaceId, sessionId })
+  const reloadEpoch = useRef(0)
+  const reloadInFlight = useRef(new Set<number>())
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [projectOffer, setProjectOffer] = useState<string | null>(null)
+  /** START_REQUESTED -> START_ACKNOWLEDGED(sessionId, missionId) or START_FAILED(reason): every send ends as one of these, never as nothing. */
+  const [startStatus, setStartStatus] = useState<StartStatus | null>(null)
   const [workspaceConfirm, setWorkspaceConfirm] = useState<{ reason: string; path: string } | null>(null)
   const [menu, setMenu] = useState<FoundryContextMenuState>(null)
   const [landingResearch, setLandingResearch] = useState<{ status: 'LIVE' | 'UNAVAILABLE'; sources: { url: string; title: string }[]; query: string } | null>(null)
@@ -444,6 +454,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
   const [composerMode, setComposerMode] = useState<FoundryComposerMode>('agent')
   const [providerFamilies, setProviderFamilies] = useState<{ family: string; configured: boolean }[]>([])
   const [modelMenuSignal, setModelMenuSignal] = useState(0)
+  const [localOnly, setLocalOnly] = useState(false)
   const streamRef = useRef<EventSource | null>(null)
   const sessionMissRef = useRef(0)
   const resumeStarted = useRef<string | null>(null)
@@ -471,7 +482,10 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
     return `${url}${url.includes('?') ? '&' : '?'}workspaceId=${encodeURIComponent(ws)}`
   }
 
-  const reload = async () => {
+  const reload = async (epoch = reloadEpoch.current) => {
+    if (epoch !== reloadEpoch.current || reloadInFlight.current.has(epoch)) return
+    reloadInFlight.current.add(epoch)
+    try {
     const sessUrl = workspaceId
       ? `/api/mission-runtime/engineering/foundry/sessions?workspaceId=${encodeURIComponent(workspaceId)}`
       : '/api/mission-runtime/engineering/foundry/sessions'
@@ -480,6 +494,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
       getJson<{ status: FoundryStatus }>('/api/mission-runtime/engineering/status'),
       getJson<{ sessions: SessionItem[] }>(sessUrl),
     ])
+    if (epoch !== reloadEpoch.current) return
     if (ws.ok && ws.data) {
       setWorkspaces(ws.data.workspaces)
       setWorkspacesLoaded(true)
@@ -493,12 +508,14 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
         ? `/api/mission-runtime/engineering/foundry/sessions?workspaceId=${encodeURIComponent(workspaceId)}&view=archived`
         : '/api/mission-runtime/engineering/foundry/sessions?view=archived'
       const archived = await getJson<{ sessions: SessionItem[] }>(archivedUrl)
+      if (epoch !== reloadEpoch.current) return
       if (archived.ok && archived.data) setArchivedSessions(archived.data.sessions)
     } else {
       setArchivedSessions([])
     }
     if (sessionId) {
       const one = await getJson<{ session: SessionItem }>(withWs(`/api/mission-runtime/engineering/foundry/sessions/${sessionId}`))
+      if (epoch !== reloadEpoch.current) return
       if (one.ok && one.data?.session.archived) {
         setSession(one.data.session)
         setSessionLoad('ready')
@@ -518,20 +535,24 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
     if (inspector) {
       // The Files panel keeps its live refresh while the inspector is open; the composer's Context menu does not depend on this.
       const listing = await getJson<{ files: string[] }>(withWs('/api/mission-runtime/engineering/repo/files'))
+      if (epoch !== reloadEpoch.current) return
       if (listing.ok && listing.data) {
         setFiles(listing.data.files)
         setFilesFor({ workspaceId: workspaceId ?? '', ok: true })
       }
     }
     const ops = await getJson<{ currentWork: FoundryMissionView | null; queue?: unknown }>('/api/foundry/operations?view=commander')
+    if (epoch !== reloadEpoch.current) return
     if (ops.ok && ops.data) {
       setCurrentWork(recoverStaleCurrentMissionPointer(ops.data.currentWork as never) as FoundryMissionView | null)
       setOpsQueue(ops.data.currentWork ?? null)
     }
     const cc = await getJson<FoundryCommandCenterSnapshot>('/api/foundry/command-center')
+    if (epoch !== reloadEpoch.current) return
     if (cc.ok && cc.data) setCommandCenter(cc.data)
     if (missionId) {
       const foundry = await getJson<{ mission: FoundryMissionView }>(`/api/foundry/missions/${missionId}`)
+      if (epoch !== reloadEpoch.current) return
       if (foundry.ok && foundry.data?.mission) {
         const next = foundry.data.mission
         const candidate = {
@@ -555,12 +576,14 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
         }
       }
     }
+    } finally { reloadInFlight.current.delete(epoch) }
   }
 
   useEffect(() => {
-    queueMicrotask(() => void reload())
-    const timer = window.setInterval(() => void reload(), 2000)
-    return () => window.clearInterval(timer)
+    const epoch = ++reloadEpoch.current
+    queueMicrotask(() => void reload(epoch))
+    const timer = window.setInterval(() => void reload(epoch), 2000)
+    return () => { reloadEpoch.current += 1; window.clearInterval(timer) }
   }, [workspaceId, sessionId, missionId, systemProjectsOpen, opsOpen, inspector, detailsOpen])
 
   useEffect(() => {
@@ -589,12 +612,13 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
       // A session without a mission (Ask, or a session that has not started work) has no mission history to lose.
       queueMicrotask(() => {
         setMission(null)
+        setLiveOutput('')
         setMissionLoad('idle')
       })
       return
     }
     let cancelled = false
-    queueMicrotask(() => setMissionLoad(current => (current === 'ready' ? 'ready' : 'loading')))
+    queueMicrotask(() => { if (!cancelled) { setMissionLoad('loading'); setLiveOutput('') } })
     void (async () => {
       const delays = [0, 600, 1500, 3000]
       let last: Awaited<ReturnType<typeof getJson<{ mission: MissionLite }>>> | null = null
@@ -602,6 +626,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
         if (delay) await new Promise(resolve => setTimeout(resolve, delay))
         if (cancelled) return
         last = await getJson<{ mission: MissionLite }>(withWs(`/api/mission-runtime/engineering/${missionId}`))
+        if (cancelled) return
         if (last.ok && last.data) {
           setMission(last.data.mission)
           setMissionLoad('ready')
@@ -610,6 +635,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
         // Standalone / application-builder missions live in the mission-controller store, not the engineering repair store.
         // A mission that exists there is not "missing history".
         const controller = await getJson<{ mission: unknown }>(`/api/foundry/missions/${missionId}`)
+        if (cancelled) return
         if (controller.ok && controller.data?.mission) {
           setMission(null)
           setMissionLoad('ready')
@@ -627,13 +653,13 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
     const onEnvelope = (evt: MessageEvent<string>) => {
       try {
         const parsed = JSON.parse(evt.data) as { mission?: MissionLite }
-        if (parsed.mission) setMission(parsed.mission)
+        if (!cancelled && parsed.mission?.id === missionId) setMission(parsed.mission)
       } catch { /* ignore */ }
     }
     const onOutput = (evt: MessageEvent<string>) => {
       try {
         const parsed = JSON.parse(evt.data) as { entries?: { text: string }[] }
-        if (parsed.entries?.length) {
+        if (!cancelled && parsed.entries?.length) {
           setLiveOutput(prev => `${prev}${parsed.entries!.map(e => e.text).join('')}`.slice(-12000))
         }
       } catch { /* ignore */ }
@@ -731,8 +757,11 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
   const ensureProjectAndSend = async (text: string, wsId: string | null, confirmedWorkspaceId?: string) => {
     setBusy('mission')
     setError(null)
+    setStartStatus(startRequested(new Date().toISOString()))
     let workspace = wsId
-    if (!workspace) {
+    // Inside a session the workspace already belongs to that session (the server resolves it from the session's own record): never create a new project
+    // just because this page has not loaded, or a restart dropped, its own view of the workspace.
+    if (!workspace && !sessionId) {
       const created = await postJson<{ workspace: WorkspaceItem }>('/api/mission-runtime/engineering/workspaces', {
         action: 'create',
         name: projectNameFromPrompt(text),
@@ -740,6 +769,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
       })
       if (!created.ok || !created.data) {
         setBusy(null)
+        setStartStatus(startFailed('PROJECT_CREATE_FAILED', new Date().toISOString(), created.error ?? null))
         return setError(created.error ?? 'Could not create project')
       }
       workspace = created.data.workspace.id
@@ -753,32 +783,41 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
       })
       if (!created.ok || !created.data) {
         setBusy(null)
+        setStartStatus(startFailed('SESSION_CREATE_FAILED', new Date().toISOString(), created.error ?? null))
         return setError(created.error ?? 'Could not open a coding session')
       }
       activeSession = created.data.session.id
     }
     const result = await postJson<{ mission: { id: string } }>(`/api/mission-runtime/engineering/foundry/sessions/${activeSession}`, {
       text: text.trim(),
-      workspaceId: workspace,
+      workspaceId: workspace ?? undefined,
       waitForCompletion: false,
       confirmedWorkspaceId,
     })
     setBusy(null)
-    if (result.status === 409 && result.json?.needsConfirmation) {
+    const outcome = classifyStartResponse({ response: result, sessionId: activeSession, at: new Date().toISOString() })
+    setStartStatus(outcome)
+    if (outcome.state === 'FAILED' && outcome.reason === 'NEEDS_WORKSPACE_CONFIRMATION' && result.json) {
       const target = result.json.target as { path?: string } | undefined
       setWorkspaceConfirm({ reason: typeof result.json.reason === 'string' ? result.json.reason : 'Confirm target workspace', path: target?.path ?? '' })
       return
     }
-    if (!result.ok || !result.data) return setError(result.error ?? 'Mission failed to start')
+    if (outcome.state === 'FAILED' && outcome.reason === 'ALREADY_RUNNING' && outcome.detail) {
+      setRequest('')
+      router.replace(qs({ workspace, session: activeSession, mission: outcome.detail }))
+      return
+    }
+    if (outcome.state !== 'ACKNOWLEDGED' || !result.data) return setError(result.error ?? startStatusSentence(outcome))
     setRequest('')
     setProjectOffer(null)
     setWorkspaceConfirm(null)
-    router.replace(qs({ workspace, session: activeSession, mission: result.data.mission.id }))
+    router.replace(qs({ workspace, session: activeSession, mission: outcome.missionId }))
   }
 
   const startCommanderFoundryMission = async (text: string, continueProjectId?: string | null) => {
     setBusy('mission')
     setError(null)
+    setStartStatus(startRequested(new Date().toISOString()))
     let activeSession = sessionId
     if (!activeSession) {
       const created = await postJson<{ session: SessionItem }>('/api/mission-runtime/engineering/foundry/sessions', {
@@ -789,6 +828,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
       })
       if (!created.ok || !created.data) {
         setBusy(null)
+        setStartStatus(startFailed('SESSION_CREATE_FAILED', new Date().toISOString(), created.error ?? null))
         return setError(created.error ?? 'Could not open a coding session')
       }
       activeSession = created.data.session.id
@@ -796,14 +836,17 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
     const createdMission = await postJson<{ mission: FoundryMissionView }>('/api/foundry/missions', {
       request: text.trim(),
       title: shortSessionTitle(text),
-      continueProjectId: continueProjectId ?? undefined,
+      ...standaloneRepairBinding(continueProjectId ?? workspaceId, composerMode !== 'standalone' || isApplicationBuilderRequest(text) || looksLikeNewApplication(text)),
+      modelPolicy: composerMode === 'standalone' && localOnly ? 'LOCAL_ONLY' : undefined,
       sessionId: activeSession,
     })
     if (!createdMission.ok || !createdMission.data) {
       setBusy(null)
+      setStartStatus(classifyStartResponse({ response: { ok: false, status: createdMission.status, json: createdMission.json, error: createdMission.error ?? 'Mission failed to start' }, sessionId: activeSession, at: new Date().toISOString() }))
       return setError(createdMission.error ?? 'Mission failed to start')
     }
     const missionView = createdMission.data.mission
+    setStartStatus({ state: 'ACKNOWLEDGED', sessionId: activeSession, missionId: missionView.missionId, at: new Date().toISOString() })
     setCurrentWork(missionView)
     setRequest('')
     setProjectOffer(null)
@@ -844,7 +887,10 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
   }
 
   const send = async () => {
-    if (!request.trim()) return setError('Describe what Foundry should build or fix.')
+    if (!request.trim()) {
+      setStartStatus(startFailed('EMPTY_REQUEST', new Date().toISOString()))
+      return setError('Describe what Foundry should build or fix.')
+    }
     if (composerMode === 'ask') {
       // Ask is read-only and tool-less: it answers from project files with the local model.
       await askFoundry(request)
@@ -863,6 +909,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
     if (resolved.kind === 'confirm') {
       const canonical = workspaces.find(w => w.id === WAR_ROOM_CANONICAL_WORKSPACE_ID)
       setWorkspaceConfirm({ reason: resolved.reason, path: canonical?.root ?? '' })
+      setStartStatus(startFailed('NEEDS_WORKSPACE_CONFIRMATION', new Date().toISOString(), resolved.reason))
       return
     }
     if (composerMode === 'standalone') {
@@ -874,12 +921,13 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
       await startCommanderFoundryMission(request, selectedWorkspace?.applicationProjectId ?? workspaceId)
       return
     }
-    const boundWorkspace = workspaceId ?? session?.workspaceId ?? null
-    if (!boundWorkspace && !projectOffer) {
+    const plan = planStartWorkspace({ workspaceId, sessionWorkspaceId: session?.workspaceId ?? null, sessionId })
+    if (plan.kind === 'OFFER_PROJECT' && !projectOffer) {
       setProjectOffer(projectNameFromPrompt(request))
+      setStartStatus(startFailed('NEEDS_PROJECT', new Date().toISOString()))
       return
     }
-    await ensureProjectAndSend(request, boundWorkspace)
+    await ensureProjectAndSend(request, plan.kind === 'USE' ? plan.workspaceId : null)
   }
 
   /** "Keep trying": continues the SAME paused mission and campaign (nothing Foundry learned is erased), as a recorded Commander decision. */
@@ -897,7 +945,17 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
   const stop = async () => {
     if (!missionId) return
     setBusy('stop')
-    await postJson(`/api/mission-runtime/engineering/${missionId}/cancel`, { reason: 'Commander STOP MISSION', workspaceId })
+    const controller = await getJson<{ mission: { missionId?: string } }>(`/api/foundry/missions/${missionId}`)
+    const controllerOwnsMission = controller.ok && controller.data?.mission?.missionId === missionId
+    if (!controllerOwnsMission && mission?.id !== missionId) {
+      setError('Could not establish the selected mission owner. Retry Stop when its details are loaded.')
+      setBusy(null)
+      return
+    }
+    const endpoint = controllerOwnsMission ? `/api/foundry/missions/${missionId}/cancel` : `/api/mission-runtime/engineering/${missionId}/cancel`
+    const result = await postJson(endpoint, { reason: 'Commander STOP MISSION', workspaceId })
+    if (!result.ok) setError(result.error ?? 'Could not stop the selected mission')
+    void reload()
     setBusy(null)
   }
 
@@ -1303,6 +1361,18 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
     if (!el) return
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) el.scrollTop = el.scrollHeight
   }, [engineeringEvents.length, quietThread.activity.length, quietThread.completion, quietThread.intervention, session?.chat.length])
+  // Explicit page/session selection establishes the Workbench owner; the server verifies it.
+  useEffect(() => {
+    if (!workbenchW0) return
+    const controller = new AbortController()
+    void fetch('/api/foundry/workbench/editor', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
+      body: JSON.stringify(missionId && sessionId && selectedWorkspace?.root
+        ? { action: 'bindOwner', owningMissionId: missionId, owningSessionId: sessionId, workspaceRoot: selectedWorkspace.root }
+        : { action: 'clearOwner' }),
+    }).catch(() => { /* Model assist remains refused until an owner is verified. */ })
+    return () => controller.abort()
+  }, [workbenchW0, missionId, sessionId, selectedWorkspace?.root])
   const focusEngineeringFile = async (filePath: string) => {
     await openFile(filePath)
     if (!workbenchW0 || !selectedWorkspace) return
@@ -1350,7 +1420,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
               Close
             </button>
           </div>
-          <FoundryOperationsPanel />
+          <FoundryOperationsPanel key={missionId ?? 'new'} initialMissionId={missionId ?? undefined} />
           <FoundryMissionControllerPanel />
         </div>
       ) : null}
@@ -1674,6 +1744,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
           </div>
           {narrative.error ? <p className="mt-1 text-[11px] text-red-400">{narrative.error}</p> : null}
           {error ? <p className="mt-1 text-[11px] text-red-400">{error}</p> : null}
+          {startStatus ? <p className={`mt-1 text-[11px] ${startStatus.state === 'FAILED' ? 'text-amber-300' : 'text-slate-400'}`} data-testid="foundry-start-status" {...startStatusAttributes(startStatus)}>{startStatusSentence(startStatus)}</p> : null}
           {missionHistoryProblem ? (
             <p className="mt-2 rounded border border-amber-400/40 px-2 py-1 text-[11px] text-amber-200" data-testid="foundry-mission-history-unavailable" data-history-problem={missionHistoryProblem}>
               {missionHistoryProblem === 'corrupt'
@@ -1957,6 +2028,8 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
             mode={composerMode}
             onModeChange={changeComposerMode}
             registry={modelRegistry}
+            localOnly={composerMode === 'standalone' && localOnly}
+            onLocalOnlyChange={setLocalOnly}
             context={contextView}
             onInsertContext={reference => { setRequest(current => insertContextReference(current, reference)); promptRef.current?.focus() }}
             localReady={localReady}

@@ -19,6 +19,9 @@ import {
   type RootCauseStatus,
 } from './foundryRootCauseBinding'
 
+// These measure how the routed hosted model engineers. The operator's saved policy (LOCAL) is for the operator's own missions and must not decide which model a validation measures.
+process.env.FOUNDRY_PROVIDER_POLICY = 'AUTO'
+
 const PRIOR_IDS = ['REASON-M2-INVOICE', 'REASON-M2-PARTS', 'REASON-M2-ACTOR', 'REASON-M2-TAG', 'REASON-M2-SKU', 'REASON-M2-SUM'] as const
 const FULL_RECOVERY_IDS = ['REASON-M2-HOLDS', 'REASON-M2-EVENTS', 'REASON-M2-CENTS', 'REASON-M2-BIN'] as const
 const FAST_RECOVERY_IDS = ['REASON-M2-HOLDS', 'REASON-M2-EVENTS'] as const

@@ -32,7 +32,8 @@ const required = [
   "quitFor('SECOND_INSTANCE')",
   "quitFor('WINDOW_ALL_CLOSED')",
 ]
-const missing = required.filter(token => !main.includes(token))
+const shutdown = readFileSync(path.join(root, 'desktop/src/ownedProcessLifecycle.cjs'), 'utf8')
+const missing = required.filter(token => !(main + shutdown).includes(token))
 const active = isRecoverableEngineeringCampaign({
   id: 'm1',
   state: 'collecting_evidence',

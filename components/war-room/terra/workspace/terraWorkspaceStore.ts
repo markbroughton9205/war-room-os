@@ -4,6 +4,7 @@ import {
   computeSmartOrganizeLayout,
   dockedPosition,
   parseWorkspaceLayout,
+  panelIsHidden,
   reconcilePanelPosition,
   recoverPanelPosition,
   TERRA_WORKSPACE_DEFAULT_SETTINGS,
@@ -97,6 +98,7 @@ function defaultRecord(id: TerraWorkspacePanelId, viewport: WorkspaceViewport, s
     locked: false,
     minimized: false,
     dock,
+    closed: id === 'terra_media' || id === 'terra_emergency_report',
   }
 }
 
@@ -204,6 +206,7 @@ export class TerraWorkspaceLayoutStore {
       locked: current?.locked ?? false,
       minimized: current?.minimized ?? false,
       dock: 'float',
+      closed: current?.closed ?? false,
     }, persist)
   }
 
@@ -243,6 +246,40 @@ export class TerraWorkspaceLayoutStore {
     // Restoring is the Commander explicitly looking at it now — clear any pending attention.
     // (Mission: "clear attention when Commander restores panel," never merely on a rerender.)
     if (!minimized && this.snapshot.attention[id]) this.clearAttention(id)
+  }
+
+  closePanel(id: TerraWorkspacePanelId): void {
+    const current = this.snapshot.panels[id]
+    if (!current || current.closed) return
+    this.patchPanel(id, { ...current, closed: true }, true)
+  }
+
+  /**
+   * terra_media FULL ↔ COMPACT. Same panel, same playback. Does not pause or spawn a window.
+   */
+  setPlayerChrome(id: TerraWorkspacePanelId, chrome: 'full' | 'compact'): void {
+    if (id !== 'terra_media') return
+    const current = this.snapshot.panels[id]
+    if (!current) return
+    const nextChrome = chrome === 'compact' ? 'compact' : 'full'
+    if (current.playerChrome === nextChrome && !current.minimized && !current.closed) return
+    this.patchPanel(id, { ...current, playerChrome: nextChrome, minimized: false, closed: false }, true)
+    this.front(id, true)
+  }
+
+  /**
+   * Single-panel launcher: open if closed, restore if minimized, focus if already open.
+   * Never creates a second record or a second surface for the same id.
+   */
+  openOrFocus(id: TerraWorkspacePanelId, viewport: WorkspaceViewport, size: WorkspacePanelSize): void {
+    this.ensurePanel(id, viewport, size)
+    const current = this.snapshot.panels[id]
+    if (!current) return
+    if (current.closed || current.minimized) {
+      this.patchPanel(id, { ...current, closed: false, minimized: false }, true)
+      if (this.snapshot.attention[id]) this.clearAttention(id)
+    }
+    this.front(id, true)
   }
 
   lockAll(locked: boolean): void {
@@ -352,6 +389,13 @@ export class TerraWorkspaceLayoutStore {
     this.persistNow()
   }
 
+  setMissionControlChrome(enabled: boolean): void {
+    if (this.snapshot.settings.missionControlChrome === enabled) return
+    this.snapshot = { ...this.snapshot, settings: { ...this.snapshot.settings, missionControlChrome: enabled } }
+    this.emit()
+    this.persistNow()
+  }
+
   clearAttention(id: TerraWorkspacePanelId): void {
     if (!this.snapshot.attention[id]) return
     const attention = { ...this.snapshot.attention }
@@ -411,10 +455,9 @@ export class TerraWorkspaceLayoutStore {
     const route = TERRA_SMART_CLICK_ROUTES[kind]
     const primary = this.snapshot.panels[route.primary]
     if (primary) {
-      if (primary.minimized) {
+      if (panelIsHidden(primary)) {
         if (this.snapshot.settings.smartOpen) {
-          this.setMinimized(route.primary, false)
-          this.front(route.primary, true)
+          this.openOrFocus(route.primary, viewport, sizes[route.primary] ?? { width: 320, height: 200 })
         } else {
           this.markAttention(route.primary, kind)
         }
@@ -424,7 +467,7 @@ export class TerraWorkspaceLayoutStore {
     }
     for (const secondaryId of route.secondary) {
       const secondary = this.snapshot.panels[secondaryId]
-      if (secondary?.minimized) this.markAttention(secondaryId, kind)
+      if (secondary && panelIsHidden(secondary)) this.markAttention(secondaryId, kind)
     }
   }
 

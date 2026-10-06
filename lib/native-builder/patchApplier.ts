@@ -97,11 +97,11 @@ async function applyOnePatch(repairId: string, patch: StructuredPatch): Promise<
 
   let nextContent: string
   if (patch.operation === 'replace_range') {
-    nextContent = current.content.replace(matchText, patch.replacementText ?? '')
+    nextContent = current.content.replace(matchText, () => patch.replacementText ?? '')
   } else if (patch.operation === 'insert_after') {
-    nextContent = current.content.replace(matchText, `${matchText}${patch.replacementText ?? ''}`)
+    nextContent = current.content.replace(matchText, () => `${matchText}${patch.replacementText ?? ''}`)
   } else {
-    nextContent = current.content.replace(matchText, `${patch.replacementText ?? ''}${matchText}`)
+    nextContent = current.content.replace(matchText, () => `${patch.replacementText ?? ''}${matchText}`)
   }
 
   await snapshotFileBeforePatch(repairId, patch.file, current.content, true)
@@ -115,8 +115,8 @@ async function applyOnePatch(repairId: string, patch: StructuredPatch): Promise<
  * function does not itself gate on approval (the API route layer does, via
  * lib/permissions/policy.ts assertAutoOrApproval with actionKind 'file_modification').
  */
-export async function applyProposal(repairId: string, proposal: NativeRepairProposal): Promise<PatchApplyResult> {
-  const policy = validatePatchPolicy(proposal)
+export async function applyProposal(repairId: string, proposal: NativeRepairProposal, options?: { maxChangedLines?: number }): Promise<PatchApplyResult> {
+  const policy = validatePatchPolicy(proposal, undefined, options)
   if (!policy.ok) {
     return {
       ok: false,

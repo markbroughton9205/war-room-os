@@ -19,6 +19,9 @@ import type { NativeCouncilInvokeFn } from './repairPlanner'
 import type { NativeIssueRecord } from './types'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
+
+// The validation injects its own models and providers; the operator's saved provider policy (for instance LOCAL) must not decide which of them may run.
+process.env.FOUNDRY_PROVIDER_POLICY = 'AUTO'
 function check(name: string, pass: boolean, detail: string): CaseResult {
   return { name, pass, detail }
 }
@@ -207,6 +210,7 @@ async function testEndToEndProposalCarriesContextSources(): Promise<CaseResult[]
   const expectedContext = await gatherHostedCoderContext(issue, [FIXTURE_REL], [])
 
   const planned = await planRepair(repair.id, {
+    useLocalModel: false,
     targetFiles: [FIXTURE_REL],
     hostedCoder: { family: 'claude', invoke },
     commanderRequestText: 'Fix isAdult to be inclusive of the boundary age.',

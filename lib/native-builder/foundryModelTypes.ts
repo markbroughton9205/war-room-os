@@ -115,6 +115,7 @@ export type FoundryModelRequestKind =
   | 'summarizeProgress'
 
 export type FoundryModelRequest = {
+  requireLoopback?: boolean
   kind: FoundryModelRequestKind
   context: FoundryModelContext
   abortSignal?: AbortSignal

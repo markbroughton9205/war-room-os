@@ -152,7 +152,6 @@ export function fixtureD(): FixtureResult {
   selectSessionStrategy(session)
   const pass = (session.selectedDepth === 'R0' || session.selectedDepth === 'R1')
     && session.selectedStrategy === 'DIRECT'
-    && session.selectedDepth !== 'R4'
     && session.resourceState.searchBranches === 0
     && ceremony(session) === 'minimal'
   return result('FIXTURE_D', pass, `${session.selectedStrategy} ${session.selectedDepth} branches=${session.resourceState.searchBranches}`)

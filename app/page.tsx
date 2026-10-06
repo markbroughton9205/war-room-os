@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, useMemo, memo, startTransition, useDeferredValue } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, memo, startTransition, useDeferredValue, Profiler } from 'react'
 import type { FormEvent } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { MatrixCodeRain } from '@/components/MatrixCodeRain'
 import { GodsEyeCommandCenter } from '@/components/war-room/terra/GodsEyeCommandCenter'
+import { TerraAgentEngineeringDetails } from '@/components/war-room/terra/TerraAgentEngineeringDetails'
 import { CouncilCommandControls } from '@/components/war-room/council/CouncilCommandControls'
 import { APPROVAL_RISK_GATES, SECURE_APPROVAL_RISKS } from '@/lib/kernel/approvals'
 import { KERNEL_EVENT_SCHEMA, KERNEL_EVENT_TYPES } from '@/lib/kernel/events'
@@ -61,6 +62,7 @@ import type { NebulaRoundHealth } from '@/lib/council/nebula/round'
 import { matrixStatus } from '@/lib/ui/matrixStatusBus'
 import { ArchiveViewer } from '@/components/war-room/council/ArchiveViewer'
 import { PanelErrorBoundary } from '@/components/war-room/runtime/PanelErrorBoundary'
+import { RuntimeTruthDetails } from '@/components/war-room/runtime/RuntimeTruthDetails'
 import { LogoutButton } from '@/components/auth/LogoutButton'
 import { CopyCouncilButton } from '@/components/war-room/council/CopyCouncilButton'
 import { MessageCopyButton } from '@/components/war-room/council/MessageCopyButton'
@@ -125,6 +127,14 @@ import { detectCouncilResearchIntent } from '@/lib/council-research/intent'
 import type { CouncilResearchHandoff, CouncilStoryContext, ResearchReport, ResearchStatus } from '@/lib/council-research/types'
 import { CouncilResearchStatus } from '@/components/war-room/council/CouncilResearchStatus'
 import { AdaptiveCouncilReadout } from '@/components/council/AdaptiveCouncilReadout'
+import { EvidenceBoardReadout } from '@/components/council/EvidenceBoardReadout'
+import { CouncilSourceList } from '@/components/council/CouncilSourceList'
+import { CouncilSourceLink } from '@/components/council/CouncilSourceLink'
+import { SafeCouncilText } from '@/components/council/SafeCouncilText'
+import { councilSourceFromDeliberationRef, councilSourcesFromSnapshot, mergeCouncilSources } from '@/lib/council/source-links'
+import { CouncilIntelligenceInspector } from '@/components/council/CouncilIntelligenceInspector'
+import type { EbcPublicSnapshot } from '@/lib/council/evidence-board/types'
+import type { CouncilIntelligencePublic } from '@/lib/council/intelligence/types'
 import { CouncilOperationTimeline } from '@/components/council/CouncilOperationTimeline'
 import { buildCouncilOperationTimeline } from '@/lib/council/unified-experience'
 import type { CouncilProgressRuntimeSnapshot } from '@/lib/council/progress-events/runtime'
@@ -209,7 +219,14 @@ import {
   shouldPersistCouncilMessage,
 } from '@/lib/council/messagePersistenceFilter'
 import { shouldAcceptCouncilAsyncResult } from '@/lib/conversation-runtime/asyncGuards'
-import { shouldReplacePersistedTranscript } from '@/lib/conversation-runtime/transcriptReconciliation'
+import { shouldDetachConversationBinding } from '@/lib/council/commander-chat/conversationBinding'
+import {
+  decideHydrationApply,
+  shouldCommitFetchedTranscript,
+  shouldHydrateAlreadySelectedSession,
+  shouldPersistLocalTranscript,
+  visibleTranscriptForSelection,
+} from '@/lib/council/commander-chat/sessionSwitchHydration'
 import type { ProviderFamilyOutcomeStatus } from '@/lib/council/providerIsolation'
 import { resolveModeGovernor } from '@/lib/council/modeGovernor'
 import {
@@ -279,6 +296,9 @@ import type {
 import { createEngineeringTaskPacket, type EngineeringTaskPacket } from '@/lib/engineering/engineeringTaskPacket'
 import { createAnalystOperationsPacket, type AnalystOperationsPacket } from '@/lib/analysts/analystOutcomeEvaluator'
 import { createProjectOrchestrationPacket, type ProjectOrchestrationPacket } from '@/lib/projects/projectOrchestrator'
+import { detectHvsProductionIntent, isHvsApprovalUtterance, type HvsWarRoomPacket } from '@/lib/media-command/war-room-hvs-intent'
+import { readHvsResume } from '@/lib/media-command/navigation'
+import { HvsWarRoomProductionCard } from '@/components/war-room/HvsWarRoomProductionCard'
 import type { CouncilRepairPacket } from '@/lib/council-repair'
 import {
   COUNCIL_OUTPUT_MODES,
@@ -292,6 +312,7 @@ import {
   AmbientActivityFeed,
   CommandConsole,
   CommanderLiveIntelRail,
+  LiveIntelToastHost,
   CommanderPresenceTrail,
   CouncilMembersPanel,
   CouncilWorkspace,
@@ -307,6 +328,7 @@ import {
 import { CouncilSessionNavigator, type CouncilSessionListItem } from '@/components/war-room/council/CouncilSessionNavigator'
 import { CouncilContextInspector } from '@/components/war-room/council/CouncilContextInspector'
 import { FoundryEntryLink } from '@/components/war-room/foundry/FoundryEntryLink'
+import { HvsEntryLink } from '@/components/war-room/higher-vision-studios/HvsEntryLink'
 import {
   actorStageLine,
   classifyCouncilTurn,
@@ -317,9 +339,42 @@ import {
   stageFromDeliberationRole,
   stageFromPersistedMetadata,
 } from '@/lib/council/session-orchestration'
+import { toNormalChatText } from '@/lib/council/commander-chat/normalChatContract'
+import {
+  commitFinalTranscript,
+  evidenceCompletionKeepsFindings,
+  humanTerminalFailure,
+  isPreExecutionStreamFailure,
+  decreeTurnMatchesOperationKey,
+  isCommanderSynthesisMessage,
+  legacyWebToolOwnsRound,
+  persistedAuroraIsTerminalBrief,
+  resolveRoundTerminal,
+  shellClearsAfterTerminal,
+} from '@/lib/council/commander-chat/roundTerminal'
+import { classifyEvidenceBoardMission } from '@/lib/council/evidence-board/classifier'
+import {
+  COMMANDER_TRANSCRIPT_KEY,
+  overlayLocalResearchSnapshots,
+  parseTranscriptStore,
+  readSessionTranscript,
+  toLocalTranscriptMessage,
+  writeSessionTranscript,
+  type LocalTranscriptMessage,
+} from '@/lib/council/commander-chat/sessionTranscript'
+import {
+  createLedgerSession,
+  mergeSessionLists,
+  readSessionLedger,
+  retitleLedgerSession,
+  upsertLedgerSession,
+  writeSessionLedger,
+  type LedgerSession,
+} from '@/lib/council/commander-chat/sessionLedger'
 import { decideMemoryCandidatePrompt } from '@/lib/council/live-orchestration/memoryCandidateGate'
 import { isSocialCouncilCheckin } from '@/lib/council/live-orchestration/socialCheckin'
 import { compactFamilyRosterLine, commanderStatusCluster, resolveCommanderPresencePhase, type CouncilRosterSnapshot } from '@/lib/council/live-orchestration/rosterHealth'
+import { PRESENCE_LABEL } from '@/lib/live-intel/composeLiveIntel'
 import { createPresentationBuffer } from '@/lib/council/live-orchestration/presentationBuffer'
 import { failureUiLabel } from '@/lib/council/live-orchestration/failureTaxonomy'
 import { consumeTerraContextForDecree } from '@/lib/council/terraContextConsumption'
@@ -449,6 +504,7 @@ export type CouncilMessage = {
   repairPacket?: CouncilRepairPacket
   projectOrchestrationPacket?: ProjectOrchestrationPacket
   analystOperationsPacket?: AnalystOperationsPacket
+  hvsProductionPacket?: HvsWarRoomPacket
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
   scoutSwarm?: ScoutSwarmPublicMeta
@@ -462,6 +518,8 @@ export type CouncilMessage = {
    * is not persisted. Never infer this from the newest decree when restoring history. */
   roundRequestId?: string | null
   shadowCouncilAssembly?: CouncilShadowSelectionReport
+  evidenceBoardCouncil?: Partial<EbcPublicSnapshot>
+  councilIntelligence?: CouncilIntelligencePublic
   councilProgress?: CouncilProgressRuntimeSnapshot
   streaming?: boolean
   roleLabel?: string
@@ -501,6 +559,16 @@ function applyLiveCouncilRenderGate(
     const content = sanitizeMemoryRuntimeText(stripHiddenReasoning(toDisplayText(message.content)))
     if (content === toDisplayText(message.content) && !message.degraded) return message
     return { ...message, content, degraded: false, integrityStatus: content ? 'COMPLETE' : 'EMPTY' }
+  }
+  if (isCommanderSynthesisMessage({
+    messageType: message.messageType,
+    familyName: message.familyName,
+    turnRole: message.familyDeliberationTurn?.turn_role,
+    content: message.content,
+    hasEvidenceBoard: Boolean(message.evidenceBoardCouncil),
+  })) {
+    const content = toNormalChatText(message.content).trim() || message.content.trim()
+    return { ...message, content, degraded: false, integrityStatus: 'COMPLETE' }
   }
   const presented = presentAgentMessage({
     agentId: nebulaAgentForSeat(family)?.id ?? null,
@@ -1572,7 +1640,7 @@ function isLastCouncilOperationMessage(message: CouncilMessage, messages: readon
 function isCurrentCouncilOperationMessage(message: CouncilMessage, messages: readonly CouncilMessage[]): boolean {
   const latestDecree = [...messages].reverse().find(item => item.messageType === 'decree')
   if (!latestDecree) return false
-  return councilOperationGroupKey(message, messages) === `turn:${latestDecree.id}`
+  return decreeTurnMatchesOperationKey(councilOperationGroupKey(message, messages), latestDecree.id)
 }
 
 const MessageBubble = memo(function MessageBubble({
@@ -1625,7 +1693,17 @@ const MessageBubble = memo(function MessageBubble({
     sessionId: item.councilProgress?.logicalRequestId ?? item.familyDeliberationTurn?.session_id ?? null,
     requestCompleted: item.messageType === 'system' && /COUNCIL DEGRADED|TIMED_OUT|PARTIAL COMPLETE/.test(item.content) ? true : undefined,
     operationStatus: item.messageType === 'system' && /COUNCIL DEGRADED|TIMED_OUT/.test(item.content) ? 'timed_out' : undefined,
-    isFinal: item.messageType === 'system' && /COUNCIL DEGRADED|PARTIAL COMPLETE/.test(item.content) ? true : undefined,
+    isFinal: (
+      (item.messageType === 'system' && /COUNCIL DEGRADED|PARTIAL COMPLETE/.test(item.content))
+      || persistedAuroraIsTerminalBrief({
+        messageType: item.messageType,
+        familyName: item.familyName,
+        provider: item.provider,
+        content: item.content,
+        hasDeliberationTurn: Boolean(item.familyDeliberationTurn),
+        hasProgress: Boolean(item.councilProgress),
+      })
+    ) ? true : undefined,
   })), [operationTimelineInputs, commanderRequest])
   const operationProgress = useMemo(
     () => [...operationTimelineInputs].reverse().find(item => item.councilProgress)?.councilProgress ?? msg.councilProgress ?? null,
@@ -1684,6 +1762,13 @@ const MessageBubble = memo(function MessageBubble({
           <p className="text-xs text-slate-400">No memory found for today yet.</p>
         )}
       </div>
+    )
+  }
+  if (msg.messageType === 'hvs_production' && msg.hvsProductionPacket) {
+    return (
+      <HvsWarRoomProductionCard
+        initial={{ packet: msg.hvsProductionPacket }}
+      />
     )
   }
   if (msg.messageType === 'project_orchestration' && msg.projectOrchestrationPacket) {
@@ -1852,7 +1937,7 @@ const MessageBubble = memo(function MessageBubble({
           <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(251,191,36,0.16)', background: 'rgba(0,0,0,0.22)' }}>
             <div className="font-bold tracking-widest" style={{ color: '#FDE68A' }}>DATA GAPS / UNKNOWNS</div>
             <ul className="mt-1 space-y-1" style={{ color: '#CBD5E1' }}>
-              {[...packet.report.dataGaps, ...packet.report.unknowns].slice(0, 3).map(item => <li key={item}>- {item}</li>)}
+              {[...(packet.report.dataGaps ?? []), ...(packet.report.unknowns ?? [])].slice(0, 3).map(item => <li key={item}>- {item}</li>)}
             </ul>
           </div>
           <div className="rounded px-2 py-2" style={{ border: '1px solid rgba(248,113,113,0.16)', background: 'rgba(0,0,0,0.22)' }}>
@@ -2032,8 +2117,41 @@ const MessageBubble = memo(function MessageBubble({
             boxShadow: isRael ? '0 0 18px rgba(34,211,238,0.08)' : '0 0 16px rgba(0,0,0,0.25)',
           }}
         >
-          {msg.content}{msg.streaming ? <span className="ml-0.5 animate-pulse" aria-hidden>▍</span> : null}
+          <SafeCouncilText text={msg.content} />{msg.streaming ? <span className="ml-0.5 animate-pulse" aria-hidden>▍</span> : null}
         </div>
+        {!isRael ? (
+          <>
+            <CouncilSourceList
+              links={mergeCouncilSources([
+                councilSourcesFromSnapshot(msg.evidenceBoardCouncil, msg.familyDeliberationTurn?.session_id ?? null),
+                (msg.familyDeliberationEvidenceReferences ?? []).map(ref => councilSourceFromDeliberationRef(
+                  ref,
+                  msg.familyDeliberationTurn?.mission_id ?? msg.evidenceBoardCouncil?.mission_id ?? null,
+                  msg.familyDeliberationTurn?.session_id ?? null,
+                  (msg.familyDeliberationTurn?.claims ?? [])
+                    .filter(claim => claim.evidence_reference_ids.includes(ref.evidence_reference_id))
+                    .map(claim => claim.claim_id),
+                )),
+              ])}
+            />
+            {(msg.familyDeliberationTurn?.claims ?? [])
+              .filter(claim => claim.evidence_reference_ids.length > 0)
+              .map(claim => (
+                <CouncilSourceList
+                  key={claim.claim_id}
+                  label={`${claim.claim_id} sources`}
+                  links={(msg.familyDeliberationEvidenceReferences ?? [])
+                    .filter(ref => claim.evidence_reference_ids.includes(ref.evidence_reference_id))
+                    .map(ref => councilSourceFromDeliberationRef(
+                      ref,
+                      msg.familyDeliberationTurn?.mission_id ?? msg.evidenceBoardCouncil?.mission_id ?? null,
+                      msg.familyDeliberationTurn?.session_id ?? null,
+                      [claim.claim_id],
+                    ))}
+                />
+              ))}
+          </>
+        ) : null}
         {!isRael && showOperationTimeline && operationTimelineInputs.length ? (
           <details className="mt-2 w-full max-w-2xl rounded border border-emerald-900/30" style={{ background: 'rgba(0,0,0,0.18)' }}>
             <summary className="cursor-pointer px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest" style={{ color: '#64748B' }}>
@@ -2068,19 +2186,13 @@ const MessageBubble = memo(function MessageBubble({
                 <ul className="space-y-1">
                   {msg.familyDeliberationEvidenceReferences.map(ref => (
                     <li key={ref.evidence_reference_id}>
-                      {ref.url ? (
-                        <a
-                          href={ref.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sky-300/90 underline decoration-sky-500/30 underline-offset-2"
-                        >
-                          {ref.label}
-                        </a>
-                      ) : (
-                        <span>{ref.label}</span>
-                      )}
-                      <span className="text-slate-600"> · {ref.source_kind}</span>
+                      <CouncilSourceLink
+                        link={councilSourceFromDeliberationRef(
+                          ref,
+                          msg.familyDeliberationTurn?.mission_id ?? msg.evidenceBoardCouncil?.mission_id ?? null,
+                          msg.familyDeliberationTurn?.session_id ?? null,
+                        )}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -2115,12 +2227,22 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           </details>
         ) : null}
-        <AdaptiveCouncilReadout
-          report={msg.shadowCouncilAssembly}
-          messageType={msg.messageType}
-          responseComplete={Boolean(msg.content.trim()) && msg.messageType === 'response'}
-          isUserMessage={isRael}
-        />
+        {!isRael && msg.evidenceBoardCouncil ? (
+          <details className="mt-2 w-full max-w-2xl rounded border border-white/10" data-testid="evidence-board-advanced">
+            <summary className="cursor-pointer px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-500">
+              Advanced
+            </summary>
+            <EvidenceBoardReadout snapshot={msg.evidenceBoardCouncil} isUserMessage={false} />
+          </details>
+        ) : null}
+        {msg.evidenceBoardCouncil ? null : (
+          <AdaptiveCouncilReadout
+            report={msg.shadowCouncilAssembly}
+            messageType={msg.messageType}
+            responseComplete={Boolean(msg.content.trim()) && msg.messageType === 'response'}
+            isUserMessage={isRael}
+          />
+        )}
         {msg.degraded && !councilPassthroughMode && msg.messageType === 'response' ? (
           <p className="mt-2 text-[10px] tracking-widest text-amber-700/80">
             Degraded response quality — excluded from synthesis and repair packets.
@@ -6032,6 +6154,7 @@ function Home() {
   const [attachedFile, setAttachedFile] = useState<{ id: string; fileName: string } | null>(null)
   const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus>('idle')
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
+  const hvsActiveProductionRef = useRef(false)
 
   const handleAttachmentSelect = async (file: File) => {
     setAttachedFile({ id: '', fileName: file.name })
@@ -6288,6 +6411,26 @@ function Home() {
   const messagesRef = useRef(messages)
   const liveCouncilMountedRef = useRef(true)
   const liveCouncilConvIdRef = useRef<string | null>(null)
+  const sessionHydrationGenerationRef = useRef(0)
+  const sessionTranscriptOwnerRef = useRef<string | null>(null)
+  const sessionHydrationAbortRef = useRef<AbortController | null>(null)
+  const [transcriptOwnerId, setTranscriptOwnerId] = useState<string | null>(null)
+  const bindActiveSessionId = (id: string) => {
+    sessionHydrationAbortRef.current?.abort()
+    const abort = new AbortController()
+    sessionHydrationAbortRef.current = abort
+    const generation = ++sessionHydrationGenerationRef.current
+    sessionTranscriptOwnerRef.current = id
+    setTranscriptOwnerId(id)
+    try {
+      sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
+    } catch {
+      /* private mode */
+    }
+    setLiveCouncilConvId(id)
+    liveCouncilConvIdRef.current = id
+    return { generation, abort }
+  }
   const archivedMessageIdsRef = useRef<Set<string>>(new Set())
   const redTeamCoderDiagnosisInFlightRef = useRef(false)
   const redTeamCoderLastDiagnosedMessageRef = useRef<string | null>(null)
@@ -6304,6 +6447,7 @@ function Home() {
   const geminiUnavailableUserMessagedRef = useRef(false)
   const orchRedTeamEarlyLatchRef = useRef(false)
   const lastCouncilFamilyErrorRef = useRef<CouncilOrchestrationFamily | null>(null)
+  const [lastCouncilFailureCode, setLastCouncilFailureCode] = useState<string | null>(null)
   /** Latest decree `submitDecree` attempt id (`decreeRoundGenRef`); compared to packet-bound round for stale `provider_error`. */
   const latestDecreeAttemptRoundRef = useRef(0)
   /** `decreeRoundGenRef` value when `councilPacketRender` was last updated from the decree pipeline. */
@@ -6311,8 +6455,18 @@ function Home() {
   const [geminiEngineRow, setGeminiEngineRow] = useState<EngineStatus | null>(null)
   const [engineList, setEngineList] = useState<EngineStatus[]>([])
   const engineMapRef = useRef<Map<EngineId, EngineStatus>>(new Map())
-  const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(null)
-  const [councilSessionList, setCouncilSessionList] = useState<CouncilSessionListItem[]>([])
+  const [liveCouncilConvId, setLiveCouncilConvId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      return sessionStorage.getItem(LIVE_COUNCIL_CONV_STORAGE_KEY)
+    } catch {
+      return null
+    }
+  })
+  const [councilSessionList, setCouncilSessionList] = useState<CouncilSessionListItem[]>(() => {
+    if (typeof window === 'undefined') return []
+    return readSessionLedger()
+  })
   const autoTitledSessionIdsRef = useRef(new Set<string>())
   const [councilSessionSearch, setCouncilSessionSearch] = useState('')
   const [councilSessionNavOpen, setCouncilSessionNavOpen] = useState(true)
@@ -6334,6 +6488,11 @@ function Home() {
   const [councilTraceTestResult, setCouncilTraceTestResult] = useState<CouncilTraceTestResponse | null>(null)
   const [councilTraceTestError, setCouncilTraceTestError] = useState<string | null>(null)
   const [persistenceAvailable, setPersistenceAvailable] = useState(false)
+  const [runtimeTruth, setRuntimeTruth] = useState<{
+    status?: string
+    persistence?: { status?: string; backend?: string; readable?: boolean; writable?: boolean; store_path?: string; last_readback_at?: string | null } | null
+    godsEye?: { configured?: boolean; registered?: boolean; healthy?: boolean; terra_linked?: boolean; status?: string; capability_count?: number; runtime_owner?: string } | null
+  } | null>(null)
   const [continuityMode, setContinuityMode] = useState<RuntimeContinuityIndicatorMode>('Unknown')
   const [continuityRecoverAt, setContinuityRecoverAt] = useState<string | null>(null)
   const [recoverRuntimeBanner, setRecoverRuntimeBanner] = useState(false)
@@ -6495,6 +6654,12 @@ function Home() {
     [liveChatWindow.visibleMessages, councilPassthroughMode],
   )
   const visibleCouncilMessages = liveCouncilHygiene.visibleMessages
+  const paneTranscript = visibleTranscriptForSelection({
+    activeSessionId: liveCouncilConvId,
+    transcriptOwnerId,
+    messages: visibleCouncilMessages,
+  })
+  const paneCouncilMessages = paneTranscript.visible ? visibleCouncilMessages : []
   const collapsedCouncilNoiseCount = liveCouncilHygiene.collapsedCount
   const [showOldCouncilDiagnostics, setShowOldCouncilDiagnostics] = useState(false)
   const [archiveViewerOpen, setArchiveViewerOpen] = useState(false)
@@ -6900,6 +7065,34 @@ function Home() {
   }, [operatorTab])
 
   useEffect(() => {
+    let cancelled = false
+    const loadRuntimeTruth = async () => {
+      try {
+        const res = await fetch('/api/runtime/health', { cache: 'no-store' })
+        if (!res.ok) return
+        const body = await res.json() as {
+          health?: { status?: string; persistence?: { status?: string; backend?: string; readable?: boolean; writable?: boolean; store_path?: string; last_readback_at?: string | null } | null }
+          godsEye?: { configured?: boolean; registered?: boolean; healthy?: boolean; terra_linked?: boolean; status?: string; capability_count?: number; runtime_owner?: string }
+        }
+        if (cancelled) return
+        setRuntimeTruth({
+          status: body.health?.status,
+          persistence: body.health?.persistence ?? null,
+          godsEye: body.godsEye ?? null,
+        })
+      } catch {
+        /* health stays at the last truthful snapshot */
+      }
+    }
+    void loadRuntimeTruth()
+    const timer = window.setInterval(() => { void loadRuntimeTruth() }, 15000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!councilMounted) return
     let cancelled = false
     const expectedSessionId = councilSnapRef.current.sessionId
@@ -6919,13 +7112,30 @@ function Home() {
         const persist = res.headers.get('x-war-room-persistence') === 'available'
         setPersistenceAvailable(persist)
         if (!res.ok || !persist) {
+          const councilId = expectedSessionId
+          const stored = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(LIVE_COUNCIL_CONV_STORAGE_KEY) : null
+          let rows = readSessionLedger()
+          if (!rows.some(row => row.id === councilId)) {
+            rows = upsertLedgerSession(rows, createLedgerSession(councilId))
+          }
+          writeSessionLedger(rows)
+          setCouncilSessionList(rows)
+          const active = rows.find(row => row.id === councilId) ?? rows.find(row => row.id === stored) ?? rows[0]
+          if (active) {
+            bindActiveSessionId(active.id)
+            const localRows = readSessionTranscript(
+              parseTranscriptStore(window.localStorage.getItem(COMMANDER_TRANSCRIPT_KEY)),
+              active.id,
+            )
+            councilDispatch({ type: 'SET_MESSAGES', payload: localRows })
+          }
           setLiveCouncilLoadState('session_only')
           return
         }
 
         const j = await res.json() as { conversations?: { id: string; title?: string; last_message_at?: string | null; updated_at?: string | null; created_at?: string | null; state?: string; metadata?: Record<string, unknown> }[] }
         const convs = Array.isArray(j.conversations) ? j.conversations : []
-        setCouncilSessionList(convs.map(c => ({
+        const remoteRows: LedgerSession[] = convs.map(c => ({
           id: c.id,
           title: typeof c.title === 'string' ? c.title : 'Untitled thread',
           last_message_at: c.last_message_at,
@@ -6936,11 +7146,17 @@ function Home() {
             ? (c.metadata as { council: { lastPreview: string } }).council.lastPreview
             : null,
           metadata: c.metadata ?? null,
-        })))
+        }))
+        const merged = mergeSessionLists(remoteRows, readSessionLedger())
+        writeSessionLedger(merged)
+        setCouncilSessionList(merged)
         let id: string | null = typeof sessionStorage !== 'undefined'
           ? sessionStorage.getItem(LIVE_COUNCIL_CONV_STORAGE_KEY)
           : null
-        if (id && !convs.some(c => c.id === id)) id = null
+        // A healthy backend must bind a server conversation. Local ledger ids from
+        // session-only mode are not proof that persistence failed.
+        if (id && !remoteRows.some(c => c.id === id)) id = null
+        if (!id && remoteRows.length) id = remoteRows[0]?.id ?? null
         if (!id) {
           const cre = await fetch('/api/conversations', {
             method: 'POST',
@@ -6956,19 +7172,70 @@ function Home() {
           }
           const cj = await cre.json() as { conversation?: { id: string } }
           id = cj.conversation?.id ?? null
+          if (id) {
+            const created = upsertLedgerSession(readSessionLedger(), createLedgerSession(id, 'New Council Session'))
+            writeSessionLedger(created)
+            setCouncilSessionList(created)
+          }
         }
         if (!id) {
           setLiveCouncilLoadState('error')
           return
         }
         if (!isCurrentRestore()) return
-        sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
-        setLiveCouncilConvId(id)
-        liveCouncilConvIdRef.current = id
+        const { generation, abort } = bindActiveSessionId(id)
+        const localOverlay = readSessionTranscript(
+          parseTranscriptStore(window.localStorage.getItem(COMMANDER_TRANSCRIPT_KEY)),
+          id,
+        )
+        councilDispatch({ type: 'SET_MESSAGES', payload: localOverlay })
 
-        const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
+        const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store', signal: abort.signal })
         if (!isCurrentRestore(id)) return
+        if (!decideHydrationApply({
+          selectedSessionId: id,
+          activeSessionId: liveCouncilConvIdRef.current,
+          resultSessionId: id,
+          selectionGeneration: sessionHydrationGenerationRef.current,
+          resultGeneration: generation,
+          aborted: abort.signal.aborted,
+        }).apply) return
         if (!tr.ok) {
+          const localOnlyBinding = merged.some(row => row.id === id) && !remoteRows.some(row => row.id === id)
+          if (persist && (tr.status === 404 || localOnlyBinding)) {
+            const cre = await fetch('/api/conversations', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                title: 'New Council Session',
+                metadata: { council: { source: 'live_council', incomeOperationsMode: false } },
+              }),
+            })
+            if (!cre.ok || cre.headers.get('x-war-room-persistence') !== 'available') {
+              setLiveCouncilLoadState('session_only')
+              return
+            }
+            const cj = await cre.json() as { conversation?: { id: string } }
+            const createdId = cj.conversation?.id ?? null
+            if (!createdId) {
+              setLiveCouncilLoadState('error')
+              return
+            }
+            const created = upsertLedgerSession(readSessionLedger(), createLedgerSession(createdId, 'New Council Session'))
+            writeSessionLedger(created)
+            setCouncilSessionList(created)
+            bindActiveSessionId(createdId)
+            setLiveCouncilLoadState('ready')
+            return
+          }
+          if (shouldDetachConversationBinding({ status: tr.status })) {
+            setLiveCouncilLoadState('session_only')
+            return
+          }
+          if (merged.some(row => row.id === id) && !remoteRows.some(row => row.id === id)) {
+            setLiveCouncilLoadState('session_only')
+            return
+          }
           setLiveCouncilLoadState('error')
           return
         }
@@ -7047,8 +7314,14 @@ function Home() {
               })),
             'persisted',
           )
-          if (shouldReplacePersistedTranscript(councilSnapRef.current.messages, mapped)) {
-            councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
+          if (shouldCommitFetchedTranscript({
+            fetchedSessionId: id,
+            activeSessionId: liveCouncilConvIdRef.current,
+            visibleOwnerId: sessionTranscriptOwnerRef.current,
+            localMessages: localOverlay,
+            fetchedMessages: mapped,
+          })) {
+            councilDispatch({ type: 'SET_MESSAGES', payload: overlayLocalResearchSnapshots(mapped, localOverlay) })
           }
         }
         const firstUser = rows.find(row => row.role === 'user')?.content?.trim() ?? ''
@@ -7069,8 +7342,9 @@ function Home() {
           }
         }
         setLiveCouncilLoadState('ready')
-      } catch {
+      } catch (error) {
         if (cancelled) return
+        if (error instanceof DOMException && error.name === 'AbortError') return
         setLiveCouncilLoadState('session_only')
         /* session-only council */
       }
@@ -7518,6 +7792,24 @@ function Home() {
     })
   }, [archivedCouncilMessages, liveCouncilConvId, persistenceAvailable])
 
+  useEffect(() => {
+    if (!liveCouncilConvId || typeof window === 'undefined') return
+    if (!shouldPersistLocalTranscript({
+      cacheSessionId: liveCouncilConvId,
+      activeSessionId: liveCouncilConvId,
+      transcriptOwnerId: sessionTranscriptOwnerRef.current,
+    })) return
+    const slim = council.messages
+      .map(message => toLocalTranscriptMessage(message))
+      .filter((row): row is LocalTranscriptMessage => Boolean(row))
+    if (!slim.length) return
+    const store = parseTranscriptStore(window.localStorage.getItem(COMMANDER_TRANSCRIPT_KEY))
+    window.localStorage.setItem(
+      COMMANDER_TRANSCRIPT_KEY,
+      JSON.stringify(writeSessionTranscript(store, liveCouncilConvId, slim)),
+    )
+  }, [council.messages, liveCouncilConvId])
+
   const isTransientProviderStatusContent = (
     content: unknown,
     family: CouncilOrchestrationFamily,
@@ -7773,7 +8065,7 @@ function Home() {
     }
   }
 
-  const beginToolRequest = (controller: AbortController) => {
+  const beginToolRequest = (_controller: AbortController) => {
     if (toolRequestActiveRef.current) return false
 
     councilDispatch({ type: 'SET_COUNCIL_STATE', payload: 'researching' })
@@ -7787,17 +8079,15 @@ function Home() {
     }
 
     toolTimeoutRef.current = window.setTimeout(() => {
-      addSystemMessage('Research timed out.')
-      controller.abort()
-      endToolRequest()
-      setTypingFamily(null)
-      setPresence('CHATGPT FAMILY', 'idle', 'standby')
-      setPresence('CLAUDE FAMILY', 'idle', 'standby')
-      setPresence('GROK FAMILY', 'idle', 'standby')
-      setPresence('GEMINI FAMILY', 'idle', 'standby')
-      setPresence('NOVA FAMILY', 'idle', 'standby')
-      setPresence('BRIDGE ARCHITECT', 'idle', 'standby')
-      setLoading(false)
+      // HUD only. Never abort the Home decree stream — PULSAR/AURORA Deep Research
+      // legitimately exceeds this scan indicator. The gather hang bound remains
+      // DECREE_GATHER_HARD_HANG_MS on the same controller.
+      setToolBarActivity(prev => {
+        const next = { ...prev }
+        delete next.web
+        delete next.research
+        return next
+      })
     }, TOOL_REQUEST_TIMEOUT_MS)
 
     return true
@@ -8579,6 +8869,8 @@ function Home() {
     instant,
     removeMessageIds,
     shadowCouncilAssembly,
+    evidenceBoardCouncil,
+    councilIntelligence,
     councilProgress,
   }: {
     familyName: TypingFamily
@@ -8596,6 +8888,8 @@ function Home() {
     removeMessageIds?: string[]
     /** Server-generated adaptive Council shadow metadata; advisory display only. */
     shadowCouncilAssembly?: CouncilShadowSelectionReport
+    evidenceBoardCouncil?: EbcPublicSnapshot
+    councilIntelligence?: CouncilIntelligencePublic
     /** Server-generated authoritative progress snapshot for timeline projection only. */
     councilProgress?: CouncilProgressRuntimeSnapshot
   }) => {
@@ -8631,6 +8925,8 @@ function Home() {
         integrityStatus: renderGate?.integrityStatus,
       renderDiagnostics: renderGate?.diagnostics,
       shadowCouncilAssembly,
+      evidenceBoardCouncil,
+      councilIntelligence,
       councilProgress,
       }], removeMessageIds?.length ? { removeIds: removeMessageIds } : undefined)
       setPresence(familyName, 'idle', 'standby')
@@ -8660,6 +8956,8 @@ function Home() {
       provider,
       messageType: 'response',
       shadowCouncilAssembly,
+      evidenceBoardCouncil,
+      councilIntelligence,
       councilProgress,
     }])
 
@@ -8778,6 +9076,8 @@ function Home() {
       commanderDecreeRoundAtFetch?: number
       transientMessageIds?: string[]
       shadowCouncilAssembly?: CouncilShadowSelectionReport
+      evidenceBoardCouncil?: EbcPublicSnapshot
+      councilIntelligence?: CouncilIntelligencePublic
       councilProgress?: CouncilProgressRuntimeSnapshot
     },
   ) => {
@@ -8870,6 +9170,8 @@ function Home() {
       instant: true,
       removeMessageIds: directInvocationRemoveIds,
       shadowCouncilAssembly: opts?.shadowCouncilAssembly,
+      evidenceBoardCouncil: opts?.evidenceBoardCouncil,
+      councilIntelligence: opts?.councilIntelligence,
       councilProgress: opts?.councilProgress,
     })
     if (directInvocationFinal) {
@@ -9381,7 +9683,9 @@ function Home() {
     lastAutonomousResearchFamilyRef.current = null
     lastAutonomousHadLiveResearchRef.current = false
     const toolIntent = mode !== 'continue' && detectToolIntent(decree)
-    if (toolIntent && toolRequestActiveRef.current) {
+    const missionClass = classifyEvidenceBoardMission({ commanderMessage: decree }).mission_class
+    const legacyWebTool = legacyWebToolOwnsRound({ toolIntent: Boolean(toolIntent), missionClass })
+    if (legacyWebTool && toolRequestActiveRef.current) {
       addSystemMessage('Research already in progress.')
       return
     }
@@ -9422,7 +9726,7 @@ function Home() {
     }
     if (mode === 'continue') {
       addSystemMessage('Council channel continuing')
-    } else if (toolIntent && !beginToolRequest(controller)) {
+    } else if (legacyWebTool && !beginToolRequest(controller)) {
       addSystemMessage('Research already in progress.')
       if (abortControllerRef.current === controller) abortControllerRef.current = null
       setLoading(false)
@@ -9619,7 +9923,17 @@ function Home() {
             } as CouncilChatJson,
           }
         }
-        const data = streamed.finalResponse ?? {}
+        const data: CouncilChatJson = streamed.finalResponse ?? {}
+        if (!streamed.finalResponse && streamed.error) {
+          data.councilProviderHttpStatus = 'failed'
+          data.councilProviderHttpDetail = streamed.error.error.message
+          data.streamTerminalCode = streamed.error.error.code
+          if (streamed.error.error.code === 'stream_ended_without_final') {
+            data.councilFailureCode = 'STREAM_FINAL_MISSING'
+          }
+        }
+        if (data.councilFailureCode) setLastCouncilFailureCode(data.councilFailureCode)
+        else if (data.councilSingleResponse) setLastCouncilFailureCode(null)
         const out = {
           res: new Response(null, {
             status: streamed.responseStatus ?? (streamed.error ? 502 : 200),
@@ -9893,7 +10207,7 @@ function Home() {
       if (cmd.directInvocation && cmd.targetFamilies[0]) {
         order = [cmd.targetFamilies[0]]
       }
-      if (intent.tier === 'casual' && !attendanceWave) {
+      if (intent.tier === 'casual' && !attendanceWave && !isSocialCouncilCheckin(decree) && classifyCouncilTurn(decree).intent !== 'SOCIAL_CHECKIN') {
         const casualFallbacks: CouncilOrchestrationFamily[] = ['chatgpt', 'claude', 'grok', 'gemini']
         order = [...order, ...casualFallbacks.filter(f => !order.includes(f))]
       }
@@ -9907,6 +10221,10 @@ function Home() {
           return row.floorEligible
         })
       order = applyHealthyRoster(order)
+      if (isSocialCouncilCheckin(decree) || classifyCouncilTurn(decree).intent === 'SOCIAL_CHECKIN') {
+        const one = order.find(family => family === 'chatgpt') ?? order[0]
+        order = one ? [one] : []
+      }
 
       const directedOrder = applyHealthyRoster(
         attendanceWave
@@ -9991,6 +10309,7 @@ function Home() {
         textOut: string
         transientMessageIds?: string[]
         shadowCouncilAssembly?: CouncilShadowSelectionReport
+        evidenceBoardCouncil?: EbcPublicSnapshot
         councilProgress?: CouncilProgressRuntimeSnapshot
       }
       const staged: StagedCouncilLine[] = []
@@ -10084,6 +10403,7 @@ function Home() {
         runtimeDetail?: string
         transientMessageIds?: string[]
         shadowCouncilAssembly?: CouncilShadowSelectionReport
+        evidenceBoardCouncil?: EbcPublicSnapshot
         councilProgress?: CouncilProgressRuntimeSnapshot
       }
 
@@ -10145,6 +10465,7 @@ function Home() {
         let runtime: ProviderFamilyOutcomeStatus = 'SKIPPED'
         let runtimeDetail: string | undefined
         let shadowCouncilAssembly: CouncilShadowSelectionReport | undefined
+        let evidenceBoardCouncil: EbcPublicSnapshot | undefined
         let councilProgressForMessage: CouncilProgressRuntimeSnapshot | undefined
 
         try {
@@ -10277,6 +10598,7 @@ function Home() {
                   runtimeDetail = 'governor_silent_skip'
                 } else {
                   shadowCouncilAssembly = chatData.shadowCouncilAssembly
+                  evidenceBoardCouncil = (chatData as { evidenceBoardCouncil?: EbcPublicSnapshot }).evidenceBoardCouncil
                   councilProgressForMessage = chatData.councilProgress
                   const extractedResponse = extractReadableCouncilResponse(chatData, family)
                   textOut = extractedResponse?.content ?? ''
@@ -10349,6 +10671,7 @@ function Home() {
           runtimeDetail,
           transientMessageIds: transientDirectStatusMessageIds,
           shadowCouncilAssembly,
+          evidenceBoardCouncil,
           councilProgress: councilProgressForMessage,
         }
       }
@@ -10361,11 +10684,12 @@ function Home() {
        */
       const formatFamilyDeliberationContent = (turn: DeliberationTurn): string => {
         if (turn.full_response.trim()) {
-          return presentAgentMessage({
+          const prose = presentAgentMessage({
             agentId: nebulaAgentForSeat(turn.provider_family)?.id ?? null,
             speaker: turn.provider_label,
             raw: turn.full_response,
           }).prose
+          return toNormalChatText(prose) || prose
         }
         return `${turn.provider_label} didn't complete this round.`
       }
@@ -10380,12 +10704,12 @@ function Home() {
           const nebulaNames = nebulaPlan.participatingAgentIds.map(id => NEBULA_AGENTS_BY_ID[id].name)
           setNebulaRoundShell({
             roundId: councilLogicalRequestId,
-            status: 'PLANNING',
-            agents: nebulaNames,
-            streamingAgent: 'ASTRA',
+            status: missionClass === 'DEEP_RESEARCH' ? 'RESEARCHING' : 'PLANNING',
+            agents: nebulaNames.filter(name => name !== 'ASTRA'),
+            streamingAgent: null,
             streamingText: '',
           })
-          setFloorStream({ family: 'ASTRA', text: '', status: 'CONNECTING' })
+          setFloorStream({ family: 'Council', text: '', status: 'CONNECTING' })
           const { res: deliberationRes, data: deliberationData } = await postCouncilChatDecreeGather({
             message: decree,
             profile: RAEL_PROFILE,
@@ -10444,7 +10768,76 @@ function Home() {
             console.warn('[council-session] suppressed_stale_family_deliberation_gather')
             return true
           }
-          if (!deliberationRes.ok || !deliberationData.familyDeliberation) return false
+          if (!deliberationRes.ok || !deliberationData.familyDeliberation) {
+            const readable = deliberationRes.ok ? extractReadableCouncilContributions(deliberationData) : []
+            const brief = deliberationRes.ok
+              ? toNormalChatText(String(deliberationData.councilSingleResponse ?? '')).trim()
+              : ''
+            const fallbackText = readable.map(row => row.content).filter(Boolean).join('\n\n') || brief
+            if (fallbackText) {
+              const committed = commitFinalTranscript([], {
+                id: readable[0]?.contributionId || councilLogicalRequestId,
+                content: fallbackText,
+              })
+              const text = committed.find(line => line.role === 'assistant')?.content ?? ''
+              if (text) {
+                addMessages([{
+                  id: committed.find(line => line.role === 'assistant')?.id || createMessageId('council-final'),
+                  familyName: 'AURORA',
+                  content: text,
+                  timestamp: new Date().toLocaleTimeString(),
+                  color: '#93C5FD',
+                  icon: '◆',
+                  provider: '',
+                  messageType: 'response',
+                  evidenceBoardCouncil: (deliberationData as { evidenceBoardCouncil?: EbcPublicSnapshot }).evidenceBoardCouncil,
+                }])
+                if (shellClearsAfterTerminal(resolveRoundTerminal({ readableFinal: text }))) {
+                  setNebulaRoundShell(null)
+                  setFloorStream(null)
+                }
+                setCouncilPacketRender(null)
+                councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+                return true
+              }
+            }
+            if (!deliberationRes.ok || isPreExecutionStreamFailure(deliberationData.streamTerminalCode)) {
+              const text = humanTerminalFailure(deliberationData.councilFailureCode ?? deliberationData.councilProviderHttpDetail)
+              addMessages([{
+                id: createMessageId('council-round-failed'),
+                familyName: 'AURORA',
+                content: text,
+                timestamp: new Date().toLocaleTimeString(),
+                color: '#93C5FD',
+                icon: '◆',
+                provider: '',
+                messageType: 'response',
+              }])
+              if (shellClearsAfterTerminal(resolveRoundTerminal({ readableFinal: null, missionFailed: true }))) {
+                setNebulaRoundShell(null)
+                setFloorStream(null)
+              }
+              setCouncilPacketRender(null)
+              councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+              return true
+            }
+            const text = humanTerminalFailure(deliberationData.councilFailureCode ?? deliberationData.councilProviderHttpDetail ?? deliberationData.message)
+            addMessages([{
+              id: createMessageId('council-round-failed'),
+              familyName: 'AURORA',
+              content: text,
+              timestamp: new Date().toLocaleTimeString(),
+              color: '#93C5FD',
+              icon: '◆',
+              provider: '',
+              messageType: 'response',
+            }])
+            setNebulaRoundShell(null)
+            setFloorStream(null)
+            setCouncilPacketRender(null)
+            councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+            return true
+          }
 
           const deliberation = deliberationData.familyDeliberation
           const responseSi = (deliberationData as { sessionIntelligence?: CouncilSessionIntelligenceV1 | null }).sessionIntelligence
@@ -10509,6 +10902,9 @@ function Home() {
               commanderTurnId: turn.commander_turn_id,
               deliberationRoundId: turn.round_id,
               shadowCouncilAssembly: turn.turn_id === shadowReadoutTurnId ? deliberationData.shadowCouncilAssembly : undefined,
+              evidenceBoardCouncil: turn.turn_id === shadowReadoutTurnId
+                ? (deliberationData as { evidenceBoardCouncil?: EbcPublicSnapshot }).evidenceBoardCouncil
+                : undefined,
               roundHealth: turn.turn_id === shadowReadoutTurnId ? deliberationData.roundHealth : undefined,
               councilRound: turn.turn_id === shadowReadoutTurnId ? deliberationData.councilRound : undefined,
               councilProgress: deliberationData.councilProgress,
@@ -10541,6 +10937,28 @@ function Home() {
                   }) as Record<string, unknown>,
                 },
               )
+            }
+          }
+
+          if (readableMessageCountBeforeFallback() === 0) {
+            const brief = toNormalChatText(String(
+              deliberationData.councilSingleResponse
+              ?? (deliberationData as { evidenceBoardCouncil?: { commander_brief?: string } }).evidenceBoardCouncil?.commander_brief
+              ?? '',
+            )).trim()
+            if (brief) {
+              messagesToAdd.push({
+                id: createMessageId('aurora-final'),
+                familyName: 'AURORA',
+                content: brief,
+                timestamp: new Date().toLocaleTimeString(),
+                color: '#93C5FD',
+                icon: '◆',
+                provider: '',
+                messageType: 'response',
+                evidenceBoardCouncil: (deliberationData as { evidenceBoardCouncil?: EbcPublicSnapshot }).evidenceBoardCouncil,
+              })
+              anySuccess = true
             }
           }
 
@@ -10606,19 +11024,51 @@ function Home() {
             }
           }
 
-          if (messagesToAdd.length) {
-            addMessages(messagesToAdd)
-            setNebulaRoundShell(prev => prev && prev.roundId === councilLogicalRequestId
-              ? {
-                  ...prev,
-                  status: deliberationData.councilRound?.status ?? (deliberationData.roundHealth?.degraded ? 'COMPLETE_DEGRADED' : 'COMPLETE'),
-                  streamingAgent: null,
-                  streamingText: '',
-                  agents: Array.from(new Set(messagesToAdd.map(item => item.familyName))),
-                }
-              : prev)
+          if (!messagesToAdd.some(message => message.content.trim())) {
+            messagesToAdd.push({
+              id: createMessageId('council-round-failed'),
+              familyName: 'AURORA',
+              content: humanTerminalFailure(deliberationData.councilFailureCode ?? deliberationData.councilProviderHttpDetail ?? deliberationData.message),
+              timestamp: new Date().toLocaleTimeString(),
+              color: '#93C5FD',
+              icon: '◆',
+              provider: '',
+              messageType: 'response',
+            })
           }
-          providerRuntimeStates = runtimeByFamily
+          const readableFinal = messagesToAdd.find(message => message.messageType === 'response' && message.content.trim())?.content ?? null
+          const evidenceState = typeof deliberationData.evidenceBoardCouncil?.completion_state === 'string'
+            ? deliberationData.evidenceBoardCouncil.completion_state
+            : null
+          const terminal = resolveRoundTerminal({
+            readableFinal,
+            partial: Boolean(readableFinal) && (
+              Boolean(deliberationData.roundHealth?.degraded)
+              || evidenceCompletionKeepsFindings(evidenceState)
+            ),
+            missionFailed: !readableFinal,
+          })
+          const committed = readableFinal
+            ? commitFinalTranscript(
+                messagesToAdd.map(message => ({
+                  id: message.id,
+                  role: message.messageType === 'decree' ? 'user' as const : message.messageType === 'system' ? 'system' as const : 'assistant' as const,
+                  content: message.content,
+                })),
+                { id: messagesToAdd.find(message => message.content.trim() === readableFinal)?.id ?? councilLogicalRequestId, content: readableFinal },
+              )
+            : []
+          const committedIds = new Set(committed.map(line => line.id))
+          const visibleMessages = readableFinal
+            ? messagesToAdd.filter(message => message.messageType === 'decree' || committedIds.has(message.id) || message.content.trim() === readableFinal)
+            : messagesToAdd
+          if (visibleMessages.length) addMessages(visibleMessages)
+          if (shellClearsAfterTerminal(terminal)) {
+            setNebulaRoundShell(null)
+            setFloorStream(null)
+          }
+          const visibleStates = Object.fromEntries(Object.entries(runtimeByFamily).filter(([, status]) => status === 'RESPONDED'))
+          providerRuntimeStates = visibleStates
           providerRuntimeDetails = detailsByFamily
           councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
           decreePacketFlushCompleteRef.current = true
@@ -10626,7 +11076,7 @@ function Home() {
             buildCouncilRenderPacket({
               command: activeCouncilCommandRef.current,
               sessionState: 'CLOSED',
-              packetStatus: turns.some(turn => turn.completion_status === 'complete') ? 'released' : 'idle',
+              packetStatus: readableFinal ? 'released' : 'idle',
               families: turns
                 .filter(turn => turn.completion_status === 'complete')
                 .map(turn => ({ family: turn.provider_family, content: turn.full_response })),
@@ -10637,7 +11087,7 @@ function Home() {
               ],
               providerRuntimeStates,
               providerRuntimeDetails,
-              directedFamilies: orderForGather,
+              directedFamilies: Object.keys(visibleStates) as CouncilOrchestrationFamily[],
             }),
           )
           councilDispatch({ type: 'SET_COUNCIL_CHANNEL_OPEN', payload: true })
@@ -10649,6 +11099,22 @@ function Home() {
           setFamilyDuty(Object.fromEntries(COUNCIL_ROSTER.map(r => [r.id, r.defaultDuty])))
           return true
         } catch {
+          if (isCurrentDecreeAsync()) {
+            addMessages([{
+              id: createMessageId('council-round-failed'),
+              familyName: 'AURORA',
+              content: humanTerminalFailure('Council stream ended before the final synthesis arrived.'),
+              timestamp: new Date().toLocaleTimeString(),
+              color: '#93C5FD',
+              icon: '◆',
+              provider: '',
+              messageType: 'response',
+            }])
+            setNebulaRoundShell(null)
+            setFloorStream(null)
+            councilDispatch({ type: 'CLEAR_PROVIDER_ERROR' })
+            return true
+          }
           if (!isCurrentDecreeAsync()) {
             // This failure (very likely the abort from a newer decree superseding this one, see
             // the abortControllerRef handling in submitDecree) belongs to a round that is no
@@ -10895,6 +11361,7 @@ function Home() {
           textOut: councilProviderTextAfterRenderGate(c.family, c.textOut!.trim(), decree, councilPassthroughMode).displayText,
           transientMessageIds: c.transientMessageIds,
           shadowCouncilAssembly: c.shadowCouncilAssembly,
+          evidenceBoardCouncil: c.evidenceBoardCouncil,
           councilProgress: c.councilProgress,
         }))
 
@@ -11041,6 +11508,7 @@ function Home() {
             commanderDecreeRoundAtFetch: myRound,
             transientMessageIds: sourceLine?.transientMessageIds,
             shadowCouncilAssembly: sourceLine?.shadowCouncilAssembly,
+            evidenceBoardCouncil: sourceLine?.evidenceBoardCouncil,
             councilProgress: sourceLine?.councilProgress,
           })
           if (!visible) continue
@@ -11292,7 +11760,7 @@ function Home() {
         type: 'SET_PROVIDER_ERROR',
         payload: msg,
       })
-      if (toolIntent) endToolRequest()
+      if (legacyWebTool) endToolRequest()
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null
       const canMutateDecreeUi =
@@ -11337,7 +11805,7 @@ function Home() {
         sequentialDiagnostics.stop()
         setTypingFamily(null)
         setFloorStream(null)
-        if (toolIntent) endToolRequest()
+        if (legacyWebTool) endToolRequest()
         if (decreeCompletedOk && !decreeMatrixFailed && !controller.signal.aborted) {
           matrixStatus('success', 'Council response ready')
         }
@@ -11684,19 +12152,38 @@ function Home() {
     // pass its staleness checks by the time it resolves.
     const decreeRound = beginDecreeRound()
     appendVisibleRaelDecree(decree, decreeRound.roundRequestId)
-    const activeSession = councilSessionList.find(s => s.id === liveCouncilConvId)
-    if (liveCouncilConvId && shouldAutoTitle(activeSession?.title, sessionTitleLocked(activeSession?.metadata))) {
+    let titledSessionId = liveCouncilConvId
+    if (!titledSessionId) {
+      titledSessionId = councilSnapRef.current.sessionId
+      const seeded = upsertLedgerSession(readSessionLedger(), createLedgerSession(titledSessionId))
+      writeSessionLedger(seeded)
+      setCouncilSessionList(seeded)
+      setLiveCouncilConvId(titledSessionId)
+      liveCouncilConvIdRef.current = titledSessionId
+      sessionTranscriptOwnerRef.current = titledSessionId
+      setTranscriptOwnerId(titledSessionId)
+      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, titledSessionId)
+    }
+    const activeSession = councilSessionList.find(s => s.id === titledSessionId) ?? readSessionLedger().find(s => s.id === titledSessionId)
+    if (titledSessionId && shouldAutoTitle(activeSession?.title, sessionTitleLocked(activeSession?.metadata))) {
       const nextTitle = generateNeutralSessionTitle(decree)
-      autoTitledSessionIdsRef.current.add(liveCouncilConvId)
-      void fetch(`/api/conversations/${liveCouncilConvId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: nextTitle, mergeMetadata: true, metadata: { council: { lastPreview: decree.slice(0, 140) } } }),
-      }).then(() => {
-        setCouncilSessionList(prev => prev.map(s => s.id === liveCouncilConvId ? { ...s, title: nextTitle, preview: decree.slice(0, 140) } : s))
-      }).catch(() => {
-        autoTitledSessionIdsRef.current.delete(liveCouncilConvId)
+      const preview = decree.slice(0, 140)
+      setCouncilSessionList(prev => {
+        const base = prev.some(row => row.id === titledSessionId) ? prev : readSessionLedger()
+        const next = retitleLedgerSession(base, titledSessionId, nextTitle, preview)
+        writeSessionLedger(next)
+        return next
       })
+      autoTitledSessionIdsRef.current.add(titledSessionId)
+      if (persistenceAvailable) {
+        void fetch(`/api/conversations/${titledSessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: nextTitle, mergeMetadata: true, metadata: { council: { lastPreview: preview } } }),
+        }).catch(() => {
+          autoTitledSessionIdsRef.current.delete(titledSessionId)
+        })
+      }
     }
 
     if (!mode && await handleContinuationAuthorityCommand(decree)) {
@@ -11744,6 +12231,53 @@ function Home() {
         )
       }
       return
+    }
+
+    const hvsApproval = isHvsApprovalUtterance(decree)
+    const hvsKind = detectHvsProductionIntent(decree, hvsActiveProductionRef.current)
+    if (hvsApproval || hvsKind !== 'none') {
+      try {
+        const hvsAction = hvsApproval === 'MAKE_VIDEO' || hvsApproval === 'BUILD_SCENE'
+          ? 'approve'
+          : hvsApproval === 'APPLY_CHANGES'
+            ? 'apply-revision'
+            : hvsApproval === 'CREATE_VERSIONS'
+              ? 'create-versions'
+              : 'route'
+        const hvsRes = await fetch('/api/media-command/war-room', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: hvsAction,
+            prompt: decree,
+            utterance: decree,
+            conversationId: liveCouncilConvId,
+            projectId: readHvsResume()?.projectId ?? undefined,
+            warRoomFileIds: attachedFile?.id ? [attachedFile.id] : [],
+          }),
+        })
+        const hvsData = await hvsRes.json() as {
+          packet?: HvsWarRoomPacket
+          error?: string
+        }
+        if (hvsData.packet?.routed || hvsAction !== 'route') {
+          hvsActiveProductionRef.current = true
+          addMessages([{
+            id: createMessageId('hvs-production'),
+            familyName: 'HIGHER VISION STUDIOS',
+            content: hvsData.packet?.progressHint || hvsData.error || 'HVS can make that.',
+            timestamp: new Date().toLocaleTimeString(),
+            color: '#E8C872',
+            icon: 'H',
+            provider: 'Higher Vision Studios',
+            messageType: 'hvs_production',
+            hvsProductionPacket: hvsData.packet,
+          }])
+          return
+        }
+      } catch {
+        /* Unrelated Council traffic continues if HVS routing fails. */
+      }
     }
 
     const projectPacket = createProjectOrchestrationPacket(decree)
@@ -12030,13 +12564,19 @@ function Home() {
 
   const startFreshCouncilSession = async (reason: 'new' | 'archive') => {
     resetCouncilTemporaryRuntime()
+    setNebulaRoundShell(null)
+    setLiveResearchHud(null)
     setSessionLifecycle(reason === 'archive' ? 'archived' : 'active')
     setSessionIntelligence(null)
     const nextSessionId = newSessionId()
+    const title = reason === 'archive' ? 'Live Council Archive Follow-up' : 'New Council Session'
+    bindActiveSessionId(nextSessionId)
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(COUNCIL_SESSION_STORAGE_KEY)
-      sessionStorage.removeItem(LIVE_COUNCIL_CONV_STORAGE_KEY)
     }
+    const created = upsertLedgerSession(readSessionLedger(), createLedgerSession(nextSessionId, title))
+    writeSessionLedger(created)
+    setCouncilSessionList(created)
     councilDispatch({ type: 'END_SESSION', payload: { sessionId: nextSessionId } })
     if (persistenceAvailable) {
       try {
@@ -12044,17 +12584,25 @@ function Home() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: reason === 'archive' ? 'Live Council Archive Follow-up' : 'New Council Session',
+            title,
             metadata: { council: { source: 'live_council', incomeOperationsMode, previousSession: liveCouncilConvId ?? councilSnapRef.current.sessionId } },
           }),
         })
         if (res.ok) {
           const body = await res.json() as { conversation?: { id?: string } }
           const id = typeof body.conversation?.id === 'string' ? body.conversation.id : null
-          if (id) {
+          if (id && liveCouncilConvIdRef.current === nextSessionId) {
+            const swapped = id === nextSessionId
+              ? readSessionLedger()
+              : readSessionLedger().map(row => row.id === nextSessionId ? { ...row, id } : row)
+            const unique = mergeSessionLists(swapped, [])
+            writeSessionLedger(unique)
+            setCouncilSessionList(unique)
+            sessionTranscriptOwnerRef.current = id
+            setTranscriptOwnerId(id)
             sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
             setLiveCouncilConvId(id)
-            void refreshCouncilSessionList()
+            liveCouncilConvIdRef.current = id
           }
         }
       } catch {
@@ -12070,83 +12618,126 @@ function Home() {
     try {
       const res = await fetch('/api/conversations', { cache: 'no-store' })
       if (!res.ok) return
+      if (res.headers.get('x-war-room-persistence') !== 'available') return
       const j = await res.json() as { conversations?: CouncilSessionListItem[] }
       const convs = Array.isArray(j.conversations) ? j.conversations : []
-      setCouncilSessionList(convs.map(c => ({
+      const remote = convs.map(c => ({
         ...c,
         preview: typeof (c.metadata as { council?: { lastPreview?: string } } | undefined)?.council?.lastPreview === 'string'
           ? (c.metadata as { council: { lastPreview: string } }).council.lastPreview
           : c.preview ?? null,
-      })))
+      }))
+      setCouncilSessionList(prev => {
+        const merged = mergeSessionLists(remote, [...readSessionLedger(), ...prev])
+        writeSessionLedger(merged)
+        return merged
+      })
     } catch {
       /* session list optional */
     }
   }
 
   const openCouncilSession = async (id: string) => {
-    if (!id || id === liveCouncilConvId) return
+    if (!id) return
+    if (!shouldHydrateAlreadySelectedSession({
+      selectedSessionId: id,
+      activeSessionId: liveCouncilConvIdRef.current,
+      transcriptOwnerId: sessionTranscriptOwnerRef.current,
+    })) return
     resetCouncilTemporaryRuntime()
-    sessionStorage.setItem(LIVE_COUNCIL_CONV_STORAGE_KEY, id)
-    setLiveCouncilConvId(id)
-    liveCouncilConvIdRef.current = id
-    councilDispatch({ type: 'SET_MESSAGES', payload: [] })
+    setNebulaRoundShell(null)
+    setLiveResearchHud(null)
     setSessionIntelligence(null)
-    const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
-    if (!tr.ok) return
-    const tj = await tr.json() as {
-      messages?: { id: string; role: string; content: string; family?: string | null; created_at: string; metadata?: Record<string, unknown> }[]
-      conversation?: { metadata?: Record<string, unknown> }
-    }
-    const rows = Array.isArray(tj.messages) ? tj.messages : []
-    const hydratedSi = rebuildIntelligenceFromMessages({
-      conversationId: id,
-      messages: rows,
-      fallbackMetadata: tj.conversation?.metadata,
-    }) ?? hydrateSessionIntelligenceFromConversation({
-      conversationId: id,
-      metadata: tj.conversation?.metadata,
-    })
-    setSessionIntelligence(hydratedSi?.intelligence ?? null)
-    const latestRow = [...rows].reverse().find(row => row.role === 'user')
-    const rowsDecreeText = latestRow ? latestRow.content.trim() : ''
-    const rowsPromptIntent = rowsDecreeText ? detectPromptIntent(rowsDecreeText) : undefined
-    const mapped = normalizeCouncilMessageIds(
-      rows
-        .filter(row =>
-          shouldPersistCouncilMessage(
-            councilMessageFromWarRoomRow({
-              role: row.role,
-              content: row.content,
-              family: row.family,
-              metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : undefined,
-            }),
-            councilPersistenceCtx,
-          ),
-        )
-        .map(row => mapWarRoomRowToCouncilMessage(row, {
-          decreeText: rowsDecreeText,
-          promptIntent: rowsPromptIntent,
-          stabilityMode: councilPassthroughMode,
-        })),
-      'persisted',
+    const { generation, abort } = bindActiveSessionId(id)
+    const localRows = readSessionTranscript(
+      parseTranscriptStore(typeof window === 'undefined' ? null : window.localStorage.getItem(COMMANDER_TRANSCRIPT_KEY)),
+      id,
     )
-    councilDispatch({ type: 'SET_MESSAGES', payload: mapped })
-    const firstUser = rows.find(row => row.role === 'user')?.content?.trim() ?? ''
-    const listed = councilSessionList.find(s => s.id === id)
-    if (firstUser && shouldAutoTitle(listed?.title, sessionTitleLocked(listed?.metadata ?? tj.conversation?.metadata))) {
-      const nextTitle = generateNeutralSessionTitle(firstUser)
-      if (nextTitle && nextTitle !== listed?.title && nextTitle !== 'New Council Session') {
-        autoTitledSessionIdsRef.current.add(id)
-        void fetch(`/api/conversations/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: nextTitle, mergeMetadata: true, metadata: { council: { lastPreview: firstUser.slice(0, 140) } } }),
-        }).then(() => {
-          setCouncilSessionList(prev => prev.map(s => s.id === id ? { ...s, title: nextTitle, preview: firstUser.slice(0, 140) } : s))
-        }).catch(() => {
-          autoTitledSessionIdsRef.current.delete(id)
-        })
+    councilDispatch({ type: 'SET_MESSAGES', payload: localRows })
+    const hydrationStillActive = () => decideHydrationApply({
+      selectedSessionId: id,
+      activeSessionId: liveCouncilConvIdRef.current,
+      resultSessionId: id,
+      selectionGeneration: sessionHydrationGenerationRef.current,
+      resultGeneration: generation,
+      aborted: abort.signal.aborted,
+    }).apply
+    try {
+      const tr = await fetch(`/api/conversations/${id}`, { cache: 'no-store', signal: abort.signal })
+      if (!hydrationStillActive()) return
+      if (!tr.ok) {
+        if (shouldDetachConversationBinding({ status: tr.status })) return
+        return
       }
+      const tj = await tr.json() as {
+        messages?: { id: string; role: string; content: string; family?: string | null; created_at: string; metadata?: Record<string, unknown> }[]
+        conversation?: { metadata?: Record<string, unknown> }
+      }
+      if (!hydrationStillActive()) return
+      const rows = Array.isArray(tj.messages) ? tj.messages : []
+      const hydratedSi = rebuildIntelligenceFromMessages({
+        conversationId: id,
+        messages: rows,
+        fallbackMetadata: tj.conversation?.metadata,
+      }) ?? hydrateSessionIntelligenceFromConversation({
+        conversationId: id,
+        metadata: tj.conversation?.metadata,
+      })
+      if (!hydrationStillActive()) return
+      setSessionIntelligence(hydratedSi?.intelligence ?? null)
+      const latestRow = [...rows].reverse().find(row => row.role === 'user')
+      const rowsDecreeText = latestRow ? latestRow.content.trim() : ''
+      const rowsPromptIntent = rowsDecreeText ? detectPromptIntent(rowsDecreeText) : undefined
+      const mapped = normalizeCouncilMessageIds(
+        rows
+          .filter(row =>
+            shouldPersistCouncilMessage(
+              councilMessageFromWarRoomRow({
+                role: row.role,
+                content: row.content,
+                family: row.family,
+                metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : undefined,
+              }),
+              councilPersistenceCtx,
+            ),
+          )
+          .map(row => mapWarRoomRowToCouncilMessage(row, {
+            decreeText: rowsDecreeText,
+            promptIntent: rowsPromptIntent,
+            stabilityMode: councilPassthroughMode,
+          })),
+        'persisted',
+      )
+      if (!hydrationStillActive()) return
+      if (shouldCommitFetchedTranscript({
+        fetchedSessionId: id,
+        activeSessionId: liveCouncilConvIdRef.current,
+        visibleOwnerId: sessionTranscriptOwnerRef.current,
+        localMessages: localRows,
+        fetchedMessages: mapped,
+      })) {
+        councilDispatch({ type: 'SET_MESSAGES', payload: overlayLocalResearchSnapshots(mapped, localRows) })
+      }
+      const firstUser = rows.find(row => row.role === 'user')?.content?.trim() ?? ''
+      const listed = councilSessionList.find(s => s.id === id)
+      if (firstUser && shouldAutoTitle(listed?.title, sessionTitleLocked(listed?.metadata ?? tj.conversation?.metadata))) {
+        const nextTitle = generateNeutralSessionTitle(firstUser)
+        if (nextTitle && nextTitle !== listed?.title && nextTitle !== 'New Council Session') {
+          autoTitledSessionIdsRef.current.add(id)
+          void fetch(`/api/conversations/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: nextTitle, mergeMetadata: true, metadata: { council: { lastPreview: firstUser.slice(0, 140) } } }),
+          }).then(() => {
+            if (liveCouncilConvIdRef.current !== id) return
+            setCouncilSessionList(prev => prev.map(s => s.id === id ? { ...s, title: nextTitle, preview: firstUser.slice(0, 140) } : s))
+          }).catch(() => {
+            autoTitledSessionIdsRef.current.delete(id)
+          })
+        }
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
     }
   }
 
@@ -12518,12 +13109,29 @@ function Home() {
     }),
     [loading, council.councilState, nebulaRoundShell?.status, liveResearchHud?.mode, liveResearchHud?.councilPhase],
   )
+  const activeCouncilSession = useMemo(
+    () => councilSessionList.find(session => session.id === liveCouncilConvId) ?? null,
+    [councilSessionList, liveCouncilConvId],
+  )
   const commanderStatusPills = useMemo(
     () => commanderStatusCluster(councilRoster, {
       researchActive: commanderPresencePhase !== 'idle',
       systemsOk: chatHealthLabel === 'Ready' || chatHealthLabel === 'Council thinking…',
+      persistenceStatus: liveCouncilLoadState === 'session_only'
+        ? 'UNAVAILABLE'
+        : liveCouncilLoadState === 'error'
+          ? 'DEGRADED'
+          : liveCouncilLoadState === 'ready'
+            ? (runtimeTruth?.persistence?.status === 'HEALTHY'
+              || runtimeTruth?.persistence?.status === 'DEGRADED'
+              || runtimeTruth?.persistence?.status === 'UNAVAILABLE'
+              || runtimeTruth?.persistence?.status === 'READ_ONLY'
+              || runtimeTruth?.persistence?.status === 'MISCONFIGURED'
+              ? runtimeTruth.persistence.status
+              : 'HEALTHY')
+            : null,
     }),
-    [councilRoster, commanderPresencePhase, chatHealthLabel],
+    [councilRoster, commanderPresencePhase, chatHealthLabel, liveCouncilLoadState, runtimeTruth?.persistence?.status],
   )
   const providerHealthLabel = coreProviderStates.some(status => status === 'online' || status === 'standby')
     ? 'Ready'
@@ -12815,6 +13423,15 @@ function Home() {
           </button>
         )}
       </div>
+      {lastCouncilFailureCode ? (
+        <div
+          data-testid="council-failure-code"
+          className="rounded px-2 py-1 text-[10px] font-mono tracking-widest"
+          style={{ border: '1px solid rgba(251,191,36,0.35)', background: 'rgba(69,26,3,0.28)', color: '#FBBF24' }}
+        >
+          Council failure code: {lastCouncilFailureCode}
+        </div>
+      ) : null}
       {councilTraceTestAvailable && (
         <div
           className="rounded p-2 text-[10px]"
@@ -13022,13 +13639,13 @@ function Home() {
     if (!liveCouncilConvId) {
       return {
         title: 'Live Council is ready.',
-        detail: 'No persisted conversation is attached yet. Enter a command to begin this session.',
+        detail: 'Persistence connected. No persisted conversation is attached yet.',
         tone: 'ready' as const,
       }
     }
     return {
       title: 'Live Council is ready.',
-      detail: 'Enter a command to begin this session.',
+      detail: 'Persistence connected. Session and mission state are durable.',
       tone: 'ready' as const,
     }
   }, [councilMounted, liveCouncilConvId, liveCouncilLoadState])
@@ -13050,6 +13667,10 @@ function Home() {
 
         .commander-research-scan {
           animation: commander-research-scan 1.8s ease-in-out infinite;
+        }
+
+        .live-intel-motion {
+          transition: flex-basis 220ms ease-out, width 220ms ease-out, min-width 220ms ease-out, opacity 220ms ease-out;
         }
 
         .typing-dot {
@@ -13135,8 +13756,10 @@ function Home() {
           .commander-status-pill,
           .commander-status-cluster,
           .commander-status-node,
-          .commander-research-scan {
+          .commander-research-scan,
+          .live-intel-motion {
             animation: none !important;
+            transition: none !important;
           }
         }
       `}</style>
@@ -13161,6 +13784,12 @@ function Home() {
           <FoundryEntryLink testId="nav-foundry-header" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.55)', color: '#6EE7B7', background: 'rgba(0,255,102,0.08)' }}>
             Foundry
           </FoundryEntryLink>
+          <Link href="/browser" data-testid="nav-browser-header" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.45)', color: '#A7F3D0', background: 'rgba(0,0,0,0.28)' }}>
+            Browser
+          </Link>
+          <HvsEntryLink testId="nav-higher-vision-studios-header" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(201,162,39,0.55)', color: '#F6E7C1', background: 'rgba(201,162,39,0.08)' }}>
+            Higher Vision Studios
+          </HvsEntryLink>
           <Link href="/income-loot" className="rounded px-3 py-2 text-xs font-bold tracking-widest" style={{ border: '1px solid rgba(52,211,153,0.35)', color: '#6EE7B7', background: 'rgba(0,0,0,0.28)' }}>
             Revenue Command
           </Link>
@@ -13233,6 +13862,7 @@ function Home() {
         }
       >
         <WriteApprovalBanner onOpenApprovals={() => setDockPanelId('approvals')} />
+        {isUnifiedLiveRoom ? <LiveIntelToastHost /> : null}
         {!isUnifiedLiveRoom ? operatorNav : null}
         {isUnifiedLiveRoom && (
         <LiveRoomShell
@@ -13268,7 +13898,14 @@ function Home() {
               ) : null}
             </>
           )}
-          intelRow={null}
+          intelRow={(
+            <CommanderLiveIntelRail
+              liveResearchHud={liveResearchHud}
+              presencePhase={commanderPresencePhase}
+              terraNote={terraContextNote}
+              sourcesPreview={liveResearchHud?.intelligence?.sourcesPreview ?? null}
+            />
+          )}
           leftNav={(
             <CouncilSessionNavigator
               sessions={councilSessionList}
@@ -13276,7 +13913,7 @@ function Home() {
               search={councilSessionSearch}
               onSearch={setCouncilSessionSearch}
               onNewChat={() => startTransition(() => { void startFreshCouncilSession('new') })}
-              onSelect={id => startTransition(() => { void openCouncilSession(id) })}
+              onSelect={id => { void openCouncilSession(id) }}
               onRename={(id, title) => { void renameCouncilSession(id, title) }}
               onArchive={id => { void archiveCouncilSessionFromList(id) }}
             />
@@ -13300,6 +13937,14 @@ function Home() {
                 </div>
               )}
               terra={<p>{terraCouncilContextRef.current ? 'Terra context is attached to the current turn only.' : 'No Terra pin.'}</p>}
+              intelligence={(
+                <CouncilIntelligenceInspector
+                  payload={[...paneCouncilMessages].reverse().find(item => item.councilIntelligence || item.evidenceBoardCouncil?.intelligence)?.councilIntelligence
+                    ?? [...paneCouncilMessages].reverse().find(item => item.evidenceBoardCouncil?.intelligence)?.evidenceBoardCouncil?.intelligence
+                    ?? null}
+                  ebc={[...paneCouncilMessages].reverse().find(item => item.evidenceBoardCouncil)?.evidenceBoardCouncil ?? null}
+                />
+              )}
               diagnostics={(
                 <div className="space-y-2">
                   {councilRoster ? (
@@ -13308,7 +13953,7 @@ function Home() {
                     </p>
                   ) : null}
                   {(() => {
-                    const source = [...visibleCouncilMessages].reverse().find(item =>
+                    const source = [...paneCouncilMessages].reverse().find(item =>
                       item.messageType === 'response' && isCouncilMessageRepairPacketEligible(item)
                     )
                     if (!source) return null
@@ -13324,6 +13969,7 @@ function Home() {
                       </button>
                     )
                   })()}
+                  <TerraAgentEngineeringDetails />
                   <div className="flex flex-wrap gap-1">
                     {(['direct', 'stable_group', 'full_council'] as const).map(mode => (
                       <button
@@ -13341,8 +13987,8 @@ function Home() {
                     ))}
                   </div>
                   <CouncilRoundInspector
-                    roundHealth={[...visibleCouncilMessages].reverse().find(item => item.roundHealth)?.roundHealth}
-                    councilRound={[...visibleCouncilMessages].reverse().find(item => item.councilRound)?.councilRound
+                    roundHealth={[...paneCouncilMessages].reverse().find(item => item.roundHealth)?.roundHealth}
+                    councilRound={[...paneCouncilMessages].reverse().find(item => item.councilRound)?.councilRound
                       ?? (nebulaRoundShell ? {
                         roundId: nebulaRoundShell.roundId,
                         requestId: nebulaRoundShell.roundId,
@@ -13411,14 +14057,7 @@ function Home() {
                 </div>
               )}
             />
-            ) : (
-              <CommanderLiveIntelRail
-                liveResearchHud={liveResearchHud}
-                presencePhase={commanderPresencePhase}
-                terraNote={terraContextNote}
-                sourcesPreview={liveResearchHud?.intelligence?.sourcesPreview ?? null}
-              />
-            )
+            ) : null
           )}
           commandConsole={null}
           activePanelId={dockPanelId}
@@ -13539,6 +14178,9 @@ function Home() {
           onTerraContextChange={handleTerraContextChange}
           chatExpanded={isChatExpanded}
           onToggleChatExpanded={() => setIsChatExpanded(prev => !prev)}
+          sessionTitle={activeCouncilSession?.title}
+          sessionStatus={PRESENCE_LABEL[commanderPresencePhase]}
+          sessionMessageCount={visibleCouncilMessages.length}
           councilComposer={<CommandConsole
             command={command}
             onCommandChange={setCommand}
@@ -13557,6 +14199,8 @@ function Home() {
           council={<CouncilWorkspace
           scrollContainerRef={scrollContainerRef}
           onScroll={handleScroll}
+          activeSessionId={liveCouncilConvId}
+          transcriptOwnerId={transcriptOwnerId}
           toolbar={(
             <CouncilCommandControls
               councilFlowMode={councilFlowMode}
@@ -13639,6 +14283,7 @@ function Home() {
           thread={(
         <>
           <CommanderPresenceTrail phase={commanderPresencePhase} />
+          {uiMode === 'advanced' ? <RuntimeTruthDetails truth={runtimeTruth} /> : null}
           {nebulaRoundShell && (nebulaRoundShell.status === 'PLANNING' || nebulaRoundShell.status === 'EXECUTING' || nebulaRoundShell.status === 'SYNTHESIZING' || nebulaRoundShell.streamingText) ? (
             <CouncilLiveRoundBanner
               status={nebulaRoundShell.status}
@@ -13649,7 +14294,8 @@ function Home() {
             />
           ) : null}
           <CouncilMessageRows
-            messages={visibleCouncilMessages}
+            key={liveCouncilConvId ?? 'none'}
+            messages={paneCouncilMessages}
             hiddenCount={hiddenCouncilMessageCount}
             collapsedNoiseCount={collapsedCouncilNoiseCount}
             emptyState={liveCouncilTranscriptEmptyState}
@@ -13862,6 +14508,7 @@ function Home() {
                 </PanelErrorBoundary>
                 <RedTeamCoderPanel state={redTeamCoder} onDiagnose={() => void runRedTeamCoderDiagnosis('manual')} />
                 <RepoAwarenessPanel repo={repoAwareness} onScan={scanRepo} />
+                {uiMode === 'advanced' ? <RuntimeTruthDetails truth={runtimeTruth} /> : null}
                 {uiMode === 'advanced' && (
                   <section className="rounded border border-white/10 p-2 text-[10px]" style={{ color: '#aaa' }}>
                     <div className="mb-1 flex items-center justify-between font-bold" style={{ color: '#94A3B8' }}>
@@ -14170,11 +14817,43 @@ function Home() {
   )
 }
 
+type HomeReactPerformance = {
+  commitCount: number
+  largestCommitMs: number
+  totalCommitMs: number
+  lastPhase: string | null
+}
+
+const homeReactPerformance: HomeReactPerformance = {
+  commitCount: 0,
+  largestCommitMs: 0,
+  totalCommitMs: 0,
+  lastPhase: null,
+}
+
+function recordHomeCommit(
+  _id: string,
+  phase: 'mount' | 'update' | 'nested-update',
+  actualDuration: number,
+): void {
+  homeReactPerformance.commitCount += 1
+  homeReactPerformance.largestCommitMs = Math.max(homeReactPerformance.largestCommitMs, actualDuration)
+  homeReactPerformance.totalCommitMs += actualDuration
+  homeReactPerformance.lastPhase = phase
+  if (typeof window !== 'undefined') {
+    ;(window as Window & { __warRoomHomePerformance?: HomeReactPerformance }).__warRoomHomePerformance = {
+      ...homeReactPerformance,
+    }
+  }
+}
+
 export default function HomePage() {
   return (
     <WarRoomUiModeProvider>
       <LiveRoomModeProvider>
-        <Home />
+        <Profiler id="WarRoomHome" onRender={recordHomeCommit}>
+          <Home />
+        </Profiler>
         <WarRoomIntro />
       </LiveRoomModeProvider>
     </WarRoomUiModeProvider>

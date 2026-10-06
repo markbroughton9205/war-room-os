@@ -380,7 +380,8 @@ export async function commitCommands(project: HvsProject, commands: EditCommand[
       warnings.push(...tracked.warnings)
     }
     if (command.kind === 'reacquireTrack' && !command.keyframes?.length && !options?.preview) {
-      const existing = current.timeline.subjects.find(s => s.clipId === command.clipId)
+      const reacquireClipId = command.clipId
+      const existing = current.timeline.subjects.find(s => s.clipId === reacquireClipId)
       const found = findClip(current, command.clipId)
       const fromSec = found ? Math.max(0, toSeconds(command.from) - toSeconds(found.clip.start)) : toSeconds(command.from)
       const tracked = await trackPersonInClip(current, {

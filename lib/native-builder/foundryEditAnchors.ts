@@ -8,7 +8,8 @@ import type { FoundryMissionRecord } from './foundryMissionTypes'
 import { ensureEngineeringState } from './foundryEngineeringDepth'
 import { extractProtectedBindings } from './foundryProtectedBindings'
 import { readRepoFile } from './repositoryInspector'
-import { collectGoalTerms, compareAnchorScores, scoreAnchorText } from './foundryAnchorRanking'
+import type { AnchorOrigin } from './foundryAnchorRanking'
+import { collectGoalTerms, compareAnchorScores, isLocalizedFixGoal, scoreAnchorText } from './foundryAnchorRanking'
 
 export const MAX_FOCUSED_READ_LINES = 30
 export const MAX_FOCUSED_READ_CHARS = 1_500
@@ -34,6 +35,7 @@ export type FoundryEditAnchor = {
   relevanceScore?: number
   relevanceReason?: string
   matchedGoalTerms?: string[]
+  origin?: AnchorOrigin
 }
 
 export type FoundryEditMatchRecovery = {
@@ -213,12 +215,17 @@ function uniqueWindowChunks(fullContent: string, window: string): string[] {
   return out
 }
 
-function pickBestUnique(candidates: string[], fullContent: string, goal?: string): string | undefined {
+/** The provenance of a candidate: an exact origin line, or the same line with different indentation (a window line is untrimmed, an origin line is trimmed). */
+export function originOf(origins: Map<string, AnchorOrigin> | undefined, text: string): AnchorOrigin | undefined {
+  return origins?.get(text) ?? origins?.get(text.trim())
+}
+
+function pickBestUnique(candidates: string[], fullContent: string, goal?: string, origins?: Map<string, AnchorOrigin>): string | undefined {
   const unique = [...new Set(candidates.filter(text => text && countOccurrences(fullContent, text) === 1))]
   if (!unique.length) return undefined
   if (!goal) return unique[0]
   const ranked = unique
-    .map(text => ({ text, startLine: lineOf(fullContent, text), score: scoreAnchorText(text, goal) }))
+    .map(text => ({ text, startLine: lineOf(fullContent, text), score: scoreAnchorText(text, goal, originOf(origins, text)) }))
     .sort((a, b) => compareAnchorScores({ ...a.score, startLine: a.startLine }, { ...b.score, startLine: b.startLine }))
   const top = ranked[0]
   if (!top || top.score.relevance === 'LOW') return undefined
@@ -231,7 +238,12 @@ function pickBestUnique(candidates: string[], fullContent: string, goal?: string
   return [...pool].sort((a, b) => a.text.length - b.text.length || b.score.score - a.score.score)[0]?.text
 }
 
-export function pickUniqueAnchorText(fullContent: string, windowContent: string, preferred?: string, focusLines?: number[], goal?: string): { text: string; unique: boolean } {
+export function pickUniqueAnchorText(fullContent: string, windowContent: string, preferred?: string, focusLines?: number[], goal?: string, origins?: Map<string, AnchorOrigin>): { text: string; unique: boolean } {
+  const known = origins ?? (goal ? anchorOrigins(fullContent, goal) : undefined)
+  // A statement of the named function that was asked for by name is that anchor: the global ranking below must not swap it for a different statement of the same function.
+  if (known && preferred && countOccurrences(fullContent, preferred) === 1 && originOf(known, preferred)) {
+    return { text: known.has(preferred) ? preferred : preferred.trim(), unique: true }
+  }
   const candidates: string[] = []
   if (preferred && countOccurrences(fullContent, preferred) === 1) {
     const preferredLines = preferred.split('\n').length
@@ -267,7 +279,8 @@ export function pickUniqueAnchorText(fullContent: string, windowContent: string,
   }
   candidates.push(...uniqueWindowChunks(fullContent, window))
   if (goal) candidates.push(...findGoalRelevantUniqueSpans(fullContent, goal))
-  const best = pickBestUnique(candidates, fullContent, goal)
+  if (known) candidates.push(...known.keys())
+  const best = pickBestUnique(candidates, fullContent, goal, known)
   if (best) return { text: best, unique: true }
   const inner = uniqueInnerJsxLine(fullContent, window)
   if (inner) return { text: inner, unique: true }
@@ -280,10 +293,116 @@ export function pickUniqueAnchorText(fullContent: string, windowContent: string,
   return { text: window, unique: Boolean(window) && countOccurrences(fullContent, window) === 1 }
 }
 
+const FUNCTION_DECLARATION = /^\s*(?:export\s+(?:default\s+)?)?(?:async\s+)?(?:function\*?\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>))/
+/** A line that only opens or closes a block (`}`, `} else {`, `try {`): never a statement worth anchoring. */
+const STRUCTURAL_LINE = /^(?:[})\]]+[;,]?|(?:\}\s*)?(?:else|try|finally|do)?\s*\{)$/
+const COMMENT_LINE = /^(?:\/\/|\/\*|\*)/
+
+/** Braces that open or close a block on one line. Braces inside a string literal or a comment do not count; the state does not carry across lines. */
+function blockBraces(line: string): { opens: number; closes: number } {
+  let opens = 0
+  let closes = 0
+  let quote = ''
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]
+    if (quote) {
+      if (ch === '\\') i += 1
+      else if (ch === quote) quote = ''
+    } else if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch
+    } else if (ch === '/' && line[i + 1] === '/') {
+      break
+    } else if (ch === '/' && line[i + 1] === '*') {
+      const end = line.indexOf('*/', i + 2)
+      if (end < 0) break
+      i = end + 1
+    } else if (ch === '{') {
+      opens += 1
+    } else if (ch === '}') {
+      closes += 1
+    }
+  }
+  return { opens, closes }
+}
+
+export type NamedBodyLine = {
+  text: string
+  functionName: string
+  /** Statement lines in the whole body (blank, comment and block-only lines excluded), not just the unique ones. */
+  statements: number
+  /** The closing brace was found inside the scan window. */
+  closed: boolean
+}
+
+/**
+ * Unique statement lines inside a function the goal names by its declared name (whole word). A short body line such as `return a - b` carries no goal term and is too short for
+ * the term-match rule below, yet it is exactly what a fix to that function changes: offer each unique body line as its own bounded anchor.
+ * Only a braced body is scanned: an expression-bodied arrow function has no body lines, and the lines after it belong to other declarations.
+ */
+export function namedFunctionBodyAnchors(fullContent: string, goal: string, limit = 6): NamedBodyLine[] {
+  const lines = fullContent.split('\n')
+  const out: NamedBodyLine[] = []
+  for (let i = 0; i < lines.length && out.length < limit; i += 1) {
+    const declared = lines[i].match(FUNCTION_DECLARATION)
+    const name = declared?.[1] ?? declared?.[2]
+    if (!name || name.length < 3 || !new RegExp(`(^|[^\\w$])${name.replace(/\$/g, '\\$')}([^\\w$]|$)`).test(goal)) continue
+    const found: string[] = []
+    let statements = 0
+    let depth = 0
+    let opened = false
+    let closed = false
+    for (let j = i; j < lines.length && j < i + 40; j += 1) {
+      const inside = opened && depth > 0
+      const braces = blockBraces(lines[j])
+      if (braces.opens) opened = true
+      depth += braces.opens - braces.closes
+      const text = lines[j].trim()
+      if (j > i && inside && text && !COMMENT_LINE.test(text) && !STRUCTURAL_LINE.test(text)) {
+        statements += 1
+        if (text.length >= 4 && countOccurrences(fullContent, text) === 1 && !found.includes(text)) found.push(text)
+      }
+      if (opened && depth <= 0) {
+        closed = true
+        break
+      }
+      if (!opened && (j >= i + 6 || (j === i && /=>\s*[^\s{]/.test(lines[j])))) break
+    }
+    for (const text of found) {
+      if (out.length >= limit) break
+      if (!out.some(item => item.text === text)) out.push({ text, functionName: name, statements, closed })
+    }
+  }
+  return out
+}
+
+export function namedFunctionBodyLines(fullContent: string, goal: string, limit = 6): string[] {
+  return namedFunctionBodyAnchors(fullContent, goal, limit).map(item => item.text)
+}
+
+/** A function this short has every statement offered as its own anchor (the extras limit), so its lines are not a biased sample. Larger functions (components, controllers) keep the ordinary ranking. */
+export const MAX_ORIGIN_BODY_STATEMENTS = 6
+
+/**
+ * Provenance for anchor candidates: the unique statement lines of a small function that a localized-fix goal names. Empty for any other goal, so features, renames and signature changes rank as before.
+ * `intent` is further text that may name the function (the mission request, when the model's own query is short).
+ */
+export function anchorOrigins(fullContent: string, goal: string, intent = ''): Map<string, AnchorOrigin> {
+  const origins = new Map<string, AnchorOrigin>()
+  const naming = [goal, intent].filter(Boolean).join('\n')
+  if (!isLocalizedFixGoal(naming)) return origins
+  for (const line of namedFunctionBodyAnchors(fullContent, naming, MAX_ORIGIN_BODY_STATEMENTS * 2)) {
+    if (line.closed && line.statements <= MAX_ORIGIN_BODY_STATEMENTS) {
+      origins.set(line.text, { kind: 'NAMED_FUNCTION_BODY', functionName: line.functionName })
+    }
+  }
+  return origins
+}
+
 export function findGoalRelevantUniqueSpans(fullContent: string, goal: string, limit = 6): string[] {
   if (!goal.trim()) return []
+  const bodyLines = namedFunctionBodyLines(fullContent, goal, limit)
   const terms = collectGoalTerms(goal)
-  if (!terms.length) return []
+  if (!terms.length) return bodyLines
   const lines = fullContent.split('\n')
   const scored: Array<{ text: string; startLine: number; score: ReturnType<typeof scoreAnchorText> }> = []
   const seen = new Set<string>()
@@ -297,10 +416,10 @@ export function findGoalRelevantUniqueSpans(fullContent: string, goal: string, l
     seen.add(span)
     scored.push({ text: span, startLine: i + 1, score: scoreAnchorText(span, goal) })
   }
-  return scored
+  const ranked = scored
     .sort((a, b) => compareAnchorScores({ ...a.score, startLine: a.startLine }, { ...b.score, startLine: b.startLine }))
-    .slice(0, limit)
     .map(item => item.text)
+  return [...new Set([...bodyLines, ...ranked])].slice(0, limit)
 }
 
 export function registerEditAnchor(mission: FoundryMissionRecord, input: {
@@ -313,19 +432,22 @@ export function registerEditAnchor(mission: FoundryMissionRecord, input: {
   preferredText?: string
   focusLines?: number[]
   goal?: string
+  intent?: string
 }): FoundryEditAnchor | null {
   const rel = input.path.replace(/\\/g, '/').replace(/^\.\//, '').trim()
   const seed = input.windowContent || input.preferredText || ''
   if (!rel || !seed) return null
   const goal = input.goal ?? mission.userRequest ?? mission.goal
-  const picked = pickUniqueAnchorText(input.fullContent, seed, input.preferredText, input.focusLines, goal)
+  const origins = anchorOrigins(input.fullContent, goal, input.intent)
+  const picked = pickUniqueAnchorText(input.fullContent, seed, input.preferredText, input.focusLines, goal, origins)
   const unique = input.uniqueHint === false ? false : picked.unique
   const startLine = unique ? lineOf(input.fullContent, picked.text) : input.range.startLine
   const endLine = startLine + Math.max(1, picked.text.split('\n').length) - 1
   const startOffset = Math.max(0, input.fullContent.indexOf(picked.text))
   const endOffset = startOffset >= 0 ? startOffset + picked.text.length : 0
   const protectedBindings = extractProtectedBindings(picked.text)
-  const scored = scoreAnchorText(picked.text, goal)
+  const origin = unique ? originOf(origins, picked.text) : undefined
+  const scored = scoreAnchorText(picked.text, goal, origin)
   const anchor: FoundryEditAnchor = {
     anchorId: `anc_${randomUUID().slice(0, 12)}`,
     missionId: mission.missionId,
@@ -344,6 +466,7 @@ export function registerEditAnchor(mission: FoundryMissionRecord, input: {
     relevanceScore: scored.score,
     relevanceReason: scored.reason,
     matchedGoalTerms: scored.matchedGoalTerms,
+    ...(origin ? { origin } : {}),
   }
   const list = anchorsOf(mission)
   const existing = list.find(item =>
@@ -364,6 +487,7 @@ export function registerEditAnchor(mission: FoundryMissionRecord, input: {
     existing.relevanceScore = scored.score
     existing.relevanceReason = scored.reason
     existing.matchedGoalTerms = scored.matchedGoalTerms
+    existing.origin = origin
     return existing
   }
   const next = [...list, anchor]
@@ -384,6 +508,7 @@ export function registerWindowAnchors(mission: FoundryMissionRecord, input: {
   extraUniqueTexts?: string[]
   focusLines?: number[]
   goal?: string
+  intent?: string
 }): FoundryEditAnchor[] {
   const primary = registerEditAnchor(mission, input)
   const out: FoundryEditAnchor[] = primary ? [primary] : []
@@ -411,10 +536,19 @@ export function registerWindowAnchors(mission: FoundryMissionRecord, input: {
     })
     if (added && !out.some(item => item.anchorId === added.anchorId)) out.push(added)
   }
-  return out.sort((a, b) => compareAnchorScores(
-    { score: a.relevanceScore ?? 0, relevance: a.relevance ?? 'LOW', matchedGoalTerms: a.matchedGoalTerms ?? [], bindings: a.protectedBindings, reason: a.relevanceReason ?? '', symbol: null, goalMatch: '', startLine: a.startLine },
-    { score: b.relevanceScore ?? 0, relevance: b.relevance ?? 'LOW', matchedGoalTerms: b.matchedGoalTerms ?? [], bindings: b.protectedBindings, reason: b.relevanceReason ?? '', symbol: null, goalMatch: '', startLine: b.startLine },
-  ))
+  // A statement of the named function that was asked for by name leads the anchors that score no higher than it; the other statements of that function tie with it and must not outrank the request.
+  const requested = primary?.origin && input.preferredText && (primary.anchorText === input.preferredText || primary.anchorText === input.preferredText.trim()) ? primary.anchorId : undefined
+  const rank = (item: FoundryEditAnchor) => ({
+    score: (item.relevanceScore ?? 0) + (item.anchorId === requested ? 0.5 : 0),
+    relevance: item.relevance ?? 'LOW',
+    matchedGoalTerms: item.matchedGoalTerms ?? [],
+    bindings: item.protectedBindings,
+    reason: item.relevanceReason ?? '',
+    symbol: null,
+    goalMatch: '',
+    startLine: item.startLine,
+  })
+  return out.sort((a, b) => compareAnchorScores(rank(a), rank(b)))
 }
 
 export function latestAnchor(mission: FoundryMissionRecord, path: string, sha256Hex?: string): FoundryEditAnchor | null {

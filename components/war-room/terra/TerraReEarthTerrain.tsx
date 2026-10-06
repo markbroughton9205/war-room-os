@@ -27,31 +27,32 @@ export function TerraReEarthTerrain({ viewer, enabled, onStatusChange }: Props) 
   useEffect(() => {
     if (!viewer || viewer.isDestroyed()) return
     let cancelled = false
+    const activeViewer: CesiumViewer = viewer
 
     async function apply() {
       if (!enabled) {
-        if (originalRef.current && !viewer.isDestroyed()) {
-          viewer.terrainProvider = originalRef.current
+        if (originalRef.current && !activeViewer.isDestroyed()) {
+          activeViewer.terrainProvider = originalRef.current
         }
         onStatusChangeRef.current?.('off')
         return
       }
       onStatusChangeRef.current?.('loading')
       const Cesium = await loadCesium()
-      if (cancelled || viewer.isDestroyed()) return
-      if (!originalRef.current) originalRef.current = viewer.terrainProvider
+      if (cancelled || activeViewer.isDestroyed()) return
+      if (!originalRef.current) originalRef.current = activeViewer.terrainProvider
       try {
         if (!evaluationRef.current) {
           evaluationRef.current = await Cesium.CesiumTerrainProvider.fromUrl(RE_EARTH_TERRAIN_PROVIDER_URL, {
             requestVertexNormals: true,
           })
         }
-        if (cancelled || viewer.isDestroyed()) return
-        viewer.terrainProvider = evaluationRef.current
+        if (cancelled || activeViewer.isDestroyed()) return
+        activeViewer.terrainProvider = evaluationRef.current
         onStatusChangeRef.current?.('evaluation_active')
       } catch {
-        if (originalRef.current && !viewer.isDestroyed()) {
-          viewer.terrainProvider = originalRef.current
+        if (originalRef.current && !activeViewer.isDestroyed()) {
+          activeViewer.terrainProvider = originalRef.current
         }
         onStatusChangeRef.current?.('unavailable')
       }

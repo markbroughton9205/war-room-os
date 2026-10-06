@@ -152,12 +152,15 @@ def wrap_lm_tokens(body: list[int]) -> np.ndarray:
     return np.array([BOS_ID, *body, EOS_ID], dtype=np.int32)
 
 
-def group_chunks_into_source_runs(records: list[dict]) -> list[list[dict]]:
+def group_chunks_into_source_runs(records: list[dict], group_by: str = "lineage") -> list[list[dict]]:
     by_source: dict[str, list[dict]] = defaultdict(list)
     for rec in records:
         if rec.get("kind") == "behavior_example":
             continue
-        key = str(rec.get("source_lineage") or rec.get("source_path") or rec.get("chunk_id") or rec.get("id"))
+        if group_by == "source_path":
+            key = str(rec.get("source_path") or rec.get("source_lineage") or rec.get("chunk_id") or rec.get("id"))
+        else:
+            key = str(rec.get("source_lineage") or rec.get("source_path") or rec.get("chunk_id") or rec.get("id"))
         by_source[key].append(rec)
     runs: list[list[dict]] = []
     for items in by_source.values():
@@ -249,7 +252,12 @@ def take_until_budget(units: list[PackedUnit], budget: int) -> list[PackedUnit]:
     return out
 
 
-def encode_corpus1_units(tokenizer: Tokenizer, dump_root: Path) -> dict[str, list[PackedUnit]]:
+def encode_corpus1_units(
+    tokenizer: Tokenizer,
+    dump_root: Path,
+    *,
+    group_by: str = "lineage",
+) -> dict[str, list[PackedUnit]]:
     train_jsonl = dump_root / "model-lab" / "corpora" / "WR-CORPUS-1-HARDENED" / "train" / "shard-00000.jsonl"
     rows = load_jsonl(train_jsonl)
     clean: list[dict] = []
@@ -260,7 +268,7 @@ def encode_corpus1_units(tokenizer: Tokenizer, dump_root: Path) -> dict[str, lis
             continue
         clean.append(rec)
     by_bucket: dict[str, list[PackedUnit]] = defaultdict(list)
-    for run in group_chunks_into_source_runs(clean):
+    for run in group_chunks_into_source_runs(clean, group_by=group_by):
         text = "".join(text_of(r) for r in run)
         if not text.strip():
             continue
@@ -273,8 +281,12 @@ def encode_corpus1_units(tokenizer: Tokenizer, dump_root: Path) -> dict[str, lis
             bucket = "other"
         if bucket == "other":
             continue
+        if group_by == "source_path":
+            unit_id = str(run[0].get("source_path") or run[0].get("source_lineage") or run[0].get("chunk_id"))
+        else:
+            unit_id = str(run[0].get("source_lineage") or run[0].get("chunk_id"))
         unit = PackedUnit(
-            unit_id=str(run[0].get("source_lineage") or run[0].get("chunk_id")),
+            unit_id=unit_id,
             bucket=bucket,
             origin="WR-CORPUS-1",
             tokens=ids,

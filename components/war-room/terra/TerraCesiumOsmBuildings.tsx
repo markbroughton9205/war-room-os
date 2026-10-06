@@ -2,6 +2,7 @@
 
 /**
  * Cesium OSM Buildings — Commander opt-in only.
+ * Close-zoom presentationGlow is PRESENTATION / INFERRED URBAN ILLUMINATION — not satellite observation.
  * Never loaded on globe boot. IMAGERY_FIRST stays the default city presentation.
  * Footprint picking remains on OSM Overpass, not this tileset.
  */
@@ -9,12 +10,31 @@ import { useEffect, useRef } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
 
+function applyPresentationGlow(
+  Cesium: Awaited<ReturnType<typeof loadCesium>>,
+  tileset: import('cesium').Cesium3DTileset,
+  enabled: boolean,
+): void {
+  try {
+    tileset.style = enabled
+      ? new Cesium.Cesium3DTileStyle({
+        color: "color('#E8C48A', 0.42)",
+        show: true,
+      })
+      : undefined
+  } catch {
+    /* Style is presentation-only. Geometry remains the lawful OSM building mesh. */
+  }
+}
+
 type Props = {
   viewer: CesiumViewer | null
   enabled: boolean
+  /** PRESENTATION / INFERRED URBAN ILLUMINATION — not satellite observation. */
+  presentationGlow?: boolean
 }
 
-export function TerraCesiumOsmBuildings({ viewer, enabled }: Props) {
+export function TerraCesiumOsmBuildings({ viewer, enabled, presentationGlow = false }: Props) {
   const tilesetRef = useRef<import('cesium').Cesium3DTileset | null>(null)
 
   useEffect(() => {
@@ -28,22 +48,25 @@ export function TerraCesiumOsmBuildings({ viewer, enabled }: Props) {
     }
 
     let cancelled = false
+    const activeViewer: CesiumViewer = viewer
     async function load() {
       const Cesium = await loadCesium()
-      if (cancelled || viewer.isDestroyed()) return
+      if (cancelled || activeViewer.isDestroyed()) return
       try {
         if (!tilesetRef.current) {
           const created = await Cesium.createOsmBuildingsAsync()
-          if (cancelled || viewer.isDestroyed()) {
+          if (cancelled || activeViewer.isDestroyed()) {
             created.destroy()
             return
           }
           created.show = true
-          viewer.scene.primitives.add(created)
+          applyPresentationGlow(Cesium, created, presentationGlow)
+          activeViewer.scene.primitives.add(created)
           tilesetRef.current = created
           return
         }
         tilesetRef.current.show = true
+        applyPresentationGlow(Cesium, tilesetRef.current, presentationGlow)
       } catch {
         /* Asset/entitlement failure degrades this overlay only. */
       }
@@ -52,7 +75,7 @@ export function TerraCesiumOsmBuildings({ viewer, enabled }: Props) {
     return () => {
       cancelled = true
     }
-  }, [viewer, enabled])
+  }, [viewer, enabled, presentationGlow])
 
   useEffect(() => {
     return () => {

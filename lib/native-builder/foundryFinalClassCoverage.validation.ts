@@ -43,6 +43,9 @@ import { applyFoundryRuntimeConfig } from './foundryRuntimeConfig'
 import { resetFoundryRuntimeClock } from './foundryRuntimeClock'
 import { resetFoundryRuntimeTestHooks, setFoundryRuntimeTiming } from './foundryMissionRuntime'
 
+// These measure how the routed hosted model engineers. The operator's saved policy (LOCAL) is for the operator's own missions and must not decide which model a validation measures.
+process.env.FOUNDRY_PROVIDER_POLICY = 'AUTO'
+
 type CaseResult = { name: string; pass: boolean; detail: string }
 const check = (name: string, pass: boolean, detail: string): CaseResult => ({ name, pass, detail })
 
@@ -304,7 +307,7 @@ async function run(): Promise<void> {
         ))
         results.push(check(
           'STATIC_WEB_STATUS_COMPUTED',
-          Boolean(staticWeb) && staticWeb!.status === 'PASSED_FIXTURE' && staticWeb!.status !== 'RELIABLE' && staticWeb!.status !== 'PASSED_MULTI_FIXTURE' && (staticWeb!.modelDrivenDistinctFixturePassCount ?? 0) === 1,
+          Boolean(staticWeb) && staticWeb!.status === 'PASSED_FIXTURE' && (staticWeb!.modelDrivenDistinctFixturePassCount ?? 0) === 1,
           staticWeb ? `${staticWeb.status} distinct=${staticWeb.modelDrivenDistinctFixturePassCount}` : 'missing',
         ))
       } else {

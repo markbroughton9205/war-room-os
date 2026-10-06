@@ -1,5 +1,6 @@
 import type { TerraDegreeRectangle } from './aircraftBoundingBox'
 import type { GodsEyeZoomRung } from './godsEye/zoomLadder'
+import type { TerraAddressMatchQuality } from './geocodeMatchQuality'
 
 export const TERRA_CONTEXT_TYPES = [
   'GPS',
@@ -9,6 +10,8 @@ export const TERRA_CONTEXT_TYPES = [
   'CAMERA',
   'EVENT',
   'VIEWPORT',
+  'HANDOFF',
+  'COORDINATE',
 ] as const
 export type TerraContextType = (typeof TERRA_CONTEXT_TYPES)[number]
 
@@ -26,7 +29,7 @@ export type TerraActiveLocation = {
   address: string | null
   region: string | null
   source: 'coordinates' | 'nominatim' | 'open_meteo' | 'geonames'
-  sourceLabel: 'Commander-selected coordinates' | 'OpenStreetMap Nominatim' | 'Device geolocation' | 'Open-Meteo Geocoding' | 'GeoNames'
+  sourceLabel: string
   sourceUrl: string | null
   nativePlaceName: string | null
   englishPlaceName: string | null
@@ -55,6 +58,14 @@ export type TerraActiveLocation = {
   /** Sublocality reverse-geocode may show (ward/township) without replacing LOCAL city/county. */
   reverseSublocalityLabel?: string | null
   reverseGeocodeStatus?: 'ok' | 'pending' | 'stale' | 'unavailable'
+  /** Honest JUMP/GO match quality. Never ROOFTOP for a street centroid. */
+  matchQuality?: TerraAddressMatchQuality | null
+  houseNumber?: string | null
+  road?: string | null
+  postcode?: string | null
+  precisionSource?: string | null
+  enrichmentState?: import('./placePrecision/matchClass').TerraEnrichmentState | null
+  geometryType?: 'point' | 'polygon' | 'polyline' | 'bbox' | null
 }
 
 export type TerraReverseLocationResolution =

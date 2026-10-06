@@ -460,5 +460,7 @@ export function isFrontierBrandCouncilIdentity(text: string): boolean {
   return /\b(chatgpt|claude family|grok family|gemini family|kimi family|red team)\b/i.test(text)
 }
 
+const LIVE_NEBULA_SEATS = NEBULA_AGENTS.filter(agent => agent.status === 'active').map(agent => agent.name)
+
 export const NEBULA_COUNCIL_INITIALIZATION_BANNER =
-  "War Room initialized. Nebula Council present. AURORA, NOVA, PULSAR, PHOENIX, ORION, LUMEN, SOLARA, and ASTRA are available. Speak your decree, Ra'el."
+  `War Room initialized. Nebula Council present: ${LIVE_NEBULA_SEATS.join(', ')}. Speak your decree.`

@@ -104,32 +104,44 @@ export function useTerraCinematicFlight(
         instantRequested: Boolean(destination.instantRequested),
       })
       setLastPlan(plan)
-      const cesiumDestination = plan.destination.kind === 'rectangle'
-        ? Cesium.Rectangle.fromDegrees(plan.destination.west, plan.destination.south, plan.destination.east, plan.destination.north)
-        : Cesium.Cartesian3.fromDegrees(plan.destination.longitude, plan.destination.latitude, plan.destination.heightMeters)
-      viewer.camera.cancelFlight()
-      if (timeoutRef.current !== null) clearTimeout(timeoutRef.current)
-      timeoutRef.current = setTimeout(() => {
-        if (generation !== generationRef.current || !flyingRef.current) return
-        generationRef.current += 1
-        if (!viewer.isDestroyed()) viewer.camera.cancelFlight()
-        finish('FAILED')
-      }, Math.round((plan.durationSeconds + 4) * 1000))
-      const orientation = plan.pitchDegrees != null || plan.headingDegrees != null
-        ? {
-          heading: plan.headingDegrees != null ? Cesium.Math.toRadians(plan.headingDegrees) : viewer.camera.heading,
-          pitch: plan.pitchDegrees != null ? Cesium.Math.toRadians(plan.pitchDegrees) : viewer.camera.pitch,
-          roll: 0,
+      const sampleTerrain = Boolean(destination.matchClass && destination.matchClass !== 'PLACE' && destination.matchClass !== 'AMBIGUOUS')
+      const applyFlight = (cesiumDestination: unknown, orientation: { heading: number; pitch: number; roll: number } | undefined) => {
+        viewer.camera.cancelFlight()
+        if (timeoutRef.current !== null) clearTimeout(timeoutRef.current)
+        timeoutRef.current = setTimeout(() => {
+          if (generation !== generationRef.current || !flyingRef.current) return
+          generationRef.current += 1
+          if (!viewer.isDestroyed()) viewer.camera.cancelFlight()
+          finish('FAILED')
+        }, Math.round((plan.durationSeconds + 4) * 1000))
+        if (plan.destination.kind === 'boundingSphere') {
+          const dest = plan.destination
+          const cartesians = dest.points.map(point => Cesium.Cartesian3.fromDegrees(point.longitude, point.latitude, 0))
+          const sphere = Cesium.BoundingSphere.fromPoints(cartesians)
+          viewer.camera.flyToBoundingSphere(sphere, {
+            duration: plan.durationSeconds,
+            offset: new Cesium.HeadingPitchRange(
+              Cesium.Math.toRadians(dest.headingDegrees),
+              Cesium.Math.toRadians(dest.pitchDegrees),
+              dest.rangeMeters,
+            ),
+            complete: onComplete,
+            cancel: onCancel,
+          })
+          return
         }
-        : undefined
-      viewer.camera.flyTo({
-        destination: cesiumDestination,
-        duration: plan.durationSeconds,
-        maximumHeight: plan.maximumHeightMeters ?? undefined,
-        flyOverLongitude: plan.flyOverLongitude != null ? Cesium.Math.toRadians(plan.flyOverLongitude) : undefined,
-        pitchAdjustHeight: plan.pitchAdjustHeightMeters ?? undefined,
-        orientation,
-        complete: () => {
+        viewer.camera.flyTo({
+          destination: cesiumDestination as never,
+          duration: plan.durationSeconds,
+          maximumHeight: plan.maximumHeightMeters ?? undefined,
+          flyOverLongitude: plan.flyOverLongitude != null ? Cesium.Math.toRadians(plan.flyOverLongitude) : undefined,
+          pitchAdjustHeight: plan.pitchAdjustHeightMeters ?? undefined,
+          orientation,
+          complete: onComplete,
+          cancel: onCancel,
+        })
+      }
+      const onComplete = () => {
           const settleAndFinish = (attempt: number) => {
             requestAnimationFrame(() => {
               if (generation !== generationRef.current) return
@@ -162,8 +174,8 @@ export function useTerraCinematicFlight(
             })
           }
           settleAndFinish(0)
-        },
-        cancel: () => {
+      }
+      const onCancel = () => {
           const next = resolveCinematicFlightOutcome({
             generationMatches: generation === generationRef.current,
             completeFired: false,
@@ -174,8 +186,40 @@ export function useTerraCinematicFlight(
           })
           if (generation !== generationRef.current) return
           finish(next)
-        },
-      })
+      }
+      const orientation = plan.pitchDegrees != null || plan.headingDegrees != null
+        ? {
+          heading: plan.headingDegrees != null ? Cesium.Math.toRadians(plan.headingDegrees) : viewer.camera.heading,
+          pitch: plan.pitchDegrees != null ? Cesium.Math.toRadians(plan.pitchDegrees) : viewer.camera.pitch,
+          roll: 0,
+        }
+        : undefined
+      const resolveTerrainThenFly = async () => {
+        let cesiumDestination
+        if (plan.destination.kind === 'rectangle') {
+          cesiumDestination = Cesium.Rectangle.fromDegrees(plan.destination.west, plan.destination.south, plan.destination.east, plan.destination.north)
+        } else if (plan.destination.kind === 'boundingSphere') {
+          cesiumDestination = null
+        } else {
+          let height = plan.destination.heightMeters
+          if (sampleTerrain && viewer.terrainProvider && typeof Cesium.sampleTerrainMostDetailed === 'function') {
+            try {
+              const carto = [Cesium.Cartographic.fromDegrees(plan.destination.longitude, plan.destination.latitude)]
+              const sampled = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, carto)
+              const terrainHeight = sampled[0]?.height
+              if (typeof terrainHeight === 'number' && Number.isFinite(terrainHeight)) {
+                height = Math.max(height, terrainHeight + 80)
+              }
+            } catch {
+              // Terrain availability missing — ellipsoid height is an honest degrade.
+            }
+          }
+          cesiumDestination = Cesium.Cartesian3.fromDegrees(plan.destination.longitude, plan.destination.latitude, height)
+        }
+        if (generation !== generationRef.current || viewer.isDestroyed()) return
+        applyFlight(cesiumDestination, orientation)
+      }
+      void resolveTerrainThenFly()
     }).catch(() => {
       if (generation !== generationRef.current) return
       finish('FAILED')

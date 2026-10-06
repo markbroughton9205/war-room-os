@@ -1,0 +1,344 @@
+{
+  "ok": true,
+  "leakage": {
+    "ok": true,
+    "n_items": 39,
+    "n_haystacks": 10355,
+    "blocking_item_ids": [],
+    "per_item": [
+      {
+        "item_id": "ret-prose-01",
+        "category": "GENERAL_PROSE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-prose-02",
+        "category": "GENERAL_PROSE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-prose-03",
+        "category": "GENERAL_PROSE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-fact-01",
+        "category": "FACTUAL_CONTINUATION",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-fact-02",
+        "category": "FACTUAL_CONTINUATION",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-fact-03",
+        "category": "FACTUAL_CONTINUATION",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-code-01",
+        "category": "CODE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-code-02",
+        "category": "CODE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-code-03",
+        "category": "CODE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-struct-01",
+        "category": "STRUCTURED_OUTPUT",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-struct-02",
+        "category": "STRUCTURED_OUTPUT",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-struct-03",
+        "category": "STRUCTURED_OUTPUT",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-inst-01",
+        "category": "INSTRUCTION_FOLLOWING",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-inst-02",
+        "category": "INSTRUCTION_FOLLOWING",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-inst-03",
+        "category": "INSTRUCTION_FOLLOWING",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-long-01",
+        "category": "LONG_FORM_CONTINUITY",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-long-02",
+        "category": "LONG_FORM_CONTINUITY",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-long-03",
+        "category": "LONG_FORM_CONTINUITY",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-rep-01",
+        "category": "REPETITION_RESISTANCE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-rep-02",
+        "category": "REPETITION_RESISTANCE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-rep-03",
+        "category": "REPETITION_RESISTANCE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-spec-01",
+        "category": "SPECIAL_TOKEN_STABILITY",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-spec-02",
+        "category": "SPECIAL_TOKEN_STABILITY",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "ret-spec-03",
+        "category": "SPECIAL_TOKEN_STABILITY",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-json-01",
+        "category": "JSON",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-json-02",
+        "category": "JSON",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-json-03",
+        "category": "JSON",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-kv-01",
+        "category": "KEY_VALUE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-kv-02",
+        "category": "KEY_VALUE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-kv-03",
+        "category": "KEY_VALUE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-list-01",
+        "category": "LIST",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-list-02",
+        "category": "LIST",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-list-03",
+        "category": "LIST",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-csv-01",
+        "category": "CSV",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-csv-02",
+        "category": "CSV",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-csv-03",
+        "category": "CSV",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-schema-01",
+        "category": "SCHEMA_ADHERENCE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-schema-02",
+        "category": "SCHEMA_ADHERENCE",
+        "blocking": false,
+        "top_hits": []
+      },
+      {
+        "item_id": "struct-schema-03",
+        "category": "SCHEMA_ADHERENCE",
+        "blocking": false,
+        "top_hits": []
+      }
+    ],
+    "note": "Incidental short common phrases are not blocking unless exact/80% contiguous 13-gram coverage of a span >= 20 chars.",
+    "stage3_streams": "NOT_MATERIALIZED; corpus0/1 train+val cover the future mix."
+  },
+  "duplication_internal": {
+    "ok": true,
+    "blocking_pairs": [],
+    "flagged_pairs": [],
+    "per_category": {
+      "LITERARY_PROSE": {
+        "n": 0,
+        "mean_pairwise_char13_jaccard": 0.0
+      },
+      "FACTUAL_PROSE": {
+        "n": 0,
+        "mean_pairwise_char13_jaccard": 0.0
+      },
+      "CODE": {
+        "n": 3,
+        "mean_pairwise_char13_jaccard": 0.0
+      },
+      "JSON_STRUCTURED_OUTPUT": {
+        "n": 0,
+        "mean_pairwise_char13_jaccard": 0.0
+      },
+      "INSTRUCTION_FOLLOWING": {
+        "n": 3,
+        "mean_pairwise_char13_jaccard": 0.0
+      },
+      "LONG_FORM_CONTINUITY": {
+        "n": 3,
+        "mean_pairwise_char13_jaccard": 0.0
+      },
+      "SPECIAL_TOKEN_STABILITY": {
+        "n": 3,
+        "mean_pairwise_char13_jaccard": 0.0
+      }
+    },
+    "poor_category_diversity": []
+  },
+  "duplication_vs_stage3": {
+    "ok": true,
+    "blocking_item_ids": [],
+    "pairs": [
+      {
+        "new": "ret-fact-01",
+        "stage3": "s3-fact-01",
+        "char13_jaccard": 0.19322,
+        "blocking": false
+      },
+      {
+        "new": "ret-fact-02",
+        "stage3": "s3-fact-02",
+        "char13_jaccard": 0.243056,
+        "blocking": false
+      },
+      {
+        "new": "ret-fact-03",
+        "stage3": "s3-fact-05",
+        "char13_jaccard": 0.286207,
+        "blocking": false
+      },
+      {
+        "new": "ret-code-01",
+        "stage3": "s3-code-01",
+        "char13_jaccard": 0.20155,
+        "blocking": false
+      },
+      {
+        "new": "ret-code-02",
+        "stage3": "s3-code-02",
+        "char13_jaccard": 0.224138,
+        "blocking": false
+      },
+      {
+        "new": "ret-long-01",
+        "stage3": "s3-long-01",
+        "char13_jaccard": 0.205379,
+        "blocking": false
+      },
+      {
+        "new": "ret-long-02",
+        "stage3": "s3-long-02",
+        "char13_jaccard": 0.18894,
+        "blocking": false
+      },
+      {
+        "new": "ret-spec-01",
+        "stage3": "s3-spec-01",
+        "char13_jaccard": 0.411348,
+        "blocking": false
+      },
+      {
+        "new": "ret-spec-03",
+        "stage3": "s3-spec-05",
+        "char13_jaccard": 0.308511,
+        "blocking": false
+      }
+    ]
+  },
+  "note": "Evaluation-only. Not used for training. CAP-EVAL-0 unmodified."
+}

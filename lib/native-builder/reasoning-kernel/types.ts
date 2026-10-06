@@ -520,7 +520,8 @@ export type FoundryToolSelection = {
   toolFamily: string
   reason: string
   authority: 'TOOL_BROKER'
-  executed: false
+  /** False when the kernel selects the tool; set true only after the tool broker (never the kernel) has run it. */
+  executed: boolean
 }
 
 export type FoundryArchitectureOption = {

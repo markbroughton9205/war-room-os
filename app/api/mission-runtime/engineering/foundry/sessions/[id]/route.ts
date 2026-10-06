@@ -6,6 +6,7 @@ import { listWorkspaces } from '@/lib/native-builder/workspaceRegistry'
 import { campaignShouldOwn } from '@/lib/native-builder/foundryEngineeringCampaign'
 import { contextShouldOwn } from '@/lib/native-builder/foundryProjectContextIO'
 import { resolveRepoRoot } from '@/lib/repo/paths'
+import { MissionAlreadyRunningError } from '@/lib/native-builder/runtime'
 import {
   WAR_ROOM_CANONICAL_WORKSPACE_ID,
   decorateWorkspaceIdentity,
@@ -119,18 +120,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     await appendFoundryChat(id, 'COMMANDER', body.text!.trim())
     const strategy = getMissionExecutionStrategy('engineering')
     const text = body.text!.trim()
-    const mission = await strategy.create({
-      title: text.slice(0, 80),
-      description: text,
-      naturalLanguage: text,
-      subsystem: 'project',
-      executionMode: 'bounded_coding',
-      // A request the campaign owns (by its API/UI shape, or because discovery grounds it in the project) is carried out by model-driven specialists.
-      specialistIntelligence: campaignShouldOwn(text) || await contextShouldOwn(resolveRepoRoot(), text) ? 'model' : undefined,
-      autoRun: true,
-      waitForCompletion: body.waitForCompletion === true,
-      sessionId: id,
-    })
+    let mission
+    try {
+      mission = await strategy.create({
+        title: text.slice(0, 80),
+        description: text,
+        naturalLanguage: text,
+        subsystem: 'project',
+        executionMode: 'bounded_coding',
+        // A request the campaign owns (by its API/UI shape, or because discovery grounds it in the project) is carried out by model-driven specialists.
+        specialistIntelligence: campaignShouldOwn(text) || await contextShouldOwn(resolveRepoRoot(), text) ? 'model' : undefined,
+        autoRun: true,
+        waitForCompletion: body.waitForCompletion === true,
+        sessionId: id,
+      })
+    } catch (error) {
+      // A start never ends as an empty 500: the Commander is told what happened, with a code the page can act on.
+      if (error instanceof MissionAlreadyRunningError) {
+        return NextResponse.json({ error: 'That request is already being worked on.', code: 'MISSION_ALREADY_RUNNING', missionId: error.repairId }, { status: 409 })
+      }
+      return NextResponse.json({ error: error instanceof Error && error.message ? error.message.slice(0, 300) : 'The mission could not be started.', code: 'START_FAILED' }, { status: 500 })
+    }
     return NextResponse.json({ session: await getFoundrySession(id), mission })
   })
   return result.ok ? result.value : result.response

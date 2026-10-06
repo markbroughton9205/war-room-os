@@ -22,7 +22,22 @@ import { sourcedCameraBearingDegrees } from '@/lib/terra/godsEye/cameraBearing'
 import { cameraInspectFreshness } from '@/lib/terra/godsEye/cameraInspectFreshness'
 import { cameraPinColor, cameraPinStateFromImageFreshness } from '@/lib/terra/godsEye/cameraFederation'
 import { terraAircraftBillboardRotationRadians } from '@/lib/terra/aircraftOrientation'
+import {
+  vehicleBillboardRotationRadians,
+  vehicleClusterMinimumSize,
+  vehicleClusterPixelRange,
+  vehicleColor,
+  vehicleIconScale,
+  vehicleShowHeadingTick,
+  vehicleSilhouetteDataUri,
+  sourcedVehicleHeadingDeg,
+} from '@/lib/terra/vehicleIcons'
+import type { TerraViewBand } from '@/lib/terra/layerGovernor/viewBands'
 import type { TerraAircraftTrailPoint } from '@/lib/terra/aircraftTrail'
+import { terraWorkerPool } from '@/lib/terra/worker/pool'
+import { TERRA_JOB_PRIORITIES, type TerraViewBandName } from '@/lib/terra/worker/types'
+import { canReuseVehicleEntities, staleEntityIds, terraLiveFeatureIds } from '@/lib/terra/stability/featureEntityReuse'
+import { assignTrackedAircraft } from '@/lib/terra/flightIntelligence/cameraFollow'
 
 type Props = {
   layerId: string
@@ -30,6 +45,7 @@ type Props = {
   enabled: boolean
   features: TerraGeoFeature[]
   selectedId: string | null
+  followId?: string | null
   /** God's Eye multi-scale phase: enables Cesium's own built-in entity clustering
    * (DataSource.clustering) — real, standard Cesium API, not a hand-rolled clustering
    * implementation. Off by default (every existing hazard layer keeps rendering one marker per
@@ -44,27 +60,18 @@ type Props = {
    * features, so the key namespace never collides across layers; every other layer passes nothing
    * and renders exactly as before. */
   trails?: Record<string, TerraAircraftTrailPoint[]>
+  viewBand?: TerraViewBand
+  clusterPixelRange?: number
+  clusterMinimumSize?: number
 }
 
-// A minimal upward-pointing glyph (drawn in white so Cesium's billboard `color` tint reproduces
-// resolveStyle's exact aircraft color) — authored pointing north at rotation 0, matching
-// terraAircraftBillboardRotationRadians' documented convention. Base64-encoded inline (not a
-// public/ asset file, and deliberately not a plain URL-encoded `data:` URI — confirmed live during
-// browser verification that Cesium's own billboard image loader silently fails to resolve a
-// `data:image/svg+xml;charset=utf-8,<url-encoded>` URI, even though a plain `<img>` tag loads it
-// fine, whereas the base64 form loads correctly in both).
-const AIRCRAFT_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
-  '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><path d="M14 1 L20 19 L14 15 L8 19 Z" fill="white"/></svg>',
+// Top-down map camera glyph: compact equipment silhouette, never a generic dot or giant pin.
+const CAMERA_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="28" viewBox="0 0 36 28"><rect x="4" y="7" width="20" height="14" rx="3" fill="white"/><path d="M24 10 L34 5 V23 L24 18 Z" fill="white"/><circle cx="13" cy="14" r="5" fill="#0B1A22"/><circle cx="13" cy="14" r="2.5" fill="white"/><rect x="8" y="22" width="12" height="3" rx="1.5" fill="white"/></svg>',
 )}`
 
-// Elongated hull/bow shape (also authored pointing north at rotation 0) so a vessel with a real
-// reported heading is visually distinguishable from an aircraft's arrowhead glyph at a glance,
-// reusing the exact same rotation convention (terraAircraftBillboardRotationRadians).
-const VESSEL_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
-  '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><path d="M14 2 L19 10 L19 22 L14 26 L9 22 L9 10 Z" fill="white"/></svg>',
-)}`
-const CAMERA_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
-  '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40"><path d="M16 1 C9.4 1 4 6.4 4 13 c0 8.8 12 25 12 25 s12-16.2 12-25 C28 6.4 22.6 1 16 1 z" fill="white"/><rect x="9" y="8" width="14" height="10" rx="1.6" fill="#0B1A22"/><circle cx="16" cy="13" r="3.1" fill="white"/><rect x="19.2" y="9.2" width="2.6" height="2" fill="white"/></svg>',
+const CAMERA_OFFLINE_GLYPH_DATA_URI = `data:image/svg+xml;base64,${btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="28" viewBox="0 0 36 28"><rect x="4" y="7" width="20" height="14" rx="3" fill="white"/><path d="M24 10 L34 5 V23 L24 18 Z" fill="white"/><path d="M3 3 L33 25 M33 3 L3 25" stroke="#0B1A22" stroke-width="4"/></svg>',
 )}`
 
 const MIN_PIXEL_SIZE = 7
@@ -127,14 +134,35 @@ function resolveStyle(kind: TerraIntelligenceEventKind, feature: TerraGeoFeature
 const CLUSTER_PIXEL_RANGE = 60
 const CLUSTER_MINIMUM_SIZE = 3
 
-export function TerraFeatureLayer({ layerId, viewer, enabled, features, selectedId, cluster = false, clusterKind, trails }: Props) {
+export function TerraFeatureLayer({
+  layerId,
+  viewer,
+  enabled,
+  features,
+  selectedId,
+  followId = null,
+  cluster = false,
+  clusterKind,
+  trails,
+  viewBand,
+  clusterPixelRange,
+  clusterMinimumSize,
+}: Props) {
   const dataSourceRef = useRef<CustomDataSource | null>(null)
+  const hoveredIdRef = useRef<string | null>(null)
+  const selectedIdRef = useRef(selectedId)
+  selectedIdRef.current = selectedId
+  const workerPool = terraWorkerPool()
+  const clusterSettingsRef = useRef({ clusterPixelRange, clusterMinimumSize, viewBand })
+  useEffect(() => {
+    clusterSettingsRef.current = { clusterPixelRange, clusterMinimumSize, viewBand }
+  }, [clusterPixelRange, clusterMinimumSize, viewBand])
 
   // Owns the DataSource's lifecycle against this specific viewer instance only. Recreated per
   // layerId so each layer's entities live in their own named DataSource (matters for future
   // per-layer Cesium operations like independent clustering, never shared/merged across layers).
   useEffect(() => {
-    if (!viewer) return
+    if (!viewer || !enabled) return
     let cancelled = false
     let created: CustomDataSource | null = null
 
@@ -147,9 +175,10 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
       if (cancelled || viewer!.isDestroyed()) return
       created = new Cesium.CustomDataSource(`terra-layer-${layerId}`)
       if (cluster) {
+        const settings = clusterSettingsRef.current
         created.clustering.enabled = true
-        created.clustering.pixelRange = CLUSTER_PIXEL_RANGE
-        created.clustering.minimumClusterSize = CLUSTER_MINIMUM_SIZE
+        created.clustering.pixelRange = settings.clusterPixelRange ?? CLUSTER_PIXEL_RANGE
+        created.clustering.minimumClusterSize = settings.clusterMinimumSize ?? CLUSTER_MINIMUM_SIZE
         created.clustering.clusterLabels = true
         created.clustering.clusterBillboards = true
         created.clustering.clusterEvent.addEventListener((clusteredEntities, cluster) => {
@@ -168,6 +197,12 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
           if (clusterKind === 'camera') {
             cluster.billboard.image = CAMERA_GLYPH_DATA_URI
             cluster.billboard.color = Cesium.Color.fromCssColorString('#22D3EE')
+            cluster.point.show = false
+          } else if (layerId === 'opensky' || layerId === 'digitraffic_marine') {
+            const activeViewBand = clusterSettingsRef.current.viewBand
+            cluster.billboard.image = vehicleSilhouetteDataUri(layerId === 'digitraffic_marine' ? 'vessel_position' : 'aircraft_state', {}, false)
+            cluster.billboard.color = Cesium.Color.fromCssColorString(layerId === 'digitraffic_marine' ? '#67E8F9' : '#E2E8F0')
+            cluster.billboard.scale = vehicleIconScale(activeViewBand ?? 'GLOBAL')
             cluster.point.show = false
           }
           let sumLat = 0
@@ -223,23 +258,121 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
       }
       if (dataSourceRef.current === created) dataSourceRef.current = null
     }
-  }, [viewer, layerId, cluster, clusterKind])
+  }, [viewer, layerId, cluster, clusterKind, enabled])
 
-  // Redraws entities whenever the feature list, selection, or visibility changes. Cheap at this
-  // phase's scale (tens of points, capped at 100 by the adapter) — full removeAll()+rebuild, not
-  // an incremental diff, is the right amount of complexity for layers of this size.
+  useEffect(() => {
+    const dataSource = dataSourceRef.current
+    if (!dataSource || !cluster) return
+    dataSource.clustering.pixelRange = clusterPixelRange ?? (viewBand ? vehicleClusterPixelRange(viewBand) : CLUSTER_PIXEL_RANGE)
+    dataSource.clustering.minimumClusterSize = clusterMinimumSize ?? (viewBand ? vehicleClusterMinimumSize(viewBand) : CLUSTER_MINIMUM_SIZE)
+  }, [cluster, clusterPixelRange, clusterMinimumSize, viewBand])
+
+  useEffect(() => {
+    if (!viewer || viewer.isDestroyed()) return
+    if (layerId !== 'opensky' && layerId !== 'digitraffic_marine') return
+    let cancelled = false
+    let handler: { destroy: () => void; setInputAction: (action: (movement: { endPosition: unknown }) => void, type: number) => void } | null = null
+    void loadCesium().then(Cesium => {
+      if (cancelled || viewer.isDestroyed()) return
+      handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
+      handler.setInputAction((movement) => {
+        const picked = viewer.scene.pick(movement.endPosition as import('cesium').Cartesian2)
+        const pickedId = picked?.id && typeof picked.id.id === 'string' ? picked.id.id : null
+        const prefix = terraEntityId(`${layerId}:`)
+        const next = pickedId && pickedId.startsWith(prefix) ? pickedId.slice(prefix.length) : null
+        if (next !== hoveredIdRef.current) {
+          const dataSource = dataSourceRef.current
+          const previous = hoveredIdRef.current
+          hoveredIdRef.current = next
+          if (dataSource) {
+            const paint = (featureId: string | null, hovered: boolean) => {
+              if (!featureId) return
+              const entity = dataSource.entities.getById(terraEntityId(`${layerId}:${featureId}`))
+              if (!entity?.billboard) return
+              const selected = featureId === selectedIdRef.current
+              const kind = layerId === 'digitraffic_marine' ? 'vessel_position' : 'aircraft_state'
+              entity.billboard.color = new Cesium.ConstantProperty(Cesium.Color.fromCssColorString(vehicleColor(kind, selected, hovered)))
+            }
+            paint(previous, false)
+            paint(next, true)
+          }
+        }
+      }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
+    })
+    return () => {
+      cancelled = true
+      handler?.destroy()
+    }
+  }, [viewer, layerId])
+
+  // Vehicle layers upsert stable billboard entities. Other layers still rebuild on feature-list
+  // change. Camera-settle worker generations and hover no longer force a full removeAll().
   useEffect(() => {
     const dataSource = dataSourceRef.current
     if (!dataSource) return
     let cancelled = false
+    const controller = new AbortController()
+    const generation = workerPool.getSnapshot().generation
 
     async function render() {
       const Cesium = await loadCesium()
       if (cancelled) return
-      dataSource!.entities.removeAll()
-      if (!enabled) return
+      if (workerPool.getSnapshot().smoothMode) return
+      if (!enabled) {
+        dataSource!.entities.removeAll()
+        return
+      }
 
-      for (const feature of features) {
+      let renderFeatures = features
+      try {
+        const task = clusterKind === 'camera'
+          ? 'CAMERA_CLUSTER'
+          : layerId === 'opensky' || layerId === 'digitraffic_marine'
+            ? 'VEHICLE_CLUSTER'
+            : 'FEATURE_FILTER'
+        const prepared = await workerPool.prepareFeatures(features, {
+          layerId,
+          viewBand: (viewBand ?? 'GLOBAL') as TerraViewBandName,
+          priority: TERRA_JOB_PRIORITIES.P1_CURRENT_VIEW,
+          task,
+          signal: controller.signal,
+        })
+        if (cancelled || generation !== workerPool.getSnapshot().generation) return
+        renderFeatures = prepared.flatMap(chunk => Array.from(chunk.featureIndices).flatMap((index, outputIndex) => {
+          const feature = features[index]
+          if (!feature) return []
+          const count = chunk.clusterCounts[outputIndex] ?? 1
+          if (count <= 1 || chunk.geometryKinds[outputIndex] !== 0) return [feature]
+          const coordinateIndex = chunk.offsets[outputIndex] * 2
+          return [{
+            ...feature,
+            longitude: chunk.coordinates[coordinateIndex],
+            latitude: chunk.coordinates[coordinateIndex + 1],
+            properties: { ...feature.properties, _terraWorkerClusterCount: count },
+          }]
+        }))
+      } catch (error) {
+        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return
+        // Worker failure degrades only this layer to its existing bounded main-thread renderer.
+        renderFeatures = features
+      }
+
+      if (cancelled || workerPool.getSnapshot().smoothMode) return
+      const reuseVehicles = canReuseVehicleEntities(renderFeatures) && dataSource!.entities.values.length > 0
+      if (!reuseVehicles) {
+        dataSource!.entities.removeAll()
+      } else {
+        const existingIds = Array.from(dataSource!.entities.values, entity => entity.id)
+        const prefix = terraEntityId(`${layerId}:`)
+        const liveIds = terraLiveFeatureIds(renderFeatures)
+        for (const staleId of staleEntityIds(existingIds, liveIds, prefix)) {
+          const entity = dataSource!.entities.getById(staleId)
+          if (entity) dataSource!.entities.remove(entity)
+        }
+      }
+
+      const addFeature = (feature: TerraGeoFeature) => {
+        if (cancelled || !dataSource) return
         const isSelected = feature.id === selectedId
         const { color, pixelSize } = resolveStyle(feature.kind, feature)
         // Composite "{layerId}:{featureId}" — not just featureId — so a click resolves back to
@@ -268,7 +401,7 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
               classificationType: Cesium.ClassificationType.TERRAIN,
             },
           })
-          continue
+          return
         }
 
         // God's Eye Traffic phase: a real LineString-backed road-event corridor (drivebc_events)
@@ -286,26 +419,89 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
               clampToGround: true,
             },
           })
-          continue
+          return
         }
 
-        // Live-aviation phase (extended to Maritime, Terra Phase 3): an aircraft/vessel with a
-        // real reported heading gets a directional glyph instead of a plain dot — orientation
-        // only reflects a heading the source actually supplied (mission requirement: never
-        // fabricate one). A feature with no heading (e.g. some on-ground aircraft reports, or a
-        // vessel report with the AIS heading-not-available sentinel already filtered to null
-        // upstream) falls through to the same plain point every other kind uses.
-        const headingKind = feature.kind === 'aircraft_state' || feature.kind === 'vessel_position'
+        const workerClusterCount = typeof feature.properties._terraWorkerClusterCount === 'number'
+          ? feature.properties._terraWorkerClusterCount
+          : 0
+        if (workerClusterCount > 1) {
+          dataSource!.entities.add({
+            id: entityId,
+            position: Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude, feature.altitude ?? 0),
+            point: {
+              pixelSize: Math.min(24, 10 + Math.log2(workerClusterCount) * 2),
+              color: Cesium.Color.fromCssColorString(color).withAlpha(0.9),
+              outlineColor: Cesium.Color.fromCssColorString('#0B1A22'),
+              outlineWidth: 2,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            label: {
+              text: String(workerClusterCount),
+              font: 'bold 11px monospace',
+              fillColor: Cesium.Color.WHITE,
+              outlineColor: Cesium.Color.fromCssColorString('#0B1A22'),
+              outlineWidth: 3,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset: new Cesium.Cartesian2(0, -18),
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+          })
+          return
+        }
+
+        // Live aircraft/vessels always use a type-aware north-up silhouette. Rotation is applied
+        // only when the source supplied heading (aircraft true_track) or heading/COG (AIS). Missing
+        // heading stays neutral — never a fabricated direction, and no separate giant arrow.
+        if (feature.kind === 'aircraft_state' || feature.kind === 'vessel_position') {
+          const headingDeg = sourcedVehicleHeadingDeg(feature.kind, feature.properties)
+          const isHovered = feature.id === hoveredIdRef.current
+          const tint = vehicleColor(feature.kind, isSelected, isHovered)
+          const tick = vehicleShowHeadingTick(viewBand ?? 'REGIONAL')
+          const position = Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude, feature.altitude ?? 0)
+          const image = vehicleSilhouetteDataUri(feature.kind, feature.properties, tick)
+          const rotation = vehicleBillboardRotationRadians(headingDeg)
+          const scale = vehicleIconScale(viewBand ?? 'REGIONAL', isSelected, isHovered)
+          const existing = dataSource!.entities.getById(entityId)
+          if (existing?.billboard) {
+            existing.position = new Cesium.ConstantPositionProperty(position)
+            existing.billboard.image = new Cesium.ConstantProperty(image)
+            existing.billboard.color = new Cesium.ConstantProperty(Cesium.Color.fromCssColorString(tint))
+            existing.billboard.scale = new Cesium.ConstantProperty(scale)
+            existing.billboard.rotation = new Cesium.ConstantProperty(rotation)
+            return
+          }
+          dataSource!.entities.add({
+            id: entityId,
+            position,
+            billboard: {
+              image,
+              color: Cesium.Color.fromCssColorString(tint),
+              scale,
+              rotation,
+              alignedAxis: Cesium.Cartesian3.ZERO,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            point: isSelected
+              ? {
+                  pixelSize: 18,
+                  color: Cesium.Color.TRANSPARENT,
+                  outlineColor: Cesium.Color.fromCssColorString('#FDE68A').withAlpha(0.9),
+                  outlineWidth: 2,
+                  disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                }
+              : undefined,
+          })
+          return
+        }
         const cameraBearing = feature.kind === 'traffic_camera' ? sourcedCameraBearingDegrees(feature.properties.direction) : null
-        const headingDeg = headingKind && typeof feature.properties.headingDeg === 'number'
-          ? feature.properties.headingDeg
-          : cameraBearing
         if (feature.kind === 'traffic_camera') {
+          const cameraState = cameraPinStateFromImageFreshness(cameraInspectFreshness(feature).imageFreshness)
           dataSource!.entities.add({
             id: entityId,
             position: Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude),
             billboard: {
-              image: CAMERA_GLYPH_DATA_URI,
+              image: cameraState === 'OFFLINE' ? CAMERA_OFFLINE_GLYPH_DATA_URI : CAMERA_GLYPH_DATA_URI,
               color: Cesium.Color.fromCssColorString(isSelected ? '#FFFFFF' : color),
               scale: isSelected ? 1.35 : 1,
               rotation: cameraBearing !== null ? terraAircraftBillboardRotationRadians(cameraBearing) : 0,
@@ -314,34 +510,44 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
               verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
             },
           })
-          continue
-        }
-        if (headingDeg !== null) {
-          dataSource!.entities.add({
-            id: entityId,
-            position: Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude, feature.altitude ?? 0),
-            billboard: {
-              image: feature.kind === 'vessel_position' ? VESSEL_GLYPH_DATA_URI : AIRCRAFT_GLYPH_DATA_URI,
-              color: Cesium.Color.fromCssColorString(isSelected ? '#FFFFFF' : color),
-              scale: isSelected ? 1.35 : 1,
-              rotation: terraAircraftBillboardRotationRadians(headingDeg),
-              alignedAxis: Cesium.Cartesian3.ZERO, // screen-space rotation, not geographic — see aircraftOrientation.ts
-              disableDepthTestDistance: Number.POSITIVE_INFINITY,
-            },
-          })
-          continue
+          return
         }
 
+        const isHistoricalQuake = feature.kind === 'earthquake' && feature.timestamp
+          && Number.isFinite(Date.parse(feature.timestamp))
+          && Date.now() - Date.parse(feature.timestamp) > 6 * 60 * 60_000
         dataSource!.entities.add({
           id: entityId,
           position: Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude),
           point: {
-            pixelSize: pixelSize + (isSelected ? SELECTED_OUTLINE_BOOST : 0),
-            color: Cesium.Color.fromCssColorString(color).withAlpha(0.85),
+            pixelSize: pixelSize + (isSelected ? SELECTED_OUTLINE_BOOST : 0) - (isHistoricalQuake ? 2 : 0),
+            color: Cesium.Color.fromCssColorString(color).withAlpha(isHistoricalQuake ? 0.4 : 0.85),
             outlineColor: isSelected ? Cesium.Color.WHITE : Cesium.Color.fromCssColorString('#0B1A22').withAlpha(0.8),
             outlineWidth: isSelected ? 3 : 1,
             disableDepthTestDistance: Number.POSITIVE_INFINITY, // stays visible through the globe at any zoom, matching the "don't let markers vanish behind the horizon" need for a sparse global layer
           },
+        })
+      }
+
+      // Result integration is deliberately bounded. Each callback is measured against the
+      // scheduler's current frame budget; Living Orbit reduces that budget automatically.
+      const integrationBatchSize = workerPool.getSnapshot().smoothMode ? 8 : 24
+      for (let start = 0; start < renderFeatures.length; start += integrationBatchSize) {
+        if (cancelled || workerPool.getSnapshot().smoothMode) return
+        const batch = renderFeatures.slice(start, start + integrationBatchSize)
+        await new Promise<void>(resolve => {
+          const accepted = workerPool.renderScheduler.enqueue({
+            id: `${layerId}:${generation}:${start}`,
+            generation,
+            priority: TERRA_JOB_PRIORITIES.P1_CURRENT_VIEW,
+            layerId,
+            run: () => {
+              for (const feature of batch) addFeature(feature)
+              resolve()
+            },
+            drop: resolve,
+          })
+          if (!accepted) resolve()
         })
       }
 
@@ -368,8 +574,20 @@ export function TerraFeatureLayer({ layerId, viewer, enabled, features, selected
 
     return () => {
       cancelled = true
+      controller.abort()
+      workerPool.cancelLayer(layerId)
     }
-  }, [features, selectedId, enabled, layerId, trails])
+  }, [features, selectedId, enabled, layerId, trails, viewBand, clusterKind, workerPool])
+
+  useEffect(() => {
+    if (!viewer || viewer.isDestroyed()) return
+    if (!followId) {
+      assignTrackedAircraft(viewer, undefined)
+      return
+    }
+    const entity = dataSourceRef.current?.entities.getById(terraEntityId(`${layerId}:${followId}`))
+    if (entity) assignTrackedAircraft(viewer, entity)
+  }, [followId, features, layerId, viewer])
 
   return null
 }

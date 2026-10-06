@@ -67,3 +67,29 @@ export function buildGibsTileUrlTemplate(layerId: string, isoDate: string): stri
   }
   return `${PUBLIC_GIBS_WMTS_BASE_URL}${encodeURIComponent(layer.identifier)}/default/${isoDate}/${layer.tileMatrixSet}/{z}/{y}/{x}.${layer.tileFormat}`
 }
+
+const ISO_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+
+export function isValidGibsDateTime(value: string): boolean {
+  if (!ISO_DATETIME_PATTERN.test(value)) return false
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed)
+}
+
+/**
+ * GIBS geostationary layers (GOES GeoColor) use a TIME dimension of
+ * `YYYY-MM-DDTHH:MM:00Z`, not a daily date. Callers pass a registered layer ID.
+ */
+export function buildGibsDateTimeTileUrlTemplate(layerId: string, isoDateTime: string): string {
+  const layer = getGibsLayer(layerId)
+  if (!layer) {
+    throw new Error('Unknown GIBS layer id')
+  }
+  if (layer.status !== 'available' || !layer.tileFormat || !layer.tileMatrixSet) {
+    throw new Error(`GIBS layer "${layerId}" is not renderable as a raster tile layer`)
+  }
+  if (!isValidGibsDateTime(isoDateTime)) {
+    throw new Error('Invalid datetime for GIBS tile request')
+  }
+  return `${PUBLIC_GIBS_WMTS_BASE_URL}${encodeURIComponent(layer.identifier)}/default/${isoDateTime}/${layer.tileMatrixSet}/{z}/{y}/{x}.${layer.tileFormat}`
+}

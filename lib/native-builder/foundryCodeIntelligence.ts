@@ -7,7 +7,9 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import ts from 'typescript'
+import { resolveRepoRoot } from '@/lib/repo/paths'
 import { foundryDataHierarchy } from './foundryPaths'
+import { isWarRoomSourceTree } from './foundryWorkspaceKind'
 import { listRepoFiles, readRepoFile } from './repositoryInspector'
 import { listTestSuites } from './qualityTools'
 import { readEngineeringMemory } from './foundryEngineeringMemory'
@@ -36,6 +38,9 @@ export type FoundryCodeIndex = {
   builtAt: string
   fileCount: number
   cacheVersion?: number
+  /** The workspace root this index describes; a cached index for another root is never reused. */
+  root?: string
+  sourceFingerprint?: string
   files: Record<string, FoundryFileIndex>
   symbols: Record<string, string[]>
   dependents: Record<string, string[]>
@@ -56,11 +61,16 @@ const INDEX_PREFIXES = ['scripts/foundry', 'lib/native-builder', 'components/war
 const SOURCE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i
 const MAX_INDEX_FILES = 2200
 const MAX_FILE_BYTES = 180_000
-const INDEX_CACHE_VERSION = 5
+const MAX_BINDINGS = 240
+const INDEX_CACHE_VERSION = 8
 
+/** One cache file per workspace root: an index built for one project must never answer for another. */
 function cachePath(): string {
-  return path.join(foundryDataHierarchy().foundryRoot, 'code-intelligence.json')
+  const key = createHash('sha256').update(path.resolve(resolveRepoRoot())).digest('hex').slice(0, 16)
+  return path.join(foundryDataHierarchy().foundryRoot, 'code-intelligence', `${key}.json`)
 }
+
+export { isWarRoomSourceTree }
 
 function packageBoundary(rel: string): string {
   const parts = rel.split('/')
@@ -97,7 +107,7 @@ function testSiblings(rel: string, files: Set<string>): string[] {
     `${dir}/app.test.mjs`,
     `${dir}/regression.test.mjs`,
   ]
-  return candidates.filter(item => files.has(item) && item !== rel)
+  return candidates.map(item => path.posix.normalize(item)).filter(item => files.has(item) && item !== rel)
 }
 
 function resolveSpecifier(fromFile: string, spec: string, files: Set<string>): string | null {
@@ -200,7 +210,8 @@ function extractFile(rel: string, content: string, files: Set<string>): FoundryF
         return (caps(b) - caps(a)) || b.length - a.length
       })
       .slice(0, 24),
-    bindings: bindings.slice(0, 40),
+    // A large panel binds more than forty values; cutting at forty in document order dropped the bindings near the end (the ones the review status is rendered from).
+    bindings: bindings.slice(0, MAX_BINDINGS),
     route: routeFromPath(rel),
     api: apiFromPath(rel),
     packageBoundary: packageBoundary(rel),
@@ -210,17 +221,9 @@ function extractFile(rel: string, content: string, files: Set<string>): FoundryF
 
 export async function buildCodeIndex(force = false): Promise<FoundryCodeIndex> {
   const dest = cachePath()
-  if (!force && existsSync(dest)) {
-    try {
-      const cached = JSON.parse(await readFile(dest, 'utf8')) as FoundryCodeIndex
-      if (cached?.files && cached.fileCount > 0 && cached.cacheVersion === INDEX_CACHE_VERSION) return cached
-    } catch {
-      /* rebuild */
-    }
-  }
-
+  const root = path.resolve(resolveRepoRoot())
   const listed: string[] = []
-  for (const prefix of INDEX_PREFIXES) {
+  for (const prefix of isWarRoomSourceTree(root) ? INDEX_PREFIXES : ['']) {
     const files = await listRepoFiles(prefix)
     for (const file of files) {
       if (!SOURCE_RE.test(file)) continue
@@ -229,10 +232,21 @@ export async function buildCodeIndex(force = false): Promise<FoundryCodeIndex> {
     }
     if (listed.length >= MAX_INDEX_FILES) break
   }
+  // A workspace can gain files or change imports between missions. Cache AST extraction,
+  // never the directory/content snapshot used to establish ownership.
+  const snapshots = await Promise.all(listed.map(async rel => ({ rel, read: await readRepoFile(rel) })))
+  const sourceFingerprint = createHash('sha256')
+    .update(JSON.stringify(snapshots.map(({rel, read}) => [rel, read.ok ? read.content : null])))
+    .digest('hex')
+  if (!force && existsSync(dest)) {
+    try {
+      const cached = JSON.parse(await readFile(dest, 'utf8')) as FoundryCodeIndex
+      if (cached.cacheVersion === INDEX_CACHE_VERSION && cached.root === root && cached.sourceFingerprint === sourceFingerprint) return cached
+    } catch { /* rebuild */ }
+  }
   const fileSet = new Set(listed)
   const files: Record<string, FoundryFileIndex> = {}
-  for (const rel of listed) {
-    const read = await readRepoFile(rel)
+  for (const {rel, read} of snapshots) {
     if (!read.ok || read.sizeBytes > MAX_FILE_BYTES) continue
     files[rel] = extractFile(rel, read.content, fileSet)
   }
@@ -262,6 +276,8 @@ export async function buildCodeIndex(force = false): Promise<FoundryCodeIndex> {
     builtAt: new Date().toISOString(),
     fileCount: Object.keys(files).length,
     cacheVersion: INDEX_CACHE_VERSION,
+    root,
+    sourceFingerprint,
     files,
     symbols,
     dependents,
@@ -303,7 +319,8 @@ function hasRenderBinding(file: FoundryFileIndex, query: string): boolean {
 function scoreFile(rel: string, file: FoundryFileIndex, query: string, index?: FoundryCodeIndex): number {
   const needle = query.toLowerCase()
   const tokens = needle.split(/[^a-z0-9]+/).filter(token => token.length > 2)
-  let score = 0
+  const exactPath = needle.replace(/^\.\//, '').trim()
+  let score = rel.toLowerCase() === exactPath || path.posix.basename(rel).toLowerCase() === exactPath ? 200 : 0
   const hay = `${rel} ${file.exports.join(' ')} ${file.symbols.map(s => s.name).join(' ')} ${(file.literals ?? []).join(' ')} ${(file.bindings ?? []).join(' ')} ${file.api ?? ''} ${file.route ?? ''}`.toLowerCase()
   if (hay.includes(needle)) score += 12
   for (const token of tokens) {
@@ -413,12 +430,15 @@ export function indexSourceFile(rel: string, content: string, knownFiles: Iterab
 
 export async function mapOwnership(query: string, index?: FoundryCodeIndex): Promise<FoundryOwnershipMap> {
   const resolved = index ?? await buildCodeIndex()
-  const ranked = rankOwnersFromIndex(query, resolved).slice(0, 8)
+  const exact = query.trim().replace(/^\.\//, '').toLowerCase()
+  const named = Object.values(resolved.files).filter(file => file.path.toLowerCase() === exact || path.posix.basename(file.path).toLowerCase() === exact)
+  const ranked = named.length ? named.map(file => ({path: file.path, score: 200})) : rankOwnersFromIndex(query, resolved).slice(0, 8)
   let owners = ranked.map(item => item.path)
   try {
     const memory = await readEngineeringMemory()
     const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter(token => token.length > 3)
     for (const feature of memory.features) {
+      if (named.length) break // explicit file ownership must not expand into unrelated remembered features
       if (feature.stale) continue
       if (!tokens.some(token => feature.feature.toLowerCase().includes(token))) continue
       owners = [...new Set([...owners, ...feature.owners.filter(file => Boolean(resolved.files[file]) || file.endsWith('.tsx') || file.endsWith('.ts'))])]

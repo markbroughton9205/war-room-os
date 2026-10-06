@@ -103,6 +103,7 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
   const handleParserEvent = (event: CouncilStreamParserEvent) => {
     if (!event.ok) {
       callbacks.onMalformedEnvelope?.(event)
+      if (finalResponse) return
       matrixStatus('error', 'Council stream sent a malformed envelope')
       error = {
         version: '48c4c.council-stream.v1',
@@ -148,6 +149,7 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
       finalResponse = event.envelope.finalResponse
       responseStatus = event.envelope.httpStatus
       responseOk = event.envelope.ok
+      error = null
       matrixStatus(event.envelope.ok ? 'success' : 'error', event.envelope.ok ? 'Council response complete' : 'Council response failed')
       callbacks.onFinal?.(event.envelope)
     }
@@ -178,7 +180,6 @@ export async function postIncrementalCouncilChat(options: IncrementalCouncilChat
         finalDecoderFlush: false,
       })
       parser.push(decoded)
-      if (error) break
     }
     const finalDecoded = decoder.decode()
     if (finalDecoded.length > 0) {

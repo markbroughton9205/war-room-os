@@ -104,7 +104,7 @@ async function run() {
   }, { repairId: loadedBase.missionId, mission: loadedBase })
   await saveMission(loadedBase)
   const readResult = (read.result ?? {}) as { anchorId?: string; ANCHOR_TEXT?: string; sha256?: string }
-  const excerpt = String((read.result as { compact?: string } | undefined)?.compact ?? read.excerpt ?? '')
+  const excerpt = String((read.result as { compact?: string } | undefined)?.compact ?? '')
   const anchorId = readResult.anchorId
     ?? excerpt.match(/EDITABLE_REGION:\nanchorId=([a-z0-9_-]+)/i)?.[1]
     ?? excerpt.match(/anchorId=([a-z0-9_-]+)/i)?.[1]
@@ -141,7 +141,7 @@ async function run() {
   if (!replaced.ok) {
     const alreadyFixed = counts.statusToken === 1 && counts.detail === 1 && !counts.passTernaryDetail
     if (!alreadyFixed) {
-      console.log(JSON.stringify({ fail: 'file.replace_unique', error: replaced.error, excerpt: String(replaced.excerpt ?? '').slice(0, 500) }, null, 2))
+      console.log(JSON.stringify({ fail: 'file.replace_unique', error: replaced.error }, null, 2))
       process.exit(1)
     }
   }
@@ -156,7 +156,7 @@ async function run() {
     input: { suite: 'validate:foundry-autonomous-engineering-depth-pass015' },
   }, { repairId: mutated.missionId, mission: mutated })
   const reviewed = await loadMission(mission.missionId) ?? mutated
-  reviewed.testState = { ok: tests.ok === true, detail: String(tests.error ?? tests.excerpt ?? 'pass015 validation') }
+  reviewed.testState = { ok: tests.ok === true, detail: String(tests.error ?? 'pass015 validation') }
   ensureEngineeringState(reviewed).regressionOk = tests.ok === true
   await saveMission(reviewed)
   const buildBlock = productionBuildAllowed(reviewed)

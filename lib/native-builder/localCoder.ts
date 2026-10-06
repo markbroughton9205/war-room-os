@@ -2,6 +2,8 @@
  * Canonical local coding-provider adapter. The model proposes structured actions;
  * Engineering Core executes. Never grants shell access.
  */
+import { isLoopbackModelEndpoint } from './foundryLaunchPolicy'
+import { resolveOllamaBaseUrl } from './ollamaClient'
 import { requestOllamaCompletion, type OllamaFormat, type OllamaGenerateOptions } from './ollamaClient'
 import { prepareFoundryCoder } from './localModelArbiter'
 import { resolveLocalModelHealth } from './localModelHealth'
@@ -83,7 +85,11 @@ export async function resolveLocalCoder(opts?: { routingRetry?: boolean }): Prom
 }
 
 export async function requestLocalCoderJson(input: {
+  signal?: AbortSignal
+  requireLoopback?: boolean
   role: FoundryRole
+  /** Explicit fallback must already be installed locally. */
+  preferredModel?: string
   system: string
   prompt: string
   timeoutMs?: number
@@ -91,14 +97,19 @@ export async function requestLocalCoderJson(input: {
   options?: OllamaGenerateOptions
   keepAlive?: number | string
 }): Promise<{ ok: true; text: string; model: string; metrics?: { totalMs: number | null; promptEvalMs: number | null; evalCount: number | null } } | { ok: false; detail: string; status: LocalCoderStatus }> {
+  if (input.signal?.aborted) return { ok: false, detail: 'Local coder request aborted.', status: 'LOCAL_CODER_UNAVAILABLE' }
+  if (input.requireLoopback && !isLoopbackModelEndpoint(resolveOllamaBaseUrl())) return { ok: false, detail: 'Local Only requires a loopback Ollama endpoint.', status: 'LOCAL_CODER_UNAVAILABLE' }
   const resolved = await resolveLocalCoder()
   if (!resolved.available || !resolved.codingModel) {
     return { ok: false, detail: resolved.detail, status: 'LOCAL_CODER_UNAVAILABLE' }
   }
-  const model = pickLocalCoderModel(resolved.models, input.role) ?? resolved.codingModel
+  if (input.preferredModel && !resolved.models.includes(input.preferredModel)) return { ok: false, detail: 'Requested local fallback is not installed.', status: resolved.status }
+  const model = input.preferredModel ?? pickLocalCoderModel(resolved.models, input.role) ?? resolved.codingModel
   await prepareFoundryCoder()
   const result = await requestOllamaCompletion({
+    signal: input.signal,
     model,
+    requireLoopback: input.requireLoopback,
     system: input.system,
     prompt: input.prompt,
     timeoutMs: input.timeoutMs ?? LOCAL_CODER_TIMEOUT_MS,
@@ -135,5 +146,51 @@ export function extractJsonObject(raw: string): Record<string, unknown> | null {
       /* try next */
     }
   }
+  const recoveredAppend = recoverWhitespaceTruncatedAppendJson(candidate)
+  if (recoveredAppend) return recoveredAppend
   return null
+}
+
+/**
+ * Some constrained local decoders finish the one requested APPEND_FILE test block and then repeat
+ * whitespace or unrelated source until the token budget ends, leaving the JSON envelope open.
+ * Recover only the first complete, column-zero registered test block from that unfinished content.
+ * This enforces the one-block contract; the normal action parser and full-file syntax/semantic
+ * preflight still decide whether the model-authored block may run.
+ */
+export function recoverWhitespaceTruncatedAppendJson(raw: string): Record<string, unknown> | null {
+  if (!/"type"\s*:\s*"APPEND_FILE"/.test(raw)) return null
+  const contentFields = [...raw.matchAll(/"content"\s*:\s*"/g)]
+  const contentField = contentFields.at(-1)
+  if (!contentField || contentField.index === undefined) return null
+  const valueAt = contentField.index + contentField[0].length
+  const encoded = raw.slice(valueAt)
+  try {
+    // Decode only through the first column-zero test terminator. Later generated material may end
+    // on a partial JSON escape when the model exhausts its token budget.
+    const firstTerminator = encoded.indexOf('\\n});')
+    if (firstTerminator < 0) return null
+    const firstEncodedBlock = encoded.slice(0, firstTerminator + '\\n});'.length)
+    const decoded = JSON.parse(`"${firstEncodedBlock}"`) as unknown
+    if (typeof decoded !== 'string') return null
+    const block = decoded.match(/^\s*(test\s*\([\s\S]*?^\}\);)/m)?.[1]
+    if (!block) return null
+    const pathToken = raw.match(/"path"\s*:\s*("(?:\\.|[^"\\])*")/)?.[1]
+    const summaryToken = raw.match(/"summary"\s*:\s*("(?:\\.|[^"\\])*")/)?.[1]
+    if (!pathToken) return null
+    const path = JSON.parse(pathToken) as unknown
+    const summary = summaryToken ? JSON.parse(summaryToken) as unknown : 'Recovered bounded append'
+    if (typeof path !== 'string' || typeof summary !== 'string') return null
+    return {
+      summary,
+      actions: [{
+        type: 'APPEND_FILE',
+        path,
+        content: block,
+        reason: 'Recovered the first complete bounded test block from a truncated structured response.',
+      }],
+    }
+  } catch {
+    return null
+  }
 }

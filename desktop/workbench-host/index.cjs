@@ -101,12 +101,14 @@ function requestedWorkspace() {
   return path.join(projectsRoot(), 'w0-workbench-spike')
 }
 
+/** @returns {string} the allowed fixture folder */
 function fixtureRoot() {
   const allowed = resolveAllowedWorkspace(requestedWorkspace())
   if (!allowed.ok) return path.join(projectsRoot(), 'w0-workbench-spike')
   return allowed.folder
 }
 
+/** @returns {string} the fixture folder, created if it was missing */
 function ensureFixture() {
   const allowed = resolveAllowedWorkspace(fixtureRoot())
   if (!allowed.ok) {
@@ -269,6 +271,11 @@ async function waitReady(token, timeoutMs = 20000) {
   return { ok: false, error: 'workbench did not become ready' }
 }
 
+/**
+ * @typedef {{ ok?: boolean, error?: string, code?: string, ready?: boolean, folder?: string, pid?: number | null, startedAt?: string | null, [key: string]: unknown }} HealthExtra
+ */
+
+/** @param {HealthExtra} [extra] */
 function publicHealth(extra = {}) {
   return {
     enabled: isFoundryWorkbenchW0Enabled(),

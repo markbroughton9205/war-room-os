@@ -143,6 +143,8 @@ export type ResearchProviderId =
   | 'unhcr_data'
   | 'ocha_fts'
   | 'opensky'
+  | 'airplanes_live'
+  | 'adsb_exchange'
   | 'cbdb'
   | 'eclac_cepalstat'
   | 'oecd_data_explorer'

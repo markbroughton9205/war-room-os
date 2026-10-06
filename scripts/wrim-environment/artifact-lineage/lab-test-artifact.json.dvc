@@ -1,0 +1,5 @@
+outs:
+- md5: 3c507b9cc0dbe3016b2170e71823321d
+  size: 115
+  hash: md5
+  path: lab-test-artifact.json

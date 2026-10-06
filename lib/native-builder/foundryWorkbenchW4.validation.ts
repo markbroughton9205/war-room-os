@@ -172,7 +172,7 @@ async function run() {
   results.push(check('nested_repo_not_parent', path.resolve(nestedInner) !== path.resolve(rootTop) && path.resolve(rootTop) === path.resolve(fixture), `root=${rootTop} nested=${nestedInner}`))
 
   const envelope = envelopeWithScm(fixture)
-  results.push(check('scm_context_caps', Boolean(envelope.git?.branch) && (envelope.git?.boundedDiffHunks.length || 0) <= 8 && (envelope.git?.changedFiles.length || 0) <= 40, `branch=${envelope.git?.branch} hunks=${envelope.git?.boundedDiffHunks.length}`))
+  results.push(check('scm_context_caps', Boolean(envelope.git?.branch) && (envelope.git?.boundedDiffHunks?.length || 0) <= 8 && (envelope.git?.changedFiles?.length || 0) <= 40, `branch=${envelope.git?.branch} hunks=${envelope.git?.boundedDiffHunks?.length}`))
 
   const counts = {
     UNGOVERNED_WORKBENCH_COMMIT_COUNT: stockGitMutationWiredInAdapter(adapter),

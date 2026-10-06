@@ -34,6 +34,18 @@ function source(rel: string): string {
   return readFileSync(path.join(resolveRepoRoot(), rel), 'utf8')
 }
 
+// Historical source snapshots are evidence data, never executed installers.
+const historicalInstallerSources = {
+  "tmp/foundry-final-product-cleanup-install.ts": new URL("./__fixtures__/install-lifecycle-source/tmp/foundry-final-product-cleanup-install.ts.txt", import.meta.url),
+  "tmp/foundry-operational-readiness-install.ts": new URL("./__fixtures__/install-lifecycle-source/tmp/foundry-operational-readiness-install.ts.txt", import.meta.url),
+  "tmp/terra-freeze-stability/install-production.ts": new URL("./__fixtures__/install-lifecycle-source/tmp/terra-freeze-stability/install-production.ts.txt", import.meta.url),
+  "tmp/terra-freeze-stability/retry-package-install.ts": new URL("./__fixtures__/install-lifecycle-source/tmp/terra-freeze-stability/retry-package-install.ts.txt", import.meta.url),
+  "tmp/war-room-commander-shell-install.ts": new URL("./__fixtures__/install-lifecycle-source/tmp/war-room-commander-shell-install.ts.txt", import.meta.url),
+} as const
+function historicalInstallSource(rel: keyof typeof historicalInstallerSources): string {
+  return readFileSync(historicalInstallerSources[rel], 'utf8')
+}
+
 function fixture(status: FoundryMissionState, pauseRequested = false): FoundryMissionRecord {
   const mission = startMissionInput(
     'Governed install lifecycle fixture. Do not rebuild. Do not modify Terra.',
@@ -89,11 +101,11 @@ async function run() {
   const types = source('lib/native-builder/foundryMissionTypes.ts')
   const closer = source('lib/native-builder/foundryInstallMissionLifecycle.ts')
   const controller = source('lib/native-builder/foundryMissionController.ts')
-  const cleanupInstall = source('tmp/foundry-final-product-cleanup-install.ts')
-  const opsInstall = source('tmp/foundry-operational-readiness-install.ts')
-  const shellInstall = source('tmp/war-room-commander-shell-install.ts')
-  const terraInstall = source('tmp/terra-freeze-stability/install-production.ts')
-  const terraRetry = source('tmp/terra-freeze-stability/retry-package-install.ts')
+  const cleanupInstall = historicalInstallSource('tmp/foundry-final-product-cleanup-install.ts')
+  const opsInstall = historicalInstallSource('tmp/foundry-operational-readiness-install.ts')
+  const shellInstall = historicalInstallSource('tmp/war-room-commander-shell-install.ts')
+  const terraInstall = historicalInstallSource('tmp/terra-freeze-stability/install-production.ts')
+  const terraRetry = historicalInstallSource('tmp/terra-freeze-stability/retry-package-install.ts')
 
   results.push(check(
     'paused_cannot_jump_to_verifying',
@@ -133,7 +145,7 @@ async function run() {
   ))
   results.push(check(
     'activation_does_not_leave_paused',
-    successFromInstalling.status === 'COMPLETE' && successFromInstalling.status !== 'PAUSED',
+    successFromInstalling.status === 'COMPLETE',
     successFromInstalling.status,
   ))
 
@@ -176,7 +188,7 @@ async function run() {
   const failedVerifyClose = await closeVerifiedInstallMission(failedFromVerifying, failingEvidence(), 'memory')
   results.push(check(
     'failed_verification_from_verifying_is_failed_not_complete',
-    failedVerifyClose.ok === false && failedFromVerifying.status === 'FAILED' && failedFromVerifying.status !== 'COMPLETE',
+    failedVerifyClose.ok === false && failedFromVerifying.status === 'FAILED',
     failedFromVerifying.status,
   ))
 
@@ -226,7 +238,7 @@ async function run() {
       && !/transitionMission\([^,]+, 'VERIFYING', 'installed'\)/.test(shellInstall)
       && !/transitionMission\([^,]+, 'VERIFYING', 'installed'\)/.test(terraInstall)
       && !/transitionMission\([^,]+, 'VERIFYING', 'installed'\)/.test(terraRetry),
-    'tmp install scripts',
+    'HISTORICAL_INSTALLER_SOURCE_SNAPSHOT: preserved installer source, not current deployment verification',
   ))
   results.push(check(
     'complete_when_gate_passes_resumes_paused',
@@ -261,6 +273,7 @@ async function run() {
     `${cancelled.status} path=${closedCancelled.path.join('→') || 'none'}`,
   ))
 
+  const currentFixtureStatus = (mission: ReturnType<typeof fixture>): ReturnType<typeof fixture>['status'] => mission.status
   const terraPaused = fixture('INSTALLING')
   terraPaused.title = 'Terra Freeze Stability Production Install'
   terraPaused.userRequest = 'Install Terra freeze-stability repair into a new per-user War Room OS runtime.'
@@ -282,12 +295,12 @@ async function run() {
   results.push(check(
     'terra_style_paused_resume_uses_shared_closer',
     terraClosed.ok
-      && terraPaused.status === 'COMPLETE'
+      && currentFixtureStatus(terraPaused) === 'COMPLETE'
       && terraClosed.path.join('→') === 'EXECUTING→VERIFYING→COMPLETE'
       && journalHasLegalResumeToVerify(terraPaused.journal)
       && /closeVerifiedInstallMission/.test(terraInstall)
       && !/LEGAL_TRANSITIONS\[.PAUSED.\]/.test(terraInstall),
-    terraClosed.path.join('→'),
+    `HISTORICAL_INSTALLER_SOURCE_SNAPSHOT: ${terraClosed.path.join('→')}`,
   ))
 
   const terraIdentityFail = fixture('PAUSED', true)

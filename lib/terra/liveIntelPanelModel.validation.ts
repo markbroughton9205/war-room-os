@@ -574,6 +574,48 @@ function run(): CaseResult[] {
     !(youtubePanel.sections.find(section => section.id === 'BREAKING')?.items.some(item => item.id === 'yt-1')),
     'breaking ids: ' + (youtubePanel.sections.find(section => section.id === 'BREAKING')?.items.map(item => item.id).join(',') || 'none'),
   ))
+  const officialYoutubePanel = composeLiveIntelPanel({
+    now: NOW,
+    news: [{
+      id: 'official-yt',
+      title: 'Official briefing clip',
+      summary: 'Source-hosted briefing.',
+      url: 'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+      sourceName: 'National Weather Service (NWS)',
+      provider: 'nws_youtube',
+      publishedAt: NOW,
+      retrievedAt: NOW,
+      contentType: 'official_youtube',
+      reliability: 'HIGH',
+    }],
+  })
+  const officialYoutubeItem = officialYoutubePanel.sections.flatMap(section => section.items).find(row => row.id === 'official-yt')
+  results.push(check(
+    'official_youtube_feed_recency_is_not_live',
+    Boolean(officialYoutubeItem && officialYoutubeItem.freshnessState !== 'LIVE'),
+    officialYoutubeItem?.freshnessState ?? 'missing',
+  ))
+  const rssFreshPanel = composeLiveIntelPanel({
+    now: NOW,
+    news: [{
+      id: 'rss-fresh',
+      title: 'Station reports a storm watch',
+      summary: 'A watch is in effect.',
+      url: 'https://www.bbc.com/news/storm-watch',
+      sourceName: 'BBC World News',
+      provider: 'public_rss',
+      publishedAt: NOW,
+      retrievedAt: NOW,
+      reliability: 'HIGH',
+      feedName: 'BBC World News',
+    }],
+  })
+  const rssFreshItem = rssFreshPanel.sections.flatMap(section => section.items).find(row => row.id === 'rss-fresh')
+  results.push(check(
+    'rss_feed_recency_is_not_live',
+    Boolean(rssFreshItem && rssFreshItem.freshnessState !== 'LIVE' && rssFreshItem.freshnessState === 'RECENT'),
+    rssFreshItem?.freshnessState ?? 'missing',
+  ))
   const publicPanel = composeLiveIntelPanel({
     now: NOW,
     authState: 'AUTH_REQUIRED',

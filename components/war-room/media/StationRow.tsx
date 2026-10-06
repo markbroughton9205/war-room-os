@@ -1,7 +1,8 @@
 'use client'
 
-import type { MediaVerificationState } from '@/lib/media/types'
+import type { MediaStation, MediaVerificationState } from '@/lib/media/types'
 import { isPlaybackEligible } from '@/lib/media/provenance'
+import { sourceFamilyLabel } from '@/lib/media/sourceFamily'
 import { useMediaPlayback } from './MediaPlaybackProvider'
 import { MiniEq, StationArt } from './StationArt'
 
@@ -13,9 +14,9 @@ const HEALTH_DOT: Record<MediaVerificationState, string> = {
   UNAVAILABLE: 'bg-slate-600',
 }
 
-export function StationRow({ stationId }: { stationId: string }) {
+export function StationRow({ stationId, station: provided }: { stationId: string; station?: MediaStation }) {
   const { state, stations, controller } = useMediaPlayback()
-  const station = stations.find(entry => entry.id === stationId)
+  const station = provided ?? stations.find(entry => entry.id === stationId)
   if (!station) return null
 
   const selected = state.station?.id === station.id
@@ -42,6 +43,9 @@ export function StationRow({ stationId }: { stationId: string }) {
         </span>
         <span className="block truncate text-[10px] text-slate-400">{station.name}</span>
         <span className="block truncate text-[9px] text-slate-500">{station.city}</span>
+        <span className="block truncate text-[8px] uppercase tracking-widest text-cyan-200/70" data-testid={`media-station-source-${station.id}`}>
+          Source: {sourceFamilyLabel(station.sourceFamily)}
+        </span>
       </span>
       <span className="flex shrink-0 flex-col items-end gap-1">
         {playing ? <MiniEq active /> : !eligible ? (

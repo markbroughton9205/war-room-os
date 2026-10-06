@@ -24,6 +24,32 @@ export type MediaSourceClass = (typeof MEDIA_SOURCE_CLASSES)[number]
 export const MEDIA_PLAYBACK_TYPES = ['PROGRESSIVE', 'HLS', 'EXTERNAL', 'NONE'] as const
 export type MediaPlaybackType = (typeof MEDIA_PLAYBACK_TYPES)[number]
 
+export const MEDIA_SOURCE_FAMILIES = ['direct', 'iheart', 'public', 'international'] as const
+export type MediaSourceFamily = (typeof MEDIA_SOURCE_FAMILIES)[number]
+
+export const MEDIA_PLAYBACK_MODES = ['DIRECT_STREAM', 'OFFICIAL_EMBED', 'OFFICIAL_PAGE', 'LINK_OUT'] as const
+export type MediaPlaybackMode = (typeof MEDIA_PLAYBACK_MODES)[number]
+
+export const MEDIA_GEO_SCOPES = ['local', 'regional', 'global'] as const
+export type MediaGeoScope = (typeof MEDIA_GEO_SCOPES)[number]
+
+export const MEDIA_SOURCE_FILTERS = ['all', 'iheart', 'direct', 'public', 'international'] as const
+export type MediaSourceFilter = (typeof MEDIA_SOURCE_FILTERS)[number]
+
+export const MEDIA_GENRE_FILTERS = [
+  'ALL',
+  'POP',
+  'HIP-HOP / R&B',
+  'ROCK',
+  'COUNTRY',
+  'NEWS / TALK',
+  'SPORTS',
+  'CLASSICAL',
+  'JAZZ',
+  'OTHER',
+] as const
+export type MediaGenreFilter = (typeof MEDIA_GENRE_FILTERS)[number]
+
 export const MEDIA_PLAYBACK_STATES = [
   'idle',
   'loading',
@@ -84,6 +110,15 @@ export type MediaStation = {
   lastVerifiedAt: string | null
   playbackType: MediaPlaybackType
   notes: string
+  sourceFamily?: MediaSourceFamily
+  playbackMode?: MediaPlaybackMode
+  market?: string | null
+  state?: string | null
+  country?: string | null
+  genre?: string | null
+  language?: string | null
+  artworkUrl?: string | null
+  embedUrl?: string | null
 }
 
 export type MediaProvenance = {

@@ -1,4 +1,6 @@
+import { IHEART_CATALOG } from './iheart/catalog'
 import { NEVER_PIN_STREAM_MARKER } from './provenance'
+import { decorateStation } from './sourceFamily'
 import type { MediaStation } from './types'
 
 /**
@@ -202,12 +204,14 @@ export const OHIO_MEDIA_STATIONS: readonly MediaStation[] = [
 ]
 
 export function getOhioMediaStations(): MediaStation[] {
-  return OHIO_MEDIA_STATIONS.map(entry => ({ ...entry }))
+  return OHIO_MEDIA_STATIONS.map(entry => decorateStation(entry))
 }
 
 export function getMediaStationById(id: string): MediaStation | null {
   const found = OHIO_MEDIA_STATIONS.find(entry => entry.id === id)
-  return found ? { ...found } : null
+    ?? IHEART_CATALOG.find(entry => entry.id === id)
+    ?? null
+  return found ? decorateStation(found) : null
 }
 
 export function assertRegistryDoesNotPinDeadWcpn(stations: readonly MediaStation[] = OHIO_MEDIA_STATIONS): void {

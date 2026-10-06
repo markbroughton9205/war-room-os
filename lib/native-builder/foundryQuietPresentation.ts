@@ -296,7 +296,8 @@ function classify(event: QuietEvent, prev: GroupKey | null): GroupKey {
   if (type === 'COMMANDER_DECISION') return { kind: 'decision', role: 'You', key: 'decision' }
   if (type === 'ROLLBACK_STARTED' || type === 'ROLLBACK_COMPLETE') return { kind: 'rollback', role: 'Foundry', key: 'rollback' }
   if (type === 'REVIEWING') return { kind: 'review', role: 'Reviewer', key: 'review' }
-  if (type === 'VERIFICATION_STARTED' || type === 'PROJECT_READY') return { kind: 'verify', role: 'Verifier', key: 'verify' }
+  if (type === 'VERIFICATION_STARTED' || type === 'PROJECT_READY' || type === 'INDEPENDENT_VERIFICATION_STARTED' || type === 'INDEPENDENT_VERIFICATION_FAILED' || type === 'INDEPENDENT_VERIFICATION_PASSED') return { kind: 'verify', role: 'Verifier', key: 'verify' }
+  if (type === 'SELF_REVIEW_FOUND_GAP') return { kind: 'verify', role: 'Self-review', key: 'verify' }
   if (DEBUG_TYPES.has(type)) return { kind: 'debug', role: 'Debugger', key: 'debug' }
   if (TEST_TYPES.has(type)) return { kind: 'test', role: 'Test', key: 'test' }
   if (UNDERSTAND_TYPES.has(type)) {

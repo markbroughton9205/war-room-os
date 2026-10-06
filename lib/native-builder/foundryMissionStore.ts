@@ -1,3 +1,5 @@
+import { transactJsonFile } from './foundryJsonTransaction'
+import { reconcileMissionControl, type MissionControlCommand } from './foundryMissionControlRevision'
 import { mkdir, readFile, appendFile, readdir } from 'node:fs/promises'
 import { parseJsonRecovering, writeFileAtomic } from './foundryAtomicJson'
 import { existsSync } from 'node:fs'
@@ -28,13 +30,19 @@ function journalPath(id: string, root: string): string {
   return path.join(root, `${id}.journal.jsonl`)
 }
 
-export async function saveMission(mission: FoundryMissionRecord): Promise<void> {
+export async function saveMission(mission: FoundryMissionRecord, command?: MissionControlCommand): Promise<void> {
   const existingFile = missionPath(mission.missionId, dataDir())
-  if (existsSync(existingFile)) {
+  const json = await transactJsonFile<FoundryMissionRecord | null, string>(existingFile, async target => {
     try {
-      const read = parseJsonRecovering<FoundryMissionRecord>(await readFile(existingFile, 'utf8'))
+      const read = parseJsonRecovering<FoundryMissionRecord>(await readFile(target, 'utf8'))
       if (!read.ok) throw new Error(read.error)
-      const existing = read.value
+      return read.value
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+  }, existing => {
+    if (existing) {
       if (existing.archived && mission.archived !== false) {
         mission.archived = true
         mission.visibility = 'system'
@@ -53,16 +61,14 @@ export async function saveMission(mission: FoundryMissionRecord): Promise<void> 
       if (existing.resumeEligible === false && mission.resumeEligible !== true) {
         mission.resumeEligible = false
       }
-    } catch {
-      /* keep incoming record */
     }
-  }
-  mission.updatedAt = new Date().toISOString()
-  const json = JSON.stringify(mission, null, 2)
-  for (const root of [dataDir(), repoMirrorDir()]) {
-    await mkdir(root, { recursive: true })
-    await writeFileAtomic(missionPath(mission.missionId, root), json)
-  }
+    reconcileMissionControl(existing, mission, command)
+    mission.updatedAt = new Date().toISOString()
+    return { value: mission, result: JSON.stringify(mission, null, 2) }
+  })
+  const mirror = repoMirrorDir()
+  await mkdir(mirror, { recursive: true })
+  await writeFileAtomic(missionPath(mission.missionId, mirror), json)
   if (mission.writeSet?.established) {
     const { persistMissionWriteSet } = await import('./foundryMissionWriteSet')
     await persistMissionWriteSet(mission)

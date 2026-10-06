@@ -124,10 +124,13 @@ async function run(): Promise<void> {
     })
     const hashA = hashMissionContract(drafted.missionContract)
     const hashB = hashMissionContractIdentity(drafted.missionContract)
-    const hashC = hashMissionContract({ ...drafted.missionContract, sealedAt: '2099-01-01T00:00:00.000Z', status: 'SEALED', createdAt: '2099-01-01T00:00:00.000Z' })
+    // Sealing details are not part of the contract's identity, so a copy that carries them must hash the same (built apart from the call so it is not checked as a fresh literal).
+    const sealedCopy = { ...drafted.missionContract, sealedAt: '2099-01-01T00:00:00.000Z', status: 'SEALED', createdAt: '2099-01-01T00:00:00.000Z' }
+    const hashC = hashMissionContract(sealedCopy)
     const hashChanged = hashMissionContract({ ...drafted.missionContract, goal: 'Ticket manager changed' })
     const acceptanceHashA = hashAcceptanceContract(drafted.acceptanceContract)
-    const acceptanceHashB = hashAcceptanceContractIdentity({ ...drafted.acceptanceContract, sealedAt: '2099-01-01T00:00:00.000Z', status: 'SEALED' })
+    const sealedAcceptanceCopy = { ...drafted.acceptanceContract, sealedAt: '2099-01-01T00:00:00.000Z', status: 'SEALED' }
+    const acceptanceHashB = hashAcceptanceContractIdentity(sealedAcceptanceCopy)
     results.push(check(
       'MISSION_CONTRACT_HASH_STABLE',
       hashA === hashB && hashA === hashC && hashA !== hashChanged && acceptanceHashA === acceptanceHashB,

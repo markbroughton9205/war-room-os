@@ -6,6 +6,7 @@ import { KpiGrid } from '@/components/war-room/KpiGrid'
 import { WarRoomShell } from '@/components/war-room/WarRoomShell'
 import { WarRoomLazyPanels } from '@/components/war-room/WarRoomLazyPanels'
 import { WarRoomPerformanceDiagnostics } from '@/components/war-room/performance/WarRoomPerformanceDiagnostics'
+import { WarRoomBackControl } from '@/components/war-room/WarRoomBackControl'
 
 export const metadata: Metadata = {
   title: 'War Room OS — Legacy Demo Dashboard',
@@ -16,6 +17,9 @@ export const metadata: Metadata = {
 export default function WarRoomDashboardPage() {
   return (
     <WarRoomShell>
+      <div className="mb-3">
+        <WarRoomBackControl />
+      </div>
       <LegacyRouteDisclosure />
       <Phase3WarRoomPanels />
       <KpiGrid />

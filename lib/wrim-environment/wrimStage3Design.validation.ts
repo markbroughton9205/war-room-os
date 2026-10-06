@@ -58,11 +58,11 @@ export async function runStage3DesignValidation(): Promise<{ passed: number; fai
 
   results.push(check('1_run_id', STAGE3_RUN_ID === 'WRIM1-RUN-000003' && DESIGN_RUN_ID === STAGE3_RUN_ID, STAGE3_RUN_ID))
   results.push(check('2_decision', STAGE3_DESIGN_STATUS === 'ACCEPTED_FOR_PREPARATION' && STAGE3_DESIGN_DECISION === STAGE3_DESIGN_STATUS, STAGE3_DESIGN_STATUS))
-  results.push(check('3_auth_no', (STAGE3_AUTHORIZATION === 'NO' || STAGE3_AUTHORIZATION === 'NO_PENDING_REVIEW') && READY_FOR_STAGE3_TRAINING_AUTHORIZATION === false, STAGE3_AUTHORIZATION))
+  results.push(check('3_auth_no', (['NO', 'NO_PENDING_REVIEW'].includes(STAGE3_AUTHORIZATION)) && READY_FOR_STAGE3_TRAINING_AUTHORIZATION === false, STAGE3_AUTHORIZATION))
   results.push(check('4_execution_review_ready', STAGE3_EXECUTION_READINESS === true && DESIGN_STAGE3A_READY === true && STAGE3B_EXECUTION_READINESS === false && DESIGN_STAGE3B_READY === false, String(DESIGN_STAGE3A_READY)))
   results.push(check('5_training_off', TRAINING_AUTHORIZATION === 'OFF' && CURRENT_WRIM_TRAINING === 'NOT_RUNNING', TRAINING_AUTHORIZATION))
   const trainPy = hasTrainer ? fs.readFileSync(path.join(repoRoot, 'scripts/wrim-environment/stage3_train.py'), 'utf8') : ''
-  results.push(check('6_trainer_gated', hasTrainer === true && trainPy.includes('TRAINING_DENIED') && trainPy.includes('authorization_gate') && (STAGE3_AUTHORIZATION === 'NO' || STAGE3_AUTHORIZATION === 'NO_PENDING_REVIEW'), 'trainer implemented, gated'))
+  results.push(check('6_trainer_gated', hasTrainer === true && trainPy.includes('TRAINING_DENIED') && trainPy.includes('authorization_gate') && (['NO', 'NO_PENDING_REVIEW'].includes(STAGE3_AUTHORIZATION)), 'trainer implemented, gated'))
   results.push(check('7_parent', PARENT_SHA256.startsWith('d1affa599ff967313b') && designMd.includes(PARENT_SHA256), 'WRIM-0'))
   results.push(check('8_tokenizer', TOKENIZER_SHA256.startsWith('47ed32ce61974e2c3b') && designMd.includes(TOKENIZER_SHA256), 'WR-TOKENIZER-0'))
   results.push(check('9_lr', STAGE3_PEAK_LR === 2e-5 && designMd.includes('peak 2e-5') && designMd.includes('2e-5'), '2e-5'))
@@ -81,7 +81,7 @@ export async function runStage3DesignValidation(): Promise<{ passed: number; fai
   results.push(check('22_rael', RAEL_STATUS === 'NOT_IMPLEMENTED', RAEL_STATUS))
   results.push(check('23_22_closed', ROADMAP_22_STATUS === 'CLOSED', ROADMAP_22_STATUS))
   results.push(check('24_23_active', ROADMAP_23_STATUS === 'ACTIVE', ROADMAP_23_STATUS))
-  results.push(check('25_next_pass', NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_REVIEW_COMPLETE' || NEXT_AUTHORIZED_PASS === 'STAGE3A_CANDIDATE_SELECTION_COMPLETE' || NEXT_AUTHORIZED_PASS === 'STAGE3A_CANDIDATE_ADJUDICATION_COMPLETE', NEXT_AUTHORIZED_PASS))
+  results.push(check('25_next_pass', ['STAGE3A_COMMANDER_AUTHORIZATION_REVIEW', 'STAGE3A_COMMANDER_REVIEW', 'STAGE3A_REVIEW_COMPLETE', 'STAGE3A_CANDIDATE_SELECTION_COMPLETE', 'STAGE3A_CANDIDATE_ADJUDICATION_COMPLETE', 'CORRECTIVE_STAGE3A_COMMANDER_AUTHORIZATION', 'CORRECTIVE_STAGE3A_PILOT_COMPLETE', 'FOUNDATIONAL_ROOT_CAUSE_REVIEW_COMPLETE', 'FOUNDATIONAL_REMEDIATION_DESIGN_COMPLETE', 'FOUNDATIONAL_P1_READINESS_COMPLETE', 'FOUNDATIONAL_P1_STREAM_REFINEMENT_COMPLETE', 'FOUNDATIONAL_P1_SOVEREIGNTY_AUDIT_COMPLETE', 'FOUNDATIONAL_P2_TRAINING_CONFIGURATION_REQUIRED', 'FOUNDATIONAL_P2_RECIPE_READY', 'FOUNDATIONAL_P2_DIAGNOSTIC_COMPLETE', 'FOUNDATIONAL_P2_ROOT_CAUSE_COMPLETE', 'P2_NEXT_A_SCHEDULE_HORIZON_RECIPE_FROZEN'].includes(NEXT_AUTHORIZED_PASS), NEXT_AUTHORIZED_PASS))
   results.push(check('26_no_delete', designMd.includes('Delete nothing now'), 'retention plan only'))
   results.push(check('27_stage3b_lr_formula', STAGE3B_LR_FORMULA === 'FROZEN_FOR_REVIEW' && designMd.includes('STAGE3B_LR_FORMULA') && designMd.includes('FROZEN_FOR_REVIEW'), STAGE3B_LR_FORMULA))
   results.push(check('28_training_still_off', TRAINING_AUTHORIZATION === 'OFF' && designMd.includes('remains **OFF**') && designMd.includes('STAGE3_AUTHORIZATION = NO'), TRAINING_AUTHORIZATION))

@@ -83,7 +83,19 @@ export async function assertCanonicalRepoPath(absPath: string, allowMissingLeaf 
     canonical = await realpath(absPath)
   } catch (error) {
     if (!allowMissingLeaf) throw error
-    canonical = path.join(await realpath(path.dirname(absPath)), path.basename(absPath))
+    const missing: string[] = []
+    let ancestor = absPath
+    while (true) {
+      try {
+        canonical = path.join(await realpath(ancestor), ...missing.reverse())
+        break
+      } catch {
+        const parent = path.dirname(ancestor)
+        if (parent === ancestor) throw error
+        missing.push(path.basename(ancestor))
+        ancestor = parent
+      }
+    }
   }
   const rel = path.relative(root, canonical)
   if (rel.startsWith('..') || path.isAbsolute(rel)) {

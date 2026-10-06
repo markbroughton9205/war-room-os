@@ -63,7 +63,9 @@ export async function runWrimStage2Validation(): Promise<{ passed: number; faile
   const pyPack = fs.readFileSync(path.join(repoRoot, 'scripts/wrim-environment/stage2_pack.py'), 'utf8')
   const pyEval = fs.readFileSync(path.join(repoRoot, 'scripts/wrim-environment/stage2_eval.py'), 'utf8')
   const pyModel = fs.readFileSync(path.join(repoRoot, 'scripts/wrim-environment/wrim_g20m.py'), 'utf8')
-  const ckptDir = String(checkpoint.dir ?? live.stage2CheckpointDir)
+  // checkpoint.dir is whatever machine's file layout the report was generated under (a Windows path in this historical report); the
+  // directory this machine actually restores the checkpoint under is the portable resolver's own live.stage2CheckpointDir.
+  const ckptDir = live.stage2CheckpointDir
   const sentinelFired = Array.isArray(report?.sentinel_events) && (report!.sentinel_events as unknown[]).length > 0
   const nSteps = Number(report?.n_steps ?? -1)
   const nTokens = Number(report?.tokens ?? -1)
@@ -92,7 +94,7 @@ export async function runWrimStage2Validation(): Promise<{ passed: number; faile
       && stage1?.promotion_candidate !== true,
     String(stage1?.run_id),
   ))
-  results.push(check('2_stage2_run_id', report?.run_id === STAGE2_RUN_ID && STAGE2_RUN_ID === 'WRIM1-NEBULA-STAB-000001' && report?.run_id !== 'WRIM1-RUN-000003', String(report?.run_id)))
+  results.push(check('2_stage2_run_id', report?.run_id === STAGE2_RUN_ID && STAGE2_RUN_ID === 'WRIM1-NEBULA-STAB-000001' && String(report?.run_id) !== 'WRIM1-RUN-000003', String(report?.run_id)))
   results.push(check('3_stage2_test_only', report?.kind === 'TEST_ONLY' && report?.classification === 'STABILITY' && report?.promotion_candidate === false, String(report?.kind)))
   results.push(check('4_parent_sha', report?.parent_sha === PARENT_SHA256, String(report?.parent_sha)))
   results.push(check('5_tokenizer_sha', report?.tokenizer_sha === TOKENIZER_SHA256, String(report?.tokenizer_sha)))
@@ -179,7 +181,7 @@ export async function runWrimStage2Validation(): Promise<{ passed: number; faile
   results.push(check('47_22_closed', ROADMAP_22_STATUS === 'CLOSED' && CORPUS_22 === 'CLOSED', ROADMAP_22_STATUS))
   results.push(check('48_23_active', ROADMAP_23_STATUS === 'ACTIVE' && CORPUS_23 === 'ACTIVE', ROADMAP_23_STATUS))
   results.push(check('49_nothing_pushed', tryForbiddenEnvAction('PUSH_CHANGES').denied && CURRENT_WRIM_TRAINING === 'NOT_RUNNING', 'no push'))
-  results.push(check('50_nothing_deployed', (NEXT_AUTHORIZED_PASS === 'PHASE2_PRIMARY_GRID' || NEXT_AUTHORIZED_PASS === 'PHASE2_GRID_REVIEW' || NEXT_AUTHORIZED_PASS === 'PHASE3A_INTERPOLATION' || NEXT_AUTHORIZED_PASS === 'PHASE3A_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3_EXECUTION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_COMMANDER_REVIEW' || NEXT_AUTHORIZED_PASS === 'STAGE3A_REVIEW_COMPLETE' || NEXT_AUTHORIZED_PASS === 'STAGE3A_CANDIDATE_SELECTION_COMPLETE' || NEXT_AUTHORIZED_PASS === 'STAGE3A_CANDIDATE_ADJUDICATION_COMPLETE') && FORBIDDEN_ENV_ACTIONS.includes('START_STAGE_3'), 'no deploy; Stage 3 denied'))
+  results.push(check('50_nothing_deployed', (['PHASE2_PRIMARY_GRID', 'PHASE2_GRID_REVIEW', 'PHASE3A_INTERPOLATION', 'PHASE3A_REVIEW', 'STAGE3_COMMANDER_REVIEW', 'STAGE3_EXECUTION_REVIEW', 'STAGE3A_COMMANDER_AUTHORIZATION_REVIEW', 'STAGE3A_COMMANDER_REVIEW', 'STAGE3A_REVIEW_COMPLETE', 'STAGE3A_CANDIDATE_SELECTION_COMPLETE', 'STAGE3A_CANDIDATE_ADJUDICATION_COMPLETE', 'CORRECTIVE_STAGE3A_COMMANDER_AUTHORIZATION', 'CORRECTIVE_STAGE3A_PILOT_COMPLETE', 'FOUNDATIONAL_ROOT_CAUSE_REVIEW_COMPLETE', 'FOUNDATIONAL_REMEDIATION_DESIGN_COMPLETE', 'FOUNDATIONAL_P1_READINESS_COMPLETE', 'FOUNDATIONAL_P1_STREAM_REFINEMENT_COMPLETE', 'FOUNDATIONAL_P1_SOVEREIGNTY_AUDIT_COMPLETE', 'FOUNDATIONAL_P2_TRAINING_CONFIGURATION_REQUIRED', 'FOUNDATIONAL_P2_RECIPE_READY', 'FOUNDATIONAL_P2_DIAGNOSTIC_COMPLETE', 'FOUNDATIONAL_P2_ROOT_CAUSE_COMPLETE', 'P2_NEXT_A_SCHEDULE_HORIZON_RECIPE_FROZEN'].includes(NEXT_AUTHORIZED_PASS)) && FORBIDDEN_ENV_ACTIONS.includes('START_STAGE_3'), 'no deploy; Stage 3 denied'))
 
   const passed = results.filter(r => r.ok).length
   const failed = results.filter(r => r.ok === false).length

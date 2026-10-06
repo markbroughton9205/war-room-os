@@ -5,6 +5,12 @@ import {
 } from '@/lib/war-room/warRoomSupabaseError'
 import { requireConversationCaller } from '@/lib/war-room/conversationAuth'
 import { stripClientOwnerFields } from '@/lib/war-room/conversationOwnership'
+import {
+  localCommanderOwnerId,
+  localConversationDelete,
+  localConversationGet,
+  localConversationPatch,
+} from '@/lib/war-room/localConversationGateway'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,10 +23,16 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   const caller = await requireConversationCaller()
-  if (!caller.ok) return caller.response
+  if (!caller.ok) {
+    const ownerId = await localCommanderOwnerId(_req)
+    if (ownerId) return localConversationGet(ownerId, (await context.params).id)
+    return caller.response
+  }
 
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
+    const ownerId = await localCommanderOwnerId(_req)
+    if (ownerId) return localConversationGet(ownerId, (await context.params).id)
     return jsonWithPersistence(
       { conversation: null, messages: [], persistence: 'Supabase not configured; conversation data unavailable.' },
       false,
@@ -86,10 +98,16 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> },
 ) {
   const caller = await requireConversationCaller()
-  if (!caller.ok) return caller.response
+  if (!caller.ok) {
+    const ownerId = await localCommanderOwnerId(req)
+    if (ownerId) return localConversationPatch(req, ownerId, (await context.params).id)
+    return caller.response
+  }
 
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
+    const ownerId = await localCommanderOwnerId(req)
+    if (ownerId) return localConversationPatch(req, ownerId, (await context.params).id)
     return jsonWithPersistence({ error: 'Supabase is not configured.' }, false, { status: 503 })
   }
 
@@ -238,10 +256,16 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> },
 ) {
   const caller = await requireConversationCaller()
-  if (!caller.ok) return caller.response
+  if (!caller.ok) {
+    const ownerId = await localCommanderOwnerId(_req)
+    if (ownerId) return localConversationDelete(ownerId, (await context.params).id)
+    return caller.response
+  }
 
   const sup = tryWarRoomSupabase()
   if (!sup.ok) {
+    const ownerId = await localCommanderOwnerId(_req)
+    if (ownerId) return localConversationDelete(ownerId, (await context.params).id)
     return jsonWithPersistence({ error: 'Supabase is not configured.' }, false, { status: 503 })
   }
 

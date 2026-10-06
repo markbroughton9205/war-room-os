@@ -134,6 +134,14 @@ export function maritimeProviderReason(record: MaritimeSourceRecord, freshness: 
       return 'Some providers in this family returned live data; others did not.'
     case 'NOT_CONFIGURED':
       return 'Provider is registered but is not configured for live use.'
+    case 'RECENT':
+      return 'Recent provider response, inside the freshness window but not the newest possible.'
+    case 'STALE_LAST_GOOD':
+      return 'Serving the last good provider response; the latest refresh did not succeed.'
+    case 'ERROR_UPSTREAM':
+      return 'The upstream provider returned an error.'
+    case 'RATE_LIMITED':
+      return 'The provider is rate limiting requests; War Room is backing off.'
   }
 }
 

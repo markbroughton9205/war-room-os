@@ -234,7 +234,7 @@ export async function runRealProjectModelWorker(options?: { workspaceRoot?: stri
     }],
     constraints: ['Tool Broker only', 'No hardcoded UI statuses', 'Write set is foundryAgentStore.ts only'],
     acceptanceConditions: ['Snapshot calls ensureAcceptedEngineeringEvidenceHydrated()'],
-    limits: { maxSteps: 8, maxWorkerCalls: 6, maxToolCalls: 12, maxReplans: 2 },
+    limits: { maxSteps: 8, workerCalls: 6, toolCalls: 12, replans: 2 },
   })
   selectSessionStrategy(frkSession)
   runBoundedSession(frkSession)

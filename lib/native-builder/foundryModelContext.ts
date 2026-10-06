@@ -1,5 +1,6 @@
 import type { FoundryMissionRecord } from './foundryMissionTypes'
 import type { FoundryModelContext } from './foundryModelTypes'
+import { budgetExtensionCurrency, isStaleBudgetRefusal, staleBudgetRefusalMarker } from './foundryStaleBudgetRefusal'
 import { FOUNDRY_MODEL_TOOL_CATALOG, toolAllowedByPermissions } from './foundryToolCatalog'
 
 const MAX_EXCERPT_CHARS = 2_000
@@ -45,6 +46,7 @@ export function buildFoundryModelContext(
   if (missing[0] === 'BROWSER_ACCEPTANCE') {
     importantFindings.unshift('GATE: only BROWSER_ACCEPTANCE remains. ACTIVE_RUNTIME is released after activate/transition. Retry browser.start, then browser.navigate to http://127.0.0.1:3848/war-room/engineering, then browser.screenshot. Do not BLOCKED: PERSISTENT_BROWSER can be acquired after REPO_WRITE.')
   }
+  const budgetCurrency = budgetExtensionCurrency(mission.missionId)
   return {
     missionId: mission.missionId,
     missionKind: mission.kind,
@@ -60,14 +62,18 @@ export function buildFoundryModelContext(
     importantFindings,
     relevantExcerpts: relevantExcerpts(mission),
     visualEvidence: mission.artifacts.slice(-8),
-    recentToolResults: mission.toolCalls.slice(-10).map(call => ({
-      tool: call.tool,
-      ok: call.ok,
-      reason: call.reason,
-      excerpt: call.excerpt?.slice(0, MAX_EXCERPT_CHARS),
-      error: call.error?.slice(0, MAX_EXCERPT_CHARS),
-    })),
-    recentErrors: mission.errors.slice(-8).map(error => ({
+    recentToolResults: mission.toolCalls.slice(-10).map(call => {
+      const stale = budgetCurrency !== null
+        && (Boolean(call.staleBudgetRefusal) || isStaleBudgetRefusal(`${call.error ?? ''} ${call.excerpt ?? ''}`, call.at, budgetCurrency))
+      return {
+        tool: call.tool,
+        ok: call.ok,
+        reason: call.reason,
+        excerpt: stale ? staleBudgetRefusalMarker(budgetCurrency) : call.excerpt?.slice(0, MAX_EXCERPT_CHARS),
+        error: stale ? staleBudgetRefusalMarker(budgetCurrency) : call.error?.slice(0, MAX_EXCERPT_CHARS),
+      }
+    }),
+    recentErrors: mission.errors.slice(-8).filter(error => !isStaleBudgetRefusal(error.message, error.at, budgetCurrency)).map(error => ({
       klass: error.klass,
       message: error.message.slice(0, MAX_EXCERPT_CHARS),
     })),

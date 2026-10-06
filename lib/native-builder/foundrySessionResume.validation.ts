@@ -25,7 +25,7 @@ const blankSkipped = resolveSessionListMissionId({ missionIds: ['', governance] 
 
 check('SESSION_LIST_COMPLETED_RESUME', completed === flush, completed ?? 'null')
 check('ACTIVE_SESSION_RESUME', preferred === active, preferred ?? 'null')
-check('SESSION_MISSION_CROSSWIRE_COUNT', sessionA === 'mission-a' && sessionB === 'mission-b2' && sessionA !== sessionB, `${sessionA} ${sessionB}`)
+check('SESSION_MISSION_CROSSWIRE_COUNT', sessionA === 'mission-a' && sessionB === 'mission-b2', `${sessionA} ${sessionB}`)
 check('MISSING_MISSION_SAFETY', missing === null, missing ?? 'null')
 check('blank_ids_skipped', blankSkipped === governance, blankSkipped ?? 'null')
 

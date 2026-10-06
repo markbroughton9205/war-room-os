@@ -17,6 +17,7 @@ import {
   type AcquisitionEnvironment,
   type CommandResult,
 } from './acquisitionSandbox'
+import { childProcessEnv } from '@/lib/repo/childProcessEnv'
 import { recordSkillEvaluation } from './evaluations'
 import { buildSkillPack, skillPackIsCompact } from './resolver'
 import { assessMissionCapabilities } from './plannerGate'
@@ -310,13 +311,13 @@ function runLinux(sandbox: string, atlas: CapabilityAtlas, env: AcquisitionEnvir
   const first = runSandboxCommand({
     sandboxRoot: sandbox,
     argv: [env.python3, broken, path.join(sandbox, dir)],
-    env: { FOUNDRY_ACQ: '1' },
+    env: childProcessEnv({ FOUNDRY_ACQ: '1' }),
   })
   const repaired = writeSandboxFile(sandbox, `${dir}/inspect.py`, readFileSync(broken, 'utf8'))
   const second = runSandboxCommand({
     sandboxRoot: sandbox,
     argv: [env.python3, repaired, path.join(sandbox, dir)],
-    env: { FOUNDRY_ACQ: '1' },
+    env: childProcessEnv({ FOUNDRY_ACQ: '1' }),
   })
   const pass = second.exitCode === 0 && /perm_ok wave1/.test(second.stdout) && /proc Name:/.test(second.stdout)
   const item = evidence({

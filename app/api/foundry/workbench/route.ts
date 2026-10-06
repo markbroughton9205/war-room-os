@@ -1,3 +1,4 @@
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import { isFoundryWorkbenchW0Enabled } from '@/lib/native-builder/foundryWorkbenchW0'
 import {
@@ -15,6 +16,8 @@ function stripSecrets(payload: Record<string, unknown>) {
 }
 
 export async function GET() {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   const enabled = isFoundryWorkbenchW0Enabled()
   if (!enabled) {
     return NextResponse.json({ enabled: false, ready: false, bind: '127.0.0.1', port: 3849 })
@@ -24,6 +27,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   if (!isFoundryWorkbenchW0Enabled()) {
     return NextResponse.json({ error: 'FOUNDRY_WORKBENCH_W0 is off' }, { status: 403 })
   }

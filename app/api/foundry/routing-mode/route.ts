@@ -1,3 +1,4 @@
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import {
   disableCapabilityAwareRouting,
@@ -12,6 +13,8 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET() {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   const mode = getCapabilityAwareRoutingMode()
   return NextResponse.json({
     mode,
@@ -22,6 +25,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   let body: { mode?: string; commanderConfirmed?: boolean } = {}
   try {
     body = await req.json() as typeof body

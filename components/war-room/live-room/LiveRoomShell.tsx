@@ -47,33 +47,37 @@ export function LiveRoomShell({
   showDock = false,
 }: LiveRoomShellProps) {
   const showLeft = !chatExpanded && sessionNavOpen
-  const showRight = !chatExpanded
-  const gridClass = showLeft && showRight
-    ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 md:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_17rem] overflow-hidden'
-    : showLeft
-      ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 md:grid-cols-[16rem_minmax(0,1fr)] overflow-hidden'
-      : showRight
-        ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_17rem] overflow-hidden'
-        : 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden'
+  const showInspector = Boolean(!chatExpanded && inspectorOpen && rightPanel)
+  const gridClass = showLeft
+    ? 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 md:grid-cols-[16rem_minmax(0,1fr)] overflow-hidden'
+    : 'live-room-center relative z-10 grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden'
   return (
     <section
       className="live-room-shell relative z-10 flex min-h-0 w-full flex-1 flex-col [--live-room-console-pad:3.5rem] [--live-room-dock-pad:3.25rem] [--live-room-bottom-reserved:calc(var(--live-room-console-pad)+var(--live-room-dock-pad))] sm:[--live-room-console-pad:3.75rem]"
       data-testid="live-room-shell"
+      data-inspector-open={showInspector ? 'true' : 'false'}
     >
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <MatrixRain />
       </div>
 
-      <div className="relative z-10 flex flex-shrink-0 flex-col">{header}</div>
-      {intelRow ? <div className="relative z-10 flex-shrink-0">{intelRow}</div> : null}
+      <div className="relative z-20 flex flex-shrink-0 flex-col">{header}</div>
+      {intelRow ? <div className="relative z-30 flex-shrink-0">{intelRow}</div> : null}
 
       <main
         className={gridClass}
         data-testid="live-room-center"
+        data-layout={showLeft ? 'sessions-workspace' : 'workspace'}
       >
         <div className={showLeft ? 'min-h-0 overflow-hidden p-2 max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-64' : 'hidden'}>{leftNav}</div>
         <div className="flex min-h-0 min-w-0 flex-col">{council}</div>
-        <div className={showRight ? (inspectorOpen ? 'min-h-0 overflow-hidden p-2 max-xl:absolute max-xl:inset-y-0 max-xl:right-0 max-xl:z-50 max-xl:w-72' : 'min-h-0 overflow-hidden p-2 max-xl:hidden') : 'hidden'}>{rightPanel}</div>
+        <div
+          className={showInspector
+            ? 'absolute inset-y-0 right-0 z-50 w-[min(18rem,calc(100%-1rem))] min-h-0 overflow-hidden p-2 max-md:w-[min(18rem,calc(100%-0.75rem))]'
+            : 'hidden'}
+        >
+          {rightPanel}
+        </div>
       </main>
 
       {activePanelId && dockPanel ? (

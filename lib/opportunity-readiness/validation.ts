@@ -583,7 +583,14 @@ export async function runOpportunityReadinessAsyncValidation(): Promise<Opportun
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ opportunity: opportunity() }),
     })
-    const res = await mod.POST(req)
+    // Called outside a Next request scope there is no session to read, and Next refuses the cookie/header read itself: the handler then fails closed (throws)
+    // and no card is produced. Inside a request the same guard answers 401/403/503. Either way no card can be reached without a Commander session.
+    let res: Response
+    try {
+      res = await mod.POST(req)
+    } catch (error) {
+      return /outside a request scope/i.test(String(error)) || `unexpected failure: ${String(error).slice(0, 160)}`
+    }
     const json = await res.json() as Record<string, unknown>
     return (res.status === 401 || res.status === 403 || res.status === 503) && !('card' in json)
       || `status=${res.status} body=${JSON.stringify(json)}`

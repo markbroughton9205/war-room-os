@@ -38,7 +38,7 @@ function check(name: string, pass: boolean, detail: string): Frk02Result {
   return { name, pass, detail }
 }
 
-function sessionFor(missionId: string, goal: string, signals?: FoundryReasoningSession['signals']): FoundryReasoningSession {
+function sessionFor(missionId: string, goal: string, signals?: Partial<FoundryReasoningSession['signals']>): FoundryReasoningSession {
   const session = createFoundryReasoningSession({
     missionId,
     goal,

@@ -6,13 +6,19 @@ import { TerraShell } from './TerraShell'
 import { TerraActiveLocationProvider, useTerraActiveLocation } from './TerraActiveLocationContext'
 import { resolveTerraLinkedStatus, type TerraLinkedStatusResult, type TerraLinkedStatusSignal } from '@/lib/terra/terraLinkedStatus'
 import { IconCollapse, IconExpand, IconMinimize, IconRestore } from '@/components/war-room/council/CommandIcons'
+import { MinimizedSessionDock } from '@/components/war-room/live-room/MinimizedSessionDock'
 import { CommanderAgentDock } from './CommanderAgentDock'
 import { CouncilRuntimeStatus } from '@/components/war-room/council/CouncilRuntimeStatus'
 import { CouncilGodsEyeStatus } from '@/components/war-room/council/CouncilGodsEyeStatus'
 import { resolveCouncilGodsEyeStatus } from '@/lib/terra/godsEyeStatusAdapter'
+import type { GodsEyeRuntimeState } from '@/lib/terra/godsEye/runtimeState'
 import type { TerraIntelligenceEventKind } from '@/lib/terra/types'
 import { formatTerraAircraftCouncilSummary } from '@/lib/terra/aircraftCouncilSummary'
 import { formatTerraVesselCouncilSummary } from '@/lib/terra/vesselCouncilSummary'
+import { useApplicationActivity } from '@/lib/ui/applicationActivity'
+import { TerraHomeGlobePreview } from './TerraHomeGlobePreview'
+import { FoundryHomeAppIcon } from '@/components/war-room/foundry/FoundryHomeAppIcon'
+import { HvsHomeAppIcon } from '@/components/war-room/higher-vision-studios/HvsHomeAppIcon'
 
 /** Short, human labels for the "War Room Terra Linked" pill -- covers every selectable Terra
  * object kind (location search, vessel, aircraft, traffic camera/event, and the rest of the
@@ -178,13 +184,40 @@ function terraLinkedSignals(
 // (no qualifying evidence either way) maps to the adapter's UNKNOWN -- the same "no data ≠ GREEN"
 // doctrine both files already share -- so the Council-facing badge never claims more than the
 // Terra evidence actually supports.
-function godsEyeStatusFromTerraLinked(status: TerraLinkedStatusResult) {
-  if (status.level === 'NEUTRAL') return resolveCouncilGodsEyeStatus(undefined)
-  return resolveCouncilGodsEyeStatus({
-    severity: status.level,
-    reason: status.reasons.join(' | ') || null,
-    source: 'godseye_runtime',
-  })
+function godsEyeStatusFromTerraLinked(status: TerraLinkedStatusResult, runtime: GodsEyeRuntimeState | null) {
+  if (status.level === 'RED' || status.level === 'AMBER' || status.level === 'GREEN') {
+    return resolveCouncilGodsEyeStatus({
+      severity: status.level,
+      reason: status.reasons.join(' | ') || null,
+      source: 'godseye_runtime',
+      freshness: runtime?.last_health_check ?? null,
+    })
+  }
+  if (runtime?.status === 'HEALTHY' && runtime.configured && runtime.registered && runtime.healthy && runtime.terra_linked) {
+    return resolveCouncilGodsEyeStatus({
+      severity: 'GREEN',
+      reason: 'God\'s Eye base capabilities are responding and Terra is linked.',
+      source: 'godseye_runtime',
+      freshness: runtime.last_health_check,
+    })
+  }
+  if (runtime?.status === 'DEGRADED') {
+    return resolveCouncilGodsEyeStatus({
+      severity: 'AMBER',
+      reason: runtime.degraded_reason || runtime.failure_reason,
+      source: 'godseye_runtime',
+      freshness: runtime.last_health_check,
+    })
+  }
+  if (runtime?.status === 'UNAVAILABLE') {
+    return resolveCouncilGodsEyeStatus({
+      severity: 'RED',
+      reason: runtime.failure_reason,
+      source: 'godseye_runtime',
+      freshness: runtime.last_health_check,
+    })
+  }
+  return resolveCouncilGodsEyeStatus(undefined)
 }
 
 const TERRA_LINKED_DOT_CLASS: Record<'RED' | 'AMBER' | 'GREEN' | 'NEUTRAL', string> = {
@@ -196,8 +229,17 @@ const TERRA_LINKED_DOT_CLASS: Record<'RED' | 'AMBER' | 'GREEN' | 'NEUTRAL', stri
 
 function ActiveTerraContextPill() {
   const { activeLocation, selectedEvent, layerCoverage } = useTerraActiveLocation()
+  const [godsEyeRuntime, setGodsEyeRuntime] = useState<GodsEyeRuntimeState | null>(null)
   const status = useMemo(() => resolveTerraLinkedStatus(terraLinkedSignals(selectedEvent, layerCoverage)), [selectedEvent, layerCoverage])
-  const godsEyeStatus = useMemo(() => godsEyeStatusFromTerraLinked(status), [status])
+  const godsEyeStatus = useMemo(() => godsEyeStatusFromTerraLinked(status, godsEyeRuntime), [status, godsEyeRuntime])
+  useEffect(() => {
+    let cancelled = false
+    void fetch('/api/terra/gods-eye/health', { cache: 'no-store' })
+      .then(res => res.ok ? res.json() as Promise<GodsEyeRuntimeState> : null)
+      .then(body => { if (!cancelled && body) setGodsEyeRuntime(body) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
   const kindLabel = selectedEvent ? TERRA_SELECTION_KIND_LABEL[selectedEvent.kind] : null
   const contextText = selectedEvent?.title ?? activeLocation?.label ?? 'Select a place or live marker to add context'
   return (
@@ -221,6 +263,7 @@ function ActiveTerraContextPill() {
 export function GodsEyeCommandCenter({
   council, councilComposer, intelOverlay, onTerraContextChange,
   chatExpanded, onToggleChatExpanded,
+  sessionTitle, sessionStatus, sessionMessageCount,
 }: {
   council: ReactNode; councilComposer?: ReactNode; intelOverlay?: ReactNode
   onTerraContextChange?: (context: string | null) => void
@@ -232,34 +275,73 @@ export function GodsEyeCommandCenter({
    */
   chatExpanded?: boolean
   onToggleChatExpanded?: () => void
+  sessionTitle?: string
+  sessionStatus?: string
+  sessionMessageCount?: number
 }) {
   const [minimized, setMinimized] = useState(false)
   const [localExpanded, setLocalExpanded] = useState(false)
+  const activity = useApplicationActivity()
+  const terraRuntimeActive = activity.mode === 'TERRA_ACTIVE'
   const expanded = chatExpanded ?? localExpanded
   const toggleExpanded = onToggleChatExpanded ?? (() => setLocalExpanded(value => !value))
   const chatMode: 'minimized' | 'compact' | 'expanded' = minimized ? 'minimized' : expanded ? 'expanded' : 'compact'
   const [intelOpen, setIntelOpen] = useState(false)
+  const restoreConversation = () => setMinimized(false)
+  const minimizeConversation = () => setMinimized(true)
   return (
     <TerraActiveLocationProvider>
       <TerraCouncilContextBridge onContextChange={onTerraContextChange} />
-      <section className="relative h-full min-h-0 overflow-hidden bg-black" data-testid="gods-eye-command-center">
-        <TerraShell presentation="command-center" />
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_44%,transparent_46%,rgba(0,0,0,0.38)_100%)]" aria-hidden="true" />
-        {intelOverlay ? <div className="absolute right-3 top-3 z-30 flex max-w-[calc(100%-1.5rem)] flex-col items-end gap-2">
-          <button type="button" onClick={() => setIntelOpen(value => !value)} className="rounded-full border border-cyan-300/25 bg-slate-950/70 px-2.5 py-1 text-[8px] font-bold uppercase tracking-[0.18em] text-cyan-200/80 backdrop-blur-xl" aria-expanded={intelOpen}>Live globe intel {intelOpen ? '−' : '+'}</button>
-          {intelOpen ? <div className="w-[min(42rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-cyan-300/20 bg-black/80 shadow-2xl backdrop-blur-xl">{intelOverlay}</div> : null}
-        </div> : null}
+      <section
+        className="relative flex h-full min-h-0 overflow-hidden bg-black"
+        data-testid="gods-eye-command-center"
+        data-conversation-minimized={minimized ? 'true' : 'false'}
+      >
         <div
-          className={`pointer-events-none absolute z-40 transition-all duration-500 ease-out ${
-            chatMode === 'minimized'
-              ? 'bottom-3 right-3 w-[min(22rem,calc(100%-1.5rem))]'
-              : 'inset-2 sm:inset-3'
+          className={`relative min-h-0 min-w-0 overflow-hidden live-intel-motion ${
+            chatMode === 'expanded' ? 'flex-[0_0_0] basis-0' : 'min-w-0 flex-1'
           }`}
+          data-testid="gods-eye-workspace"
+        >
+          {terraRuntimeActive ? (
+            <TerraShell presentation="command-center" />
+          ) : (
+            <>
+              <TerraHomeGlobePreview />
+              <FoundryHomeAppIcon />
+              <HvsHomeAppIcon />
+            </>
+          )}
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_44%,transparent_46%,rgba(0,0,0,0.38)_100%)]" aria-hidden="true" />
+          {intelOverlay ? <div className="absolute right-3 top-3 z-30 flex max-w-[calc(100%-1.5rem)] flex-col items-end gap-2">
+            <button type="button" onClick={() => setIntelOpen(value => !value)} className="rounded-full border border-cyan-300/25 bg-slate-950/70 px-2.5 py-1 text-[8px] font-bold uppercase tracking-[0.18em] text-cyan-200/80 backdrop-blur-xl" aria-expanded={intelOpen}>Live globe intel {intelOpen ? '−' : '+'}</button>
+            {intelOpen ? <div className="w-[min(42rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-cyan-300/20 bg-black/80 shadow-2xl backdrop-blur-xl">{intelOverlay}</div> : null}
+          </div> : null}
+          <Link href="/terra" className="absolute bottom-3 left-3 z-20 rounded-full border border-cyan-400/20 bg-black/55 px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest text-cyan-300/80 backdrop-blur-sm">
+            Terra workspace
+          </Link>
+          {minimized ? (
+            <MinimizedSessionDock
+              title={sessionTitle?.trim() || 'War Room'}
+              status={sessionStatus?.trim() || 'Idle'}
+              messageCount={sessionMessageCount}
+              onRestore={restoreConversation}
+            />
+          ) : null}
+        </div>
+        <div
+          className={`flex min-h-0 flex-col overflow-hidden live-intel-motion ${
+            chatMode === 'minimized'
+              ? 'min-w-0 flex-[0_0_0] basis-0 opacity-0'
+              : chatMode === 'expanded'
+                ? 'min-w-0 flex-1 p-2 sm:p-3'
+                : 'w-[min(32rem,46%)] shrink-0 p-2 sm:p-3'
+          }`}
+          aria-hidden={minimized || undefined}
+          inert={minimized ? true : undefined}
         >
           <div
-            className={`pointer-events-auto flex min-h-0 flex-col overflow-hidden rounded-2xl border border-cyan-300/20 bg-[rgba(3,8,14,0.78)] shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl transition-[height] duration-500 ease-out ${
-              chatMode === 'minimized' ? 'h-12' : 'h-full'
-            }`}
+            className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-cyan-300/20 bg-[rgba(3,8,14,0.78)] shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
             data-testid="floating-council-chat"
             data-chat-mode={chatMode}
             data-conversation-auto-expand="disabled"
@@ -268,9 +350,9 @@ export function GodsEyeCommandCenter({
               <div className="flex min-w-0 items-center gap-2">
                 <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-emerald-300/35 bg-emerald-400/10 text-xs text-emerald-200">⌁</span>
                 <div className="min-w-0">
-                  <p className="truncate text-[11px] font-bold tracking-wide text-white">War Room</p>
+                  <p className="truncate text-[11px] font-bold tracking-wide text-white">{sessionTitle?.trim() || 'War Room'}</p>
                   <p className="flex items-center gap-1 text-[8px] uppercase tracking-[0.16em] text-emerald-300">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 commander-status-pill" /> conversation
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 commander-status-pill" /> {/listening/i.test(sessionStatus ?? '') ? 'Idle' : (sessionStatus?.trim() || 'conversation')}
                   </p>
                 </div>
               </div>
@@ -278,7 +360,7 @@ export function GodsEyeCommandCenter({
                 <button
                   type="button"
                   onClick={() => { setMinimized(false); toggleExpanded() }}
-                  className="grid h-7 w-7 place-items-center rounded-full text-cyan-200 hover:bg-white/10"
+                  className="grid h-7 w-7 place-items-center rounded-full text-cyan-200 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan-300"
                   aria-label={chatMode === 'expanded' ? 'Restore compact conversation view' : 'Expand conversation'}
                   title={chatMode === 'expanded' ? 'Restore compact view' : 'Expand'}
                   data-testid="gods-eye-expand"
@@ -287,30 +369,24 @@ export function GodsEyeCommandCenter({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMinimized(value => !value)}
-                  className="grid h-7 w-7 place-items-center rounded-full text-slate-300 hover:bg-white/10"
-                  aria-label={chatMode === 'minimized' ? 'Open conversation' : 'Minimize conversation'}
-                  title={chatMode === 'minimized' ? 'Open chat' : 'Minimize chat'}
+                  onClick={minimized ? restoreConversation : minimizeConversation}
+                  className="grid h-7 w-7 place-items-center rounded-full text-slate-300 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan-300"
+                  aria-label={minimized ? 'Restore conversation' : 'Minimize conversation'}
+                  title={minimized ? 'Restore conversation' : 'Minimize conversation'}
+                  data-testid="gods-eye-minimize"
                 >
-                  {chatMode === 'minimized' ? <IconRestore /> : <IconMinimize />}
+                  {minimized ? <IconRestore /> : <IconMinimize />}
                 </button>
               </div>
             </div>
-            {chatMode !== 'minimized' ? (
-              <>
-                <ActiveTerraContextPill />
-                <div className="relative min-h-0 flex-1 overflow-hidden">
-                  <div className="h-full min-h-0 overflow-hidden pr-14">{council}</div>
-                  <CommanderAgentDock />
-                </div>
-                {councilComposer ? <div className="relative z-40 shrink-0 border-t border-white/10">{councilComposer}</div> : null}
-              </>
-            ) : null}
+            <ActiveTerraContextPill />
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+              <div className="h-full min-h-0 overflow-hidden pr-14">{council}</div>
+              <CommanderAgentDock />
+            </div>
+            {councilComposer ? <div className="relative z-40 shrink-0 border-t border-white/10">{councilComposer}</div> : null}
           </div>
         </div>
-        <Link href="/terra" className="absolute bottom-3 left-3 z-20 rounded-full border border-cyan-400/20 bg-black/55 px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest text-cyan-300/80 backdrop-blur-sm">
-          Terra workspace
-        </Link>
       </section>
     </TerraActiveLocationProvider>
   )

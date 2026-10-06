@@ -142,6 +142,66 @@ const size = { width: 320, height: 200 }
   check('Smart Click OFF setup sanity', raw.x <= viewport.width, `x=${raw.x}`)
 }
 
+{
+  const store = new TerraWorkspaceLayoutStore()
+  store.ensurePanel('terra_emergency_report', viewport, size)
+  store.ensurePanel('terra_media', viewport, size)
+  store.setMinimized('terra_emergency_report', true)
+  store.setMinimized('terra_media', true)
+  store.notifyInteraction('emergency_media', viewport, {})
+  const after = store.getSnapshot()
+  check(
+    'emergency_media_pulses_minimized_emergency_report_without_auto_open',
+    after.panels.terra_emergency_report?.minimized === true && after.attention.terra_emergency_report?.reason === 'emergency_media',
+    JSON.stringify(after.attention.terra_emergency_report),
+  )
+  check(
+    'emergency_media_secondary_terra_media_attention_only',
+    after.panels.terra_media?.minimized === true && after.attention.terra_media?.reason === 'emergency_media',
+    JSON.stringify(after.attention.terra_media),
+  )
+  store.setSmartOpenEnabled(true)
+  store.notifyInteraction('emergency_media', viewport, { terra_emergency_report: size })
+  check(
+    'emergency_media_smart_open_restores_emergency_report',
+    store.getSnapshot().panels.terra_emergency_report?.minimized === false,
+    `minimized=${store.getSnapshot().panels.terra_emergency_report?.minimized}`,
+  )
+}
+
+{
+  const store = new TerraWorkspaceLayoutStore()
+  store.ensurePanel('terra_media', viewport, size)
+  check('terra_media_defaults_closed', store.getSnapshot().panels.terra_media?.closed === true, JSON.stringify(store.getSnapshot().panels.terra_media))
+  store.openOrFocus('terra_media', viewport, size)
+  check(
+    'open_or_focus_opens_single_terra_media',
+    store.getSnapshot().panels.terra_media?.closed === false && store.getSnapshot().zOrder.filter(id => id === 'terra_media').length === 1,
+    JSON.stringify(store.getSnapshot().zOrder),
+  )
+  store.openOrFocus('terra_media', viewport, size)
+  check(
+    'repeated_open_or_focus_does_not_duplicate',
+    store.getSnapshot().zOrder.filter(id => id === 'terra_media').length === 1,
+    JSON.stringify(store.getSnapshot().zOrder),
+  )
+  store.setMinimized('terra_media', true)
+  store.openOrFocus('terra_media', viewport, size)
+  check('open_or_focus_restores_minimized', store.getSnapshot().panels.terra_media?.minimized === false, 'minimized')
+  store.closePanel('terra_media')
+  store.openOrFocus('terra_media', viewport, size)
+  check('open_or_focus_reopens_closed', store.getSnapshot().panels.terra_media?.closed === false, 'closed')
+  store.setPlayerChrome('terra_media', 'compact')
+  check('full_to_compact_same_panel', store.getSnapshot().panels.terra_media?.playerChrome === 'compact' && store.getSnapshot().zOrder.filter(id => id === 'terra_media').length === 1, JSON.stringify(store.getSnapshot().panels.terra_media?.playerChrome))
+  store.setPlayerChrome('terra_media', 'full')
+  check('compact_to_full_same_panel', store.getSnapshot().panels.terra_media?.playerChrome === 'full', String(store.getSnapshot().panels.terra_media?.playerChrome))
+  store.setPlayerChrome('terra_media', 'compact')
+  store.setMinimized('terra_media', true)
+  check('compact_survives_minimize', store.getSnapshot().panels.terra_media?.playerChrome === 'compact' && store.getSnapshot().panels.terra_media?.minimized === true, JSON.stringify(store.getSnapshot().panels.terra_media))
+  store.openOrFocus('terra_media', viewport, size)
+  check('restore_keeps_compact_chrome', store.getSnapshot().panels.terra_media?.playerChrome === 'compact' && store.getSnapshot().panels.terra_media?.minimized === false, JSON.stringify(store.getSnapshot().panels.terra_media))
+}
+
 const failed = results.filter(r => !r.pass)
 for (const r of results) {
   console.log(`${r.pass ? 'PASS' : 'FAIL'} — ${r.name} :: ${r.detail}`)
