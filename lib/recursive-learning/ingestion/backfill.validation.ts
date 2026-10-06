@@ -47,11 +47,13 @@ check('K06_bounded_by_limit', bounded.filesExamined === 2 && bounded.limitReache
   const l2 = freshLog()
   // simulate the old buggy attribution already in the log
   l2.recordEvents([{ id: 'old-wrong', subject: { kind: 'provider', id: 'cursor-agent' }, taskClass: 'code_modification', outcome: 'SUCCESS', occurredAt: '2026-09-20T10:30:00.000Z', source: { kind: 'foundry-mission', ref: `mission:${U(50)}` }, provenance: { adapter: 'foundry-mission', backfilled: true, sourcePath: `foundry-missions/${U(50)}.json` } }])
+  // sibling signal events (different adapter, same mission source) must be reconciled too
+  l2.recordEvents([{ id: 'old-install', subject: { kind: 'provider', id: 'cursor-agent' }, taskClass: 'code_modification', outcome: 'SUCCESS', signal: 'INSTALLED_OUTCOME', occurredAt: '2026-09-20T10:30:00.000Z', source: { kind: 'foundry-mission', ref: `mission:${U(50)}` }, provenance: { adapter: 'installed-outcome', backfilled: true, sourcePath: `foundry-missions/${U(50)}.json` } }])
   const withoutFlag = await backfillFoundryMissions({ missionsDir: dir2, log: l2, dryRun: false })
   check('K09_stale_not_touched_without_flag', withoutFlag.staleSuperseded === 0 && l2.view().activeEvents.some((e) => e.id === 'old-wrong'))
   const fixed = await backfillFoundryMissions({ missionsDir: dir2, log: l2, dryRun: false, supersedeStale: true })
   const v = l2.view()
-  check('K10_stale_superseded_not_deleted', fixed.staleSuperseded === 1 && v.events.some((e) => e.id === 'old-wrong') && !v.activeEvents.some((e) => e.id === 'old-wrong') && v.activeEvents.every((e) => e.subject.id.startsWith('ollama')))
+  check('K10_stale_superseded_not_deleted', fixed.staleSuperseded === 2 && !v.activeEvents.some((e) => e.id === 'old-install') && v.events.some((e) => e.id === 'old-wrong') && !v.activeEvents.some((e) => e.id === 'old-wrong') && v.activeEvents.every((e) => e.subject.id.startsWith('ollama')))
   const again = await backfillFoundryMissions({ missionsDir: dir2, log: l2, dryRun: false, supersedeStale: true })
   check('K11_reconciliation_rerunnable', again.staleSuperseded === 0 && again.inserted === 0)
 }

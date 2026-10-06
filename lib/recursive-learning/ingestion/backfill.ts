@@ -72,7 +72,7 @@ export async function backfillFoundryMissions(opts: BackfillOptions): Promise<Ba
     for await (const line of rl) if (/"message":"[^"]*rollback/i.test(line)) report.unattributableRollbackReceipts += 1
   }
   const stale = opts.supersedeStale
-    ? opts.log.view().activeEvents.filter((e) => e.provenance?.adapter === 'foundry-mission' && e.provenance.backfilled && e.provenance.sourcePath && examined.has(e.provenance.sourcePath) && !proposed.some((p) => p.id === e.id))
+    ? opts.log.view().activeEvents.filter((e) => e.source.kind === 'foundry-mission' && e.provenance?.backfilled && e.provenance.sourcePath && examined.has(e.provenance.sourcePath) && !proposed.some((p) => p.id === e.id))
     : []
   if (dryRun) {
     report.staleSuperseded = stale.length
