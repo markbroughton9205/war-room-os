@@ -182,6 +182,15 @@ for (const [status, expectedLabel, expectedTone] of [
 }
 assert.notEqual(buildMissionControlView({ ...fixture, mission: { ...fixture.mission, status: 'FAILED' } }).header.phase, 'Working');
 
+
+// P9-E: a WAITING/BLOCKED task with no blockers array entries must not crash the view.
+const noBlockerFixture = JSON.parse(JSON.stringify(fixture))
+noBlockerFixture.tasks[0].state = 'BLOCKED'
+noBlockerFixture.tasks[0].blockers = []
+const v3 = buildMissionControlView(noBlockerFixture)
+const blockedGroup = v3.taskGroups.find(g => g.state === 'BLOCKED')
+assert.ok(blockedGroup && blockedGroup.items[0].detail.length > 0, 'BLOCKED task without blockers still renders a detail')
+
 console.log('PASS 1');
 console.log('PASS 2');
 console.log('PASS 3');
@@ -193,4 +202,5 @@ console.log('PASS 8');
 console.log('PASS 9');
 console.log('PASS 10');
 console.log('PASS 11');
-console.log('MISSION_CONTROL_VALIDATION 11/11');
+console.log('PASS 12');
+console.log('MISSION_CONTROL_VALIDATION 12/12');

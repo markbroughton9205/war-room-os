@@ -76,7 +76,7 @@ export function buildMissionControlView(input: McInput): McView {
       title: task.description.substring(0, 80),
       detail:
         (task.state === 'WAITING' || task.state === 'BLOCKED') ?
-          task.blockers[0].detail : 
+          (task.blockers[0]?.detail ?? task.description) :
           task.attempts > 1 ? 'Attempt ' + task.attempts : '',
       tone: describeTaskState(task.state).tone,
     })),
