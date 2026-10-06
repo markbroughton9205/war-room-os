@@ -9,8 +9,10 @@ import { buildOpsSnapshot } from './readModel'
 import { AgentRegistry, NeedGateError, deriveAgents } from './registry'
 import { WorkerError, approveEffect, deriveWorkers, executeWorker, recoverInterruptedRuns, registerWorker, resumeWorker, stopWorker } from './workers'
 import type { AgentState } from './types'
+import { AssignmentError, deriveAssignments, pauseAssignment, requestCancel, resumeAssignment } from './engineering/assignments'
+import { buildAssignmentStatus, listAssignmentStatuses } from './engineering/status'
 
-export const READ_SECTIONS = ['summary', 'agents', 'workers', 'runs', 'approvals', 'evaluations', 'errors', 'run'] as const
+export const READ_SECTIONS = ['summary', 'agents', 'workers', 'runs', 'approvals', 'evaluations', 'errors', 'run', 'assignments', 'assignment'] as const
 type ApiResult = { status: number; body: unknown }
 
 /** Pure read handler. Opens nothing for writing; never mutates. */
@@ -27,6 +29,11 @@ export function handleOpsRead(url: URL, log: AgentOpsLog, now: Date = new Date()
     case 'approvals': return env(snap.pendingApprovals)
     case 'evaluations': return env(snap.agents.map((a) => ({ agentId: a.view.spec.id, evaluation: a.evaluation, latestRecommendation: a.latestRecommendation })))
     case 'errors': return env(snap.errors)
+    case 'assignments': return env(listAssignmentStatuses(log, Math.min(Math.max(Number(url.searchParams.get('limit')) || 30, 1), 100)))
+    case 'assignment': {
+      const v = deriveAssignments(log).assignments.get(url.searchParams.get('id') ?? '')
+      return v ? env(buildAssignmentStatus(log, v)) : { status: 404, body: { error: 'unknown assignment' } }
+    }
     default: {
       const id = url.searchParams.get('id') ?? ''
       const run = snap.recentRuns.find((r) => r.runId === id) ?? [...deriveWorkers(log).workers.values()].flatMap((w) => w.runs).find((r) => r.runId === id)
@@ -41,7 +48,7 @@ export function commanderActor(userId: string | null | undefined): string | null
   return clean ? `commander:${clean}` : null
 }
 
-export const CONTROL_ACTIONS = ['detectNeed', 'proposeAgent', 'transitionAgent', 'registerWorker', 'stopWorker', 'resumeWorker', 'approveEffect', 'runWorker', 'proposeAdaptation', 'decideAdaptation', 'applyScopeChange', 'recordFeedback', 'evaluateAgent', 'recoverRuns', 'setSchedule', 'setSchedulerGlobal'] as const
+export const CONTROL_ACTIONS = ['detectNeed', 'proposeAgent', 'transitionAgent', 'registerWorker', 'stopWorker', 'resumeWorker', 'approveEffect', 'runWorker', 'proposeAdaptation', 'decideAdaptation', 'applyScopeChange', 'recordFeedback', 'evaluateAgent', 'recoverRuns', 'setSchedule', 'setSchedulerGlobal', 'pauseAssignment', 'resumeAssignment', 'cancelAssignment'] as const
 
 type Body = Record<string, unknown>
 const s = (v: unknown) => (typeof v === 'string' ? v : '')
@@ -81,6 +88,10 @@ export async function handleOpsControl(body: Body, actor: string | null, log: Ag
       }
       case 'setSchedule': { const rec = setSchedule(log, s(body.workerId), { enabled: body.enabled === true, cadenceMinutes: Number(body.cadenceMinutes) }, actor, s(body.reason) || 'Commander schedule change', now); return { status: 200, body: { schedule: { workerId: s(body.workerId), enabled: body.enabled === true, rid: rec.rid } } } }
       case 'setSchedulerGlobal': setSchedulerGlobal(log, body.enabled === true, actor, s(body.reason) || (body.enabled === true ? 'Commander resumed scheduling' : 'Commander paused scheduling'), now); return { status: 200, body: { schedulerEnabled: body.enabled === true } }
+      case 'pauseAssignment': pauseAssignment(log, s(body.assignmentId), actor, s(body.reason) || 'Commander paused', now); return { status: 200, body: { paused: true } }
+      case 'resumeAssignment': resumeAssignment(log, s(body.assignmentId), actor, s(body.reason) || 'Commander resumed', now); return { status: 200, body: { resumed: true } }
+      // cancellation is a REQUEST: the runner acknowledges and stops at a safe boundary; the real phase is visible in the status read
+      case 'cancelAssignment': requestCancel(log, s(body.assignmentId), actor, s(body.reason) || 'Commander cancelled', now); return { status: 202, body: { cancelRequested: true } }
       default: return { status: 200, body: { interrupted: recoverInterruptedRuns(log, now) } }
     }
   } catch (err) {
@@ -88,6 +99,7 @@ export async function handleOpsControl(body: Body, actor: string | null, log: Ag
     if (err instanceof NeedGateError) return { status: 422, body: { error: err.message, code: 'NEED_GATE', missing: err.missing } }
     if (err instanceof AdaptationError || err instanceof WorkerError) return { status: err.code === 'NOT_AUTHORIZED' ? 403 : 400, body: { error: err.message, code: err.code } }
     if (err instanceof SchedulerError) return { status: err.code === 'NOT_AUTHORIZED' ? 403 : err.code === 'NOT_ELIGIBLE' ? 409 : 400, body: { error: err.message, code: err.code } }
+    if (err instanceof AssignmentError) return { status: err.code === 'NOT_AUTHORIZED' ? 403 : 409, body: { error: err.message, code: err.code } }
     if (err instanceof FeedbackError) return { status: 400, body: { error: err.message, code: 'FEEDBACK' } }
     return { status: 400, body: { error: err instanceof Error ? err.message.slice(0, 200) : 'invalid request', code: 'INVALID' } }
   }
