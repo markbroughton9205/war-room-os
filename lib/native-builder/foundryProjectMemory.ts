@@ -27,10 +27,10 @@ import {
   type ProjectIndex,
 } from './foundryProjectContext'
 
-export type MemoryKind = 'PROJECT_FACT' | 'FIX_PATTERN' | 'FAILED_STRATEGY' | 'DECISION' | 'VERIFICATION' | 'WORKFLOW'
+export type MemoryKind = 'PROJECT_FACT' | 'FIX_PATTERN' | 'FAILED_STRATEGY' | 'DECISION' | 'VERIFICATION' | 'WORKFLOW' | 'RESEARCH_FINDING'
 export type MemoryStatus = 'VERIFIED' | 'STALE' | 'SUPERSEDED' | 'RETIRED'
 export type MemoryScope = 'MISSION' | 'SESSION' | 'PROJECT'
-export type EvidenceType = 'TEST_PASS' | 'TEST_FAIL' | 'DISK_HASH' | 'CONTEXT_LINK' | 'DISPROVEN' | 'NO_EFFECT' | 'REVERTED' | 'EDIT_INEFFECTIVE' | 'TRACEBACK'
+export type EvidenceType = 'TEST_PASS' | 'TEST_FAIL' | 'DISK_HASH' | 'CONTEXT_LINK' | 'DISPROVEN' | 'NO_EFFECT' | 'REVERTED' | 'EDIT_INEFFECTIVE' | 'TRACEBACK' | 'SOURCE_DOC'
 
 export const MEMORY_LIMITS = {
   entries: 120,
@@ -62,6 +62,7 @@ export type MemoryDetail =
   | { kind: 'DECISION'; decision: 'DEPENDENCY_DIRECTION' | 'OWNERSHIP'; from: string; to: string }
   | { kind: 'VERIFICATION'; command: string; tests: string[]; covers: string[] }
   | { kind: 'WORKFLOW'; note: string; command?: string }
+  | { kind: 'RESEARCH_FINDING'; root: string; symbol: string | null; question: string; action: string; version: string | null; replacement: string | null; url: string; tier: number; installed: string; python: string; checkedAt: string }
 
 export type EngineeringMemory = {
   id: string
@@ -140,6 +141,7 @@ const EVIDENCE_FOR: Record<MemoryKind, readonly EvidenceType[]> = {
   DECISION: ['CONTEXT_LINK'],
   VERIFICATION: ['TEST_PASS'],
   WORKFLOW: ['DISK_HASH', 'TEST_PASS'],
+  RESEARCH_FINDING: ['SOURCE_DOC'],
 }
 
 export type Eligibility = { ok: true } | { ok: false; reason: string }
@@ -163,6 +165,11 @@ export function checkWriteEligibility(candidate: EngineeringMemory): Eligibility
     const d = candidate.detail as Extract<MemoryDetail, { kind: 'FIX_PATTERN' }>
     if (!d.causeFiles.length || !d.causeFiles.every(file => d.changedFiles.includes(file))) return { ok: false, reason: 'the cause must be a file the verified fix changed' }
     if (!candidate.failure) return { ok: false, reason: 'a fix pattern needs the failure it fixed' }
+  }
+  if (candidate.kind === 'RESEARCH_FINDING') {
+    const d = candidate.detail as Extract<MemoryDetail, { kind: 'RESEARCH_FINDING' }>
+    if (!/^https:\/\//.test(d.url) || d.tier > 5) return { ok: false, reason: 'only a primary source counts as a durable research finding' }
+    if (!candidate.evidence.some(item => item.type === 'TEST_PASS')) return { ok: false, reason: 'a research finding is kept only after the change it led to passed the tests' }
   }
   if (candidate.kind === 'FAILED_STRATEGY') {
     if (!candidate.failure) return { ok: false, reason: 'a failed strategy needs the failure it did not fix' }
@@ -408,6 +415,7 @@ export function mergeMemories(store: MemoryStore, candidates: readonly Engineeri
     known.tests = uniq([...candidate.tests, ...known.tests]).slice(0, 5)
     if (candidate.failure) known.failure = { exception: candidate.failure.exception, tests: uniq([...candidate.failure.tests, ...(known.failure?.tests ?? [])]).slice(0, 6), frames: uniq([...candidate.failure.frames, ...(known.failure?.frames ?? [])]).slice(0, 10) }
     if (candidate.detail.kind === 'FIX_PATTERN' && known.detail.kind === 'FIX_PATTERN') known.detail = { ...known.detail, changedFiles: uniq([...candidate.detail.changedFiles, ...known.detail.changedFiles]).slice(0, MEMORY_LIMITS.files), verifiedBy: uniq([...candidate.detail.verifiedBy, ...known.detail.verifiedBy]).slice(0, 4) }
+    if (known.kind === 'RESEARCH_FINDING') known.detail = candidate.detail // re-read from the source now: its date and version are the new ones
     // A durable confirmation upgrades a session note, and the same fact holding again revives a stale or superseded one.
     if (known.scope === 'SESSION' && candidate.scope === 'PROJECT') { known.scope = 'PROJECT'; delete known.sessionId }
     if (known.status !== 'VERIFIED') { known.supersededBy = undefined; pushHistory(known, 'VERIFIED', 'the same fact was verified again against the current code', at, candidate.lastMission) }
@@ -446,6 +454,8 @@ export function restoreStore(raw: unknown): MemoryStore | null {
 // Revalidation against current disk truth
 // ---------------------------------------------------------------------------------------------
 
+export const RESEARCH_FRESH_MS = 30 * 24 * 60 * 60 * 1000
+
 export type Revalidation = { store: MemoryStore; changed: { id: string; from: MemoryStatus; to: MemoryStatus; why: string }[] }
 
 /**
@@ -458,6 +468,18 @@ export function revalidateStore(store: MemoryStore, index: ProjectIndex, at: str
   const entries = store.entries.map(entry => ({ ...entry, history: [...entry.history], anchors: [...entry.anchors] }))
   for (const entry of entries) {
     if (entry.status === 'RETIRED') continue
+    if (entry.detail.kind === 'RESEARCH_FINDING') {
+      // A research finding ages by its source, not by the project's files: only its own age (and the installed version, see revalidateResearch) moves it.
+      const missing = entry.anchors.find(anchor => !index.files[anchor.file])
+      const aged = Date.parse(at) - Date.parse(entry.detail.checkedAt) > RESEARCH_FRESH_MS
+      const why = missing ? `${missing.file} no longer exists` : aged ? 'the source was last read too long ago to trust without reading it again' : null
+      if (why && entry.status === 'VERIFIED') {
+        entry.status = missing ? 'RETIRED' : 'STALE'
+        pushHistory(entry, entry.status, why, at, mission)
+        changed.push({ id: entry.id, from: 'VERIFIED', to: entry.status, why })
+      }
+      continue
+    }
     const verdict = supportOf(entry, index)
     const before = entry.status
     if (verdict.state === 'SUPPORTED') {
@@ -551,7 +573,7 @@ export type RetrievalResult = {
   ignored: { memory: EngineeringMemory; why: string }[]
 }
 
-const KIND_ORDER: Record<MemoryKind, number> = { FIX_PATTERN: 0, FAILED_STRATEGY: 1, PROJECT_FACT: 2, DECISION: 3, VERIFICATION: 4, WORKFLOW: 5 }
+const KIND_ORDER: Record<MemoryKind, number> = { FIX_PATTERN: 0, FAILED_STRATEGY: 1, PROJECT_FACT: 2, DECISION: 3, VERIFICATION: 4, WORKFLOW: 5, RESEARCH_FINDING: 6 }
 
 export function failureMatches(entry: FailureKey | undefined, query: FailureKey | null | undefined): 'exact' | 'related' | null {
   if (!entry || !query || !entry.exception || entry.exception !== query.exception) return null
@@ -575,6 +597,7 @@ export function retrieveMemories(store: MemoryStore, query: RetrievalQuery, inde
   const hits: MemoryHit[] = []
   const ignored: RetrievalResult['ignored'] = []
   for (const memory of store.entries) {
+    if (memory.kind === 'RESEARCH_FINDING') continue // looked up by question, with its own freshness rules
     if (memory.scope === 'SESSION' && memory.sessionId !== query.sessionId) continue
     const links: MemoryLink[] = []
     const reasons: string[] = []
@@ -690,4 +713,79 @@ export function memoryDetails(result: RetrievalResult): string[] {
     ...result.hits.map(hit => `used ${hit.memory.kind} ${hit.memory.id} [${hit.memory.status}] because ${hit.reasons.join(', ')}; verified ${hit.memory.lastVerified}; evidence ${hit.memory.evidence.map(item => item.type).join('/')}`),
     ...result.ignored.map(item => `ignored ${item.memory.kind} ${item.memory.id} [${item.memory.status}]: ${item.why}`),
   ].map(line => redactSecrets(line))
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Research findings (Phase 5): what an official source said about an external name, for the version installed at the time
+// ---------------------------------------------------------------------------------------------
+
+export type ResearchMemoryInput = {
+  mission: string
+  session: string | null
+  at: string
+  resolved: boolean
+  index: ProjectIndex
+  filesMutated: readonly string[]
+  questions: readonly {
+    key: string
+    text: string
+    root: string
+    symbol: string | null
+    status: string
+    installedVersion: string | null
+    python: string
+    finding: { action: string; version: string | null; replacement: string | null; url: string; tier: number; quote: string } | null
+  }[]
+}
+
+/** A finding is remembered only after the change it led to passed the tests, from a primary source, with the version it applied to. */
+export function researchMemoriesFromMission(input: ResearchMemoryInput): EngineeringMemory[] {
+  if (!input.resolved) return []
+  const changed = uniq(input.filesMutated).filter(file => input.index.files[file] && !input.index.files[file].isTest).slice(0, 2)
+  const anchors = changed.map(file => ({ file, hash: input.index.files[file].hash, symbols: [] as string[] }))
+  const out: EngineeringMemory[] = []
+  for (const q of input.questions) {
+    if (q.status !== 'ANSWERED' || !q.finding || q.finding.tier > 5 || !anchors.length) continue
+    const subject = safeText(`${q.root}${q.symbol ? `.${q.symbol}` : ''}: ${q.finding.action.toLowerCase().replace('_', ' ')}${q.finding.version ? ` in ${q.finding.version}` : ''} (checked in the official source for ${q.installedVersion ?? 'the installed version'})`, 200)
+    if (!subject) continue
+    out.push({
+      id: memoryId('RESEARCH_FINDING', [q.root, q.symbol ?? '', q.installedVersion ?? q.python]),
+      kind: 'RESEARCH_FINDING', scope: 'PROJECT', status: 'VERIFIED', subject,
+      detail: { kind: 'RESEARCH_FINDING', root: q.root, symbol: q.symbol, question: q.text.slice(0, 160), action: q.finding.action, version: q.finding.version, replacement: q.finding.replacement, url: q.finding.url, tier: q.finding.tier, installed: q.installedVersion ?? q.python, python: q.python, checkedAt: input.at },
+      files: changed, symbols: q.symbol ? [q.symbol] : [], tests: [], anchors,
+      evidence: [{ type: 'SOURCE_DOC', ref: q.finding.url.slice(0, 160), mission: input.mission, at: input.at }, { type: 'TEST_PASS', ref: 'tests passed after the change the finding led to', mission: input.mission, at: input.at }],
+      sourceMission: input.mission, lastMission: input.mission, createdAt: input.at, lastVerified: input.at,
+      history: [{ at: input.at, from: null, to: 'VERIFIED', why: 'written from a primary source and a passing test', mission: input.mission }],
+    })
+  }
+  return out.filter(item => checkWriteEligibility(item).ok)
+}
+
+/** A remembered finding for the same external name and the same installed version, still fresh: a place to look first, never an answer on its own. */
+export function findResearchMemory(store: MemoryStore, query: { root: string; symbol: string | null; installed: string; now: string }): { memory: EngineeringMemory; url: string; claim: string; finding: { action: string; version: string | null; replacement: string | null; tier: number; checkedAt: string } } | null {
+  for (const memory of store.entries) {
+    if (memory.kind !== 'RESEARCH_FINDING' || memory.status !== 'VERIFIED') continue
+    const d = memory.detail as Extract<MemoryDetail, { kind: 'RESEARCH_FINDING' }>
+    if (d.root !== query.root || d.symbol !== query.symbol || d.installed !== query.installed) continue
+    if (Date.parse(query.now) - Date.parse(d.checkedAt) > RESEARCH_FRESH_MS) continue
+    return { memory, url: d.url, claim: memory.subject, finding: { action: d.action, version: d.version, replacement: d.replacement, tier: d.tier, checkedAt: d.checkedAt } }
+  }
+  return null
+}
+
+/** The library or interpreter changed since a finding was written: it no longer describes what is installed, so it is downgraded with the reason. */
+export function revalidateResearch(store: MemoryStore, installed: Record<string, string>, at: string, mission: string): Revalidation {
+  const changed: Revalidation['changed'] = []
+  const entries = store.entries.map(entry => ({ ...entry, history: [...entry.history] }))
+  for (const entry of entries) {
+    if (entry.kind !== 'RESEARCH_FINDING' || entry.status !== 'VERIFIED') continue
+    const d = entry.detail as Extract<MemoryDetail, { kind: 'RESEARCH_FINDING' }>
+    const now = installed[d.root]
+    if (now === undefined || now === d.installed) continue
+    entry.status = 'STALE'
+    pushHistory(entry, 'STALE', `${d.root} is ${now} now; this was checked for ${d.installed}`, at, mission)
+    changed.push({ id: entry.id, from: 'VERIFIED', to: 'STALE', why: `${d.root} changed from ${d.installed} to ${now}` })
+  }
+  return { store: { ...store, entries, updatedAt: changed.length ? at : store.updatedAt }, changed }
 }

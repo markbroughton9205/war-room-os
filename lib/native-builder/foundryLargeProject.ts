@@ -994,7 +994,19 @@ export function failureFile(root: string, failureText: string): string | null {
 
 export function keyFailureLine(text: string): string {
   const lines = text.split('\n').map(item => item.trim())
-  const named = lines.find(item => /^(NameError|TypeError|KeyError|AssertionError|ImportError|AttributeError|SyntaxError)\b/.test(item))
+  // unittest wraps an import failure before printing its traceback. Prefer the actual cause.
+  const namedErrors = lines.filter(item => /^(NameError|TypeError|KeyError|AssertionError|ImportError|ModuleNotFoundError|AttributeError|SyntaxError|IndentationError)\b/.test(item))
+  const named = namedErrors.find(item => !/^ImportError: Failed to import test module:/.test(item)) ?? namedErrors[0]
   const other = lines.find(item => /Error:/.test(item) && !/^ERROR:\s/.test(item))
-  return (named ?? other ?? 'command failed').slice(0, 240)
+  const selected = named ?? other ?? 'command failed'
+  if (/^(SyntaxError|IndentationError)\b/.test(selected)) {
+    const beforeError = lines.slice(0, lines.indexOf(selected))
+    const frameAt = beforeError.findLastIndex(item => /^File ["']/.test(item))
+    const frame = frameAt >= 0 ? beforeError[frameAt].match(/^File ["']([^"']+)["'], line (\d+)/) : null
+    if (frame) {
+      const file = frame[1].replace(/\\/g, '/').split('/').slice(-2).join('/')
+      return `${selected} at ${file}:${frame[2]}: ${beforeError[frameAt + 1] ?? ''}`.slice(0, 240)
+    }
+  }
+  return selected.slice(0, 240)
 }

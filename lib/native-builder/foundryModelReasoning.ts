@@ -195,6 +195,10 @@ function labeled(text: string, name: string): string[] {
   return [...matches].map(item => clip(item[1] ?? '', 400)).filter(Boolean)
 }
 
+function startingRole(): FoundryReasoningRole {
+  return 'IMPLEMENTER'
+}
+
 function toolsFor(role: FoundryReasoningRole) {
   const allowed = role === 'IMPLEMENTER' || role === 'DEBUGGER' ? WRITE_TOOLS : READ_TOOLS
   const tools = FOUNDRY_MODEL_TOOL_CATALOG.filter(tool => allowed.has(tool.name))
@@ -575,7 +579,8 @@ export async function runModelReasoningCase(input: {
   }
 
   const router = input.router ?? new FoundryModelRouter()
-  let role: FoundryReasoningRole = 'IMPLEMENTER'
+  // The role can move through the whole staged sequence (architect, test engineer, implementer, debugger, reviewer), so it is not narrowed to where it starts.
+  let role: FoundryReasoningRole = startingRole()
   let warning: string | undefined
   try {
     for (let turn = 0; turn < callLimit; turn += 1) {

@@ -99,11 +99,13 @@ export async function selectStrongerReasoningModel(): Promise<StrongerModelSelec
     }
   }
   const chosen = candidates[0]
+  // The probe is its own mission: its budget must not be one that every earlier probe has already spent.
+  const probeId = `m04-availability-${Date.now().toString(36)}`
   const router = new FoundryModelRouter([chosen])
   const routed = await router.route('chooseNextAction', {
     kind: 'chooseNextAction',
     context: {
-      missionId: 'm04-availability',
+      missionId: probeId,
       missionKind: 'application',
       userRequest: 'Availability probe. Return TOOL file.read path=README.md reason=probe. Do not write files.',
       goal: 'Prove the pinned route answers.',
@@ -141,7 +143,7 @@ export async function selectStrongerReasoningModel(): Promise<StrongerModelSelec
       completionGate: { complete: false, missing: ['INDEPENDENT_VERIFIER'], detail: 'probe' },
       tools: FOUNDRY_MODEL_TOOL_CATALOG.filter(tool => tool.name === 'file.read' || tool.name === 'workspace.inspect'),
     },
-  }, { missionId: 'm04-availability', pinProvider: chosen.provider })
+  }, { missionId: probeId, pinProvider: chosen.provider })
   const response = routed.response
   if (!response.ok || routed.selectedProvider !== chosen.provider) {
     const error = response.ok ? 'Pinned provider did not stay selected.' : response.error

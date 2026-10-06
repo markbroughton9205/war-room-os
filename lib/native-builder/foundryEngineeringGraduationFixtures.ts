@@ -157,10 +157,13 @@ export function graduationBenchmarks(): FoundryEngineeringBenchmark[] {
       runtime: 'node',
       environment: 'local-disposable',
       startingFixture: 'empty-cli',
-      missionPrompt: 'Build a Node CLI: --help, --name greeting, --sum reading numbers from data.json, invalid args exit 2, success exit 0.',
+      // "--name" takes a value on the command line (the caller's own name), distinct from "--sum" (which takes none and reads numbers from data.json).
+      // The prompt states that explicitly: an earlier wording ("--name greeting") left it ambiguous whether --name reads its greeting subject from
+      // argv or from data.json (mirroring --sum), and a model that reasonably chose the latter failed E2/E5 for a prompt reason, not a model reason.
+      missionPrompt: 'Build a Node CLI: --help, --name <person> prints "Hello <person>" using the person given on the command line (not from data.json), --sum reading numbers from data.json, invalid args exit 2, success exit 0.',
       acceptanceCriteria: [
         criterion('E1', '--help prints usage', 'CLI', 'Usage'),
-        criterion('E2', '--name greets', 'CLI', 'Hello'),
+        criterion('E2', '--name <person> greets with the given person', 'CLI', 'Hello'),
         criterion('E3', '--sum matches hidden expected total', 'CLI', 'hidden sum'),
         criterion('E4', 'invalid input exits 2', 'CLI', 'exit 2'),
         criterion('E5', 'success exits 0', 'CLI', 'exit 0'),
@@ -630,10 +633,14 @@ export function seedFixture(benchmark: FoundryEngineeringBenchmark, variant = 'v
     return { variant, hidden: { note: `${person}-note` }, files: {} }
   }
   if (benchmark.benchmarkId === 'GRAD-E-CLI' || benchmark.benchmarkId === 'GRAD-N-RESOURCE' || benchmark.benchmarkId === 'GRAD-O-MULTIDAY' || benchmark.benchmarkId === 'GRAD-P-UNATTENDED' || benchmark.benchmarkId === 'GRAD-Q-CONTRACT' || benchmark.benchmarkId === 'GRAD-R-UNKNOWN') {
+    // `person` is a hidden CLI argument the verifier passes on argv (`--name <person>`), never a value the model is meant to read from a file.
+    // It used to sit in data.json next to `numbers`, and a model that noticed it there had a real, disk-backed reason to make --name a no-arg
+    // flag that echoes data.json (mirroring how --sum reads data.json), which fails E5 the moment the verifier's argv value is treated as an
+    // unexpected extra argument. Keeping it out of every file removes that temptation; nothing else reads it from data.json.
     return {
       variant,
       hidden: { person, sum, numbers: numbers.join(',') },
-      files: { 'data.json': JSON.stringify({ numbers, person }) },
+      files: { 'data.json': JSON.stringify({ numbers }) },
     }
   }
   if (benchmark.benchmarkId === 'GRAD-F-LIBRARY') {

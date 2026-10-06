@@ -546,6 +546,7 @@ export type NativeEngineerProgressEvent = {
 export type NativeValidationOutcomeKind = 'IMPLEMENTED' | 'VALIDATED' | 'PARTIALLY_VALIDATED' | 'BLOCKED_BY_ENVIRONMENT'
 
 export type NativeCodingMissionState = {
+  applicationBuild?: import('./foundryApplicationMission').ApplicationBuildState
   mode: NativeCodingExecutionMode
   workspaceId?: string
   workspaceBinding?: FoundryMissionWorkspaceBinding

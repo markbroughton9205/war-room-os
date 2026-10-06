@@ -81,6 +81,23 @@ function killTreePosix(child: ChildProcess): void {
   }
 }
 
+function signalTreePosix(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (typeof child.pid !== 'number') return
+  try { process.kill(-child.pid, signal) } catch {
+    try { child.kill(signal) } catch { /* already exited */ }
+  }
+}
+
+async function stopTreePosix(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  signalTreePosix(child, 'SIGTERM')
+  await new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, 1500)
+    child.once('close', () => { clearTimeout(timer); resolve() })
+  })
+  if (child.exitCode === null && child.signalCode === null) killTreePosix(child)
+}
+
 async function killTreeWindows(child: ChildProcess): Promise<void> {
   if (typeof child.pid !== 'number') return
   await new Promise<void>(resolve => {
@@ -135,7 +152,7 @@ export async function killProcessesForRepair(repairId: string): Promise<KillResu
     if (process.platform === 'win32') {
       await killTreeWindows(tracked.child)
     } else {
-      killTreePosix(tracked.child)
+      await stopTreePosix(tracked.child)
     }
     results.push({ killed: tracked.child.pid ?? -1, label: tracked.label })
     set.delete(tracked)

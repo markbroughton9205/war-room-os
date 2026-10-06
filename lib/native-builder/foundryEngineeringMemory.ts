@@ -421,9 +421,11 @@ export async function ensureEngineeringMemoryBootstrap(): Promise<FoundryEnginee
     const trusted = BOOTSTRAP.find(entry => entry.topic === 'trusted-desktop-auto-entry')!
     facts = [verifyFact({ ...trusted, id: 'bootstrap-trusted-desktop-auto-entry', repoHead: currentRepoHead() }), ...facts]
   }
-  const features = store.features.length
-    ? store.features
-    : FEATURE_BOOTSTRAP.map(feature => verifyFeature({ ...feature, repoHead: currentRepoHead() }))
+  // Seeded features are always available to readers: the 40-feature cap evicts the oldest entries first, which are the seeded ones once real missions fill the store.
+  const missingSeeds = FEATURE_BOOTSTRAP
+    .filter(seed => !store.features.some(item => item.feature.toLowerCase() === seed.feature.toLowerCase()))
+    .map(seed => verifyFeature({ ...seed, repoHead: currentRepoHead() }))
+  const features = [...store.features, ...missingSeeds]
   const next = { updatedAt: new Date().toISOString(), facts, features }
   if (!store.facts.length || !store.features.length || !store.facts.some(fact => fact.topic === 'trusted-desktop-auto-entry')) {
     await writeStore(next)
