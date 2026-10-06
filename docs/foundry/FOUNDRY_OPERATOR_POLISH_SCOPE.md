@@ -1,4 +1,6 @@
-# Foundry Phase 9 — POLISHED DAILY-DRIVER EXPERIENCE (P9-0 scope freeze)
+# Foundry Operator Polish — Daily-Driver Experience
+
+> **NAMING NOTE (authoritative):** This document is a Foundry operator-polish track and is NOT War Room roadmap Phase 9. War Room Phase 9 is defined by `docs/phases/phase-9.md` as *Recursive Learning and Evaluation Systems*.
 
 Baseline: `ad5ad5e612cba6d44777102f446dea19b6b46446` on `live-council-intelligence-repair`, clean tree,
 typecheck PASS, desktop build check PASS, frozen lockfile PASS. Nebula storage healthy (111 → 659 GB free after

@@ -27,5 +27,5 @@ for (const entry of checks) {
     console.error(`FAILED: ${entry} (exit ${result.status})`)
   }
 }
-console.log(failed === 0 ? 'PHASE9_ACCEPTANCE_BUNDLE_PASS' : `PHASE9_ACCEPTANCE_BUNDLE_FAIL (${failed})`)
+console.log(failed === 0 ? 'OPERATOR_POLISH_ACCEPTANCE_BUNDLE_PASS' : `OPERATOR_POLISH_ACCEPTANCE_BUNDLE_FAIL (${failed})`)
 process.exit(failed === 0 ? 0 : 1)
