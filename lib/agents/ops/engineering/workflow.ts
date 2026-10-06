@@ -145,6 +145,21 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     const users = removed.map((name) => ({ name, by: Object.values(idx.files).filter((f) => f.path !== path && f.imports.some((i) => i.resolved === path && (i.names.includes(name) || i.names.includes('*')))).map((f) => f.path) })).filter((u) => u.by.length)
     return users.length ? `your version removes exports that other files still import: ${users.map((u) => `${u.name} (used by ${u.by.join(', ')})`).join('; ')}. Keep them (add new exports instead of replacing).` : null
   }
+  /** Static import gate: a written file may only import names that the workspace module really exports (ground truth, not memory). */
+  const importCompat = (path: string, content: string, ignoreModules: Set<string> = new Set()): string | null => {
+    const idx = buildWorkspaceIndex(ws.root)
+    const known = new Set(Object.keys(idx.files))
+    const entry = indexSource(path, content, known)
+    const bad: string[] = []
+    for (const imp of entry.imports) {
+      if (!imp.resolved || imp.names.includes('*') || ignoreModules.has(imp.resolved)) continue
+      const target = path === imp.resolved ? undefined : idx.files[imp.resolved]
+      if (!target || target.kind === 'data' || target.isHtml || target.exports.includes('default')) continue
+      const missing = imp.names.filter((n) => !target.exports.includes(n))
+      if (missing.length) bad.push(`${missing.join(', ')} from ${imp.resolved} (it exports: ${target.exports.join(', ') || 'nothing'})`)
+    }
+    return bad.length ? `you import names that do not exist: ${bad.join('; ')}. Use only the real exports.` : null
+  }
   const relatedFor = (path: string, doneFiles: string[]) => {
     const idx = buildWorkspaceIndex(ws.root)
     const f = idx.files[path]
@@ -201,7 +216,14 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const rr = await call(modeR === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: hypText, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode: modeR }))
       noteTokens(rr)
       if (!rr.ok) { attemptsNotes.push(`repair call failed: ${rr.detail}`); continue }
-      const pr = parseEditReply(rr.text, ws.read(file))
+      let pr = parseEditReply(rr.text, ws.read(file))
+      if (pr.kind !== 'code' && budgetLeft()) {
+        // the command is failing, so NO_CHANGE / an unusable reply is not an answer: ask once more, with the refusal reason and a full rewrite allowed
+        const why = pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE is not valid: the failing command above proves a change is needed'
+        const rr2 = await call(ENGINEER_REWRITE_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: `${hypText}\nYOUR PREVIOUS REPLY WAS REJECTED: ${why}`, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode: 'rewrite' }))
+        noteTokens(rr2)
+        if (rr2.ok) pr = parseEditReply(rr2.text, ws.read(file))
+      }
       if (pr.kind !== 'code') { attemptsNotes.push(`repair reply unusable: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`); continue }
       const compat = apiCompat(file, pr.content)
       if (compat) { attemptsNotes.push(`repair rejected: ${compat}`); continue }
@@ -264,7 +286,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null) : { kind: 'invalid', reason: 'model call failed' }
       for (let rej = 0; rej < 2 && reply.ok; rej++) {
-        const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? apiCompat(path, parsedReply.content) : null
+        const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? (apiCompat(path, parsedReply.content) ?? importCompat(path, parsedReply.content)) : null
         if (!problem) break
         feedback = problem
         emit('REJECT', `${path}: ${problem}`)
@@ -274,7 +296,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         parsedReply = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null) : { kind: 'invalid', reason: 'model call failed' }
       }
       void feedback
-      if (reply.ok) { const still = parsedReply.kind === 'code' ? apiCompat(path, parsedReply.content) : null; if (still) { step.status = 'FAILED'; step.note = `rejected: ${still}`; checkpoint(); failAssignment(log, assignmentId, actor, `the model repeatedly produced a ${path} that ${still}`, undefined, clock()); return result('FAILED', `${path}: incompatible rewrite after 2 rejections`) } }
+      if (reply.ok) { const skippedFiles = new Set(state.steps.filter((x) => x.status === 'SKIPPED').flatMap((x) => x.files)) // a skipped step's file may be the true defect: let evidence-driven repair find it rather than failing here
+      const still = parsedReply.kind === 'code' ? (apiCompat(path, parsedReply.content) ?? importCompat(path, parsedReply.content, skippedFiles)) : null; if (still) { step.status = 'FAILED'; step.note = `rejected: ${still}`; checkpoint(); failAssignment(log, assignmentId, actor, `the model repeatedly produced a ${path} that ${still}`, undefined, clock()); return result('FAILED', `${path}: incompatible rewrite after 2 rejections`) } }
       if (!reply.ok) { if (reply.detail.includes('cancel')) { const b = boundary(); if (b.stop) { checkpoint(); return b.stop } } step.status = 'FAILED'; step.note = `model call failed: ${reply.detail}`; checkpoint(); failAssignment(log, assignmentId, actor, `model call failed: ${reply.detail}`, undefined, clock()); return result('FAILED', `model call failed: ${reply.detail}`) }
       const pr = parsedReply
       if (pr.kind === 'no_change') { step.status = 'SKIPPED'; step.note = 'model: NO_CHANGE needed for this file'; checkpoint(); emit('NO_CHANGE', path); continue }
