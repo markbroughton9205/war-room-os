@@ -1,11 +1,12 @@
 /** Phase 10 validation. Run: pnpm run validate:agent-ops */
 import { appendFileSync, readFileSync } from 'node:fs'
-import { harness, freshOps, fullNeed, draft, activeAgent, NOW, tmp } from './testkit'
+import { harness, freshOps, fullNeed, draft, activeAgent, NOW, mins, tmp } from './testkit'
 import { AgentOpsLog } from './log'
 import { AgentRegistry, NeedGateError, deriveAgents } from './registry'
 import { AgentTransitionError, assertTransition } from './lifecycle'
 import { detectNeed, missingCriteria } from './need'
 import { NEED_CRITERIA, type AgentState } from './types'
+import { EffectBlockedError, WorkerError, approveEffect, auditCompleteness, deriveWorkers, executeWorker, recoverInterruptedRuns, registerWorker, resumeWorker, stopWorker, type WorkerDraft } from './workers'
 import { checkTaskScope, type AgentTask } from './specialization'
 import { AdaptationError, applyApprovedScopeChange, decideAdaptation, proposeAdaptation } from './adaptation'
 
@@ -99,5 +100,99 @@ const { check, finish } = harness('AGENT_OPS_VALIDATION')
   const c = activeAgent()
   c.log.append({ t: 'scope', agentId: c.spec.id, proposalId: 'none', permissionScope: ['read_repo', 'read_docs', 'write_own_reports'], memoryScope: ['docs'], by: 'commander:mark', at: NOW.toISOString() })
   check('B18_forged_scope_record_ignored', c.reg.get(c.spec.id)!.spec.version === 1 && !c.reg.get(c.spec.id)!.spec.permissionScope.includes('read_repo'))
+}
+// ---- P10-C: workers, runtime governor, run log, stop controls
+{
+  const wd = (agentId: string, over: Partial<WorkerDraft> = {}): WorkerDraft => ({
+    id: 'worker-docs-freshness', agentId, category: 'documentation_freshness', version: '1.0.0', mission: 'Report stale docs',
+    permissionScope: ['read_docs'], memoryScope: ['docs'], limits: { maxRuntimeMs: 2000, maxRunsPerDay: 5, maxConsecutiveFailures: 2, cadenceMinutes: 60 }, ...over,
+  })
+  const ok = async () => ({ outputs: [{ kind: 'report', ref: 'docs/report', summary: '3 stale docs' }], toolsUsed: ['fs.stat'] })
+  const werr = (fn: () => unknown, code: string) => { try { fn(); return false } catch (e) { return e instanceof WorkerError && e.code === code } }
+
+  const a = activeAgent()
+  check('C01_register_requires_commander_and_bounded_scope', werr(() => registerWorker(a.log, wd(a.spec.id), 'agent:x', NOW), 'NOT_AUTHORIZED') && werr(() => registerWorker(a.log, wd(a.spec.id, { permissionScope: ['read_repo'] }), 'commander:mark', NOW), 'INVALID') && werr(() => registerWorker(a.log, wd(a.spec.id, { limits: { maxRuntimeMs: 99_999_999, maxRunsPerDay: 5, maxConsecutiveFailures: 2, cadenceMinutes: null } }), 'commander:mark', NOW), 'LIMIT_EXCEEDED') && werr(() => registerWorker(a.log, wd(a.spec.id, { category: 'vibes' as never }), 'commander:mark', NOW), 'INVALID'))
+  const pend = freshOps(); const n = fullNeed(); pend.reg.recordNeed(n); const ps = pend.reg.propose(n.id, draft(), NOW)
+  check('C02_worker_needs_an_approved_agent', werr(() => registerWorker(pend.log, wd(ps.id), 'commander:mark', NOW), 'AGENT_NOT_ELIGIBLE'))
+  registerWorker(a.log, wd(a.spec.id), 'commander:mark', NOW)
+  check('C03_duplicate_worker_id_refused', werr(() => registerWorker(a.log, wd(a.spec.id), 'commander:mark', NOW), 'INVALID'))
+
+  const r1 = await executeWorker(a.log, 'worker-docs-freshness', ok, { now: NOW, runId: 'run-1' })
+  const run1 = r1.ok ? r1.run : null
+  check('C04_run_records_every_roadmap_field', !!run1 && run1.status === 'SUCCEEDED' && auditCompleteness(run1).complete && run1.workerVersion === '1.0.0' && run1.mission === 'Report stale docs' && run1.permissionScope.join() === 'read_docs' && run1.memoryScope.join() === 'docs' && run1.toolsUsed[0] === 'fs.stat' && run1.outputs.length === 1 && Array.isArray(run1.escalations) && Array.isArray(run1.errors), JSON.stringify(auditCompleteness(run1!)))
+  check('C05_cost_tokens_and_executor_stay_UNKNOWN', run1!.resource.costUsd === 'UNKNOWN' && run1!.resource.tokens === 'UNKNOWN' && run1!.executor === 'UNKNOWN' && typeof run1!.resource.durationMs === 'number')
+  const withModel = await executeWorker(a.log, 'worker-docs-freshness', async () => ({ executor: { provider: 'ollama', model: 'qwen2.5-coder:14b' }, resource: { costUsd: 0, tokens: 1200 } }), { now: NOW, runId: 'run-2' })
+  check('C06_actual_executor_and_reported_cost_recorded_as_given', withModel.ok && withModel.run.executor !== 'UNKNOWN' && (withModel.run.executor as { model: string }).model === 'qwen2.5-coder:14b' && withModel.run.resource.costUsd === 0 && withModel.run.resource.tokens === 1200)
+
+  const slow = await executeWorker(a.log, 'worker-docs-freshness', () => new Promise((r) => setTimeout(() => r({}), 4000)), { now: NOW, runId: 'run-3' })
+  check('C07_runtime_limit_enforced', slow.ok && slow.run.status === 'TIMED_OUT' && slow.run.errors[0].message.includes('2000ms'))
+  // daily cap (limit 5): runs 1,2,3 so far + 2 more
+  await executeWorker(a.log, 'worker-docs-freshness', ok, { now: NOW, runId: 'run-4' }); await executeWorker(a.log, 'worker-docs-freshness', ok, { now: NOW, runId: 'run-5' })
+  const capped = await executeWorker(a.log, 'worker-docs-freshness', ok, { now: NOW, runId: 'run-6' })
+  check('C08_daily_cap_enforced', !capped.ok && capped.reason === 'DAILY_CAP_REACHED')
+  const nextDay = await executeWorker(a.log, 'worker-docs-freshness', ok, { now: new Date(NOW.getTime() + 86_400_000), runId: 'run-7' })
+  check('C09_cap_resets_next_utc_day', nextDay.ok)
+
+  // failure trip + resume
+  const f = activeAgent(); registerWorker(f.log, wd(f.spec.id), 'commander:mark', NOW)
+  const boom = async () => { throw new Error('disk exploded with token=abcdefgh12345678') }
+  const f1 = await executeWorker(f.log, 'worker-docs-freshness', boom, { now: NOW, runId: 'f1' })
+  check('C10_failure_recorded_scrubbed_not_thrown', f1.ok && f1.run.status === 'FAILED' && !JSON.stringify(f1.run).includes('abcdefgh12345678') && f1.run.errors[0].recovery.length > 0)
+  await executeWorker(f.log, 'worker-docs-freshness', boom, { now: NOW, runId: 'f2' })
+  check('C11_consecutive_failures_trip_agent_to_PAUSED_by_system', f.reg.get(f.spec.id)!.state === 'PAUSED' && f.reg.get(f.spec.id)!.history.at(-1)!.by === 'system:governor')
+  const afterTrip = await executeWorker(f.log, 'worker-docs-freshness', ok, { now: NOW, runId: 'f3' })
+  check('C12_paused_agent_cannot_run_workers', !afterTrip.ok && afterTrip.reason === 'AGENT_NOT_ACTIVE')
+  f.reg.transition(f.spec.id, 'ACTIVE', 'commander:mark', 'reviewed failures', NOW)
+  const stillTripped = await executeWorker(f.log, 'worker-docs-freshness', ok, { now: NOW, runId: 'f4' })
+  check('C13_resuming_agent_alone_does_not_clear_the_trip', !stillTripped.ok && stillTripped.reason === 'TRIPPED')
+  check('C14_only_commander_resumes_worker', werr(() => resumeWorker(f.log, 'worker-docs-freshness', 'system:governor', 'x', NOW), 'NOT_AUTHORIZED'))
+  resumeWorker(f.log, 'worker-docs-freshness', 'commander:mark', 'fixed disk', NOW)
+  const recovered = await executeWorker(f.log, 'worker-docs-freshness', ok, { now: NOW, runId: 'f5' })
+  check('C15_commander_resume_clears_trip', recovered.ok && recovered.run.status === 'SUCCEEDED' && deriveWorkers(f.log).workers.get('worker-docs-freshness')!.consecutiveFailures === 0)
+
+  // stop controls
+  const s = activeAgent(); registerWorker(s.log, wd(s.spec.id), 'commander:mark', NOW)
+  stopWorker(s.log, 'worker-docs-freshness', 'commander:mark', 'operator stop', NOW)
+  const refused = await executeWorker(s.log, 'worker-docs-freshness', ok, { now: NOW, runId: 's1' })
+  const restarted = deriveWorkers(new AgentOpsLog(s.dir)).workers.get('worker-docs-freshness')!
+  check('C16_stop_halts_new_runs_and_persists', !refused.ok && refused.reason === 'STOPPED' && restarted.stopped && restarted.stopReason === 'operator stop')
+  resumeWorker(s.log, 'worker-docs-freshness', 'commander:mark', 'ok', NOW)
+  const midStop = await executeWorker(s.log, 'worker-docs-freshness', async (ctx) => { stopWorker(s.log, 'worker-docs-freshness', 'commander:mark', 'stop mid-run', NOW); return { outputs: [{ kind: 'k', ref: 'r', summary: ctx.shouldStop() ? 'saw stop' : 'no stop' }] } }, { now: NOW, runId: 's2' })
+  check('C17_stop_during_run_is_observed_and_recorded', midStop.ok && midStop.run.status === 'STOPPED' && midStop.run.outputs[0].summary === 'saw stop')
+
+  // protected effects
+  const e = activeAgent(); registerWorker(e.log, wd(e.spec.id), 'commander:mark', NOW)
+  const blocked = await executeWorker(e.log, 'worker-docs-freshness', async (ctx) => { ctx.requestEffect('external_communication'); return {} }, { now: NOW, runId: 'e1' })
+  check('C18_unapproved_protected_effect_blocked_and_escalated_not_failed', blocked.ok && blocked.run.status === 'BLOCKED' && blocked.run.escalations[0].to === 'commander' && blocked.run.requestedEffects.join() === 'external_communication' && deriveWorkers(e.log).workers.get('worker-docs-freshness')!.consecutiveFailures === 0)
+  check('C19_effect_approval_requires_commander', werr(() => approveEffect(e.log, 'worker-docs-freshness', ['spend'], 'agent:self', 'x', NOW), 'NOT_AUTHORIZED') && werr(() => approveEffect(e.log, 'worker-docs-freshness', ['launch_missiles' as never], 'commander:mark', 'x', NOW), 'INVALID'))
+  const appr = approveEffect(e.log, 'worker-docs-freshness', ['external_communication'], 'commander:mark', 'one notification', NOW)
+  const allowed = await executeWorker(e.log, 'worker-docs-freshness', async (ctx) => { ctx.requestEffect('external_communication'); return {} }, { now: NOW, runId: 'e2', approvalRid: appr.rid })
+  const reused = await executeWorker(e.log, 'worker-docs-freshness', async (ctx) => { ctx.requestEffect('external_communication'); return {} }, { now: NOW, runId: 'e3', approvalRid: appr.rid })
+  const wrongEffect = await executeWorker(e.log, 'worker-docs-freshness', async (ctx) => { ctx.requestEffect('spend'); return {} }, { now: NOW, runId: 'e4', approvalRid: appr.rid })
+  check('C20_approval_is_single_use_and_effect_specific', allowed.ok && allowed.run.status === 'SUCCEEDED' && allowed.run.approvalRef === appr.rid && reused.ok && reused.run.status === 'BLOCKED' && wrongEffect.ok && wrongEffect.run.status === 'BLOCKED')
+  const pre = activeAgent(); registerWorker(pre.log, wd(pre.spec.id, { preApprovedEffects: ['external_communication'] }), 'commander:mark', NOW)
+  const preRun = await executeWorker(pre.log, 'worker-docs-freshness', async (ctx) => { ctx.requestEffect('external_communication'); ctx.requestEffect('spend'); return {} }, { now: NOW, runId: 'p1' })
+  check('C21_narrow_preapproved_policy_honored_but_only_for_listed_effects', preRun.ok && preRun.run.status === 'BLOCKED' && preRun.run.requestedEffects.join() === 'external_communication,spend')
+
+  // secrets, crash recovery, idempotence
+  const x = activeAgent(); registerWorker(x.log, wd(x.spec.id), 'commander:mark', NOW)
+  const leak = await executeWorker(x.log, 'worker-docs-freshness', async () => ({ outputs: [{ kind: 'k', ref: 'r', summary: 'key sk-abcdefghijklmnopqrstuvwxyz123456 found' }] }), { now: NOW, runId: 'x1' })
+  check('C22_credential_in_output_is_redacted_run_still_recorded', leak.ok && leak.run.outputs[0].summary.includes('[REDACTED]') && !readFileSync(x.log.file, 'utf8').includes('abcdefghijklmnopqrstuvwxyz1234'))
+  x.log.append({ t: 'run', rid: 'run:crash:start', run: { runId: 'crash', workerId: 'worker-docs-freshness', agentId: x.spec.id, workerVersion: '1.0.0', mission: 'm', permissionScope: ['read_docs'], memoryScope: ['docs'], startedAt: NOW.toISOString(), status: 'RUNNING', toolsUsed: [], outputs: [], escalations: [], errors: [], executor: 'UNKNOWN', resource: { costUsd: 'UNKNOWN', tokens: 'UNKNOWN' }, requestedEffects: [] } })
+  const blockedByGhost = await executeWorker(x.log, 'worker-docs-freshness', ok, { now: mins(0), runId: 'x2' })
+  const sizeBefore = readFileSync(x.log.file, 'utf8').length
+  const early = recoverInterruptedRuns(x.log, mins(0))
+  const rec1 = recoverInterruptedRuns(x.log, mins(10))
+  const bytes = readFileSync(x.log.file, 'utf8')
+  const rec2 = recoverInterruptedRuns(x.log, mins(20))
+  check('C23_running_run_blocks_second_run_until_recovered', !blockedByGhost.ok && blockedByGhost.reason === 'ALREADY_RUNNING' && early.length === 0 && rec1.join() === 'crash')
+  check('C24_recovery_idempotent_append_only_and_marks_INTERRUPTED', rec2.length === 0 && readFileSync(x.log.file, 'utf8') === bytes && bytes.startsWith(readFileSync(x.log.file, 'utf8').slice(0, sizeBefore)) && deriveWorkers(x.log).workers.get('worker-docs-freshness')!.runs.find((r) => r.runId === 'crash')!.status === 'INTERRUPTED')
+  const after = await executeWorker(x.log, 'worker-docs-freshness', ok, { now: mins(10), runId: 'x3' })
+  check('C25_worker_runs_again_after_recovery', after.ok && after.run.status === 'SUCCEEDED')
+  // retired agent
+  const rt = activeAgent(); registerWorker(rt.log, wd(rt.spec.id), 'commander:mark', NOW); rt.reg.transition(rt.spec.id, 'RETIRED', 'commander:mark', 'obsolete', NOW)
+  const dead = await executeWorker(rt.log, 'worker-docs-freshness', ok, { now: NOW, runId: 'rt1' })
+  check('C26_retired_agent_workers_never_run', !dead.ok && dead.reason === 'AGENT_NOT_ACTIVE')
+  void EffectBlockedError
 }
 finish()
