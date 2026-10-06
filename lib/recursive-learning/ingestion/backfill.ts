@@ -20,6 +20,11 @@ export type BackfillOptions = {
   auditFile?: string
   /** Default true: report what would be ingested without writing. */
   dryRun?: boolean
+  /**
+   * Supersede (never delete) previously backfilled events from examined mission files that the current adapter no longer
+   * produces, e.g. after an attribution correction. Apply mode only.
+   */
+  supersedeStale?: boolean
   now?: Date
 }
 export type BackfillReport = {
@@ -33,6 +38,7 @@ export type BackfillReport = {
   skippedByReason: Record<string, number>
   unreadable: number
   unattributableRollbackReceipts: number
+  staleSuperseded: number
 }
 
 /**
@@ -43,11 +49,13 @@ export async function backfillFoundryMissions(opts: BackfillOptions): Promise<Ba
   const dryRun = opts.dryRun ?? true
   const limit = opts.limit ?? 2000
   const names = (await readdir(opts.missionsDir)).filter((n) => MISSION_FILE.test(n)).sort()
-  const report: BackfillReport = { dryRun, filesExamined: 0, limitReached: names.length > limit, eventsProposed: 0, inserted: 0, duplicates: 0, rejected: 0, skippedByReason: {}, unreadable: 0, unattributableRollbackReceipts: 0 }
+  const report: BackfillReport = { dryRun, filesExamined: 0, limitReached: names.length > limit, eventsProposed: 0, inserted: 0, duplicates: 0, rejected: 0, skippedByReason: {}, unreadable: 0, unattributableRollbackReceipts: 0, staleSuperseded: 0 }
   const proposed: EvaluationEventInput[] = []
+  const examined = new Set<string>()
   for (const name of names.slice(0, limit)) {
     report.filesExamined += 1
     const file = path.join(opts.missionsDir, name)
+    examined.add(`foundry-missions/${name}`)
     try {
       if ((await stat(file)).size > MAX_FILE_BYTES) throw new Error('file_too_large')
       const res = missionToEvents(JSON.parse(await readFile(file, 'utf8')), { backfilled: true, sourcePath: `foundry-missions/${name}`, includeClassifications: opts.includeClassifications })
@@ -63,7 +71,11 @@ export async function backfillFoundryMissions(opts: BackfillOptions): Promise<Ba
     const rl = createInterface({ input: createReadStream(opts.auditFile, 'utf8'), crlfDelay: Infinity })
     for await (const line of rl) if (/"message":"[^"]*rollback/i.test(line)) report.unattributableRollbackReceipts += 1
   }
+  const stale = opts.supersedeStale
+    ? opts.log.view().activeEvents.filter((e) => e.provenance?.adapter === 'foundry-mission' && e.provenance.backfilled && e.provenance.sourcePath && examined.has(e.provenance.sourcePath) && !proposed.some((p) => p.id === e.id))
+    : []
   if (dryRun) {
+    report.staleSuperseded = stale.length
     const known = new Set(opts.log.view().events.map((e) => e.id))
     report.duplicates = proposed.filter((e) => e.id && known.has(e.id)).length
     return report
@@ -72,5 +84,7 @@ export async function backfillFoundryMissions(opts: BackfillOptions): Promise<Ba
   report.inserted = res.inserted.length
   report.duplicates = res.duplicates
   report.rejected = res.rejected.length
+  for (const e of stale) opts.log.supersede(e.id, 'backfill reconciliation: current adapter no longer attributes this event', undefined, opts.now)
+  report.staleSuperseded = stale.length
   return report
 }

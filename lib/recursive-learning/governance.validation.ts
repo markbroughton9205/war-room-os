@@ -106,5 +106,20 @@ if (existsSync(realLog)) {
   const lines = readFileSync(realLog, 'utf8').split('\n').filter(Boolean)
   check('N14_real_learning_log_contains_no_secrets', lines.every((l) => !containsSecret(l)), `lines=${lines.length}`)
 } else check('N14_real_learning_log_contains_no_secrets', true, 'no real log present (skipped)')
+// review follow-ups: idempotent promotion; proposals must cite real evidence
+{
+  const l = freshLog()
+  for (let i = 1; i <= 5; i++) l.recordEvent(ev('gpt', 'risk_review', 'FAILURE', i, { errorClass: 'x_gate' }), NOW)
+  const f2 = detectRecurringFailures(l.view().activeEvents, NOW)
+  const p2 = submitProposal(l, buildMemoryCandidates(f2, [], NOW)[0], NOW)
+  decideProposal(l, p2.id, 'APPROVED', 'commander:mark', 'ok', NOW)
+  promoteMemoryCandidate(l, p2.id, NOW)
+  let twice = false
+  try { promoteMemoryCandidate(l, p2.id, NOW); twice = true } catch { /* expected */ }
+  check('N15_promotion_is_idempotent_single_record', !twice && l.view().promotions.length === 1)
+  let ghost = false
+  try { submitProposal(l, { ...buildMemoryCandidates(f2, [], NOW)[0], evidenceEventIds: ['no-such-event'] }, NOW); ghost = true } catch { /* expected */ }
+  check('N16_proposal_must_cite_existing_evidence', !ghost)
+}
 void tmpDir
 finish()

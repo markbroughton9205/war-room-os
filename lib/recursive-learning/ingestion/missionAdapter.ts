@@ -1,12 +1,13 @@
 import type { EvalSubject, EvaluationEventInput, TaskClass, ValidationStatus } from '../types'
 import { stableEventId } from './ids'
-import { commanderDecisionEvent, installedAcceptanceEvent, reviewFindingEvent } from './signalAdapters'
+import { commanderDecisionEvent, reviewFindingEvent } from './signalAdapters'
 import { valueContainsSecret } from './redact'
 
 export const ADAPTER = 'foundry-mission'
 const TERMINAL: Record<string, 'SUCCESS' | 'FAILURE'> = { COMPLETE: 'SUCCESS', FAILED: 'FAILURE' }
 /** Mission kinds that build/modify code. Anything else has no honest task-class mapping and is skipped. */
 const CODE_KINDS = new Set(['application', 'app_builder', 'fixture'])
+const MAX_TRUSTED_LATENCY_MS = 6 * 3_600_000
 const INTERRUPTION = /→ (PAUSED|BLOCKED|RECOVERING|WAITING_[A-Z_]+)\b/
 
 export type MissionAdapterOptions = {
@@ -22,11 +23,18 @@ const isRec = (v: unknown): v is Rec => !!v && typeof v === 'object' && !Array.i
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined)
 const SAFE_ID = /^[A-Za-z0-9._:/@+-]{1,120}$/
 
+/**
+ * Executing worker attribution. Order: actualWorker (what really ran) -> modelState.active*. A pinnedModel is a routing
+ * preference, NOT evidence of who executed, so it is never used; unattributable missions are skipped.
+ */
 function subjectsOf(m: Rec): EvalSubject[] {
   const ms = isRec(m.modelState) ? m.modelState : {}
-  const pin = isRec(m.pinnedModel) ? m.pinnedModel : {}
-  const provider = str(ms.activeProvider) ?? str(pin.provider)
-  const model = str(ms.activeModel) ?? str(pin.modelId)
+  const aw = isRec(m.actualWorker) ? m.actualWorker : undefined
+  let provider: string | undefined
+  let model: string | undefined
+  if (aw && str(aw.provider)) { provider = str(aw.provider); model = str(aw.model) }
+  else if (aw) return [] // actualWorker present but empty: execution unattributed, do not guess
+  else { provider = str(ms.activeProvider); model = str(ms.activeModel) }
   const out: EvalSubject[] = []
   if (provider && SAFE_ID.test(provider)) out.push({ kind: 'provider', id: provider })
   if (provider && model && SAFE_ID.test(model)) out.push({ kind: 'model', id: `${provider}/${model}` })
@@ -75,7 +83,8 @@ export function missionToEvents(raw: unknown, opts: MissionAdapterOptions): Miss
   const interrupted = journal.some((j) => j.kind === 'transition' && INTERRUPTION.test(j.text))
   const start = journal[0]?.at ?? str(raw.createdAt)
   const elapsed = !interrupted && termEntry && start ? Date.parse(termEntry.at) - Date.parse(start) : NaN
-  const latencyMs = Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : undefined
+  // wall-clock beyond 6h almost certainly includes idle time not recorded as an interruption: UNKNOWN, not a guess
+  const latencyMs = Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= MAX_TRUSTED_LATENCY_MS ? elapsed : undefined
   const retryObj = isRec(raw.retryCounts) ? raw.retryCounts : undefined
   const retries = retryObj ? Object.values(retryObj).reduce<number>((a, v) => a + (typeof v === 'number' && v >= 0 ? v : 0), 0) : undefined
   const errs = Array.isArray(raw.errors) ? raw.errors.filter(isRec) : []
@@ -101,8 +110,7 @@ export function missionToEvents(raw: unknown, opts: MissionAdapterOptions): Miss
       source: { kind: 'foundry-mission', ref: sourceRef },
       provenance: { adapter: ADAPTER, backfilled: opts.backfilled, sourcePath: opts.sourcePath },
     })
-    const install = isRec(raw.installState) && typeof raw.installState.ok === 'boolean' ? raw.installState.ok : undefined
-    if (install !== undefined) events.push(installedAcceptanceEvent({ ...common, subject, pass: install }))
+    // installState is folded into the RUN event's validation (a separate event would double-count one mission)
     const auth = isRec(raw.authorization) ? raw.authorization : undefined
     const approval = auth ? str(auth.approvalState) : undefined
     const authAt = auth && str(auth.requestedAt) && !Number.isNaN(Date.parse(String(auth.requestedAt))) ? String(auth.requestedAt) : occurredAt

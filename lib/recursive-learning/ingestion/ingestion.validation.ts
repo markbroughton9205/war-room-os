@@ -1,5 +1,5 @@
 /** P9-J ingestion validation. Run: pnpm run validate:recursive-learning-ingestion */
-import { readFileSync, existsSync } from 'node:fs'
+import { appendFileSync, readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { harness, freshLog, missionFixture, tmpDir, NOW } from '../testkit'
 import { missionToEvents } from './missionAdapter'
@@ -27,11 +27,43 @@ const opts = { backfilled: false }
   const skip = (over: Record<string, unknown>) => missionToEvents(missionFixture(over), opts).skipped
   check('J05_skips_cancelled_nonterminal_fixture_unattributed_unmapped',
     skip({ status: 'CANCELLED' }) === 'cancelled_not_outcome_evidence' && skip({ status: 'EXECUTING' }) === 'non_terminal' && skip({ classification: 'ACCEPTANCE_FIXTURE' })?.startsWith('classification_excluded') === true &&
-    skip({ modelState: {}, pinnedModel: undefined }) === 'no_provider_attribution' && skip({ kind: 'research' }) === 'no_task_class_mapping')
+    skip({ modelState: {}, pinnedModel: { provider: 'cursor-agent', modelId: 'm' } }) === 'no_provider_attribution' && skip({ kind: 'research' }) === 'no_task_class_mapping')
   const vf = missionToEvents(missionFixture({ testState: { ok: false }, buildState: { ok: true } }), opts).events[0]
   check('J06_failed_test_state_marks_validation_failed', vf.validation === 'FAILED')
   const unk = missionToEvents(missionFixture({ testState: { ok: null }, buildState: { ok: null } }), opts).events[0]
   check('J07_no_validation_data_is_unknown', unk.validation === 'UNKNOWN')
+}
+
+// attribution truth (review finding 1): pinned is a preference, actualWorker is execution
+{
+  const aw = missionToEvents(missionFixture({ modelState: {}, pinnedModel: { provider: 'cursor-agent', modelId: 'gpt' }, actualWorker: { provider: 'ollama', model: 'qwen', source: 'CAPABILITY' } }), opts).events.filter((e) => e.signal === 'RUN')
+  check('J21_actual_worker_beats_pinned_model', aw.length === 2 && aw.every((e) => e.subject.id.startsWith('ollama')))
+  const empty = missionToEvents(missionFixture({ modelState: { activeProvider: 'cursor-agent', activeModel: 'x' }, actualWorker: { provider: null, model: null, source: 'NONE' } }), opts)
+  check('J22_empty_actual_worker_is_unattributed_not_guessed', empty.events.length === 0 && empty.skipped === 'no_provider_attribution')
+  const long = missionToEvents(missionFixture({ journal: [{ at: '2026-09-20T00:00:00.000Z', kind: 'decision', text: 'c' }, { at: '2026-09-20T12:00:00.000Z', kind: 'transition', text: 'VERIFYING → COMPLETE: x' }] }), opts).events[0]
+  check('J23_implausible_wall_clock_latency_is_unknown', long.metrics?.latencyMs === undefined)
+  const inst = missionToEvents(missionFixture({ installState: { ok: true } }), opts).events
+  check('J24_install_state_folds_into_run_no_extra_event', inst.length === 2 && inst.every((e) => e.signal === 'RUN'))
+}
+
+// log robustness (review findings 2, 3, 8)
+{
+  const log = freshLog()
+  const evs = missionToEvents(missionFixture({ missionId: 'r-1' }), opts).events
+  log.recordEvents(evs, NOW)
+  appendFileSync(log.file, '{"t":"event","event":{"id":"torn')
+  const v1 = log.view()
+  check('J25_torn_line_skipped_and_counted_not_fatal', v1.corruptLines === 1 && v1.events.length === 2)
+  const r = log.recordEvents(missionToEvents(missionFixture({ missionId: 'r-2' }), opts).events, NOW)
+  const v2 = log.view()
+  check('J26_append_after_torn_write_starts_new_line', r.inserted.length === 2 && v2.events.length === 4 && v2.corruptLines === 1)
+  const dupLine = readFileSync(log.file, 'utf8').split('\n').find((l) => l.includes('"t":"event"') && l.includes(evs[0].id!))!
+  appendFileSync(log.file, dupLine + '\n')
+  const v3 = log.view()
+  check('J27_duplicate_event_lines_ignored_in_view', v3.events.length === 4 && v3.duplicateEventLines === 1 && v3.activeEvents.length === 4)
+  let futureRejected = false
+  futureRejected = log.recordEvents([{ ...evs[0], id: 'fut', occurredAt: '2027-01-01T00:00:00.000Z' }], NOW).rejected.length === 1
+  check('J28_future_dated_event_rejected', futureRejected)
 }
 
 // secrets

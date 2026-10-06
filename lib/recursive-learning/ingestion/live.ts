@@ -9,6 +9,8 @@ import { recordIngestionFailure } from './failureLog'
  */
 export function ingestMissionOutcomeSafe(mission: unknown): void {
   if (process.env.WAR_ROOM_LEARNING_INGEST === 'off') return
+  // test runs must not write into the real War Room evidence log unless explicitly redirected
+  if (process.env.NODE_ENV === 'test' && !process.env.WAR_ROOM_LEARNING_DIR) return
   const id = typeof (mission as { missionId?: unknown })?.missionId === 'string' ? (mission as { missionId: string }).missionId : 'unknown'
   try {
     const { events, skipped } = missionToEvents(mission, { backfilled: false })

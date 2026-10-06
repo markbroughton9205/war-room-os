@@ -27,6 +27,9 @@ export function buildProposal(draft: ProposalDraft, now: Date): Proposal {
 
 export function submitProposal(log: LearningLog, draft: ProposalDraft, now: Date = new Date()): Proposal {
   const proposal = buildProposal(draft, now)
+  const known = new Set(log.view().events.map((e) => e.id))
+  const missing = [...proposal.evidenceEventIds, ...proposal.contradictoryEventIds].filter((id) => !known.has(id))
+  if (missing.length) throw new Error(`proposal cites unknown evidence: ${missing.slice(0, 3).join(',')}`)
   log.append({ t: 'proposal', proposal })
   return proposal
 }
@@ -37,7 +40,10 @@ export function proposalStatus(view: LogView, proposalId: string): ProposalStatu
   return latest ? latest.status : 'PROPOSED'
 }
 
-/** Only a Commander identity may decide. Rejections are kept (audit), never deleted. */
+/**
+ * NOTE: `decidedBy` is a format check only. Any future write route MUST derive it from the authenticated Commander
+ * session (requireCommanderSession), never from request input. No route reaches this today.
+ * Only a Commander identity may decide. Rejections are kept (audit), never deleted. */
 export function decideProposal(
   log: LearningLog,
   proposalId: string,
@@ -63,6 +69,7 @@ export function promoteMemoryCandidate(log: LearningLog, proposalId: string, now
   const p = view.proposals.find((x) => x.id === proposalId)
   if (!p || p.kind !== 'MEMORY_PROMOTION') throw new Error('not a memory promotion candidate')
   if (proposalStatus(view, proposalId) !== 'APPROVED') throw new Error('memory promotion requires Commander approval')
+  if (view.promotions.some((x) => x.proposalId === proposalId)) throw new Error('already promoted')
   const approval = [...view.decisions].reverse().find((d) => d.proposalId === proposalId && d.status === 'APPROVED')!
   const record = { t: 'promotion' as const, proposalId, approvedBy: approval.decidedBy, at: now.toISOString() }
   log.append(record)

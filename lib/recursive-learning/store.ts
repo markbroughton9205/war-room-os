@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { createEvaluationEvent } from './eventModel'
 import type { Decision, EvaluationEvent, EvaluationEventInput, LogRecord, Proposal } from './types'
@@ -10,6 +10,10 @@ export type LogView = {
   proposals: Proposal[]
   decisions: Decision[]
   promotions: Extract<LogRecord, { t: 'promotion' }>[]
+  /** Unparseable lines skipped (e.g. a torn write). Surfaced, never silently hidden. */
+  corruptLines: number
+  /** Repeated event ids ignored (first occurrence wins). */
+  duplicateEventLines: number
 }
 
 /**
@@ -25,9 +29,15 @@ export class LearningLog {
     this.file = path.join(dir, 'recursive-learning.jsonl')
   }
 
+  /** Appends text; if a previous torn write left no trailing newline, starts on a fresh line so records never merge. */
+  private write(text: string): void {
+    const torn = existsSync(this.file) && statSync(this.file).size > 0 && !readFileSync(this.file, 'utf8').endsWith('\n')
+    appendFileSync(this.file, (torn ? '\n' : '') + text, 'utf8')
+  }
+
   append(record: LogRecord): void {
     if (this.readOnly) throw new Error('learning log opened read-only')
-    appendFileSync(this.file, JSON.stringify(record) + '\n', 'utf8')
+    this.write(JSON.stringify(record) + '\n')
   }
 
   recordEvent(input: EvaluationEventInput, now: Date = new Date()): EvaluationEvent {
@@ -57,7 +67,7 @@ export class LearningLog {
       }
     })
     if (this.readOnly) throw new Error('learning log opened read-only')
-    if (inserted.length > 0) appendFileSync(this.file, inserted.map((event) => JSON.stringify({ t: 'event', event })).join('\n') + '\n', 'utf8')
+    if (inserted.length > 0) this.write(inserted.map((event) => JSON.stringify({ t: 'event', event })).join('\n') + '\n')
     return { inserted, duplicates, rejected }
   }
 
@@ -76,11 +86,19 @@ export class LearningLog {
     const proposals: Proposal[] = []
     const decisions: Decision[] = []
     const promotions: LogView['promotions'] = []
+    const seen = new Set<string>()
+    let corruptLines = 0
+    let duplicateEventLines = 0
     if (existsSync(this.file)) {
       for (const line of readFileSync(this.file, 'utf8').split('\n')) {
         if (!line.trim()) continue
-        const rec = JSON.parse(line) as LogRecord
-        if (rec.t === 'event') events.push(rec.event)
+        let rec: LogRecord
+        try { rec = JSON.parse(line) as LogRecord } catch { corruptLines += 1; continue }
+        if (rec.t === 'event') {
+          if (seen.has(rec.event.id)) { duplicateEventLines += 1; continue }
+          seen.add(rec.event.id)
+          events.push(rec.event)
+        }
         else if (rec.t === 'supersede') supersessions.push(rec)
         else if (rec.t === 'proposal') proposals.push(rec.proposal)
         else if (rec.t === 'decision') decisions.push(rec.decision)
@@ -88,6 +106,6 @@ export class LearningLog {
       }
     }
     const gone = new Set(supersessions.map((s) => s.eventId))
-    return { events, activeEvents: events.filter((e) => !gone.has(e.id)), supersessions, proposals, decisions, promotions }
+    return { events, activeEvents: events.filter((e) => !gone.has(e.id)), supersessions, proposals, decisions, promotions, corruptLines, duplicateEventLines }
   }
 }

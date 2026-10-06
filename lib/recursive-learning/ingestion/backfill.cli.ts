@@ -1,4 +1,4 @@
-/** Usage: pnpm run backfill:recursive-learning [-- --apply] [--limit N] [--include CLASS,CLASS] */
+/** Usage: pnpm run backfill:recursive-learning [-- --apply] [--supersede-stale] [--limit N] [--include CLASS,CLASS] */
 import path from 'node:path'
 import { defaultLearningLog } from '../paths'
 import { backfillFoundryMissions } from './backfill'
@@ -14,5 +14,6 @@ const report = await backfillFoundryMissions({
   limit: val('--limit') ? Number(val('--limit')) : undefined,
   includeClassifications: val('--include')?.split(','),
   dryRun: !args.includes('--apply'),
+  supersedeStale: args.includes('--supersede-stale'),
 })
 console.log(JSON.stringify(report, null, 2))

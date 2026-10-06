@@ -16,6 +16,7 @@ export function createEvaluationEvent(input: EvaluationEventInput, now: Date = n
   if (!input.source?.ref) throw new Error('source.ref required (evidence must be traceable)')
   if (Number.isNaN(Date.parse(input.occurredAt))) throw new Error('occurredAt must be an ISO timestamp')
 
+  if (Date.parse(input.occurredAt) > now.getTime() + 86_400_000) throw new Error('occurredAt is in the future')
   const validation: ValidationStatus = input.validation ?? 'UNKNOWN'
   const coercions: string[] = []
   let outcome = input.outcome
