@@ -7,6 +7,9 @@ import { AgentTransitionError, assertTransition } from './lifecycle'
 import { detectNeed, missingCriteria } from './need'
 import { NEED_CRITERIA, type AgentState } from './types'
 import { EffectBlockedError, WorkerError, approveEffect, auditCompleteness, deriveWorkers, executeWorker, recoverInterruptedRuns, registerWorker, resumeWorker, stopWorker, type WorkerDraft } from './workers'
+import { FeedbackError, evaluateAgent, executorEvidence, recommendForAgent, recordFeedback } from './evaluation'
+import { freshLog as p9Log, ev as p9Ev } from '@/lib/recursive-learning/testkit'
+import { scoreMatrix } from '@/lib/recursive-learning/scoring'
 import { checkTaskScope, type AgentTask } from './specialization'
 import { AdaptationError, applyApprovedScopeChange, decideAdaptation, proposeAdaptation } from './adaptation'
 
@@ -194,5 +197,87 @@ const { check, finish } = harness('AGENT_OPS_VALIDATION')
   const dead = await executeWorker(rt.log, 'worker-docs-freshness', ok, { now: NOW, runId: 'rt1' })
   check('C26_retired_agent_workers_never_run', !dead.ok && dead.reason === 'AGENT_NOT_ACTIVE')
   void EffectBlockedError
+}
+// ---- P10-D: evaluation, recommendations, Phase 9 consumption
+{
+  const mk = (specialization: 'documentation_synthesis' | 'codebase_triage' = 'documentation_synthesis') => {
+    const o = activeAgent({ specialization })
+    registerWorker(o.log, { id: 'w', agentId: o.spec.id, category: 'documentation_freshness', version: '1', mission: 'm', permissionScope: ['read_docs'], memoryScope: ['docs'], limits: { maxRuntimeMs: 1000, maxRunsPerDay: 500, maxConsecutiveFailures: 10, cadenceMinutes: null } }, 'commander:mark', NOW)
+    return o
+  }
+  let seq = 0
+  const run = (o: ReturnType<typeof mk>, outcome: 'ok' | 'fail' | 'block', extra: Record<string, unknown> = {}) => executeWorker(o.log, 'w', async (ctx) => { if (outcome === 'fail') throw new Error('x'); if (outcome === 'block') ctx.requestEffect('spend'); return extra }, { now: NOW, runId: `d-${++seq}` })
+  const empty = mk()
+  const e0 = evaluateAgent(empty.log, empty.spec.id, NOW)
+  check('D01_no_evidence_is_UNKNOWN_never_zero', e0.runs.total === 0 && Object.values(e0.dimensions).every((v) => v === 'UNKNOWN'), JSON.stringify(e0.dimensions))
+  const m = mk()
+  for (let i = 0; i < 6; i++) await run(m, 'ok')
+  for (let i = 0; i < 2; i++) await run(m, 'fail')
+  for (let i = 0; i < 3; i++) await run(m, 'block')
+  const em = evaluateAgent(m.log, m.spec.id, NOW)
+  check('D02_success_rate_excludes_blocked_stopped_interrupted', em.runs.terminal === 8 && em.runs.blocked === 3 && em.dimensions.taskSuccessRate === 6 / 8 && em.dimensions.failureRate === 2 / 8 && em.blockedEffectAttempts === 3)
+  check('D03_cost_unknown_when_unreported_latency_known', em.dimensions.meanCostUsd === 'UNKNOWN' && typeof em.dimensions.meanLatencyMs === 'number' && em.dimensions.auditCompleteness === 1 && em.dimensions.approvalDoctrineCompliance === 1)
+  await run(m, 'ok', { resource: { costUsd: 0.5 } }); await run(m, 'ok', { resource: { costUsd: 1.5 } })
+  check('D04_mean_cost_over_reporters_only', evaluateAgent(m.log, m.spec.id, NOW).dimensions.meanCostUsd === 1)
+  const r0 = recommendForAgent(freshOps().log, 'nobody', NOW)
+  const rThin = recommendForAgent(empty.log, empty.spec.id, NOW)
+  check('D05_insufficient_evidence_never_recommends_action', r0.action === 'none' && rThin.action === 'none' && rThin.reasons[0].startsWith('INSUFFICIENT_EVIDENCE'))
+
+  const bad = mk(); for (let i = 0; i < 6; i++) { await run(bad, 'fail'); await run(bad, 'ok') }
+  const bad2 = mk(); for (let i = 0; i < 9; i++) { await run(bad2, 'fail'); if (i < 2) await run(bad2, 'ok') }
+  const retrain = recommendForAgent(bad.log, bad.spec.id, NOW)
+  const retire = recommendForAgent(bad2.log, bad2.spec.id, NOW)
+  check('D06_underperformers_get_retrain_or_retire_recommendation', retrain.action === 'retrain' && retire.action === 'retire', `${retrain.action}/${retire.action}`)
+  const stateBefore = bad2.reg.get(bad2.spec.id)!.state
+  const persisted = recommendForAgent(bad2.log, bad2.spec.id, NOW, { persist: true })
+  check('D07_recommendation_is_not_applied_and_agent_state_unchanged', persisted.applied === false && bad2.reg.get(bad2.spec.id)!.state === stateBefore && stateBefore === 'ACTIVE' && bad2.log.view().records.some((r) => r.t === 'recommendation'))
+  recommendForAgent(bad2.log, bad2.spec.id, NOW, { flagForReview: true })
+  check('D08_flag_for_review_is_opt_in_and_only_parks_to_UNDER_REVIEW_by_system', bad2.reg.get(bad2.spec.id)!.state === 'UNDER_REVIEW' && bad2.reg.get(bad2.spec.id)!.history.at(-1)!.by === 'system:evaluator' && (await run(bad2, 'ok')).ok === false)
+
+  const c = mk(); for (let i = 0; i < 10; i++) await run(c, 'ok')
+  const runIds = evaluateAgent(c.log, c.spec.id, NOW).evidenceRunIds
+  let fbErr = 0
+  for (const fn of [() => recordFeedback(c.log, runIds[0], 'accepted', 'agent:x', 'n', {}, NOW), () => recordFeedback(c.log, 'nope', 'accepted', 'commander:mark', 'n', {}, NOW), () => recordFeedback(c.log, runIds[0], 'meh' as never, 'commander:mark', 'n', {}, NOW)]) { try { fn() } catch (e) { if (e instanceof FeedbackError) fbErr += 1 } }
+  check('D09_feedback_requires_commander_known_finished_run', fbErr === 3)
+  for (let i = 0; i < 4; i++) recordFeedback(c.log, runIds[i], 'corrected', 'commander:mark', 'wrong', {}, NOW)
+  check('D10_correction_rate_unknown_until_enough_reviewed_then_narrow', evaluateAgent(c.log, c.spec.id, NOW).dimensions.commanderCorrectionRate === 1 && recommendForAgent(c.log, c.spec.id, NOW).action === 'none')
+  for (let i = 4; i < 6; i++) recordFeedback(c.log, runIds[i], 'accepted', 'commander:mark', 'fine', {}, NOW)
+  const narrowed = recommendForAgent(c.log, c.spec.id, NOW)
+  check('D11_high_correction_rate_recommends_narrowing', narrowed.action === 'narrow' && evaluateAgent(c.log, c.spec.id, NOW).dimensions.accuracy === 2 / 6)
+  recordFeedback(c.log, runIds[0], 'accepted', 'commander:mark', 'on reflection ok', {}, NOW)
+  check('D12_latest_feedback_wins', evaluateAgent(c.log, c.spec.id, NOW).dimensions.commanderCorrectionRate === 3 / 6)
+  // approval doctrine violation injected (cannot occur through the governor): detected
+  c.log.append({ t: 'run', rid: 'run:viol:start', run: { ...{ runId: 'viol', workerId: 'w', agentId: c.spec.id, workerVersion: '1', mission: 'm', permissionScope: ['read_docs'], memoryScope: ['docs'], startedAt: NOW.toISOString(), endedAt: NOW.toISOString(), status: 'SUCCEEDED', toolsUsed: [], outputs: [], escalations: [], errors: [], executor: 'UNKNOWN', resource: { durationMs: 1, costUsd: 'UNKNOWN', tokens: 'UNKNOWN' }, requestedEffects: ['spend'] } } as never })
+  const viol = evaluateAgent(c.log, c.spec.id, NOW)
+  check('D13_approval_doctrine_violation_is_detected_and_recommends_retire', (viol.dimensions.approvalDoctrineCompliance as number) < 1 && recommendForAgent(c.log, c.spec.id, NOW).action === 'retire')
+
+  // merge candidate
+  const two = freshOps(); const dr = (id: string) => { const nd = fullNeed(`n-${id}`); two.reg.recordNeed(nd); const sp = two.reg.propose(nd.id, draft({ id, specialization: 'codebase_triage', permissionScope: ['read_docs', 'write_own_reports'] }), NOW); two.reg.transition(sp.id, 'APPROVED', 'commander:mark', 'a', NOW); two.reg.transition(sp.id, 'ACTIVE', 'commander:mark', 'a', NOW); registerWorker(two.log, { id: `w-${id}`, agentId: sp.id, category: 'incident_watch', version: '1', mission: 'm', permissionScope: ['read_docs'], memoryScope: ['docs'], limits: { maxRuntimeMs: 1000, maxRunsPerDay: 500, maxConsecutiveFailures: 10, cadenceMinutes: null } }, 'commander:mark', NOW) }
+  dr('big'); dr('small')
+  for (let i = 0; i < 12; i++) await executeWorker(two.log, 'w-big', async () => ({}), { now: NOW, runId: `mb-${i}` })
+  for (let i = 0; i < 2; i++) await executeWorker(two.log, 'w-small', async () => ({}), { now: NOW, runId: `ms-${i}` })
+  const lone = freshOps(); void lone
+  check('D14_overlapping_low_usage_agent_gets_merge_recommendation', recommendForAgent(two.log, 'small', NOW).action === 'merge' && recommendForAgent(two.log, 'big', NOW).action === 'none')
+  const one = freshOps(); const nb = fullNeed('b'); one.reg.recordNeed(nb); const bg = one.reg.propose(nb.id, draft({ id: 'big2', specialization: 'codebase_triage' }), NOW); one.reg.transition(bg.id, 'APPROVED', 'commander:mark', 'a', NOW); one.reg.transition(bg.id, 'ACTIVE', 'commander:mark', 'a', NOW)
+  registerWorker(one.log, { id: 'wb', agentId: bg.id, category: 'incident_watch', version: '1', mission: 'm', permissionScope: ['read_docs'], memoryScope: ['docs'], limits: { maxRuntimeMs: 1000, maxRunsPerDay: 500, maxConsecutiveFailures: 10, cadenceMinutes: null } }, 'commander:mark', NOW)
+  for (let i = 0; i < 12; i++) await executeWorker(one.log, 'wb', async () => ({}), { now: NOW, runId: `ob-${i}` })
+  const ns = fullNeed('s'); one.reg.recordNeed(ns); const sm = one.reg.propose(ns.id, draft({ id: 'small2', specialization: 'codebase_triage' }), NOW); one.reg.transition(sm.id, 'APPROVED', 'commander:mark', 'a', NOW); one.reg.transition(sm.id, 'ACTIVE', 'commander:mark', 'a', NOW)
+  registerWorker(one.log, { id: 'ws', agentId: sm.id, category: 'incident_watch', version: '1', mission: 'm', permissionScope: ['read_docs'], memoryScope: ['docs'], limits: { maxRuntimeMs: 1000, maxRunsPerDay: 500, maxConsecutiveFailures: 10, cadenceMinutes: null } }, 'commander:mark', NOW)
+  for (let i = 0; i < 10; i++) await executeWorker(one.log, 'ws', async () => ({}), { now: NOW, runId: `os-${i}` })
+  check('D15_no_merge_when_both_agents_have_real_usage', recommendForAgent(one.log, 'small2', NOW).action === 'none')
+
+  // Phase 9 consumption
+  const p9 = p9Log()
+  for (let i = 1; i <= 6; i++) p9.recordEvent(p9Ev('ollama', 'code_modification', 'SUCCESS', i), NOW)
+  const cards = scoreMatrix(p9.view().activeEvents, NOW)
+  const k = mk(); await run(k, 'ok', { executor: { provider: 'ollama', model: 'qwen2.5-coder:14b' } }); await run(k, 'ok')
+  const p9Before = readFileSync(p9.file, 'utf8')
+  const evd = executorEvidence(k.log, k.spec.id, cards)
+  const recA = recommendForAgent(k.log, k.spec.id, NOW)
+  const recB = (() => { const r = recommendForAgent(k.log, k.spec.id, NOW); return r })()
+  check('D16_phase9_evidence_attached_for_actual_executor_only', evd.length === 1 && evd[0].executor === 'ollama/qwen2.5-coder:14b' && evd[0].runCount === 1 && evd[0].phase9.length >= 1 && evd[0].phase9[0].samples === 6)
+  check('D17_phase9_is_read_only_and_does_not_change_recommendations', readFileSync(p9.file, 'utf8') === p9Before && recA.action === recB.action && recA.action === 'none')
+  const restartedEval = evaluateAgent(new AgentOpsLog(m.dir), m.spec.id, NOW)
+  check('D18_evaluation_identical_after_restart', JSON.stringify({ ...restartedEval, generatedAt: 0 }) === JSON.stringify({ ...evaluateAgent(m.log, m.spec.id, NOW), generatedAt: 0 }))
 }
 finish()
