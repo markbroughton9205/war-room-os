@@ -9,7 +9,7 @@ const checks = [
   'lib/native-builder/foundryWorkbenchW0.validation.ts',
 ]
 
-// Known-failing at baseline ad5ad5e (fixture failures fixture_A..G in W4); tracked as P9 issue,
+// Known-failing at baseline ad5ad5e (fixture failures fixture_A..G in W4); tracked as operator-polish issue,
 // not part of the acceptance bundle until the fixtures are repaired.
 const knownFailing = ['lib/native-builder/foundryWorkbenchW4.validation.ts']
 

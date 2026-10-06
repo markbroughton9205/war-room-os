@@ -45,18 +45,18 @@ the 7 deferred Phase-8 HOLD hunks, any security/auth weakening.
 - Mission Control lists missions/jobs but operator-facing "what now" affordance is uneven; recovery states and
   receipt access need consistent surfacing (acceptance tests below define the bar).
 - Resource discipline after the storage cut: test-only checkpoints, media tmp, and install accumulation must
-  stay bounded during Phase 9 builds.
+  stay bounded during operator-polish builds.
 
 ## Implementation slices (dependency order)
-- P9-A Startup/Resume/State Truth: validate no phantom EXECUTING after restart; recovery snapshot correctness.
-- P9-B Mission Control daily UX: honest status, progress, blockers, receipts links.
-- P9-C Workbench operator flow: policy-gated refusals explain why; ownership visible.
-- P9-D Provider/worker health + routing clarity: unavailable provider → useful fallback/refusal, no silent switch.
-- P9-E Failure/recovery UX: stale lock recovery messaging, duplicate mission prevention, operator retry.
-- P9-F Performance/resource discipline: broker.tmp cleanup guard, tmp/checkpoint retention rules, poll audit.
-- P9-G Receipt/evidence surfacing: completion proof accessible; installed-vs-source truth surfaced.
-- P9-H Daily-driver polish: empty/loading/refusal states, dead-control pass.
-- P9-I Installed runtime verification: build, install into canonical runtime (new versioned dir allowed once),
+- OP-A Startup/Resume/State Truth: validate no phantom EXECUTING after restart; recovery snapshot correctness.
+- OP-B Mission Control daily UX: honest status, progress, blockers, receipts links.
+- OP-C Workbench operator flow: policy-gated refusals explain why; ownership visible.
+- OP-D Provider/worker health + routing clarity: unavailable provider → useful fallback/refusal, no silent switch.
+- OP-E Failure/recovery UX: stale lock recovery messaging, duplicate mission prevention, operator retry.
+- OP-F Performance/resource discipline: broker.tmp cleanup guard, tmp/checkpoint retention rules, poll audit.
+- OP-G Receipt/evidence surfacing: completion proof accessible; installed-vs-source truth surfaced.
+- OP-H Daily-driver polish: empty/loading/refusal states, dead-control pass.
+- OP-I Installed runtime verification: build, install into canonical runtime (new versioned dir allowed once),
   restart/resume probe, controlled failure/recovery, rollback proof, retention cleanup.
 
 ## Objective acceptance criteria (summary)
@@ -77,10 +77,10 @@ identity from `INSTALL_STAMP.json`, run one Foundry-owned objective via the inst
 inject one controlled failure, prove rollback dir intact, delete scratch build artifacts after.
 
 ## Rollback plan
-- Source: branch `live-council-intelligence-repair`; any Phase 9 work lands as discrete local commits that can be
+- Source: branch `live-council-intelligence-repair`; any operator-polish work lands as discrete local commits that can be
   reverted by SHA.
 - Runtime: keep canonical `…-05bc` as the known-good until a new install validates; keep
   `…-terra-layer-governor` as the retained rollback; one new `…-phase9` dir maximum; remove scratch builds.
-- If Phase 9 validation fails: revert commits, leave canonical runtime on Phase 8.
+- If operator-polish validation fails: revert commits, leave canonical runtime on Phase 8.
 
-This scope is frozen as of P9-0. Do not expand silently.
+This scope is frozen as of OP-0. Do not expand silently.
