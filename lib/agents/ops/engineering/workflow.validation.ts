@@ -347,5 +347,28 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   const an2 = m2.calls.find((c) => c.kind === 'analyst')
   check('N42_a_failure_that_only_implicates_the_new_test_after_verified_acceptance_is_repaired_in_the_test_and_never_touches_implementation', r2.status === 'COMPLETED' && !!an2 && !an2.prompt.includes('--- src/messageStore.mjs ---') && an2.prompt.includes('The failing test is the suspect') && y.ws.read('src/messageStore.mjs').includes("return 'store'"), `${r2.status} ${r2.reason}`)
 }
+// ---- 12. repeated hypotheses: acting twice on the same cause is refused; one different hypothesis is requested, else UNDETERMINED early
+{
+  const brk = CHAT_REFERENCE['src/chatService.mjs'].replace('export function createSession(name) {', 'export function createSession(name) {{{')
+  const x = makeWorld({ limits: { maxRetries: 5 } }); let analysed = 0, repairsAsked = 0
+  const m1 = new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'src/chatService.mjs') return fenced(brk)
+    if (c.kind === 'analyst') { analysed += 1; return JSON.stringify({ hypothesis: 'createSession has a stray brace that makes chatService.mjs fail to parse', file: 'src/chatService.mjs', differs: 'another look' }) }
+    if (c.kind === 'repair') { repairsAsked += 1; return fenced(brk) }
+    return good(c)
+  })
+  const r1 = await runFeatureWorkflow(deps(x, m1), REQ)
+  const led1 = deriveLedger(x.log, x.asg.id)
+  check('N43_a_re_proposed_hypothesis_is_challenged_once_and_then_ends_UNDETERMINED_without_spending_another_repair', r1.status === 'FAILED' && repairsAsked === 1 && led1.repairs.length === 1 && led1.undetermined.size === 1 && analysed === 3 && m1.calls.filter((c) => c.kind === 'analyst')[2].prompt.includes('REPEATED HYPOTHESIS REJECTED'), `${r1.status} repairs=${repairsAsked} analysed=${analysed}`)
+  const y = makeWorld({ limits: { maxRetries: 5 } }); let an = 0, rp = 0
+  const m2 = new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'src/chatService.mjs') return fenced(brk)
+    if (c.kind === 'analyst') { an += 1; return JSON.stringify({ hypothesis: an <= 2 ? 'createSession has a stray brace that makes chatService.mjs fail to parse' : 'the second function body opens two braces where one is needed (SyntaxError at createSession)', file: 'src/chatService.mjs', differs: 'another look' }) }
+    if (c.kind === 'repair') { rp += 1; return fenced(rp === 1 ? brk : CHAT_REFERENCE['src/chatService.mjs']) }
+    return good(c)
+  })
+  const r2 = await runFeatureWorkflow(deps(y, m2), REQ)
+  check('N44_when_the_analyst_does_offer_a_different_hypothesis_the_loop_continues_and_can_fix_the_failure', r2.status === 'COMPLETED' && rp === 2 && an === 3, `${r2.status} ${r2.reason} rp=${rp} an=${an}`)
+}
 void deriveAssignments; void AgentRegistry
 finish()

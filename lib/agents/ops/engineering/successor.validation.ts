@@ -13,7 +13,19 @@ import type { EngineeringTool } from '../types'
 const { check, finish } = harness('AGENT_ENG_SUCCESSOR_VALIDATION')
 const TOOLS: EngineeringTool[] = ['read_workspace', 'write_workspace', 'run_workspace_tests', 'run_typecheck', 'model_local', 'read_runtime_output']
 const REQ = { request: CHAT_FEATURE.request, acceptance: CHAT_FEATURE.acceptance, hints: CHAT_FEATURE.hints }
-const good = (c: { kind: string; path: string | null }) => (c.kind === 'file' && c.path && CHAT_REFERENCE[c.path] ? fenced(CHAT_REFERENCE[c.path]) : null)
+const STORE_TEST = `import test from 'node:test'
+import assert from 'node:assert'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+process.env.CHAT_DATA_FILE = path.join(mkdtempSync(path.join(tmpdir(), 'store-')), 'sessions.json')
+const store = await import('../src/messageStore.mjs')
+test('sessions round-trip through the data file', () => {
+  store.saveSessions([{ id: 'x', name: 'x', createdAt: 'now', messages: [] }])
+  assert.strictEqual(store.loadSessions()[0].id, 'x')
+})
+`
+const good = (c: { kind: string; path: string | null }) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(STORE_TEST) : c.kind === 'file' && c.path === 'test/chatService.test.mjs' ? 'NO_CHANGE' : c.kind === 'file' && c.path && CHAT_REFERENCE[c.path] ? fenced(CHAT_REFERENCE[c.path]) : null)
 
 async function crashed() {
   const w = engWorld(); const a = addAgent(w, 'agent-a'); const b = addAgent(w, 'agent-b')
@@ -41,5 +53,24 @@ const doneFile = latestCheckpoint(y.w.log, y.asg.id)!.state.fileChanges[0].path
 new Workspace(y.root).write(doneFile, '// edited by someone else\n')
 const seed2 = seedFromHandoff(y.w.log, cont2.assignmentId, new Workspace(y.root))
 check('U05_a_drifted_file_makes_the_seed_unsafe_with_the_conflict_named', seed2.seeded && !seed2.safe && seed2.conflicts.some((c) => c.includes(doneFile)))
+// end to end: the successor agent completes the feature from the predecessor's checkpoint, calling the model only for the remaining steps
+const z = await crashed()
+const contZ = continueAssignment(z.w.log, z.asg.id, z.b.id, C, 'predecessor died; successor continues', NOW)
+startAssignment(z.w.log, contZ.assignmentId, 'system:runner', NOW)
+const model = new ScriptedModel(good)
+const events: string[] = []
+const done = await runFeatureWorkflow({ log: z.w.log, assignmentId: contZ.assignmentId, ws: new Workspace(z.root), model, tools: TOOLS, onEvent: (e) => events.push(`${e.kind}:${e.detail}`) }, REQ)
+const fileCalls = model.calls.filter((c) => c.kind === 'file').map((c) => c.path)
+check('U06_the_successor_completes_the_feature_calling_the_model_only_for_the_steps_the_predecessor_did_not_finish', done.status === 'COMPLETED' && fileCalls.length === 4 && !fileCalls.includes('src/messageStore.mjs') && !fileCalls.includes('src/chatService.mjs') && events.some((e) => e.startsWith('SUCCESSOR:')), `${done.status} ${done.reason} calls=${fileCalls.join(',')}`)
+const vz = deriveAssignments(z.w.log).assignments
+check('U07_assignment_states_are_honest_predecessor_INTERRUPTED_successor_COMPLETED_by_the_other_agent', vz.get(z.asg.id)!.state === 'INTERRUPTED' && vz.get(contZ.assignmentId)!.state === 'COMPLETED' && vz.get(contZ.assignmentId)!.assignment.agentId === z.b.id)
+check('U08_predecessor_files_are_not_rewritten_by_the_successor', (() => { const cp = latestCheckpoint(z.w.log, contZ.assignmentId)!.state; const pre = latestCheckpoint(z.w.log, z.asg.id)!.state; return pre.fileChanges.every((f) => cp.fileChanges.some((g) => g.path === f.path && g.afterHash === f.afterHash)) })())
+// drift: the successor refuses to overwrite someone else's change
+const q = await crashed()
+const contQ = continueAssignment(q.w.log, q.asg.id, q.b.id, C, 'continue', NOW)
+startAssignment(q.w.log, contQ.assignmentId, 'system:runner', NOW)
+new Workspace(q.root).write(latestCheckpoint(q.w.log, q.asg.id)!.state.fileChanges[0].path, '// edited by someone else\n')
+const conflict = await runFeatureWorkflow({ log: q.w.log, assignmentId: contQ.assignmentId, ws: new Workspace(q.root), model: new ScriptedModel(good), tools: TOOLS }, REQ)
+check('U09_a_drifted_predecessor_file_makes_the_successor_stop_with_CONFLICT_instead_of_overwriting', conflict.status === 'CONFLICT')
 void deriveAssignments
 finish()

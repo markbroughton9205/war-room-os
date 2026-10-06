@@ -9,6 +9,7 @@ import type { CommandRecord, ModelClient, ModelResult } from './runtime/ports'
 import { runCommand } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
+import { seedFromHandoff } from './successor'
 
 export type FeatureRequest = { request: string; acceptance: string[]; hints?: string[] }
 export type WorkflowEvent = { at: string; kind: string; detail: string }
@@ -71,6 +72,16 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     plan = planFromCode(index0, { request: req.request, acceptance: req.acceptance, hints: req.hints, kind: 'feature' })
     for (const f of state.fileChanges) changed.add(f.path)
     emit('RESUME', `resuming from checkpoint ${prior.seq}; skipping ${rp.skip.join(',') || 'none'}; redo ${rp.redo.map((r) => r.stepId).join(',') || 'none'}`)
+  } else if (seedFromHandoff(log, assignmentId, ws).seeded) {
+    // successor: start from the PREDECESSOR's structured checkpoint (done steps kept, the rest retried), never from scratch
+    const seed = seedFromHandoff(log, assignmentId, ws)
+    if (!seed.seeded) throw new Error('unreachable')
+    if (!seed.safe) return result('CONFLICT', `cannot continue the predecessor's work safely: ${seed.conflicts.join('; ')}`)
+    state = seed.state
+    plan = planFromCode(index0, { request: req.request, acceptance: req.acceptance, hints: req.hints, kind: 'feature' })
+    for (const f of state.fileChanges) changed.add(f.path)
+    saveCheckpoint(log, assignmentId, state, actor, clock())
+    emit('SUCCESSOR', `continuing ${seed.fromAssignment}: keeping ${seed.skip.join(',') || 'no'} done step(s), retrying ${state.steps.filter((x) => x.status === 'PENDING').map((x) => x.id).join(',')}; ${seed.carriedDoNotRepeat} doNotRepeat carried`)
   } else {
     plan = planFromCode(index0, { request: req.request, acceptance: req.acceptance, hints: req.hints, kind: 'feature' })
     const fileSteps: CheckpointStep[] = []
@@ -198,12 +209,16 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   }
   const allTests = (): string[] | null => { const t = Object.keys(ws.snapshot()).filter((f) => /^test\/.+\.test\.m?js$/.test(f)); return t.length ? ['node', '--test', ...t] : null }
 
+  const hypTokens = (t: string) => new Set(t.toLowerCase().match(/[a-z0-9_]+/g) ?? [])
+  /** Near-identical wording (token Jaccard >= 0.6) means the analyst re-proposed a cause that was already acted on without fixing the failure. */
+  const sameHypothesis = (a: string, b: string) => { const A = hypTokens(a), B = hypTokens(b); let i = 0; for (const x of A) if (B.has(x)) i += 1; return A.size > 0 && B.size > 0 && i / (A.size + B.size - i) >= 0.6 }
   /** The evidence-driven repair loop for ONE failing command. Returns true when the ORIGINAL failure is fixed. */
   const debugLoop = async (failedCmd: CommandRecord, candidates: string[], stepId: string, label: string, rerunOriginal: () => Promise<CommandRecord> = () => runCheck(failedCmd.argv), confine?: string[]): Promise<boolean> => {
     let cmd = failedCmd
     let rec = recordFailure(log, assignmentId, cmd, actor, clock())
     const attemptsNotes: string[] = confine ? ['The implementation already PASSED the independent acceptance verification. The failing test is the suspect: fix the TEST file so it matches the real behaviour; do not change implementation files.'] : []
     const triedFiles = new Set<string>()
+    const priorHyps: string[] = []
     // Per-failure budget is MAX_REPAIR_ATTEMPTS; a repair that STRICTLY REDUCES the number of failing checks is progress and opens a fresh failure record
     // for the remainder (its own evidence discipline). The assignment's maxRetries ceiling bounds the total, and strictly-decreasing failures cannot loop.
     const totalCap = Math.max(1, limits.maxRetries), perCap = Math.min(MAX_REPAIR_ATTEMPTS, totalCap)
@@ -212,18 +227,31 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const bs = budgetStop(); if (bs) throw Object.assign(new Error('STOP'), { stop: bs })
       const out = `${cmd.stdout}\n${cmd.stderr}`
       const evCmd = addEvidence(log, assignmentId, rec.failureId, { kind: /\.m?js$/.test(cmd.argv.at(-1) ?? '') && cmd.argv[1] === '--check' ? 'type_diagnostic' : 'test_result', ref: `${cmd.argv.join(' ')}#attempt${attempt}`, content: out, summary: `${label} failed (exit ${cmd.exitCode}): ${out.split('\n').filter((l) => /Error|not ok|✖|fail/i.test(l)).slice(0, 2).join(' | ').slice(0, 220) || 'see output'}` }, actor, clock())
-      // a file already edited without fixing the ORIGINAL failure is deprioritised: the next attempt must look elsewhere while untried candidates remain
-      const allCand = candidatesFromOutput(out, candidates.filter((c) => ws.exists(c))).filter((c) => !confine || confine.includes(c))
-      const untried = allCand.filter((c) => !triedFiles.has(c))
-      const cand = untried.length ? untried : allCand
+      const cand = candidatesFromOutput(out, candidates.filter((c) => ws.exists(c))).filter((c) => !confine || confine.includes(c))
       const evFiles = cand.map((c) => addEvidence(log, assignmentId, rec.failureId, { kind: 'file_read', ref: c, content: ws.read(c), summary: `current content of ${c}` }, actor, clock()))
       const ar = await call(ANALYST_SYSTEM, analystPrompt({ failureOutput: out, candidates: cand.map((c) => ({ path: c, text: ws.read(c) })), prior: attemptsNotes }), true)
       noteTokens(ar)
       if (!ar.ok) { attemptsNotes.push(`analysis call failed: ${ar.detail}`); continue }
       let parsed: { hypothesis?: string; file?: string; differs?: string } = {}
       try { parsed = JSON.parse(ar.text) } catch { parsed = {} }
-      const hypText = (parsed.hypothesis ?? '').trim()
+      let hypText = (parsed.hypothesis ?? '').trim()
       if (!hypText) { attemptsNotes.push('analysis returned no hypothesis'); continue }
+      if (priorHyps.some((p) => sameHypothesis(p, hypText)) && budgetLeft()) {
+        // the same cause was already acted on and the failure persists: ask once for a DIFFERENT cause before spending another repair
+        const again = await call(ANALYST_SYSTEM, analystPrompt({ failureOutput: out, candidates: cand.map((c) => ({ path: c, text: ws.read(c) })), prior: [...attemptsNotes, `REPEATED HYPOTHESIS REJECTED: "${hypText.slice(0, 220)}" was already acted on and the failure persists. Propose a DIFFERENT cause (another file or another mechanism), grounded in the failing output.`] }), true, { temperature: 0.5, seed: 7 + attempt })
+        noteTokens(again)
+        let p2: { hypothesis?: string; file?: string; differs?: string } = {}
+        try { p2 = again.ok ? JSON.parse(again.text) : {} } catch { p2 = {} }
+        const h2 = (p2.hypothesis ?? '').trim()
+        if (!h2 || priorHyps.some((p) => sameHypothesis(p, h2))) {
+          attemptsNotes.push('analyst repeated an already-acted-on hypothesis even when asked for a different one')
+          markUndetermined(log, assignmentId, rec.failureId, 'the analyst could only re-propose an already-acted-on cause; no new hypothesis exists to act on', actor, clock())
+          state.doNotRepeat.push({ key: `failure:${rec.failureId}`, reason: `${label}: no new hypothesis available; cause UNDETERMINED` })
+          return false
+        }
+        hypText = h2; parsed = p2
+      }
+      priorHyps.push(hypText)
       const file = cand.includes(parsed.file ?? '') ? parsed.file! : cand[0]
       const lastHyp = [...deriveLedger(log, assignmentId).hypotheses.entries()].filter(([, h]) => h.failureId === rec.failureId && h.status !== 'REFUTED').at(-1)
       const hid = proposeHypothesis(log, assignmentId, rec.failureId, { statement: hypText, supporting: [evCmd.id, ...evFiles.map((e) => e.id).slice(0, 2)], ...(lastHyp && attempt > 1 ? { revisionOf: lastHyp[0], whyRevised: `attempt ${attempt - 1} did not fix it; new failure output recorded as ${evCmd.id}` } : {}) }, actor, clock())
@@ -269,7 +297,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       if (v.outcome === 'NEW_FAILURE' && rerun.exitCode !== 0 && after < before) {
         attemptsNotes.push(`progress: failing checks ${before} -> ${after}; continuing on the remaining failure`)
         emit('PROGRESS', `${label}: failing checks ${before} -> ${after}`)
-        cmd = rerun; rec = recordFailure(log, assignmentId, cmd, actor, clock()); attempt = 0; triedFiles.clear()
+        cmd = rerun; rec = recordFailure(log, assignmentId, cmd, actor, clock()); attempt = 0; triedFiles.clear(); priorHyps.length = 0
         continue
       }
       cmd = rerun
