@@ -10,6 +10,9 @@ import type { FoundryMissionModel, FoundryModelResponse } from './foundryModelTy
 type CaseResult = { name: string; pass: boolean; detail: string }
 const check = (name: string, pass: boolean, detail: string): CaseResult => ({ name, pass, detail })
 
+// The validation injects its own models (hosted and local test doubles); the operator's saved provider policy (for instance LOCAL) must not decide which of them may run.
+process.env.FOUNDRY_PROVIDER_POLICY = 'AUTO'
+
 class TestModel implements FoundryMissionModel {
   readonly provider: 'wrim' | 'openai'
   readonly model: string
@@ -74,6 +77,10 @@ async function run() {
     new TestModel('wrim', unavailable),
     new TestModel('openai', success),
   ]).route('chooseNextAction', { kind: 'chooseNextAction', context })
+  const wrimPinned = await new FoundryModelRouter([
+    new TestModel('wrim', unavailable),
+    new TestModel('openai', success),
+  ]).route('chooseNextAction', { kind: 'chooseNextAction', context }, { pinProvider: 'wrim' })
   const loopMission = await startMission('Contract fixture: search for ALPHA and demonstrate bounded repeated-action handling.')
   const loopRouter = new FoundryModelRouter([
     new TestModel('openai', success),
@@ -92,7 +99,8 @@ async function run() {
     check('p005_contract_06_blocker_schema', blocked.ok && blocked.decision.decision === 'BLOCKED', JSON.stringify(blocked)),
     check('p005_contract_07_context_bounded', JSON.stringify(context.relevantExcerpts).length <= 12_000, `${JSON.stringify(context.relevantExcerpts).length} chars`),
     check('p005_contract_08_context_has_gate', 'completionGate' in context && Array.isArray(context.tools), context.completionGate.detail),
-    check('p005_contract_09_provider_fallback', routed.response.ok && routed.attempts.length === 2, JSON.stringify(routed.attempts)),
+    // WRIM is a pinned-only provider: it is never in the default rotation, so an unavailable WRIM cannot be "fallen back from" and cannot be silently switched away from.
+    check('p005_contract_09_provider_fallback', routed.response.ok && routed.attempts.length === 1 && routed.attempts[0]?.provider === 'openai' && wrimPinned.response.ok === false && wrimPinned.attempts.every(attempt => attempt.provider === 'wrim') && wrimPinned.selectedProvider !== 'openai', JSON.stringify({ routed: routed.attempts, pinned: wrimPinned.attempts })),
     check('p005_contract_10_wrim_interface', futureFoundryModelAdapter('wrim').provider === 'wrim', 'normalized future adapter'),
     check('p005_contract_11_model_tool_executed', loopResult.toolCalls.some(call => call.tool === 'workspace.search'), loopResult.toolCalls.map(call => call.tool).join(',')),
     check('p005_contract_12_loop_detected', loopResult.status === 'BLOCKED' && /Repeated tool loop/.test(loopResult.blocker?.evidence ?? ''), JSON.stringify(loopResult.blocker)),

@@ -1,4 +1,6 @@
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
+import { createOperationsSnapshotReader } from '@/lib/native-builder/foundryOperationsSnapshot'
 import { listMissions } from '@/lib/native-builder/foundryMissionStore'
 import { groupOperationsQueue, toRegistryEntry } from '@/lib/native-builder/foundryMissionRegistry'
 import { ensureRecovered, inspectOperations } from '@/lib/native-builder/foundryOperationsManager'
@@ -13,14 +15,14 @@ import { readLastWatchdogScan } from '@/lib/native-builder/foundryProductionLeas
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-export async function GET(req: Request) {
+const readSnapshot = createOperationsSnapshotReader(async (requestedView) => {
   await ensureRecovered()
-  const view = parseFoundryMissionHistoryView(new URL(req.url).searchParams.get('view'))
+  const view = parseFoundryMissionHistoryView(requestedView)
   const missions = filterMissionsForView(await listMissions(200), view)
   const registry = missions.map(toRegistryEntry)
   const inspection = await inspectOperations()
   const current = selectCurrentCommanderWork(missions)
-  return NextResponse.json({
+  return {
     view,
     queue: groupOperationsQueue(registry),
     currentWork: current ? toFoundryMissionCommanderView(current) : null,
@@ -31,5 +33,12 @@ export async function GET(req: Request) {
     productionOwner: await readProductionOwner(),
     lastWatchdogScan: await readLastWatchdogScan(),
     missions: missions.map(toFoundryMissionCommanderView),
-  })
+  }
+})
+
+export async function GET(req: Request) {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
+  const view = parseFoundryMissionHistoryView(new URL(req.url).searchParams.get('view'))
+  return NextResponse.json(await readSnapshot(view))
 }

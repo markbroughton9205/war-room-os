@@ -196,7 +196,7 @@ export const SingleAgentEngineeringStrategy: MissionExecutionStrategy<Engineerin
       subsystem: request.subsystem,
       severity: request.severity,
     })
-    const { issue, repair } = await reportIssue(input)
+    const { issue, repair } = await reportIssue(input, { commanderRequested: request.executionMode === 'bounded_coding' })
     if (!repair) {
       throw new Error(
         `native-builder merged this into an existing open issue (fingerprint ${issue.fingerprint}) without opening a new repair — call get() with the existing repair id instead of create() again for the same issue.`,

@@ -1,3 +1,4 @@
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import {
   cancelCommandCenter,
@@ -19,10 +20,14 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET() {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   return NextResponse.json(commandCenterSnapshotWithContractViews(getCommandCenterSnapshot()))
 }
 
 export async function POST(req: Request) {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   let body: {
     action?: string
     goal?: string

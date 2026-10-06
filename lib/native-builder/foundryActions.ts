@@ -2,7 +2,12 @@
  * Schema-validated Foundry actions. Malformed/unauthorized actions are rejected.
  * Execution always goes through Engineering Core tools — never a raw shell string.
  */
+import { spawn } from 'node:child_process'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { executeEngineerTool, isEngineerToolName, type EngineerToolName } from './engineerTools'
+import { assertCanonicalRepoPath, readRepoFile, resolveRepoRelativePath } from './repositoryInspector'
 import { classifyArgv } from './commandPolicy'
 import { terminalRepoDiff, terminalRepoStatus } from './terminalExecutor'
 import type { NativeValidationOperation } from './types'
@@ -18,7 +23,9 @@ export const FOUNDRY_ACTION_TYPES = [
   'READ_FILE',
   'SEARCH_CODE',
   'CREATE_FILE',
+  'REPLACE_FILE',
   'PATCH_FILE',
+  'APPEND_FILE',
   'DELETE_FILE',
   'RUN_COMMAND',
   'START_PROCESS',
@@ -37,7 +44,9 @@ export type FoundryAction =
   | { type: 'READ_FILE'; path: string }
   | { type: 'SEARCH_CODE'; query: string }
   | { type: 'CREATE_FILE'; path: string; content: string; reason?: string }
+  | { type: 'REPLACE_FILE'; path: string; content: string; reason: string }
   | { type: 'PATCH_FILE'; path: string; matchText: string; replacementText: string; reason?: string }
+  | { type: 'APPEND_FILE'; path: string; content: string; reason: string }
   | { type: 'DELETE_FILE'; path: string; commanderConfirmed?: boolean; reason?: string }
   | { type: 'RUN_COMMAND'; operation: NativeValidationOperation }
   | { type: 'START_PROCESS'; cmd: string; args: string[]; label?: string }
@@ -98,11 +107,21 @@ function parseOne(type: FoundryActionType, row: Record<string, unknown>): { ok: 
     case 'CREATE_FILE':
       if (!asString(row.path) || typeof row.content !== 'string') return { ok: false, error: 'CREATE_FILE requires path and content.' }
       return { ok: true, action: { type, path: asString(row.path), content: String(row.content), reason: asString(row.reason) || undefined } }
+    case 'REPLACE_FILE':
+      if (!asString(row.path) || typeof row.content !== 'string' || !asString(row.reason)) {
+        return { ok: false, error: 'REPLACE_FILE requires path, complete content, and reason.' }
+      }
+      return { ok: true, action: { type, path: asString(row.path), content: String(row.content), reason: asString(row.reason) } }
     case 'PATCH_FILE':
       if (!asString(row.path) || typeof row.matchText !== 'string' || typeof row.replacementText !== 'string') {
         return { ok: false, error: 'PATCH_FILE requires path, matchText, and replacementText.' }
       }
       return { ok: true, action: { type, path: asString(row.path), matchText: String(row.matchText), replacementText: String(row.replacementText), reason: asString(row.reason) || undefined } }
+    case 'APPEND_FILE':
+      if (!asString(row.path) || typeof row.content !== 'string' || !asString(row.reason)) {
+        return { ok: false, error: 'APPEND_FILE requires path, complete appended content, and reason.' }
+      }
+      return { ok: true, action: { type, path: asString(row.path), content: String(row.content), reason: asString(row.reason) } }
     case 'DELETE_FILE':
       if (!asString(row.path)) return { ok: false, error: 'DELETE_FILE requires path.' }
       return { ok: true, action: { type, path: asString(row.path), commanderConfirmed: row.commanderConfirmed === true, reason: asString(row.reason) || undefined } }
@@ -153,6 +172,25 @@ function skippedDevRuntime(type: FoundryActionType): FoundryActionResult {
   }
 }
 
+async function sourceSyntaxDefect(file: string, content: string): Promise<string | null> {
+  if (!/\.(?:mjs|cjs|js)$/.test(file)) return null
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'foundry-source-preflight-'))
+  const target = path.join(dir, path.basename(file))
+  try {
+    await writeFile(target, content, 'utf8')
+    const result = await new Promise<{ code: number | null; stderr: string }>(resolve => {
+      const child = spawn(process.execPath, ['--check', target], { shell: false, stdio: ['ignore', 'ignore', 'pipe'] })
+      let stderr = ''
+      child.stderr.on('data', chunk => { stderr = (stderr + String(chunk)).slice(-4000) })
+      child.on('error', error => resolve({ code: null, stderr: error.message }))
+      child.on('close', code => resolve({ code, stderr }))
+    })
+    return result.code === 0 ? null : `SOURCE_SYNTAX_REJECTED: ${result.stderr.trim() || `node --check exited ${result.code}`}`
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
 export async function executeFoundryAction(action: FoundryAction, ctx: { repairId: string }): Promise<FoundryActionResult> {
   if (isUnnecessaryDevScriptPackageMutation(action)) return skippedDevRuntime(action.type)
   if (action.type === 'START_PROCESS' && isDevServerLaunch(action.cmd, action.args)) return skippedDevRuntime(action.type)
@@ -169,16 +207,80 @@ export async function executeFoundryAction(action: FoundryAction, ctx: { repairI
       return { ok: result.ok, type: action.type, detail: result.ok ? `Searched ${action.query}` : result.error ?? 'search failed', result: result.result }
     }
     case 'CREATE_FILE': {
+      const existing = await readRepoFile(action.path)
+      if (existing.ok) {
+        return { ok: false, type: action.type, detail: `CREATE_FILE cannot overwrite existing ${action.path}.` }
+      }
+      const testPath = /(?:^|\/)(?:test|tests|spec|specs)(?:\/|\.|$)|\.(?:test|spec)\.[^.]+$/i.test(action.path)
+      const candidateIsTest = /(?:from\s+['"]node:test['"]|require\s*\(\s*['"]node:test['"]\s*\))/.test(action.content)
+      if (/(?:^|\/)browser\.(?:test|spec)\.[^.]+$/i.test(action.path)) {
+        return { ok: false, type: action.type, detail: `SOURCE_ROLE_REJECTED: ${action.path} cannot establish browser acceptance. The executor owns real Playwright UI, reload, restart, console, and persistence verification; keep source tests focused on the real server integration.` }
+      }
+      if (!testPath && candidateIsTest) {
+        return { ok: false, type: action.type, detail: `SOURCE_ROLE_REJECTED: ${action.path} is a product path. Put node:test code in a separate *.test.* or test.* file.` }
+      }
+      const syntax = await sourceSyntaxDefect(action.path, action.content)
+      if (syntax) return { ok: false, type: action.type, detail: syntax }
+      const absolute = resolveRepoRelativePath(action.path)
+      await assertCanonicalRepoPath(absolute, true)
+      await mkdir(path.dirname(absolute), { recursive: true })
       const result = await executeEngineerTool({ tool: 'file.write', input: { path: action.path, content: action.content, reason: action.reason } }, ctx)
       return { ok: result.ok, type: action.type, detail: result.ok ? `Wrote ${action.path}` : result.error ?? 'write failed', result: result.result }
     }
+    case 'REPLACE_FILE': {
+      const existing = await readRepoFile(action.path)
+      if (!existing.ok) {
+        return { ok: false, type: action.type, detail: `REPLACE_FILE requires existing ${action.path}; use CREATE_FILE for a new path.` }
+      }
+      const testPath = /(?:^|\/)(?:test|tests|spec|specs)(?:\/|\.|$)|\.(?:test|spec)\.[^.]+$/i.test(action.path)
+      const originalWasTest = /(?:from\s+['"]node:test['"]|require\s*\(\s*['"]node:test['"]\s*\))/.test(existing.content)
+      const candidateIsTest = /(?:from\s+['"]node:test['"]|require\s*\(\s*['"]node:test['"]\s*\))/.test(action.content)
+      if (!testPath && !originalWasTest && candidateIsTest) {
+        return { ok: false, type: action.type, detail: `SOURCE_ROLE_REJECTED: ${action.path} is product source. Create a separate test file instead of replacing the product with test code.` }
+      }
+      const syntax = await sourceSyntaxDefect(action.path, action.content)
+      if (syntax) return { ok: false, type: action.type, detail: syntax }
+      const result = await executeEngineerTool({ tool: 'file.write', input: { path: action.path, content: action.content, reason: action.reason } }, ctx)
+      return { ok: result.ok, type: action.type, detail: result.ok ? `Replaced ${action.path}` : result.error ?? 'replace failed', result: result.result }
+    }
+    case 'APPEND_FILE': {
+      const read = await readRepoFile(action.path)
+      if (!read.ok) return { ok: false, type: action.type, detail: `APPEND_FILE requires existing ${action.path}; use CREATE_FILE for a new path.` }
+      const appendedTestName = action.content.match(/\btest\s*\(\s*(['"])(.*?)\1/)?.[2]
+      if (appendedTestName) {
+        const escaped = appendedTestName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        if (new RegExp(`\\btest\\s*\\(\\s*['"]${escaped}['"]`).test(read.content)) {
+          return { ok: false, type: action.type, detail: `DUPLICATE_TEST_CASE: ${action.path} already registers ${appendedTestName}; patch that complete existing test block instead of appending another copy.` }
+        }
+      }
+      const separator = read.content.endsWith('\n') ? '\n' : '\n\n'
+      const next = read.content + separator + action.content.trim() + '\n'
+      const syntax = await sourceSyntaxDefect(action.path, next)
+      if (syntax) return { ok: false, type: action.type, detail: syntax }
+      const result = await executeEngineerTool({ tool: 'file.write', input: { path: action.path, content: next, reason: action.reason } }, ctx)
+      return { ok: result.ok, type: action.type, detail: result.ok ? `Appended ${action.path}` : result.error ?? 'append failed', result: result.result }
+    }
     case 'PATCH_FILE': {
-      const read = await executeEngineerTool({ tool: 'file.read', input: { path: action.path } }, ctx)
-      const content = read.ok && read.result && typeof read.result === 'object' && 'content' in read.result ? String((read.result as { content: string }).content) : ''
+      // Patch against the complete bounded repository file. compactFileRead is appropriate for
+      // model context, but using its excerpt here would silently truncate the candidate source.
+      const read = await readRepoFile(action.path)
+      const content = read.ok ? read.content : ''
       if (!content.includes(action.matchText)) {
         return { ok: false, type: action.type, detail: `PATCH_FILE matchText not found in ${action.path}` }
       }
-      const next = content.replace(action.matchText, action.replacementText)
+      if (action.matchText === action.replacementText) {
+        return { ok: false, type: action.type, detail: `PATCH_FILE_NO_OP: replacementText is identical to matchText in ${action.path}` }
+      }
+      const declarations = (text: string) => new Set([...text.matchAll(/^(?:export\s+)?(?:async\s+)?(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/gm)].map(match => match[1]))
+      const currentBindings = declarations(content)
+      const replacedBindings = declarations(action.matchText)
+      const duplicateBinding = [...declarations(action.replacementText)].find(name => currentBindings.has(name) && !replacedBindings.has(name))
+      if (duplicateBinding) {
+        return { ok: false, type: action.type, detail: `PATCH_FILE_DUPLICATE_BINDING: replacementText redeclares existing top-level ${duplicateBinding} outside matchText in ${action.path}. Patch only the exact declaration or hook that must change; do not paste unchanged helpers or tests into a narrow replacement.` }
+      }
+      const next = content.replace(action.matchText, () => action.replacementText)
+      const syntax = await sourceSyntaxDefect(action.path, next)
+      if (syntax) return { ok: false, type: action.type, detail: syntax }
       const result = await executeEngineerTool({ tool: 'file.write', input: { path: action.path, content: next, reason: action.reason } }, ctx)
       return { ok: result.ok, type: action.type, detail: result.ok ? `Patched ${action.path}` : result.error ?? 'patch failed' }
     }

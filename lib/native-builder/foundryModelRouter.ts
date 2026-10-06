@@ -7,6 +7,8 @@ import type {
   FoundryModelResponse,
 } from './foundryModelTypes'
 import { configuredFoundryModels } from './foundryModelProviders'
+import { isLoopbackModelEndpoint } from './foundryLaunchPolicy'
+import { resolveOllamaBaseUrl } from './ollamaClient'
 import { applyFoundryRuntimeConfig, type FoundryProviderPolicy } from './foundryRuntimeConfig'
 import { authorizeResourceAction, beginResourceUsage, completeResourceUsage } from './foundryResourceGovernor'
 import { createWrimStep400ModelIfHealthy } from './reasoning-kernel/wrim-worker'
@@ -20,6 +22,7 @@ export type FoundryModelRouteReason =
   | 'FALLBACK'
 
 export type FoundryModelRouteOptions = {
+  requireLoopback?: boolean
   pinProvider?: FoundryModelProviderId | null
   pinModel?: string | null
   policy?: FoundryProviderPolicy
@@ -81,6 +84,12 @@ export class FoundryModelRouter {
     request: FoundryModelRequest,
     options?: FoundryModelRouteOptions,
   ): Promise<FoundryModelRouteResult> {
+    const requireLoopback = options?.requireLoopback === true || request.requireLoopback === true
+    if (requireLoopback) options = { ...options, requireLoopback: true, pinProvider: 'ollama' }
+    applyFoundryRuntimeConfig()
+    if (options?.requireLoopback && !isLoopbackModelEndpoint(resolveOllamaBaseUrl())) {
+      return { response: { ok: false, provider: 'ollama', model: null, error: 'Local Only requires a loopback Ollama endpoint. No model was invoked.', failureClass: 'UNAVAILABLE', latencyMs: 0 }, attempts: [], requestedProvider: 'ollama', selectedProvider: null, selectedModel: null, reason: 'PINNED' }
+    }
     const catalog = this.suppliedModels ?? await configuredFoundryModels()
     const all = [...catalog]
     if (!this.suppliedModels && options?.pinProvider === 'wrim' && !all.some(model => model.provider === 'wrim')) {
@@ -144,7 +153,7 @@ export class FoundryModelRouter {
       }
       const actionId = `model-${randomUUID()}`
       if (missionId) beginResourceUsage({ missionId, kind: 'model', actionId, graphId: options?.graphId, taskId: options?.taskId, provider: model.provider, model: model.model })
-      const response = await invoke(model, kind, request)
+      const response = await invoke(model, kind, { ...request, requireLoopback })
       if (missionId) {
         const outputTokens = response.ok ? Math.ceil((response.rawText || '').length / 4) : 0
         completeResourceUsage({

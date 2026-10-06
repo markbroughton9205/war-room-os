@@ -15,6 +15,7 @@ import type { FoundryMissionRecord } from './foundryMissionTypes'
 import { buildCodeIndex, lookupSymbol } from './foundryCodeIntelligence'
 import { ensureEngineeringState } from './foundryEngineeringDepth'
 import {
+  anchorOrigins,
   capFocusedWindow,
   editAnchorView,
   findGoalRelevantUniqueSpans,
@@ -22,6 +23,7 @@ import {
   MAX_FOCUSED_READ_CHARS,
   MAX_FOCUSED_READ_LINES,
   markLintRetryUsed,
+  originOf,
   registerWindowAnchors,
   resolveEditAnchor,
 } from './foundryEditAnchors'
@@ -218,6 +220,7 @@ export function validateReplacementText(input: {
   anchorId?: string
   fileContent?: string
 }): string | null {
+  if (input.matchText === input.replacementText) return 'NO_CHANGE: replacementText is identical to existing source. No mutation or completion credit was recorded; diagnose the requested source and failing test.'
   if (!input.replacementText.trim()) {
     return formatProtectedBindingRefusal({
       missing: extractProtectedBindings(input.matchText),
@@ -315,7 +318,7 @@ export function inferUniqueQueryMatch(content: string, query: string): string | 
   return undefined
 }
 
-export function inferQueryReadBounds(content: string, query: string): {
+export function inferQueryReadBounds(content: string, query: string, intent?: string): {
   aroundMatch?: string
   startLine?: number
   endLine?: number
@@ -335,13 +338,14 @@ export function inferQueryReadBounds(content: string, query: string): {
     if (matches.length === 1) uniqueHits.push({ text: matches[0].text, line: matches[0].line, phrase })
     if (matches.length > 1) multiHits.push(...matches.map(item => ({ line: item.line, text: item.text })))
   }
-  const goalSpans = findGoalRelevantUniqueSpans(content, query)
+  const origins = anchorOrigins(content, query, intent)
+  const goalSpans = [...new Set([...origins.keys(), ...findGoalRelevantUniqueSpans(content, query)])]
   if (goalSpans.length) {
     const rankedSpans = goalSpans
       .map(text => ({
         text,
         line: occurrenceLineNumbers(content, text)[0] ?? 1,
-        score: scoreAnchorText(text, query),
+        score: scoreAnchorText(text, query, originOf(origins, text)),
       }))
       .sort((a, b) => compareAnchorScores({ ...a.score, startLine: a.line }, { ...b.score, startLine: b.line }))
     const best = rankedSpans[0]
@@ -506,9 +510,10 @@ export async function compactFileRead(
   const large = file.content.split('\n').length > MAX_READ_WINDOW_LINES
   let queryCandidates: Array<{ line: number; text: string }> | undefined
   const goal = query ?? mission?.userRequest ?? mission?.goal ?? ''
+  const intent = [mission?.userRequest, mission?.goal].filter(Boolean).join('\n')
   const explicitRange = Boolean(aroundMatch) || Boolean(symbol) || (startLine != null && endLine != null)
   if (!explicitRange && goal) {
-    const inferred = inferQueryReadBounds(file.content, goal)
+    const inferred = inferQueryReadBounds(file.content, goal, intent)
     if (inferred?.ambiguous) {
       queryCandidates = inferred.candidates
     } else {
@@ -584,12 +589,14 @@ export async function compactFileRead(
       extraUniqueTexts: window.error ? [] : [...copies, ...goalSpans],
       focusLines: (window.matchLines?.length ? window.matchLines : queryCandidates?.map(item => item.line)) ?? [],
       goal,
+      intent,
     })
     : []
   const uniqueAnchors = registered.filter(item => item.unique)
   const high = uniqueAnchors.filter(item => item.relevance === 'HIGH')
   const primary = (high[0] ?? uniqueAnchors[0] ?? registered[0]) ?? null
-  if (primary?.relevance === 'HIGH' && windowContent && scoreAnchorText(windowContent, goal || 'bounded edit').relevance === 'LOW') {
+  // A statement anchor is HIGH by provenance, not by wording: the window around it stays whole (it is the function), instead of shrinking to that one line.
+  if (primary?.relevance === 'HIGH' && !primary.origin && windowContent && scoreAnchorText(windowContent, goal || 'bounded edit').relevance === 'LOW') {
     windowContent = primary.anchorText
     window.range.startLine = primary.startLine
     window.range.endLine = primary.endLine
@@ -600,7 +607,7 @@ export async function compactFileRead(
     anchorId: item.anchorId,
     startLine: item.startLine,
     endLine: item.endLine,
-    score: scoreAnchorText(item.anchorText, goal || 'bounded edit'),
+    score: scoreAnchorText(item.anchorText, goal || 'bounded edit', item.origin),
   })))
   const windowBlock = windowContent
     ? [
@@ -659,7 +666,7 @@ export async function compactFileRead(
     views.length > 1
       ? [
         'EDITABLE_REGIONS:',
-        ...views.map(item => `- ${item.anchorId} lines ${item.ANCHOR_START_LINE}-${item.ANCHOR_END_LINE} relevance=${item.ANCHOR_RELEVANCE ?? 'LOW'} bindings=${JSON.stringify(item.PROTECTED_BINDINGS)}`),
+        ...views.map((item, index) => `- ${item.anchorId} lines ${item.ANCHOR_START_LINE}-${item.ANCHOR_END_LINE} relevance=${item.ANCHOR_RELEVANCE ?? 'LOW'} bindings=${JSON.stringify(item.PROTECTED_BINDINGS)}${registered[index]?.origin ? ` text=${JSON.stringify(item.ANCHOR_TEXT_PREVIEW.slice(0, 60))}` : ''}`),
         'Select one anchorId. Do not guess.',
       ].join('\n')
       : '',
@@ -716,6 +723,20 @@ function parseInput(raw: Record<string, unknown>): BoundedEditInput {
   }
 }
 
+/** A file this short is cheaper to rewrite whole than to anchor: the model rewrites it with file.write. */
+export const WHOLE_FILE_WRITE_MAX_LINES = 200
+
+/**
+ * An anchorless replace_unique that cannot resolve an anchor on a short file gets one concrete next step (file.write with the complete contents) instead of an anchor error it cannot act on.
+ * The original anchor code stays in the message. A call that names an anchorId is never rewritten: a stale or foreign anchor is a different failure.
+ */
+export function wholeFileWriteAdvice(input: { path?: string; anchorId?: string }, content: string, anchorError: string): string | null {
+  if (input.anchorId || !/^ANCHOR_(AMBIGUOUS|NOT_FOUND)/.test(anchorError)) return null
+  const lines = content.split('\n').length
+  if (lines > WHOLE_FILE_WRITE_MAX_LINES) return null
+  return `WHOLE_FILE_WRITE_REQUIRED: ${input.path ?? 'this file'} is ${lines} lines (limit ${WHOLE_FILE_WRITE_MAX_LINES}) and no anchor was supplied. Call file.write with path and content set to the complete corrected file; do not retry file.replace_unique. (${anchorError})`
+}
+
 export async function executeReplaceUnique(
   raw: Record<string, unknown>,
   ctx: { repairId: string; mission?: FoundryMissionRecord | null },
@@ -760,7 +781,7 @@ export async function executeReplaceUnique(
       expectedSha256: input.expectedSha256 || undefined,
       actualSha256: actualSha,
     })
-    if (!resolved.ok) return { ok: false, error: resolved.error }
+    if (!resolved.ok) return { ok: false, error: wholeFileWriteAdvice(input, current.content, resolved.error) ?? resolved.error }
     if (input.matchText && input.matchText !== resolved.anchor.anchorText) {
       return { ok: false, error: 'ANCHOR_MATCHTEXT_MISMATCH: supplied matchText disagrees with the broker-issued anchor. Use only the returned anchorId.' }
     }
@@ -831,6 +852,39 @@ export async function executeReplaceUnique(
     return {
       ok: false,
       error: `EDIT_SCOPE_TOO_LARGE replaced=${replacedLines} replacement=${replacementLines} total=${totalChanged} limits=${MAX_REPLACED_LINES}/${MAX_REPLACEMENT_LINES}/${MAX_TOTAL_CHANGED_LINES}`,
+    }
+  }
+
+  // Never leave a parseable source file unparseable: refuse before anything is written, remember the rejected candidate, and tell the model exactly why.
+  const { sourceSyntaxProblem } = await import('./foundrySyntaxGuard')
+  const recovery = await import('./foundrySyntaxRecovery')
+  const engineeringState = ensureEngineeringState(mission)
+  const signature = recovery.candidateSignature(input.path, actualSha, search, replacement)
+  if (recovery.isRepeatedBadCandidate(engineeringState.syntaxRecovery, input.path, actualSha, signature)) {
+    const priorError = engineeringState.syntaxRecovery?.rejected.find(item => item.signature === signature)?.error ?? 'syntax error'
+    engineeringState.syntaxRecovery = recovery.recordSyntaxRejection(engineeringState.syntaxRecovery, input.path, actualSha, signature, priorError, resolvedAnchorId)
+    return { ok: false, error: recovery.repeatedBadPatchMessage(input.path, priorError, engineeringState.syntaxRecovery.count, current.content.split('\n').length <= WHOLE_FILE_WRITE_MAX_LINES) }
+  }
+  const brokenAfter = sourceSyntaxProblem(input.path, current.content.replace(search, () => replacement))
+  if (brokenAfter && !sourceSyntaxProblem(input.path, current.content)) {
+    const next = recovery.recordSyntaxRejection(engineeringState.syntaxRecovery, input.path, actualSha, signature, brokenAfter, resolvedAnchorId)
+    engineeringState.syntaxRecovery = next
+    const from = occurrenceLineNumbers(current.content, search)[0] ?? 1
+    const to = from + Math.max(1, lineCount(input.matchText)) - 1
+    return {
+      ok: false,
+      error: recovery.describeSyntaxRejection({
+        path: input.path,
+        parserError: brokenAfter,
+        anchorId: resolvedAnchorId,
+        startLine: from,
+        endLine: to,
+        matched: search,
+        replacement,
+        window: recovery.syntaxWindow(current.content, from, to),
+        count: next.count,
+        wholeFileAllowed: current.content.split('\n').length <= WHOLE_FILE_WRITE_MAX_LINES,
+      }),
     }
   }
 

@@ -16,11 +16,11 @@ import {
 } from './runtime'
 import { getIssue, getRepair, saveRepair } from './storage'
 import { buildRepoMap } from './repoMap'
-import { buildTaskTrackerProposal, isTaskTrackerRequest } from './scaffold'
+import { listRepoFiles } from './repositoryInspector'
 import { executeTypedTerminal, startOwnedProcess, stopOwnedProcesses } from './terminalExecutor'
 import { appendProjectMemory, writeProjectMemory } from './projectMemory'
 import { isRepairCancellationRequested } from './processRegistry'
-import { acquireMissionOwnership, isMissionOwned, releaseMissionOwnership, runAsExecutor, withRecordLock } from './foundryMissionOwnership'
+import { MissionSealedError, acquireMissionOwnership, isMissionOwned, releaseMissionOwnership, runAsExecutor, withRecordLock } from './foundryMissionOwnership'
 import { engineeringRuntimeShouldOwn, runOwnedEngineeringMission, terminalSealReason } from './foundryEngineeringRuntime'
 import { countProjectFiles, largeProjectShouldOwn } from './foundryLargeProject'
 import { campaignShouldOwn } from './foundryEngineeringCampaign'
@@ -28,6 +28,8 @@ import { contextShouldOwn } from './foundryProjectContextIO'
 import { decideFailureContinuation, buildFailureSignature, sourceFingerprint } from './foundryEngineeringFailure'
 import { emptyEngineeringRuntime, engineeringEvent, reduceEngineeringEvents, workstreamTextForEvent, type FoundryEngineeringEventType } from './foundryEngineeringEvents'
 import { runFoundryMission } from './foundryLoop'
+import { acquireApplicationProcessLock } from './foundryApplicationProcessLock'
+import { isExplicitDirectApplicationRequest } from './foundryApplicationMission'
 import { resolveLocalCoder } from './localCoder'
 import { failureFromValidation, toCommanderState } from './foundryCommanderState'
 import {
@@ -146,19 +148,36 @@ export async function runCodingMission(repairId: string): Promise<NativeRepairRe
     await logExecutor(repairId, 'sealed-noop')
     return existing
   }
+  const isApplication = Boolean(existing?.codingMission?.applicationBuild)
+    || isExplicitDirectApplicationRequest(existing?.codingMission?.commanderRequest ?? '')
+    || await countProjectFiles() === 0
+  const processLock = isApplication ? await acquireApplicationProcessLock(repairId) : undefined
+  if (processLock === null) {
+    await logExecutor(repairId, 'attached')
+    return (await getRepair(repairId)) ?? existing!
+  }
   const owner = acquireMissionOwnership(repairId)
   if (!owner) {
+    await processLock?.release()
     await logExecutor(repairId, 'attached')
     const current = await getRepair(repairId)
     if (!current) throw new Error(`No repair ${repairId}`)
     return current
   }
+  processLock?.onLost(() => releaseMissionOwnership(owner))
   await logExecutor(repairId, 'started', owner.token)
   try {
     return await runAsExecutor(owner, () => runCodingMissionUnlocked(repairId))
+  } catch (error) {
+    if (isApplication && error instanceof MissionSealedError) {
+      const current = await getRepair(repairId)
+      if (current && terminalSealReason(current)) return current
+    }
+    throw error
   } finally {
     releaseMissionOwnership(owner)
     await logExecutor(repairId, 'released', owner.token)
+    await processLock?.release()
   }
 }
 
@@ -201,13 +220,17 @@ async function runCodingMissionUnlocked(repairId: string): Promise<NativeRepairR
     })
   }
 
+  if (record.codingMission.applicationBuild) return runFoundryMission(repairId)
+  if (isExplicitDirectApplicationRequest(record.codingMission.commanderRequest ?? '')) return runFoundryMission(repairId)
+  const projectFileCount = await countProjectFiles()
+  if (projectFileCount === 0) return runFoundryMission(repairId)
+
   if (record.codingMission.engineeringRuntime?.campaign?.phase || record.codingMission.engineeringRuntime?.largeProject?.phase) {
     return runOwnedEngineeringMission(repairId)
   }
   if (campaignShouldOwn(record.codingMission.commanderRequest ?? '') || await contextShouldOwn(resolveRepoRoot(), record.codingMission.commanderRequest ?? '')) {
     return runOwnedEngineeringMission(repairId)
   }
-  const projectFileCount = await countProjectFiles()
   if (largeProjectShouldOwn({
     fileCount: projectFileCount,
     request: record.codingMission.commanderRequest ?? '',
@@ -236,6 +259,7 @@ async function runCodingMissionUnlocked(repairId: string): Promise<NativeRepairR
 
   if (engineeringRuntimeShouldOwn({
     fileCount: map.fileCount,
+    pythonFileCount: (await listRepoFiles()).filter(file => file.endsWith('.py')).length,
     request: record.codingMission?.commanderRequest ?? '',
   })) {
     return runOwnedEngineeringMission(repairId)
@@ -244,29 +268,7 @@ async function runCodingMissionUnlocked(repairId: string): Promise<NativeRepairR
   const issue = await getIssue(record.issueId)
   if (!issue) throw new Error(`No issue for repair ${repairId}`)
 
-  if (map.fileCount === 0 && isTaskTrackerRequest(requireCoding(record).commanderRequest)) {
-    const proposal = buildTaskTrackerProposal(issue)
-    record = await adoptPreparedProposal(repairId, proposal)
-    record = await bump(repairId, 'EDITING', 'Scaffolding task-tracker files.', {
-      filesChanged: proposal.relevantFiles,
-    })
-  } else if (map.fileCount === 0) {
-    const local = await resolveLocalCoder()
-    if (local.available) {
-      return runFoundryMission(repairId)
-    }
-    const coding = requireCoding(record)
-    record = await planRepair(repairId, { useLocalModel: false, hostedCoder: loopHostedCoder(), commanderRequestText: coding.commanderRequest, targetFiles: coding.filesRead.length ? coding.filesRead : undefined })
-    if (!record.selectedProposal) {
-      return bump(repairId, 'BLOCKED', local.detail, {
-        foundryMode: 'FOUNDRY_LOCAL_MODE',
-        localCoderStatus: 'LOCAL_CODER_UNAVAILABLE',
-        hostedCoderStatus: local.hostedStatus,
-        blockingReason: 'LOCAL_CODER_UNAVAILABLE',
-        validationOutcome: 'BLOCKED_BY_ENVIRONMENT',
-      })
-    }
-  } else if (!record.selectedProposal || record.state === 'collecting_evidence' || record.state === 'blocked') {
+  if (!record.selectedProposal || record.state === 'collecting_evidence' || record.state === 'blocked') {
     const coding = requireCoding(record)
     const local = await resolveLocalCoder()
     record = await planRepair(repairId, { useLocalModel: local.available, hostedCoder: loopHostedCoder(), commanderRequestText: coding.commanderRequest, targetFiles: coding.filesRead.length ? coding.filesRead : undefined })

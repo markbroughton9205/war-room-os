@@ -4,7 +4,7 @@
 // across lib/) fail plain-node module resolution without this stub.
 const SERVER_ONLY_STUB_URL = 'data:text/javascript,export default undefined;'
 
-export async function resolve(specifier, context, defaultResolve) {
+async function resolveBase(specifier, context, defaultResolve) {
   if (specifier === 'server-only' || specifier === 'client-only') {
     return { url: SERVER_ONLY_STUB_URL, format: 'module', shortCircuit: true }
   }
@@ -15,7 +15,7 @@ export async function resolve(specifier, context, defaultResolve) {
     return defaultResolve('next/headers.js', context, defaultResolve)
   }
   if (specifier.startsWith('@/')) {
-    return resolve(`./${specifier.slice(2)}`, { ...context, parentURL: new URL('../', import.meta.url).href }, defaultResolve)
+    return resolveBase(`./${specifier.slice(2)}`, { ...context, parentURL: new URL('../', import.meta.url).href }, defaultResolve)
   }
 
   try {
@@ -44,4 +44,19 @@ export async function resolve(specifier, context, defaultResolve) {
     }
     throw error
   }
+}
+
+// Opt-in file overlay (used by Foundry's repair engine to run a validator against a CANDIDATE version of a file without touching the repository):
+// FOUNDRY_OVERLAY is a JSON object { "<absolute path>": "<absolute path of the replacement>" }. Unset, nothing changes.
+const OVERLAY = (() => {
+  try { return process.env.FOUNDRY_OVERLAY ? JSON.parse(process.env.FOUNDRY_OVERLAY) : null } catch { return null }
+})()
+
+export async function resolve(specifier, context, defaultResolve) {
+  const resolved = await resolveBase(specifier, context, defaultResolve)
+  if (OVERLAY && typeof resolved?.url === 'string' && resolved.url.startsWith('file://')) {
+    const replacement = OVERLAY[decodeURIComponent(new URL(resolved.url).pathname)]
+    if (replacement) return { ...resolved, url: new URL(`file://${replacement}`).href, shortCircuit: true }
+  }
+  return resolved
 }

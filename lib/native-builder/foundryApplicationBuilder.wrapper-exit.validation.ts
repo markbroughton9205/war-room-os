@@ -1,7 +1,8 @@
 /**
  * Application Builder wrapper-exit / preview-ownership validation.
  * Does not rebuild or delete the Commander transportation project.
- * Does not stop the live 127.0.0.1:18780 preview.
+ * Does not stop a live 127.0.0.1:18780 preview it found. When none is running the validation serves the project itself (a static server on that port,
+ * registered like any retained preview) so the checks about a retained live preview do not depend on what happens to be running, and stops only that one.
  */
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -29,13 +30,12 @@ import {
   stopOwnedProjectPreview,
 } from './foundryProjectProcessRegistry'
 import { heartbeatMission } from './foundryOperationsManager'
+import { ensureLivePreview, LIVE_PORT, LIVE_PROJECT, LIVE_PROJECT_ID, stopOwnLivePreview } from './foundryLivePreviewFixture'
 import type { FoundryMissionRecord } from './foundryMissionTypes'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 const check = (name: string, pass: boolean, detail: string): CaseResult => ({ name, pass, detail })
 
-const LIVE_PROJECT = path.join(os.homedir(), 'FoundryProjects', 'professional-website-for-a')
-const LIVE_PORT = 18780
 const DUMMY_SERVER = `import http from 'node:http'
 const port = Number(process.env.PORT || 18791)
 http.createServer((req, res) => {
@@ -120,10 +120,11 @@ async function runChildMode(mode: string): Promise<void> {
 }
 
 async function run(): Promise<void> {
+  const ownLivePreviewPid = await ensureLivePreview('wrapper-exit-live-preview')
   const liveBefore = await inspectRetainedApplicationPreview({ projectRoot: LIVE_PROJECT, port: LIVE_PORT })
   const liveAdopt = existsSync(LIVE_PROJECT)
     ? await adoptLoopbackPreview({
-        projectId: 'dd4af6c3-5603-4584-b0ad-88ff900df5c0',
+        projectId: LIVE_PROJECT_ID,
         projectRoot: LIVE_PROJECT,
         missionId: 'wrapper-exit-adopt',
         port: LIVE_PORT,
@@ -255,6 +256,8 @@ async function run(): Promise<void> {
     results.push(check('no_project_deletion', files && liveAfter.projectPreserved, LIVE_PROJECT))
     results.push(check('live_preview_http_after', liveAfter.httpOk && liveAfter.status === 200, String(liveAfter.status)))
   } finally {
+    // The preview was adopted by the checks above, so it is stopped by the pid this run started, not through the registry.
+    stopOwnLivePreview(ownLivePreviewPid)
     if (previousRoot === undefined) delete process.env.FOUNDRY_PROJECTS_ROOT
     else process.env.FOUNDRY_PROJECTS_ROOT = previousRoot
     await rm(tmpRoot, { recursive: true, force: true }).catch(() => undefined)

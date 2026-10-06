@@ -329,7 +329,7 @@ export function extendSelfReviewForMultiFile(review: FoundrySelfReview, mission:
     return allowed.length > 0 && !allowed.includes(file)
   })
   if (unexpected.length) extra.push(`UNEXPECTED FILES: ${unexpected.join(', ')}`)
-  if (/shared\.mjs/.test(files.join(' ')) && files.some(file => /alpha|beta|gamma/.test(file)) === false) {
+  if (files.includes('scripts/foundry/multi-file/duplication/shared.mjs') && /multi-file\/duplication/.test(mission.userRequest) && files.some(file => /(?:^|\/)(?:alpha|beta|gamma)\.mjs$/.test(file)) === false) {
     extra.push('OLD PATHS LEFT BEHIND: callers not updated')
   }
   const findings = [...review.findings, ...extra]

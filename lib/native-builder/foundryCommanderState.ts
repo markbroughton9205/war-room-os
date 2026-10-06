@@ -166,8 +166,12 @@ export function activityTextForAction(action: FoundryAction, result?: { ok: bool
       return `Searching ${action.query}`
     case 'CREATE_FILE':
       return `Creating ${action.path}`
+    case 'REPLACE_FILE':
+      return `Replacing ${action.path}`
     case 'PATCH_FILE':
       return `Editing ${action.path}`
+    case 'APPEND_FILE':
+      return `Appending ${action.path}`
     case 'DELETE_FILE':
       return `Deleting ${action.path}`
     case 'RUN_COMMAND':
@@ -201,7 +205,7 @@ export function workEventFromAction(
   result?: { ok: boolean; detail: string },
 ): FoundryWorkEvent {
   const kind: FoundryWorkEvent['kind'] =
-    action.type === 'CREATE_FILE' || action.type === 'PATCH_FILE' || action.type === 'DELETE_FILE' || action.type === 'READ_FILE'
+    action.type === 'CREATE_FILE' || action.type === 'REPLACE_FILE' || action.type === 'PATCH_FILE' || action.type === 'APPEND_FILE' || action.type === 'DELETE_FILE' || action.type === 'READ_FILE'
       ? 'file'
       : action.type === 'RUN_VALIDATION' || action.type === 'RUN_COMMAND'
         ? 'test'

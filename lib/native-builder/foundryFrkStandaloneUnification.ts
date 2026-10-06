@@ -135,6 +135,8 @@ export type UnifiedRoutingInput = {
 }
 
 export type UnifiedLoopHost = ReasoningMissionHost & {
+  modelPolicy?: 'LOCAL_ONLY'
+  pinnedModel?: { provider: string; modelId: string } | null
   currentAction?: string | null
   observations?: { at: string; text: string; source: string }[]
   unifiedVerdict?: FoundryUnifiedVerdict | null
@@ -256,11 +258,11 @@ function routingNeed(loop: UnifiedLoop, requirement: FoundryWorkerRequirement, i
     ambiguity: requirement.ambiguity,
     risk: requirement.risk,
     privacyRequirement: requirement.privacyRequirement,
-    localOnlyRequirement: requirement.localOnlyRequirement,
-    remotePermitted: input?.remotePermitted === true,
-    commanderPolicy: input?.commanderPolicy ?? 'LOCAL',
+    localOnlyRequirement: loop.mission.modelPolicy === 'LOCAL_ONLY' || requirement.localOnlyRequirement,
+    remotePermitted: loop.mission.modelPolicy !== 'LOCAL_ONLY' && input?.remotePermitted === true,
+    commanderPolicy: loop.mission.modelPolicy === 'LOCAL_ONLY' ? 'LOCAL' : input?.commanderPolicy ?? 'LOCAL',
     commanderRemoteApprovalRequired: input?.commanderRemoteApprovalRequired === true,
-    pin: input?.pin ?? null,
+    pin: loop.mission.modelPolicy === 'LOCAL_ONLY' ? (loop.mission.pinnedModel?.provider === 'ollama' ? { provider: 'ollama', model: loop.mission.pinnedModel.modelId } : null) : input?.pin ?? null,
     candidates: routingCandidates(input),
     callBudgetRemaining: Math.max(0, 6 - loop.session.resourceState.workerCalls),
     callBudgetCeiling: 6,
@@ -283,7 +285,7 @@ function routingStoreRoot(): string | null {
 
 function applyRoutingDecision(loop: UnifiedLoop, decision: FoundryWorkerRoutingDecision, input?: UnifiedRoutingInput): void {
   const local = evidenceLocalWorker()
-  const pin = input?.pin ?? null
+  const pin = loop.mission.modelPolicy === 'LOCAL_ONLY' ? (loop.mission.pinnedModel?.provider === 'ollama' ? { provider: 'ollama', model: loop.mission.pinnedModel.modelId } : null) : input?.pin ?? null
   const mode = getCapabilityAwareRoutingMode()
   const enabled = mode === 'ENABLED'
   const selected = decision.outcome === 'SELECTED' && decision.selectedProvider
@@ -392,7 +394,8 @@ export function reconsiderWorkerRouting(loop: UnifiedLoop, input: UnifiedRouting
   return result.reconsideration
 }
 
-export function liveRouteOptionsFromLoop(loop: UnifiedLoop, pin?: { provider: string; model: string } | null): { missionId: string; pinProvider: string | null; pinModel: string | null } {
+export function liveRouteOptionsFromLoop(loop: UnifiedLoop, pin?: { provider: string; model: string } | null): { missionId: string; pinProvider: string | null; pinModel: string | null; requireLoopback?: boolean } {
+  if (loop.mission.modelPolicy === 'LOCAL_ONLY') return { requireLoopback: true, missionId: loop.mission.missionId, pinProvider: 'ollama', pinModel: loop.mission.pinnedModel?.provider === 'ollama' ? loop.mission.pinnedModel.modelId : null }
   return applyCapabilityAwareRouteOptions({
     missionId: loop.mission.missionId,
     pinProvider: pin?.provider ?? (loop.actualWorker.source === 'PINNED' ? loop.actualWorker.provider : null),

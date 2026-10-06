@@ -4,6 +4,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import {
   LOCAL_UI_ORIGIN,
   LOCAL_UI_PORT,
@@ -78,6 +79,10 @@ export async function runPhase11aLocalUiValidation(opts?: {
   results.push(check('3_local_next_runtime', artifacts.ok, artifacts.missing.join(',') || 'artifacts present'))
 
   const mainSrc = fs.readFileSync(path.join(repoRoot, 'desktop', 'src', 'main.cjs'), 'utf8')
+  const rendererSandbox = createRequire(import.meta.url)('../../desktop/src/rendererSandbox.cjs') as { resolveRendererSandbox: (platform: string, env: Record<string, string>) => { sandbox: boolean } }
+  // Secure by default everywhere; only an explicit Linux operator opt-in (WAR_ROOM_DISABLE_RENDERER_SANDBOX=1) turns it off — a literal `sandbox: true` in
+  // source no longer holds since that opt-in was added (main.cjs sets `sandbox: !linuxRendererSandboxDisabled`), so this checks the same resolver phase11d/phase15 use.
+  const sandboxEnforcedByDefault = rendererSandbox.resolveRendererSandbox('linux', {}).sandbox === true && rendererSandbox.resolveRendererSandbox('linux', { WAR_ROOM_DISABLE_RENDERER_SANDBOX: '1' }).sandbox === false
   results.push(check('4_desktop_loads_localhost', /127\.0\.0\.1:3848|LOCAL_UI_ORIGIN/.test(mainSrc), '3848'))
   results.push(check('5_not_warroomos', !/loadURL\(\s*['"]https:\/\/warroomos\.com/i.test(mainSrc), 'ok'))
 
@@ -159,7 +164,7 @@ export async function runPhase11aLocalUiValidation(opts?: {
   results.push(check('33_no_website_fallback', decideDesktopNavigation('https://warroomos.com/').allowed === false, 'denied'))
 
   results.push(check('34_context_isolation', DESKTOP_SECURITY_POLICY.contextIsolation === true && /contextIsolation:\s*true/.test(mainSrc), 'ok'))
-  results.push(check('35_sandbox', DESKTOP_SECURITY_POLICY.sandbox === true && /sandbox:\s*true/.test(mainSrc), 'ok'))
+  results.push(check('35_sandbox', DESKTOP_SECURITY_POLICY.sandbox === true && sandboxEnforcedByDefault, 'ok'))
   results.push(check('36_no_node_integration', DESKTOP_SECURITY_POLICY.nodeIntegration === false && /nodeIntegration:\s*false/.test(mainSrc), 'ok'))
   results.push(check('37_no_shell_ipc', assertNoPrivilegedIpcChannel('shell.exec'), 'ok'))
   results.push(check('38_no_ps_ipc', assertNoPrivilegedIpcChannel('powershell.run'), 'ok'))
@@ -229,7 +234,7 @@ export async function runPhase11aLocalUiValidation(opts?: {
   results.push(check('66_22_closed', truth.ROADMAP_22 === 'CLOSED', 'CLOSED'))
   results.push(check('67_23_active', truth.ROADMAP_23 === 'ACTIVE', 'ACTIVE'))
   results.push(check('68_typescript_structural', true, 'tsc separately'))
-  results.push(check('69_desktop_security', /sandbox:\s*true/.test(mainSrc), 'ok'))
+  results.push(check('69_desktop_security', sandboxEnforcedByDefault, 'ok'))
   results.push(check('70_desktop_build_check', fs.existsSync(path.join(repoRoot, 'desktop', 'scripts', 'build-check.cjs')), 'ok'))
 
   results.push(check('arch_next_server', LOCAL_UI_ARCHITECTURE.name === 'ELECTRON_TO_LOCAL_NEXT_SERVER', LOCAL_UI_ARCHITECTURE.name))

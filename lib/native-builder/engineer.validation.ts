@@ -148,9 +148,12 @@ async function testWorkspaceEscape(): Promise<CaseResult[]> {
       } catch (error) {
         results.push(check('escape_02_system_dir_open', error instanceof WorkspaceValidationError, String(error)))
       }
+      // A link inside the workspace that leads outside it must be refused: a junction to the Windows directory there, a directory link to a real outside directory here.
       const link = path.join(ws.root, 'escape-link')
+      const outside = process.platform === 'win32' ? 'C:\\Windows' : await mkdtemp(path.join(tmpdir(), 'wr-engineer-outside-'))
       try {
-        await symlink('C:\\Windows', link, 'junction')
+        if (process.platform !== 'win32') await writeFile(path.join(outside, 'notepad.exe'), 'outside', 'utf8')
+        await symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir')
         try {
           await assertCanonicalRepoPath(path.join(link, 'notepad.exe'))
           results.push(check('escape_03_junction_escape', false, 'did not throw'))
@@ -158,7 +161,9 @@ async function testWorkspaceEscape(): Promise<CaseResult[]> {
           results.push(check('escape_03_junction_escape', error instanceof RepoAccessDeniedError, String(error)))
         }
       } catch (error) {
-        results.push(check('escape_03_junction_escape', true, `junction not creatable here: ${String(error)}`))
+        results.push(check('escape_03_junction_escape', process.platform === 'win32', `link not creatable here: ${String(error)}`))
+      } finally {
+        if (process.platform !== 'win32') await rm(outside, { recursive: true, force: true }).catch(() => undefined)
       }
       return results
     }, ws.id)
@@ -193,7 +198,7 @@ async function testE2ERepair(): Promise<CaseResult[]> {
       const source = await readFile(path.join(ws.root, 'sum.mjs'), 'utf8')
       const repair = await getRepair(mission.id)
       return [
-        check('e2e_repair_01_completed_or_validated', mission.status === 'completed' || mission.engineer?.currentStep === 'DONE' || mission.engineer?.currentStep === 'COMPLETE', `${mission.status} ${mission.engineer?.currentStep}`),
+        check('e2e_repair_01_completed_or_validated', mission.status === 'completed' || mission.engineer?.currentStep === 'DONE' || mission.engineer?.currentStep === 'COMPLETE', `${mission.status} ${mission.engineer?.currentStep} ${(mission.engineer?.blockingReason ?? '').slice(0, 400)} events=${(mission.engineer?.progressEvents ?? []).map(event => `${event.step}:${event.detail.slice(0, 80)}`).slice(-6).join(' | ')}`),
         check('e2e_repair_02_file_fixed', source.includes('values.length;') && !source.includes('values.length - 1'), source.slice(0, 200)),
         check('e2e_repair_03_validations_ran', (mission.validationResults?.length ?? 0) > 0, JSON.stringify(mission.validationResults?.map(v => [v.operation.id, v.ok]))),
         check('e2e_repair_04_no_autonomous_commit_executed', !String(repair?.commitPreparation?.commitMessage ?? '').includes('git commit -m'), repair?.commitPreparation?.commitMessage ?? 'none'),

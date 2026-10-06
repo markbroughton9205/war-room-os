@@ -32,6 +32,7 @@ import {
 import { appendFoundryWorkbenchEvent, readFoundryWorkbenchEvents } from './foundryWorkbenchEvents'
 import { isFoundryWorkbenchW0Enabled } from './foundryWorkbenchW0'
 import { ensureFoundryWorkbenchFixture, foundryWorkbenchStateDir as workbenchHostStateDir } from './foundryWorkbenchW0.host'
+import { routeWorkbenchAssist as routeModel, useDeterministicAssist } from './foundryWorkbenchAssistRouting'
 import { runFoundryW4Command } from './foundryWorkbenchW4'
 import { runFoundryW5Command } from './foundryWorkbenchW5'
 
@@ -158,10 +159,6 @@ export function isFoundryWorkbenchW2Enabled(env: NodeJS.ProcessEnv = process.env
   return isFoundryWorkbenchW0Enabled(env)
 }
 
-function useDeterministicAssist(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = String(env.FOUNDRY_WORKBENCH_W2_DETERMINISTIC ?? '').trim().toLowerCase()
-  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on'
-}
 
 function attachmentPath(): string {
   return busFile('editor-attachment.json')
@@ -210,6 +207,8 @@ export function composerContextSnapshot() {
       id: string
       kind: FoundryW2AssistKind
       instruction?: string
+      owningMissionId?: string
+      owningBindingId?: string
       envelope?: FoundryEditorContextEnvelope
       commanderApproved?: boolean
       files?: string[]
@@ -341,67 +340,6 @@ function deterministicText(kind: FoundryW2AssistKind, envelope: FoundryEditorCon
   return `Proposed edit for ${symbol}: ${instruction || 'typed result instead of throw'}.`
 }
 
-function emptyModelContext(instruction: string, envelope: FoundryEditorContextEnvelope): FoundryModelContext {
-  return {
-    missionId: 'foundry-workbench-w2',
-    missionKind: 'fixture',
-    userRequest: instruction,
-    goal: instruction,
-    successCriteria: ['Return a bounded Foundry editor assist response.'],
-    constraints: ['Do not write files. Propose JSON only.'],
-    permissions: {
-      filesystem: true,
-      terminal: false,
-      browser: false,
-      computerUse: false,
-      tests: false,
-      lint: false,
-      typecheck: false,
-      build: false,
-      package: false,
-      installProduction: false,
-      activateInstall: false,
-      installedRuntimeControl: false,
-      process: false,
-      commit: false,
-      push: false,
-      liveDeploy: false,
-      internetResearch: false,
-    },
-    phase: 'EXECUTING',
-    plan: [],
-    hypotheses: [],
-    changedFiles: [],
-    importantFindings: [],
-    relevantExcerpts: [
-      { source: envelope.activeFile || 'selection', text: redactSecretLikeText(envelope.selection.text).slice(0, 4000) },
-      ...(envelope.nearbyLines ? [{ source: 'nearby', text: envelope.nearbyLines.slice(0, 4000) }] : []),
-    ],
-    visualEvidence: [],
-    recentToolResults: [],
-    recentErrors: [],
-    unresolvedQuestions: [],
-    completionGate: { complete: false, missing: [], detail: 'W2 editor assist' },
-    tools: [],
-  }
-}
-
-async function routeModel(instruction: string, envelope: FoundryEditorContextEnvelope): Promise<{ text: string; provider: string; model: string | null } | null> {
-  if (useDeterministicAssist()) return null
-  const router = new FoundryModelRouter()
-  const request: FoundryModelRequest = {
-    kind: 'summarizeProgress',
-    context: emptyModelContext(instruction, envelope),
-  }
-  try {
-    const routed = await router.route('summarizeProgress', request)
-    if (!routed.response.ok) return null
-    const text = routed.response.rawText || routed.response.decision.reasoningSummary || ''
-    return { text, provider: routed.response.provider, model: routed.response.model }
-  } catch {
-    return null
-  }
-}
 
 async function augmentProjectContext(envelope: FoundryEditorContextEnvelope): Promise<{ refs?: unknown; git?: string }> {
   const extra: { refs?: unknown; git?: string } = {}
@@ -461,6 +399,8 @@ export function ensureFoundryWorkbenchW2Fixture(root?: string): string {
 }
 
 export async function runFoundryW2Command(input: {
+  owningMissionId?: string
+  owningBindingId?: string
   kind: FoundryW2AssistKind
   envelope?: FoundryEditorContextEnvelope | null
   instruction?: string
@@ -502,6 +442,8 @@ export async function runFoundryW2Command(input: {
   ])
   if (w4Kinds.has(input.kind)) {
     const w4 = await runFoundryW4Command({
+      owningMissionId: input.owningMissionId,
+      owningBindingId: input.owningBindingId,
       kind: input.kind,
       envelope: input.envelope,
       workspaceRoot: input.envelope?.workspaceRoot,
@@ -632,7 +574,14 @@ export async function runFoundryW2Command(input: {
 
   const instruction = String(input.instruction ?? '').trim()
   const project = await augmentProjectContext(envelope)
-  const routed = await routeModel(instruction || input.kind, envelope)
+  let routed: Awaited<ReturnType<typeof routeModel>>
+  try {
+    routed = await routeModel(instruction || input.kind, envelope, input.owningMissionId, input.owningBindingId)
+  } catch {
+    return { ok: false, kind: input.kind, readOnly: true, code: 'WORKBENCH_ASSIST_POLICY_REFUSED',
+      error: 'Workbench assist was refused because its owning mission policy, workspace or source context could not be verified.' }
+  }
+  const resolvedProviderClass = routed ? (routed.provider === 'ollama' || routed.provider === 'wrim' ? 'local' : 'remote') : 'none'
   const provider = routed?.provider || (useDeterministicAssist() ? 'foundry-w2-fixture' : 'foundry-model-router')
   const modelId = routed?.model ?? (useDeterministicAssist() ? 'deterministic' : null)
 
@@ -648,7 +597,7 @@ export async function runFoundryW2Command(input: {
       envelope,
       chips: editorContextChips(envelope),
       references: input.kind === 'explainSymbol' ? project.refs : undefined,
-      privacy: privacy(envelope, providerClass),
+      privacy: privacy(envelope, resolvedProviderClass),
     }
     writeJson(lastResponsePath(), response)
     return response
@@ -718,7 +667,7 @@ export async function runFoundryW2Command(input: {
     proposal,
     envelope,
     chips: editorContextChips(envelope),
-    privacy: privacy(envelope, providerClass),
+    privacy: privacy(envelope, resolvedProviderClass),
   }
   writeJson(lastResponsePath(), response)
   writeJson(busFile('proposal-preview.json'), {

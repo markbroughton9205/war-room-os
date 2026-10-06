@@ -85,7 +85,7 @@ function missionWith(status: FoundryMissionState, id: string): FoundryMissionRec
 }
 
 async function acquireClaim(resource: FoundryResourceId, missionId: string, operation: string) {
-  return acquireResource({ resource, missionId, operation, waitMs: 0 })
+  return acquireResource({ resource, missionId, operation, waitMs: 0, workspaceRoot: resource === 'REPO_WRITE' ? resolveRepoRoot() : undefined })
 }
 
 async function runResourceCases(): Promise<{ results: CaseResult[]; occupantBefore: string; occupantAfter: string }> {
@@ -392,7 +392,8 @@ async function run(): Promise<void> {
   const panel = readFileSync(path.join(ROOT, PANEL), 'utf8')
   results.push(check(
     'engineering_review_ui_regression',
-    /selected\.engineeringReview\b/.test(panel) && /Foundry checked all required gates and tests/.test(panel),
+    // The panel binds the review state and shows the review's own detail; it never states PASS in prose of its own (Pass 013/014).
+    /selected\.engineeringReview\b/.test(panel) && /selected\.engineeringReviewDetail/.test(panel) && !/PASS: Foundry checked all required gates and tests\./.test(panel),
     'panel binding and explanation intact',
   ))
 

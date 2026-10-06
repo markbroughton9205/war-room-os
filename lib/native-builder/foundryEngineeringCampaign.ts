@@ -6,6 +6,7 @@
 import type { PlannedEdit } from './foundryLargeProject'
 import type { EngineeringPlan } from './foundryEngineeringPlan'
 import type { ProjectContext } from './foundryProjectContext'
+import type { EditForensics, ProgressEdit } from './foundryEditForensics'
 import { emptyCampaignProgress, type CampaignProgress } from './foundryProgressEvaluation'
 
 export const MAX_ACTIVE_SUBTASKS = 8
@@ -92,7 +93,15 @@ export type EngineeringCampaign = {
   filesMutated: string[]
   appliedEditKeys: string[]
   /** The last applied edit (file + unified diff). Only used to tell a repairer that its own edit broke the project. */
-  recentEdits?: { file: string; diff: string }[]
+  recentEdits?: { file: string; diff: string; forensics?: EditForensics; span?: { start: number; end: number; before: string; after: string } }[]
+  /** What the failures were, in order (identity only): lets the runtime see a change bouncing between two broken states. Survives restart. */
+  failureTrail?: string[]
+  /** The last edit fixed one problem and broke another: what worked and what broke. Cleared once the tests pass or the failure changes again. */
+  editOutcome?: { kind: 'PARTIAL_PROGRESS'; kept: string; broke: string } | null
+  /** The tests showed the safer equivalent was not enough here (it could not read something the unsafe form could): stop preferring it for the rest of the mission. */
+  secureDefaultsOff?: boolean
+  /** The last edit that turned one failure into another: the good part to keep if the change starts bouncing. */
+  progressEdit?: ProgressEdit | null
   /** Files a repair edit was applied to without changing the failure: runtime evidence that the cause is elsewhere. Survives restart with the record. */
   ruledOut?: { file: string; layer: string; basis?: 'EDIT' | 'ISOLATED_TESTS' }[]
   /** Files where a worker proposed edits that would have changed nothing. Survives restart with the record, so a resumed mission does not start the same ineffective strategy again. */
@@ -136,6 +145,21 @@ export type EngineeringCampaign = {
   /** The mutated files as they were when the covering tests last passed, and what opened the current rework. A review-driven change that turns them red is put back. */
   greenSnapshot?: { generation: number; files: Record<string, string> }
   reworkOrigin?: 'TEST' | 'REVIEW'
+  /**
+   * Phase 6: self-review and independent verification, run after tests pass and before the mission can be declared
+   * complete. Persisted so a restart does not throw the review away and start it over; disk/runtime truth is
+   * re-checked on resume regardless (see foundryPhase6Completion). retiredFindingKeys bounds reopening the same
+   * finding forever, the same way reviewedClaims already bounds the reviewer.
+   */
+  phase6?: {
+    verifierFollowups?: { generation: number; original: string; clarification: string }[]
+    counterexamples?: { generation: number; probe: import('./foundryVerificationProbe').VerificationProbe; settled: boolean; finding: import('./foundryPhase6Types').Phase6Finding | null }[]
+    selfReview?: import('./foundrySelfReview').SelfReviewResult
+    independentVerdict?: import('./foundryIndependentVerifier').IndependentVerdict
+    disagreement?: import('./foundryReviewDisagreement').DisagreementRecord | null
+    retiredFindingKeys?: string[]
+    receipt?: import('./foundryPhase6Completion').Phase6VerificationReceipt
+  }
   reverts?: number
   /** The files a review-driven rework was put back on (for engineering memory). */
   revertedFiles?: string[]
@@ -143,6 +167,8 @@ export type EngineeringCampaign = {
   baselineFailure?: { exception: string | null; tests: string[]; frames: string[] }
   /** Evidence trail for engineering memory: files edited in the cycle that turned failing tests green, files after whose edit the very same failure came back, and the last failure key seen. */
   memoryTrail?: { greenFiles: string[]; ineffective: string[]; lastKey: string | null; editsAtRun: number }
+  /** Phase 5: what each tool was used for, in order, and the research state (questions, sources, findings). Persisted with the mission so a restart continues it. */
+  tooling?: import('./foundryToolReasoning').ToolingState
   /** Phase 4: what engineering memory did in this mission. The memory itself lives in the project store; this is the mission's record of using and saving it. */
   memory?: {
     status: 'FRESH' | 'SAME' | 'QUARANTINED'
@@ -586,8 +612,13 @@ export function sourceUsesUnboundName(source: string): boolean {
 }
 
 export function failureSignature(finding: string): string {
-  const line = finding.split('\n').map(item => item.trim()).find(item => /^(NameError|TypeError|KeyError|AssertionError|ImportError|AttributeError|SyntaxError)\b/.test(item))
-    ?? finding.split('\n').map(item => item.trim()).find(item => /Error:/.test(item) && !/^ERROR:\s/.test(item))
+  const lines = finding.split('\n').map(item => item.trim())
+  const first = lines.find(item => /^(NameError|TypeError|KeyError|AssertionError|ImportError|AttributeError|SyntaxError)\b/.test(item))
+  // An import-time failure is headed by the runner's generic "Failed to import test module" line; the exception that really stopped the code is the last one
+  // in the traceback. Without this an ImportError and a later NameError share one signature and real progress reads as "the same failure".
+  const inner = first && /Failed to import test module/i.test(first) ? [...lines].reverse().find(item => /^[A-Za-z_][\w.]*(?:Error|Exception):/.test(item) && !/Failed to import test module/i.test(item)) : undefined
+  const line = inner ?? first
+    ?? lines.find(item => /Error:/.test(item) && !/^ERROR:\s/.test(item))
     ?? finding
   return line.replace(/\s+/g, ' ').trim().slice(0, 180)
 }

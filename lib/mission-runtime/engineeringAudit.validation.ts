@@ -34,6 +34,11 @@ import { tryWarRoomSupabase } from '@/lib/war-room/persistence'
 import { buildCouncilAssistAuditMetadata, buildProviderResolutionAuditMetadata } from './engineeringAudit'
 import type { NativeCouncilAssistSession } from '@/lib/native-builder/types'
 
+// These validations are about what happens when no reasoning provider is available. A local model that happens to be running on this machine must not change that, so the
+// local endpoint is pointed at a port nothing listens on and the saved provider policy is not consulted.
+process.env.OLLAMA_BASE_URL = 'http://127.0.0.1:9'
+process.env.FOUNDRY_PROVIDER_POLICY = 'AUTO'
+
 type CaseResult = { name: string; pass: boolean; detail: string }
 function check(name: string, pass: boolean, detail: string): CaseResult {
   return { name, pass, detail }

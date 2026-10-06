@@ -141,6 +141,8 @@ export type FoundryEngineeringState = {
   lastReplanRefusal?: string
   editAnchors?: import('./foundryEditAnchors').FoundryEditAnchor[]
   editMatchRecovery?: import('./foundryEditAnchors').FoundryEditMatchRecovery
+  /** Rejected syntax-breaking candidates for one source digest (see foundrySyntaxRecovery). */
+  syntaxRecovery?: import('./foundrySyntaxRecovery').SyntaxRecovery
   lintRegionRecovery?: import('./foundryEditAnchors').FoundryLintRegionRecovery
   lastAppliedMutation?: {
     path: string
@@ -345,11 +347,12 @@ function captureAuthRuntimeSnapshot(): Record<string, unknown> {
 export async function captureEngineeringBaseline(mission: FoundryMissionRecord, files: string[] = []): Promise<unknown> {
   const targets = [...new Set([...files, ...mission.candidateFiles, ...(ensureEngineeringState(mission).impact?.owners ?? [])])].slice(0, 20)
   const baseline = await recordMissionBaseline(mission, targets)
-  const diff = await terminalRepoDiff(targets.length ? targets : undefined)
+  // A workspace that is not a git repository has nothing to diff against: its baseline is the file hashes, not a failure.
+  const diff = await terminalRepoDiff(targets.length ? targets : undefined).catch(() => null)
   const runtime = mission.kind === 'application' ? await runtimeVerify().catch(() => null) : null
   const auth = captureAuthRuntimeSnapshot()
   mission.sourceState.baselineFiles = targets
-  mission.sourceState.diffSummary = typeof diff.diff === 'string' ? diff.diff.slice(0, 2_000) : String(diff).slice(0, 2_000)
+  mission.sourceState.diffSummary = !diff ? '' : typeof diff.diff === 'string' ? diff.diff.slice(0, 2_000) : String(diff).slice(0, 2_000)
   const { allowedChangeSet } = await import('./foundryMultiFileEngineering')
   const ownership = ensureEngineeringState(mission).ownership ?? {
     query: mission.goal,
@@ -389,6 +392,15 @@ const REVIEW_MARKERS = [
   { re: /LOCAL_CODER_|OPS_WRITE_LABEL/, label: 'fixture leakage', severity: 'fail' as const },
 ]
 
+/**
+ * Console output is a debug leftover in product code but the product itself in a validator, proof, test or script (and wherever the Commander asked for logged output).
+ * Only then is `console.log` not a review finding; `debugger` and the other markers always are.
+ */
+export function consoleOutputIsIntended(files: string[], request: string): boolean {
+  if (/console\.log|console output|\blog(?:ging)?\b[^.]{0,40}\b(line|result|count|summary)\b|\bprints?\b[^.]{0,40}\b(line|result|count|summary|PASS)\b/i.test(request)) return true
+  return files.length > 0 && files.every(file => /\.(?:validation|proof|test|spec)\.[cm]?[jt]sx?$|(?:^|\/)scripts\//.test(file))
+}
+
 export function reviewDiffText(diff: string, mission: FoundryMissionRecord): FoundrySelfReview {
   const findings: string[] = []
   const severity: Array<'info' | 'warn' | 'fail'> = []
@@ -410,8 +422,10 @@ export function reviewDiffText(diff: string, mission: FoundryMissionRecord): Fou
   if (files.some(file => /(^|\/)(node_modules|\.next|dist-release|vendor)\//.test(file))) {
     note('unexpected generated-file edits', 'fail')
   }
+  const consoleIntended = consoleOutputIsIntended(files, mission.userRequest)
   for (const marker of REVIEW_MARKERS) {
-    if (marker.re.test(diff) && !marker.re.test(mission.userRequest)) note(marker.label, marker.severity)
+    const re = consoleIntended && marker.label === 'debug markers' ? /\bdebugger\b|TODO REMOVE|FIXME HACK/i : marker.re
+    if (re.test(diff) && !re.test(mission.userRequest)) note(marker.label, marker.severity)
   }
   const added = [...diff.matchAll(/^\+[^+]/gm)].length
   const removed = [...diff.matchAll(/^-[^-]/gm)].length

@@ -53,6 +53,11 @@ export async function previewDiff(options: PreviewDiffOptions = {}): Promise<{
     diff = stdout
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
+    // Fresh workspaces have file-hash baselines but no Git history. Preserve all other Git errors.
+    const stderr = typeof (error as { stderr?: unknown }).stderr === 'string' ? (error as { stderr: string }).stderr : ''
+    if (/^(?:warning: Not a git repository\.|fatal: not a git repository)/mi.test(stderr)) {
+      return { diff: '', truncated: false, staged, repoPath }
+    }
     if (msg.includes('maxBuffer') || msg.includes('stdout maxBuffer')) {
       return { diff: '', truncated: true, staged, repoPath }
     }

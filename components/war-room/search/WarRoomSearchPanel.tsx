@@ -47,15 +47,17 @@ export function WarRoomSearchPanel() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(SEARCH_RECENT_STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as unknown
-        if (Array.isArray(parsed)) setRecent(parsed.filter((item): item is string => typeof item === 'string').slice(0, 8))
+    queueMicrotask(() => {
+      try {
+        const raw = sessionStorage.getItem(SEARCH_RECENT_STORAGE_KEY)
+        if (raw) {
+          const parsed = JSON.parse(raw) as unknown
+          if (Array.isArray(parsed)) setRecent(parsed.filter((item): item is string => typeof item === 'string').slice(0, 8))
+        }
+      } catch {
+        /* session-local only */
       }
-    } catch {
-      /* session-local only */
-    }
+    })
     inputRef.current?.focus()
   }, [])
 

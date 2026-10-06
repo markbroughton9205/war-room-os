@@ -20,6 +20,7 @@ import { FOUNDRY_MODEL_TOOL_CATALOG } from './foundryToolCatalog'
 import type { FoundryModelContext, FoundryMissionModel } from './foundryModelTypes'
 import type { PlannedEdit } from './foundryLargeProject'
 import { noEffectStatements, ruledOutStatements } from './foundryGoalAnchor'
+import { assertionSentence, editEvidence, readAssertion } from './foundryEditForensics'
 import {
   MAX_MODEL_CALLS_PER_CAMPAIGN,
   contractFieldName,
@@ -69,6 +70,8 @@ export type FoundrySpecialistRequest = {
   alreadyTried?: string[]
   /** Set only when the newest failure is an import/syntax error right after an edit: the edit that most likely caused it. */
   suspectEdit?: string
+  /** The exact reason the same role's previous answer was rejected as unusable, so the next attempt does not repeat the same malformed call. */
+  previousInvalid?: string
   resourceBudget: { callsRemaining: number; ceiling: number }
   localOnly: boolean
   reasoningDepth: 'R0' | 'R1' | 'R2' | 'R3' | 'R4'
@@ -150,7 +153,9 @@ export function parseSpecialistPayload(input: {
   generalMode?: boolean
 }): { result: FoundrySpecialistResult; failureClass: SpecialistFailureClass | null; edit: PlannedEdit | null; noEffect?: NoEffectiveChange | null } {
   const parsed = input.raw ? extractJsonObject(input.raw) : null
-  const summary = clip(input.summary || (typeof parsed?.reasoningSummary === 'string' ? parsed.reasoningSummary : ''), 500)
+  const rawSummary = typeof parsed?.reasoningSummary === 'string' ? parsed.reasoningSummary : ''
+  // Verification may end with a bounded PROBE_JSON payload. Do not clip that evidence to a UI receipt.
+  const summary = clip(input.role === 'VERIFIER' ? rawSummary || input.summary : input.summary || rawSummary, input.role === 'VERIFIER' ? 8000 : 500)
   const tool = parsed?.tool && typeof parsed.tool === 'object' && !Array.isArray(parsed.tool)
     ? parsed.tool as Record<string, unknown>
     : null
@@ -428,7 +433,7 @@ export function editBrokeTheProject(evidence: readonly string[]): boolean {
   return /ImportError|ModuleNotFoundError|SyntaxError|IndentationError|Failed to import test module|cannot import name/i.test(evidence.join(' '))
 }
 
-function promptFor(input: FoundrySpecialistRequest): string {
+export function promptFor(input: FoundrySpecialistRequest): string {
   const source = input.role === 'ARCHITECT'
     ? input.excerpts.map(item => item.file).join('\n')
     : input.excerpts.map(item => `${item.readOnly ? 'TEST (read only, never edit)' : 'SOURCE'} ${item.file}\n${item.text.slice(0, item.readOnly ? 2500 : 4000)}`).join('\n')
@@ -437,6 +442,7 @@ function promptFor(input: FoundrySpecialistRequest): string {
     : ''
   const shared = [
     lead,
+    input.generalMode && (input.role === 'BACKEND' || input.role === 'FRONTEND') ? 'First compare the requested behavior with SOURCE. If it already implements the request, return REPLAN with STATUS pass and no tool. Do not rewrite equivalent code or add redundant operations.' : '',
     `ROLE ${input.role}. You are not the campaign owner.`,
     `PURPOSE ${input.taskPurpose}`,
     input.missionContract ? `CONTRACT ${input.missionContract.slice(0, 400)}` : '',
@@ -444,8 +450,8 @@ function promptFor(input: FoundrySpecialistRequest): string {
     input.alreadyTried?.length && (input.role === 'DEBUGGER' || input.role === 'BACKEND' || input.role === 'FRONTEND')
       ? `ALREADY TRIED, DO NOT REPEAT ${input.alreadyTried.join(' | ').slice(0, 320)}`
       : '',
-    input.suspectEdit && (input.role === 'DEBUGGER' || input.role === 'BACKEND' || input.role === 'FRONTEND') ? `MY LAST EDIT MAY HAVE CAUSED THIS ${input.suspectEdit.slice(0, 240)}` : '',
-    input.projectFacts.length ? `FACTS ${input.projectFacts.join(' | ').slice(0, 300)}` : '',
+    input.suspectEdit && (input.role === 'DEBUGGER' || input.role === 'BACKEND' || input.role === 'FRONTEND') ? `${input.suspectEdit.slice(0, 900)}\nRead every line by its label. ADDED and MOVED lines are the change that was asked for: keep them. REMOVED lines are what the edit took away: a REMOVED name that is now undefined is the regression, so put back only that. Do not undo the requested change.` : '',
+    input.role !== 'VERIFIER' && input.projectFacts.length ? `FACTS ${input.projectFacts.join(' | ').slice(0, 300)}` : '',
     input.contextNotes?.length && input.role !== 'REVIEWER' && input.role !== 'VERIFIER' ? `CONTEXT ${input.contextNotes.join(' | ').slice(0, 900)}` : '',
     'Do not commit, push, deploy, spend, or write files yourself.',
     source,
@@ -455,10 +461,7 @@ function promptFor(input: FoundrySpecialistRequest): string {
     return ['Compare the REQUEST and each numbered ACCEPTANCE line in CONTRACT with SOURCE. Only those lines are acceptance; a constant or label in SOURCE is not. A STATUSES list is not a defect. Return REPLAN. reasoningSummary must be STATUS fail and name each unmet acceptance, or STATUS pass when every acceptance sentence is implemented. Do not call a tool.', ...shared].join('\n')
   }
   if (input.role === 'VERIFIER') {
-    const passed = input.projectFacts.some(item => /verify pass/.test(item))
-    const line = passed
-      ? 'The tests passed. reasoningSummary must be the single word PROJECT_READY. Return REPLAN. Do not call a tool.'
-      : 'The tests failed. reasoningSummary must be the single word NOT_READY. Return REPLAN. Do not call a tool.'
+    const line = 'Independently compare the REQUEST and acceptance criteria in CONTRACT with SOURCE. Do not infer correctness from a prior pass verdict. Return REPLAN without tools. If the source satisfies the goal, reasoningSummary starts with PROJECT_READY and cites the supporting file and symbol. If it does not, start with NOT_READY and state the specific unmet criterion, file, and reproducible counterexample. For a callable Python counterexample, append PROBE_JSON followed by one JSON object with file, function, args (array), expected, and criterion (the exact acceptance sentence). This is data for a bounded probe; never provide executable probe code. Do not invent requirements.'
     return [line, ...shared].join('\n')
   }
   if (input.role === 'TEST') {
@@ -471,17 +474,21 @@ function promptFor(input: FoundrySpecialistRequest): string {
     return [...shared, 'The narrow test already passes. Return REPLAN. reasoningSummary must be STATUS pass. Do not return TOOL.'].join('\n')
   }
   const file = input.workingSet[0] ?? input.excerpts[0]?.file ?? ''
+  const rejected = input.previousInvalid
+    ? `YOUR LAST ANSWER WAS REJECTED: ${input.previousInvalid} Return TOOL file.replace_unique again with EVERY argument filled in and none empty: {"path":"${file}","matchText":"<the exact line(s) copied once from SOURCE>","replacementText":"<those same lines with only the needed change, written out in full>","reason":"<one short sentence>"}.`
+    : ''
   const missingName = /NameError|not defined|not imported|ImportError/i.test(input.failureEvidence.join(' '))
   const named = missingNamesFromFailure(input.failureEvidence)
   if (input.generalMode) {
     return [
       ...shared,
-      `Return TOOL file.replace_unique for ${file}.`,
+      rejected,
+      `Choose REPLAN with reasoningSummary STATUS pass when ${file} already satisfies CONTRACT. Only when a concrete requested behavior is missing or FAILURE proves a defect, return TOOL file.replace_unique for ${file}.`,
       'path must be that working-set file. matchText must be copied exactly from SOURCE and occur once. replacementText is the replacement. Do not use anchorId. Do not use src/example.ts.',
-      'Do not replace the whole file. Keep every existing function, assignment, and import that SOURCE already has.',
+      'Do not replace the whole file. Preserve existing behavior. Remove an import only when FAILURE proves it invalid. A requirement naming a missing function means implement that function in the requested file; only import names the other module actually defines.',
       input.role === 'FRONTEND'
         ? `Update ${file} so it works with the change made in the code it uses (see CONTEXT and FAILURE). Change only what the request and the failure require.`
-        : `Make the smallest change in ${file} that carries out the request in CONTRACT and makes the failing test in FAILURE pass. Change only behavior the request asks for; do not rename or remove anything else.`,
+        : `If a change is needed, implement only the missing behavior in CONTRACT or fix the concrete FAILURE. Otherwise leave ${file} unchanged. Do not rename or remove anything else.`,
       `TEST shows what must hold. Do not add behavior that the request and TEST do not ask for. If ${file} already does what is needed, return REPLAN with reasoningSummary STATUS pass and no tool call instead.`,
       named.unknownImports.length
         ? `The import of ${named.unknownImports.join(', ')} is wrong: that name does not exist in the module it is imported from. Fix the import using names SOURCE shows the module defines.`
@@ -497,6 +504,7 @@ function promptFor(input: FoundrySpecialistRequest): string {
   const normalizer = /def\s+(normalize_[A-Za-z_]+)\s*\(/.exec(input.missionContract)?.[1] ?? null
   return [
     ...shared,
+    rejected,
     `Return TOOL file.replace_unique for ${file}.`,
     'path must be that working-set file. matchText must be copied exactly from SOURCE and occur once. replacementText is the replacement. Do not use anchorId. Do not use src/example.ts.',
     'Do not replace the whole file. Keep every existing function, assignment, and import that SOURCE already has.',
@@ -511,7 +519,7 @@ function promptFor(input: FoundrySpecialistRequest): string {
           ? 'FAILURE names a missing name. Add the missing import from the shared module with one unique replacement, using the name exactly as SOURCE uses it. Do not define a local copy. Do not delete existing functions or data.'
           : 'A name used in the file must be imported or defined in SOURCE. If CONTRACT defines a helper, import it before calling it.',
     'Do not return COMPLETE.',
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 function contextFor(input: FoundrySpecialistRequest, goal: string): FoundryModelContext {
@@ -538,7 +546,7 @@ function contextFor(input: FoundrySpecialistRequest, goal: string): FoundryModel
     plan: [{ id: input.taskId, title: input.taskPurpose.slice(0, 80), status: 'active' }],
     hypotheses: [],
     changedFiles: [],
-    importantFindings: input.projectFacts.slice(0, 4),
+    importantFindings: input.role === 'VERIFIER' ? [] : input.projectFacts.slice(0, 4),
     relevantExcerpts: input.excerpts.slice(0, 4).map(item => ({ source: item.file, text: item.text.slice(0, 700) })),
     visualEvidence: [],
     recentToolResults: input.excerpts.slice(0, 3).map(item => ({
@@ -553,7 +561,7 @@ function contextFor(input: FoundrySpecialistRequest, goal: string): FoundryModel
       complete: false,
       missing: [input.role !== 'VERIFIER'
         ? 'specialist-result'
-        : input.projectFacts.some(item => /verify pass/.test(item)) ? 'PROJECT_READY' : 'NOT_READY'],
+        : 'independent source acceptance assessment'],
       detail: input.role,
     },
     loopWarning: input.needsEdit ? undefined : 'Return REPLAN only. Do not call a tool.',
@@ -587,7 +595,7 @@ async function dispatchPinned(input: FoundrySpecialistRequest, provider: string,
       task: input.role === 'DEBUGGER' ? 'diagnosis' : input.role === 'REVIEWER' ? 'critique' : input.needsEdit ? 'repair' : 'understand',
       problem: input.taskPurpose,
       constraints: ['No direct file writes.', 'No commit, push, or deploy.'],
-      evidenceSummaries: input.projectFacts.slice(0, 4),
+      evidenceSummaries: input.role === 'VERIFIER' ? [] : input.projectFacts.slice(0, 4),
     }),
     context: contextFor(input, goal),
     pin: { provider, model },
@@ -786,18 +794,23 @@ export function specialistRequestFromCampaign(input: {
     campaignId: campaign.missionId,
     taskId: input.taskId,
     role: input.role,
-    missionContract: input.contractText || [campaign.request, ...campaign.acceptance].join('\n'),
+    missionContract: input.contractText ? `REQUEST ${campaign.request}\n${input.contractText}` : [campaign.request, ...campaign.acceptance].join('\n'),
     taskPurpose: input.purpose,
     acceptanceCriteria: [input.acceptance],
     workingSet: input.workingSet,
-    // The newest test results decide what a verifier is told; the oldest ones must not push them out of a long mission's facts.
-    projectFacts: [...campaign.knowledge.architecture.slice(0, 2), ...campaign.knowledge.tests.slice(-4)],
+    // Verification receives source and acceptance criteria without earlier workers' verdicts.
+    projectFacts: input.role === 'VERIFIER' ? [] : [...campaign.knowledge.architecture.slice(0, 2), ...campaign.knowledge.tests.slice(-4)],
     knownInterfaces: campaign.knowledge.interfaces.slice(0, 4),
     // A reviewer or verifier judges the files as they are now. The failure that started the repair is history once the tests pass, and
     // handing it to them anchors a small model on a problem that is already fixed.
-    failureEvidence: input.role === 'REVIEWER' || input.role === 'VERIFIER' ? [] : campaign.repairFinding ? [campaign.repairFinding] : campaign.knowledge.failures.slice(-2),
+    failureEvidence: input.role === 'REVIEWER' || input.role === 'VERIFIER' ? [] : campaign.repairFinding ? [
+      // Keep the observed exception ahead of a debugger hypothesis so it cannot be paraphrased away.
+      ...(campaign.reworkOrigin === 'TEST' ? campaign.knowledge.failures.filter(item => /^(integration defect|tests fail before any change:)/.test(item)).slice(-1) : []),
+      ...assertionReadingFor(campaign.repairFinding), campaign.repairFinding,
+    ] : campaign.knowledge.failures.slice(-2),
     alreadyTried: [...ruledOutStatements(campaign.ruledOut), ...noEffectStatements(campaign.noEffect), ...(campaign.progress?.triedSummaries?.slice(-4) ?? [])],
     ...suspectEditFor(campaign),
+    ...previousInvalidFor(campaign, input.role, input.taskId),
     resourceBudget: { callsRemaining: campaign.modelCallBudget - campaign.modelCalls, ceiling: campaign.modelCallBudget },
     localOnly: campaign.localOnly,
     reasoningDepth: 'R1',
@@ -810,12 +823,33 @@ export function specialistRequestFromCampaign(input: {
   }
 }
 
+/** The sentence that says which side of a failed assertion the code produced, so it is never read backwards. */
+function assertionReadingFor(finding: string): string[] {
+  const reading = readAssertion(finding)
+  return reading ? [assertionSentence(reading)] : []
+}
+
+/**
+ * When the last answer from this role was rejected as unusable (a tool call missing an argument, the wrong shape), the next request says exactly what was
+ * wrong. Asking again with the same words gets the same malformed answer back.
+ */
+export function previousInvalidFor(campaign: EngineeringCampaign, role: CampaignRole, taskId: string): { previousInvalid?: string } {
+  if (role !== 'BACKEND' && role !== 'FRONTEND') return {}
+  const last = [...(campaign.workerReceipts ?? [])].reverse().find(item => item.role === role && item.taskId === taskId)
+  if (!last || last.failureClass !== 'INVALID_OUTPUT' || !last.summary) return {}
+  return { previousInvalid: last.summary.replace(/\s+/g, ' ').slice(0, 220) }
+}
+
 /** Only when the project stopped loading after an edit does the request carry that edit; elsewhere extra context only distracts a small model. */
 function suspectEditFor(campaign: EngineeringCampaign): { suspectEdit?: string } {
   const last = campaign.recentEdits?.at(-1)
   const evidence = campaign.repairFinding ? [campaign.repairFinding] : campaign.knowledge.failures.slice(-2)
-  if (!last || !editBrokeTheProject(evidence)) return {}
-  return { suspectEdit: `${last.file}: ${compactDiff(last.diff)}` }
+  if (!last || !(editBrokeTheProject(evidence) || campaign.editOutcome)) return {}
+  // Every line is labelled BEFORE / AFTER / ADDED / REMOVED / MOVED so the edit can never be read backwards; an old record without them falls back to the raw +/- lines.
+  const block = last.forensics ? editEvidence(last.forensics) : `MY LAST EDIT in ${last.file}\nCHANGED LINES: ${compactDiff(last.diff)}`
+  const outcome = campaign.editOutcome
+  const verdict = outcome?.kind === 'PARTIAL_PROGRESS' ? `\nWHAT WORKED: ${outcome.kept} is fixed now, so that part of the change stays.\nWHAT BROKE: ${outcome.broke} is missing after the edit. Repair only ${outcome.broke}, the way it was BEFORE.` : ''
+  return { suspectEdit: `${block}${verdict}` }
 }
 
 export function campaignCallsRemaining(campaign: EngineeringCampaign): number {

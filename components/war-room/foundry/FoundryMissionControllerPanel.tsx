@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FoundryLiveAgentEvents } from './FoundryLiveAgentEvents'
 import { FoundryContractVerdictPanel } from './FoundryContractVerdictPanel'
 import { FoundryResourceGovernorPanel } from './FoundryResourceGovernorPanel'
@@ -63,25 +63,35 @@ export function FoundryMissionControllerPanel() {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const refreshInFlight = useRef(false)
+  const refreshGeneration = useRef(0)
   const refresh = useCallback(async () => {
-    const listing = await json<{ missions: Mission[] }>(`/api/foundry/missions?limit=20&view=commander`)
-    setMissions(listing.missions)
-    if (selectedId) {
-      const detail = await json<{ mission: Mission }>(`/api/foundry/missions/${selectedId}`)
-      setSelected(detail.mission)
-    } else {
-      setSelected(null)
-    }
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
+    const generation = refreshGeneration.current
+    try {
+      const listing = await json<{ missions: Mission[] }>(`/api/foundry/missions?limit=20&view=commander`)
+      if (generation !== refreshGeneration.current) return
+      setMissions(listing.missions)
+      if (selectedId) {
+        const detail = await json<{ mission: Mission }>(`/api/foundry/missions/${selectedId}`)
+        if (generation !== refreshGeneration.current) return
+        setSelected(detail.mission)
+      } else {
+        setSelected(null)
+      }
+    } finally { refreshInFlight.current = false }
   }, [selectedId])
 
   useEffect(() => {
+    refreshGeneration.current += 1
     queueMicrotask(() => {
       void refresh().catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))
     })
     const timer = window.setInterval(() => {
       void refresh().catch(() => undefined)
     }, 2_000)
-    return () => window.clearInterval(timer)
+    return () => { refreshGeneration.current += 1; window.clearInterval(timer) }
   }, [refresh])
 
   const run = async (missionId: string) => {
@@ -187,7 +197,7 @@ export function FoundryMissionControllerPanel() {
         <select
           className="max-w-xs rounded border border-white/10 bg-slate-950 px-2 py-1 text-[10px] text-slate-300"
           value={selectedId ?? ''}
-          onChange={event => setSelectedId(event.target.value || null)}
+          onChange={event => { setSelected(null); setSelectedId(event.target.value || null) }}
           aria-label="Mission status"
         >
           <option value="">NEW MISSION</option>

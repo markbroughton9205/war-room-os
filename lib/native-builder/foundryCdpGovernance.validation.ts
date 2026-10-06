@@ -41,10 +41,12 @@ async function lanCdpUnreachable(): Promise<{ pass: boolean; detail: string }> {
 
 async function run() {
   const root = resolveRepoRoot()
+  const desktopCdp = await readFile(`${root}/desktop/src/warRoomCdp.cjs`, 'utf8')
   const main = await readFile(`${root}/desktop/src/main.cjs`, 'utf8')
   const installer = await readFile(`${root}/lib/native-builder/installerTool.ts`, 'utf8')
   const runtime = await readFile(`${root}/lib/native-builder/runtimeControl.ts`, 'utf8')
   const cdp = await readFile(`${root}/lib/native-builder/foundryComputerUseCdp.ts`, 'utf8')
+  const sandboxFlags = await readFile(`${root}/lib/native-builder/linuxElectronSandboxCapability.ts`, 'utf8')
   const computer = await readFile(`${root}/lib/native-builder/foundryComputerUse.ts`, 'utf8')
   const catalog = await readFile(`${root}/lib/native-builder/foundryToolCatalog.ts`, 'utf8')
 
@@ -53,15 +55,27 @@ async function run() {
     'cdp_loopback_only',
     REMOTE_DEBUGGING_ADDRESS === '127.0.0.1'
       && WAR_ROOM_CDP_ADDRESS === '127.0.0.1'
-      && /REMOTE_DEBUGGING_ADDRESS = '127\.0\.0\.1'/.test(main)
-      && installer.includes('--remote-debugging-address=127.0.0.1')
-      && runtime.includes('--remote-debugging-address=127.0.0.1')
-      && /claimWarRoomCdpEndpoint/.test(main)
+      && /const LOOPBACK = '127\.0\.0\.1'/.test(desktopCdp)
+      // The launch flags come from one shared source; the installer's shim and the runtime relaunch both use it, so loopback-only cannot drift between them.
+      && sandboxFlags.includes("'--remote-debugging-address=127.0.0.1'")
+      && installer.includes('electronShimExecLine')
+      && runtime.includes('electronLaunchFlags(')
+      && /configureWarRoomCdp\(app.commandLine\)/.test(main)
       && !/--remote-debugging-port=9222/.test(installer)
       && !/--remote-debugging-port=9222/.test(runtime)
       && !/listen\([^)]*0\.0\.0\.0/.test(cdp)
       && !/remote-debugging-address['", ]+0\.0\.0\.0/.test(main),
     `address=${REMOTE_DEBUGGING_ADDRESS}`,
+  ))
+  results.push(check(
+    'cdp_explicit_opt_in_default_off',
+    /configureWarRoomCdp\(app.commandLine\)/.test(main)
+      && /env.WAR_ROOM_ENABLE_DESKTOP_CDP !== '1'/.test(desktopCdp)
+      && /commandLine.removeSwitch\(name\)/.test(desktopCdp)
+      && ['remote-debugging-port', 'remote-debugging-pipe', 'remote-debugging-address'].every(name => desktopCdp.includes(`'${name}'`))
+      && /cdpPort: 0, allocation: 'disabled'/.test(desktopCdp)
+      && /process.platform === 'linux' && claimedCdp/.test(main),
+    'explicit opt-in, inherited switch removal, disabled discovery and readiness gate',
   ))
   const lan = await lanCdpUnreachable()
   results.push(check('cdp_lan_unreachable', lan.pass, lan.detail))

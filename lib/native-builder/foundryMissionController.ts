@@ -1,19 +1,26 @@
+import { reconcileMissionControl } from './foundryMissionControlRevision'
 /**
  * Foundry Mission Controller — PASS 004 autonomous coding agent.
  * Chooses existing Engineer/Foundry broker tools from mission state. Does not rebuild PASS 003.
  */
+import { isWarRoomSourceTree, projectHasNoStaticTooling, projectTestFiles } from './foundryWorkspaceKind'
 import { createHash, randomUUID } from 'node:crypto'
-import { executeEngineerTool, type EngineerToolName } from './engineerTools'
+import { executeEngineerTool, isEngineerToolName, type EngineerToolName } from './engineerTools'
 import { coerceTerminalExecuteArgs } from './foundryToolCatalog'
 import { evaluateCompletionGate } from './productionCompletionGate'
-import { interpretCommanderRequest, buildInitialPlan, replanAfterTestFailure } from './foundryMissionPlanner'
+import { interpretCommanderRequest, buildInitialPlan, replanAfterTestFailure, correctLegacyMissionIntent } from './foundryMissionPlanner'
 import { emptyApplicationBuilderState } from './foundryApplicationBuilderTypes'
 import { classifyFoundryMission, isTestMissionClass } from './foundryMissionVisibility'
 import { appendJournal, loadMission, saveMission, summarizeContext, transitionMission } from './foundryMissionStore'
+import { runWithWorkspaceRoot } from '@/lib/repo/workspaceContext'
 import { resumeInstallMissionForVerification } from './foundryInstallMissionLifecycle'
 import { resolveRepoRoot } from '@/lib/repo/paths'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { commanderDeclaredNewFiles, coerceReplanWithTool, toRepoRelativeTarget } from './foundryEngineeringContract'
 import { logWarRoomRepoAudit } from '@/lib/war-room/repoAudit'
 import { FoundryModelRouter } from './foundryModelRouter'
+import { FoundryLaunchPolicyError, localOnlyRouting } from './foundryLaunchPolicy'
 import { resolveFoundryBrainStatus } from './foundryBrainStatus'
 import { applyFoundryRuntimeConfig } from './foundryRuntimeConfig'
 import { foundryContextForModel } from './foundryContextManager'
@@ -92,11 +99,15 @@ import {
   parseLintErrorLocations,
   repoRelativeLintPath,
 } from './foundryEditAnchors'
+import { repairStagnant, MAX_TRIES_PER_TARGET } from './foundryNarrowRepair'
 import {
+  authoringProgress,
   buildEngineeringGateTable,
   evaluateReplanDecision,
   evaluateBlockedDecision,
 } from './foundryEngineeringGateTable'
+import { FOUNDRY_DEFAULT_FALLBACK_MODEL } from './foundryOperationsTypes'
+import { acquireModelTurn, executiveAfterTool, executivePrecheck, executiveTick, isBackgroundOrchestrationRequest, isBuildMissionRequest, orchestrationNextCall, orchestrationProgress, waitForJobEvent } from './foundryMissionExecutiveRuntime'
 import {
   beginDurableTool,
   checkpointIfNeeded,
@@ -124,7 +135,7 @@ import {
   verifyInstallArtifactIntegrity,
 } from './foundryActivationHandoff'
 import { classifyToolIdempotency } from './foundryToolLifecycle'
-import { acquireResource, releaseMissionResources } from './foundryResourceLocks'
+import { releaseMissionResources } from './foundryResourceLocks'
 import type {
   FoundryHypothesis,
   FoundryModelDecision,
@@ -333,6 +344,71 @@ function pendingIntent(mission: FoundryMissionRecord): FoundryMissionStep | null
   return mission.plan.find(s => s.status === 'pending') ?? null
 }
 
+
+type DirectedStep = { tool: EngineerToolName; args: Record<string, unknown>; why: string }
+
+/**
+ * Steps with no judgment in them are executed by the Mission Executive itself, exactly as Foundry already does its start-of-mission
+ * search/owners/baseline: lint and self-review after an authoring write, and every next call of a build mission (define task, run task,
+ * start verification job, wait). The model is kept for the work that needs it: writing and repairing source.
+ */
+function executiveDirectedStep(mission: FoundryMissionRecord): DirectedStep | null {
+  if (isBackgroundOrchestrationRequest(mission.userRequest)) {
+    const call = orchestrationNextCall(mission.missionId, mission.userRequest, false)
+    if (!call || !isBuildMissionRequest(mission.userRequest)) return null
+    try {
+      const parsed = JSON.parse(call) as { reasoningSummary: string; tool: { name: string; args: Record<string, unknown> } }
+      if (isEngineerToolName(parsed.tool.name)) return { tool: parsed.tool.name, args: parsed.tool.args, why: parsed.reasoningSummary }
+    } catch { /* fall through to the model */ }
+    return null
+  }
+  const authoring = authoringProgress(mission)
+  if (authoring?.phase === 'LINT') return { tool: 'lint.run', args: { targets: authoring.files }, why: 'lint what was written' }
+  if (authoring?.phase === 'TYPECHECK') return { tool: 'typecheck.run', args: { scopeGlob: authoring.files[0] }, why: 'type-check what was written' }
+  if (authoring?.phase === 'REVIEW') return { tool: 'engineering.review', args: {}, why: 'self-review the change' }
+  return null
+}
+
+/**
+ * WAITING is not a model problem. When the model has called job.wait (nothing independent remains) and the only thing outstanding is a
+ * running job, wait on the job event here, keep the lease alive, and spend no model calls until something actually changes.
+ */
+async function awaitExecutiveIdle(mission: FoundryMissionRecord): Promise<void> {
+  if (!isBackgroundOrchestrationRequest(mission.userRequest)) return
+  const modelHasNothingToDo = mission.toolCalls.at(-1)?.tool === 'job.wait' || (mission.modelState?.consecutiveFailures ?? 0) > 0
+  if (!modelHasNothingToDo) return
+  for (let slice = 0; slice < 60; slice += 1) {
+    const progress = orchestrationProgress(mission.missionId, mission.userRequest)
+    if (progress.phase !== 'JOB_RUNNING' || progress.wantsGraph || progress.readyIndependent.length) return
+    if (mission.cancelRequested || isFoundryAgentAborted(mission.missionId)) return
+    await waitForJobEvent(progress.running[0].jobId, 120_000)
+    await heartbeatMission(mission, 'waiting on background job')
+  }
+  // Rejections while there was genuinely nothing to do are not model failures; do not let them count toward a block.
+  if (mission.modelState) mission.modelState.consecutiveFailures = 0
+}
+
+/** Turn-start executive tick: folds finished background jobs into the graph, wakes dependents, and refreshes the model-visible brief. */
+function applyExecutiveTurn(mission: FoundryMissionRecord): void {
+  const tick = executiveTick(mission.missionId, mission.goal)
+  for (const event of tick.events) appendFoundryAgentEvent(mission, 'MISSION_EXECUTIVE', event, { ok: true })
+  if (tick.events.length) mission.observations.push({ at: now(), text: `EXECUTIVE: ${tick.events.join('; ')}`, source: 'mission.executive' })
+  const prior = (mission.runtimeFindings ?? []).find(item => item.startsWith('EXECUTIVE: '))
+  const findings = (mission.runtimeFindings ?? []).filter(item => !item.startsWith('EXECUTIVE: '))
+  if (tick.brief && !(tick.brief === 'Mission complete.' && mission.completionGate.missing.length > 0)) {
+    const next = tick.next.start.length ? ` Ready now: ${tick.next.start.map(task => task.taskId).join(', ')}.` : ''
+    const line = `EXECUTIVE: ${tick.brief}${next}`
+    findings.push(line)
+    if (line !== prior) appendFoundryAgentEvent(mission, 'MISSION_EXECUTIVE', tick.brief)
+  }
+  mission.runtimeFindings = findings
+}
+
+async function syncMissionControl(mission: FoundryMissionRecord): Promise<void> {
+  const persisted = await loadMission(mission.missionId)
+  if (persisted) reconcileMissionControl(persisted, mission)
+}
+
 async function callTool(
   mission: FoundryMissionRecord,
   tool: EngineerToolName,
@@ -340,6 +416,9 @@ async function callTool(
   reason: string,
   waitMs = 0,
 ): Promise<CallResult> {
+  await syncMissionControl(mission)
+  if (['COMPLETE', 'CANCELLED', 'FAILED'].includes(mission.status) && tool !== 'process.stop' && tool !== 'browser.stop') return { ok: false, tool, error: 'Mission is terminal.' }
+  if (mission.pauseRequested && tool !== 'process.stop' && tool !== 'browser.stop') return { ok: false, tool, error: 'Mission paused.' }
   if ((mission.cancelRequested || isFoundryAgentAborted(mission.missionId)) && tool !== 'process.stop' && tool !== 'browser.stop' && tool !== 'mission.cancel') {
     return { ok: false, tool, error: 'Mission cancelled.' }
   }
@@ -359,6 +438,15 @@ async function callTool(
       await requestControlledAuthorization(mission, tool, denied, tool, 'Only this pending action is paused. Existing work is preserved.')
     }
     return { ok: false, tool, error: denied }
+  }
+  const exec = executivePrecheck(mission.missionId, tool, input)
+  if (!exec.ok) {
+    // WAITING is not BLOCKED: record it and return so the model can take independent work; no status change, no Commander ask.
+    appendFoundryAgentEvent(mission, 'MISSION_EXECUTIVE', exec.error, { tool, ok: false })
+    mission.toolCalls.push({ at: now(), tool, ok: false, reason, error: exec.error, excerpt: exec.error })
+    mission.observations.push({ at: now(), text: `${tool} ${exec.wait ? 'WAIT' : 'REFUSED'}: ${exec.error}`, source: tool })
+    await saveMission(mission)
+    return { ok: false, tool, error: exec.error }
   }
   const claimed = await claimToolResources(mission, tool, input, waitMs)
   if (!claimed.ok) {
@@ -390,6 +478,8 @@ async function callTool(
     { tool, ok: result.ok },
   )
   noteConsecutiveToolFailure(mission, !result.ok)
+  const stopNote = executiveAfterTool(mission.missionId, tool, input, result)
+  if (stopNote) mission.observations.push({ at: now(), text: stopNote, source: 'mission.executive' })
   mission.toolCalls.push(rec)
   mission.observations.push({ at: now(), text: `${tool} ${result.ok ? 'ok' : 'FAIL'}: ${rec.excerpt}`, source: tool })
   if (!result.ok) {
@@ -469,6 +559,13 @@ function standaloneMissionMissing(mission: FoundryMissionRecord): string[] {
 }
 
 function evaluateMissionGate(mission: FoundryMissionRecord) {
+  // Universal guard: a request that names files to create or rewrite is not complete until those files exist (and, for any authoring
+  // mission, until something was actually written). A mission can never complete on job or review truth alone.
+  const declaredFiles = commanderDeclaredNewFiles(mission.userRequest)
+  const missingDeclared = declaredFiles.filter(file => !existsSync(path.join(resolveRepoRoot(), file)))
+  if (missingDeclared.length && !isBuildMissionRequest(mission.userRequest)) {
+    return { complete: false, missing: ['DECLARED_FILE_MISSING'], detail: `The request names ${missingDeclared.join(', ')}, which does not exist yet.` }
+  }
   const progress = orderedInspectProgress(mission)
   const engineering = ensureEngineeringState(mission)
   const ownershipMapped = mission.toolCalls.some(call =>
@@ -485,6 +582,16 @@ function evaluateMissionGate(mission: FoundryMissionRecord) {
       missing,
       detail: missing.length ? `missing: ${missing.join(', ')}` : 'Ordered inspect gates satisfied.',
     }
+  }
+  const authoring = authoringProgress(mission)
+  if (authoring && !isBackgroundOrchestrationRequest(mission.userRequest)) {
+    const missing = authoring.phase === 'DONE' ? [] : [authoring.phase === 'WRITE' ? 'SOURCE_DONE' : authoring.phase === 'LINT' ? 'LINT_DONE' : authoring.phase === 'TYPECHECK' ? 'TYPECHECK_DONE' : 'SELF_REVIEW_DONE']
+    return { complete: missing.length === 0, missing, detail: authoring.detail }
+  }
+  if (isBackgroundOrchestrationRequest(mission.userRequest)) {
+    const progress = orchestrationProgress(mission.missionId, mission.userRequest)
+    const missing = progress.phase === 'START_JOB' ? ['BACKGROUND_JOB_STARTED'] : progress.phase === 'JOB_RUNNING' ? ['BACKGROUND_JOB_FINISHED'] : progress.phase === 'TASKS_OPEN' || progress.phase === 'RUN_TASKS' ? ['MISSION_TASKS_COMPLETE'] : progress.phase === 'STUCK' ? ['VERIFICATION_STUCK'] : []
+    return { complete: missing.length === 0, missing, detail: progress.detail }
   }
   if (isLocateOnlyRequest(mission.userRequest)) {
     const searched = mission.toolCalls.some(call => call.ok && call.tool === 'workspace.search')
@@ -593,6 +700,7 @@ function evaluateMissionGate(mission: FoundryMissionRecord) {
 }
 
 export type FoundryMissionStartOptions = {
+  modelPolicy?: 'LOCAL_ONLY'
   parentMissionId?: string | null
   helperMissionId?: string | null
   requestId?: string | null
@@ -600,6 +708,8 @@ export type FoundryMissionStartOptions = {
   productionOwner?: boolean
   continueProjectId?: string | null
   sessionId?: string | null
+  /** Bind the mission to a trusted workspace from the workspace registry. */
+  workspaceId?: string | null
   engineeringClass?: import('./foundryContractTypes').FoundryEngineeringClass
 }
 
@@ -609,6 +719,7 @@ export function startMissionInput(userRequest: string, title?: string, options?:
   const createdAt = now()
   return {
     missionId,
+    modelPolicy: options?.modelPolicy,
     title: title || userRequest.slice(0, 80),
     userRequest,
     createdAt,
@@ -743,6 +854,20 @@ export async function startMission(userRequest: string, title?: string, options?
   const { ensureRecovered } = await import('./foundryOperationsManager')
   await ensureRecovered()
   const mission = startMissionInput(userRequest, title, options)
+  // Bind the workspace BEFORE anything else reads mission.workspace: an invalid binding throws WorkspaceBindingError and the mission is never created.
+  const { resolveWorkspaceBinding } = await import('./foundryWorkspaceBinding')
+  const parentMission = options?.parentMissionId ? await loadMission(options.parentMissionId) : null
+  const bindingSession = options?.sessionId ? await (await import('./foundrySessions')).getFoundrySession(options.sessionId) : null
+  const binding = await resolveWorkspaceBinding({
+    workspaceId: options?.workspaceId,
+    parentBinding: parentMission?.workspaceBinding ?? null,
+    sessionWorkspaceId: bindingSession?.workspaceId ?? null,
+  })
+  if (binding) {
+    mission.workspaceBinding = binding
+    mission.workspace = binding.workspaceRoot
+    mission.repoIdentity = binding.workspaceRoot
+  }
   ensureOperationsFields(mission)
   const classified = classifyFoundryMission(mission)
   mission.classification = classified.classification
@@ -779,12 +904,16 @@ export async function startMission(userRequest: string, title?: string, options?
       internetResearch: true,
     }
   }
+  if (parentMission?.modelPolicy === 'LOCAL_ONLY') mission.modelPolicy = 'LOCAL_ONLY'
+  if (mission.modelPolicy === 'LOCAL_ONLY' && mission.kind === 'app_builder') {
+    throw new FoundryLaunchPolicyError('Local Only currently supports Standalone repairs. Application builds require a separately verified routing path.')
+  }
   pinDefaultModel(mission)
   seedFixtureDiagnosis(mission)
   const { ensureLiveMissionReasoning } = await import('./reasoning-kernel/mission-lifecycle')
   await ensureLiveMissionReasoning(mission, 'START')
   const { attachFoundryMissionRouting } = await import('./foundryFrkStandaloneUnification')
-  await attachFoundryMissionRouting(mission, { remotePermitted: true })
+  await attachFoundryMissionRouting(mission, { remotePermitted: mission.modelPolicy !== 'LOCAL_ONLY', localOnlyRequirement: mission.modelPolicy === 'LOCAL_ONLY' })
   await saveMission(mission)
   await appendJournal(mission, { kind: 'decision', text: `Mission created. Kind=${mission.kind}. Goal: ${mission.goal}` })
   await registerMission(mission)
@@ -799,6 +928,7 @@ export async function cancelMission(missionId: string): Promise<FoundryMissionRe
   const mission = await loadMission(missionId)
   if (!mission) throw new Error(`Unknown mission ${missionId}`)
   mission.cancelRequested = true
+  await saveMission(mission, 'cancel')
   abortFoundryAgentWork(missionId, 'Commander cancelled')
   appendFoundryAgentEvent(mission, 'ERROR', 'Commander cancelled. In-flight model, tool, research, browser, command, and subtask work abort.')
   await callTool(mission, 'process.stop', {}, 'cancel: stop owned processes')
@@ -1935,7 +2065,7 @@ function modelToolSucceeded(tool: EngineerToolName, result: CallResult): boolean
   return result.ok && nested?.ok !== false && (nested?.exitCode === undefined || nested.exitCode === 0)
 }
 
-function ingestModelToolResult(
+export function ingestModelToolResult(
   mission: FoundryMissionRecord,
   tool: EngineerToolName,
   args: Record<string, unknown>,
@@ -2096,6 +2226,15 @@ function ingestModelToolResult(
       engineering.regressionOk = true
       markStep(mission, 'REGRESSION', 'done', targets.join(', '))
     }
+    // An ordinary bound project with no linter or typechecker to run: a passing run of all of its own test files is its regression evidence.
+    if (ok && mission.workspaceBinding && engineering.regressionOk !== true) {
+      const root = mission.workspaceBinding.workspaceRoot
+      const tests = projectTestFiles(root)
+      if (!isWarRoomSourceTree(root) && projectHasNoStaticTooling(root) && tests.length && tests.every(file => targets.some(target => target === file || target.endsWith(`/${file}`) || file.endsWith(target)))) {
+        engineering.regressionOk = true
+        markStep(mission, 'REGRESSION', 'done', `all project tests passed (${tests.join(', ')}); the project has no lint or typecheck tooling`)
+      }
+    }
     if (!ok) classifyFailure(mission, excerpt(result.result ?? result.error, 1_200))
   }
   if ((tool === 'lint.run' || tool === 'typecheck.run') && ok && mission.kind === 'application') {
@@ -2207,7 +2346,7 @@ function modelToolPrecondition(mission: FoundryMissionRecord, tool: EngineerTool
     const writeSetPaths = mission.writeSet?.established ? mission.writeSet.paths : null
     const allowed = writeSetPaths ?? mission.engineering?.allowedChangeSet
     if (allowed?.length) {
-      const refused = paths.filter(file => !allowed.includes(file.replace(/\\/g, '/')))
+      const refused = paths.filter(file => !allowed.includes(toRepoRelativeTarget(file.replace(/\\/g, '/'), resolveRepoRoot())))
       if (refused.length) {
         return `${writeSetPaths ? 'REFUSED_OUTSIDE_WRITE_SET' : 'CHANGE_BOUNDARY'}: refuse ${refused.join(', ')}. Stay inside ALLOWED_WRITE_SET.`
       }
@@ -2351,9 +2490,16 @@ async function runModelMissionUnlocked(
   }
   const { isResumeEligible } = await import('./foundryMissionVisibility')
   if (!isResumeEligible(mission) || mission.superseded === true) return mission
-  if (mission.cancelRequested || mission.status === 'CANCELLED' || mission.status === 'COMPLETE') return mission
+  if (mission.cancelRequested || mission.pauseRequested || mission.status === 'CANCELLED' || mission.status === 'COMPLETE') return mission
+  beginFoundryAgentWork(missionId)
+  if (correctLegacyMissionIntent(mission)) {
+    ensureEngineeringState(mission).lintRegionRecovery = undefined
+    await appendJournal(mission, { kind: 'decision', text: 'Corrected legacy application classification: prohibited installation and package.json are not installation requests. Source/test evidence, plan history, permissions and limits retained.' })
+    await saveMission(mission)
+  }
   ensureModelState(mission)
   ensureOperationsFields(mission)
+  if (isBuildMissionRequest(mission.userRequest)) mission.maxLoops = Math.max(mission.maxLoops, 2000) // bounded by the Commander-approved ceilings, not by a loop count
   if (mission.authorization?.waiting) return mission
   if (mission.status === 'BLOCKED' || mission.status === 'PAUSED' || mission.status === 'WAITING_RESOURCE' || mission.status === 'RECOVERING' || mission.status === ACTIVATION_PENDING_STATE) {
     if (mission.status === ACTIVATION_PENDING_STATE || mission.engineering?.activationPending) {
@@ -2558,6 +2704,8 @@ async function runModelMissionUnlocked(
   const router = suppliedRouter ?? new FoundryModelRouter()
   let lastSignature = ''
   let repeated = 0
+  let completeRefusedForTool = 0
+  let replanWhileSatisfied = 0
   let replaceNudges = 0
 
   while (!FOUNDRY_HOLD_STATES.includes(mission.status)) {
@@ -2572,6 +2720,40 @@ async function runModelMissionUnlocked(
       return pauseMission(missionId, 'Pause honored after in-flight tool completed')
     }
     await heartbeatMission(mission, `loop ${mission.loopCount}`)
+    await awaitExecutiveIdle(mission)
+    applyExecutiveTurn(mission)
+    {
+      mission.completionGate = evaluateMissionGate(mission)
+      const directed = mission.completionGate.complete ? null : executiveDirectedStep(mission)
+      if (mission.completionGate.complete && (isBackgroundOrchestrationRequest(mission.userRequest) || authoringProgress(mission))) {
+        await completeWhenGatePasses(mission)
+        break
+      }
+      const repairing = mission.completionGate.complete ? null : authoringProgress(mission)
+      if (repairing?.phase === 'WRITE' && repairing.fixing && repairing.files.length === 1 && /^(?:TypeScript|Lint) found problems/.test(repairing.detail)) {
+        const stagnation = repairStagnant(resolveRepoRoot(), repairing.files[0])
+        if (stagnation.stagnant) {
+          mission.blocker = { blocker: 'NARROW_REPAIR_STAGNANT', evidence: `${stagnation.remaining} TypeScript diagnostic(s) remain in ${repairing.files[0]}; each has used its ${MAX_TRIES_PER_TARGET} bounded tries on the current source without improving it.`, attempted: 'diagnostic-by-diagnostic narrow repair', why: 'Repeating the same repair would burn calls without progress.', unblock: 'A different repair formulation, a stronger model for this file, or a Commander decision.' }
+          await transitionMission(mission, 'BLOCKED', mission.blocker.evidence)
+          await saveMission(mission)
+          break
+        }
+      }
+      if (directed) {
+        appendFoundryAgentEvent(mission, 'MISSION_EXECUTIVE', `${directed.why}`, { tool: directed.tool })
+        const directedResult = await callTool(mission, directed.tool, directed.args, `executive: ${directed.why}`, 20_000)
+        ingestModelToolResult(mission, directed.tool, directed.args, directedResult)
+        await saveMission(mission)
+        continue
+      }
+      if (isBuildMissionRequest(mission.userRequest) && orchestrationProgress(mission.missionId, mission.userRequest).phase === 'STUCK') {
+        const stuck = orchestrationProgress(mission.missionId, mission.userRequest).detail
+        mission.blocker = { blocker: 'COMMANDER DECISION REQUIRED', evidence: stuck, attempted: 'automatic retry and repair', why: 'The mission cannot make further progress on its own.', unblock: 'Commander decision: extend the ceiling, adjust the objective, or repair the named problem.' }
+        await transitionMission(mission, 'BLOCKED', stuck)
+        await saveMission(mission)
+        break
+      }
+    }
     applyCompactWorkingLine(mission)
     buildEngineeringGateTable(mission)
 
@@ -2586,7 +2768,8 @@ async function runModelMissionUnlocked(
     const missing0 = missing[0]
     const config = applyFoundryRuntimeConfig()
     const brain = await resolveFoundryBrainStatus()
-    const useLocalContext = config.providerPolicy === 'LOCAL'
+    const useLocalContext = mission.modelPolicy === 'LOCAL_ONLY'
+      || config.providerPolicy === 'LOCAL'
       || state.activeProvider === 'ollama'
       || (config.providerPolicy === 'AUTO' && brain.usageLimited)
     const inspectStall = !useLocalContext && missing0 === 'BUILD_DONE'
@@ -2612,24 +2795,56 @@ async function runModelMissionUnlocked(
     const context = foundryContextForModel(mission, loopWarning, { local: useLocalContext })
     if (isFoundryPlanningMode(mission)) context.tools = foundryPlanningReadOnlyCatalog()
     appendFoundryAgentEvent(mission, 'THINKING', `loop ${mission.loopCount} ${requestKind}`)
-    const providerSlot = await acquireResource({
-      resource: 'PROVIDER_SLOT',
+    const modelTurn = await acquireModelTurn({
       missionId: mission.missionId,
+      local: useLocalContext || config.providerPolicy === 'LOCAL',
+      model: FOUNDRY_DEFAULT_FALLBACK_MODEL.replace(/^ollama:/, ''),
       operation: `reason:${requestKind}`,
-      exclusive: true,
-      waitMs: 180_000,
+      isCancelled: () => mission.cancelRequested || isFoundryAgentAborted(mission.missionId),
+      onQueued: holders => appendFoundryAgentEvent(mission, 'MISSION_EXECUTIVE', `the local model is busy with ${holders.length > 1 ? 'other missions' : 'another mission'}; this turn is queued and runs next`),
     })
-    if (providerSlot.state !== 'ACQUIRED') {
-      await waitForResource(mission, `PROVIDER_SLOT busy${providerSlot.state === 'DEADLOCK_REFUSED' ? `: ${providerSlot.error}` : ''}`)
+    if ('refused' in modelTurn) {
+      if (mission.cancelRequested || isFoundryAgentAborted(missionId)) return cancelMission(missionId)
+      await waitForResource(mission, modelTurn.refused)
       break
     }
+    const providerSlot = modelTurn
     const routed = await router.route(requestKind, { kind: requestKind, context, abortSignal: foundryAgentAbortSignal(mission.missionId) }, {
-      pinProvider: state.activeProvider,
+      ...localOnlyRouting(mission.modelPolicy, state.activeProvider, mission.pinnedModel),
       policy: config.providerPolicy,
       primaryUsageLimited: brain.usageLimited,
       requestedProvider: mission.pinnedModel?.provider ?? config.primaryModel.split(':')[0],
       missionId: mission.missionId,
     }).finally(() => providerSlot.release())
+    if (!routed.response.ok && /RESOURCE_BUDGET_EXHAUSTED|Resource execution is paused\./i.test(routed.response.error)) {
+      // A prior fallback candidate may have actually failed before the governor refused the next one.
+      const actualFailures = routed.attempts.filter(attempt => !attempt.ok)
+      if (actualFailures.length) {
+        state.calls += 1
+        state.providerFailures += actualFailures.length
+        for (const attempt of actualFailures) {
+          await noteProviderOutcome(mission, attempt.provider, null, false, attempt.error, 'PROVIDER')
+          await appendJournal(mission, { kind: 'observation', text: `Actual provider failure before resource refusal: ${attempt.provider}: ${attempt.error ?? 'provider failure'}` })
+        }
+      }
+      mission.blocker = {
+        blocker: 'Resource budget requires Commander action',
+        evidence: routed.response.error,
+        attempted: 'Resource authorization check; no model invocation was authorized',
+        why: 'The resource governor refused this turn. Retrying a provider cannot resolve an authorization limit.',
+        unblock: 'Review the exhausted resource budget and explicitly authorize an extension, then resume this same mission.',
+      }
+      await appendJournal(mission, { kind: 'observation', text: `Resource authorization refused: ${routed.response.error}. Provider retry suppressed; limits unchanged.` })
+      await transitionMission(mission, 'PAUSED', 'Paused for resource authorization; no provider retry')
+      break
+    }
+    await syncMissionControl(mission)
+    if (['COMPLETE', 'CANCELLED', 'FAILED'].includes(mission.status)) return mission
+    if (mission.cancelRequested) return cancelMission(missionId)
+    if (mission.pauseRequested) {
+      const { pauseMission } = await import('./foundryOperationsManager')
+      return pauseMission(missionId, 'Pause honored after model turn')
+    }
     state.calls += 1
     state.providerFailures += routed.attempts.filter(attempt => !attempt.ok).length
     await logWarRoomRepoAudit('foundry-model: decision', {
@@ -2705,6 +2920,13 @@ async function runModelMissionUnlocked(
     })
 
     if (response.decision.decision === 'REPLAN') {
+      const coerced = coerceReplanWithTool(response.decision)
+      if (coerced && !evaluateReplanDecision(mission, response.decision).allowed) {
+        response.decision = coerced
+        await appendJournal(mission, { kind: 'decision', text: 'The model sent a complete tool call inside a REPLAN decision while a tool is required: run it as a TOOL decision.' })
+      }
+    }
+    if (response.decision.decision === 'REPLAN') {
       const verdict = evaluateReplanDecision(mission, response.decision)
       if (!verdict.allowed) {
         const engineering = ensureEngineeringState(mission)
@@ -2720,6 +2942,30 @@ async function runModelMissionUnlocked(
           )
           break
         }
+        await saveMission(mission)
+        continue
+      }
+      const satisfied = mission.sourceState.changedFiles.length > 0 ? evaluateMissionGate(mission) : null
+      const satisfiedAction = satisfied
+        ? (await import('./foundryGateDrive')).satisfiedGateReplanAction({
+          gateComplete: satisfied.complete,
+          nextRequiredAction: buildEngineeringGateTable(mission).nextRequiredAction,
+          justification: verdict.justification,
+          refusals: replanWhileSatisfied,
+        })
+        : null
+      if (satisfied && satisfiedAction) {
+        replanWhileSatisfied += 1
+        mission.completionGate = satisfied
+        if (satisfiedAction === 'COMPLETE') {
+          await appendJournal(mission, { kind: 'decision', text: `The model chose REPLAN ${replanWhileSatisfied} times with no justification while every gate was satisfied: the controller completes the mission through the completion gate. ${satisfied.detail}` })
+          appendFoundryAgentEvent(mission, 'COMPLETE', 'Sovereign completion gate passed.')
+          await completeWhenGatePasses(mission)
+          break
+        }
+        const compact = 'REPLAN_NOT_NEEDED ALL_GATES_SATISFIED NEXT_REQUIRED_ACTION=COMPLETE The change is applied and its checks passed. Reply with decision COMPLETE.'
+        mission.observations.push({ at: now(), source: 'gate-table', text: compact })
+        await appendJournal(mission, { kind: 'decision', text: compact })
         await saveMission(mission)
         continue
       }
@@ -2769,9 +3015,20 @@ async function runModelMissionUnlocked(
     }
 
     if (response.decision.decision === 'COMPLETE') {
+      // A model that keeps asking to COMPLETE while a read-only evidence tool is still required: the controller runs that step itself (never an edit).
+      const { gateDrivenToolDecision } = await import('./foundryGateDrive')
+      const driven = gateDrivenToolDecision({ table: buildEngineeringGateTable(mission), refusals: completeRefusedForTool, goal: mission.goal })
+      if (driven) {
+        await appendJournal(mission, { kind: 'decision', text: `GATE_DRIVEN_TOOL ${driven.tool?.name}: ${driven.reasoningSummary}` })
+        response.decision = driven
+      }
+    }
+
+    if (response.decision.decision === 'COMPLETE') {
       mission.completionGate = evaluateMissionGate(mission)
       const table = buildEngineeringGateTable(mission)
       if (table.nextRequiredAction === 'TOOL') {
+        completeRefusedForTool += 1
         const compact = `COMPLETE_REFUSED ${table.compact}`
         mission.observations.push({ at: now(), source: 'gate-table', text: compact })
         mission.architectureFindings!.push(compact)
@@ -3004,6 +3261,13 @@ async function runModelMissionUnlocked(
           isSourceMutationTool(requested.name) ? 60_000 : 20_000,
         )
     ingestModelToolResult(mission, requested.name, requestedArgs, result)
+    // Preserve the applied source/result before asynchronous review or validation can fail.
+    await saveMission(mission)
+    if (mission.cancelRequested) return cancelMission(missionId)
+    if (mission.pauseRequested) {
+      const { pauseMission } = await import('./foundryOperationsManager')
+      return pauseMission(missionId, 'Pause honored after in-flight tool completed')
+    }
     if (requested.name === 'installer.activate' && !result.ok && isActivationOwnershipConflict(result.error) && mission.installState.ok === true) {
       const blocking = await describeBlockingProductionOwner()
       await enterActivationPending(mission, {
@@ -3260,17 +3524,50 @@ async function runModelMissionUnlocked(
 export { pauseMission, setMissionPriority } from './foundryOperationsManager'
 
 export async function resumeMission(missionId: string, suppliedRouter?: FoundryModelRouter): Promise<FoundryMissionRecord> {
+  const previousRun = activeModelMissionRuns.get(missionId)
+  if (previousRun) await previousRun.catch(() => undefined)
   const { resumeMissionRecord } = await import('./foundryOperationsManager')
   const { isResumeEligible } = await import('./foundryMissionVisibility')
   const mission = await resumeMissionRecord(missionId)
-  if (!isResumeEligible(mission) || mission.superseded === true) return mission
+  if (!isResumeEligible(mission) || mission.superseded === true || ['COMPLETE', 'CANCELLED', 'FAILED'].includes(mission.status) || mission.cancelRequested) return mission
   if (mission.authorization?.waiting) return mission
+  const { markStaleBudgetRefusals } = await import('./foundryStaleBudgetRefusal')
+  const staleRefusals = markStaleBudgetRefusals(mission)
+  if (staleRefusals > 0) {
+    await appendJournal(mission, { kind: 'decision', text: `${staleRefusals} earlier budget refusal(s) were resolved by the Commander's budget extension; they stay in the history but no longer steer decisions.` })
+    await saveMission(mission)
+  }
   const { ensureLiveMissionReasoning } = await import('./reasoning-kernel/mission-lifecycle')
   await ensureLiveMissionReasoning(mission, 'RESUME')
   return runModelMission(missionId, suppliedRouter)
 }
 
-const activeModelMissionRuns = new Map<string, Promise<FoundryMissionRecord>>()
+const sharedRuns = globalThis as typeof globalThis & { __warRoomFoundryModelRuns?: Map<string, Promise<FoundryMissionRecord>> }
+const activeModelMissionRuns = sharedRuns.__warRoomFoundryModelRuns ??= new Map<string, Promise<FoundryMissionRecord>>()
+
+/**
+ * Every run of a model mission (HTTP run, resume, restart recovery, child job runner) goes through here: the workspace recorded on the mission is
+ * re-validated and made the active root for the whole run, so file, git, terminal, test and build operations resolve inside it. A write-capable
+ * mission with no binding on an installed runtime is blocked; it never falls back to the process working directory.
+ */
+async function runModelMissionInWorkspace(missionId: string, suppliedRouter?: FoundryModelRouter): Promise<FoundryMissionRecord> {
+  const mission = await loadMission(missionId)
+  if (!mission) throw new Error(`Unknown mission ${missionId}`)
+  if (mission.status === 'COMPLETE' || mission.status === 'CANCELLED' || mission.status === 'FAILED') return runModelMissionUnlocked(missionId, suppliedRouter)
+  const { missionWorkspaceScope } = await import('./foundryWorkspaceBinding')
+  const scope = await missionWorkspaceScope(mission)
+  if (!scope.ok) {
+    mission.blocker = scope.blocker
+    if (mission.status === 'QUEUED') await transitionMission(mission, 'UNDERSTANDING', 'workspace binding check')
+    await transitionMission(mission, 'BLOCKED', `${scope.code}: ${scope.blocker.evidence}`)
+    await appendJournal(mission, { kind: 'decision', text: `${scope.code}: ${scope.blocker.evidence}` })
+    await saveMission(mission)
+    return mission
+  }
+  if (!scope.root) return runModelMissionUnlocked(missionId, suppliedRouter)
+  const root = scope.root
+  return runWithWorkspaceRoot(root, () => runModelMissionUnlocked(missionId, suppliedRouter), scope.workspaceId) as Promise<FoundryMissionRecord>
+}
 
 /** Coalesces duplicate HTTP/UI resume clicks so one mission cannot execute two tool turns at once. */
 export function runModelMission(
@@ -3279,7 +3576,7 @@ export function runModelMission(
 ): Promise<FoundryMissionRecord> {
   const active = activeModelMissionRuns.get(missionId)
   if (active) return active
-  const run = runModelMissionUnlocked(missionId, suppliedRouter)
+  const run = runModelMissionInWorkspace(missionId, suppliedRouter)
     .finally(() => activeModelMissionRuns.delete(missionId))
   activeModelMissionRuns.set(missionId, run)
   return run
@@ -3446,6 +3743,10 @@ export async function completeMission(missionId: string): Promise<{ ok: boolean;
       return { ok: false, mission, error: allowed.error }
     }
   }
+  if (mission.blocker) {
+    await appendJournal(mission, { kind: 'observation', text: `Completion gates passed; previous blocker retained in history: ${JSON.stringify(mission.blocker)}` })
+    mission.blocker = null
+  }
   if (mission.status !== 'COMPLETE') await transitionMission(mission, 'COMPLETE', 'Explicit complete after gate pass')
   else {
     const { releaseTerminalMissionClaims } = await import('./foundryTerminalResourceRelease')
@@ -3469,3 +3770,4 @@ export function canComplete(mission: FoundryMissionRecord) {
 }
 
 export { currentVerdict, missingAcceptanceEvidence }
+

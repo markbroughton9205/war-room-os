@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { resolveBaseRepoRoot } from '@/lib/repo/paths'
+import { resolveRepoRoot } from '@/lib/repo/paths'
 import { foundryDataHierarchy } from './foundryPaths'
 import type { FoundryMissionRecord } from './foundryMissionTypes'
 import {
@@ -26,8 +26,8 @@ export function toRegistryEntry(mission: FoundryMissionRecord): FoundryRegistryE
     status: mission.status,
     phase: mission.phase,
     owner: mission.owner ?? 'commander',
-    workspace: mission.workspace ?? resolveBaseRepoRoot(),
-    repoIdentity: mission.repoIdentity ?? resolveBaseRepoRoot(),
+    workspace: mission.workspace ?? resolveRepoRoot(),
+    repoIdentity: mission.repoIdentity ?? resolveRepoRoot(),
     modelProvider: mission.pinnedModel?.provider ?? mission.modelState?.activeProvider ?? null,
     modelId: mission.pinnedModel?.modelId ?? mission.modelState?.activeModel ?? null,
     authorizationWaiting: Boolean(mission.authorization?.waiting),

@@ -138,7 +138,23 @@ async function persist(record: NativeRepairRecord, auditMessage: string): Promis
 // 1. Issue ingestion -> repair creation
 // ---------------------------------------------------------------------------
 
-export async function reportIssue(input: NativeIssueIngestInput): Promise<{ issue: NativeIssueRecord; repair: NativeRepairRecord | null }> {
+/** A repair that is genuinely in flight (not finished, blocked, cancelled or rolled back). One left in a working state long ago is an orphan, not a mission that is running. */
+const IN_FLIGHT_REPAIR_STATES = new Set(['detected', 'collecting_evidence', 'inspecting_repository', 'planning', 'awaiting_local_execution_approval', 'applying_patch', 'validating'])
+export const IN_FLIGHT_REPAIR_WINDOW_MS = 15 * 60 * 1000
+
+/** The Commander asked for work that is already being done: say so and point at it instead of starting the same mission twice. */
+export class MissionAlreadyRunningError extends Error {
+  readonly code = 'MISSION_ALREADY_RUNNING'
+  constructor(readonly repairId: string) {
+    super('That request is already being worked on.')
+  }
+}
+
+/**
+ * `commanderRequested`: a person asking for work is an intent to work, not a duplicate report. The same request again (after a finished, blocked or cancelled
+ * mission) opens a new repair for the same issue; only a repair that is genuinely in flight refuses, with a typed error that names it.
+ */
+export async function reportIssue(input: NativeIssueIngestInput, options: { commanderRequested?: boolean } = {}): Promise<{ issue: NativeIssueRecord; repair: NativeRepairRecord | null }> {
   const now = new Date().toISOString()
   const fingerprint = fingerprintIssue(input)
   const existing = await findIssueByFingerprint(fingerprint)
@@ -151,6 +167,11 @@ export async function reportIssue(input: NativeIssueIngestInput): Promise<{ issu
     if (existing.status === 'resolved') {
       const repair = await createRepairForIssue(merged)
       return { issue: merged, repair }
+    }
+    if (options.commanderRequested) {
+      const running = (await listRepairsForIssue(existing.id)).find(item => IN_FLIGHT_REPAIR_STATES.has(item.state) && Date.parse(now) - Date.parse(item.updatedAt) < IN_FLIGHT_REPAIR_WINDOW_MS)
+      if (running) throw new MissionAlreadyRunningError(running.id)
+      return { issue: merged, repair: await createRepairForIssue(merged) }
     }
     return { issue: merged, repair: null }
   }

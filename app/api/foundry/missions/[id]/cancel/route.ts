@@ -1,3 +1,4 @@
+import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import { cancelMission } from '@/lib/native-builder/foundryMissionController'
 import { toFoundryMissionCommanderView } from '@/lib/native-builder/foundryMissionView'
@@ -6,6 +7,8 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const commander = await requireCommanderSession('Foundry')
+  if (!commander.ok) return commander.response
   const { id } = await params
   try {
     return NextResponse.json({ mission: toFoundryMissionCommanderView(await cancelMission(id)) })

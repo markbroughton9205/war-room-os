@@ -46,7 +46,7 @@ export function WrCorpusPanel() {
   }, [])
 
   useEffect(() => {
-    void refresh().catch(err => setError(err instanceof Error ? err.message : String(err)))
+    queueMicrotask(() => void refresh().catch(err => setError(err instanceof Error ? err.message : String(err))))
   }, [refresh])
 
   async function runQuery() {

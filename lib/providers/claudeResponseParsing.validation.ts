@@ -271,77 +271,44 @@ async function retryCases(): Promise<CaseResult[]> {
 }
 
 // --- Structural source checks -------------------------------------------------------------
-// These guarantee properties that can't be exercised by calling the pure retry helper alone,
-// since the actual family dispatch (execute.ts's `continue_single` switch) isn't independently
-// invocable without the full Next.js route context. Modeled on the existing
-// `noRecursiveSelfCallInSource` pattern in retryOrchestration.validation.ts.
+// The Claude family is no longer dispatched from app/api/chat/execute.ts: every seat goes through invokeCouncilSeat and the live adapters, which return a
+// typed failure ({ ok: false, error: 'empty response body' }) for an empty reply instead of throwing, and the routing policy decides what happens next.
+// What is left of the empty-content retry is the pure helper in claudeResponseParsing.ts. These checks pin exactly that: the retired wrapper is not
+// wired anywhere, the adapters fail in a typed way, and the helper stays a bounded, content-free, side-effect-free retry.
 
-function executeTsSource(): string {
-  const sourcePath = fileURLToPath(new URL('../../app/api/chat/execute.ts', import.meta.url))
-  return readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n')
-}
-
-function claudeAndRedTeamCaseBodies(source: string): { claude: string; redTeam: string } {
-  const claudeMatch = source.match(/case 'claude': \{([\s\S]*?)\n {10}\}\n {10}case 'grok':/)
-  const redTeamMatch = source.match(/case 'red_team': \{([\s\S]*?)\n {10}\}\n {10}case 'baby':/)
-  return {
-    claude: claudeMatch?.[1] ?? '',
-    redTeam: redTeamMatch?.[1] ?? '',
-  }
-}
+const repoFile = (rel: string) => readFileSync(fileURLToPath(new URL(`../../${rel}`, import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
 
 function structuralCases(): CaseResult[] {
-  const source = executeTsSource()
-  const { claude, redTeam } = claudeAndRedTeamCaseBodies(source)
-
-  const otherCaseNames = ['chatgpt', 'grok', 'gemini', 'nova', 'baby']
-  const otherCasesUseRetryHelper = otherCaseNames.some(name => {
-    const match = source.match(new RegExp(`case '${name}': \\{([\\s\\S]*?)\\n {10}\\}\\n {10}case `))
-    return (match?.[1] ?? '').includes('callClaudeWithEmptyContentRetry')
-  })
-
-  const retryHelperSource = source.match(/const callClaudeWithEmptyContentRetry = [\s\S]*?\n {6}\n/)?.[0] ?? ''
-
+  const execute = repoFile('app/api/chat/execute.ts')
+  const anthropic = repoFile('lib/council/live-orchestration/adapters/anthropic.ts')
+  const direct = repoFile('lib/council/providerDirectCall.ts')
+  const helper = repoFile('lib/providers/claudeResponseParsing.ts')
+  const helperFn = helper.match(/export async function callClaudeFamilyWithEmptyContentRetry[\s\S]*?\n\}\n/)?.[0] ?? ''
   return [
     check(
-      'claude_retry_structural_01_only_claude_and_red_team_cases_use_the_retry_wrapper',
-      claude.includes('callClaudeWithEmptyContentRetry') && redTeam.includes('callClaudeWithEmptyContentRetry') && !otherCasesUseRetryHelper,
-      `claudeUses=${claude.includes('callClaudeWithEmptyContentRetry')} redTeamUses=${redTeam.includes('callClaudeWithEmptyContentRetry')} otherFamilyUsesIt=${otherCasesUseRetryHelper}`,
+      'claude_retry_structural_01_the_retired_execute_wrapper_is_not_wired_into_any_seat',
+      !execute.includes('callClaudeWithEmptyContentRetry') && !execute.includes('recordClaudeRetryTelemetry') && execute.includes('invokeCouncilSeat'),
+      'execute.ts dispatches through invokeCouncilSeat and holds no retry wrapper',
     ),
     check(
-      'claude_retry_structural_02_successful_retry_rejoins_normal_path_no_early_return_in_case_body',
-      !claude.includes('return ') && !redTeam.includes('return '),
-      `claudeHasReturn=${claude.includes('return ')} redTeamHasReturn=${redTeam.includes('return ')}`,
+      'claude_retry_structural_02_live_adapters_fail_in_a_typed_way_on_an_empty_body',
+      anthropic.includes("error: 'empty response body'") && direct.includes("error: 'empty response body'") && !anthropic.includes('ClaudeEmptyContentError') && !direct.includes('ClaudeEmptyContentError'),
+      'empty replies become typed failures, never thrown empty-content errors',
     ),
     check(
-      'claude_retry_structural_03_progress_events_recorded_once_per_switch_not_inside_retry_helper',
-      !retryHelperSource.includes('recordCouncilProgressProviderStart') && !retryHelperSource.includes('recordCouncilProgressProviderResult'),
-      'retry helper body does not call progress-event recorders directly',
+      'claude_retry_structural_03_helper_records_no_progress_events',
+      helperFn.length > 0 && !helperFn.includes('recordCouncilProgressProviderStart') && !helperFn.includes('recordCouncilProgressProviderResult'),
+      'retry helper body does not call progress-event recorders',
     ),
     check(
-      'claude_retry_structural_04_retry_wrapper_has_no_loop_construct',
-      !/const callClaudeWithEmptyContentRetry[\s\S]{0,400}?(for\s*\(|while\s*\()/.test(source),
-      'no for/while near the wrapper definition',
+      'claude_retry_structural_04_helper_has_no_loop_construct',
+      helperFn.length > 0 && !/(for\s*\(|while\s*\()/.test(helperFn),
+      'bounded to exactly two attempts, no for/while',
     ),
     check(
-      'claude_retry_structural_05_telemetry_uses_diagnostic_event_not_canonical_contribution_event',
-      (() => {
-        const telemetryFnSource = source.match(/function recordClaudeRetryTelemetry\([\s\S]*?\n\}/)?.[0] ?? ''
-        return (
-          telemetryFnSource.includes("eventType: 'diagnostic_recorded'")
-          && !telemetryFnSource.includes("eventType: 'family_responded'")
-          && !telemetryFnSource.includes("eventType: 'family_failed'")
-        )
-      })(),
-      'recordClaudeRetryTelemetry emits diagnostic_recorded, never a canonical family-contribution event type',
-    ),
-    check(
-      'claude_retry_structural_06_telemetry_carries_no_raw_content_field',
-      (() => {
-        const telemetryFnSource = source.match(/function recordClaudeRetryTelemetry\([\s\S]*?\n\}/)?.[0] ?? ''
-        return telemetryFnSource.length > 0 && !/\bcontent:\s*result\b|\bcontent:\s*responseText\b|\bcontent:\s*text\b/.test(telemetryFnSource)
-      })(),
-      'recordClaudeRetryTelemetry body never assigns raw response text into the recorded payload',
+      'claude_retry_structural_05_helper_observer_receives_no_provider_content',
+      /export type ClaudeRetryAttemptInfo = \{\s*attempt: 1 \| 2\s*outcome: ClaudeRetryAttemptOutcome\s*\}/.test(helper) && !/onAttempt\?\.\([^)]*(result|err\.message|prompt)/.test(helperFn),
+      'the observer only gets the attempt number and a coarse outcome',
     ),
   ]
 }

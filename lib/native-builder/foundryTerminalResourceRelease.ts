@@ -12,7 +12,7 @@ import {
 } from './foundryOperationsTypes'
 import {
   listResourceClaims,
-  releaseMissionResources,
+  missionResourceGenerationIsCurrent,
   releaseResource,
 } from './foundryResourceLocks'
 import { FOUNDRY_TERMINAL_STATES, type FoundryMissionRecord, type FoundryMissionState } from './foundryMissionTypes'
@@ -47,25 +47,39 @@ export function resourcesToKeepOnTerminal(mission: FoundryMissionRecord): Foundr
   return []
 }
 
-export async function releaseTerminalMissionClaims(mission: FoundryMissionRecord): Promise<TerminalClaimRelease> {
+export async function releaseTerminalMissionClaims(mission: FoundryMissionRecord, expectedClaims: readonly FoundryResourceClaim[] = mission.lockClaims ?? []): Promise<TerminalClaimRelease> {
   if (!isTerminalClaimMission(mission)) {
     return { missionId: mission.missionId, status: mission.status, released: [], kept: (mission.lockClaims ?? []).map(claim => claim.resource), alreadyClear: false }
   }
   const keep = new Set(resourcesToKeepOnTerminal(mission))
-  const recorded = [...(mission.lockClaims ?? [])]
+  const recorded = expectedClaims.map(claim => ({ ...claim }))
+  if (!await missionResourceGenerationIsCurrent(mission.missionId, recorded)) {
+    return { missionId: mission.missionId, status: mission.status, released: [], kept: recorded.map(c => c.resource), alreadyClear: false }
+  }
   const fileClaims = (await listResourceClaims()).filter(claim => claim.missionId === mission.missionId)
   const byResource = new Map<FoundryResourceId, FoundryResourceClaim>()
-  for (const claim of [...fileClaims, ...recorded]) byResource.set(claim.resource, claim)
+  // Recorded tokens fence this execution; current file claims are evidence, never borrowed authority.
+  for (const claim of recorded) {
+    if (fileClaims.some(current => current.resource === claim.resource && current.callId === claim.callId && current.pid === claim.pid)) byResource.set(claim.resource, claim)
+  }
 
   const released: FoundryResourceClaim[] = []
   const drop: FoundryResourceId[] = []
   for (const resource of [...FOUNDRY_LOCK_ORDER].reverse()) {
     if (keep.has(resource)) continue
     const claim = byResource.get(resource)
-    if (!claim && !(mission.lockClaims ?? []).some(item => item.resource === resource)) continue
-    await releaseResource(resource, mission.missionId)
-    drop.push(resource)
-    if (claim) released.push(claim)
+    if (!claim?.callId) continue
+    // REPO_WRITE compares this token and removes only that claim in one registry transaction.
+    if (await releaseResource(resource, mission.missionId, claim.callId)) {
+      drop.push(resource)
+      released.push(claim)
+    } else {
+      // A replacement can arrive between discovery and release; the transaction refused this token.
+      return { missionId: mission.missionId, status: mission.status, released, kept: recorded.map(c => c.resource), alreadyClear: false }
+    }
+  }
+  if (!await missionResourceGenerationIsCurrent(mission.missionId, recorded)) {
+    return { missionId: mission.missionId, status: mission.status, released, kept: recorded.map(c => c.resource), alreadyClear: false }
   }
   if (!keep.has('PRODUCTION_LEASE')) {
     const { shouldHoldProductionLease, releaseProductionLease } = await import('./foundryProductionLease')
@@ -76,7 +90,8 @@ export async function releaseTerminalMissionClaims(mission: FoundryMissionRecord
     }
   }
 
-  const remaining = (mission.lockClaims ?? []).filter(claim => keep.has(claim.resource) && !drop.includes(claim.resource))
+  const remaining = (mission.lockClaims ?? []).filter(claim => keep.has(claim.resource)
+    || !recorded.some(old => old.resource === claim.resource && old.callId === claim.callId))
   const alreadyClear = released.length === 0 && remaining.length === (mission.lockClaims ?? []).length && drop.length === 0
   mission.lockClaims = remaining
   if (!keep.has('ACTIVE_RUNTIME')) {

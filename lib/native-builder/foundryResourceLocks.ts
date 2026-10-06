@@ -2,12 +2,13 @@
  * Hierarchical mission resource locks. Reuses the build/package lock for BUILD/PACKAGE
  * and adds Foundry-owned locks for repo write, install, runtime, ports, and desktop.
  */
-import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { link, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { acquireBuildLock, type BuildLockPayload } from './buildLock'
 import { foundryDataHierarchy } from './foundryPaths'
+import { acquireRepoWrite, listRepoWriteClaims, mutateRepoWriteClaims } from './foundryRepoWriteLocks'
 import { logWarRoomRepoAudit } from '@/lib/war-room/repoAudit'
 import {
   FOUNDRY_LOCK_ORDER,
@@ -61,6 +62,8 @@ function isProcessAlive(pid: number): boolean {
 
 function isStale(claim: FoundryResourceClaim): boolean {
   if (!isProcessAlive(claim.pid)) return true
+  // A live repository writer is never evicted solely because its heartbeat is old.
+  if (claim.resource === 'REPO_WRITE') return false
   const age = Date.now() - Date.parse(claim.heartbeatAt || claim.acquiredAt)
   return Number.isFinite(age) && age > STALE_AFTER_MS[claim.resource]
 }
@@ -75,21 +78,37 @@ async function readClaim(resource: FoundryResourceId): Promise<FoundryResourceCl
   }
 }
 
+/** A lock file that exists but cannot be parsed as a claim (empty/torn, e.g. from a pre-atomic-write crash) has no owner: remove it once it is clearly not mid-write. */
+const UNREADABLE_LOCK_GRACE_MS = 5_000
+async function removeUnreadableLock(resource: FoundryResourceId): Promise<void> {
+  const file = lockPath(resource)
+  try {
+    const info = await stat(file)
+    if (Date.now() - info.mtimeMs < UNREADABLE_LOCK_GRACE_MS) return
+    if (await readClaim(resource)) return
+    await rm(file, { force: true })
+    await logWarRoomRepoAudit('foundry-ops: resource.unreadable-lock-removed', { resource, bytes: info.size })
+  } catch {
+    /* absent or already removed */
+  }
+}
+
 async function writeClaimAtomic(claim: FoundryResourceClaim, createOnly: boolean): Promise<boolean> {
   const file = lockPath(claim.resource)
   await mkdir(path.dirname(file), { recursive: true })
   if (createOnly) {
+    // Create-if-absent must be all-or-nothing: write the full claim to a private temp file, then link() it into place.
+    // link() fails with EEXIST like open('wx') does, but a crash can never leave a half-written (empty) lock behind.
+    const staged = `${file}.new-${process.pid}-${randomUUID()}`
+    await writeFile(staged, JSON.stringify(claim, null, 2), 'utf8')
     try {
-      const handle = await open(file, 'wx')
-      try {
-        await handle.writeFile(JSON.stringify(claim, null, 2))
-      } finally {
-        await handle.close()
-      }
+      await link(staged, file)
       return true
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code === 'EEXIST') return false
       throw error
+    } finally {
+      await rm(staged, { force: true })
     }
   }
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`
@@ -115,39 +134,69 @@ export function assertLockOrder(held: readonly FoundryResourceId[], next: Foundr
 export async function listResourceClaims(): Promise<FoundryResourceClaim[]> {
   const claims: FoundryResourceClaim[] = []
   for (const resource of FOUNDRY_LOCK_ORDER) {
+    if (resource === 'REPO_WRITE') { claims.push(...await listRepoWriteClaims(lockPath(resource))); continue }
     const claim = await readClaim(resource)
     if (claim) claims.push(claim)
   }
   return claims
 }
 
-export async function heartbeatResourceClaim(resource: FoundryResourceId, missionId: string): Promise<void> {
+export async function heartbeatResourceClaim(resource: FoundryResourceId, missionId: string, callId?: string): Promise<void> {
+  if (resource === 'REPO_WRITE') { await mutateRepoWriteClaims(lockPath(resource), missionId, callId, 'heartbeat', isStale); return }
   const current = await readClaim(resource)
-  if (!current || current.missionId !== missionId) return
+  if (!current || current.missionId !== missionId || (callId && current.callId !== callId)) return
   current.heartbeatAt = new Date().toISOString()
   await writeClaimAtomic(current, false)
 }
 
-export async function releaseResource(resource: FoundryResourceId, missionId: string, callId?: string): Promise<void> {
+export async function releaseResource(resource: FoundryResourceId, missionId: string, callId?: string): Promise<boolean> {
+  if (resource === 'REPO_WRITE') {
+    if (!callId) {
+      await logWarRoomRepoAudit('foundry-ops: resource.release-refused-without-generation', { resource, missionId })
+      return false
+    }
+    return (await mutateRepoWriteClaims(lockPath(resource), missionId, callId, 'release', isStale)).length > 0
+  }
   const current = await readClaim(resource)
-  if (!current) return
-  if (current.missionId !== missionId) return
-  if (callId && current.callId !== callId) return
+  if (!current) return false
+  if (current.missionId !== missionId) return false
+  if (callId && current.callId !== callId) return false
   await rm(lockPath(resource), { force: true })
   await logWarRoomRepoAudit('foundry-ops: resource.released', { resource, missionId, callId: current.callId })
+  return true
 }
 
-export async function releaseMissionResources(missionId: string, resources?: readonly FoundryResourceId[]): Promise<void> {
+export async function releaseMissionResources(missionId: string, resources?: readonly FoundryResourceId[], expectedClaims?: readonly FoundryResourceClaim[]): Promise<void> {
   const targets = resources ?? FOUNDRY_LOCK_ORDER
   for (const resource of [...targets].reverse()) {
-    await releaseResource(resource, missionId)
+    if (expectedClaims) {
+      for (const claim of expectedClaims.filter(c => c.resource === resource && c.missionId === missionId)) {
+        if (claim.callId) await releaseResource(resource, missionId, claim.callId)
+      }
+    } else {
+      // Legacy mission-only callers cannot release a live repository generation. Other global resources retain their existing behavior.
+      await releaseResource(resource, missionId)
+    }
   }
+}
+
+/** A stale/missing mission record cannot adopt the current execution's claims as cleanup authority. */
+export async function missionResourceGenerationIsCurrent(missionId: string, recorded: readonly FoundryResourceClaim[]): Promise<boolean> {
+  const current = (await listResourceClaims()).filter(c => c.missionId === missionId)
+  const matches = current.every(c => recorded.some(old => old.resource === c.resource && old.missionId === c.missionId
+    && typeof old.callId === 'string' && old.callId.length > 0 && old.callId === c.callId && old.pid === c.pid))
+  if (!matches) await logWarRoomRepoAudit('foundry-ops: resource.cleanup-generation-refused', {
+    missionId, recorded: recorded.map(c => ({ resource: c.resource, callId: c.callId, pid: c.pid })),
+    current: current.map(c => ({ resource: c.resource, callId: c.callId, pid: c.pid })),
+  })
+  return matches
 }
 
 /** Release only stale/dead claims owned by this mission. Live claims stay until the owner process ends. */
 export async function releaseMissionResourcesIfStale(missionId: string): Promise<FoundryResourceClaim[]> {
   const released: FoundryResourceClaim[] = []
   for (const resource of [...FOUNDRY_LOCK_ORDER].reverse()) {
+    if (resource === 'REPO_WRITE') { released.push(...await mutateRepoWriteClaims(lockPath(resource), missionId, undefined, 'reclaim', isStale)); continue }
     const claim = await readClaim(resource)
     if (!claim || claim.missionId !== missionId) continue
     if (!isStale(claim)) continue
@@ -161,6 +210,7 @@ export async function releaseMissionResourcesIfStale(missionId: string): Promise
 export async function reclaimStaleResources(): Promise<FoundryResourceClaim[]> {
   const reclaimed: FoundryResourceClaim[] = []
   for (const resource of FOUNDRY_LOCK_ORDER) {
+    if (resource === 'REPO_WRITE') { reclaimed.push(...await mutateRepoWriteClaims(lockPath(resource), undefined, undefined, 'reclaim', isStale)); continue }
     const claim = await readClaim(resource)
     if (!claim || !isStale(claim)) continue
     await rm(lockPath(resource), { force: true })
@@ -175,12 +225,15 @@ export async function acquireResource(input: {
   missionId: string
   operation: string
   paths?: string[]
+  workspaceRoot?: string
   exclusive?: boolean
   waitMs?: number
   alreadyHeld?: readonly FoundryResourceId[]
 }): Promise<ResourceAcquireResult> {
   const orderError = assertLockOrder(input.alreadyHeld ?? [], input.resource)
   if (orderError) return { state: 'DEADLOCK_REFUSED', error: orderError }
+
+  if (input.resource === 'REPO_WRITE') return acquireRepoWrite(lockPath(input.resource), input, isStale)
 
   if (PRODUCTION_GATED_RESOURCES.includes(input.resource)) {
     const held = input.alreadyHeld ?? []
@@ -259,11 +312,12 @@ export async function acquireResource(input: {
       await rm(lockPath(input.resource), { force: true })
       holder = null
     }
+    if (!holder) await removeUnreadableLock(input.resource)
     if (holder) {
       if (holder.missionId === input.missionId) {
         holder.heartbeatAt = new Date().toISOString()
         await writeClaimAtomic(holder, false)
-        return { state: 'ACQUIRED', claim: holder, release: async () => releaseResource(input.resource, input.missionId, holder.callId) }
+        return { state: 'ACQUIRED', claim: holder, release: async () => { await releaseResource(input.resource, input.missionId, holder.callId) } }
       }
       if (!exclusive && !holder.exclusive && SHARED_RESOURCES.has(input.resource)) {
         return { state: 'ACQUIRED', claim: holder, release: async () => undefined }
@@ -283,7 +337,7 @@ export async function acquireResource(input: {
       return {
         state: 'ACQUIRED',
         claim,
-        release: async () => releaseResource(input.resource, input.missionId, callId),
+        release: async () => { await releaseResource(input.resource, input.missionId, callId) },
       }
     }
     if (Date.now() >= deadline) {

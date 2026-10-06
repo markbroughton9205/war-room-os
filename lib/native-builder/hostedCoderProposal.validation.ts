@@ -26,6 +26,9 @@ import type { NativeIssueRecord, NativeRepairProposal } from './types'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 
+// The validation injects its own models and providers; the operator's saved provider policy (for instance LOCAL) must not decide which of them may run.
+process.env.FOUNDRY_PROVIDER_POLICY = 'AUTO'
+
 function check(name: string, pass: boolean, detail: string): CaseResult {
   return { name, pass, detail }
 }
@@ -94,6 +97,7 @@ async function testValidHostedProposalFullPipeline(): Promise<CaseResult[]> {
   const invoke = fixtureInvokeReturning(validProposalJson('return age > 18', 'return age >= 18'))
 
   const planned = await planRepair(repair.id, {
+    useLocalModel: false,
     targetFiles: [FIXTURE_REL],
     hostedCoder: { family: 'claude', invoke },
     commanderRequestText: 'Fix isAdult to be inclusive of the boundary age.',
@@ -293,7 +297,7 @@ async function testStaleProposalRejected(): Promise<CaseResult[]> {
 
   const { repair } = await seedNovelIssueAndRepair()
   const invoke = fixtureInvokeReturning(validProposalJson('return age > 18', 'return age >= 18'))
-  const planned = await planRepair(repair.id, { targetFiles: [FIXTURE_REL], hostedCoder: { family: 'claude', invoke } })
+  const planned = await planRepair(repair.id, { useLocalModel: false, targetFiles: [FIXTURE_REL], hostedCoder: { family: 'claude', invoke } })
   results.push(check('stale_01_hosted_proposal_planned', planned.selectedProposal?.sourceKind === 'hosted_model', planned.selectedProposal?.sourceKind ?? 'none'))
 
   // Simulate a concurrent edit landing after the proposal's expectedOriginalHash was computed but
@@ -336,7 +340,7 @@ async function testValidationFailureThenReplanWithEvidence(): Promise<CaseResult
   }
 
   // Attempt 1: hosted proposal applies cleanly but fails typecheck for real.
-  const planned1 = await planRepair(repair.id, { targetFiles: [FIXTURE_REL], hostedCoder: { family: 'claude', invoke: statefulInvoke } })
+  const planned1 = await planRepair(repair.id, { useLocalModel: false, targetFiles: [FIXTURE_REL], hostedCoder: { family: 'claude', invoke: statefulInvoke } })
   results.push(check('replan_01_attempt_one_planned', planned1.selectedProposal?.sourceKind === 'hosted_model', planned1.state))
 
   const applied1 = await approveAndApply(planned1.id, true)
@@ -346,7 +350,7 @@ async function testValidationFailureThenReplanWithEvidence(): Promise<CaseResult
   // Replan: the same repairId, now in 'verification_failed' — one of the five real replan-entry
   // states (Foundation Hardening). The hosted coder is called again; this time it must receive the
   // real failure evidence from attempt 1.
-  const planned2 = await planRepair(applied1.id, { targetFiles: [FIXTURE_REL], hostedCoder: { family: 'claude', invoke: statefulInvoke } })
+  const planned2 = await planRepair(applied1.id, { useLocalModel: false, targetFiles: [FIXTURE_REL], hostedCoder: { family: 'claude', invoke: statefulInvoke } })
   results.push(check('replan_04_provider_called_exactly_twice', callCount === 2, String(callCount)))
   results.push(check('replan_05_second_call_received_real_failure_evidence', secondCallSawFailureEvidence, String(secondCallSawFailureEvidence)))
   results.push(check('replan_06_attempt_two_planned', planned2.selectedProposal?.sourceKind === 'hosted_model', planned2.state))
@@ -382,7 +386,7 @@ async function testProviderFailureIsHonest(): Promise<CaseResult[]> {
   const { repair } = await seedNovelIssueAndRepair()
   const invoke = fixtureInvokeFailing('ANTHROPIC_API_KEY not configured')
 
-  const planned = await planRepair(repair.id, { targetFiles: [FIXTURE_REL], hostedCoder: { family: 'claude', invoke } })
+  const planned = await planRepair(repair.id, { useLocalModel: false, targetFiles: [FIXTURE_REL], hostedCoder: { family: 'claude', invoke } })
   results.push(check('provider_failure_01_no_hosted_proposal_fabricated', planned.proposals.every(p => p.sourceKind !== 'hosted_model'), JSON.stringify(planned.proposals.map(p => p.sourceKind))))
   results.push(check('provider_failure_02_no_deterministic_match_either', !planned.selectedProposal, planned.selectedProposal?.sourceKind ?? 'none selected'))
   results.push(check('provider_failure_03_repair_lands_blocked', planned.state === 'blocked', planned.state))

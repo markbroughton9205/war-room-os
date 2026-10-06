@@ -1,5 +1,6 @@
-import type { FoundryMissionInterpretation, FoundryMissionKind, FoundryMissionStep } from './foundryMissionTypes'
+import type { FoundryMissionInterpretation, FoundryMissionKind, FoundryMissionStep, FoundryMissionRecord } from './foundryMissionTypes'
 import { isReadOnlyLocateRequest } from './foundryLocalModelRuntime'
+import { commanderDeclaredNewFiles } from './foundryEngineeringContract'
 import { isApplicationBuilderRequest } from './foundryRequirementsEngine'
 import { assessMissionCapabilities, persistableCapabilityAssessment } from './capability-atlas/plannerGate'
 
@@ -7,15 +8,26 @@ function quote(value: string): string {
   return value.replace(/^["']|["']$/g, '').trim()
 }
 
+/** Keep forbidden actions out of lane selection; preserve any later affirmative action conservatively. */
+export function requestWithoutProhibitions(text: string): string {
+  return text.replace(/\b(?:do not|don['’]t|must not|should not|avoid|refrain from|never|without|no|not)\s+(?:chang(?:e|ing)|modif(?:y|ying)|edit(?:ing)?|commit(?:ting)?|push(?:ing)?|install(?:ation|ing|ed)?|activat(?:e|ing|ion|ed)|packag(?:e|ing|es)|deploy(?:ment|ing)?|spend(?:ing)?|trad(?:e|ing)|wager(?:ing)?|submit(?:ting)?|restart(?:ing)?)\b[\s\S]*?(?=\.(?:\s|$)|[;\n!?]|\bbut\b|\b(?:and(?: then)?|then)\s+(?:(?:please|also)\s+)*(?:install|activat|packag|deploy)|,\s*(?:and\s+)?(?:(?:please|also)\s+)*(?:install|activate|package|deploy)\s+(?:the|this|it|app|application|runtime|build|package)\b|$)/gi, ' ')
+}
+
+/** Exclude dependency metadata nouns from installation intent without hiding action forms. */
+export function installationIntentText(text: string): string {
+  return requestWithoutProhibitions(text).replace(/\bpackage(?:-lock)?\.json\b|\bpackage manager\b/gi, ' ')
+}
+
 export function interpretCommanderRequest(userRequest: string, options?: { repoTruth?: string; workspace?: string }): FoundryMissionInterpretation {
   const text = userRequest.trim()
   const fromTo = text.match(/from\s+["']?(.+?)["']?\s+to\s+["']?(.+?)["']?(?:\s+and|\s*$)/i)
   const addMarker = text.match(/\b(FOUNDRY[- ]P00\d|FOUNDRY READY)\b/i)
-  const wantsInstall = /install|activate|installed app|production|package|exact install/i.test(text)
+  const installIntent = installationIntentText(text)
+  const wantsInstall = /install|activat|installed app|production|packag|exact install/i.test(installIntent)
     && !/\bnot a production( install)?\b/i.test(text)
-  const mentionsWarRoom = /war room|header|login page|terra/i.test(text) && !/test application|fixture/i.test(text)
+  const mentionsWarRoom = /war room|header|login page|terra/i.test(installIntent) && !/test application|fixture/i.test(text)
   const mentionsFixture = /test application|fixture|status label|local-coder-label|engineering-depth|impl-bug|stale-expect|system rdy|multi-file\/|pass009\/|pass010\//i.test(text)
-  const mentionsFoundryApp = /the foundry|engineering review|session details|foundrymissioncontrollerpanel|components\/war-room\/foundry|advanced session/i.test(text)
+  const mentionsFoundryApp = /the foundry|engineering review|session details|foundrymissioncontrollerpanel|components\/war-room\/foundry|advanced session/i.test(installIntent)
     && !mentionsFixture
   const locateOnly = isReadOnlyLocateRequest(text)
   const appBuilder = isApplicationBuilderRequest(text)
@@ -24,7 +36,11 @@ export function interpretCommanderRequest(userRequest: string, options?: { repoT
     && !mentionsFoundryApp
     && !mentionsWarRoom
     && !wantsInstall
-  const kind: FoundryMissionKind = locateOnly
+  // The Commander named the exact file(s) to create or rewrite and asked for no install/activation: this is source authoring, not a production-install mission,
+  // even when a field name in the spec happens to contain a word like "header".
+  const explicitInstall = /\b(install(ed)?\s+(the\s+)?(app|application|runtime|build|package)|activate\s+(the\s+)?(install|runtime|app)|package\s+(the\s+)?(app|application|runtime)|deploy(ing)?\s+(to|the)|production\s+(build|install|runtime))\b/i.test(installIntent)
+  const authoringOnly = commanderDeclaredNewFiles(text).length > 0 && !explicitInstall
+  const kind: FoundryMissionKind = locateOnly || authoringOnly
     ? 'fixture'
     : mentionsFixture && !wantsInstall && !mentionsFoundryApp
       ? 'fixture'
@@ -193,4 +209,17 @@ export function replanAfterTestFailure(plan: FoundryMissionStep[]): FoundryMissi
   const next = [...plan]
   next.splice(testIdx >= 0 ? testIdx : next.length, 0, extra)
   return next.map(s => (s.intent === 'TEST' ? { ...s, status: 'pending' } : s))
+}
+
+/** Reinterpret only resumable records with a proven metadata/prohibition trigger and no installation artifact. */
+export function correctLegacyMissionIntent(mission: FoundryMissionRecord): boolean {
+  if (!['BLOCKED', 'PAUSED', 'RECOVERING'].includes(mission.status) || mission.kind !== 'application'
+      || mission.installState.installId || mission.packageState.appimage || mission.packageState.deb || mission.packageState.linuxUnpackedDir) return false
+  if (!/package(?:-lock)?\.json|package manager|\b(?:do not|don['’]t|must not|should not|avoid|refrain from|never|without|no|not)\s+(?:install|activat|packag|deploy)/i.test(mission.userRequest)) return false
+  const corrected = interpretCommanderRequest(mission.userRequest)
+  if (corrected.kind !== 'fixture') return false
+  mission.kind = corrected.kind
+  mission.interpretation = { ...corrected, capabilityAssessment: mission.interpretation.capabilityAssessment, constraints: mission.interpretation.constraints }
+  mission.successCriteria = corrected.successCriteria
+  return true
 }

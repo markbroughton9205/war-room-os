@@ -18,8 +18,9 @@
  * a secret printed by a build tool must never land in .war-room/ persistence or an SSE frame.
  */
 import { execFile, spawn } from 'node:child_process'
+import path from 'node:path'
 import { promisify } from 'node:util'
-import { access } from 'node:fs/promises'
+import { access, realpath } from 'node:fs/promises'
 import { constants as FsConstants } from 'node:fs'
 import { resolveRepoRoot } from '@/lib/repo/paths'
 import { classifyCommandCwd } from './commandPolicy'
@@ -188,7 +189,18 @@ async function resolveOperationArgv(
     case 'eslint_targeted': {
       const files = validateTargetFiles(op.targets)
       if (!files.length) return { ok: false, error: 'eslint_targeted requires at least one target file.' }
-      return { ok: true, argv: { cmd: 'pnpm', args: ['exec', 'eslint', ...files, '--max-warnings=0'], timeoutMs: DEFAULT_TIMEOUT_MS } }
+      // The installed runtime carries its own pinned ESLint closure; workspace files remain the lint targets.
+      const bundled = path.join(process.cwd(), 'toolchain', 'node_modules', 'eslint', 'bin', 'eslint.js')
+      try {
+        await access(bundled, FsConstants.R_OK)
+        const cli = await realpath(bundled)
+        const root = await realpath(resolveRepoRoot())
+        const relative = path.relative(root, cli)
+        if (!relative.startsWith('..' + path.sep) && !path.isAbsolute(relative)) return { ok: false, error: 'Bundled lint toolchain must be outside the mission workspace.' }
+        const { foundryNodeExecutable } = await import('./foundryProjectIsolation')
+        return { ok: true, argv: { cmd: foundryNodeExecutable(), args: [cli, '--max-warnings=0', '--', ...files], timeoutMs: DEFAULT_TIMEOUT_MS } }
+      } catch { /* Ordinary source checkouts use their own package-manager toolchain. */ }
+      return { ok: true, argv: { cmd: 'pnpm', args: ['exec', 'eslint', '--max-warnings=0', '--', ...files], timeoutMs: DEFAULT_TIMEOUT_MS } }
     }
 
     case 'build':
@@ -205,11 +217,15 @@ async function resolveOperationArgv(
 
     case 'node_test': {
       const files = validateTargetFiles(op.targets)
-      const scoped = files.filter(file => /^scripts\/foundry\/.+\.test\.(mjs|js)$/.test(file))
+      // The War Room tree keeps its scripts/foundry convention; any other workspace may test any test file inside it (containment was enforced by validateTargetFiles).
+      const { isWarRoomSourceTree } = await import('./foundryWorkspaceKind')
+      const warRoom = isWarRoomSourceTree(path.resolve(resolveRepoRoot()))
+      const scoped = files.filter(file => (warRoom ? /^scripts\/foundry\/.+\.test\.(mjs|js)$/ : /(^|\/)[^/]+\.(test|spec)\.(mjs|cjs|js|ts)$/).test(file))
       if (files.length && scoped.length !== files.length) {
-        return { ok: false, error: 'node_test targets must be scripts/foundry/*.test.mjs files.' }
+        return { ok: false, error: warRoom ? 'node_test targets must be scripts/foundry/*.test.mjs files.' : 'node_test targets must be *.test.* or *.spec.* files inside the workspace.' }
       }
-      return { ok: true, argv: { cmd: 'node', args: scoped.length ? ['--test', ...scoped] : ['--test'], timeoutMs: DEFAULT_TIMEOUT_MS } }
+      const { foundryNodeExecutable } = await import('./foundryProjectIsolation')
+      return { ok: true, argv: { cmd: foundryNodeExecutable(), args: scoped.length ? ['--test', ...scoped] : ['--test'], timeoutMs: DEFAULT_TIMEOUT_MS } }
     }
 
     case 'package_install': {

@@ -36,7 +36,9 @@ export function FoundryLiveAgentEvents({ events, missionSelected }: Props) {
         <ol className="mt-1 max-h-40 space-y-1 overflow-auto" aria-label="Live agent events">
           {rows.map(event => {
             const refused = event.type === 'COMPLETION_REFUSED'
-            const name = refused
+            // Mission Executive narration is plain prose for the Commander, never an enum name.
+            const narration = event.type === 'MISSION_EXECUTIVE'
+            const name = narration ? event.text : refused
               ? (event.text.startsWith('Completion refused') ? event.text : `Completion refused: ${event.text}`)
               : [event.type, event.tool, event.text].filter(Boolean).join(' ')
             return (
@@ -46,9 +48,9 @@ export function FoundryLiveAgentEvents({ events, missionSelected }: Props) {
                 aria-label={name}
                 data-event-type={event.type}
               >
-                <span className="text-cyan-300">{refused ? 'Completion refused' : event.type}</span>
-                {event.tool ? <span className="text-slate-500"> · {event.tool}</span> : null}
-                {' '}{refused ? event.text.replace(/^COMPLETION_REFUSED:?\s*/i, '').replace(/^Completion refused:?\s*/i, '') : event.text}
+                {narration ? <span className="text-emerald-300" data-testid="foundry-executive-narration">{event.text.charAt(0).toUpperCase() + event.text.slice(1)}</span> : <span className="text-cyan-300">{refused ? 'Completion refused' : event.type}</span>}
+                {narration ? null : event.tool ? <span className="text-slate-500"> · {event.tool}</span> : null}
+                {narration ? null : ' '}{narration ? null : refused ? event.text.replace(/^COMPLETION_REFUSED:?\s*/i, '').replace(/^Completion refused:?\s*/i, '') : event.text}
               </li>
             )
           })}

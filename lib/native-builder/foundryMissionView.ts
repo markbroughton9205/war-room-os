@@ -32,6 +32,7 @@ export function toFoundryMissionCommanderView(mission: FoundryMissionRecord) {
     activeToolCallId: mission.activeToolCallId ?? null,
     lockClaims: (mission.lockClaims ?? []).map(claim => claim.resource),
     runtimeClaims: mission.runtimeClaims ?? [],
+    modelPolicy: mission.modelPolicy ?? 'AUTO',
     pinnedModel: mission.pinnedModel ?? null,
     recovery: mission.recovery ?? null,
     visibility: mission.visibility ?? 'commander',

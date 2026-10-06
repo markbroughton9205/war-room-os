@@ -434,7 +434,7 @@ export async function runPhase11cLocalOwnershipValidation(opts?: {
 
     // Red team extras
     results.push(check('28_service_role', assertServiceRoleIsNotCommander().ok === false, 'ok'))
-    results.push(check('41_electron_ne_auth', !fs.readFileSync(path.join(repoRoot, 'desktop', 'src', 'main.cjs'), 'utf8').includes('LOCAL_COMMANDER'), 'ok'))
+    results.push(check('41_electron_ne_auth', !fs.readFileSync(path.join(repoRoot, 'desktop', 'src', 'main.cjs'), 'utf8').includes('LOCAL_COMMANDER') && fs.readFileSync(path.join(repoRoot, 'desktop', 'src', 'main.cjs'), 'utf8').includes('desktopTrust') && fs.existsSync(path.join(repoRoot, 'desktop', 'src', 'desktopTrust.cjs')), 'desktop injects trust proof; password auth stays in Next'))
     results.push(check('57_baby_isolation', SEARCH_CORPUS_OWNERSHIP_CLASS.baby_chat === 'SESSION_LOCAL', 'ok'))
     results.push(check('58_19_module', fs.existsSync(path.join(repoRoot, 'lib', 'war-room', 'conversationOwnership.ts')), 'ok'))
     results.push(check('61_11b', fs.existsSync(path.join(repoRoot, 'lib', 'sovereign-runtime', 'phase11b.validation.ts')), 'ok'))

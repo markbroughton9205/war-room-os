@@ -546,7 +546,8 @@ async function runActivationHandoffCases(): Promise<CaseResult[]> {
   results.push(check('rollback_installs_preserved', existsSync(path.join(opt, occupantInstall)) && existsSync(path.join(opt, 'war-room-os-0.1.0-75f49a0-foundry-4083e095')) && existsSync(path.join(opt, provenInstall)), 'occupant, baseline, and historical install remain'))
 
   const panel = readFileSync(path.join(ROOT, 'components/war-room/foundry/FoundryMissionControllerPanel.tsx'), 'utf8')
-  results.push(check('pass011_edit_contracts_remain', /selected\.engineeringReview\b/.test(panel) && /Foundry checked all required gates and tests/.test(panel) && /PENDING/.test(panel) && /FAIL/.test(panel), 'panel binding intact'))
+  // Pass 013/014 replaced the hard-coded PASS sentence with the review's own detail text: the panel binds the state and shows what the review said, and never claims PASS in prose.
+  results.push(check('pass011_edit_contracts_remain', /selected\.engineeringReview\b/.test(panel) && /selected\.engineeringReviewDetail/.test(panel) && !/PASS: Foundry checked all required gates and tests\./.test(panel) && /PENDING/.test(panel) && /FAIL/.test(panel), 'panel binding intact'))
   const opsPanel = readFileSync(path.join(ROOT, 'components/war-room/foundry/FoundryOperationsPanel.tsx'), 'utf8')
   results.push(check('advanced_production_owner_chip', /data-testid="foundry-production-owner"/.test(opsPanel) && /data-testid="foundry-production-owner-generation"/.test(opsPanel) && /CURRENT/.test(opsPanel) && /G\$\{productionLease\.generation\}/.test(opsPanel), 'Advanced-only PRODUCTION OWNER CURRENT'))
   const pass011 = readFileSync(path.join(ROOT, 'lib/native-builder/foundryAutonomousEngineeringDepth.pass011.validation.ts'), 'utf8')

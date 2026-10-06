@@ -5,7 +5,7 @@
  */
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { classifyArgv } from './commandPolicy'
 import { resolveLocalModelHealth } from './localModelHealth'
@@ -115,7 +115,17 @@ import {
   type PlanTrigger,
   type RevisionInput,
 } from './foundryEngineeringPlan'
-import { acceptanceBasis, reviewClaimDecision, reviewerContract, setAsideNote, testsGreenAtCurrentGeneration, type ReviewClaimDecision } from './foundryAcceptanceBasis'
+import { acceptanceBasis, reviewerContract, testsGreenAtCurrentGeneration } from './foundryAcceptanceBasis'
+import { decideReviewClaim, evidenceNote, type EvidenceDecision, type EvidenceSource } from './foundryReviewEvidence'
+import { scopeOfEdit, scopeRefusalNote, type ScopeOrigin } from './foundryEditScope'
+import { causeRefusalNote, causesIn } from './foundryCauseRepairs'
+import { runSelfReview } from './foundrySelfReview'
+import { runIndependentVerification } from './foundryIndependentVerifier'
+import { parseVerificationProbe, VERIFICATION_PROBE_SCRIPT, verificationProbeFinding } from './foundryVerificationProbe'
+import { selectDisconfirmationProbes, interpretProbeResult } from './foundryDisconfirmation'
+import { resolveDisagreement, resolveDisagreementAfterProbe } from './foundryReviewDisagreement'
+import { phase6CompletionAllowed, findingKey } from './foundryPhase6Completion'
+import { installedRuntimeAvailable, checkInstalledRuntimeMatches } from './foundryInstalledRuntimeCheck'
 import { contradictedClaim, debugFilesFor, failingTestFiles, filesNamedBy, ineffectiveEdits, isolatedLayerEvidence, layerOfFile, mergeRuledOut, noEffectExhausted, recordNoEffect, reopenAfterNoEffect, reopenableLayers, scopeTestFailures, type DeferredFailure, type IsolatedLayerEvidence } from './foundryGoalAnchor'
 import {
   PROGRESS_LIMITS,
@@ -166,16 +176,22 @@ import {
   type ProjectIndex,
 } from './foundryProjectContext'
 import { contextShouldOwn, diskHashes, isFilterShaped, readProjectFile, readProjectSources } from './foundryProjectContextIO'
+import { saferFormWasNotEnough } from './foundrySecureDefaults'
+import { guardPlannedEdit } from './foundryEditGuard'
+import { classifyEditOutcome, failureFirst, failureIdentity, isOscillating, parseFailure, pushTrail, recoverProgress } from './foundryEditForensics'
 import {
   MEMORY_LIMITS,
   causeSuggestions,
   describeIgnoredMemory,
   describeMemoryUse,
+  findResearchMemory,
   memoriesFromMission,
   memoryDetails,
   memoryNotes,
   mergeMemories,
+  researchMemoriesFromMission,
   retrieveMemories,
+  revalidateResearch,
   revalidateStore,
   unrelatedCandidates,
   type FailureKey,
@@ -183,6 +199,35 @@ import {
   type RetrievalResult,
 } from './foundryProjectMemory'
 import { listTopLevelNames, loadMemory, saveMemory } from './foundryProjectMemoryIO'
+import {
+  CALL_TRACE_SCRIPT,
+  PACKAGE_PROBE_SCRIPT,
+  SIGNATURE_PROBE_SCRIPT,
+  parseSignature,
+  type RememberedFinding,
+  dropStaleHints,
+  TOOL_LIMITS,
+  VERSION_PROBE_SCRIPT,
+  analyzeFailure,
+  chooseNextTool,
+  describeReceipt,
+  makeReceipt,
+  parseInstalled,
+  parsePackage,
+  parseTrace,
+  pushReceipt,
+  replacementPackage,
+  researchNote,
+  restoreTooling,
+  say as toolSay,
+  searchReceipts,
+  traceFiles,
+  traceNotes,
+  mergeResearchNote,
+  type ToolReceipt,
+  type ToolingState,
+} from './foundryToolReasoning'
+import { answerFromMemory, readLocalNotes, researchQuestion, type FetchResult } from './foundryToolReasoningIO'
 import { resolveRepoRoot } from '@/lib/repo/paths'
 import { getRepair, saveRepair } from './storage'
 import { MissionSealedError, MissionSupersededError, assertExecutorMayWrite, isMissionOwned, withRecordLock } from './foundryMissionOwnership'
@@ -193,9 +238,11 @@ export const REPAIR_STRATEGIES = ALL_REPAIR_STRATEGIES
 
 const children = new Map<string, { pid: number; kill: () => void }>()
 
-export function engineeringRuntimeShouldOwn(input: { fileCount: number; request: string }): boolean {
+export function engineeringRuntimeShouldOwn(input: { fileCount: number; request: string; pythonFileCount?: number }): boolean {
   if (input.fileCount <= 0 || input.fileCount > 80) return false
   if (isGovernanceProbe(input.request)) return true
+  // The small-workspace body validates a Python entry point. A workspace with no Python file is not its to own: the general engineer loop repairs it.
+  if (input.pythonFileCount === 0) return false
   return /\b(fix|repair|debug|failing|bug|serialization|validate this)\b/i.test(input.request)
 }
 
@@ -304,6 +351,7 @@ export const persistMissionRecord = persist
 export function terminalSealReason(record: NativeRepairRecord | null | undefined): string | null {
   if (!record) return null
   if (record.state === 'resolved' || record.state === 'cancelled' || record.state === 'rolled_back') return record.state
+  if (record.codingMission?.completionTruth?.canComplete && (record.codingMission.currentStep === 'COMPLETE' || record.codingMission.currentStep === 'DONE')) return 'complete'
   if (record.state === 'blocked' && record.codingMission?.engineeringRuntime?.blockedDetail) return 'blocked'
   return null
 }
@@ -1246,6 +1294,10 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     for (const file of state.componentFiles.contract) texts.push(await load(file))
     return texts
   }
+  /** The files as they are on disk now, told apart into code and tests (contract files are context, not code the reviewer can point at). */
+  const evidenceSourcesOf = (): EvidenceSource[] => [...sources.entries()]
+    .filter(([file, text]) => text && !state.componentFiles.contract.includes(file))
+    .map(([file, text]) => ({ file, text, role: state.componentFiles.tests.includes(file) || /(^|\/)tests?\//.test(file) || /(^|\/)test_[^/]*$/.test(file) ? 'test' as const : 'source' as const }))
 
   // Planning: revisions are recorded as the task graph changes and announced once, at the top of the next loop turn.
   let planDirty = false
@@ -1393,6 +1445,8 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     return true
   }
 
+  /** Set when the failure has bounced between two broken states: the change that fixed the first one is put back (with the unaffected elements kept) before the next repair. */
+  let recoveryDue = false
   /** Opens one rework cycle: a debugger task, then the implementation and verification tasks it feeds. Shared by a normal rework and a Commander continuation. */
   const reopenReworkTasks = (finding: string, trigger: PlanTrigger = 'TEST_FAILURE', planTrigger?: PlanTrigger) => {
     const previousSignature = state.lastFailureSignature
@@ -1400,6 +1454,8 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     // A worker that answered unusably says nothing new about the project. The real failure that started this repair stays the evidence,
     // otherwise the next diagnosis is about the worker's formatting mistake instead of the code (the newest observation displacing the goal).
     const carried = (trigger === 'INVALID_OUTPUT' || trigger === 'NO_EFFECTIVE_CHANGE') && state.repairFinding ? state.repairFinding : finding
+    const previousFinding = state.repairFinding
+    if (saferFormWasNotEnough(finding)) state.secureDefaultsOff = true
     state.repairFinding = carried
     if (carried === finding) state.knowledge.failures.push(finding)
     state.reviewFindings = [carried]
@@ -1408,8 +1464,19 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     const editsSinceFailure = state.appliedEditKeys.length - (state.editsAtFailure ?? 0)
     editedSinceLastFailure = editsSinceFailure > 0
     state.editsAtFailure = state.appliedEditKeys.length
+    // What the last edit really did: it can fix one problem and break another (partial progress), or swing the failure back and forth between two states.
+    const lastEdit = editsSinceFailure > 0 && trigger !== 'INVALID_OUTPUT' && trigger !== 'NO_EFFECTIVE_CHANGE' ? state.recentEdits?.at(-1) : undefined
+    const outcome = lastEdit && previousFinding ? classifyEditOutcome({ previous: previousFinding, current: carried, forensics: lastEdit.forensics ?? null }) : null
+    state.editOutcome = outcome?.kind === 'PARTIAL_PROGRESS' ? outcome : null
+    if (trigger !== 'INVALID_OUTPUT' && trigger !== 'NO_EFFECTIVE_CHANGE') state.failureTrail = pushTrail(state.failureTrail, failureIdentity(carried))
+    const oscillating = isOscillating(state.failureTrail ?? [])
+    if (!oscillating && lastEdit?.span && outcome && (outcome.kind === 'PARTIAL_PROGRESS' || outcome.kind === 'CHANGED')) {
+      state.progressEdit = { ...lastEdit.span, file: lastEdit.file, fixed: parseFailure(previousFinding ?? '').symbol ?? '', broke: parseFailure(carried).symbol ?? '' }
+    }
+    if (oscillating && state.progressEdit) recoveryDue = true
     // Evidence beats belief: edits were applied and the same failure came back, so those files are not the cause. Rule them out instead of trying them again.
-    const ineffective = trigger === 'INVALID_OUTPUT' || trigger === 'NO_EFFECTIVE_CHANGE' ? [] : ineffectiveEdits({ sameFailure: Boolean(previousSignature) && previousSignature === signature, editsSinceFailure, recentEdits: state.recentEdits ?? [], components: state.componentFiles })
+    // Partial progress and bouncing are not "the same failure": the file was the right place, and part of the change worked.
+    const ineffective = trigger === 'INVALID_OUTPUT' || trigger === 'NO_EFFECTIVE_CHANGE' || oscillating || outcome?.kind === 'PARTIAL_PROGRESS' ? [] : ineffectiveEdits({ sameFailure: Boolean(previousSignature) && previousSignature === signature, editsSinceFailure, recentEdits: state.recentEdits ?? [], components: state.componentFiles })
     if (ineffective.length) state.ruledOut = mergeRuledOut(state.ruledOut, ineffective)
     const debugId = `debug-${state.reworkCycles}`
     state.tasks.push({
@@ -1448,7 +1515,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     replanForRework(
       finding,
       debugId,
-      ineffective.length ? 'EDIT_INEFFECTIVE' : planTrigger ?? (trigger === 'TEST_FAILURE' && previousSignature && previousSignature !== signature ? 'FAILURE_CHANGED' : trigger),
+      ineffective.length ? 'EDIT_INEFFECTIVE' : planTrigger ?? (oscillating ? 'OSCILLATION' : outcome?.kind === 'PARTIAL_PROGRESS' ? 'PARTIAL_PROGRESS' : trigger === 'TEST_FAILURE' && previousSignature && previousSignature !== signature ? 'FAILURE_CHANGED' : trigger),
       ineffective.length ? `I changed ${ineffective.map(item => item.file).join(', ')} and the same test still fails.` : undefined,
     )
   }
@@ -1723,6 +1790,264 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     }
     await announceMemory(result, stage, extra)
   }
+  // ---- Phase 5: tool depth. The next tool follows the latest evidence: repository truth from the context engine, behaviour truth from a targeted terminal run,
+  // ---- external facts from primary-source research, and nothing at all when the local tests already answer the question.
+  const toolingState = (): ToolingState => {
+    if (!state.tooling || !Array.isArray(state.tooling.receipts) || !state.tooling.searched || !state.tooling.signatures) state.tooling = restoreTooling(state.tooling)
+    return state.tooling!
+  }
+  const announceTool = async (text: string, receipts: ToolReceipt[]) => {
+    const tooling = toolingState()
+    if (tooling.told.includes(text)) return
+    tooling.told = [...tooling.told, text].slice(-12)
+    await bindCampaign(repairId, sessionId, 'PLANNING', text, state, emit(repairId, sessionId, 'ARCHITECTING', text, { status: 'info', detail: receipts.map(describeReceipt).join('\n') || undefined }))
+  }
+  const recordSearchReceipts = async (stage: 'start' | 'failure') => {
+    if (!contextOn()) return
+    const tooling = toolingState()
+    const ctx = state.context!
+    const index = await ensureIndex()
+    const fresh = searchReceipts({
+      terms: ctx.terms,
+      entries: ctx.entries.map(entry => ({ path: entry.path, role: entry.role, reasons: entry.reasons })),
+      expansions: ctx.expansions.map(item => ({ file: item.file, reason: item.reason })),
+      totalFiles: Object.keys(index.files).length,
+    }, tooling, new Date().toISOString(), stage)
+    for (const receipt of fresh) pushReceipt(tooling, receipt)
+  }
+  const governedFetch = async (url: string): Promise<FetchResult> => {
+    const research = await import('./foundryInternetResearch')
+    const transport = await import('./foundryResearchTransport')
+    const classified = research.classifyResearchRequest({ url, method: 'GET' })
+    if (!classified.ok) return { ok: false, error: classified.error }
+    try {
+      const res = await transport.foundryResearchFetch(url, { method: 'GET', redirect: 'follow', headers: { Accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.1', 'User-Agent': 'WarRoom-Foundry-Research/1.0 (governed research; GET-only)' } }, { missionId: repairId })
+      if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status}` }
+      return { ok: true, status: res.status, text: (await res.text()).slice(0, 900_000) }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  const governedSearch = async (query: string) => {
+    const research = await import('./foundryInternetResearch')
+    const found = await research.searchPublicWeb(query, 5, { missionId: repairId })
+    return found.ok ? found.results : []
+  }
+  const shortUrl = (url: string) => { try { const u = new URL(url); return `${u.hostname}${u.pathname}`.replace(/\/$/, '') } catch { return url } }
+  const overrideLastRevisionSummary = (text: string) => {
+    const last = state.plan?.revisions[state.plan.revisions.length - 1]
+    if (state.plan && last) state.plan.revisions[state.plan.revisions.length - 1] = { ...last, summary: text }
+  }
+  /** What an installed package is called in code: a changelog names the project, the import statement needs the module. */
+  /** What the installed callable accepts, read from the installed library itself. The fixed script takes two identifiers and nothing from the project. */
+  const probeSignature = async (lib: string, symbol: string, stage: 'start' | 'failure', why: string, say?: string): Promise<boolean> => {
+    const tooling = toolingState()
+    const key = `${lib}.${symbol}`
+    if (tooling.probed.includes(`signature:${key}`) || state.commandsRun >= commandLimit()) return Boolean(tooling.signatures[key]?.signature)
+    state.commandsRun += 1
+    tooling.probed.push(`signature:${key}`)
+    if (say) await announceTool(say, [])
+    const bin = await pythonBin(root)
+    const display = `python3 -c <signature probe> ${key}`
+    const result = await runStepCommand(repairId, sessionId, bin, ['-c', SIGNATURE_PROBE_SCRIPT, lib, symbol], root, `Asking the installed ${lib} what ${symbol} accepts`, display)
+    const found = parseSignature(result.stdout)
+    if (found) tooling.signatures[key] = found
+    if (found?.signature) tooling.notes = [...tooling.notes.filter(item => !item.startsWith(`The installed ${key}`)), `The installed ${key}${found.signature} is what this version accepts; anything not listed there is rejected.`].slice(-TOOL_LIMITS.notes)
+    pushReceipt(tooling, makeReceipt({ tool: 'TERMINAL', at: new Date().toISOString(), stage, why, question: `What does the installed ${lib} ${symbol} accept?`, ran: display, sent: [], command: display, exitCode: result.code, found: found?.signature ? `${key}${found.signature}` : 'the installed library could not describe it', changedPlan: Boolean(found?.signature), next: found?.signature ? 'compare the argument against what it accepts' : 'read the official docs for that version' }, tooling))
+    return Boolean(found?.signature)
+  }
+  const probePackage = async (name: string, stage: 'start' | 'failure', why: string, say?: string): Promise<boolean> => {
+    const tooling = toolingState()
+    if (tooling.probed.includes(`package:${name}`) || state.commandsRun >= commandLimit()) return Boolean(tooling.importNames[name])
+    state.commandsRun += 1
+    tooling.probed.push(`package:${name}`)
+    if (say) await announceTool(say, [])
+    const bin = await pythonBin(root)
+    const display = `python3 -c <package probe> ${name}`
+    const result = await runStepCommand(repairId, sessionId, bin, ['-c', PACKAGE_PROBE_SCRIPT, name], root, `Checking what the installed ${name} package is called`, display)
+    const found = parsePackage(result.stdout)
+    const learned = Boolean(found?.installed && found.modules.length)
+    if (learned && found) {
+      tooling.importNames[name] = { version: found.version, modules: found.modules }
+      tooling.notes = [...tooling.notes.filter(item => !item.startsWith(`The package ${name}`)), `The package ${name} is installed as ${found.name}${found.version ? ` ${found.version}` : ''}; the module to import is \`${found.modules[0]}\` (import names are case-sensitive).`].slice(-TOOL_LIMITS.notes)
+    }
+    pushReceipt(tooling, makeReceipt({ tool: 'TERMINAL', at: new Date().toISOString(), stage, why, question: `What is the ${name} package imported as?`, ran: display, sent: [], command: display, exitCode: result.code, found: learned && found ? `${found.name} ${found.version ?? ''} is installed and is imported as ${found.modules[0]}`.replace(/\s+/g, ' ') : `no installed package called ${name} was found`, changedPlan: learned, next: learned ? 'use that module name in the import' : 'continue on the failure text' }, tooling))
+    return learned
+  }
+  const investigate = async (raw: string, stage: 'start' | 'failure') => {
+    if (!contextOn()) return
+    const tooling = toolingState()
+    const index = await ensureIndex()
+    const projectFiles = Object.keys(index.files)
+    for (const abs of [...new Set([...raw.matchAll(/File "([^"]+)", line \d+/g)].map(hit => hit[1].replace(/\\/g, '/')))].slice(0, 6)) {
+      const rel = projectFiles.filter(candidate => abs.endsWith(`/${candidate}`)).sort((a, b) => b.length - a.length)[0]
+      if (rel && !sources.has(rel)) await load(rel)
+    }
+    const analysis = analyzeFailure(raw.replace(/\u001b\[[0-9;]*m/g, ''), { projectFiles, sourceOf: rel => sources.get(rel) ?? null })
+    await recordSearchReceipts(stage)
+    let usedTool = false
+    for (let step = 0; step < 4; step += 1) {
+      const next = chooseNextTool({ analysis, state: tooling, codeGeneration: state.mutationGeneration, commandsLeft: commandLimit() - state.commandsRun, codeFilesInPlay: (state.context?.entries ?? []).filter(entry => entry.role !== 'test' && entry.role !== 'config').length })
+      const at = new Date().toISOString()
+      if (next.tool === 'NONE') {
+        if (next.reason === 'LOCAL_SUFFICIENT' && !usedTool && !tooling.localSaid) {
+          tooling.localSaid = true
+          const receipt = makeReceipt({ tool: 'NONE', at, stage, why: next.why, question: null, ran: 'no tool beyond the tests', sent: [], found: 'the failure names project code and the tests show it', changedPlan: false, next: 'make the change and rerun the tests' }, tooling)
+          pushReceipt(tooling, receipt)
+          if (next.say) await announceTool(next.say, [receipt])
+        } else if (next.reason === 'BUDGET' || next.reason === 'UNSUPPORTED') {
+          const receipt = makeReceipt({ tool: 'NONE', at, stage, why: next.why, question: null, ran: `stopped: ${next.reason.toLowerCase()}`, sent: [], found: next.why, changedPlan: false, next: 'go on the evidence already gathered' }, tooling)
+          if (!tooling.receipts.some(item => item.ran === receipt.ran && item.found === receipt.found)) pushReceipt(tooling, receipt)
+        }
+        break
+      }
+      usedTool = true
+      state.knowledge.decisions.push(`TOOL ${next.tool} ${next.why}`.slice(0, 160))
+      const ext = analysis.external
+      if (next.tool === 'PROJECT_SEARCH') {
+        await expandContext(raw)
+        await recordSearchReceipts(stage)
+        break
+      }
+      if (next.tool === 'TERMINAL' && next.probe === 'VERSION' && ext) {
+        state.commandsRun += 1
+        tooling.probed.push(`version:${ext.root}`)
+        await announceTool(next.say, [])
+        const bin = await pythonBin(root)
+        const result = await runStepCommand(repairId, sessionId, bin, ['-c', VERSION_PROBE_SCRIPT, ext.root], root, `Checking which version of ${ext.root} is installed`, `python3 -c <version probe> ${ext.root}`)
+        const info = parseInstalled(ext.root, result.stdout)
+        if (info) tooling.installed[ext.root] = info
+        pushReceipt(tooling, makeReceipt({
+          tool: 'TERMINAL', at, stage, why: next.why, question: `Which version of ${ext.root} runs here?`, ran: `python3 -c <version probe> ${ext.root}`, sent: [], command: `python3 -c <version probe> ${ext.root}`, exitCode: result.code,
+          found: info ? `${info.stdlib ? `Python ${info.python}` : `${ext.root} ${info.version ?? 'unknown version'}`} is installed (Python ${info.python})` : 'the installed version could not be read',
+          changedPlan: false, next: info ? 'read the release notes for that version' : 'continue on the local evidence',
+        }, tooling))
+        if (!info) break
+        continue
+      }
+      if (next.tool === 'TERMINAL' && next.probe === 'SIGNATURE') {
+        await probeSignature(next.root, next.symbol, stage, next.why, next.say)
+        continue
+      }
+      if (next.tool === 'TERMINAL' && next.probe === 'PACKAGE') {
+        const learned = await probePackage(next.name, stage, next.why, next.say)
+        if (learned) {
+          const modules = tooling.importNames[next.name].modules
+          revisePlanFor('RUNTIME_EVIDENCE', { evidence: [`${next.name} is imported as ${modules[0]}`] })
+          const told = `The installed package is imported as ${modules[0]}, so I'm correcting the import name and running the tests.`
+          overrideLastRevisionSummary(told)
+          await announceTool(told, tooling.receipts.slice(-1))
+        }
+        break
+      }
+      if (next.tool === 'WEB') {
+        const question = next.question
+        const info = tooling.installed[question.root]
+        if (!info) break
+        tooling.mode = 'RESEARCHING'
+        tooling.current = question.key
+        await announceTool(next.say, [])
+        const remembered = await rememberedResearch(question, info)
+        // Same library, same installed version, checked recently, from a primary source: the answer is already known, so nothing is read again.
+        // A changed version or an old finding was downgraded above and is not found here, so it is researched fresh.
+        const reused = remembered ? answerFromMemory({ question, info, tooling, remembered, now: new Date().toISOString() }) : null
+        const usedMemory = Boolean(reused && reused.memoryHit === 'REUSED')
+        if (remembered && !usedMemory) await announceTool(toolSay.recheck(question.root), [])
+        const outcome = usedMemory && reused ? reused : await researchQuestion({
+          question, info, tooling,
+          deps: { fetchText: governedFetch, localNotes: terms => readLocalNotes(root, terms), search: governedSearch, now: () => new Date().toISOString() },
+          remembered,
+        })
+        const answered = outcome.question
+        answered.recheckedFromMemory = Boolean(remembered) && !usedMemory
+        if (usedMemory) await announceTool(toolSay.reused(question.root), [])
+        else if (remembered) await announceTool(outcome.memoryHit === 'CONFIRMED' ? 'The same source still says the same thing, so the earlier answer holds.' : "The source doesn't say what my notes did any more, so I've gone by the current docs.", [])
+        const hosts = outcome.urls.map(shortUrl)
+        pushReceipt(tooling, makeReceipt({
+          tool: usedMemory ? 'NONE' : 'WEB', at, stage, why: usedMemory ? 'the same question was answered earlier for this exact installed version and is still fresh' : next.why, question: question.text,
+          ran: usedMemory ? 'used the answer remembered from an earlier mission (no web read)' : hosts.length ? `read ${hosts.join(', ')}` : 'no source could be reached',
+          sent: usedMemory ? [] : [`${question.root}${question.symbol ? ` ${question.symbol}` : ''}`, ...(outcome.query ? [`search: ${outcome.query}`] : [])],
+          found: answered.implication ?? 'the sources I could reach did not settle it',
+          changedPlan: answered.status === 'ANSWERED', next: answered.status === 'ANSWERED' ? 'go back to the code and change it' : 'go on the local evidence',
+          urls: usedMemory && answered.fromMemory ? [answered.fromMemory.url] : outcome.urls,
+        }, tooling))
+        if (outcome.said.includes('unavailable')) await announceTool(toolSay.unavailable(), [])
+        const replacementName = answered.status === 'ANSWERED' ? replacementPackage(answered.findings[0]?.replacement ?? null, question.root) : null
+        if (replacementName) await probePackage(replacementName, stage, 'the release notes name a replacement package; the code needs the name it is imported as')
+        const note = researchNote(answered, tooling.importNames, raw)
+        if (note) tooling.notes = mergeResearchNote(tooling.notes, note, question.root, TOOL_LIMITS.notes)
+        if (answered.implication) state.knowledge.decisions.push(`RESEARCH ${answered.implication}`.slice(0, 220))
+        const told = answered.status !== 'ANSWERED' ? toolSay.inconclusive(question.root) : answered.conflicts[0] ? toolSay.conflict(answered.conflicts[0]) : toolSay.answered(answered)
+        if (answered.status === 'ANSWERED') {
+          revisePlanFor(usedMemory ? 'MEMORY_USED' : 'RESEARCH_USED', { evidence: [answered.implication ?? question.text] })
+          overrideLastRevisionSummary(told)
+        }
+        tooling.mode = 'CODING'
+        tooling.current = null
+        await announceTool(told, tooling.receipts.slice(-1))
+        break
+      }
+      if (next.tool === 'TERMINAL' && next.probe === 'CALL_TRACE' && analysis.testId) {
+        state.commandsRun += 1
+        tooling.traced.push(`${analysis.key}@${state.mutationGeneration}`)
+        await announceTool(next.say, [])
+        const bin = await pythonBin(root)
+        const display = `python3 -c <call-trace probe> ${analysis.testId}`
+        const result = await runStepCommand(repairId, sessionId, bin, ['-c', CALL_TRACE_SCRIPT, analysis.testId], root, 'Running the failing test under a trace', display)
+        const trace = parseTrace(result.stdout)
+        if (!trace) {
+          await announceTool(toolSay.traceUnavailable(), [])
+          const again = state.commandsRun < commandLimit() ? await runStepCommand(repairId, sessionId, bin, ['-m', 'unittest', '-v', analysis.testId], root, 'Rerunning just the failing test') : null
+          if (again) state.commandsRun += 1
+          pushReceipt(tooling, makeReceipt({ tool: 'TERMINAL', at, stage, why: next.why, question: 'What did the code actually do?', ran: display, sent: [], command: display, exitCode: result.code, found: 'the trace could not run; the failing test was rerun on its own', changedPlan: false, next: 'continue on the failure text' }, tooling))
+          break
+        }
+        const lines = traceNotes(trace, [root, await realpath(root).catch(() => root)])
+        // When the evidence shows the cause (for instance a byte-order mark in the data), the note names the repair at the cause, so the model is not left to hard-code the symptom.
+        const causeNotes = causesIn(lines.join('\n')).map(cause => `Cause shown by the trace: ${cause.hint}`)
+        tooling.notes = [...tooling.notes.filter(item => !item.startsWith('Runtime trace') && !item.startsWith('Cause shown by the trace')), `Runtime trace of the failing test (what the project's functions actually returned, then where it failed):\n${lines.join('\n')}`, ...causeNotes].slice(-TOOL_LIMITS.notes)
+        const files = traceFiles(trace)
+        await expandContext(files.map(file => `File "${root}/${file}", line 1, in traced`).join('\n'))
+        const where = trace.failure?.at?.split(':')[0]
+        const found = where && !/^tests?\//.test(where) ? `the failure inside ${where} together with the real values the code was working with` : 'what each function actually returned while the test ran'
+        pushReceipt(tooling, makeReceipt({ tool: 'TERMINAL', at, stage, why: next.why, question: 'What did the code actually do during the failing test?', ran: display, sent: [], command: display, exitCode: result.code, found: `${found}: ${lines.slice(0, 2).join(' / ')}`.slice(0, 300), changedPlan: true, next: 'edit the code the trace points at' }, tooling))
+        revisePlanFor('RUNTIME_EVIDENCE', { evidence: lines.slice(0, 3) })
+        const told = toolSay.traced(found)
+        overrideLastRevisionSummary(told)
+        await announceTool(told, tooling.receipts.slice(-1))
+        break
+      }
+      break
+    }
+  }
+  /** After the change, the same tests are the judge: one receipt says what the earlier tool work led to. */
+  const noteVerifiedAfterTools = async () => {
+    if (!contextOn()) return
+    const tooling = toolingState()
+    if (tooling.told.includes('verified-after-tools') || !tooling.receipts.some(item => item.tool === 'WEB' || (item.tool === 'TERMINAL' && item.changedPlan))) return
+    tooling.told = [...tooling.told, 'verified-after-tools'].slice(-12)
+    pushReceipt(tooling, makeReceipt({ tool: 'TERMINAL', at: new Date().toISOString(), stage: 'failure', why: 'check the change against the evidence', question: null, ran: 'reran the tests after the change', sent: [], found: 'the tests that failed before now pass', changedPlan: false, next: 'verify from disk and finish' }, tooling))
+  }
+  /**
+   * An earlier verified mission may have researched this very question. That is a place to look first: the library version is compared (a changed version
+   * downgrades the finding on the spot) and the answer is still confirmed against the same source before it is relied on.
+   */
+  const rememberedResearch = async (question: { root: string; symbol: string | null }, info: { stdlib: boolean; python: string; version: string | null }): Promise<RememberedFinding | null> => {
+    const store = await memoryReady()
+    const at = memoryNow()
+    const installed = info.stdlib ? info.python : info.version ?? info.python
+    const checked = revalidateResearch(store, { [question.root]: installed }, at, repairId)
+    if (checked.changed.length) {
+      memoryStore = checked.store
+      await saveMemory(root, memoryStore)
+      const m = memoryState()
+      m.revalidated = [...(m.revalidated ?? []), ...checked.changed].slice(0, 8)
+      await announceTool(`I'd looked into ${question.root} before, but the installed version is different now, so I'm not relying on those notes and I'm checking the current docs.`, [])
+    }
+    const found = findResearchMemory(memoryStore ?? checked.store, { root: question.root, symbol: question.symbol, installed, now: at })
+    if (!found) return null
+    return { url: found.url, claim: found.claim, finding: found.finding }
+  }
   /** What the tests just proved is written down, but only from typed evidence: a verified completion, a recorded disproval, a no-op, a revert. */
   const writeMemoryAtCompletion = async () => {
     if (!contextOn() || memoryState().savedAt) return
@@ -1734,6 +2059,14 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
       baseline: state.baselineFailure ?? null, ruledOut: [...(state.ruledOut ?? []), ...(state.memoryTrail?.ineffective ?? []).filter(file => !(state.ruledOut ?? []).some(item => item.file === file)).map(file => ({ file, layer: layerOfFile(file, state.componentFiles) ?? 'code', basis: 'EDIT' as const }))], noEffect: state.noEffect ?? [], reverted: state.revertedFiles ?? [], greenFiles: state.memoryTrail?.greenFiles ?? [],
       testCommand: 'python3 -m unittest discover -s tests', greenGeneration: state.mutationGeneration, projectFiles: await listTopLevelNames(root),
     })
+    const tooling = toolingState()
+    candidates.push(...researchMemoriesFromMission({
+      mission: repairId, session: sessionId ?? null, at, resolved: true, index, filesMutated: state.filesMutated,
+      questions: tooling.questions.map(item => ({
+        key: item.key, text: item.text, root: item.root, symbol: item.symbol, status: item.status, installedVersion: item.installedVersion, python: tooling.installed[item.root]?.python ?? '',
+        finding: item.findings[0] ? { action: item.findings[0].action, version: item.findings[0].version, replacement: item.findings[0].replacement, url: item.findings[0].url, tier: item.findings[0].tier, quote: item.findings[0].quote } : null,
+      })),
+    }))
     memoryStore = mergeMemories(revalidated.store, candidates, at)
     await saveMemory(root, memoryStore)
     const m = memoryState()
@@ -1889,6 +2222,19 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     lastDecision = null
   }
 
+  /** Why the last proposed edit was not applied: a change nobody's evidence points at, or one that hides the symptom of a cause. */
+  let lastRefusal: { note: string; why: string } | null = null
+  /** A refused edit is not applied and not a failed hypothesis: the specialist is asked again (bounded by the invalid-output streak), the work already done stands. */
+  const refuseEdit = async (current: CampaignTask, file: string, workerLabel: string): Promise<'retry' | 'blocked'> => {
+    const refusal = lastRefusal ?? { note: 'That change was not applied.', why: 'it was refused' }
+    current.status = 'FAILED'
+    const reopened = openModelRework(`the edit to ${file} was refused: ${refusal.why}`, null, { role: current.role, taskId: current.id })
+    await reportProgress(reopened ? 'REPAIRING' : 'TESTING')
+    if (!reopened) return 'blocked'
+    await bindCampaign(repairId, sessionId, 'REPAIRING', 'A change that did not belong was refused.', state, emit(repairId, sessionId, 'REWORKING', refusal.note, { status: 'blocked', detail: workerLabel }))
+    return 'retry'
+  }
+
   const applyModelEdit = async (current: CampaignTask, edit: PlannedEdit, localWorker: boolean) => {
     const key = `${edit.file}:model:${edit.start}:${edit.end}:${sha256(edit.after).slice(0, 12)}`
     const held = state.writeLocks.find(lock => lock.file === edit.file)
@@ -1906,18 +2252,40 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     if (preexistingDirtyBlocksEdit(state.preexistingDirty, edit.file, state.filesMutated)) {
       return 'dirty' as const
     }
+    // A targeted change leaves the unaffected elements alone: a name the file still uses is never taken away together with the one being changed.
+    // (A PlannedEdit carries the whole old and new source plus the changed region; the guard works on that region and puts the file back together.)
+    const onDisk = await readProjectFile(root, edit.file)
+    const guarded = onDisk !== null ? guardPlannedEdit({ file: edit.file, source: onDisk, edit, secureOff: state.secureDefaultsOff === true, causeEvidence: [...(state.tooling?.notes ?? []), state.repairFinding ?? ''].join('\n') }) : null
+    if (guarded?.refused) {
+      state.knowledge.decisions.push(`CAUSE_FIRST ${edit.file}: ${guarded.refused.because}`.slice(0, 240))
+      lastRefusal = { note: causeRefusalNote(guarded.refused), why: guarded.refused.because }
+      return 'refused' as const
+    }
+    const kept = { restored: guarded?.restored ?? [] }
+    const secured = { rewrites: guarded?.rewrites ?? [] }
+    const effective = guarded?.changed ? { ...edit, after: guarded.after } : edit
     const applied = await applyUniqueEdit({
       repairId,
       issueId,
       file: edit.file,
       before: edit.before,
-      after: edit.after,
+      after: effective.after,
       start: edit.start,
       end: edit.end,
       reason: edit.reason,
       sourceKind: localWorker ? 'local_model' : 'hosted_model',
     })
     if (!applied.ok) return 'failed' as const
+    if (secured.rewrites.length) {
+      const first = secured.rewrites[0]
+      state.knowledge.decisions.push(`SECURE_DEFAULT ${edit.file}: ${first.from} -> ${first.to}`.slice(0, 220))
+      revisePlanFor('SECURE_DEFAULT', { evidence: secured.rewrites.map(item => `${item.from} -> ${item.to}: ${item.because}`).slice(0, 2) })
+    }
+    if (kept.restored.length) {
+      const names = kept.restored.map(item => item.name).join(', ')
+      state.knowledge.decisions.push(`EDIT_PRESERVED ${edit.file}: kept ${names}, still used by the code`.slice(0, 220))
+      revisePlanFor('EDIT_PRESERVED', { evidence: [`${edit.file}: kept ${names} in place; only the requested name was changed`] })
+    }
     state.mutationGeneration += 1
     if (!state.writeLocks.some(lock => lock.file === edit.file)) {
       state.writeLocks.push({ file: edit.file, taskId: current.id })
@@ -1925,9 +2293,9 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     if (!state.filesMutated.includes(edit.file)) state.filesMutated.push(edit.file)
     if (!current.writes.includes(edit.file)) current.writes.push(edit.file)
     state.appliedEditKeys.push(key)
-    state.recentEdits = [...(state.recentEdits ?? []), { file: edit.file, diff: (applied.diff ?? '').slice(0, 1200) }].slice(-2)
-    state.progress = noteMutation(state.progress, { file: edit.file, before: edit.before, after: edit.after, start: edit.start, end: edit.end })
-    sources.set(edit.file, edit.after)
+    state.recentEdits = [...(state.recentEdits ?? []), { file: edit.file, diff: (applied.diff ?? '').slice(0, 1200), ...(guarded ? { forensics: guarded.forensics, span: guarded.span } : {}) }].slice(-2)
+    state.progress = noteMutation(state.progress, { file: edit.file, before: edit.before, after: effective.after, start: edit.start, end: edit.end })
+    sources.set(edit.file, effective.after)
     if (contextOn()) {
       state.context = noteChanged(state.context!, edit.file, state.mutationGeneration)
       // Disk is the truth: re-read what was just written and re-link, instead of trusting the text the edit computed.
@@ -1935,6 +2303,28 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
     }
     await bindCampaign(repairId, sessionId, 'EDITING', `Edited ${edit.file}.`, state, emit(repairId, sessionId, 'FILE_EDITED', edit.file, { status: 'pass', filePath: edit.file, diff: applied.diff }))
     return 'applied' as const
+  }
+
+  /**
+   * The failure bounced back to an earlier state: the file went back to how it was. The change that had fixed the first problem is applied again, this time
+   * through the same preservation guard, so the verified-good part is kept and only the regression is left for the repair. Once per progress edit.
+   */
+  const recoverFromOscillation = async () => {
+    if (!recoveryDue) return
+    recoveryDue = false
+    const progress = state.progressEdit
+    const backend = state.tasks.find(task => task.id === 'backend')
+    if (!progress || !backend) return
+    state.progressEdit = null
+    state.failureTrail = []
+    const current = await readProjectFile(root, progress.file)
+    const recovered = current === null ? null : recoverProgress({ file: progress.file, current, progress })
+    if (current === null || !recovered) return
+    state.appliedEditKeys = state.appliedEditKeys.filter(key => !key.startsWith(`${progress.file}:model:${progress.start}:`))
+    const result = await applyModelEdit(backend, { file: progress.file, before: current, after: recovered.content, start: progress.start, end: progress.end, reason: 'Put back the change that had fixed the first problem, keeping the unaffected parts.' }, false)
+    if (result !== 'applied') return
+    if (progress.fixed && progress.broke) state.editOutcome = { kind: 'PARTIAL_PROGRESS', kept: progress.fixed, broke: progress.broke }
+    state.knowledge.decisions.push(`OSCILLATION ${progress.file}: put back the change that fixed ${progress.fixed || 'the first problem'}`.slice(0, 220))
   }
 
   if (state.intelligence === 'model' && state.localOnly) {
@@ -1962,6 +2352,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
   // The task-loop bound is the third finite ceiling; progress extends it inside a hard absolute limit.
   while (guard < progressLimits(state.progress).iterations) {
     guard += 1
+    await recoverFromOscillation()
     await announcePlanRevision()
     if (state.budgetExhausted || state.commandsRun > commandLimit()) {
       return sealBlocked(repairId, blocked('BLOCKED_RESOURCE', 'Campaign budget is exhausted.', [], false, 'Raise the campaign budget in a new mission. This budget was not reset.'))
@@ -2018,6 +2409,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             state.repairFinding = finding
             state.knowledge.failures.push(finding.slice(0, 200))
             await applyMemoryForFailure(raw, 'start')
+            await investigate(raw, 'start')
           }
         }
         completeCampaignTask(current, ['evidenced'])
@@ -2077,15 +2469,161 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
           await bindCampaign(repairId, sessionId, 'REPAIRING', 'Rework opened from verification.', state, emit(repairId, sessionId, 'REWORKING', finding, { status: 'fail', detail: call.workerLabel }))
           continue
         }
+        if (state.reviewFindings.length > 0) {
+          return sealBlocked(repairId, blocked('INVALID_OUTPUT', call.result.summary, [], false, 'Current test evidence or review clearance is missing.'))
+        }
+
+        // Phase 6: self-review, then independent verification, before the mission is declared complete. Neither is
+        // primed with "tests passed" or "the verifier says this is fine" — both derive their own conclusion from the
+        // acceptance criteria, the files on disk, and the tests, the same evidence the Phase 5 reviewer already uses.
+        const phase6Basis = acceptanceBasis({ request: state.request, acceptance: state.acceptance, contracts: await contractsOf() })
+        const primaryFiles = [state.componentFiles.backend[0], state.componentFiles.frontend[0]].filter(Boolean) as string[]
+        const touchedFiles = [...new Set([...state.filesMutated, ...(state.recentEdits ?? []).map(item => item.file)])]
+        const retiredFindingKeys = state.phase6?.retiredFindingKeys ?? []
+        const selfReview = runSelfReview({
+          missionId: state.missionId,
+          generation: state.mutationGeneration,
+          basis: phase6Basis,
+          sources: evidenceSourcesOf(),
+          touchedFiles,
+          primaryFiles,
+          testsGreenNow: passed,
+        })
+        state.phase6 = { ...(state.phase6 ?? {}), selfReview, retiredFindingKeys }
+        const activeSelfReviewFindings = selfReview.findings.filter(item => !retiredFindingKeys.includes(findingKey(item)))
+        if (activeSelfReviewFindings.length) {
+          const finding = activeSelfReviewFindings[0].claim
+          current.status = 'FAILED'
+          await bindCampaign(repairId, sessionId, 'TESTING', 'Self-review found a gap.', state, emit(repairId, sessionId, 'SELF_REVIEW_FOUND_GAP', finding, { status: 'fail', detail: call.workerLabel }))
+          if (!openModelRework(finding, fingerprintFinding(finding, 'REVIEW'), undefined, 'REVIEW')) {
+            await reportProgress('TESTING')
+            return sealBlocked(repairId, blockedByProgress(finding, 'Self-review found a gap that needs a bounded repair.'))
+          }
+          await reportProgress('REPAIRING')
+          await bindCampaign(repairId, sessionId, 'REPAIRING', 'Self-review opened a rework.', state, emit(repairId, sessionId, 'REWORKING', finding, { status: 'fail', detail: call.workerLabel }))
+          continue
+        }
+        await bindCampaign(repairId, sessionId, 'TESTING', "Implementation is complete. I'm independently verifying the result now.", state, emit(repairId, sessionId, 'INDEPENDENT_VERIFICATION_STARTED', 'Self-review found no blocking gap.', { status: 'pass' }))
+
+        let independentVerdict = runIndependentVerification({
+          missionId: state.missionId,
+          generation: state.mutationGeneration,
+          basis: phase6Basis,
+          sources: evidenceSourcesOf(),
+          primaryFiles,
+          testsGreenNow: passed,
+          filesMeetCriteria: diskMeetsContract(contractText, backend, frontend),
+          earlierClaims: state.reviewedClaims ?? [],
+          claim: call.result.verdict === 'PROJECT_READY' ? undefined : call.result.summary,
+        })
+        let counterexample = parseVerificationProbe(call.result.summary, phase6Basis, evidenceSourcesOf())
+        if (!counterexample && independentVerdict.findings.some(item => item.confidenceClass === 'PLAUSIBLE_NEEDS_PROBE') && state.modelCalls < state.modelCallBudget) {
+          // One bounded clarification converts a vague verifier objection into executable evidence.
+          const followup = await callCampaignSpecialist(specialistRequestFromCampaign({
+            campaign: state, taskId: `${current.id}-counterexample`, role: 'VERIFIER',
+            purpose: 'Check your objection against the source again. Return PROJECT_READY if it has no concrete failing example. Otherwise return NOT_READY and a PROBE_JSON object for one exact input, expected output, function and acceptance sentence. Do not repeat prose without a probe.',
+            acceptance: current.acceptance, workingSet: primaryFiles,
+            excerpts: evidenceSourcesOf().map(item => ({ file: item.file, text: item.text, readOnly: item.role === 'test' })),
+            needsEdit: false, attempt: current.attempt + 1,
+            contractText: `${contractText}\nACCEPTANCE ${phase6Basis.criteria.join('\nACCEPTANCE ')}\nYour earlier objection: ${call.result.summary.slice(0, 800)}`,
+          }), sources)
+          state.modelCalls += followup.calls
+          state.callsByRole.VERIFIER = (state.callsByRole.VERIFIER ?? 0) + followup.calls
+          state.workerReceipts.push(followup.receipt)
+          state.phase6.verifierFollowups = [...(state.phase6.verifierFollowups ?? []), { generation: state.mutationGeneration, original: call.result.summary, clarification: followup.result?.summary ?? followup.receipt.summary }].slice(-4)
+          if (!followup.failureClass && followup.result?.verdict) {
+            independentVerdict = runIndependentVerification({
+              missionId: state.missionId, generation: state.mutationGeneration, basis: phase6Basis,
+              sources: evidenceSourcesOf(), primaryFiles, testsGreenNow: passed,
+              filesMeetCriteria: diskMeetsContract(contractText, backend, frontend), earlierClaims: state.reviewedClaims ?? [],
+              claim: followup.result.verdict === 'PROJECT_READY' ? undefined : followup.result.summary,
+            })
+            counterexample = parseVerificationProbe(followup.result.summary, phase6Basis, evidenceSourcesOf())
+          }
+        }
+        let counterexampleSettled = false
+        let counterexampleFinding: import('./foundryPhase6Types').Phase6Finding | null = null
+        if (counterexample && state.commandsRun < commandLimit()) {
+          state.commandsRun += 1
+          const probeRun = await runStepCommand(repairId, sessionId, bin, ['-c', VERIFICATION_PROBE_SCRIPT, JSON.stringify(counterexample)], root, 'Checking the verifier counterexample against the current code', 'python3 -c <verification counterexample>')
+          counterexampleFinding = verificationProbeFinding(counterexample, probeRun)
+          counterexampleSettled = counterexampleFinding === null || counterexampleFinding.confidenceClass === 'DIRECTLY_PROVEN'
+          state.phase6.counterexamples = [...(state.phase6.counterexamples ?? []), { generation: state.mutationGeneration, probe: counterexample, settled: counterexampleSettled, finding: counterexampleFinding }].slice(-8)
+          if (counterexampleFinding) {
+            independentVerdict.findings.push(counterexampleFinding)
+            independentVerdict.recommendation = 'REPAIR_NEEDED'
+          }
+        }
+        // The one disconfirmation probe wired to run automatically: bounded selection, and only the installed-runtime
+        // check actually executes here (restart/reopen persistence is exercised end-to-end by the live-proof harness,
+        // which controls the real app restart; a mission does not restart the desktop app on every completion).
+        for (const probe of selectDisconfirmationProbes({ criteria: state.acceptance, touchedFiles, primaryFiles, installedRuntimeAvailable: installedRuntimeAvailable(), handlesUntrustedInput: false })) {
+          if (probe.hypothesisId !== 'INSTALLED_RUNTIME_MISMATCH') continue
+          const target = primaryFiles[0]
+          if (!target) continue
+          const outcome = checkInstalledRuntimeMatches(target, sources.get(target) ?? '')
+          const probeFinding = interpretProbeResult(probe, outcome)
+          if (probeFinding) {
+            independentVerdict.findings.push(probeFinding)
+            if (probeFinding.severity === 'BLOCKING') independentVerdict.recommendation = 'REPAIR_NEEDED'
+          }
+        }
+
+        let disagreement = resolveDisagreement({
+          selfReviewRecommendation: selfReview.recommendation,
+          selfReviewFindings: selfReview.findings,
+          independentRecommendation: independentVerdict.recommendation,
+          independentFindings: independentVerdict.findings,
+        })
+        if (disagreement?.status === 'DISAGREEMENT_PROBE') {
+          if (!counterexampleSettled) {
+            state.phase6.independentVerdict = independentVerdict
+            state.phase6.disagreement = disagreement
+            await bindCampaign(repairId, sessionId, 'TESTING', 'Verification needs a targeted counterexample.', state, emit(repairId, sessionId, 'INDEPENDENT_VERIFICATION_FAILED', 'The existing passing tests do not settle an uncovered claim.', { status: 'fail' }))
+            return sealBlocked(repairId, blocked('INVALID_OUTPUT', disagreement.reason, [], false, 'A targeted verification probe is required; rerunning unrelated passing tests cannot settle this claim.'))
+          }
+          disagreement = resolveDisagreementAfterProbe(disagreement, counterexampleFinding)
+          if (disagreement.resolution === 'COMPLETE') {
+            const settledKey = disagreement.strongestIndependentFinding ? findingKey(disagreement.strongestIndependentFinding) : disagreement.strongestSelfReviewFinding ? findingKey(disagreement.strongestSelfReviewFinding) : null
+            if (settledKey) state.phase6.retiredFindingKeys = [...retiredFindingKeys, settledKey].slice(-6)
+          }
+        }
+        state.phase6.independentVerdict = independentVerdict
+        state.phase6.disagreement = disagreement
+
+        const receipt = phase6CompletionAllowed({
+          missionId: state.missionId,
+          generation: state.mutationGeneration,
+          selfReview,
+          independentVerdict,
+          disagreement,
+          retiredFindingKeys: state.phase6.retiredFindingKeys,
+        })
+        state.phase6.receipt = receipt
+        if (!receipt.complete) {
+          const finding = receipt.unresolvedBlockingFindings[0]?.claim ?? receipt.reason
+          current.status = 'FAILED'
+          await bindCampaign(repairId, sessionId, 'TESTING', 'Independent verification did not accept the result.', state, emit(repairId, sessionId, 'INDEPENDENT_VERIFICATION_FAILED', finding, { status: 'fail', detail: call.workerLabel }))
+          if (!openModelRework(finding, fingerprintFinding(finding, 'VERIFY'), undefined, 'VERIFY')) {
+            await reportProgress('TESTING')
+            return sealBlocked(repairId, blockedByProgress(finding, 'Independent verification found a gap that needs a bounded repair.'))
+          }
+          await reportProgress('REPAIRING')
+          await bindCampaign(repairId, sessionId, 'REPAIRING', 'Independent verification opened a rework.', state, emit(repairId, sessionId, 'REWORKING', finding, { status: 'fail', detail: call.workerLabel }))
+          continue
+        }
+        // Completion follows the evidence-bound verdict, so an unsupported specialist claim can be retired first.
         const allowed = campaignCompletionAllowed({
-          verification: call.result.verdict,
+          verification: receipt.complete ? 'PROJECT_READY' : call.result.verdict,
           testsPassed: passed,
           reviewClear: state.reviewFindings.length === 0,
-          unresolvedFailure: false,
+          unresolvedFailure: receipt.unresolvedBlockingFindings.length > 0,
         })
         if (!allowed || !verificationBarrierSatisfied(state)) {
-          return sealBlocked(repairId, blocked('INVALID_OUTPUT', call.result.summary, [], false, 'The verifier did not accept a passing disk result.'))
+          return sealBlocked(repairId, blocked('INVALID_OUTPUT', receipt.reason, [], false, 'The evidence-bound completion gate did not accept the result.'))
         }
+        await bindCampaign(repairId, sessionId, 'TESTING', 'Independent verification passed. The mission is complete.', state, emit(repairId, sessionId, 'INDEPENDENT_VERIFICATION_PASSED', 'Independent verification passed from its own evidence.', { status: 'pass' }))
+
         state.verification = 'PROJECT_READY'
         state.phase = 'COMPLETE'
         state.checkpoints.push('PROJECT_READY')
@@ -2093,6 +2631,14 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
         await writeMemoryAtCompletion()
         await bindCampaign(repairId, sessionId, 'DONE', emitProgress(), state, emit(repairId, sessionId, 'PROJECT_READY', 'Verifier accepted the campaign from disk truth.', { status: 'pass', detail: `${call.workerLabel}; ${emitProgress()}`, validationResult: 'PASS' }))
       } else {
+        // Before anything has been changed, the failing run says where the problem is: that file is edited first, whatever the request's words matched best.
+        if ((current.role === 'BACKEND' || current.role === 'FRONTEND') && state.mutationGeneration === 0 && state.baselineFailure && current.workingSet.length) {
+          const targeted = failureFirst(current.workingSet, state.baselineFailure.frames)
+          if (targeted[0] !== current.workingSet[0]) {
+            state.knowledge.decisions.push(`TARGET ${targeted[0]}: the failing run points there, ahead of ${current.workingSet[0]}`.slice(0, 200))
+            current.workingSet = targeted
+          }
+        }
         const contractText = await load(state.componentFiles.contract[0] ?? '')
         const files = (current.workingSet.length ? current.workingSet : contextOn() ? contextSourceFiles() : [
           state.componentFiles.contract[0],
@@ -2116,9 +2662,33 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             ...files.map(file => ({ file, text: sources.get(file) ?? '' })),
             ...(contextOn() && (current.role === 'BACKEND' || current.role === 'FRONTEND') ? await contextTestExcerpts(files) : []),
           ]
-          const notesForCall = contextOn() ? [...(state.memory?.notes ?? []), ...contextNotes(state.context!, await ensureIndex(), current.role === 'BACKEND' || current.role === 'FRONTEND' ? current.workingSet[0] : undefined)] : []
+          const notesForCall = contextOn() ? [...(state.memory?.notes ?? []), ...dropStaleHints(state.tooling?.notes ?? [], shownExcerpts.filter(item => item.text.length > 0).map(item => item.text)), ...contextNotes(state.context!, await ensureIndex(), current.role === 'BACKEND' || current.role === 'FRONTEND' ? current.workingSet[0] : undefined)] : []
           // The record shows exactly what reached the model: which files, and which context notes.
           if (contextOn()) state.context = noteSent(state.context!, { role: current.role, task: current.id, files: shownExcerpts.map(item => item.file), notes: notesForCall })
+          // A green baseline is not completion evidence, but it is a reason to inspect the goal before authorizing an edit.
+          if (contextOn() && needsEdit && state.mutationGeneration === 0 && state.reworkCycles === 0 && state.checkpoints.includes('BASELINE') && !state.repairFinding && state.modelCalls + 1 < state.modelCallBudget) {
+            const preflight = await callCampaignSpecialist(specialistRequestFromCampaign({
+              campaign: state, taskId: `${current.id}-necessity`, role: 'REVIEWER',
+              purpose: 'Determine whether current source already implements the requested behavior before any edit. Name a concrete missing acceptance criterion, or report STATUS pass. Tests passing alone do not establish the goal.',
+              acceptance: current.acceptance, workingSet: files, excerpts: shownExcerpts,
+              needsEdit: false, attempt: current.attempt,
+              contractText: reviewerContract(acceptanceBasis({ request: state.request, acceptance: state.acceptance, contracts: await contractsOf() })),
+            }), sources)
+            state.modelCalls += preflight.calls
+            state.callsByRole.REVIEWER = (state.callsByRole.REVIEWER ?? 0) + preflight.calls
+            state.workerReceipts.push(preflight.receipt)
+            const necessity = preflight.result && !preflight.failureClass ? decideReviewClaim(preflight.result.summary, {
+              basis: acceptanceBasis({ request: state.request, acceptance: state.acceptance, contracts: await contractsOf() }),
+              earlierClaims: state.reviewedClaims ?? [], testsGreenNow: testsGreenAtCurrentGeneration(state),
+              filesMeetCriteria: diskMeetsContract(contractText, sources.get(state.componentFiles.backend[0] ?? '') ?? '', sources.get(state.componentFiles.frontend[0] ?? '') ?? ''),
+              sources: evidenceSourcesOf(),
+            }) : null
+            if (!preflight.failureClass && preflight.result && (preflight.result.status === 'pass' && /STATUS pass/i.test(preflight.result.summary) || necessity && necessity.decision !== 'REOPEN')) {
+              completeCampaignTask(current, ['Current source matches the request; verify without an implementation edit.', preflight.result.summary])
+              await bindCampaign(repairId, sessionId, 'TESTING', 'The code already matches the request. I am checking it from disk.', state, emit(repairId, sessionId, 'REVIEWING', 'No implementation change was needed on inspection; tests and independent verification still have to pass.', { status: 'info', detail: preflight.workerLabel }))
+              continue
+            }
+          }
           const call = await callCampaignSpecialist(specialistRequestFromCampaign({
             campaign: state,
             taskId: current.id,
@@ -2184,7 +2754,32 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             if (!allowed) {
               return sealBlocked(repairId, blocked('INVALID_OUTPUT', `${call.edit.file} is outside the task working set.`, [], false, 'The specialist edit was refused.'))
             }
+            // A repair edit has to trace to why the repair exists (a failing run, a finding that stands); anything else is a change nobody asked for.
+            if (state.reworkCycles > 0) {
+              const scope = scopeOfEdit({
+                file: call.edit.file,
+                rework: true,
+                origin: (state.reworkOrigin ?? 'TEST') as ScopeOrigin,
+                finding: state.repairFinding ?? state.reviewFindings[0] ?? '',
+                sources: [...sources.entries()].filter(([, text]) => text).map(([file, text]) => ({ file, text })),
+                primaryFiles: contextOn()
+                  ? state.context!.entries.filter(entry => entry.role === 'implementation' || entry.role === 'consumer').map(entry => entry.path)
+                  : [...state.componentFiles.backend, ...state.componentFiles.frontend],
+              })
+              if (!scope.allowed) {
+                state.knowledge.decisions.push(`SCOPE_REFUSED ${call.edit.file}: ${scope.detail}`.slice(0, 240))
+                lastRefusal = { note: scopeRefusalNote(call.edit.file), why: scope.detail }
+                const refusal = await refuseEdit(current, call.edit.file, call.workerLabel)
+                if (refusal === 'blocked') return sealBlocked(repairId, blockedByProgress(`the edit to ${call.edit.file} was outside the scope of the failure`, 'The specialist kept proposing changes nothing pointed at.'))
+                continue
+              }
+            }
             const edited = await applyModelEdit(current, call.edit, call.localWorker)
+            if (edited === 'refused') {
+              const refusal = await refuseEdit(current, call.edit.file, call.workerLabel)
+              if (refusal === 'blocked') return sealBlocked(repairId, blockedByProgress(`the edit to ${call.edit.file} only hid the symptom of the failure`, 'The specialist kept proposing a workaround instead of repairing the cause.'))
+              continue
+            }
             if (edited === 'dirty') {
               return sealBlocked(repairId, blocked('Preexisting dirty file.', `${call.edit.file} is preexisting dirty.`, [], false, 'Leave the dirty file untouched.'))
             }
@@ -2197,26 +2792,28 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             let gap = Boolean(call.result && reviewerFoundGap(call.result.summary))
             const backendNow = sources.get(state.componentFiles.backend[0] ?? '') ?? ''
             const frontendNow = sources.get(state.componentFiles.frontend[0] ?? '') ?? ''
-            let setAside: ReviewClaimDecision | null = null
+            let setAside: EvidenceDecision | null = null
             let claimKey = ''
             if (gap && call.result) {
-              // A reviewer sentence is a claim. It reopens work only when it maps to a real acceptance criterion and is not the same claim already handled while the tests pass.
-              const verdict = reviewClaimDecision({
-                claim: call.result.summary,
+              // A reviewer sentence is a claim, weighed against the evidence: the request and its criteria, the files on disk now, the tests at this generation.
+              // It reopens work only when that evidence supports it; a claim the evidence contradicts is retired without a repair.
+              for (const file of [...state.componentFiles.backend, ...state.componentFiles.frontend, ...state.componentFiles.tests]) await load(file)
+              const verdict = decideReviewClaim(call.result.summary, {
                 basis: acceptanceBasis({ request: state.request, acceptance: state.acceptance, contracts: await contractsOf() }),
                 earlierClaims: state.reviewedClaims ?? [],
                 testsGreenNow: testsGreenAtCurrentGeneration(state),
                 filesMeetCriteria: diskMeetsContract(contractText, backendNow, frontendNow),
+                sources: evidenceSourcesOf(),
               })
               claimKey = verdict.key
               if (verdict.decision !== 'REOPEN') {
                 gap = false
                 setAside = verdict.decision
-                state.knowledge.decisions.push(`REVIEW_SET_ASIDE ${verdict.decision} ${verdict.support.reason}: ${call.result.summary.slice(0, 120)}`)
+                state.knowledge.decisions.push(`REVIEW_SET_ASIDE ${verdict.decision} ${verdict.because}: ${call.result.summary.slice(0, 120)}`.slice(0, 260))
               }
             }
             state.reviewFindings = gap && call.result ? [call.result.summary] : []
-            await bindCampaign(repairId, sessionId, 'TESTING', 'Reviewer checked the campaign.', state, emit(repairId, sessionId, 'REVIEWING', gap ? state.reviewFindings[0] : 'Review found no blocking gap.', { status: gap ? 'fail' : 'pass', detail: setAside ? `${call.workerLabel} · ${setAsideNote(setAside)}` : call.workerLabel }))
+            await bindCampaign(repairId, sessionId, 'TESTING', 'Reviewer checked the campaign.', state, emit(repairId, sessionId, 'REVIEWING', gap ? state.reviewFindings[0] : 'Review found no blocking gap.', { status: gap ? 'fail' : 'pass', detail: setAside ? `${call.workerLabel} · ${evidenceNote(setAside)}` : call.workerLabel }))
             if (gap) {
               const finding = state.reviewFindings[0] ?? ''
               const actionable = !diskMeetsContract(contractText, backendNow, frontendNow)
@@ -2260,6 +2857,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
             state.knowledge.tests.push(`integrate ${passed ? 'pass' : 'fail'}`)
             if (passed) state.progress = noteGreen(state.progress, { at: new Date().toISOString(), mutationGeneration: state.mutationGeneration })
             await noteMemoryTrail(passed, `${result.stdout}\n${result.stderr}`)
+            if (passed) await noteVerifiedAfterTools()
             if (passed && contextOn()) await snapshotGreen()
             if (!passed) {
               const raw = scoped?.relatedText ?? `${result.stdout}\n${result.stderr}`
@@ -2285,6 +2883,7 @@ async function runCampaignBody(repairId: string, issueId: string, sessionId: str
               }
               state.reworkOrigin = 'TEST'
               await applyMemoryForFailure(`${result.stdout}\n${result.stderr}`, 'failure')
+              await investigate(`${result.stdout}\n${result.stderr}`, 'failure')
               // The failing run may point at code the working set does not hold yet: grow it, with the reason, before the diagnosis is asked for.
               await expandContext(`${result.stdout}\n${result.stderr}`)
               await gatherContextEvidence()
@@ -2744,8 +3343,9 @@ async function runStepCommand(
   args: string[],
   cwd: string,
   summary: string,
+  display?: string,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  const command = [cmd, ...args].join(' ')
+  const command = display ?? [cmd, ...args].join(' ')
   const governance = classifyEngineeringCommand(cmd, args, false)
   if (!governance.allowed) {
     await persist(

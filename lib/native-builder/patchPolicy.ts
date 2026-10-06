@@ -13,6 +13,8 @@ export const MAX_CHANGED_FILES = 5
 export const MAX_CHANGED_LINES = 150
 export const EXTERNAL_MAX_CHANGED_FILES = 40
 export const EXTERNAL_MAX_CHANGED_LINES = 8000
+/** One file the Commander (or the mission executive) assigned to an authoring mission may be written whole; everything else in the policy still applies. */
+export const AUTHORING_MAX_CHANGED_LINES = 2000
 
 export function resolvePatchPolicyProfile(): PatchPolicyProfile {
   const root = path.resolve(resolveRepoRoot())
@@ -152,10 +154,10 @@ function validateOnePatch(
  * Full policy evaluation for a proposal. Purely structural — reads nothing from disk (that's
  * patchApplier's job when it re-verifies expectedOriginalHash at apply time).
  */
-export function validatePatchPolicy(proposal: NativeRepairProposal, profile?: PatchPolicyProfile): PatchPolicyResult {
+export function validatePatchPolicy(proposal: NativeRepairProposal, profile?: PatchPolicyProfile, options?: { maxChangedLines?: number }): PatchPolicyResult {
   const active = profile ?? resolvePatchPolicyProfile()
   const maxFiles = active === 'external_coding' ? EXTERNAL_MAX_CHANGED_FILES : MAX_CHANGED_FILES
-  const maxLines = active === 'external_coding' ? EXTERNAL_MAX_CHANGED_LINES : MAX_CHANGED_LINES
+  const maxLines = options?.maxChangedLines ?? (active === 'external_coding' ? EXTERNAL_MAX_CHANGED_LINES : MAX_CHANGED_LINES)
   const violations: PatchPolicyViolation[] = []
   const seenFiles = new Set<string>()
   let changedLineCount = 0

@@ -10,8 +10,8 @@ import {
 
 /**
  * Foundry's main command surface. Everything here is connected to something real:
- * modes route to real mission-controller behavior, the model chip shows the real registry (only
- * Foundry Auto is selectable), and the Context menu offers only sources that already exist.
+ * modes route to real mission-controller behavior. Standalone exposes a local-only policy;
+ * individual model rows report status. Context offers only sources that already exist.
  */
 
 const DOT: Record<string, string> = {
@@ -57,6 +57,8 @@ export function FoundryComposer({
   terminalOpen,
   onToggleTerminal,
   modelMenuSignal,
+  localOnly = false,
+  onLocalOnlyChange,
 }: {
   request: string
   onRequestChange: (value: string) => void
@@ -68,6 +70,8 @@ export function FoundryComposer({
   missionRunning: boolean
   mode: FoundryComposerMode
   onModeChange: (mode: FoundryComposerMode) => void
+  localOnly?: boolean
+  onLocalOnlyChange?: (value: boolean) => void
   registry: ModelRegistryView
   context: ContextSourceView
   onInsertContext: (reference: string) => void
@@ -99,7 +103,7 @@ export function FoundryComposer({
   }
 
   const chip = 'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] text-slate-300 hover:bg-white/[0.06]'
-  const currentDot = DOT[registry.current.state] ?? DOT.unknown
+  const currentDot = localOnly ? (localReady ? DOT.ready : DOT.unavailable) : DOT[registry.current.state] ?? DOT.unknown
   const modeMeta = FOUNDRY_COMPOSER_MODES.find(item => item.id === mode)
 
   return (
@@ -136,26 +140,32 @@ export function FoundryComposer({
           <div className="relative">
             <button type="button" className={chip} data-testid="foundry-model-selector" aria-haspopup="listbox" aria-expanded={menu === 'model'} onClick={() => setMenu(menu === 'model' ? null : 'model')}>
               <span className={`h-1.5 w-1.5 rounded-full ${currentDot}`} aria-hidden="true" />
-              {registry.current.label}
-              <span className="text-slate-500">{registry.current.locality === 'unknown' ? '' : registry.current.locality === 'local' ? 'Local' : 'Cloud'}</span>
+              {localOnly ? 'Local Only' : registry.current.label}
+              <span className="text-slate-500">{localOnly ? 'Local' : registry.current.locality === 'unknown' ? '' : registry.current.locality === 'local' ? 'Local' : 'Cloud'}</span>
               <span aria-hidden="true" className="text-[9px] text-slate-500">▾</span>
             </button>
             {menu === 'model' ? (
               <Popover onClose={() => setMenu(null)} testId="foundry-model-menu" wide>
                 <p className="px-1.5 pb-1 text-[10.5px] uppercase tracking-widest text-slate-500">Models</p>
+                {mode === 'standalone' && onLocalOnlyChange ? (
+                  <div className="flex gap-2 p-1.5" role="group" aria-label="Mission model policy">
+                    <button type="button" aria-pressed={!localOnly} onClick={() => { onLocalOnlyChange(false); setMenu(null) }}>Foundry Auto</button>
+                    <button type="button" aria-pressed={localOnly} onClick={() => { onLocalOnlyChange(true); setMenu(null) }}>Local Only</button>
+                  </div>
+                ) : null}
                 <ul className="space-y-0.5" role="listbox">
                   {registry.entries.map(entry => (
-                    <li key={entry.id} role="option" aria-selected={entry.selected} aria-disabled={!entry.selectable} data-testid="foundry-model-entry" data-model-id={entry.id} className={`flex items-start gap-2 rounded px-1.5 py-1 ${entry.selected ? 'bg-white/[0.06]' : ''} ${entry.selectable ? '' : 'opacity-80'}`}>
+                    <li key={entry.id} role="option" aria-selected={entry.selected && !localOnly} aria-disabled={!entry.selectable} data-testid="foundry-model-entry" data-model-id={entry.id} className={`flex items-start gap-2 rounded px-1.5 py-1 ${entry.selected && !localOnly ? 'bg-white/[0.06]' : ''} ${entry.selectable ? '' : 'opacity-80'}`}>
                       <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${DOT[entry.state] ?? DOT.unknown}`} aria-hidden="true" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-slate-100">{entry.label} <span className="text-slate-500">{entry.locality === 'auto' ? '' : entry.locality === 'local' ? 'Local' : 'Cloud'}</span></span>
                         <span className="block truncate text-[11px] text-slate-500">{entry.state} · {entry.detail}</span>
                       </span>
-                      {entry.selected ? <span className="text-[11px] text-emerald-300">✓</span> : null}
+                      {entry.selected && !localOnly ? <span className="text-[11px] text-emerald-300">✓</span> : null}
                     </li>
                   ))}
                 </ul>
-                <p className="px-1.5 pt-1.5 text-[10.5px] leading-snug text-slate-500">Foundry Auto chooses the worker for each task. Direct model selection is not connected yet, so other models are shown for status only.</p>
+                <p className="px-1.5 pt-1.5 text-[10.5px] leading-snug text-slate-500">{mode === 'standalone' ? 'Local Only pins Standalone repairs to the installed local model. If it is unavailable, the mission stops without a cloud fallback. Other model entries report status.' : 'Foundry Auto chooses the worker. Choose Standalone to use Local Only for a repair; individual models report status.'}</p>
               </Popover>
             ) : null}
           </div>
