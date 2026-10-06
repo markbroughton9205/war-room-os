@@ -18,12 +18,15 @@ export type LogView = {
  */
 export class LearningLog {
   readonly file: string
-  constructor(dir: string) {
-    mkdirSync(dir, { recursive: true })
+  readonly readOnly: boolean
+  constructor(dir: string, opts: { readOnly?: boolean } = {}) {
+    this.readOnly = opts.readOnly ?? false
+    if (!this.readOnly) mkdirSync(dir, { recursive: true })
     this.file = path.join(dir, 'recursive-learning.jsonl')
   }
 
   append(record: LogRecord): void {
+    if (this.readOnly) throw new Error('learning log opened read-only')
     appendFileSync(this.file, JSON.stringify(record) + '\n', 'utf8')
   }
 
@@ -53,6 +56,7 @@ export class LearningLog {
         rejected.push({ index, reason: err instanceof Error ? err.message : 'invalid event' })
       }
     })
+    if (this.readOnly) throw new Error('learning log opened read-only')
     if (inserted.length > 0) appendFileSync(this.file, inserted.map((event) => JSON.stringify({ t: 'event', event })).join('\n') + '\n', 'utf8')
     return { inserted, duplicates, rejected }
   }

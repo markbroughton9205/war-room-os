@@ -7,4 +7,4 @@ export function learningDir(): string {
   const raw = process.env.WAR_ROOM_LEARNING_DIR?.trim()
   return raw ? path.resolve(raw) : path.join(resolveBaseRepoRoot(), '.war-room', 'recursive-learning')
 }
-export const defaultLearningLog = () => new LearningLog(learningDir())
+export const defaultLearningLog = (opts: { readOnly?: boolean } = {}) => new LearningLog(learningDir(), opts)
