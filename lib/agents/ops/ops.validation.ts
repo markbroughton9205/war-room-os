@@ -6,6 +6,8 @@ import { AgentRegistry, NeedGateError, deriveAgents } from './registry'
 import { AgentTransitionError, assertTransition } from './lifecycle'
 import { detectNeed, missingCriteria } from './need'
 import { NEED_CRITERIA, type AgentState } from './types'
+import { checkTaskScope, type AgentTask } from './specialization'
+import { AdaptationError, applyApprovedScopeChange, decideAdaptation, proposeAdaptation } from './adaptation'
 
 const { check, finish } = harness('AGENT_OPS_VALIDATION')
 
@@ -57,5 +59,45 @@ const { check, finish } = harness('AGENT_OPS_VALIDATION')
   check('A12_read_only_log_refuses_writes', ro)
   const a = activeAgent()
   check('A13_agent_identity_independent_of_provider', !('provider' in a.spec) && !('model' in a.spec) && a.reg.get(a.spec.id)!.state === 'ACTIVE')
+}
+// ---- P10-B: specialization boundaries, escalation, bounded adaptation
+{
+  const a = activeAgent()
+  const view = () => a.reg.get(a.spec.id)!
+  const task = (over: Partial<AgentTask> = {}): AgentTask => ({ title: 't', domain: 'documentation_synthesis', riskClass: 'low', permissions: ['read_docs'], memory: ['docs'], effects: [], ...over })
+  check('B01_in_scope_task_accepted', checkTaskScope(view(), task()).verdict === 'IN_SCOPE')
+  const off = checkTaskScope(view(), task({ domain: 'financial_review' }))
+  check('B02_out_of_domain_escalates_to_known_path', off.verdict === 'ESCALATE' && off.to === 'commander' && off.reasons[0].includes('outside specialization'))
+  check('B03_over_risk_escalates', checkTaskScope(view(), task({ riskClass: 'elevated' })).verdict === 'ESCALATE')
+  const wide = checkTaskScope(view(), task({ permissions: ['read_repo'], memory: ['project_knowledge'] }))
+  check('B04_permission_and_memory_outside_scope_escalate', wide.verdict === 'ESCALATE' && wide.reasons.length === 2)
+  check('B05_protected_effects_always_escalate', ['external_action', 'production_change', 'spend', 'external_communication'].every((e) => checkTaskScope(view(), task({ effects: [e as never] })).verdict === 'ESCALATE'))
+  const paused = freshOps(); const need = fullNeed(); paused.reg.recordNeed(need); const ps = paused.reg.propose(need.id, draft(), NOW)
+  check('B06_non_active_agent_refuses_work', checkTaskScope(paused.reg.get(ps.id)!, task()).verdict === 'REFUSE')
+  a.reg.transition(a.spec.id, 'RETIRED', 'commander:mark', 'done', NOW)
+  check('B07_retired_agent_refuses_work', checkTaskScope(view(), task()).verdict === 'REFUSE')
+
+  const b = activeAgent()
+  const propose = (over: Record<string, unknown>) => proposeAdaptation(b.log, b.spec.id, { kind: 'workflow_change', summary: 'tweak', evidenceRefs: ['run:1'], ...over } as never, NOW)
+  const err = (fn: () => unknown, code: string) => { try { fn(); return false } catch (e) { return e instanceof AdaptationError && e.code === code } }
+  check('B08_forbidden_adaptations_refused', ['silent_permission_expansion', 'hidden_external_action', 'production_mutation', 'spending', 'external_communication', 'anything_else'].every((k) => err(() => propose({ kind: k }), 'FORBIDDEN_KIND')))
+  check('B09_permitted_kinds_are_recommend_only', ['workflow_change', 'narrow_task_classification', 'retrieval_strategy_update', 'weak_tool_flag', 'retire_step'].every((k) => propose({ kind: k }).applied === false))
+  check('B10_evidence_required', err(() => propose({ evidenceRefs: [] }), 'INVALID') && err(() => propose({ summary: ' ' }), 'INVALID'))
+  check('B11_only_permission_request_may_carry_permissions_and_only_safe_ones', err(() => propose({ requestedPermissions: ['read_repo'] }), 'OUT_OF_BOUNDS') && err(() => propose({ kind: 'permission_change_request', requestedPermissions: ['spend'] }), 'OUT_OF_BOUNDS') && err(() => propose({ kind: 'permission_change_request' }), 'INVALID'))
+  const before = b.reg.get(b.spec.id)!.spec
+  const req = propose({ kind: 'permission_change_request', requestedPermissions: ['read_repo'], summary: 'needs repo read for triage' })
+  check('B12_proposal_alone_changes_nothing', JSON.stringify(b.reg.get(b.spec.id)!.spec) === JSON.stringify(before))
+  check('B13_apply_without_approval_refused_and_not_logged', err(() => applyApprovedScopeChange(b.log, req.id, 'commander:mark', NOW), 'NOT_AUTHORIZED') && !b.log.view().records.some((r) => r.t === 'scope'))
+  check('B14_only_commander_decides', err(() => decideAdaptation(b.log, req.id, 'APPROVED', 'agent:self', 'x', NOW), 'NOT_AUTHORIZED') && err(() => decideAdaptation(b.log, req.id, 'APPROVED', 'system:governor', 'x', NOW), 'NOT_AUTHORIZED'))
+  decideAdaptation(b.log, req.id, 'REJECTED', 'commander:mark', 'not now', NOW)
+  check('B15_rejected_request_cannot_be_applied_and_stays_auditable', err(() => applyApprovedScopeChange(b.log, req.id, 'commander:mark', NOW), 'NOT_AUTHORIZED') && b.log.view().records.some((r) => r.t === 'decision' && r.status === 'REJECTED'))
+  decideAdaptation(b.log, req.id, 'APPROVED', 'commander:mark', 'ok, scoped', NOW)
+  const applied = applyApprovedScopeChange(b.log, req.id, 'commander:mark', NOW)
+  check('B16_approved_scope_change_creates_new_version_only_for_requested_scope', applied.spec.version === 2 && applied.spec.permissionScope.includes('read_repo') && applied.spec.permissionScope.length === before.permissionScope.length + 1 && JSON.stringify(applied.spec.memoryScope) === JSON.stringify(before.memoryScope))
+  check('B17_scope_change_survives_restart', new AgentRegistry(new AgentOpsLog(b.dir)).get(b.spec.id)!.spec.version === 2)
+  // forged scope record (no matching approval) is ignored on replay
+  const c = activeAgent()
+  c.log.append({ t: 'scope', agentId: c.spec.id, proposalId: 'none', permissionScope: ['read_repo', 'read_docs', 'write_own_reports'], memoryScope: ['docs'], by: 'commander:mark', at: NOW.toISOString() })
+  check('B18_forged_scope_record_ignored', c.reg.get(c.spec.id)!.spec.version === 1 && !c.reg.get(c.spec.id)!.spec.permissionScope.includes('read_repo'))
 }
 finish()

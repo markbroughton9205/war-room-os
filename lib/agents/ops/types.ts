@@ -158,4 +158,5 @@ export type AgentOpsRecord =
   | { t: 'stop'; rid: string; workerId: string; by: Actor; at: string; reason: string; resumed: boolean }
   | { t: 'adaptation'; rid: string; proposal: AdaptationProposal }
   | { t: 'decision'; rid: string; proposalId: string; status: 'APPROVED' | 'REJECTED'; by: Actor; at: string; reason: string }
+  | { t: 'scope'; rid: string; agentId: string; proposalId: string; permissionScope: SafePermission[]; memoryScope: MemoryScope[]; by: Actor; at: string }
   | { t: 'recommendation'; rid: string; rec: Recommendation }

@@ -1,7 +1,7 @@
 import { AgentOpsLog } from './log'
-import { AgentTransitionError, assertTransition } from './lifecycle'
+import { AgentTransitionError, assertTransition, isCommander } from './lifecycle'
 import { missingCriteria } from './need'
-import { PROTECTED_EFFECTS, SAFE_PERMISSIONS, SPECIALIZATIONS, MEMORY_SCOPES, RISK_CLASSES, type Actor, type AgentSpec, type AgentState, type NeedRecord, type TransitionRecord } from './types'
+import { PROTECTED_EFFECTS, SAFE_PERMISSIONS, type AdaptationProposal, type AgentOpsRecord, SPECIALIZATIONS, MEMORY_SCOPES, RISK_CLASSES, type Actor, type AgentSpec, type AgentState, type NeedRecord, type TransitionRecord } from './types'
 
 export type AgentView = { spec: AgentSpec; state: AgentState; history: TransitionRecord[] }
 
@@ -15,9 +15,27 @@ export function deriveAgents(log: AgentOpsLog): { agents: Map<string, AgentView>
   const needs = new Map<string, NeedRecord>()
   const agents = new Map<string, AgentView>()
   let rejectedTransitions = 0
+  const proposals = new Map<string, AdaptationProposal>()
+  const decisions: Extract<AgentOpsRecord, { t: 'decision' }>[] = []
   for (const r of v.records) {
     if (r.t === 'need') needs.set(r.need.id, r.need)
     else if (r.t === 'agent') { if (!agents.has(r.agent.id)) agents.set(r.agent.id, { spec: r.agent, state: 'PROPOSED', history: [] }) }
+    else if (r.t === 'adaptation') proposals.set(r.proposal.id, r.proposal)
+    else if (r.t === 'decision') decisions.push(r)
+    else if (r.t === 'scope') {
+      // a scope change applies only if a Commander-APPROVED permission_change_request covers exactly the added scope
+      const a = agents.get(r.agentId)
+      const p = proposals.get(r.proposalId)
+      const dec = [...decisions].reverse().find((d) => d.proposalId === r.proposalId)
+      const addsPerm = r.permissionScope.filter((x) => !a?.spec.permissionScope.includes(x))
+      const addsMem = r.memoryScope.filter((x) => !a?.spec.memoryScope.includes(x))
+      const ok = a && a.state !== 'RETIRED' && a.state !== 'REJECTED' && p && p.agentId === r.agentId && p.kind === 'permission_change_request'
+        && dec?.status === 'APPROVED' && isCommander(dec.by) && isCommander(r.by)
+        && addsPerm.every((x) => p.requestedPermissions?.includes(x)) && addsMem.every((x) => p.requestedMemory?.includes(x))
+        && r.permissionScope.every((x) => SAFE_PERMISSIONS.includes(x)) && r.memoryScope.every((x) => MEMORY_SCOPES.includes(x))
+      if (!ok || !a) { rejectedTransitions += 1; continue }
+      a.spec = { ...a.spec, permissionScope: r.permissionScope, memoryScope: r.memoryScope, version: a.spec.version + 1 }
+    }
     else if (r.t === 'transition') {
       const a = agents.get(r.tr.agentId)
       if (!a || a.state !== r.tr.from) { rejectedTransitions += 1; continue }
