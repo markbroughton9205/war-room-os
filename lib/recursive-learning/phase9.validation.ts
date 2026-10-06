@@ -2,7 +2,12 @@
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import * as api from './index'
 import { LearningLog } from './store'
+import { drillDown, listProposals } from './evidence'
+import { recommendRouting, routingProposalDraft } from './recommendations'
 import { rankWorkflows, scoreMatrix, scoreSubject } from './scoring'
 import { detectRecurringFailures } from './analysis'
 import { buildDoctrineProposals, buildMemoryCandidates, decideProposal, promoteMemoryCandidate, proposalStatus, submitProposal } from './proposals'
@@ -162,6 +167,52 @@ export const freshLog = () => new LearningLog(mkdtempSync(path.join(tmpdir(), 'p
   for (const d of [1, 2, 3, 4, 5]) bigLog.recordEvent(ev('gpt', 'risk_review', 'FAILURE', d, { errorClass: 'ignored_approval_gate' }), NOW)
   const doctrine = buildDoctrineProposals(detectRecurringFailures(bigLog.view().activeEvents, NOW))
   check('09b_doctrine_proposals_protected_and_unapplied', doctrine.length === 1 && submitProposal(bigLog, doctrine[0], NOW).targetsProtectedPolicy === true)
+}
+
+// ---- S5: recommendations + evidence (tests 7, 8, 10, 13, 16)
+{
+  const log = freshLog()
+  const runs = (id: string, n: number, outcome: EvaluationEventInput['outcome'], metrics: EvaluationEventInput['metrics']) =>
+    Array.from({ length: n }, (_, i) => log.recordEvent(ev(id, 'architecture_analysis', outcome, i + 1, { metrics }), NOW))
+  const claude = runs('claude', 6, 'SUCCESS', { costUsd: 0.5, latencyMs: 9000 })
+  const gpt = runs('gpt', 6, 'SUCCESS', { costUsd: 0.05, latencyMs: 1000 })
+  const active = log.view().activeEvents
+  const quality = recommendRouting(active, 'architecture_analysis', NOW)
+  const priced = recommendRouting(active, 'architecture_analysis', NOW, { weights: { cost: 0.5, latency: 0.2 } })
+  const cited = new Set(priced.citedEventIds)
+  check('07_routing_recommendation_cites_evidence', priced.reason === 'RECOMMENDED' && priced.citedEventIds.length >= 6 && [...gpt, ...claude].every((e) => cited.has(e.id)) && priced.applied === false)
+  check('13_cost_latency_influence_recommendation', priced.recommended?.id === 'gpt' && quality.ranking.length === 2 && quality.recommended !== null, `quality->${quality.recommended?.id} priced->${priced.recommended?.id}`)
+
+  const sparse = freshLog()
+  sparse.recordEvent(ev('claude', 'risk_review', 'SUCCESS', 1), NOW)
+  const thin = recommendRouting(sparse.view().activeEvents, 'risk_review', NOW)
+  check('07b_thin_evidence_abstains', thin.recommended === null && thin.reason === 'INSUFFICIENT_EVIDENCE')
+  const unk = freshLog()
+  for (let i = 1; i <= 6; i++) { unk.recordEvent(ev('a', 'risk_review', 'SUCCESS', i, { metrics: { costUsd: 0.01 } }), NOW); unk.recordEvent(ev('b', 'risk_review', 'SUCCESS', i), NOW) }
+  const ur = recommendRouting(unk.view().activeEvents, 'risk_review', NOW, { weights: { cost: 0.5 } })
+  check('14d_unknown_cost_not_treated_as_free', (() => { const b = ur.ranking.find((r) => r.card.subject.id === 'b')!; const a = ur.ranking.find((r) => r.card.subject.id === 'a')!; return b.unknownMetrics.includes('cost') && b.utility <= a.utility + 1e-12 })(), JSON.stringify(ur.ranking.map((r) => [r.card.subject.id, r.utility.toFixed(3), r.unknownMetrics])))
+
+  // 16 + 10: drill-down, supersession visible, rejection auditable
+  const p = submitProposal(log, routingProposalDraft(priced), NOW)
+  log.supersede(gpt[0].id, 'duplicate run record', gpt[1].id, NOW)
+  const dd = drillDown(log, p.id)
+  check('16_drill_down_to_source_evidence', dd.supporting.length === p.evidenceEventIds.length && dd.missingEventIds.length === 0 && dd.supporting.some((i) => i.superseded && i.supersededReason === 'duplicate run record') && dd.supporting.every((i) => i.event.source.ref.startsWith('fixture-')))
+  decideProposal(log, p.id, 'REJECTED', 'commander:mark', 'prefer claude for architecture regardless of cost', NOW)
+  const row = listProposals(log).find((r) => r.proposal.id === p.id)
+  const dd2 = drillDown(log, p.id)
+  check('10_rejected_recommendation_stays_auditable', row?.status === 'REJECTED' && dd2.decisions.length === 1 && dd2.decisions[0].reason.includes('prefer claude') && dd2.proposal.evidenceEventIds.length > 0)
+
+  // 8: hard policy never silently mutated
+  const protectedFiles = ['docs/war-room-constitution.md', 'CLAUDE.md', 'docs/phases/phase-9.md', 'lib/auth', 'middleware.ts'].filter((f) => existsSync(f) && !f.endsWith('auth'))
+  const hash = () => protectedFiles.map((f) => createHash('sha256').update(readFileSync(f)).digest('hex')).join()
+  const h0 = hash()
+  const dl = freshLog()
+  for (const d of [1, 2, 3, 4, 5]) dl.recordEvent(ev('gpt', 'risk_review', 'FAILURE', d, { errorClass: 'skipped_deploy_gate' }), NOW)
+  const dp = submitProposal(dl, buildDoctrineProposals(detectRecurringFailures(dl.view().activeEvents, NOW))[0], NOW)
+  decideProposal(dl, dp.id, 'APPROVED', 'commander:mark', 'approved for review', NOW)
+  const surface = Object.keys(api).filter((k) => /^(apply|mutate|rewrite|deploy|push|merge|spend|execute|write)/i.test(k))
+  check('08_hard_policy_never_silently_mutated', h0 === hash() && protectedFiles.length >= 2 && dp.targetsProtectedPolicy && dp.applied === false && surface.length === 0, `files=${protectedFiles.length} mutatingExports=${surface.join(',') || 'none'}`)
+  check('08b_protected_targets_flagged', api.touchesProtectedPolicy('ROUTING_RECOMMENDATION', ['lib/auth/session.ts']) && api.touchesProtectedPolicy('ROUTING_RECOMMENDATION', ['deploy rules']) && !api.touchesProtectedPolicy('ROUTING_RECOMMENDATION', ['routing/summarization']))
 }
 
 export function finish(extra: Result[] = []) {
