@@ -370,5 +370,13 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   const r2 = await runFeatureWorkflow(deps(y, m2), REQ)
   check('N44_when_the_analyst_does_offer_a_different_hypothesis_the_loop_continues_and_can_fix_the_failure', r2.status === 'COMPLETED' && rp === 2 && an === 3, `${r2.status} ${r2.reason} rp=${rp} an=${an}`)
 }
+// ---- 13. hermetic test runs: state a model-written test leaves behind never persists into the next run or the workspace
+{
+  const LEAKY = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { appendFileSync, mkdirSync, readFileSync } from 'node:fs'\ntest('leaves state behind', () => {\n  mkdirSync('data', { recursive: true })\n  appendFileSync('data/leak.txt', 'x\\n')\n  assert.strictEqual(readFileSync('data/leak.txt', 'utf8').split('\\n').filter(Boolean).length, 1)\n})\n`
+  const x = makeWorld({ limits: { maxRetries: 5 } })
+  const model = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(LEAKY) : good(c)))
+  const r = await runFeatureWorkflow(deps(x, model, { finalVerification: x.verification }), REQ)
+  check('N45_a_test_that_writes_state_passes_on_every_re_run_because_runs_are_hermetic_and_the_workspace_stays_clean', r.status === 'COMPLETED' && r.repairs === 0 && !x.ws.exists('data/leak.txt'), `${r.status} ${r.reason} repairs=${r.repairs} leaked=${x.ws.exists('data/leak.txt')}`)
+}
 void deriveAssignments; void AgentRegistry
 finish()

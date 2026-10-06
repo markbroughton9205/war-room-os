@@ -6,7 +6,7 @@ import { latestCheckpoint, planResume, runEffectOnce, saveCheckpoint, sha256 } f
 import { MAX_REPAIR_ATTEMPTS, addEvidence, deriveLedger, markUndetermined, proposeHypothesis, recordFailure, recordRepair, recordValidation, authorizeRepair, parseToolOutput } from './debugLedger'
 import { ANALYST_SYSTEM, ENGINEER_REWRITE_SYSTEM, ENGINEER_SYSTEM, analystPrompt, chooseMode, featurePrompt, parseEditReply, repairPrompt, type FileJob } from './prompts'
 import type { CommandRecord, ModelClient, ModelResult } from './runtime/ports'
-import { runCommand } from './runtime/commandRunner'
+import { runCommand, runHermetic } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
 import { seedFromHandoff } from './successor'
@@ -201,7 +201,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     if (out.conflict) throw new Error(out.conflict)
     if (out.ran || out.skipped === 'RECONCILED_LANDED') { state.fileChanges = [...state.fileChanges.filter((c) => !(c.path === path && c.stepId === stepId)), expected]; if (!state.effectsDone.includes(key)) state.effectsDone.push(key); changed.add(path) }
   }
-  const runCheck = async (argv: string[]) => { const rec = await runCommand(ws.root, argv, deps.tools, { timeoutMs: 90_000 }); return rec }
+  // test runs are hermetic (fresh copy of the workspace each time); syntax/type checks are read-only so they run in place
+  const runCheck = async (argv: string[]) => (argv[0] === 'node' && argv[1] === '--test' ? runHermetic(ws.root, argv, deps.tools, { timeoutMs: 90_000 }) : runCommand(ws.root, argv, deps.tools, { timeoutMs: 90_000 }))
   const validationFor = (stepFiles: string[]): string[][] => {
     const cmds: string[][] = []
     for (const f of stepFiles) if (/\.m?js$/.test(f)) cmds.push(['node', '--check', f])

@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { redactText } from '@/lib/recursive-learning/ingestion/redact'
 import type { EngineeringTool } from '../../types'
@@ -58,4 +59,22 @@ export async function startWorkspaceServer(root: string, script: string, tools: 
     try { const r = await fetch(baseUrl + '/', { signal: AbortSignal.timeout(500) }); void r; break } catch { if (Date.now() > deadline) { child.kill('SIGKILL'); throw new Error('server did not become ready') } await new Promise((r) => setTimeout(r, 100)) }
   }
   return { baseUrl, log: () => redactText(buf).slice(-4000), stop: () => new Promise((resolve) => { if (child.exitCode !== null) return resolve(); child.once('exit', () => resolve()); child.kill('SIGTERM'); setTimeout(() => child.kill('SIGKILL'), 1500) }) }
+}
+
+/**
+ * Hermetic test run: the command executes in a throw-away COPY of the workspace (without node_modules/.git), so state a test writes (data files,
+ * counters, temp files) never persists between runs or pollutes the workspace. Repeated runs of the same failing test therefore see the same clean start,
+ * as a fresh checkout would. Output paths are mapped back to the real workspace root so evidence and file candidates stay consistent.
+ */
+export async function runHermetic(root: string, argv: string[], tools: EngineeringTool[], opts: { timeoutMs?: number; env?: Record<string, string> } = {}): Promise<CommandRecord> {
+  try { authorizeCommand(argv, root, tools) } catch { return runCommand(root, argv, tools, opts) } // refusals are reported by runCommand itself
+  const scratch = mkdtempSync(path.join(tmpdir(), 'wr-hermetic-'))
+  const copy = path.join(scratch, 'ws')
+  try {
+    cpSync(root, copy, { recursive: true, filter: (src) => { const rel = path.relative(root, src); return !rel.split(path.sep).some((seg) => seg === 'node_modules' || seg === '.git') } })
+    const rec = await runCommand(copy, argv, tools, opts)
+    const back = (t: string) => t.split(copy).join(root)
+    const stdout = back(rec.stdout), stderr = back(rec.stderr)
+    return { ...rec, cwd: root, stdout, stderr, outputHash: sha(stdout + '\n' + stderr) }
+  } finally { rmSync(scratch, { recursive: true, force: true }) }
 }
