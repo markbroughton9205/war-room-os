@@ -165,7 +165,11 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   /** Every static gate a reply must pass BEFORE it is written. */
   const gateProblem = (path: string, content: string, ignoreModules: Set<string> = new Set()): string | null => {
     const dups = /\.m?[jt]sx?$/.test(path) ? topLevelDuplicates(path, content) : []
-    if (dups.length) return `your version declares ${dups.join(', ')} more than once at the top level (a SyntaxError). Edit the existing declaration instead of adding a second one.`
+    if (dups.length) {
+      const imported = dups.filter((n) => new RegExp(`import\\s*\\{[^}]*\\b${n}\\b[^}]*\\}`).test(content))
+      const hint = imported.length ? ` ${imported.join(', ')} is both imported and declared here: rename the import with "as" (e.g. import { ${imported[0]} as store_${imported[0]} } from ...) and call the alias.` : ' Edit the existing declaration instead of adding a second one.'
+      return `your version declares ${dups.join(', ')} more than once at the top level (a SyntaxError).${hint}`
+    }
     return apiCompat(path, content) ?? importCompat(path, content, ignoreModules)
   }
   const relatedFor = (path: string, doneFiles: string[]) => {
@@ -199,12 +203,16 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     let cmd = failedCmd
     const rec = recordFailure(log, assignmentId, cmd, actor, clock())
     const attemptsNotes: string[] = []
+    const triedFiles = new Set<string>()
     for (let attempt = 1; attempt <= Math.min(MAX_REPAIR_ATTEMPTS, Math.max(1, limits.maxRetries)); attempt++) {
       const b = boundary(); if (b.stop) throw Object.assign(new Error('STOP'), { stop: b.stop })
       const bs = budgetStop(); if (bs) throw Object.assign(new Error('STOP'), { stop: bs })
       const out = `${cmd.stdout}\n${cmd.stderr}`
       const evCmd = addEvidence(log, assignmentId, rec.failureId, { kind: /\.m?js$/.test(cmd.argv.at(-1) ?? '') && cmd.argv[1] === '--check' ? 'type_diagnostic' : 'test_result', ref: `${cmd.argv.join(' ')}#attempt${attempt}`, content: out, summary: `${label} failed (exit ${cmd.exitCode}): ${out.split('\n').filter((l) => /Error|not ok|✖|fail/i.test(l)).slice(0, 2).join(' | ').slice(0, 220) || 'see output'}` }, actor, clock())
-      const cand = candidatesFromOutput(out, candidates.filter((c) => ws.exists(c)))
+      // a file already edited without fixing the ORIGINAL failure is deprioritised: the next attempt must look elsewhere while untried candidates remain
+      const allCand = candidatesFromOutput(out, candidates.filter((c) => ws.exists(c)))
+      const untried = allCand.filter((c) => !triedFiles.has(c))
+      const cand = untried.length ? untried : allCand
       const evFiles = cand.map((c) => addEvidence(log, assignmentId, rec.failureId, { kind: 'file_read', ref: c, content: ws.read(c), summary: `current content of ${c}` }, actor, clock()))
       const ar = await call(ANALYST_SYSTEM, analystPrompt({ failureOutput: out, candidates: cand.map((c) => ({ path: c, text: ws.read(c) })), prior: attemptsNotes }), true)
       noteTokens(ar)
@@ -243,6 +251,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       if (compat) { attemptsNotes.push(`repair rejected: ${compat}`); state.doNotRepeat.push({ key: `reject:${file}:repair${attempt}`, reason: compat }); continue }
       const beforeHash = ws.hash(file)
       await writeFile(stepId, file, pr.content)
+      triedFiles.add(file)
       repairs += 1
       const newHash = ws.hash(file)!
       const repair = recordRepair(log, assignmentId, rec.failureId, { hypothesisId: hid, filesEdited: [{ path: file, afterHash: newHash }], rationale: hypText, differsFromPrevious: diff, newEvidence: attempt > 1 ? [evCmd.id] : [] }, actor, clock())
