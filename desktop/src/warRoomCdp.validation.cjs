@@ -39,6 +39,19 @@ childProcess.spawnSync = (file, args, options) => {
 let cdp
 try {
   cdp = loadFresh()
+  // Default-off policy removes inherited debug switches and clears stale discovery.
+  const policyTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-cdp-policy-'))
+  const switches = new Map([['remote-debugging-port', '9222'], ['remote-debugging-pipe', ''], ['remote-debugging-address', '0.0.0.0']])
+  const commandLine = { removeSwitch: name => switches.delete(name), appendSwitch: (name, value) => switches.set(name, value) }
+  const disabled = cdp.configureWarRoomCdp(commandLine, { platform: 'linux', env: {}, runtimeDirOverride: policyTmp })
+  check('policy_default_off_no_probe_or_debug_switch', disabled === null && switches.size === 0 && calls.length === 0)
+  check('policy_disabled_discovery_cleared', cdp.readDesktopRuntime(policyTmp).cdpPort === 0)
+  const invalid = cdp.configureWarRoomCdp(commandLine, { platform: 'linux', env: { WAR_ROOM_ENABLE_DESKTOP_CDP: 'true' }, runtimeDirOverride: policyTmp })
+  check('policy_requires_exact_opt_in', invalid === null && calls.length === 0)
+  const enabled = cdp.configureWarRoomCdp(commandLine, { platform: 'linux', env: { WAR_ROOM_ENABLE_DESKTOP_CDP: '1' }, runtimeDirOverride: policyTmp })
+  check('policy_explicit_opt_in_loopback', enabled && switches.get('remote-debugging-address') === '127.0.0.1' && switches.get('remote-debugging-port') === String(enabled.cdpPort))
+  fs.rmSync(policyTmp, { recursive: true, force: true })
+  calls.length = 0
   // A. loopbackPortInUse
   mockMode = 'free'
   const free = cdp.loopbackPortInUse(9240)

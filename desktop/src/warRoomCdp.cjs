@@ -158,6 +158,24 @@ function claimWarRoomCdpEndpoint(options) {
   }, runtimeDirOverride)
 }
 
+// Debugging grants control of the authenticated renderer. It is opt-in only.
+function configureWarRoomCdp(commandLine, options) {
+  for (const name of ['remote-debugging-port', 'remote-debugging-pipe', 'remote-debugging-address']) {
+    commandLine.removeSwitch(name)
+  }
+  const env = options?.env || process.env
+  if ((options?.platform || process.platform) !== 'linux') return null
+  if (env.WAR_ROOM_ENABLE_DESKTOP_CDP !== '1') {
+    // Replace stale discovery evidence without claiming or probing any port.
+    persistDesktopRuntime({ cdpPort: 0, allocation: 'disabled', pid: process.pid }, options?.runtimeDirOverride)
+    return null
+  }
+  const claimed = claimWarRoomCdpEndpoint(options)
+  commandLine.appendSwitch('remote-debugging-address', LOOPBACK)
+  commandLine.appendSwitch('remote-debugging-port', String(claimed.cdpPort))
+  return claimed
+}
+
 function recordResolvedCdpPort(port, runtimeDirOverride) {
   const n = Number(port)
   if (!Number.isInteger(n) || n <= 0) return readDesktopRuntime(runtimeDirOverride)
@@ -184,5 +202,6 @@ module.exports = {
   loopbackPortInUse,
   candidatePorts,
   claimWarRoomCdpEndpoint,
+  configureWarRoomCdp,
   recordResolvedCdpPort,
 }
