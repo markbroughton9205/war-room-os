@@ -15,6 +15,8 @@ import { CHAT_FEATURE, CHAT_VERIFY_SCRIPT, makeChatApp } from './chatFixture'
 import { latestCheckpoint } from './continuity'
 import { deriveLedger, debugSummary } from './debugLedger'
 import { OllamaModelClient } from './runtime/ollamaModel'
+import { ForgeStore } from '@/lib/agents/forge/store'
+import { gpuUsedMiB, ramUsedMiB } from '@/lib/agents/forge/profile'
 import { makeIndependentVerification } from './runtime/verifier'
 import { Workspace } from './runtime/workspaceFs'
 import { runFeatureWorkflow } from './workflow'
@@ -53,6 +55,8 @@ const traced: ModelClient = {
 const verification = makeIndependentVerification('independent chat-session verification', path.join(outDir, `verifier-${stamp}`), 'verify.mjs', CHAT_VERIFY_SCRIPT, wsRoot)
 console.log(`workspace: ${wsRoot}\nmodel: ${modelName}\nassignment: ${assignment.id}`)
 const t0 = Date.now()
+let peakGpu: number | 'UNKNOWN' = 'UNKNOWN', peakRam: number | 'UNKNOWN' = 'UNKNOWN'
+const sampler = setInterval(() => { const g = gpuUsedMiB(), r = ramUsedMiB(); if (typeof g === 'number' && (peakGpu === 'UNKNOWN' || g > peakGpu)) peakGpu = g; if (typeof r === 'number' && (peakRam === 'UNKNOWN' || r > peakRam)) peakRam = r }, 3000)
 const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, onEvent: (e) => console.log(`[${e.kind}] ${e.detail}`) }, { request: CHAT_FEATURE.request, acceptance: CHAT_FEATURE.acceptance, hints: CHAT_FEATURE.hints })
 const v = deriveAssignments(log).assignments.get(assignment.id)!
 const finalVerify = await verification.run()
@@ -63,5 +67,12 @@ const report = {
   checkpoint: latestCheckpoint(log, assignment.id)?.state.steps.map((s) => `${s.id} ${s.status} ${s.files[0] ?? ''}${s.note ? ' — ' + s.note : ''}`),
   debug: debugSummary(log, assignment.id), ledgerFailures: deriveLedger(log, assignment.id).failures.size,
 }
+clearInterval(sampler)
 writeFileSync(path.join(outDir, `report-${stamp}.json`), JSON.stringify(report, null, 1))
+{
+  // Forge benchmark record: score parsed from the independent verifier's own TAP totals; nothing here is estimated
+  const pass = Number(/# pass (\d+)/.exec(report.independentVerificationNow.summary)?.[1]), total = Number(/# tests (\d+)/.exec(report.independentVerificationNow.summary)?.[1])
+  const score = Number.isFinite(pass) && Number.isFinite(total) && total > 0 ? { pass, total } : ('UNKNOWN' as const)
+  new ForgeStore().recordBenchmark({ modelRef: modelName, executor: `ollama:${modelName}`, fixture: 'chat-sessions (CHAT_FEATURE, independent 12-check verifier)', at: new Date().toISOString(), taskClass: 'complete_feature', verifierScore: score, completion: result.status === 'COMPLETED' && score !== 'UNKNOWN' && score.pass === score.total ? 'COMPLETED' : result.status === 'BLOCKED' ? 'BLOCKED' : score !== 'UNKNOWN' && score.pass > 2 ? 'PARTIAL' : 'FAILED', modelCalls: result.modelCalls, repairs: result.repairs, retries: 'UNKNOWN', regressions: 'UNKNOWN', elapsedMs: report.wallMs, manualIntervention: false, contextTokens: 8192, ramMiB: peakRam, vramMiB: peakGpu, rootCause: result.status === 'COMPLETED' ? undefined : result.reason, evidencePath: path.join(outDir, `report-${stamp}.json`), historicalBaseline: process.argv[4] === 'baseline' })
+}
 console.log(JSON.stringify({ status: result.status, reason: result.reason, modelCalls: result.modelCalls, repairs: result.repairs, tokens: result.tokens, files: result.filesChanged, verify: report.independentVerificationNow, wallS: Math.round(report.wallMs / 1000) }, null, 1))
