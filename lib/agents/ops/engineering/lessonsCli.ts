@@ -24,7 +24,7 @@ if (cmd === 'harvest' && storeDir) {
       // capture into a scratch log so the source evidence log is never written
       const scratch = new AgentOpsLog(mkdtempSync(path.join(tmpdir(), 'lesson-scratch-')))
       for (const r of log.view().records) { try { scratch.append(r as never) } catch { /* duplicate or refused */ } }
-      for (const l of captureLessons(scratch, id, { taskClass: v.assignment.taskClass, executor })) { if (!have.has(l.id)) { have.add(l.id); store.append({ t: 'lesson', lesson: l }); added += 1 } }
+      for (const l of captureLessons(scratch, id, { taskClass: v.assignment.taskClass, executor })) { if (!have.has(l.id) && (!process.env.LESSON_CLASS || l.cls === process.env.LESSON_CLASS)) { have.add(l.id); store.append({ t: 'lesson', lesson: l }); added += 1 } }
     }
   }
   console.log(JSON.stringify({ added, total: allLessons(store).length }))

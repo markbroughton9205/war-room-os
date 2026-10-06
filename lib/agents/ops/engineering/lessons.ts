@@ -47,7 +47,7 @@ export function captureLessons(log: AgentOpsLog, assignmentId: string, ctx: { ta
     if (!fixed) continue
     const rep = led.repairs.find((r) => r.repairId === fixed.repairId)
     const cls = classifyFailure(f.excerpt)
-    add({ cls, taskClass: ctx.taskClass, observation: `${f.signature.slice(0, 160)}`, correction: `${GUIDANCE[cls] || 'see repair'} Worked: ${(rep?.rationale ?? '').slice(0, 220)}`.trim(), evidence: { assignmentId, failureId, kind: 'FIXED_FAILURE' }, at: now.toISOString(), executor: ctx.executor,
+    add({ cls, taskClass: ctx.taskClass, observation: `${f.signature.slice(0, 160)}`, correction: `${GUIDANCE[cls] || 'see repair'}${rep && classifyFailure(rep.rationale) === cls ? ` Worked: ${rep.rationale.slice(0, 220)}` : ''}`.trim(), evidence: { assignmentId, failureId, kind: 'FIXED_FAILURE' }, at: now.toISOString(), executor: ctx.executor,
       trigger: `${ctx.taskClass}: command \`${f.argv.join(' ').slice(0, 80)}\` failed with class ${cls}`, applicability: [`task class ${ctx.taskClass}`, `same failure class ${cls}`], validation: `the original failing command was re-run after the repair and passed (ORIGINAL_FIXED) in assignment ${assignmentId}` })
   }
   for (const d of latestCheckpoint(log, assignmentId)?.state.doNotRepeat ?? []) {
