@@ -49,6 +49,7 @@ export function applyApprovedScopeChange(log: AgentOpsLog, proposalId: string, b
   if (!rec || rec.t !== 'adaptation' || rec.proposal.kind !== 'permission_change_request') throw new AdaptationError('INVALID', 'not a permission change request')
   const agent = deriveAgents(log).agents.get(rec.proposal.agentId)
   if (!agent) throw new AdaptationError('INVALID', 'unknown agent')
+  if (deriveAgents(log).appliedScopes.has(proposalId)) throw new AdaptationError('INVALID', 'scope change already applied')
   const latest = [...log.view().records].reverse().find((r) => r.t === 'decision' && r.proposalId === proposalId)
   if (!latest || latest.t !== 'decision' || latest.status !== 'APPROVED') throw new AdaptationError('NOT_AUTHORIZED', 'no Commander approval on record for this scope change')
   const permissionScope = [...new Set([...agent.spec.permissionScope, ...(rec.proposal.requestedPermissions ?? [])])]

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { resolveBaseRepoRoot } from '@/lib/repo/paths'
 import { defaultLearningLog } from '@/lib/recursive-learning/paths'
@@ -26,26 +26,42 @@ export const evaluationScoringRunner: WorkerRunner = async (ctx): Promise<Runner
 }
 
 /** Documentation freshness worker: reports stale docs by mtime. Honest NOT AVAILABLE when no docs directory exists. */
+const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((res) => { const t = setTimeout(res, ms); signal.addEventListener('abort', () => { clearTimeout(t); res() }, { once: true }) })
+
+/** Documentation freshness worker: reports stale docs by mtime. Read-only; symlinks are skipped; honest NOT AVAILABLE / truncation reporting. */
 export const documentationFreshnessRunner: WorkerRunner = async (ctx): Promise<RunnerResult> => {
   requirePermission(ctx, 'read_docs')
+  // acceptance-only pause (env, capped, abort-aware) so restart-during-work can be exercised against the installed runtime
+  const hold = Math.min(Number(process.env.WAR_ROOM_AGENT_OPS_RUN_HOLD_MS) || 0, 30_000)
+  if (hold > 0) await sleep(hold, ctx.signal)
   const dir = process.env.WAR_ROOM_DOCS_DIR?.trim() || path.join(resolveBaseRepoRoot(), 'docs')
   if (!existsSync(dir)) return { toolsUsed: ['fs.exists'], outputs: [{ kind: 'docs-freshness', ref: 'docs', summary: 'NOT AVAILABLE: docs directory not found in this runtime' }] }
+  const MAX_ENTRIES = 20_000
   const files: { rel: string; ageDays: number }[] = []
+  let entries = 0
+  let truncated = false
+  let skipped = 0
   const walk = (d: string, depth: number) => {
     if (depth > 3 || ctx.signal.aborted || ctx.shouldStop()) return
-    for (const name of readdirSync(d)) {
+    let names: string[] = []
+    try { names = readdirSync(d) } catch { skipped += 1; return }
+    for (const name of names) {
+      if (++entries > MAX_ENTRIES) { truncated = true; return }
       const p = path.join(d, name)
-      const st = statSync(p)
+      let st
+      try { st = lstatSync(p) } catch { skipped += 1; continue }
+      if (st.isSymbolicLink()) { skipped += 1; continue }
       if (st.isDirectory()) walk(p, depth + 1)
-      else if (/\.md$/i.test(name) && files.length < 2000) files.push({ rel: path.relative(dir, p), ageDays: (Date.now() - st.mtimeMs) / 86_400_000 })
+      else if (/\.md$/i.test(name)) { if (files.length < 2000) files.push({ rel: path.relative(dir, p), ageDays: (Date.now() - st.mtimeMs) / 86_400_000 }); else truncated = true }
+      if (truncated) return
     }
   }
   walk(dir, 0)
   const stale = files.filter((f) => f.ageDays > 90).sort((a, b) => b.ageDays - a.ageDays)
   return {
-    toolsUsed: ['fs.readdir', 'fs.stat'],
+    toolsUsed: ['fs.readdir', 'fs.lstat'],
     outputs: [
-      { kind: 'docs-freshness', ref: 'docs', summary: `${files.length} markdown docs scanned; ${stale.length} older than 90 days` },
+      { kind: 'docs-freshness', ref: 'docs', summary: `${files.length} markdown docs scanned; ${stale.length} older than 90 days${truncated ? ' (TRUNCATED: entry/file cap reached)' : ''}${skipped ? `; ${skipped} entr${skipped === 1 ? 'y' : 'ies'} skipped (symlink/unreadable)` : ''}` },
       ...stale.slice(0, 5).map((f) => ({ kind: 'stale-doc', ref: f.rel, summary: `${f.rel}: ${Math.round(f.ageDays)} days since last modification` })),
     ],
   }

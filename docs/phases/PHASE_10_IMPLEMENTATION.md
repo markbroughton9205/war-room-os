@@ -63,3 +63,9 @@ All additive. Revert the Phase 10 commits; delete `<app-data>/agent-foundry/` (d
 
 ## Evidence
 `phase10-scope-freeze.md`, `phase10-architecture.md`, `phase10-slice-*.md`, `phase10-validation.md`, `phase10-independent-review.md`, `phase10-installed-acceptance.md`, `phase10-final-receipt.md` under the evidence directory.
+
+## Trust model and known limits (added after independent review round 1; scope itself unchanged)
+- The agent-foundry log is **trusted-local state**. Replay enforces state-machine legality and structural validity (need gate re-checked, worker limits/scope/effects re-checked, proposals first-wins, one scope application per proposal, terminal run records final) but not authenticity: anyone who can write the file can append records. HMAC signing with an out-of-directory key is a deferred hardening.
+- Workers run **in-process and cooperatively**. A runner that ignores the abort signal cannot be killed; after timeout/stop/finish every `requestEffect` is denied and later results are not recorded. Effect gating is **declared-effects-only**: an undeclared side effect is not detectable, and compliance is labelled accordingly. Built-in workers are read-only.
+- An effect approval authorizes **one run** (any number of calls of the approved effects within it). Start check + approval claim + start record are one cross-process critical section (O_EXCL lock file).
+- Not delivered / nominal in this phase: only 2 of 7 worker categories ship runners (evaluation_scoring, documentation_freshness); `checkTaskScope` is a library gate not yet wired to an assignment path; adaptation proposals are record-only (a Commander-approved permission request can be applied as a new agent version, nothing else is applied); memory quality and operator-workload reduction have no evidence source (UNKNOWN); no scheduler (workers run only on Commander trigger).

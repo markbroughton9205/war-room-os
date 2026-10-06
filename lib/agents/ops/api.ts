@@ -48,6 +48,7 @@ const s = (v: unknown) => (typeof v === 'string' ? v : '')
 /** Commander control surface. `actor` MUST come from the authenticated session. Typed errors map to 4xx; nothing partial is written on refusal. */
 export async function handleOpsControl(body: Body, actor: string | null, log: AgentOpsLog, now: Date = new Date()): Promise<ApiResult> {
   if (!actor || !isCommander(actor)) return { status: 403, body: { error: 'Commander session required', code: 'NOT_AUTHORIZED' } }
+  if (JSON.stringify(body).length > 65_536) return { status: 413, body: { error: 'request too large', code: 'TOO_LARGE' } }
   const action = s(body.action)
   if (!(CONTROL_ACTIONS as readonly string[]).includes(action)) return { status: 400, body: { error: 'unknown action', actions: CONTROL_ACTIONS } }
   const reg = new AgentRegistry(log)

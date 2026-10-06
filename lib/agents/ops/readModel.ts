@@ -12,7 +12,7 @@ export type OpsSnapshot = {
   needs: { id: string; title: string; detectedAt: string; hasAgent: boolean }[]
   workers: { view: WorkerView; agentState: string; runsToday: number; lastRun: RunRecord | null; lastMeaningfulProgress: string | 'NO EVIDENCE'; health: 'RUNNING' | 'STOPPED' | 'TRIPPED' | 'AGENT_NOT_ACTIVE' | 'IDLE' }[]
   recentRuns: RunRecord[]
-  pendingApprovals: { kind: 'agent_proposal' | 'adaptation' | 'blocked_effect' | 'recommendation'; ref: string; summary: string }[]
+  pendingApprovals: { kind: 'agent_proposal' | 'adaptation' | 'blocked_effect' | 'recommendation'; ref: string; summary: string; payload?: Record<string, unknown> }[]
   errors: { runId: string; workerId: string; at: string; message: string; recovery: string }[]
   resourceUsage: { workerId: string; runs: number; totalDurationMs: number; costUsd: number | 'UNKNOWN' }[]
 }
@@ -36,8 +36,13 @@ export function buildOpsSnapshot(log: AgentOpsLog, now: Date = new Date(), opts:
   })
   const pending: OpsSnapshot['pendingApprovals'] = []
   for (const a of agents.values()) if (a.state === 'PROPOSED') pending.push({ kind: 'agent_proposal', ref: a.spec.id, summary: `${a.spec.name} (${a.spec.specialization}) awaits Commander approval` })
-  for (const r of v.records) if (r.t === 'adaptation' && !decided.has(r.proposal.id)) pending.push({ kind: 'adaptation', ref: r.proposal.id, summary: `${r.proposal.kind}: ${r.proposal.summary}` })
-  for (const run of allRuns.slice(0, 50)) if (run.status === 'BLOCKED') pending.push({ kind: 'blocked_effect', ref: run.runId, summary: `${run.workerId} blocked on ${run.requestedEffects.join(', ')}` })
+  for (const r of v.records) if (r.t === 'adaptation' && !decided.has(r.proposal.id)) pending.push({ kind: 'adaptation', ref: r.proposal.id, summary: `${r.proposal.kind}: ${r.proposal.summary}`, payload: { proposalId: r.proposal.id } })
+  const approvalsFor = v.records.filter((r): r is Extract<AgentOpsRecord, { t: 'effectApproval' }> => r.t === 'effectApproval')
+  for (const run of allRuns.slice(0, 50)) {
+    if (run.status !== 'BLOCKED') continue
+    const answered = approvalsFor.some((a) => a.workerId === run.workerId && Date.parse(a.at) >= Date.parse(run.startedAt)) || allRuns.some((r2) => r2.workerId === run.workerId && r2.status === 'SUCCEEDED' && Date.parse(r2.startedAt) > Date.parse(run.startedAt))
+    if (!answered) pending.push({ kind: 'blocked_effect', ref: run.runId, summary: `${run.workerId} blocked on ${run.requestedEffects.join(', ')}`, payload: { workerId: run.workerId, effects: [...new Set(run.requestedEffects)] } })
+  }
   for (const [agentId, rec] of latestRec) if (rec.action !== 'none') pending.push({ kind: 'recommendation', ref: rec.id, summary: `${agentId}: ${rec.action} (${rec.reasons.join('; ')})` })
   const usage = workerRows.map((w) => {
     const costs = w.view.runs.map((r) => r.resource.costUsd)

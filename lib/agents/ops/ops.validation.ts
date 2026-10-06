@@ -10,6 +10,15 @@ import { EffectBlockedError, WorkerError, approveEffect, auditCompleteness, deri
 import { FeedbackError, evaluateAgent, executorEvidence, recommendForAgent, recordFeedback } from './evaluation'
 import { freshLog as p9Log, ev as p9Ev } from '@/lib/recursive-learning/testkit'
 import { scoreMatrix } from '@/lib/recursive-learning/scoring'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { documentationFreshnessRunner } from './builtinWorkers'
+import { handleOpsControl } from './api'
+import { MAX_RECORD_BYTES } from './log'
+import { buildOpsSnapshot } from './readModel'
+import { buildOpsViewModel } from './uiState'
 import { checkTaskScope, type AgentTask } from './specialization'
 import { AdaptationError, applyApprovedScopeChange, decideAdaptation, proposeAdaptation } from './adaptation'
 
@@ -171,8 +180,9 @@ const { check, finish } = harness('AGENT_OPS_VALIDATION')
   const appr = approveEffect(e.log, 'worker-docs-freshness', ['external_communication'], 'commander:mark', 'one notification', NOW)
   const allowed = await executeWorker(e.log, 'worker-docs-freshness', async (ctx) => { ctx.requestEffect('external_communication'); return {} }, { now: NOW, runId: 'e2', approvalRid: appr.rid })
   const reused = await executeWorker(e.log, 'worker-docs-freshness', async (ctx) => { ctx.requestEffect('external_communication'); return {} }, { now: NOW, runId: 'e3', approvalRid: appr.rid })
-  const wrongEffect = await executeWorker(e.log, 'worker-docs-freshness', async (ctx) => { ctx.requestEffect('spend'); return {} }, { now: NOW, runId: 'e4', approvalRid: appr.rid })
-  check('C20_approval_is_single_use_and_effect_specific', allowed.ok && allowed.run.status === 'SUCCEEDED' && allowed.run.approvalRef === appr.rid && reused.ok && reused.run.status === 'BLOCKED' && wrongEffect.ok && wrongEffect.run.status === 'BLOCKED')
+  const appr2 = approveEffect(e.log, 'worker-docs-freshness', ['external_communication'], 'commander:mark', 'second', NOW)
+  const wrongEffect = await executeWorker(e.log, 'worker-docs-freshness', async (ctx) => { ctx.requestEffect('spend'); return {} }, { now: NOW, runId: 'e4', approvalRid: appr2.rid })
+  check('C20_approval_authorizes_one_run_and_only_its_effects', allowed.ok && allowed.run.status === 'SUCCEEDED' && allowed.run.approvalRef === appr.rid && !reused.ok && reused.reason === 'APPROVAL_INVALID' && wrongEffect.ok && wrongEffect.run.status === 'BLOCKED')
   const pre = activeAgent(); registerWorker(pre.log, wd(pre.spec.id, { preApprovedEffects: ['external_communication'] }), 'commander:mark', NOW)
   const preRun = await executeWorker(pre.log, 'worker-docs-freshness', async (ctx) => { ctx.requestEffect('external_communication'); ctx.requestEffect('spend'); return {} }, { now: NOW, runId: 'p1' })
   check('C21_narrow_preapproved_policy_honored_but_only_for_listed_effects', preRun.ok && preRun.run.status === 'BLOCKED' && preRun.run.requestedEffects.join() === 'external_communication,spend')
@@ -279,5 +289,103 @@ const { check, finish } = harness('AGENT_OPS_VALIDATION')
   check('D17_phase9_is_read_only_and_does_not_change_recommendations', readFileSync(p9.file, 'utf8') === p9Before && recA.action === recB.action && recA.action === 'none')
   const restartedEval = evaluateAgent(new AgentOpsLog(m.dir), m.spec.id, NOW)
   check('D18_evaluation_identical_after_restart', JSON.stringify({ ...restartedEval, generatedAt: 0 }) === JSON.stringify({ ...evaluateAgent(m.log, m.spec.id, NOW), generatedAt: 0 }))
+}
+// ---- Review-driven regression tests (independent review of P10-A..G)
+{
+  const W = (agentId: string, over: Record<string, unknown> = {}) => ({ id: 'rw', agentId, category: 'incident_watch' as const, version: '1', mission: 'm', permissionScope: ['read_docs' as const], memoryScope: ['docs' as const], limits: { maxRuntimeMs: 100, maxRunsPerDay: 500, maxConsecutiveFailures: 5, cadenceMinutes: null }, ...over })
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  // HIGH-1: effects after timeout / stop / finish are denied
+  const a = activeAgent(); registerWorker(a.log, W(a.spec.id), 'commander:mark', NOW)
+  let late = 'untouched'
+  const t = await executeWorker(a.log, 'rw', async (ctx) => { await sleep(300); try { ctx.requestEffect('spend'); late = 'allowed' } catch (e) { late = e instanceof EffectBlockedError ? 'denied' : 'other' } return {} }, { now: NOW, runId: 'r-t' })
+  await sleep(450)
+  check('R01_effect_after_timeout_is_denied', t.ok && t.run.status === 'TIMED_OUT' && late === 'denied', late)
+  const b = activeAgent(); registerWorker(b.log, W(b.spec.id, { limits: { maxRuntimeMs: 3000, maxRunsPerDay: 50, maxConsecutiveFailures: 5, cadenceMinutes: null } }), 'commander:mark', NOW)
+  let lateStop = 'untouched'
+  await executeWorker(b.log, 'rw', async (ctx) => { stopWorker(b.log, 'rw', 'commander:mark', 'stop', NOW); try { ctx.requestEffect('spend'); lateStop = 'allowed' } catch { lateStop = 'denied' } return {} }, { now: NOW, runId: 'r-s' })
+  check('R02_effect_after_stop_is_denied', lateStop === 'denied')
+  // HIGH-2: real cross-process race (3 OS processes, one spend approval, one shared start instant)
+  const r = activeAgent(); registerWorker(r.log, W(r.spec.id, { limits: { maxRuntimeMs: 5000, maxRunsPerDay: 50, maxConsecutiveFailures: 5, cadenceMinutes: null } }), 'commander:mark', NOW)
+  const ap = approveEffect(r.log, 'rw', ['spend'], 'commander:mark', 'one run', NOW)
+  const barrier = String(Date.now() + 1500)
+  const run = promisify(execFile)
+  const outs = await Promise.all(['a', 'b', 'c'].map((tag) => run('node', ['--loader', './scripts/ts-extension-loader.mjs', '--experimental-transform-types', 'lib/agents/ops/race.child.validation.ts', r.dir, 'rw', ap.rid, barrier, tag]).then((o) => JSON.parse(o.stdout.trim().split('\n').pop()!))))
+  const okCount = outs.filter((o) => o.ok).length
+  const rv = new AgentOpsLog(r.dir).view()
+  check('R03_cross_process_race_one_run_one_approval_use', okCount === 1 && outs.filter((o) => !o.ok && ['ALREADY_RUNNING', 'APPROVAL_INVALID'].includes(o.reason)).length === 2 && rv.records.filter((x) => x.t === 'run' && x.rid.endsWith(':start')).length === 1, JSON.stringify(outs))
+  // HIGH-4: run id collision refused
+  const c = activeAgent(); registerWorker(c.log, W(c.spec.id), 'commander:mark', NOW)
+  await executeWorker(c.log, 'rw', async () => ({}), { now: NOW, runId: 'same' })
+  const second = await executeWorker(c.log, 'rw', async () => { throw new Error('should not run') }, { now: NOW, runId: 'same' })
+  check('R04_runid_collision_refused_runner_not_executed', !second.ok && second.reason === 'RUN_ID_EXISTS')
+  // HIGH-5: secret / malformed output never leaves the worker stuck
+  const d = activeAgent(); registerWorker(d.log, W(d.spec.id), 'commander:mark', NOW)
+  const f1 = await executeWorker(d.log, 'rw', async () => ({ executor: { provider: 'sk-abcdefghijklmnopqrstuvwxyz123456', model: 'm' } }), { now: NOW, runId: 'f1' })
+  const f2 = await executeWorker(d.log, 'rw', async () => ({ outputs: [null as never] }), { now: NOW, runId: 'f2' })
+  const f3 = await executeWorker(d.log, 'rw', async () => ({ resource: { costUsd: -5, tokens: NaN } }), { now: NOW, runId: 'f3' })
+  check('R05_malformed_or_secret_result_is_recorded_not_stuck', f1.ok && f1.run.status !== 'RUNNING' && f2.ok && f2.run.status !== 'RUNNING' && !deriveWorkers(d.log).workers.get('rw')!.running && !readFileSync(d.log.file, 'utf8').includes('abcdefghijklmnopqrstuvwxyz1234'))
+  check('R06_negative_or_nan_cost_is_UNKNOWN', f3.ok && f3.run.resource.costUsd === 'UNKNOWN' && f3.run.resource.tokens === 'UNKNOWN')
+  // HIGH-3: pre-approved policy is not a violation; honest label
+  const g = activeAgent(); registerWorker(g.log, W(g.spec.id, { preApprovedEffects: ['external_communication'], limits: { maxRuntimeMs: 1000, maxRunsPerDay: 500, maxConsecutiveFailures: 5, cadenceMinutes: null } }), 'commander:mark', NOW)
+  for (let i = 0; i < 10; i++) await executeWorker(g.log, 'rw', async (ctx) => { ctx.requestEffect('external_communication'); return {} }, { now: NOW, runId: `pa-${i}` })
+  const gev = evaluateAgent(g.log, g.spec.id, NOW)
+  check('R07_preapproved_effects_are_not_flagged_as_violations', gev.dimensions.approvalDoctrineCompliance === 1 && recommendForAgent(g.log, g.spec.id, NOW).action === 'none' && gev.notes.some((n) => n.includes('DECLARED effects only')))
+
+  // MED-1: replay hardening
+  const h = activeAgent()
+  h.log.append({ t: 'agent', agent: { ...h.spec, id: 'agent-forged', needId: 'no-need' } })
+  const need2 = fullNeed('thin'); need2.evidence.pop(); h.reg.recordNeed(need2)
+  h.log.append({ t: 'agent', agent: { ...h.spec, id: 'agent-forged2', needId: need2.id } })
+  check('R08_forged_agent_without_evidenced_need_is_not_an_agent', !deriveAgents(h.log).agents.has('agent-forged') && !deriveAgents(h.log).agents.has('agent-forged2'))
+  const prop = proposeAdaptation(h.log, h.spec.id, { kind: 'permission_change_request', summary: 'repo read', evidenceRefs: ['r'], requestedPermissions: ['read_repo'] }, NOW)
+  h.log.append({ t: 'adaptation', proposal: { ...prop, requestedPermissions: ['read_repo', 'read_mission_records'], requestedMemory: ['mission_state'] } as never })
+  check('R09_adaptation_proposal_cannot_be_rewritten', h.log.view().records.filter((x) => x.t === 'adaptation').length >= 1)
+  decideAdaptation(h.log, prop.id, 'APPROVED', 'commander:mark', 'ok', NOW)
+  h.log.append({ t: 'scope', agentId: h.spec.id, proposalId: prop.id, permissionScope: ['read_docs', 'write_own_reports', 'read_repo', 'read_mission_records'], memoryScope: ['docs', 'agent_operational', 'mission_state'], by: 'commander:mark', at: NOW.toISOString() })
+  const forgedScope = h.reg.get(h.spec.id)!.spec
+  check('R10_forged_scope_beyond_approved_request_ignored', forgedScope.version === 1 && !forgedScope.permissionScope.includes('read_mission_records'))
+  const once = applyApprovedScopeChange(h.log, prop.id, 'commander:mark', NOW)
+  let twice = false
+  try { applyApprovedScopeChange(h.log, prop.id, 'commander:mark', NOW) } catch { twice = true }
+  check('R11_scope_apply_is_once_per_proposal', once.spec.version === 2 && twice && h.reg.get(h.spec.id)!.spec.version === 2)
+  h.log.append({ t: 'worker', worker: { ...W(h.spec.id, { id: 'forged-w', limits: { maxRuntimeMs: 99_999_999, maxRunsPerDay: 5, maxConsecutiveFailures: 2, cadenceMinutes: null } }), preApprovedEffects: [], createdAt: NOW.toISOString() }, approvedBy: 'commander:mark' })
+  h.log.append({ t: 'worker', worker: { ...W(h.spec.id, { id: 'forged-w2', permissionScope: ['read_mission_records'] }), preApprovedEffects: ['spend'] as never, createdAt: NOW.toISOString() }, approvedBy: 'commander:mark' })
+  check('R12_forged_workers_beyond_limits_scope_or_effects_are_inert', !deriveWorkers(h.log).workers.has('forged-w') && !deriveWorkers(h.log).workers.has('forged-w2'))
+  // MED-3: a late end record cannot override interrupted
+  const i = activeAgent(); registerWorker(i.log, W(i.spec.id), 'commander:mark', NOW)
+  i.log.append({ t: 'run', rid: 'run:z:start', run: { runId: 'z', workerId: 'rw', agentId: i.spec.id, workerVersion: '1', mission: 'm', permissionScope: ['read_docs'], memoryScope: ['docs'], startedAt: NOW.toISOString(), status: 'RUNNING', toolsUsed: [], outputs: [], escalations: [], errors: [], executor: 'UNKNOWN', resource: { costUsd: 'UNKNOWN', tokens: 'UNKNOWN' }, requestedEffects: [] } })
+  recoverInterruptedRuns(i.log, mins(10))
+  const base = deriveWorkers(i.log).workers.get('rw')!.runs[0]
+  i.log.append({ t: 'run', rid: 'run:z:end', run: { ...base, status: 'SUCCEEDED', endedAt: mins(11).toISOString() } })
+  check('R13_terminal_run_record_is_final', deriveWorkers(i.log).workers.get('rw')!.runs.find((x) => x.runId === 'z')!.status === 'INTERRUPTED')
+
+  // MED-2: docs worker robustness
+  const docs = path.join(tmp(), 'docs'); mkdirSync(path.join(docs, 'sub'), { recursive: true })
+  writeFileSync(path.join(docs, 'a.md'), '# a'); symlinkSync(path.join(docs, 'missing.md'), path.join(docs, 'dangling.md')); symlinkSync(tmp(), path.join(docs, 'escape'))
+  process.env.WAR_ROOM_DOCS_DIR = docs
+  const dw = activeAgent(); registerWorker(dw.log, W(dw.spec.id, { id: 'dw', category: 'documentation_freshness', limits: { maxRuntimeMs: 5000, maxRunsPerDay: 50, maxConsecutiveFailures: 5, cadenceMinutes: null } }), 'commander:mark', NOW)
+  const dr = await executeWorker(dw.log, 'dw', documentationFreshnessRunner, { now: NOW, runId: 'dw1' })
+  check('R14_docs_worker_skips_symlinks_and_reports_skips', dr.ok && dr.run.status === 'SUCCEEDED' && dr.run.outputs[0].summary.includes('1 markdown docs scanned') && dr.run.outputs[0].summary.includes('2 entries skipped'), dr.ok ? dr.run.outputs[0].summary : '')
+  delete process.env.WAR_ROOM_DOCS_DIR
+  // MED-4/6: pending approvals clear, limits
+  const p = activeAgent(); registerWorker(p.log, W(p.spec.id, { limits: { maxRuntimeMs: 1000, maxRunsPerDay: 50, maxConsecutiveFailures: 5, cadenceMinutes: null } }), 'commander:mark', NOW)
+  await executeWorker(p.log, 'rw', async (ctx) => { ctx.requestEffect('spend'); return {} }, { now: NOW, runId: 'pb' })
+  const pendBefore = buildOpsSnapshot(p.log, NOW).pendingApprovals.filter((x) => x.kind === 'blocked_effect').length
+  const vm = buildOpsViewModel({ generatedAt: NOW.toISOString(), totals: buildOpsSnapshot(p.log, NOW).totals, governance: buildOpsSnapshot(p.log, NOW).governance, data: buildOpsSnapshot(p.log, NOW) })
+  approveEffect(p.log, 'rw', ['spend'], 'commander:mark', 'ok', mins(1))
+  const pendAfter = buildOpsSnapshot(p.log, mins(2)).pendingApprovals.filter((x) => x.kind === 'blocked_effect').length
+  check('R15_blocked_effect_pending_until_answered_and_actionable_in_ui', pendBefore === 1 && pendAfter === 0 && vm.sections.approvals.rows[0].controls![0].action === 'approveEffect')
+  const big = await handleOpsControl({ action: 'detectNeed', title: 't', evidence: [{ criterion: 'recurring_task_pattern', summary: 'x'.repeat(70_000), evidenceRefs: ['r'] }] }, 'commander:mark', p.log, NOW)
+  let tooLarge = false
+  try { p.log.append({ t: 'need', need: { id: 'n', title: 'x'.repeat(MAX_RECORD_BYTES + 10), detectedAt: NOW.toISOString(), evidence: [] } }) } catch { tooLarge = true }
+  check('R16_oversized_requests_and_records_refused', big.status === 413 && tooLarge)
+  const regV = freshOps(); const rv2 = new AgentOpsLog(regV.dir); rv2.view()
+  new AgentOpsLog(regV.dir).append({ t: 'need', need: fullNeed('cache') })
+  check('R17_log_cache_sees_other_writers', rv2.view().records.length === 1)
+  // MED-6 / stale RUNNING gets a recover control
+  const sr = activeAgent(); registerWorker(sr.log, W(sr.spec.id), 'commander:mark', NOW)
+  sr.log.append({ t: 'run', rid: 'run:st:start', run: { runId: 'st', workerId: 'rw', agentId: sr.spec.id, workerVersion: '1', mission: 'm', permissionScope: ['read_docs'], memoryScope: ['docs'], startedAt: NOW.toISOString(), status: 'RUNNING', toolsUsed: [], outputs: [], escalations: [], errors: [], executor: 'UNKNOWN', resource: { costUsd: 'UNKNOWN', tokens: 'UNKNOWN' }, requestedEffects: [] } })
+  const stale = buildOpsSnapshot(sr.log, mins(10)); const svm = buildOpsViewModel({ generatedAt: stale.generatedAt, totals: stale.totals, governance: stale.governance, data: stale })
+  check('R18_stale_running_worker_offers_recover_control', svm.sections.workers.rows[0].controls.some((c) => c.action === 'recoverRuns'))
 }
 finish()

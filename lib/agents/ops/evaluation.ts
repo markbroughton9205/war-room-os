@@ -60,10 +60,14 @@ export function evaluateAgent(log: AgentOpsLog, agentId: string, now: Date = new
   const finished = runs.filter((r) => r.status !== 'RUNNING')
   const escalated = runs.filter((r) => r.escalations.length > 0)
   const judgedEsc = escalated.map((r) => latestFeedback.get(r.runId)?.usefulEscalation).filter((x): x is boolean => typeof x === 'boolean')
-  const violations = runs.filter((r) => r.status === 'SUCCEEDED' && r.requestedEffects.length > 0 && !r.approvalRef).length // unapproved effect that still "succeeded"
+  const { workers, approvals } = deriveWorkers(log)
+  // a violation = a run that declared an effect, finished SUCCEEDED, yet the effect was neither pre-approved by the worker spec nor covered by the approval claimed at start
+  const covered = (r: RunRecord, e: RunRecord['requestedEffects'][number]) => (workers.get(r.workerId)?.spec.preApprovedEffects.includes(e) ?? false) || (!!r.approvalRef && !!approvals.find((a) => a.rid === r.approvalRef)?.effects.includes(e))
+  const violations = runs.filter((r) => r.status === 'SUCCEEDED' && r.requestedEffects.some((e) => !covered(r, e))).length
   const notes: string[] = []
   if (terminal < MIN_TERMINAL_RUNS) notes.push(`only ${terminal} terminal run(s); rates need at least ${MIN_TERMINAL_RUNS} for recommendations`)
   notes.push('memoryQuality and operatorWorkloadReduction have no evidence source yet')
+  notes.push('approval-doctrine compliance covers DECLARED effects only; undeclared side effects are not detectable')
   return {
     agentId,
     generatedAt: now.toISOString(),

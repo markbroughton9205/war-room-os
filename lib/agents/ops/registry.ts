@@ -10,17 +10,23 @@ export class NeedGateError extends Error { constructor(public readonly missing: 
 export type AgentDraft = Omit<AgentSpec, 'id' | 'createdAt' | 'version' | 'needId'> & { id?: string }
 
 /** Derives agents from the log by replaying only transitions that are valid at their position (defends against forged records). */
-export function deriveAgents(log: AgentOpsLog): { agents: Map<string, AgentView>; needs: Map<string, NeedRecord>; rejectedTransitions: number } {
+export function deriveAgents(log: AgentOpsLog): { agents: Map<string, AgentView>; needs: Map<string, NeedRecord>; rejectedTransitions: number; appliedScopes: Set<string> } {
   const v = log.view()
   const needs = new Map<string, NeedRecord>()
   const agents = new Map<string, AgentView>()
   let rejectedTransitions = 0
   const proposals = new Map<string, AdaptationProposal>()
   const decisions: Extract<AgentOpsRecord, { t: 'decision' }>[] = []
+  const appliedScopes = new Set<string>()
   for (const r of v.records) {
     if (r.t === 'need') needs.set(r.need.id, r.need)
-    else if (r.t === 'agent') { if (!agents.has(r.agent.id)) agents.set(r.agent.id, { spec: r.agent, state: 'PROPOSED', history: [] }) }
-    else if (r.t === 'adaptation') proposals.set(r.proposal.id, r.proposal)
+    else if (r.t === 'agent') {
+      // replay re-checks the need gate: a forged bare agent record without fully evidenced need is not an agent
+      const need = needs.get(r.agent.needId)
+      if (!agents.has(r.agent.id) && need && missingCriteria(need).length === 0) agents.set(r.agent.id, { spec: r.agent, state: 'PROPOSED', history: [] })
+      else if (!agents.has(r.agent.id)) rejectedTransitions += 1
+    }
+    else if (r.t === 'adaptation') { if (!proposals.has(r.proposal.id)) proposals.set(r.proposal.id, r.proposal); else rejectedTransitions += 1 } // first wins: a proposal cannot be rewritten after the fact
     else if (r.t === 'decision') decisions.push(r)
     else if (r.t === 'scope') {
       // a scope change applies only if a Commander-APPROVED permission_change_request covers exactly the added scope
@@ -29,11 +35,13 @@ export function deriveAgents(log: AgentOpsLog): { agents: Map<string, AgentView>
       const dec = [...decisions].reverse().find((d) => d.proposalId === r.proposalId)
       const addsPerm = r.permissionScope.filter((x) => !a?.spec.permissionScope.includes(x))
       const addsMem = r.memoryScope.filter((x) => !a?.spec.memoryScope.includes(x))
-      const ok = a && a.state !== 'RETIRED' && a.state !== 'REJECTED' && p && p.agentId === r.agentId && p.kind === 'permission_change_request'
+      const alreadyApplied = appliedScopes.has(r.proposalId)
+      const ok = !alreadyApplied && a && a.state !== 'RETIRED' && a.state !== 'REJECTED' && p && p.agentId === r.agentId && p.kind === 'permission_change_request'
         && dec?.status === 'APPROVED' && isCommander(dec.by) && isCommander(r.by)
         && addsPerm.every((x) => p.requestedPermissions?.includes(x)) && addsMem.every((x) => p.requestedMemory?.includes(x))
         && r.permissionScope.every((x) => SAFE_PERMISSIONS.includes(x)) && r.memoryScope.every((x) => MEMORY_SCOPES.includes(x))
       if (!ok || !a) { rejectedTransitions += 1; continue }
+      appliedScopes.add(r.proposalId)
       a.spec = { ...a.spec, permissionScope: r.permissionScope, memoryScope: r.memoryScope, version: a.spec.version + 1 }
     }
     else if (r.t === 'transition') {
@@ -44,7 +52,7 @@ export function deriveAgents(log: AgentOpsLog): { agents: Map<string, AgentView>
       a.history.push(r.tr)
     }
   }
-  return { agents, needs, rejectedTransitions }
+  return { agents, needs, rejectedTransitions, appliedScopes }
 }
 
 export class AgentRegistry {
@@ -63,6 +71,7 @@ export class AgentRegistry {
     if (!draft.permissionScope.length || draft.permissionScope.some((p) => !SAFE_PERMISSIONS.includes(p))) throw new Error('permission scope must be a non-empty set of safe permissions')
     if ((draft.permissionScope as string[]).some((p) => (PROTECTED_EFFECTS as readonly string[]).includes(p))) throw new Error('protected effects cannot be part of a permission scope')
     if (!draft.memoryScope.length || draft.memoryScope.some((m) => !MEMORY_SCOPES.includes(m))) throw new Error('memory scope must be a non-empty set of known scopes')
+    if (draft.name.length > 120 || draft.purpose.length > 500 || draft.ioContract.input.length > 500 || draft.ioContract.output.length > 500 || draft.escalationPath.length > 120 || draft.reviewProcess.length > 500) throw new Error('field too long')
     if (!draft.ioContract.input.trim() || !draft.ioContract.output.trim()) throw new Error('io contract required')
     if (!draft.escalationPath.trim() || !draft.reviewProcess.trim()) throw new Error('escalation path and review process required')
     const id = draft.id ?? `agent-${draft.specialization}-${needId.slice(-8)}`

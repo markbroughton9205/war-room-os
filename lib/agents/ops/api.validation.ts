@@ -66,7 +66,7 @@ const get = (log: AgentOpsLog, q: string) => handleOpsRead(new URL(`http://x/?${
 
   const rDocs = await ctl(o.log, { action: 'runWorker', workerId: 'w-docs' })
   const dRun = (rDocs.body as { run: { status: string; outputs: { summary: string }[]; toolsUsed: string[] } }).run
-  check('E09_docs_freshness_worker_real_read_only_run', rDocs.status === 200 && dRun.status === 'SUCCEEDED' && dRun.outputs[0].summary === '2 markdown docs scanned; 1 older than 90 days' && dRun.toolsUsed.includes('fs.stat'))
+  check('E09_docs_freshness_worker_real_read_only_run', rDocs.status === 200 && dRun.status === 'SUCCEEDED' && dRun.outputs[0].summary === '2 markdown docs scanned; 1 older than 90 days' && dRun.toolsUsed.includes('fs.lstat'))
   const rEval = await ctl(o.log, { action: 'runWorker', workerId: 'w-eval' })
   const eRun = (rEval.body as { run: { status: string; outputs: { summary: string }[] } }).run
   check('E10_evaluation_worker_consumes_phase9_read_only', eRun.status === 'SUCCEEDED' && eRun.outputs[0].summary.includes('6 active') && readFileSync(p9.file, 'utf8') === p9Before)

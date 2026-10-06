@@ -48,7 +48,7 @@ const m0 = missionSig()
   const results = await Promise.all([executeWorker(a.log, 'w', slow, { now: NOW, runId: 'c1' }), executeWorker(a.log, 'w', slow, { now: NOW, runId: 'c2' }), executeWorker(a.log, 'w', slow, { now: NOW, runId: 'c3' })])
   check('G03_concurrent_runs_of_one_worker_are_serialized', results.filter((r) => r.ok).length === 1 && results.filter((r) => !r.ok && r.reason === 'ALREADY_RUNNING').length === 2)
   const dup = await executeWorker(a.log, 'w', async () => ({}), { now: NOW, runId: 'c1' })
-  check('G04_reused_run_id_is_idempotent_not_double_counted', dup.ok && deriveWorkers(a.log).workers.get('w')!.runs.filter((r) => r.runId === 'c1').length === 1 && deriveWorkers(a.log).workers.get('w')!.runs.find((r) => r.runId === 'c1')!.status === 'SUCCEEDED')
+  check('G04_reused_run_id_is_refused_not_silently_dropped', !dup.ok && dup.reason === 'RUN_ID_EXISTS' && deriveWorkers(a.log).workers.get('w')!.runs.filter((r) => r.runId === 'c1').length === 1 && deriveWorkers(a.log).workers.get('w')!.runs.find((r) => r.runId === 'c1')!.status === 'SUCCEEDED')
 }
 
 // F3: static boundaries
