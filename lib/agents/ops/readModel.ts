@@ -6,6 +6,7 @@ import type { AgentOpsRecord, RunRecord } from './types'
 import { SCHEDULER_ELIGIBLE, SCHED_MAX_CONCURRENT, deriveScheduler, evaluateDue, schedulabilityProblem } from './scheduler'
 import { readSchedulerHealth } from './schedulerHealth'
 import path from 'node:path'
+import { listAssignmentStatuses, type SimpleStatus } from './engineering/status'
 
 export type OpsSnapshot = {
   generatedAt: string
@@ -26,6 +27,7 @@ export type OpsSnapshot = {
     maxConcurrent: number
     workers: { workerId: string; schedulable: boolean; schedulableProblem: string | null; enabled: boolean; cadenceMinutes: number | null; nextEligibleAt: string | 'UNKNOWN'; dueSince: string | null; willRunNext: boolean; lastAutomaticRunAt: string | 'NONE'; lastClaimAt: string | 'NONE'; lastDecision: string | 'NONE'; lastSkipReason: string | 'NONE'; lastClaimId: string | 'NONE'; dueNow: boolean }[]
   }
+  assignments: SimpleStatus[]
   resourceUsage: { workerId: string; runs: number; totalDurationMs: number; costUsd: number | 'UNKNOWN' }[]
 }
 
@@ -90,6 +92,7 @@ export function buildOpsSnapshot(log: AgentOpsLog, now: Date = new Date(), opts:
     pendingApprovals: pending,
     errors: allRuns.filter((r) => r.errors.length > 0).slice(0, 20).flatMap((r) => r.errors.map((e) => ({ runId: r.runId, workerId: r.workerId, at: r.endedAt ?? r.startedAt, message: e.message, recovery: e.recovery }))),
     scheduler,
+    assignments: listAssignmentStatuses(log, 20),
     resourceUsage: usage,
   }
 }

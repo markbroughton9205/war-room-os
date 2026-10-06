@@ -34,4 +34,12 @@ const cx = buildAssignmentStatus(w.log, deriveAssignments(w.log).assignments.get
 check('S05_cancel_is_a_request_202_whose_real_phase_is_visible_not_pretended_stopped', c1.status === 202 && cx.details.cancellation === 'REQUESTED' && cx.state === 'CANCEL_REQUESTED' && cx.doingNow.includes('safe point'))
 check('S06_list_section_and_unknown_id_behave', listAssignmentStatuses(w.log).length === 1 && (handleOpsRead(base('section=assignment&id=nope'), w.log, NOW).status === 404) && (handleOpsRead(base('section=assignments'), w.log, NOW).status === 200))
 check('S07_controls_on_unknown_assignments_fail_closed_without_writing', (await handleOpsControl({ action: 'pauseAssignment', assignmentId: 'asg-nope' }, 'commander:mark', w.log, NOW)).status >= 400)
+{
+  const { buildOpsSnapshot } = await import('../readModel')
+  const { buildOpsViewModel } = await import('../uiState')
+  const snap = buildOpsSnapshot(w.log, NOW)
+  const vm = buildOpsViewModel({ generatedAt: snap.generatedAt, totals: snap.totals, governance: snap.governance, data: snap })
+  const row = vm.sections.assignments.rows[0]
+  check('S08_the_operator_view_model_shows_doing_now_blocker_approval_with_details_and_safe_controls_only', vm.sections.assignments.rows.length === 1 && row.detail.includes('Doing now:') && row.detail.includes('Approval needed:') && (row.outputs ?? []).some((o) => o.startsWith('Verified:')) && (row.outputs ?? []).some((o) => o.startsWith('Details:')) && !(row.controls ?? []).some((c) => c.action === 'resumeAssignment' && snap.assignments[0].state !== 'PAUSED'))
+}
 finish()

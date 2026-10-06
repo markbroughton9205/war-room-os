@@ -77,6 +77,20 @@ export function buildOpsViewModel(env: OpsEnvelope) {
           })),
         ] as GenericRow[],
       },
+      assignments: {
+        title: 'Engineering work', empty: 'No engineering assignments yet.',
+        rows: (s.assignments ?? []).map((a) => ({
+          id: `assignment:${a.assignmentId}`,
+          title: `${a.goal.slice(0, 120)} · ${a.state}`,
+          detail: `Doing now: ${a.doingNow} · Blocker: ${a.blocker} · Approval needed: ${a.approvalNeeded}`,
+          outputs: [
+            `Verified: ${a.verified.length ? a.verified.join(' | ') : 'nothing verified yet'}`,
+            `Remaining: ${a.remaining.length ? a.remaining.join(' | ') : 'none'}`,
+            `Details: agent ${a.agentId} · cancellation ${a.details.cancellation} · checkpoint ${a.details.checkpointSeq} · files ${a.details.filesChanged.join(', ') || 'none'} · open failures ${a.details.openFailures} · undetermined ${a.details.undetermined} · executor ${a.details.executor} · model calls ${a.details.modelCalls}`,
+          ],
+          controls: ((a.state === 'RUNNING' ? [{ label: 'Pause', action: 'pauseAssignment', payload: { assignmentId: a.assignmentId, reason: 'Commander paused' } }] : a.state === 'PAUSED' ? [{ label: 'Resume', action: 'resumeAssignment', payload: { assignmentId: a.assignmentId, reason: 'Commander resumed' } }] : []).concat(['QUEUED', 'RUNNING', 'PAUSED', 'BLOCKED'].includes(a.state) ? [{ label: 'Cancel (stops at a safe point)', action: 'cancelAssignment', payload: { assignmentId: a.assignmentId, reason: 'Commander cancelled' }, confirm: true } as never] : [])) as Control[],
+        })),
+      },
       runs: { title: 'Recent actions', empty: 'No worker runs recorded.', rows: s.recentRuns.map((r) => ({ id: r.runId, title: `${r.workerId} · ${(r.origin ?? 'manual') === 'scheduled' ? 'SCHEDULED' : 'MANUAL'} · ${r.status === 'INTERRUPTED' ? 'RECOVERED (interrupted)' : r.status === 'RUNNING' && Date.parse(env.generatedAt) - Date.parse(r.startedAt) > 120_000 ? 'RUNNING (possibly recovering)' : r.status} · ${r.startedAt.slice(0, 19)}Z`, detail: `origin ${r.origin ?? 'manual'}${r.claimId ? ` (${r.claimId})` : ''} · tools ${r.toolsUsed.join(', ') || 'none'} · outputs ${r.outputs.length} · escalations ${r.escalations.length} · errors ${r.errors.length} · executor ${r.executor === 'UNKNOWN' ? 'UNKNOWN' : `${r.executor.provider}/${r.executor.model}`} · duration ${ms(r.resource.durationMs ?? 'UNKNOWN')} · cost ${usd(typeof r.resource.costUsd === 'number' ? r.resource.costUsd : 'UNKNOWN')}`, outputs: r.outputs.map((o) => `${o.kind}: ${o.summary}`) })) },
       errors: { title: 'Errors and recovery', empty: 'No errors recorded.', rows: s.errors.map((e) => ({ id: `${e.runId}:${e.message}`, title: `${e.workerId} @ ${e.at.slice(0, 19)}Z`, detail: `${e.message} — recovery: ${e.recovery}` })) },
       usage: { title: 'Resource usage', empty: 'No usage recorded.', rows: s.resourceUsage.map((u) => ({ id: u.workerId, title: u.workerId, detail: `${u.runs} run(s) · ${u.totalDurationMs}ms total · cost ${usd(u.costUsd)}` })) },
