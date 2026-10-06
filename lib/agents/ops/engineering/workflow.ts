@@ -199,10 +199,10 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   const allTests = (): string[] | null => { const t = Object.keys(ws.snapshot()).filter((f) => /^test\/.+\.test\.m?js$/.test(f)); return t.length ? ['node', '--test', ...t] : null }
 
   /** The evidence-driven repair loop for ONE failing command. Returns true when the ORIGINAL failure is fixed. */
-  const debugLoop = async (failedCmd: CommandRecord, candidates: string[], stepId: string, label: string, rerunOriginal: () => Promise<CommandRecord> = () => runCheck(failedCmd.argv)): Promise<boolean> => {
+  const debugLoop = async (failedCmd: CommandRecord, candidates: string[], stepId: string, label: string, rerunOriginal: () => Promise<CommandRecord> = () => runCheck(failedCmd.argv), confine?: string[]): Promise<boolean> => {
     let cmd = failedCmd
     let rec = recordFailure(log, assignmentId, cmd, actor, clock())
-    const attemptsNotes: string[] = []
+    const attemptsNotes: string[] = confine ? ['The implementation already PASSED the independent acceptance verification. The failing test is the suspect: fix the TEST file so it matches the real behaviour; do not change implementation files.'] : []
     const triedFiles = new Set<string>()
     // Per-failure budget is MAX_REPAIR_ATTEMPTS; a repair that STRICTLY REDUCES the number of failing checks is progress and opens a fresh failure record
     // for the remainder (its own evidence discipline). The assignment's maxRetries ceiling bounds the total, and strictly-decreasing failures cannot loop.
@@ -213,7 +213,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const out = `${cmd.stdout}\n${cmd.stderr}`
       const evCmd = addEvidence(log, assignmentId, rec.failureId, { kind: /\.m?js$/.test(cmd.argv.at(-1) ?? '') && cmd.argv[1] === '--check' ? 'type_diagnostic' : 'test_result', ref: `${cmd.argv.join(' ')}#attempt${attempt}`, content: out, summary: `${label} failed (exit ${cmd.exitCode}): ${out.split('\n').filter((l) => /Error|not ok|✖|fail/i.test(l)).slice(0, 2).join(' | ').slice(0, 220) || 'see output'}` }, actor, clock())
       // a file already edited without fixing the ORIGINAL failure is deprioritised: the next attempt must look elsewhere while untried candidates remain
-      const allCand = candidatesFromOutput(out, candidates.filter((c) => ws.exists(c)))
+      const allCand = candidatesFromOutput(out, candidates.filter((c) => ws.exists(c))).filter((c) => !confine || confine.includes(c))
       const untried = allCand.filter((c) => !triedFiles.has(c))
       const cand = untried.length ? untried : allCand
       const evFiles = cand.map((c) => addEvidence(log, assignmentId, rec.failureId, { kind: 'file_read', ref: c, content: ws.read(c), summary: `current content of ${c}` }, actor, clock()))
@@ -359,7 +359,15 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         if (tests) {
           const run = await runCheck(tests)
           state.validations.push({ stepId: step.id, command: tests.join(' '), status: run.exitCode === 0 ? 'PASSED' : 'FAILED', at: clock().toISOString(), outputHash: run.outputHash, summary: `${parseToolOutput(run.stdout, run.stderr).pass} pass / ${parseToolOutput(run.stdout, run.stderr).fail} fail` })
-          if (run.exitCode !== 0) stepOk = await debugLoop(run, [...changed].filter((f) => !/^test\//.test(f)).concat([path]), step.id, 'tests')
+          if (run.exitCode !== 0) {
+            // Once the independent acceptance has PASSED, the implementation is verified ground truth: a failure that only implicates the NEW test is a test defect,
+            // so the repair is confined to that test file instead of risking the verified behaviour.
+            const acceptPassed = state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED')
+            const out = `${run.stdout}\n${run.stderr}`
+            const otherTests = tests.slice(2).filter((t) => t !== path && out.includes(t))
+            const testOnly = acceptPassed && out.includes(path) && !otherTests.length
+            stepOk = await debugLoop(run, testOnly ? [path] : [...changed].filter((f) => !/^test\//.test(f)).concat([path]), step.id, 'tests', () => runCheck(tests), testOnly ? [path] : undefined)
+          }
         }
       }
       if (!stepOk) { step.status = 'FAILED'; checkpoint(); failAssignment(log, assignmentId, actor, `step ${step.id} (${path}) could not be validated; cause UNDETERMINED after bounded evidence-based repairs`, { validation: 'FAILED', summary: `${path} failing`, artifacts: [...changed], executor, tokens, latencyMs: Date.now() - t0, retries: repairs }, clock()); return result('FAILED', `${path}: UNDETERMINED`) }
