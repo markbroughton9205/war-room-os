@@ -1,0 +1,137 @@
+.hvs-3d {
+  --hvs-3d-gold: #e8c872;
+  --hvs-3d-cyan: #5ce1ff;
+  color: #f4efe4;
+}
+
+.hvs-3d-hero,
+.hvs-3d-panel,
+.hvs-3d-stage {
+  border: 1px solid rgba(232, 200, 114, 0.22);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(11, 18, 32, 0.94), rgba(5, 7, 10, 0.96));
+  padding: 18px 20px;
+  margin-bottom: 14px;
+}
+
+.hvs-3d-kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--hvs-3d-gold);
+}
+
+.hvs-3d-title {
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  color: #fff8e8;
+}
+
+.hvs-3d-sub {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgba(214, 222, 230, 0.78);
+}
+
+.hvs-3d-prompt {
+  margin-top: 16px;
+  width: 100%;
+  min-height: 7rem;
+  resize: vertical;
+  border: 1px solid rgba(92, 225, 255, 0.28);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 14px 16px;
+  color: #f8f4ea;
+  font-size: 15px;
+}
+
+.hvs-3d-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.hvs-3d-btn,
+.hvs-3d-chip {
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f8f4ea;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(232, 200, 114, 0.28);
+}
+
+.hvs-3d-btn-go {
+  background: linear-gradient(180deg, #e8c872, #b8892d);
+  color: #1a1208;
+  border-color: transparent;
+}
+
+.hvs-3d-btn-ghost {
+  background: transparent;
+}
+
+.hvs-3d-chip-on {
+  border-color: var(--hvs-3d-cyan);
+  color: var(--hvs-3d-cyan);
+}
+
+.hvs-3d-list {
+  margin: 8px 0 0 1.1rem;
+  color: #d1d5db;
+}
+
+.hvs-3d-viewport {
+  height: 420px;
+  max-height: 70vh;
+  width: 100%;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #05070c;
+}
+
+.hvs-3d-viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hvs-3d-stage {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 960px) {
+  .hvs-3d-stage {
+    grid-template-columns: 1.4fr 0.8fr;
+    align-items: start;
+  }
+}
+
+.hvs-3d-placeholder {
+  margin-top: 10px;
+  color: #e8c872;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hvs-3d-error {
+  color: #fca5a5;
+}
+
+.hvs-3d-shots h3 {
+  margin-top: 12px;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  color: var(--hvs-3d-gold);
+}

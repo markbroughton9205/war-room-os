@@ -1,0 +1,9 @@
+---
+description: HVS workflow discipline is runtime code, not a prompt
+globs: lib/media-command/**,app/api/media-command/**,docs/hvs-waves/**
+alwaysApply: false
+---
+
+# HVS workflow discipline
+
+Substantial HVS work follows PLAN, RESEARCH_PREPARE, CREATE, REVIEW, REFINE, QC, DELIVER. Trivial single edits skip that loop. Workflow state and lessons stay off `.hvsproj`. Rights, FFmpeg, render, and Commander delivery authority stay above this rule. Runtime modules are `lib/media-command/workflow-discipline.ts`, `lib/media-command/lessons/`, and `lib/media-command/verification-classes.ts`.
