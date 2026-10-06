@@ -82,7 +82,11 @@ const prod = files(lib).filter((f) => f.endsWith('.ts') && !/validation\.ts$|tes
 const writers = prod.filter((f) => /\b(writeFile|writeFileSync|appendFile|appendFileSync|rmSync|unlink|rename|copyFile|truncate|createWriteStream)\b/.test(readFileSync(f, 'utf8')))
 check('N08_only_log_and_failure_files_write', writers.map((f) => path.basename(f)).sort().join() === 'failureLog.ts,store.ts', writers.join(','))
 const importers = execFileSync('grep', ['-rl', '--include=*.ts', '--include=*.tsx', '--exclude-dir=node_modules', '--exclude-dir=.next', '--exclude-dir=.war-room', '--exclude-dir=recursive-learning', '@/lib/recursive-learning', 'app', 'lib', 'components', 'scripts'], { encoding: 'utf8' }).split('\n').filter(Boolean).sort()
-check('N09_only_sanctioned_outside_dependents', importers.join() === ['app/api/foundry/learning/route.ts', 'components/war-room/foundry/FoundryLearningPanel.tsx', 'lib/native-builder/foundryMissionStore.ts'].join(), importers.join(','))
+// Agent Foundry (lib/agents/**) may use the secret-refusal helper everywhere; only the Forge Phase 9 adapter writes to it and the Phase 10 read-only worker reads its snapshot (validators/testkits excluded).
+const agentImporters = importers.filter((f) => f.startsWith('lib/agents/'))
+const outsideAgents = importers.filter((f) => !f.startsWith('lib/agents/'))
+const agentMisuse = agentImporters.filter((f) => !/validation\.ts$|testkit\.ts$/.test(f) && !['lib/agents/forge/phase9.ts', 'lib/agents/ops/builtinWorkers.ts'].includes(f) && /@\/lib\/recursive-learning\/(?!ingestion\/redact['"])/.test(readFileSync(f, 'utf8')))
+check('N09_only_sanctioned_outside_dependents', outsideAgents.join() === ['app/api/foundry/learning/route.ts', 'components/war-room/foundry/FoundryLearningPanel.tsx', 'lib/native-builder/foundryMissionStore.ts'].join() && agentMisuse.length === 0, importers.join(',') + ' misuse=' + agentMisuse.join(','))
 const forbiddenImports = prod.filter((f) => /from '@\/lib\/(native-builder|model-router|council|council-routing|payments|deploy|security)\b/.test(readFileSync(f, 'utf8')))
 const netOrSpend = prod.filter((f) => /\b(fetch\(|https?:\/\/|XMLHttpRequest|child_process|node:https?|node:net)/i.test(readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')))
 check('N10_layer_cannot_reach_routing_deploy_payments_network', forbiddenImports.length === 0 && netOrSpend.length === 0, `imports=${forbiddenImports.join(',')} net=${netOrSpend.join(',')}`)
