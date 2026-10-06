@@ -294,5 +294,31 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   const les = captureLessons(x.log, x.asg.id, { taskClass: 'feature_implementation', executor: 'test-double' })
   check('N38_a_reply_declaring_a_name_twice_is_rejected_before_writing_with_a_reason_and_the_rejection_becomes_a_lesson', r.status === 'COMPLETED' && r.repairs === 0 && model.calls.filter((c) => c.path === 'src/chatService.mjs')[1].prompt.includes('more than once') && les.some((l) => l.cls === 'DUPLICATE_DECLARATION' && l.evidence.kind === 'GATE_REJECTION'))
 }
+// ---- 10. progress-aware repair: a repair that strictly reduces the failing checks opens a fresh failure record; bounded by the assignment ceiling
+{
+  const x = makeWorld({ limits: { maxRetries: 5 } })
+  const TOKENS = ['TOKEN_A', 'TOKEN_B', 'TOKEN_C', 'TOKEN_D']
+  const SCRIPT = `import { readFileSync } from 'node:fs'\nconst t = readFileSync(process.argv[2] + '/server.mjs', 'utf8'); const toks = ${JSON.stringify(TOKENS)}\nlet fail = 0\ntoks.forEach((k, i) => { const ok = t.includes(k); if (!ok) fail++; console.log((ok ? 'ok ' : 'not ok ') + (i + 1) + ' - has ' + k) })\nconsole.log('# tests ' + toks.length + '\\n# pass ' + (toks.length - fail) + '\\n# fail ' + fail); process.exit(fail ? 1 : 0)`
+  const ver = makeIndependentVerification('multi-check acceptance', tmp(), 'multi.mjs', SCRIPT, x.root)
+  let n = 0
+  const model = new ScriptedModel((c) => {
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: `server.mjs is missing ${TOKENS[Math.min(n, 3)]} (the verifier prints "not ok ... has ${TOKENS[Math.min(n, 3)]}")`, file: 'server.mjs', differs: 'targets the next missing token reported by the verifier' })
+    if (c.kind === 'repair') { n += 1; return fenced(CHAT_REFERENCE['server.mjs'] + '\n' + TOKENS.slice(0, n).map((k) => `// ${k}`).join('\n') + '\n') }
+    return good(c)
+  })
+  const r = await runFeatureWorkflow(deps(x, model, { finalVerification: ver }), REQ)
+  const led = deriveLedger(x.log, x.asg.id)
+  check('N39_four_failing_checks_fixed_one_per_repair_complete_because_each_repair_strictly_reduced_failures_and_each_remainder_got_its_own_failure_record', r.status === 'COMPLETED' && r.repairs === 4 && led.failures.size === 4 && led.repairs.length === 4, `${r.status} ${r.reason} repairs=${r.repairs} failures=${led.failures.size}`)
+  const y = makeWorld({ limits: { maxRetries: 3 } })
+  const ver2 = makeIndependentVerification('multi-check acceptance', tmp(), 'multi.mjs', SCRIPT, y.root)
+  let m = 0
+  const model2 = new ScriptedModel((c) => {
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: `server.mjs is missing ${TOKENS[Math.min(m, 3)]}`, file: 'server.mjs', differs: 'next token' })
+    if (c.kind === 'repair') { m += 1; return fenced(CHAT_REFERENCE['server.mjs'] + '\n' + TOKENS.slice(0, m).map((k) => `// ${k}`).join('\n') + '\n') }
+    return good(c)
+  })
+  const r2 = await runFeatureWorkflow(deps(y, model2, { finalVerification: ver2 }), REQ)
+  check('N40_progress_never_exceeds_the_assignment_retry_ceiling_the_same_scenario_with_maxRetries_3_stops_UNDETERMINED', r2.status === 'FAILED' && r2.repairs === 3 && view(y).state === 'FAILED')
+}
 void deriveAssignments; void AgentRegistry
 finish()

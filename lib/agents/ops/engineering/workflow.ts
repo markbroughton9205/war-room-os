@@ -201,10 +201,13 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   /** The evidence-driven repair loop for ONE failing command. Returns true when the ORIGINAL failure is fixed. */
   const debugLoop = async (failedCmd: CommandRecord, candidates: string[], stepId: string, label: string, rerunOriginal: () => Promise<CommandRecord> = () => runCheck(failedCmd.argv)): Promise<boolean> => {
     let cmd = failedCmd
-    const rec = recordFailure(log, assignmentId, cmd, actor, clock())
+    let rec = recordFailure(log, assignmentId, cmd, actor, clock())
     const attemptsNotes: string[] = []
     const triedFiles = new Set<string>()
-    for (let attempt = 1; attempt <= Math.min(MAX_REPAIR_ATTEMPTS, Math.max(1, limits.maxRetries)); attempt++) {
+    // Per-failure budget is MAX_REPAIR_ATTEMPTS; a repair that STRICTLY REDUCES the number of failing checks is progress and opens a fresh failure record
+    // for the remainder (its own evidence discipline). The assignment's maxRetries ceiling bounds the total, and strictly-decreasing failures cannot loop.
+    const totalCap = Math.max(1, limits.maxRetries), perCap = Math.min(MAX_REPAIR_ATTEMPTS, totalCap)
+    for (let attempt = 1, total = 0; attempt <= perCap && total < totalCap; attempt++, total++) {
       const b = boundary(); if (b.stop) throw Object.assign(new Error('STOP'), { stop: b.stop })
       const bs = budgetStop(); if (bs) throw Object.assign(new Error('STOP'), { stop: bs })
       const out = `${cmd.stdout}\n${cmd.stderr}`
@@ -262,6 +265,13 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       checkpoint()
       emit('REPAIR', `${label}: attempt ${attempt} -> ${v.outcome}`)
       if (v.outcome === 'ORIGINAL_FIXED') return true
+      const before = parseToolOutput(cmd.stdout, cmd.stderr).fail, after = parseToolOutput(rerun.stdout, rerun.stderr).fail
+      if (v.outcome === 'NEW_FAILURE' && rerun.exitCode !== 0 && after < before) {
+        attemptsNotes.push(`progress: failing checks ${before} -> ${after}; continuing on the remaining failure`)
+        emit('PROGRESS', `${label}: failing checks ${before} -> ${after}`)
+        cmd = rerun; rec = recordFailure(log, assignmentId, cmd, actor, clock()); attempt = 0; triedFiles.clear()
+        continue
+      }
       cmd = rerun
     }
     markUndetermined(log, assignmentId, rec.failureId, 'repair attempts exhausted without fixing the original failure', actor, clock())
